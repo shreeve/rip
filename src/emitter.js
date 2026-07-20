@@ -1657,7 +1657,12 @@ class Emitter {
   // params minus names already declared in an enclosing scope. Returns
   // the entries plus the full set of names this scope declares (for
   // the scope chain).
-  scopedHoist(stmts, params = []) {
+  //
+  // `declareInPlace: false` keeps every target on the hoist line —
+  // required when `stmts` are expression-position values (component
+  // `_init` member initializers): a parenthetical multi-statement
+  // lowers to a comma expression, where `let` is invalid JS.
+  scopedHoist(stmts, params = [], { declareInPlace = true } = {}) {
     const collected = this.hoistTargets(stmts, params);
     let entries = collected.filter(([n]) => !this.inScope(n));
     entries.annotations = collected.annotations;
@@ -1668,7 +1673,9 @@ class Emitter {
     // assign emits in EXPRESSION position (`return (r = 5)`), where a
     // `let ` is invalid JS, so the tail is never a declare-in-place
     // site (over-conservative for void-defs, which only costs a pin).
-    entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
+    if (declareInPlace) {
+      entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
+    }
     return { entries, names };
   }
 
@@ -4710,7 +4717,8 @@ class Emitter {
   // syntax, not the child's code. The classification is structural; the
   // `.parenthesized` fat-node flag is never read for grouping — its
   // readers are SEMANTIC decisions where source parens select the
-  // program (the postfix-if-else hoist guard, chain-link detection).
+  // program (the postfix-if-else hoist guard, chain-link detection,
+  // sealed dammit-as-callee / `new (f!)` serialization).
   //
   // Async marking: a function is async iff its BODY awaits — the walk
   // stops at nested function/class boundaries, so an inner arrow's
@@ -6362,11 +6370,20 @@ class Emitter {
     this.methodName = null;
 
     // _init hoists inner assignment targets of member initializers at
-    // its own top (each is a real function scope).
-    const initValues = [...readonlyVars, ...plainVars, ...stateVars, ...derivedVars]
-      .map((m) => m.value)
-      .filter((v) => v !== undefined && !(isBlock(v) && v.length > 2));
-    const { entries: initHoist, names: initNames } = this.scopedHoist(initValues, []);
+    // its own top (each is a real function scope). Multi-statement
+    // computed (`~=`) bodies are excluded — they open their own
+    // funcBlock hoist via computedBody; parenthetical blocks on
+    // readonly/plain/state still emit inline here and must keep
+    // collecting (otherwise `this.x = (a = 1, a)` throws undeclared).
+    // Never declare-in-place: these values emit in expression position.
+    const initValues = [
+      ...[...readonlyVars, ...plainVars, ...stateVars].map((m) => m.value),
+      ...derivedVars
+        .map((m) => m.value)
+        .filter((v) => !(isBlock(v) && v.length > 2)),
+    ].filter((v) => v !== undefined);
+    const { entries: initHoist, names: initNames } =
+      this.scopedHoist(initValues, [], { declareInPlace: false });
 
     this.mark(node, '$self', () => {
       this.b.emit('class');
@@ -10658,6 +10675,8 @@ class Emitter {
   // ["new", operand] — a member operand keeps the
   // bare NewExpression (`new a.B`); a call-array operand becomes
   // `new Ctor(args)`; a simple operand gains empty parens (`new A()`).
+  // A sealed dammit operand (`new (f!)`) is an expression, not a call
+  // shape — emit the awaited call, then empty construction args.
   newExpr(node) {
     const [, operand] = node;
     this.mark(node, '$self', () => {
@@ -10666,6 +10685,13 @@ class Emitter {
       this.mark(node, 'operand', () => {
         if (isNode(operand) && (operand[0] === '.' || operand[0] === '?.')) {
           this.member(operand);
+        } else if (isNode(operand) && operand[0] === 'dammit!') {
+          // `new (f!)` → `new (await f())()`. Source parens selected
+          // the program (sealed Value-dammit as the constructor).
+          if (operand.parenthesized) this.b.emit('(');
+          this.dammit(operand);
+          if (operand.parenthesized) this.b.emit(')');
+          this.b.emit('()');
         } else if (isNode(operand)) {
           // A call node — [ctor, ...args] — emits Ctor(args); with the
           // `new ` prefix already written this is `new Ctor(args)`.
@@ -11195,9 +11221,28 @@ class Emitter {
     }
     // A dammit callee awaits the CALL, not the callee: `f! 1, 2` →
     // `await f(1, 2)` — the await surrounds the whole invocation, so
-    // no callee grouping is needed. This spelling keeps its inline
-    // path; every other call emits through the chain driver.
+    // no callee grouping is needed. A PARENTHESIZED dammit sealed the
+    // await-call inside its parens; outer args belong to THIS call
+    // (`(f!)(a)` / `new (f!)(a)` → `(await f())(a)`, not `await f(a)`).
+    // This spelling keeps its inline path; every other call emits
+    // through the chain driver.
     if (isNode(node[0]) && node[0][0] === 'dammit!') {
+      if (node[0].parenthesized) {
+        this.mark(node, '$self', () => {
+          this.b.emit('(');
+          this.dammit(node[0]);
+          this.b.emit(')');
+          this.mark(node, 'args', () => {
+            this.b.emit('(');
+            node.slice(1).forEach((arg, i) => {
+              if (i > 0) this.b.emit(', ');
+              this.callArg(arg);
+            });
+            this.b.emit(')');
+          });
+        });
+        return;
+      }
       this.mark(node, '$self', () => {
         this.b.emit('await ');
         this.mark(node[0], '$self', () => this.head(node[0], 'target', node[0][1]));

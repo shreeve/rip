@@ -1,169 +1,372 @@
-# @rip-lang/db
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
 
-The one database adapter contract and its single shipped adapter:
-DuckDB reached over HTTP by an external `duckdb-harbor` endpoint. The
-harbor server is never vendored, and the adapter is pure over an
-injected `fetch`, so every protocol behavior tests without a server.
+# Rip DB - @rip-lang/db
 
-## The adapter contract
+> **DuckDB over duckdb-harbor — connect(), module-level query/Model, MCP stdio server, and rip-db CLI.**
 
-An adapter implements four members. `query(sql, params)` returning
-`{ columns, data, rowCount }` is the floor; the rest layer on top. Each
-`columns` entry is a `{ name, type }` object (harbor's own per-column
-shape, with `type` aliased from its `duckdbType`), and `data` is an
-array of positional row arrays — the shape the schema ORM hydrates from:
+A client for a running [duckdb-harbor](https://github.com/shreeve/duckdb-harbor)
+instance. One file covers the wire adapter (`harborAdapter`), the
+materializing client (`createClient`), a process-wide default
+(`connect` + module-level `query` / `findOne` / `Model`), a boot-time
+reachability probe, an MCP stdio server for assistants, and the
+`rip-db` dump/load/checkpoint CLI. Harbor is never vendored; every
+network edge goes through an injectable `fetch`, so protocol behavior
+tests without a live database.
 
-```rip
-import { harborAdapter } from '@rip-lang/db'
+**Runtime:** not browser-safe — talks to harbor over HTTP (`fetch`),
+the CLI/MCP paths use the filesystem and `node:readline`, and the
+`rip-db` bin is a stdio server when run as `rip-db mcp`. One `.rip`
+file, which is itself the `rip-db` binary (first line
+`#!/usr/bin/env rip`).
 
-db = harborAdapter url: process.env.RIP_DB_URL, token: process.env.RIP_DB_TOKEN
+**Mental model:** this package does not embed or start DuckDB. Harbor
+runs inside a DuckDB process and speaks HTTP; Rip DB is the client.
+`connect!` installs a process-wide default so `findOne!` / `Model` /
+schema `:model` all share one connection. Starting and stopping harbor
+is outside this package (keep the DuckDB process up yourself).
 
-{ data } = await db.query 'SELECT id, name FROM users WHERE active = ?', [true]
+## Quick Start
 
-tx = await db.begin()
-try
-  await tx.query 'INSERT INTO users (name) VALUES (?)', ['Ada']
-  await tx.commit()
-catch error
-  await tx.rollback()
+```bash
+bun add @rip-lang/db
 ```
 
-- **`query(sql, params)`** POSTs `/sql`; parameters ride alongside the
-  SQL and are omitted when empty.
-- **`begin(options)`** opens a session (`POST /sql/sessions/new`),
-  carries its `sessionId` on every statement, and drops it after
-  COMMIT or ROLLBACK. Transaction semantics are the product's: one
-  session per transaction, no savepoints. The session is dropped in a
-  `finally`, so a failed COMMIT or ROLLBACK still releases the open
-  transaction promptly; a failed BEGIN drops its own orphaned session;
-  and a session response with no id refuses to run rather than execute
-  a fake, unisolated transaction. A failed drop itself is best-effort —
-  harbor's idle TTL reaps it — so it never masks the outcome.
-- **`capabilities`** declares `{ tx, ddlTransactional }` — DuckDB rolls
-  DDL back with the transaction, so the migration runner may claim a
-  whole-file rollback.
+### 1. Start harbor (once)
 
-### Temporal values cross the wire as `Date`
+```sql
+INSTALL harbor FROM community;
+LOAD harbor;
+CALL harbor_serve(bind := '127.0.0.1', port := 9494, token := 'rip-token');
+```
 
-DuckDB temporal columns (the TIMESTAMP family, TIMESTAMPTZ, DATE —
-keyed by each column's `duckdbType`) decode to real JS `Date` objects
-at the adapter seam. The wire form is actively wrong for `new Date()`:
-a naive TIMESTAMP arrives with no `Z`/offset (`2024-03-15T10:30:00`),
-so parsing it in app code reads it as LOCAL and shifts every value by
-the host's UTC offset. Naive TIMESTAMP is defined as UTC wall-clock and
-decoded here — the ONE decode seam — so raw query results, the client's
-materializers, and the schema ORM's hydration all agree. TIME stays a
-string (it has no date component), and odd values (DuckDB's
-`infinity` sentinels, unexpected formats) pass through untouched.
+Keep that DuckDB process open — when it exits, harbor exits with it.
 
-Symmetrically, a `Date` parameter encodes to an explicit ISO-8601 UTC
-string — nested Dates inside array/object params included — and an
-Invalid Date throws a `TypeError` instead of letting JSON silently
-serialize it to `null`.
+```bash
+export RIP_DB_URL=http://127.0.0.1:9494
+export RIP_DB_TOKEN=rip-token   # omit only if harbor_serve(..., token := NULL)
+```
 
-There is deliberately no `introspect()` method. Schema introspection for
-the migration runner reads DuckDB's own catalog directly through
-`query` (`information_schema`, `duckdb_constraints()`, `duckdb_indexes()`,
-`duckdb_sequences()`) — the rich metadata a diff needs, which a thin
-adapter surface cannot carry.
+### 2. Query from Rip
+
+Use Rip's dammit operator (`!`) to call and await in one step.
+
+```coffee
+import { connect, ensureRunning, findOne, findAll, query, Model, transaction } from '@rip-lang/db'
+
+ensureRunning!    # fail fast if harbor is down
+connect!          # process default from env (or connect! url)
+
+# Positional ? params — never interpolate values into SQL strings
+user  = findOne! 'SELECT * FROM users WHERE id = ?', [1]
+list  = findAll! 'SELECT * FROM users WHERE active = ?', [true]
+count = (query! 'SELECT count(*) AS n FROM users').rows[0].n
+
+User  = Model 'users'
+alice = User.find! 42
+team  = User.where(active: true).order('name').limit(20).all!
+User.insert! { name: 'Ada', email: 'ada@example.com' }
+
+newId = transaction! (tx) ->
+  (tx.one! 'INSERT INTO users (name) VALUES (?) RETURNING id', ['Grace']).id
+```
+
+`connect` installs a process-wide default and rewires it on later
+calls. Skip it and the first `query!` / `Model` call lazy-connects
+from env. Power users can still build `harborAdapter` + `createClient`
+by hand.
+
+### 3. Ops CLI (same env)
+
+```bash
+rip-db ping                  # harbor up? prints url + database name
+rip-db dump                  # → <db>-YYYYMMDD-HHMMSS.tar.gz
+rip-db load snapshot.tar.gz  # refuses unless the target DB is empty
+rip-db checkpoint [--force]
+rip-db mcp                   # MCP stdio server for AI assistants
+```
+
+Runnable smoke script (harbor already up):
+
+```bash
+rip packages/db/example.rip
+```
+
+## Features
+
+- **`connect()`** — installs the process default (harbor adapter +
+  client); soft-wires schema `:model` when that runtime is loaded
+- **Module-level API** — `query` / `findOne` / `findAll` /
+  `transaction` / `Model(table)` over that default
+- **`Model(table)`** — lightweight ActiveRecord SQL builder (`pk`
+  defaults to `id`); schema `:model` remains the typed ORM
+- **`ping`** — `/ready` + `current_database()` health check (`rip-db status` is the CLI alias)
+- **One adapter contract** — `query` / `begin` / `capabilities`; no
+  `introspect()` — catalog SQL goes through `query`
+- **Error hierarchy** — `DbError` → `QueryError` | `ConnectionError` |
+  `CancelledError`, catchable with `isDbError`
+- **Temporal wire seam** — TIMESTAMP/DATE/TIMESTAMPTZ decode to real
+  `Date`s; outbound `Date`s encode as ISO-8601 UTC
+- **Client surface** — materialize to row objects, `rows` / `one` /
+  `value` on the client, nested-joining transactions, AbortSignal
+  cancellation
+- **MCP tools** — `execute_query`, `list_tables`, `list_columns` over
+  stdio JSON-RPC
+- **Operational CLI** — ping / dump / load / checkpoint / mcp
+
+## Configuration
+
+| Env / option | Meaning | Default |
+|---|---|---|
+| `RIP_DB_URL` | Harbor base URL | `http://127.0.0.1:9494` |
+| `RIP_DB_TOKEN` | Bearer token for `/sql` | unset (only when harbor is unauthenticated) |
+
+URL resolution is one rule everywhere (adapter, probe, CLI, MCP):
+explicit argument → `RIP_DB_URL` → default. Trailing slashes are
+trimmed.
+
+```coffee
+connect!                                    # env / default
+connect! 'http://127.0.0.1:9494'            # string URL
+connect! url: '…', token: '…', timeoutMs: 60_000
+connect! { adapter }                        # tests / custom wires
+```
+
+Local convenience: put the `LOAD` / `harbor_serve` lines in an init
+file (`duckdb -init ~/.duckdb-harbor.rc my.duckdb`). A shell alias is
+optional sugar — not part of this package.
+
+## Working with Results
+
+| Want | Use |
+|---|---|
+| One row object (or `null`) | `findOne! sql, params` |
+| Array of row objects | `findAll! sql, params` |
+| Rows + column names + count | `query! sql, params` → `{ rows, columns, rowCount }` |
+| First scalar | `(query! 'SELECT count(*) AS n FROM t').rows[0].n` — or `db.value!` on the client |
+| Table helpers | `Model 'users'` |
+
+Module-level names are `findOne` / `findAll` so you can write
+`rows = findAll! …` without shadowing an import. The client object from
+`connect()` still has short projections:
+
+```coffee
+db = connect!
+db.rows!  'SELECT id, name FROM users'
+db.one!   'SELECT * FROM users WHERE id = ?', [1]
+db.value! 'SELECT count(*) AS n FROM users'
+```
+
+Duplicate column names in a join overwrite in row objects (object keys
+are unique) — alias them in SQL (`users.id AS user_id`) or read
+positionally from the adapter's `data` arrays.
+
+## Model
+
+Lightweight SQL builder over the process default — **not** schema
+`:model` (typed models, scopes, and relations live in the schema
+runtime). Both share the same harbor connection after `connect`.
+
+`find` / `update` / `destroy` use the primary key column — **default
+`id`**. Override with `pk:` (and optionally `database:`):
+
+```coffee
+User = Model 'users'                                      # pk: 'id'
+User = Model 'users', 'analytics'                         # analytics.users, pk id
+User = Model 'users', { pk: 'user_id' }
+User = Model 'users', { database: 'analytics', pk: 'uid' }
+
+User.find! 42
+User.all! 100
+User.where(active: true).or(role: 'admin').order('name').limit(20).all!
+User.where(id: 1).first!
+User.where(active: true).count!
+User.insert! { name: 'Ada' }
+User.insert! [{ name: 'Ada' }, { name: 'Grace' }]   # multi-row RETURNING *
+User.update! 42, { last_login: new Date() }
+User.upsert! { email: 'a@x.com', name: 'Ada' }, on: 'email'
+User.destroy! 42
+User.where(active: false).update! { archived: true }
+User.where(active: false).destroy!
+```
+
+
+Builder chains: `where` / `or` / `not` / `select` / `order` / `group` /
+`having` / `limit` / `offset`, then `all!` / `first!` / `count!` /
+`update!` / `destroy!`. Object `where` uses `?` binds; string form is
+an escape hatch (`where 'age > ?', [21]`). `ident(name)` quotes
+identifiers.
+
+| | `Model 'users'` (this package) | `schema :model` (Rip language) |
+|---|---|---|
+| What | Lightweight SQL builder | Typed ORM — fields, scopes, relations, hooks |
+| Setup | `connect!` then `Model 'users'` | Declare models; `connect!` wires the adapter |
+| Use when | Ad-hoc tables, scripts, simple CRUD | App domain models |
+
+## Client
+
+`createClient(adapter)` materializes `{ columns, data }` into row
+objects and projects them:
+
+| Client method | Module-level | Returns |
+|---|---|---|
+| `query` | `query` | `{ rows, columns, rowCount }` |
+| `rows` | `findAll` | array of row objects |
+| `one` | `findOne` | first row or `null` |
+| `value` | — (use `client.value` or read `query!.rows`) | first scalar or `null` |
+
+```coffee
+db = connect!
+
+db.transaction! (tx) ->
+  tx.query! 'INSERT INTO users (name) VALUES (?)', ['Ada']
+  tx.one! 'SELECT * FROM users WHERE name = ?', ['Ada']
+```
+
+`transaction(fn)` begins a session, hands `fn` a client bound to it,
+commits on return, and rolls back on throw. A nested `tx.transaction`
+joins the outer session — there are no savepoints. Module-level
+`transaction(fn)` is the same runner on the process default. `begin()`
+is the raw adapter session + `BEGIN` (what schema transactions use
+under the hood).
+
+Pass `{ signal }` to cancel: an already-aborted signal rejects before
+dispatch; an in-flight abort rejects with `CancelledError` and aborts
+the harbor request.
+
+## Adapter Contract
+
+The floor is `harborAdapter` → `{ query, begin, capabilities }`.
+
+`query(sql, params)` returns `{ columns, data, rowCount }`. Each column
+is `{ name, type }` (`type` aliased from harbor's `duckdbType`); `data`
+is positional row arrays — the shape the schema ORM hydrates from.
+
+- **`query`** POSTs `/sql`; parameters ride alongside the SQL and are
+  omitted when empty
+- **`begin`** opens a session (`POST /sql/sessions/new`), carries its
+  `sessionId` on every statement, and drops it after COMMIT or
+  ROLLBACK. No savepoints. Failed BEGIN drops its orphaned session; a
+  missing session id refuses rather than faking isolation
+- **`capabilities`** is `{ tx: true, ddlTransactional: true }` —
+  DuckDB rolls DDL back with the transaction
+
+There is deliberately no `introspect()` method. Schema introspection
+for migrations reads DuckDB's catalogs through `query`
+(`information_schema`, `duckdb_constraints()`, `duckdb_indexes()`,
+`duckdb_sequences()`).
+
+Every request honors `timeoutMs` (default 30s; `0` disables) and a
+caller's `AbortSignal`. Timeouts are `ConnectionError` with code
+`TIMEOUT`; caller aborts use code `ABORTED`.
+
+```coffee
+import { harborAdapter, createClient } from '@rip-lang/db'
+
+adapter = harborAdapter url: '…', token: '…', fetch: myFetch
+client  = createClient adapter
+```
+
+## Temporal Wire
+
+DuckDB temporal columns decode to real JS `Date` objects at this seam —
+the one decode path shared by raw adapter results, the client, and the
+schema ORM. A naive TIMESTAMP arrives with no `Z`/offset
+(`2024-03-15T10:30:00`); bare `new Date(value)` would read it as local
+and shift by the host offset. Naive TIMESTAMP is defined here as UTC
+wall-clock. TIMESTAMPTZ keeps its offset; DATE is civil midnight UTC.
+TIME stays a string (no date component). Odd values (`infinity`,
+unexpected formats) pass through untouched.
+
+Outbound `Date` parameters encode to explicit ISO-8601 UTC (including
+Dates nested in arrays/objects). An Invalid Date throws `TypeError`
+instead of letting JSON silently turn it into `null`.
 
 ## Errors
 
-Every failure is one typed hierarchy, so a caller can catch the family
-with `isDbError(err)` (or `err instanceof DbError`):
+| Type | When |
+|---|---|
+| `QueryError` | Engine rejected the statement — `.code`, `.details`, `.sql` |
+| `ConnectionError` | Transport failure, HTTP 5xx, timeout, abort |
+| `CancelledError` | Caller `AbortSignal` — also a `DbError`, `.code = 'ABORTED'` |
 
-- **`QueryError`** — the engine rejected the statement (a body error
-  code); carries its `code`, `details`, and the offending `sql`.
-- **`ConnectionError`** — the transport failed or the harbor was
-  unreachable, including an HTTP 5xx with no engine code, so a retry
-  loop keyed on `ConnectionError` catches an availability failure even
-  during a query.
-- Both extend **`DbError`**, which carries the `httpStatus` when the
-  failure came back over HTTP; the offending `sql` is attached
-  whenever there was one.
+Catch the family with `isDbError(err)`. `httpStatus` is set when the
+failure came back over HTTP.
 
-Configuration is `url` (defaulting to the local harbor
-`http://127.0.0.1:9494`), an optional bearer `token`, the injectable
-`fetch`, and `timeoutMs` — a per-request deadline (default 30s; `0`
-disables) that actually aborts a hung request and surfaces as a
-`ConnectionError` with `code: 'TIMEOUT'`. `query` also accepts a
-`{ signal }` AbortSignal; a caller abort cancels the in-flight fetch
-and surfaces as `code: 'ABORTED'`.
+```coffee
+import { findOne, isDbError, QueryError } from '@rip-lang/db'
 
-## The query client
-
-`createClient(adapter)` layers result ownership over any adapter: it
-materializes the adapter's `{ columns, data }` into row objects and
-projects them.
-
-```rip
-db = createClient harborAdapter(url: env.RIP_DB_URL)
-
-people   = await db.rows  'SELECT id, name FROM users WHERE active = ?', [true]
-ada      = await db.one   'SELECT * FROM users WHERE id = ?', [1]   # first row or null
-howMany  = await db.value 'SELECT count(*) FROM users'              # scalar
-
-newId = await db.transaction (tx) ->
-  row = await tx.one 'INSERT INTO users (name) VALUES (?) RETURNING id', ['Ada']
-  row.id
+try
+  findOne! 'SELECT * FROM users WHERE id = ?', [1]
+catch e
+  throw e unless isDbError e
+  if e instanceof QueryError
+    warn "SQL failed (#{e.code}): #{e.message}"
+  else
+    warn "harbor unreachable: #{e.message}"
 ```
 
-- **`query`** returns `{ rows, columns, rowCount }`; **`rows`**,
-  **`one`** (first row or `null`), and **`value`** (first scalar) are
-  the projections.
-- **`transaction(fn)`** begins a session, hands `fn` a client bound to
-  it, and commits on return or rolls back on any throw. A nested
-  `tx.transaction` JOINS the outer one — there are no savepoints, so
-  the inner call reuses the session rather than opening a second.
-- **Cancellation**: pass a `{ signal }` `AbortSignal`. An
-  already-aborted signal rejects before dispatch; an abort in flight
-  rejects the caller with a `CancelledError` at once AND aborts the
-  underlying harbor request — the signal is threaded through to the
-  adapter's fetch.
+## Boot Probe
 
-## Operational surfaces
+```coffee
+import { assertReachable, ensureRunning, ping } from '@rip-lang/db'
 
-Three tools ride the same harbor `/sql` wire. None starts the database —
-harbor's lifecycle is external.
-
-### `rip-db` — snapshot, restore, checkpoint
-
-```
-rip-db dump [ARCHIVE.tar.gz | DIRECTORY]   # EXPORT DATABASE → a .tar.gz
-rip-db load ARCHIVE.tar.gz                 # IMPORT DATABASE (into an empty DB)
-rip-db checkpoint [--force]                # flush the WAL into the DB file
+ensureRunning!                 # same as assertReachable!
+assertReachable!               # RIP_DB_URL / default
+info = ping!                   # { ok, url, database } — or throws
 ```
 
-`dump` auto-names `<db>-YYYYMMDD-HHMMSS.tar.gz` and refuses to overwrite;
-`load` refuses a non-empty target and screens the archive for traversal
-paths (it is for archives you trust). `checkpoint` fails while other
-writers are active; `--force` preempts them. The command logic lives in
-`cli.rip` behind an injected host seam, so it tests without a server;
-`bin/rip-db` supplies the real `fetch`/filesystem/tar seam.
+`assertReachable` / `ensureRunning` hit harbor's unauthenticated
+`/ready` with a 5s timeout. `ping` also runs `SELECT current_database()`
+and returns `{ ok: true, url, database }`. The CLI accepts `rip-db status`
+as a synonym for `rip-db ping`.
 
-### `@rip-lang/db/embed` — a boot reachability probe
+## CLI
 
-```rip
-import { assertReachable } from '@rip-lang/db/embed'
-await assertReachable 'http://127.0.0.1:9494'   # throws if harbor isn't answering
+`rip-db` never starts or stops harbor — point `RIP_DB_URL` /
+`RIP_DB_TOKEN` at a running instance.
+
+| Command | Behavior |
+|---|---|
+| `ping` / `status` | `/ready` + database name; exits 1 if unreachable |
+| `dump [ARCHIVE\|DIR]` | `EXPORT DATABASE` → `.tar.gz`; auto-names `<db>-YYYYMMDD-HHMMSS.tar.gz`; refuses to overwrite |
+| `load ARCHIVE` | `IMPORT DATABASE` into an **empty** DB; screens the archive for traversal paths — load only archives you trust |
+| `checkpoint [--force]` | flush the WAL; plain mode fails while other writers are active; `--force` preempts them (can lose their uncommitted writes) |
+| `mcp [--url URL]` | MCP stdio server |
+
+## MCP
+
+```bash
+rip-db mcp --url http://127.0.0.1:9494
 ```
-
-Hits harbor's unauthenticated `/ready` probe with a 5s timeout, so an app
-fails loudly at boot instead of on its first mysterious query 500.
-
-### `@rip-lang/db/mcp` — an MCP server
-
-A line-delimited JSON-RPC stdio server exposing three tools —
-`execute_query`, `list_tables`, `list_columns` — to AI assistants:
 
 ```json
-{ "mcpServers": { "duckdb": {
-  "command": "rip",
-  "args": ["packages/db/mcp.rip", "--url", "http://127.0.0.1:9494"],
-  "env": { "RIP_DB_TOKEN": "<token>" }
-} } }
+{
+  "mcpServers": {
+    "duckdb": {
+      "command": "rip-db",
+      "args": ["mcp"],
+      "env": {
+        "RIP_DB_URL": "http://127.0.0.1:9494",
+        "RIP_DB_TOKEN": "<token>"
+      }
+    }
+  }
+}
 ```
 
-Results are truncated past 1024 rows or 50KB. `createMcpServer({ sql })`
-is the protocol core, pure over an injected runner, so every method and
-tool tests without stdio or a server.
+Tools: `execute_query`, `list_tables`, `list_columns`. Results truncate
+past 1024 rows or 50KB. Harbor traffic uses the same adapter wire as
+the rest of the package (timeouts, temporal encode, DbError hierarchy).
+Import `{ createMcpServer }` and inject an `sql` runner for hermetic
+tests.
+
+## Test
+
+```bash
+bun run test
+```
+
+One `test.rip` on `@rip-lang/testing` covers the package surface, the
+adapter and temporal wire, the client, module-level API / `Model`, CLI
+helpers, boot probe, MCP protocol, and the `rip-db` bin. Network-facing
+cases run against fetch doubles — no live harbor required.

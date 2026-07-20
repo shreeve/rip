@@ -449,6 +449,100 @@ test 'dammit call then member reads the resolved value', '''
 
 code 'dammit stays bare as an operand', 'f!() + 1', 'await f() + 1;'
 
+# ==============================================================================
+# Dammit × new — postfix ! on a member of a completed new-expression
+# binds to the member access (call-with-await on the member), never
+# into the new-callee. The inline spelling means exactly what the
+# bound spelling (`res = new Response(x)` then `res.text!`) and the
+# parenthesized spelling (`(new Response(x)).text!`) mean.
+# ==============================================================================
+
+code 'dammit on a member of a completed new', 'body = new Response(x).text!', 'let body = await new Response(x).text();'
+
+test 'new-member dammit round-trips', 'new Response("hi").text!', 'hi'
+
+# The three spellings of the same program agree byte-for-byte.
+# (v3 silently DROPS the inline spelling's `!` — `new Response(x).text`
+# with no call and no await; the bound and parenthesized spellings are
+# its correct reading.)
+code 'inline new-member dammit agrees with the parenthesized spelling', 'body = (new Response(x)).text!', 'let body = await new Response(x).text();'
+
+# The matrix: every completed-new member shape carries the dammit as an
+# awaited member call on the instance. (v3 silently drops the `!` in
+# each of these cells.)
+code 'new-member dammit with empty ctor args', 'x = new X().b!', 'let x = await new X().b();'
+code 'new-member dammit on a deeper chain', 'x = new X(a).b.c!', 'let x = await new X(a).b.c();'
+code 'new-member dammit with call args', 'x = new X(a).b!(c)', 'let x = await new X(a).b(c);'
+code 'new-member dammit continues the chain', 'x = new X(a).b!.c', 'let x = (await new X(a).b()).c;'
+code 'two new-member dammits chain their awaits', 'x = new X(a).b!.c!', 'let x = await (await new X(a).b()).c();'
+code 'new-member dammit after an index link', 'x = new X(a)[k].b!', 'let x = await new X(a)[k].b();'
+code 'new-member dammit through an optional link', 'x = new X(a)?.b!', 'let x = await new X(a)?.b();'
+
+# Dammit on the construction itself (no argument list before the `!`):
+# the dammit's call IS the construction, awaited. (v3 emits `new await
+# X()()` — a SyntaxError under a spec parser.)
+code 'dammit directly on the new awaits the construction', 'x = new X!', 'let x = await new X();'
+code 'dammit on a member callee awaits the construction', 'x = new X.b!', 'let x = await new X.b;'
+code 'dammit supplies the construction args', 'x = new X!(a)', 'let x = await new X(a);'
+code 'construction dammit continues the chain', 'x = new X!.b', 'let x = (await new X()).b;'
+
+# A PARENTHESIZED dammit completes inside its parens — the callee is
+# the awaited value, and the construction applies to it.
+code 'parenthesized dammit is the new callee', 'x = new (f!)', 'let x = new (await f())();'
+code 'parenthesized dammit callee takes ctor args', 'x = new (f!)(a)', 'let x = new (await f())(a);'
+code 'parenthesized dammit chain is the new callee', 'x = new (X(a).b!)', 'let x = new (await X(a).b())();'
+code 'member of a parenthesized dammit is constructed', 'x = new (f!).b', 'let x = new (await f()).b;'
+
+# Expression positions inherit the rebinding.
+code 'new-member dammit as a call argument', 'x = f(new X(a).b!)', 'let x = f(await new X(a).b());'
+code 'new-member dammit as a condition', 'x = if new X(a).b! then 1 else 2', 'let x = await new X(a).b() ? 1 : 2;'
+code 'new-member dammit in an interpolation', 'x = "#{new X(a).b!}"', 'let x = `${await new X(a).b()}`;'
+
+# Runtime: the awaited member call reads the constructed instance.
+
+test 'new-member dammit calls the instance method', '''
+  class Box
+    constructor: (@v) ->
+    read: -> Promise.resolve(@v * 2)
+  new Box(21).read!
+''', 42
+
+test 'construction dammit awaits a thenable-returning constructor', '''
+  class Lazy
+    constructor: -> return Promise.resolve(7)
+  new Lazy!
+''', 7
+
+test 'new-member dammit chain continues on the resolved value', '''
+  class Box
+    constructor: (@v) ->
+    read: -> Promise.resolve({n: @v})
+  new Box(3).read!.n
+''', 3
+
+# Component emission paths inherit the rebinding: a method body lowers
+# the shape exactly like any function body, and a render expression
+# rejects it exactly like any other await (a render body evaluates
+# synchronously).
+
+test 'new-member dammit inside a component method', '''
+  A = component
+    read = -> new Response("ok").text!
+  a = A.new()
+  a.read()
+''', 'ok'
+
+fail 'render expression cannot await through a new-member dammit', '''
+  A = component
+    render
+      div "#{new Response("x").text!}"
+''', 'render body evaluates synchronously'
+
+# The index-member dammit spelling stays a positioned parse rejection —
+# `!` lexes as DAMMIT only after a name (uniform with `a[k]!` outside
+# new); the member spellings above are the working forms.
+fail 'dammit directly after an index link rejects', 'x = new X(a)[k]!', "Unexpected 'UNARY_MATH'"
+
 # Dynamic import with dammit operator
 code 'import! dynamic', 'import!("./foo.rip")', "await import(\"./foo.rip\");"
 code 'import! with variable', 'import!(path)', "await import(path);"

@@ -1,20 +1,30 @@
 {
   "name": "@rip-lang/server",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
+  "description": "Sinatra-style web framework — routes, smart responses, read() validation, and AsyncLocalStorage-powered request context",
   "exports": {
-    ".": "./index.rip"
+    ".": "./server.rip",
+    "./middleware": "./middleware.rip"
   },
   "bin": {
-    "rip-server": "./bin/rip-server"
+    "rip-server": "./server.rip"
   },
   "scripts": {
-    "test": "rip test"
+    "test": "rip test.rip"
   },
   "files": [
-    "*.rip",
-    "bin/",
+    "server.rip",
+    "middleware.rip",
+    "worker.rip",
+    "manager.rip",
     "README.md"
-  ]
+  ],
+  "dependencies": {
+    "@rip-lang/validate": "workspace:*"
+  },
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
 }

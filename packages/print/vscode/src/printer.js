@@ -447,7 +447,7 @@ ${fileSections}
 
 /**
  * Render a single markdown file into a standalone HTML document by shelling out
- * to `bun -e` (Bun.markdown.html). The CSS template matches packages/server
+ * to `bun -e` (Bun.markdown.html). The CSS template matches misc/server-v4-discarded
  * /serving/static.rip's renderMarkdown exactly.
  *
  * Returns null on any failure (bun not on PATH, non-zero exit, empty stdout,

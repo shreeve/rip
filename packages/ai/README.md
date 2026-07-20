@@ -1,23 +1,42 @@
-# @rip-lang/ai
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
 
-> **Persistent multi-model AI consultation MCP — discuss, panel, fresh-review, content-hashed attachments, live model catalog**
+# Rip AI - @rip-lang/ai
 
-An MCP stdio server that lets the AI you're working with consult its peers — across providers, with conversations that survive restarts, attachments that travel between turns, and parallel model panels with synthesis. Zero npm dependencies (uses `bun:sqlite` and `bun`'s built-in `fetch`).
+> **Persistent multi-model AI consultation MCP — discuss, panel, fresh-review, content-hashed attachments, live model catalog.**
 
-## Why this exists
+An MCP stdio server the assisting model drives through tool calls: `chat` and
+`discuss` reach a peer model, `panel` fans one prompt across several with
+optional synthesis, and `fresh_review` gets an independent read that can exclude
+prior coauthors. Conversations live in a local SQLite database that survives
+restarts; attachments are loaded once, SHA-256-addressed, and re-checked for
+drift between turns. Model aliases resolve to each provider's current flagship
+from a live catalog, so there's no version string to remember. Zero npm
+dependencies — it uses `bun:sqlite` and Bun's built-in `fetch`.
 
-Native subagents already give a peer model full tool access. This package focuses on the things subagents don't do:
+**Runtime:** not browser-safe — it runs as an MCP stdio server, persists to
+SQLite (`bun:sqlite`), reads credentials and attachments from the filesystem,
+and calls provider APIs over the network. One `.rip` entry plus `lib/`.
 
-- **Two models, zero guesswork** — `gpt` (latest OpenAI) and `claude` (latest Anthropic), autodetected live and cached
-- **Persistent conversations** that survive IDE / server / machine restarts
-- **Multi-model panels** with optional synthesis
-- **Content-hashed attachments** reused across turns, with change detection
-- **Cost transparency** on every call, with optional caps
-- **Independence guarantees** for unbiased fresh review (avoids coauthor models)
+## Quick Start
 
-## Install
+```bash
+bun add @rip-lang/ai
+```
 
-Add to your MCP config (e.g. `~/.cursor/mcp.json`):
+```coffee
+# Tool surface an assisting model drives through MCP:
+chat prompt: "Is this O(n²) or O(n)?", model: "claude"
+
+discuss message: "Should we use a B-tree or a hash here?"
+# → { conversation_id }; continue with:
+discuss conversation_id: "c_…", message: "What about cache locality?"
+
+panel prompt: "Critique this approach", models: ["gpt", "claude"], synthesize: true
+
+fresh_review artifact: "PLAN.md", prompt: "Be hostile. Find what's wrong.", exclude_models: ["claude"]
+```
+
+Register the server with your MCP client (e.g. `~/.cursor/mcp.json`):
 
 ```json
 {
@@ -27,7 +46,7 @@ Add to your MCP config (e.g. `~/.cursor/mcp.json`):
 }
 ```
 
-API keys come from environment variables or `~/.config/rip/credentials`:
+Provide at least one provider key — environment variables win over the file:
 
 ```bash
 mkdir -p ~/.config/rip
@@ -38,7 +57,14 @@ EOF
 chmod 600 ~/.config/rip/credentials
 ```
 
-Environment variables always win over the file.
+## Features
+
+- **Two models, zero guesswork** — `gpt` (latest OpenAI) and `claude` (latest Anthropic), autodetected live and cached
+- **Persistent conversations** that survive IDE / server / machine restarts
+- **Multi-model panels** with optional synthesis over the successful responses
+- **Content-hashed attachments** reused across turns, with change detection
+- **Cost transparency** on every call, with optional preflight caps
+- **Independence guarantees** for unbiased fresh review (avoids coauthor models)
 
 ## Storage
 
@@ -46,11 +72,13 @@ Environment variables always win over the file.
 ~/.config/rip-ai/
   conversations.db          SQLite (WAL, mode 0600)
   attachments/ab/cd/<sha>   content-addressed cache (mode 0600)
-  models.json               catalog disk cache (informational)
+  models.json               catalog disk cache (offline fallback)
   latest.json               resolved latest gpt/claude ids, 12h TTL
 ```
 
-The DB is auto-created on first run. If it gets corrupted, the server quarantines it (`*.corrupt.<timestamp>`) and creates a fresh one — `status` reports the recovery.
+The DB is auto-created on first run. If it gets corrupted, the server quarantines
+it (`*.corrupt.<timestamp>`) and creates a fresh one — `status` reports the
+recovery.
 
 ## Tools
 
@@ -63,9 +91,9 @@ Server info, credential availability, defaults, conversation count, db path.
 Resolved provider catalog. **Rarely needed** — just pass `model: "gpt"` or `"claude"`. Use this only when you want the concrete version string behind an alias.
 
 ```
-list_models()                      # all providers, memory-cached 5min
-list_models({ provider: "openai" })
-list_models({ refresh: true })     # bypass cache
+list_models()                    # all providers, memory-cached 5min
+list_models(provider: "openai")
+list_models(refresh: true)       # bypass cache
 ```
 
 Each entry has: `id`, `provider`, `provider_model`, `display`, `available`, `is_latest` (the current flagship pick), `pricing`, `created_at`, `source`.
@@ -75,11 +103,11 @@ Each entry has: `id`, `provider`, `provider_model`, `display`, `available`, `is_
 One-shot peer message, no persistence.
 
 ```
-chat({ prompt: "Is this O(n²) or O(n)?", model: "claude" })
-chat({
-  prompt: "Spot the bug",
+chat(prompt: "Is this O(n²) or O(n)?", model: "claude")
+chat(
+  prompt: "Spot the bug"
   attachments: [{ type: "file", path: "src/compiler.js" }]
-})
+)
 ```
 
 | Parameter | Type | Required | Notes |
@@ -96,14 +124,14 @@ chat({
 Multi-turn conversation, persistent across server restarts. Pass the same `conversation_id` to continue.
 
 ```
-discuss({ message: "Should we use a B-tree or a hash here?" })
+discuss(message: "Should we use a B-tree or a hash here?")
 # returns conversation_id; reuse it:
-discuss({ conversation_id: "c_a1b2…", message: "What about cache locality?" })
-discuss({
-  conversation_id: "c_a1b2…",
-  message: "Reread the file — has it changed?",
+discuss(conversation_id: "c_a1b2…", message: "What about cache locality?")
+discuss(
+  conversation_id: "c_a1b2…"
+  message: "Reread the file — has it changed?"
   attachments: [{ type: "file", path: "src/cache.rip" }]
-})
+)
 ```
 
 | Parameter | Type | Required | Notes |
@@ -123,12 +151,12 @@ Returns: `conversation_id`, `message_id`, `response_id`, `text`, `attachments`, 
 Send the same prompt to several models in parallel. Optional synthesis over successful responses.
 
 ```
-panel({
-  prompt: "Critique this approach",
-  models: ["gpt", "claude"],
-  synthesize: true,
+panel(
+  prompt: "Critique this approach"
+  models: ["gpt", "claude"]
+  synthesize: true
   attachments: [{ type: "file", path: "PLAN.md" }]
-})
+)
 ```
 
 Returns `responses[]` (per-model results, including failures), an optional `synthesis` block, total `usage`, `warnings`. One model failure does not fail the panel; only "all panelists failed" raises.
@@ -138,11 +166,11 @@ Returns `responses[]` (per-model results, including failures), an optional `synt
 Independent review of an artifact. `exclude_models` lets you avoid models that previously coauthored it.
 
 ```
-fresh_review({
-  artifact: "PLAN.md",
-  prompt: "Be hostile. Find what's wrong.",
+fresh_review(
+  artifact: "PLAN.md"
+  prompt: "Be hostile. Find what's wrong."
   exclude_models: ["claude"]
-})
+)
 ```
 
 If a `model` is given and it's in `exclude_models`, the call fails fast. If no model is given, the server picks the first credentialed default that isn't excluded.
@@ -155,7 +183,7 @@ If a `model` is given and it's in `exclude_models`, the call fails fast. If no m
 | `get_conversation` | `conversation_id`, `include_attachments?` | `conversation, messages: [...]` |
 | `delete_conversation` | `conversation_id` | `{ deleted: true, conversation_id }` |
 | `export_conversation` | `conversation_id`, `format: "json" \| "markdown"` | `{ format, content }` |
-| `redact` | `conversation_id`, `mode: "content" \| "all"` | `{ redacted: true, mode }` |
+| `redact` | `conversation_id`, `mode: "content" \| "all"` | `{ redacted: true, mode, conversation_id }` |
 
 `redact("content")` replaces every message text with `[redacted]` and clears attachment refs but keeps the row + token/cost totals. `redact("all")` removes every message but keeps the conversation row and totals.
 
@@ -163,10 +191,10 @@ If a `model` is given and it's in `exclude_models`, the call fails fast. If no m
 
 All tools that send a prompt accept an `attachments` array:
 
-```js
+```coffee
 [
-  { type: "file", path: "src/compiler.js" },
-  { type: "url",  url:  "https://example.com/spec.txt" },
+  { type: "file", path: "src/compiler.js" }
+  { type: "url",  url:  "https://example.com/spec.txt" }
   { type: "blob", name: "snippet.rip", content: "x = 42\n" }
 ]
 ```
@@ -249,25 +277,14 @@ Every tool that calls a model returns a `usage` object with a token breakdown, t
 | Cost cap exceeded preflight | refuse with explanatory error |
 | Cost cap exceeded post-hoc | succeed, surface in `warnings[]` |
 
-## Layout
+## Test
 
-```
-mcp.rip                   protocol entry, JSON-RPC dispatch
-lib/credentials.rip       env + ~/.config/rip/credentials
-lib/store.rip             SQLite schema, CRUD, attachment records
-lib/attachments.rip       file/url/blob load, SHA-256 cache, prompt rendering
-lib/openai.rip            OpenAI adapter (chat, list_models)
-lib/anthropic.rip         Anthropic adapter (chat, list_models)
-lib/providers.rip         latest-model autodetect + cache, pricing, cost, catalog
-lib/tools.rip             handlers for all 11 MCP tools
-bin/rip-ai                CLI shim (runs mcp.rip under the repository loader)
+```bash
+bun run test
 ```
 
-## Requirements
-
-- **Bun** 1.0+ (uses `bun:sqlite` and `fetch`)
-- At least one provider key (OpenAI and/or Anthropic)
-
-## License
-
-MIT
+One `test.rip` on `@rip-lang/testing` covers the package surface, the provider
+adapters and model resolution, the SQLite store, all eleven tools, the MCP wire
+protocol, credential and SSRF security, and attachment handling. Every provider
+call runs against an in-process double, so the suite touches no network and no
+real key.

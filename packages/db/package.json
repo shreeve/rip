@@ -1,22 +1,24 @@
 {
   "name": "@rip-lang/db",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
+  "description": "DuckDB over duckdb-harbor — connect(), module-level query/Model, MCP stdio server, and rip-db CLI",
   "exports": {
-    ".": "./index.rip",
-    "./embed": "./embed.rip",
-    "./mcp": "./mcp.rip"
+    ".": "./db.rip"
   },
   "bin": {
-    "rip-db": "./bin/rip-db"
+    "rip-db": "./db.rip"
   },
   "scripts": {
-    "test": "rip test"
+    "test": "rip test.rip"
   },
   "files": [
-    "*.rip",
-    "bin/",
-    "README.md"
-  ]
+    "db.rip",
+    "README.md",
+    "example.rip"
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
 }

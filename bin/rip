@@ -30,11 +30,14 @@ Usage:
                                      (default: the current directory; 'rip check --help')
   rip schema <verb> [args...]        Schema evolution: status | plan | make | migrate
                                      (run 'rip schema --help' for the full surface)
-  rip server [tokens...]             The application server: serve static sites, App
-                                     bundles, and serve.rip configs
-                                     (run 'rip server --help' for the token grammar)
+  rip server [entry] [flags...]      Run a @rip-lang/server app under the worker-pool
+                                     manager behind Janus
+                                     (run 'rip server --help' for the flags)
   rip test [args...]                 Run \`bun test\` with the .rip loader preloaded
                                      (default --timeout 15000; extra args pass through)
+  rip <name> [args...]               Run rip-<name>: sibling of this executable, repo
+                                     bin/, nearest node_modules/.bin up from the cwd,
+                                     then PATH
 
 Options:
   -c, --compile        Print compiled JavaScript to stdout
@@ -125,20 +128,6 @@ if (args[0] === 'check') {
   process.exit(r.status ?? 1);
 }
 
-// `rip server [tokens…]` — the application server subcommand,
-// dispatched like `schema` (the word `server` in first position is
-// the subcommand, never an input file — run a file literally named
-// `server` as `rip ./server`). The server bin registers the loader
-// itself and owns the whole token grammar (`rip server --help`).
-if (args[0] === 'server') {
-  const serverBinPath = join(dirname(fileURLToPath(import.meta.url)), '../packages/server/bin/rip-server');
-  const r = spawnSync('bun', [serverBinPath, ...args.slice(1)], {
-    stdio: 'inherit',
-    env: process.env,
-  });
-  process.exit(r.status ?? 1);
-}
-
 // `rip test [bun-test args...]` — Bun's test runner with the .rip
 // loader preloaded, so suites that import .rip modules need no
 // per-package preload config. Dispatched like `schema`: the word
@@ -154,6 +143,48 @@ if (args[0] === 'test') {
     env: process.env,
   });
   process.exit(r.status ?? 1);
+}
+
+// --- Subcommand dispatch: rip <name> [args...] → rip-<name> ---
+//
+// The word in first position is a subcommand when it is not a flag, not
+// an existing file or directory, and not path-shaped (contains no '/'
+// or '.'). Resolution order, first hit wins: a rip-<name> next to this
+// executable, the cwd's git checkout bin/ (rip-<name>, then <name>),
+// the nearest node_modules/.bin/rip-<name> walking up from the cwd
+// (where package.json "bin" entries land via bun install), then PATH.
+// A miss rejects loudly.
+if (args.length > 0 && !args[0].startsWith('-') && !args[0].includes('/') && !args[0].includes('.') && !existsSync(args[0])) {
+  const name = args[0];
+  const subArgs = args.slice(1);
+  const runSub = (cmd) => {
+    const r = spawnSync(cmd, subArgs, { stdio: 'inherit', env: process.env });
+    process.exit(r.status ?? 1);
+  };
+
+  const binDir = dirname(fileURLToPath(import.meta.url));
+  if (existsSync(join(binDir, `rip-${name}`))) runSub(join(binDir, `rip-${name}`));
+
+  const toplevel = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  const repoRoot = toplevel.status === 0 ? toplevel.stdout.trim() : null;
+  if (repoRoot) {
+    if (existsSync(join(repoRoot, 'bin', `rip-${name}`))) runSub(join(repoRoot, 'bin', `rip-${name}`));
+    if (existsSync(join(repoRoot, 'bin', name))) runSub(join(repoRoot, 'bin', name));
+  }
+
+  let nmDir = process.cwd();
+  while (true) {
+    const nmBin = join(nmDir, 'node_modules', '.bin', `rip-${name}`);
+    if (existsSync(nmBin)) runSub(nmBin);
+    const parent = dirname(nmDir);
+    if (parent === nmDir) break;
+    nmDir = parent;
+  }
+
+  const fromPath = spawnSync(`rip-${name}`, subArgs, { stdio: 'inherit', env: process.env });
+  if (fromPath.error?.code !== 'ENOENT') process.exit(fromPath.status ?? 1);
+
+  fail(`rip: unknown command '${name}'\n\nRun 'rip --help' for usage.`);
 }
 
 const takesArgument = new Set(['-o', '--output', '--explain', '--explain-generated', '--dts-dir', '--runtime', '--face']);

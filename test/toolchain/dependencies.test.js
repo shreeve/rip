@@ -17,7 +17,7 @@
 // inside a minimal, enumerated dependency budget — anything beyond it is
 // a deliberate change, never a quiet `bun add`.
 import { test, expect } from 'bun:test';
-import { readFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { builtinModules } from 'module';
 
@@ -38,6 +38,23 @@ test('root declares no runtime dependencies; TypeScript lives once in the worksp
   // The root IS the packages/* workspace root (owner decision: in-tree
   // @rip-lang/* resolution, hoisted linker).
   expect(pkg.workspaces).toEqual(['packages/*']);
+});
+
+// Workspace packages must not carry a sibling bun.lock. Under
+// linker=hoisted, `bun install` from a package directory still resolves
+// against the ROOT lockfile — a package-local lock is not isolation, and
+// CI's frozen-lockfile gate is root-only. Nested quarantine trees that
+// are their own package (csv/bench, print/vscode) may keep a lock.
+test('workspace package roots do not carry a local bun.lock', () => {
+  const packagesDir = join(ROOT, 'packages');
+  const offenders = [];
+  for (const name of readdirSync(packagesDir)) {
+    const pkgJson = join(packagesDir, name, 'package.json');
+    if (!existsSync(pkgJson)) continue;
+    const lock = join(packagesDir, name, 'bun.lock');
+    if (existsSync(lock)) offenders.push(`packages/${name}/bun.lock`);
+  }
+  expect(offenders).toEqual([]);
 });
 
 test('packages/vscode stays inside the dependency budget; every pin is exact or the catalog', () => {

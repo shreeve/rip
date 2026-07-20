@@ -1,323 +1,928 @@
-# The runnable serving layer — the module that turns a resolved
-# configuration into a listening server. This is deliberately the
-# host-touching composition of the certified cores: serveStatic and
-# appServer answer requests, compose builds each site's pipeline,
-# createWatch carries the dev SSE transport, createPool bounds
-# concurrency, resolveTls judges the certificate policy, and Bun.serve
-# holds the socket. Nothing here re-decides what a core already
-# decided.
+#!/usr/bin/env rip
+
+# ==============================================================================
+# @rip-lang/server — Sinatra-style web framework for Rip
+# ==============================================================================
 #
-# The listener behavior is v3's: the preferred port is tried, an
-# EADDRINUSE walks forward through a 100-port window, and an EACCES on
-# a privileged port falls back to 3000 (3443 under TLS) and scans from
-# there. Requests dispatch through the worker pool — S1 runs ONE
-# process, so the pool's workers are in-process handlers; the pool
-# still enforces the operational envelope (workers × concurrency in
-# flight, a bounded queue with a wait timeout) so the seam the process
-# workers will fill in S2 is already load-bearing. The SSE watch
-# endpoint bypasses the pool: a held-open stream is not a unit of work
-# and must never starve request capacity.
+# Routes, smart responses, read() validation, and AsyncLocalStorage-powered
+# request context. Apps written against this DSL run identically standalone
+# (`start port: 3000` → Bun.serve) and under a worker pool behind Janus
+# (the manager/worker runtime detects itself via environment).
 #
-# stop() is the graceful shutdown: the listener stops accepting, the
-# pool drains its in-flight work (queued jobs reject), and then the
-# remaining held-open connections (SSE watchers) are closed.
+# Public exports:
+#   DSL:        get, post, put, patch, del, all, use, prefix
+#   Server:     start, startHandler, fetch, App
+#   Filters:    raw, before, after
+#   Handlers:   onError, notFound
+#   Errors:     error!, notice!, bail!
+#   Validation: read, registerValidator, getValidator, isRawType,
+#               validatorNames, check
+#   Context:    ctx, session, env, subrequest, mark
+#   Utilities:  isBlank, toName, toPhone, formatMoney, mimeType
+#   OpenAPI:    openapi, errorEnvelope
+#   Dev:        resetGlobals, requestContext, setCorsPreflightPolicy
+# ==============================================================================
 
-import { cpus } from 'node:os'
-import { readFileSync } from 'node:fs'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { posix } from 'node:path'
 
-import { createContext } from './context.rip'
-import { compose } from './middleware.rip'
-import { appServer, serveStatic } from './serving.rip'
-import { diskHost } from './host.rip'
-import { createWatch } from './watch.rip'
-import { createPool } from './pool.rip'
-import { resolveTls } from './tls.rip'
+# ==============================================================================
+# Module State
+# ==============================================================================
 
-fail = (message) -> throw new Error "Rip Server: #{message}"
+_: RegExpMatchArray | null            = null  # Match capture holder for Rip's =~
+_errorHandler: Function | null        = null  # Custom error handler
+_notFoundHandler: Function | null     = null  # Custom 404 handler
+_rawFilter: Function | null           = null  # Raw request filter (before body parsing)
+_beforeFilters: Function[]            = []    # Before request filters
+_afterFilters: Function[]             = []    # After request filters
+_routes: any[]                        = []    # Route definitions
+_middlewares: { fn: Function, regex?: RegExp, path?: string }[] = []  # Global + path-scoped middleware, in registration order
+_prefix: string                       = ''    # Current route prefix for grouping
+_corsPreflightPolicy: Function | null = null  # Policy fn set by cors middleware: see setCorsPreflightPolicy
+_openapiRegistered: boolean           = false # GET /openapi.json auto-registered?
+_openapiInfo: Record<string, any>     = { title: 'Rip API', version: '0.0.0' }
+_routeIndex: any                      = null  # method → { statics, dynamics }; built lazily, cleared on registration
+_composeEpoch: number                 = 0     # bumped when use/before/after mutate the chain inputs
 
-WATCH_PATH = '/_rip/watch'
-PORT_SCAN_WINDOW = 100
+export resetGlobals = ->
+  _errorHandler        = null
+  _notFoundHandler     = null
+  _rawFilter           = null
+  _beforeFilters       = []
+  _afterFilters        = []
+  _routes              = []
+  _middlewares         = []
+  _prefix              = ''
+  _corsPreflightPolicy = null
+  _openapiRegistered   = false
+  _openapiInfo         = { title: 'Rip API', version: '0.0.0' }
+  _routeIndex          = null
+  _composeEpoch++
 
-# A PEM file as the tls core's load adapter sees it: the text is the
-# certificate when it carries one, and the key when it carries one —
-# a combined PEM answers both, so a cert/key pair may share a file.
-pemLoad = (path) ->
-  text = readFileSync path, 'utf8'
-  entry: any = {}
-  entry.cert = text if text.includes 'CERTIFICATE'
-  entry.key = text if text.includes 'PRIVATE KEY'
-  entry
+# Register a CORS preflight policy. Called by the `cors()` middleware when
+# opts.preflight is set. The policy function receives the request Origin
+# header and returns an object shaped like:
+#
+#   {
+#     allowedOrigin: string | null,   # null means reject / no headers
+#     methods: string,                # "GET,POST,..."
+#     headers: string,                # "Content-Type,..."
+#     credentials: boolean,
+#     maxAge: number                  # seconds
+#   }
+#
+# Early-OPTIONS handling uses this SAME policy so the preflight response
+# and the actual-request CORS check agree. Without it, preflight could
+# advertise a permissive policy (reflect any origin + credentials) that
+# the middleware would later reject on the real request — a misleading
+# posture that middleware/CSRF audits would flag.
+export setCorsPreflightPolicy = (fn) ->
+  _corsPreflightPolicy = if typeof fn is 'function' then fn else null
 
-# The v3 listener scan: try the preferred port; EADDRINUSE walks
-# forward through the window; EACCES on a privileged port falls back
-# to the unprivileged default (3000 http / 3443 tls) and scans from
-# there; anything else is a real startup failure. `attempt(port)`
-# binds and returns the live server (injected, so the policy tests
-# without racing real sockets).
-export def scanListen(preferred: number, attempt: (port: number) => any, opts: any = {}): any
-  base = preferred
-  port = preferred
-  while port < base + PORT_SCAN_WINDOW
-    try
-      return attempt port
-    catch error
-      detail: any = error
-      if detail?.code is 'EACCES' and port < 1024
-        fallback = if opts.tls then 3443 else 3000
-        console.warn "rip-server: port #{port} requires elevated privileges, falling back to #{fallback}" unless opts.quiet
-        port = fallback
-        base = fallback
-        continue
-      throw error unless detail?.code is 'EADDRINUSE'
-      port++
-  fail "no available port found (tried #{base}–#{base + PORT_SCAN_WINDOW - 1})"
+# AsyncLocalStorage for request context (enables sync read() in handlers)
+export requestContext: AsyncLocalStorage<{ env?: any, data: any }> = new AsyncLocalStorage()
 
-# ── site pipelines ────────────────────────────────────────────────────
+# ==============================================================================
+# Router: Pattern Compiler
+# ==============================================================================
 
-notFound = (c) -> c.text 'Not Found', 404
+compilePattern = (path) ->
+  keys = []
+  path = path.replace /\?$/, ''
+  escaped = path.replace /[.+^${}()|[\]\\]/g, '\\$&'
+  regex = escaped.replace /:(\w+)(?:\{([^}]+)\})?/g, (match, key, pattern) ->
+    keys.push key
+    "(#{pattern or '[^/]+'})"
+  wildcard = /(?<![\\*])\*(?!\*)/.test(regex)
+  regex = regex.replace /(?<![\\*])\*(?!\*)/g, '(.*)'
+  # A pattern with no captures and no wildcard matches exactly one path
+  # (modulo the /?$ trailing slash) — eligible for the static-path Map.
+  staticPath = if keys.length is 0 and not wildcard then path else null
+  { regex: new RegExp("^#{regex}/?$"), keys, staticPath }
 
-# Host matching, v3's route-table judgment: exact beats wildcard beats
-# the '*' catch-all; a wildcard covers exactly one deeper label.
-hostRank = (pattern, host) ->
-  return 3 if pattern is host
-  if typeof pattern is 'string' and pattern.startsWith '*.'
-    suffix = pattern.slice 1
-    if host.endsWith(suffix)
-      label = host.slice 0, host.length - suffix.length
-      return 2 if label.length > 0 and not label.includes('.')
-  return 1 if pattern is '*'
-  0
+# ==============================================================================
+# Router: Route Matching
+# ==============================================================================
+#
+# Routes are indexed per method on first lookup: static paths (no params, no
+# wildcards) live in a Map under both spellings the compiled /?$ tolerates
+# (`/x` and `/x/`); everything else stays an ordered regex list. Registration
+# order is the tiebreak across both — a static hit only wins over dynamic
+# routes registered after it, so `get '/users/:id'` before `get '/users/list'`
+# still routes /users/list to :id, exactly as the linear walk did. Only the
+# standard verbs are indexed (an arbitrary request method cannot grow the
+# table); anything else takes the full walk. Route registration drops the
+# index; resetGlobals does too.
 
-# One site's routes: the longest mount path that prefixes the request
-# wins (v3's path score). A mounted route sees the request with its
-# mount prefix stripped, so a serveStatic root composed at '/docs'
-# serves '/docs/a.css' as '/a.css'.
-mountMatches = (mountPath, pathname) ->
-  return true if mountPath is '/'
-  pathname is mountPath or pathname.startsWith "#{mountPath}/"
+INDEXED_METHODS =! new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])
 
-stripMount = (request, mountPath) ->
-  return request if mountPath is '/'
-  url = new URL request.url
-  url.pathname = url.pathname.slice(mountPath.length) or '/'
-  new Request url.toString(), request
+routeBucket = (method) ->
+  return null unless INDEXED_METHODS.has(method)
+  _routeIndex ?= new Map()
+  bucket = _routeIndex.get(method)
+  return bucket if bucket?
+  bucket = { statics: new Map(), dynamics: [] }
+  for route, order in _routes
+    continue unless route.method is method or route.method is 'ALL'
+    if route.staticPath?
+      entry = { route, order }
+      bucket.statics.set(route.staticPath, entry) unless bucket.statics.has(route.staticPath)
+      slashed = "#{route.staticPath}/"
+      bucket.statics.set(slashed, entry) unless bucket.statics.has(slashed)
+    else
+      bucket.dynamics.push { route, order }
+  _routeIndex.set(method, bucket)
+  bucket
 
-# Only Strict-Transport-Security, and only when TLS is live — the v3
-# judgment: HSTS is an opt-in header on a listener that can honor it,
-# never a header a plaintext listener teaches a browser.
-hstsWare = (c, next) ->
-  response = await next()
-  response.headers.set 'Strict-Transport-Security', 'max-age=31536000; includeSubDomains' unless response.headers.has 'Strict-Transport-Security'
-  response
+matchOne = (route, pathname) ->
+  match = pathname.match route.regex
+  return null unless match
+  params = {}
+  for key, i in route.keys
+    params[key] = decodeURIComponent(match[i + 1]) if match[i + 1]?
+  { handler: route.handler, params, route }
 
-buildRoute = (route, host, hsts) ->
-  use = []
-  use.push hstsWare if hsts
-  if route.bundle?
-    use.push appServer {
-      root: route.root
-      host: host
-      bundle: route.bundle
-      title: route.title
-      state: route.state
-      bundlePath: route.bundlePath
-      index: route.index
-      maxAge: route.maxAge
-      secure: route.secure
-    }
-  else
-    fail 'a serve route requires a static root or a bundle' unless route.root
-    use.push serveStatic { root: route.root, host: host, spa: route.spa is true, index: route.index, maxAge: route.maxAge }
-  {
-    mountPath: route.mountPath ?? '/'
-    run: compose { use, handler: notFound }
-  }
+matchRoute = (method, pathname) ->
+  bucket = routeBucket(method)
+  unless bucket?
+    for route in _routes
+      continue unless route.method is method or route.method is 'ALL'
+      found = matchOne(route, pathname)
+      return found if found?
+    return null
+  hit = bucket.statics.get(pathname)
+  limit = if hit? then hit.order else Infinity
+  for entry in bucket.dynamics
+    break unless entry.order < limit
+    found = matchOne(entry.route, pathname)
+    return found if found?
+  return { handler: hit.route.handler, params: {}, route: hit.route } if hit?
+  null
 
-buildSite = (site, host, hsts) ->
-  routes = ((buildRoute route, host, hsts) for route in (site.routes ?? []))
-  routes.sort (a, b) -> b.mountPath.length - a.mountPath.length
-  { host: String(site.host ?? '*').toLowerCase(), routes }
+# ==============================================================================
+# MIME Types — Auto-detect content type from file extension
+# ==============================================================================
 
-# ── TLS resolution ────────────────────────────────────────────────────
+_mimeTypes =
+  '.html':  'text/html; charset=UTF-8'
+  '.htm':   'text/html; charset=UTF-8'
+  '.css':   'text/css; charset=UTF-8'
+  '.js':    'application/javascript'
+  '.mjs':   'application/javascript'
+  '.json':  'application/json'
+  '.txt':   'text/plain; charset=UTF-8'
+  '.csv':   'text/csv; charset=UTF-8'
+  '.xml':   'application/xml'
+  '.svg':   'image/svg+xml'
+  '.png':   'image/png'
+  '.jpg':   'image/jpeg'
+  '.jpeg':  'image/jpeg'
+  '.gif':   'image/gif'
+  '.webp':  'image/webp'
+  '.avif':  'image/avif'
+  '.ico':   'image/x-icon'
+  '.woff':  'font/woff'
+  '.woff2': 'font/woff2'
+  '.ttf':   'font/ttf'
+  '.otf':   'font/otf'
+  '.mp3':   'audio/mpeg'
+  '.mp4':   'video/mp4'
+  '.webm':  'video/webm'
+  '.ogg':   'audio/ogg'
+  '.pdf':   'application/pdf'
+  '.zip':   'application/zip'
+  '.gz':    'application/gzip'
+  '.wasm':  'application/wasm'
+  '.rip':   'text/x-rip; charset=UTF-8'
 
-resolveMaterial = (opts) ->
-  return null unless opts.tls?
-  resolution = resolveTls {
-    cert: opts.tls.cert
-    key: opts.tls.key
-    certPath: opts.tls.certPath
-    keyPath: opts.tls.keyPath
-    production: opts.production is true
-  }, { load: pemLoad }
-  fail 'https requires explicit certificate material in S1 — pass cert/key paths (ACME and the dev CA arrive with S5)' unless resolution.mode is 'explicit'
-  resolution.material
+export mimeType = (path) ->
+  ext = path.substring(path.lastIndexOf('.'))
+  _mimeTypes[ext] or 'application/octet-stream'
 
-# ── the server ────────────────────────────────────────────────────────
+# ==============================================================================
+# Context Factory
+# ==============================================================================
 
-export type ServeHandle =
-  port: number
-  hostname: string
+# Public type surface for route handlers. The `Ctx` shape mirrors the object
+# returned by `createContext` below; `RouteHandler` types the `this`-bound
+# context that handlers receive (passed as both `this` and first positional
+# arg via `handler.call!(c, c)`), so `@req.json!`, `@params.id`, `@json(...)`
+# all type-check in user code without needing per-app declarations.
+
+export type CtxReq =
+  raw: Request
+  method: string
   url: string
-  server: any
-  watch: any
-  pool: any
-  fetchHandler: (req: Request) => Promise<Response>
-  stop: () => Promise<void>
+  path: string
+  param: (key?: string) => any
+  query: (key?: string) => any
+  header: (key?: string) => any
+  json: () => Promise<any>
+  text: () => Promise<string>
+  formData: () => Promise<FormData>
+  parseBody: (opts?: Record<string, unknown>) => Promise<any>
 
-export type ServeOpts =
-  sites?: any[]
-  root?: string
-  bundle?: any
-  title?: string
-  state?: any
-  spa?: boolean
-  httpPort?: number
-  httpsPort?: number | null
-  tls?: any
-  watch?: boolean
-  watchPath?: string
-  workers?: number
-  concurrency?: number
-  maxQueue?: number
-  queueTimeoutMs?: number
-  maxRequestsPerWorker?: number
-  maxSecondsPerWorker?: number
-  idleTimeoutSec?: number
-  hsts?: boolean
-  hostname?: string
-  quiet?: boolean
-  production?: boolean
-  host?: any
-  serve?: (options: any) => any
+export type Ctx =
+  input: any
+  json: (data: any, status?: number, headers?: Record<string, string>) => Response
+  text: (str: string, status?: number, headers?: Record<string, string>) => Response
+  html: (str: string, status?: number, headers?: Record<string, string>) => Response
+  body: (data: BodyInit | null, status?: number, headers?: Record<string, string>) => Response
+  redirect: (location: string, status?: number) => Response
+  send: (path: string, type?: string) => Response
+  header: (name: string, value?: string, opts?: { append?: boolean }) => string | null | undefined
+  cache: (duration: number | string) => void
+  session: Record<string, any>
+  req: CtxReq
 
-export def startServer(opts: ServeOpts = {}): ServeHandle
-  host = opts.host ?? diskHost()
-  serveFn = opts.serve ?? ((options) -> Bun.serve options)
+export type RouteHandler = (this: Ctx, c: Ctx, next?: () => Promise<void>) => any
 
-  # A single root (or bundle) is the one-site shorthand the CLI uses;
-  # `sites` is the serve.rip shape. Either way the result is an
-  # ordered site list with composed pipelines.
-  siteConfigs = if opts.sites?.length
-    opts.sites
-  else if opts.root? or opts.bundle?
-    [{
-      host: '*'
-      routes: [{
-        mountPath: '/'
-        root: opts.root
-        bundle: opts.bundle
-        title: opts.title
-        state: opts.state
-        spa: opts.spa
-      }]
-    }]
-  else
-    fail 'startServer requires a root, a bundle, or sites'
+# The helpers live on shared prototypes and take the context as `this`
+# (handler.call(c, c) semantics unchanged), so a request allocates two small
+# objects with own data fields instead of ~15 fresh closures. The outgoing
+# `out` Headers is lazy — created on the first header write; a response whose
+# headers were never touched builds from a plain object and skips it.
 
-  useTls = opts.tls?
-  material = resolveMaterial opts
-  hsts = opts.hsts is true and useTls
-  sites = ((buildSite site, host, hsts) for site in siteConfigs)
+CtxReqProto =
+  param: (key) -> if key? then @_params[key] else { ...@_params }
+  query: (key) -> if key? then @_url.searchParams.get(key) else Object.fromEntries(@_url.searchParams)
+  header: (key) -> if key? then @raw.headers.get(key) else Object.fromEntries(@raw.headers)
+  json: -> @raw.json()
+  text: -> @raw.text()
+  formData: -> @raw.formData()
+  parseBody: (opts = {}) ->
+    ct = @raw.headers.get('content-type') or ''
+    if ct =~ /json/i
+      @raw.json!
+    else if ct =~ /form/i
+      fd = @raw.formData!
+      Object.fromEntries(fd)
+    else
+      {}
 
-  watch = if opts.watch is true then createWatch() else null
-  watchPath = opts.watchPath ?? WATCH_PATH
+CtxProto =
+  # One response builder: an existing `out` takes the content type and the
+  # per-call headers (which may override it, matching set-then-set order);
+  # without one, a plain-object headers init avoids the Headers allocation.
+  _respond: (data, status, headers, ctype) ->
+    if @_out?
+      @_out.set('Content-Type', ctype) if ctype?
+      for k, v of headers then @_out.set(k, v)
+      return new Response data, { status, headers: @_out }
+    h = if ctype? then { 'Content-Type': ctype, ...headers } else headers
+    new Response data, { status, headers: h }
 
-  cores = cpus().length
-  workers = Math.max 1, Math.floor(opts.workers ?? Math.max(1, Math.floor(cores / 2)))
-  pool = createPool
-    spawn: -> { handle: (job) -> job() }
-    size: workers
-    concurrency: opts.concurrency ?? 1
-    queueLimit: opts.maxQueue ?? 512
-    timeout: opts.queueTimeoutMs ?? 30000
-    maxRequests: opts.maxRequestsPerWorker ?? 10000
-    maxAge: (opts.maxSecondsPerWorker ?? 3600) * 1000
+  json: (data, status = 200, headers = {}) ->
+    @_respond JSON.stringify(data), status, headers, 'application/json'
 
-  siteFor = (hostname) ->
-    best = null
-    bestRank = 0
-    for site in sites
-      rank = hostRank site.host, hostname
-      if rank > bestRank
-        best = site
-        bestRank = rank
-    best
+  text: (str, status = 200, headers = {}) ->
+    @_respond str, status, headers, 'text/plain; charset=UTF-8'
 
-  answer = (request) ->
-    url = new URL request.url
-    site = siteFor url.hostname.toLowerCase()
-    return new Response('Not Found', { status: 404 }) unless site?
-    for route in site.routes
-      if mountMatches route.mountPath, url.pathname
-        scoped = stripMount request, route.mountPath
-        return route.run createContext(scoped)
-    new Response 'Not Found', { status: 404 }
+  html: (str, status = 200, headers = {}) ->
+    @_respond str, status, headers, 'text/html; charset=UTF-8'
 
-  # Pool failures translate to the v3 status vocabulary: a full queue
-  # is 503 Server busy, a queue wait past its timeout is 504, and a
-  # draining server answers 503 to whoever raced the shutdown.
-  overloaded = (error) ->
-    message = String(error?.message ?? error)
-    return new Response('Queue timeout', { status: 504 }) if message.includes 'timed out in queue'
-    return new Response('Server busy', { status: 503 }) if message.includes 'queue is at capacity'
-    return new Response('Server shutting down', { status: 503 }) if message.includes 'shutting down'
-    throw error
+  redirect: (location, status = 302) ->
+    new Response null, { status, headers: { Location: String(location) } }
 
-  fetchHandler = (request) ->
-    if watch? and new URL(request.url).pathname is watchPath
-      return watch.handler createContext(request)
-    try
-      await pool.submit -> answer request
-    catch error
-      overloaded error
+  body: (data, status = 200, headers = {}) ->
+    @_respond data, status, headers, null
 
-  listenOpts: any =
-    idleTimeout: Math.max 0, Math.floor(opts.idleTimeoutSec ?? 30)
-    fetch: fetchHandler
-  listenOpts.hostname = opts.hostname if opts.hostname?
-  listenOpts.tls = { cert: material.cert, key: material.key } if material?
+  send: (path, type) ->
+    file = Bun.file(path)
+    etag = "W/\"#{file.lastModified}-#{file.size}\""
+    if @req.raw.headers.get('if-none-match') is etag
+      return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control': @_out?.get('Cache-Control') or 'no-cache' } })
+    out = (@_out ?= new Headers())
+    out.set 'Content-Type', (type or mimeType(path))
+    out.set 'Cache-Control', 'no-cache' unless out.has 'Cache-Control'
+    out.set 'ETag', etag
+    new Response file, { status: 200, headers: out }
 
-  # An absent port takes the protocol default; an EXPLICIT 0 is the
-  # OS-assigned ephemeral port (the CLI layer resolves v3's "0 means
-  # unspecified" before it gets here).
-  preferred = if useTls then (opts.httpsPort ?? 443) else (opts.httpPort ?? 80)
-  server = scanListen preferred, ((port) -> serveFn { ...listenOpts, port }), { tls: useTls, quiet: opts.quiet is true }
-
-  # The HTTP→HTTPS redirect listener, v3's: best effort on port 80
-  # with a short idle timeout — a machine that refuses the bind gets a
-  # warning, never a failed start.
-  redirectServer = null
-  if useTls and opts.redirectHttp is true
-    httpsPort = server.port
-    try
-      redirectServer = serveFn
-        port: 80
-        idleTimeout: 8
-        fetch: (req) ->
-          url = new URL req.url
-          new Response null, { status: 301, headers: { Location: "https://#{url.hostname}:#{httpsPort}#{url.pathname}#{url.search}" } }
-    catch
-      console.warn 'rip-server: could not bind port 80 for HTTP→HTTPS redirect' unless opts.quiet is true
-
-  stopped = null
-  stop = ->
-    stopped ??= do ->
-      server.stop()          # stop accepting; in-flight requests finish
-      try redirectServer?.stop(true) catch then null
-      await pool.shutdown()  # drain workers, reject the queue
-      server.stop true       # close what remains held open (SSE watchers)
+  header: (name, value, opts: { append?: boolean } = {}) ->
+    if value?
+      out = (@_out ?= new Headers())
+      if opts.append then out.append(name, value) else out.set(name, value)
       return
-    stopped
+    @_out?.get(name) ?? null
 
-  protocol = if useTls then 'https' else 'http'
-  hostname = opts.hostname ?? 'localhost'
-  {
-    port: server.port
-    hostname
-    url: "#{protocol}://#{hostname}:#{server.port}"
-    server
-    watch
-    pool
-    fetchHandler
-    stop
-  }
+  cache: (duration) ->
+    seconds = if typeof duration is 'number' then duration
+    else if typeof duration is 'string'
+      parts = duration.match(/^(\d+)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/i)
+      if parts
+        n = parseInt(parts[1])
+        switch parts[2][0].toLowerCase()
+          when 's' then n
+          when 'm' then n * 60
+          when 'h' then n * 3600
+          when 'd' then n * 86400
+          when 'w' then n * 604800
+          when 'y' then n * 31536000
+          else n
+      else parseInt(duration) or 0
+    else 0
+    out = (@_out ?= new Headers())
+    out.set 'Cache-Control', "public, max-age=#{seconds}, immutable"
+    out.set 'Expires', new Date(Date.now() + seconds * 1000).toUTCString()
+    return
+
+# fetch() passes its already-parsed url + normalized pathname through so the
+# request is parsed exactly once; the defaults keep direct calls working.
+createContext = (req, params = {}, url = null, pathname = null) ->
+  url ?= new URL(req.url)
+  pathname ?= posix.normalize(url.pathname)
+  r = Object.create(CtxReqProto)
+  r.raw = req
+  r.method = req.method
+  r.url = req.url
+  r.path = pathname
+  r._url = url
+  r._params = params
+  c = Object.create(CtxProto)
+  c._out = null
+  c.session = {}
+  c.req = r
+  c
+
+# ==============================================================================
+# Middleware Composition (Koa-style)
+# ==============================================================================
+
+compose = (middlewares, beforeFilters, afterFilters, handler) ->
+  (c) ->
+    index = -1
+    dispatch = (i) ->
+      if i <= index
+        throw new Error 'next() called multiple times'
+      index = i
+
+      # Run middlewares first — a path-scoped entry is skipped (not called)
+      # when the request path is outside its pattern
+      if i < middlewares.length
+        m = middlewares[i]
+        return dispatch!(i + 1) if m.regex? and not m.regex.test(c.req.path)
+        result = m.fn.call!(c, c, -> dispatch!(i + 1))
+        c._response = result if result instanceof Response
+        return
+
+      # After middlewares, run before filters, handler, after filters
+      if i is middlewares.length
+        # Run before filters
+        for filter in beforeFilters
+          result = filter.call!(c, c)
+          if result instanceof Response
+            c._response = result
+            return
+
+        # Run handler
+        result = handler.call!(c, c)
+        c._response = result if result instanceof Response
+
+        # Run after filters
+        for filter in afterFilters
+          filter.call!(c, c)
+
+    dispatch!(0)
+    c
+
+# ==============================================================================
+# Smart Response Wrapper
+# ==============================================================================
+
+STATUS_TEXT: Record<number, string> =
+  400: 'Bad Request'
+  401: 'Unauthorized'
+  403: 'Forbidden'
+  404: 'Not Found'
+  409: 'Conflict'
+  422: 'Unprocessable Entity'
+  429: 'Too Many Requests'
+  500: 'Internal Server Error'
+  502: 'Bad Gateway'
+  503: 'Service Unavailable'
+
+export type ApiError = { message?: string, notice?: string, issues?: unknown[] }
+
+# One JSON error envelope for every thrown error. `notice` (notice!) and
+# `issues` (read/schema validation) are explicitly user-facing, so they're
+# always shown. A plain `error!` message is shown only for 4xx; 5xx and raw
+# throws (no/invalid status) are masked to a generic status message so internal
+# details never leak. Exported so a custom `onError` can reuse the same shape.
+# (`err` is an arbitrary thrown value — untyped by nature, like a catch binding.)
+export errorEnvelope = (err: any): { status: number, error: ApiError } ->
+  raw = err?.status
+  status = if Number.isInteger(raw) and 400 <= raw <= 599 then raw else 500
+  error =
+    if err?.issues
+      { message: err.message or 'Validation failed', issues: err.issues }
+    else if err?.notice
+      { notice: err.notice }
+    else if status < 500
+      { message: err.message or STATUS_TEXT[status] or 'Error' }
+    else
+      { message: STATUS_TEXT[status] or 'Internal Server Error' }
+  { status, error }
+
+smart = (fn) ->
+  (c, next) ->
+    try
+      result = if fn.length > 0 then fn.call!(c, c) else fn.call!(c)
+      return result if result instanceof Response
+      return c.json(result) if result? and typeof result is 'object'
+      if typeof result is 'string'
+        type = if result.trimStart().startsWith('<') then 'html' else 'text'
+        return c[type](result)
+      return c.text(String(result)) if typeof result in ['number', 'boolean']
+      if result is null or result is undefined
+        return new Response(null, { status: 204 })
+      result
+    catch err
+      { status, error } = errorEnvelope(err)
+      warn 'Handler error:', err if status >= 500
+      new Response JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
+
+# ==============================================================================
+# DSL: Route Registration
+# ==============================================================================
+
+# Validate the JSON body through a schema before the handler runs. On
+# failure the request never reaches the handler — a 400 with structured
+# {field, error, message} issues goes out instead (see smart's catch).
+# On success the parsed, defaulted, coerced value is `@input`. Uses
+# safeAsync so schemas with @ensure! async refinements work too.
+withInput = (schema, fn) ->
+  (c) ->
+    if c._bodyInvalid
+      err = new Error 'Invalid JSON body'
+      err.status = 400
+      err.issues = [{ field: '', error: 'json', message: 'request body is not valid JSON' }]
+      throw err
+    r = schema.safeAsync! (c._body ?? {})
+    unless r.ok
+      err = new Error 'Validation failed'
+      err.status = 400
+      err.issues = r.errors
+      throw err
+    c.input = r.value
+    if fn.length > 0 then fn.call!(c, c) else fn.call!(c)
+
+addRoute = (method, path, ...handlers) ->
+  # Route options: a leading plain-object slot carries route metadata.
+  # `input: SomeSchema` wires schema validation + the OpenAPI contract:
+  #
+  #   post '/signup', input: SignupInput, ->
+  #     # @input is the parsed value; 400 with issues is automatic
+  opts = null
+  if handlers.length > 1 and handlers[0]? and typeof handlers[0] is 'object'
+    opts = handlers[0]
+    handlers = handlers.slice(1)
+  _routeIndex = null
+  fullPath = "#{_prefix}#{path}"
+  if fullPath.includes(':') and fullPath.endsWith('?')
+    basePath = fullPath.slice(0, -1).replace(/\/:[^\/]+$/, '')
+    if basePath and basePath isnt fullPath.slice(0, -1)
+      addRoute method, basePath, ...(if opts then [opts, ...handlers] else handlers)
+    fullPath = fullPath.slice(0, -1)
+  { regex, keys, staticPath } = compilePattern(fullPath)
+  for handler in handlers
+    h = if opts?.input then withInput(opts.input, handler) else handler
+    _routes.push {
+      method: method.toUpperCase(), regex, keys, staticPath,
+      handler: smart(h), path: fullPath,
+      inputSchema: opts?.input ?? null,
+    }
+  # The first input-validated route turns on the generated OpenAPI
+  # document — GET /openapi.json reflects every such route, always
+  # current, with zero additional authoring. Registered directly (no
+  # _prefix) so it lives at the server root even inside prefix blocks.
+  if opts?.input and not _openapiRegistered
+    _openapiRegistered = true
+    oa = compilePattern('/openapi.json')
+    _routes.push {
+      method: 'GET', regex: oa.regex, keys: oa.keys, staticPath: oa.staticPath,
+      handler: smart(-> buildOpenAPI()), path: '/openapi.json',
+      inputSchema: null,
+    }
+
+export get:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'GET',    path, ...handlers
+export post:  (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'POST',   path, ...handlers
+export put:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'PUT',    path, ...handlers
+export patch: (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'PATCH',  path, ...handlers
+export del:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'DELETE', path, ...handlers
+export all:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'ALL',    path, ...handlers
+
+# ==============================================================================
+# OpenAPI generation
+# ==============================================================================
+#
+# Every route registered with an `input:` schema contributes an
+# operation: path params from the route pattern, requestBody from
+# `schema.toJSONSchema()` (draft 2020-12), and the standard 400
+# validation-failure shape. The document is rebuilt per request — route
+# tables are small and this keeps it always-current.
+
+ISSUE_SCHEMA =!
+  type: 'object'
+  properties:
+    field:   { type: 'string' }
+    error:   { type: 'string' }
+    message: { type: 'string' }
+
+buildOpenAPI = ->
+  paths = {}
+  for r in _routes
+    continue unless r.inputSchema
+    continue if r.method is 'ALL'
+    oaPath = r.path.replace(/:([A-Za-z0-9_]+)\??/g, '{$1}')
+    entry = (paths[oaPath] ?= {})
+    op: Record<string, any> =
+      responses:
+        '200': { description: 'OK' }
+        '400':
+          description: 'Validation failed'
+          content:
+            'application/json':
+              schema:
+                type: 'object'
+                properties:
+                  error:
+                    type: 'object'
+                    properties:
+                      message: { type: 'string' }
+                      issues:  { type: 'array', items: ISSUE_SCHEMA }
+      requestBody:
+        required: true
+        content:
+          'application/json':
+            schema: r.inputSchema.toJSONSchema()
+    if r.keys?.length
+      op.parameters = r.keys.map (k) -> { name: k, in: 'path', required: true, schema: { type: 'string' } }
+    entry[r.method.toLowerCase()] = op
+  { openapi: '3.1.0', info: _openapiInfo, paths }
+
+# Customize the document's info block and/or build it imperatively:
+#
+#   openapi title: 'Trust Health API', version: '1.4.0'
+export openapi = (info = null) ->
+  Object.assign(_openapiInfo, info) if info
+  buildOpenAPI()
+
+# use(mw) registers global middleware; use(path, mw) scopes it to requests
+# whose path matches the pattern — the pattern covers the path itself AND
+# anything beneath it (use '/api' runs for /api and /api/users), using the
+# same :param / * grammar as routes. Patterns are match-only: their :params
+# are never exposed to middleware or handlers. Global and scoped middleware
+# share ONE registration order; a scoped entry is skipped when the request
+# path is outside its pattern.
+compileMiddlewarePattern = (path) ->
+  path = path.replace /\/+$/, ''
+  escaped = path.replace /[.+^${}()|[\]\\]/g, '\\$&'
+  source = escaped.replace /:(\w+)(?:\{([^}]+)\})?/g, (match, key, pattern) -> "(?:#{pattern or '[^/]+'})"
+  source = source.replace /(?<![\\*])\*(?!\*)/g, '.*'
+  new RegExp("^#{source}(?:/|$)")
+
+export use = (pathOrMw, mw = null) ->
+  _composeEpoch++
+  if typeof pathOrMw is 'function'
+    _middlewares.push { fn: pathOrMw }
+  else if typeof pathOrMw is 'string' and typeof mw is 'function'
+    _middlewares.push { fn: mw, regex: compileMiddlewarePattern(pathOrMw), path: pathOrMw }
+  else
+    throw new TypeError "use() takes (middleware) or (path, middleware); got (#{kind(pathOrMw)}, #{kind(mw)})"
+
+export prefix = (base, fn) ->
+  old = _prefix
+  _prefix = "#{_prefix}#{base}"
+  try
+    fn?.()
+  finally
+    _prefix = old
+
+export onError:  (handler: RouteHandler) => void = (handler) -> _errorHandler = handler
+export notFound: (handler: RouteHandler) => void = (handler) -> _notFoundHandler = handler
+
+export raw: (fn: (req: Request) => any) => void = (fn) -> _rawFilter = fn
+
+export before: (fn: RouteHandler) => void = (fn) ->
+  _composeEpoch++
+  _beforeFilters.push fn
+
+export after: (fn: RouteHandler) => void = (fn) ->
+  _composeEpoch++
+  _afterFilters.push fn
+
+# ==============================================================================
+# Main Fetch Handler
+# ==============================================================================
+
+export fetch = (req) ->
+  url = new URL(req.url)
+  pathname = posix.normalize(url.pathname)
+  method = req.method
+
+  if method is 'HEAD'
+    res = fetch!(new Request(req.url, { method: 'GET', headers: req.headers }))
+    return new Response(null, { status: res.status, headers: res.headers })
+
+  # Handle CORS preflight (OPTIONS) requests early, before route matching.
+  # The policy function is set by `cors({preflight: true})` and MUST agree
+  # with the middleware's origin validation — otherwise preflight could
+  # advertise a more permissive CORS posture than the app actually enforces.
+  if method is 'OPTIONS' and _corsPreflightPolicy?
+    requestOrigin = req.headers.get('origin')
+    decision = try _corsPreflightPolicy(requestOrigin) catch then null
+    if decision? and decision.allowedOrigin?
+      h =
+        'Access-Control-Allow-Origin':   decision.allowedOrigin
+        'Access-Control-Allow-Methods':  decision.methods  or 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS'
+        'Access-Control-Allow-Headers':  decision.headers  or (req.headers.get('access-control-request-headers') or 'Content-Type,Authorization')
+        'Access-Control-Max-Age':        String(decision.maxAge or 86400)
+      # Credentials: ONLY when the policy allows it AND the origin is not
+      # the wildcard (browsers reject credentials + '*' anyway, but the
+      # combination is a well-known misconfig worth refusing to emit).
+      if decision.credentials and decision.allowedOrigin isnt '*'
+        h['Access-Control-Allow-Credentials'] = 'true'
+      return new Response null, { status: 204, headers: h }
+    # Policy rejected this origin — fall through with no CORS headers.
+    # Browsers interpret a missing Access-Control-Allow-Origin as deny.
+    return new Response null, { status: 204 }
+
+  match = matchRoute(method, pathname)
+
+  unless match
+    c = createContext(req, {}, url, pathname)
+    if _notFoundHandler?
+      return _notFoundHandler.call!(c, c)
+    return new Response('Not Found', { status: 404 })
+
+  c = createContext(req, match.params, url, pathname)
+
+  # Run raw filter before body parsing (e.g., fix content-type)
+  _rawFilter?.(req) if method in ['POST', 'PUT', 'PATCH']
+
+  # Pre-parse body and query for sync read() — baked in, zero ceremony
+  data: any = {}
+  try
+    ct = req.headers.get('content-type') or ''
+    if method in ['POST', 'PUT', 'PATCH']
+      if ct =~ /json/i
+        data = c.req.json!
+      else if ct =~ /x-www-form-urlencoded|form-data/i
+        data = c.req.parseBody!
+        keys = Object.keys(data)
+        data = { body: keys[0] } if keys.length is 1 and data[keys[0]] is ''
+      else if ct =~ /text\//i
+        data = { body: c.req.text! }
+  catch
+    data = {}
+    c._bodyInvalid = true
+  # The body stream is consumed now — route `input:` validation reads
+  # the parsed value from here, never from c.req.json() again.
+  c._body = data
+  merged = { ...data, ...c.req.query(), ...match.params }
+
+  # Run handler inside AsyncLocalStorage context
+  requestContext.run! { env: c, data: merged }, ->
+    runHandler!(c, match.route)
+
+# Each route's composed chain is cached on the route object; a use/before/
+# after registration (or resetGlobals) bumps _composeEpoch and stale chains
+# rebuild on their next request.
+composedChain = (route) ->
+  return route._chain if route._chain? and route._chainEpoch is _composeEpoch
+  route._chainEpoch = _composeEpoch
+  route._chain = compose(_middlewares, _beforeFilters, _afterFilters, route.handler)
+
+# Internal: Execute handler with middleware and error handling
+runHandler = (c, route) ->
+  # Stamp the opt-in correlation id (`@mark = ...` in the handler) onto an
+  # internal response header. Janus scrubs `rip-mark` from client responses
+  # in its data plane and surfaces it for access logging — so one handler
+  # line (`@mark = corrId`) ties the access log, any `mark()` reads in
+  # library code, and downstream logs together without leaking the id.
+  applyMark = (r) ->
+    return r unless r? and c.mark?
+    try r.headers.set('rip-mark', String(c.mark))
+    r
+  try
+    # Compose runs: middlewares → before filters → handler → after filters
+    chain = composedChain(route)
+    chain!(c)
+    applyMark(c._response or new Response('', { status: 204 }))
+  catch err
+    warn 'Request error:', err if not err?.status or err.status >= 500
+    res = if _errorHandler?
+      _errorHandler.call!(c, err, c)
+    else
+      # Same masked JSON envelope smart() emits: 5xx internals never leak.
+      masked = errorEnvelope(err)
+      new Response JSON.stringify({ error: masked.error }), { status: masked.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
+    applyMark(res)
+
+# ==============================================================================
+# Server Startup
+# ==============================================================================
+
+export startHandler = -> fetch
+
+export start = (opts?: { host?: string, port?: number, silent?: boolean }) ->
+  opts ?= {}
+  handler = startHandler()
+
+  # Under the worker runtime, hand the fetch handler over and return —
+  # the worker owns the unix socket.
+  if process.env.WORKER_ID? or process.env.SOCKET_PATH?
+    globalThis.__ripHandler = handler
+    return handler
+
+  # Otherwise start standalone server
+  host = opts.host or 'localhost'
+  port = opts.port or 3000
+  server = Bun.serve { hostname: host, port: port, fetch: handler }
+  p "rip-server listening on http://#{host}:#{port}" unless opts.silent
+  server
+
+export App = (fn) ->
+  resetGlobals()
+  fn?.()
+  startHandler()
+
+# ==============================================================================
+# Utility: Get Current Environment/Context
+# ==============================================================================
+
+export ctx = ->
+  store = requestContext.getStore()
+  store?.env or null
+
+# mark() — current request's correlation id (whatever the handler assigned
+# to `@mark`). Returns null if no handler has set one, or if called outside
+# a request. Use from library code that needs to tag logs/artifacts with
+# the same id the access log shows:
+#
+#   labcorpFetch = (path, opts) ->
+#     corrId = mark()
+#     console.log "[labcorp] #{corrId or '-'} → #{opts.method} #{path}"
+#
+export mark = -> requestContext.getStore()?.env?.mark or null
+
+# Subrequest — run a function with new data but same @ context
+# Enables read() to work against a synthetic payload while preserving
+# all @ variables from the parent request (e.g., @token).
+export subrequest = (data, fn) ->
+  store = requestContext.getStore() or throw new Error 'no context for subrequest()'
+  requestContext.run! { env: store.env, data }, ->
+    fn.call!(store.env)
+
+# Session proxy — access session.foo anywhere (via AsyncLocalStorage)
+export session = new Proxy {},
+  get: (_, key) ->
+    requestContext.getStore()?.env?.session?[key]
+  set: (_, key, value) ->
+    ctx = requestContext.getStore()?.env
+    return false unless ctx?
+    ctx.session ?= {}
+    ctx.session[key] = value
+    true
+  deleteProperty: (_, key) ->
+    ctx = requestContext.getStore()?.env
+    delete ctx.session[key] if ctx?.session?
+    true
+
+# Env proxy — access env.FOO anywhere (shortcut for process.env)
+export env = new Proxy {}, get: (_, key) -> process.env[String(key)]
+
+# ==============================================================================
+# Error Helpers — Halt request with an HTTP error
+# ==============================================================================
+
+export error = (message = 'Bad request', status = 400) ->
+  throw Object.assign(new Error(message), { status })
+
+export notice = (message = 'Something went wrong', status = 400) ->
+  throw Object.assign(new Error(message), { status, notice: message })
+
+export bail = ->
+  store = requestContext.getStore()
+  if store?.env?.session?
+    for key of store.env.session
+      delete store.env.session[key]
+  # 401, not 403: bail is the no/invalid-session case (missing credentials),
+  # which is "(re)authenticate" — and it just cleared the session. 403
+  # (authenticated-but-refused) stays with `error! '…', 403`.
+  throw Object.assign(new Error('Unauthorized'), { status: 401 })
+
+# ==============================================================================
+# Utility Functions
+# ==============================================================================
+
+# The validation/normalization vocabulary lives in @rip-lang/validate — a
+# zero-dependency, browser-safe (`rip.browser: true`) package, so the same
+# validators that power `read()` here also power `~:name` schema coercers
+# in client-side `.parse()` calls. Importing it registers every validator
+# as a named schema coercer. Re-exported here: these are part of
+# @rip-lang/server's public surface.
+
+import { isBlank, toName, toPhone, formatMoney, registerValidator, getValidator, isRawType, validatorNames, check } from '@rip-lang/validate'
+export { isBlank, toName, toPhone, formatMoney, registerValidator, getValidator, isRawType, validatorNames, check }
+
+# ==============================================================================
+# read() — Sinatra-style Parameter Reading
+# ==============================================================================
+
+export read = (name?: string, type?: string | RegExp | any[] | Record<string, any>, miss?: any) ->
+  store = requestContext.getStore() or throw new Error 'no context for read()'
+
+  # missing value helper
+  done = (must = false) ->
+    return miss() if typeof miss is 'function'
+    throw Object.assign(new Error("Missing required field: #{name}"), { status: 400 }) if must
+    return miss ?? null
+
+  # get value from store — supports dotted paths for nested JSON bodies,
+  # e.g. read 'patient.firstName' walks {patient: {firstName: ...}}
+  v = store.data or {}
+  if name?
+    for part in name.split('.')
+      break unless v? and typeof v is 'object'
+      v = v[part]
+  return v if type is 'raw'
+  v = v.trim() if typeof v is 'string'
+
+  # value only, no validator
+  if !type?
+    return v if v?
+    return done()
+
+  # String: apply validator function
+  else if typeof type is 'string'
+
+    # detect required value (trailing '!')
+    if type.endsWith '!'
+      must = true
+      type = type.slice(0, -1)
+
+    # apply validator function — raw validators (array/hash/json) take
+    # the value untouched; the registry's isRawType seam decides.
+    f = getValidator(type)
+    v = String(v ?? '') unless isRawType(type)
+    v = if f then f(v) else null
+
+  # Regex: apply regex pattern
+  else if type instanceof RegExp
+    s = String(v ?? '')
+    v = s.match(type)?[0] or null
+
+  # Array: [min, max] constraint or enumeration
+  else if Array.isArray(type)
+    s = String(v ?? '')
+    y: boolean = true
+    if typeof type[0] is 'number'
+      [min, max] = type
+      if typeof v is 'number' or (s =~ /^[-+]?\d+$/)
+        n = if typeof v is 'number' then v else +s
+        y = false if min? and n < min
+        y = false if max? and n > max
+        v = if y then n else null
+      else
+        y = false if min? and s.length < min
+        y = false if max? and s.length > max
+        v = if y then s else null
+    else
+      v = if type.includes(s) then s else null
+
+  # Object: start/end, min/max
+  else if type? and typeof type is 'object'
+    s = String(v ?? '')
+    if type.start? or type.end?
+      n = if s =~ /^[-+]?\d+$/ then +s else NaN
+      v = if not isNaN(n) and (not type.start? or n >= type.start) and (not type.end? or n <= type.end) then n else null
+    else if type.min? or type.max?
+      y: boolean = true
+      if typeof v is 'number' or (s =~ /^[-+]?\d+$/)
+        n = if typeof v is 'number' then v else +s
+        y = false if type.min? and n < type.min
+        y = false if type.max? and n > type.max
+        v = if y then n else null
+      else
+        y = false if type.min? and s.length < type.min
+        y = false if type.max? and s.length > type.max
+        v = if y then s else null
+
+  # blank / missing value handling
+  if not v? or (typeof v is 'string' and v.trim() is '')
+    return done(must)
+
+  v
+
+# ==============================================================================
+# CLI — `rip server` / `rip-server`
+# ==============================================================================
+
+# Executed directly, this file is the manager bin. The manager loads
+# dynamically so DSL importers never pull in orchestration code; argv is
+# handed over unparsed.
+if import.meta.main
+  { main } = import!('./manager.rip')
+  main! process.argv.slice(2)

@@ -1,7 +1,6 @@
+#!/usr/bin/env rip
 # ==============================================================================
 # @rip-lang/ai — Persistent multi-model AI consultation MCP server
-#
-# Author: Steve Shreeve (steve.shreeve@gmail.com)
 #
 # Tools (11):
 #   status, list_models,
@@ -26,12 +25,13 @@
 #   }
 # ==============================================================================
 
+import { readFileSync }    from 'fs'
 import { createInterface } from 'readline'
 import * as store      from './lib/store.rip'
 import * as toolset    from './lib/tools.rip'
 import * as providers  from './lib/providers.rip'
 
-VERSION =! '1.1.0'
+VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
 PROTOCOL =! '2024-11-05'
 MAX_RESPONSE =! 256_000
 

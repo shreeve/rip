@@ -1,416 +1,264 @@
-# @rip-lang/server
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
 
-The Rip HTTP server framework, assembled unit by unit. Server-only by
-design: this package never declares browser safety and never travels
-in an application bundle. The server HTTP router is not the App SPA
-router.
+# Rip Server - @rip-lang/server
 
-## The request matcher
+> **Sinatra-style web framework — routes, smart responses, read() validation, and AsyncLocalStorage-powered request context**
 
-`createMatcher()` is the framework's pure routing core — no sockets,
-no I/O; every behavior is a function of the registered routes and the
-incoming `(method, pathname)`.
+Handlers are plain functions bound to a request context: return an object
+and it ships as JSON, return a string and it ships as text (or HTML when it
+looks like markup), throw `error!`/`notice!` and a structured envelope goes
+out with the right status. `read()` pulls validated parameters from body,
+query, and path with one call, backed by the `@rip-lang/validate`
+vocabulary, and `AsyncLocalStorage` makes `session`, `read()`, and `ctx()`
+work anywhere in your call stack — no threading a context argument through
+your code. The same app file runs standalone on a port or under a worker
+pool behind [Janus](https://github.com/shreeve/janus).
 
-```rip
-import { createMatcher } from '@rip-lang/server'
+**Runtime:** not browser-safe — uses `Bun.serve`, `Bun.file`, and
+`node:async_hooks`. Four `.rip` files: the DSL (`server.rip`, also the
+`rip-server` bin), the middleware collection (`middleware.rip`), and the
+pool runtimes (`manager.rip`, `worker.rip`).
 
-routes = createMatcher()
-routes.add 'GET',  '/users/:id',         showUser
-routes.add 'GET',  '/orders/:id{\\d+}',  showOrder
-routes.add 'GET',  '/files/*path',       sendFile
-routes.add 'ALL',  '/health',            health
+## Quick Start
 
-hit = routes.match 'GET', '/users/42'
-# { handler: showUser, params: { id: '42' }, route: {…} }
+```bash
+bun add @rip-lang/server
 ```
 
-Constraints ride inside string literals, so regex backslashes double:
-the pattern `:id{\d+}` is spelled `':id{\\d+}'` in source.
+```coffee
+import { get, post, read, error, start } from '@rip-lang/server'
 
-Routes match in registration order and the first match wins — there is
-no specificity scoring, so precedence is exactly the order you wrote.
-That also means two patterns with the same shape (`/users/:id` after
-`/users/:name`) both register and the later one never matches; only an
-exact method+pattern duplicate rejects loudly, as does every malformed
-pattern (at registration, never at request time).
+get '/' -> { message: 'Hello!' }
 
-Pattern grammar, per `/`-separated segment:
+get '/users/:id' ->
+  id = read 'id', 'id!'          # validated integer > 0, 400 if missing
+  { id, name: "User #{id}" }
 
-| Segment | Meaning |
-|---|---|
-| `users` | static — compared literally, as written |
-| `:id` | param — one segment, percent-decoded |
-| `:id{\d+}` | constrained param — the regex judges the decoded segment; capturing groups reject |
-| `*rest` / `*` | catch-all — final segment only; captures the remaining segments (at least one), decoded and re-joined |
+post '/signup' ->
+  email = read 'email', 'email!' # normalized, lowercased, 400 if invalid
+  error! 'taken', 409 if email is 'admin@example.com'
+  { ok: true, email }
 
-Methods normalize to uppercase; `ALL` matches every method. Matching
-tolerates one trailing slash. An empty path segment never satisfies a
-param or a catch-all piece, and a segment that fails to percent-decode
-matches nothing — a malformed escape is not routable data.
-
-Decoded captures are data, nothing more: `%2F` decodes to `/` inside
-one param and `%2e%2e` to `..` inside a catch-all. A handler building
-file paths from params owns its own containment — the serving units
-do exactly that.
-
-`parseQuery(search)` is the query representation for `location.search`
-/ `url.search` input (fragments are not stripped): WHATWG decoding,
-duplicate keys keep the last value, `+` decodes to a space, and a
-`__proto__` key lands as inert own data.
-
-`routes()` returns an ordered snapshot of `{ method, pattern, handler }`
-— the seam later units (OpenAPI generation, the app-serving preset)
-read instead of reaching into the table.
-
-## The request context
-
-`createContext(request, { params, files })` wraps one web-standard
-`Request` into the surface a handler works with — reading never
-touches a socket, and every helper returns a web-standard `Response`:
-
-```rip
-show = (c) ->
-  id   = c.req.param 'id'         # one param, or param() for all
-  sort = c.req.query 'sort'       # last value wins, like parseQuery
-  body = await c.req.parseBody()  # dispatches on content type
-  c.json { id, sort, body }       # or text/html/body/redirect/send
+start port: 3000
 ```
 
-Response headers stage on the context: `c.header 'Vary', 'Accept'`
-lands on every later response (`append: true` to accumulate), per-call
-headers override staged ones, and one response's per-call headers
-never leak into the next. `c.cache 60` (or `'2 hours'`) stages
-`Cache-Control`; an unparseable duration rejects loudly.
+## Features
 
-`send(path)` serves through the injected `files` host with weak-ETag
-revalidation (304 on `If-None-Match`); there is no default host —
-this package never touches a filesystem, and the serving units own
-the real host alongside its containment policy.
+- **Sinatra-style routes** — `get`, `post`, `put`, `patch`, `del`, `all`,
+  with `:params`, wildcards, optional segments, and `prefix` grouping
+- **Smart responses** — return objects (JSON), strings (text/HTML),
+  numbers, `null` (204), or a raw `Response`
+- **`read()`** — one call to fetch and validate any input (body, query,
+  path), with 35+ named validators, regex/range/enum forms, dotted paths,
+  and a `!` suffix for required fields
+- **Error helpers** — `error!`, `notice!`, `bail!` halt the request with a
+  structured JSON envelope; 5xx internals are always masked
+- **Request context anywhere** — `session`, `ctx()`, `mark()`, and
+  `subrequest()` ride AsyncLocalStorage, so library code sees the current
+  request without plumbing
+- **`input:` schemas** — validate JSON bodies through a Rip `schema`
+  before the handler runs; `GET /openapi.json` generates itself
+- **Middleware** — Koa-style `use` composition plus a built-in set:
+  `cors`, `logger`, `compress`, `sessions` (signed or AES-256-GCM
+  encrypted), `csrf`, `secureHeaders`, `timeout`, `bodyLimit`, `htmlJson`
+- **Runs anywhere** — standalone `Bun.serve` on a port, or handed to a
+  worker pool via `startHandler()`
 
-## The pipeline
+## Routing
 
-`compose({ use, before, after, handler })` builds the middleware
-pipeline as an onion — every stage a pure function of the context:
+```coffee
+get '/users/:id' -> { id: @req.param('id') }
+get '/files/*' -> @send "public/#{@req.path.slice(7)}"
+get '/reports/:year/:month?' -> @req.param()      # optional segment
+all '/webhook' -> @req.method
 
-```rip
-run = compose
-  use:     [logger(), cors(origin: 'https://app.example')]
-  before:  [requireUser]           # a returned Response short-circuits
-  after:   [stampVersion]          # observes (and may replace) every response
-  handler: show
-
-response = await run createContext(request, params: hit.params)
+prefix '/api/v1', ->
+  get '/ping' -> 'pong'                           # GET /api/v1/ping
 ```
 
-Middleware receives `(c, next)`; `next()` returns the downstream
-`Response` for inspection or replacement. Returning a `Response`
-short-circuits; returning nothing *without* calling `next` is a loud
-mistake, never a silent hang; calling `next` twice rejects. Before
-filters guard the handler; after filters run at the center of the
-onion — on guard responses and handler envelopes alike — so a
-wrapping logger sees the final truth. A throw in any stage translates
-through the error envelope. An aborted request stops the pipeline
-with 499 and skips everything downstream. `c.locals` is the
-request-local bag, owned by one request across all stages.
+Handlers receive the context as both `this` and the first argument, so
+`@req`, `@json()`, `@send()`, and `@session` all work. A handler's return
+value becomes the response: `Response` passes through, objects become
+JSON, strings become text (or HTML when they start with `<`), and
+`null`/`undefined` becomes 204.
 
-`cors()` reflects any origin as `*` by default and scopes by string,
-list, or predicate — a scoped policy always emits `Vary: Origin`, on
-allow and deny alike. A true preflight (`OPTIONS` carrying
-`Access-Control-Request-Method`) answers 204 before the handler; any
-other `OPTIONS` is an ordinary request. Credentials never ride a
-wildcard or the literal `null` origin. `logger()` writes one line per
-request to an injected stream — the status logged is the status sent,
-envelopes included, and a broken sink loses a log line, never the
-response. Security middleware (sessions, CSRF, secure headers)
-arrives with its own dedicated unit and review.
+## read() — validated input, one call
 
-## Input validation and OpenAPI
+`read()` merges the parsed body, query string, and path params, then
+validates:
 
-`reading()` parses the body once and installs `c.read` — the
-zero-ceremony reader over body ∪ query ∪ params (params win), speaking
-the `@rip-lang/validate` vocabulary:
-
-```rip
-create = (c) ->
-  email = @read 'email', 'email!'          # required — missing is a 400
-  phone = @read 'phone', 'phone'           # optional — miss answers null
-  role  = @read 'role', ['admin', 'user'], 'user'
-  age   = @read 'age', [18, 120]
-  first = @read 'patient.name.first'       # dotted paths walk the body
-  @json { email, phone, role, age, first }
+```coffee
+post '/orders' ->
+  user  = read 'userId', 'id!'          # required positive integer
+  total = read 'total', 'money!'        # "$1,234.56" → 123456 cents
+  when_ = read 'date', 'date'           # real calendar dates only
+  size  = read 'size', ['S', 'M', 'L']  # enumeration
+  qty   = read 'qty', [1, 99]           # numeric range
+  note  = read 'note', /^[\w ]{0,80}$/  # regex extract
+  name  = read 'patient.firstName'      # dotted path into nested JSON
+  ...
 ```
 
-An unknown validator name rejects loudly — a vocabulary typo is a
-configuration mistake, not an empty read.
+A trailing `!` makes the field required (400 with the field name if
+absent). The third argument supplies a default (or a function to call) for
+missing values. The validator vocabulary — `id`, `int`, `money`, `email`,
+`date`, `phone`, `ssn`, `uuid`, and thirty more — lives in
+`@rip-lang/validate` and is re-exported here (`registerValidator` adds
+your own).
 
-`withInput(schema, handler)` validates the JSON body through a schema
-before the handler runs: the parsed, defaulted, coerced value is
-`c.input`, and a failing body — invalid JSON included — is a
-structured 400 carrying `{field, error, message}` issues. The wrapped
-handler carries its schema, which is how the OpenAPI document knows
-the route table:
+## Error helpers
 
-```rip
-routes.add 'POST', '/orders', withInput(CreateOrder, create)
-doc = openapi routes.routes(), title: 'Orders API', version: '1.0.0'
+```coffee
+get '/admin' ->
+  user = session.user or bail!          # 401, session cleared
+  error! 'forbidden', 403 unless user.admin
+  notice! 'Quota exceeded' if user.overQuota   # always user-facing
+  ...
 ```
 
-`openapi(routes, info)` is derived, never registered, and
-deterministic: paths and methods sort, identical schemas deduplicate
-into `components/schemas` under their own names, and the same route
-table is the same bytes whatever order registration ran in.
+Thrown errors become one JSON envelope: `{ error: { message, notice?,
+issues? } }`. Messages show for 4xx; 5xx and raw throws are masked to a
+generic status line so internals never leak.
 
-## Security
+## input: schemas and OpenAPI
 
-`sessions({ secret })` decodes `c.session` before the handler and
-writes it back as one cookie afterward, only when it changed — an
-emptied session expires its cookie, and a 5xx response commits no
-change (a half-applied mutation from a failed handler never reaches
-the client). Signed (HMAC-SHA256) by default: tamper-proof, but the
-payload is client-readable, so never store secrets in a signed
-session. `encrypt: true` seals it with AES-256-GCM (key derived from
-the secret). A missing, blank, or too-short secret is a startup
-failure — no environment sniffing; a deployment that truly wants
-unsigned dev sessions writes `insecure: true` in its own words. Cookie
-defaults are `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/` (`Secure`
-is opt-out for plaintext dev; `SameSite=None` requires it). A tampered
-or foreign cookie is a fresh empty session, never a throw.
+```coffee
+Signup = schema :input
+  name! 2..50
+  age?  ~integer
 
-`csrf({ secret })` is header-only double-submit: safe requests mint a
-readable `csrf_token` cookie; every unsafe request must echo it in
-`X-CSRF-Token`, compared in constant time. There is no form-field
-fallback. The cookie carries an HMAC binding, so a planted cookie
-fails without the server key — a secretless double-submit is forgeable
-and so, like sessions, needs an explicit `insecure: true`.
-
-`secureHeaders()` sets the modern set — `X-Content-Type-Options`,
-`X-Frame-Options`, `Referrer-Policy`, and `X-XSS-Protection: 0` (the
-legacy filter it once enabled caused more injection than it stopped).
-CSP and HSTS are explicit opt-ins. `trustProxy()` reads `X-Forwarded-*`
-only when you opt in — `trust: true` or a `hops` count — because
-trusting those headers in front of a directly-exposed app hands the
-client control of its own attested `ip`/`proto`/`host`; a forwarded
-host is accepted only in bare `hostname[:port]` shape. It resolves
-`c.locals.client` from the trusted hop. `harden()` is the cheap
-pre-handler gate on already-parsed values: 414 over-long URLs, 405
-unknown methods. Real body-size limits read the stream at the socket
-layer, not a client-declared `Content-Length`.
-
-## Static and application serving
-
-`serveStatic({ root, host })` serves files under `root` and falls
-through to the next handler on a miss (`spa: true` instead serves the
-root `index.html` for HTML navigations). Containment is the whole
-game: a request path is decoded, every `..` resolved, and any climb
-above the root refused (`403`) — then the resolved path's realpath is
-re-checked against the root's realpath, so a symlink pointing outside
-is refused too. Files carry their content type and a weak ETag with
-`304` revalidation; `maxAge`/`immutable` set `Cache-Control`. The
-filesystem arrives through an injected `host` — `diskHost()` is the
-Bun-backed default; a test passes an in-memory host of the same shape,
-so the containment policy is exercised without a disk. Content types
-follow the file extension, so a static root must never point at a
-user-upload directory — an uploaded `x.html` would serve as
-`text/html` in your origin. Serve untrusted uploads from a separate
-origin.
-
-`appServer({ root, host, bundle })` is the app-serving preset:
-`secureHeaders` ride every response (opt out with `secure: false`),
-the bundle serves at `/bundle.json` with ETag revalidation, static
-assets serve from `root`, and an HTML navigation that matched no asset
-gets the shell — `appShell({ title, state })` — with the bundle's
-`data` injected as boot state. `appShell` escapes a hostile title into
-text and neutralizes a state payload that tries to close its `<script>`
-block, so neither can break out into markup.
-
-## Development watch
-
-`createWatch()` is the SSE development transport — one client
-implementation, web-standard streams, no socket of its own. Its
-`handler` opens a `text/event-stream` that fans one event to every
-open connection, each tagged with a monotonic revision as its SSE id;
-`reload()`, `css(hrefs)`, and `error(payload)` push to whoever is
-connected. A client that reconnects with a stale `Last-Event-ID` is
-reloaded at once (last-known-good), a compile `error` is sticky so a
-client entering a broken build still sees it (and the next `reload`
-clears it), and `css()` is the fast path — the client swaps only the
-named stylesheets, no reload, no lost application state.
-
-```rip
-watch = createWatch()
-# the file watcher (with the CLI) calls these:
-watch.css ['/style.css']          # a stylesheet changed
-watch.reload()                    # a source module changed
-watch.error { file, line, message }  # a build broke
+post '/signup', input: Signup, ->
+  { welcome: @input.name }    # parsed, coerced, defaulted
 ```
 
-`watchClient({ path })` is that one client, emitted as a string to
-inline under watch: it connects, reloads, swaps stylesheets, and shows
-a compile-error overlay that clears on the next good build.
+A bad body never reaches the handler — a 400 with structured
+`{field, error, message}` issues goes out instead. The first `input:`
+route turns on `GET /openapi.json`, generated from the route table and
+each schema's JSON Schema, always current.
 
-## The worker pool
+## Middleware
 
-`createPool({ spawn })` schedules jobs across a fixed set of workers
-with bounded concurrency, a bounded queue, a recycle policy, and
-graceful shutdown — all deterministic, because the worker body and
-the clock are injected. `spawn()` builds a worker exposing
-`handle(job) → Promise` (and an optional `close()` the pool calls when
-it disposes the worker); `submit(job)` dispatches to a free worker or
-queues, rejecting loudly once the queue is at capacity and rejecting a
-job that waits past the timeout. A synchronous throw from `handle` is
-caught and becomes a normal rejection — a misbehaving worker never
-wedges the pool. A worker retires when its request budget or age is
-spent; its replacement spawns at once (the pool keeps `size`
-non-retiring workers, so there is no capacity gap) and the retiring
-worker leaves only after its in-flight jobs drain, so a recycle never
-drops a request. `shutdown()` stops intake,
-cancels the queue, and resolves once every worker is idle. `stats()`
-reports `size`/`inflight`/`queued`/`recycled`.
+```coffee
+import { use, before, session } from '@rip-lang/server'
+import { cors, logger, sessions, csrf, secureHeaders } from '@rip-lang/server/middleware'
 
-Defaults follow the product's operational profile: concurrency 1, a
-queue of 512 with a 30 s wait timeout, and recycle after 10000
-requests or 3600 s (the real deployment sizes the pool at `cores/2`
-and passes process-backed workers and wall-clock timers).
+use logger()
+use cors origin: 'https://myapp.com', preflight: true
+use sessions secret: process.env.SESSION_SECRET, encrypt: true
+use csrf secret: process.env.SESSION_SECRET
+use secureHeaders()
+```
 
-## TLS
+`use` also takes custom Koa-style middleware — `(c, next) ->` — either
+global or path-scoped:
 
-No certificate or private key is committed to this repository, so
-`resolveTls(opts, adapters)` is pure over injected host adapters —
-`load(path)` reads a PEM pair, `acme(domain)` fetches an ACME-managed
-pair, `devCert(host)` mints a local development certificate. The
-policy is the surface it enforces: material resolves by precedence
-(an explicit cert/key, inline or by path, then ACME, then the dev CA),
-**production requires real material** — a missing certificate is a
-startup failure, never a silent plaintext fallback and never a
-development cert — and a per-host cert map resolves most-specific
-first. `certSpecificity`, `orderCerts`, and `matchCert` are the SNI
-primitives: a wildcard `*.example.com` covers exactly one deeper label,
-never the apex or a two-level subdomain, and matching is
-case-insensitive with the port and trailing dot normalized away. The
-result — `{ mode, material, sni, serverNames }` — is what the serving
-layer hands the socket; key material is never logged.
+```coffee
+use (c, next) ->                # global: every request
+  await next()
 
-## Upstream proxy pool
+use '/api', (c, next) ->        # scoped: /api and everything beneath it
+  return c.text('denied', 403) unless session.user   # short-circuits
+  await next()
+```
 
-`createUpstream({ targets })` is the proxy's decision core — target
-selection, a per-target circuit breaker, health thresholds, and
-retry/backoff — pure over an injected `now` and `random`, so the whole
-state machine is deterministic (the actual fetch and health-poll loop
-are the serving layer's wiring). `pick()` returns the next eligible
-target by strategy (`round-robin`, `least-inflight`, `weighted`) or
-`null` when everything is down; `begin`/`end` bracket a request for
-inflight accounting; `record(target, { ok, status })` drives health
-and the circuit. A target's circuit is a three-state machine: `closed`
-flows until a full window's error rate crosses the threshold, `open`
-skips the target through a jittered cooldown then half-opens for one
-probe, and the probe's outcome closes or reopens it. Eligibility is a
-pure check — only the target `pick()` actually routes to transitions
-to half-open, so a scan never strands the others — and a probe that is
-never recorded (a crashed fetch) re-arms after `probeTimeoutMs` rather
-than dropping the upstream forever. `shouldRetry`
-honors the retryable statuses and idempotent methods up to the attempt
-cap; `backoff(attempt)` grows exponentially with jitter.
+A path-scoped pattern uses the same `:param` / `*` grammar as routes but
+is **match-only** — its `:params` are never exposed; `@req.param()` binds
+from the matched route's pattern alone. Global and scoped middleware share
+one registration order; a scoped entry is skipped (never called) when the
+request path is outside its pattern. `sessions` cookies are HMAC-signed by
+default or AES-256-GCM sealed with `encrypt: true`; `csrf` implements
+double-submit with HMAC binding.
 
-## The `rip server` CLI
+## Architecture
 
-The CLI speaks v3's token grammar, not conventional `--name value`
-flags: `w:4` workers, `c:2` per-worker concurrency, `r:500,60s`
-restart policy, `http` / `http:8080` / `https` / `https:443` / a bare
-`8080` for the listeners, an app token (`myapp`, `./path`,
-`./path@alias1,alias2`), and a small set of `--long` flags for the
-rest (`rip server --help` lists everything). `RIP_*` environment
-variables back the tokens, and the precedence is pinned: token >
-environment > serve.rip file > default.
+The package is three concepts — the DSL is the only part an app ever
+imports; the manager and worker are the runtime `rip server` runs it under:
 
-`parseServerFlags(argv)` resolves one invocation into a flags object
-(it reads the real filesystem — whether a token is an app path is a
-question about the disk, by v3's design); `resolveServerAction(flags)`
-names the one action asked for; `dispatchServer(argv, handlers)`
-drives it against an injected handler table (`--help`/`--version`
-answer before any parse), turning a handler's number into an exit
-code and a thrown error into a non-zero result rather than an
-unhandled crash. Two loud departures from v3's parser (never its
-documented grammar): an option-shaped token is always an option
-(`rip server w:4` configures workers instead of naming an app
-"w:4"), and an unknown `--flag` or a missing app path rejects
-instead of being silently absorbed.
+```text
+                     ┌──────────────────────────────┐
+/1.0 + doorbell ◄────┤  MANAGER   (manager.rip)     │  the process you run
+                     │  watch · spawn · heartbeat   │  never touches a request
+                     └──────────┬───────────────────┘
+                                │ Bun.spawn + env
+                     ┌──────────▼───────────────────┐
+Janus ──UDS─────────►│  WORKER    (worker.rip)      │  binds the unix socket
+                     │  bind UDS · /ready · drain   │  loads your app
+                     └──────────┬───────────────────┘
+                                │ import
+                     ┌──────────▼───────────────────┐
+                     │  YOUR APP  (app.rip)         │
+                     │  import { get, read, start } │
+                     │    from '@rip-lang/server'   │  ◄── the DSL (server.rip)
+                     └──────────────────────────────┘
+```
 
-## The serve.rip config loader
+The manager implements the Rip Server half of the pool coordination
+protocol in the Janus repository (`docs/20260719-002000-pool-protocol.md`):
+it registers the app on `/1.0` and heartbeats every 5s from the moment of
+registration, owns a persistent doorbell socket, and spawns workers on
+unique unix socket paths, publishing them with atomic full-list PUTs. In
+watch mode a save settles (~150ms), passes a content-hash gate (identical
+bytes are free), then cuts admission with one doorbell PUT and retires the
+old pool — nothing boots until a request actually rings, and the ring is
+answered 204 only after the fresh sockets PUT is acknowledged. A boot
+failure is cached and answered 503 with the error; the next
+content-changing save clears it. The handover seam is `start()`: under a
+worker environment (`WORKER_ID`/`SOCKET_PATH`) it hands over its fetch
+handler instead of opening a port, so the same `app.rip` runs standalone
+on your laptop and pooled behind Janus in production, unchanged.
 
-A `serve.rip` file is a Rip module exporting a plain object — `sites`
-name hostnames, `apps` bind site names (with `@/mount` paths and
-`spa`/`browse` flags) to a local directory, an `http(s)://` proxy, or
-a `tcp://` passthrough; `ssl` names a directory of cert/key pairs
-matched to hosts by SAN; `server` carries cert/key, hsts, acme,
-timeouts, and the verify policy. `loadConfig(path)` imports and
-normalizes it with positioned `E_*` diagnostics — every problem in
-the file reports in one pass (`formatConfigErrors` prints them), and
-a file with any error never half-loads. `rip server -c` validates and
-exits; `--nginx`/`--caddy` translate a loaded config through
-`compatConfig` into the generators above. `assertServable` is the
-separate serving judgment: a valid file naming a feature this server
-has not grown yet (proxying, streams, managed apps, ACME, ssl-dir
-SNI) refuses loudly, by stage, instead of silently dropping routes.
+## rip server — CLI
 
-## The runnable server
+```bash
+rip server [app-entry] [options]   # app-entry defaults to ./app.rip, then ./index.rip
+```
 
-`startServer(opts)` turns a resolved configuration into a listening
-Bun.serve server and returns the handle: `{ port, url, watch, pool,
-fetchHandler, stop }`. It serves a static `root`, an App `bundle`
-through the preset, or `sites` (host-routed, longest mount wins, the
-mount prefix stripped). The listener behavior is v3's: the preferred
-port is tried, EADDRINUSE walks a 100-port window, EACCES on a
-privileged port falls back to 3000 (3443 under TLS). TLS terminates
-from an explicit cert/key pair via `resolveTls`; `hsts: true` adds
-Strict-Transport-Security only when TLS is live; `redirectHttp`
-starts the best-effort port-80 redirect listener. Requests dispatch
-through the worker pool (in-process handlers today, the seam process
-workers fill next), so workers × concurrency, the bounded queue, and
-its wait timeout are already enforced — a full queue answers 503, a
-stale queue wait 504. `watch: true` serves the SSE transport at
-`/_rip/watch` (bypassing the pool — a held-open stream is not a unit
-of work). `stop()` is graceful: stop accepting, drain the pool, then
-close what remains held open.
+| Flag | Meaning |
+| --- | --- |
+| `--name <n>` | App name for registration (default: the app directory's name) |
+| `--host <h>` | Public host to claim; repeatable (default: the app name) |
+| `-w, --workers <n>` | Worker processes (default: 2) |
+| `-c, --concurrency <n>` | Concurrent requests per worker (default: 1). Refused with watch on — `--eager` included — raise `c` only with watch off (`--no-watch`, or `RIP_ENV=production`); see the sizing maxim below |
+| `--watch` / `--no-watch` | File watching + hot reload (default ON unless `RIP_ENV=production`) |
+| `--allow-watch` | Required to enable `--watch` when `RIP_ENV=production`; logs loudly |
+| `--eager` | Boot the fresh pool at settle instead of waiting for a ring |
+| `--control <target>` | Janus control endpoint — unix socket path or http(s) URL (or env `JANUS_CONTROL`); required, verified at startup |
 
-`bin/rip-server` (also `rip server` through the repository CLI) wires
-it all: `runServe` resolves serve.rip, merges it with the flags
-(`buildServeOptions` — where the precedence table is decided), starts
-the server, writes the PID file `--stop` signals, and shuts down
-gracefully on SIGINT/SIGTERM.
+With watch on the pool publishes at the first ready worker (`readyWhen: 1`)
+and late workers join with follow-up PUTs; with `RIP_ENV=production` all
+workers must be ready before the first publish, and a startup boot failure
+exits nonzero.
 
-## nginx and Caddy config generation
+Sizing the pool: **raise `c` when handlers wait; raise `w` when handlers
+work.** Workers (`-w`) are processes — real parallelism across cores, for
+CPU-bound handlers. Per-worker concurrency (`-c`) interleaves I/O waits on
+one event loop — it adds capacity only while handlers are blocked on a
+database or upstream, and cannot add CPU. The default is `c:1`: one
+in-flight request per worker, and concurrent arrivals bounce to the next
+worker via a marked 503. Raising `c` is the opt-in for I/O-bound apps,
+and only with watch off — retiring a pool must drain up to `c` in-flight
+requests per worker, so hot reload and `c > 1` do not mix (the manager
+refuses the combination at startup).
 
-`generateNginx(config)` and `generateCaddy(config)` emit a web-server
-configuration from a normalized site config (`{ sites: [{ host, tls?,
-routes: [{ path, proxy } | { path, static, spa? }] }] }`). Output is
-deterministic — routes sort by descending prefix length, sites by
-host, so the same config is always the same bytes. The load-bearing
-property is **injection safety**: every value that reaches a directive
-— host, proxy target, filesystem path, route prefix — is validated
-against a strict shape first (a proxy target is parsed and rebuilt
-from its validated pieces, since the URL parser will keep a `;` or
-newline inside a hostname), so a value carrying a newline, a brace, or
-a stray directive is refused at generation time rather than written
-into a config the web server would then execute.
+Env knobs (all in milliseconds, defaults per the protocol): `RIP_SETTLE_MS`
+(150), `RIP_DRAIN_MS` (2500 drain grace before SIGTERM), `RIP_KILL_MS`
+(5000 SIGTERM→SIGKILL), `RIP_HEARTBEAT_MS` (5000), `RIP_HOLD_MS` (15000
+ring hold cap), `RIP_BOOT_DEADLINE_MS` (30000 per worker), and
+`RIP_WAITER_CAP` (64 held rings, a count). Workers receive their in-flight
+cap via `WORKER_CONCURRENCY`, set by the manager from `-c`.
 
-## mDNS and the rip.local dashboard
+## Test
 
-`lanIP(interfaces)` selects the first routable IPv4 from an injected
-network-interface map, skipping loopback, IPv6, and link-local
-`169.254/16`. `mdnsService(host, { port, ip, https })` builds the
-service descriptor the serving layer hands to `dns-sd`: a non-`.local`
-host is simply not advertised (`null`), and a malformed `.local` host
-or a bad port rejects loudly. `renderDashboard({ apps, title })` is
-the page served at `rip.local` — one row per registered app, every
-value escaped, and a URL rendered as a live link only once it is
-proven `http(s)` (a `javascript:` or `data:` url renders as inert
-text). The interface enumeration and the `dns-sd` advertisement are
-the serving layer's host concerns.
+```bash
+bun run test
+```
 
-`errorEnvelope(err)` is the one deterministic error translation:
-`notice` and `issues` are explicitly user-facing and always shown, a
-plain message shows only for 4xx, and 5xx or raw throws mask to the
-generic status text so internals never leak. `respond(handler, ctx)`
-drives a handler to a `Response` — a `Response` passes through, an
-object becomes JSON, a string becomes text or HTML by its shape,
-`null`/`undefined` become 204, and a throw becomes its envelope.
+The suite drives the exported fetch handler end-to-end — routing, smart
+responses, error envelopes, the full `read()` vocabulary, session/context
+helpers, `input:` schema validation with the generated OpenAPI document,
+and every built-in middleware — with no live socket. The worker and
+manager runtimes then run as real subprocesses over unix sockets against
+a stub Janus `/1.0` control socket that records every call in order:
+readiness, drains, the dirty epoch (doorbell PUT before the ring's 204,
+sockets PUT before the 204), save coalescing, the identical-bytes no-op,
+boot-failure caching, and shutdown.

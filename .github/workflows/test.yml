@@ -23,11 +23,13 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      # Single frozen-lockfile gate. Bun workspaces + linker=hoisted mean
+      # `bun install` from a package directory still resolves against the
+      # ROOT bun.lock — a per-package frozen install is not isolation, and
+      # a stale root lock surfaces as a misleading package-step failure.
+      # Package budgets live in each package.json (see
+      # test/toolchain/dependencies.test.js); the root lock owns versions.
       - name: Install (one workspace install provisions every member; compiler purity is gated separately)
-        run: bun install --frozen-lockfile
-
-      - name: Install UI package dependencies (isolated exact budget)
-        working-directory: packages/ui
         run: bun install --frozen-lockfile
 
       - name: Full suite, extended tier included
@@ -76,13 +78,10 @@ jobs:
 
       - name: Time package suite (packages/time — its own suite, its own boundary; dayjs is the parity oracle)
         working-directory: packages/time
-        run: |
-          bun install --frozen-lockfile
-          bun run test
+        run: bun run test
 
       - name: Real-browser suite (packages/browser-tests — Playwright in Chromium/Firefox/WebKit)
         working-directory: packages/browser-tests
         run: |
-          bun install --frozen-lockfile
           bunx playwright install --with-deps
           bun run test

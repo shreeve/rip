@@ -64,11 +64,8 @@ def run(args, opts = {})
     proc.stdin.write opts.input
     proc.stdin.end()
   status = await proc.exited
-  # Split assignments: `new Response(x).text!` trips the compiler.
-  outRes = new Response(proc.stdout)
-  errRes = new Response(proc.stderr)
-  stdout = outRes.text!
-  stderr = errRes.text!
+  stdout = new Response(proc.stdout).text!
+  stderr = new Response(proc.stderr).text!
   { status, stdout, stderr }
 
 # ==[ Package surface ]==

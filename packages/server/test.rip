@@ -1,0 +1,1165 @@
+# ==============================================================================
+# server tests — the behavior contract, end-to-end through the fetch handler:
+# routing, smart responses, error envelopes, read() validation, request
+# context (session/ctx/mark/subrequest), input: schemas + OpenAPI, and the
+# built-in middleware (cors, sessions, csrf, secureHeaders, bodyLimit,
+# htmlJson) — no live socket needed — plus the worker and manager runtimes
+# driven as real subprocesses against a stub Janus /1.0 control socket
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import * as mod from '@rip-lang/server'
+import { get, post, put, patch, del, all, use, prefix, before, after, onError, notFound, raw,
+         fetch as handle, App, resetGlobals, requestContext, startHandler, start,
+         read, error, notice, bail, ctx, session, subrequest, mark,
+         mimeType, errorEnvelope, openapi } from '@rip-lang/server'
+import { cors, logger, compress, sessions, csrf, secureHeaders, bodyLimit, htmlJson } from '@rip-lang/server/middleware'
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
+
+req = (method, path, opts = {}) -> new Request("http://test.local#{path}", { method, ...opts })
+jreq = (method, path, body) ->
+  req method, path, { body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }
+
+# read() against a synthetic payload, outside any HTTP machinery
+rd = (was, ...args) -> requestContext.run { data: { v: was } }, -> read('v', ...args)
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "public entry exposes the DSL surface, named exports only", ->
+  names = Object.keys(mod)
+  for name in ['get', 'post', 'put', 'patch', 'del', 'all', 'use', 'prefix',
+               'before', 'after', 'onError', 'notFound', 'raw',
+               'start', 'startHandler', 'fetch', 'App',
+               'read', 'error', 'notice', 'bail',
+               'ctx', 'session', 'env', 'subrequest', 'mark',
+               'mimeType', 'errorEnvelope', 'openapi', 'resetGlobals']
+    ok names.includes(name), "missing export: #{name}"
+  ok not ('default' of mod), 'no default export'
+
+test "validate vocabulary rides along", ->
+  for name in ['isBlank', 'toName', 'toPhone', 'formatMoney',
+               'registerValidator', 'getValidator', 'isRawType', 'validatorNames', 'check']
+    ok typeof mod[name] is 'function', "missing re-export: #{name}"
+
+test "only @rip-lang/validate as a runtime dep; testing as the only dev dep", ->
+  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
+  eq Object.keys(pkg.dependencies), ['@rip-lang/validate']
+  eq Object.keys(pkg.devDependencies), ['@rip-lang/testing']
+
+# ==[ Routing ]==
+
+console.log "\nRouting"
+
+resetGlobals()
+get '/hello' -> 'hi'
+get '/html' -> '<h1>yo</h1>'
+get '/num' -> 42
+get '/obj' -> { a: 1 }
+get '/none' -> null
+get '/users/:id' -> { id: @req.param('id') }
+get '/users/:id/books/:bid' -> @req.param()
+get '/files/*' -> @req.path
+get '/maybe/:id?' -> { id: @req.param('id') ?? 'none' }
+all '/any' -> @req.method
+prefix '/api', ->
+  get '/v1/ping' -> 'pong'
+
+test! "text handler returns 200 text", ->
+  res = handle! req('GET', '/hello')
+  eq res.status, 200
+  eq res.headers.get('content-type'), 'text/plain; charset=UTF-8'
+  eq (res.text!), 'hi'
+
+test! "a string starting with < is html", ->
+  res = handle! req('GET', '/html')
+  eq res.headers.get('content-type'), 'text/html; charset=UTF-8'
+
+test! "a number stringifies as text", ->
+  res = handle! req('GET', '/num')
+  eq (res.text!), '42'
+
+test! "an object serializes as JSON", ->
+  res = handle! req('GET', '/obj')
+  eq res.headers.get('content-type'), 'application/json'
+  eq (res.json!), { a: 1 }
+
+test! "null becomes 204 No Content", ->
+  res = handle! req('GET', '/none')
+  eq res.status, 204
+
+test! "path params bind and decode", ->
+  res = handle! req('GET', '/users/42')
+  eq (res.json!), { id: '42' }
+
+test! "multiple params bind by name", ->
+  res = handle! req('GET', '/users/7/books/9')
+  eq (res.json!), { id: '7', bid: '9' }
+
+test! "wildcard matches any depth", ->
+  res = handle! req('GET', '/files/a/b/c.txt')
+  eq (res.text!), '/files/a/b/c.txt'
+
+test! "optional param matches with and without", ->
+  eq ((handle! req('GET', '/maybe/9')).json!), { id: '9' }
+  eq ((handle! req('GET', '/maybe')).json!), { id: 'none' }
+
+test! "all matches every method", ->
+  eq ((handle! req('PUT', '/any')).text!), 'PUT'
+  eq ((handle! req('DELETE', '/any')).text!), 'DELETE'
+
+test! "prefix groups routes under a base path", ->
+  eq ((handle! req('GET', '/api/v1/ping')).text!), 'pong'
+
+test! "HEAD mirrors GET status and headers with no body", ->
+  res = handle! req('HEAD', '/hello')
+  eq res.status, 200
+  eq (res.text!), ''
+
+test! "unknown path is 404", ->
+  res = handle! req('GET', '/nope')
+  eq res.status, 404
+
+test! "trailing slash matches", ->
+  eq (handle! req('GET', '/hello/')).status, 200
+
+# ==[ Error helpers ]==
+
+console.log "\nErrors"
+
+resetGlobals()
+get '/teapot' -> error 'short and stout', 418
+get '/notice' -> notice 'Try again later'
+get '/bail' -> bail()
+get '/custom-404' -> 'x'
+notFound -> @text 'lost', 404
+
+test! "error! sets status and shows the 4xx message", ->
+  res = handle! req('GET', '/teapot')
+  eq res.status, 418
+  eq (res.json!), { error: { message: 'short and stout' } }
+
+test! "notice! is always user-facing", ->
+  res = handle! req('GET', '/notice')
+  eq res.status, 400
+  eq (res.json!), { error: { notice: 'Try again later' } }
+
+test! "bail! clears the session and returns 401", ->
+  res = handle! req('GET', '/bail')
+  eq res.status, 401
+
+test! "custom notFound handler runs", ->
+  res = handle! req('GET', '/definitely-missing')
+  eq res.status, 404
+  eq (res.text!), 'lost'
+
+test "errorEnvelope masks 5xx internals", ->
+  { status, error: e } = errorEnvelope(new Error('secret db string'))
+  eq status, 500
+  eq e, { message: 'Internal Server Error' }
+
+test "errorEnvelope shows 4xx messages and issues", ->
+  { status, error: e } = errorEnvelope(Object.assign(new Error('nope'), { status: 403 }))
+  eq [status, e.message], [403, 'nope']
+  withIssues = Object.assign(new Error('Validation failed'), { status: 400, issues: [{ field: 'x' }] })
+  eq errorEnvelope(withIssues).error.issues, [{ field: 'x' }]
+
+test! "a throwing before filter is a masked 500 JSON envelope — no internals leak", ->
+  resetGlobals()
+  before ->
+    throw new Error('secret db string')
+  get '/leaky' -> 'never'
+  res = handle! req('GET', '/leaky')
+  eq res.status, 500
+  eq res.headers.get('content-type'), 'application/json; charset=utf-8'
+  eq (res.json!), { error: { message: 'Internal Server Error' } }
+
+# ==[ Filters and middleware order ]==
+
+console.log "\nFilters"
+
+resetGlobals()
+trail = []
+use (c, next) ->
+  trail.push 'mw1'
+  await next()
+  trail.push 'mw1-out'
+before -> trail.push 'before'
+after -> trail.push 'after'
+get '/flow' ->
+  trail.push 'handler'
+  'ok'
+get '/blocked' -> 'never'
+
+test! "middleware wraps before/handler/after", ->
+  trail.length = 0
+  handle! req('GET', '/flow')
+  eq trail, ['mw1', 'before', 'handler', 'after', 'mw1-out']
+
+test! "a before filter returning a Response short-circuits", ->
+  resetGlobals()
+  before (c) -> c.text('halted', 403)
+  get '/blocked' -> 'never'
+  res = handle! req('GET', '/blocked')
+  eq res.status, 403
+  eq (res.text!), 'halted'
+
+test! "path-scoped middleware runs for matching paths — itself and beneath", ->
+  resetGlobals()
+  use '/api', (c, next) ->
+    await next()
+    c._response?.headers.set('x-scoped', 'yes')
+  get '/api' -> 'root'
+  get '/api/users' -> 'users'
+  eq (handle! req('GET', '/api')).headers.get('x-scoped'), 'yes'
+  eq (handle! req('GET', '/api/users')).headers.get('x-scoped'), 'yes'
+
+test! "path-scoped middleware skips non-matching paths, including prefixes", ->
+  resetGlobals()
+  use '/api', (c, next) ->
+    await next()
+    c._response?.headers.set('x-scoped', 'yes')
+  get '/other' -> 'x'
+  get '/apix' -> 'x'
+  eq (handle! req('GET', '/other')).headers.get('x-scoped'), null
+  eq (handle! req('GET', '/apix')).headers.get('x-scoped'), null
+
+test! "global and path-scoped middleware run in overall registration order", ->
+  resetGlobals()
+  order = []
+  use (c, next) ->
+    order.push 'g1'
+    await next()
+    order.push 'g1-out'
+  use '/api', (c, next) ->
+    order.push 'scoped'
+    await next()
+    order.push 'scoped-out'
+  use (c, next) ->
+    order.push 'g2'
+    await next()
+    order.push 'g2-out'
+  get '/api/x' -> 'ok'
+  get '/plain' -> 'ok'
+  handle! req('GET', '/api/x')
+  eq order, ['g1', 'scoped', 'g2', 'g2-out', 'scoped-out', 'g1-out']
+  order.length = 0
+  handle! req('GET', '/plain')
+  eq order, ['g1', 'g2', 'g2-out', 'g1-out']
+
+test! "path-scoped middleware can short-circuit without calling next()", ->
+  resetGlobals()
+  reached = { handler: false }
+  use '/admin', (c, next) -> c.text('denied', 403)
+  get '/admin/panel' ->
+    reached.handler = true
+    'secret'
+  res = handle! req('GET', '/admin/panel')
+  eq res.status, 403
+  eq (res.text!), 'denied'
+  eq reached.handler, false
+
+test! "middleware patterns are match-only: their :params never bind", ->
+  resetGlobals()
+  seen = { v: 'unset' }
+  use '/api/:version', (c, next) ->
+    seen.v = c.req.param('version') ?? null
+    await next()
+  get '/api/v2/ping' -> @req.param()
+  res = handle! req('GET', '/api/v2/ping')
+  eq seen.v, null           # the middleware pattern contributed no params...
+  eq (res.json!), {}        # ...and none leak into the route's params either
+
+test "use() rejects a pathless or handlerless registration loudly", ->
+  throws (-> use('/api')), 'use() takes'
+  throws (-> use(42)), 'use() takes'
+
+# ==[ read() — Sinatra-style parameter reading ]==
+
+console.log "\nread()"
+
+test "no context rejects loudly", ->
+  throws (-> read('v')), 'no context for read()'
+
+test "value passthrough and trim", ->
+  eq rd('  x  '), 'x'
+  eq rd(undefined), null
+  eq rd(undefined, null, 'fallback'), 'fallback'
+
+test "required ! throws a 400 with the field name", ->
+  throws (-> rd(undefined, 'int!')), 'Missing required field: v'
+
+test "miss function is called for absent values", ->
+  eq rd(undefined, 'int', -> 'made'), 'made'
+
+test "numbers", ->
+  eq rd('42', 'id'), 42
+  eq rd('0', 'id'), null
+  eq rd('-7', 'int'), -7
+  eq rd('7', 'whole'), 7
+  eq rd('-1', 'whole'), null
+  eq rd('3.14', 'float'), 3.14
+
+test "money in dollars becomes integer cents", ->
+  eq rd('$1,234.56', 'money'), 123456
+  eq rd('2.005', 'money'), 201
+  eq rd('12', 'cents'), 12
+  eq rd('007.50', 'decimal'), '7.50'
+
+test "strings and names", ->
+  eq rd('a\t\tb', 'string'), 'a b'
+  eq rd('john  smith', 'name'), 'John Smith'
+
+test "calendar dates must exist for real", ->
+  eq rd('2024-02-29', 'date'), '2024-02-29'
+  eq rd('2023-02-29', 'date'), null
+  eq rd('20240229', 'date'), '2024-02-29'
+  eq rd('14:30', 'time'), '14:30'
+  eq rd('2:30 pm', 'time12'), '2:30 pm'
+
+test "booleans", ->
+  eq rd('yes', 'truthy'), true
+  eq rd('off', 'falsy'), true
+  eq rd('on', 'bool'), true
+  eq rd('no', 'bool'), false
+  eq rd('maybe', 'bool'), null
+
+test "contact and identity", ->
+  eq rd('A@B.CoM', 'email'), 'a@b.com'
+  eq rd('ut', 'state'), 'UT'
+  eq rd('84604-1234', 'zip'), '84604'
+  eq rd('84604-1234', 'zipplus4'), '84604-1234'
+  eq rd('123-45-6789', 'ssn'), '123456789'
+  eq rd('female', 'sex'), 'F'
+  eq rd('801-555-1212', 'phone'), '(801) 555-1212'
+
+test "web and technical", ->
+  eq rd('User_1', 'username'), 'user_1'
+  eq rd('10.0.0.1', 'ip'), '10.0.0.1'
+  eq rd('AA-BB-CC-DD-EE-FF', 'mac'), 'aa:bb:cc:dd:ee:ff'
+  eq rd('https://x.io/a', 'url'), 'https://x.io/a'
+  eq rd('FFF', 'color'), '#fff'
+  eq rd('1.2.3-rc.1', 'semver'), '1.2.3-rc.1'
+  eq rd('My-Post', 'slug'), 'my-post'
+  eq rd('3, 1, 2, 3', 'ids'), [1, 2, 3]
+
+test "raw collection validators take the value untouched", ->
+  eq rd([1, 2], 'array'), [1, 2]
+  eq rd('nope', 'array'), null
+  eq rd({ a: 1 }, 'hash'), { a: 1 }
+  eq rd('{"a":1}', 'json'), { a: 1 }
+  eq rd('not json', 'json'), null
+
+test "type 'raw' skips even the trim", ->
+  eq rd('  x  ', 'raw'), '  x  '
+
+test "regex type extracts the match", ->
+  eq rd('abc123', /\d+/), '123'
+  eq rd('abc', /\d+/), null
+
+test "[min, max] constrains numbers or lengths", ->
+  eq rd('5', [1, 10]), 5
+  eq rd('50', [1, 10]), null
+  eq rd('hello', [2, 8]), 'hello'
+  eq rd('toolongforthis', [2, 8]), null
+
+test "array of strings is an enumeration", ->
+  eq rd('red', ['red', 'blue']), 'red'
+  eq rd('green', ['red', 'blue']), null
+
+test "{min, max} and {start, end} objects", ->
+  eq rd('7', { min: 1, max: 10 }), 7
+  eq rd('11', { min: 1, max: 10 }), null
+  eq rd('5', { start: 5, end: 9 }), 5
+  eq rd('4', { start: 5, end: 9 }), null
+
+test "dotted paths walk nested bodies", ->
+  v = requestContext.run { data: { patient: { name: 'Amy' } } }, -> read('patient.name')
+  eq v, 'Amy'
+
+# ==[ Request context: session, ctx, mark, subrequest ]==
+
+console.log "\nContext"
+
+resetGlobals()
+get '/whoami' ->
+  session.user = 'amy'
+  { user: session.user }
+get '/marked' ->
+  @mark = 'corr-1'
+  'ok'
+get '/sub' ->
+  inner = subrequest!({ q: 'inner' }, -> read('q'))
+  { inner }
+
+test! "session proxy reads and writes through ALS", ->
+  res = handle! req('GET', '/whoami')
+  eq (res.json!), { user: 'amy' }
+
+test! "@mark lands on the internal rip-mark header", ->
+  res = handle! req('GET', '/marked')
+  eq res.headers.get('rip-mark'), 'corr-1'
+
+test! "subrequest swaps data but keeps the context", ->
+  res = handle! req('GET', '/sub')
+  eq (res.json!), { inner: 'inner' }
+
+test "ctx and mark are null outside a request", ->
+  eq ctx(), null
+  eq mark(), null
+
+test "start() under a worker env hands over the fetch handler", ->
+  process.env.WORKER_ID = '1'
+  try
+    h = start()
+    ok typeof h is 'function'
+    ok globalThis.__ripHandler is h
+  finally
+    delete process.env.WORKER_ID
+    delete globalThis.__ripHandler
+
+test "bare start() defaults host and port (standalone)", ->
+  realServe = Bun.serve
+  captured = {}
+  Bun.serve = (o) ->
+    Object.assign(captured, o)
+    { stop: (->), port: o.port, hostname: o.hostname }
+  try
+    start()
+    eq captured.hostname, 'localhost'
+    eq captured.port, 3000
+  finally
+    Bun.serve = realServe
+
+# ==[ Body parsing + input: schemas + OpenAPI ]==
+
+console.log "\nBodies and schemas"
+
+Signup = schema :input
+  name! 2..10
+  age? ~integer
+
+resetGlobals()
+post '/echo-body' -> { name: read('name') }
+post '/signup', input: Signup, -> { got: @input }
+put '/form' -> { a: read('a') }
+
+test! "JSON bodies pre-parse for read()", ->
+  res = handle! jreq('POST', '/echo-body', { name: 'Zed' })
+  eq (res.json!), { name: 'Zed' }
+
+test! "form bodies pre-parse for read()", ->
+  body = new URLSearchParams({ a: 'b' })
+  res = handle! req('PUT', '/form', { body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+  eq (res.json!), { a: 'b' }
+
+test! "query params reach read() too", ->
+  res = handle! req('POST', '/echo-body?name=Query', { headers: { 'Content-Type': 'application/json' }, body: '{}' })
+  eq (res.json!), { name: 'Query' }
+
+test! "input: schema rejects a bad body with structured issues", ->
+  res = handle! jreq('POST', '/signup', { name: 'x' })
+  eq res.status, 400
+  body = res.json!
+  eq body.error.message, 'Validation failed'
+  ok Array.isArray(body.error.issues) and body.error.issues.length > 0
+
+test! "input: schema parses, coerces, and lands on @input", ->
+  res = handle! jreq('POST', '/signup', { name: 'Amy', age: '30' })
+  eq (res.json!), { got: { name: 'Amy', age: 30 } }
+
+test! "invalid JSON with input: schema is a clean 400", ->
+  res = handle! req('POST', '/signup', { body: '{oops', headers: { 'Content-Type': 'application/json' } })
+  eq res.status, 400
+
+test! "GET /openapi.json reflects input-validated routes", ->
+  res = handle! req('GET', '/openapi.json')
+  eq res.status, 200
+  doc = res.json!
+  eq doc.openapi, '3.1.0'
+  ok doc.paths['/signup']?.post?.requestBody?
+
+# ==[ Middleware: cors ]==
+
+console.log "\nMiddleware"
+
+test! "cors sets allow-origin on actual requests", ->
+  resetGlobals()
+  use cors origin: 'https://a.com'
+  get '/c' -> 'x'
+  res = handle! req('GET', '/c', { headers: { Origin: 'https://a.com' } })
+  eq res.headers.get('access-control-allow-origin'), 'https://a.com'
+
+test! "cors preflight answers early OPTIONS through the shared policy", ->
+  resetGlobals()
+  use cors origin: 'https://a.com', preflight: true
+  get '/c' -> 'x'
+  res = handle! req('OPTIONS', '/c', { headers: { Origin: 'https://a.com' } })
+  eq res.status, 204
+  eq res.headers.get('access-control-allow-origin'), 'https://a.com'
+
+test! "secureHeaders stamps the standard set", ->
+  resetGlobals()
+  use secureHeaders()
+  get '/s' -> 'x'
+  res = handle! req('GET', '/s')
+  eq res.headers.get('x-content-type-options'), 'nosniff'
+  eq res.headers.get('x-frame-options'), 'DENY'
+
+test! "signed sessions round-trip through the cookie", ->
+  resetGlobals()
+  use sessions secret: 'test-secret'
+  get '/login' ->
+    session.user = 'amy'
+    'ok'
+  get '/who' -> { user: session.user ?? null }
+  login = handle! req('GET', '/login')
+  cookie = login.headers.get('set-cookie')
+  ok cookie?.startsWith('session=')
+  who = handle! req('GET', '/who', { headers: { Cookie: cookie.split(';')[0] } })
+  eq (who.json!), { user: 'amy' }
+
+test! "a tampered session cookie decodes to an empty session", ->
+  resetGlobals()
+  use sessions secret: 'test-secret'
+  get '/who' -> { user: session.user ?? null }
+  res = handle! req('GET', '/who', { headers: { Cookie: 'session=dGFtcGVyZWQ%3D--deadbeef' } })
+  eq (res.json!), { user: null }
+
+test! "encrypted sessions ship opaque v1. ciphertext", ->
+  resetGlobals()
+  use sessions secret: 'test-secret', encrypt: true
+  get '/login' ->
+    session.token = 'sk-hidden'
+    'ok'
+  get '/who' -> { token: session.token ?? null }
+  login = handle! req('GET', '/login')
+  cookie = login.headers.get('set-cookie')
+  ok decodeURIComponent(cookie).includes('v1.')
+  who = handle! req('GET', '/who', { headers: { Cookie: cookie.split(';')[0] } })
+  eq (who.json!), { token: 'sk-hidden' }
+
+test "sessions with encrypt but no secret rejects at install", ->
+  throws (-> sessions(encrypt: true)), 'requires a secret'
+
+test! "csrf blocks unsafe requests without a token and issues one on GET", ->
+  resetGlobals()
+  use csrf secret: 'csrf-secret'
+  get '/page' -> 'x'
+  post '/act' -> 'did'
+  blocked = handle! req('POST', '/act')
+  eq blocked.status, 403
+  page = handle! req('GET', '/page')
+  cookie = page.headers.get('set-cookie')
+  ok cookie?.startsWith('csrf_token=')
+  rawValue = decodeURIComponent(cookie.split(';')[0].slice('csrf_token='.length))
+  token = rawValue.split('.')[0]
+  allowed = handle! req('POST', '/act', { headers: { Cookie: cookie.split(';')[0], 'X-CSRF-Token': token } })
+  eq allowed.status, 200
+
+test! "a foreign %-cookie is tolerated and the session still works", ->
+  resetGlobals()
+  use sessions secret: 'test-secret'
+  get '/login' ->
+    session.user = 'amy'
+    'ok'
+  get '/who' -> { user: session.user ?? null }
+  login = handle! req('GET', '/login')
+  cookie = login.headers.get('set-cookie').split(';')[0]
+  res = handle! req('GET', '/who', { headers: { Cookie: "legacy=100%; #{cookie}" } })
+  eq res.status, 200
+  eq (res.json!), { user: 'amy' }
+
+test! "csrf tolerates a foreign %-cookie", ->
+  resetGlobals()
+  use csrf secret: 'csrf-secret'
+  get '/page' -> 'x'
+  res = handle! req('GET', '/page', { headers: { Cookie: 'legacy=100%' } })
+  eq res.status, 200
+
+test! "compress round-trips binary bodies byte-identically", ->
+  resetGlobals()
+  use compress threshold: 100
+  bytes = crypto.getRandomValues(new Uint8Array(3000))
+  get '/bin' -> @body bytes, 200, { 'Content-Type': 'application/octet-stream' }
+  res = handle! req('GET', '/bin', { headers: { 'Accept-Encoding': 'gzip' } })
+  eq res.headers.get('content-encoding'), 'gzip'
+  ok (res.headers.get('vary') or '').includes('Accept-Encoding')
+  out = Bun.gunzipSync(new Uint8Array(res.arrayBuffer!))
+  eq out.length, bytes.length
+  ok Buffer.from(out).equals(Buffer.from(bytes)), 'gunzipped body is byte-identical'
+
+test! "compress leaves an already-encoded response untouched", ->
+  resetGlobals()
+  use compress threshold: 100
+  pre = Bun.gzipSync(Buffer.from('x'.repeat(5000)))
+  get '/pre' -> @body pre, 200, { 'Content-Encoding': 'gzip', 'Content-Type': 'application/octet-stream' }
+  res = handle! req('GET', '/pre', { headers: { 'Accept-Encoding': 'gzip' } })
+  got = new Uint8Array(res.arrayBuffer!)
+  ok Buffer.from(got).equals(Buffer.from(pre)), 'pre-encoded body passes through untouched'
+
+test! "bodyLimit rejects oversize bodies with 413", ->
+  resetGlobals()
+  use bodyLimit maxSize: 10
+  post '/up' -> 'ok'
+  res = handle! req('POST', '/up', { body: 'x'.repeat(50), headers: { 'Content-Length': '50', 'Content-Type': 'text/plain' } })
+  eq res.status, 413
+
+test! "htmlJson renders JSON as html for iOS navigations only", ->
+  resetGlobals()
+  use htmlJson
+  get '/j' -> { a: 1 }
+  ios = handle! req('GET', '/j', { headers: { 'User-Agent': 'iPhone Safari', 'Accept': 'text/html' } })
+  ok ios.headers.get('content-type').includes('text/html')
+  api = handle! req('GET', '/j')
+  eq api.headers.get('content-type'), 'application/json'
+
+# ==[ Utilities ]==
+
+console.log "\nUtilities"
+
+test "mimeType maps extensions and defaults to octet-stream", ->
+  eq mimeType('a/b.html'), 'text/html; charset=UTF-8'
+  eq mimeType('x.wasm'), 'application/wasm'
+  eq mimeType('mystery.bin'), 'application/octet-stream'
+
+test "App resets globals and returns a fresh handler", ->
+  h = App ->
+    get '/fresh' -> 'yes'
+  ok typeof h is 'function'
+  resetGlobals()
+
+# ==============================================================================
+# Worker + manager runtimes — real subprocesses over unix sockets, against a
+# stub Janus /1.0 control socket that records every call in order. Timing is
+# compressed via the documented env knobs (RIP_SETTLE_MS, RIP_DRAIN_MS, …).
+# ==============================================================================
+
+PRELOAD    = process.execArgv.find (a) -> a.startsWith('--preload=')
+WORKER_BIN = "#{import.meta.dir}/worker.rip"
+SERVER_BIN = "#{import.meta.dir}/server.rip"
+
+TEST_KNOBS =
+  RIP_ENV: 'development'
+  RIP_SETTLE_MS: '60'
+  RIP_HEARTBEAT_MS: '150'
+  RIP_DRAIN_MS: '100'
+  RIP_KILL_MS: '400'
+  RIP_HOLD_MS: '8000'
+  RIP_BOOT_DEADLINE_MS: '15000'
+  RIP_FAIL_LINGER_MS: '1500'
+
+uds = (sock, path, opts = {}) -> fetch("http://uds#{path}", { ...opts, unix: sock })
+
+# Poll until fn() is truthy (subprocess-heavy tests: deadlines, no bare sleeps)
+waitFor = (fn, timeout = 10000, every = 25) ->
+  deadline = Date.now() + timeout
+  loop
+    v = fn()
+    v = await v if v?.then?
+    return v if v
+    throw new Error 'waitFor: timed out' if Date.now() > deadline
+    sleep! every
+
+readyProbe = (sock) ->
+  try
+    res = fetch!('http://uds/ready', { unix: sock })
+    { status: res.status, body: (res.text!), failed: res.headers.get('rip-boot-failed')? }
+  catch
+    null
+
+appSource = (msg) -> """
+import { get, start } from '@rip-lang/server'
+get '/hi' -> '#{msg}'
+get '/slow' ->
+  sleep! 300
+  'done'
+start()
+"""
+
+BROKEN_SOURCE = '''
+import { get, start } from '@rip-lang/server'
+get '/hi' -> (((
+start()
+'''
+
+spawnWorkerProc = (entry, sock, extraEnv = {}) ->
+  Bun.spawn [process.execPath, PRELOAD, WORKER_BIN],
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'inherit'
+    env: { ...process.env, ...TEST_KNOBS, APP_ENTRY: entry, SOCKET_PATH: sock, WORKER_ID: '1', ...extraEnv }
+
+# ==[ Worker runtime ]==
+
+console.log "\nWorker runtime"
+
+test! "worker boots, /ready flips 200, and serves app routes over its socket", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    res = uds!(sock, '/hi')
+    eq res.status, 200
+    eq (res.text!), 'hi'
+  finally
+    proc.kill('SIGTERM')
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "worker SIGTERM finishes the in-flight request (c:1), then exits 0", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    slow = uds(sock, '/slow')       # in flight...
+    sleep! 80
+    proc.kill('SIGTERM')            # ...when the drain starts
+    res = await slow
+    eq (res.text!), 'done'
+    code = await proc.exited
+    eq code, 0
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "a concurrent request at c:1 bounces 503 with the Rip-Worker-Busy marker", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    slow = uds(sock, '/slow')       # occupies the single slot...
+    sleep! 80
+    res = uds!(sock, '/hi')         # ...so this one bounces, marked
+    eq res.status, 503
+    eq res.headers.get('rip-worker-busy'), '1'
+    eq (res.text!), 'busy'
+    first = await slow              # the in-flight request is untouched
+    eq (first.text!), 'done'
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "a c:2 worker holds two slow requests concurrently; the third bounces marked", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock, { WORKER_CONCURRENCY: '2' }
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    t0 = Date.now()
+    a = uds(sock, '/slow')          # two 300ms sleeps in flight together...
+    b = uds(sock, '/slow')
+    sleep! 80
+    third = uds!(sock, '/hi')       # ...so the THIRD bounces, marked
+    eq third.status, 503
+    eq third.headers.get('rip-worker-busy'), '1'
+    ra = await a
+    rb = await b
+    eq (ra.text!), 'done'
+    eq (rb.text!), 'done'
+    elapsed = Date.now() - t0
+    ok elapsed < 550, "the sleeps interleaved (#{elapsed}ms; serial would be >= 600)"
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "SIGTERM at c:2 drains BOTH in-flight requests before exiting 0", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock, { WORKER_CONCURRENCY: '2' }
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    a = uds(sock, '/slow')          # both slots occupied...
+    b = uds(sock, '/slow')
+    sleep! 80
+    proc.kill('SIGTERM')            # ...when the drain starts
+    ra = await a
+    rb = await b
+    eq (ra.text!), 'done'
+    eq (rb.text!), 'done'
+    code = await proc.exited
+    eq code, 0
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "a broken app surfaces its boot error on /ready and exits nonzero", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), BROKEN_SOURCE
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock
+  try
+    st = waitFor! ->
+      s = readyProbe!(sock)
+      if s? and s.failed then s else null
+    eq st.status, 503
+    ok st.body.includes('app.rip'), 'boot error names the failing file'
+    code = await proc.exited
+    ok code isnt 0, 'exits nonzero after a failed boot'
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "an orphaned worker (parent gone) exits on its own", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  # An intermediary bash spawns the worker and exits immediately, so the
+  # worker reparents — the ppid watchdog must notice and exit unprompted.
+  launcher = Bun.spawn ['bash', '-c', "\"#{process.execPath}\" \"#{PRELOAD}\" \"#{WORKER_BIN}\" >/dev/null & echo $!"],
+    stdin: 'ignore'
+    stdout: 'pipe'
+    stderr: 'inherit'
+    env: { ...process.env, ...TEST_KNOBS, RIP_PPID_MS: '50', APP_ENTRY: join(dir, 'app.rip'), SOCKET_PATH: sock, WORKER_ID: 'orphan' }
+  pid = parseInt(new Response(launcher.stdout).text!.trim())
+  await launcher.exited
+  ok Number.isFinite(pid) and pid > 1, 'captured the worker pid'
+  alive = (target) ->
+    try
+      process.kill(target, 0)
+      true
+    catch
+      false
+  try
+    waitFor! (-> not alive(pid)), 5000
+    ok not alive(pid), 'orphaned worker exited on its own'
+  finally
+    try process.kill(pid, 'SIGKILL')
+    rmSync dir, { recursive: true, force: true }
+
+# ==[ Manager: stub Janus control plane ]==
+
+console.log "\nManager runtime"
+
+janusSock = join(tmpdir(), "rip-janus-#{Date.now()}-#{rand(1e6)}.sock")
+janusCalls = []
+janusSeq = { n: 0 }
+janusServer = Bun.serve
+  unix: janusSock
+  fetch: (req) ->
+    url = new URL(req.url)
+    # GETs are the manager's reachability probe — not control traffic
+    return new Response('janus', { status: 404 }) if req.method is 'GET'
+    body = null
+    if req.method is 'POST' or req.method is 'PUT'
+      body = try req.json! catch then null
+    janusCalls.push { method: req.method, path: url.pathname, body }
+    if req.method is 'POST' and url.pathname is '/1.0/apps'
+      janusSeq.n += 1
+      return Response.json { id: "app-#{janusSeq.n}" }, { status: 201 }
+    if req.method is 'PUT' and url.pathname.endsWith('/upstreams')
+      return Response.json { ok: true }
+    if req.method is 'POST' and url.pathname.endsWith('/heartbeat')
+      return new Response(null, { status: 204 })
+    if req.method is 'DELETE'
+      return new Response(null, { status: 204 })
+    new Response('nope', { status: 404 })
+
+allPuts  = -> janusCalls.filter (c) -> c.method is 'PUT'
+bellPuts = -> allPuts().filter (c) -> c.body?.upstreams?.some (u) -> u.doorbell
+sockPuts = -> allPuts().filter (c) -> c.body?.upstreams?.length and not c.body.upstreams.some (u) -> u.doorbell
+beats    = -> janusCalls.filter (c) -> c.path.endsWith('/heartbeat')
+latestSocks = ->
+  puts = sockPuts()
+  return [] unless puts.length
+  puts[puts.length - 1].body.upstreams.map (u) -> u.path
+
+mgrDir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+writeFileSync join(mgrDir, 'app.rip'), appSource('hi')
+mgrProc = Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, '--control', janusSock, '--name', 'tapp', '-w', '2'],
+  cwd: mgrDir
+  stdin: 'ignore'
+  stdout: 'ignore'
+  stderr: 'inherit'
+  env: { ...process.env, ...TEST_KNOBS }
+live = { doorbell: null, oldSocks: [] }
+
+process.on 'exit', ->
+  try mgrProc.kill('SIGKILL')
+  try janusServer.stop(true)
+  try rmSync(mgrDir, { recursive: true, force: true })
+
+test! "manager registers the app, then publishes the doorbell before anything else", ->
+  waitFor! -> janusCalls.length > 0
+  eq janusCalls[0].method, 'POST'
+  eq janusCalls[0].path, '/1.0/apps'
+  eq janusCalls[0].body, { name: 'tapp', hosts: ['tapp'] }
+  waitFor! -> allPuts().length >= 1
+  first = allPuts()[0]
+  eq first.body.upstreams.length, 1
+  eq first.body.upstreams[0].doorbell, true
+  ok first.body.upstreams[0].path.endsWith('.sock')
+  live.doorbell = first.body.upstreams[0].path
+
+test! "startup boot publishes socks readyWhen:1 — first ready, late workers join", ->
+  waitFor! -> sockPuts().some (c) -> c.body.upstreams.length is 2
+  puts = sockPuts()
+  ok puts[0].body.upstreams.length >= 1, 'first sockets PUT ships the first ready worker'
+  socks = latestSocks()
+  eq new Set(socks).size, 2
+  for path in socks
+    ok path.endsWith('.sock')
+  live.oldSocks = socks
+
+test! "heartbeats tick against POST /1.0/apps/{id}/heartbeat", ->
+  base = beats().length
+  waitFor! -> beats().length >= base + 2
+  eq beats()[0].method, 'POST'
+
+test! "published worker sockets serve the app", ->
+  res = uds!(latestSocks()[0], '/hi')
+  eq res.status, 200
+  eq (res.text!), 'hi'
+
+test! "a save cuts admission: the doorbell PUT arrives first, and nothing boots", ->
+  putsAt = allPuts().length
+  writeFileSync join(mgrDir, 'app.rip'), appSource('v2')
+  waitFor! -> allPuts().length > putsAt
+  cut = allPuts()[putsAt]
+  eq cut.body.upstreams.length, 1
+  eq cut.body.upstreams[0].doorbell, true
+  sleep! 350   # saves are free: no spawn, no further control traffic before a ring
+  eq allPuts().length, putsAt + 1
+
+test! "a ring boots a fresh pool; 204 answers strictly after the socks PUT", ->
+  putsAt = sockPuts().length
+  res = uds!(live.doorbell, '/ring')
+  eq res.status, 204
+  ok sockPuts().length > putsAt, 'the socks PUT landed before the ring was answered'
+  fresh = latestSocks()
+  for path in fresh
+    ok not live.oldSocks.includes(path), 'socket paths are never reused across pools'
+  r2 = uds!(fresh[0], '/hi')
+  eq (r2.text!), 'v2'
+  waitFor! -> latestSocks().length is 2   # the late worker's join PUT
+  live.oldSocks = latestSocks()
+
+test! "rapid saves coalesce into one doorbell PUT; the ring serves the latest code", ->
+  putsAt = allPuts().length
+  writeFileSync join(mgrDir, 'app.rip'), appSource('v3a')
+  sleep! 15
+  writeFileSync join(mgrDir, 'app.rip'), appSource('v3b')
+  sleep! 15
+  writeFileSync join(mgrDir, 'app.rip'), appSource('v3')
+  waitFor! -> allPuts().length > putsAt
+  sleep! 350
+  eq allPuts().length, putsAt + 1
+  eq allPuts()[putsAt].body.upstreams[0].doorbell, true
+  res = uds!(live.doorbell, '/ring')
+  eq res.status, 204
+  r2 = uds!(latestSocks()[0], '/hi')
+  eq (r2.text!), 'v3'
+  waitFor! -> latestSocks().length is 2   # the late worker's join PUT
+  live.oldSocks = latestSocks()
+
+test! "a format-only save (identical bytes) is a no-op", ->
+  putsAt = allPuts().length
+  writeFileSync join(mgrDir, 'app.rip'), appSource('v3')   # same bytes
+  sleep! 350
+  eq allPuts().length, putsAt
+
+test! "a broken save answers rings 503 with the boot error and never respawns", ->
+  putsAt = allPuts().length
+  writeFileSync join(mgrDir, 'app.rip'), BROKEN_SOURCE
+  waitFor! -> allPuts().length > putsAt
+  eq allPuts()[putsAt].body.upstreams[0].doorbell, true
+  sBefore = sockPuts().length
+  r1 = uds!(live.doorbell, '/ring')
+  eq r1.status, 503
+  body = r1.text!
+  ok body.includes('app.rip'), 'the 503 carries the boot error'
+  # cached: the next ring answers immediately, with no new boot attempt
+  t0 = Date.now()
+  r2 = uds!(live.doorbell, '/ring')
+  eq r2.status, 503
+  ok Date.now() - t0 < 1000, 'cached failure answers without a respawn'
+  eq sockPuts().length, sBefore
+
+test! "fixing the file recovers on the next ring", ->
+  writeFileSync join(mgrDir, 'app.rip'), appSource('v5')
+  # a cached-failure ring is instant 503; once the settle clears the failure,
+  # the ring boots and answers 204
+  ok waitFor! ->
+    res = uds!(live.doorbell, '/ring')
+    res.status is 204
+  r2 = uds!(latestSocks()[0], '/hi')
+  eq (r2.text!), 'v5'
+  waitFor! -> latestSocks().length is 2   # fully published before shutdown
+
+test! "shutdown publishes [], drains, and deletes the app", ->
+  mgrProc.kill('SIGTERM')
+  code = await mgrProc.exited
+  eq code, 0
+  lastPut = allPuts()[allPuts().length - 1]
+  eq lastPut.body.upstreams, []
+  last = janusCalls[janusCalls.length - 1]
+  eq last.method, 'DELETE'
+  ok janusCalls.indexOf(lastPut) < janusCalls.indexOf(last), 'the empty PUT precedes the DELETE'
+
+# Unconditional teardown — a failed assertion above must not leave the stub
+# control server holding the event loop open (the tally would never print).
+try mgrProc.kill('SIGKILL')
+janusServer.stop(true)
+rmSync mgrDir, { recursive: true, force: true }
+
+# ==[ Manager: the boot publish re-checks state inside the writer chain ]==
+#
+# The stub holds the startup doorbell PUT open, which parks the boot's
+# enqueued socks publish behind it in the writer chain. A save lands in that
+# gap; on release the publish fn must see dirty and skip — the next PUT is
+# the re-cut doorbell, never a socks PUT for the stale pool.
+
+console.log "\nManager publish race"
+
+test! "a save landing while the boot publish waits in the chain yields no stale socks PUT", ->
+  raceSock = join(tmpdir(), "rip-janus-race-#{Date.now()}-#{rand(1e6)}.sock")
+  raceDir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(raceDir, 'app.rip'), appSource('v1')
+  calls = []
+  gate = {}
+  gate.promise = new Promise (open) -> gate.open = open
+  held = { taken: false }
+  stub = Bun.serve
+    unix: raceSock
+    fetch: (rq) ->
+      url = new URL(rq.url)
+      return new Response('janus', { status: 404 }) if rq.method is 'GET'
+      body = null
+      if rq.method is 'POST' or rq.method is 'PUT'
+        body = try rq.json! catch then null
+      calls.push { method: rq.method, path: url.pathname, body }
+      if rq.method is 'POST' and url.pathname is '/1.0/apps'
+        return Response.json { id: 'app-race' }, { status: 201 }
+      if rq.method is 'PUT' and url.pathname.endsWith('/upstreams')
+        if body?.upstreams?.some((u) -> u.doorbell) and not held.taken
+          held.taken = true
+          await gate.promise           # park the writer chain here
+        return Response.json { ok: true }
+      if rq.method is 'POST' and url.pathname.endsWith('/heartbeat')
+        return new Response(null, { status: 204 })
+      if rq.method is 'DELETE'
+        return new Response(null, { status: 204 })
+      new Response('nope', { status: 404 })
+  raceProc = Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, '--control', raceSock, '--name', 'rapp', '-w', '1'],
+    cwd: raceDir
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'inherit'
+    env: { ...process.env, ...TEST_KNOBS }
+  racePuts = -> calls.filter (c) -> c.method is 'PUT'
+  try
+    waitFor! -> held.taken             # startup doorbell PUT arrived and is held
+    sleep! 3000                        # boot completes; its publish parks behind the held PUT
+    writeFileSync join(raceDir, 'app.rip'), appSource('v2')
+    sleep! 400                         # settle fires; dirty is set while the chain is parked
+    gate.open()
+    waitFor! -> racePuts().length >= 2 and racePuts().some (c) -> not c.body.upstreams.some((u) -> u.doorbell)
+    puts = racePuts()
+    ok puts[0].body.upstreams[0].doorbell, 'first PUT is the startup doorbell'
+    ok puts[1].body.upstreams[0]?.doorbell, 'the PUT after release is the re-cut doorbell, not stale socks'
+    firstSocks = puts.find (c) -> c.body.upstreams.length and not c.body.upstreams.some((u) -> u.doorbell)
+    res = uds!(firstSocks.body.upstreams[0].path, '/hi')
+    eq (res.text!), 'v2'
+  finally
+    try raceProc.kill('SIGKILL')
+    await raceProc.exited
+    stub.stop(true)
+    rmSync raceDir, { recursive: true, force: true }
+
+# ==[ Manager: the per-worker concurrency knob (-c) ]==
+
+console.log "\nManager concurrency knob"
+
+test! "manager refuses c > 1 with watch on (eager included) and bad -c values, loudly", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  outcome = (args) ->
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, ...args],
+      cwd: dir
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'pipe'
+      env: { ...process.env, ...TEST_KNOBS }
+    errText = new Response(proc.stderr).text!
+    code = await proc.exited
+    { code, errText }
+  try
+    r = outcome! ['-c', '3']                        # watch defaults ON outside production
+    ok r.code isnt 0, 'watch-on refusal exits nonzero'
+    ok r.errText.includes('raise c only with watch off'), "names the rule: #{r.errText}"
+    r = outcome! ['-c', '2', '--no-watch', '--eager']
+    ok r.code isnt 0, 'eager counts as watch'
+    ok r.errText.includes('raise c only with watch off'), "names the rule for eager: #{r.errText}"
+    r = outcome! ['-c', '0', '--no-watch']
+    ok r.code isnt 0, 'c below 1 exits nonzero'
+    ok r.errText.includes('--concurrency takes an integer >= 1'), "rejects 0: #{r.errText}"
+    r = outcome! ['-c', 'many', '--no-watch']
+    ok r.code isnt 0, 'non-integer c exits nonzero'
+    ok r.errText.includes('--concurrency takes an integer >= 1'), "rejects 'many': #{r.errText}"
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test! "manager -c 2 --no-watch plumbs the cap to workers: two in flight over one sock", ->
+  cSock = join(tmpdir(), "rip-janus-c-#{Date.now()}-#{rand(1e6)}.sock")
+  cDir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(cDir, 'app.rip'), appSource('hi')
+  calls = []
+  stub = Bun.serve
+    unix: cSock
+    fetch: (rq) ->
+      url = new URL(rq.url)
+      return new Response('janus', { status: 404 }) if rq.method is 'GET'
+      body = null
+      if rq.method is 'POST' or rq.method is 'PUT'
+        body = try rq.json! catch then null
+      calls.push { method: rq.method, path: url.pathname, body }
+      if rq.method is 'POST' and url.pathname is '/1.0/apps'
+        return Response.json { id: 'app-c' }, { status: 201 }
+      if rq.method is 'PUT' and url.pathname.endsWith('/upstreams')
+        return Response.json { ok: true }
+      if rq.method is 'POST' and url.pathname.endsWith('/heartbeat')
+        return new Response(null, { status: 204 })
+      if rq.method is 'DELETE'
+        return new Response(null, { status: 204 })
+      new Response('nope', { status: 404 })
+  proc = Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, '--control', cSock, '--name', 'capp', '-w', '1', '-c', '2', '--no-watch'],
+    cwd: cDir
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'inherit'
+    env: { ...process.env, ...TEST_KNOBS }
+  try
+    sock = waitFor! ->
+      sockPut = calls.find (c) -> c.method is 'PUT' and c.body?.upstreams?.length and not c.body.upstreams.some (u) -> u.doorbell
+      sockPut?.body.upstreams[0].path
+    a = uds(sock, '/slow')          # the single worker holds both...
+    b = uds(sock, '/slow')
+    sleep! 80
+    third = uds!(sock, '/hi')       # ...and the third bounces, marked
+    eq third.status, 503
+    eq third.headers.get('rip-worker-busy'), '1'
+    ra = await a
+    rb = await b
+    eq (ra.text!), 'done'
+    eq (rb.text!), 'done'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync cDir, { recursive: true, force: true }

@@ -773,3 +773,50 @@ describe('compile() input validation and diagnostic rendering', () => {
     }
   });
 });
+
+describe('cli: subcommand dispatch (rip <name> → rip-<name>)', () => {
+  // Dispatch fires only for a first argument that is not a flag, not an
+  // existing file or directory, and not path-shaped. Resolution walks:
+  // sibling of the executable, repo bin/, nearest node_modules/.bin up
+  // from the cwd, PATH. A miss rejects loudly.
+
+  test('an unknown name rejects loudly with the unknown-command error', () => {
+    const r = rip(['definitely-not-a-subcommand']);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("rip: unknown command 'definitely-not-a-subcommand'");
+  });
+
+  test('a path-shaped name is a file, never a subcommand', () => {
+    const missingFile = rip(['nope.rip']);
+    expect(missingFile.status).toBe(1);
+    expect(missingFile.stderr).toContain('file not found');
+    const missingPath = rip(['./nope']);
+    expect(missingPath.status).toBe(1);
+    expect(missingPath.stderr).toContain('file not found');
+  });
+
+  test('rip-<name> in the nearest node_modules/.bin wins, with args passed through', () => {
+    const binDir = join(dir, 'node_modules', '.bin');
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(join(binDir, 'rip-hello'), '#!/bin/sh\necho "hello:$@"\nexit 7\n', { mode: 0o755 });
+    const r = rip(['hello', 'a', 'b']);
+    expect(r.stdout).toBe('hello:a b\n');
+    expect(r.status).toBe(7);
+  });
+
+  test('the walk climbs from a nested cwd to the project node_modules/.bin', () => {
+    const nested = join(dir, 'deep', 'inner');
+    mkdirSync(nested, { recursive: true });
+    const r = spawnSync('bun', [BIN, 'hello', 'up'], { cwd: nested, encoding: 'utf8' });
+    expect(r.stdout).toBe('hello:up\n');
+    expect(r.status).toBe(7);
+  });
+
+  test('an existing directory still runs dir/index.rip, never dispatches', () => {
+    mkdirSync(join(dir, 'hello2'), { recursive: true });
+    writeFileSync(join(dir, 'hello2', 'index.rip'), "console.log 'ran the dir'\n");
+    const r = rip(['hello2']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('ran the dir');
+  });
+});

@@ -323,7 +323,7 @@ const CAST_LHS_ENDERS = new Set([
 const TYPE_STARTERS = new Set([
   'IDENTIFIER', 'PROPERTY', '(', 'CALL_START', 'PARAM_START', '{', '[',
   'INDEX_START', 'STRING', 'NUMBER', 'BOOL', 'NULL', 'UNDEFINED', '-',
-  'UNARY', 'RESERVED',
+  'UNARY', 'NEW', 'RESERVED',
 ]);
 
 const RUN_OPENERS = new Set(['(', 'CALL_START', 'PARAM_START', '[', 'INDEX_START', '{', 'PICK_START', 'OPTPICK_START']);
@@ -1977,7 +1977,7 @@ const ALIASES = {
   and: ['&&', '&&'],
   or: ['||', '||'],
   not: ['UNARY', '!'], // word-not is UNARY; symbol ! is UNARY_MATH
-  new: ['UNARY', 'new'], // the emitter owns `new`'s lowering
+  new: ['NEW', 'new'], // dedicated token: the grammar owns the new/member split
   typeof: ['UNARY', 'typeof'],
   delete: ['UNARY', 'delete'],
   instanceof: ['RELATION', 'instanceof'],
@@ -2075,7 +2075,7 @@ const OPS2 = {
 // it continues through the grammar's dedicated `= TERMINATOR` /
 // `= INDENT` rules instead.
 const UNFINISHED = new Set([
-  '.', '?.', 'UNARY', 'DO', 'DO_IIFE', 'MATH', 'UNARY_MATH', '+', '-', '**', 'SHIFT',
+  '.', '?.', 'UNARY', 'NEW', 'DO', 'DO_IIFE', 'MATH', 'UNARY_MATH', '+', '-', '**', 'SHIFT',
   'RELATION', 'COMPARE', '&', '^', '|', '&&', '||', '??', 'TERNARY', 'EXTENDS',
 ]);
 
@@ -3759,7 +3759,7 @@ const IMPLICIT_CALL_STARTERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_START', 'REGEX', 'HEREGEX_START', 'SYMBOL', 'MAP_START',
   'PARAM_START', 'IF', 'TRY', 'SWITCH', 'CLASS', 'THIS', 'SUPER',
   'UNDEFINED', 'NULL',
-  'BOOL', 'UNARY', 'DO', 'DO_IIFE', 'UNARY_MATH', 'AWAIT', 'YIELD', 'THROW', '@', '->', '=>', '[', '(', '{',
+  'BOOL', 'UNARY', 'NEW', 'DO', 'DO_IIFE', 'UNARY_MATH', 'AWAIT', 'YIELD', 'THROW', '@', '->', '=>', '[', '(', '{',
   '--', '++',
 ]);
 const IMPLICIT_END = new Set([

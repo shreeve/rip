@@ -35,24 +35,30 @@ Permanent documentation:
    grammar or generator and regenerate via `bun run parser` —
    regeneration is byte-gated in CI.
 
-4. **No backward compatibility, no legacy modes, no historical
+4. **Every bug gets fixed at the layer that owns it.** A wrong tree
+   is a grammar (or lexer-token) bug; a correct tree that serializes
+   wrong is an emitter bug. Do not paper over a parse-shape defect
+   with an emitter special case, or re-detect structure in a token
+   rewriter that the SLR table should own.
+
+5. **No backward compatibility, no legacy modes, no historical
    comments.** Code states present facts only. Never write "we used
    to", "previously", "legacy", "for compat", or speculative "someday
    we might". There is exactly one way to do each thing.
 
-5. **Tests are the contract.** New behavior lands with tests (snapshot
+6. **Tests are the contract.** New behavior lands with tests (snapshot
    surfaces and negative tests). If a test fails, fix the code or (with
    justification) the test — never weaken an acceptance criterion to
    pass. Every confirmed defect converts to a permanent pin in the same
    commit as its fix; a pin asserts the CORRECT behavior, never the bug.
 
-6. **Emitted output never changes silently.** A change that alters the
+7. **Emitted output never changes silently.** A change that alters the
    compiler's output bytes lands with its regenerated corpus snapshots
    (`bun run corpus-expected`) in the same commit — and the diff is
    ENUMERATED: every changed region is inspected and matches the
    change's stated intent. An unexplained region is a stop-and-report.
 
-7. **Claims are verified, not asserted.** A review finding, a bug
+8. **Claims are verified, not asserted.** A review finding, a bug
    report, or a performance claim is a hypothesis; reproduce it
    empirically before changing code, and record what refuted it when
    it dies. A performance change lands with its measurement, and the
@@ -61,10 +67,26 @@ Permanent documentation:
    path by regressing another is not an optimization until the
    trade-off is measured and accepted.
 
-8. **Plain git, verified locally.** Run the affected suites before
+9. **Plain git, verified locally.** Run the affected suites before
    committing; report failures as failures. Commits carry **no AI
    attribution** — no Co-Authored-By trailers, no "generated with"
    footers; authorship is the owner's.
+
+### Seam decision: `new` × dammit (rule 4)
+
+Bug: `new Response(x).text!` nested the dammit under `new`; the emitter
+leaked a `dammit!` head → Bun `Unexpected !`. Own layer: **grammar**
+(JS NewExpression/MemberExpression split), not an emitter rewrite.
+
+Two seams scored the same (~20/20 in-scope; suite ~5417/3 sealed-paren
+emitter cells). **Grammar won:** retag `new`→`NEW`; `NewValue` /
+`NewCall` / `NewSpine` in `grammar.rip`; conflict-neutral (~60 lines +
+tiny lexer set memberships). **Lexer/rewriter lost:** hybrid
+`rewriteNewDammit` after `implicitCalls` (paren-seal member-dammit;
+await-inject construction-dammit) — ~+205 lines in `lexer.js` only;
+same score, but re-detects construction boundaries the parse owns.
+Sealed-paren `.parenthesized` serialization is a tiny separate emitter
+fix — not a reason to pick the rewriter.
 
 ## Lowering Doctrine (rule 2, in full)
 
@@ -203,7 +225,7 @@ ALL THREE in the same change.
   the extended tier. CI runs this, always. COMPLETION CLAIMS run
   against `bun run test:all`, not the fast loop.
 - `bun run test` FROM `packages/vscode` — the extension's own suite
-  (run `bun install` in the package first).
+  (deps come from the repo-root `bun install`; no package-local lock).
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus-expected` — regenerate the corpus expected outputs.
 - `bun run type-audit` — the typed-editor scoreboard. Three audits (type,

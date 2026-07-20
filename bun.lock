@@ -10,9 +10,12 @@
     },
     "packages/ai": {
       "name": "@rip-lang/ai",
-      "version": "0.0.0",
+      "version": "4.0.0",
       "bin": {
-        "rip-ai": "./bin/rip-ai",
+        "rip-ai": "./ai.rip",
+      },
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
       },
     },
     "packages/app": {
@@ -38,9 +41,12 @@
     },
     "packages/db": {
       "name": "@rip-lang/db",
-      "version": "0.0.0",
+      "version": "4.0.0",
       "bin": {
-        "rip-db": "./bin/rip-db",
+        "rip-db": "./db.rip",
+      },
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
       },
     },
     "packages/decimal": {
@@ -99,9 +105,15 @@
     },
     "packages/server": {
       "name": "@rip-lang/server",
-      "version": "0.0.0",
+      "version": "4.0.0",
       "bin": {
-        "rip-server": "./bin/rip-server",
+        "rip-server": "./server.rip",
+      },
+      "dependencies": {
+        "@rip-lang/validate": "workspace:*",
+      },
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
       },
     },
     "packages/stamp": {
