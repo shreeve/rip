@@ -71,7 +71,7 @@ import {
   SUPPRESSED_TS_CODES,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
-import { generatedTsconfig as buildGeneratedTsconfig, mirrorRelForFsPath, ripImportsOf } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -251,27 +251,30 @@ function loadCache() {
 }
 
 // JSONC → parseable JSON (comments stripped).
-// The user's resolved `extends` chain, recorded by generatedTsconfig
+// The user's resolved `extends` chain, recorded by generatedMirror
 // (below) so the watcher can re-govern when a chain member changes.
 const userConfigChain = new Set();
 
-// The generated mirror-root tsconfig — the pure builder lives in
-// mirror.js (shared with the batch `rip check`); here it is fed the
-// server's workspace/fallback state and its config-chain set.
-function generatedTsconfig() {
-  return buildGeneratedTsconfig({
+// The generated mirror-root files (tsconfig + host floor) — the pure
+// builder lives in mirror.js (shared with the batch `rip check`); here
+// it is fed the server's workspace/fallback state and its config-chain
+// set.
+function generatedMirror() {
+  return buildGeneratedMirror({
     workspaceRoot, mirrorRootIsFallback, chain: userConfigChain,
     onUnresolved: (spec) =>
       connection.console.log(`[rip] tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
   });
 }
 
-// Idempotent: an unchanged config never rewrites (no spurious mtime for
-// tsgo to reload on).
+// Idempotent: an unchanged file never rewrites (no spurious mtime for
+// tsgo to reload on). The host floor is written even when inactive —
+// always-present, content varies — so a gate flip is a plain Changed
+// event with no create/delete lifecycle.
 function writeGeneratedTsconfig() {
-  const configPath = path.join(mirrorRoot, 'tsconfig.json');
-  const content = JSON.stringify(generatedTsconfig(), null, 2);
-  ensureOwnedFile(configPath, content);
+  const mirror = generatedMirror();
+  ensureOwnedFile(path.join(mirrorRoot, 'tsconfig.json'), JSON.stringify(mirror.tsconfig, null, 2));
+  ensureOwnedFile(path.join(mirrorRoot, HOST_FLOOR_NAME), mirror.hostFloorDts);
 }
 
 // A .rip uri's mirror path: workspace files keep their relative structure
@@ -1221,9 +1224,19 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
       // docs present. package.json edits are rare, so refresh ALL open
       // docs and let each re-resolve its own nearest config (resolution
       // is per-doc, so this is correct in a monorepo — every doc lands on
-      // its own answer). Skip dependency churn: an install rewrites
-      // node_modules/**/package.json and must not recompile the world.
-      if (!fsPath.includes(`${path.sep}node_modules${path.sep}`)) refreshAllForConfig = true;
+      // its own answer). The generated tsconfig ALSO depends on
+      // package.json now — hostFloorPath reads the workspace's
+      // rip.strict to decide whether the host floor joins the program —
+      // so the same edit regenerates it and re-governs tsgo, not just
+      // presentation. (The floor's other input, node_modules/@types
+      // presence, stays reload-only: VS Code's default watcher excludes
+      // node_modules, so an install's events never arrive.) Skip
+      // dependency churn: an install rewrites node_modules/**/package.json
+      // and must not recompile the world.
+      if (!fsPath.includes(`${path.sep}node_modules${path.sep}`)) {
+        refreshAllForConfig = true;
+        configChanged = true;
+      }
       continue;
     }
     if (!fsPath.endsWith('.rip')) continue;
@@ -1258,8 +1271,12 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
   if (configChanged && mirrorRootReady) {
     // A pre-materialization config change has nothing to re-govern; the
     // first materialization generates from the current user config.
+    // The host floor forwards too: its content can flip while the
+    // tsconfig text stays identical (a rip.strict toggle changes only
+    // the floor), and tsgo re-reads only what it is told changed.
     writeGeneratedTsconfig();
     forward.push({ uri: 'file://' + path.join(mirrorRoot, 'tsconfig.json'), type: FileChangeType.Changed });
+    forward.push({ uri: 'file://' + path.join(mirrorRoot, HOST_FLOOR_NAME), type: FileChangeType.Changed });
   }
   if (refreshAllForConfig) {
     // A package.json#rip edit re-governs every open doc's presentation
