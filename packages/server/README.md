@@ -213,6 +213,15 @@ and late workers join with follow-up PUTs; with `RIP_ENV=production` all
 workers must be ready before the first publish, and a startup boot failure
 exits nonzero.
 
+Sizing the pool: **raise `c` when handlers wait; raise `w` when handlers
+work.** Workers (`-w`) are processes — real parallelism across cores, for
+CPU-bound handlers. Per-worker concurrency (`c`) interleaves I/O waits on
+one event loop — it adds capacity only while handlers are blocked on a
+database or upstream, and cannot add CPU. Today workers run `c:1` (one
+in-flight request each; concurrent arrivals bounce to the next worker via
+a marked 503); the higher-`c` opt-in for I/O-bound apps is defined by the
+pool protocol and tracked in TODO.md.
+
 Env knobs (all in milliseconds, defaults per the protocol): `RIP_SETTLE_MS`
 (150), `RIP_DRAIN_MS` (2500 drain grace before SIGTERM), `RIP_KILL_MS`
 (5000 SIGTERM→SIGKILL), `RIP_HEARTBEAT_MS` (5000), `RIP_HOLD_MS` (15000
