@@ -37,7 +37,7 @@ _rawFilter: Function | null           = null  # Raw request filter (before body 
 _beforeFilters: Function[]            = []    # Before request filters
 _afterFilters: Function[]             = []    # After request filters
 _routes: any[]                        = []    # Route definitions
-_middlewares: Function[]              = []    # Global middleware functions
+_middlewares: { fn: Function, regex?: RegExp, path?: string }[] = []  # Global + path-scoped middleware, in registration order
 _prefix: string                       = ''    # Current route prefix for grouping
 _corsPreflightPolicy: Function | null = null  # Policy fn set by cors middleware: see setCorsPreflightPolicy
 _openapiRegistered: boolean           = false # GET /openapi.json auto-registered?
@@ -99,7 +99,6 @@ compilePattern = (path) ->
 
 matchRoute = (method, pathname) ->
   for route in _routes
-    continue if route.middleware
     continue unless route.method is method or route.method is 'ALL'
     match = pathname.match route.regex
     if match
@@ -287,10 +286,12 @@ compose = (middlewares, beforeFilters, afterFilters, handler) ->
         throw new Error 'next() called multiple times'
       index = i
 
-      # Run middlewares first
+      # Run middlewares first — a path-scoped entry is skipped (not called)
+      # when the request path is outside its pattern
       if i < middlewares.length
-        fn = middlewares[i]
-        result = fn.call!(c, c, -> dispatch!(i + 1))
+        m = middlewares[i]
+        return dispatch!(i + 1) if m.regex? and not m.regex.test(c.req.path)
+        result = m.fn.call!(c, c, -> dispatch!(i + 1))
         c._response = result if result instanceof Response
         return
 
@@ -459,7 +460,7 @@ ISSUE_SCHEMA =!
 buildOpenAPI = ->
   paths = {}
   for r in _routes
-    continue if r.middleware or not r.inputSchema
+    continue unless r.inputSchema
     continue if r.method is 'ALL'
     oaPath = r.path.replace(/:([A-Za-z0-9_]+)\??/g, '{$1}')
     entry = (paths[oaPath] ?= {})
@@ -495,12 +496,27 @@ export openapi = (info = null) ->
   Object.assign(_openapiInfo, info) if info
   buildOpenAPI()
 
+# use(mw) registers global middleware; use(path, mw) scopes it to requests
+# whose path matches the pattern — the pattern covers the path itself AND
+# anything beneath it (use '/api' runs for /api and /api/users), using the
+# same :param / * grammar as routes. Patterns are match-only: their :params
+# are never exposed to middleware or handlers. Global and scoped middleware
+# share ONE registration order; a scoped entry is skipped when the request
+# path is outside its pattern.
+compileMiddlewarePattern = (path) ->
+  path = path.replace /\/+$/, ''
+  escaped = path.replace /[.+^${}()|[\]\\]/g, '\\$&'
+  source = escaped.replace /:(\w+)(?:\{([^}]+)\})?/g, (match, key, pattern) -> "(?:#{pattern or '[^/]+'})"
+  source = source.replace /(?<![\\*])\*(?!\*)/g, '.*'
+  new RegExp("^#{source}(?:/|$)")
+
 export use = (pathOrMw, mw = null) ->
   if typeof pathOrMw is 'function'
-    _middlewares.push pathOrMw
+    _middlewares.push { fn: pathOrMw }
+  else if typeof pathOrMw is 'string' and typeof mw is 'function'
+    _middlewares.push { fn: mw, regex: compileMiddlewarePattern(pathOrMw), path: pathOrMw }
   else
-    { regex, keys } = compilePattern(pathOrMw)
-    _routes.push { method: 'ALL', regex, keys, handler: mw, path: pathOrMw, middleware: true }
+    throw new TypeError "use() takes (middleware) or (path, middleware); got (#{kind(pathOrMw)}, #{kind(mw)})"
 
 export prefix = (base, fn) ->
   old = _prefix

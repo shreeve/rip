@@ -207,6 +207,76 @@ test! "a before filter returning a Response short-circuits", ->
   eq res.status, 403
   eq (res.text!), 'halted'
 
+test! "path-scoped middleware runs for matching paths — itself and beneath", ->
+  resetGlobals()
+  use '/api', (c, next) ->
+    await next()
+    c._response?.headers.set('x-scoped', 'yes')
+  get '/api' -> 'root'
+  get '/api/users' -> 'users'
+  eq (handle! req('GET', '/api')).headers.get('x-scoped'), 'yes'
+  eq (handle! req('GET', '/api/users')).headers.get('x-scoped'), 'yes'
+
+test! "path-scoped middleware skips non-matching paths, including prefixes", ->
+  resetGlobals()
+  use '/api', (c, next) ->
+    await next()
+    c._response?.headers.set('x-scoped', 'yes')
+  get '/other' -> 'x'
+  get '/apix' -> 'x'
+  eq (handle! req('GET', '/other')).headers.get('x-scoped'), null
+  eq (handle! req('GET', '/apix')).headers.get('x-scoped'), null
+
+test! "global and path-scoped middleware run in overall registration order", ->
+  resetGlobals()
+  order = []
+  use (c, next) ->
+    order.push 'g1'
+    await next()
+    order.push 'g1-out'
+  use '/api', (c, next) ->
+    order.push 'scoped'
+    await next()
+    order.push 'scoped-out'
+  use (c, next) ->
+    order.push 'g2'
+    await next()
+    order.push 'g2-out'
+  get '/api/x' -> 'ok'
+  get '/plain' -> 'ok'
+  handle! req('GET', '/api/x')
+  eq order, ['g1', 'scoped', 'g2', 'g2-out', 'scoped-out', 'g1-out']
+  order.length = 0
+  handle! req('GET', '/plain')
+  eq order, ['g1', 'g2', 'g2-out', 'g1-out']
+
+test! "path-scoped middleware can short-circuit without calling next()", ->
+  resetGlobals()
+  reached = { handler: false }
+  use '/admin', (c, next) -> c.text('denied', 403)
+  get '/admin/panel' ->
+    reached.handler = true
+    'secret'
+  res = handle! req('GET', '/admin/panel')
+  eq res.status, 403
+  eq (res.text!), 'denied'
+  eq reached.handler, false
+
+test! "middleware patterns are match-only: their :params never bind", ->
+  resetGlobals()
+  seen = { v: 'unset' }
+  use '/api/:version', (c, next) ->
+    seen.v = c.req.param('version') ?? null
+    await next()
+  get '/api/v2/ping' -> @req.param()
+  res = handle! req('GET', '/api/v2/ping')
+  eq seen.v, null           # the middleware pattern contributed no params...
+  eq (res.json!), {}        # ...and none leak into the route's params either
+
+test "use() rejects a pathless or handlerless registration loudly", ->
+  throws (-> use('/api')), 'use() takes'
+  throws (-> use(42)), 'use() takes'
+
 # ==[ read() — Sinatra-style parameter reading ]==
 
 console.log "\nread()"

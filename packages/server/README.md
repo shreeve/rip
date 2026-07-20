@@ -149,10 +149,25 @@ use csrf secret: process.env.SESSION_SECRET
 use secureHeaders()
 ```
 
-`use` also takes custom Koa-style middleware — `(c, next) ->` — and
-path-scoped forms. `sessions` cookies are HMAC-signed by default or
-AES-256-GCM sealed with `encrypt: true`; `csrf` implements double-submit
-with HMAC binding.
+`use` also takes custom Koa-style middleware — `(c, next) ->` — either
+global or path-scoped:
+
+```coffee
+use (c, next) ->                # global: every request
+  await next()
+
+use '/api', (c, next) ->        # scoped: /api and everything beneath it
+  return c.text('denied', 403) unless session.user   # short-circuits
+  await next()
+```
+
+A path-scoped pattern uses the same `:param` / `*` grammar as routes but
+is **match-only** — its `:params` are never exposed; `@req.param()` binds
+from the matched route's pattern alone. Global and scoped middleware share
+one registration order; a scoped entry is skipped (never called) when the
+request path is outside its pattern. `sessions` cookies are HMAC-signed by
+default or AES-256-GCM sealed with `encrypt: true`; `csrf` implements
+double-submit with HMAC binding.
 
 ## Architecture
 
