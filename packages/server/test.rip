@@ -715,6 +715,7 @@ get '/hi' -> '#{msg}'
 get '/slow' ->
   sleep! 300
   'done'
+get '/hang' -> new Promise(->)
 start()
 """
 
@@ -829,6 +830,43 @@ test! "SIGTERM at c:2 drains BOTH in-flight requests before exiting 0", ->
     rb = await b
     eq (ra.text!), 'done'
     eq (rb.text!), 'done'
+    code = await proc.exited
+    eq code, 0
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "the drain wait honors the manager-passed ceiling — a hung request can't hold the exit", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock, { RIP_DRAIN_DEADLINE_MS: '250', RIP_HANDLER_DEADLINE_MS: '0' }
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    hang = uds(sock, '/hang')       # never resolves; holds the in-flight slot
+    hang.catch -> null
+    sleep! 50
+    t0 = Date.now()
+    proc.kill('SIGTERM')
+    code = await proc.exited
+    eq code, 0
+    elapsed = Date.now() - t0
+    ok elapsed < 2000, "exited in #{elapsed}ms — inside the supervised SIGTERM→SIGKILL ceiling, not a 30s wait"
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "the hung-handler watchdog recycles the worker on its own (RIP_HANDLER_DEADLINE_MS)", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock, { RIP_HANDLER_DEADLINE_MS: '200', RIP_DRAIN_DEADLINE_MS: '200' }
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    hang = uds(sock, '/hang')       # exceeds the deadline; no signal is ever sent
+    hang.catch -> null
     code = await proc.exited
     eq code, 0
   finally
@@ -1218,6 +1256,120 @@ test! "manager refuses c > 1 with watch on (eager included) and bad -c values, l
     ok r.code isnt 0, 'non-integer c exits nonzero'
     ok r.errText.includes('--concurrency takes an integer >= 1'), "rejects 'many': #{r.errText}"
   finally
+    rmSync dir, { recursive: true, force: true }
+
+# ==[ Manager: lifecycle — register 409 retry, hung-handler recycle ]==
+
+console.log "\nManager lifecycle"
+
+# Minimal stub control plane for one-off manager runs. `behave` may answer a
+# recorded call with its own Response; returning null falls through to the
+# stock verbs.
+stubJanus = (sockPath, calls, behave = null) ->
+  Bun.serve
+    unix: sockPath
+    fetch: (rq) ->
+      url = new URL(rq.url)
+      return new Response('janus', { status: 404 }) if rq.method is 'GET'
+      body = null
+      if rq.method is 'POST' or rq.method is 'PUT'
+        body = try rq.json! catch then null
+      call = { method: rq.method, path: url.pathname, body }
+      calls.push call
+      override = behave?(call)
+      return override if override?
+      if rq.method is 'POST' and url.pathname is '/1.0/apps'
+        return Response.json { id: 'app-x' }, { status: 201 }
+      if rq.method is 'PUT' and url.pathname.endsWith('/upstreams')
+        return Response.json { ok: true }
+      if rq.method is 'POST' and url.pathname.endsWith('/heartbeat')
+        return new Response(null, { status: 204 })
+      if rq.method is 'DELETE'
+        return new Response(null, { status: 204 })
+      new Response('nope', { status: 404 })
+
+spawnManager = (dir, controlSock, args, extraEnv = {}, stderr = 'inherit') ->
+  Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, '--control', controlSock, ...args],
+    cwd: dir
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: stderr
+    env: { ...process.env, ...TEST_KNOBS, ...extraEnv }
+
+managerSockPuts = (calls) ->
+  calls.filter (c) -> c.method is 'PUT' and c.body?.upstreams? and not c.body.upstreams.some (u) -> u.doorbell
+
+test! "register retries a 409 within the TTL window and proceeds once the stale claim frees", ->
+  ctlSock = join(tmpdir(), "rip-janus-409-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  posts = { n: 0 }
+  stub = stubJanus ctlSock, calls, (call) ->
+    if call.method is 'POST' and call.path is '/1.0/apps'
+      posts.n += 1
+      # First attempt hits the dead predecessor's still-live claim
+      return new Response('claimed', { status: 409 }) if posts.n is 1
+    null
+  proc = spawnManager dir, ctlSock, ['--name', 'rapp409', '-w', '1', '--no-watch'], { RIP_REGISTER_409_MS: '10000' }
+  try
+    sock = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    eq posts.n, 2
+    res = uds!(sock, '/hi')
+    eq (res.text!), 'hi'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "a 409 outlasting the retry window still aborts with the claim message", ->
+  ctlSock = join(tmpdir(), "rip-janus-409x-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  stub = stubJanus ctlSock, calls, (call) ->
+    if call.method is 'POST' and call.path is '/1.0/apps'
+      return new Response('claimed', { status: 409 })
+    null
+  proc = spawnManager dir, ctlSock, ['--name', 'rappstuck', '-w', '1', '--no-watch'], { RIP_REGISTER_409_MS: '300' }, 'pipe'
+  try
+    errText = new Response(proc.stderr).text!
+    code = await proc.exited
+    ok code isnt 0, 'exhausted 409 retries exit nonzero'
+    ok errText.includes('host already claimed at the control plane (409)'), "names the claim: #{errText}"
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "a hung handler recycles its worker; the manager republishes a fresh socket", ->
+  ctlSock = join(tmpdir(), "rip-janus-hang-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'hangapp', '-w', '1', '--no-watch'], { RIP_HANDLER_DEADLINE_MS: '200' }
+  try
+    sock1 = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    hang = uds(sock1, '/hang')      # never returns; the watchdog must act unprompted
+    hang.catch -> null
+    # The recycle shows at the control plane as a socket drop (empty PUT)...
+    waitFor! -> managerSockPuts(calls).some (c) -> c.body.upstreams.length is 0
+    # ...then the respawned worker re-publishes on a fresh socket path
+    sock2 = waitFor! ->
+      puts = managerSockPuts(calls).filter (c) -> c.body.upstreams.length is 1
+      fresh = puts[puts.length - 1]?.body.upstreams[0].path
+      if fresh? and fresh isnt sock1 then fresh else null
+    res = uds!(sock2, '/hi')
+    eq (res.text!), 'hi'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
     rmSync dir, { recursive: true, force: true }
 
 test! "manager -c 2 --no-watch plumbs the cap to workers: two in flight over one sock", ->

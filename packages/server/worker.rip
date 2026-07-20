@@ -32,9 +32,22 @@ appEntry   = process.env.APP_ARTIFACT or process.env.APP_ENTRY or abort "worker 
 # Window for the manager to read the boot-failure 503 before the exit
 failLinger = parseInt(process.env.RIP_FAIL_LINGER_MS or '')
 FAIL_LINGER_MS    =! if Number.isFinite(failLinger) and failLinger > 0 then failLinger else 1500
-DRAIN_DEADLINE_MS =! 30000     # max wait for in-flight requests on SIGTERM
+
+# Max wait for in-flight requests on SIGTERM. Supervised workers get this
+# from the manager (WORKER_DRAIN_MS there, held under its SIGTERM → SIGKILL
+# ceiling RIP_KILL_MS) — waiting longer would just mean dying by SIGKILL
+# mid-drain. Direct entry defaults under the manager's stock 5s ceiling.
+drainMs = parseInt(process.env.RIP_DRAIN_DEADLINE_MS or '')
+DRAIN_DEADLINE_MS =! if Number.isFinite(drainMs) and drainMs > 0 then drainMs else 4500
+
 ppidMs = parseInt(process.env.RIP_PPID_MS or '')
 PPID_CHECK_MS     =! if Number.isFinite(ppidMs) and ppidMs > 0 then ppidMs else 1000
+
+# Hung-handler watchdog: when any in-flight request's age exceeds this,
+# the worker logs loudly and self-recycles through the drain path so the
+# manager respawns a clean process. 0 disables.
+handlerMs = parseInt(process.env.RIP_HANDLER_DEADLINE_MS or '')
+HANDLER_DEADLINE_MS =! if Number.isFinite(handlerMs) and handlerMs >= 0 then handlerMs else 30000
 
 # In-flight cap: WORKER_CONCURRENCY (the manager's -c). Unset means 1;
 # a set-but-invalid value is a plumbing bug, not a default.
@@ -49,6 +62,8 @@ state =
   bootError: null
   handler: null
   inflight: 0
+  inflightStarts: new Map()    # request serial → start ms, for the watchdog
+  reqSeq: 0
   draining: false
 
 # --- Boot: import the app, resolve its fetch handler --------------------------
@@ -103,6 +118,8 @@ server = Bun.serve
       return new Response('busy', { status: 503, headers: { 'Retry-After': '0', 'Rip-Worker-Busy': '1' } })
 
     state.inflight++
+    id = ++state.reqSeq
+    state.inflightStarts.set(id, Date.now())
     try
       res = state.handler!(req)
       if res instanceof Response then res else new Response(String(res))
@@ -110,6 +127,7 @@ server = Bun.serve
       warn "[worker #{workerId}] request error:", err
       new Response('Internal Server Error', { status: 500 })
     finally
+      state.inflightStarts.delete(id)
       state.inflight = Math.max(0, state.inflight - 1)
 
 boot!
@@ -127,6 +145,25 @@ shutdown = ->
 
 process.on 'SIGTERM', shutdown
 process.on 'SIGINT', shutdown
+
+# --- Hung-handler watchdog ------------------------------------------------------
+#
+# A handler that never returns leaves this worker busy-bouncing forever while
+# /ready stays green. When any in-flight request outlives the deadline, log
+# loudly and recycle through the same drain path SIGTERM takes — the manager
+# sees the exit and respawns a clean worker.
+
+if HANDLER_DEADLINE_MS > 0
+  checkEvery = Math.min(1000, Math.max(25, Math.floor(HANDLER_DEADLINE_MS / 4)))
+  setInterval ->
+    return if state.draining
+    now = Date.now()
+    for t0 as state.inflightStarts.values()
+      if now - t0 > HANDLER_DEADLINE_MS
+        warn "[worker #{workerId}] in-flight request stuck past #{HANDLER_DEADLINE_MS}ms; recycling this worker"
+        shutdown!()
+        return
+  , checkEvery
 
 # --- Orphan watchdog ------------------------------------------------------------
 #

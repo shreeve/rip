@@ -60,16 +60,6 @@ B-list real-but-deferrable items (janus included — no scratchpad there).
       (Narrowed 2026-07-20: `cors({preflight: true})` now answers
       OPTIONS before route matching, and `use(path, mw)` path scoping
       works — `603ee80`. The unmatched-request/404 half remains open.)
-- [ ] Manager 409 on re-register within the heartbeat TTL aborts
-      immediately — restart-under-supervisor flaps until TTL expiry.
-      A bounded 409 retry (~TTL + margin) removes the papercut.
-- [ ] Drain constants disagree: worker `DRAIN_DEADLINE_MS` 30s vs
-      manager grace 2.5s + SIGKILL 5s — an in-flight response >~7.5s
-      is severed while the worker believes it has 30s. Align, or
-      comment the supervised ceiling.
-- [ ] No hung-handler watchdog at c:1 — a never-returning handler
-      leaves the worker busy-bouncing forever while `/ready` stays
-      green. Design a worker-side in-flight-age deadline.
 - [ ] Respawn edges: (a) a worker crashing MID-BOOT under readyWhen:1
       is never respawned (pool degraded until next save); (b) a
       deadline-expired-but-alive worker is neither killed nor

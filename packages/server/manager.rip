@@ -40,6 +40,12 @@ HEARTBEAT_MS     =! envNum 'RIP_HEARTBEAT_MS', 5000     # heartbeat cadence
 HOLD_MS          =! envNum 'RIP_HOLD_MS', 15000         # ring hold cap, then 503
 BOOT_DEADLINE_MS =! envNum 'RIP_BOOT_DEADLINE_MS', 30000  # per-worker /ready deadline
 WAITER_CAP       =! envNum 'RIP_WAITER_CAP', 64         # held rings per app, then 503
+REGISTER_409_MS  =! envNum 'RIP_REGISTER_409_MS', 20000 # 409 retry window (~heartbeat TTL + margin)
+
+# The worker's in-flight drain wait after SIGTERM must finish under THIS
+# manager's SIGTERM → SIGKILL ceiling (KILL_MS — see retirePool), with margin
+# for exit housekeeping. Passed to every worker via RIP_DRAIN_DEADLINE_MS.
+WORKER_DRAIN_MS  =! Math.max(KILL_MS - 500, Math.floor(KILL_MS / 2))
 
 IGNORED_DIRS =! new Set ['node_modules', '.git', 'dist', 'coverage', 'tmp', '.rip-cache', '.cache']
 
@@ -127,6 +133,7 @@ cfetch = (method, path, body = null) ->
 
 registerApp = ->
   backoff = 200
+  deadline409 = null
   loop
     res = null
     try
@@ -138,8 +145,15 @@ registerApp = ->
         state.appId = body.id
         return
       if res.status is 409
-        abort "rip-server: host already claimed at the control plane (409): #{cfg.hosts.join(', ')}"
-      warn "rip-server: register failed (#{res.status}); retrying"
+        # A restart under a supervisor lands inside the heartbeat TTL while
+        # the dead manager's claim is still live — retry until ~TTL + margin
+        # before treating the claim as genuinely foreign.
+        deadline409 ?= Date.now() + REGISTER_409_MS
+        if Date.now() >= deadline409
+          abort "rip-server: host already claimed at the control plane (409): #{cfg.hosts.join(', ')}"
+        warn "rip-server: hosts still claimed (409); retrying until the stale claim expires"
+      else
+        warn "rip-server: register failed (#{res.status}); retrying"
     else
       warn "rip-server: control unreachable during register; retrying"
     sleep! backoff
@@ -266,7 +280,7 @@ spawnWorker = (pool) ->
     stdout: 'inherit'
     stderr: 'inherit'
     stdin: 'ignore'
-    env: { ...process.env, APP_ARTIFACT: pool.artifact, SOCKET_PATH: sock, WORKER_ID: "#{pool.n}.#{pool.serial}", WORKER_CONCURRENCY: "#{cfg.concurrency}" }
+    env: { ...process.env, APP_ARTIFACT: pool.artifact, SOCKET_PATH: sock, WORKER_ID: "#{pool.n}.#{pool.serial}", WORKER_CONCURRENCY: "#{cfg.concurrency}", RIP_DRAIN_DEADLINE_MS: "#{WORKER_DRAIN_MS}" }
   w = { sock, proc, ready: false }
   monitorWorker pool, w
   w
