@@ -239,6 +239,7 @@ grammar =
     # token and a real node. The head is non-spellable: a user call
     # `dammit f` must never share its shape.
     o 'Value DAMMIT', '["dammit!", 1]', 'dammit: _, target'
+    o 'NewValue'
     # Tagged templates: a string against a value (`tag"x"`) or
     # bridged by `$` (`sh $"cmd"`) calls the tag with the template.
     o 'Value TEMPLATE_TAG String', '["tagged-template", 1, 3]', 'tagged: _, tag, str'
@@ -530,6 +531,61 @@ grammar =
     # ('import'), so chains read through it (`import.meta.url`).
     o 'IMPORT_META . Property', '[".", 1, 3]', 'member: operator, object, property'
     o 'NEW_TARGET . Property'  , '[".", 1, 3]', 'member: operator, object, property'
+  ]
+
+  # ============================================================================
+  # New expressions — the JS MemberExpression/NewExpression split.
+  # NewSpine is the CALLEE's member spine (no call forms: the first
+  # argument list completes the construction). A completed NewValue is
+  # a Value, so accessors, calls, and the dammit operator bind OUTSIDE
+  # the construction (`new X(a).b!` is the awaited member call on the
+  # instance). A DAMMIT directly on the spine is the construction
+  # dammit — the construction IS the awaited call (`new X!` →
+  # `await new X()`; `new X!(a)` → `await new X(a)`). A parenthesized
+  # spine link seals normally (`new (f!)` constructs the awaited
+  # callee): the DAMMIT inside the parens is an ordinary Value dammit.
+  # ============================================================================
+
+  NewValue: [
+    # Bare construction (`new X`, `new a.B`): the token value IS the
+    # head, so the node and its roles are byte-identical to the old
+    # `UNARY Expression` reading.
+    o 'NEW NewSpine'                 , '[1, 2]', 'unary: operator, operand'
+    # Nested construction (`new new X()` — the JS NewExpression
+    # recursion); rare but the old UNARY reading accepted it.
+    o 'NEW NewValue'                 , '[1, 2]', 'unary: operator, operand'
+    # Completed construction (`new X(a)`): the ctor call is a real
+    # annotated call node — the construction closes here, so accessors
+    # and DAMMIT bind OUTSIDE on the Value tier.
+    o 'NEW NewCall'                  , '[1, 2]', 'unary: operator, operand'
+    # Construction dammit (`new X!`, `new X!(a)`): the dammit's call
+    # IS the construction, awaited (the DYNAMIC_IMPORT DAMMIT
+    # precedent — a real await node, no hidden channels).
+    # prec NEW (below CALL_START): a following argument list shifts
+    # INTO the construction (`new X!(a)` supplies the ctor args).
+    o 'NEW NewSpine DAMMIT'          , '["await", ["new", 2]]', prec: 'NEW'
+    o 'NEW NewSpine DAMMIT Arguments', '["await", ["new", [2, ...4]]]'
+  ]
+
+  NewCall: [
+    o 'NewSpine Arguments', '[1, ...2]', 'call: callee, ...args'
+  ]
+
+  # The new-CALLEE's member spine — deliberately call-free (JS's
+  # NewExpression/MemberExpression split): the first argument list
+  # completes the construction. A Parenthetical link seals (`new (f!)`
+  # constructs the awaited callee — the DAMMIT inside is an ordinary
+  # Value dammit).
+  NewSpine: [
+    o 'Identifier'
+    o 'ThisProperty'
+    o 'This'
+    o 'Parenthetical'
+    o 'Super'
+    o 'NewSpine . Property' , '[".", 1, 3]' , 'member: operator, object, property'
+    o 'NewSpine ?. Property', '["?.", 1, 3]', 'member: operator, object, property'
+    o 'NewSpine INDEX_START Expression INDEX_END', '["[]", 1, 3]', 'index: operator, object, key'
+    o 'NewSpine TEMPLATE_TAG String', '["tagged-template", 1, 3]', 'tagged: _, tag, str'
   ]
 
   # Subjectable — anything that can carry a postfix accessor chain. Code
@@ -1276,10 +1332,10 @@ grammar =
 
 operators = """
   right       DO_IIFE
-  left        . ?.
+  left        . ?. DAMMIT INDEX_START TEMPLATE_TAG
   left        CALL_START CALL_END
   nonassoc    ++ -- ? PRESENCE
-  right       UNARY DO
+  right       UNARY NEW DO
   right       AWAIT
   right       **
   right       UNARY_MATH
