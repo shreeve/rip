@@ -217,6 +217,53 @@ worker environment (`WORKER_ID`/`SOCKET_PATH`) it hands over its fetch
 handler instead of opening a port, so the same `app.rip` runs standalone
 on your laptop and pooled behind Janus in production, unchanged.
 
+## The no-fork memory story
+
+Unicorn-era servers had a beautiful trick: load the app once in a master
+process, then `fork()` workers that share every untouched page with the
+parent via copy-on-write. Modern JS runtimes cannot play it. Bun/JSC runs
+concurrent GC and JIT threads before any of your code executes, and a
+forked child inherits permanently locked mutexes from threads that don't
+exist on its side of the fork — the child is unusable, and no quiesce
+hatch exists. `Bun.spawn` uses `posix_spawn`, which is safe precisely
+because it discards the address space: no shared pages, no COW. So the
+typical Node/Bun cluster pays the full price in every worker — each
+process independently loads, compiles, and retains everything the app
+needs to boot, times `w`.
+
+Fork's durable value was never really the shared pages (more on that
+below) — it was **load the app once**. Rip Server recovers that without
+fork: the manager compiles the app once per reload epoch and workers boot
+the resulting plain-JS artifact, so the Rip compiler — its code, its
+parser tables, its retained heap — exists in exactly one process instead
+of `w + 1`. Workers get module evaluation and heap build, the part that
+is irreducibly per-process, and nothing else.
+
+Measured on the landing commit (M5, Bun 1.3.14, interleaved
+before/after legs):
+
+- **Per-worker RSS ~137–145MB → 33–40MB** — ~3.7x smaller, ~105MB less
+  per worker, ~850MB recovered at `w:8`.
+- **Reload (save → fresh response) at `w:8`: ~470ms → ~170ms** — ~2.7x,
+  and reload latency no longer scales with worker count (`w:2` measured
+  ~245ms → ~153ms; one build now serves all `w` instead of `w`
+  recompiles racing for cores).
+- **Boot to all-ready at `w:8`: ~650ms → ~300ms** — ~2x, with the
+  artifact build included in the after number.
+
+The honest coda, in two parts. First, fork's *other* promise — a shared
+warm heap — decays even where fork works: GC, inline caches, and JIT
+profiling counters dirty the "shared" pages within minutes (Ruby spent
+years on `GC.compact` fighting exactly this). Load-once was always the
+part worth keeping. Second, there is a read-only-pages variant that
+would genuinely share memory across workers — compile the artifact to
+JSC bytecode and let the kernel mmap it into every process — and it is
+measured as **not yet viable on Bun 1.3.14**: ESM bytecode requires
+`compile: true` (a standalone executable), and the one bundle format
+bytecode accepts (CJS) rejects top-level await, which idiomatic Rip
+emits routinely. When Bun ships ESM bytecode, the artifact is one flag
+away from kernel-shared pages.
+
 ## rip server — CLI
 
 ```bash
