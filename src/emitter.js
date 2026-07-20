@@ -1529,7 +1529,12 @@ class Emitter {
   // params minus names already declared in an enclosing scope. Returns
   // the entries plus the full set of names this scope declares (for
   // the scope chain).
-  scopedHoist(stmts, params = []) {
+  //
+  // `declareInPlace: false` keeps every target on the hoist line —
+  // required when `stmts` are expression-position values (component
+  // `_init` member initializers): a parenthetical multi-statement
+  // lowers to a comma expression, where `let` is invalid JS.
+  scopedHoist(stmts, params = [], { declareInPlace = true } = {}) {
     const collected = this.hoistTargets(stmts, params);
     let entries = collected.filter(([n]) => !this.inScope(n));
     entries.annotations = collected.annotations;
@@ -1540,7 +1545,9 @@ class Emitter {
     // assign emits in EXPRESSION position (`return (r = 5)`), where a
     // `let ` is invalid JS, so the tail is never a declare-in-place
     // site (over-conservative for void-defs, which only costs a pin).
-    entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
+    if (declareInPlace) {
+      entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
+    }
     return { entries, names };
   }
 
@@ -6229,11 +6236,20 @@ class Emitter {
     this.methodName = null;
 
     // _init hoists inner assignment targets of member initializers at
-    // its own top (each is a real function scope).
-    const initValues = [...readonlyVars, ...plainVars, ...stateVars, ...derivedVars]
-      .map((m) => m.value)
-      .filter((v) => v !== undefined && !(isBlock(v) && v.length > 2));
-    const { entries: initHoist, names: initNames } = this.scopedHoist(initValues, []);
+    // its own top (each is a real function scope). Multi-statement
+    // computed (`~=`) bodies are excluded — they open their own
+    // funcBlock hoist via computedBody; parenthetical blocks on
+    // readonly/plain/state still emit inline here and must keep
+    // collecting (otherwise `this.x = (a = 1, a)` throws undeclared).
+    // Never declare-in-place: these values emit in expression position.
+    const initValues = [
+      ...[...readonlyVars, ...plainVars, ...stateVars].map((m) => m.value),
+      ...derivedVars
+        .map((m) => m.value)
+        .filter((v) => !(isBlock(v) && v.length > 2)),
+    ].filter((v) => v !== undefined);
+    const { entries: initHoist, names: initNames } =
+      this.scopedHoist(initValues, [], { declareInPlace: false });
 
     this.mark(node, '$self', () => {
       this.b.emit('class');

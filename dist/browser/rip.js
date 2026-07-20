@@ -9750,7 +9750,7 @@ class Emitter {
   inScope(name) {
     return this.scopes.some((s) => s.has(name));
   }
-  scopedHoist(stmts, params = []) {
+  scopedHoist(stmts, params = [], { declareInPlace = true } = {}) {
     const collected = this.hoistTargets(stmts, params);
     let entries = collected.filter(([n]) => !this.inScope(n));
     entries.annotations = collected.annotations;
@@ -9759,7 +9759,9 @@ class Emitter {
     for (const p of params)
       for (const n of this.patternNames(p, [], true))
         names.add(n);
-    entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
+    if (declareInPlace) {
+      entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
+    }
     return { entries, names };
   }
   hoistTargets(nodes, exclude = []) {
@@ -13486,8 +13488,11 @@ ${pad ?? ""}`);
     this.rframes.push({ reactive: new Set, bound: new Set, members, memberReactive });
     const prevMethod = this.methodName;
     this.methodName = null;
-    const initValues = [...readonlyVars, ...plainVars, ...stateVars, ...derivedVars].map((m) => m.value).filter((v) => v !== undefined && !(isBlock2(v) && v.length > 2));
-    const { entries: initHoist, names: initNames } = this.scopedHoist(initValues, []);
+    const initValues = [
+      ...[...readonlyVars, ...plainVars, ...stateVars].map((m) => m.value),
+      ...derivedVars.map((m) => m.value).filter((v) => !(isBlock2(v) && v.length > 2))
+    ].filter((v) => v !== undefined);
+    const { entries: initHoist, names: initNames } = this.scopedHoist(initValues, [], { declareInPlace: false });
     this.mark(node, "$self", () => {
       this.b.emit("class");
       if (this.ts && this._componentTypeParams) {
