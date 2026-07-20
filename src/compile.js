@@ -187,6 +187,11 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     stores: emitted.stores,
     mappings: new Mappings(emitted.mappings),
     runtimes: emitted.runtimes,
+    // The program's top-level binding inventory: [{name, kind}] with
+    // kind plain / state / computed / effect / readonly / import /
+    // class / def / enum — the REPL's `.vars` data and the ambient
+    // seed for its next line. Unconditional on every compile.
+    bindings: emitted.bindings,
     tsRegions: emitted.tsRegions,
     pinnables: emitted.pinnables,
     // Emitted module-specifier spans, recorded at emission — the

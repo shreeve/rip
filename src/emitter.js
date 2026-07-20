@@ -12107,6 +12107,45 @@ const normalizeAmbient = (ambientBindings) => {
   return ambientBindings;
 };
 
+// The program's top-level binding inventory — programScopeNames'
+// constituents, kept apart so every name carries its KIND: the same
+// vocabulary ambientBindings accepts (a REPL feeds one line's
+// inventory back as the next line's seed). First classification
+// wins per name; the collectors themselves are the single source
+// (never a scan of emitted JS).
+const inventoryBindings = (emitter, sexpr) => {
+  const stmts = sexpr.slice(1);
+  const kinds = new Map();
+  const add = (name, kind) => {
+    if (typeof name === 'string' && !kinds.has(name)) kinds.set(name, kind);
+  };
+  for (const s of stmts) {
+    if (emitter.isModuleImport(s)) for (const n of Emitter.importedNames([s])) add(n, 'import');
+  }
+  const computed = emitter.collectComputedNames(stmts);
+  for (const n of emitter.collectReactiveNames(stmts)) add(n, computed.has(n) ? 'computed' : 'state');
+  for (const n of emitter.collectEffectHandles(stmts)) add(n, 'effect');
+  for (const n of emitter.collectReadonlyNames(stmts)) add(n, 'readonly');
+  const declared = (s) => {
+    if (!isNode(s)) return;
+    if (s[0] === 'enum' && typeof s[1] === 'string') add(s[1], 'enum');
+    if (s[0] === 'class' && typeof s[1] === 'string') add(s[1], 'class');
+    if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === 'string') add(s[1], 'def');
+    if ((s[0] === '=' || s[0] === 'void-assign') && typeof s[1] === 'string') add(s[1], 'plain');
+  };
+  for (const s of stmts) {
+    declared(s);
+    if (isNode(s) && s[0] === 'export' && isNode(s[1])) declared(s[1]);
+  }
+  // Hoisted assignment targets (nested positions and patterns
+  // included) are the plain remainder; chain/reference temps carry a
+  // non-'target' role and are the emitter's, never bindings.
+  for (const [n, , role] of emitter.hoistTargets(stmts)) {
+    if (role === 'target') add(n, 'plain');
+  }
+  return [...kinds].map(([name, kind]) => ({ name, kind }));
+};
+
 export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, dataPayload = null, ambientBindings = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
@@ -12184,6 +12223,10 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     }
   }
   const bound = programScopeNames(emitter, parseResult.sexpr);
+  // The result's binding inventory — computed from the same read-only
+  // pre-walks, BEFORE ambient names join the bound set (the inventory
+  // is this program's own bindings, never the environment's).
+  const bindings = inventoryBindings(emitter, parseResult.sexpr);
   // A seeded name counts as bound for the delivery decision: a free
   // reference to a runtime name a prior line BOUND must not trigger
   // (or be shadowed by) an injection this line.
@@ -12413,7 +12456,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd],
     });
   }
-  return { code: builder.code, mappings: builder.rows, stores, runtimes, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, stores, runtimes, bindings, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a
