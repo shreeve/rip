@@ -111,7 +111,12 @@ const diagnosticError = (file, path, d) => {
 // declaration were in-file — reactive reads/writes unwrap `.value`,
 // readonly and computed writes reject positioned, the name never
 // re-hoists, and minted temporaries dodge it.
-export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, foldProjections = false, ambientBindings = null } = {}) {
+// `repl: true` (off by default, zero effect when off) shapes the
+// emission for REPL evaluation inside an async function body: the
+// final top-level expression statement lands in a MINTED result slot
+// (reported as `replResultName`; null when nothing captured), and
+// top-level static imports lower to awaited dynamic imports.
+export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, foldProjections = false, ambientBindings = null, repl = false } = {}) {
   // One stable identifying error for a non-string source — without
   // it, malformed input fails in whichever subsystem dereferences it
   // first, with an incidental TypeError.
@@ -159,7 +164,7 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
 
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, dataPayload, ambientBindings });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, dataPayload, ambientBindings, repl });
   } catch (err) {
     // Emitter rejections carry the offending node's offset span
     // (Emitter#positionedError) and format like every other
@@ -196,6 +201,10 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // class / def / enum — the REPL's `.vars` data and the ambient
     // seed for its next line. Unconditional on every compile.
     bindings: emitted.bindings,
+    // repl mode's minted result slot — the name the final expression
+    // statement's value landed in; null when nothing captured (or
+    // when repl mode is off).
+    replResultName: emitted.replResultName,
     tsRegions: emitted.tsRegions,
     pinnables: emitted.pinnables,
     // Emitted module-specifier spans, recorded at emission — the
