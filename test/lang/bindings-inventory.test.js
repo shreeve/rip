@@ -80,4 +80,17 @@ describe('result.bindings reports every top-level binding with its kind', () => 
     const next = compile('x + 1', { runtimeDelivery: 'none', ambientBindings: first.bindings });
     expect(next.code).toBe('x.value + 1;');
   });
+
+  test('a plain WRITE to an ambient name binds nothing — the seed keeps its kind', () => {
+    // The write targets the seeded binding (its hoist is suppressed);
+    // reporting it as a plain binding would downgrade a state seed on
+    // the round-trip and silently sever the signal two lines later.
+    const w = compile('x = 3', { runtimeDelivery: 'none', ambientBindings: [{ name: 'x', kind: 'state' }] });
+    expect(w.bindings).toEqual([]);
+    // A REDECLARATION of the ambient name is a real shadow and reports.
+    const d = compile('x =! 3', { runtimeDelivery: 'none', ambientBindings: [{ name: 'x', kind: 'state' }] });
+    expect(d.bindings).toEqual([{ name: 'x', kind: 'readonly' }]);
+    const e = compile('export x = 3', { runtimeDelivery: 'none', ambientBindings: [{ name: 'x', kind: 'state' }] });
+    expect(e.bindings).toEqual([{ name: 'x', kind: 'plain' }]);
+  });
 });

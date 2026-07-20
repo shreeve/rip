@@ -12201,11 +12201,21 @@ const normalizeAmbient = (ambientBindings) => {
 // inventory back as the next line's seed). First classification
 // wins per name; the collectors themselves are the single source
 // (never a scan of emitted JS).
-const inventoryBindings = (emitter, sexpr) => {
+const inventoryBindings = (emitter, sexpr, ambientNames) => {
   const stmts = sexpr.slice(1);
   const kinds = new Map();
   const add = (name, kind) => {
     if (typeof name === 'string' && !kinds.has(name)) kinds.set(name, kind);
+  };
+  // A plain WRITE to an ambient name binds nothing — the emission
+  // targets the seeded binding (its hoist is suppressed), so the
+  // inventory must not claim it (a REPL feeding the inventory back
+  // as the next seed would silently downgrade a state kind to plain,
+  // severing the signal on the line after next). A DECLARATION of an
+  // ambient name (state/computed/readonly/effect/class/def/enum) is
+  // a real shadow and reports normally.
+  const plain = (name) => {
+    if (!ambientNames.has(name)) add(name, 'plain');
   };
   for (const s of stmts) {
     if (emitter.isModuleImport(s)) for (const n of Emitter.importedNames([s])) add(n, 'import');
@@ -12214,22 +12224,27 @@ const inventoryBindings = (emitter, sexpr) => {
   for (const n of emitter.collectReactiveNames(stmts)) add(n, computed.has(n) ? 'computed' : 'state');
   for (const n of emitter.collectEffectHandles(stmts)) add(n, 'effect');
   for (const n of emitter.collectReadonlyNames(stmts)) add(n, 'readonly');
-  const declared = (s) => {
+  const declared = (s, exported) => {
     if (!isNode(s)) return;
     if (s[0] === 'enum' && typeof s[1] === 'string') add(s[1], 'enum');
     if (s[0] === 'class' && typeof s[1] === 'string') add(s[1], 'class');
     if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === 'string') add(s[1], 'def');
-    if ((s[0] === '=' || s[0] === 'void-assign') && typeof s[1] === 'string') add(s[1], 'plain');
+    if ((s[0] === '=' || s[0] === 'void-assign') && typeof s[1] === 'string') {
+      // Exported assigns declare (`export const q = …`) even over an
+      // ambient name; bare ones follow the write-vs-bind rule above.
+      if (exported) add(s[1], 'plain');
+      else plain(s[1]);
+    }
   };
   for (const s of stmts) {
-    declared(s);
-    if (isNode(s) && s[0] === 'export' && isNode(s[1])) declared(s[1]);
+    declared(s, false);
+    if (isNode(s) && s[0] === 'export' && isNode(s[1])) declared(s[1], true);
   }
   // Hoisted assignment targets (nested positions and patterns
   // included) are the plain remainder; chain/reference temps carry a
   // non-'target' role and are the emitter's, never bindings.
   for (const [n, , role] of emitter.hoistTargets(stmts)) {
-    if (role === 'target') add(n, 'plain');
+    if (role === 'target') plain(n);
   }
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
@@ -12314,7 +12329,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // The result's binding inventory — computed from the same read-only
   // pre-walks, BEFORE ambient names join the bound set (the inventory
   // is this program's own bindings, never the environment's).
-  const bindings = inventoryBindings(emitter, parseResult.sexpr);
+  const bindings = inventoryBindings(emitter, parseResult.sexpr, new Set(ambient.map(({ name }) => name)));
   // A seeded name counts as bound for the delivery decision: a free
   // reference to a runtime name a prior line BOUND must not trigger
   // (or be shadowed by) an injection this line.
