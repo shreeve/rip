@@ -61,6 +61,17 @@ const positioned = (file, path, reason, start, end) => {
   return new CompileError(message, { path, start, end, line: line + 1, col: col + 1 });
 };
 
+// A parse diagnostic as a CompileError. The one grammar state whose
+// FIRST expectation is the ternary's ':' is a two-operand `a ? b` —
+// almost always a reach for the nullish default; the hint names the
+// operator that means it.
+const diagnosticError = (file, path, d) => {
+  const message = d.expected?.[0] === ':'
+    ? `${d.message}\n  (a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y)`
+    : d.message;
+  return positioned(file, path, message, d.start, d.end);
+};
+
 // source text → { code, map, stores, mappings, trivia, declarations }.
 // `map` is the Source Map V3 object for `code` (serialize or inline as
 // the consumer requires); `stores` is the Stores query layer over the
@@ -141,14 +152,7 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
   }
 
   if (result.diagnostics.length > 0) {
-    const d = result.diagnostics[0];
-    // The one grammar state whose FIRST expectation is the ternary's
-    // ':' is a two-operand `a ? b` — almost always a reach for the
-    // nullish default; the hint names the operator that means it.
-    const message = d.expected?.[0] === ':'
-      ? `${d.message}\n  (a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y)`
-      : d.message;
-    throw positioned(file, path, message, d.start, d.end);
+    throw diagnosticError(file, path, result.diagnostics[0]);
   }
 
   if (foldProjections) foldDerivedSchemas(result.sexpr);
@@ -213,4 +217,61 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
       return declarations;
     },
   };
+}
+
+// Is `source` a complete program, a legal prefix of one, or broken?
+// The REPL's continue/report decision, owned by the lexer+parser —
+// never a bracket-counting heuristic over text. Returns
+//   { status: 'complete' }
+//   { status: 'incomplete' }
+//   { status: 'error', error: CompileError }  — positioned, exactly
+//     what compile() would throw for the same source.
+//
+// The classification facts, in order:
+//   1. A lexer rejection whose delimiter was still OPEN at end of
+//      input (err.openAtEnd — unclosed bracket, unterminated
+//      string/heredoc, open heregex) is incomplete; any other lexer
+//      rejection is a hard error (a newline-broken single-line
+//      string can never be closed by more input).
+//   2. A parse diagnostic got 'end of input' is incomplete.
+//   3. Any other diagnostic classifies by the classifier's single
+//      owned probe: reparse with one INDENTED continuation line
+//      appended (one level deeper than the last line). A bodiless
+//      block header (`if x` retags to POST_IF without mentioning end
+//      of input) parses clean under the probe — by definition a
+//      legal prefix; a genuine mid-input error stays broken.
+// A prefix-complete program (`class Foo`) parses clean and reports
+// complete — deciding to WAIT on it is the caller's policy, not a
+// language fact.
+export function classifyCompleteness(source) {
+  if (typeof source !== 'string') {
+    const kind = source === null ? 'null' : Array.isArray(source) ? 'an array' : `a ${typeof source}`;
+    throw new CompileError(`classifyCompleteness: source must be a string; got ${kind}`);
+  }
+  const path = '<repl>';
+  const file = new SourceFile(source, path);
+  const parse = (text) => {
+    const parser = Parser();
+    parser.lexer = makeParserLexer(path);
+    return parser.parse(text);
+  };
+  let result;
+  try {
+    result = parse(source);
+  } catch (err) {
+    if (typeof err.start !== 'number') throw err; // a bug, not a diagnostic
+    if (err.openAtEnd === true) return { status: 'incomplete' };
+    return { status: 'error', error: positioned(file, path, err.reason ?? err.message, err.start, err.end) };
+  }
+  if (result.diagnostics.length === 0) return { status: 'complete' };
+  const d = result.diagnostics[0];
+  if (d.got === 'end of input') return { status: 'incomplete' };
+  const lastLine = source.slice(source.lastIndexOf('\n') + 1);
+  const probe = `${source}\n${/^[ \t]*/.exec(lastLine)[0]}  0`;
+  try {
+    if (parse(probe).diagnostics.length === 0) return { status: 'incomplete' };
+  } catch {
+    // The probe line broke tokenization — the original diagnostic stands.
+  }
+  return { status: 'error', error: diagnosticError(file, path, d) };
 }
