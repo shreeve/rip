@@ -671,6 +671,22 @@ class Emitter {
     return false;
   }
 
+  // A seeded (ambient) readonly name at the innermost frame that
+  // binds `name`. Writes reject at COMPILE time — the const that
+  // makes an in-file readonly write throw lives in a previous REPL
+  // line's program, so a silent write here would sever the binding
+  // with no error anywhere (the silent-miscompile class).
+  isAmbientReadonly(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive.has(name)) return false;
+      if (f.ambientReadonly !== undefined && f.ambientReadonly.has(name)) return true;
+      if (f.bound.has(name)) return false;
+      if (f.members !== undefined && f.members.has(name)) return false;
+    }
+    return false;
+  }
+
   // The component-member KIND a bare name resolves to here (state /
   // computed / readonly / prop / plain / method / accept) — null when
   // a local, param, or reactive declaration shadows it, or when no
@@ -2182,6 +2198,21 @@ class Emitter {
     return this.programWith(sexpr);
   }
 
+  // Ambient bindings suppress the program's own hoist for the names
+  // they already bind — exactly scopedHoist's rule for a function
+  // under an enclosing scope, the per-invocation `_` exception
+  // included. With no ambient scope pushed (every non-REPL compile),
+  // this.scopes is empty at program entry and the entries pass
+  // through untouched.
+  ambientHoistFilter(collected) {
+    if (this.scopes.length === 0) return collected;
+    const entries = collected.filter(([n]) => !this.inScope(n) || (n === '_' && collected.matchWrite));
+    entries.matchWrite = collected.matchWrite;
+    entries.annotations = collected.annotations;
+    entries.directives = collected.directives;
+    return entries;
+  }
+
   // Attach the schema story's declared types to the PROGRAM hoist
   // entries (only non-exported module-level schema bindings hoist;
   // exported ones emit `export const` and infer from the cast).
@@ -2211,7 +2242,7 @@ class Emitter {
         for (const imp of all.slice(0, lead)) this.statement(imp, 0);
         this.emitDataConst();
         const rest = all.slice(lead);
-        let entries = this.hoistTargets(rest);
+        let entries = this.ambientHoistFilter(this.hoistTargets(rest));
         this.attachSchemaConsts(entries);
         const names = new Set([...entries.map(([n]) => n), ...Emitter.importedNames(all.slice(0, lead))]);
         for (const n of this.pushReactiveFrame(rest, names)) names.add(n);
@@ -2289,7 +2320,7 @@ class Emitter {
   programPlain(sexpr, stmts) {
     this.mark(sexpr, '$self', () => {
       this.emitDataConst();
-      let entries = this.hoistTargets(stmts);
+      let entries = this.ambientHoistFilter(this.hoistTargets(stmts));
       this.attachSchemaConsts(entries);
       const names = new Set(entries.map(([n]) => n));
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
@@ -5383,6 +5414,10 @@ class Emitter {
     if (typeof node[1] === 'string' && this.isComputedName(node[1])) {
       throw this.positionedError(node,
         `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
+    }
+    if (typeof node[1] === 'string' && this.isAmbientReadonly(node[1])) {
+      throw this.positionedError(node,
+        `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
     }
     this.checkMemberWrite(node, node[1]);
     // A void definition (`save! = ->`, head 'void-assign') validates its
@@ -10798,6 +10833,10 @@ class Emitter {
       throw this.positionedError(node,
         `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
     }
+    if (typeof node[1] === 'string' && this.isAmbientReadonly(node[1])) {
+      throw this.positionedError(node,
+        `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
+    }
     this.checkMemberWrite(node, node[1]);
     // An optional chain is not a JavaScript assignment reference —
     // `obj?.x++` has no valid emission; guard the update explicitly.
@@ -12037,13 +12076,45 @@ const programScopeNames = (emitter, sexpr) => {
   return names;
 };
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, dataPayload = null } = {}) {
+// The binding kinds an ambient seed may carry — exactly the kinds the
+// binding inventory reports (one vocabulary; a REPL feeds one line's
+// inventory back as the next line's seed).
+const AMBIENT_KINDS = new Set(['plain', 'state', 'computed', 'effect', 'readonly', 'import', 'class', 'def', 'enum']);
+const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
+
+// Validate and normalize the ambientBindings option: an array of
+// {name, kind} with identifier names, known kinds, and no duplicates
+// — anything else rejects loudly (an API guard; no source node
+// exists, so the error is message-only).
+const normalizeAmbient = (ambientBindings) => {
+  if (ambientBindings == null) return [];
+  if (!Array.isArray(ambientBindings)) {
+    throw new Error(`emitter: ambientBindings must be an array of {name, kind}; got ${typeof ambientBindings}`);
+  }
+  const seen = new Set();
+  for (const b of ambientBindings) {
+    if (b === null || typeof b !== 'object' || typeof b.name !== 'string' || !IDENTIFIER_RE.test(b.name)) {
+      throw new Error(`emitter: ambientBindings entries are {name, kind} with an identifier name; got ${JSON.stringify(b)}`);
+    }
+    if (!AMBIENT_KINDS.has(b.kind)) {
+      throw new Error(`emitter: ambientBindings kind '${b.kind}' for '${b.name}' is not a binding kind — expected one of ${[...AMBIENT_KINDS].join(', ')}`);
+    }
+    if (seen.has(b.name)) {
+      throw new Error(`emitter: ambientBindings names '${b.name}' twice — one binding per name`);
+    }
+    seen.add(b.name);
+  }
+  return ambientBindings;
+};
+
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, dataPayload = null, ambientBindings = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
   if (face !== 'js' && face !== 'ts') {
     throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
   }
+  const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source });
   const emitter = new Emitter(stores, builder, { face, pins, strict, script });
@@ -12094,7 +12165,14 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     collectAtoms(tree);
     collectAtoms(atoms);
   }
+  // Ambient names are bindings the program's environment supplies:
+  // minted temps dodge them exactly like source-spelled identifiers,
+  // and runtime aliases dodge them exactly like source bindings (a
+  // prior line binding `__state` shifts the delivered alias the same
+  // way an in-file binding does).
+  for (const { name } of ambient) emitter.temps.used.add(name);
   const aliasUsed = runtimeAliasBindings(emitter, trees);
+  for (const { name } of ambient) aliasUsed.add(name);
   // Runtime names spelled only by generated output get one module-level
   // alias minted against every source binding. The default alias is the
   // public runtime name, preserving bytes and source-spelled references;
@@ -12106,6 +12184,10 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     }
   }
   const bound = programScopeNames(emitter, parseResult.sexpr);
+  // A seeded name counts as bound for the delivery decision: a free
+  // reference to a runtime name a prior line BOUND must not trigger
+  // (or be shadowed by) an injection this line.
+  for (const { name } of ambient) bound.add(name);
   const runtimes = new Set();
   for (const rt of RUNTIME_TABLE) {
     const unboundSet = new Set(rt.names.filter((n) => !bound.has(n)));
@@ -12275,7 +12357,31 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   }
 
   emitter.tsDirectivesArmed = true;
+  // Ambient bindings frame the program from BELOW its own scope: the
+  // program's declarations shadow a seed (redeclaration wins), and
+  // anything the program does not itself bind resolves to the seed —
+  // reactive kinds unwrap, everything else reads plain. The scope
+  // entry makes seeded names visible to hoist filtering (the program
+  // and every nested function skip re-declaring them).
+  if (ambient.length > 0) {
+    const reactive = new Set();
+    const computed = new Set();
+    const readonly = new Set();
+    const bound = new Set();
+    for (const { name, kind } of ambient) {
+      if (kind === 'state' || kind === 'computed') reactive.add(name);
+      else bound.add(name);
+      if (kind === 'computed') computed.add(name);
+      if (kind === 'readonly') readonly.add(name);
+    }
+    emitter.rframes.push({ reactive, computed, bound, ambientReadonly: readonly });
+    emitter.scopes.push(new Set(ambient.map(({ name }) => name)));
+  }
   emitter.program(parseResult.sexpr);
+  if (ambient.length > 0) {
+    emitter.rframes.pop();
+    emitter.scopes.pop();
+  }
   // The module marker: the loader runs every .rip file as a Bun
   // ES module, so a face whose own syntax carries no import/export
   // must not present as a global SCRIPT — script-ness misrepresents

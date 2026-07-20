@@ -93,7 +93,14 @@ const positioned = (file, path, reason, start, end) => {
 // (`V = User.pick("id")`) into self-contained schema literals — the
 // browser-bundle extractor's option; OFF by default so every other
 // path keeps the runtime algebra and its `_sourceModel` back-pointer.
-export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, foldProjections = false } = {}) {
+// `ambientBindings` seeds the emitter's program scope with bindings
+// from OUTSIDE this source (the REPL's prior lines): `[{name, kind}]`
+// with kind plain / state / computed / effect / readonly / import /
+// class / def / enum. A seeded name emits exactly as if its
+// declaration were in-file — reactive reads/writes unwrap `.value`,
+// readonly and computed writes reject positioned, the name never
+// re-hoists, and minted temporaries dodge it.
+export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, foldProjections = false, ambientBindings = null } = {}) {
   // One stable identifying error for a non-string source — without
   // it, malformed input fails in whichever subsystem dereferences it
   // first, with an incidental TypeError.
@@ -148,7 +155,7 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
 
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, dataPayload });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, dataPayload, ambientBindings });
   } catch (err) {
     // Emitter rejections carry the offending node's offset span
     // (Emitter#positionedError) and format like every other
