@@ -300,9 +300,11 @@ refuses the combination at startup).
 Env knobs (all in milliseconds, defaults per the protocol): `RIP_SETTLE_MS`
 (150), `RIP_DRAIN_MS` (2500 drain grace before SIGTERM), `RIP_KILL_MS`
 (5000 SIGTERM→SIGKILL), `RIP_HEARTBEAT_MS` (5000), `RIP_HOLD_MS` (15000
-ring hold cap), `RIP_BOOT_DEADLINE_MS` (30000 per worker), and
-`RIP_WAITER_CAP` (64 held rings, a count). Workers receive their in-flight
-cap via `WORKER_CONCURRENCY`, set by the manager from `-c`.
+ring hold cap), `RIP_BOOT_DEADLINE_MS` (30000 per worker),
+`RIP_PPID_MS` (1000 orphan-watchdog cadence — a worker whose parent
+manager dies exits on its own), and `RIP_WAITER_CAP` (64 held rings, a
+count). Workers receive their in-flight cap via `WORKER_CONCURRENCY`,
+set by the manager from `-c`.
 
 ## Test
 

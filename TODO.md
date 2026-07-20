@@ -54,10 +54,12 @@ B-list real-but-deferrable items (janus included — no scratchpad there).
 
 ### rip packages/server
 
-- [ ] Middleware wraps only MATCHED routes: `use cors()` alone never
-      answers preflights (its OPTIONS branch is unreachable without an
-      OPTIONS route) and `logger` never logs 404s. Either document the
+- [ ] Middleware wraps only MATCHED routes: `logger` never logs 404s,
+      and unmatched requests never run the chain. Either document the
       non-Koa semantics or route unmatched requests through the chain.
+      (Narrowed 2026-07-20: `cors({preflight: true})` now answers
+      OPTIONS before route matching, and `use(path, mw)` path scoping
+      works — `603ee80`. The unmatched-request/404 half remains open.)
 - [ ] CSRF form-field token: `fieldName` option is read, never checked
       (header path only). Wire to `c._body[fieldName]` or delete the
       option. Fails closed today.
@@ -95,14 +97,19 @@ B-list real-but-deferrable items (janus included — no scratchpad there).
       crash respawn, `--eager`, heartbeat-404 re-register + re-PUT,
       prod readyWhen:all, `--allow-watch` gate, logger/timeout
       middleware.
-- [ ] `rip-mark`: Janus scrubs it from client responses; surfacing it
-      in an access log is unbuilt future work.
+- [ ] `rip-mark` access log: surfacing the mark in an access log is
+      unbuilt future work. (The scrub itself is done and documented:
+      Janus's `ModifyResponse` deletes `Rip-Mark` from every client
+      response, and the micro-cache stores post-scrub bytes.)
 
 ### janus (tracked here; see janus/docs perf doc for measured levers)
 
-- [ ] `dp.state`/`dp.proxies` grow across reload epochs (fresh socket
-      paths per pool → one entry per worker per save in dev watch).
-      GC entries no app references, minding lock order in setUpstreams.
+- [ ] `dp.state` grows across reload epochs (fresh socket paths per
+      pool → one entry per worker per save in dev watch). GC entries
+      no app references, minding lock order in setUpstreams. (The
+      separate `dp.proxies` map is gone — folded into `upstreamState`
+      by the lock collapse, `fd1fe2f` — but the state map still only
+      grows.)
 - [ ] `replayable()` is narrower than the protocol wording: "no body
       at all" vs "no body streamed to the worker". Safe (never double
       delivery), just more client-visible 503s for bodied requests —
@@ -126,7 +133,8 @@ B-list real-but-deferrable items (janus included — no scratchpad there).
 
 ## Related pointers
 
-- Janus repo: control `/1.0` + cold capabilities **ping** then **control**.
+- Janus repo: control `/1.0` + cold capabilities **ping**, **control**,
+  **cache** (micro-cache + coalescing).
 - **Pool protocol:** `janus/docs/20260719-002000-pool-protocol.md`
 - Server pool sizing / `-c`: `packages/server/README.md` (default `c:1`
   with watch; higher `c` opt-in when reload off). ALS covers framework
@@ -141,5 +149,8 @@ B-list real-but-deferrable items (janus included — no scratchpad there).
   from hoist → bare assigns — **fixed** on this branch (`d3c59d1`); pin
   in `test/battery/components.rip`.
 - if-expr on `=!` leaves IIFE temp undeclared — **refuted** (module
-  hoist present; truncated inspection).
+  hoist present; truncated inspection). Re-probed 2026-07-20:
+  `printf 'x =! if a\n  b = 1\n  b + 1\nelse\n  2\n' | ./bin/rip -c`
+  emits `let b;` at module scope and a correct
+  `const x = (() => { … })()` IIFE.
 - `-c` / `WORKER_CONCURRENCY` knob — **landed** (refused with watch).
