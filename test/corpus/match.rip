@@ -1,0 +1,41 @@
+# The match seam: `=~` and regex-index writes bind the last-match `_`
+# per function invocation — a body with its own match write declares
+# its own `let _` even under an outer `_`; module scope keeps ONE `_`.
+"m0" =~ /m(0)/
+top = _[1]
+
+grab = (s) ->
+  s =~ /x(\w+)/
+  _[1]
+
+indexed = (v) -> v[/^([1-9]\d*)$/, 1]
+
+reader = ->
+  "ab" =~ /a(b)/
+  read = -> _[1]
+  read()
+
+branchy = (s) ->
+  r = if s =~ /q(\d)/ then _[1] else "none"
+  r
+
+sieve = (xs) ->
+  hits = (x for x in xs when x =~ /a(\w)/)
+  [hits.length, _[1]]
+
+looped = (xs) ->
+  for x in xs
+    x =~ /v(\d)/
+  _[1]
+
+class Cap
+  grab: (s) ->
+    s =~ /c(\w)/
+    _[1]
+
+param = (_) ->
+  "zz" =~ /z(z)/
+  _[1]
+
+after = ("a" =~ /(a)/) isnt null
+_ = 5

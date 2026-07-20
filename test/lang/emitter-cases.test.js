@@ -353,6 +353,94 @@ describe('match reads deliver the stdlib runtime', () => {
     expect(compileDelivered(src, 'import')).toMatch(/import \{[^}]*toMatchable as toMatchable_[^}]*\} from/);
   });
 
+  test('a match write declares `_` at its own function scope even when an outer scope has one', () => {
+    // The last-match binding is per-function-invocation: a module-level
+    // match hoists `_` at module scope AND a function containing its
+    // own match re-declares `let _` in its body — sharing the outer
+    // binding would let concurrent async invocations clobber each
+    // other's match across await points.
+    const code = compile('"m0" =~ /m(0)/\nf = (s) ->\n  s =~ /x(\\w+)/\n  _[1]');
+    expect(code).toContain('let _;\n');
+    expect(code).toMatch(/function\(s\) \{\n  let _;\n/);
+  });
+
+  test('a match inside a value-position lowering binds the SOURCE function `_`, not a generated scope', () => {
+    // The if-expression lowers to a ternary and the comprehension to an
+    // IIFE — both generated scopes assign the enclosing source
+    // function's `_` (declared once at its top), never a binding
+    // trapped inside the lowering.
+    const iff = compile('f = (s) ->\n  r = if s =~ /q(\\d)/ then _[1] else "none"\n  r');
+    expect(iff).toMatch(/function\(s\) \{\n  let _;\n/);
+    const comp = compile('g = (xs) ->\n  ys = (x for x in xs when x =~ /a/)\n  ys.length');
+    expect(comp).toMatch(/function\(xs\) \{\n  let _;\n/);
+    expect(comp.match(/let _;/g)).toHaveLength(1);
+  });
+
+  test('a function with no match write declares no `_` of its own', () => {
+    const code = compile('f = ->\n  "ab" =~ /a(b)/\n  read = -> _[1]\n  read()');
+    expect(code.match(/let _;/g)).toHaveLength(1);
+  });
+
+  test('concurrent async invocations keep their own `_` across await interleavings', () => {
+    const src = [
+      '"seed" =~ /s(e)ed/',
+      'f = (s, ms) ->',
+      '  s =~ /x(\\w+)/',
+      '  await sleep ms',
+      '  _[1]',
+      'main = ->',
+      '  [a, b] = await Promise.all [f("xAAA", 30), f("xBBB", 5)]',
+      '  console.log "#{a} #{b}"',
+      'main()',
+    ].join('\n');
+    const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const { join } = require('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'rip-match-'));
+    try {
+      const file = join(dir, 'probe.rip');
+      writeFileSync(file, src);
+      const run = spawnSync('bun', ['bin/rip', file], { encoding: 'utf8' });
+      expect(run.stderr).toBe('');
+      expect(run.stdout).toBe('AAA BBB\n');
+      expect(run.status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a single-statement schema body hoists its targets like a multi-statement one', () => {
+    // The battery evaluates in sloppy eval where an undeclared write
+    // leaks to the global — only a real (strict) module exposes a
+    // missing declaration, so this pin runs the compiled output in a
+    // subprocess.
+    const src = [
+      'X = schema :shape',
+      '  name! string',
+      '  tail: -> ("abc" =~ /b(c)/) and _[1]',
+      '  five: -> (y = 5) and y',
+      'x = X.parse({name: "n"})',
+      'console.log x.tail(), x.five()',
+    ].join('\n');
+    const code = compileDelivered(src, 'none');
+    expect(code).toMatch(/name: "tail", fn: \(function\(\) \{ let _; return/);
+    expect(code).toMatch(/name: "five", fn: \(function\(\) \{ let y; return/);
+    const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const { join } = require('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'rip-match-'));
+    try {
+      const file = join(dir, 'probe.rip');
+      writeFileSync(file, src);
+      const run = spawnSync('bun', ['bin/rip', file], { encoding: 'utf8' });
+      expect(run.stderr).toBe('');
+      expect(run.stdout).toBe('c 5\n');
+      expect(run.status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('a compiled match-op program runs standalone', () => {
     const src = [
       'v = "x42"',

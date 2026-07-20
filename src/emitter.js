@@ -1530,13 +1530,31 @@ class Emitter {
   // the entries plus the full set of names this scope declares (for
   // the scope chain).
   //
+  // The one exception to the enclosing-scope filter is the last-match
+  // binding: a body with its own match write re-declares `_` even when
+  // an outer scope already has one, so every invocation owns its own
+  // last match (concurrent async invocations never clobber each other
+  // across await points). A `_` parameter still wins — hoistTargets'
+  // exclude already dropped it, and the match assigns the parameter.
+  //
   // `declareInPlace: false` keeps every target on the hoist line —
   // required when `stmts` are expression-position values (component
   // `_init` member initializers): a parenthetical multi-statement
   // lowers to a comma expression, where `let` is invalid JS.
   scopedHoist(stmts, params = [], { declareInPlace = true } = {}) {
+    // A parameter default runs in the parameter scope, which cannot
+    // reach a body `let _` — a match write there has no legal home
+    // (a nested function inside the default owns its `_` and passes).
+    for (const p of params) {
+      const hit = Emitter.paramMatchWrite(p);
+      if (hit !== null) {
+        throw this.positionedError(hit,
+          'emitter: a parameter default cannot write the last-match binding — ' +
+          '`_` lives in the enclosing body, which a default cannot reach (move the match into the body)');
+      }
+    }
     const collected = this.hoistTargets(stmts, params);
-    let entries = collected.filter(([n]) => !this.inScope(n));
+    let entries = collected.filter(([n]) => !this.inScope(n) || (n === '_' && collected.matchWrite));
     entries.annotations = collected.annotations;
     entries.directives = collected.directives;
     const names = new Set(entries.map(([n]) => n));
@@ -1553,6 +1571,10 @@ class Emitter {
 
   hoistTargets(nodes, exclude = []) {
     const targets = new Map();
+    // True when this scope's own statements contain a match write
+    // (`=~`, a regex index) — carried out on the entries so
+    // scopedHoist can apply the per-invocation `_` rule.
+    let matchWrite = false;
     // Reactive declarations bind through `const` — their names never
     // hoist, and a later plain write (`count = 5`) or pattern-target
     // element writes the container's `.value`, not a hoisted `let`
@@ -1579,6 +1601,17 @@ class Emitter {
     };
     const add = (name, node) => {
       if (!targets.has(name)) targets.set(name, node);
+    };
+    // Match writes hiding in slots the target walk skips (loop-head
+    // and comprehension-clause pattern defaults): only `_` collects —
+    // the pattern's own names still declare in the for-head.
+    const matchScan = (n) => {
+      if (this.scopeBoundary(n) === 'skip') return;
+      if (Emitter.isMatchWrite(n)) {
+        add('_', n);
+        matchWrite = true;
+      }
+      for (const el of n) matchScan(el);
     };
     // Scope boundaries come from scopeBoundary() — the ONE classifier
     // this walk shares with planReferenceTemps' planning walk, so the
@@ -1649,14 +1682,19 @@ class Emitter {
       }
       // Loop variables declare in the for-head (`for (let [q = 7] …)`)
       // — their pattern defaults are NOT scope-level assignments; skip
-      // the vars slot.
+      // the vars slot for targets, but still scan it for match writes
+      // (a default's `=~` assigns this scope's `_`, which must exist).
       if (boundary === 'loop') {
+        matchScan(n[1]);
         for (const el of n.slice(2)) walk(el);
         return;
       }
       if (boundary === 'comprehension') {
         walk(n[1]);
-        for (const clause of n[2] ?? []) walk(clause[2]);
+        for (const clause of n[2] ?? []) {
+          matchScan(clause[1]);
+          walk(clause[2]);
+        }
         for (const g of n[3] ?? []) walk(g);
         return;
       }
@@ -1684,10 +1722,14 @@ class Emitter {
       }
       // The match operator and regex-index reads write the generated
       // last-match binding — `_` declares at the scope like any
-      // assigned name.
-      if (n[0] === '=~' && n.length === 3) add('_', n);
-      if (n[0] === 'regex-index' && n.length === 4) add('_', n);
-      if (n[0] === '[]' && n.length === 3 && typeof n[2] === 'string' && n[2][0] === '/') add('_', n);
+      // assigned name, and the scope records the match write so
+      // scopedHoist re-declares `_` even under an outer `_` (the
+      // per-invocation contract: every function body that matches
+      // owns its own last match).
+      if (Emitter.isMatchWrite(n)) {
+        add('_', n);
+        matchWrite = true;
+      }
       if ((ASSIGNS.has(n[0]) || n[0] === '*>') && n.length === 3) {
         // Merge assignment DECLARES a plain-name target: its `??= {}`
         // initializes a nullish binding, so first use is legal.
@@ -1722,6 +1764,7 @@ class Emitter {
       for (const name of f.members.keys()) targets.delete(name);
     }
     const entries = [...targets.entries()].map(([name, node]) => [name, node, 'target']);
+    entries.matchWrite = matchWrite;
     entries.push(...chainTemps);
     // Reference-capture temps: a second pass over the same statements
     // plans single-evaluation captures for optional assignments and
@@ -1846,6 +1889,15 @@ class Emitter {
       if (isDefHead(head) || head === 'class' || head === 'component' || head === 'enum') {
         const level = isDefHead(head) ? 2 : Math.max(inFn, 1);
         for (const el of n.slice(typeof n[1] === 'string' ? 2 : 1)) walk(el, level);
+        return;
+      }
+      // Match writes assign `_` — recorded as writes with no declaring
+      // statement, so a later explicit `_ = v` never claims the
+      // declaration (declaring in place there would put the earlier
+      // match's assignment above its `let` — a TDZ throw).
+      if (Emitter.isMatchWrite(n)) {
+        for (const el of n.slice(1)) walk(el, inFn);
+        occur('_', inFn, true);
         return;
       }
       if ((ASSIGNS.has(head) || head === '*>') && n.length === 3) {
@@ -2832,10 +2884,17 @@ class Emitter {
     let bodyText;
     if (stmts.length === 1) {
       const stmt = stmts[0];
-      const h = isNode(stmt) ? stmt[0] : null;
-      const names = new Set(params);
+      // The compact body hoists exactly like the block form — a
+      // single statement can still assign (`(y = 5) and y`, a match
+      // write's `_`), and the emitted function is a real (strict
+      // module) scope where an undeclared write throws.
+      const { entries, names } = sub.scopedHoist([stmt], params.map(String));
       for (const n of sub.pushReactiveFrame(stmts, names)) names.add(n);
       sub.scopes.push(names);
+      if (entries.length) {
+        sub.hoistLine(entries);
+        sub.b.emit(' ');
+      }
       if (isLoopNode(stmt) || isComprehensionNode(stmt)) sub.statement(stmt, 0);
       else sub.implicitReturn(stmt, 0);
       bodyText = `{ ${sub.b.code} }`;
@@ -11293,6 +11352,31 @@ class Emitter {
     });
   }
 
+  // The three source shapes that write the last-match binding `_`:
+  // the match operator and both regex-index reads. ONE predicate —
+  // the `_`-hoist walker, captureScan, and the runtime-delivery
+  // trigger (containsMatchRead) all dispatch on it, so a new match
+  // shape can never join one walk and silently miss another.
+  static isMatchWrite(n) {
+    if (!isNode(n)) return false;
+    if (n[0] === '=~' && n.length === 3) return true;
+    if (n[0] === 'regex-index' && n.length === 4) return true;
+    return n[0] === '[]' && n.length === 3 && typeof n[2] === 'string' && n[2][0] === '/';
+  }
+
+  // The first match write inside a parameter (a default's expression),
+  // or null. Functions inside a default stop the scan — their bodies
+  // declare their own `_` when they emit.
+  static paramMatchWrite(p) {
+    if (!isNode(p) || isFunc(p) || isDefHead(p[0])) return null;
+    if (Emitter.isMatchWrite(p)) return p;
+    for (const el of p) {
+      const hit = Emitter.paramMatchWrite(el);
+      if (hit !== null) return hit;
+    }
+    return null;
+  }
+
   // ["=~", left, right] — the match operator: `text =~ /re/` emits
   // `(_ = toMatchable(text).match(/re/))` — the match array or null,
   // with `_` (the last-match binding, hoisted at the scope) holding
@@ -11555,12 +11639,11 @@ const containsObjectComprehension = (sexpr) => {
 // Structural trigger for the match seam: `text =~ /re/` and
 // `text[/re/]` / `text[/re/, n]` spell the stdlib's `toMatchable` in
 // generated output even though the source never references it. The
-// three shapes mirror the `_`-hoist walker's clauses exactly.
+// three shapes are Emitter.isMatchWrite — the same predicate the
+// `_`-hoist walker and captureScan dispatch on.
 const containsMatchRead = (sexpr) => {
   if (!isNode(sexpr)) return false;
-  if (sexpr[0] === '=~' && sexpr.length === 3) return true;
-  if (sexpr[0] === 'regex-index' && sexpr.length === 4) return true;
-  if (sexpr[0] === '[]' && sexpr.length === 3 && typeof sexpr[2] === 'string' && sexpr[2][0] === '/') return true;
+  if (Emitter.isMatchWrite(sexpr)) return true;
   return sexpr.some(containsMatchRead);
 };
 

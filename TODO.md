@@ -6,46 +6,6 @@ moved into real docs/tests.
 
 ---
 
-## Rip last-match binding `_` under concurrency
-
-`text =~ /re/` (and related) assign last-match `_`, later read as `_[1]`,
-etc. If `_` is a **module-level singleton**, then under worker `c > 1`
-(or any overlapping async in one process):
-
-```text
-request A:  x =~ /pat/     → sets module _
-request A:  await …       → yields
-request B:  y =~ /other/   → overwrites module _
-request A:  use _[1]       → WRONG capture (B’s match)
-```
-
-Silent corruption. v3 `@rip-lang/validate` does many match→`_` uses;
-**today those validators are sync**, so production `read()` is OK while
-they stay sync. A custom `registerValidator` that `await`s between match
-and `_` would be unsafe with module-scoped `_`.
-
-**Wrong fix:** put `_` in ALS — hot-path tax, odd “last match in this
-HTTP request” semantics, wrong tool for Perl-style match sugar.
-
-**Right fix:** lexical / scope-local `_` — hoist in the enclosing
-function/scope (v4 emitter already describes this intent), never a
-module singleton. Concurrent requests do not clobber; no ALS.
-
-- [ ] Audit Rip emit of `=~` / regex-index / `v[/re/]` in **this**
-      checkout: confirm `_` is always scope-local, never a shared
-      module binding (including compiled output of `packages/validate`
-      and any `api.rip`-style explicit `_: … = null`).
-- [ ] Add a negative/concurrency pin: two overlapping async paths in
-      one process that match then await then read `_` must not cross
-      captures (or reject awaiting between match and `_` use if we
-      choose a stricter rule).
-- [ ] Document in language/server docs: custom validators must not
-      await between `=~` and use of `_` unless `_` is proven lexical.
-- [ ] When rebuilding `@rip-lang/server` (Janus-era): keep ALS for
-      request context; do not invent ALS for `_`.
-
----
-
 ## Deferred findings — 2026-07-19 exit-gate reviews
 
 Three deep reviews (Janus Go, rip server package, docs coherence) ran
@@ -114,6 +74,18 @@ B-list real-but-deferrable items (janus included — no scratchpad there).
 
 ## Done / refuted
 
+- Last-match `_` under concurrency — **fixed** on `match-underscore-scope`.
+  Audit confirmed the clobber: a function whose enclosing scope already
+  declared `_` shared it, so overlapping async invocations crossed
+  captures. Now every function body with its own match write declares
+  its own `let _` (per-invocation; no ALS). Same seam fixes: the
+  declare-in-place TDZ on `_ = v` after a module-level match, the
+  single-statement schema body dropping ALL hoist targets, and match
+  writes in loop-head pattern defaults; a match write in a parameter
+  default rejects positioned. Module top-level `_` stays ONE binding —
+  never `await` between a module-level match and its `_` read (pinned).
+  Pins: `test/battery/regex.rip`, `test/battery/schema.rip`,
+  `test/lang/emitter-cases.test.js`, `test/corpus/match.rip`.
 - Component `_init` drops parenthetical multi-stmt member initializers
   from hoist → bare assigns — **fixed** on this branch (`d3c59d1`); pin
   in `test/battery/components.rip`.
