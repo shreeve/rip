@@ -3488,6 +3488,119 @@ code 'component extends: inherits tag, rest props forwarded', '''
   '''
 
 # ==============================================================================
+# Member initializer hoist — parenthetical multi-statement
+# ==============================================================================
+# A parenthetical multi-statement member value emits as a comma
+# expression in _init. Inner assignment targets must hoist to `_init`'s
+# let line (`let a; this.x = (a = 1, a)`). Filtering those blocks out of
+# hoist collection (the old multi-stmt blanket) left bare assigns and
+# threw in strict mode. Multi-stmt `~=` bodies still hoist inside their
+# own computed funcBlock — not here.
+
+code '=! member paren multi-stmt hoists inner assigns in _init', '''
+  C = component
+    x =! (
+      a = 1
+      a
+    )
+    render
+      div
+  ''', '''
+  let C = class extends __Component {
+    _init(props) {
+      let a;
+      this.x = (a = 1, a);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'C');
+      return this._el0;
+    }
+  };
+  '''
+
+code '= member paren multi-stmt hoists inner assigns in _init', '''
+  C = component
+    x = (
+      a = 1
+      a
+    )
+    render
+      div
+  ''', '''
+  let C = class extends __Component {
+    _init(props) {
+      let a;
+      this.x = (a = 1, a);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'C');
+      return this._el0;
+    }
+  };
+  '''
+
+test '=! member paren multi-stmt initializes without ReferenceError', '''
+  C = component
+    x =! (
+      a = 1
+      a
+    )
+    render
+      div
+  c = C.new()
+  c._init({})
+  c.x
+  ''', 1
+
+code ':= member paren multi-stmt hoists inner assigns in _init', '''
+  C = component
+    x := (
+      a = 1
+      a
+    )
+    render
+      div
+  ''', '''
+  let C = class extends __Component {
+    _init(props) {
+      let a;
+      this.x = __state((a = 1, a));
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'C');
+      return this._el0;
+    }
+  };
+  '''
+
+code '~= member paren multi-stmt hoists inside computed only', '''
+  C = component
+    x ~= (
+      a = 1
+      a
+    )
+    render
+      div
+  ''', '''
+  let C = class extends __Component {
+    _init(props) {
+      this.x = __computed(() => {
+        let a = 1;
+        return a;
+      });
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'C');
+      return this._el0;
+    }
+  };
+  '''
+
+# ==============================================================================
 # Member write guards
 # ==============================================================================
 # A readonly ('=!') member never changes after _init — every write

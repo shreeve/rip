@@ -18,18 +18,12 @@ moved into real docs/tests.
 
 ## Component `_init` drops parenthetical multi-stmt member initializers
 
-- [ ] Component `_init` drops parenthetical multi-statement member
+- [x] ~~Component `_init` drops parenthetical multi-statement member
       initializers from hoist collection → bare assigns (strict-mode
-      throw). Not if→IIFE, not `=!`-specific. Guilty filter
-      (`src/emitter.js` ~6231–6236): `initValues` filters out
-      `isBlock(v) && v.length > 2`, intended for multi-stmt computed
-      bodies, but also drops parenthetical blocks on `=!` / `=`
-      members. Repro: `C = component` / `x =! (` / `a = 1` / `a` /
-      `)` / `render` / `div` (or `x = (…)` twin) → `_init` has
-      `this.x = (a = 1, a)` without `let a`. Multi-line `if` on the
-      same member hoists correctly. Fix: narrow filter to multi-stmt
-      **computed** values only; keep collecting hoist targets for
-      readonly/plain/state block initializers. Pin in battery.
+      throw)~~ — fixed. Narrowed `initValues` filter to multi-stmt
+      **computed** bodies only; `_init` hoist uses
+      `declareInPlace: false` (comma-expr values). Pinned in
+      `test/battery/components.rip`.
 
 ## Rip Server concurrency (`c:N`) and hot reload
 
