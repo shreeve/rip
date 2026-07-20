@@ -1343,6 +1343,31 @@ test! "register retries a 409 within the TTL window and proceeds once the stale 
     stub.stop(true)
     rmSync dir, { recursive: true, force: true }
 
+test! "register accepts only 201 — a 200 from POST /apps is retried, never trusted", ->
+  ctlSock = join(tmpdir(), "rip-janus-200-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  posts = { n: 0 }
+  stub = stubJanus ctlSock, calls, (call) ->
+    if call.method is 'POST' and call.path is '/1.0/apps'
+      posts.n += 1
+      # An off-protocol 200 (with a plausible body!) must not register
+      return Response.json({ id: 'bogus' }, { status: 200 }) if posts.n is 1
+    null
+  proc = spawnManager dir, ctlSock, ['--name', 'app200', '-w', '1', '--no-watch']
+  try
+    sock = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    eq posts.n, 2
+    res = uds!(sock, '/hi')
+    eq (res.text!), 'hi'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
 test! "a 409 outlasting the retry window still aborts with the claim message", ->
   ctlSock = join(tmpdir(), "rip-janus-409x-#{Date.now()}-#{rand(1e6)}.sock")
   dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')

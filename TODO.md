@@ -70,8 +70,6 @@ B-list real-but-deferrable items (janus included — no scratchpad there).
 - [ ] Writer chain grows unboundedly during a long control-plane
       outage (one heartbeat closure per tick behind the blocked retry
       loop). Memory only, bounded by outage length.
-- [ ] Style: middleware.rip uses raw `await next()` (7 sites) where
-      `next!()` is the idiom.
 - [ ] `rip-mark` access log: surfacing the mark in an access log is
       unbuilt future work. (The scrub itself is done and documented:
       Janus's `ModifyResponse` deletes `Rip-Mark` from every client
@@ -99,10 +97,6 @@ B-list real-but-deferrable items (janus included — no scratchpad there).
 - [ ] No scoping on host claims or socket paths within the trust
       domain (any control client can claim any host first-wins).
       Pull INTO the Phase 7 / multi-tenant design.
-- [ ] Wording drift: heartbeat failures retry next-tick (doc says
-      "with backoff"); manager accepts 200 or 201 from POST /apps
-      (protocol says 201); rip README ties readyWhen:1 to "watch on"
-      while code keys off RIP_ENV.
 
 ---
 

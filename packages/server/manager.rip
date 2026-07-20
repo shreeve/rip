@@ -68,7 +68,8 @@ Options:
                       (or env JANUS_CONTROL); required, verified at startup
 
 Env knobs: RIP_SETTLE_MS, RIP_DRAIN_MS, RIP_KILL_MS, RIP_HEARTBEAT_MS,
-RIP_HOLD_MS, RIP_BOOT_DEADLINE_MS, RIP_WAITER_CAP
+RIP_HOLD_MS, RIP_BOOT_DEADLINE_MS, RIP_WAITER_CAP, RIP_REGISTER_409_MS,
+RIP_HANDLER_DEADLINE_MS
 """
 
 # --- Module state ---------------------------------------------------------------
@@ -139,7 +140,7 @@ registerApp = ->
     try
       res = cfetch! 'POST', '/1.0/apps', { name: cfg.name, hosts: cfg.hosts }
     if res?
-      if res.status is 201 or res.status is 200
+      if res.status is 201            # per the pool protocol: created, only
         body = res.json!
         abort "rip-server: control returned no app id" unless body?.id?
         state.appId = body.id
@@ -182,13 +183,17 @@ putUpstreams = (list) ->
     sleep! backoff
     backoff = Math.min(backoff * 2, 5000)
 
+# Runs enqueued in the writer chain, one closure per tick. A failed beat has
+# no local retry loop — the next tick's enqueued heartbeat IS the retry, and
+# during a control outage those closures queue behind putUpstreams' backoff,
+# so the effective retry cadence follows that backoff, not the flat interval.
 heartbeatOnce = ->
   return unless state.appId?
   res = null
   try
     res = cfetch! 'POST', "/1.0/apps/#{state.appId}/heartbeat"
   unless res?
-    warn "rip-server: heartbeat unreachable; retrying next tick"
+    warn "rip-server: heartbeat unreachable; the next tick retries"
     return
   if res.status is 404
     warn "rip-server: heartbeat 404 — re-registering and re-publishing upstreams"

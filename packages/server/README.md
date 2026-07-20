@@ -281,10 +281,10 @@ rip server [app-entry] [options]   # app-entry defaults to ./app.rip, then ./ind
 | `--eager` | Boot the fresh pool at settle instead of waiting for a ring |
 | `--control <target>` | Janus control endpoint — unix socket path or http(s) URL (or env `JANUS_CONTROL`); required, verified at startup |
 
-With watch on the pool publishes at the first ready worker (`readyWhen: 1`)
-and late workers join with follow-up PUTs; with `RIP_ENV=production` all
-workers must be ready before the first publish, and a startup boot failure
-exits nonzero.
+Unless `RIP_ENV=production`, the pool publishes at the first ready worker
+(`readyWhen: 1`) and late workers join with follow-up PUTs — this keys off
+`RIP_ENV`, not watch mode. With `RIP_ENV=production` all workers must be
+ready before the first publish, and a startup boot failure exits nonzero.
 
 Sizing the pool: **raise `c` when handlers wait; raise `w` when handlers
 work.** Workers (`-w`) are processes — real parallelism across cores, for
@@ -302,9 +302,15 @@ Env knobs (all in milliseconds, defaults per the protocol): `RIP_SETTLE_MS`
 (5000 SIGTERM→SIGKILL), `RIP_HEARTBEAT_MS` (5000), `RIP_HOLD_MS` (15000
 ring hold cap), `RIP_BOOT_DEADLINE_MS` (30000 per worker),
 `RIP_PPID_MS` (1000 orphan-watchdog cadence — a worker whose parent
-manager dies exits on its own), and `RIP_WAITER_CAP` (64 held rings, a
-count). Workers receive their in-flight cap via `WORKER_CONCURRENCY`,
-set by the manager from `-c`.
+manager dies exits on its own), `RIP_REGISTER_409_MS` (20000 — how long a
+409 at registration retries before aborting, riding out a dead
+predecessor's still-live host claim), `RIP_HANDLER_DEADLINE_MS` (30000
+hung-handler watchdog: an in-flight request older than this recycles the
+worker; 0 disables), and `RIP_WAITER_CAP` (64 held rings, a count).
+Workers receive their in-flight cap via `WORKER_CONCURRENCY`, set by the
+manager from `-c`, and their SIGTERM drain budget via
+`RIP_DRAIN_DEADLINE_MS`, derived from `RIP_KILL_MS` so a drain always
+finishes inside the manager's SIGTERM→SIGKILL ceiling.
 
 ## Test
 
