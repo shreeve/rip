@@ -72,10 +72,6 @@ B-list real-but-deferrable items (janus included — no scratchpad there).
       loop). Memory only, bounded by outage length.
 - [ ] Style: middleware.rip uses raw `await next()` (7 sites) where
       `next!()` is the idiom.
-- [ ] Implemented but unpinned: WAITER_CAP, hold-cap timeout 503,
-      crash respawn, `--eager`, heartbeat-404 re-register + re-PUT,
-      prod readyWhen:all, `--allow-watch` gate, logger/timeout
-      middleware.
 - [ ] `rip-mark` access log: surfacing the mark in an access log is
       unbuilt future work. (The scrub itself is done and documented:
       Janus's `ModifyResponse` deletes `Rip-Mark` from every client
