@@ -4,7 +4,7 @@
 # One process, one unix socket. Spawned by manager.rip with:
 #
 #   bun --preload=<rip loader> worker.rip
-#   env: APP_ENTRY, SOCKET_PATH, WORKER_ID, RIP_ENV
+#   env: APP_ENTRY, SOCKET_PATH, WORKER_ID, WORKER_CONCURRENCY, RIP_ENV
 #
 # Imports the app entry, resolves its fetch handler (module default →
 # module.fetch → globalThis.__ripHandler — the handover seam start() uses
@@ -28,6 +28,14 @@ FAIL_LINGER_MS    =! if Number.isFinite(failLinger) and failLinger > 0 then fail
 DRAIN_DEADLINE_MS =! 30000     # max wait for in-flight requests on SIGTERM
 ppidMs = parseInt(process.env.RIP_PPID_MS or '')
 PPID_CHECK_MS     =! if Number.isFinite(ppidMs) and ppidMs > 0 then ppidMs else 1000
+
+# In-flight cap: WORKER_CONCURRENCY (the manager's -c). Unset means 1;
+# a set-but-invalid value is a plumbing bug, not a default.
+rawC = process.env.WORKER_CONCURRENCY
+cNum = if rawC? then parseInt(rawC) else 1
+if rawC? and not (Number.isFinite(cNum) and cNum >= 1 and String(cNum) is rawC)
+  abort "worker #{workerId}: WORKER_CONCURRENCY must be an integer >= 1, got #{rawC}"
+CONCURRENCY =! cNum
 
 state =
   ready: false
@@ -79,9 +87,9 @@ server = Bun.serve
     if state.draining
       return new Response('draining', { status: 503, headers: { 'Retry-After': '0', 'Rip-Worker-Draining': '1' } })
 
-    # c:1 — one request at a time; concurrent arrivals bounce so the
-    # edge's least_conn picks another worker.
-    if state.inflight >= 1
+    # At the concurrency cap (c requests in flight), arrivals bounce so
+    # the edge's least_conn picks another worker.
+    if state.inflight >= CONCURRENCY
       return new Response('busy', { status: 503, headers: { 'Retry-After': '0', 'Rip-Worker-Busy': '1' } })
 
     state.inflight++

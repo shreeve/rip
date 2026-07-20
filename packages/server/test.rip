@@ -616,12 +616,12 @@ get '/hi' -> (((
 start()
 '''
 
-spawnWorkerProc = (entry, sock) ->
+spawnWorkerProc = (entry, sock, extraEnv = {}) ->
   Bun.spawn [process.execPath, PRELOAD, WORKER_BIN],
     stdin: 'ignore'
     stdout: 'ignore'
     stderr: 'inherit'
-    env: { ...process.env, ...TEST_KNOBS, APP_ENTRY: entry, SOCKET_PATH: sock, WORKER_ID: '1' }
+    env: { ...process.env, ...TEST_KNOBS, APP_ENTRY: entry, SOCKET_PATH: sock, WORKER_ID: '1', ...extraEnv }
 
 # ==[ Worker runtime ]==
 
@@ -676,6 +676,53 @@ test! "a concurrent request at c:1 bounces 503 with the Rip-Worker-Busy marker",
     eq (res.text!), 'busy'
     first = await slow              # the in-flight request is untouched
     eq (first.text!), 'done'
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "a c:2 worker holds two slow requests concurrently; the third bounces marked", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock, { WORKER_CONCURRENCY: '2' }
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    t0 = Date.now()
+    a = uds(sock, '/slow')          # two 300ms sleeps in flight together...
+    b = uds(sock, '/slow')
+    sleep! 80
+    third = uds!(sock, '/hi')       # ...so the THIRD bounces, marked
+    eq third.status, 503
+    eq third.headers.get('rip-worker-busy'), '1'
+    ra = await a
+    rb = await b
+    eq (ra.text!), 'done'
+    eq (rb.text!), 'done'
+    elapsed = Date.now() - t0
+    ok elapsed < 550, "the sleeps interleaved (#{elapsed}ms; serial would be >= 600)"
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "SIGTERM at c:2 drains BOTH in-flight requests before exiting 0", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock, { WORKER_CONCURRENCY: '2' }
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    a = uds(sock, '/slow')          # both slots occupied...
+    b = uds(sock, '/slow')
+    sleep! 80
+    proc.kill('SIGTERM')            # ...when the drain starts
+    ra = await a
+    rb = await b
+    eq (ra.text!), 'done'
+    eq (rb.text!), 'done'
+    code = await proc.exited
+    eq code, 0
   finally
     proc.kill('SIGKILL') unless proc.killed
     await proc.exited
@@ -964,3 +1011,85 @@ test! "a save landing while the boot publish waits in the chain yields no stale 
     await raceProc.exited
     stub.stop(true)
     rmSync raceDir, { recursive: true, force: true }
+
+# ==[ Manager: the per-worker concurrency knob (-c) ]==
+
+console.log "\nManager concurrency knob"
+
+test! "manager refuses c > 1 with watch on (eager included) and bad -c values, loudly", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  outcome = (args) ->
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, ...args],
+      cwd: dir
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'pipe'
+      env: { ...process.env, ...TEST_KNOBS }
+    errText = new Response(proc.stderr).text!
+    code = await proc.exited
+    { code, errText }
+  try
+    r = outcome! ['-c', '3']                        # watch defaults ON outside production
+    ok r.code isnt 0, 'watch-on refusal exits nonzero'
+    ok r.errText.includes('raise c only with watch off'), "names the rule: #{r.errText}"
+    r = outcome! ['-c', '2', '--no-watch', '--eager']
+    ok r.code isnt 0, 'eager counts as watch'
+    ok r.errText.includes('raise c only with watch off'), "names the rule for eager: #{r.errText}"
+    r = outcome! ['-c', '0', '--no-watch']
+    ok r.code isnt 0, 'c below 1 exits nonzero'
+    ok r.errText.includes('--concurrency takes an integer >= 1'), "rejects 0: #{r.errText}"
+    r = outcome! ['-c', 'many', '--no-watch']
+    ok r.code isnt 0, 'non-integer c exits nonzero'
+    ok r.errText.includes('--concurrency takes an integer >= 1'), "rejects 'many': #{r.errText}"
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test! "manager -c 2 --no-watch plumbs the cap to workers: two in flight over one sock", ->
+  cSock = join(tmpdir(), "rip-janus-c-#{Date.now()}-#{rand(1e6)}.sock")
+  cDir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(cDir, 'app.rip'), appSource('hi')
+  calls = []
+  stub = Bun.serve
+    unix: cSock
+    fetch: (rq) ->
+      url = new URL(rq.url)
+      return new Response('janus', { status: 404 }) if rq.method is 'GET'
+      body = null
+      if rq.method is 'POST' or rq.method is 'PUT'
+        body = try rq.json! catch then null
+      calls.push { method: rq.method, path: url.pathname, body }
+      if rq.method is 'POST' and url.pathname is '/1.0/apps'
+        return Response.json { id: 'app-c' }, { status: 201 }
+      if rq.method is 'PUT' and url.pathname.endsWith('/upstreams')
+        return Response.json { ok: true }
+      if rq.method is 'POST' and url.pathname.endsWith('/heartbeat')
+        return new Response(null, { status: 204 })
+      if rq.method is 'DELETE'
+        return new Response(null, { status: 204 })
+      new Response('nope', { status: 404 })
+  proc = Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, '--control', cSock, '--name', 'capp', '-w', '1', '-c', '2', '--no-watch'],
+    cwd: cDir
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'inherit'
+    env: { ...process.env, ...TEST_KNOBS }
+  try
+    sock = waitFor! ->
+      sockPut = calls.find (c) -> c.method is 'PUT' and c.body?.upstreams?.length and not c.body.upstreams.some (u) -> u.doorbell
+      sockPut?.body.upstreams[0].path
+    a = uds(sock, '/slow')          # the single worker holds both...
+    b = uds(sock, '/slow')
+    sleep! 80
+    third = uds!(sock, '/hi')       # ...and the third bounces, marked
+    eq third.status, 503
+    eq third.headers.get('rip-worker-busy'), '1'
+    ra = await a
+    rb = await b
+    eq (ra.text!), 'done'
+    eq (rb.text!), 'done'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync cDir, { recursive: true, force: true }

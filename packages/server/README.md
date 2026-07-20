@@ -203,6 +203,7 @@ rip server [app-entry] [options]   # app-entry defaults to ./app.rip, then ./ind
 | `--name <n>` | App name for registration (default: the app directory's name) |
 | `--host <h>` | Public host to claim; repeatable (default: the app name) |
 | `-w, --workers <n>` | Worker processes (default: 2) |
+| `-c, --concurrency <n>` | Concurrent requests per worker (default: 1). Refused with watch on — `--eager` included — raise `c` only with watch off (`--no-watch`, or `RIP_ENV=production`); see the sizing maxim below |
 | `--watch` / `--no-watch` | File watching + hot reload (default ON unless `RIP_ENV=production`) |
 | `--allow-watch` | Required to enable `--watch` when `RIP_ENV=production`; logs loudly |
 | `--eager` | Boot the fresh pool at settle instead of waiting for a ring |
@@ -215,18 +216,21 @@ exits nonzero.
 
 Sizing the pool: **raise `c` when handlers wait; raise `w` when handlers
 work.** Workers (`-w`) are processes — real parallelism across cores, for
-CPU-bound handlers. Per-worker concurrency (`c`) interleaves I/O waits on
+CPU-bound handlers. Per-worker concurrency (`-c`) interleaves I/O waits on
 one event loop — it adds capacity only while handlers are blocked on a
-database or upstream, and cannot add CPU. Today workers run `c:1` (one
-in-flight request each; concurrent arrivals bounce to the next worker via
-a marked 503); the higher-`c` opt-in for I/O-bound apps is defined by the
-pool protocol and tracked in TODO.md.
+database or upstream, and cannot add CPU. The default is `c:1`: one
+in-flight request per worker, and concurrent arrivals bounce to the next
+worker via a marked 503. Raising `c` is the opt-in for I/O-bound apps,
+and only with watch off — retiring a pool must drain up to `c` in-flight
+requests per worker, so hot reload and `c > 1` do not mix (the manager
+refuses the combination at startup).
 
 Env knobs (all in milliseconds, defaults per the protocol): `RIP_SETTLE_MS`
 (150), `RIP_DRAIN_MS` (2500 drain grace before SIGTERM), `RIP_KILL_MS`
 (5000 SIGTERM→SIGKILL), `RIP_HEARTBEAT_MS` (5000), `RIP_HOLD_MS` (15000
 ring hold cap), `RIP_BOOT_DEADLINE_MS` (30000 per worker), and
-`RIP_WAITER_CAP` (64 held rings, a count).
+`RIP_WAITER_CAP` (64 held rings, a count). Workers receive their in-flight
+cap via `WORKER_CONCURRENCY`, set by the manager from `-c`.
 
 ## Test
 

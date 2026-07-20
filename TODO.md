@@ -14,6 +14,11 @@ per-worker concurrent requests). v3 default is `c:1`.
 
 ### Recommendation (locked for now)
 
+**Status:** the knob is built — `rip server -c <n>` (workers receive
+`WORKER_CONCURRENCY`); `c > 1` with watch on (or `--eager`) is refused
+loudly at startup, pinned in `packages/server/test.rip`. The
+recommendation below stands.
+
 - Default **`c:1`**, especially with file watch / hot reload.
 - Higher `c` (e.g. `c:10` / `c:20`) is an opt-in for I/O-bound apps
   when hot reload is off (or when longer drains are acceptable).
@@ -189,8 +194,10 @@ they are not lost (janus items included — janus has no scratchpad).
       middleware.
 - [ ] `rip-mark`: Janus scrubs it from client responses; surfacing it
       in an access log is unbuilt future work.
-- [ ] `c` opt-in knob is unbuilt (perf lever #1 — 4x measured headroom
-      on I/O-bound handlers; worker hardcodes `inflight >= 1`).
+- [x] ~~`c` opt-in knob is unbuilt (perf lever #1 — 4x measured headroom
+      on I/O-bound handlers; worker hardcodes `inflight >= 1`)~~ —
+      landed as `-c, --concurrency` / `WORKER_CONCURRENCY`, refused
+      with watch on, pinned in `packages/server/test.rip`.
 
 ### janus (tracked here; see janus/docs perf doc for measured levers)
 

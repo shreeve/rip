@@ -43,6 +43,7 @@ Options:
   --name <n>          App name for registration (default: the app directory's name)
   --host <h>          Public host to claim; repeatable (default: the app name)
   -w, --workers <n>   Worker processes (default: 2)
+  -c, --concurrency <n>  Concurrent requests per worker (default: 1; c > 1 requires watch off)
   --watch             Watch app files and hot-reload (default ON unless RIP_ENV=production)
   --no-watch          Disable the watcher
   --allow-watch       Required to enable --watch when RIP_ENV=production
@@ -62,6 +63,7 @@ cfg =
   name: null
   hosts: []
   workers: 2
+  concurrency: 1
   watch: false
   eager: false
   control: null
@@ -184,7 +186,7 @@ spawnWorker = (pool) ->
     stdout: 'inherit'
     stderr: 'inherit'
     stdin: 'ignore'
-    env: { ...process.env, APP_ENTRY: cfg.entry, SOCKET_PATH: sock, WORKER_ID: "#{pool.n}.#{pool.serial}" }
+    env: { ...process.env, APP_ENTRY: cfg.entry, SOCKET_PATH: sock, WORKER_ID: "#{pool.n}.#{pool.serial}", WORKER_CONCURRENCY: "#{cfg.concurrency}" }
   w = { sock, proc, ready: false }
   monitorWorker pool, w
   w
@@ -490,7 +492,7 @@ shutdown = ->
   exit 0
 
 parseArgs = (argv) ->
-  args = { entry: null, name: null, hosts: [], workers: 2, watch: null, allowWatch: false, eager: false, control: process.env.JANUS_CONTROL or null }
+  args = { entry: null, name: null, hosts: [], workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, control: process.env.JANUS_CONTROL or null }
   i = 0
   while i < argv.length
     a = argv[i]
@@ -504,6 +506,10 @@ parseArgs = (argv) ->
       when '--workers', '-w'
         args.workers = parseInt(nextValue())
         abort "rip-server: --workers takes a positive integer" unless Number.isFinite(args.workers) and args.workers >= 1
+      when '--concurrency', '-c'
+        raw = nextValue()
+        args.concurrency = parseInt(raw)
+        abort "rip-server: --concurrency takes an integer >= 1, got #{raw}" unless Number.isFinite(args.concurrency) and args.concurrency >= 1 and String(args.concurrency) is raw
       when '--watch' then args.watch = true
       when '--no-watch' then args.watch = false
       when '--allow-watch' then args.allowWatch = true
@@ -541,6 +547,7 @@ export main = (argv) ->
   cfg.appDir = dirname(cfg.entry)
   cfg.name = args.name or basename(cfg.appDir)
   cfg.workers = args.workers
+  cfg.concurrency = args.concurrency
   cfg.eager = args.eager
   cfg.control = args.control
   if args.hosts.length > 0
@@ -554,6 +561,11 @@ export main = (argv) ->
   if cfg.watch and prod
     abort "rip-server: watch in production requires --allow-watch" unless args.allowWatch
     warn "rip-server: WATCH ENABLED IN PRODUCTION — saves cut admission and retire live pools"
+  # c > 1 and hot reload do not mix: retiring a pool must drain up to c
+  # in-flight requests per worker, and the protocol pins "raise only with
+  # watch off". Eager rides the watcher, so it counts as watch here.
+  if cfg.concurrency > 1 and (cfg.watch or cfg.eager)
+    abort "rip-server: -c #{cfg.concurrency} requires watch off — raise c only with watch off (use --no-watch, or RIP_ENV=production)"
   state.readyWhen = if prod then cfg.workers else 1
 
   # Workers must compile .rip imports themselves; the loader compiling THIS
