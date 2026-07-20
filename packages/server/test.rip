@@ -597,6 +597,26 @@ test! "worker SIGTERM finishes the in-flight request (c:1), then exits 0", ->
     await proc.exited
     rmSync dir, { recursive: true, force: true }
 
+test! "a concurrent request at c:1 bounces 503 with the Rip-Worker-Busy marker", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    slow = uds(sock, '/slow')       # occupies the single slot...
+    sleep! 80
+    res = uds!(sock, '/hi')         # ...so this one bounces, marked
+    eq res.status, 503
+    eq res.headers.get('rip-worker-busy'), '1'
+    eq (res.text!), 'busy'
+    first = await slow              # the in-flight request is untouched
+    eq (first.text!), 'done'
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
 test! "a broken app surfaces its boot error on /ready and exits nonzero", ->
   dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
   sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")

@@ -70,13 +70,17 @@ server = Bun.serve
     unless state.ready
       return new Response(state.bootError or 'not ready', { status: 503 })
 
+    # Drain and busy 503s carry a marker header: Janus excludes marked 503s
+    # from health accounting and immediately tries the next upstream, so a
+    # worker at capacity never poisons the pool or bounces a client that
+    # another worker could serve.
     if state.draining
-      return new Response('draining', { status: 503, headers: { 'Retry-After': '0' } })
+      return new Response('draining', { status: 503, headers: { 'Retry-After': '0', 'Rip-Worker-Draining': '1' } })
 
     # c:1 — one request at a time; concurrent arrivals bounce so the
     # edge's least_conn picks another worker.
     if state.inflight >= 1
-      return new Response('busy', { status: 503, headers: { 'Retry-After': '0' } })
+      return new Response('busy', { status: 503, headers: { 'Retry-After': '0', 'Rip-Worker-Busy': '1' } })
 
     state.inflight++
     try
