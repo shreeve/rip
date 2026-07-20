@@ -18225,12 +18225,16 @@ var normalizeAmbient = (ambientBindings) => {
   }
   return ambientBindings;
 };
-var inventoryBindings = (emitter, sexpr) => {
+var inventoryBindings = (emitter, sexpr, ambientNames) => {
   const stmts = sexpr.slice(1);
   const kinds = new Map;
   const add = (name, kind) => {
     if (typeof name === "string" && !kinds.has(name))
       kinds.set(name, kind);
+  };
+  const plain = (name) => {
+    if (!ambientNames.has(name))
+      add(name, "plain");
   };
   for (const s of stmts) {
     if (emitter.isModuleImport(s))
@@ -18244,7 +18248,7 @@ var inventoryBindings = (emitter, sexpr) => {
     add(n, "effect");
   for (const n of emitter.collectReadonlyNames(stmts))
     add(n, "readonly");
-  const declared = (s) => {
+  const declared = (s, exported) => {
     if (!isNode4(s))
       return;
     if (s[0] === "enum" && typeof s[1] === "string")
@@ -18253,17 +18257,21 @@ var inventoryBindings = (emitter, sexpr) => {
       add(s[1], "class");
     if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === "string")
       add(s[1], "def");
-    if ((s[0] === "=" || s[0] === "void-assign") && typeof s[1] === "string")
-      add(s[1], "plain");
+    if ((s[0] === "=" || s[0] === "void-assign") && typeof s[1] === "string") {
+      if (exported)
+        add(s[1], "plain");
+      else
+        plain(s[1]);
+    }
   };
   for (const s of stmts) {
-    declared(s);
+    declared(s, false);
     if (isNode4(s) && s[0] === "export" && isNode4(s[1]))
-      declared(s[1]);
+      declared(s[1], true);
   }
   for (const [n, , role] of emitter.hoistTargets(stmts)) {
     if (role === "target")
-      add(n, "plain");
+      plain(n);
   }
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
@@ -18319,7 +18327,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
     }
   }
   const bound = programScopeNames(emitter, parseResult.sexpr);
-  const bindings = inventoryBindings(emitter, parseResult.sexpr);
+  const bindings = inventoryBindings(emitter, parseResult.sexpr, new Set(ambient.map(({ name }) => name)));
   for (const { name } of ambient)
     bound.add(name);
   const runtimes = new Set;
