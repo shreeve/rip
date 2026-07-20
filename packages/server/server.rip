@@ -186,96 +186,112 @@ export type Ctx =
 
 export type RouteHandler = (this: Ctx, c: Ctx, next?: () => Promise<void>) => any
 
+# The helpers live on shared prototypes and take the context as `this`
+# (handler.call(c, c) semantics unchanged), so a request allocates two small
+# objects with own data fields instead of ~15 fresh closures. The outgoing
+# `out` Headers is lazy — created on the first header write; a response whose
+# headers were never touched builds from a plain object and skips it.
+
+CtxReqProto =
+  param: (key) -> if key? then @_params[key] else { ...@_params }
+  query: (key) -> if key? then @_url.searchParams.get(key) else Object.fromEntries(@_url.searchParams)
+  header: (key) -> if key? then @raw.headers.get(key) else Object.fromEntries(@raw.headers)
+  json: -> @raw.json()
+  text: -> @raw.text()
+  formData: -> @raw.formData()
+  parseBody: (opts = {}) ->
+    ct = @raw.headers.get('content-type') or ''
+    if ct =~ /json/i
+      @raw.json!
+    else if ct =~ /form/i
+      fd = @raw.formData!
+      Object.fromEntries(fd)
+    else
+      {}
+
+CtxProto =
+  # One response builder: an existing `out` takes the content type and the
+  # per-call headers (which may override it, matching set-then-set order);
+  # without one, a plain-object headers init avoids the Headers allocation.
+  _respond: (data, status, headers, ctype) ->
+    if @_out?
+      @_out.set('Content-Type', ctype) if ctype?
+      for k, v of headers then @_out.set(k, v)
+      return new Response data, { status, headers: @_out }
+    h = if ctype? then { 'Content-Type': ctype, ...headers } else headers
+    new Response data, { status, headers: h }
+
+  json: (data, status = 200, headers = {}) ->
+    @_respond JSON.stringify(data), status, headers, 'application/json'
+
+  text: (str, status = 200, headers = {}) ->
+    @_respond str, status, headers, 'text/plain; charset=UTF-8'
+
+  html: (str, status = 200, headers = {}) ->
+    @_respond str, status, headers, 'text/html; charset=UTF-8'
+
+  redirect: (location, status = 302) ->
+    new Response null, { status, headers: { Location: String(location) } }
+
+  body: (data, status = 200, headers = {}) ->
+    @_respond data, status, headers, null
+
+  send: (path, type) ->
+    file = Bun.file(path)
+    etag = "W/\"#{file.lastModified}-#{file.size}\""
+    if @req.raw.headers.get('if-none-match') is etag
+      return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control': @_out?.get('Cache-Control') or 'no-cache' } })
+    out = (@_out ?= new Headers())
+    out.set 'Content-Type', (type or mimeType(path))
+    out.set 'Cache-Control', 'no-cache' unless out.has 'Cache-Control'
+    out.set 'ETag', etag
+    new Response file, { status: 200, headers: out }
+
+  header: (name, value, opts: { append?: boolean } = {}) ->
+    if value?
+      out = (@_out ?= new Headers())
+      if opts.append then out.append(name, value) else out.set(name, value)
+      return
+    @_out?.get(name) ?? null
+
+  cache: (duration) ->
+    seconds = if typeof duration is 'number' then duration
+    else if typeof duration is 'string'
+      parts = duration.match(/^(\d+)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/i)
+      if parts
+        n = parseInt(parts[1])
+        switch parts[2][0].toLowerCase()
+          when 's' then n
+          when 'm' then n * 60
+          when 'h' then n * 3600
+          when 'd' then n * 86400
+          when 'w' then n * 604800
+          when 'y' then n * 31536000
+          else n
+      else parseInt(duration) or 0
+    else 0
+    out = (@_out ?= new Headers())
+    out.set 'Cache-Control', "public, max-age=#{seconds}, immutable"
+    out.set 'Expires', new Date(Date.now() + seconds * 1000).toUTCString()
+    return
+
 # fetch() passes its already-parsed url + normalized pathname through so the
 # request is parsed exactly once; the defaults keep direct calls working.
 createContext = (req, params = {}, url = null, pathname = null) ->
   url ?= new URL(req.url)
   pathname ?= posix.normalize(url.pathname)
-  out = new Headers()
-
-  ctx =
-    json: (data, status = 200, headers = {}) ->
-      out.set 'Content-Type', 'application/json'
-      for k, v of headers then out.set(k, v)
-      new Response JSON.stringify(data), { status, headers: out }
-
-    text: (str, status = 200, headers = {}) ->
-      out.set 'Content-Type', 'text/plain; charset=UTF-8'
-      for k, v of headers then out.set(k, v)
-      new Response str, { status, headers: out }
-
-    html: (str, status = 200, headers = {}) ->
-      out.set 'Content-Type', 'text/html; charset=UTF-8'
-      for k, v of headers then out.set(k, v)
-      new Response str, { status, headers: out }
-
-    redirect: (location, status = 302) ->
-      new Response null, { status, headers: { Location: String(location) } }
-
-    body: (data, status = 200, headers = {}) ->
-      for k, v of headers then out.set(k, v)
-      new Response data, { status, headers: out }
-
-    send: (path, type) ->
-      file = Bun.file(path)
-      etag = "W/\"#{file.lastModified}-#{file.size}\""
-      if req.headers.get('if-none-match') is etag
-        return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control': out.get('Cache-Control') or 'no-cache' } })
-      out.set 'Content-Type', (type or mimeType(path))
-      out.set 'Cache-Control', 'no-cache' unless out.has 'Cache-Control'
-      out.set 'ETag', etag
-      new Response file, { status: 200, headers: out }
-
-    header: (name, value, opts: { append?: boolean } = {}) ->
-      if value?
-        if opts.append then out.append(name, value) else out.set(name, value)
-        return
-      out.get(name)
-
-    cache: (duration) ->
-      seconds = if typeof duration is 'number' then duration
-      else if typeof duration is 'string'
-        parts = duration.match(/^(\d+)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/i)
-        if parts
-          n = parseInt(parts[1])
-          switch parts[2][0].toLowerCase()
-            when 's' then n
-            when 'm' then n * 60
-            when 'h' then n * 3600
-            when 'd' then n * 86400
-            when 'w' then n * 604800
-            when 'y' then n * 31536000
-            else n
-        else parseInt(duration) or 0
-      else 0
-      out.set 'Cache-Control', "public, max-age=#{seconds}, immutable"
-      out.set 'Expires', new Date(Date.now() + seconds * 1000).toUTCString()
-      return
-
-    session: {}
-
-    req:
-      raw: req
-      method: req.method
-      url: req.url
-      path: pathname
-      param: (key) -> if key? then params[key] else { ...params }
-      query: (key) -> if key? then url.searchParams.get(key) else Object.fromEntries(url.searchParams)
-      header: (key) -> if key? then req.headers.get(key) else Object.fromEntries(req.headers)
-      json: -> req.json()
-      text: -> req.text()
-      formData: -> req.formData()
-      parseBody: (opts = {}) ->
-        ct = req.headers.get('content-type') or ''
-        if ct =~ /json/i
-          req.json!
-        else if ct =~ /form/i
-          fd = req.formData!
-          Object.fromEntries(fd)
-        else
-          {}
-
-  ctx
+  r = Object.create(CtxReqProto)
+  r.raw = req
+  r.method = req.method
+  r.url = req.url
+  r.path = pathname
+  r._url = url
+  r._params = params
+  c = Object.create(CtxProto)
+  c._out = null
+  c.session = {}
+  c.req = r
+  c
 
 # ==============================================================================
 # Middleware Composition (Koa-style)
