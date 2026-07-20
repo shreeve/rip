@@ -449,6 +449,18 @@ test 'dammit call then member reads the resolved value', '''
 
 code 'dammit stays bare as an operand', 'f!() + 1', 'await f() + 1;'
 
+# ==============================================================================
+# Dammit × new — postfix ! on a member of a completed new-expression
+# binds to the member access (call-with-await on the member), never
+# into the new-callee. The inline spelling means exactly what the
+# bound spelling (`res = new Response(x)` then `res.text!`) and the
+# parenthesized spelling (`(new Response(x)).text!`) mean.
+# ==============================================================================
+
+code 'dammit on a member of a completed new', 'body = new Response(x).text!', 'let body = await new Response(x).text();'
+
+test 'new-member dammit round-trips', 'new Response("hi").text!', 'hi'
+
 # Dynamic import with dammit operator
 code 'import! dynamic', 'import!("./foo.rip")', "await import(\"./foo.rip\");"
 code 'import! with variable', 'import!(path)', "await import(path);"
