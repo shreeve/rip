@@ -88,12 +88,8 @@ serve = (args, cwd = fixtures) ->
     catch
       sleep! 50
   exitCode = await proc.exited
-  # Split assignments: `new Response(x).text!` trips the compiler (the
-  # dammit operator misparses inside a `new` member chain).
-  outRes = new Response(proc.stdout)
-  errRes = new Response(proc.stderr)
-  stdout = outRes.text!
-  stderr = errRes.text!
+  stdout = new Response(proc.stdout).text!
+  stderr = new Response(proc.stderr).text!
   { html, headers, stdout, stderr, exitCode }
 
 # ==[ Package surface ]==

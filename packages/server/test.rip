@@ -710,8 +710,7 @@ test! "an orphaned worker (parent gone) exits on its own", ->
     stdout: 'pipe'
     stderr: 'inherit'
     env: { ...process.env, ...TEST_KNOBS, RIP_PPID_MS: '50', APP_ENTRY: join(dir, 'app.rip'), SOCKET_PATH: sock, WORKER_ID: 'orphan' }
-  pidOut = new Response(launcher.stdout)
-  pid = parseInt((pidOut.text!).trim())
+  pid = parseInt(new Response(launcher.stdout).text!.trim())
   await launcher.exited
   ok Number.isFinite(pid) and pid > 1, 'captured the worker pid'
   alive = (target) ->
