@@ -161,9 +161,16 @@ export function moduleSourceText(s) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false } = {}) {
+  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, repl = false } = {}) {
     this.stores = stores;
     this.b = builder;
+    // repl emission: the final top-level expression statement lands
+    // in the minted result slot; top-level static imports lower to
+    // awaited dynamic imports. Off by default with zero effect —
+    // the slot name mints lazily, so the used-name registry and the
+    // temp allocator are untouched when off.
+    this.repl = repl;
+    this.replResultName = null;
     // Script-target emission: <script type="text/rip"> sources share one
     // page scope and are not modules, so every module form rejects at
     // its own position instead of emitting bytes new Function cannot take.
@@ -2390,6 +2397,9 @@ class Emitter {
       if (!isComprehensionNode(node)) return false;
       e.ind = ind;
       if (node === e.lastProgramStmt) {
+        // Its value IS the program result, so repl mode captures it
+        // like any final expression.
+        if (e.repl) e.b.emit(`const ${e.replSlot()} = `);
         e.comprehension(node, ind);
         e.b.emit(';');
       } else {
@@ -2453,6 +2463,7 @@ class Emitter {
     if (this.script) {
       throw this.positionedError(node, 'emitter: module imports are not available in a script tag — script sources share one scope, and modules arrive with the package graph');
     }
+    if (this.repl) return this.replImportStatement(node);
     const source = node[node.length - 1];
     const specs = node.slice(1, -1);
     this.mark(node, '$self', () => {
@@ -2473,6 +2484,45 @@ class Emitter {
         const specStart = this.b.offset;
         this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
         this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
+      }
+    });
+    this.b.emit(';\n');
+  }
+
+  // repl mode's import lowering: a static import cannot live in a
+  // function body (the REPL evaluates each line inside an async
+  // function), so the statement emits as its awaited dynamic
+  // equivalent, bindings preserved — named/default specifiers
+  // destructure the namespace (`const { default: d, a, b: c } =
+  // await import('m')`), `* as ns` binds the module object whole
+  // (a mixed form destructures FROM the bound namespace, one await),
+  // and a side-effect import awaits bare. The specifier span records
+  // exactly like the static form's — consumers splice resolved
+  // specifiers by offset either way. No generated function scope is
+  // introduced; `await` sits in the program's own context.
+  replImportStatement(node) {
+    const source = node[node.length - 1];
+    const specs = node.slice(1, -1);
+    const parts = [];
+    let nsName = null;
+    for (const spec of specs) {
+      if (spec === '{}') continue;
+      if (typeof spec === 'string') parts.push(`default: ${spec}`);
+      else if (spec[0] === '*') nsName = spec[1];
+      else for (const s of spec) parts.push(isNode(s) ? `${s[0]}: ${s[1]}` : s);
+    }
+    this.mark(node, '$self', () => {
+      if (nsName !== null) this.b.emit(`const ${nsName} = `);
+      else if (parts.length > 0) this.b.emit(`const { ${parts.join(', ')} } = `);
+      this.b.emit('await import(');
+      {
+        const specStart = this.b.offset;
+        this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
+        this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
+      }
+      this.b.emit(')');
+      if (nsName !== null && parts.length > 0) {
+        this.b.emit(`, { ${parts.join(', ')} } = ${nsName}`);
       }
     });
     this.b.emit(';\n');
@@ -3142,6 +3192,13 @@ class Emitter {
         }
       }
     }
+    // repl capture: everything reaching this point is an expression
+    // statement (the dispatched statement forms and the assignment
+    // rewrites returned above); the program's FINAL one lands in the
+    // result slot. Direct writes (assign/compound/update) stay
+    // uncaptured — their emission owns declaration syntax (`let x =
+    // 5`) the capture prefix cannot wrap.
+    if (this.replCapture(node)) return;
     // Statement-position grouping: expression forms JS treats specially
     // at statement start group unconditionally — object literals (bare
     // braces parse as a block) and `->` function expressions (a bare
@@ -3168,6 +3225,37 @@ class Emitter {
         typeof node[1] === 'string' && this.componentInfo.has(node[2])) {
       this.tsComponentCompanion(node[2], node[1], false, this.annotationText(node, 'typeParams'));
     }
+  }
+
+  // Write heads that never capture in repl mode — their statement
+  // emission owns declaration syntax (declare-in-place `let`) or has
+  // no value reading a REPL should print.
+  static REPL_NO_CAPTURE = new Set([...ASSIGNS, '//=', '%%=', '++', '--']);
+
+  // repl mode's result slot, minted against the used-name registry on
+  // FIRST capture (never a fixed string — a user may legally bind any
+  // name the emitter is fond of; mintName registers the pick, so
+  // later minted names dodge it too). Lazy so an off-flag or
+  // capture-free emission never touches the registry.
+  replSlot() {
+    if (this.replResultName === null) {
+      this.replResultName = Emitter.mintName('__result', this.temps.used);
+    }
+    return this.replResultName;
+  }
+
+  // The final top-level expression statement lands in the result
+  // slot: `const <slot> = <expr>;`. The `const <slot> = ` prefix is
+  // generated declaration syntax outside all role marks (the
+  // declare-in-place `let ` precedent), so every role row keeps its
+  // exact source↔generated slice.
+  replCapture(node) {
+    if (!this.repl || node !== this.lastProgramStmt) return false;
+    if (isNode(node) && Emitter.REPL_NO_CAPTURE.has(node[0]) && node.length === 3) return false;
+    this.b.emit(`const ${this.replSlot()} = `);
+    this.expr(node);
+    this.b.emit(';');
+    return true;
   }
 
   // ["while", condition, body] — the plain loop; ["while", condition,
@@ -12146,7 +12234,7 @@ const inventoryBindings = (emitter, sexpr) => {
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, dataPayload = null, ambientBindings = null } = {}) {
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, dataPayload = null, ambientBindings = null, repl = false } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -12156,7 +12244,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, repl });
   emitter.dataPayload = dataPayload;
 
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {
@@ -12456,7 +12544,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd],
     });
   }
-  return { code: builder.code, mappings: builder.rows, stores, runtimes, bindings, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, stores, runtimes, bindings, replResultName: emitter.replResultName, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a
