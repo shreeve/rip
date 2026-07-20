@@ -4579,6 +4579,14 @@ function tokenize(text, path = "<anonymous>") {
     err.end = end;
     throw err;
   };
+  const failOpenAtEnd = (message, at, end = at) => {
+    try {
+      fail(message, at, end);
+    } catch (err) {
+      err.openAtEnd = true;
+      throw err;
+    }
+  };
   const push = (kind, value, start, end, extra = {}) => {
     if ((kind === "STRING" || kind === "STRING_START") && (seenImport || seenExport)) {
       const prevTok = tokens[tokens.length - 1];
@@ -4684,7 +4692,7 @@ function tokenize(text, path = "<anonymous>") {
       pos++;
     }
     if (pos >= text.length)
-      fail("unterminated string", opener);
+      failOpenAtEnd("unterminated string", opener);
     const content = text.slice(contentStart, pos);
     pos += delim.length;
     return content;
@@ -4744,7 +4752,7 @@ ${baseline}`).join(`
       pos++;
     }
     if (pos >= text.length)
-      fail("unterminated string", ctx.opener);
+      failOpenAtEnd("unterminated string", ctx.opener);
     const rawChunk = text.slice(chunkStart, hash === -1 ? pos : hash);
     if (hash === -1 && !ctx.started) {
       const end = pos + ctx.delim.length;
@@ -4862,8 +4870,9 @@ ${baseline}`).join(`
       pos = interpAt + 2;
       return;
     }
-    if (!text.startsWith("///", pos))
-      fail("missing /// (unclosed heregex)", ctx.opener);
+    if (!text.startsWith("///", pos)) {
+      failOpenAtEnd("missing /// (unclosed heregex)", ctx.opener);
+    }
     const bodyEnd = pos;
     pos += 3;
     const flags = /^\w*/.exec(text.slice(pos))[0];
@@ -5255,7 +5264,7 @@ ${baseline}`).join(`
             i++;
         }
         if (depth !== 0)
-          fail(`unclosed %w${opener} — never closed by '${closer}'`, pos, pos + 3);
+          failOpenAtEnd(`unclosed %w${opener} — never closed by '${closer}'`, pos, pos + 3);
         push("[", "[", pos, pos + 3);
         const wordRe = /(?:\\\s|\S)+/g;
         wordRe.lastIndex = pos + 3;
@@ -5507,7 +5516,7 @@ ${baseline}`).join(`
   if (parens.length > 0) {
     const open = parens[0];
     const glyph = { call: "(", group: "(", index: "[", array: "[", object: "{", interp: "#{" }[open.kind] ?? open.kind;
-    fail(`unclosed '${glyph}' — never closed by end of input`, open.at, open.at + glyph.length);
+    failOpenAtEnd(`unclosed '${glyph}' — never closed by end of input`, open.at, open.at + glyph.length);
   }
   const eofEnd = lastRealEnd();
   while (indents.length > 1) {
@@ -8924,9 +8933,11 @@ function moduleSourceText(s) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = "js", pins = null, strict = false, script = false } = {}) {
+  constructor(stores, builder, { face = "js", pins = null, strict = false, script = false, repl = false } = {}) {
     this.stores = stores;
     this.b = builder;
+    this.repl = repl;
+    this.replResultName = null;
     this.script = script;
     this.importSpans = [];
     this.pins = pins;
@@ -9175,6 +9186,20 @@ class Emitter {
       const f = this.rframes[i];
       if (f.reactive.has(name))
         return f.computed !== undefined && f.computed.has(name);
+      if (f.bound.has(name))
+        return false;
+      if (f.members !== undefined && f.members.has(name))
+        return false;
+    }
+    return false;
+  }
+  isAmbientReadonly(name) {
+    for (let i = this.rframes.length - 1;i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive.has(name))
+        return false;
+      if (f.ambientReadonly !== undefined && f.ambientReadonly.has(name))
+        return true;
       if (f.bound.has(name))
         return false;
       if (f.members !== undefined && f.members.has(name))
@@ -10164,6 +10189,15 @@ class Emitter {
   program(sexpr) {
     return this.programWith(sexpr);
   }
+  ambientHoistFilter(collected) {
+    if (this.scopes.length === 0)
+      return collected;
+    const entries = collected.filter(([n]) => !this.inScope(n) || n === "_" && collected.matchWrite);
+    entries.matchWrite = collected.matchWrite;
+    entries.annotations = collected.annotations;
+    entries.directives = collected.directives;
+    return entries;
+  }
   attachSchemaConsts(entries) {
     if (!this.schemaStories)
       return;
@@ -10187,7 +10221,7 @@ class Emitter {
           this.statement(imp, 0);
         this.emitDataConst();
         const rest = all.slice(lead);
-        let entries = this.hoistTargets(rest);
+        let entries = this.ambientHoistFilter(this.hoistTargets(rest));
         this.attachSchemaConsts(entries);
         const names = new Set([...entries.map(([n]) => n), ...Emitter.importedNames(all.slice(0, lead))]);
         for (const n of this.pushReactiveFrame(rest, names))
@@ -10263,7 +10297,7 @@ class Emitter {
   programPlain(sexpr, stmts) {
     this.mark(sexpr, "$self", () => {
       this.emitDataConst();
-      let entries = this.hoistTargets(stmts);
+      let entries = this.ambientHoistFilter(this.hoistTargets(stmts));
       this.attachSchemaConsts(entries);
       const names = new Set(entries.map(([n]) => n));
       for (const n of this.pushReactiveFrame(stmts, names))
@@ -10321,6 +10355,8 @@ class Emitter {
         return false;
       e.ind = ind;
       if (node === e.lastProgramStmt) {
+        if (e.repl)
+          e.b.emit(`const ${e.replSlot()} = `);
         e.comprehension(node, ind);
         e.b.emit(";");
       } else {
@@ -10361,6 +10397,8 @@ class Emitter {
     if (this.script) {
       throw this.positionedError(node, "emitter: module imports are not available in a script tag — script sources share one scope, and modules arrive with the package graph");
     }
+    if (this.repl)
+      return this.replImportStatement(node);
     const source = node[node.length - 1];
     const specs = node.slice(1, -1);
     this.mark(node, "$self", () => {
@@ -10385,6 +10423,41 @@ class Emitter {
         const specStart = this.b.offset;
         this.mark(node, "source", () => this.b.emit(this.moduleSource(source)));
         this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
+      }
+    });
+    this.b.emit(`;
+`);
+  }
+  replImportStatement(node) {
+    const source = node[node.length - 1];
+    const specs = node.slice(1, -1);
+    const parts = [];
+    let nsName = null;
+    for (const spec of specs) {
+      if (spec === "{}")
+        continue;
+      if (typeof spec === "string")
+        parts.push(`default: ${spec}`);
+      else if (spec[0] === "*")
+        nsName = spec[1];
+      else
+        for (const s of spec)
+          parts.push(isNode4(s) ? `${s[0]}: ${s[1]}` : s);
+    }
+    this.mark(node, "$self", () => {
+      if (nsName !== null)
+        this.b.emit(`const ${nsName} = `);
+      else if (parts.length > 0)
+        this.b.emit(`const { ${parts.join(", ")} } = `);
+      this.b.emit("await import(");
+      {
+        const specStart = this.b.offset;
+        this.mark(node, "source", () => this.b.emit(this.moduleSource(source)));
+        this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
+      }
+      this.b.emit(")");
+      if (nsName !== null && parts.length > 0) {
+        this.b.emit(`, { ${parts.join(", ")} } = ${nsName}`);
       }
     });
     this.b.emit(`;
@@ -10885,6 +10958,8 @@ class Emitter {
         }
       }
     }
+    if (this.replCapture(node))
+      return;
     const wrap = Emitter.needsGrouping(node, "statement");
     if (wrap) {
       this.mark(node, "$self", () => {
@@ -10900,6 +10975,23 @@ class Emitter {
     if (this.ts && isNode4(node) && node[0] === "=" && node.length === 3 && typeof node[1] === "string" && this.componentInfo.has(node[2])) {
       this.tsComponentCompanion(node[2], node[1], false, this.annotationText(node, "typeParams"));
     }
+  }
+  static REPL_NO_CAPTURE = new Set([...ASSIGNS, "//=", "%%=", "++", "--"]);
+  replSlot() {
+    if (this.replResultName === null) {
+      this.replResultName = Emitter.mintName("__result", this.temps.used);
+    }
+    return this.replResultName;
+  }
+  replCapture(node) {
+    if (!this.repl || node !== this.lastProgramStmt)
+      return false;
+    if (isNode4(node) && Emitter.REPL_NO_CAPTURE.has(node[0]) && node.length === 3)
+      return false;
+    this.b.emit(`const ${this.replSlot()} = `);
+    this.expr(node);
+    this.b.emit(";");
+    return true;
   }
   whileStatement(node, ind) {
     this.inCtrl(() => this.whileStatementCtrl(node, ind));
@@ -12871,6 +12963,9 @@ ${pad ?? ""}`);
     const wrapParens = isObject(node[1]) && !this.inPattern;
     if (typeof node[1] === "string" && this.isComputedName(node[1])) {
       throw this.positionedError(node, `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
+    }
+    if (typeof node[1] === "string" && this.isAmbientReadonly(node[1])) {
+      throw this.positionedError(node, `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
     }
     this.checkMemberWrite(node, node[1]);
     if (node[0] === "void-assign")
@@ -17117,6 +17212,9 @@ ${"  ".repeat(ind)}`);
     if (typeof node[1] === "string" && this.isComputedName(node[1])) {
       throw this.positionedError(node, `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
     }
+    if (typeof node[1] === "string" && this.isAmbientReadonly(node[1])) {
+      throw this.positionedError(node, `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
+    }
     this.checkMemberWrite(node, node[1]);
     if (isNode4(node[1]) && Emitter.optionalGuard(node[1]) !== null) {
       throw this.positionedError(node, "emitter: an optional chain cannot be an update target — no reference exists for `obj?.x++`; " + "guard it explicitly (`obj.x++ if obj?`)");
@@ -18104,16 +18202,82 @@ var programScopeNames = (emitter, sexpr) => {
   }
   return names;
 };
-function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, dataPayload = null } = {}) {
+var AMBIENT_KINDS = new Set(["plain", "state", "computed", "effect", "readonly", "import", "class", "def", "enum"]);
+var IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
+var normalizeAmbient = (ambientBindings) => {
+  if (ambientBindings == null)
+    return [];
+  if (!Array.isArray(ambientBindings)) {
+    throw new Error(`emitter: ambientBindings must be an array of {name, kind}; got ${typeof ambientBindings}`);
+  }
+  const seen = new Set;
+  for (const b of ambientBindings) {
+    if (b === null || typeof b !== "object" || typeof b.name !== "string" || !IDENTIFIER_RE.test(b.name)) {
+      throw new Error(`emitter: ambientBindings entries are {name, kind} with an identifier name; got ${JSON.stringify(b)}`);
+    }
+    if (!AMBIENT_KINDS.has(b.kind)) {
+      throw new Error(`emitter: ambientBindings kind '${b.kind}' for '${b.name}' is not a binding kind — expected one of ${[...AMBIENT_KINDS].join(", ")}`);
+    }
+    if (seen.has(b.name)) {
+      throw new Error(`emitter: ambientBindings names '${b.name}' twice — one binding per name`);
+    }
+    seen.add(b.name);
+  }
+  return ambientBindings;
+};
+var inventoryBindings = (emitter, sexpr) => {
+  const stmts = sexpr.slice(1);
+  const kinds = new Map;
+  const add = (name, kind) => {
+    if (typeof name === "string" && !kinds.has(name))
+      kinds.set(name, kind);
+  };
+  for (const s of stmts) {
+    if (emitter.isModuleImport(s))
+      for (const n of Emitter.importedNames([s]))
+        add(n, "import");
+  }
+  const computed = emitter.collectComputedNames(stmts);
+  for (const n of emitter.collectReactiveNames(stmts))
+    add(n, computed.has(n) ? "computed" : "state");
+  for (const n of emitter.collectEffectHandles(stmts))
+    add(n, "effect");
+  for (const n of emitter.collectReadonlyNames(stmts))
+    add(n, "readonly");
+  const declared = (s) => {
+    if (!isNode4(s))
+      return;
+    if (s[0] === "enum" && typeof s[1] === "string")
+      add(s[1], "enum");
+    if (s[0] === "class" && typeof s[1] === "string")
+      add(s[1], "class");
+    if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === "string")
+      add(s[1], "def");
+    if ((s[0] === "=" || s[0] === "void-assign") && typeof s[1] === "string")
+      add(s[1], "plain");
+  };
+  for (const s of stmts) {
+    declared(s);
+    if (isNode4(s) && s[0] === "export" && isNode4(s[1]))
+      declared(s[1]);
+  }
+  for (const [n, , role] of emitter.hoistTargets(stmts)) {
+    if (role === "target")
+      add(n, "plain");
+  }
+  return [...kinds].map(([name, kind]) => ({ name, kind }));
+};
+function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, dataPayload = null, ambientBindings = null, repl = false } = {}) {
   if (!parseResult.sexpr) {
     throw new Error("emitter: cannot emit a failed parse");
   }
   if (face !== "js" && face !== "ts") {
     throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
   }
+  const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, repl });
   emitter.dataPayload = dataPayload;
   if (runtimeDelivery !== "none" && runtimeDelivery !== "import" && runtimeDelivery !== "inline") {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
@@ -18144,13 +18308,20 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
     collectAtoms(tree);
     collectAtoms(atoms);
   }
+  for (const { name } of ambient)
+    emitter.temps.used.add(name);
   const aliasUsed = runtimeAliasBindings(emitter, trees);
+  for (const { name } of ambient)
+    aliasUsed.add(name);
   for (const rt of RUNTIME_TABLE) {
     for (const name of rt.generatedNames ?? []) {
       emitter.runtimeAliases.set(name, Emitter.mintName(name, aliasUsed));
     }
   }
   const bound = programScopeNames(emitter, parseResult.sexpr);
+  const bindings = inventoryBindings(emitter, parseResult.sexpr);
+  for (const { name } of ambient)
+    bound.add(name);
   const runtimes = new Set;
   for (const rt of RUNTIME_TABLE) {
     const unboundSet = new Set(rt.names.filter((n) => !bound.has(n)));
@@ -18185,21 +18356,21 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
     const programId = stores.idOf(parseResult.sexpr);
     for (const unit of units) {
       const generated = new Set(unit.runtimes.flatMap((rt) => rt.generatedNames ?? []));
-      const bindings = unit.names.filter((name) => generated.has(name) || !bound.has(name)).map((name) => ({ name, local: generated.has(name) ? emitter.runtimeAliases.get(name) : name }));
-      if (bindings.length === 0)
+      const bindings2 = unit.names.filter((name) => generated.has(name) || !bound.has(name)).map((name) => ({ name, local: generated.has(name) ? emitter.runtimeAliases.get(name) : name }));
+      if (bindings2.length === 0)
         continue;
       const start = builder.offset;
       if (unit.imp) {
-        builder.emit(`import { ${bindings.map(({ name, local }) => name === local ? name : `${name} as ${local}`).join(", ")} } from `);
+        builder.emit(`import { ${bindings2.map(({ name, local }) => name === local ? name : `${name} as ${local}`).join(", ")} } from `);
         const specStart = builder.offset;
         builder.emit(JSON.stringify(unit.imp));
         emitter.importSpans.push({ start: specStart, end: builder.offset, specifier: JSON.stringify(unit.imp) });
         builder.emit(`;
 `);
       } else {
-        builder.emit(`const { ${bindings.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(", ")} }`);
+        builder.emit(`const { ${bindings2.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(", ")} }`);
         if (face === "ts" && unit.types) {
-          const members = bindings.filter(({ name }) => unit.types[name]).map(({ local, name }) => `${local}: ${unit.types[name]}`);
+          const members = bindings2.filter(({ name }) => unit.types[name]).map(({ local, name }) => `${local}: ${unit.types[name]}`);
           if (members.length > 0)
             builder.tsOnly(() => builder.emit(`: { ${members.join("; ")} }`));
         }
@@ -18312,7 +18483,29 @@ return { ${unit.names.join(", ")} };
     }
   }
   emitter.tsDirectivesArmed = true;
+  if (ambient.length > 0) {
+    const reactive = new Set;
+    const computed = new Set;
+    const readonly = new Set;
+    const bound2 = new Set;
+    for (const { name, kind } of ambient) {
+      if (kind === "state" || kind === "computed")
+        reactive.add(name);
+      else
+        bound2.add(name);
+      if (kind === "computed")
+        computed.add(name);
+      if (kind === "readonly")
+        readonly.add(name);
+    }
+    emitter.rframes.push({ reactive, computed, bound: bound2, ambientReadonly: readonly });
+    emitter.scopes.push(new Set(ambient.map(({ name }) => name)));
+  }
   emitter.program(parseResult.sexpr);
+  if (ambient.length > 0) {
+    emitter.rframes.pop();
+    emitter.scopes.pop();
+  }
   if (face === "ts" && !isModuleShaped(parseResult.sexpr, (s) => emitter.isModuleImport(s))) {
     builder.tsOnly(() => builder.emit(`
 export {};
@@ -18336,7 +18529,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, stores, runtimes, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, stores, runtimes, bindings, replResultName: emitter.replResultName, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -18839,7 +19032,12 @@ var positioned = (file, path, reason, start, end) => {
 ${excerpt(file, start)}`;
   return new CompileError(message, { path, start, end, line: line + 1, col: col + 1 });
 };
-function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, foldProjections = false } = {}) {
+var diagnosticError = (file, path, d) => {
+  const message = d.expected?.[0] === ":" ? `${d.message}
+  (a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y)` : d.message;
+  return positioned(file, path, message, d.start, d.end);
+};
+function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, foldProjections = false, ambientBindings = null, repl = false } = {}) {
   if (typeof source !== "string") {
     const kind = source === null ? "null" : Array.isArray(source) ? "an array" : `a ${typeof source}`;
     throw new CompileError(`compile: source must be a string; got ${kind}`, { path });
@@ -18871,16 +19069,13 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     throw positioned(file, path, err.reason ?? err.message, err.start, err.end);
   }
   if (result.diagnostics.length > 0) {
-    const d = result.diagnostics[0];
-    const message = d.expected?.[0] === ":" ? `${d.message}
-  (a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y)` : d.message;
-    throw positioned(file, path, message, d.start, d.end);
+    throw diagnosticError(file, path, result.diagnostics[0]);
   }
   if (foldProjections)
     foldDerivedSchemas(result.sexpr);
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, dataPayload });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, dataPayload, ambientBindings, repl });
   } catch (err) {
     if (typeof err.start === "number") {
       throw positioned(file, path, err.message, err.start, err.end);
@@ -18898,6 +19093,8 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     stores: emitted.stores,
     mappings: new Mappings(emitted.mappings),
     runtimes: emitted.runtimes,
+    bindings: emitted.bindings,
+    replResultName: emitted.replResultName,
     tsRegions: emitted.tsRegions,
     pinnables: emitted.pinnables,
     imports: emitted.imports,
