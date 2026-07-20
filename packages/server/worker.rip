@@ -26,6 +26,8 @@ appEntry   = process.env.APP_ENTRY or abort "worker #{workerId}: APP_ENTRY is re
 failLinger = parseInt(process.env.RIP_FAIL_LINGER_MS or '')
 FAIL_LINGER_MS    =! if Number.isFinite(failLinger) and failLinger > 0 then failLinger else 1500
 DRAIN_DEADLINE_MS =! 30000     # max wait for in-flight requests on SIGTERM
+ppidMs = parseInt(process.env.RIP_PPID_MS or '')
+PPID_CHECK_MS     =! if Number.isFinite(ppidMs) and ppidMs > 0 then ppidMs else 1000
 
 state =
   ready: false
@@ -107,3 +109,16 @@ shutdown = ->
 
 process.on 'SIGTERM', shutdown
 process.on 'SIGINT', shutdown
+
+# --- Orphan watchdog ------------------------------------------------------------
+#
+# The manager is the parent. Reparenting (ppid changes / becomes 1) means it
+# died without SIGTERMing us — drain and exit instead of serving forever for
+# nobody. ppid 1 at boot means the parent was gone before we could look.
+
+bootPpid = process.ppid
+setInterval ->
+  return if process.ppid is bootPpid and process.ppid isnt 1
+  warn "[worker #{workerId}] parent gone (ppid #{bootPpid} → #{process.ppid}); exiting"
+  shutdown!()
+, PPID_CHECK_MS

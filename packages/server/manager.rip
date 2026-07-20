@@ -361,10 +361,13 @@ bootLoop = ->
     if state.dirty                   # check at publish: never publish a stale pool
       scrapPool pool
       continue
-    # The dirty check above and this enqueue are synchronous — no save can
-    # interleave. The list is computed inside the writer chain so workers
-    # that came ready in the meantime ride the same PUT.
-    enqueue! -> putUpstreams! readySocks(pool)
+    # The enqueued fn runs behind whatever the writer chain already holds —
+    # a save or a shutdown can land in that gap, so re-check inside the
+    # chain (mirrors publishSocks). The list is computed inside the writer
+    # chain so workers that came ready in the meantime ride the same PUT.
+    enqueue! ->
+      return if state.dirty or state.shuttingDown
+      putUpstreams! readySocks(pool)
     state.currentPool = pool
     state.doorbellPublished = false
     attachLateJoins pool
@@ -378,6 +381,8 @@ bootLoop = ->
 # ==============================================================================
 
 handleRing = ->
+  if state.shuttingDown                              # never spawn during shutdown
+    return new Response('shutting down', { status: 503 })
   if state.bootFailure?
     return new Response(state.bootFailure, { status: 503 })
   if not state.dirty and not state.doorbellPublished and state.currentPool?

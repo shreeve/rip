@@ -13,7 +13,7 @@ import { get, post, put, patch, del, all, use, prefix, before, after, onError, n
          fetch as handle, App, resetGlobals, requestContext, startHandler, start,
          read, error, notice, bail, ctx, session, subrequest, mark,
          mimeType, errorEnvelope, openapi } from '@rip-lang/server'
-import { cors, logger, sessions, csrf, secureHeaders, bodyLimit, htmlJson } from '@rip-lang/server/middleware'
+import { cors, logger, compress, sessions, csrf, secureHeaders, bodyLimit, htmlJson } from '@rip-lang/server/middleware'
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -166,6 +166,16 @@ test "errorEnvelope shows 4xx messages and issues", ->
   eq [status, e.message], [403, 'nope']
   withIssues = Object.assign(new Error('Validation failed'), { status: 400, issues: [{ field: 'x' }] })
   eq errorEnvelope(withIssues).error.issues, [{ field: 'x' }]
+
+test! "a throwing before filter is a masked 500 JSON envelope — no internals leak", ->
+  resetGlobals()
+  before ->
+    throw new Error('secret db string')
+  get '/leaky' -> 'never'
+  res = handle! req('GET', '/leaky')
+  eq res.status, 500
+  eq res.headers.get('content-type'), 'application/json; charset=utf-8'
+  eq (res.json!), { error: { message: 'Internal Server Error' } }
 
 # ==[ Filters and middleware order ]==
 
@@ -341,6 +351,19 @@ test "start() under a worker env hands over the fetch handler", ->
     delete process.env.WORKER_ID
     delete globalThis.__ripHandler
 
+test "bare start() defaults host and port (standalone)", ->
+  realServe = Bun.serve
+  captured = {}
+  Bun.serve = (o) ->
+    Object.assign(captured, o)
+    { stop: (->), port: o.port, hostname: o.hostname }
+  try
+    start()
+    eq captured.hostname, 'localhost'
+    eq captured.port, 3000
+  finally
+    Bun.serve = realServe
+
 # ==[ Body parsing + input: schemas + OpenAPI ]==
 
 console.log "\nBodies and schemas"
@@ -466,6 +489,47 @@ test! "csrf blocks unsafe requests without a token and issues one on GET", ->
   token = rawValue.split('.')[0]
   allowed = handle! req('POST', '/act', { headers: { Cookie: cookie.split(';')[0], 'X-CSRF-Token': token } })
   eq allowed.status, 200
+
+test! "a foreign %-cookie is tolerated and the session still works", ->
+  resetGlobals()
+  use sessions secret: 'test-secret'
+  get '/login' ->
+    session.user = 'amy'
+    'ok'
+  get '/who' -> { user: session.user ?? null }
+  login = handle! req('GET', '/login')
+  cookie = login.headers.get('set-cookie').split(';')[0]
+  res = handle! req('GET', '/who', { headers: { Cookie: "legacy=100%; #{cookie}" } })
+  eq res.status, 200
+  eq (res.json!), { user: 'amy' }
+
+test! "csrf tolerates a foreign %-cookie", ->
+  resetGlobals()
+  use csrf secret: 'csrf-secret'
+  get '/page' -> 'x'
+  res = handle! req('GET', '/page', { headers: { Cookie: 'legacy=100%' } })
+  eq res.status, 200
+
+test! "compress round-trips binary bodies byte-identically", ->
+  resetGlobals()
+  use compress threshold: 100
+  bytes = crypto.getRandomValues(new Uint8Array(3000))
+  get '/bin' -> @body bytes, 200, { 'Content-Type': 'application/octet-stream' }
+  res = handle! req('GET', '/bin', { headers: { 'Accept-Encoding': 'gzip' } })
+  eq res.headers.get('content-encoding'), 'gzip'
+  ok (res.headers.get('vary') or '').includes('Accept-Encoding')
+  out = Bun.gunzipSync(new Uint8Array(res.arrayBuffer!))
+  eq out.length, bytes.length
+  ok Buffer.from(out).equals(Buffer.from(bytes)), 'gunzipped body is byte-identical'
+
+test! "compress leaves an already-encoded response untouched", ->
+  resetGlobals()
+  use compress threshold: 100
+  pre = Bun.gzipSync(Buffer.from('x'.repeat(5000)))
+  get '/pre' -> @body pre, 200, { 'Content-Encoding': 'gzip', 'Content-Type': 'application/octet-stream' }
+  res = handle! req('GET', '/pre', { headers: { 'Accept-Encoding': 'gzip' } })
+  got = new Uint8Array(res.arrayBuffer!)
+  ok Buffer.from(got).equals(Buffer.from(pre)), 'pre-encoded body passes through untouched'
 
 test! "bodyLimit rejects oversize bodies with 413", ->
   resetGlobals()
@@ -633,6 +697,34 @@ test! "a broken app surfaces its boot error on /ready and exits nonzero", ->
   finally
     proc.kill('SIGKILL') unless proc.killed
     await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "an orphaned worker (parent gone) exits on its own", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  # An intermediary bash spawns the worker and exits immediately, so the
+  # worker reparents — the ppid watchdog must notice and exit unprompted.
+  launcher = Bun.spawn ['bash', '-c', "\"#{process.execPath}\" \"#{PRELOAD}\" \"#{WORKER_BIN}\" >/dev/null & echo $!"],
+    stdin: 'ignore'
+    stdout: 'pipe'
+    stderr: 'inherit'
+    env: { ...process.env, ...TEST_KNOBS, RIP_PPID_MS: '50', APP_ENTRY: join(dir, 'app.rip'), SOCKET_PATH: sock, WORKER_ID: 'orphan' }
+  pidOut = new Response(launcher.stdout)
+  pid = parseInt((pidOut.text!).trim())
+  await launcher.exited
+  ok Number.isFinite(pid) and pid > 1, 'captured the worker pid'
+  alive = (target) ->
+    try
+      process.kill(target, 0)
+      true
+    catch
+      false
+  try
+    waitFor! (-> not alive(pid)), 5000
+    ok not alive(pid), 'orphaned worker exited on its own'
+  finally
+    try process.kill(pid, 'SIGKILL')
     rmSync dir, { recursive: true, force: true }
 
 # ==[ Manager: stub Janus control plane ]==
@@ -809,3 +901,67 @@ test! "shutdown publishes [], drains, and deletes the app", ->
 try mgrProc.kill('SIGKILL')
 janusServer.stop(true)
 rmSync mgrDir, { recursive: true, force: true }
+
+# ==[ Manager: the boot publish re-checks state inside the writer chain ]==
+#
+# The stub holds the startup doorbell PUT open, which parks the boot's
+# enqueued socks publish behind it in the writer chain. A save lands in that
+# gap; on release the publish fn must see dirty and skip — the next PUT is
+# the re-cut doorbell, never a socks PUT for the stale pool.
+
+console.log "\nManager publish race"
+
+test! "a save landing while the boot publish waits in the chain yields no stale socks PUT", ->
+  raceSock = join(tmpdir(), "rip-janus-race-#{Date.now()}-#{rand(1e6)}.sock")
+  raceDir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(raceDir, 'app.rip'), appSource('v1')
+  calls = []
+  gate = {}
+  gate.promise = new Promise (open) -> gate.open = open
+  held = { taken: false }
+  stub = Bun.serve
+    unix: raceSock
+    fetch: (rq) ->
+      url = new URL(rq.url)
+      return new Response('janus', { status: 404 }) if rq.method is 'GET'
+      body = null
+      if rq.method is 'POST' or rq.method is 'PUT'
+        body = try rq.json! catch then null
+      calls.push { method: rq.method, path: url.pathname, body }
+      if rq.method is 'POST' and url.pathname is '/1.0/apps'
+        return Response.json { id: 'app-race' }, { status: 201 }
+      if rq.method is 'PUT' and url.pathname.endsWith('/upstreams')
+        if body?.upstreams?.some((u) -> u.doorbell) and not held.taken
+          held.taken = true
+          await gate.promise           # park the writer chain here
+        return Response.json { ok: true }
+      if rq.method is 'POST' and url.pathname.endsWith('/heartbeat')
+        return new Response(null, { status: 204 })
+      if rq.method is 'DELETE'
+        return new Response(null, { status: 204 })
+      new Response('nope', { status: 404 })
+  raceProc = Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, '--control', raceSock, '--name', 'rapp', '-w', '1'],
+    cwd: raceDir
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'inherit'
+    env: { ...process.env, ...TEST_KNOBS }
+  racePuts = -> calls.filter (c) -> c.method is 'PUT'
+  try
+    waitFor! -> held.taken             # startup doorbell PUT arrived and is held
+    sleep! 3000                        # boot completes; its publish parks behind the held PUT
+    writeFileSync join(raceDir, 'app.rip'), appSource('v2')
+    sleep! 400                         # settle fires; dirty is set while the chain is parked
+    gate.open()
+    waitFor! -> racePuts().length >= 2 and racePuts().some (c) -> not c.body.upstreams.some((u) -> u.doorbell)
+    puts = racePuts()
+    ok puts[0].body.upstreams[0].doorbell, 'first PUT is the startup doorbell'
+    ok puts[1].body.upstreams[0]?.doorbell, 'the PUT after release is the re-cut doorbell, not stale socks'
+    firstSocks = puts.find (c) -> c.body.upstreams.length and not c.body.upstreams.some((u) -> u.doorbell)
+    res = uds!(firstSocks.body.upstreams[0].path, '/hi')
+    eq (res.text!), 'v2'
+  finally
+    try raceProc.kill('SIGKILL')
+    await raceProc.exited
+    stub.stop(true)
+    rmSync raceDir, { recursive: true, force: true }

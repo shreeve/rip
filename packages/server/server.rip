@@ -461,8 +461,8 @@ buildOpenAPI = ->
   for r in _routes
     continue if r.middleware or not r.inputSchema
     continue if r.method is 'ALL'
-    p = r.path.replace(/:([A-Za-z0-9_]+)\??/g, '{$1}')
-    entry = (paths[p] ?= {})
+    oaPath = r.path.replace(/:([A-Za-z0-9_]+)\??/g, '{$1}')
+    entry = (paths[oaPath] ?= {})
     op: Record<string, any> =
       responses:
         '200': { description: 'OK' }
@@ -594,10 +594,10 @@ export fetch = (req) ->
 # Internal: Execute handler with middleware and error handling
 runHandler = (c, handler) ->
   # Stamp the opt-in correlation id (`@mark = ...` in the handler) onto an
-  # internal response header. The manager strips `rip-mark` before returning
-  # to the client, but surfaces it in the access log — so one handler line
-  # (`@mark = corrId`) ties the access log, any `mark()` reads in library
-  # code, and downstream logs together without leaking the id to clients.
+  # internal response header. Janus scrubs `rip-mark` from client responses
+  # in its data plane and surfaces it for access logging — so one handler
+  # line (`@mark = corrId`) ties the access log, any `mark()` reads in
+  # library code, and downstream logs together without leaking the id.
   applyMark = (r) ->
     return r unless r? and c.mark?
     try r.headers.set('rip-mark', String(c.mark))
@@ -612,7 +612,9 @@ runHandler = (c, handler) ->
     res = if _errorHandler?
       _errorHandler.call!(c, err, c)
     else
-      new Response err?.message or 'Internal Server Error', { status: err?.status or 500 }
+      # Same masked JSON envelope smart() emits: 5xx internals never leak.
+      masked = errorEnvelope(err)
+      new Response JSON.stringify({ error: masked.error }), { status: masked.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
     applyMark(res)
 
 # ==============================================================================
@@ -622,6 +624,7 @@ runHandler = (c, handler) ->
 export startHandler = -> fetch
 
 export start = (opts?: { host?: string, port?: number, silent?: boolean }) ->
+  opts ?= {}
   handler = startHandler()
 
   # Under the worker runtime, hand the fetch handler over and return —

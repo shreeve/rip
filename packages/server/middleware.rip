@@ -180,6 +180,9 @@ export compress = (opts: { threshold?: number, encodings?: string[] } = {}) ->
     response = c._response
     return unless response?
 
+    # Never re-encode a body that already carries a Content-Encoding
+    return if response.headers.get('Content-Encoding')
+
     # Check Accept-Encoding header
     acceptEncoding = c.req.header('Accept-Encoding') or ''
 
@@ -197,19 +200,19 @@ export compress = (opts: { threshold?: number, encodings?: string[] } = {}) ->
       body = response.body
       return unless body
 
-      # Clone to read the body
-      clone = response.clone()
-      text = clone.text!
-      return if text.length < threshold
+      # Read the raw bytes — text() lossily decodes binary bodies
+      buf = response.clone().arrayBuffer!
+      return if buf.byteLength < threshold
 
       # Compress using Bun's built-in CompressionStream
       return unless encoding is 'gzip' or encoding is 'deflate'
-      compressed = new Response(text).body.pipeThrough(new CompressionStream(encoding))
+      compressed = new Response(buf).body.pipeThrough(new CompressionStream(encoding))
 
       # Create new response with compressed body
       headers = new Headers(response.headers)
       headers.set 'Content-Encoding', encoding
       headers.delete 'Content-Length'  # Length changed
+      headers.append 'Vary', 'Accept-Encoding' unless (headers.get('Vary') or '').includes('Accept-Encoding')
 
       c._response = new Response compressed,
         status: response.status
@@ -377,12 +380,13 @@ export sessions = (opts: {
     throw new Error('sessions({encrypt: true}) requires a secret for key derivation')
 
   (c, next) ->
-    # Parse cookie header
+    # Parse cookie header. A foreign cookie may carry malformed %-escapes
+    # (not our encoding) — keep its raw value rather than throwing.
     cookieHeader = c.req.header('Cookie') or ''
     cookies = {}
     for pair in cookieHeader.split(';')
       [key, val] = pair.trim().split('=')
-      cookies[key] = decodeURIComponent(val) if key and val
+      cookies[key] = (try decodeURIComponent(val) catch then val) if key and val
 
     # Decode existing session
     raw = cookies[cookieName]
@@ -515,12 +519,13 @@ export csrf = (opts: {
     method = c.req.method
     safe = SAFE_METHODS.has(method)
 
-    # Pull current token out of the cookie jar.
+    # Pull current token out of the cookie jar. A foreign cookie may carry
+    # malformed %-escapes — keep its raw value rather than throwing.
     cookieHeader = c.req.header('Cookie') or ''
     cookies = {}
     for pair in cookieHeader.split(';')
       [key, val] = pair.trim().split('=')
-      cookies[key] = decodeURIComponent(val) if key and val
+      cookies[key] = (try decodeURIComponent(val) catch then val) if key and val
     rawCookie = cookies[cookieName]
     cookieToken = parseCsrfCookie!(rawCookie, secret)
 
