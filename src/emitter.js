@@ -4582,7 +4582,8 @@ class Emitter {
   // syntax, not the child's code. The classification is structural; the
   // `.parenthesized` fat-node flag is never read for grouping — its
   // readers are SEMANTIC decisions where source parens select the
-  // program (the postfix-if-else hoist guard, chain-link detection).
+  // program (the postfix-if-else hoist guard, chain-link detection,
+  // sealed dammit-as-callee / `new (f!)` serialization).
   //
   // Async marking: a function is async iff its BODY awaits — the walk
   // stops at nested function/class boundaries, so an inner arrow's
@@ -10374,6 +10375,8 @@ class Emitter {
   // ["new", operand] — a member operand keeps the
   // bare NewExpression (`new a.B`); a call-array operand becomes
   // `new Ctor(args)`; a simple operand gains empty parens (`new A()`).
+  // A sealed dammit operand (`new (f!)`) is an expression, not a call
+  // shape — emit the awaited call, then empty construction args.
   newExpr(node) {
     const [, operand] = node;
     this.mark(node, '$self', () => {
@@ -10382,6 +10385,13 @@ class Emitter {
       this.mark(node, 'operand', () => {
         if (isNode(operand) && (operand[0] === '.' || operand[0] === '?.')) {
           this.member(operand);
+        } else if (isNode(operand) && operand[0] === 'dammit!') {
+          // `new (f!)` → `new (await f())()`. Source parens selected
+          // the program (sealed Value-dammit as the constructor).
+          if (operand.parenthesized) this.b.emit('(');
+          this.dammit(operand);
+          if (operand.parenthesized) this.b.emit(')');
+          this.b.emit('()');
         } else if (isNode(operand)) {
           // A call node — [ctor, ...args] — emits Ctor(args); with the
           // `new ` prefix already written this is `new Ctor(args)`.
@@ -10903,9 +10913,28 @@ class Emitter {
     }
     // A dammit callee awaits the CALL, not the callee: `f! 1, 2` →
     // `await f(1, 2)` — the await surrounds the whole invocation, so
-    // no callee grouping is needed. This spelling keeps its inline
-    // path; every other call emits through the chain driver.
+    // no callee grouping is needed. A PARENTHESIZED dammit sealed the
+    // await-call inside its parens; outer args belong to THIS call
+    // (`(f!)(a)` / `new (f!)(a)` → `(await f())(a)`, not `await f(a)`).
+    // This spelling keeps its inline path; every other call emits
+    // through the chain driver.
     if (isNode(node[0]) && node[0][0] === 'dammit!') {
+      if (node[0].parenthesized) {
+        this.mark(node, '$self', () => {
+          this.b.emit('(');
+          this.dammit(node[0]);
+          this.b.emit(')');
+          this.mark(node, 'args', () => {
+            this.b.emit('(');
+            node.slice(1).forEach((arg, i) => {
+              if (i > 0) this.b.emit(', ');
+              this.callArg(arg);
+            });
+            this.b.emit(')');
+          });
+        });
+        return;
+      }
       this.mark(node, '$self', () => {
         this.b.emit('await ');
         this.mark(node[0], '$self', () => this.head(node[0], 'target', node[0][1]));
