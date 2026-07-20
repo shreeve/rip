@@ -9751,8 +9751,14 @@ class Emitter {
     return this.scopes.some((s) => s.has(name));
   }
   scopedHoist(stmts, params = [], { declareInPlace = true } = {}) {
+    for (const p of params) {
+      const hit = Emitter.paramMatchWrite(p);
+      if (hit !== null) {
+        throw this.positionedError(hit, "emitter: a parameter default cannot write the last-match binding — " + "`_` lives in the enclosing body, which a default cannot reach (move the match into the body)");
+      }
+    }
     const collected = this.hoistTargets(stmts, params);
-    let entries = collected.filter(([n]) => !this.inScope(n));
+    let entries = collected.filter(([n]) => !this.inScope(n) || n === "_" && collected.matchWrite);
     entries.annotations = collected.annotations;
     entries.directives = collected.directives;
     const names = new Set(entries.map(([n]) => n));
@@ -9766,6 +9772,7 @@ class Emitter {
   }
   hoistTargets(nodes, exclude = []) {
     const targets = new Map;
+    let matchWrite = false;
     const reactive = new Set;
     const chainTemps = [];
     const annotations = new Map;
@@ -9777,6 +9784,16 @@ class Emitter {
     const add = (name, node) => {
       if (!targets.has(name))
         targets.set(name, node);
+    };
+    const matchScan = (n) => {
+      if (this.scopeBoundary(n) === "skip")
+        return;
+      if (Emitter.isMatchWrite(n)) {
+        add("_", n);
+        matchWrite = true;
+      }
+      for (const el of n)
+        matchScan(el);
     };
     const walk = (n) => {
       const boundary = this.scopeBoundary(n);
@@ -9822,14 +9839,17 @@ class Emitter {
         return;
       }
       if (boundary === "loop") {
+        matchScan(n[1]);
         for (const el of n.slice(2))
           walk(el);
         return;
       }
       if (boundary === "comprehension") {
         walk(n[1]);
-        for (const clause of n[2] ?? [])
+        for (const clause of n[2] ?? []) {
+          matchScan(clause[1]);
           walk(clause[2]);
+        }
         for (const g of n[3] ?? [])
           walk(g);
         return;
@@ -9850,12 +9870,10 @@ class Emitter {
         }
         return;
       }
-      if (n[0] === "=~" && n.length === 3)
+      if (Emitter.isMatchWrite(n)) {
         add("_", n);
-      if (n[0] === "regex-index" && n.length === 4)
-        add("_", n);
-      if (n[0] === "[]" && n.length === 3 && typeof n[2] === "string" && n[2][0] === "/")
-        add("_", n);
+        matchWrite = true;
+      }
       if ((ASSIGNS.has(n[0]) || n[0] === "*>") && n.length === 3) {
         if (typeof n[1] === "string") {
           add(n[1], n);
@@ -9890,6 +9908,7 @@ class Emitter {
         targets.delete(name);
     }
     const entries = [...targets.entries()].map(([name, node]) => [name, node, "target"]);
+    entries.matchWrite = matchWrite;
     entries.push(...chainTemps);
     const knownHere = new Set([...targets.keys(), ...excludeNames, ...reactive]);
     entries.push(...this.planReferenceTemps(nodes, knownHere));
@@ -9950,6 +9969,12 @@ class Emitter {
         const level = isDefHead(head) ? 2 : Math.max(inFn, 1);
         for (const el of n.slice(typeof n[1] === "string" ? 2 : 1))
           walk(el, level);
+        return;
+      }
+      if (Emitter.isMatchWrite(n)) {
+        for (const el of n.slice(1))
+          walk(el, inFn);
+        occur("_", inFn, true);
         return;
       }
       if ((ASSIGNS.has(head) || head === "*>") && n.length === 3) {
@@ -10682,11 +10707,14 @@ class Emitter {
     let bodyText;
     if (stmts.length === 1) {
       const stmt = stmts[0];
-      const h = isNode4(stmt) ? stmt[0] : null;
-      const names = new Set(params);
+      const { entries, names } = sub.scopedHoist([stmt], params.map(String));
       for (const n of sub.pushReactiveFrame(stmts, names))
         names.add(n);
       sub.scopes.push(names);
+      if (entries.length) {
+        sub.hoistLine(entries);
+        sub.b.emit(" ");
+      }
       if (isLoopNode(stmt) || isComprehensionNode(stmt))
         sub.statement(stmt, 0);
       else
@@ -17528,6 +17556,27 @@ ${"  ".repeat(ind)}`);
       this.b.emit("])");
     });
   }
+  static isMatchWrite(n) {
+    if (!isNode4(n))
+      return false;
+    if (n[0] === "=~" && n.length === 3)
+      return true;
+    if (n[0] === "regex-index" && n.length === 4)
+      return true;
+    return n[0] === "[]" && n.length === 3 && typeof n[2] === "string" && n[2][0] === "/";
+  }
+  static paramMatchWrite(p) {
+    if (!isNode4(p) || isFunc2(p) || isDefHead(p[0]))
+      return null;
+    if (Emitter.isMatchWrite(p))
+      return p;
+    for (const el of p) {
+      const hit = Emitter.paramMatchWrite(el);
+      if (hit !== null)
+        return hit;
+    }
+    return null;
+  }
   matchOp(node) {
     if (isNode4(node[1]) && node[1][0] === "=~" && !node[1].parenthesized) {
       throw this.positionedError(node, "emitter: `=~` does not chain — `a =~ b =~ c` would match the first match RESULT against the second pattern (parenthesize: `(a =~ b) =~ c`, or split the matches)");
@@ -17707,11 +17756,7 @@ var containsObjectComprehension = (sexpr) => {
 var containsMatchRead = (sexpr) => {
   if (!isNode4(sexpr))
     return false;
-  if (sexpr[0] === "=~" && sexpr.length === 3)
-    return true;
-  if (sexpr[0] === "regex-index" && sexpr.length === 4)
-    return true;
-  if (sexpr[0] === "[]" && sexpr.length === 3 && typeof sexpr[2] === "string" && sexpr[2][0] === "/")
+  if (Emitter.isMatchWrite(sexpr))
     return true;
   return sexpr.some(containsMatchRead);
 };

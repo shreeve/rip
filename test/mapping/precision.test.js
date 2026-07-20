@@ -91,6 +91,7 @@ const FLOORS = {
   'whileguard.rip': 96,
   'model.rip': 15,
   'components.rip': 399,
+  'match.rip': 100,
 };
 
 const corpusDir = join(import.meta.dir, '../corpus');
