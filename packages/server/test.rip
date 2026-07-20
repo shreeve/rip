@@ -843,6 +843,73 @@ test! "an orphaned worker (parent gone) exits on its own", ->
     try process.kill(pid, 'SIGKILL')
     rmSync dir, { recursive: true, force: true }
 
+# ==[ Prebuild — the manager's per-epoch artifact ]==
+
+console.log "\nPrebuild"
+
+import { buildArtifact } from './manager.rip'
+
+test! "buildArtifact bundles an app to one JS file a loader-free worker serves", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')
+  sock = join(tmpdir(), "rip-pb-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi-artifact')
+  # The exact shape the manager boots: prebuilt worker runtime + prebuilt
+  # app artifact, spawned WITHOUT the rip loader — no compiler in the worker.
+  workerJs = buildArtifact! WORKER_BIN, join(dir, 'worker.js')
+  appJs = buildArtifact! join(dir, 'app.rip'), join(dir, 'app.js')
+  ok (readFileSync(appJs, 'utf8')).length > 0
+  proc = Bun.spawn [process.execPath, workerJs],
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'inherit'
+    env: { ...process.env, ...TEST_KNOBS, APP_ARTIFACT: appJs, SOCKET_PATH: sock, WORKER_ID: 'pb' }
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    res = uds!(sock, '/hi')
+    eq res.status, 200
+    eq (res.text!), 'hi-artifact'
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "the artifact preserves a module's own import.meta.dir", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')
+  writeFileSync join(dir, 'app.rip'), """
+  import { get, start } from '@rip-lang/server'
+  get '/dir' -> import.meta.dir
+  start()
+  """
+  appJs = buildArtifact! join(dir, 'app.rip'), join(tmpdir(), "rip-pb-meta-#{Date.now()}.js")
+  try
+    proc = Bun.spawn [process.execPath, '-e', """
+      process.env.WORKER_ID = 'm'
+      await import(#{JSON.stringify(appJs)})
+      await Promise.resolve()
+      const res = await globalThis.__ripHandler(new Request('http://x/dir'))
+      console.log(await res.text())
+    """], { stdin: 'ignore', stdout: 'pipe', stderr: 'inherit', env: { ...process.env } }
+    out = new Response(proc.stdout).text!
+    await proc.exited
+    eq out.trim(), dir
+  finally
+    rmSync dir, { recursive: true, force: true }
+    try unlinkSync appJs
+
+test! "buildArtifact rejects a broken app loudly, naming the file", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')
+  writeFileSync join(dir, 'app.rip'), BROKEN_SOURCE
+  try
+    err = null
+    try
+      buildArtifact! join(dir, 'app.rip'), join(dir, 'app.js')
+    catch e
+      err = e
+    ok err?, 'a broken app must not build'
+    ok err.message.includes('app.rip'), "the diagnostic names the file: #{err.message}"
+  finally
+    rmSync dir, { recursive: true, force: true }
+
 # ==[ Manager: stub Janus control plane ]==
 
 console.log "\nManager runtime"

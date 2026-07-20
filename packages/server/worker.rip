@@ -1,14 +1,21 @@
 # ==============================================================================
 # @rip-lang/server — worker runtime
 #
-# One process, one unix socket. Spawned by manager.rip with:
+# One process, one unix socket. The manager spawns it loader-free against
+# the pool's prebuilt artifacts (no Rip compiler in any worker):
+#
+#   bun <runDir>/worker.js
+#   env: APP_ARTIFACT, SOCKET_PATH, WORKER_ID, WORKER_CONCURRENCY, RIP_ENV
+#
+# Direct-entry (tests, standalone debugging) keeps the loader path:
 #
 #   bun --preload=<rip loader> worker.rip
 #   env: APP_ENTRY, SOCKET_PATH, WORKER_ID, WORKER_CONCURRENCY, RIP_ENV
 #
-# Imports the app entry, resolves its fetch handler (module default →
-# module.fetch → globalThis.__ripHandler — the handover seam start() uses
-# when it detects a worker environment), and serves it on SOCKET_PATH.
+# Imports the app (APP_ARTIFACT wins over APP_ENTRY), resolves its fetch
+# handler (module default → module.fetch → globalThis.__ripHandler — the
+# handover seam start() uses when it detects a worker environment), and
+# serves it on SOCKET_PATH.
 # `GET /ready` answers 200 once the app module has fully loaded, 503
 # before — the manager polls it. SIGTERM finishes in-flight requests,
 # then exits clean.
@@ -20,7 +27,7 @@
 
 workerId   = process.env.WORKER_ID or '?'
 socketPath = process.env.SOCKET_PATH or abort "worker #{workerId}: SOCKET_PATH is required"
-appEntry   = process.env.APP_ENTRY or abort "worker #{workerId}: APP_ENTRY is required"
+appEntry   = process.env.APP_ARTIFACT or process.env.APP_ENTRY or abort "worker #{workerId}: APP_ARTIFACT or APP_ENTRY is required"
 
 # Window for the manager to read the boot-failure 503 before the exit
 failLinger = parseInt(process.env.RIP_FAIL_LINGER_MS or '')

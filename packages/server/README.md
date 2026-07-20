@@ -202,7 +202,17 @@ bytes are free), then cuts admission with one doorbell PUT and retires the
 old pool — nothing boots until a request actually rings, and the ring is
 answered 204 only after the fresh sockets PUT is acknowledged. A boot
 failure is cached and answered 503 with the error; the next
-content-changing save clears it. The handover seam is `start()`: under a
+content-changing save clears it.
+
+Workers never carry the Rip compiler. The manager compiles the app **once
+per boot epoch** — `Bun.build` with a `.rip` plugin over the compiler it is
+already running on — into a single ESM artifact in the pool's run tmpdir,
+and each worker (itself prebuilt to plain JS at startup) just imports the
+artifact: no loader preload, no per-worker recompile. A new epoch builds a
+new artifact, so never-stale is automatic, and a compile error is a boot
+failure like any other — the doorbell answers 503 carrying the diagnostic.
+Bundling freezes each module's `import.meta` path fields to its source
+location, so `import.meta.dir`-relative file serving works unchanged. The handover seam is `start()`: under a
 worker environment (`WORKER_ID`/`SOCKET_PATH`) it hands over its fetch
 handler instead of opening a port, so the same `app.rip` runs standalone
 on your laptop and pooled behind Janus in production, unchanged.
@@ -261,4 +271,5 @@ manager runtimes then run as real subprocesses over unix sockets against
 a stub Janus `/1.0` control socket that records every call in order:
 readiness, drains, the dirty epoch (doorbell PUT before the ring's 204,
 sockets PUT before the 204), save coalescing, the identical-bytes no-op,
-boot-failure caching, and shutdown.
+boot-failure caching, prebuilt-artifact boots (loader-free workers,
+`import.meta.dir` preservation, loud build rejection), and shutdown.
