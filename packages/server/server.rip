@@ -42,6 +42,8 @@ _prefix: string                       = ''    # Current route prefix for groupin
 _corsPreflightPolicy: Function | null = null  # Policy fn set by cors middleware: see setCorsPreflightPolicy
 _openapiRegistered: boolean           = false # GET /openapi.json auto-registered?
 _openapiInfo: Record<string, any>     = { title: 'Rip API', version: '0.0.0' }
+_routeIndex: any                      = null  # method → { statics, dynamics }; built lazily, cleared on registration
+_composeEpoch: number                 = 0     # bumped when use/before/after mutate the chain inputs
 
 export resetGlobals = ->
   _errorHandler        = null
@@ -55,6 +57,8 @@ export resetGlobals = ->
   _corsPreflightPolicy = null
   _openapiRegistered   = false
   _openapiInfo         = { title: 'Rip API', version: '0.0.0' }
+  _routeIndex          = null
+  _composeEpoch++
 
 # Register a CORS preflight policy. Called by the `cors()` middleware when
 # opts.preflight is set. The policy function receives the request Origin
@@ -90,22 +94,70 @@ compilePattern = (path) ->
   regex = escaped.replace /:(\w+)(?:\{([^}]+)\})?/g, (match, key, pattern) ->
     keys.push key
     "(#{pattern or '[^/]+'})"
+  wildcard = /(?<![\\*])\*(?!\*)/.test(regex)
   regex = regex.replace /(?<![\\*])\*(?!\*)/g, '(.*)'
-  { regex: new RegExp("^#{regex}/?$"), keys }
+  # A pattern with no captures and no wildcard matches exactly one path
+  # (modulo the /?$ trailing slash) — eligible for the static-path Map.
+  staticPath = if keys.length is 0 and not wildcard then path else null
+  { regex: new RegExp("^#{regex}/?$"), keys, staticPath }
 
 # ==============================================================================
 # Router: Route Matching
 # ==============================================================================
+#
+# Routes are indexed per method on first lookup: static paths (no params, no
+# wildcards) live in a Map under both spellings the compiled /?$ tolerates
+# (`/x` and `/x/`); everything else stays an ordered regex list. Registration
+# order is the tiebreak across both — a static hit only wins over dynamic
+# routes registered after it, so `get '/users/:id'` before `get '/users/list'`
+# still routes /users/list to :id, exactly as the linear walk did. Only the
+# standard verbs are indexed (an arbitrary request method cannot grow the
+# table); anything else takes the full walk. Route registration drops the
+# index; resetGlobals does too.
+
+INDEXED_METHODS =! new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])
+
+routeBucket = (method) ->
+  return null unless INDEXED_METHODS.has(method)
+  _routeIndex ?= new Map()
+  bucket = _routeIndex.get(method)
+  return bucket if bucket?
+  bucket = { statics: new Map(), dynamics: [] }
+  for route, order in _routes
+    continue unless route.method is method or route.method is 'ALL'
+    if route.staticPath?
+      entry = { route, order }
+      bucket.statics.set(route.staticPath, entry) unless bucket.statics.has(route.staticPath)
+      slashed = "#{route.staticPath}/"
+      bucket.statics.set(slashed, entry) unless bucket.statics.has(slashed)
+    else
+      bucket.dynamics.push { route, order }
+  _routeIndex.set(method, bucket)
+  bucket
+
+matchOne = (route, pathname) ->
+  match = pathname.match route.regex
+  return null unless match
+  params = {}
+  for key, i in route.keys
+    params[key] = decodeURIComponent(match[i + 1]) if match[i + 1]?
+  { handler: route.handler, params, route }
 
 matchRoute = (method, pathname) ->
-  for route in _routes
-    continue unless route.method is method or route.method is 'ALL'
-    match = pathname.match route.regex
-    if match
-      params = {}
-      for key, i in route.keys
-        params[key] = decodeURIComponent(match[i + 1]) if match[i + 1]?
-      return { handler: route.handler, params, route }
+  bucket = routeBucket(method)
+  unless bucket?
+    for route in _routes
+      continue unless route.method is method or route.method is 'ALL'
+      found = matchOne(route, pathname)
+      return found if found?
+    return null
+  hit = bucket.statics.get(pathname)
+  limit = if hit? then hit.order else Infinity
+  for entry in bucket.dynamics
+    break unless entry.order < limit
+    found = matchOne(entry.route, pathname)
+    return found if found?
+  return { handler: hit.route.handler, params: {}, route: hit.route } if hit?
   null
 
 # ==============================================================================
@@ -425,17 +477,18 @@ addRoute = (method, path, ...handlers) ->
   if handlers.length > 1 and handlers[0]? and typeof handlers[0] is 'object'
     opts = handlers[0]
     handlers = handlers.slice(1)
+  _routeIndex = null
   fullPath = "#{_prefix}#{path}"
   if fullPath.includes(':') and fullPath.endsWith('?')
     basePath = fullPath.slice(0, -1).replace(/\/:[^\/]+$/, '')
     if basePath and basePath isnt fullPath.slice(0, -1)
       addRoute method, basePath, ...(if opts then [opts, ...handlers] else handlers)
     fullPath = fullPath.slice(0, -1)
-  { regex, keys } = compilePattern(fullPath)
+  { regex, keys, staticPath } = compilePattern(fullPath)
   for handler in handlers
     h = if opts?.input then withInput(opts.input, handler) else handler
     _routes.push {
-      method: method.toUpperCase(), regex, keys,
+      method: method.toUpperCase(), regex, keys, staticPath,
       handler: smart(h), path: fullPath,
       inputSchema: opts?.input ?? null,
     }
@@ -447,7 +500,7 @@ addRoute = (method, path, ...handlers) ->
     _openapiRegistered = true
     oa = compilePattern('/openapi.json')
     _routes.push {
-      method: 'GET', regex: oa.regex, keys: oa.keys,
+      method: 'GET', regex: oa.regex, keys: oa.keys, staticPath: oa.staticPath,
       handler: smart(-> buildOpenAPI()), path: '/openapi.json',
       inputSchema: null,
     }
@@ -530,6 +583,7 @@ compileMiddlewarePattern = (path) ->
   new RegExp("^#{source}(?:/|$)")
 
 export use = (pathOrMw, mw = null) ->
+  _composeEpoch++
   if typeof pathOrMw is 'function'
     _middlewares.push { fn: pathOrMw }
   else if typeof pathOrMw is 'string' and typeof mw is 'function'
@@ -548,9 +602,15 @@ export prefix = (base, fn) ->
 export onError:  (handler: RouteHandler) => void = (handler) -> _errorHandler = handler
 export notFound: (handler: RouteHandler) => void = (handler) -> _notFoundHandler = handler
 
-export raw:    (fn: (req: Request) => any) => void = (fn) -> _rawFilter = fn
-export before: (fn: RouteHandler) => void = (fn) -> _beforeFilters.push fn
-export after:  (fn: RouteHandler) => void = (fn) -> _afterFilters.push fn
+export raw: (fn: (req: Request) => any) => void = (fn) -> _rawFilter = fn
+
+export before: (fn: RouteHandler) => void = (fn) ->
+  _composeEpoch++
+  _beforeFilters.push fn
+
+export after: (fn: RouteHandler) => void = (fn) ->
+  _composeEpoch++
+  _afterFilters.push fn
 
 # ==============================================================================
 # Main Fetch Handler
@@ -624,10 +684,18 @@ export fetch = (req) ->
 
   # Run handler inside AsyncLocalStorage context
   requestContext.run! { env: c, data: merged }, ->
-    runHandler!(c, match.handler)
+    runHandler!(c, match.route)
+
+# Each route's composed chain is cached on the route object; a use/before/
+# after registration (or resetGlobals) bumps _composeEpoch and stale chains
+# rebuild on their next request.
+composedChain = (route) ->
+  return route._chain if route._chain? and route._chainEpoch is _composeEpoch
+  route._chainEpoch = _composeEpoch
+  route._chain = compose(_middlewares, _beforeFilters, _afterFilters, route.handler)
 
 # Internal: Execute handler with middleware and error handling
-runHandler = (c, handler) ->
+runHandler = (c, route) ->
   # Stamp the opt-in correlation id (`@mark = ...` in the handler) onto an
   # internal response header. Janus scrubs `rip-mark` from client responses
   # in its data plane and surfaces it for access logging — so one handler
@@ -639,7 +707,7 @@ runHandler = (c, handler) ->
     r
   try
     # Compose runs: middlewares → before filters → handler → after filters
-    chain = compose(_middlewares, _beforeFilters, _afterFilters, handler)
+    chain = composedChain(route)
     chain!(c)
     applyMark(c._response or new Response('', { status: 204 }))
   catch err
