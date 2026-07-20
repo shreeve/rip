@@ -530,8 +530,13 @@ export csrf = (opts: {
     cookieToken = parseCsrfCookie!(rawCookie, secret)
 
     # For unsafe methods, require a matching token from header OR form.
+    # The form field reads from the DSL's pre-parsed body (c._body) —
+    # same constant-time comparison as the header path.
     unless safe
       submitted = c.req.header(headerName)
+      unless submitted?
+        field = if c._body? and typeof c._body is 'object' then c._body[fieldName] else null
+        submitted = field if typeof field is 'string'
       unless cookieToken and submitted and tokensEqual(submitted, cookieToken)
         return new Response 'CSRF token mismatch',
           status: 403

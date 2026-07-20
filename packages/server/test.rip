@@ -63,6 +63,7 @@ get '/none' -> null
 get '/users/:id' -> { id: @req.param('id') }
 get '/users/:id/books/:bid' -> @req.param()
 get '/files/*' -> @req.path
+get '/n/:id{\\d+}' -> { n: @req.param('id') }
 get '/maybe/:id?' -> { id: @req.param('id') ?? 'none' }
 all '/any' -> @req.method
 prefix '/api', ->
@@ -102,6 +103,17 @@ test! "multiple params bind by name", ->
 test! "wildcard matches any depth", ->
   res = handle! req('GET', '/files/a/b/c.txt')
   eq (res.text!), '/files/a/b/c.txt'
+
+test! "inline :param{pattern} constrains the match — /n/42 hits, /n/abc 404s", ->
+  res = handle! req('GET', '/n/42')
+  eq res.status, 200
+  eq (res.json!), { n: '42' }
+  eq (handle! req('GET', '/n/abc')).status, 404
+
+test! "malformed %-encoding in a matched param answers a clean 400", ->
+  res = handle! req('GET', '/users/%zz')
+  eq res.status, 400
+  eq (res.json!), { error: { message: 'malformed percent-encoding in path' } }
 
 test! "optional param matches with and without", ->
   eq ((handle! req('GET', '/maybe/9')).json!), { id: '9' }
@@ -446,6 +458,7 @@ resetGlobals()
 post '/echo-body' -> { name: read('name') }
 post '/signup', input: Signup, -> { got: @input }
 put '/form' -> { a: read('a') }
+post '/raw-form' -> { keys: Object.keys(@_body), body: @_body.body ?? null }
 
 test! "JSON bodies pre-parse for read()", ->
   res = handle! jreq('POST', '/echo-body', { name: 'Zed' })
@@ -455,6 +468,14 @@ test! "form bodies pre-parse for read()", ->
   body = new URLSearchParams({ a: 'b' })
   res = handle! req('PUT', '/form', { body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
   eq (res.json!), { a: 'b' }
+
+test! "a bare urlencoded body (no '=') surfaces as {body: text}", ->
+  res = handle! req('POST', '/raw-form', { body: 'just some text', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+  eq (res.json!), { keys: ['body'], body: 'just some text' }
+
+test! "a form clearing its only field (subscribe=) parses normally", ->
+  res = handle! req('POST', '/raw-form', { body: 'subscribe=', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+  eq (res.json!), { keys: ['subscribe'], body: null }
 
 test! "query params reach read() too", ->
   res = handle! req('POST', '/echo-body?name=Query', { headers: { 'Content-Type': 'application/json' }, body: '{}' })
@@ -559,6 +580,23 @@ test! "csrf blocks unsafe requests without a token and issues one on GET", ->
   token = rawValue.split('.')[0]
   allowed = handle! req('POST', '/act', { headers: { Cookie: cookie.split(';')[0], 'X-CSRF-Token': token } })
   eq allowed.status, 200
+
+test! "csrf accepts the form-field token; a wrong or missing field fails 403", ->
+  resetGlobals()
+  use csrf secret: 'csrf-secret'
+  get '/page' -> 'x'
+  post '/act' -> 'did'
+  page = handle! req('GET', '/page')
+  jar = page.headers.get('set-cookie').split(';')[0]
+  token = decodeURIComponent(jar.slice('csrf_token='.length)).split('.')[0]
+  form = (body) -> req('POST', '/act', { body, headers: { Cookie: jar, 'Content-Type': 'application/x-www-form-urlencoded' } })
+  allowed = handle! form("_csrf=#{token}")
+  eq allowed.status, 200
+  eq (allowed.text!), 'did'
+  wrong = handle! form('_csrf=deadbeef')
+  eq wrong.status, 403
+  missing = handle! form('other=x')
+  eq missing.status, 403
 
 test! "a foreign %-cookie is tolerated and the session still works", ->
   resetGlobals()

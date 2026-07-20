@@ -87,13 +87,28 @@ export requestContext: AsyncLocalStorage<{ env?: any, data: any }> = new AsyncLo
 # Router: Pattern Compiler
 # ==============================================================================
 
+# Lift :param slots (with their optional inline {pattern}) out of the path
+# BEFORE literal escaping, so a custom pattern like :id{\d+} arrives as live
+# regex — escaping first would neuter the braces and leave it unmatchable.
+liftParams = (path, capture, keys = null) ->
+  paramRe = /:(\w+)(?:\{([^}]+)\})?/g
+  escapeLiteral = (s) -> s.replace /[.+^${}()|[\]\\]/g, '\\$&'
+  out = ''
+  last = 0
+  loop
+    m = paramRe.exec(path)
+    break unless m?
+    out += escapeLiteral(path.slice(last, m.index))
+    keys?.push m[1]
+    inner = m[2] or '[^/]+'
+    out += if capture then "(#{inner})" else "(?:#{inner})"
+    last = m.index + m[0].length
+  out + escapeLiteral(path.slice(last))
+
 compilePattern = (path) ->
   keys = []
   path = path.replace /\?$/, ''
-  escaped = path.replace /[.+^${}()|[\]\\]/g, '\\$&'
-  regex = escaped.replace /:(\w+)(?:\{([^}]+)\})?/g, (match, key, pattern) ->
-    keys.push key
-    "(#{pattern or '[^/]+'})"
+  regex = liftParams(path, true, keys)
   wildcard = /(?<![\\*])\*(?!\*)/.test(regex)
   regex = regex.replace /(?<![\\*])\*(?!\*)/g, '(.*)'
   # A pattern with no captures and no wildcard matches exactly one path
@@ -135,12 +150,21 @@ routeBucket = (method) ->
   _routeIndex.set(method, bucket)
   bucket
 
+# Malformed %-encoding in a matched param (e.g. /u/%zz) is a client error:
+# a status-400 throw that fetch() converts to a clean envelope, never a raw
+# URIError escaping the exported handler.
+decodeParam = (raw) ->
+  try
+    decodeURIComponent(raw)
+  catch
+    throw Object.assign(new Error('malformed percent-encoding in path'), { status: 400 })
+
 matchOne = (route, pathname) ->
   match = pathname.match route.regex
   return null unless match
   params = {}
   for key, i in route.keys
-    params[key] = decodeURIComponent(match[i + 1]) if match[i + 1]?
+    params[key] = decodeParam(match[i + 1]) if match[i + 1]?
   { handler: route.handler, params, route }
 
 matchRoute = (method, pathname) ->
@@ -577,8 +601,7 @@ export openapi = (info = null) ->
 # path is outside its pattern.
 compileMiddlewarePattern = (path) ->
   path = path.replace /\/+$/, ''
-  escaped = path.replace /[.+^${}()|[\]\\]/g, '\\$&'
-  source = escaped.replace /:(\w+)(?:\{([^}]+)\})?/g, (match, key, pattern) -> "(?:#{pattern or '[^/]+'})"
+  source = liftParams(path, false)
   source = source.replace /(?<![\\*])\*(?!\*)/g, '.*'
   new RegExp("^#{source}(?:/|$)")
 
@@ -648,7 +671,12 @@ export fetch = (req) ->
     # Browsers interpret a missing Access-Control-Allow-Origin as deny.
     return new Response null, { status: 204 }
 
-  match = matchRoute(method, pathname)
+  match = null
+  try
+    match = matchRoute(method, pathname)
+  catch err
+    { status, error } = errorEnvelope(err)
+    return new Response JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
 
   unless match
     c = createContext(req, {}, url, pathname)
@@ -668,10 +696,17 @@ export fetch = (req) ->
     if method in ['POST', 'PUT', 'PATCH']
       if ct =~ /json/i
         data = c.req.json!
-      else if ct =~ /x-www-form-urlencoded|form-data/i
-        data = c.req.parseBody!
+      else if ct =~ /x-www-form-urlencoded/i
+        # Parse from the raw text so the bare-body heuristic can see it:
+        # `curl -d 'some text'` sends no '=' and parses as {text: ''} —
+        # surface that as {body: text}. A real form clearing its only
+        # field (`subscribe=`) contains '=' and parses normally.
+        rawBody = c.req.text!
+        data = Object.fromEntries(new URLSearchParams(rawBody))
         keys = Object.keys(data)
-        data = { body: keys[0] } if keys.length is 1 and data[keys[0]] is ''
+        data = { body: keys[0] } if keys.length is 1 and not rawBody.includes('=')
+      else if ct =~ /form-data/i
+        data = c.req.parseBody!
       else if ct =~ /text\//i
         data = { body: c.req.text! }
   catch

@@ -60,17 +60,6 @@ B-list real-but-deferrable items (janus included — no scratchpad there).
       (Narrowed 2026-07-20: `cors({preflight: true})` now answers
       OPTIONS before route matching, and `use(path, mw)` path scoping
       works — `603ee80`. The unmatched-request/404 half remains open.)
-- [ ] CSRF form-field token: `fieldName` option is read, never checked
-      (header path only). Wire to `c._body[fieldName]` or delete the
-      option. Fails closed today.
-- [ ] Inline route patterns `:id{\d+}` can never match — the escape
-      pass runs before the param pass, so the brace group arrives
-      pre-escaped. Fix the pass order or reject the syntax loudly.
-- [ ] Malformed %-encoding in a matched param (`/u/%zz`) throws
-      URIError out of the exported fetch → should be a 400.
-- [ ] Single-empty-field form heuristic rewrites `subscribe=` to
-      `{body: 'subscribe'}` — corrupts a legit form clearing its only
-      field. Trigger should check whether the raw body contained `=`.
 - [ ] Manager 409 on re-register within the heartbeat TTL aborts
       immediately — restart-under-supervisor flaps until TTL expiry.
       A bounded 409 retry (~TTL + margin) removes the papercut.
