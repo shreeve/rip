@@ -8,17 +8,28 @@ moved into real docs/tests.
 
 ## Possible emitter bug: if-expression on `=!` leaves an IIFE temp undeclared
 
-Reported 2026-07-20 while building the `-c` knob (worker env
-validation): a multi-line `if`-expression assigned to a `=!` readonly
-binding compiled to an IIFE whose inner temporary was left undeclared —
-output that throws under strict mode. The author flattened the code
-rather than ship the shape, so no repro was committed. This smells like
-the silent-miscompile class (rule 1 worst case).
+- [x] ~~Possible emitter bug: multi-line `if` on `=!` leaves IIFE temp
+      undeclared (reported 2026-07-20 during `-c` knob work)~~ —
+      refuted. Shape was real (`CONCURRENCY =! if rawC? … n =
+      parseInt …`); emit has module-scoped `let n` on enclosing hoist
+      line above the IIFE. Misread was truncated inspection (`rg`/sed
+      window skipped hoist). `=!` not load-bearing vs `=`/`:=`. No
+      pin/fix needed. Related: see below.
 
-- [ ] Reconstruct the shape (multi-line `if` expression value on `=!`),
-      minimize, and check `rip -c` output for the undeclared temp.
-- [ ] If real: fix per emitter doctrine and pin in the battery; if not
-      reproducible, record what refuted it here and strike.
+## Component `_init` drops parenthetical multi-stmt member initializers
+
+- [ ] Component `_init` drops parenthetical multi-statement member
+      initializers from hoist collection → bare assigns (strict-mode
+      throw). Not if→IIFE, not `=!`-specific. Guilty filter
+      (`src/emitter.js` ~6231–6236): `initValues` filters out
+      `isBlock(v) && v.length > 2`, intended for multi-stmt computed
+      bodies, but also drops parenthetical blocks on `=!` / `=`
+      members. Repro: `C = component` / `x =! (` / `a = 1` / `a` /
+      `)` / `render` / `div` (or `x = (…)` twin) → `_init` has
+      `this.x = (a = 1, a)` without `let a`. Multi-line `if` on the
+      same member hoists correctly. Fix: narrow filter to multi-stmt
+      **computed** values only; keep collecting hoist targets for
+      readonly/plain/state block initializers. Pin in battery.
 
 ## Rip Server concurrency (`c:N`) and hot reload
 
