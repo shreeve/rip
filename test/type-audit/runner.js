@@ -218,6 +218,8 @@ import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.js';
 import { compile } from '../../src/compile.js';
+import { Parser } from '../../src/parser.js';
+import { makeParserLexer } from '../../src/lexer.js';
 import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, offsetToPosition } from '../../packages/vscode/src/translate.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -227,7 +229,7 @@ const SERVER = path.join(ROOT, 'packages/vscode/src/server.js');
 const FIX = path.join(HERE, 'fixtures');
 const HOVERS = path.join(HERE, 'hover-pins.json');
 const ARGV = process.argv.slice(2);
-// ── flags. THE COMMAND IS THE DOCUMENTATION. ALL THREE audits live in this
+// ── flags. THE COMMAND IS THE DOCUMENTATION. Every audit lives in this
 // table, the default one included, and it is the only place that knows an audit
 // exists: --help, the unknown-flag guard, which audits run, and the closing
 // "not run" footer all derive from it. So adding or renaming an audit cannot
@@ -268,9 +270,20 @@ const AUDITS = [
          + 'when the precise map resolves it and `text`-true when that position holds its\n'
          + 'own bytes; each failure is classified by the mapping row it fell to',
   },
+  {
+    key: 'grammar', flag: '--grammar', name: 'Grammar Gate',
+    // Parser only — no server, no tsgo, no compile even: the corpus is parsed
+    // with an instrumented Parser and each reduce records its rule.
+    runs: 'parser only',
+    blurb: 'which grammar productions the fixture corpus exercises, and which it never reduces',
+    judge: 'the GRAMMAR\'S OWN RULE LIST — a closed denominator: every production the\n'
+         + 'parser can reduce is enumerable, so "exercised by at least one fixture" is\n'
+         + 'checkable in a way no corpus-relative rate ever is. The uncovered list is\n'
+         + 'the M3 fixture-growth queue (see ROADMAP.md)',
+  },
 ];
 const FLAGS = [
-  ['--all', 'all four audits'],
+  ['--all', 'every audit'],
   ['--serial', 'probe one fixture at a time — the control for the concurrent pass'],
   ['--v', '+ expected hover divergences, unasserted tokens, and every flagged mapping read, in full'],
   ['--update-hovers', 're-pin expected hovers (verify the change is correct FIRST)'],
@@ -293,7 +306,7 @@ const usage = () => [
   ...AUDITS.filter((a) => a.flag).map((a) => `  ${a.flag.padEnd(16)} the ${a.name} only (${a.runs ?? 'drives the editor server'})`),
   ...FLAGS.map((row) => `  ${row.slice(0, -1).join(', ').padEnd(16)} ${row.at(-1)}`),
   '',
-  'The four audits, and what each is judged against:',
+  'The audits, and what each is judged against:',
   '',
   ...AUDITS.flatMap((a) => [
     `  ${a.name} (${a.flag ?? 'default'}) — ${a.blurb}`,
@@ -334,6 +347,7 @@ const RUN_MAIN = ranAudit('main');
 const RUN_HOVER = ranAudit('hover');
 const RUN_TOKENS = ranAudit('token');
 const RUN_MAP = ranAudit('map');
+const RUN_GRAMMAR = ranAudit('grammar');
 // The Mapping Audit reads the compiler's own mapping rows and touches no
 // server, so a run covering ONLY it needs neither the editor-server pool nor
 // tsgo. Everything else does. This gates both the pool construction and the
@@ -1645,6 +1659,57 @@ if (RUN_MAP) {
   // check the manual gauge fires only when someone runs it anyway.
 }
 
+// ── the Grammar Gate (ROADMAP "M2"): which productions the corpus exercises.
+// Parser only — no compile, no server. Each fixture is parsed with an
+// instrumented Parser whose ctx.onReduce records every rule the parse reduces;
+// the denominator is the generated parser's own ruleNames table (index 0 is
+// the $accept pad), so the question "is every production exercised by at least
+// one fixture?" has a CLOSED answer no corpus-relative rate can give. The
+// uncovered list is the M3 fixture-growth queue — group it by LHS so a reader
+// sees which CONSTRUCTS are dark, not 200 interchangeable rows. Coverage here
+// is necessary, not sufficient: a rule can be exercised while its interaction
+// shapes (reorder × repetition, strings/comments in the frame) stay untested —
+// those are M3's adversarial tranche, not this gate's denominator.
+let gr = null;
+if (RUN_GRAMMAR) {
+  const names = Parser().ruleNames;
+  const denom = [];
+  for (let i = 1; i < names.length; i++) if (names[i]) denom.push(i);
+  auditBanner('GRAMMAR GATE', `productions the corpus reduces · ${denom.length} rules · ${fixtures.length} fixtures`);
+  const seen = new Set();
+  for (const f of fixtures) {
+    const before = seen.size;
+    const p = Parser({ onReduce: (id) => seen.add(id) });
+    p.lexer = makeParserLexer(path.join(FIX, f));
+    try {
+      p.parse(fs.readFileSync(path.join(FIX, f), 'utf8'));
+      console.log(`    ${green('✓')} ${pad(f, 20)} ${dim(`+${seen.size - before} new rules (${seen.size} cumulative)`)}`);
+    } catch (e) {
+      console.log(`    ${red('✗')} ${pad(f, 20)} ${dim(`parse failed — ${String(e.message ?? e).split('\n')[0]}`)}`);
+    }
+  }
+  const uncovered = denom.filter((i) => !seen.has(i));
+  // Group by LHS: the construct is the unit a fixture author thinks in.
+  const byLhs = new Map();
+  for (const i of uncovered) {
+    const lhs = names[i].split(' → ')[0];
+    if (!byLhs.has(lhs)) byLhs.set(lhs, []);
+    byLhs.get(lhs).push(names[i]);
+  }
+  console.log(`\n    ${bold('Coverage')} ${dim(`(exercised = reduced by at least one fixture)`)}`);
+  const pct = ((100 * (denom.length - uncovered.length)) / denom.length).toFixed(1);
+  console.log(`    ${(uncovered.length ? yellow : green)(String(denom.length - uncovered.length))} ${dim('/')} ${dim(String(denom.length))} ${dim(`productions (${pct}%)`)}`);
+  if (byLhs.size) {
+    console.log(`\n    ${bold('Uncovered, by construct')} ${dim(`— the M3 queue; ${VERBOSE ? 'every production shown' : 'counts only, --v for every production'}`)}`);
+    const lhss = [...byLhs.entries()].sort((a, b) => b[1].length - a[1].length);
+    for (const [lhs, rules] of lhss) {
+      console.log(`      ${pad(lhs, 24)} ${yellow(String(rules.length).padStart(3))}`);
+      if (VERBOSE) for (const r of rules) console.log(`        ${dim(r)}`);
+    }
+  }
+  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, constructs: byLhs.size };
+}
+
 const PROBES = new Map();   // file → { decls, hovers, tokens, tmap }
 let hskip = 0;
 if (RUN_HOVER || RUN_TOKENS) {
@@ -2186,6 +2251,13 @@ if (mp) totalLine('Mapping', `${mp.totReads} reads: `
     : `${yellow(`${mp.totFlag} unmapped`)} ${dim(`(${mp.unplaced} unplaced, ${mp.mistext} mis-texted · ${mp.synthetic} synthetic, ${mp.rewrite} rewrite)`)} ${dim('tracking the mapping gap (expected)')}`)
   + dim(` · ${mp.census} at-risk (census: no exact row)`)
   + (mp.missing ? ` · ${red(`${mp.missing} missing span${mp.missing === 1 ? '' : 's'}`)} ${dim('— a new class')}` : ''));
+// The Grammar Gate is a gauge toward M3, not a regression count: uncovered
+// productions are the fixture-growth queue, red only in the sense of "work
+// remains", so the count paints yellow until the corpus covers the grammar.
+if (gr) totalLine('Grammar', `${gr.total} productions: `
+  + (gr.uncovered === 0
+    ? green('every production exercised by the corpus')
+    : `${green(`${gr.covered} exercised`)}${dim(' · ')}${yellow(`${gr.uncovered} uncovered`)} ${dim(`across ${gr.constructs} constructs — the M3 queue`)}`));
 if (hp) totalLine('Hover', `${hp.probed} hover probes: `
   + (hp.gap === 0 && hp.snapChanged === 0 && hp.violations.length === 0
     ? green('twin parity + expected clean')
@@ -2228,7 +2300,7 @@ if (tk) {
   if (skipped.length) {
     console.log(`\n  ${dim('Not run')} ${dim(`(this run: ${covered})`)}`);
     for (const a of skipped) console.log(`    ${dim('·')} ${bold(a.name)} ${dim(`— ${a.blurb}`)}\n      ${dim(`bun run type-audit${a.flag ? ' ' + a.flag : ''}`)}`);
-    console.log(`    ${dim('·')} ${dim('all four:')} ${dim('bun run type-audit --all')}   ${dim('· full flag list:')} ${dim('--help')}`);
+    console.log(`    ${dim('·')} ${dim('all of them:')} ${dim('bun run type-audit --all')}   ${dim('· full flag list:')} ${dim('--help')}`);
   }
 }
 console.log('');

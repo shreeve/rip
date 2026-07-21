@@ -36,11 +36,9 @@ Depends on nothing. Produces: use-site position coverage and the root classifier
 
 ## M2 — Grammar gate
 
-*Prototyped; not built.*
+*Built.* `bun run type-audit --grammar`. Parses the corpus with an instrumented Parser — Solar's generated module carries a `ruleNames` table and a `ctx.onReduce` hook (src/grammar/solar.rip), so each reduce records its production — and reports which of the grammar's productions no fixture ever reduces, grouped by construct (`--v` lists every production). The denominator is the parser's own rule list, so "exercised by at least one fixture" is judged against a CLOSED set rather than any corpus-relative rate; the run prints the live coverage number. Parser only: no compile, no server, no tsgo.
 
-Report per run: how many grammar rules the corpus exercises, and which it doesn't.
-
-The corpus exercises only a fraction of the rules real rip code uses, and whole constructs are missing — `throw`, for one, appears in no fixture.
+Coverage here is necessary, not sufficient — a production can be exercised while its interaction shapes (emission reorder × repeated names, strings and comments inside the frame) stay untested. Those belong to M3's adversarial tranche, not to this gate's denominator.
 
 Depends on nothing. Produces: the coverage number and the uncovered-rule list M3 consumes.
 
