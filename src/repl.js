@@ -321,17 +321,22 @@ const CONST_RESTORE = new Set(['state', 'computed', 'effect', 'readonly', 'impor
 // The ctx parameter and the outer result slot are minted against the
 // inventory, the runtime names, the emission's own minted slot, and
 // every identifier the entry spells.
-export function buildWrapper({ code, source, replResultName = null, priorKinds = new Map(), lineBindings = [], rtNames = [] }) {
+export function buildWrapper({ code, source, replResultName = null, replImportResolver = null, priorKinds = new Map(), lineBindings = [], rtNames = [] }) {
   const used = new Set();
   for (const m of source.matchAll(/[A-Za-z_$][\w$]*/g)) used.add(m[0]);
   for (const name of priorKinds.keys()) used.add(name);
   for (const { name } of lineBindings) used.add(name);
   for (const name of rtNames) used.add(name);
   if (replResultName !== null) used.add(replResultName);
+  if (replImportResolver !== null) used.add(replImportResolver);
   const ctxName = mintFresh('__rip', used);
   const lastName = mintFresh('__last', used);
 
   const lines = [`'use strict';`];
+  // The emission routes every dynamic-import specifier through the
+  // minted resolver name — bind it to the session's cwd-anchored
+  // resolver.
+  if (replImportResolver !== null) lines.push(`const ${replImportResolver} = ${ctxName}.resolveImport;`);
   const exposed = rtNames.filter((n) => n !== '_' && !priorKinds.has(n));
   if (exposed.length > 0) lines.push(`const { ${exposed.join(', ')} } = ${ctxName}.rt;`);
   // `_` is the REPL's last-result binding — excluded from the
@@ -362,36 +367,34 @@ export function buildWrapper({ code, source, replResultName = null, priorKinds =
 
 const AsyncFunction = (async () => {}).constructor;
 
-// Splice pre-resolved import specifiers into the compiled code by the
-// RECORDED spans (result.imports — offsets recorded at emission,
-// never rediscovered). Dynamic import inside an AsyncFunction anchors
-// to THIS module, so relative and bare specifiers resolve against the
-// user's cwd up front; unresolvable ones stay as written and fail
-// with the import's own error.
-export function resolveImportSpecs(code, imports, cwd) {
-  let out = code;
-  const sorted = [...imports].sort((a, b) => b.start - a.start);
-  for (const { start, end } of sorted) {
-    const spec = out.slice(start + 1, end - 1).replace(/\\'/g, "'").replace(/\\\\/g, '\\');
-    if (spec.startsWith('node:') || spec.startsWith('bun:') || spec.includes('://')) continue;
-    let resolved;
-    try {
-      resolved = Bun.resolveSync(spec, cwd);
-    } catch {
-      continue;
+// The cwd-anchored import resolver the wrapper binds to the emission's
+// minted resolver name. Dynamic import inside an AsyncFunction anchors
+// to THIS module, so every specifier — lowered static imports, literal
+// AND computed `import(...)` arguments — maps through here at runtime.
+// Absolute paths, URLs, and node:/bun: builtins pass through; relative
+// and bare specifiers resolve against the session's cwd; an
+// unresolvable one throws NAMING the specifier and the resolution base
+// (never an opaque resolver object).
+export function makeImportResolver(cwd) {
+  return (spec) => {
+    if (typeof spec !== 'string') return spec;
+    if (spec.startsWith('node:') || spec.startsWith('bun:') || spec.startsWith('data:') ||
+        spec.startsWith('/') || spec.includes('://')) {
+      return spec;
     }
-    if (resolved === spec) continue;
-    const text = `'${resolved.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
-    out = out.slice(0, start) + text + out.slice(end);
-  }
-  return out;
+    try {
+      return Bun.resolveSync(spec, cwd);
+    } catch {
+      throw new Error(`Cannot resolve import '${spec}' from '${cwd}' — check the specifier, or install the package there`);
+    }
+  };
 }
 
 export class Session {
   constructor({ cwd = process.cwd() } = {}) {
     this.cwd = cwd;
     this.bindings = new Map(); // name → kind (the persisted inventory)
-    this.ctx = { vars: {}, rt: {} };
+    this.ctx = { vars: {}, rt: {}, resolveImport: makeImportResolver(cwd) };
     this.loadedRuntimes = new Set();
     this.runtimeTable = _runtimeTable();
   }
@@ -439,11 +442,11 @@ export class Session {
     if (onCompiled !== null) onCompiled(result);
     if (result.code.trim() === '') return { value: undefined, captured: false };
     await this.loadRuntimes(result.runtimes);
-    const code = resolveImportSpecs(result.code, result.imports, this.cwd);
     const { body, ctxName } = buildWrapper({
-      code,
+      code: result.code,
       source,
       replResultName: result.replResultName,
+      replImportResolver: result.replImportResolver,
       priorKinds: this.bindings,
       lineBindings: result.bindings,
       rtNames: Object.keys(this.ctx.rt),
@@ -474,6 +477,23 @@ export class Session {
 
 export function formatValue(value, theme, colorOn) {
   return inspect(value, { colors: colorOn, depth: 4, maxArrayLength: 100 });
+}
+
+// One error, one honest line. CompileError messages are already
+// positioned and excerpted. Bun's ResolveMessage/BuildMessage are NOT
+// Error instances and inspect to empty braces — their message,
+// specifier, and referrer surface explicitly instead.
+export function describeError(err) {
+  if (err instanceof CompileError) return err.message;
+  if (err instanceof Error) return `${err.name}: ${err.message}`;
+  if (err !== null && typeof err === 'object' && typeof err.message === 'string') {
+    const name = typeof err.name === 'string' && err.name !== '' ? err.name : 'Error';
+    const spec = typeof err.specifier === 'string' && err.specifier !== '' ? err.specifier : null;
+    const from = typeof err.referrer === 'string' && err.referrer !== '' ? err.referrer : null;
+    const detail = spec === null ? '' : ` (importing '${spec}'${from === null ? '' : ` from '${from}'`})`;
+    return `${name}: ${err.message}${detail}`;
+  }
+  return inspect(err);
 }
 
 // ---------------------------------------------------------------------------
@@ -772,10 +792,7 @@ export class Repl {
   }
 
   printError(err) {
-    const message = err instanceof CompileError ? err.message
-      : err instanceof Error ? `${err.name}: ${err.message}`
-      : inspect(err);
-    this.output.write(`${this.theme.paint('error', message)}\n`);
+    this.output.write(`${this.theme.paint('error', describeError(err))}\n`);
     if (this.env.RIP_DEBUG && err instanceof Error && err.stack) {
       this.output.write(`${this.theme.paint('dim', err.stack)}\n`);
     }
@@ -983,7 +1000,7 @@ if (import.meta.main) {
       }
       process.exit(0);
     } catch (err) {
-      console.error(err instanceof CompileError ? err.message : err instanceof Error ? `${err.name}: ${err.message}` : inspect(err));
+      console.error(describeError(err));
       process.exit(1);
     }
   }

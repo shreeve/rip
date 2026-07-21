@@ -7,15 +7,15 @@
 // process rule).
 import { describe, test, expect } from 'bun:test';
 import { PassThrough } from 'node:stream';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   mintFresh, buildWrapper, resolveThemeName, buildTheme, ansiFor,
-  colorizeLastLine, stripAnsi, encodeEntry, resolveImportSpecs,
-  Session, Repl, THEME_NAMES,
+  colorizeLastLine, stripAnsi, encodeEntry, makeImportResolver,
+  describeError, Session, Repl, THEME_NAMES,
 } from '../../src/repl.js';
-import { compile } from '../../src/compile.js';
+import { CompileError } from '../../src/compile.js';
 
 describe('wrapper generation', () => {
   test('strict prologue, block-nested user code, restore and save from reported names', () => {
@@ -80,6 +80,17 @@ describe('wrapper generation', () => {
     });
     expect(body).toContain('const { sleep, zip } = __rip.rt;');
     expect(body).toContain(`let p = __rip.vars['p'];`);
+  });
+
+  test('the emission-minted import resolver binds from the context object', () => {
+    const { body } = buildWrapper({
+      code: `await import(__resolveImport('./m.js'));`,
+      source: `import './m.js'`,
+      replImportResolver: '__resolveImport',
+    });
+    expect(body).toContain('const __resolveImport = __rip.resolveImport;');
+    const without = buildWrapper({ code: '1;', source: '1' });
+    expect(without.body).not.toContain('resolveImport');
   });
 
   test('mintFresh walks underscore suffixes', () => {
@@ -175,36 +186,66 @@ describe('history encoding', () => {
   });
 });
 
-describe('import specifier splicing', () => {
-  test('relative specifiers resolve against the cwd by recorded spans', () => {
+describe('the cwd-anchored import resolver', () => {
+  test('relative specifiers resolve against the session cwd', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rip-repl-imp-'));
     try {
       writeFileSync(join(dir, 'm.rip'), 'export answer = 1\n');
-      const r = compile('import { answer } from "./m.rip"', { repl: true, runtimeDelivery: 'none' });
-      const out = resolveImportSpecs(r.code, r.imports, dir);
-      expect(out).toContain(join(dir, 'm.rip'));
-      expect(out).not.toContain("'./m.rip'");
+      const resolve = makeImportResolver(dir);
+      // Compare realpaths on both sides — the macOS tmpdir is a
+      // symlink and resolveSync does not promise either spelling.
+      expect(realpathSync(resolve('./m.rip'))).toBe(join(realpathSync(dir), 'm.rip'));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test('builtins and unresolvable specifiers stay as written', () => {
-    const r = compile('import { readFileSync } from "node:fs"\nimport missing from "no-such-pkg-xyz"', { repl: true, runtimeDelivery: 'none' });
-    const out = resolveImportSpecs(r.code, r.imports, tmpdir());
-    expect(out).toContain("'node:fs'");
-    expect(out).toContain("'no-such-pkg-xyz'");
+  test('builtins, URLs, absolute paths, and non-strings pass through', () => {
+    const resolve = makeImportResolver(tmpdir());
+    expect(resolve('node:fs')).toBe('node:fs');
+    expect(resolve('bun:test')).toBe('bun:test');
+    expect(resolve('https://x.example/m.js')).toBe('https://x.example/m.js');
+    expect(resolve('/abs/path.js')).toBe('/abs/path.js');
+    expect(resolve(42)).toBe(42);
+  });
+
+  test('an unresolvable specifier throws naming the specifier and the base', () => {
+    const resolve = makeImportResolver('/tmp');
+    expect(() => resolve('no-such-pkg-xyz')).toThrow(/Cannot resolve import 'no-such-pkg-xyz' from '\/tmp'/);
+  });
+});
+
+describe('error display', () => {
+  test('CompileError keeps its positioned message; Errors show name and message', () => {
+    const ce = new CompileError('<repl>:1:1: boom');
+    expect(describeError(ce)).toBe('<repl>:1:1: boom');
+    expect(describeError(new TypeError('nope'))).toBe('TypeError: nope');
+  });
+
+  test('a ResolveMessage-shaped non-Error surfaces message, specifier, and referrer — never {}', () => {
+    const rm = { name: 'ResolveMessage', message: 'Cannot find module', specifier: './x.js', referrer: '/tmp/repl.js' };
+    expect(describeError(rm)).toBe("ResolveMessage: Cannot find module (importing './x.js' from '/tmp/repl.js')");
+    expect(describeError({ message: 'bare' })).toBe('Error: bare');
+    expect(describeError('thrown string')).toBe("'thrown string'");
   });
 });
 
 describe('in-process session (plain bindings only)', () => {
-  test('bindings persist and reads capture', async () => {
+  test('bindings persist; assignments echo their value and reads capture', async () => {
     const s = new Session();
-    expect((await s.eval('q = 41')).captured).toBe(false);
+    const w = await s.eval('q = 41');
+    expect(w.captured).toBe(true);
+    expect(w.value).toBe(41);
     const r = await s.eval('q + 1');
     expect(r.captured).toBe(true);
     expect(r.value).toBe(42);
     expect(s.bindings.get('q')).toBe('plain');
+  });
+
+  test('a destructuring assignment echoes the full RHS value', async () => {
+    const s = new Session();
+    expect((await s.eval('[a, b] = [1, 2]')).value).toEqual([1, 2]);
+    expect((await s.eval('b')).value).toBe(2);
   });
 
   test('a user binding of the would-be result name never collides', async () => {
