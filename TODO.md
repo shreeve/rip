@@ -12,9 +12,11 @@ moved into real docs/tests.
       `src/grammar/grammar.rip`, the lexer's context-sensitive behavior
       (retags like `POST_IF`), and the battery (the syntax contract)
       into an authoritative document. It takes the `docs/SYNTAX.md`
-      name when it exists; `docs/POSSIBLE-FUTURE-SYNTAX.md` (renamed
-      2026-07-20) keeps the speculative notes. Cross-check the three
-      editor grammars for drift while at it.
+      name when it exists. (The old speculative-notes file — briefly
+      `docs/POSSIBLE-FUTURE-SYNTAX.md` — was deleted 2026-07-20; it
+      mixed real and aspirational behavior. Recover from git history
+      if ever needed.) Cross-check the three editor grammars for
+      drift while at it.
 
 ---
 
