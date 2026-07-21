@@ -171,6 +171,7 @@ class Emitter {
     // temp allocator are untouched when off.
     this.repl = repl;
     this.replResultName = null;
+    this.replImportResolver = null;
     // Script-target emission: <script type="text/rip"> sources share one
     // page scope and are not modules, so every module form rejects at
     // its own position instead of emitting bytes new Function cannot take.
@@ -2257,7 +2258,11 @@ class Emitter {
         this.moduleClassNames = Emitter.classDeclNames(rest);
         this.rejectDuplicateDefault(rest);
         this.scopes.push(names);
-        entries = this.applyDeclareInPlace(entries, sexpr.slice(1));
+        // repl mode captures a final assignment as an expression
+        // (`const <slot> = x = 5`) — a `let` is invalid there, so the
+        // tail keeps its hoist-line declaration (the function-scope
+        // tail rule).
+        entries = this.applyDeclareInPlace(entries, sexpr.slice(1), { tailIsExpression: this.repl });
         if (entries.length) {
           this.hoistLine(entries);
           this.b.emit('\n\n');
@@ -2335,7 +2340,8 @@ class Emitter {
       this.moduleClassNames = Emitter.classDeclNames(stmts);
       this.rejectDuplicateDefault(stmts);
       this.scopes.push(names);
-      entries = this.applyDeclareInPlace(entries, sexpr.slice(1));
+      // The same repl tail rule as programWith.
+      entries = this.applyDeclareInPlace(entries, sexpr.slice(1), { tailIsExpression: this.repl });
       if (entries.length) {
         this.hoistLine(entries);
         this.b.emit('\n\n');
@@ -2496,10 +2502,11 @@ class Emitter {
   // destructure the namespace (`const { default: d, a, b: c } =
   // await import('m')`), `* as ns` binds the module object whole
   // (a mixed form destructures FROM the bound namespace, one await),
-  // and a side-effect import awaits bare. The specifier span records
-  // exactly like the static form's — consumers splice resolved
-  // specifiers by offset either way. No generated function scope is
-  // introduced; `await` sits in the program's own context.
+  // and a side-effect import awaits bare. The specifier routes
+  // through the minted import resolver like every repl-mode dynamic
+  // import, and its span still records exactly like the static
+  // form's. No generated function scope is introduced; `await` sits
+  // in the program's own context.
   replImportStatement(node) {
     const source = node[node.length - 1];
     const specs = node.slice(1, -1);
@@ -2514,13 +2521,13 @@ class Emitter {
     this.mark(node, '$self', () => {
       if (nsName !== null) this.b.emit(`const ${nsName} = `);
       else if (parts.length > 0) this.b.emit(`const { ${parts.join(', ')} } = `);
-      this.b.emit('await import(');
+      this.b.emit(`await import(${this.replResolver()}(`);
       {
         const specStart = this.b.offset;
         this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
         this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
       }
-      this.b.emit(')');
+      this.b.emit('))');
       if (nsName !== null && parts.length > 0) {
         this.b.emit(`, { ${parts.join(', ')} } = ${nsName}`);
       }
@@ -3148,7 +3155,10 @@ class Emitter {
     this.funcBodyStmt = funcBody;
     if (isNode(node)) {
       const form = Emitter.STATEMENT_FORMS[node[0]];
-      if (form && form(this, node, ind)) return;
+      if (form && form(this, node, ind)) {
+        this.replDeclEcho(node);
+        return;
+      }
       // Return guards are statement rewrites: bare (`x or return e`)
       // and assigning (`y = x or return e`) forms both emit an `if`
       // whose body is the return — the one lowering that keeps the
@@ -3227,11 +3237,6 @@ class Emitter {
     }
   }
 
-  // Write heads that never capture in repl mode — their statement
-  // emission owns declaration syntax (declare-in-place `let`) or has
-  // no value reading a REPL should print.
-  static REPL_NO_CAPTURE = new Set([...ASSIGNS, '//=', '%%=', '++', '--']);
-
   // repl mode's result slot, minted against the used-name registry on
   // FIRST capture (never a fixed string — a user may legally bind any
   // name the emitter is fond of; mintName registers the pick, so
@@ -3244,18 +3249,57 @@ class Emitter {
     return this.replResultName;
   }
 
-  // The final top-level expression statement lands in the result
-  // slot: `const <slot> = <expr>;`. The `const <slot> = ` prefix is
-  // generated declaration syntax outside all role marks (the
-  // declare-in-place `let ` precedent), so every role row keeps its
-  // exact source↔generated slice.
+  // repl mode's import resolver — the minted name every dynamic-
+  // import specifier routes through (`import(<R>(spec))`), reported
+  // as result.replImportResolver so the evaluation environment can
+  // bind it to a cwd-anchored resolver. Minted lazily on the same
+  // rule as the result slot.
+  replResolver() {
+    if (this.replImportResolver === null) {
+      this.replImportResolver = Emitter.mintName('__resolveImport', this.temps.used);
+    }
+    return this.replImportResolver;
+  }
+
+  // The final top-level expression OR assignment statement lands in
+  // the result slot: `const <slot> = <expr>;` — an assignment's echo
+  // is its expression value (the RHS for plain, compound, and
+  // destructuring forms; postfix updates echo JS's own pre-update
+  // value). The `const <slot> = ` prefix is generated declaration
+  // syntax outside all role marks (the declare-in-place `let `
+  // precedent), so every role row keeps its exact source↔generated
+  // slice. Assignment forms that lower to multi-statement rewrites
+  // (`.=`, `*>`, optional-chain targets, middle-rest patterns) return
+  // from statementCore before this point and stay echo-free.
   replCapture(node) {
     if (!this.repl || node !== this.lastProgramStmt) return false;
-    if (isNode(node) && Emitter.REPL_NO_CAPTURE.has(node[0]) && node.length === 3) return false;
     this.b.emit(`const ${this.replSlot()} = `);
     this.expr(node);
     this.b.emit(';');
     return true;
+  }
+
+  // The declaration echo: a final reactive/readonly/effect
+  // declaration binds through its own statement form, then the result
+  // slot receives the freshly bound value — reactive containers
+  // unwrap (`x := 5` echoes 5, never the signal object; a computed's
+  // echo performs its first read). The read is a bound-identifier
+  // re-read (REPEAT-SAFE by the doctrine's own judgment), never a
+  // re-evaluation of the initializer.
+  replDeclEcho(node) {
+    if (!this.repl || node !== this.lastProgramStmt || !isNode(node)) return;
+    let name = null;
+    let unwrap = false;
+    if (this.isReactiveDecl(node) && typeof node[1] === 'string') {
+      name = node[1];
+      unwrap = true;
+    } else if (this.isReadonlyDecl(node) && typeof node[1] === 'string') {
+      name = node[1];
+    } else if (this.isEffectDecl(node) && typeof node[1] === 'string') {
+      name = node[1];
+    }
+    if (name === null) return;
+    this.b.emit(`\nconst ${this.replSlot()} = ${name}${unwrap ? '.value' : ''};`);
   }
 
   // ["while", condition, body] — the plain loop; ["while", condition,
@@ -11103,6 +11147,29 @@ class Emitter {
   }
 
   call(node) {
+    // repl mode: a dynamic import evaluates inside an async function
+    // whose module context is the REPL's own, so a specifier that
+    // should resolve against the user's cwd would silently anchor
+    // elsewhere. The first argument routes through the minted
+    // resolver — `import(<R>(spec))` — which handles COMPUTED
+    // specifiers too (the operand still evaluates exactly once; the
+    // resolver only maps the resulting string). The semanticKind
+    // discriminates the real dynamic-import call.
+    if (this.repl && node[0] === 'import' && (node.length === 2 || node.length === 3) && this.lockedHead(node, 'dynimport')) {
+      this.mark(node, '$self', () => {
+        this.b.emit(`import(${this.replResolver()}(`);
+        this.mark(node, 'args', () => {
+          this.callArg(node[1]);
+          this.b.emit(')');
+          if (node.length === 3) {
+            this.b.emit(', ');
+            this.callArg(node[2]);
+          }
+        });
+        this.b.emit(')');
+      });
+      return;
+    }
     // A rest-headed node reaching CALL emission inside a pattern sits
     // in a position the `rest x` sugar does not cover (array() owns
     // the one legal position, a binding pattern's tail): an object
@@ -12559,7 +12626,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd],
     });
   }
-  return { code: builder.code, mappings: builder.rows, stores, runtimes, bindings, replResultName: emitter.replResultName, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

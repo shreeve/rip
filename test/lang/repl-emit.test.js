@@ -39,18 +39,31 @@ describe('result capture: the final top-level expression statement', () => {
     const r = repl('if x\n  1');
     expect(r.replResultName).toBe(null);
     expect(r.code).not.toContain('__result');
+    expect(repl('class Foo').replResultName).toBe(null);
+    expect(repl('def f(n)\n  n').replResultName).toBe(null);
   });
 
-  test('declaration-last emits no capture', () => {
-    const r = repl('x := 5');
-    expect(r.replResultName).toBe(null);
-    expect(r.code).toBe('const x = __state(5);');
+  test('declaration-last echoes the bound value, reactive containers unwrapped', () => {
+    expect(repl('x := 5').code).toBe('const x = __state(5);\nconst __result = x.value;');
+    expect(repl('a := 1\nb ~= a * 2').code)
+      .toEndWith('const b = __computed(() => (a.value * 2));\nconst __result = b.value;');
+    expect(repl('k =! 7').code).toBe('const k = 7;\nconst __result = k;');
+    // A bound effect echoes its dispose handle; a bare one binds
+    // nothing and echoes nothing.
+    expect(repl('a := 1\nh ~> a').code).toEndWith('\nconst __result = h;');
+    expect(repl('a := 1\n~> a').replResultName).toBe(null);
   });
 
-  test('assignment-last and update-last emit no capture', () => {
-    expect(repl('x = 5').replResultName).toBe(null);
-    expect(repl('x = 1\nx += 5').replResultName).toBe(null);
-    expect(repl('x = 1\nx++').replResultName).toBe(null);
+  test('assignment-last and update-last capture their expression value', () => {
+    // The tail keeps its hoist-line declaration (a `let` is invalid
+    // in the capture's expression position — the function-tail rule).
+    expect(repl('x = 5').code).toBe('let x;\n\nconst __result = x = 5;');
+    expect(repl('x = 1\nx += 5').code).toBe('let x = 1;\nconst __result = x += 5;');
+    expect(repl('x = 1\nx++').code).toBe('let x = 1;\nconst __result = x++;');
+  });
+
+  test('a destructuring assignment echoes the full RHS value', () => {
+    expect(repl('[a, b] = [1, 2]').code).toBe('let a, b;\n\nconst __result = [a, b] = [1, 2];');
   });
 
   test('a final statement-position comprehension captures (its value is the program result)', () => {
@@ -72,43 +85,44 @@ describe('repl + ambientBindings together (the REPL combination)', () => {
     expect(r.replResultName).toBe('__result');
   });
 
-  test('a seeded state write stays uncaptured and unwraps', () => {
+  test('a seeded state write captures its value and unwraps the container', () => {
     const r = repl('x = 3', { ambientBindings: [{ name: 'x', kind: 'state' }] });
-    expect(r.code).toBe('x.value = 3;');
-    expect(r.replResultName).toBe(null);
+    expect(r.code).toBe('const __result = x.value = 3;');
+    expect(r.replResultName).toBe('__result');
   });
 });
 
-describe('static imports lower to awaited dynamic imports', () => {
+describe('static imports lower to awaited dynamic imports through the minted resolver', () => {
   test('named specifiers destructure the namespace', () => {
     const r = repl('import { a, b as c } from "./m.js"');
-    expect(r.code).toContain("const { a, b: c } = await import('./m.js');");
+    expect(r.code).toContain("const { a, b: c } = await import(__resolveImport('./m.js'));");
+    expect(r.replImportResolver).toBe('__resolveImport');
   });
 
   test('a default import destructures default', () => {
     const r = repl('import d from "./m.js"');
-    expect(r.code).toContain("const { default: d } = await import('./m.js');");
+    expect(r.code).toContain("const { default: d } = await import(__resolveImport('./m.js'));");
   });
 
   test('a namespace import binds the module object whole', () => {
     const r = repl('import * as ns from "./m.js"');
-    expect(r.code).toContain("const ns = await import('./m.js');");
+    expect(r.code).toContain("const ns = await import(__resolveImport('./m.js'));");
   });
 
   test('a side-effect import awaits bare', () => {
     const r = repl('import "./side.js"');
-    expect(r.code).toContain("await import('./side.js');");
-    expect(r.code).not.toContain('const');
+    expect(r.code).toContain("await import(__resolveImport('./side.js'));");
+    expect(r.code).not.toContain('const {');
   });
 
   test('default + named share one destructure', () => {
     const r = repl('import d, { a } from "./m.js"');
-    expect(r.code).toContain("const { default: d, a } = await import('./m.js');");
+    expect(r.code).toContain("const { default: d, a } = await import(__resolveImport('./m.js'));");
   });
 
   test('default + namespace bind through the namespace', () => {
     const r = repl('import d, * as ns from "./m.js"');
-    expect(r.code).toContain("const ns = await import('./m.js'), { default: d } = ns;");
+    expect(r.code).toContain("const ns = await import(__resolveImport('./m.js')), { default: d } = ns;");
   });
 
   test('lowered bindings report kind import in the inventory', () => {
@@ -127,8 +141,42 @@ describe('static imports lower to awaited dynamic imports', () => {
 
   test('an import above a captured expression keeps both behaviors', () => {
     const r = repl('import { a } from "./m.js"\na(1)');
-    expect(r.code).toContain("const { a } = await import('./m.js');");
+    expect(r.code).toContain("const { a } = await import(__resolveImport('./m.js'));");
     expect(r.code).toContain('const __result = a(1);');
+  });
+});
+
+describe('user-spelled dynamic imports route through the minted resolver', () => {
+  test('a literal specifier wraps', () => {
+    const r = repl('m = await import("./m.js")');
+    expect(r.code).toContain('await import(__resolveImport("./m.js"))');
+    expect(r.replImportResolver).toBe('__resolveImport');
+  });
+
+  test('a COMPUTED specifier wraps too — the operand still evaluates once', () => {
+    const r = repl('spec = "./m.js"\nm = await import(spec)');
+    expect(r.code).toContain('await import(__resolveImport(spec))');
+  });
+
+  test('import options ride outside the resolver call', () => {
+    const r = repl('m = await import("./m.js", opts)');
+    expect(r.code).toContain('await import(__resolveImport("./m.js"), opts)');
+  });
+
+  test('the resolver name is MINTED: a user binding pushes it off', () => {
+    const r = repl('__resolveImport = 1\nm = await import("./m.js")');
+    expect(r.replImportResolver).toBe('__resolveImport_');
+    expect(r.code).toContain('await import(__resolveImport_("./m.js"))');
+  });
+
+  test('off by default: no resolver, no wrapping', () => {
+    const r = compile('m = await import("./m.js")', { runtimeDelivery: 'none' });
+    expect(r.replImportResolver).toBe(null);
+    expect(r.code).toBe('let m = await import("./m.js");');
+  });
+
+  test('a program with no import reports a null resolver', () => {
+    expect(repl('1 + 1').replImportResolver).toBe(null);
   });
 });
 

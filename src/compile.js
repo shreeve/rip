@@ -201,10 +201,15 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // class / def / enum — the REPL's `.vars` data and the ambient
     // seed for its next line. Unconditional on every compile.
     bindings: emitted.bindings,
-    // repl mode's minted result slot — the name the final expression
-    // statement's value landed in; null when nothing captured (or
-    // when repl mode is off).
+    // repl mode's minted result slot — the name the final expression,
+    // assignment, or declaration echo landed in; null when nothing
+    // captured (or when repl mode is off).
     replResultName: emitted.replResultName,
+    // repl mode's minted import-resolver name — every dynamic-import
+    // specifier routes through `<name>(spec)`, and the evaluation
+    // environment binds it to a cwd-anchored resolver; null when the
+    // program has no import (or repl mode is off).
+    replImportResolver: emitted.replImportResolver,
     tsRegions: emitted.tsRegions,
     pinnables: emitted.pinnables,
     // Emitted module-specifier spans, recorded at emission — the
