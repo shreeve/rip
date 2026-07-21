@@ -2105,6 +2105,16 @@ export function isIdentifierName(value) {
   }
   return true;
 }
+
+// Every identifier-shaped run in a text — built from the SAME
+// IDENT_START/IDENT_PART classes (one identifier vocabulary in the
+// repository), for consumers that mint scaffold names against
+// everything a source spells. String.match with /g resets lastIndex
+// itself, so the shared regex stays stateless across calls.
+const IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, 'g');
+export function identifierRuns(text) {
+  return text.match(IDENT_RUN_RE) ?? [];
+}
 const DIGIT = /[0-9]/;
 
 // The numeric-literal matcher: binary/octal/hex with optional
