@@ -586,6 +586,46 @@ export const decodeEntry = (s) => s.replace(/⏎([ne])/g, (_, c) => (c === 'n' ?
 // double-width (East Asian) glyphs — Bun.stringWidth owns the tables.
 export const displayWidth = (s) => Bun.stringWidth(s);
 
+// Recall bookkeeping: the decode table maps SUBMITTED text back to an
+// entry's original source, but that mapping is legitimate ONLY for a
+// line history navigation placed in the buffer and the user never
+// edited — typed bytes that happen to equal an encoded entry must
+// evaluate verbatim. The tracker holds at most one mark: the exact
+// text the last navigation recalled. `fromHistory` is readline's own
+// verdict (historyIndex ≥ 0) — navigating down past the newest entry
+// restores the user's saved in-progress line, which is typed text,
+// not a recall. Any key that changes the buffer clears the mark;
+// cursor movement (buffer unchanged) keeps it. The submit-time
+// decision consumes the mark either way.
+export class RecallTracker {
+  constructor() {
+    this.recalled = null;
+  }
+
+  navigated(line, fromHistory) {
+    this.recalled = fromHistory ? line : null;
+  }
+
+  touched(line) {
+    if (this.recalled !== null && line !== this.recalled) this.recalled = null;
+  }
+
+  shouldDecode(submitted) {
+    const hit = this.recalled !== null && submitted === this.recalled;
+    this.recalled = null;
+    return hit;
+  }
+}
+
+// The keys readline treats as history navigation: plain up/down
+// arrows and ctrl-p/ctrl-n. A misclassification fails SAFE: a missed
+// navigation just skips the decode; a false positive defers to
+// readline's historyIndex verdict.
+export const isHistoryNavKey = (key) =>
+  key != null && key.meta !== true && (
+    ((key.name === 'up' || key.name === 'down') && key.ctrl !== true) ||
+    ((key.name === 'p' || key.name === 'n') && key.ctrl === true));
+
 // ---------------------------------------------------------------------------
 // The interactive REPL
 
@@ -606,6 +646,7 @@ export class Repl {
     this.entries = [];          // evaluated entries, oldest first
     this.recall = [];           // encoded recall lines, newest first (rl.history's source of truth)
     this.decodeTable = new Map(); // encoded recall line → original source
+    this.recallTracker = new RecallTracker(); // never marked without a terminal: piped input always passes through verbatim
     this.editorMode = false;
     this.editorLines = [];
     this.evaluating = false;
@@ -684,14 +725,39 @@ export class Repl {
     if (this.terminal) {
       // Live repaint: re-tokenize the buffer per keystroke and repaint
       // the input line with theme colors. setImmediate lets readline
-      // apply the key first; the guard keeps evaluation output clean.
+      // apply the key first — runtimes differ on whether keypress
+      // fires before or after readline mutates rl.line, so BOTH the
+      // repaint and the recall bookkeeping sample state on the next
+      // tick, when the mutation has landed either way. Return/enter
+      // are excluded, so a recall mark survives to the 'line' event.
       if (this.keypressListener !== undefined) this.input.removeListener('keypress', this.keypressListener);
       this.keypressListener = (_s, key) => {
         if (key && (key.name === 'return' || key.name === 'enter')) return;
-        setImmediate(() => this.repaint());
+        setImmediate(() => {
+          this.observeKeyEffect(key);
+          this.repaint();
+        });
       };
       this.input.on('keypress', this.keypressListener);
     }
+  }
+
+  // The recall-bookkeeping sampler (fix seam, called post-mutation):
+  // a navigation key marks the buffer as recalled when readline's own
+  // historyIndex says the line came from history; any other key runs
+  // the edit check against the mark.
+  observeKeyEffect(key) {
+    if (this.rl === undefined || this.closing) return;
+    const line = this.rl.line ?? '';
+    if (isHistoryNavKey(key)) this.recallTracker.navigated(line, (this.rl.historyIndex ?? -1) >= 0);
+    else this.recallTracker.touched(line);
+  }
+
+  // The submit-side decision: a line decodes back to its original
+  // source ONLY when history navigation placed it and no edit
+  // followed; typed text always evaluates verbatim.
+  resolveSubmitted(raw) {
+    return this.recallTracker.shouldDecode(raw) ? this.decodeTable.get(raw) ?? raw : raw;
   }
 
   repaint() {
@@ -804,7 +870,7 @@ export class Repl {
   }
 
   async onLine(rawLine) {
-    const line = this.decodeTable.get(rawLine) ?? rawLine;
+    const line = this.resolveSubmitted(rawLine);
     if (this.editorMode) {
       this.editorLines.push(line);
       return;

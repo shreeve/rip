@@ -14,7 +14,7 @@ import {
   mintFresh, buildWrapper, resolveThemeName, buildTheme, ansiFor,
   colorizeLastLine, stripAnsi, encodeEntry, decodeEntry, displayWidth,
   makeImportResolver, describeError, Session, Repl, THEME_NAMES,
-  Osc11Matcher,
+  RecallTracker, isHistoryNavKey, Osc11Matcher,
 } from '../../src/repl.js';
 import { identifierRuns } from '../../src/lexer.js';
 import { CompileError } from '../../src/compile.js';
@@ -224,6 +224,91 @@ describe('history encoding', () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe('recall decode bookkeeping (decode applies ONLY to recalled, unedited lines)', () => {
+  test('a line placed by history navigation and submitted unedited decodes', () => {
+    const t = new RecallTracker();
+    t.navigated('if x⏎n  1', true);
+    expect(t.shouldDecode('if x⏎n  1')).toBe(true);
+  });
+
+  test('TYPED text that equals an encoded entry never decodes (no navigation happened)', () => {
+    const t = new RecallTracker();
+    expect(t.shouldDecode('if x⏎n  1')).toBe(false);
+  });
+
+  test('an edit after recall clears the mark — even a later byte-identical submit stays verbatim', () => {
+    const t = new RecallTracker();
+    t.navigated('if x⏎n  1', true);
+    t.touched('if x⏎n  1z'); // the buffer diverged: an edit
+    expect(t.shouldDecode('if x⏎n  1')).toBe(false);
+  });
+
+  test('a key that leaves the buffer unchanged (cursor movement) keeps the mark', () => {
+    const t = new RecallTracker();
+    t.navigated('if x⏎n  1', true);
+    t.touched('if x⏎n  1'); // right-arrow / home: same buffer
+    expect(t.shouldDecode('if x⏎n  1')).toBe(true);
+  });
+
+  test('navigating DOWN past the newest entry restores the typed line — readline says not-from-history, so no mark', () => {
+    const t = new RecallTracker();
+    t.navigated('a⏎nb', false); // historyIndex is -1: the saved in-progress line
+    expect(t.shouldDecode('a⏎nb')).toBe(false);
+  });
+
+  test('further navigation retargets the mark to the newly recalled entry', () => {
+    const t = new RecallTracker();
+    t.navigated('first⏎n1', true);
+    t.navigated('second⏎n2', true);
+    expect(t.shouldDecode('second⏎n2')).toBe(true);
+  });
+
+  test('the decision consumes the mark — the next submit starts fresh', () => {
+    const t = new RecallTracker();
+    t.navigated('e⏎n1', true);
+    expect(t.shouldDecode('e⏎n1')).toBe(true);
+    expect(t.shouldDecode('e⏎n1')).toBe(false);
+  });
+
+  test('a submit of DIFFERENT text than the mark stays verbatim and clears', () => {
+    const t = new RecallTracker();
+    t.navigated('e⏎n1', true);
+    expect(t.shouldDecode('other')).toBe(false);
+    expect(t.shouldDecode('e⏎n1')).toBe(false);
+  });
+
+  test('isHistoryNavKey: plain arrows and ctrl-p/ctrl-n navigate; everything else does not', () => {
+    expect(isHistoryNavKey({ name: 'up', ctrl: false, meta: false })).toBe(true);
+    expect(isHistoryNavKey({ name: 'down', ctrl: false, meta: false })).toBe(true);
+    expect(isHistoryNavKey({ name: 'p', ctrl: true, meta: false })).toBe(true);
+    expect(isHistoryNavKey({ name: 'n', ctrl: true, meta: false })).toBe(true);
+    expect(isHistoryNavKey({ name: 'p', ctrl: false, meta: false })).toBe(false);
+    expect(isHistoryNavKey({ name: 'up', ctrl: false, meta: true })).toBe(false);
+    expect(isHistoryNavKey({ name: 'a', ctrl: false, meta: false })).toBe(false);
+    expect(isHistoryNavKey(undefined)).toBe(false);
+  });
+
+  test('Repl wiring: observeKeyEffect samples rl state and resolveSubmitted decodes only under a live mark', () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const repl = new Repl({ input, output, env: { NO_COLOR: '1' } });
+    const encoded = encodeEntry('if x\n  1');
+    repl.decodeTable.set(encoded, 'if x\n  1');
+    // No navigation: the typed line passes through verbatim.
+    expect(repl.resolveSubmitted(encoded)).toBe(encoded);
+    // History navigation placed the line (readline's own verdict).
+    repl.rl = { line: encoded, historyIndex: 0 };
+    repl.observeKeyEffect({ name: 'up', ctrl: false, meta: false });
+    expect(repl.resolveSubmitted(encoded)).toBe('if x\n  1');
+    // Recall then edit: the mark clears the moment the buffer diverges.
+    repl.rl = { line: encoded, historyIndex: 0 };
+    repl.observeKeyEffect({ name: 'up', ctrl: false, meta: false });
+    repl.rl.line = encoded + 'z';
+    repl.observeKeyEffect({ name: 'z', ctrl: false, meta: false });
+    expect(repl.resolveSubmitted(encoded)).toBe(encoded);
   });
 });
 
