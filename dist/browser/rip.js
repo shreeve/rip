@@ -9151,10 +9151,206 @@ class Emitter {
     }
     return names;
   }
-  pushReactiveFrame(stmts, bound) {
+  nodeLine(node) {
+    const id = this.stores.idOf(node);
+    const span = id !== null ? this.stores.selfSpan(id) : null;
+    if (!span || typeof this.b.source !== "string")
+      return null;
+    let line = 1;
+    for (let i = 0;i < span[0] && i < this.b.source.length; i++) {
+      if (this.b.source[i] === `
+`)
+        line++;
+    }
+    return line;
+  }
+  checkScopeRedeclarations(stmts, params = [], owner = null) {
+    const forms = [];
+    const auth = (name, kind, node) => {
+      if (typeof name === "string")
+        forms.push({ name, kind, node, auth: true });
+    };
+    const plainForm = (name, node) => {
+      if (typeof name === "string")
+        forms.push({ name, kind: "plain", node, auth: false });
+    };
+    const dupIn = (names, node, what) => {
+      const seen = new Set;
+      for (const n of names) {
+        if (seen.has(n)) {
+          throw this.positionedError(node, `emitter: '${n}' is bound twice in one ${what} — one binding per name; rename or drop the duplicate`, ...owner !== null ? [owner] : []);
+        }
+        seen.add(n);
+      }
+      return names;
+    };
+    {
+      const names = [];
+      for (const p of params ?? [])
+        this.patternNames(p, names, true);
+      dupIn(names, isNode4(params?.[0]) ? params[0] : owner, "parameter list");
+      for (const n of names)
+        auth(n, "parameter", null);
+    }
+    const walk = (n, nested) => {
+      if (!isNode4(n))
+        return;
+      if (this.isModuleImport(n)) {
+        for (const name of Emitter.importedNames([n]))
+          auth(name, "import", n);
+        return;
+      }
+      if (isFunc2(n))
+        return;
+      if (isDefHead(n[0])) {
+        if (!nested && n.length === 4)
+          auth(n[1], "def", n);
+        return;
+      }
+      if (n[0] === "enum") {
+        if (!nested)
+          auth(n[1], "enum", n);
+        return;
+      }
+      if (n[0] === "component" && n.length === 3)
+        return;
+      if (n[0] === "class") {
+        if (!nested)
+          auth(n[1], "class", n);
+        if (n[2] != null)
+          walk(n[2], true);
+        const body = n[3];
+        if (isBlock2(body)) {
+          for (const stmt of body.slice(1)) {
+            if (isNode4(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3)
+              walk(stmt[2], true);
+            else if (!Emitter.isTypedWrapper(stmt))
+              walk(stmt, true);
+          }
+        }
+        return;
+      }
+      if (this.isReactiveDecl(n)) {
+        auth(n[1], n[0] === "computed" ? "computed" : "state", n);
+        if (!(n[0] === "computed" && isBlock2(n[2]) && n[2].length > 2))
+          walk(n[2], nested);
+        return;
+      }
+      if (this.isEffectDecl(n)) {
+        if (n[1] !== null)
+          auth(n[1], "effect", n);
+        return;
+      }
+      if (this.isReadonlyDecl(n)) {
+        auth(n[1], "readonly", n);
+        walk(n[2], nested);
+        return;
+      }
+      if (n[0] === "export") {
+        for (const spec of n.slice(1)) {
+          if (!isNode4(spec))
+            continue;
+          if ((spec[0] === "=" || spec[0] === "void-assign") && spec.length === 3 && typeof spec[1] === "string") {
+            auth(spec[1], "plain", spec);
+            walk(spec[2], nested);
+          } else {
+            walk(spec, nested);
+          }
+        }
+        return;
+      }
+      if (n[0] === "for-in" || n[0] === "for-of" || n[0] === "for-as") {
+        if (isNode4(n[1])) {
+          const names = [];
+          for (const pattern of n[1])
+            this.patternNames(pattern, names, true);
+          dupIn(names, n, "loop head");
+        }
+        for (const el of n.slice(2))
+          walk(el, true);
+        return;
+      }
+      if (isComprehensionNode(n)) {
+        walk(n[1], true);
+        for (const clause of n[2] ?? []) {
+          const names = [];
+          if (isNode4(clause[1]))
+            for (const pattern of clause[1])
+              this.patternNames(pattern, names, true);
+          dupIn(names, n, "comprehension clause");
+          walk(clause[2], true);
+        }
+        for (const g of n[3] ?? [])
+          walk(g, true);
+        return;
+      }
+      if (n[0] === "try") {
+        for (const part of n.slice(2)) {
+          if (isNode4(part) && part.length === 2 && Emitter.isPattern(part[0])) {
+            for (const name of dupIn(this.patternNames(part[0]), part[0], "catch pattern")) {
+              plainForm(name, n);
+            }
+            walk(part[1], true);
+          } else {
+            walk(part, true);
+          }
+        }
+        walk(n[1], true);
+        return;
+      }
+      if ((ASSIGNS.has(n[0]) || n[0] === "*>") && n.length === 3) {
+        if (typeof n[1] === "string")
+          plainForm(n[1], n);
+        else if (n[0] === "=" && Emitter.isPattern(n[1])) {
+          for (const name of dupIn(this.patternNames(n[1]), n, "destructuring pattern")) {
+            plainForm(name, n);
+          }
+        }
+      }
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      for (const el of n)
+        walk(el, below);
+    };
+    for (const s of stmts)
+      walk(s, false);
+    forms.forEach((f, i) => {
+      f.order = i;
+    });
+    const reject = (at, prior) => {
+      const line = prior.node !== null ? this.nodeLine(prior.node) : null;
+      const hint = prior.kind === "state" || prior.kind === "parameter" || prior.kind === "plain" ? ` — assign with '${at.name} = …' to update it, or choose a different name` : " — choose a different name";
+      throw this.positionedError(at.node, `emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ""}${hint}`, ...owner !== null ? [owner] : []);
+    };
+    const decls = new Map;
+    for (const f of forms) {
+      if (!f.auth)
+        continue;
+      const prior = decls.get(f.name);
+      if (prior !== undefined)
+        reject(f, prior);
+      decls.set(f.name, f);
+    }
+    for (const f of forms) {
+      if (f.auth)
+        continue;
+      const prior = decls.get(f.name);
+      if (prior !== undefined) {
+        if (prior.auth && f.order < prior.order)
+          reject(prior, f);
+        continue;
+      }
+      if (this.inScope(f.name))
+        continue;
+      if (this.cframes.some((fr) => fr.members.has(f.name)))
+        continue;
+      decls.set(f.name, f);
+    }
+  }
+  pushReactiveFrame(stmts, bound, params = [], owner = null) {
     const reactive = this.collectReactiveNames(stmts);
     const handles = this.collectEffectHandles(stmts);
     const readonly = this.collectReadonlyNames(stmts);
+    this.checkScopeRedeclarations(stmts, params, owner);
     this.rframes.push({
       reactive,
       computed: this.collectComputedNames(stmts),
@@ -9797,7 +9993,7 @@ class Emitter {
     }
     return { entries, names };
   }
-  hoistTargets(nodes, exclude = []) {
+  hoistTargets(nodes, exclude = [], extraDeclared = []) {
     const targets = new Map;
     let matchWrite = false;
     const reactive = new Set;
@@ -9930,6 +10126,16 @@ class Emitter {
       targets.delete(x);
     for (const x of reactive)
       targets.delete(x);
+    const scopeStmts = nodes.length === 1 && isBlock2(nodes[0]) ? nodes[0].slice(1) : nodes;
+    for (const x of Emitter.declaredNames(scopeStmts))
+      targets.delete(x);
+    for (const x of extraDeclared)
+      targets.delete(x);
+    for (const s of scopeStmts) {
+      if (this.isModuleImport(s))
+        for (const x of Emitter.importedNames([s]))
+          targets.delete(x);
+    }
     for (const f of this.cframes) {
       for (const name of f.members.keys())
         targets.delete(name);
@@ -10223,10 +10429,10 @@ class Emitter {
           this.statement(imp, 0);
         this.emitDataConst();
         const rest = all.slice(lead);
-        let entries = this.ambientHoistFilter(this.hoistTargets(rest));
+        let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], Emitter.importedNames(all.slice(0, lead))));
         this.attachSchemaConsts(entries);
         const names = new Set([...entries.map(([n]) => n), ...Emitter.importedNames(all.slice(0, lead))]);
-        for (const n of this.pushReactiveFrame(rest, names))
+        for (const n of this.pushReactiveFrame(all, names))
           names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
         this.moduleClassNames = Emitter.classDeclNames(rest);
@@ -10786,7 +10992,7 @@ class Emitter {
     if (stmts.length === 1) {
       const stmt = stmts[0];
       const { entries, names } = sub.scopedHoist([stmt], params.map(String));
-      for (const n of sub.pushReactiveFrame(stmts, names))
+      for (const n of sub.pushReactiveFrame(stmts, names, params.map(String)))
         names.add(n);
       sub.scopes.push(names);
       if (entries.length) {
@@ -10800,7 +11006,7 @@ class Emitter {
       bodyText = `{ ${sub.b.code} }`;
     } else {
       const { entries, names } = sub.scopedHoist([bodyNode], params.map(String));
-      for (const n of sub.pushReactiveFrame(stmts, names))
+      for (const n of sub.pushReactiveFrame(stmts, names, params.map(String)))
         names.add(n);
       sub.scopes.push(names);
       sub.b.emit(`{
@@ -12369,7 +12575,7 @@ ${pad ?? ""}`);
       this.b.emit(" ");
       const stmts = this.liveStmts(isBlock2(node[3]) ? node[3].slice(1) : [node[3]], { forwards: true });
       const { entries, names } = this.scopedHoist([node[3]], node[2]);
-      for (const n of this.pushReactiveFrame(stmts, names))
+      for (const n of this.pushReactiveFrame(stmts, names, node[2], node))
         names.add(n);
       this.scopes.push(names);
       this.funcBlock(node, node[3], stmts, ind, entries, isVoid);
@@ -13256,6 +13462,7 @@ ${pad ?? ""}`);
       return;
     }
     const { entries, names } = this.scopedHoist([body], []);
+    this.checkScopeRedeclarations([body], [], node);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set, bound: names });
     this.b.emit("{ ");
@@ -16913,7 +17120,7 @@ ${"  ".repeat(ind)}`);
   methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, atParams = [] }) {
     const stmts = this.liveStmts(isNode4(block) && block[0] === "block" ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
-    for (const n of this.pushReactiveFrame(stmts, names))
+    for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode))
       names.add(n);
     this.scopes.push(names);
     const outerMethod = this.methodName;
@@ -17064,7 +17271,7 @@ ${"  ".repeat(ind)}`);
     const isVoid = this.voidFuncs.has(node);
     const stmts = this.liveStmts(isNode4(block) && block[0] === "block" ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, params);
-    for (const n of this.pushReactiveFrame(stmts, names))
+    for (const n of this.pushReactiveFrame(stmts, names, params, node))
       names.add(n);
     this.scopes.push(names);
     const isAsync = Emitter.containsAwait(block);
