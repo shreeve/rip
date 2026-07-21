@@ -6,7 +6,7 @@ the Rip compiler: language, toolchain, runtimes, and editor support.
 Permanent documentation:
 
 - [README.md](README.md) — repository orientation and entry points.
-- [docs/SYNTAX.md](docs/SYNTAX.md) — context-sensitive language syntax.
+- [docs/POSSIBLE-FUTURE-SYNTAX.md](docs/POSSIBLE-FUTURE-SYNTAX.md) — speculative notes on potential future syntax (not current language facts).
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
 - [docs/HMR.md](docs/HMR.md) — HMR design and acceptance contract.
 - [docs/FRAME.md](docs/FRAME.md) — Rip-native hypermedia design and acceptance contract.

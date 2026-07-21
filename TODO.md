@@ -6,6 +6,35 @@ moved into real docs/tests.
 
 ---
 
+## Documentation
+
+- [ ] Write the REAL syntax reference: drill down from
+      `src/grammar/grammar.rip`, the lexer's context-sensitive behavior
+      (retags like `POST_IF`), and the battery (the syntax contract)
+      into an authoritative document. It takes the `docs/SYNTAX.md`
+      name when it exists; `docs/POSSIBLE-FUTURE-SYNTAX.md` (renamed
+      2026-07-20) keeps the speculative notes. Cross-check the three
+      editor grammars for drift while at it.
+
+---
+
+## Compiler / REPL — deferred findings (2026-07-20 reviews, PRs #176/#177)
+
+- [ ] REPL history decodeTable applies to typed input as well as
+      recalled lines (readline exposes no recall metadata): typing text
+      that exactly equals an encoded entry evaluates the decoded
+      original. Vanishingly narrow; fix needs readline-level recall
+      detection.
+- [ ] REPL OSC 11 drain discards a whole stdin chunk containing the
+      reply prefix — type-ahead mixed into the same chunk is dropped,
+      and a reply split across chunks may partially unshift. Bounded by
+      the 2×80ms startup window.
+- [ ] Cosmetic: the parameter-kind redeclaration message omits
+      "on line N" where every other kind includes one (parameters
+      carry no line in the message). Align when convenient.
+
+---
+
 ## Deferred findings — 2026-07-19 exit-gate reviews
 
 Three deep reviews (Janus Go, rip server package, docs coherence) ran
@@ -34,6 +63,15 @@ B-list real-but-deferrable items (janus included — no scratchpad there).
       unbuilt future work. (The scrub itself is done and documented:
       Janus's `ModifyResponse` deletes `Rip-Mark` from every client
       response, and the micro-cache stores post-scrub bytes.)
+
+### 2026-07-20 bench incident observations
+
+- [ ] A production rip-server exiting cleanly (exit 0) logs nothing
+      about why — no shutdown reason, no signal note. The manager
+      should say what ended it on the way out.
+- [ ] The 409 stale-claim retry gives up before the claim TTL expires,
+      despite logging "retrying until the stale claim expires" — retry
+      deadline and claim TTL are misaligned.
 
 ### janus (tracked here; see janus/docs perf doc for measured levers)
 
@@ -74,21 +112,39 @@ B-list real-but-deferrable items (janus included — no scratchpad there).
 
 ## Done / refuted
 
-- Last-match `_` under concurrency — **fixed** on `match-underscore-scope`.
-  Audit confirmed the clobber: a function whose enclosing scope already
-  declared `_` shared it, so overlapping async invocations crossed
-  captures. Now every function body with its own match write declares
-  its own `let _` (per-invocation; no ALS). Same seam fixes: the
-  declare-in-place TDZ on `_ = v` after a module-level match, the
-  single-statement schema body dropping ALL hoist targets, and match
-  writes in loop-head pattern defaults; a match write in a parameter
-  default rejects positioned. Module top-level `_` stays ONE binding —
-  never `await` between a module-level match and its `_` read (pinned).
-  Pins: `test/battery/regex.rip`, `test/battery/schema.rip`,
+- Same-scope redeclaration — **fixed** (PR #177, `2b54cfa`, landed
+  2026-07-20). A second declaring form for one name in one scope
+  rejects positioned, naming both sites and the prior kind; replaces
+  the unpositioned Bun BuildMessages and the three silent cells (the
+  assign-then-state TDZ trap, double `def` last-wins on Bun/SyntaxError
+  on Node, param+`def` swallowing the argument). 42 pins in
+  `test/battery/redeclare.rip`. Bonus: `def f` then `f = 2` is now a
+  working reassignment (this also closes the "in-file `def g` then
+  `g = 5` emits invalid JS" finding from the #176 reviews). Writes,
+  write-through, nested shadowing, and REPL fluidity untouched.
+- The v4 REPL — **landed** (PR #176, 2026-07-20). Built on four
+  compiler seams (ambientBindings, result.bindings inventory,
+  classifyCompleteness, repl:true emission) instead of v3's
+  generated-code scanning; live lexer-driven highlighting, themeable
+  with OSC 11 light/dark detection, declaration echo, cwd-anchored
+  dynamic imports, injective 0600 history, Unicode identifiers,
+  `-e/--eval`. Bare `rip` on a TTY starts it.
+- Last-match `_` under concurrency — **fixed** (PR #175, landed
+  2026-07-20 as `f3a8d18`). Audit confirmed the clobber: a function
+  whose enclosing scope already declared `_` shared it, so overlapping
+  async invocations crossed captures. Now every function body with its
+  own match write declares its own `let _` (per-invocation; no ALS).
+  Same seam fixes: the declare-in-place TDZ on `_ = v` after a
+  module-level match, the single-statement schema body dropping ALL
+  hoist targets, and match writes in loop-head pattern defaults; a
+  match write in a parameter default rejects positioned. Module
+  top-level `_` stays ONE binding — never `await` between a
+  module-level match and its `_` read (pinned). Pins:
+  `test/battery/regex.rip`, `test/battery/schema.rip`,
   `test/lang/emitter-cases.test.js`, `test/corpus/match.rip`.
 - Component `_init` drops parenthetical multi-stmt member initializers
-  from hoist → bare assigns — **fixed** on this branch (`d3c59d1`); pin
-  in `test/battery/components.rip`.
+  from hoist → bare assigns — **fixed** (`d3c59d1`); pin in
+  `test/battery/components.rip`.
 - if-expr on `=!` leaves IIFE temp undeclared — **refuted** (module
   hoist present; truncated inspection). Re-probed 2026-07-20:
   `printf 'x =! if a\n  b = 1\n  b + 1\nelse\n  2\n' | ./bin/rip -c`
