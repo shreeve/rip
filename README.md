@@ -25,12 +25,9 @@ in [docs/ROADMAP.md](docs/ROADMAP.md).
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) — mandatory repository rules and invariants
-- [docs/POSSIBLE-FUTURE-SYNTAX.md](docs/POSSIBLE-FUTURE-SYNTAX.md) — speculative notes on potential future syntax
 - [docs/TYPES.md](docs/TYPES.md) — type-system and editor architecture
 - [docs/HMR.md](docs/HMR.md) — hot-module-replacement design
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work
-- [CHANGELOG.md](CHANGELOG.md) — shipped and unreleased changes
-
 ## Core commands
 
 ```sh

@@ -1,7 +1,7 @@
 # Product Roadmap
 
 This document lists current open work only. Completed behavior belongs
-in tests, `CHANGELOG.md`, and permanent reference documentation.
+in tests and permanent reference documentation.
 
 No item here authorizes a silent design choice. Product decisions are
 resolved before implementation depends on them.
