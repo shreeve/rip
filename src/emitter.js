@@ -683,12 +683,22 @@ class Emitter {
       return names;
     };
     // Parameters bind first (before every body statement) and share
-    // one namespace across the whole list.
+    // one namespace across the whole list. Each name records its
+    // declaring site — the parameter's own node (a pattern, default,
+    // typed-var) or the parameter LIST for a bare name (bare names
+    // are strings, spanless; the list's span starts at the first
+    // parameter) — so the rejection names the line like every other
+    // declaring kind.
     {
       const names = [];
-      for (const p of params ?? []) this.patternNames(p, names, true);
+      const sites = [];
+      for (const p of params ?? []) {
+        this.patternNames(p, names, true);
+        const site = isNode(p) ? p : params;
+        while (sites.length < names.length) sites.push(site);
+      }
       dupIn(names, isNode(params?.[0]) ? params[0] : owner, 'parameter list');
-      for (const n of names) auth(n, 'parameter', null);
+      names.forEach((n, i) => auth(n, 'parameter', sites[i]));
     }
     const walk = (n, nested) => {
       if (!isNode(n)) return;
