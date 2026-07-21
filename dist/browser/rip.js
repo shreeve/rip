@@ -8938,6 +8938,7 @@ class Emitter {
     this.b = builder;
     this.repl = repl;
     this.replResultName = null;
+    this.replImportResolver = null;
     this.script = script;
     this.importSpans = [];
     this.pins = pins;
@@ -10230,7 +10231,7 @@ class Emitter {
         this.moduleClassNames = Emitter.classDeclNames(rest);
         this.rejectDuplicateDefault(rest);
         this.scopes.push(names);
-        entries = this.applyDeclareInPlace(entries, sexpr.slice(1));
+        entries = this.applyDeclareInPlace(entries, sexpr.slice(1), { tailIsExpression: this.repl });
         if (entries.length) {
           this.hoistLine(entries);
           this.b.emit(`
@@ -10306,7 +10307,7 @@ class Emitter {
       this.moduleClassNames = Emitter.classDeclNames(stmts);
       this.rejectDuplicateDefault(stmts);
       this.scopes.push(names);
-      entries = this.applyDeclareInPlace(entries, sexpr.slice(1));
+      entries = this.applyDeclareInPlace(entries, sexpr.slice(1), { tailIsExpression: this.repl });
       if (entries.length) {
         this.hoistLine(entries);
         this.b.emit(`
@@ -10449,13 +10450,13 @@ class Emitter {
         this.b.emit(`const ${nsName} = `);
       else if (parts.length > 0)
         this.b.emit(`const { ${parts.join(", ")} } = `);
-      this.b.emit("await import(");
+      this.b.emit(`await import(${this.replResolver()}(`);
       {
         const specStart = this.b.offset;
         this.mark(node, "source", () => this.b.emit(this.moduleSource(source)));
         this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
       }
-      this.b.emit(")");
+      this.b.emit("))");
       if (nsName !== null && parts.length > 0) {
         this.b.emit(`, { ${parts.join(", ")} } = ${nsName}`);
       }
@@ -10926,8 +10927,10 @@ class Emitter {
     this.funcBodyStmt = funcBody;
     if (isNode4(node)) {
       const form = Emitter.STATEMENT_FORMS[node[0]];
-      if (form && form(this, node, ind))
+      if (form && form(this, node, ind)) {
+        this.replDeclEcho(node);
         return;
+      }
       if (Emitter.returnGuard(node) || Emitter.throwGuard(node)) {
         return this.returnGuardStatement(node, null);
       }
@@ -10976,22 +10979,43 @@ class Emitter {
       this.tsComponentCompanion(node[2], node[1], false, this.annotationText(node, "typeParams"));
     }
   }
-  static REPL_NO_CAPTURE = new Set([...ASSIGNS, "//=", "%%=", "++", "--"]);
   replSlot() {
     if (this.replResultName === null) {
       this.replResultName = Emitter.mintName("__result", this.temps.used);
     }
     return this.replResultName;
   }
+  replResolver() {
+    if (this.replImportResolver === null) {
+      this.replImportResolver = Emitter.mintName("__resolveImport", this.temps.used);
+    }
+    return this.replImportResolver;
+  }
   replCapture(node) {
     if (!this.repl || node !== this.lastProgramStmt)
-      return false;
-    if (isNode4(node) && Emitter.REPL_NO_CAPTURE.has(node[0]) && node.length === 3)
       return false;
     this.b.emit(`const ${this.replSlot()} = `);
     this.expr(node);
     this.b.emit(";");
     return true;
+  }
+  replDeclEcho(node) {
+    if (!this.repl || node !== this.lastProgramStmt || !isNode4(node))
+      return;
+    let name = null;
+    let unwrap = false;
+    if (this.isReactiveDecl(node) && typeof node[1] === "string") {
+      name = node[1];
+      unwrap = true;
+    } else if (this.isReadonlyDecl(node) && typeof node[1] === "string") {
+      name = node[1];
+    } else if (this.isEffectDecl(node) && typeof node[1] === "string") {
+      name = node[1];
+    }
+    if (name === null)
+      return;
+    this.b.emit(`
+const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
   }
   whileStatement(node, ind) {
     this.inCtrl(() => this.whileStatementCtrl(node, ind));
@@ -17348,6 +17372,21 @@ ${"  ".repeat(ind)}`);
     });
   }
   call(node) {
+    if (this.repl && node[0] === "import" && (node.length === 2 || node.length === 3) && this.lockedHead(node, "dynimport")) {
+      this.mark(node, "$self", () => {
+        this.b.emit(`import(${this.replResolver()}(`);
+        this.mark(node, "args", () => {
+          this.callArg(node[1]);
+          this.b.emit(")");
+          if (node.length === 3) {
+            this.b.emit(", ");
+            this.callArg(node[2]);
+          }
+        });
+        this.b.emit(")");
+      });
+      return;
+    }
     if (node[0] === "rest" && this.inPattern) {
       throw this.positionedError(node, this.bindingPattern ? "emitter: a `rest` element is only legal at an array pattern's tail" : "emitter: Cannot use 'rest' expression as a destructuring target (destructuring rest is spelled '...name')");
     }
@@ -18537,7 +18576,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, stores, runtimes, bindings, replResultName: emitter.replResultName, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -19103,6 +19142,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     runtimes: emitted.runtimes,
     bindings: emitted.bindings,
     replResultName: emitted.replResultName,
+    replImportResolver: emitted.replImportResolver,
     tsRegions: emitted.tsRegions,
     pinnables: emitted.pinnables,
     imports: emitted.imports,
