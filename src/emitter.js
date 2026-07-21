@@ -613,6 +613,230 @@ class Emitter {
     return names;
   }
 
+  // The 1-based source line of a node's span start — for diagnostics
+  // that name a PRIOR site inside the message body (the redeclaration
+  // rejection); null when the node has no recorded span or the
+  // builder carries no source text.
+  nodeLine(node) {
+    const id = this.stores.idOf(node);
+    const span = id !== null ? this.stores.selfSpan(id) : null;
+    if (!span || typeof this.b.source !== 'string') return null;
+    let line = 1;
+    for (let i = 0; i < span[0] && i < this.b.source.length; i++) {
+      if (this.b.source[i] === '\n') line++;
+    }
+    return line;
+  }
+
+  // Same-scope redeclaration: one binding per name per scope. Runs at
+  // every function/program scope open, over the scope's live
+  // statements and parameters, BEFORE the scope's own frame pushes —
+  // this.scopes and this.cframes still describe the ENCLOSING
+  // environment, exactly what hoist filtering consults.
+  //
+  // Declaring forms carry the binding-inventory kind vocabulary:
+  // parameter, import, state (:=), computed (~=), readonly (=!),
+  // effect (a bound handle), def, class, enum — the AUTHORITATIVE
+  // forms — and plain (an assignment that creates the binding: a
+  // bare-name `=`/compound/merge target, a destructuring element, a
+  // catch-pattern element). Two authoritative forms for one name
+  // reject in EITHER order (hoisting never licenses a duplicate). A
+  // plain form classifies by position against the scope's own
+  // authoritative declaration of the same name: BEFORE it, the
+  // assignment created the binding the declaration then re-declares —
+  // the declaration rejects, naming the assignment (the TDZ cell:
+  // `x = 1` then `x := 1` emits a write into a const's temporal dead
+  // zone); AFTER it, the assignment is a WRITE with the binding's own
+  // write semantics (state write-through, the readonly/computed write
+  // guards) and is never flagged. A plain form for a name bound by an
+  // ENCLOSING scope (an outer function, the REPL's ambient seed) or by
+  // a component member is a write to that binding, never a declaration
+  // — mirroring the hoist suppression exactly.
+  //
+  // Deliberately OUTSIDE the rule, each being its own nested scope
+  // (shadowing, never a same-scope duplicate): loop variables (the
+  // for-head), simple catch bindings (the JS catch parameter),
+  // comprehension clause variables, nested function bodies, and
+  // block-nested def/class/enum (block-scoped declarations). The
+  // emitter-minted last-match `_` never participates — a match write
+  // is a write, not a declaring form. Duplicate names WITHIN one
+  // pattern (a parameter list, a destructuring pattern, a loop head,
+  // a catch pattern) reject unconditionally: `{x, x}` has no reading.
+  checkScopeRedeclarations(stmts, params = [], owner = null) {
+    const forms = [];
+    const auth = (name, kind, node) => {
+      if (typeof name === 'string') forms.push({ name, kind, node, auth: true });
+    };
+    const plainForm = (name, node) => {
+      if (typeof name === 'string') forms.push({ name, kind: 'plain', node, auth: false });
+    };
+    const dupIn = (names, node, what) => {
+      const seen = new Set();
+      for (const n of names) {
+        if (seen.has(n)) {
+          throw this.positionedError(node,
+            `emitter: '${n}' is bound twice in one ${what} — one binding per name; rename or drop the duplicate`,
+            ...(owner !== null ? [owner] : []));
+        }
+        seen.add(n);
+      }
+      return names;
+    };
+    // Parameters bind first (before every body statement) and share
+    // one namespace across the whole list.
+    {
+      const names = [];
+      for (const p of params ?? []) this.patternNames(p, names, true);
+      dupIn(names, isNode(params?.[0]) ? params[0] : owner, 'parameter list');
+      for (const n of names) auth(n, 'parameter', null);
+    }
+    const walk = (n, nested) => {
+      if (!isNode(n)) return;
+      if (this.isModuleImport(n)) {
+        for (const name of Emitter.importedNames([n])) auth(name, 'import', n);
+        return;
+      }
+      if (isFunc(n)) return;
+      if (isDefHead(n[0])) {
+        if (!nested && n.length === 4) auth(n[1], 'def', n);
+        return;
+      }
+      if (n[0] === 'enum') {
+        if (!nested) auth(n[1], 'enum', n);
+        return;
+      }
+      if (n[0] === 'component' && n.length === 3) return;
+      if (n[0] === 'class') {
+        if (!nested) auth(n[1], 'class', n);
+        if (n[2] != null) walk(n[2], true);
+        // Field VALUES are expressions of this scope; field names are
+        // members, never scope bindings (hoistTargets' class rule).
+        const body = n[3];
+        if (isBlock(body)) {
+          for (const stmt of body.slice(1)) {
+            if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) walk(stmt[2], true);
+            else if (!Emitter.isTypedWrapper(stmt)) walk(stmt, true);
+          }
+        }
+        return;
+      }
+      if (this.isReactiveDecl(n)) {
+        auth(n[1], n[0] === 'computed' ? 'computed' : 'state', n);
+        if (!(n[0] === 'computed' && isBlock(n[2]) && n[2].length > 2)) walk(n[2], nested);
+        return;
+      }
+      if (this.isEffectDecl(n)) {
+        if (n[1] !== null) auth(n[1], 'effect', n);
+        return;
+      }
+      if (this.isReadonlyDecl(n)) {
+        auth(n[1], 'readonly', n);
+        walk(n[2], nested);
+        return;
+      }
+      if (n[0] === 'export') {
+        for (const spec of n.slice(1)) {
+          if (!isNode(spec)) continue;
+          // An exported plain assign is `export const …` — a real
+          // declaration (never a hoisted write), so it participates
+          // authoritatively under the plain kind.
+          if ((spec[0] === '=' || spec[0] === 'void-assign') && spec.length === 3 && typeof spec[1] === 'string') {
+            auth(spec[1], 'plain', spec);
+            walk(spec[2], nested);
+          } else {
+            walk(spec, nested);
+          }
+        }
+        return;
+      }
+      if (n[0] === 'for-in' || n[0] === 'for-of' || n[0] === 'for-as') {
+        // Loop variables declare in the for-head — their own scope;
+        // only intra-head duplicates reject. The vars slot is a LIST
+        // of patterns (value, index/key).
+        if (isNode(n[1])) {
+          const names = [];
+          for (const pattern of n[1]) this.patternNames(pattern, names, true);
+          dupIn(names, n, 'loop head');
+        }
+        for (const el of n.slice(2)) walk(el, true);
+        return;
+      }
+      if (isComprehensionNode(n)) {
+        walk(n[1], true);
+        for (const clause of n[2] ?? []) {
+          const names = [];
+          if (isNode(clause[1])) for (const pattern of clause[1]) this.patternNames(pattern, names, true);
+          dupIn(names, n, 'comprehension clause');
+          walk(clause[2], true);
+        }
+        for (const g of n[3] ?? []) walk(g, true);
+        return;
+      }
+      if (n[0] === 'try') {
+        for (const part of n.slice(2)) {
+          if (isNode(part) && part.length === 2 && Emitter.isPattern(part[0])) {
+            // A destructured catch assigns its elements in THIS scope
+            // (a simple catch name is the JS catch parameter — its
+            // own per-handler scope, walked generically below).
+            for (const name of dupIn(this.patternNames(part[0]), part[0], 'catch pattern')) {
+              plainForm(name, n);
+            }
+            walk(part[1], true);
+          } else {
+            walk(part, true);
+          }
+        }
+        walk(n[1], true);
+        return;
+      }
+      if ((ASSIGNS.has(n[0]) || n[0] === '*>') && n.length === 3) {
+        if (typeof n[1] === 'string') plainForm(n[1], n);
+        else if (n[0] === '=' && Emitter.isPattern(n[1])) {
+          for (const name of dupIn(this.patternNames(n[1]), n, 'destructuring pattern')) {
+            plainForm(name, n);
+          }
+        }
+      }
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      for (const el of n) walk(el, below);
+    };
+    for (const s of stmts) walk(s, false);
+    forms.forEach((f, i) => { f.order = i; });
+    const reject = (at, prior) => {
+      const line = prior.node !== null ? this.nodeLine(prior.node) : null;
+      const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'plain'
+        ? ` — assign with '${at.name} = …' to update it, or choose a different name`
+        : ' — choose a different name';
+      throw this.positionedError(at.node,
+        `emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ''}${hint}`,
+        ...(owner !== null ? [owner] : []));
+    };
+    const decls = new Map();
+    for (const f of forms) {
+      if (!f.auth) continue;
+      const prior = decls.get(f.name);
+      if (prior !== undefined) reject(f, prior);
+      decls.set(f.name, f);
+    }
+    for (const f of forms) {
+      if (f.auth) continue;
+      const prior = decls.get(f.name);
+      if (prior !== undefined) {
+        // A plain form ahead of the scope's own declaration: the
+        // assignment created the binding — the declaration is the
+        // redeclaration and rejects, naming the assignment site.
+        if (prior.auth && f.order < prior.order) reject(prior, f);
+        continue; // a write — the binding's own write semantics govern
+      }
+      // A name an enclosing scope (or the ambient seed) binds, or a
+      // component member: the assignment targets THAT binding — the
+      // exact set hoist filtering suppresses.
+      if (this.inScope(f.name)) continue;
+      if (this.cframes.some((fr) => fr.members.has(f.name))) continue;
+      decls.set(f.name, f);
+    }
+  }
+
   // Open a reactive frame for a scope (paired with a this.scopes push
   // at every function/program scope; loop/catch frames are
   // binding-only and push no scope). Returns every const-declared
@@ -622,11 +846,13 @@ class Emitter {
   // shadow-hoist it). Handles and readonly names enter the frame's
   // BOUND set, never the reactive set: both are plain consts (reads
   // never unwrap), and each shadows any outer reactive name it
-  // re-binds.
-  pushReactiveFrame(stmts, bound) {
+  // re-binds. `params` (the function scopes) join the redeclaration
+  // check as parameter-kind declarations.
+  pushReactiveFrame(stmts, bound, params = [], owner = null) {
     const reactive = this.collectReactiveNames(stmts);
     const handles = this.collectEffectHandles(stmts);
     const readonly = this.collectReadonlyNames(stmts);
+    this.checkScopeRedeclarations(stmts, params, owner);
     this.rframes.push({
       reactive,
       computed: this.collectComputedNames(stmts),
@@ -1597,7 +1823,7 @@ class Emitter {
     return { entries, names };
   }
 
-  hoistTargets(nodes, exclude = []) {
+  hoistTargets(nodes, exclude = [], extraDeclared = []) {
     const targets = new Map();
     // True when this scope's own statements contain a match write
     // (`=~`, a regex index) — carried out on the entries so
@@ -1784,6 +2010,19 @@ class Emitter {
     for (const x of exclude) this.patternNames(x, excludeNames, true);
     for (const x of excludeNames) targets.delete(x);
     for (const x of reactive) targets.delete(x);
+    // One binding per name: a def/class/enum declaration or an import
+    // already binds the name through its own keyword — the hoist line
+    // must never re-declare it (`def f` then `f = 2` is a plain
+    // reassignment of the function binding, not a second `let f`).
+    // The scope's statement level only (one block unwrap for the
+    // body-node callers): block-NESTED declarations are block-scoped
+    // JS and never collide with a function-scoped `let`.
+    const scopeStmts = nodes.length === 1 && isBlock(nodes[0]) ? nodes[0].slice(1) : nodes;
+    for (const x of Emitter.declaredNames(scopeStmts)) targets.delete(x);
+    for (const x of extraDeclared) targets.delete(x);
+    for (const s of scopeStmts) {
+      if (this.isModuleImport(s)) for (const x of Emitter.importedNames([s])) targets.delete(x);
+    }
     // Component member names never hoist: a bare write inside a
     // member body targets the instance member (`this.name = …`),
     // never a fresh local (the rule — a member name cannot be
@@ -2254,10 +2493,14 @@ class Emitter {
         for (const imp of all.slice(0, lead)) this.statement(imp, 0);
         this.emitDataConst();
         const rest = all.slice(lead);
-        let entries = this.ambientHoistFilter(this.hoistTargets(rest));
+        // Leading-import names join the hoist exclusion (one binding
+        // per name — a later assignment writes the import binding,
+        // never a second `let`) and the redeclaration check (the
+        // whole program is one scope; the emission split is layout).
+        let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], Emitter.importedNames(all.slice(0, lead))));
         this.attachSchemaConsts(entries);
         const names = new Set([...entries.map(([n]) => n), ...Emitter.importedNames(all.slice(0, lead))]);
-        for (const n of this.pushReactiveFrame(rest, names)) names.add(n);
+        for (const n of this.pushReactiveFrame(all, names)) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
         this.moduleClassNames = Emitter.classDeclNames(rest);
         this.rejectDuplicateDefault(rest);
@@ -2987,7 +3230,7 @@ class Emitter {
       // write's `_`), and the emitted function is a real (strict
       // module) scope where an undeclared write throws.
       const { entries, names } = sub.scopedHoist([stmt], params.map(String));
-      for (const n of sub.pushReactiveFrame(stmts, names)) names.add(n);
+      for (const n of sub.pushReactiveFrame(stmts, names, params.map(String))) names.add(n);
       sub.scopes.push(names);
       if (entries.length) {
         sub.hoistLine(entries);
@@ -2998,7 +3241,7 @@ class Emitter {
       bodyText = `{ ${sub.b.code} }`;
     } else {
       const { entries, names } = sub.scopedHoist([bodyNode], params.map(String));
-      for (const n of sub.pushReactiveFrame(stmts, names)) names.add(n);
+      for (const n of sub.pushReactiveFrame(stmts, names, params.map(String))) names.add(n);
       sub.scopes.push(names);
       sub.b.emit('{\n');
       if (entries.length) {
@@ -4769,7 +5012,7 @@ class Emitter {
       this.b.emit(' ');
       const stmts = this.liveStmts(isBlock(node[3]) ? node[3].slice(1) : [node[3]], { forwards: true });
       const { entries, names } = this.scopedHoist([node[3]], node[2]);
-      for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
+      for (const n of this.pushReactiveFrame(stmts, names, node[2], node)) names.add(n);
       this.scopes.push(names);
       // def bodies implicitly return their last expression, same as
       // arrow functions — unless the def is void.
@@ -5979,6 +6222,7 @@ class Emitter {
     // wrapper; object literals group — a bare `{`
     // would open a block.
     const { entries, names } = this.scopedHoist([body], []);
+    this.checkScopeRedeclarations([body], [], node);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set(), bound: names });
     this.b.emit('{ ');
@@ -10562,7 +10806,7 @@ class Emitter {
   methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, atParams = [] }) {
     const stmts = this.liveStmts(isNode(block) && block[0] === 'block' ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
-    for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
+    for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode)) names.add(n);
     this.scopes.push(names);
     const outerMethod = this.methodName;
     this.methodName = methodName;
@@ -10755,7 +10999,7 @@ class Emitter {
     const isVoid = this.voidFuncs.has(node);
     const stmts = this.liveStmts(isNode(block) && block[0] === 'block' ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, params);
-    for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
+    for (const n of this.pushReactiveFrame(stmts, names, params, node)) names.add(n);
     this.scopes.push(names);
     const isAsync = Emitter.containsAwait(block);
     const isGen = Emitter.containsYield(block);
