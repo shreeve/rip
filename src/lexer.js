@@ -2105,6 +2105,16 @@ export function isIdentifierName(value) {
   }
   return true;
 }
+
+// Every identifier-shaped run in a text — built from the SAME
+// IDENT_START/IDENT_PART classes (one identifier vocabulary in the
+// repository), for consumers that mint scaffold names against
+// everything a source spells. String.match with /g resets lastIndex
+// itself, so the shared regex stays stateless across calls.
+const IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, 'g');
+export function identifierRuns(text) {
+  return text.match(IDENT_RUN_RE) ?? [];
+}
 const DIGIT = /[0-9]/;
 
 // The numeric-literal matcher: binary/octal/hex with optional
@@ -2183,6 +2193,20 @@ export function tokenize(text, path = '<anonymous>') {
     err.start = at;
     err.end = end;
     throw err;
+  };
+
+  // The end-state variant: the input ENDED while a delimiter was
+  // still open (an unclosed bracket, an unterminated string/heredoc,
+  // an open heregex), so more input can complete the program. The
+  // structured fact classifyCompleteness consumes — the span still
+  // points at the opener, never a pretend position at end of input.
+  const failOpenAtEnd = (message, at, end = at) => {
+    try {
+      fail(message, at, end);
+    } catch (err) {
+      err.openAtEnd = true;
+      throw err;
+    }
   };
 
   const push = (kind, value, start, end, extra = {}) => {
@@ -2317,7 +2341,7 @@ export function tokenize(text, path = '<anonymous>') {
       if (text[pos] === '\\') pos++;
       pos++;
     }
-    if (pos >= text.length) fail('unterminated string', opener);
+    if (pos >= text.length) failOpenAtEnd('unterminated string', opener);
     const content = text.slice(contentStart, pos);
     pos += delim.length;
     return content;
@@ -2392,7 +2416,7 @@ export function tokenize(text, path = '<anonymous>') {
       }
       pos++;
     }
-    if (pos >= text.length) fail('unterminated string', ctx.opener);
+    if (pos >= text.length) failOpenAtEnd('unterminated string', ctx.opener);
 
     const rawChunk = text.slice(chunkStart, hash === -1 ? pos : hash);
     if (hash === -1 && !ctx.started) {
@@ -2538,7 +2562,12 @@ export function tokenize(text, path = '<anonymous>') {
       pos = interpAt + 2;
       return;
     }
-    if (!text.startsWith('///', pos)) fail('missing /// (unclosed heregex)', ctx.opener);
+    if (!text.startsWith('///', pos)) {
+      // The chunk scan stops only at the closer, an interpolation, or
+      // end of input — reaching here without the closer IS end of
+      // input, so continuation input can still close the literal.
+      failOpenAtEnd('missing /// (unclosed heregex)', ctx.opener);
+    }
     const bodyEnd = pos;
     pos += 3;
     const flags = /^\w*/.exec(text.slice(pos))[0];
@@ -3074,7 +3103,7 @@ export function tokenize(text, path = '<anonymous>') {
           if (ch === closer) depth--;
           if (depth > 0) i++;
         }
-        if (depth !== 0) fail(`unclosed %w${opener} — never closed by '${closer}'`, pos, pos + 3);
+        if (depth !== 0) failOpenAtEnd(`unclosed %w${opener} — never closed by '${closer}'`, pos, pos + 3);
         push('[', '[', pos, pos + 3);
         const wordRe = /(?:\\\s|\S)+/g;
         wordRe.lastIndex = pos + 3;
@@ -3428,7 +3457,7 @@ export function tokenize(text, path = '<anonymous>') {
   if (parens.length > 0) {
     const open = parens[0];
     const glyph = { call: '(', group: '(', index: '[', array: '[', object: '{', interp: '#{' }[open.kind] ?? open.kind;
-    fail(`unclosed '${glyph}' — never closed by end of input`, open.at, open.at + glyph.length);
+    failOpenAtEnd(`unclosed '${glyph}' — never closed by end of input`, open.at, open.at + glyph.length);
   }
 
   // Close any open blocks at end of input, anchored at the end of the

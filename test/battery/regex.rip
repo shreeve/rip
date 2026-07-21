@@ -275,3 +275,135 @@ test 'heregex forward slashes', '''
 code 'regex literal', '/test/', '/test/'
 code 'regex with flags', '/test/gi', '/test/gi'
 code 'heregex ${} no interpolation', '///test${var}end///', '/test${var}end/'
+
+# ==============================================================================
+# Last-match scoping — `_` is per-function-invocation: every function
+# body containing a match write (`=~`, `text[/re/]`, `text[/re/, n]`)
+# declares its own `_`, so concurrent async invocations never clobber
+# each other's match. Module top-level `_` is ONE binding for the whole
+# module: sequential module-level matches read back correctly, but the
+# binding is shared across await interleavings — never `await` between
+# a module-level match and its `_` read (function bodies are exempt;
+# each invocation owns its `_`).
+# ==============================================================================
+
+test 'each function owns its last match — inner never clobbers outer', '''
+  outer = ->
+    "q1" =~ /q(1)/
+    inner = (s) ->
+      s =~ /x(\\w+)/
+      _[1]
+    [inner("xZZ"), _[1]]
+  outer()
+''', ['ZZ', '1']
+
+test 'a function match never clobbers the module-level match', '''
+  "m0" =~ /m(0)/
+  f = (s) -> (s =~ /y(\\w)/) and _[1]
+  r = f("yQ")
+  [r, _[1]]
+''', ['Q', '0']
+
+test 'a regex index in a function never clobbers the module-level match', '''
+  "m0" =~ /m(0)/
+  f = (s) -> s[/y(\\w)/, 1]
+  r = f("yQ")
+  [r, _[1]]
+''', ['Q', '0']
+
+test 'a closure that only reads _ sees the enclosing match', '''
+  f = ->
+    "ab" =~ /a(b)/
+    read = -> _[1]
+    read()
+  f()
+''', 'b'
+
+test 'module-level matches read back sequentially', '''
+  "one1" =~ /one(\\d)/
+  a = _[1]
+  "two2" =~ /two(\\d)/
+  [a, _[1]]
+''', ['1', '2']
+
+test 'a match inside an if-expression lowering binds the function _', '''
+  f = (s) ->
+    r = if s =~ /q(\\d)/ then _[1] else "none"
+    r
+  f("q7")
+''', '7'
+
+test 'a match inside a comprehension guard binds the enclosing _', '''
+  f = (xs) ->
+    hits = (x for x in xs when x =~ /a(\\w)/)
+    [hits.length, _[1]]
+  f(["ax", "b", "ay"])
+''', [2, 'y']
+
+test 'a match in a loop leaves the last iteration in _', '''
+  f = (xs) ->
+    for x in xs
+      x =~ /v(\\d)/
+    _[1]
+  f(["v1", "v2", "v3"])
+''', '3'
+
+test 'the rightmost match in one expression wins _', '''
+  ("a1" =~ /(a)1/) and ("b2" =~ /(b)2/)
+  _[1]
+''', 'b'
+
+test 'a user _ parameter receives the match write', '''
+  k = (_) ->
+    "zz" =~ /z(z)/
+    _[1]
+  k("param")
+''', 'z'
+
+test 'an explicit _ write shares the scope with a later match', '''
+  f = ->
+    _ = "start"
+    "ab" =~ /a(b)/
+    _[1]
+  f()
+''', 'b'
+
+test 'a module-level match precedes an explicit _ write', '''
+  "a" =~ /(a)/
+  cap = _[1]
+  _ = 5
+  [cap, _]
+''', ['a', 5]
+
+test 'an explicit _ write directly after a module-level match', '''
+  hit = ("a" =~ /(a)/) isnt null
+  _ = 5
+  [hit, _]
+''', [true, 5]
+
+test 'a class method owns its last match', '''
+  "m0" =~ /m(0)/
+  class C
+    grab: (s) ->
+      s =~ /c(\\w)/
+      _[1]
+  r = (new C).grab("cY")
+  [r, _[1]]
+''', ['Y', '0']
+
+test 'a match in a loop-head pattern default binds the function _', '''
+  f = (xs) ->
+    for [a = (("d" =~ /(d)/) and "dflt")] in xs
+      a
+    _[1]
+  f([[], ["v"]])
+''', 'd'
+
+fail 'a match write in a parameter default rejects', '''
+  f = (x = ("ab" =~ /a(b)/)) -> x
+''', 'parameter default cannot write the last-match binding'
+
+test 'a function inside a parameter default owns its own _', '''
+  f = (cb = (s) -> (s =~ /x(\\w)/) and _[1]) -> cb("xJ")
+  f()
+''', 'J'

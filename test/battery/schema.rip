@@ -3921,6 +3921,33 @@ test 'methods accept parameters (typed and untyped) at runtime', '''
   [b.amount, a.scaled(2, "x")]
   ''', [125, 'x200']
 
+# A single-statement callable body hoists its assignment targets the
+# same as a multi-statement one — the match write's `_` and any plain
+# local both declare inside the emitted function, never leak.
+
+test 'single-statement method body declares its match _', '''
+  X = schema :shape
+    name! string
+    tail: -> ("abc" =~ /b(c)/) and _[1]
+  X.parse({name: "n"}).tail()
+  ''', 'c'
+
+test 'single-statement method body declares its local', '''
+  X = schema :shape
+    name! string
+    five: -> (y = 5) and y
+  X.parse({name: "n"}).five()
+  ''', 5
+
+test 'multi-statement method body declares its match _', '''
+  X = schema :shape
+    name! string
+    tail: ->
+      "abc" =~ /b(c)/
+      _[1]
+  X.parse({name: "n"}).tail()
+  ''', 'c'
+
 # Every derived schema carries a back-pointer to the original :model —
 # tooling follows the chain (pick -> partial -> ...) to its source.
 

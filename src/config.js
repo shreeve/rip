@@ -13,6 +13,9 @@
 //              program so imports still resolve — the project-glob form
 //              of the per-file `# @ts-nocheck` directive. For partly-
 //              typed projects quieting untyped/legacy paths.
+//   repl     — REPL presentation: { theme: 'dark'|'light'|'mono',
+//              colors: { <class>: <ansi name | #hex> } } — consumed by
+//              src/repl.js; anything non-object leaves the null default.
 //
 // Resolution: walk UP to the FIRST package.json and stop — that file
 // is the project boundary whether or not it carries a `rip` block. A
@@ -23,7 +26,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 
 export function readProjectConfig(dir) {
-  const config = { strict: false, noCheck: [], _configDir: null };
+  const config = { strict: false, noCheck: [], repl: null, _configDir: null };
   try {
     let d = resolve(dir);
     for (;;) {
@@ -38,6 +41,9 @@ export function readProjectConfig(dir) {
           const nc = pkg.rip.noCheck;
           if (typeof nc === 'string') config.noCheck = [nc];
           else if (Array.isArray(nc)) config.noCheck = nc.filter((g) => typeof g === 'string');
+          if (pkg.rip.repl !== null && typeof pkg.rip.repl === 'object' && !Array.isArray(pkg.rip.repl)) {
+            config.repl = pkg.rip.repl;
+          }
         }
         config._configDir = d;
         break;

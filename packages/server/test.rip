@@ -13,7 +13,7 @@ import { get, post, put, patch, del, all, use, prefix, before, after, onError, n
          fetch as handle, App, resetGlobals, requestContext, startHandler, start,
          read, error, notice, bail, ctx, session, subrequest, mark,
          mimeType, errorEnvelope, openapi } from '@rip-lang/server'
-import { cors, logger, compress, sessions, csrf, secureHeaders, bodyLimit, htmlJson } from '@rip-lang/server/middleware'
+import { cors, logger, compress, sessions, csrf, secureHeaders, timeout, bodyLimit, htmlJson } from '@rip-lang/server/middleware'
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -63,6 +63,7 @@ get '/none' -> null
 get '/users/:id' -> { id: @req.param('id') }
 get '/users/:id/books/:bid' -> @req.param()
 get '/files/*' -> @req.path
+get '/n/:id{\\d+}' -> { n: @req.param('id') }
 get '/maybe/:id?' -> { id: @req.param('id') ?? 'none' }
 all '/any' -> @req.method
 prefix '/api', ->
@@ -102,6 +103,17 @@ test! "multiple params bind by name", ->
 test! "wildcard matches any depth", ->
   res = handle! req('GET', '/files/a/b/c.txt')
   eq (res.text!), '/files/a/b/c.txt'
+
+test! "inline :param{pattern} constrains the match — /n/42 hits, /n/abc 404s", ->
+  res = handle! req('GET', '/n/42')
+  eq res.status, 200
+  eq (res.json!), { n: '42' }
+  eq (handle! req('GET', '/n/abc')).status, 404
+
+test! "malformed %-encoding in a matched param answers a clean 400", ->
+  res = handle! req('GET', '/users/%zz')
+  eq res.status, 400
+  eq (res.json!), { error: { message: 'malformed percent-encoding in path' } }
 
 test! "optional param matches with and without", ->
   eq ((handle! req('GET', '/maybe/9')).json!), { id: '9' }
@@ -446,6 +458,7 @@ resetGlobals()
 post '/echo-body' -> { name: read('name') }
 post '/signup', input: Signup, -> { got: @input }
 put '/form' -> { a: read('a') }
+post '/raw-form' -> { keys: Object.keys(@_body), body: @_body.body ?? null }
 
 test! "JSON bodies pre-parse for read()", ->
   res = handle! jreq('POST', '/echo-body', { name: 'Zed' })
@@ -455,6 +468,14 @@ test! "form bodies pre-parse for read()", ->
   body = new URLSearchParams({ a: 'b' })
   res = handle! req('PUT', '/form', { body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
   eq (res.json!), { a: 'b' }
+
+test! "a bare urlencoded body (no '=') surfaces as {body: text}", ->
+  res = handle! req('POST', '/raw-form', { body: 'just some text', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+  eq (res.json!), { keys: ['body'], body: 'just some text' }
+
+test! "a form clearing its only field (subscribe=) parses normally", ->
+  res = handle! req('POST', '/raw-form', { body: 'subscribe=', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+  eq (res.json!), { keys: ['subscribe'], body: null }
 
 test! "query params reach read() too", ->
   res = handle! req('POST', '/echo-body?name=Query', { headers: { 'Content-Type': 'application/json' }, body: '{}' })
@@ -560,6 +581,23 @@ test! "csrf blocks unsafe requests without a token and issues one on GET", ->
   allowed = handle! req('POST', '/act', { headers: { Cookie: cookie.split(';')[0], 'X-CSRF-Token': token } })
   eq allowed.status, 200
 
+test! "csrf accepts the form-field token; a wrong or missing field fails 403", ->
+  resetGlobals()
+  use csrf secret: 'csrf-secret'
+  get '/page' -> 'x'
+  post '/act' -> 'did'
+  page = handle! req('GET', '/page')
+  jar = page.headers.get('set-cookie').split(';')[0]
+  token = decodeURIComponent(jar.slice('csrf_token='.length)).split('.')[0]
+  form = (body) -> req('POST', '/act', { body, headers: { Cookie: jar, 'Content-Type': 'application/x-www-form-urlencoded' } })
+  allowed = handle! form("_csrf=#{token}")
+  eq allowed.status, 200
+  eq (allowed.text!), 'did'
+  wrong = handle! form('_csrf=deadbeef')
+  eq wrong.status, 403
+  missing = handle! form('other=x')
+  eq missing.status, 403
+
 test! "a foreign %-cookie is tolerated and the session still works", ->
   resetGlobals()
   use sessions secret: 'test-secret'
@@ -600,6 +638,25 @@ test! "compress leaves an already-encoded response untouched", ->
   res = handle! req('GET', '/pre', { headers: { 'Accept-Encoding': 'gzip' } })
   got = new Uint8Array(res.arrayBuffer!)
   ok Buffer.from(got).equals(Buffer.from(pre)), 'pre-encoded body passes through untouched'
+
+test! "logger writes one formatted line per request to a custom stream", ->
+  resetGlobals()
+  lines = []
+  use logger format: 'tiny', stream: { write: (msg) -> lines.push msg }
+  get '/logme' -> 'x'
+  handle! req('GET', '/logme')
+  eq lines.length, 1
+  ok /^GET \/logme 200 - \d+ms\n$/.test(lines[0]), "line: #{JSON.stringify(lines[0])}"
+
+test! "timeout middleware answers a slow handler with the 408 envelope", ->
+  resetGlobals()
+  use timeout ms: 60
+  get '/slowh' ->
+    sleep! 300
+    'never'
+  res = handle! req('GET', '/slowh')
+  eq res.status, 408
+  eq (res.json!), { error: 'Request Timeout' }
 
 test! "bodyLimit rejects oversize bodies with 413", ->
   resetGlobals()
@@ -677,6 +734,7 @@ get '/hi' -> '#{msg}'
 get '/slow' ->
   sleep! 300
   'done'
+get '/hang' -> new Promise(->)
 start()
 """
 
@@ -798,6 +856,43 @@ test! "SIGTERM at c:2 drains BOTH in-flight requests before exiting 0", ->
     await proc.exited
     rmSync dir, { recursive: true, force: true }
 
+test! "the drain wait honors the manager-passed ceiling — a hung request can't hold the exit", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock, { RIP_DRAIN_DEADLINE_MS: '250', RIP_HANDLER_DEADLINE_MS: '0' }
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    hang = uds(sock, '/hang')       # never resolves; holds the in-flight slot
+    hang.catch -> null
+    sleep! 50
+    t0 = Date.now()
+    proc.kill('SIGTERM')
+    code = await proc.exited
+    eq code, 0
+    elapsed = Date.now() - t0
+    ok elapsed < 2000, "exited in #{elapsed}ms — inside the supervised SIGTERM→SIGKILL ceiling, not a 30s wait"
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "the hung-handler watchdog recycles the worker on its own (RIP_HANDLER_DEADLINE_MS)", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock, { RIP_HANDLER_DEADLINE_MS: '200', RIP_DRAIN_DEADLINE_MS: '200' }
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    hang = uds(sock, '/hang')       # exceeds the deadline; no signal is ever sent
+    hang.catch -> null
+    code = await proc.exited
+    eq code, 0
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
 test! "a broken app surfaces its boot error on /ready and exits nonzero", ->
   dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
   sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
@@ -841,6 +936,73 @@ test! "an orphaned worker (parent gone) exits on its own", ->
     ok not alive(pid), 'orphaned worker exited on its own'
   finally
     try process.kill(pid, 'SIGKILL')
+    rmSync dir, { recursive: true, force: true }
+
+# ==[ Prebuild — the manager's per-epoch artifact ]==
+
+console.log "\nPrebuild"
+
+import { buildArtifact } from './manager.rip'
+
+test! "buildArtifact bundles an app to one JS file a loader-free worker serves", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')
+  sock = join(tmpdir(), "rip-pb-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi-artifact')
+  # The exact shape the manager boots: prebuilt worker runtime + prebuilt
+  # app artifact, spawned WITHOUT the rip loader — no compiler in the worker.
+  workerJs = buildArtifact! WORKER_BIN, join(dir, 'worker.js')
+  appJs = buildArtifact! join(dir, 'app.rip'), join(dir, 'app.js')
+  ok (readFileSync(appJs, 'utf8')).length > 0
+  proc = Bun.spawn [process.execPath, workerJs],
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'inherit'
+    env: { ...process.env, ...TEST_KNOBS, APP_ARTIFACT: appJs, SOCKET_PATH: sock, WORKER_ID: 'pb' }
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    res = uds!(sock, '/hi')
+    eq res.status, 200
+    eq (res.text!), 'hi-artifact'
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "the artifact preserves a module's own import.meta.dir", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')
+  writeFileSync join(dir, 'app.rip'), """
+  import { get, start } from '@rip-lang/server'
+  get '/dir' -> import.meta.dir
+  start()
+  """
+  appJs = buildArtifact! join(dir, 'app.rip'), join(tmpdir(), "rip-pb-meta-#{Date.now()}.js")
+  try
+    proc = Bun.spawn [process.execPath, '-e', """
+      process.env.WORKER_ID = 'm'
+      await import(#{JSON.stringify(appJs)})
+      await Promise.resolve()
+      const res = await globalThis.__ripHandler(new Request('http://x/dir'))
+      console.log(await res.text())
+    """], { stdin: 'ignore', stdout: 'pipe', stderr: 'inherit', env: { ...process.env } }
+    out = new Response(proc.stdout).text!
+    await proc.exited
+    eq out.trim(), dir
+  finally
+    rmSync dir, { recursive: true, force: true }
+    try unlinkSync appJs
+
+test! "buildArtifact rejects a broken app loudly, naming the file", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')
+  writeFileSync join(dir, 'app.rip'), BROKEN_SOURCE
+  try
+    err = null
+    try
+      buildArtifact! join(dir, 'app.rip'), join(dir, 'app.js')
+    catch e
+      err = e
+    ok err?, 'a broken app must not build'
+    ok err.message.includes('app.rip'), "the diagnostic names the file: #{err.message}"
+  finally
     rmSync dir, { recursive: true, force: true }
 
 # ==[ Manager: stub Janus control plane ]==
@@ -1112,6 +1274,285 @@ test! "manager refuses c > 1 with watch on (eager included) and bad -c values, l
     r = outcome! ['-c', 'many', '--no-watch']
     ok r.code isnt 0, 'non-integer c exits nonzero'
     ok r.errText.includes('--concurrency takes an integer >= 1'), "rejects 'many': #{r.errText}"
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+# ==[ Manager: lifecycle — register 409 retry, hung-handler recycle ]==
+
+console.log "\nManager lifecycle"
+
+# Minimal stub control plane for one-off manager runs. `behave` may answer a
+# recorded call with its own Response; returning null falls through to the
+# stock verbs.
+stubJanus = (sockPath, calls, behave = null) ->
+  Bun.serve
+    unix: sockPath
+    fetch: (rq) ->
+      url = new URL(rq.url)
+      return new Response('janus', { status: 404 }) if rq.method is 'GET'
+      body = null
+      if rq.method is 'POST' or rq.method is 'PUT'
+        body = try rq.json! catch then null
+      call = { method: rq.method, path: url.pathname, body }
+      calls.push call
+      override = behave?(call)
+      return override if override?
+      if rq.method is 'POST' and url.pathname is '/1.0/apps'
+        return Response.json { id: 'app-x' }, { status: 201 }
+      if rq.method is 'PUT' and url.pathname.endsWith('/upstreams')
+        return Response.json { ok: true }
+      if rq.method is 'POST' and url.pathname.endsWith('/heartbeat')
+        return new Response(null, { status: 204 })
+      if rq.method is 'DELETE'
+        return new Response(null, { status: 204 })
+      new Response('nope', { status: 404 })
+
+spawnManager = (dir, controlSock, args, extraEnv = {}, stderr = 'inherit') ->
+  Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, '--control', controlSock, ...args],
+    cwd: dir
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: stderr
+    env: { ...process.env, ...TEST_KNOBS, ...extraEnv }
+
+managerSockPuts = (calls) ->
+  calls.filter (c) -> c.method is 'PUT' and c.body?.upstreams? and not c.body.upstreams.some (u) -> u.doorbell
+
+test! "register retries a 409 within the TTL window and proceeds once the stale claim frees", ->
+  ctlSock = join(tmpdir(), "rip-janus-409-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  posts = { n: 0 }
+  stub = stubJanus ctlSock, calls, (call) ->
+    if call.method is 'POST' and call.path is '/1.0/apps'
+      posts.n += 1
+      # First attempt hits the dead predecessor's still-live claim
+      return new Response('claimed', { status: 409 }) if posts.n is 1
+    null
+  proc = spawnManager dir, ctlSock, ['--name', 'rapp409', '-w', '1', '--no-watch'], { RIP_REGISTER_409_MS: '10000' }
+  try
+    sock = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    eq posts.n, 2
+    res = uds!(sock, '/hi')
+    eq (res.text!), 'hi'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "register accepts only 201 — a 200 from POST /apps is retried, never trusted", ->
+  ctlSock = join(tmpdir(), "rip-janus-200-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  posts = { n: 0 }
+  stub = stubJanus ctlSock, calls, (call) ->
+    if call.method is 'POST' and call.path is '/1.0/apps'
+      posts.n += 1
+      # An off-protocol 200 (with a plausible body!) must not register
+      return Response.json({ id: 'bogus' }, { status: 200 }) if posts.n is 1
+    null
+  proc = spawnManager dir, ctlSock, ['--name', 'app200', '-w', '1', '--no-watch']
+  try
+    sock = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    eq posts.n, 2
+    res = uds!(sock, '/hi')
+    eq (res.text!), 'hi'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "a 409 outlasting the retry window still aborts with the claim message", ->
+  ctlSock = join(tmpdir(), "rip-janus-409x-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  stub = stubJanus ctlSock, calls, (call) ->
+    if call.method is 'POST' and call.path is '/1.0/apps'
+      return new Response('claimed', { status: 409 })
+    null
+  proc = spawnManager dir, ctlSock, ['--name', 'rappstuck', '-w', '1', '--no-watch'], { RIP_REGISTER_409_MS: '300' }, 'pipe'
+  try
+    errText = new Response(proc.stderr).text!
+    code = await proc.exited
+    ok code isnt 0, 'exhausted 409 retries exit nonzero'
+    ok errText.includes('host already claimed at the control plane (409)'), "names the claim: #{errText}"
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "a hung handler recycles its worker; the manager republishes a fresh socket", ->
+  ctlSock = join(tmpdir(), "rip-janus-hang-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'hangapp', '-w', '1', '--no-watch'], { RIP_HANDLER_DEADLINE_MS: '200' }
+  try
+    sock1 = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    hang = uds(sock1, '/hang')      # never returns; the watchdog must act unprompted
+    hang.catch -> null
+    # The recycle shows at the control plane as a socket drop (empty PUT)...
+    waitFor! -> managerSockPuts(calls).some (c) -> c.body.upstreams.length is 0
+    # ...then the respawned worker re-publishes on a fresh socket path
+    sock2 = waitFor! ->
+      puts = managerSockPuts(calls).filter (c) -> c.body.upstreams.length is 1
+      fresh = puts[puts.length - 1]?.body.upstreams[0].path
+      if fresh? and fresh isnt sock1 then fresh else null
+    res = uds!(sock2, '/hi')
+    eq (res.text!), 'hi'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+# A slow-boot app: module-level top-level await holds /ready 503 for `ms`,
+# so rings arriving mid-boot are genuinely held — no bare-sleep guessing.
+slowBootSource = (ms) -> """
+import { get, start } from '@rip-lang/server'
+sleep! #{ms}
+get '/hi' -> 'slowboot'
+start()
+"""
+
+test! "rings past WAITER_CAP answer an immediate 503; held rings still complete", ->
+  ctlSock = join(tmpdir(), "rip-janus-cap-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), slowBootSource(1500)
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'capapp', '-w', '1'], { RIP_WAITER_CAP: '2' }
+  try
+    bell = waitFor! ->
+      calls.find((c) -> c.method is 'PUT' and c.body?.upstreams?.some((u) -> u.doorbell))?.body.upstreams[0].path
+    r1 = uds(bell, '/ring')         # both hold slots fill while the slow boot runs...
+    r2 = uds(bell, '/ring')
+    r1.catch -> null
+    r2.catch -> null
+    sleep! 150
+    r3 = uds!(bell, '/ring')        # ...so the cap answers the third at once
+    eq r3.status, 503
+    eq (r3.text!), 'too many held requests'
+    eq r3.headers.get('retry-after'), '1'
+    a = await r1
+    b = await r2
+    eq a.status, 204
+    eq b.status, 204
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "a ring outliving RIP_HOLD_MS answers 503 with Retry-After while boot continues", ->
+  ctlSock = join(tmpdir(), "rip-janus-hold-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), slowBootSource(2500)
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'holdapp', '-w', '1'], { RIP_HOLD_MS: '250' }
+  try
+    bell = waitFor! ->
+      calls.find((c) -> c.method is 'PUT' and c.body?.upstreams?.some((u) -> u.doorbell))?.body.upstreams[0].path
+    res = uds!(bell, '/ring')
+    eq res.status, 503
+    eq (res.text!), 'boot still in progress'
+    eq res.headers.get('retry-after'), '2'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "a heartbeat 404 re-registers the app and re-publishes the same upstreams", ->
+  ctlSock = join(tmpdir(), "rip-janus-hb404-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  tripped = { fired: false }
+  stub = stubJanus ctlSock, calls, (call) ->
+    # One 404 on the first heartbeat that arrives after socks are published —
+    # the control plane "restarted and lost us"
+    if call.path.endsWith('/heartbeat') and not tripped.fired and managerSockPuts(calls).some((c) -> c.body.upstreams.length > 0)
+      tripped.fired = true
+      return new Response(null, { status: 404 })
+    null
+  proc = spawnManager dir, ctlSock, ['--name', 'hbapp', '-w', '1', '--no-watch']
+  try
+    sock = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    waitFor! -> tripped.fired
+    registers = -> calls.filter (c) -> c.method is 'POST' and c.path is '/1.0/apps'
+    waitFor! -> registers().length >= 2
+    waitFor! ->
+      puts = managerSockPuts(calls)
+      last = puts[puts.length - 1]
+      puts.length >= 2 and last.body.upstreams.length is 1 and last.body.upstreams[0].path is sock
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "--eager boots the fresh pool at settle — new socks publish with no ring", ->
+  ctlSock = join(tmpdir(), "rip-janus-eager-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('v1')
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'eagerapp', '-w', '1', '--eager']
+  try
+    sock1 = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    writeFileSync join(dir, 'app.rip'), appSource('v2')
+    # No ring is ever sent: the settle alone must cut admission AND boot
+    sock2 = waitFor! ->
+      puts = managerSockPuts(calls).filter (c) -> c.body.upstreams.length is 1
+      fresh = puts[puts.length - 1]?.body.upstreams[0].path
+      if fresh? and fresh isnt sock1 then fresh else null
+    res = uds!(sock2, '/hi')
+    eq (res.text!), 'v2'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "production readyWhen:all — the first socks PUT ships every worker at once", ->
+  ctlSock = join(tmpdir(), "rip-janus-prod-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'prodapp', '-w', '2'], { RIP_ENV: 'production' }
+  try
+    first = waitFor! -> managerSockPuts(calls)[0]
+    eq first.body.upstreams.length, 2
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "watch in production requires --allow-watch, loudly", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnManager dir, '/nonexistent.sock', ['--name', 'prodwatch', '--watch'], { RIP_ENV: 'production' }, 'pipe'
+  try
+    errText = new Response(proc.stderr).text!
+    code = await proc.exited
+    ok code isnt 0, 'refusal exits nonzero'
+    ok errText.includes('watch in production requires --allow-watch'), "names the gate: #{errText}"
   finally
     rmSync dir, { recursive: true, force: true }
 

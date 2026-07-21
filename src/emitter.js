@@ -160,9 +160,17 @@ export function moduleSourceText(s) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false } = {}) {
+  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, repl = false } = {}) {
     this.stores = stores;
     this.b = builder;
+    // repl emission: the final top-level expression statement lands
+    // in the minted result slot; top-level static imports lower to
+    // awaited dynamic imports. Off by default with zero effect —
+    // the slot name mints lazily, so the used-name registry and the
+    // temp allocator are untouched when off.
+    this.repl = repl;
+    this.replResultName = null;
+    this.replImportResolver = null;
     // Script-target emission: <script type="text/rip"> sources share one
     // page scope and are not modules, so every module form rejects at
     // its own position instead of emitting bytes new Function cannot take.
@@ -612,6 +620,230 @@ class Emitter {
     return names;
   }
 
+  // The 1-based source line of a node's span start — for diagnostics
+  // that name a PRIOR site inside the message body (the redeclaration
+  // rejection); null when the node has no recorded span or the
+  // builder carries no source text.
+  nodeLine(node) {
+    const id = this.stores.idOf(node);
+    const span = id !== null ? this.stores.selfSpan(id) : null;
+    if (!span || typeof this.b.source !== 'string') return null;
+    let line = 1;
+    for (let i = 0; i < span[0] && i < this.b.source.length; i++) {
+      if (this.b.source[i] === '\n') line++;
+    }
+    return line;
+  }
+
+  // Same-scope redeclaration: one binding per name per scope. Runs at
+  // every function/program scope open, over the scope's live
+  // statements and parameters, BEFORE the scope's own frame pushes —
+  // this.scopes and this.cframes still describe the ENCLOSING
+  // environment, exactly what hoist filtering consults.
+  //
+  // Declaring forms carry the binding-inventory kind vocabulary:
+  // parameter, import, state (:=), computed (~=), readonly (=!),
+  // effect (a bound handle), def, class, enum — the AUTHORITATIVE
+  // forms — and plain (an assignment that creates the binding: a
+  // bare-name `=`/compound/merge target, a destructuring element, a
+  // catch-pattern element). Two authoritative forms for one name
+  // reject in EITHER order (hoisting never licenses a duplicate). A
+  // plain form classifies by position against the scope's own
+  // authoritative declaration of the same name: BEFORE it, the
+  // assignment created the binding the declaration then re-declares —
+  // the declaration rejects, naming the assignment (the TDZ cell:
+  // `x = 1` then `x := 1` emits a write into a const's temporal dead
+  // zone); AFTER it, the assignment is a WRITE with the binding's own
+  // write semantics (state write-through, the readonly/computed write
+  // guards) and is never flagged. A plain form for a name bound by an
+  // ENCLOSING scope (an outer function, the REPL's ambient seed) or by
+  // a component member is a write to that binding, never a declaration
+  // — mirroring the hoist suppression exactly.
+  //
+  // Deliberately OUTSIDE the rule, each being its own nested scope
+  // (shadowing, never a same-scope duplicate): loop variables (the
+  // for-head), simple catch bindings (the JS catch parameter),
+  // comprehension clause variables, nested function bodies, and
+  // block-nested def/class/enum (block-scoped declarations). The
+  // emitter-minted last-match `_` never participates — a match write
+  // is a write, not a declaring form. Duplicate names WITHIN one
+  // pattern (a parameter list, a destructuring pattern, a loop head,
+  // a catch pattern) reject unconditionally: `{x, x}` has no reading.
+  checkScopeRedeclarations(stmts, params = [], owner = null) {
+    const forms = [];
+    const auth = (name, kind, node) => {
+      if (typeof name === 'string') forms.push({ name, kind, node, auth: true });
+    };
+    const plainForm = (name, node) => {
+      if (typeof name === 'string') forms.push({ name, kind: 'plain', node, auth: false });
+    };
+    const dupIn = (names, node, what) => {
+      const seen = new Set();
+      for (const n of names) {
+        if (seen.has(n)) {
+          throw this.positionedError(node,
+            `emitter: '${n}' is bound twice in one ${what} — one binding per name; rename or drop the duplicate`,
+            ...(owner !== null ? [owner] : []));
+        }
+        seen.add(n);
+      }
+      return names;
+    };
+    // Parameters bind first (before every body statement) and share
+    // one namespace across the whole list.
+    {
+      const names = [];
+      for (const p of params ?? []) this.patternNames(p, names, true);
+      dupIn(names, isNode(params?.[0]) ? params[0] : owner, 'parameter list');
+      for (const n of names) auth(n, 'parameter', null);
+    }
+    const walk = (n, nested) => {
+      if (!isNode(n)) return;
+      if (this.isModuleImport(n)) {
+        for (const name of Emitter.importedNames([n])) auth(name, 'import', n);
+        return;
+      }
+      if (isFunc(n)) return;
+      if (isDefHead(n[0])) {
+        if (!nested && n.length === 4) auth(n[1], 'def', n);
+        return;
+      }
+      if (n[0] === 'enum') {
+        if (!nested) auth(n[1], 'enum', n);
+        return;
+      }
+      if (n[0] === 'component' && n.length === 3) return;
+      if (n[0] === 'class') {
+        if (!nested) auth(n[1], 'class', n);
+        if (n[2] != null) walk(n[2], true);
+        // Field VALUES are expressions of this scope; field names are
+        // members, never scope bindings (hoistTargets' class rule).
+        const body = n[3];
+        if (isBlock(body)) {
+          for (const stmt of body.slice(1)) {
+            if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) walk(stmt[2], true);
+            else if (!Emitter.isTypedWrapper(stmt)) walk(stmt, true);
+          }
+        }
+        return;
+      }
+      if (this.isReactiveDecl(n)) {
+        auth(n[1], n[0] === 'computed' ? 'computed' : 'state', n);
+        if (!(n[0] === 'computed' && isBlock(n[2]) && n[2].length > 2)) walk(n[2], nested);
+        return;
+      }
+      if (this.isEffectDecl(n)) {
+        if (n[1] !== null) auth(n[1], 'effect', n);
+        return;
+      }
+      if (this.isReadonlyDecl(n)) {
+        auth(n[1], 'readonly', n);
+        walk(n[2], nested);
+        return;
+      }
+      if (n[0] === 'export') {
+        for (const spec of n.slice(1)) {
+          if (!isNode(spec)) continue;
+          // An exported plain assign is `export const …` — a real
+          // declaration (never a hoisted write), so it participates
+          // authoritatively under the plain kind.
+          if ((spec[0] === '=' || spec[0] === 'void-assign') && spec.length === 3 && typeof spec[1] === 'string') {
+            auth(spec[1], 'plain', spec);
+            walk(spec[2], nested);
+          } else {
+            walk(spec, nested);
+          }
+        }
+        return;
+      }
+      if (n[0] === 'for-in' || n[0] === 'for-of' || n[0] === 'for-as') {
+        // Loop variables declare in the for-head — their own scope;
+        // only intra-head duplicates reject. The vars slot is a LIST
+        // of patterns (value, index/key).
+        if (isNode(n[1])) {
+          const names = [];
+          for (const pattern of n[1]) this.patternNames(pattern, names, true);
+          dupIn(names, n, 'loop head');
+        }
+        for (const el of n.slice(2)) walk(el, true);
+        return;
+      }
+      if (isComprehensionNode(n)) {
+        walk(n[1], true);
+        for (const clause of n[2] ?? []) {
+          const names = [];
+          if (isNode(clause[1])) for (const pattern of clause[1]) this.patternNames(pattern, names, true);
+          dupIn(names, n, 'comprehension clause');
+          walk(clause[2], true);
+        }
+        for (const g of n[3] ?? []) walk(g, true);
+        return;
+      }
+      if (n[0] === 'try') {
+        for (const part of n.slice(2)) {
+          if (isNode(part) && part.length === 2 && Emitter.isPattern(part[0])) {
+            // A destructured catch assigns its elements in THIS scope
+            // (a simple catch name is the JS catch parameter — its
+            // own per-handler scope, walked generically below).
+            for (const name of dupIn(this.patternNames(part[0]), part[0], 'catch pattern')) {
+              plainForm(name, n);
+            }
+            walk(part[1], true);
+          } else {
+            walk(part, true);
+          }
+        }
+        walk(n[1], true);
+        return;
+      }
+      if ((ASSIGNS.has(n[0]) || n[0] === '*>') && n.length === 3) {
+        if (typeof n[1] === 'string') plainForm(n[1], n);
+        else if (n[0] === '=' && Emitter.isPattern(n[1])) {
+          for (const name of dupIn(this.patternNames(n[1]), n, 'destructuring pattern')) {
+            plainForm(name, n);
+          }
+        }
+      }
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      for (const el of n) walk(el, below);
+    };
+    for (const s of stmts) walk(s, false);
+    forms.forEach((f, i) => { f.order = i; });
+    const reject = (at, prior) => {
+      const line = prior.node !== null ? this.nodeLine(prior.node) : null;
+      const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'plain'
+        ? ` — assign with '${at.name} = …' to update it, or choose a different name`
+        : ' — choose a different name';
+      throw this.positionedError(at.node,
+        `emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ''}${hint}`,
+        ...(owner !== null ? [owner] : []));
+    };
+    const decls = new Map();
+    for (const f of forms) {
+      if (!f.auth) continue;
+      const prior = decls.get(f.name);
+      if (prior !== undefined) reject(f, prior);
+      decls.set(f.name, f);
+    }
+    for (const f of forms) {
+      if (f.auth) continue;
+      const prior = decls.get(f.name);
+      if (prior !== undefined) {
+        // A plain form ahead of the scope's own declaration: the
+        // assignment created the binding — the declaration is the
+        // redeclaration and rejects, naming the assignment site.
+        if (prior.auth && f.order < prior.order) reject(prior, f);
+        continue; // a write — the binding's own write semantics govern
+      }
+      // A name an enclosing scope (or the ambient seed) binds, or a
+      // component member: the assignment targets THAT binding — the
+      // exact set hoist filtering suppresses.
+      if (this.inScope(f.name)) continue;
+      if (this.cframes.some((fr) => fr.members.has(f.name))) continue;
+      decls.set(f.name, f);
+    }
+  }
+
   // Open a reactive frame for a scope (paired with a this.scopes push
   // at every function/program scope; loop/catch frames are
   // binding-only and push no scope). Returns every const-declared
@@ -621,11 +853,13 @@ class Emitter {
   // shadow-hoist it). Handles and readonly names enter the frame's
   // BOUND set, never the reactive set: both are plain consts (reads
   // never unwrap), and each shadows any outer reactive name it
-  // re-binds.
-  pushReactiveFrame(stmts, bound) {
+  // re-binds. `params` (the function scopes) join the redeclaration
+  // check as parameter-kind declarations.
+  pushReactiveFrame(stmts, bound, params = [], owner = null) {
     const reactive = this.collectReactiveNames(stmts);
     const handles = this.collectEffectHandles(stmts);
     const readonly = this.collectReadonlyNames(stmts);
+    this.checkScopeRedeclarations(stmts, params, owner);
     this.rframes.push({
       reactive,
       computed: this.collectComputedNames(stmts),
@@ -672,6 +906,26 @@ class Emitter {
     for (let i = this.rframes.length - 1; i >= 0; i--) {
       const f = this.rframes[i];
       if (f.reactive.has(name)) return f.computed !== undefined && f.computed.has(name);
+      if (f.bound.has(name)) return false;
+      if (f.members !== undefined && f.members.has(name)) return false;
+    }
+    return false;
+  }
+
+  // A seeded (ambient) readonly name at the innermost frame that
+  // binds `name`. Direct writes (assign, compound, update) reject at
+  // COMPILE time — deliberately STRICTER than an in-file readonly,
+  // whose write emits bare and throws JS's own TypeError only when
+  // the const runs: across REPL lines the positioned rejection is the
+  // better diagnostic and fires before any of the entry's side
+  // effects. Pattern-element writes keep the runtime backstop — the
+  // evaluation environment restores readonly kinds as const, so JS
+  // throws there (the contract is pinned in ambient-bindings tests).
+  isAmbientReadonly(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive.has(name)) return false;
+      if (f.ambientReadonly !== undefined && f.ambientReadonly.has(name)) return true;
       if (f.bound.has(name)) return false;
       if (f.members !== undefined && f.members.has(name)) return false;
     }
@@ -1658,13 +1912,31 @@ class Emitter {
   // the entries plus the full set of names this scope declares (for
   // the scope chain).
   //
+  // The one exception to the enclosing-scope filter is the last-match
+  // binding: a body with its own match write re-declares `_` even when
+  // an outer scope already has one, so every invocation owns its own
+  // last match (concurrent async invocations never clobber each other
+  // across await points). A `_` parameter still wins — hoistTargets'
+  // exclude already dropped it, and the match assigns the parameter.
+  //
   // `declareInPlace: false` keeps every target on the hoist line —
   // required when `stmts` are expression-position values (component
   // `_init` member initializers): a parenthetical multi-statement
   // lowers to a comma expression, where `let` is invalid JS.
   scopedHoist(stmts, params = [], { declareInPlace = true } = {}) {
+    // A parameter default runs in the parameter scope, which cannot
+    // reach a body `let _` — a match write there has no legal home
+    // (a nested function inside the default owns its `_` and passes).
+    for (const p of params) {
+      const hit = Emitter.paramMatchWrite(p);
+      if (hit !== null) {
+        throw this.positionedError(hit,
+          'emitter: a parameter default cannot write the last-match binding — ' +
+          '`_` lives in the enclosing body, which a default cannot reach (move the match into the body)');
+      }
+    }
     const collected = this.hoistTargets(stmts, params);
-    let entries = collected.filter(([n]) => !this.inScope(n));
+    let entries = collected.filter(([n]) => !this.inScope(n) || (n === '_' && collected.matchWrite));
     entries.annotations = collected.annotations;
     entries.directives = collected.directives;
     const names = new Set(entries.map(([n]) => n));
@@ -1679,8 +1951,12 @@ class Emitter {
     return { entries, names };
   }
 
-  hoistTargets(nodes, exclude = []) {
+  hoistTargets(nodes, exclude = [], extraDeclared = []) {
     const targets = new Map();
+    // True when this scope's own statements contain a match write
+    // (`=~`, a regex index) — carried out on the entries so
+    // scopedHoist can apply the per-invocation `_` rule.
+    let matchWrite = false;
     // Reactive declarations bind through `const` — their names never
     // hoist, and a later plain write (`count = 5`) or pattern-target
     // element writes the container's `.value`, not a hoisted `let`
@@ -1707,6 +1983,17 @@ class Emitter {
     };
     const add = (name, node) => {
       if (!targets.has(name)) targets.set(name, node);
+    };
+    // Match writes hiding in slots the target walk skips (loop-head
+    // and comprehension-clause pattern defaults): only `_` collects —
+    // the pattern's own names still declare in the for-head.
+    const matchScan = (n) => {
+      if (this.scopeBoundary(n) === 'skip') return;
+      if (Emitter.isMatchWrite(n)) {
+        add('_', n);
+        matchWrite = true;
+      }
+      for (const el of n) matchScan(el);
     };
     // Scope boundaries come from scopeBoundary() — the ONE classifier
     // this walk shares with planReferenceTemps' planning walk, so the
@@ -1777,14 +2064,19 @@ class Emitter {
       }
       // Loop variables declare in the for-head (`for (let [q = 7] …)`)
       // — their pattern defaults are NOT scope-level assignments; skip
-      // the vars slot.
+      // the vars slot for targets, but still scan it for match writes
+      // (a default's `=~` assigns this scope's `_`, which must exist).
       if (boundary === 'loop') {
+        matchScan(n[1]);
         for (const el of n.slice(2)) walk(el);
         return;
       }
       if (boundary === 'comprehension') {
         walk(n[1]);
-        for (const clause of n[2] ?? []) walk(clause[2]);
+        for (const clause of n[2] ?? []) {
+          matchScan(clause[1]);
+          walk(clause[2]);
+        }
         for (const g of n[3] ?? []) walk(g);
         return;
       }
@@ -1812,10 +2104,14 @@ class Emitter {
       }
       // The match operator and regex-index reads write the generated
       // last-match binding — `_` declares at the scope like any
-      // assigned name.
-      if (n[0] === '=~' && n.length === 3) add('_', n);
-      if (n[0] === 'regex-index' && n.length === 4) add('_', n);
-      if (n[0] === '[]' && n.length === 3 && typeof n[2] === 'string' && n[2][0] === '/') add('_', n);
+      // assigned name, and the scope records the match write so
+      // scopedHoist re-declares `_` even under an outer `_` (the
+      // per-invocation contract: every function body that matches
+      // owns its own last match).
+      if (Emitter.isMatchWrite(n)) {
+        add('_', n);
+        matchWrite = true;
+      }
       if ((ASSIGNS.has(n[0]) || n[0] === '*>') && n.length === 3) {
         // Merge assignment DECLARES a plain-name target: its `??= {}`
         // initializes a nullish binding, so first use is legal.
@@ -1842,6 +2138,19 @@ class Emitter {
     for (const x of exclude) this.patternNames(x, excludeNames, true);
     for (const x of excludeNames) targets.delete(x);
     for (const x of reactive) targets.delete(x);
+    // One binding per name: a def/class/enum declaration or an import
+    // already binds the name through its own keyword — the hoist line
+    // must never re-declare it (`def f` then `f = 2` is a plain
+    // reassignment of the function binding, not a second `let f`).
+    // The scope's statement level only (one block unwrap for the
+    // body-node callers): block-NESTED declarations are block-scoped
+    // JS and never collide with a function-scoped `let`.
+    const scopeStmts = nodes.length === 1 && isBlock(nodes[0]) ? nodes[0].slice(1) : nodes;
+    for (const x of Emitter.declaredNames(scopeStmts)) targets.delete(x);
+    for (const x of extraDeclared) targets.delete(x);
+    for (const s of scopeStmts) {
+      if (this.isModuleImport(s)) for (const x of Emitter.importedNames([s])) targets.delete(x);
+    }
     // Component member names never hoist: a bare write inside a
     // member body targets the instance member (`this.name = …`),
     // never a fresh local (the rule — a member name cannot be
@@ -1850,6 +2159,7 @@ class Emitter {
       for (const name of f.members.keys()) targets.delete(name);
     }
     const entries = [...targets.entries()].map(([name, node]) => [name, node, 'target']);
+    entries.matchWrite = matchWrite;
     entries.push(...chainTemps);
     // Reference-capture temps: a second pass over the same statements
     // plans single-evaluation captures for optional assignments and
@@ -1974,6 +2284,15 @@ class Emitter {
       if (isDefHead(head) || head === 'class' || head === 'component' || head === 'enum') {
         const level = isDefHead(head) ? 2 : Math.max(inFn, 1);
         for (const el of n.slice(typeof n[1] === 'string' ? 2 : 1)) walk(el, level);
+        return;
+      }
+      // Match writes assign `_` — recorded as writes with no declaring
+      // statement, so a later explicit `_ = v` never claims the
+      // declaration (declaring in place there would put the earlier
+      // match's assignment above its `let` — a TDZ throw).
+      if (Emitter.isMatchWrite(n)) {
+        for (const el of n.slice(1)) walk(el, inFn);
+        occur('_', inFn, true);
         return;
       }
       if ((ASSIGNS.has(head) || head === '*>') && n.length === 3) {
@@ -2258,6 +2577,21 @@ class Emitter {
     return this.programWith(sexpr);
   }
 
+  // Ambient bindings suppress the program's own hoist for the names
+  // they already bind — exactly scopedHoist's rule for a function
+  // under an enclosing scope, the per-invocation `_` exception
+  // included. With no ambient scope pushed (every non-REPL compile),
+  // this.scopes is empty at program entry and the entries pass
+  // through untouched.
+  ambientHoistFilter(collected) {
+    if (this.scopes.length === 0) return collected;
+    const entries = collected.filter(([n]) => !this.inScope(n) || (n === '_' && collected.matchWrite));
+    entries.matchWrite = collected.matchWrite;
+    entries.annotations = collected.annotations;
+    entries.directives = collected.directives;
+    return entries;
+  }
+
   // Attach the schema story's declared types to the PROGRAM hoist
   // entries (only non-exported module-level schema bindings hoist;
   // exported ones emit `export const` and infer from the cast).
@@ -2287,15 +2621,23 @@ class Emitter {
         for (const imp of all.slice(0, lead)) this.statement(imp, 0);
         this.emitDataConst();
         const rest = all.slice(lead);
-        let entries = this.hoistTargets(rest);
+        // Leading-import names join the hoist exclusion (one binding
+        // per name — a later assignment writes the import binding,
+        // never a second `let`) and the redeclaration check (the
+        // whole program is one scope; the emission split is layout).
+        let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], Emitter.importedNames(all.slice(0, lead))));
         this.attachSchemaConsts(entries);
         const names = new Set([...entries.map(([n]) => n), ...Emitter.importedNames(all.slice(0, lead))]);
-        for (const n of this.pushReactiveFrame(rest, names)) names.add(n);
+        for (const n of this.pushReactiveFrame(all, names)) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
         this.moduleClassNames = Emitter.classDeclNames(rest);
         this.rejectDuplicateDefault(rest);
         this.scopes.push(names);
-        entries = this.applyDeclareInPlace(entries, sexpr.slice(1));
+        // repl mode captures a final assignment as an expression
+        // (`const <slot> = x = 5`) — a `let` is invalid there, so the
+        // tail keeps its hoist-line declaration (the function-scope
+        // tail rule).
+        entries = this.applyDeclareInPlace(entries, sexpr.slice(1), { tailIsExpression: this.repl });
         if (entries.length) {
           this.hoistLine(entries);
           this.b.emit('\n\n');
@@ -2365,7 +2707,7 @@ class Emitter {
   programPlain(sexpr, stmts) {
     this.mark(sexpr, '$self', () => {
       this.emitDataConst();
-      let entries = this.hoistTargets(stmts);
+      let entries = this.ambientHoistFilter(this.hoistTargets(stmts));
       this.attachSchemaConsts(entries);
       const names = new Set(entries.map(([n]) => n));
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
@@ -2373,7 +2715,8 @@ class Emitter {
       this.moduleClassNames = Emitter.classDeclNames(stmts);
       this.rejectDuplicateDefault(stmts);
       this.scopes.push(names);
-      entries = this.applyDeclareInPlace(entries, sexpr.slice(1));
+      // The same repl tail rule as programWith.
+      entries = this.applyDeclareInPlace(entries, sexpr.slice(1), { tailIsExpression: this.repl });
       if (entries.length) {
         this.hoistLine(entries);
         this.b.emit('\n\n');
@@ -2435,6 +2778,9 @@ class Emitter {
       if (!isComprehensionNode(node)) return false;
       e.ind = ind;
       if (node === e.lastProgramStmt) {
+        // Its value IS the program result, so repl mode captures it
+        // like any final expression.
+        if (e.repl) e.b.emit(`const ${e.replSlot()} = `);
         e.comprehension(node, ind);
         e.b.emit(';');
       } else {
@@ -2498,6 +2844,7 @@ class Emitter {
     if (this.script) {
       throw this.positionedError(node, 'emitter: module imports are not available in a script tag — script sources share one scope, and modules arrive with the package graph');
     }
+    if (this.repl) return this.replImportStatement(node);
     const source = node[node.length - 1];
     const specs = node.slice(1, -1);
     this.mark(node, '$self', () => {
@@ -2523,9 +2870,55 @@ class Emitter {
     this.b.emit(';\n');
   }
 
+  // repl mode's import lowering: a static import cannot live in a
+  // function body (the REPL evaluates each line inside an async
+  // function), so the statement emits as its awaited dynamic
+  // equivalent, bindings preserved — named/default specifiers
+  // destructure the namespace (`const { default: d, a, b: c } =
+  // await import('m')`), `* as ns` binds the module object whole
+  // (a mixed form destructures FROM the bound namespace, one await),
+  // and a side-effect import awaits bare. The specifier routes
+  // through the minted import resolver like every repl-mode dynamic
+  // import, and its span still records exactly like the static
+  // form's. No generated function scope is introduced; `await` sits
+  // in the program's own context.
+  replImportStatement(node) {
+    const source = node[node.length - 1];
+    const specs = node.slice(1, -1);
+    const parts = [];
+    let nsName = null;
+    for (const spec of specs) {
+      if (spec === '{}') continue;
+      if (typeof spec === 'string') parts.push(`default: ${spec}`);
+      else if (spec[0] === '*') nsName = spec[1];
+      else for (const s of spec) parts.push(isNode(s) ? `${s[0]}: ${s[1]}` : s);
+    }
+    this.mark(node, '$self', () => {
+      if (nsName !== null) this.b.emit(`const ${nsName} = `);
+      else if (parts.length > 0) this.b.emit(`const { ${parts.join(', ')} } = `);
+      this.b.emit(`await import(${this.replResolver()}(`);
+      {
+        const specStart = this.b.offset;
+        this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
+        this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
+      }
+      this.b.emit('))');
+      if (nsName !== null && parts.length > 0) {
+        this.b.emit(`, { ${parts.join(', ')} } = ${nsName}`);
+      }
+    });
+    this.b.emit(';\n');
+  }
+
   exportStatement(node, ind) {
     if (this.script) {
       throw this.positionedError(node, 'emitter: exports are not available in a script tag — drop the export keyword; script sources share one scope');
+    }
+    // A REPL entry evaluates inside an async function body, where
+    // `export` is a load-time SyntaxError with no position — reject
+    // HERE, positioned (the script-mode precedent).
+    if (this.repl) {
+      throw this.positionedError(node, "emitter: 'export' has no meaning in a REPL entry — every top-level binding already persists to later lines; drop the export keyword");
     }
     const head = node[0];
     this.mark(node, '$self', () => {
@@ -2960,16 +3353,23 @@ class Emitter {
     let bodyText;
     if (stmts.length === 1) {
       const stmt = stmts[0];
-      const h = isNode(stmt) ? stmt[0] : null;
-      const names = new Set(params);
-      for (const n of sub.pushReactiveFrame(stmts, names)) names.add(n);
+      // The compact body hoists exactly like the block form — a
+      // single statement can still assign (`(y = 5) and y`, a match
+      // write's `_`), and the emitted function is a real (strict
+      // module) scope where an undeclared write throws.
+      const { entries, names } = sub.scopedHoist([stmt], params.map(String));
+      for (const n of sub.pushReactiveFrame(stmts, names, params.map(String))) names.add(n);
       sub.scopes.push(names);
+      if (entries.length) {
+        sub.hoistLine(entries);
+        sub.b.emit(' ');
+      }
       if (isLoopNode(stmt) || isComprehensionNode(stmt)) sub.statement(stmt, 0);
       else sub.implicitReturn(stmt, 0);
       bodyText = `{ ${sub.b.code} }`;
     } else {
       const { entries, names } = sub.scopedHoist([bodyNode], params.map(String));
-      for (const n of sub.pushReactiveFrame(stmts, names)) names.add(n);
+      for (const n of sub.pushReactiveFrame(stmts, names, params.map(String))) names.add(n);
       sub.scopes.push(names);
       sub.b.emit('{\n');
       if (entries.length) {
@@ -3136,7 +3536,10 @@ class Emitter {
     this.funcBodyStmt = funcBody;
     if (isNode(node)) {
       const form = Emitter.STATEMENT_FORMS[node[0]];
-      if (form && form(this, node, ind)) return;
+      if (form && form(this, node, ind)) {
+        this.replDeclEcho(node);
+        return;
+      }
       // Return guards are statement rewrites: bare (`x or return e`)
       // and assigning (`y = x or return e`) forms both emit an `if`
       // whose body is the return — the one lowering that keeps the
@@ -3180,6 +3583,13 @@ class Emitter {
         }
       }
     }
+    // repl capture: everything reaching this point is an expression
+    // statement (the dispatched statement forms and the assignment
+    // rewrites returned above); the program's FINAL one lands in the
+    // result slot. Direct writes (assign/compound/update) stay
+    // uncaptured — their emission owns declaration syntax (`let x =
+    // 5`) the capture prefix cannot wrap.
+    if (this.replCapture(node)) return;
     // Statement-position grouping: expression forms JS treats specially
     // at statement start group unconditionally — object literals (bare
     // braces parse as a block) and `->` function expressions (a bare
@@ -3206,6 +3616,71 @@ class Emitter {
         typeof node[1] === 'string' && this.componentInfo.has(node[2])) {
       this.tsComponentCompanion(node[2], node[1], false, this.annotationText(node, 'typeParams'));
     }
+  }
+
+  // repl mode's result slot, minted against the used-name registry on
+  // FIRST capture (never a fixed string — a user may legally bind any
+  // name the emitter is fond of; mintName registers the pick, so
+  // later minted names dodge it too). Lazy so an off-flag or
+  // capture-free emission never touches the registry.
+  replSlot() {
+    if (this.replResultName === null) {
+      this.replResultName = Emitter.mintName('__result', this.temps.used);
+    }
+    return this.replResultName;
+  }
+
+  // repl mode's import resolver — the minted name every dynamic-
+  // import specifier routes through (`import(<R>(spec))`), reported
+  // as result.replImportResolver so the evaluation environment can
+  // bind it to a cwd-anchored resolver. Minted lazily on the same
+  // rule as the result slot.
+  replResolver() {
+    if (this.replImportResolver === null) {
+      this.replImportResolver = Emitter.mintName('__resolveImport', this.temps.used);
+    }
+    return this.replImportResolver;
+  }
+
+  // The final top-level expression OR assignment statement lands in
+  // the result slot: `const <slot> = <expr>;` — an assignment's echo
+  // is its expression value (the RHS for plain, compound, and
+  // destructuring forms; postfix updates echo JS's own pre-update
+  // value). The `const <slot> = ` prefix is generated declaration
+  // syntax outside all role marks (the declare-in-place `let `
+  // precedent), so every role row keeps its exact source↔generated
+  // slice. Assignment forms that lower to multi-statement rewrites
+  // (`.=`, `*>`, optional-chain targets, middle-rest patterns) return
+  // from statementCore before this point and stay echo-free.
+  replCapture(node) {
+    if (!this.repl || node !== this.lastProgramStmt) return false;
+    this.b.emit(`const ${this.replSlot()} = `);
+    this.expr(node);
+    this.b.emit(';');
+    return true;
+  }
+
+  // The declaration echo: a final reactive/readonly/effect
+  // declaration binds through its own statement form, then the result
+  // slot receives the freshly bound value — reactive containers
+  // unwrap (`x := 5` echoes 5, never the signal object; a computed's
+  // echo performs its first read). The read is a bound-identifier
+  // re-read (REPEAT-SAFE by the doctrine's own judgment), never a
+  // re-evaluation of the initializer.
+  replDeclEcho(node) {
+    if (!this.repl || node !== this.lastProgramStmt || !isNode(node)) return;
+    let name = null;
+    let unwrap = false;
+    if (this.isReactiveDecl(node) && typeof node[1] === 'string') {
+      name = node[1];
+      unwrap = true;
+    } else if (this.isReadonlyDecl(node) && typeof node[1] === 'string') {
+      name = node[1];
+    } else if (this.isEffectDecl(node) && typeof node[1] === 'string') {
+      name = node[1];
+    }
+    if (name === null) return;
+    this.b.emit(`\nconst ${this.replSlot()} = ${name}${unwrap ? '.value' : ''};`);
   }
 
   // ["while", condition, body] — the plain loop; ["while", condition,
@@ -4665,7 +5140,7 @@ class Emitter {
       this.b.emit(' ');
       const stmts = this.liveStmts(isBlock(node[3]) ? node[3].slice(1) : [node[3]], { forwards: true });
       const { entries, names } = this.scopedHoist([node[3]], node[2]);
-      for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
+      for (const n of this.pushReactiveFrame(stmts, names, node[2], node)) names.add(n);
       this.scopes.push(names);
       // def bodies implicitly return their last expression, same as
       // arrow functions — unless the def is void.
@@ -5453,6 +5928,10 @@ class Emitter {
       throw this.positionedError(node,
         `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
     }
+    if (typeof node[1] === 'string' && this.isAmbientReadonly(node[1])) {
+      throw this.positionedError(node,
+        `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
+    }
     this.checkMemberWrite(node, node[1]);
     // A void definition (`save! = ->`, head 'void-assign') validates its
     // function value and emits as a plain '='; the value's body owns
@@ -5877,6 +6356,7 @@ class Emitter {
     // wrapper; object literals group — a bare `{`
     // would open a block.
     const { entries, names } = this.scopedHoist([body], []);
+    this.checkScopeRedeclarations([body], [], node);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set(), bound: names });
     this.b.emit('{ ');
@@ -10610,7 +11090,7 @@ class Emitter {
   methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, atParams = [] }) {
     const stmts = this.liveStmts(isNode(block) && block[0] === 'block' ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
-    for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
+    for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode)) names.add(n);
     this.scopes.push(names);
     const outerMethod = this.methodName;
     this.methodName = methodName;
@@ -10811,7 +11291,7 @@ class Emitter {
     const isVoid = this.voidFuncs.has(node);
     const stmts = this.liveStmts(isNode(block) && block[0] === 'block' ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, params);
-    for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
+    for (const n of this.pushReactiveFrame(stmts, names, params, node)) names.add(n);
     this.scopes.push(names);
     const isAsync = Emitter.containsAwait(block);
     const isGen = Emitter.containsYield(block);
@@ -11031,6 +11511,10 @@ class Emitter {
       throw this.positionedError(node,
         `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
     }
+    if (typeof node[1] === 'string' && this.isAmbientReadonly(node[1])) {
+      throw this.positionedError(node,
+        `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
+    }
     this.checkMemberWrite(node, node[1]);
     // An optional chain is not a JavaScript assignment reference —
     // `obj?.x++` has no valid emission; guard the update explicitly.
@@ -11209,6 +11693,29 @@ class Emitter {
   }
 
   call(node) {
+    // repl mode: a dynamic import evaluates inside an async function
+    // whose module context is the REPL's own, so a specifier that
+    // should resolve against the user's cwd would silently anchor
+    // elsewhere. The first argument routes through the minted
+    // resolver — `import(<R>(spec))` — which handles COMPUTED
+    // specifiers too (the operand still evaluates exactly once; the
+    // resolver only maps the resulting string). The semanticKind
+    // discriminates the real dynamic-import call.
+    if (this.repl && node[0] === 'import' && (node.length === 2 || node.length === 3) && this.lockedHead(node, 'dynimport')) {
+      this.mark(node, '$self', () => {
+        this.b.emit(`import(${this.replResolver()}(`);
+        this.mark(node, 'args', () => {
+          this.callArg(node[1]);
+          this.b.emit(')');
+          if (node.length === 3) {
+            this.b.emit(', ');
+            this.callArg(node[2]);
+          }
+        });
+        this.b.emit(')');
+      });
+      return;
+    }
     // A rest-headed node reaching CALL emission inside a pattern sits
     // in a position the `rest x` sugar does not cover (array() owns
     // the one legal position, a binding pattern's tail): an object
@@ -11585,6 +12092,31 @@ class Emitter {
     });
   }
 
+  // The three source shapes that write the last-match binding `_`:
+  // the match operator and both regex-index reads. ONE predicate —
+  // the `_`-hoist walker, captureScan, and the runtime-delivery
+  // trigger (containsMatchRead) all dispatch on it, so a new match
+  // shape can never join one walk and silently miss another.
+  static isMatchWrite(n) {
+    if (!isNode(n)) return false;
+    if (n[0] === '=~' && n.length === 3) return true;
+    if (n[0] === 'regex-index' && n.length === 4) return true;
+    return n[0] === '[]' && n.length === 3 && typeof n[2] === 'string' && n[2][0] === '/';
+  }
+
+  // The first match write inside a parameter (a default's expression),
+  // or null. Functions inside a default stop the scan — their bodies
+  // declare their own `_` when they emit.
+  static paramMatchWrite(p) {
+    if (!isNode(p) || isFunc(p) || isDefHead(p[0])) return null;
+    if (Emitter.isMatchWrite(p)) return p;
+    for (const el of p) {
+      const hit = Emitter.paramMatchWrite(el);
+      if (hit !== null) return hit;
+    }
+    return null;
+  }
+
   // ["=~", left, right] — the match operator: `text =~ /re/` emits
   // `(_ = toMatchable(text).match(/re/))` — the match array or null,
   // with `_` (the last-match binding, hoisted at the scope) holding
@@ -11847,12 +12379,11 @@ const containsObjectComprehension = (sexpr) => {
 // Structural trigger for the match seam: `text =~ /re/` and
 // `text[/re/]` / `text[/re/, n]` spell the stdlib's `toMatchable` in
 // generated output even though the source never references it. The
-// three shapes mirror the `_`-hoist walker's clauses exactly.
+// three shapes are Emitter.isMatchWrite — the same predicate the
+// `_`-hoist walker and captureScan dispatch on.
 const containsMatchRead = (sexpr) => {
   if (!isNode(sexpr)) return false;
-  if (sexpr[0] === '=~' && sexpr.length === 3) return true;
-  if (sexpr[0] === 'regex-index' && sexpr.length === 4) return true;
-  if (sexpr[0] === '[]' && sexpr.length === 3 && typeof sexpr[2] === 'string' && sexpr[2][0] === '/') return true;
+  if (Emitter.isMatchWrite(sexpr)) return true;
   return sexpr.some(containsMatchRead);
 };
 
@@ -12246,16 +12777,103 @@ const programScopeNames = (emitter, sexpr) => {
   return names;
 };
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, dataPayload = null } = {}) {
+// The binding kinds an ambient seed may carry — exactly the kinds the
+// binding inventory reports (one vocabulary; a REPL feeds one line's
+// inventory back as the next line's seed).
+const AMBIENT_KINDS = new Set(['plain', 'state', 'computed', 'effect', 'readonly', 'import', 'class', 'def', 'enum']);
+
+// Validate and normalize the ambientBindings option: an array of
+// {name, kind} with identifier names (the LEXER's identifier
+// vocabulary — a seed round-trips names the scanner accepted, Unicode
+// included), known kinds, and no duplicates — anything else rejects
+// loudly (an API guard; no source node exists, so the error is
+// message-only).
+const normalizeAmbient = (ambientBindings) => {
+  if (ambientBindings == null) return [];
+  if (!Array.isArray(ambientBindings)) {
+    throw new Error(`emitter: ambientBindings must be an array of {name, kind}; got ${typeof ambientBindings}`);
+  }
+  const seen = new Set();
+  for (const b of ambientBindings) {
+    if (b === null || typeof b !== 'object' || !isIdentifierName(b.name)) {
+      throw new Error(`emitter: ambientBindings entries are {name, kind} with an identifier name; got ${JSON.stringify(b)}`);
+    }
+    if (!AMBIENT_KINDS.has(b.kind)) {
+      throw new Error(`emitter: ambientBindings kind '${b.kind}' for '${b.name}' is not a binding kind — expected one of ${[...AMBIENT_KINDS].join(', ')}`);
+    }
+    if (seen.has(b.name)) {
+      throw new Error(`emitter: ambientBindings names '${b.name}' twice — one binding per name`);
+    }
+    seen.add(b.name);
+  }
+  return ambientBindings;
+};
+
+// The program's top-level binding inventory — programScopeNames'
+// constituents, kept apart so every name carries its KIND: the same
+// vocabulary ambientBindings accepts (a REPL feeds one line's
+// inventory back as the next line's seed). First classification
+// wins per name; the collectors themselves are the single source
+// (never a scan of emitted JS).
+const inventoryBindings = (emitter, sexpr, ambientNames) => {
+  const stmts = sexpr.slice(1);
+  const kinds = new Map();
+  const add = (name, kind) => {
+    if (typeof name === 'string' && !kinds.has(name)) kinds.set(name, kind);
+  };
+  // A plain WRITE to an ambient name binds nothing — the emission
+  // targets the seeded binding (its hoist is suppressed), so the
+  // inventory must not claim it (a REPL feeding the inventory back
+  // as the next seed would silently downgrade a state kind to plain,
+  // severing the signal on the line after next). A DECLARATION of an
+  // ambient name (state/computed/readonly/effect/class/def/enum) is
+  // a real shadow and reports normally.
+  const plain = (name) => {
+    if (!ambientNames.has(name)) add(name, 'plain');
+  };
+  for (const s of stmts) {
+    if (emitter.isModuleImport(s)) for (const n of Emitter.importedNames([s])) add(n, 'import');
+  }
+  const computed = emitter.collectComputedNames(stmts);
+  for (const n of emitter.collectReactiveNames(stmts)) add(n, computed.has(n) ? 'computed' : 'state');
+  for (const n of emitter.collectEffectHandles(stmts)) add(n, 'effect');
+  for (const n of emitter.collectReadonlyNames(stmts)) add(n, 'readonly');
+  const declared = (s, exported) => {
+    if (!isNode(s)) return;
+    if (s[0] === 'enum' && typeof s[1] === 'string') add(s[1], 'enum');
+    if (s[0] === 'class' && typeof s[1] === 'string') add(s[1], 'class');
+    if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === 'string') add(s[1], 'def');
+    if ((s[0] === '=' || s[0] === 'void-assign') && typeof s[1] === 'string') {
+      // Exported assigns declare (`export const q = …`) even over an
+      // ambient name; bare ones follow the write-vs-bind rule above.
+      if (exported) add(s[1], 'plain');
+      else plain(s[1]);
+    }
+  };
+  for (const s of stmts) {
+    declared(s, false);
+    if (isNode(s) && s[0] === 'export' && isNode(s[1])) declared(s[1], true);
+  }
+  // Hoisted assignment targets (nested positions and patterns
+  // included) are the plain remainder; chain/reference temps carry a
+  // non-'target' role and are the emitter's, never bindings.
+  for (const [n, , role] of emitter.hoistTargets(stmts)) {
+    if (role === 'target') plain(n);
+  }
+  return [...kinds].map(([name, kind]) => ({ name, kind }));
+};
+
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, dataPayload = null, ambientBindings = null, repl = false } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
   if (face !== 'js' && face !== 'ts') {
     throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
   }
+  const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, repl });
   emitter.dataPayload = dataPayload;
 
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {
@@ -12303,7 +12921,14 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     collectAtoms(tree);
     collectAtoms(atoms);
   }
+  // Ambient names are bindings the program's environment supplies:
+  // minted temps dodge them exactly like source-spelled identifiers,
+  // and runtime aliases dodge them exactly like source bindings (a
+  // prior line binding `__state` shifts the delivered alias the same
+  // way an in-file binding does).
+  for (const { name } of ambient) emitter.temps.used.add(name);
   const aliasUsed = runtimeAliasBindings(emitter, trees);
+  for (const { name } of ambient) aliasUsed.add(name);
   // Runtime names spelled only by generated output get one module-level
   // alias minted against every source binding. The default alias is the
   // public runtime name, preserving bytes and source-spelled references;
@@ -12315,6 +12940,14 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     }
   }
   const bound = programScopeNames(emitter, parseResult.sexpr);
+  // The result's binding inventory — computed from the same read-only
+  // pre-walks, BEFORE ambient names join the bound set (the inventory
+  // is this program's own bindings, never the environment's).
+  const bindings = inventoryBindings(emitter, parseResult.sexpr, new Set(ambient.map(({ name }) => name)));
+  // A seeded name counts as bound for the delivery decision: a free
+  // reference to a runtime name a prior line BOUND must not trigger
+  // (or be shadowed by) an injection this line.
+  for (const { name } of ambient) bound.add(name);
   const runtimes = new Set();
   for (const rt of RUNTIME_TABLE) {
     const unboundSet = new Set(rt.names.filter((n) => !bound.has(n)));
@@ -12454,7 +13087,31 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   }
 
   emitter.tsDirectivesArmed = true;
+  // Ambient bindings frame the program from BELOW its own scope: the
+  // program's declarations shadow a seed (redeclaration wins), and
+  // anything the program does not itself bind resolves to the seed —
+  // reactive kinds unwrap, everything else reads plain. The scope
+  // entry makes seeded names visible to hoist filtering (the program
+  // and every nested function skip re-declaring them).
+  if (ambient.length > 0) {
+    const reactive = new Set();
+    const computed = new Set();
+    const readonly = new Set();
+    const bound = new Set();
+    for (const { name, kind } of ambient) {
+      if (kind === 'state' || kind === 'computed') reactive.add(name);
+      else bound.add(name);
+      if (kind === 'computed') computed.add(name);
+      if (kind === 'readonly') readonly.add(name);
+    }
+    emitter.rframes.push({ reactive, computed, bound, ambientReadonly: readonly });
+    emitter.scopes.push(new Set(ambient.map(({ name }) => name)));
+  }
   emitter.program(parseResult.sexpr);
+  if (ambient.length > 0) {
+    emitter.rframes.pop();
+    emitter.scopes.pop();
+  }
   // The module marker: the loader runs every .rip file as a Bun
   // ES module, so a face whose own syntax carries no import/export
   // must not present as a global SCRIPT — script-ness misrepresents
@@ -12490,7 +13147,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, stores, runtimes, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

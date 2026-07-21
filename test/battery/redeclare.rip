@@ -1,0 +1,109 @@
+# Test: Same-scope redeclaration
+# One binding per name per scope: a second DECLARING form for a name
+# rejects positioned, naming the prior site and its binding kind
+# (state/computed/readonly/plain/def/class/enum/import/parameter/effect).
+# Writes stay legal: plain reassignment, state write-through, and
+# nested-scope shadowing are the negative space and pin here too.
+
+import { test, code, fail, type } from '../support/testing.js'
+
+# ==============================================================================
+# The rejection: two declaring forms for one name in one scope
+# ==============================================================================
+
+# The TDZ cell: the assignment created the binding; the state
+# declaration re-declares it — positioned at the DECLARATION, naming
+# the assignment's line (the emitted write would land in the const's
+# temporal dead zone pointing at the innocent first line).
+fail "plain then state", "x = 1\nx := 1", "redeclare.rip>:2:1: emitter: 'x' was already declared as plain on line 1"
+
+fail "plain then def", "x = 1\ndef x\n  2", "'x' was already declared as plain on line 1"
+fail "plain then export assign", "x = 1\nexport x = 2", "'x' was already declared as plain on line 1"
+fail "state twice", "x := 1\nx := 2", "'x' was already declared as state on line 1"
+fail "state then computed", "x := 1\nx ~= 2", "'x' was already declared as state on line 1"
+fail "state then def", "x := 1\ndef x\n  1", "'x' was already declared as state on line 1"
+fail "computed then state", "x ~= 1 + 2\nx := 3", "'x' was already declared as computed on line 1"
+fail "readonly then state", "x =! 1\nx := 2", "'x' was already declared as readonly on line 1"
+fail "effect handle twice", "h ~> 1\nh ~> 2", "'h' was already declared as effect on line 1"
+fail "class then state", "class X\n  m: -> 1\nX := 2", "'X' was already declared as class on line 1"
+fail "enum twice", "enum E\n  a = 0\nenum E\n  b = 1", "'E' was already declared as enum on line 1"
+fail "import then def", "import x from './probe.js'\ndef x\n  1", "'x' was already declared as import on line 1"
+fail "state then export assign", "x := 1\nexport x = 2", "'x' was already declared as state on line 1"
+
+# def x twice: Bun runs the module-scope pair silently (last wins),
+# Node rejects it — never intent, so BOTH nesting levels reject.
+fail "def twice at module scope", "def x\n  1\ndef x\n  2", "'x' was already declared as def on line 1"
+fail "def twice in a function body", "def outer\n  def x\n    1\n  def x\n    2\n  x()", "'x' was already declared as def on line 2"
+
+# export def and a later bare def bind ONE name.
+fail "export def then def", "export def f\n  1\ndef f\n  2", "'f' was already declared as def on line 1"
+
+# A parameter is a declaration; a declaring form for its name in the
+# body rejects (the silent argument-discard cell).
+fail "param then def in body", "def f(x)\n  def x\n    1\n  x", "'x' was already declared as parameter"
+fail "param then state in body", "def f(x)\n  x := 1\n  x", "'x' was already declared as parameter"
+
+# The plain-then-declare order rejects inside function scopes too.
+fail "plain then state in def body", "def f\n  x = 1\n  x := 2\n  x", "'x' was already declared as plain on line 2"
+
+# ==============================================================================
+# Duplicate names within one pattern
+# ==============================================================================
+
+fail "duplicate params", "def f(x, x)\n  x", "'x' is bound twice in one parameter list"
+fail "duplicate in object pattern", "{x, x} = o", "'x' is bound twice in one destructuring pattern"
+fail "duplicate in array pattern", "[x, x] = p", "'x' is bound twice in one destructuring pattern"
+fail "duplicate in loop head", "for x, x in [[1, 2]]\n  x", "'x' is bound twice in one loop head"
+fail "duplicate in comprehension clause", "ys = (a for [a, a] in xs)", "'a' is bound twice in one comprehension clause"
+fail "duplicate in catch pattern", "try\n  a()\ncatch [e, e]\n  e", "'e' is bound twice in one catch pattern"
+
+# ==============================================================================
+# The negative space: writes and shadows stay legal
+# ==============================================================================
+
+# Plain reassignment — the first assignment declares, later ones write.
+test "plain reassignment", "x = 1\nx = 2\nx", 2
+
+# State write-through: a plain (or compound, or pattern-element) write
+# AFTER the declaration updates the container.
+test "state write-through", "x := 1\nx = 5\nx", 5
+test "state compound write-through", "x := 1\nx += 4\nx", 5
+test "state pattern write-through", "x := 1\n[x] = [7]\nx", 7
+test "write-through inside a def body", "def f\n  y := 1\n  y = 3\n  y\nf()", 3
+
+# Destructured catch elements write through to a state binding —
+# a write, never a redeclaration.
+test "catch pattern write-through", "x := 1\ntry\n  throw {x: 5}\ncatch {x}\n  0\nx", 5
+
+# Nested-scope shadowing: a declaration in an inner function scope
+# legally shadows the outer binding.
+test "def body shadows module plain", "x = 1\ndef f\n  x := 5\n  x\nf() + x", 6
+test "parameter shadows module state", "x := 1\nf = (x) -> x + 1\nf(10) + x", 12
+
+# One binding per name: an assignment to a def/class name reassigns
+# the keyword-declared binding — the hoist line mints no second `let`.
+test "def then plain reassignment", "def f\n  1\nf = 2\nf", 2
+test "class then plain reassignment", "class C\n  m: -> 1\nC = 5\nC", 5
+
+# A plain write to a parameter is a write.
+test "param plain assignment", "def f(x)\n  x = x + 1\n  x\nf(1)", 2
+
+# Loop variables declare in the for-head — their own scope: sibling
+# loops reuse a name, and a loop variable shadows an outer binding
+# without touching it.
+test "two loops reuse the variable", "t = 0\nfor i in [1, 2]\n  t += i\nfor i in [3]\n  t += i\nt", 6
+test "loop variable shadows state", "i := 9\nout = []\nfor i in [1, 2]\n  out.push(i)\nout.push(i)\nout", [1, 2, 9]
+
+# A simple catch binding is the JS catch parameter — per-handler
+# scope, so sibling handlers reuse a name.
+test "two catches reuse the binding", "r = []\ntry\n  throw 1\ncatch e\n  r.push(e)\ntry\n  throw 2\ncatch e\n  r.push(e)\nr", [1, 2]
+
+# Comprehension clause variables bind per-construct.
+test "comprehension clause shadows plain", "x = 1\nys = (x * 2 for x in [2, 3])\nys.concat([x])", [4, 6, 1]
+
+# The emitter-minted last-match `_` is not a user declaration: match
+# writes in any number of scopes (each body re-declares its own `_`
+# per invocation) never trip the rule, and a user `_` binding takes
+# match writes as ordinary writes.
+test "match writes are not declarations", "def grab(s)\n  s =~ /b/\n  _[0]\nx = 'abc'\nx =~ /c/\ngrab('abc') + _[0]", "bc"
+test "match write into a user underscore", "_ = 'seed'\ns = 'ab'\ns =~ /a/\n_[0]", "a"

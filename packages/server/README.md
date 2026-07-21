@@ -202,10 +202,67 @@ bytes are free), then cuts admission with one doorbell PUT and retires the
 old pool — nothing boots until a request actually rings, and the ring is
 answered 204 only after the fresh sockets PUT is acknowledged. A boot
 failure is cached and answered 503 with the error; the next
-content-changing save clears it. The handover seam is `start()`: under a
+content-changing save clears it.
+
+Workers never carry the Rip compiler. The manager compiles the app **once
+per boot epoch** — `Bun.build` with a `.rip` plugin over the compiler it is
+already running on — into a single ESM artifact in the pool's run tmpdir,
+and each worker (itself prebuilt to plain JS at startup) just imports the
+artifact: no loader preload, no per-worker recompile. A new epoch builds a
+new artifact, so never-stale is automatic, and a compile error is a boot
+failure like any other — the doorbell answers 503 carrying the diagnostic.
+Bundling freezes each module's `import.meta` path fields to its source
+location, so `import.meta.dir`-relative file serving works unchanged. The handover seam is `start()`: under a
 worker environment (`WORKER_ID`/`SOCKET_PATH`) it hands over its fetch
 handler instead of opening a port, so the same `app.rip` runs standalone
 on your laptop and pooled behind Janus in production, unchanged.
+
+## The no-fork memory story
+
+Unicorn-era servers had a beautiful trick: load the app once in a master
+process, then `fork()` workers that share every untouched page with the
+parent via copy-on-write. Modern JS runtimes cannot play it. Bun/JSC runs
+concurrent GC and JIT threads before any of your code executes, and a
+forked child inherits permanently locked mutexes from threads that don't
+exist on its side of the fork — the child is unusable, and no quiesce
+hatch exists. `Bun.spawn` uses `posix_spawn`, which is safe precisely
+because it discards the address space: no shared pages, no COW. So the
+typical Node/Bun cluster pays the full price in every worker — each
+process independently loads, compiles, and retains everything the app
+needs to boot, times `w`.
+
+Fork's durable value was never really the shared pages (more on that
+below) — it was **load the app once**. Rip Server recovers that without
+fork: the manager compiles the app once per reload epoch and workers boot
+the resulting plain-JS artifact, so the Rip compiler — its code, its
+parser tables, its retained heap — exists in exactly one process instead
+of `w + 1`. Workers get module evaluation and heap build, the part that
+is irreducibly per-process, and nothing else.
+
+Measured on the landing commit (M5, Bun 1.3.14, interleaved
+before/after legs):
+
+- **Per-worker RSS ~137–145MB → 33–40MB** — ~3.7x smaller, ~105MB less
+  per worker, ~850MB recovered at `w:8`.
+- **Reload (save → fresh response) at `w:8`: ~470ms → ~170ms** — ~2.7x,
+  and reload latency no longer scales with worker count (`w:2` measured
+  ~245ms → ~153ms; one build now serves all `w` instead of `w`
+  recompiles racing for cores).
+- **Boot to all-ready at `w:8`: ~650ms → ~300ms** — ~2x, with the
+  artifact build included in the after number.
+
+The honest coda, in two parts. First, fork's *other* promise — a shared
+warm heap — decays even where fork works: GC, inline caches, and JIT
+profiling counters dirty the "shared" pages within minutes (Ruby spent
+years on `GC.compact` fighting exactly this). Load-once was always the
+part worth keeping. Second, there is a read-only-pages variant that
+would genuinely share memory across workers — compile the artifact to
+JSC bytecode and let the kernel mmap it into every process — and it is
+measured as **not yet viable on Bun 1.3.14**: ESM bytecode requires
+`compile: true` (a standalone executable), and the one bundle format
+bytecode accepts (CJS) rejects top-level await, which idiomatic Rip
+emits routinely. When Bun ships ESM bytecode, the artifact is one flag
+away from kernel-shared pages.
 
 ## rip server — CLI
 
@@ -224,10 +281,10 @@ rip server [app-entry] [options]   # app-entry defaults to ./app.rip, then ./ind
 | `--eager` | Boot the fresh pool at settle instead of waiting for a ring |
 | `--control <target>` | Janus control endpoint — unix socket path or http(s) URL (or env `JANUS_CONTROL`); required, verified at startup |
 
-With watch on the pool publishes at the first ready worker (`readyWhen: 1`)
-and late workers join with follow-up PUTs; with `RIP_ENV=production` all
-workers must be ready before the first publish, and a startup boot failure
-exits nonzero.
+Unless `RIP_ENV=production`, the pool publishes at the first ready worker
+(`readyWhen: 1`) and late workers join with follow-up PUTs — this keys off
+`RIP_ENV`, not watch mode. With `RIP_ENV=production` all workers must be
+ready before the first publish, and a startup boot failure exits nonzero.
 
 Sizing the pool: **raise `c` when handlers wait; raise `w` when handlers
 work.** Workers (`-w`) are processes — real parallelism across cores, for
@@ -243,9 +300,17 @@ refuses the combination at startup).
 Env knobs (all in milliseconds, defaults per the protocol): `RIP_SETTLE_MS`
 (150), `RIP_DRAIN_MS` (2500 drain grace before SIGTERM), `RIP_KILL_MS`
 (5000 SIGTERM→SIGKILL), `RIP_HEARTBEAT_MS` (5000), `RIP_HOLD_MS` (15000
-ring hold cap), `RIP_BOOT_DEADLINE_MS` (30000 per worker), and
-`RIP_WAITER_CAP` (64 held rings, a count). Workers receive their in-flight
-cap via `WORKER_CONCURRENCY`, set by the manager from `-c`.
+ring hold cap), `RIP_BOOT_DEADLINE_MS` (30000 per worker),
+`RIP_PPID_MS` (1000 orphan-watchdog cadence — a worker whose parent
+manager dies exits on its own), `RIP_REGISTER_409_MS` (20000 — how long a
+409 at registration retries before aborting, riding out a dead
+predecessor's still-live host claim), `RIP_HANDLER_DEADLINE_MS` (30000
+hung-handler watchdog: an in-flight request older than this recycles the
+worker; 0 disables), and `RIP_WAITER_CAP` (64 held rings, a count).
+Workers receive their in-flight cap via `WORKER_CONCURRENCY`, set by the
+manager from `-c`, and their SIGTERM drain budget via
+`RIP_DRAIN_DEADLINE_MS`, derived from `RIP_KILL_MS` so a drain always
+finishes inside the manager's SIGTERM→SIGKILL ceiling.
 
 ## Test
 
@@ -261,4 +326,5 @@ manager runtimes then run as real subprocesses over unix sockets against
 a stub Janus `/1.0` control socket that records every call in order:
 readiness, drains, the dirty epoch (doorbell PUT before the ring's 204,
 sockets PUT before the 204), save coalescing, the identical-bytes no-op,
-boot-failure caching, and shutdown.
+boot-failure caching, prebuilt-artifact boots (loader-free workers,
+`import.meta.dir` preservation, loud build rejection), and shutdown.

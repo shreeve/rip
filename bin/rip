@@ -19,13 +19,15 @@ import packageJson from '../package.json' with { type: 'json' };
 
 const loaderPath = join(dirname(fileURLToPath(import.meta.url)), '../src/loader.js');
 const runnerPath = join(dirname(fileURLToPath(import.meta.url)), '../src/run.js');
+const replPath = join(dirname(fileURLToPath(import.meta.url)), '../src/repl.js');
 
 const HELP = `rip ${packageJson.version} — ${packageJson.description}
 
 Usage:
+  rip                                Start the interactive REPL (on a terminal)
   rip [options] file.rip [args...]   Run a .rip file (its .rip imports compile transitively)
   rip [options] dir [args...]        Run dir/index.rip
-  rip [options]                      Read source from stdin
+  rip [options]                      Read source from stdin (when piped)
   rip check [paths...]               Type-check .rip files/dirs headlessly, no editor
                                      (default: the current directory; 'rip check --help')
   rip schema <verb> [args...]        Schema evolution: status | plan | make | migrate
@@ -40,6 +42,9 @@ Usage:
                                      then PATH
 
 Options:
+  -r, --repl           Start the interactive REPL (a bare \`rip\` on a
+                       terminal starts it too)
+  -e, --eval <code>    Evaluate one line of Rip and exit
   -c, --compile        Print compiled JavaScript to stdout
   -o, --output <file>  Write compiled JavaScript to <file>
   -m, --map            Append an inline source map to compiled output
@@ -187,7 +192,7 @@ if (args.length > 0 && !args[0].startsWith('-') && !args[0].includes('/') && !ar
   fail(`rip: unknown command '${name}'\n\nRun 'rip --help' for usage.`);
 }
 
-const takesArgument = new Set(['-o', '--output', '--explain', '--explain-generated', '--dts-dir', '--runtime', '--face']);
+const takesArgument = new Set(['-o', '--output', '--explain', '--explain-generated', '--dts-dir', '--runtime', '--face', '-e', '--eval']);
 let fileIndex = -1;
 for (let i = 0; i < args.length; i++) {
   if (i > 0 && takesArgument.has(args[i - 1])) continue;
@@ -208,6 +213,15 @@ if (has('-h', '--help')) {
 if (has('-v', '--version')) {
   console.log(`rip ${packageJson.version}`);
   process.exit(0);
+}
+
+const wantRepl = has('-r', '--repl');
+let evalCode = null;
+for (let i = 0; i < options.length; i++) {
+  if (options[i] === '-e' || options[i] === '--eval') {
+    evalCode = options[++i];
+    if (evalCode === undefined) fail('rip: -e/--eval requires a code argument', 2);
+  }
 }
 
 const showCompiled = has('-c', '--compile');
@@ -275,10 +289,38 @@ if (faceGiven && explainDirection === null) {
   fail("rip: --face selects the surface --explain reads against — compile and run modes always ship JS (the TS face is never a shipping target)", 2);
 }
 
-const known = new Set(['-c', '--compile', '--ts', '-o', '--output', '-m', '--map', '-t', '--tokens', '-s', '--sexpr', '--dts', '--dts-dir', '--runtime', '--explain', '--explain-generated', '--face', outputFile, dtsDir]);
+const known = new Set(['-c', '--compile', '--ts', '-o', '--output', '-m', '--map', '-t', '--tokens', '-s', '--sexpr', '--dts', '--dts-dir', '--runtime', '--explain', '--explain-generated', '--face', '-r', '--repl', '-e', '--eval', outputFile, dtsDir, evalCode]);
 const unknown = options.filter((o) => o.startsWith('-') && !known.has(o));
 if (unknown.length > 0) {
   fail(`rip: unknown option${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}\n\nRun 'rip --help' for usage.`, 2);
+}
+
+// ---- REPL mode ----
+//
+// The REPL runs in a child bun with the .rip loader preloaded (the
+// run harness's pattern), so `import './file.rip'` inside a session
+// compiles transitively. `-e/--eval` evaluates one entry through the
+// same machinery and exits. The parent ignores SIGINT while waiting —
+// Ctrl+C belongs to the session (buffer-clear first, then exit).
+const startRepl = () => {
+  const replArgs = evalCode !== null ? ['--eval', evalCode] : [];
+  process.on('SIGINT', () => {});
+  const r = spawnSync('bun', [`--preload=${loaderPath}`, replPath, ...replArgs], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  process.exit(r.status ?? 1);
+};
+
+if (wantRepl || evalCode !== null) {
+  const others = options.filter((o) => o.startsWith('-') && !['-r', '--repl', '-e', '--eval'].includes(o));
+  if (others.length > 0) {
+    fail(`rip: -r/--repl and -e/--eval cannot combine with other options: ${others.join(', ')}\n\nRun 'rip --help' for usage.`, 2);
+  }
+  if (fileIndex !== -1) {
+    fail(`rip: -r/--repl and -e/--eval take no file argument; unexpected: ${args.slice(fileIndex).join(' ')}\n\nRun 'rip --help' for usage.`, 2);
+  }
+  startRepl();
 }
 
 // ---- Explain mode ----
@@ -347,8 +389,10 @@ if (compileMode && scriptArgs.length > 0) {
   fail(`rip: unexpected argument${scriptArgs.length === 1 ? '' : 's'} after the input file in compile mode: ${scriptArgs.join(' ')}\n\nRun 'rip --help' for usage.`, 2);
 }
 
-// No file and an interactive terminal: nothing to read — show usage.
+// No file and an interactive terminal: run mode starts the REPL;
+// compile modes have nothing to read and show usage.
 if (inputFile === null && process.stdin.isTTY) {
+  if (!compileMode && !showTsFace) startRepl();
   console.log(HELP);
   process.exit(0);
 }

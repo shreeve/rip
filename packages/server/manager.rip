@@ -17,6 +17,16 @@ import { watch, readdirSync, readFileSync, existsSync, statSync, unlinkSync, mkd
 import { join, resolve, dirname, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 
+# The compiler compiling THIS process is the one that builds artifacts —
+# resolved from the loader's --preload path, loaded once, on first build.
+_compile = null
+loadCompiler = ->
+  return _compile if _compile?
+  preload = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
+  abort "rip-server: the rip loader is missing from execArgv — run via `rip server`" unless preload?
+  mod = import!(join(dirname(resolve(preload)), 'compile.js'))
+  _compile = mod.compile
+
 # --- Tunables — env-overridable, defaults per the pool protocol ----------------
 
 envNum = (name, fallback) ->
@@ -30,6 +40,12 @@ HEARTBEAT_MS     =! envNum 'RIP_HEARTBEAT_MS', 5000     # heartbeat cadence
 HOLD_MS          =! envNum 'RIP_HOLD_MS', 15000         # ring hold cap, then 503
 BOOT_DEADLINE_MS =! envNum 'RIP_BOOT_DEADLINE_MS', 30000  # per-worker /ready deadline
 WAITER_CAP       =! envNum 'RIP_WAITER_CAP', 64         # held rings per app, then 503
+REGISTER_409_MS  =! envNum 'RIP_REGISTER_409_MS', 20000 # 409 retry window (~heartbeat TTL + margin)
+
+# The worker's in-flight drain wait after SIGTERM must finish under THIS
+# manager's SIGTERM → SIGKILL ceiling (KILL_MS — see retirePool), with margin
+# for exit housekeeping. Passed to every worker via RIP_DRAIN_DEADLINE_MS.
+WORKER_DRAIN_MS  =! Math.max(KILL_MS - 500, Math.floor(KILL_MS / 2))
 
 IGNORED_DIRS =! new Set ['node_modules', '.git', 'dist', 'coverage', 'tmp', '.rip-cache', '.cache']
 
@@ -52,7 +68,8 @@ Options:
                       (or env JANUS_CONTROL); required, verified at startup
 
 Env knobs: RIP_SETTLE_MS, RIP_DRAIN_MS, RIP_KILL_MS, RIP_HEARTBEAT_MS,
-RIP_HOLD_MS, RIP_BOOT_DEADLINE_MS, RIP_WAITER_CAP
+RIP_HOLD_MS, RIP_BOOT_DEADLINE_MS, RIP_WAITER_CAP, RIP_REGISTER_409_MS,
+RIP_HANDLER_DEADLINE_MS
 """
 
 # --- Module state ---------------------------------------------------------------
@@ -72,8 +89,9 @@ state =
   appId: null
   controlUnix: null    # unix socket path to the control plane, or
   controlBase: null    # http(s) base URL
-  loaderPath: null     # the rip loader compiling THIS process
-  runDir: null         # tmpdir holding the doorbell + worker sockets
+  workerJs: null       # the worker runtime, prebuilt to plain JS at startup
+  buildCounter: 0      # one app artifact per boot epoch, uniquely named
+  runDir: null         # tmpdir holding the doorbell, worker sockets, artifacts
   bellPath: null
   bell: null
   watcher: null
@@ -116,19 +134,27 @@ cfetch = (method, path, body = null) ->
 
 registerApp = ->
   backoff = 200
+  deadline409 = null
   loop
     res = null
     try
       res = cfetch! 'POST', '/1.0/apps', { name: cfg.name, hosts: cfg.hosts }
     if res?
-      if res.status is 201 or res.status is 200
+      if res.status is 201            # per the pool protocol: created, only
         body = res.json!
         abort "rip-server: control returned no app id" unless body?.id?
         state.appId = body.id
         return
       if res.status is 409
-        abort "rip-server: host already claimed at the control plane (409): #{cfg.hosts.join(', ')}"
-      warn "rip-server: register failed (#{res.status}); retrying"
+        # A restart under a supervisor lands inside the heartbeat TTL while
+        # the dead manager's claim is still live — retry until ~TTL + margin
+        # before treating the claim as genuinely foreign.
+        deadline409 ?= Date.now() + REGISTER_409_MS
+        if Date.now() >= deadline409
+          abort "rip-server: host already claimed at the control plane (409): #{cfg.hosts.join(', ')}"
+        warn "rip-server: hosts still claimed (409); retrying until the stale claim expires"
+      else
+        warn "rip-server: register failed (#{res.status}); retrying"
     else
       warn "rip-server: control unreachable during register; retrying"
     sleep! backoff
@@ -157,13 +183,17 @@ putUpstreams = (list) ->
     sleep! backoff
     backoff = Math.min(backoff * 2, 5000)
 
+# Runs enqueued in the writer chain, one closure per tick. A failed beat has
+# no local retry loop — the next tick's enqueued heartbeat IS the retry, and
+# during a control outage those closures queue behind putUpstreams' backoff,
+# so the effective retry cadence follows that backoff, not the flat interval.
 heartbeatOnce = ->
   return unless state.appId?
   res = null
   try
     res = cfetch! 'POST', "/1.0/apps/#{state.appId}/heartbeat"
   unless res?
-    warn "rip-server: heartbeat unreachable; retrying next tick"
+    warn "rip-server: heartbeat unreachable; the next tick retries"
     return
   if res.status is 404
     warn "rip-server: heartbeat 404 — re-registering and re-publishing upstreams"
@@ -174,6 +204,75 @@ deleteApp = ->
   try cfetch! 'DELETE', "/1.0/apps/#{state.appId}"
 
 # ==============================================================================
+# Prebuild — one JS artifact per boot epoch, built by the manager
+# ==============================================================================
+#
+# Workers never carry the Rip compiler: the manager compiles the app ONCE per
+# boot (Bun.build + a .rip plugin over the compiler already loaded here) into
+# a single ESM artifact in the run tmpdir, and every worker just imports it.
+# A build failure is a boot failure — cached, rings answer 503 with the
+# compile diagnostic, and the next content-changing save retries.
+#
+# Bytecode was measured and is not viable on Bun 1.3.14: ESM bytecode
+# requires `compile: true` (a standalone executable), and the one format
+# bytecode does accept (CJS) rejects top-level await — which idiomatic Rip
+# (module-level dammit) produces routinely. The plain-JS artifact ships.
+
+# Bundling must not change what a module's own import.meta says: freeze the
+# path-valued fields to the SOURCE module's location at build time.
+# import.meta.main stays live (false under the worker's dynamic import,
+# exactly as an unbundled dynamic import of the entry evaluated).
+rewriteMeta = (code, path) ->
+  return code unless code.includes('import.meta')
+  dir = dirname(path)
+  t = new Bun.Transpiler
+    loader: 'js'
+    define:
+      'import.meta.url':      JSON.stringify(Bun.pathToFileURL(path).href)
+      'import.meta.path':     JSON.stringify(path)
+      'import.meta.filename': JSON.stringify(path)
+      'import.meta.dir':      JSON.stringify(dir)
+      'import.meta.dirname':  JSON.stringify(dir)
+      'import.meta.file':     JSON.stringify(basename(path))
+  t.transformSync(code)
+
+ripBuildPlugin = (compile) ->
+  name: 'rip'
+  setup: (build) ->
+    build.onLoad { filter: /\.rip$/ }, (args) ->
+      source = readFileSync(args.path, 'utf8')
+      { code } = compile(source, { path: args.path, runtimeDelivery: 'import' })
+      { contents: rewriteMeta(code, args.path), loader: 'js' }
+    # Plain-JS modules riding into the bundle keep their import.meta too.
+    build.onLoad { filter: /\.[mc]?js$/ }, (args) ->
+      source = readFileSync(args.path, 'utf8')
+      return unless source.includes('import.meta')
+      { contents: rewriteMeta(source, args.path), loader: 'js' }
+    return
+
+# entry (.rip or .js) → one self-contained ESM artifact at outfile. `bun` and
+# node builtins stay external (target 'bun'); everything else bundles, so the
+# artifact needs no loader and no node_modules to boot. Throws with the full
+# compile/bundle diagnostic on failure.
+export buildArtifact = (entry, outfile) ->
+  compile = loadCompiler!()
+  result = Bun.build!
+    entrypoints: [entry]
+    target: 'bun'
+    format: 'esm'
+    sourcemap: 'none'
+    throw: false
+    plugins: [ripBuildPlugin(compile)]
+  unless result.success
+    throw new Error(result.logs.map((l) -> l?.message or String(l)).join('\n'))
+  Bun.write! outfile, result.outputs[0].text!
+  outfile
+
+buildApp = ->
+  state.buildCounter += 1
+  buildArtifact! cfg.entry, join(state.runDir, "b#{state.buildCounter}-app.js")
+
+# ==============================================================================
 # Workers and pools
 # ==============================================================================
 
@@ -182,11 +281,11 @@ workerPath =! join(import.meta.dir, 'worker.rip')
 spawnWorker = (pool) ->
   pool.serial += 1
   sock = join(state.runDir, "p#{pool.n}w#{pool.serial}.sock")
-  proc = Bun.spawn ['bun', "--preload=#{state.loaderPath}", workerPath],
+  proc = Bun.spawn ['bun', state.workerJs],
     stdout: 'inherit'
     stderr: 'inherit'
     stdin: 'ignore'
-    env: { ...process.env, APP_ENTRY: cfg.entry, SOCKET_PATH: sock, WORKER_ID: "#{pool.n}.#{pool.serial}", WORKER_CONCURRENCY: "#{cfg.concurrency}" }
+    env: { ...process.env, APP_ARTIFACT: pool.artifact, SOCKET_PATH: sock, WORKER_ID: "#{pool.n}.#{pool.serial}", WORKER_CONCURRENCY: "#{cfg.concurrency}", RIP_DRAIN_DEADLINE_MS: "#{WORKER_DRAIN_MS}" }
   w = { sock, proc, ready: false }
   monitorWorker pool, w
   w
@@ -230,9 +329,9 @@ pollWorker = (w) ->
       return { ok: false, w, error: lastBody or 'worker boot deadline expired' }
     sleep! 25
 
-spawnPool = ->
+spawnPool = (artifact) ->
   state.poolCounter += 1
-  pool = { n: state.poolCounter, serial: 0, workers: [], polls: [], retired: false }
+  pool = { n: state.poolCounter, serial: 0, workers: [], polls: [], retired: false, artifact }
   for i in [0...cfg.workers]
     pool.workers.push spawnWorker(pool)
   pool.polls = pool.workers.map (w) -> pollWorker(w)
@@ -308,6 +407,7 @@ retirePool = (pool, graceMs = DRAIN_MS) ->
     clearTimeout hardKill
     for w in pool.workers
       try unlinkSync w.sock
+    try unlinkSync pool.artifact if pool.artifact?   # per-epoch, dies with the pool
     return
 
 scrapPool = (pool) -> retirePool pool, 0
@@ -346,12 +446,24 @@ kickBoot = ->
   cleanup.catch -> null       # the failure is cached; rings read it as 503
   pr
 
-# Boot from the latest files, scrap-at-publish when dirty again, publish via
-# an awaited PUT, repeat while saves keep landing.
+# Boot from the latest files — build the epoch's artifact, then spawn against
+# it — scrap-at-publish when dirty again, publish via an awaited PUT, repeat
+# while saves keep landing. A build failure takes the exact boot-failure path.
 bootLoop = ->
   loop
     state.dirty = false
-    pool = spawnPool()
+    artifact = null
+    try
+      artifact = buildApp!()
+    catch err
+      continue if state.dirty        # files changed mid-build; the failure may be stale
+      state.bootFailure = err?.message or String(err)
+      warn "rip-server: app build failed: #{state.bootFailure}"
+      throw err
+    if state.dirty                   # saved during the build — this artifact is stale
+      try unlinkSync artifact
+      continue
+    pool = spawnPool(artifact)
     try
       awaitReady! pool, state.readyWhen
     catch err
@@ -568,12 +680,6 @@ export main = (argv) ->
     abort "rip-server: -c #{cfg.concurrency} requires watch off — raise c only with watch off (use --no-watch, or RIP_ENV=production)"
   state.readyWhen = if prod then cfg.workers else 1
 
-  # Workers must compile .rip imports themselves; the loader compiling THIS
-  # process is the one to hand them (worker threads/processes inherit neither
-  # preloads nor bunfig).
-  state.loaderPath = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
-  abort "rip-server: the rip loader is missing from execArgv — run via `rip server`" unless state.loaderPath?
-
   abort "rip-server: no control endpoint — pass --control <unix-path-or-url> or set JANUS_CONTROL" unless args.control?
   if args.control.startsWith('http://') or args.control.startsWith('https://')
     state.controlBase = args.control.replace(/\/+$/, '')
@@ -585,6 +691,15 @@ export main = (argv) ->
     abort "rip-server: control endpoint unreachable at #{args.control}: #{e?.message or e}"
 
   state.runDir = mkdtempSync(join(tmpdir(), 'rip-srv-'))
+
+  # The worker runtime is fixed code — prebuild it to plain JS once, here,
+  # so workers spawn with no loader and no compiler. Failing to build our
+  # own runtime is a toolchain defect, not an app error: abort.
+  try
+    state.workerJs = buildArtifact! workerPath, join(state.runDir, 'worker.js')
+  catch e
+    abort "rip-server: cannot build the worker runtime: #{e?.message or e}"
+
   startDoorbell()
 
   registerApp!()

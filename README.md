@@ -25,7 +25,7 @@ in [docs/ROADMAP.md](docs/ROADMAP.md).
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) — mandatory repository rules and invariants
-- [docs/SYNTAX.md](docs/SYNTAX.md) — context-sensitive syntax reference
+- [docs/POSSIBLE-FUTURE-SYNTAX.md](docs/POSSIBLE-FUTURE-SYNTAX.md) — speculative notes on potential future syntax
 - [docs/TYPES.md](docs/TYPES.md) — type-system and editor architecture
 - [docs/HMR.md](docs/HMR.md) — hot-module-replacement design
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work
@@ -41,3 +41,11 @@ bun run parser         # regenerate src/parser.js
 bun run corpus-expected
 bun run type-audit
 ```
+
+## REPL
+
+`rip` on a TTY (or `rip -r`) starts the interactive REPL: reactive
+bindings persist across lines, input is syntax-highlighted live from
+the real lexer, themes auto-detect the terminal background (`.theme`
+to override), imports resolve against the session cwd, and `-e`
+evaluates one entry. `.help` inside the session lists the commands.
