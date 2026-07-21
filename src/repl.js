@@ -118,10 +118,72 @@ export function resolveThemeName({ override = null, configTheme = null, detected
   return 'dark';
 }
 
+// Stateful byte-level matcher for the OSC 11 background reply
+// (ESC ] 11 ; <payload> terminated by BEL or ST = ESC \). It buffers
+// raw stdin bytes across chunk boundaries, extracts EXACTLY ONE
+// complete reply wherever it sits, and keeps every non-reply byte —
+// type-ahead mixed into the same chunk, bytes before and after the
+// reply — in original order for release back onto the stream. Bytes
+// (never decoded strings) are the unit: a multibyte glyph split
+// across chunks survives intact.
+const OSC11_HEAD = Buffer.from('\x1b]11;', 'latin1');
+const ST = Buffer.from('\x1b\\', 'latin1');
+
+export class Osc11Matcher {
+  constructor() {
+    this.buffer = Buffer.alloc(0);
+    this.reply = null; // the payload string once a complete reply extracted
+  }
+
+  // Feed one stdin chunk; true once a complete reply has been
+  // extracted (its bytes leave the buffer; everything else stays).
+  feed(chunk) {
+    this.buffer = Buffer.concat([this.buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8')]);
+    if (this.reply === null) {
+      const start = this.buffer.indexOf(OSC11_HEAD);
+      if (start !== -1) {
+        const payloadAt = start + OSC11_HEAD.length;
+        const bel = this.buffer.indexOf(0x07, payloadAt);
+        const st = this.buffer.indexOf(ST, payloadAt);
+        const payloadEnd = bel === -1 ? st : st === -1 ? bel : Math.min(bel, st);
+        if (payloadEnd !== -1) {
+          const end = payloadEnd + (payloadEnd === bel ? 1 : ST.length);
+          this.reply = this.buffer.toString('utf8', payloadAt, payloadEnd);
+          this.buffer = Buffer.concat([this.buffer.subarray(0, start), this.buffer.subarray(end)]);
+        }
+      }
+    }
+    return this.reply !== null;
+  }
+
+  // Is an INCOMPLETE reply still growable? True for a started reply
+  // awaiting its terminator, and for a proper prefix of the header at
+  // the buffer's end. Bytes that diverged from the header are plain
+  // input and never count.
+  hasPartial() {
+    if (this.reply !== null) return false;
+    if (this.buffer.indexOf(OSC11_HEAD) !== -1) return true;
+    const max = Math.min(OSC11_HEAD.length - 1, this.buffer.length);
+    for (let len = max; len > 0; len--) {
+      if (this.buffer.subarray(this.buffer.length - len).equals(OSC11_HEAD.subarray(0, len))) return true;
+    }
+    return false;
+  }
+
+  // Every byte that is not the extracted reply, original order.
+  residue() {
+    return this.buffer;
+  }
+}
+
 // Terminal background detection, once at startup (TTY only): OSC 11
 // query with a short timeout — parse the `rgb:` reply and compute
 // luminance — falling back to $COLORFGBG's background field, then
-// dark.
+// dark. The matcher above owns reply recognition; on timeout with a
+// PARTIAL reply pending, one grace window (same length) waits for the
+// terminator, and a second timeout releases every buffered byte back
+// onto stdin verbatim — detection may then miss, but a keystroke is
+// never eaten.
 export async function detectBackgroundTheme({ timeoutMs = 80 } = {}) {
   const fromColorFgBg = () => {
     const parts = (process.env.COLORFGBG ?? '').split(';');
@@ -130,49 +192,43 @@ export async function detectBackgroundTheme({ timeoutMs = 80 } = {}) {
     return bg === 7 || bg >= 9 ? 'light' : 'dark';
   };
   if (!process.stdout.isTTY || !process.stdin.isTTY) return fromColorFgBg() ?? 'dark';
-  const reply = await new Promise((resolve) => {
+  const payload = await new Promise((resolve) => {
     const stdin = process.stdin;
     const wasRaw = stdin.isRaw;
-    let data = '';
-    let draining = false;
-    const finish = (value) => {
+    const matcher = new Osc11Matcher();
+    let graced = false;
+    let timer;
+    const finish = () => {
+      clearTimeout(timer);
       stdin.removeListener('data', onData);
       if (!wasRaw) stdin.setRawMode(false);
       stdin.pause();
-      resolve(value);
+      const rest = matcher.residue();
+      if (rest.length > 0) stdin.unshift(rest);
+      resolve(matcher.reply);
     };
-    // The late-reply race: a terminal that answers AFTER the timeout
-    // would leak its OSC reply into readline as garbage input. On
-    // timeout, hold the listener for one more short window and
-    // DISCARD an escape-prefixed chunk if it arrives; a chunk that is
-    // not a terminal reply (real typed-ahead input) pushes back onto
-    // the stream untouched.
-    const timer = setTimeout(() => {
-      draining = true;
-      setTimeout(() => finish(null), timeoutMs);
-    }, timeoutMs);
-    const onData = (chunk) => {
-      if (draining) {
-        if (!chunk.toString('utf8').includes('\x1b]')) stdin.unshift(chunk);
-        finish(null);
+    const onTimeout = () => {
+      if (matcher.hasPartial() && !graced) {
+        graced = true;
+        timer = setTimeout(finish, timeoutMs);
         return;
       }
-      data += chunk.toString('utf8');
-      const m = /\]11;rgb:([0-9a-f]+)\/([0-9a-f]+)\/([0-9a-f]+)/i.exec(data);
-      if (m) {
-        clearTimeout(timer);
-        finish(m.slice(1, 4));
-      }
+      finish();
+    };
+    timer = setTimeout(onTimeout, timeoutMs);
+    const onData = (chunk) => {
+      if (matcher.feed(chunk)) finish();
     };
     stdin.setRawMode(true);
     stdin.resume();
     stdin.on('data', onData);
     process.stdout.write('\x1b]11;?\x07');
   });
-  if (reply === null) return fromColorFgBg() ?? 'dark';
+  const m = payload === null ? null : /rgb:([0-9a-f]+)\/([0-9a-f]+)\/([0-9a-f]+)/i.exec(payload);
+  if (m === null) return fromColorFgBg() ?? 'dark';
   // Components arrive as 1–4 hex digits per channel; normalize to 0–1.
   const chan = (h) => parseInt(h, 16) / (16 ** h.length - 1);
-  const [r, g, b] = reply.map(chan);
+  const [r, g, b] = m.slice(1, 4).map(chan);
   const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
   return luminance > 0.5 ? 'light' : 'dark';
 }

@@ -14,6 +14,7 @@ import {
   mintFresh, buildWrapper, resolveThemeName, buildTheme, ansiFor,
   colorizeLastLine, stripAnsi, encodeEntry, decodeEntry, displayWidth,
   makeImportResolver, describeError, Session, Repl, THEME_NAMES,
+  Osc11Matcher,
 } from '../../src/repl.js';
 import { identifierRuns } from '../../src/lexer.js';
 import { CompileError } from '../../src/compile.js';
@@ -223,6 +224,89 @@ describe('history encoding', () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe('OSC 11 incremental reply matcher', () => {
+  const REPLY = '\x1b]11;rgb:1111/2222/3333\x07';
+  const PAYLOAD = 'rgb:1111/2222/3333';
+
+  test('a reply alone extracts with empty residue', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from(REPLY, 'latin1'))).toBe(true);
+    expect(m.reply).toBe(PAYLOAD);
+    expect(m.residue().length).toBe(0);
+    expect(m.hasPartial()).toBe(false);
+  });
+
+  test('keystrokes + reply + keystrokes in ONE chunk: the reply extracts, every other byte survives in order', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from(`abc${REPLY}def`, 'latin1'))).toBe(true);
+    expect(m.reply).toBe(PAYLOAD);
+    expect(m.residue().toString('utf8')).toBe('abcdef');
+  });
+
+  test('a reply split across 2 chunks extracts once complete', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from('ab\x1b]11;rgb:11', 'latin1'))).toBe(false);
+    expect(m.feed(Buffer.from('11/2222/3333\x07cd', 'latin1'))).toBe(true);
+    expect(m.reply).toBe(PAYLOAD);
+    expect(m.residue().toString('utf8')).toBe('abcd');
+  });
+
+  test('a reply split across 3 chunks — the split lands inside the 5-byte header', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from('\x1b]', 'latin1'))).toBe(false);
+    expect(m.hasPartial()).toBe(true);
+    expect(m.feed(Buffer.from('11;rgb:1111/2222', 'latin1'))).toBe(false);
+    expect(m.feed(Buffer.from('/3333\x07', 'latin1'))).toBe(true);
+    expect(m.reply).toBe(PAYLOAD);
+    expect(m.residue().length).toBe(0);
+  });
+
+  test('keystrokes only: no reply, no partial — every byte releases verbatim', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from('hello world', 'utf8'))).toBe(false);
+    expect(m.hasPartial()).toBe(false);
+    expect(m.residue().toString('utf8')).toBe('hello world');
+  });
+
+  test('a partial prefix pending at timeout: hasPartial reports it, and residue still returns EVERY byte verbatim', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from('xy\x1b]11;rgb:aa', 'latin1'))).toBe(false);
+    expect(m.hasPartial()).toBe(true);
+    expect(m.residue().toString('utf8')).toBe('xy\x1b]11;rgb:aa');
+  });
+
+  test('a lone ESC at buffer end counts as a possible prefix; a diverging next byte stops counting', () => {
+    const partial = new Osc11Matcher();
+    partial.feed(Buffer.from('q\x1b', 'latin1'));
+    expect(partial.hasPartial()).toBe(true);
+    const diverged = new Osc11Matcher();
+    diverged.feed(Buffer.from('q\x1bZ', 'latin1'));
+    expect(diverged.hasPartial()).toBe(false);
+  });
+
+  test('the ST terminator (ESC \\) ends a reply exactly like BEL', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from('a\x1b]11;rgb:aaaa/bbbb/cccc\x1b\\b', 'latin1'))).toBe(true);
+    expect(m.reply).toBe('rgb:aaaa/bbbb/cccc');
+    expect(m.residue().toString('utf8')).toBe('ab');
+  });
+
+  test('byte-level buffering: a multibyte glyph split across the chunk boundary survives intact', () => {
+    const glyph = Buffer.from('é', 'utf8'); // two UTF-8 bytes
+    const m = new Osc11Matcher();
+    expect(m.feed(glyph.subarray(0, 1))).toBe(false);
+    expect(m.feed(Buffer.concat([glyph.subarray(1), Buffer.from(REPLY, 'latin1')]))).toBe(true);
+    expect(m.residue().toString('utf8')).toBe('é');
+  });
+
+  test('exactly ONE reply extracts; a second one stays in the residue', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from(`${REPLY}${REPLY}`, 'latin1'))).toBe(true);
+    expect(m.reply).toBe(PAYLOAD);
+    expect(m.residue().toString('latin1')).toBe(REPLY);
   });
 });
 
