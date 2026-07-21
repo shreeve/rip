@@ -6,7 +6,7 @@
 // (b) top-level static imports lower to awaited dynamic imports so
 // the program is evaluable inside an async function body.
 import { describe, test, expect } from 'bun:test';
-import { compile } from '../../src/compile.js';
+import { compile, CompileError } from '../../src/compile.js';
 
 const repl = (src, opts = {}) => compile(src, { runtimeDelivery: 'none', repl: true, ...opts });
 
@@ -177,6 +177,26 @@ describe('user-spelled dynamic imports route through the minted resolver', () =>
 
   test('a program with no import reports a null resolver', () => {
     expect(repl('1 + 1').replImportResolver).toBe(null);
+  });
+});
+
+describe('export rejects positioned in repl mode', () => {
+  test('every export form rejects with a positioned message', () => {
+    for (const src of ['export q = 5', 'export class Foo', 'export default 1', 'q = 1\nexport { q }']) {
+      let err = null;
+      try {
+        repl(src);
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(CompileError);
+      expect(err.message).toMatch(/'export' has no meaning in a REPL entry/);
+      expect(typeof err.start).toBe('number');
+    }
+  });
+
+  test('off by default: export emits untouched', () => {
+    expect(compile('export q = 5', { runtimeDelivery: 'none' }).code).toContain('export const q = 5;');
   });
 });
 

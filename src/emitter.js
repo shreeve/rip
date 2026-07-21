@@ -680,10 +680,14 @@ class Emitter {
   }
 
   // A seeded (ambient) readonly name at the innermost frame that
-  // binds `name`. Writes reject at COMPILE time — the const that
-  // makes an in-file readonly write throw lives in a previous REPL
-  // line's program, so a silent write here would sever the binding
-  // with no error anywhere (the silent-miscompile class).
+  // binds `name`. Direct writes (assign, compound, update) reject at
+  // COMPILE time — deliberately STRICTER than an in-file readonly,
+  // whose write emits bare and throws JS's own TypeError only when
+  // the const runs: across REPL lines the positioned rejection is the
+  // better diagnostic and fires before any of the entry's side
+  // effects. Pattern-element writes keep the runtime backstop — the
+  // evaluation environment restores readonly kinds as const, so JS
+  // throws there (the contract is pinned in ambient-bindings tests).
   isAmbientReadonly(name) {
     for (let i = this.rframes.length - 1; i >= 0; i--) {
       const f = this.rframes[i];
@@ -2538,6 +2542,12 @@ class Emitter {
   exportStatement(node, ind) {
     if (this.script) {
       throw this.positionedError(node, 'emitter: exports are not available in a script tag — drop the export keyword; script sources share one scope');
+    }
+    // A REPL entry evaluates inside an async function body, where
+    // `export` is a load-time SyntaxError with no position — reject
+    // HERE, positioned (the script-mode precedent).
+    if (this.repl) {
+      throw this.positionedError(node, "emitter: 'export' has no meaning in a REPL entry — every top-level binding already persists to later lines; drop the export keyword");
     }
     const head = node[0];
     this.mark(node, '$self', () => {
@@ -12235,12 +12245,13 @@ const programScopeNames = (emitter, sexpr) => {
 // binding inventory reports (one vocabulary; a REPL feeds one line's
 // inventory back as the next line's seed).
 const AMBIENT_KINDS = new Set(['plain', 'state', 'computed', 'effect', 'readonly', 'import', 'class', 'def', 'enum']);
-const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
 
 // Validate and normalize the ambientBindings option: an array of
-// {name, kind} with identifier names, known kinds, and no duplicates
-// — anything else rejects loudly (an API guard; no source node
-// exists, so the error is message-only).
+// {name, kind} with identifier names (the LEXER's identifier
+// vocabulary — a seed round-trips names the scanner accepted, Unicode
+// included), known kinds, and no duplicates — anything else rejects
+// loudly (an API guard; no source node exists, so the error is
+// message-only).
 const normalizeAmbient = (ambientBindings) => {
   if (ambientBindings == null) return [];
   if (!Array.isArray(ambientBindings)) {
@@ -12248,7 +12259,7 @@ const normalizeAmbient = (ambientBindings) => {
   }
   const seen = new Set();
   for (const b of ambientBindings) {
-    if (b === null || typeof b !== 'object' || typeof b.name !== 'string' || !IDENTIFIER_RE.test(b.name)) {
+    if (b === null || typeof b !== 'object' || !isIdentifierName(b.name)) {
       throw new Error(`emitter: ambientBindings entries are {name, kind} with an identifier name; got ${JSON.stringify(b)}`);
     }
     if (!AMBIENT_KINDS.has(b.kind)) {

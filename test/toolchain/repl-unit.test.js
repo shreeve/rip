@@ -7,14 +7,15 @@
 // process rule).
 import { describe, test, expect } from 'bun:test';
 import { PassThrough } from 'node:stream';
-import { mkdtempSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   mintFresh, buildWrapper, resolveThemeName, buildTheme, ansiFor,
-  colorizeLastLine, stripAnsi, encodeEntry, makeImportResolver,
-  describeError, Session, Repl, THEME_NAMES,
+  colorizeLastLine, stripAnsi, encodeEntry, decodeEntry, displayWidth,
+  makeImportResolver, describeError, Session, Repl, THEME_NAMES,
 } from '../../src/repl.js';
+import { identifierRuns } from '../../src/lexer.js';
 import { CompileError } from '../../src/compile.js';
 
 describe('wrapper generation', () => {
@@ -97,6 +98,17 @@ describe('wrapper generation', () => {
     const used = new Set(['x', 'x_']);
     expect(mintFresh('x', used)).toBe('x__');
     expect(used.has('x__')).toBe(true);
+  });
+
+  test('the identifier vocabulary is the LEXER\'s — Unicode names collect', () => {
+    expect(identifierRuns('café := №1 + x')).toEqual(expect.arrayContaining(['café', 'x']));
+    expect(identifierRuns('1 + 2')).toEqual([]);
+    const { body } = buildWrapper({
+      code: `café.value = 2;`,
+      source: 'café = 2',
+      priorKinds: new Map([['café', 'state']]),
+    });
+    expect(body).toContain(`const café = __rip.vars['café'];`);
   });
 });
 
@@ -181,8 +193,78 @@ describe('live-highlight colorizer', () => {
 
 describe('history encoding', () => {
   test('multi-line entries encode to one line', () => {
-    expect(encodeEntry('if x\n  1')).toBe('if x⏎  1');
+    expect(encodeEntry('if x\n  1')).toBe('if x⏎n  1');
     expect(encodeEntry('plain')).toBe('plain');
+  });
+
+  test('the encoding is INJECTIVE: a literal ⏎ round-trips distinctly from a newline', () => {
+    for (const entry of ['if x\n  1', 's = "a⏎b"', 'a⏎nb', 'a⏎eb', '⏎\n⏎']) {
+      expect(decodeEntry(encodeEntry(entry))).toBe(entry);
+      expect(encodeEntry(entry).includes('\n')).toBe(false);
+    }
+    expect(encodeEntry('a\nb')).not.toBe(encodeEntry('a⏎b'));
+  });
+
+  test('loadHistory decodes stored entries exactly (multi-line AND literal-⏎ single lines)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'rip-repl-hist-'));
+    try {
+      const file = join(tmp, 'history');
+      const multi = 'if x\n  1';
+      const glyph = 's = "a⏎b"';
+      writeFileSync(file, `${encodeEntry(multi)}\n${encodeEntry(glyph)}\n`);
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const repl = new Repl({ input, output, env: { NO_COLOR: '1' } });
+      repl.historyFile = file;
+      repl.loadHistory();
+      expect(repl.decodeTable.get(encodeEntry(multi))).toBe(multi);
+      expect(repl.decodeTable.get(encodeEntry(glyph))).toBe(glyph);
+      expect(repl.recall).toEqual([encodeEntry(glyph), encodeEntry(multi)]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('history persistence and recall bookkeeping', () => {
+  const makeRepl = () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    return new Repl({ input, output, env: { NO_COLOR: '1' } });
+  };
+
+  test('the history file writes mode 0600 and TIGHTENS an existing looser file', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'rip-repl-mode-'));
+    try {
+      const file = join(tmp, 'history');
+      writeFileSync(file, 'old\n', { mode: 0o644 });
+      const repl = makeRepl();
+      repl.historyFile = file;
+      repl.entries.push('q = 1');
+      repl.saveHistory();
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test('recall bookkeeping REBUILDS rl.history from the session record — no splice guesses', () => {
+    const repl = makeRepl();
+    repl.rl = { history: [] };
+    repl.noteRecall('a = 1');
+    repl.noteRecall('if x\n  1');
+    repl.noteRecall('.vars');
+    repl.noteRecall('a = 1'); // repeat: dedups, newest first
+    expect(repl.rl.history).toEqual(['a = 1', '.vars', encodeEntry('if x\n  1')]);
+    expect(repl.decodeTable.get(encodeEntry('if x\n  1'))).toBe('if x\n  1');
+  });
+});
+
+describe('repaint cursor math', () => {
+  test('double-width characters count two cells; ANSI escapes count zero', () => {
+    expect(displayWidth('abc')).toBe(3);
+    expect(displayWidth('你好')).toBe(4);
+    expect(displayWidth('\x1b[32mab\x1b[0m')).toBe(2);
   });
 });
 

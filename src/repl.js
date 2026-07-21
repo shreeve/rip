@@ -18,11 +18,11 @@
 
 import * as readline from 'node:readline';
 import { inspect } from 'node:util';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { compile, CompileError, classifyCompleteness } from './compile.js';
-import { tokenize, makeParserLexer } from './lexer.js';
+import { tokenize, makeParserLexer, identifierRuns } from './lexer.js';
 import { Parser } from './parser.js';
 import { _runtimeTable } from './emitter.js';
 import { readProjectConfig } from './config.js';
@@ -134,14 +134,29 @@ export async function detectBackgroundTheme({ timeoutMs = 80 } = {}) {
     const stdin = process.stdin;
     const wasRaw = stdin.isRaw;
     let data = '';
+    let draining = false;
     const finish = (value) => {
       stdin.removeListener('data', onData);
       if (!wasRaw) stdin.setRawMode(false);
       stdin.pause();
       resolve(value);
     };
-    const timer = setTimeout(() => finish(null), timeoutMs);
+    // The late-reply race: a terminal that answers AFTER the timeout
+    // would leak its OSC reply into readline as garbage input. On
+    // timeout, hold the listener for one more short window and
+    // DISCARD an escape-prefixed chunk if it arrives; a chunk that is
+    // not a terminal reply (real typed-ahead input) pushes back onto
+    // the stream untouched.
+    const timer = setTimeout(() => {
+      draining = true;
+      setTimeout(() => finish(null), timeoutMs);
+    }, timeoutMs);
     const onData = (chunk) => {
+      if (draining) {
+        if (!chunk.toString('utf8').includes('\x1b]')) stdin.unshift(chunk);
+        finish(null);
+        return;
+      }
       data += chunk.toString('utf8');
       const m = /\]11;rgb:([0-9a-f]+)\/([0-9a-f]+)\/([0-9a-f]+)/i.exec(data);
       if (m) {
@@ -323,7 +338,9 @@ const CONST_RESTORE = new Set(['state', 'computed', 'effect', 'readonly', 'impor
 // every identifier the entry spells.
 export function buildWrapper({ code, source, replResultName = null, replImportResolver = null, priorKinds = new Map(), lineBindings = [], rtNames = [] }) {
   const used = new Set();
-  for (const m of source.matchAll(/[A-Za-z_$][\w$]*/g)) used.add(m[0]);
+  // The lexer's identifier vocabulary — Unicode names dodge exactly
+  // like ASCII ones (one identifier definition in the repository).
+  for (const name of identifierRuns(source)) used.add(name);
   for (const name of priorKinds.keys()) used.add(name);
   for (const { name } of lineBindings) used.add(name);
   for (const name of rtNames) used.add(name);
@@ -497,13 +514,21 @@ export function describeError(err) {
 }
 
 // ---------------------------------------------------------------------------
-// History — ~/.rip_history, 1000 entries, dedup. Multi-line entries
-// store (and recall) as SINGLE entries: newlines encode as a visible
-// return glyph, and an exact-match table decodes a recalled line back
-// to its original source (never a substring guess).
+// History — ~/.rip_history (mode 0600 — histories carry secrets),
+// 1000 entries, dedup. Multi-line entries store (and recall) as
+// SINGLE entries through an INJECTIVE escape: the ⏎ glyph is the
+// escape character (⏎n = newline, ⏎e = a literal ⏎), so a legal
+// single-line entry containing ⏎ round-trips exactly and can never
+// be mistaken for a multi-line one. An exact-match table decodes a
+// recalled line back to its original source (never a substring guess).
 
 export const HISTORY_LIMIT = 1000;
-export const encodeEntry = (s) => s.replaceAll('\n', '⏎');
+export const encodeEntry = (s) => s.replaceAll('⏎', '⏎e').replaceAll('\n', '⏎n');
+export const decodeEntry = (s) => s.replace(/⏎([ne])/g, (_, c) => (c === 'n' ? '\n' : '⏎'));
+
+// Display-cell width for cursor math: zero for ANSI escapes, two for
+// double-width (East Asian) glyphs — Bun.stringWidth owns the tables.
+export const displayWidth = (s) => Bun.stringWidth(s);
 
 // ---------------------------------------------------------------------------
 // The interactive REPL
@@ -523,6 +548,7 @@ export class Repl {
     this.session = new Session({ cwd });
     this.buffer = '';
     this.entries = [];          // evaluated entries, oldest first
+    this.recall = [];           // encoded recall lines, newest first (rl.history's source of truth)
     this.decodeTable = new Map(); // encoded recall line → original source
     this.editorMode = false;
     this.editorLines = [];
@@ -591,10 +617,7 @@ export class Repl {
       removeHistoryDuplicates: true,
       completer: (line) => this.complete(line),
     });
-    if (this.rlHistory !== undefined && this.rl.history !== undefined) {
-      this.rl.history = this.rlHistory;
-    }
-    this.rlHistory = this.rl.history;
+    if (this.rl.history !== undefined) this.rl.history = [...this.recall];
     this.rl.on('line', (line) => {
       this.queue = this.queue.then(() => this.onLine(line)).catch((err) => this.printError(err));
     });
@@ -633,7 +656,10 @@ export class Repl {
     readline.cursorTo(this.output, 0);
     this.output.write(prompt + colored);
     readline.clearLine(this.output, 1);
-    readline.cursorTo(this.output, stripAnsi(prompt).length + this.rl.cursor);
+    // Cursor math in display CELLS: ANSI escapes are zero-width and
+    // East Asian glyphs are double-width (displayWidth owns both), so
+    // the cursor lands on the glyph rl.cursor points at.
+    readline.cursorTo(this.output, displayWidth(prompt) + displayWidth(raw.slice(0, this.rl.cursor)));
   }
 
   complete(line) {
@@ -719,6 +745,7 @@ export class Repl {
       return;
     }
     if (this.buffer === '' && line.trimStart().startsWith('.') && /^\.[a-z]/.test(line.trimStart())) {
+      this.noteRecall(line.trim());
       await this.command(line.trim());
       this.promptNext();
       return;
@@ -804,19 +831,25 @@ export class Repl {
 
   // ---- history -----------------------------------------------------------
 
+  // One recall record, session-owned: readline's own per-line history
+  // additions are guesses (it skips empty lines and dedup reorders),
+  // so rl.history is REBUILT from this record after every completed
+  // entry or dot command — never spliced by counting. Mid-entry, the
+  // physical-line fragments readline added stay recallable; the
+  // rebuild replaces them when the entry lands.
+  noteRecall(text) {
+    const encoded = encodeEntry(text);
+    if (encoded !== text) this.decodeTable.set(encoded, text);
+    const at = this.recall.indexOf(encoded);
+    if (at !== -1) this.recall.splice(at, 1);
+    this.recall.unshift(encoded);
+    if (this.recall.length > HISTORY_LIMIT) this.recall.length = HISTORY_LIMIT;
+    if (this.rl?.history !== undefined) this.rl.history = [...this.recall];
+  }
+
   recordEntry(source) {
     this.entries.push(source);
-    if (source.includes('\n')) {
-      const encoded = encodeEntry(source);
-      this.decodeTable.set(encoded, source);
-      if (this.rl.history !== undefined) {
-        // readline recorded each physical line; replace the fragments
-        // with ONE encoded entry so recall brings the whole thing back.
-        const lineCount = source.split('\n').length;
-        this.rl.history.splice(0, lineCount);
-        this.rl.history.unshift(encoded);
-      }
-    }
+    this.noteRecall(source);
   }
 
   loadHistory() {
@@ -824,9 +857,10 @@ export class Repl {
       if (!existsSync(this.historyFile)) return;
       const lines = readFileSync(this.historyFile, 'utf8').split('\n').filter((l) => l.trim() !== '');
       for (const encoded of lines) {
-        if (encoded.includes('⏎')) this.decodeTable.set(encoded, encoded.replaceAll('⏎', '\n'));
+        const decoded = decodeEntry(encoded);
+        if (decoded !== encoded) this.decodeTable.set(encoded, decoded);
       }
-      this.rlHistory = [...lines].reverse();
+      this.recall = [...lines].reverse();
     } catch { /* an unreadable history file never blocks startup */ }
   }
 
@@ -844,7 +878,11 @@ export class Repl {
         seen.add(merged[i]);
         deduped.unshift(merged[i]);
       }
-      writeFileSync(this.historyFile, deduped.slice(-HISTORY_LIMIT).join('\n') + '\n');
+      // Histories carry secrets: 0600 at creation, and an existing
+      // looser file TIGHTENS (writeFileSync's mode applies only at
+      // creation, so the chmod is load-bearing).
+      writeFileSync(this.historyFile, deduped.slice(-HISTORY_LIMIT).join('\n') + '\n', { mode: 0o600 });
+      chmodSync(this.historyFile, 0o600);
     } catch { /* a read-only home never blocks exit */ }
   }
 

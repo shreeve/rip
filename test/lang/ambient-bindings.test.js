@@ -129,6 +129,30 @@ describe('seeded names join the used-name registry and the bound set', () => {
   });
 });
 
+describe('identifier vocabulary and the readonly contract', () => {
+  test('a Unicode identifier seeds — the lexer identifier vocabulary, never an ASCII-only guess', () => {
+    const r = seeded('café + 1', [{ name: 'café', kind: 'state' }]);
+    expect(r.code).toBe('café.value + 1;');
+    // The full REPL round-trip: declare, inventory, reseed.
+    const first = compile('café := 1', { runtimeDelivery: 'none' });
+    expect(first.bindings).toEqual([{ name: 'café', kind: 'state' }]);
+    const next = compile('café = 2', { runtimeDelivery: 'none', ambientBindings: first.bindings });
+    expect(next.code).toBe('café.value = 2;');
+  });
+
+  test('the readonly contract: direct writes reject at compile time; pattern writes keep the const-restore backstop', () => {
+    // Deliberately stricter than in-file for DIRECT writes (the
+    // positioned rejection fires before any entry side effect); a
+    // PATTERN element emits bare and relies on the environment
+    // restoring readonly kinds as const — JS's own TypeError, the
+    // same backstop in-file readonly writes use.
+    expect(() => seeded('k = 1', [{ name: 'k', kind: 'readonly' }]))
+      .toThrow(/cannot assign to readonly 'k'/);
+    const r = seeded('[k, y] = pair', [{ name: 'k', kind: 'readonly' }]);
+    expect(r.code).toContain('[k, y] = pair');
+  });
+});
+
 describe('option validation rejects loudly', () => {
   test('an unknown kind rejects', () => {
     expect(() => seeded('1', [{ name: 'x', kind: 'bogus' }]))

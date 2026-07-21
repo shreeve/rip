@@ -78,6 +78,12 @@ describe('repl: _ and display', () => {
     expect(results(r.stdout)).toEqual(['1024', '1024']);
   });
 
+  test('Unicode identifiers round-trip across lines (the lexer vocabulary)', () => {
+    const r = repl('café := 1\ncafé + 1\ncafé = 2\ncafé\n');
+    expect(r.status).toBe(0);
+    expect(results(r.stdout)).toEqual(['1', '2', '2', '2']);
+  });
+
   test('undefined results print nothing — an undefined-initializing assignment included', () => {
     const r = repl('undefined\nconsole.log(1 + 2)\nq = undefined\n1\n');
     expect(results(r.stdout)).toEqual(['1']);
@@ -121,6 +127,14 @@ describe('repl: continuation and errors', () => {
     expect(r.stdout).toMatch(/ReferenceError|TypeError/);
     expect(results(r.stdout)).toEqual(['2']);
   });
+
+  test('export rejects positioned and the session continues', () => {
+    const r = repl('export q = 5\n1\n');
+    expect(r.stdout).toContain("'export' has no meaning in a REPL entry");
+    expect(r.stdout).toContain('<repl>:1:1');
+    expect(results(r.stdout)).toEqual(['1']);
+    expect(r.status).toBe(0);
+  });
 });
 
 describe('repl: dot commands', () => {
@@ -156,7 +170,7 @@ describe('repl: dot commands', () => {
 
   test('.history recalls multi-line entries as single rows', () => {
     const r = repl('if true\n  1\n\n.history\n');
-    expect(r.stdout).toContain('1: if true⏎  1');
+    expect(r.stdout).toContain('1: if true⏎n  1');
   });
 
   test('.theme reports and switches; unknown names reject', () => {
@@ -230,7 +244,7 @@ describe('repl: colors and environment', () => {
       expect(existsSync(file)).toBe(true);
       const lines = readFileSync(file, 'utf8').trim().split('\n');
       expect(lines).toContain('q = 1');
-      expect(lines).toContain('if true⏎  2');
+      expect(lines).toContain('if true⏎n  2');
       // A second session dedups repeats.
       repl('q = 1\n', { env: { HOME: scratchHome } });
       const again = readFileSync(file, 'utf8').trim().split('\n');
