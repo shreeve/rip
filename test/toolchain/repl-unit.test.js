@@ -392,4 +392,17 @@ describe('completion', () => {
     expect(all).toContain('.vars');
     expect(all).toContain('.editor');
   });
+
+  test('the completion word comes from the lexer vocabulary — Unicode prefixes complete', () => {
+    const repl = makeRepl();
+    repl.session.bindings.set('πval', 'plain');
+    repl.session.bindings.set('πx', 'state');
+    const [hits, word] = repl.complete('1 + π');
+    expect(word).toBe('π');
+    expect(hits).toEqual(['πval', 'πx']);
+    // The dot-command case is untouched, and a member tail still
+    // offers nothing (completion is bindings-only, never members).
+    expect(repl.complete('.he')).toEqual([['.help'], '.he']);
+    expect(repl.complete('obj.π')[0]).toEqual([]);
+  });
 });

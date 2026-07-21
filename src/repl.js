@@ -22,7 +22,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { compile, CompileError, classifyCompleteness } from './compile.js';
-import { tokenize, makeParserLexer, identifierRuns } from './lexer.js';
+import { tokenize, makeParserLexer, identifierRuns, isIdentifierName } from './lexer.js';
 import { Parser } from './parser.js';
 import { _runtimeTable } from './emitter.js';
 import { readProjectConfig } from './config.js';
@@ -663,13 +663,22 @@ export class Repl {
   }
 
   complete(line) {
-    const m = /(\.?[A-Za-z_$][\w$]*|\.)$/.exec(line);
-    const word = m === null ? '' : m[0];
-    const pool = word.startsWith('.') && line.trimStart() === word
-      ? DOT_COMMANDS
-      : [...this.session.bindings.keys()].filter((n) => n !== '_');
-    const hits = pool.filter((c) => c.startsWith(word)).sort();
-    return [hits, word];
+    // A line that IS a dot word ('.', '.he') completes dot commands.
+    const trimmed = line.trimStart();
+    if (trimmed === '.' || (trimmed.startsWith('.') && isIdentifierName(trimmed.slice(1)))) {
+      return [DOT_COMMANDS.filter((c) => c.startsWith(trimmed)).sort(), trimmed];
+    }
+    // The trailing word comes from the lexer's ONE identifier
+    // vocabulary (Unicode included): the last identifier run, only
+    // when it reaches the line's end.
+    const runs = identifierRuns(line);
+    const last = runs.length > 0 ? runs[runs.length - 1] : '';
+    const word = last !== '' && line.endsWith(last) ? last : '';
+    // A member tail (`obj.π`) offers nothing — completion is
+    // bindings-only, never members.
+    if (word !== '' && line[line.length - word.length - 1] === '.') return [[], word];
+    const pool = [...this.session.bindings.keys()].filter((n) => n !== '_');
+    return [pool.filter((c) => c.startsWith(word)).sort(), word];
   }
 
   onInterrupt() {
