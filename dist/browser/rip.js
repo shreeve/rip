@@ -4545,6 +4545,7 @@ function isIdentifierName(value) {
   }
   return true;
 }
+var IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, "g");
 var DIGIT = /[0-9]/;
 var NUMBER_RE = /^0b[01](?:_?[01])*n?|^0o[0-7](?:_?[0-7])*n?|^0x[\da-f](?:_?[\da-f])*n?|^\d+(?:_\d+)*n|^(?:\d+(?:_\d+)*)?\.?\d+(?:_\d+)*(?:e[+-]?\d+(?:_\d+)*)?/i;
 var REGEX_RE = /^\/(?!\/)((?:[^[\/\n\\]|\\[^\n]|\[(?:\\[^\n]|[^\]\n\\])*\])*)(\/)?/;
@@ -10467,6 +10468,9 @@ class Emitter {
   exportStatement(node, ind) {
     if (this.script) {
       throw this.positionedError(node, "emitter: exports are not available in a script tag — drop the export keyword; script sources share one scope");
+    }
+    if (this.repl) {
+      throw this.positionedError(node, "emitter: 'export' has no meaning in a REPL entry — every top-level binding already persists to later lines; drop the export keyword");
     }
     const head = node[0];
     this.mark(node, "$self", () => {
@@ -18242,7 +18246,6 @@ var programScopeNames = (emitter, sexpr) => {
   return names;
 };
 var AMBIENT_KINDS = new Set(["plain", "state", "computed", "effect", "readonly", "import", "class", "def", "enum"]);
-var IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
 var normalizeAmbient = (ambientBindings) => {
   if (ambientBindings == null)
     return [];
@@ -18251,7 +18254,7 @@ var normalizeAmbient = (ambientBindings) => {
   }
   const seen = new Set;
   for (const b of ambientBindings) {
-    if (b === null || typeof b !== "object" || typeof b.name !== "string" || !IDENTIFIER_RE.test(b.name)) {
+    if (b === null || typeof b !== "object" || !isIdentifierName(b.name)) {
       throw new Error(`emitter: ambientBindings entries are {name, kind} with an identifier name; got ${JSON.stringify(b)}`);
     }
     if (!AMBIENT_KINDS.has(b.kind)) {
