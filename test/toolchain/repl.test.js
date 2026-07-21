@@ -236,6 +236,22 @@ describe('repl: colors and environment', () => {
     expect(r.stdout).not.toContain('\x1b[');
   });
 
+  test('TYPED text that equals an encoded history entry passes through verbatim — decode is recall-only', () => {
+    const scratchHome = mkdtempSync(join(tmpdir(), 'rip-repl-typed-'));
+    try {
+      // The history file holds the ENCODED form of the entry 'a⏎b'
+      // (a literal ⏎ escapes to ⏎e), so the decode table maps the
+      // typed bytes to a DIFFERENT program. Typing those bytes must
+      // evaluate them verbatim: no history recall happened.
+      writeFileSync(join(scratchHome, '.rip_history'), "'a⏎eb'\n");
+      const r = repl("'a⏎eb'\n", { env: { HOME: scratchHome } });
+      expect(results(r.stdout)).toEqual(["'a⏎eb'"]);
+      expect(r.status).toBe(0);
+    } finally {
+      rmSync(scratchHome, { recursive: true, force: true });
+    }
+  });
+
   test('history persists to $HOME/.rip_history with multi-line entries encoded', () => {
     const scratchHome = mkdtempSync(join(tmpdir(), 'rip-repl-h-'));
     try {
