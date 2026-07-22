@@ -2,7 +2,7 @@
 
 # Rip Server - @rip-lang/server
 
-> **Sinatra-style web framework — routes, smart responses, read() validation, and AsyncLocalStorage-powered request context**
+> **Sinatra-style web framework and worker-pool runtime — routes, smart responses, elegant request-parameter validation; serve one file on a port for development, or run the same app as the app tier behind Janus and Caddy**
 
 Handlers are plain functions bound to a request context: return an object
 and it ships as JSON, return a string and it ships as text (or HTML when it
@@ -12,7 +12,8 @@ query, and path with one call, backed by the `@rip-lang/validate`
 vocabulary, and `AsyncLocalStorage` makes `session`, `read()`, and `ctx()`
 work anywhere in your call stack — no threading a context argument through
 your code. The same app file runs standalone on a port or under a worker
-pool behind [Janus](https://github.com/shreeve/janus).
+pool behind [Janus](https://github.com/shreeve/janus) — the full stack is
+described below.
 
 **Runtime:** not browser-safe — uses `Bun.serve`, `Bun.file`, and
 `node:async_hooks`. Four `.rip` files: the DSL (`server.rip`, also the
@@ -42,6 +43,68 @@ post '/signup' ->
 start port: 3000
 ```
 
+## The full stack
+
+In production the app sits behind [Janus](https://github.com/shreeve/janus),
+a Caddy module, and five layers divide the labor. Each fact below has one
+authoritative home: edge internals are contracted in the
+[janus docs](https://github.com/shreeve/janus/blob/main/docs/README.md),
+and this README covers the Rip side.
+
+| Layer | Owns |
+| --- | --- |
+| **Caddy** | Listeners, HTTP/1–3, TLS termination, ACME certificates, SNI site selection |
+| **Janus** (a Caddy module) | Site admission (`janus` directive; unknown hosts → 404), dynamic host→unix-socket routing (least-conn + health), the `/1.0` control API (app registration, upstream publication, heartbeats with a 15s TTL reap, the on-demand-TLS allowlist ask), a 1s-default micro-cache with request coalescing, and the hub — edge-terminated WebSocket fan-out |
+| **Rip manager** (`manager.rip`) | Registers the app on `/1.0`, heartbeats every 5s, compiles the app once per boot epoch, spawns workers on unique unix sockets, publishes them with atomic full-list PUTs, drives watch-mode hot reload; never on the data path |
+| **Rip workers** (`worker.rip`) | Boot the compiled artifact and serve plain HTTP over their unix socket; bounce at capacity with marked 503s; die disposably |
+| **The framework** (`server.rip`) | Routes, smart responses, `read()` validation, `@cache` Cache-Control sugar, middleware, `notFound`/`onError`, sessions and request context |
+
+A request walks the stack like this:
+
+1. **TLS terminates at Caddy.** SNI picks the site; certificates and ACME
+   are ordinary Caddy configuration.
+2. **Janus admits the host.** Only sites carrying the `janus` directive
+   join the data plane; a public host with no registered app answers 404.
+3. **The micro-cache may answer.** An anonymous GET can be served from
+   memory (1s TTL by default), and concurrent misses on one key coalesce
+   into a single worker fill.
+4. **The registry routes.** The host resolves to the app's live worker
+   sockets; least-conn selection with health accounting picks one.
+5. **A worker runs the handler** — plain HTTP over the unix socket. The
+   manager never touches client traffic.
+6. **Response headers steer the edge on the way out.** `Cache-Control`
+   (the `@cache` helper) is honored by the micro-cache, capped at its
+   `ttl_max` (10s by default) — the header still reaches CDNs and browsers
+   intact. A worker's marked 503 (busy or draining) sends Janus straight
+   to the next worker without poisoning health accounting.
+
+**Hot reload** (watch mode, the default outside `RIP_ENV=production`): a
+save settles (~150ms) and passes a content-hash gate — identical bytes are
+free. A changed hash cuts admission with one doorbell PUT; nothing boots
+until a request actually rings. The ring triggers one compile, a fresh
+worker pool, and a sockets PUT — and the held request completes against
+the new code. The protocol is contracted in the janus repo
+([pool protocol](https://github.com/shreeve/janus/blob/main/docs/20260719-002000-pool-protocol.md)).
+
+**WebSockets terminate at the edge.** The hub owns the sockets, channels,
+and fan-out; workers never need to hold a socket. The app participates
+over plain HTTP: Janus POSTs every socket event
+(`Sec-WebSocket-Frame: open | text | close`) to the app's registered
+`bridge_path`, the response body carries delivery directives, and
+server-initiated broadcasts go out via
+`POST /1.0/apps/{id}/hub/publish`. An app reload is invisible to connected
+clients — sockets ride above the worker plane. One honest caveat: this
+split is not enforced with a 4xx. An `Upgrade` request on a hub-off site
+proxies through to a worker like any request, and that socket dies at the
+next pool reload — do not build on it. The hub grammar and lifecycle are
+contracted in the
+[hub design](https://github.com/shreeve/janus/blob/main/docs/20260720-162350-hub-design.md).
+
+The runnable end-to-end tutorial — all four Janus capabilities driven by a
+Rip app, one page and one `app.rip` — is the
+[counter demo](https://github.com/shreeve/janus/blob/main/docs/counter/index.md)
+in the janus repo.
+
 ## Features
 
 - **Sinatra-style routes** — `get`, `post`, `put`, `patch`, `del`, `all`,
@@ -60,7 +123,7 @@ start port: 3000
   before the handler runs; `GET /openapi.json` generates itself
 - **Middleware** — Koa-style `use` composition plus a built-in set:
   `cors`, `logger`, `compress`, `sessions` (signed or AES-256-GCM
-  encrypted), `csrf`, `secureHeaders`, `timeout`, `bodyLimit`, `htmlJson`
+  encrypted), `csrf`, `secureHeaders`, `timeout`, `htmlJson`
 - **Runs anywhere** — standalone `Bun.serve` on a port, or handed to a
   worker pool via `startHandler()`
 
@@ -112,13 +175,95 @@ your own).
 get '/admin' ->
   user = session.user or bail!          # 401, session cleared
   error! 'forbidden', 403 unless user.admin
-  notice! 'Quota exceeded' if user.overQuota   # always user-facing
+  notice! 'Account suspended' if user.suspended   # always user-facing
   ...
 ```
 
 Thrown errors become one JSON envelope: `{ error: { message, notice?,
 issues? } }`. Messages show for 4xx; 5xx and raw throws are masked to a
 generic status line so internals never leak.
+
+## notFound and onError
+
+Two registrable handlers cover the requests no route answers and the
+errors no handler catches:
+
+```coffee
+notFound -> @text 'lost', 404          # every unmatched request
+onError (err) -> @json { oops: err.status ?? 500 }, err.status ?? 500
+```
+
+`notFound (handler) ->` registers the catch-all for unmatched requests;
+without one the response is a plain 404. `onError (handler) ->` replaces
+the default error envelope for errors thrown from matched routes; the
+handler receives the error (and the context as both `this` and a second
+argument). Both handlers receive the request context and must return a
+`Response` — the ctx helpers (`@text`, `@json`, …) do; a bare return
+value is not smart-converted.
+
+Middleware and before/after filters wrap matched routes only — an
+unmatched request goes straight to `notFound`, never through the chain.
+
+## @cache — response freshness, one word
+
+```coffee
+get '/report' -> @cache '1h';      report()   # fresh for an hour
+get '/feed'   -> @cache 10;        feed()     # ten seconds
+get '/live'   -> @cache off;       stats()    # never stored
+get '/logo'   -> @cache 'forever'; @send 'logo.svg'
+```
+
+Sugar over standard `Cache-Control`, so the same word steers a
+micro-cache (Janus), a CDN, and the browser alike.
+
+**Never store** — all emit `Cache-Control: no-store`:
+
+```coffee
+@cache 0
+@cache false
+@cache off            # bare word — off is rip's false
+@cache 'off'
+@cache 'no-store'
+```
+
+**Finite freshness** — emit `public, max-age=N` plus a matching
+`Expires`. Bare numbers and numeric strings are seconds; counted units
+take any listed spelling, singular or plural, with optional whitespace,
+case-insensitive:
+
+```coffee
+@cache 10             # max-age=10
+@cache '90'           # max-age=90
+@cache '30s'          # s / sec / secs / second / seconds
+@cache '36m'          # m / min / mins / minute / minutes — m is ALWAYS minutes
+@cache '2 hours'      # h / hr / hrs / hour / hours
+@cache '7 days'       # d / day / days
+@cache '2 weeks'      # w / week / weeks
+@cache '1 month'      # mo / month / months — 30 days by convention, never m
+@cache '1y'           # y / yr / yrs / year / years
+```
+
+**Forever** — the canonical HTTP forever, for fingerprinted assets that
+never change under one URL (browsers skip revalidation entirely):
+
+```coffee
+@cache 'forever'      # public, max-age=31536000, immutable
+```
+
+**Anything else throws** — a cache directive that does not parse is a
+bug, never a guessed TTL:
+
+```coffee
+@cache '1 fortnight'  # unknown unit
+@cache '5ms'          # milliseconds are not a cache duration
+@cache 'always'       # one canonical word for forever, and this isn't it
+@cache -1             # negative — a computed TTL gone wrong, not "forever"
+@cache 1.5            # fractional seconds aren't representable in max-age
+@cache ''             # empty string — almost always an interpolation bug
+```
+
+An edge cache in front may cap long freshness at its own ceiling
+(Janus: `ttl_max`); the header still reaches the browser intact.
 
 ## input: schemas and OpenAPI
 
@@ -169,7 +314,7 @@ request path is outside its pattern. `sessions` cookies are HMAC-signed by
 default or AES-256-GCM sealed with `encrypt: true`; `csrf` implements
 double-submit with HMAC binding.
 
-## Architecture
+## Running under Janus — the pool runtime
 
 The package is three concepts — the DSL is the only part an app ever
 imports; the manager and worker are the runtime `rip server` runs it under:
@@ -193,16 +338,20 @@ Janus ──UDS─────────►│  WORKER    (worker.rip)      �
 ```
 
 The manager implements the Rip Server half of the pool coordination
-protocol in the Janus repository (`docs/20260719-002000-pool-protocol.md`):
-it registers the app on `/1.0` and heartbeats every 5s from the moment of
-registration, owns a persistent doorbell socket, and spawns workers on
-unique unix socket paths, publishing them with atomic full-list PUTs. In
-watch mode a save settles (~150ms), passes a content-hash gate (identical
-bytes are free), then cuts admission with one doorbell PUT and retires the
-old pool — nothing boots until a request actually rings, and the ring is
-answered 204 only after the fresh sockets PUT is acknowledged. A boot
-failure is cached and answered 503 with the error; the next
-content-changing save clears it.
+protocol: it POSTs `{name, hosts}` to `/1.0/apps` (retrying a 409 for 30s
+by default — sized so a dead predecessor's claim, held for Janus's 15s
+heartbeat TTL plus its reap-sweep lag, expires inside the window),
+heartbeats every 5s from the moment of registration, owns a persistent
+doorbell socket, and spawns workers on unique unix socket paths,
+publishing them with atomic full-list PUTs. A boot failure is cached and
+answered 503 with the error; the next content-changing save clears it. On
+SIGINT/SIGTERM it logs one lifecycle line —
+`rip-server: <SIGNAL> — deregistering <name> (<appId>), draining workers`
+— publishes an empty upstream list, drains, and DELETEs the registration.
+Registration carries `name` and `hosts` only: a hub app's `bridge_path` is
+wired today with a manual `PATCH /1.0/apps/{id}` — the
+[counter demo](https://github.com/shreeve/janus/blob/main/docs/counter/index.md)
+documents the exact command (a `--bridge` flag is planned; see below).
 
 Workers never carry the Rip compiler. The manager compiles the app **once
 per boot epoch** — `Bun.build` with a `.rip` plugin over the compiler it is
@@ -212,10 +361,121 @@ artifact: no loader preload, no per-worker recompile. A new epoch builds a
 new artifact, so never-stale is automatic, and a compile error is a boot
 failure like any other — the doorbell answers 503 carrying the diagnostic.
 Bundling freezes each module's `import.meta` path fields to its source
-location, so `import.meta.dir`-relative file serving works unchanged. The handover seam is `start()`: under a
-worker environment (`WORKER_ID`/`SOCKET_PATH`) it hands over its fetch
-handler instead of opening a port, so the same `app.rip` runs standalone
-on your laptop and pooled behind Janus in production, unchanged.
+location, so `import.meta.dir`-relative file serving works unchanged. The
+handover seam is `start()`: under a worker environment
+(`WORKER_ID`/`SOCKET_PATH`) it hands over its fetch handler instead of
+opening a port, so the same `app.rip` runs standalone on your laptop and
+pooled behind Janus in production, unchanged.
+
+For local HTTPS the janus repo commits a trusted `*.ripdev.io` wildcard
+certificate whose DNS resolves to `127.0.0.1` — SNI picks the site, and
+the dev flow needs no local CA ceremony (see
+[certs/README.md](https://github.com/shreeve/janus/blob/main/certs/README.md)).
+
+### rip server — CLI
+
+```bash
+rip server [app-entry] [options]   # app-entry defaults to ./app.rip, then ./index.rip
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--name <n>` | App name for registration (default: the app directory's name) |
+| `--host <h>` | Public host to claim; repeatable (default: the app name) |
+| `-w, --workers <n>` | Worker processes (default: 2) |
+| `-c, --concurrency <n>` | Concurrent requests per worker (default: 1). Refused with watch on — `--eager` included — raise `c` only with watch off (`--no-watch`, or `RIP_ENV=production`); see the sizing maxim below |
+| `--watch` / `--no-watch` | File watching + hot reload (default ON unless `RIP_ENV=production`) |
+| `--allow-watch` | Required to enable `--watch` when `RIP_ENV=production`; logs loudly |
+| `--eager` | Boot the fresh pool at settle instead of waiting for a ring |
+| `--control <target>` | Janus control endpoint — unix socket path or http(s) URL (or env `JANUS_CONTROL`); required, verified at startup |
+
+Unless `RIP_ENV=production`, the pool publishes at the first ready worker
+(`readyWhen: 1`) and late workers join with follow-up PUTs — this keys off
+`RIP_ENV`, not watch mode. With `RIP_ENV=production` all workers must be
+ready before the first publish, and a startup boot failure exits nonzero.
+
+Sizing the pool: **raise `c` when handlers wait; raise `w` when handlers
+work.** Workers (`-w`) are processes — real parallelism across cores, for
+CPU-bound handlers. Per-worker concurrency (`-c`) interleaves I/O waits on
+one event loop — it adds capacity only while handlers are blocked on a
+database or upstream, and cannot add CPU. The default is `c:1`: one
+in-flight request per worker, and concurrent arrivals bounce to the next
+worker via a marked 503. Raising `c` is the opt-in for I/O-bound apps,
+and only with watch off — retiring a pool must drain up to `c` in-flight
+requests per worker, so hot reload and `c > 1` do not mix (the manager
+refuses the combination at startup).
+
+Env knobs (all in milliseconds, defaults per the protocol): `RIP_SETTLE_MS`
+(150), `RIP_DRAIN_MS` (2500 drain grace before SIGTERM), `RIP_KILL_MS`
+(5000 SIGTERM→SIGKILL), `RIP_HEARTBEAT_MS` (5000), `RIP_HOLD_MS` (15000
+ring hold cap), `RIP_BOOT_DEADLINE_MS` (30000 per worker),
+`RIP_PPID_MS` (1000 orphan-watchdog cadence — a worker whose parent
+manager dies exits on its own), `RIP_REGISTER_409_MS` (30000 — how long a
+409 at registration retries before aborting, sized to outlive a dead
+predecessor's still-live host claim: heartbeat TTL 15s + reap-sweep lag up
+to 5s + retry spacing up to 5s, with margin), `RIP_HANDLER_DEADLINE_MS` (30000
+hung-handler watchdog: an in-flight request older than this recycles the
+worker; 0 disables), and `RIP_WAITER_CAP` (64 held rings, a count).
+Workers receive their in-flight cap via `WORKER_CONCURRENCY`, set by the
+manager from `-c`, and their SIGTERM drain budget via
+`RIP_DRAIN_DEADLINE_MS`, derived from `RIP_KILL_MS` so a drain always
+finishes inside the manager's SIGTERM→SIGKILL ceiling.
+
+### The startup report
+
+Once the startup boot fully completes — every worker poll settled, the
+registration confirmed, the upstreams PUT landed — the manager prints
+one structured report:
+
+```text
+  rip server v4.0.0
+
+  app      acme (acme-x7k2p9)
+  control  unix:/run/janus/control.sock — janus 1.0
+  workers  4
+  watch    *.rip
+
+  ✓ worker 1   /tmp/rip-srv-eLm14s/p1w1.sock    27ms
+  ✓ worker 2   /tmp/rip-srv-eLm14s/p1w2.sock    27ms
+  ✓ worker 3   /tmp/rip-srv-eLm14s/p1w3.sock    27ms
+  ✓ worker 4   /tmp/rip-srv-eLm14s/p1w4.sock    26ms
+
+  registered  4 upstreams published, heartbeating every 5.0s
+
+  → acme registered with janus, 4 workers ready
+```
+
+The `janus 1.0` tag and the `registered` line are **read back** from the
+control plane after publishing — `GET /1.0` and `GET /1.0/apps/{id}`
+through the same client that registered — so the report states the
+registration as Janus holds it (the upstream count comes from the
+response body), never merely what this manager sent. A failed read-back
+is reported as a failure (`read-back failed (GET /1.0/apps/{id} → 404)`
+on the `registered` line, and the closing arrow drops the
+registered-with-janus claim), never as success. Per-worker boot times
+are spawn-to-`/ready`, humanized by the exported `scale` helper (SI
+prefixes from `T` down to `p`, fixed width: 3 digit characters, 1
+prefix character, the unit). Output is mono — no ANSI bytes — when
+`NO_COLOR` is set or stdout is not a TTY.
+
+### Logging
+
+Every log line is written by the process that witnessed the event. The
+per-request access log is the edge's — Janus and Caddy see every
+request, including micro-cache hits and unknown-host 404s that never
+reach a worker — so that log's file, format, and ownership are
+edge-side, configured in the Caddyfile. The Rip Server story is one
+merged stream: worker output flows through the manager tagged
+`[worker N]`, interleaved with the manager's own lifecycle lines on a
+single timeline — the interleaving is the value. There are no
+per-concern files and no `error.log`; severity is a field on a line,
+never a separate file. The stream goes to stdout: in dev you watch the
+terminal, and in production journald owns rotation, retention, and
+query. File logging is opt-in and not yet built (see **Planned**
+below): a `logs:` config knob or the `RIP_LOG_DIR` env var will
+redirect the server stream to `logs/server.log`, and the Caddyfile can
+point the edge's access log at the same directory (`logs/access.log`)
+— that file stays the edge's.
 
 ## The no-fork memory story
 
@@ -264,54 +524,6 @@ bytecode accepts (CJS) rejects top-level await, which idiomatic Rip
 emits routinely. When Bun ships ESM bytecode, the artifact is one flag
 away from kernel-shared pages.
 
-## rip server — CLI
-
-```bash
-rip server [app-entry] [options]   # app-entry defaults to ./app.rip, then ./index.rip
-```
-
-| Flag | Meaning |
-| --- | --- |
-| `--name <n>` | App name for registration (default: the app directory's name) |
-| `--host <h>` | Public host to claim; repeatable (default: the app name) |
-| `-w, --workers <n>` | Worker processes (default: 2) |
-| `-c, --concurrency <n>` | Concurrent requests per worker (default: 1). Refused with watch on — `--eager` included — raise `c` only with watch off (`--no-watch`, or `RIP_ENV=production`); see the sizing maxim below |
-| `--watch` / `--no-watch` | File watching + hot reload (default ON unless `RIP_ENV=production`) |
-| `--allow-watch` | Required to enable `--watch` when `RIP_ENV=production`; logs loudly |
-| `--eager` | Boot the fresh pool at settle instead of waiting for a ring |
-| `--control <target>` | Janus control endpoint — unix socket path or http(s) URL (or env `JANUS_CONTROL`); required, verified at startup |
-
-Unless `RIP_ENV=production`, the pool publishes at the first ready worker
-(`readyWhen: 1`) and late workers join with follow-up PUTs — this keys off
-`RIP_ENV`, not watch mode. With `RIP_ENV=production` all workers must be
-ready before the first publish, and a startup boot failure exits nonzero.
-
-Sizing the pool: **raise `c` when handlers wait; raise `w` when handlers
-work.** Workers (`-w`) are processes — real parallelism across cores, for
-CPU-bound handlers. Per-worker concurrency (`-c`) interleaves I/O waits on
-one event loop — it adds capacity only while handlers are blocked on a
-database or upstream, and cannot add CPU. The default is `c:1`: one
-in-flight request per worker, and concurrent arrivals bounce to the next
-worker via a marked 503. Raising `c` is the opt-in for I/O-bound apps,
-and only with watch off — retiring a pool must drain up to `c` in-flight
-requests per worker, so hot reload and `c > 1` do not mix (the manager
-refuses the combination at startup).
-
-Env knobs (all in milliseconds, defaults per the protocol): `RIP_SETTLE_MS`
-(150), `RIP_DRAIN_MS` (2500 drain grace before SIGTERM), `RIP_KILL_MS`
-(5000 SIGTERM→SIGKILL), `RIP_HEARTBEAT_MS` (5000), `RIP_HOLD_MS` (15000
-ring hold cap), `RIP_BOOT_DEADLINE_MS` (30000 per worker),
-`RIP_PPID_MS` (1000 orphan-watchdog cadence — a worker whose parent
-manager dies exits on its own), `RIP_REGISTER_409_MS` (20000 — how long a
-409 at registration retries before aborting, riding out a dead
-predecessor's still-live host claim), `RIP_HANDLER_DEADLINE_MS` (30000
-hung-handler watchdog: an in-flight request older than this recycles the
-worker; 0 disables), and `RIP_WAITER_CAP` (64 held rings, a count).
-Workers receive their in-flight cap via `WORKER_CONCURRENCY`, set by the
-manager from `-c`, and their SIGTERM drain budget via
-`RIP_DRAIN_DEADLINE_MS`, derived from `RIP_KILL_MS` so a drain always
-finishes inside the manager's SIGTERM→SIGKILL ceiling.
-
 ## Test
 
 ```bash
@@ -327,4 +539,25 @@ a stub Janus `/1.0` control socket that records every call in order:
 readiness, drains, the dirty epoch (doorbell PUT before the ring's 204,
 sockets PUT before the 204), save coalescing, the identical-bytes no-op,
 boot-failure caching, prebuilt-artifact boots (loader-free workers,
-`import.meta.dir` preservation, loud build rejection), and shutdown.
+`import.meta.dir` preservation, loud build rejection), the startup
+report (`scale`, the read-back rule, honest read-back failure, mono
+piped output), and shutdown.
+
+## Planned
+
+Approved near-term work — everything in this section is **not yet
+shipped**; the rest of this README states only what is:
+
+1. **`--bridge` manager flag** — registration carries `bridge_path`, so a
+   hub app needs no manual `PATCH /1.0/apps/{id}` after launch.
+2. **Hub ergonomics in the framework** — bridge-frame dispatch
+   (open/text/close routed like methods), directive-response helpers for
+   the sigil grammar (`!` / `@` / `+` / `-` / `?` / `<` / `*`, including
+   the required-`!` rule on the bridge plane), a publish client with
+   app-id plumbing (the manager holds `state.appId`; workers currently
+   re-derive it by name), and membership-snapshot access.
+3. **Opt-in file logging** — a `logs:` config knob or the `RIP_LOG_DIR`
+   env var redirects the merged server stream to `logs/server.log`;
+   stdout stays the default. The edge's access log can be pointed at
+   the same directory via the Caddyfile (`logs/access.log`) — its
+   format and ownership stay edge-side.

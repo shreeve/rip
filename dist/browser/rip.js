@@ -9122,11 +9122,15 @@ class Emitter {
     };
     {
       const names = [];
-      for (const p of params ?? [])
+      const sites = [];
+      for (const p of params ?? []) {
         this.patternNames(p, names, true);
+        const site = isNode4(p) ? p : params;
+        while (sites.length < names.length)
+          sites.push(site);
+      }
       dupIn(names, isNode4(params?.[0]) ? params[0] : owner, "parameter list");
-      for (const n of names)
-        auth(n, "parameter", null);
+      names.forEach((n, i) => auth(n, "parameter", sites[i]));
     }
     const walk = (n, nested) => {
       if (!isNode4(n))

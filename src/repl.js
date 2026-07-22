@@ -118,10 +118,72 @@ export function resolveThemeName({ override = null, configTheme = null, detected
   return 'dark';
 }
 
+// Stateful byte-level matcher for the OSC 11 background reply
+// (ESC ] 11 ; <payload> terminated by BEL or ST = ESC \). It buffers
+// raw stdin bytes across chunk boundaries, extracts EXACTLY ONE
+// complete reply wherever it sits, and keeps every non-reply byte —
+// type-ahead mixed into the same chunk, bytes before and after the
+// reply — in original order for release back onto the stream. Bytes
+// (never decoded strings) are the unit: a multibyte glyph split
+// across chunks survives intact.
+const OSC11_HEAD = Buffer.from('\x1b]11;', 'latin1');
+const ST = Buffer.from('\x1b\\', 'latin1');
+
+export class Osc11Matcher {
+  constructor() {
+    this.buffer = Buffer.alloc(0);
+    this.reply = null; // the payload string once a complete reply extracted
+  }
+
+  // Feed one stdin chunk; true once a complete reply has been
+  // extracted (its bytes leave the buffer; everything else stays).
+  feed(chunk) {
+    this.buffer = Buffer.concat([this.buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8')]);
+    if (this.reply === null) {
+      const start = this.buffer.indexOf(OSC11_HEAD);
+      if (start !== -1) {
+        const payloadAt = start + OSC11_HEAD.length;
+        const bel = this.buffer.indexOf(0x07, payloadAt);
+        const st = this.buffer.indexOf(ST, payloadAt);
+        const payloadEnd = bel === -1 ? st : st === -1 ? bel : Math.min(bel, st);
+        if (payloadEnd !== -1) {
+          const end = payloadEnd + (payloadEnd === bel ? 1 : ST.length);
+          this.reply = this.buffer.toString('utf8', payloadAt, payloadEnd);
+          this.buffer = Buffer.concat([this.buffer.subarray(0, start), this.buffer.subarray(end)]);
+        }
+      }
+    }
+    return this.reply !== null;
+  }
+
+  // Is an INCOMPLETE reply still growable? True for a started reply
+  // awaiting its terminator, and for a proper prefix of the header at
+  // the buffer's end. Bytes that diverged from the header are plain
+  // input and never count.
+  hasPartial() {
+    if (this.reply !== null) return false;
+    if (this.buffer.indexOf(OSC11_HEAD) !== -1) return true;
+    const max = Math.min(OSC11_HEAD.length - 1, this.buffer.length);
+    for (let len = max; len > 0; len--) {
+      if (this.buffer.subarray(this.buffer.length - len).equals(OSC11_HEAD.subarray(0, len))) return true;
+    }
+    return false;
+  }
+
+  // Every byte that is not the extracted reply, original order.
+  residue() {
+    return this.buffer;
+  }
+}
+
 // Terminal background detection, once at startup (TTY only): OSC 11
 // query with a short timeout — parse the `rgb:` reply and compute
 // luminance — falling back to $COLORFGBG's background field, then
-// dark.
+// dark. The matcher above owns reply recognition; on timeout with a
+// PARTIAL reply pending, one grace window (same length) waits for the
+// terminator, and a second timeout releases every buffered byte back
+// onto stdin verbatim — detection may then miss, but a keystroke is
+// never eaten.
 export async function detectBackgroundTheme({ timeoutMs = 80 } = {}) {
   const fromColorFgBg = () => {
     const parts = (process.env.COLORFGBG ?? '').split(';');
@@ -130,49 +192,43 @@ export async function detectBackgroundTheme({ timeoutMs = 80 } = {}) {
     return bg === 7 || bg >= 9 ? 'light' : 'dark';
   };
   if (!process.stdout.isTTY || !process.stdin.isTTY) return fromColorFgBg() ?? 'dark';
-  const reply = await new Promise((resolve) => {
+  const payload = await new Promise((resolve) => {
     const stdin = process.stdin;
     const wasRaw = stdin.isRaw;
-    let data = '';
-    let draining = false;
-    const finish = (value) => {
+    const matcher = new Osc11Matcher();
+    let graced = false;
+    let timer;
+    const finish = () => {
+      clearTimeout(timer);
       stdin.removeListener('data', onData);
       if (!wasRaw) stdin.setRawMode(false);
       stdin.pause();
-      resolve(value);
+      const rest = matcher.residue();
+      if (rest.length > 0) stdin.unshift(rest);
+      resolve(matcher.reply);
     };
-    // The late-reply race: a terminal that answers AFTER the timeout
-    // would leak its OSC reply into readline as garbage input. On
-    // timeout, hold the listener for one more short window and
-    // DISCARD an escape-prefixed chunk if it arrives; a chunk that is
-    // not a terminal reply (real typed-ahead input) pushes back onto
-    // the stream untouched.
-    const timer = setTimeout(() => {
-      draining = true;
-      setTimeout(() => finish(null), timeoutMs);
-    }, timeoutMs);
-    const onData = (chunk) => {
-      if (draining) {
-        if (!chunk.toString('utf8').includes('\x1b]')) stdin.unshift(chunk);
-        finish(null);
+    const onTimeout = () => {
+      if (matcher.hasPartial() && !graced) {
+        graced = true;
+        timer = setTimeout(finish, timeoutMs);
         return;
       }
-      data += chunk.toString('utf8');
-      const m = /\]11;rgb:([0-9a-f]+)\/([0-9a-f]+)\/([0-9a-f]+)/i.exec(data);
-      if (m) {
-        clearTimeout(timer);
-        finish(m.slice(1, 4));
-      }
+      finish();
+    };
+    timer = setTimeout(onTimeout, timeoutMs);
+    const onData = (chunk) => {
+      if (matcher.feed(chunk)) finish();
     };
     stdin.setRawMode(true);
     stdin.resume();
     stdin.on('data', onData);
     process.stdout.write('\x1b]11;?\x07');
   });
-  if (reply === null) return fromColorFgBg() ?? 'dark';
+  const m = payload === null ? null : /rgb:([0-9a-f]+)\/([0-9a-f]+)\/([0-9a-f]+)/i.exec(payload);
+  if (m === null) return fromColorFgBg() ?? 'dark';
   // Components arrive as 1–4 hex digits per channel; normalize to 0–1.
   const chan = (h) => parseInt(h, 16) / (16 ** h.length - 1);
-  const [r, g, b] = reply.map(chan);
+  const [r, g, b] = m.slice(1, 4).map(chan);
   const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
   return luminance > 0.5 ? 'light' : 'dark';
 }
@@ -530,6 +586,46 @@ export const decodeEntry = (s) => s.replace(/⏎([ne])/g, (_, c) => (c === 'n' ?
 // double-width (East Asian) glyphs — Bun.stringWidth owns the tables.
 export const displayWidth = (s) => Bun.stringWidth(s);
 
+// Recall bookkeeping: the decode table maps SUBMITTED text back to an
+// entry's original source, but that mapping is legitimate ONLY for a
+// line history navigation placed in the buffer and the user never
+// edited — typed bytes that happen to equal an encoded entry must
+// evaluate verbatim. The tracker holds at most one mark: the exact
+// text the last navigation recalled. `fromHistory` is readline's own
+// verdict (historyIndex ≥ 0) — navigating down past the newest entry
+// restores the user's saved in-progress line, which is typed text,
+// not a recall. Any key that changes the buffer clears the mark;
+// cursor movement (buffer unchanged) keeps it. The submit-time
+// decision consumes the mark either way.
+export class RecallTracker {
+  constructor() {
+    this.recalled = null;
+  }
+
+  navigated(line, fromHistory) {
+    this.recalled = fromHistory ? line : null;
+  }
+
+  touched(line) {
+    if (this.recalled !== null && line !== this.recalled) this.recalled = null;
+  }
+
+  shouldDecode(submitted) {
+    const hit = this.recalled !== null && submitted === this.recalled;
+    this.recalled = null;
+    return hit;
+  }
+}
+
+// The keys readline treats as history navigation: plain up/down
+// arrows and ctrl-p/ctrl-n. A misclassification fails SAFE: a missed
+// navigation just skips the decode; a false positive defers to
+// readline's historyIndex verdict.
+export const isHistoryNavKey = (key) =>
+  key != null && key.meta !== true && (
+    ((key.name === 'up' || key.name === 'down') && key.ctrl !== true) ||
+    ((key.name === 'p' || key.name === 'n') && key.ctrl === true));
+
 // ---------------------------------------------------------------------------
 // The interactive REPL
 
@@ -550,6 +646,7 @@ export class Repl {
     this.entries = [];          // evaluated entries, oldest first
     this.recall = [];           // encoded recall lines, newest first (rl.history's source of truth)
     this.decodeTable = new Map(); // encoded recall line → original source
+    this.recallTracker = new RecallTracker(); // never marked without a terminal: piped input always passes through verbatim
     this.editorMode = false;
     this.editorLines = [];
     this.evaluating = false;
@@ -628,14 +725,39 @@ export class Repl {
     if (this.terminal) {
       // Live repaint: re-tokenize the buffer per keystroke and repaint
       // the input line with theme colors. setImmediate lets readline
-      // apply the key first; the guard keeps evaluation output clean.
+      // apply the key first — runtimes differ on whether keypress
+      // fires before or after readline mutates rl.line, so BOTH the
+      // repaint and the recall bookkeeping sample state on the next
+      // tick, when the mutation has landed either way. Return/enter
+      // are excluded, so a recall mark survives to the 'line' event.
       if (this.keypressListener !== undefined) this.input.removeListener('keypress', this.keypressListener);
       this.keypressListener = (_s, key) => {
         if (key && (key.name === 'return' || key.name === 'enter')) return;
-        setImmediate(() => this.repaint());
+        setImmediate(() => {
+          this.observeKeyEffect(key);
+          this.repaint();
+        });
       };
       this.input.on('keypress', this.keypressListener);
     }
+  }
+
+  // The recall-bookkeeping sampler (fix seam, called post-mutation):
+  // a navigation key marks the buffer as recalled when readline's own
+  // historyIndex says the line came from history; any other key runs
+  // the edit check against the mark.
+  observeKeyEffect(key) {
+    if (this.rl === undefined || this.closing) return;
+    const line = this.rl.line ?? '';
+    if (isHistoryNavKey(key)) this.recallTracker.navigated(line, (this.rl.historyIndex ?? -1) >= 0);
+    else this.recallTracker.touched(line);
+  }
+
+  // The submit-side decision: a line decodes back to its original
+  // source ONLY when history navigation placed it and no edit
+  // followed; typed text always evaluates verbatim.
+  resolveSubmitted(raw) {
+    return this.recallTracker.shouldDecode(raw) ? this.decodeTable.get(raw) ?? raw : raw;
   }
 
   repaint() {
@@ -748,7 +870,7 @@ export class Repl {
   }
 
   async onLine(rawLine) {
-    const line = this.decodeTable.get(rawLine) ?? rawLine;
+    const line = this.resolveSubmitted(rawLine);
     if (this.editorMode) {
       this.editorLines.push(line);
       return;
