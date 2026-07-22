@@ -59,7 +59,7 @@ AI/MCP, host provisioning (stamp), and the database client (`rip-db`
 over duckdb-harbor, with its MCP server and CLI) all ship with
 converted or new test suites. Each package earns its place through an
 independently runnable contract and current Rip types. Auth-wall
-functionality is Janus's job: the `guard` capability (edge-terminated
+functionality is Janus's job: the `auth` capability (edge-terminated
 login in front of an unsecured app) lives in the Janus repository.
 
 ### Browser delivery
