@@ -40,7 +40,14 @@ HEARTBEAT_MS     =! envNum 'RIP_HEARTBEAT_MS', 5000     # heartbeat cadence
 HOLD_MS          =! envNum 'RIP_HOLD_MS', 15000         # ring hold cap, then 503
 BOOT_DEADLINE_MS =! envNum 'RIP_BOOT_DEADLINE_MS', 30000  # per-worker /ready deadline
 WAITER_CAP       =! envNum 'RIP_WAITER_CAP', 64         # held rings per app, then 503
-REGISTER_409_MS  =! envNum 'RIP_REGISTER_409_MS', 20000 # 409 retry window (~heartbeat TTL + margin)
+
+# The 409 retry window must outlive a genuinely stale claim: the control
+# plane holds a dead predecessor's claim for its heartbeat TTL (janus
+# defaultHeartbeatTTL, 15s), its reap sweep ticks at TTL/3 (the host frees
+# up to 5s after expiry), and registerApp's backoff spaces retries up to
+# 5s apart — so the first retry that can succeed lands by 25s. 30s clears
+# that worst case with margin.
+export REGISTER_409_MS =! envNum 'RIP_REGISTER_409_MS', 30000
 
 # The worker's in-flight drain wait after SIGTERM must finish under THIS
 # manager's SIGTERM → SIGKILL ceiling (KILL_MS — see retirePool), with margin
@@ -147,8 +154,9 @@ registerApp = ->
         return
       if res.status is 409
         # A restart under a supervisor lands inside the heartbeat TTL while
-        # the dead manager's claim is still live — retry until ~TTL + margin
-        # before treating the claim as genuinely foreign.
+        # the dead manager's claim is still live — retry for REGISTER_409_MS
+        # (sized to the claim's worst-case lifetime, see the knob) before
+        # treating the claim as genuinely foreign.
         deadline409 ?= Date.now() + REGISTER_409_MS
         if Date.now() >= deadline409
           abort "rip-server: host already claimed at the control plane (409): #{cfg.hosts.join(', ')}"
@@ -587,9 +595,12 @@ startWatcher = ->
 # Startup and shutdown
 # ==============================================================================
 
-shutdown = ->
+# Signal listeners receive the signal name as the first argument; a direct
+# call carries none and logs as a plain shutdown.
+shutdown = (reason) ->
   return if state.shuttingDown
   state.shuttingDown = true
+  p "rip-server: #{reason or 'shutdown'} — deregistering #{cfg.name} (#{state.appId}), draining workers"
   try state.watcher?.close()
   clearTimeout state.settleTimer if state.settleTimer?
   clearInterval state.hbTimer if state.hbTimer?
