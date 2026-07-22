@@ -100,14 +100,6 @@ next pool reload — do not build on it. The hub grammar and lifecycle are
 contracted in the
 [hub design](https://github.com/shreeve/janus/blob/main/docs/20260720-162350-hub-design.md).
 
-**Rate limiting: nobody does it.** No layer of this stack performs per-IP
-request-rate limiting today — Janus ships none and no third-party Caddy
-module is compiled in. If ever wanted, it belongs at the edge. The
-framework ships `bodyLimit` (request-size, not request-rate); the one
-rate-shaped concern that belongs in the framework is identity-keyed quotas
-(per-user, per-session, per-API-key) — application knowledge Janus
-deliberately lacks. See **Planned** below.
-
 The runnable end-to-end tutorial — all four Janus capabilities driven by a
 Rip app, one page and one `app.rip` — is the
 [counter demo](https://github.com/shreeve/janus/blob/main/docs/counter/index.md)
@@ -183,7 +175,7 @@ your own).
 get '/admin' ->
   user = session.user or bail!          # 401, session cleared
   error! 'forbidden', 403 unless user.admin
-  notice! 'Quota exceeded' if user.overQuota   # always user-facing
+  notice! 'Account suspended' if user.suspended   # always user-facing
   ...
 ```
 
@@ -506,10 +498,7 @@ shipped**; the rest of this README states only what is:
    the required-`!` rule on the bridge plane), a publish client with
    app-id plumbing (the manager holds `state.appId`; workers currently
    re-derive it by name), and membership-snapshot access.
-3. **Identity-keyed rate quotas** — middleware for per-user, per-session,
-   and per-API-key limits: the one rate-shaped concern that lives in the
-   framework, because it needs application identity the edge lacks.
-4. **Structured startup report** — composed from what the manager knows
+3. **Structured startup report** — composed from what the manager knows
    plus read-backs of `GET /1.0` and `GET /1.0/apps/{id}`, so it reports
    the registration as Janus holds it (control-plane surfaces: `/1.0`,
    `/1.0/health`, `/1.0/apps[/{id}]`, `/1.0/tls/ask`, `/1.0/cache`,

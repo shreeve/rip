@@ -38,11 +38,9 @@ but it must not block direct-path package implementation and tests.
   plane and stops there. Remaining in Rip Server itself (contracts in
   the packages/server README's Planned section): hub ergonomics
   (bridge-frame dispatch, sigil directive helpers, a publish client,
-  the `--bridge` registration flag), identity-keyed rate quotas
-  (per-user/session/API-key middleware — per-IP request-rate limiting
-  belongs to the edge), and structured startup reporting. Process
-  workers, control-plane registration with heartbeats and upstream
-  publication, and dev watch with live reload are shipped.
+  the `--bridge` registration flag) and structured startup reporting.
+  Process workers, control-plane registration with heartbeats and
+  upstream publication, and dev watch with live reload are shipped.
 - **UI:** the headless widget catalog and its app-framework
   integration. The browser interaction primitives the widgets build
   on (`@rip-lang/ui/browser`: nav, dismiss, overlay, position, focus,
