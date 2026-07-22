@@ -689,6 +689,54 @@ test "App resets globals and returns a fresh handler", ->
   ok typeof h is 'function'
   resetGlobals()
 
+# ==[ @cache — the Cache-Control directive vocabulary ]==
+
+console.log "\ncache()"
+
+resetGlobals()
+get '/c/secs'    -> @cache 10;            'x'
+get '/c/minutes' -> @cache '36m';         'x'
+get '/c/hours'   -> @cache '2 hours';     'x'
+get '/c/month'   -> @cache '1 month';     'x'
+get '/c/bare'    -> @cache '90';          'x'
+get '/c/zero'    -> @cache 0;             'x'
+get '/c/false'   -> @cache false;         'x'
+get '/c/off'     -> @cache 'off';         'x'
+get '/c/nostore' -> @cache 'no-store';    'x'
+get '/c/forever' -> @cache 'forever';     'x'
+get '/c/word'    -> @cache 'always';      'x'
+get '/c/unit'    -> @cache '1 fortnight'; 'x'
+get '/c/ms'      -> @cache '5ms';         'x'
+get '/c/neg'     -> @cache -1;            'x'
+get '/c/empty'   -> @cache '';            'x'
+get '/c/frac'    -> @cache 1.5;           'x'
+
+test! "cache(seconds) emits public max-age with an Expires, never immutable", ->
+  res = handle! req('GET', '/c/secs')
+  eq res.headers.get('cache-control'), 'public, max-age=10'
+  ok res.headers.get('expires')?
+
+test! "duration strings parse: unit words, spaced plurals, bare digits", ->
+  eq (handle! req('GET', '/c/minutes')).headers.get('cache-control'), 'public, max-age=2160'
+  eq (handle! req('GET', '/c/hours')).headers.get('cache-control'), 'public, max-age=7200'
+  eq (handle! req('GET', '/c/bare')).headers.get('cache-control'), 'public, max-age=90'
+
+test! "a month is 30 days by convention; m stays minutes", ->
+  eq (handle! req('GET', '/c/month')).headers.get('cache-control'), 'public, max-age=2592000'
+
+test! "the never-store family — 0, false, off, no-store — one canonical output", ->
+  for path in ['/c/zero', '/c/false', '/c/off', '/c/nostore']
+    res = handle! req('GET', path)
+    eq res.headers.get('cache-control'), 'no-store'
+    eq res.headers.get('expires'), null
+
+test! "forever is the canonical HTTP forever: a year, immutable", ->
+  eq (handle! req('GET', '/c/forever')).headers.get('cache-control'), 'public, max-age=31536000, immutable'
+
+test! "a directive that does not parse throws — never a guessed TTL", ->
+  for path in ['/c/word', '/c/unit', '/c/ms', '/c/neg', '/c/empty', '/c/frac']
+    eq (handle! req('GET', path)).status, 500
+
 # ==============================================================================
 # Worker + manager runtimes — real subprocesses over unix sockets, against a
 # stub Janus /1.0 control socket that records every call in order. Timing is

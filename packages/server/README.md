@@ -120,6 +120,25 @@ Thrown errors become one JSON envelope: `{ error: { message, notice?,
 issues? } }`. Messages show for 4xx; 5xx and raw throws are masked to a
 generic status line so internals never leak.
 
+## @cache — response freshness, one word
+
+```coffee
+get '/report' -> @cache '1h';      report()   # fresh for an hour
+get '/feed'   -> @cache 10;        feed()     # ten seconds
+get '/live'   -> @cache off;       stats()    # never stored
+get '/logo'   -> @cache 'forever'; @send 'logo.svg'
+```
+
+Sugar over standard `Cache-Control`, so the same word steers a
+micro-cache (Janus), a CDN, and the browser alike. Durations take
+seconds (`10`, `'90'`) or a counted unit (`'36m'`, `'2 hours'`,
+`'1 month'` — 30 days; `m` always means minutes). `0`, `false`, `'off'`,
+and `'no-store'` all emit `no-store`; `'forever'` emits the canonical
+year-plus-`immutable`. Anything else throws — a cache directive that
+does not parse is a bug, never a guessed TTL. An edge cache in front
+may cap long freshness at its own ceiling (Janus: `ttl_max`); the
+header still reaches the browser intact.
+
 ## input: schemas and OpenAPI
 
 ```coffee
