@@ -32,16 +32,17 @@ but it must not block direct-path package implementation and tests.
 ### Application foundation
 
 - **Server:** the edge belongs to Janus running with Caddy — proxy
-  and stream execution, and the TLS story (ACME, certificates, SNI)
-  — so none of that is Rip Server work; `packages/server` publishes
-  upstreams to the control plane and stops there. Remaining in Rip
-  Server itself, subject to that review: rate limiting at the app
-  tier (request-body limits ship as the `bodyLimit` middleware; a
-  rate limiter does not exist), realtime transport (no WebSocket
-  surface in the framework), mDNS advertisement, and structured
-  startup reporting. Process workers, control-plane registration
-  with heartbeats and upstream publication, and dev watch with live
-  reload are shipped.
+  and stream execution, the TLS story (ACME, certificates, SNI), and
+  WebSocket termination with hub fan-out — so none of that is Rip
+  Server work; `packages/server` publishes upstreams to the control
+  plane and stops there. Remaining in Rip Server itself (contracts in
+  the packages/server README's Planned section): hub ergonomics
+  (bridge-frame dispatch, sigil directive helpers, a publish client,
+  the `--bridge` registration flag), identity-keyed rate quotas
+  (per-user/session/API-key middleware — per-IP request-rate limiting
+  belongs to the edge), and structured startup reporting. Process
+  workers, control-plane registration with heartbeats and upstream
+  publication, and dev watch with live reload are shipped.
 - **UI:** the headless widget catalog and its app-framework
   integration. The browser interaction primitives the widgets build
   on (`@rip-lang/ui/browser`: nav, dismiss, overlay, position, focus,
