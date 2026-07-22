@@ -937,13 +937,14 @@ describe.skipIf(!tsgoAvailable)('TS directives reach the editor (directive inher
   //
   //   · single-line — the face directive sits directly above the one emitted
   //     statement, so TSGO absorbs the error at the face. applyRipDirectives
-  //     never sees it; only the hint reaches the range check.
-  //   · block-bodied — the face directive governs only its next FACE line, so
-  //     an error deeper in the block LEAKS past it and
-  //     reaches applyRipDirectives over rip positions. That is the only path
-  //     on which the range check absorbs a real error, marks the directive
-  //     used, and drops tsgo's now-spurious TS2578 — so it is the only case
-  //     that exercises those branches.
+  //     never sees it; only the hint reaches the governed-line check.
+  //   · multi-line lowering — the face directive governs only its next FACE
+  //     line, so an error landing on a LATER line of the same statement's
+  //     lowering LEAKS past it and reaches applyRipDirectives over rip
+  //     positions, mapped back onto the head line the directive governs.
+  //     That is the only path on which the governed-line check absorbs a
+  //     real error, marks the directive used, and drops tsgo's now-spurious
+  //     TS2578 — so it is the only case that exercises those branches.
   test('a directive absorbs the ERROR, never the unused-local fade (TS6133 survives, tagged)', async () => {
     await inWorkspace({}, async (api) => {
       await api.open('app.rip', '# @ts-expect-error\nbadCount: number = "oops"\n');
@@ -973,34 +974,25 @@ describe.skipIf(!tsgoAvailable)('TS directives reach the editor (directive inher
     });
   }, 30000);
 
-  test('a LEAKED error (block body) is absorbed over rip positions and marks the directive used — the fade still survives', async () => {
+  test('a LEAKED error (multi-line lowering) is absorbed over rip positions and marks the directive used', async () => {
     await inWorkspace({}, async (api) => {
-      // `y: string = x` is inside the def body, so its TS2322 lands on a face
-      // line the face directive does not govern: it leaks, and only rip-side
-      // suppression can absorb it. `f` is never called, so an unused-local
-      // hint sits in the SAME directive range — all three behaviors at once.
-      await api.open('app.rip', '# @ts-expect-error\ndef f(x: number)\n  y: string = x\n  y\n');
-      const diags = api.diagnostics('app.rip');
-
-      // The leaked TS2322 is absorbed (it is the error the directive
-      // promised) — and absorbing it marked the directive USED, so tsgo's
-      // spurious face-level TS2578 drops. The hint alone would NOT have
-      // marked it used: that guard is pinned by check.test.js
-      // ('an unused @ts-expect-error stays loud'), where a hint is the only
-      // thing in range and the TS2578 survives.
-      expect(diags.map((d) => d.code)).not.toContain(2322);
-      expect(diags.map((d) => d.code)).not.toContain(2578);
-
-      // ...and the fade rides through the same suppression that ate the error.
-      expect(diags).toHaveLength(1);
-      expect(diags[0].code).toBe(6133);
-      expect(diags[0].severity).toBe(4);
-      expect(diags[0].tags).toEqual([1]);
-      expect(diags[0].range.start.line).toBe(1);   // `f`, on the def line
+      // A child component's prop errors land on the CTOR face line, but a
+      // directive above the ELEMENT emits above the mount scaffold's first
+      // line — a face line with no error — so tsgo reports the TS2322 live
+      // plus a spurious TS2578. Both map back onto rip positions: the
+      // TS2322 onto the `Chip label: 123` head line the directive governs —
+      // absorbed, and absorbing it marked the directive USED, so the TS2578
+      // drops. A hint alone would NOT have marked it used: that guard is
+      // pinned by check.test.js ('an unused @ts-expect-error stays loud').
+      const chip = 'export Chip = component\n  @label: string := ""\n\n  render\n    span label\n\n';
+      await api.open('app.rip',
+        chip + 'export App = component\n  render\n    div\n      # @ts-expect-error — label expects string\n      Chip label: 123\n');
+      expect(api.diagnostics('app.rip')).toEqual([]);
 
       // Control: drop the directive and the leaked error is REAL and loud —
-      // so the green assertions above mean "absorbed", not "nothing fired".
-      await api.change('app.rip', 'def f(x: number)\n  y: string = x\n  y\n');
+      // so the green assertion above means "absorbed", not "nothing fired".
+      await api.change('app.rip',
+        chip + 'export App = component\n  render\n    div\n      Chip label: 123\n');
       expect(api.diagnostics('app.rip').map((d) => d.code)).toContain(2322);
     });
   }, 30000);

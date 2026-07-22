@@ -610,6 +610,30 @@ describe('TS directive comments', () => {
     // JS mode carries no directive rows — the channel is face-only.
     expect(js(src).mappings.rows.some((m) => m.role === 'tsDirective')).toBe(false);
   });
+
+  test('an inline child-prop directive keeps the strip identity — the per-pair layout is mode-uniform', () => {
+    // A directive on one prop line switches the ctor object to ONE
+    // PAIR PER LINE so TypeScript's next-line rule governs that pair
+    // alone. The layout decision must bind to the SOURCE shape, not
+    // the face: JS mode emits the same pair-per-line bytes minus the
+    // directive lines, or stripping the face could never restore them.
+    const src =
+      'export Kid = component\n  @value?: string := ""\n  @label?: string := ""\n  render\n    div\n      = value\n\n'
+      + 'export C = component\n  count := 0\n  render\n    Kid\n      # @ts-expect-error bind\n      value <=> count\n      label: 42\n';
+    const faced = ts(src);
+    // The comment sits above ITS pair only — the undirected sibling
+    // stays on an ungoverned line (siblings must not be blinded).
+    expect(faced.code).toMatch(/new Kid\(\{\n\s*\/\/ @ts-expect-error bind\n\s*__bind_value__.*,\n\s*label: 42\n\s*\}\);/);
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
+    expect(js(src).code).not.toContain('@ts-');
+
+    // The DOM-attribute form rides its own replay line in both modes;
+    // pinned here so the two inline forms hold the identity together.
+    const dom = 'export C = component\n  render\n    div\n      span\n        # @ts-expect-error inline\n        title: 1\n';
+    const domFaced = ts(dom);
+    expect(domFaced.code).toMatch(/\/\/ @ts-expect-error inline\n\s*this\._el\d+\.setAttribute\('title'/);
+    expect(stripFace(domFaced.code, domFaced.tsRegions)).toBe(js(dom).code);
+  });
 });
 
 // ── 4. mapping pins ──────────────────────────────────────────────────

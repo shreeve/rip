@@ -1580,11 +1580,16 @@ class Emitter {
   // list — the positions the emitter prints as lines. Ties at one
   // source start (a postfix form and its guarded statement) resolve
   // OUTERMOST: the outer element is the one the statement list emits.
+  // Attachment runs in BOTH modes: emission is ts-gated at every
+  // consumer, but a prop pair's attached directive also decides the
+  // child-ctor object's LAYOUT (one pair per line), and the strip
+  // contract — face minus regions === JS bytes — holds only if both
+  // modes make that layout decision from the same map.
   collectTsDirectives(sexpr, trivia, source) {
     this.tsDirectiveMap = new Map();
     this.tsNocheck = null;
     this.pendingHoistDirectives = [];
-    if (!this.ts || trivia.length === 0) return;
+    if (trivia.length === 0) return;
     const lineStarts = [0];
     for (let i = 0; i < source.length; i++) {
       if (source[i] === '\n') lineStarts.push(i + 1);
@@ -1651,7 +1656,7 @@ class Emitter {
     // no statement precedes it in the source; the FIRST such comment
     // emits as the face's first line, the rest stay ordinary comments.
     const firstStmt = elements.length > 0 ? elements[0].start : Infinity;
-    this.tsNocheck = nochecks.find((t) => t.end <= firstStmt) ?? null;
+    this.tsNocheck = this.ts ? (nochecks.find((t) => t.end <= firstStmt) ?? null) : null;
   }
 
   // One directive line: `//` + the comment's own bytes past the `#`
@@ -7347,12 +7352,21 @@ class Emitter {
   }
 
   replayCreates(rec, pad) {
-    for (const { node, fn, semi } of rec.creates) {
-      this.renderDirectives(node, pad);
-      this.b.emit(pad);
-      if (node != null) this.mark(node, '$self', fn);
-      else fn();
-      this.b.emit(semi ? ';\n' : '\n');
+    // The pad, readable by a create fn that emits MULTI-LINE (the
+    // child-component ctor with per-prop directive lines) — saved and
+    // restored so a nested replay cannot leave a stale pad behind.
+    const prevPad = this.replayPad;
+    this.replayPad = pad;
+    try {
+      for (const { node, fn, semi } of rec.creates) {
+        this.renderDirectives(node, pad);
+        this.b.emit(pad);
+        if (node != null) this.mark(node, '$self', fn);
+        else fn();
+        this.b.emit(semi ? ';\n' : '\n');
+      }
+    } finally {
+      this.replayPad = prevPad;
     }
   }
 
@@ -8165,6 +8179,7 @@ class Emitter {
         eventBindings.push({ pair, event: key[2], value });
         return;
       }
+      takePropDirectives(pair);
       if (typeof key !== 'string') {
         throw this.positionedError(pair, 'emitter: computed prop keys are not supported on a child component', markNode ?? this.rstate.node);
       }
@@ -8290,6 +8305,44 @@ class Emitter {
       return [m.index, m.index + word.length];
     };
 
+    // A directive INSIDE the element body (above a bind/prop line)
+    // attaches to the props object (above the FIRST line — same
+    // start, and the attachment pre-pass sorts the object first) or
+    // to one of its pairs. An EVENT pair keeps its attachment: its
+    // addEventListener replay line consumes it like any pair-owned
+    // line. A PROP pair's only face manifestation is the ctor call's
+    // argument object, so its directives collect here — and their
+    // presence switches the ctor emission below to ONE PAIR PER LINE,
+    // the only shape under which TypeScript's next-line suppression
+    // can govern one prop without blinding its siblings (one shared
+    // line would also read every stacked sibling directive but the
+    // last as unused, TS2578). Collection runs in BOTH modes — the
+    // per-line layout must too, or stripping the face's directive
+    // lines would not restore the JS bytes; only the directive
+    // lines themselves are ts-gated.
+    const propDirs = new Map();  // prop pair → its directives
+    const takePropDirectives = (pair) => {
+      if (!this.tsDirectivesArmed) return;
+      const attached = this.tsDirectiveMap.get(pair);
+      if (attached === undefined) return;
+      this.tsDirectiveMap.delete(pair);
+      propDirs.set(pair, [...(propDirs.get(pair) ?? []), ...attached]);
+    };
+    const rehomeObjectDirectives = (obj) => {
+      if (!this.tsDirectivesArmed) return;
+      const attached = this.tsDirectiveMap.get(obj);
+      if (attached === undefined) return;
+      // Re-homing is line-preserving or nothing: the directive sat
+      // above the FIRST pair's line, so only that pair may take it. An
+      // extracted loop `key:` first pair never emits a line of its own
+      // — DECLINE (the comment stays ordinary) rather than govern a
+      // sibling line the author never wrote it above.
+      const firstPair = obj.slice(1).find((p) => isNode(p));
+      if (firstPair === undefined || R.suppressedPairs.has(firstPair)) return;
+      this.tsDirectiveMap.delete(obj);
+      this.tsDirectiveMap.set(firstPair, [...attached, ...(this.tsDirectiveMap.get(firstPair) ?? [])]);
+    };
+
     // First pass: props classify in source order; DOM children
     // collect for the build below (the split — every non-prop arg
     // is child DOM).
@@ -8314,6 +8367,7 @@ class Emitter {
     };
     for (const arg of args) {
       if (isObject(arg)) {
+        rehomeObjectDirectives(arg);
         for (const pair of arg.slice(1)) addPair(pair);
         scanAdvance(arg);
       } else if (isFunc(arg)) {
@@ -8323,6 +8377,7 @@ class Emitter {
         const stmts = isBlock(block) ? block.slice(1) : block != null ? [block] : [];
         for (const child of stmts) {
           if (isObject(child)) {
+            rehomeObjectDirectives(child);
             for (const pair of child.slice(1)) addPair(pair);
             scanAdvance(child);
           } else {
@@ -8404,9 +8459,21 @@ class Emitter {
       if (props.length === 0) {
         this.b.emit('{}');
       } else {
-        this.b.emit('{ ');
+        // With directive-carrying pairs, the argument object emits ONE
+        // PAIR PER LINE so each directive sits directly above the face
+        // line its own pair's diagnostics land on. Without them, the
+        // compact single-line form is unchanged.
+        const multi = propDirs.size > 0;
+        const inner = this.replayPad + '  ';
+        this.b.emit(multi ? '{' : '{ ');
         props.forEach((p, i) => {
-          if (i > 0) this.b.emit(', ');
+          if (multi) {
+            if (i > 0) this.b.emit(',');
+            this.b.emit('\n');
+            const dirs = p.pair !== null ? propDirs.get(p.pair) : undefined;
+            if (this.ts && dirs !== undefined) for (const d of dirs) this.tsDirectiveLine(d, inner, true);
+            this.b.emit(inner);
+          } else if (i > 0) this.b.emit(', ');
           const emitPair = () => {
             // A boolean-shorthand key's derived span records a face
             // row (the builder's verbatim comparison makes it EXACT —
@@ -8427,7 +8494,7 @@ class Emitter {
           if (p.pair !== null && this.stores.idOf(p.pair) !== null) this.mark(p.pair, '$self', emitPair);
           else emitPair();
         });
-        this.b.emit(' }');
+        this.b.emit(multi ? `\n${this.replayPad}}` : ' }');
       }
       this.b.emit(');');
     });
@@ -8551,6 +8618,36 @@ class Emitter {
   // Attributes, events, and class merges on one element.
   renderAttributes(el, objExpr) {
     const R = this.rstate;
+    // A directive above the FIRST attribute line attaches to the props
+    // OBJECT (same start, and the attachment pre-pass sorts the object
+    // before its first pair) — but an element's replay lines carry the
+    // PAIR nodes, so re-home it onto the first pair for the replay
+    // consumption every other attribute line already gets. Re-homing
+    // is line-preserving or nothing: only the first pair may take it,
+    // and only when that pair emits a replay line of its own. A first
+    // pair with no line to govern — an extracted loop `key:`, a
+    // `class:` merging into the element's clsx call, a factory-side
+    // `ref:` riding m() — DECLINES (place-or-decline: the comment
+    // stays an ordinary Rip comment) rather than govern a sibling
+    // line the author never wrote it above.
+    if (this.ts && this.tsDirectivesArmed && this.tsDirectiveMap.has(objExpr)) {
+      const firstPair = objExpr.slice(1).find((p) => isNode(p));
+      const replays = firstPair !== undefined && firstPair.length === 3 &&
+        !R.suppressedPairs.has(firstPair) &&
+        (() => {
+          let k = firstPair[1];
+          if (typeof k !== 'string') return true;   // `@event:` — its listener line consumes
+          if (k.startsWith('"') && k.endsWith('"')) k = k.slice(1, -1);
+          if ((k === 'class' || k === 'className') && R.pendingClassArgs !== null && R.pendingClassEl === el) return false;
+          if (k === 'ref' && this.rstate.sink.kind !== 'class') return false;
+          return true;
+        })();
+      if (replays) {
+        const attached = this.tsDirectiveMap.get(objExpr);
+        this.tsDirectiveMap.delete(objExpr);
+        this.tsDirectiveMap.set(firstPair, [...attached, ...(this.tsDirectiveMap.get(firstPair) ?? [])]);
+      }
+    }
     for (const pair of objExpr.slice(1)) {
       if (!isNode(pair) || pair.length !== 3) {
         throw this.positionedError(pair, 'emitter: unsupported attribute form in render', objExpr);

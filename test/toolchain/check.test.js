@@ -97,9 +97,8 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     // type, so a bad member access INSIDE the branch or row reports
     // exactly like one at render top level — in PERMISSIVE mode, on
     // the user's own expression. The errors drive BARE, no directive:
-    // an inline `# @ts-expect-error` on an element line inside a
-    // render block never reaches the face, so a directive-covered
-    // fixture would pin rip's fallback suppression, not the checking.
+    // a directive-covered fixture would pin rip's suppression, not
+    // the checking.
     const src = [
       'type TOption = { id: number, label: string }',
       '',
@@ -283,6 +282,125 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       fs.rmSync(expectErr, { recursive: true, force: true });
       fs.rmSync(ignore, { recursive: true, force: true });
     }
+  }, 90_000);
+
+  // A directive governs its statement's HEAD line only — tsc's one-line
+  // rule at rip's statement granularity (ripDirectiveLines). A directive
+  // above a `def` or an `if` must NOT absorb a bug inside the indented
+  // block: the bug stays loud and the directive reports unused (TS2578),
+  // tsc's verdict for a marker that did nothing. The hatch for an error
+  // interior to a render element is a directive on the offending line
+  // itself (the audit corpus's 09-components drives that form). The
+  // single-line file is the in-run control: suppression itself still
+  // works, so the loud block bugs mean "not governed", not "broken".
+  test('a directive governs the head line only — a bug inside the indented block surfaces, the directive reads unused', () => {
+    const dir = workspace({
+      'single.rip': "# @ts-expect-error — deliberately wrong, acknowledged\nbad: number = 'oops'\nconsole.log bad\n",
+      'blocks.rip': [
+        '# @ts-expect-error — governs `def f` only, never its body',
+        'def f(x: number)',
+        '  y: string = x',
+        '  y',
+        'flag = true',
+        '# @ts-expect-error — governs `if flag` only, never its branch',
+        'if flag',
+        "  z: number = 'oops'",
+        '# @ts-expect-error — a blank line beneath: the marker governs nothing',
+        '',
+        "w: number = 'oops'",
+        'console.log f(1), flag, w',
+      ].join('\n') + '\n',
+    });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).not.toContain('single.rip');                 // the control: still absorbed
+      expect(r.stdout).toContain('blocks.rip:1:1 - error TS2578');  // the def directive did nothing
+      expect(r.stdout).toContain('blocks.rip:3:3 - error TS2322');  // the body bug is loud
+      expect(r.stdout).toContain('blocks.rip:6:1 - error TS2578');  // the if directive did nothing
+      expect(r.stdout).toContain('blocks.rip:8:3 - error TS2322');  // the branch bug is loud
+      expect(r.stdout).toContain('blocks.rip:11:1 - error TS2322'); // no blank-skip: the gap kills governance
+      // ...and the gapped marker is a DECLINED ordinary comment (the
+      // emitter never places it), so no TS2578 points at line 9.
+      expect(r.stdout).not.toContain('blocks.rip:9');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // Interior directives on a child component: every prop lowers into ONE
+  // ctor call, so the emitter switches the argument object to one pair
+  // per line when any prop carries a directive — each marker then
+  // governs exactly its own pair's face line. Two acknowledged props are
+  // both absorbed with no TS2578 (a shared line would read every stacked
+  // directive but the last as unused), and an UNACKNOWLEDGED sibling of
+  // an acknowledged prop stays loud (a shared line would let one marker
+  // blind every sibling).
+  test('inline component-prop directives govern per pair — siblings neither blinded nor double-flagged', () => {
+    const chip = [
+      'export Chip = component',
+      "  @label: string := ''",
+      '  @size: number := 0',
+      '',
+      '  render',
+      '    span label',
+      '',
+    ];
+    const dir = workspace({
+      'acked.rip': [...chip,
+        'export BothAcked = component',
+        '  render',
+        '    div',
+        '      Chip',
+        '        # @ts-expect-error — label expects string',
+        '        label: 123',
+        '        # @ts-expect-error — size expects number',
+        "        size: 'big'",
+      ].join('\n') + '\n',
+      'sibling.rip': [...chip,
+        'export OneAcked = component',
+        '  render',
+        '    div',
+        '      Chip',
+        '        # @ts-expect-error — label expects string',
+        '        label: 123',
+        "        size: 'big'",
+      ].join('\n') + '\n',
+    });
+    try {
+      const r = check(dir, ['--json']);
+      expect(r.status).toBe(1);
+      const diags = JSON.parse(r.stdout);
+      expect(diags.filter((d) => d.file.endsWith('acked.rip'))).toEqual([]);
+      const sib = diags.filter((d) => d.file.endsWith('sibling.rip'));
+      expect(sib.map((d) => [d.code, d.line])).toEqual([[2322, 14]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A directive above a first attribute line that never emits a replay
+  // line of its own — a loop's extracted `key:` is consumed by the keyFn
+  // — DECLINES (the comment stays an ordinary Rip comment) rather than
+  // re-homing onto a sibling line the author never wrote it above: the
+  // sibling's own error must stay loud.
+  test('a directive above a loop `key:` declines — it never governs a sibling attribute line', () => {
+    const dir = workspace({
+      'k.rip': [
+        'export List = component',
+        '  items := [1, 2, 3]',
+        '',
+        '  render',
+        '    ul',
+        '      for item in items',
+        '        li',
+        '          # @ts-expect-error — key: is loop machinery, no line to govern',
+        '          key: item',
+        '          title: item.toUpperCasez()',
+      ].join('\n') + '\n',
+    });
+    try {
+      const r = check(dir, ['--json']);
+      expect(r.status).toBe(1);
+      const diags = JSON.parse(r.stdout);
+      expect(diags.map((d) => [d.code, d.line])).toEqual([[2339, 10]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
   test('cross-file: a misused typed export reports at the call site', () => {

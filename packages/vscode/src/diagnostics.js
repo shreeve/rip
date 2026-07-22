@@ -77,52 +77,47 @@ export function mapTsDiagnostic(good, d) {
   };
 }
 
-// A `# @ts-expect-error` directive governs the next SOURCE STATEMENT —
-// including its indented block (rip's statement unit): a marker above a
-// render element must absorb an error on the element's bind/prop lines
-// inside it. The governed range runs from the directive's next non-blank
-// line through the last consecutive line indented DEEPER than that first
-// line. One directive absorbs only within its own statement.
+// A `# @ts-expect-error` directive governs the line DIRECTLY beneath
+// it — tsc's one-line rule. An error inside a statement's indented
+// block is NOT governed: a bug written later in a `def` body surfaces,
+// and the directive above the head reports unused. A blank line
+// beneath the directive leaves it governing nothing — the same
+// next-line adjacency the emitter's attachment pre-pass requires, so
+// broker and face agree on which line a marker reaches. The hatch for
+// an error interior to a render element is a directive on the
+// offending bind/prop line itself — the idiom TSX forces for a JSX
+// attribute, and the emitter places it on the face line that pair's
+// own diagnostics land on.
 //
 // The broker owns this over RIP positions because a FACE-level directive
 // governs only its immediate next FACE line, which multi-line lowerings
-// structurally defeat: an error whose mapped line sits under
-// a source directive suppresses (directive used), and a USED directive's
+// structurally defeat: an error whose mapped line is the governed head
+// line suppresses (directive used), and a USED directive's
 // spurious face-level TS2578 drops. A directive that rescues nothing
 // keeps its TS2578 — unused stays loud, exactly tsc's contract.
 export function ripDirectiveLines(good) {
-  if (good._directiveRanges === undefined) {
-    const src = good.source.split('\n');
-    const indentOf = (l) => /^[ \t]*/.exec(l)[0].length;
-    const ranges = [];
-    src.forEach((l, i) => {
-      if (!/^[ \t]*#[ \t]*@ts-(expect-error|ignore)(\s|$)/.test(l)) return;
-      let start = i + 1;
-      while (start < src.length && src[start].trim() === '') start++;
-      if (start >= src.length) return;
-      const head = indentOf(src[start]);
-      let end = start;
-      while (end + 1 < src.length &&
-             (src[end + 1].trim() === '' || indentOf(src[end + 1]) > head)) end++;
-      ranges.push({ line: i, start, end });
+  if (good._directiveLines === undefined) {
+    const lines = [];
+    good.source.split('\n').forEach((l, i) => {
+      if (/^[ \t]*#[ \t]*@ts-(expect-error|ignore)(\s|$)/.test(l)) lines.push(i);
     });
-    good._directiveRanges = ranges;
+    good._directiveLines = lines;
   }
-  return good._directiveRanges;
+  return good._directiveLines;
 }
 
 export function applyRipDirectives(good, mapped) {
-  const ranges = ripDirectiveLines(good);
-  if (ranges.length === 0) return mapped;
+  const directives = ripDirectiveLines(good);
+  if (directives.length === 0) return mapped;
   const is2578 = (m) => String(m.code) === '2578';
   const used = new Set();
   const survivors = [];
   for (const m of mapped) {
     const line = m.range.start.line;
     if (!is2578(m)) {
-      const r = ranges.find((g) => line >= g.start && line <= g.end);
-      // A directive absorbs the ERRORS (and warnings) in its range, and only
-      // those mark it USED. A suggestion-class hint in the range — an
+      const r = directives.find((g) => line === g + 1);
+      // A directive absorbs the ERRORS (and warnings) on its governed line,
+      // and only those mark it USED. A suggestion-class hint there — an
       // unused-local fade (TS6133) on a throwaway test binding is the common
       // one — is not the error an `@ts-expect-error` promised, so it does
       // neither. Two independent rules, one condition:
@@ -133,15 +128,15 @@ export function applyRipDirectives(good, mapped) {
       //   · a hint must not be absorbed — tsc's directives govern errors,
       //     never the fade classes, so a suppressed line still dims its
       //     unused binding, exactly as the .ts twin does
-      if (r && (m.severity ?? 1) <= 2) { used.add(r.line); continue; }
+      if (r !== undefined && (m.severity ?? 1) <= 2) { used.add(r); continue; }
     }
     survivors.push(m);
   }
   // tsgo's TS2578 ("unused '@ts-expect-error'") maps onto the directive
   // comment and arrives here as a normal diagnostic. Drop it only when the
-  // directive is genuinely used — an ERROR fell in its range (a mis-governed
-  // multi-line face directive whose leaked error we suppressed over rip
-  // positions). Otherwise it survives: unused stays loud.
+  // directive is genuinely used — an ERROR landed on its governed line (a
+  // mis-governed multi-line face directive whose leaked error we suppressed
+  // over rip positions). Otherwise it survives: unused stays loud.
   return survivors.filter((m) => !(is2578(m) && used.has(m.range.start.line)));
 }
 

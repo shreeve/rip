@@ -101,8 +101,8 @@ export BindingTypeTests = component
       # Correct: string <=> string — no error
       Input
         value <=> email
-      # @ts-expect-error — Type 'number' is not assignable to type 'string'
       Input
+        # @ts-expect-error — Type 'number' is not assignable to type 'string'
         value <=> count
 
 # ── Negative: type safety inside component bodies ──

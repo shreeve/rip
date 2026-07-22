@@ -9720,7 +9720,7 @@ class Emitter {
     this.tsDirectiveMap = new Map;
     this.tsNocheck = null;
     this.pendingHoistDirectives = [];
-    if (!this.ts || trivia.length === 0)
+    if (trivia.length === 0)
       return;
     const lineStarts = [0];
     for (let i = 0;i < source.length; i++) {
@@ -9790,7 +9790,7 @@ class Emitter {
       this.tsDirectiveMap.set(target.el, attached);
     }
     const firstStmt = elements.length > 0 ? elements[0].start : Infinity;
-    this.tsNocheck = nochecks.find((t) => t.end <= firstStmt) ?? null;
+    this.tsNocheck = this.ts ? nochecks.find((t) => t.end <= firstStmt) ?? null : null;
   }
   tsDirectiveLine(d, pad, padFirst = false) {
     this.b.tsOnly(() => {
@@ -14266,16 +14266,22 @@ ${pad ?? ""}`);
       this.tsDirectiveLine(d, pad, true);
   }
   replayCreates(rec, pad) {
-    for (const { node, fn, semi } of rec.creates) {
-      this.renderDirectives(node, pad);
-      this.b.emit(pad);
-      if (node != null)
-        this.mark(node, "$self", fn);
-      else
-        fn();
-      this.b.emit(semi ? `;
+    const prevPad = this.replayPad;
+    this.replayPad = pad;
+    try {
+      for (const { node, fn, semi } of rec.creates) {
+        this.renderDirectives(node, pad);
+        this.b.emit(pad);
+        if (node != null)
+          this.mark(node, "$self", fn);
+        else
+          fn();
+        this.b.emit(semi ? `;
 ` : `
 `);
+      }
+    } finally {
+      this.replayPad = prevPad;
     }
   }
   replaySetups(rec, pad) {
@@ -14881,6 +14887,7 @@ ${pad ?? ""}`);
         eventBindings.push({ pair, event: key[2], value });
         return;
       }
+      takePropDirectives(pair);
       if (typeof key !== "string") {
         throw this.positionedError(pair, "emitter: computed prop keys are not supported on a child component", markNode ?? this.rstate.node);
       }
@@ -14961,6 +14968,28 @@ ${pad ?? ""}`);
       scanAt = m.index + word.length;
       return [m.index, m.index + word.length];
     };
+    const propDirs = new Map;
+    const takePropDirectives = (pair) => {
+      if (!this.tsDirectivesArmed)
+        return;
+      const attached = this.tsDirectiveMap.get(pair);
+      if (attached === undefined)
+        return;
+      this.tsDirectiveMap.delete(pair);
+      propDirs.set(pair, [...propDirs.get(pair) ?? [], ...attached]);
+    };
+    const rehomeObjectDirectives = (obj) => {
+      if (!this.tsDirectivesArmed)
+        return;
+      const attached = this.tsDirectiveMap.get(obj);
+      if (attached === undefined)
+        return;
+      const firstPair = obj.slice(1).find((p) => isNode4(p));
+      if (firstPair === undefined || R.suppressedPairs.has(firstPair))
+        return;
+      this.tsDirectiveMap.delete(obj);
+      this.tsDirectiveMap.set(firstPair, [...attached, ...this.tsDirectiveMap.get(firstPair) ?? []]);
+    };
     const domItems = [];
     const isTextChild = (arg) => !isNode4(arg) && !(typeof arg === "string" && ((isHtmlTag2(arg.split(/[#.]/)[0]) || isComponentName2(arg.split(/[#.]/)[0])) && this.renderVarKind(arg) === null && this.resolveBareRead(arg) === null));
     const classifyChild = (arg) => {
@@ -14979,6 +15008,7 @@ ${pad ?? ""}`);
     };
     for (const arg of args) {
       if (isObject(arg)) {
+        rehomeObjectDirectives(arg);
         for (const pair of arg.slice(1))
           addPair(pair);
         scanAdvance(arg);
@@ -14987,6 +15017,7 @@ ${pad ?? ""}`);
         const stmts = isBlock2(block) ? block.slice(1) : block != null ? [block] : [];
         for (const child of stmts) {
           if (isObject(child)) {
+            rehomeObjectDirectives(child);
             for (const pair of child.slice(1))
               addPair(pair);
             scanAdvance(child);
@@ -15064,9 +15095,21 @@ ${pad ?? ""}`);
       if (props.length === 0) {
         this.b.emit("{}");
       } else {
-        this.b.emit("{ ");
+        const multi = propDirs.size > 0;
+        const inner = this.replayPad + "  ";
+        this.b.emit(multi ? "{" : "{ ");
         props.forEach((p, i) => {
-          if (i > 0)
+          if (multi) {
+            if (i > 0)
+              this.b.emit(",");
+            this.b.emit(`
+`);
+            const dirs = p.pair !== null ? propDirs.get(p.pair) : undefined;
+            if (this.ts && dirs !== undefined)
+              for (const d of dirs)
+                this.tsDirectiveLine(d, inner, true);
+            this.b.emit(inner);
+          } else if (i > 0)
             this.b.emit(", ");
           const emitPair = () => {
             const mid = isNode4(markNode) ? this.stores.idOf(markNode) : null;
@@ -15084,7 +15127,8 @@ ${pad ?? ""}`);
           else
             emitPair();
         });
-        this.b.emit(" }");
+        this.b.emit(multi ? `
+${this.replayPad}}` : " }");
       }
       this.b.emit(");");
     });
@@ -15195,6 +15239,26 @@ ${pad ?? ""}`);
   }
   renderAttributes(el, objExpr) {
     const R = this.rstate;
+    if (this.ts && this.tsDirectivesArmed && this.tsDirectiveMap.has(objExpr)) {
+      const firstPair = objExpr.slice(1).find((p) => isNode4(p));
+      const replays = firstPair !== undefined && firstPair.length === 3 && !R.suppressedPairs.has(firstPair) && (() => {
+        let k = firstPair[1];
+        if (typeof k !== "string")
+          return true;
+        if (k.startsWith('"') && k.endsWith('"'))
+          k = k.slice(1, -1);
+        if ((k === "class" || k === "className") && R.pendingClassArgs !== null && R.pendingClassEl === el)
+          return false;
+        if (k === "ref" && this.rstate.sink.kind !== "class")
+          return false;
+        return true;
+      })();
+      if (replays) {
+        const attached = this.tsDirectiveMap.get(objExpr);
+        this.tsDirectiveMap.delete(objExpr);
+        this.tsDirectiveMap.set(firstPair, [...attached, ...this.tsDirectiveMap.get(firstPair) ?? []]);
+      }
+    }
     for (const pair of objExpr.slice(1)) {
       if (!isNode4(pair) || pair.length !== 3) {
         throw this.positionedError(pair, "emitter: unsupported attribute form in render", objExpr);

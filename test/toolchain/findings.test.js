@@ -45,8 +45,11 @@ const LEDGER = join('test', 'type-audit', 'FINDINGS.md');   // sep-correct: comp
 const RUNNER = join('test', 'type-audit', 'runner.js');
 // `.rip` is the editor's generated mirror — untracked scratch that holds
 // compiled faces of whatever happened to be open, so scanning it makes this
-// gate's verdict depend on whether VS Code was running.
-const SKIP = new Set(['node_modules', '.git', '.rip', 'dist', 'build', 'coverage', '.vscode-test']);
+// gate's verdict depend on whether VS Code was running. `.claude` is the
+// same class: agent-session state (settings, git worktrees holding whole
+// checkouts of OTHER branches), so scanning it makes the verdict depend on
+// whether a Claude session was running and what its branch contained.
+const SKIP = new Set(['node_modules', '.git', '.rip', '.claude', 'dist', 'build', 'coverage', '.vscode-test']);
 const TEXT = /\.(js|mjs|cjs|md|json|rip|ts|tsx)$/;
 
 // The banned form. `finding` and `#<n>` may be separated by a comment
