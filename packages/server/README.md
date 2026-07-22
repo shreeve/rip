@@ -2,7 +2,7 @@
 
 # Rip Server - @rip-lang/server
 
-> **Sinatra-style web framework — routes, smart responses, read() validation, and AsyncLocalStorage-powered request context**
+> **Sinatra-style web framework and worker-pool runtime — routes, smart responses, elegant request-parameter validation; serve one file on a port for development, or run the same app as the app tier behind Janus and Caddy**
 
 Handlers are plain functions bound to a request context: return an object
 and it ships as JSON, return a string and it ships as text (or HTML when it
