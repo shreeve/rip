@@ -17,9 +17,10 @@ Working ledgers (not permanent docs):
 - `TODO.md` — open design/correctness notes ONLY. Remove items when
   fixed or moved into real docs/tests; git history and PR bodies are
   the record of completed work. No done-items archive.
-- `HANDOFF.md` — untracked, machine-local session launch document.
-  Read it first when starting a session; rewrite it at session
-  boundaries with live-verified facts. Never commit it.
+- `HANDOFF.md` — the tracked session launch document. Read it first
+ when starting a session; rewrite it at session boundaries with
+ live-verified facts only — never stale state. It is committed like
+ any other file.
 
 ## The Rules
 
