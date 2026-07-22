@@ -458,6 +458,25 @@ prefixes from `T` down to `p`, fixed width: 3 digit characters, 1
 prefix character, the unit). Output is mono — no ANSI bytes — when
 `NO_COLOR` is set or stdout is not a TTY.
 
+### Logging
+
+Every log line is written by the process that witnessed the event. The
+per-request access log is the edge's — Janus and Caddy see every
+request, including micro-cache hits and unknown-host 404s that never
+reach a worker — so that log's file, format, and ownership are
+edge-side, configured in the Caddyfile. The Rip Server story is one
+merged stream: worker output flows through the manager tagged
+`[worker N]`, interleaved with the manager's own lifecycle lines on a
+single timeline — the interleaving is the value. There are no
+per-concern files and no `error.log`; severity is a field on a line,
+never a separate file. The stream goes to stdout: in dev you watch the
+terminal, and in production journald owns rotation, retention, and
+query. File logging is opt-in and not yet built (see **Planned**
+below): a `logs:` config knob or the `RIP_LOG_DIR` env var will
+redirect the server stream to `logs/server.log`, and the Caddyfile can
+point the edge's access log at the same directory (`logs/access.log`)
+— that file stays the edge's.
+
 ## The no-fork memory story
 
 Unicorn-era servers had a beautiful trick: load the app once in a master
@@ -537,3 +556,8 @@ shipped**; the rest of this README states only what is:
    the required-`!` rule on the bridge plane), a publish client with
    app-id plumbing (the manager holds `state.appId`; workers currently
    re-derive it by name), and membership-snapshot access.
+3. **Opt-in file logging** — a `logs:` config knob or the `RIP_LOG_DIR`
+   env var redirects the merged server stream to `logs/server.log`;
+   stdout stays the default. The edge's access log can be pointed at
+   the same directory via the Caddyfile (`logs/access.log`) — its
+   format and ownership stay edge-side.
