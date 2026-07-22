@@ -639,27 +639,6 @@ export timeout = (opts: { ms?: number, message?: string, status?: number } = {})
       clearTimeout timer if timer
 
 # ==============================================================================
-# bodyLimit — Request Body Size Limit
-# ==============================================================================
-#
-# Options:
-#   maxSize: number (bytes, default 1MB)
-#   message: string (error message)
-#
-
-export bodyLimit = (opts: { maxSize?: number, message?: string } = {}) ->
-  maxSize = opts.maxSize or 1024 * 1024  # 1MB default
-  message = opts.message or 'Request body too large'
-
-  (c, next) ->
-    contentLength = parseInt(c.req.header('Content-Length') or '0')
-
-    if contentLength > maxSize
-      return c.json { error: message }, 413
-
-    next!
-
-# ==============================================================================
 # htmlJson — Pretty JSON for iOS Mobile Browsers
 # ==============================================================================
 #

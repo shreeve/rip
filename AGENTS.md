@@ -80,7 +80,10 @@ Working ledgers (not permanent docs):
  committing; report failures as failures. Commits carry **no AI
  attribution** — no Co-Authored-By trailers, no "generated with"
  footers; authorship is the owner's. Shared branches catch up by
- MERGE, never rebase; never force-push.
+ MERGE, never rebase; never force-push. PRs land as TRUE MERGE
+ commits — never squash-merged, never rebase-merged: a landed
+ branch's tip stays an ancestor of main, so merged-branch
+ verification is a pure git ancestry check.
 
 10. **Big merges get adversarial review, including one COLD pass.**
  Before a substantial PR lands: independent empirical verification

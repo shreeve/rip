@@ -294,7 +294,7 @@ spawnWorker = (pool) ->
     stderr: 'inherit'
     stdin: 'ignore'
     env: { ...process.env, APP_ARTIFACT: pool.artifact, SOCKET_PATH: sock, WORKER_ID: "#{pool.n}.#{pool.serial}", WORKER_CONCURRENCY: "#{cfg.concurrency}", RIP_DRAIN_DEADLINE_MS: "#{WORKER_DRAIN_MS}" }
-  w = { sock, proc, ready: false }
+  w = { sock, proc, ready: false, spawnedAt: Date.now(), readyAt: null }
   monitorWorker pool, w
   w
 
@@ -327,6 +327,7 @@ pollWorker = (w) ->
       res = fetch! 'http://worker/ready', { unix: w.sock }
       if res.status is 200
         w.ready = true
+        w.readyAt = Date.now()
         return { ok: true, w }
       lastBody = res.text!
       # The worker marks a failed boot on /ready — no point waiting out
@@ -592,6 +593,123 @@ startWatcher = ->
     state.settleTimer = setTimeout settle, SETTLE_MS
 
 # ==============================================================================
+# The startup report
+# ==============================================================================
+
+# Humanize a value in base units (seconds or bytes) with SI prefixes spanning
+# T G M k (space) m µ n p — fixed width: 3 chars of digits, 1 char of prefix,
+# then the unit. One decimal below 10 (`1.5`), integers from 10 up (` 57`);
+# the no-prefix slot pads with a space so `1.5 s` aligns with `1.5ms`.
+# Scale-down below 0.995, scale-up at 999.5 — rounding promotes across the
+# boundary (9.97 → ` 10`). Zero prints `  0 s`; NaN, negatives, and
+# out-of-range magnitudes print `???` + unit.
+export scale = (value, unit, pad = true) ->
+  if value > 0 and Number.isFinite(value)
+    span = ['T', 'G', 'M', 'k', (if pad then ' ' else ''), 'm', 'µ', 'n', 'p']
+    minSlot = 0
+    maxSlot = span.length - 1
+    slot = 4                      # the no-prefix slot
+    while value < 0.995 and slot <= maxSlot
+      value *= 1000
+      slot++
+    while value >= 999.5 and slot >= minSlot
+      value /= 1000
+      slot--
+    if slot >= minSlot and slot <= maxSlot
+      tens = Math.round(value * 10) / 10
+      nums = if tens >= 10 then Math.round(value).toString() else tens.toFixed(1)
+      nums = nums.padStart(3, ' ') if pad
+      return "#{nums}#{span[slot]}#{unit}"
+  return (if pad then '  0 ' else '0') + unit if value is 0
+  '???' + (if pad then ' ' else '') + unit
+
+serverVersion =! JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8')).version
+
+# The report's ONE color decision: mono (empty codes) when NO_COLOR is set or
+# stdout is not a TTY; ANSI otherwise.
+reportTheme = ->
+  if process.env.NO_COLOR? or not process.stdout.isTTY
+    { d: '', r: '', b: '', c: '', g: '', y: '' }
+  else
+    { d: '\x1b[2m', r: '\x1b[0m', b: '\x1b[1m', c: '\x1b[36m', g: '\x1b[32m', y: '\x1b[33m' }
+
+# Printed once, after the startup boot fully completes: every worker poll has
+# settled, the registration is confirmed, and the upstreams PUT has landed.
+# The registration facts are READ BACK from the control plane (GET /1.0 and
+# GET /1.0/apps/{id}) so the report states what JANUS holds, not what this
+# manager sent; a failed read-back is reported as a failure, never as success.
+startupReport = ->
+  pool = state.currentPool
+  outcomes = if pool? then Promise.all! pool.polls else []
+
+  plane = null
+  planeErr = null
+  reg = null
+  regErr = null
+  # Read-backs ride the writer chain so they observe every PUT already sent
+  # (late-join publishes included), never a half-published pool.
+  enqueue! ->
+    try
+      res = cfetch! 'GET', '/1.0'
+      if res.status is 200
+        plane = res.json!
+      else
+        planeErr = "GET /1.0 → #{res.status}"
+    catch e
+      planeErr = e?.message or String(e)
+    try
+      res = cfetch! 'GET', "/1.0/apps/#{state.appId}"
+      if res.status is 200
+        reg = res.json!
+      else
+        regErr = "GET /1.0/apps/#{state.appId} → #{res.status}"
+    catch e
+      regErr = e?.message or String(e)
+
+  { d, r, b, c, g, y } = reportTheme()
+  label = (name) -> "#{d}#{name}#{r}" + ' '.repeat(9 - name.length)
+  target = if state.controlUnix? then "unix:#{state.controlUnix}" else state.controlBase
+
+  lines = []
+  lines.push ''
+  lines.push "  #{b}rip server#{r} #{d}v#{serverVersion}#{r}"
+  lines.push ''
+  lines.push "  #{label('app')}#{cfg.name} #{d}(#{state.appId})#{r}"
+  if plane?
+    lines.push "  #{label('control')}#{c}#{target}#{r} #{d}— #{plane.type} #{plane.api_version}#{r}"
+  else
+    lines.push "  #{label('control')}#{c}#{target}#{r} #{d}—#{r} #{y}read-back failed (#{planeErr})#{r}"
+  lines.push "  #{label('workers')}#{cfg.workers}"
+  lines.push "  #{label('watch')}#{if cfg.watch then "*.rip#{if cfg.eager then ', eager' else ''}" else "#{y}off#{r}"}"
+
+  if outcomes.length > 0
+    lines.push ''
+    width = 0
+    width = Math.max(width, o.w.sock.length) for o in outcomes
+    for o, i in outcomes
+      sock = o.w.sock.padEnd(width)
+      if o.ok
+        lines.push "  #{g}✓#{r} worker #{i + 1}   #{sock}   #{d}#{scale((o.w.readyAt - o.w.spawnedAt) / 1000, 's')}#{r}"
+      else
+        lines.push "  #{y}✗#{r} worker #{i + 1}   #{sock}   #{y}#{o.error}#{r}"
+
+  lines.push ''
+  if reg?
+    held = reg.upstreams?.length or 0
+    lines.push "  #{d}registered#{r}  #{held} upstream#{if held is 1 then '' else 's'} published, heartbeating every #{scale(HEARTBEAT_MS / 1000, 's', false)}"
+  else
+    lines.push "  #{d}registered#{r}  #{y}read-back failed (#{regErr})#{r}"
+
+  ready = outcomes.filter((o) -> o.ok).length
+  lines.push ''
+  if reg?
+    lines.push "  #{g}#{b}→#{r} #{g}#{cfg.name} registered with janus, #{ready} worker#{if ready is 1 then '' else 's'} ready#{r}"
+  else
+    lines.push "  #{y}#{b}→#{r} #{y}#{cfg.name} up, #{ready} worker#{if ready is 1 then '' else 's'} ready — registration read-back failed#{r}"
+  lines.push ''
+  p lines.join('\n')
+
+# ==============================================================================
 # Startup and shutdown
 # ==============================================================================
 
@@ -726,7 +844,10 @@ export main = (argv) ->
     cutAdmission()
     startWatcher()
     p "rip-server: #{cfg.name} registered (#{state.appId}) — #{cfg.workers} worker(s), watch on#{if cfg.eager then ', eager' else ''}"
-    kickBoot().catch(-> null)      # startup boot; failure caches, doorbell stays
+    booted = kickBoot()
+    # A startup boot failure is cached and already warned; the doorbell stays.
+    reported = booted.then((-> startupReport()), (-> null))
+    reported.catch (e) -> warn "rip-server: startup report failed: #{e?.message or e}"
   else
     state.dirty = true
     p "rip-server: #{cfg.name} registered (#{state.appId}) — #{cfg.workers} worker(s), watch off"
@@ -735,4 +856,4 @@ export main = (argv) ->
     catch e
       warn "rip-server: startup boot failed: #{state.bootFailure or e?.message or e}"
       exit 1
-    p "rip-server: #{cfg.name} up — #{cfg.workers} worker(s) published"
+    startupReport!()
