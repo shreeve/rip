@@ -110,10 +110,15 @@ fresh suite runs.
   app-framework integration) begins with Philip after #156 lands.
 - Open PRs besides #156: the steve-types findings series — #158, #159,
   #160, #161, #162, #165 (#157 is CLOSED).
+- RULED (owner, 2026-07-22 morning): the `gate` package moves to the
+  Janus project as a Janus enhancement, which kills the v3-comparison
+  pass the packages upgrade ledger was gated on; that ledger is
+  deleted (its remainder was a done-items archive) and the migration
+  is tracked in TODO.md (Package moves). The clean-room rewrite plan
+  is docs/CLEANROOM.md, listed as permanent documentation.
 - Pending owner rulings: misc/PLAN.md + misc/FINALIZE.md deletion
   (recommended: delete — stale campaign machinery);
-  packages/UPGRADE.md's fate (gated on the `gate` package's
-  v3-comparison pass); the three untriaged misc/ directories
+  the three untriaged misc/ directories
   (analysis/, server-v4-discarded/, vite/); the bare-optional-
   parameters strict contract (docs/ROADMAP.md, Type and editor
   directions).

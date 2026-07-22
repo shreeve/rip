@@ -28,6 +28,8 @@ in [docs/ROADMAP.md](docs/ROADMAP.md).
 - [docs/TYPES.md](docs/TYPES.md) — type-system and editor architecture
 - [docs/HMR.md](docs/HMR.md) — hot-module-replacement design
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work
+- [docs/CLEANROOM.md](docs/CLEANROOM.md) — the clean-room engine rewrite plan (activates when v4 is declared done)
+
 ## Core commands
 
 ```sh

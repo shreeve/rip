@@ -11,6 +11,8 @@ Permanent documentation:
 - [docs/HMR.md](docs/HMR.md) — HMR design and acceptance contract.
 - [docs/FRAME.md](docs/FRAME.md) — Rip-native hypermedia design and acceptance contract.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work.
+- [docs/CLEANROOM.md](docs/CLEANROOM.md) — the clean-room engine
+ rewrite plan (activates when v4 is declared done).
 
 Working ledgers (not permanent docs):
 
