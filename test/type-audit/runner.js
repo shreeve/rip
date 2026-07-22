@@ -1472,25 +1472,62 @@ if (RUN_GRAMMAR) {
     }
   }
   const uncovered = denom.filter((i) => !seen.has(i));
-  // Group by LHS: the construct is the unit a fixture author thinks in.
-  const byLhs = new Map();
+  // Grouping key: the M3 manifest's OWNING FILE when MANIFEST.md exists — the
+  // decision record of which corpus file owns each construct's productions,
+  // with per-production overrides for bridges that carry another family's
+  // construct. The MEASUREMENT above is untouched; the manifest changes only
+  // how the report groups. A production the manifest fails to allocate paints
+  // red as UNALLOCATED — a grammar change demands an ownership decision, never
+  // a silent default — and a malformed manifest refuses rather than degrading.
+  // With no manifest (post-M3, once it is deleted), grouping is by LHS
+  // construct: the unit a fixture author thinks in.
+  const MANIFEST = path.join(HERE, 'MANIFEST.md');
+  let owner = null;
+  if (fs.existsSync(MANIFEST)) {
+    owner = { constructs: new Map(), overrides: new Map(), parked: new Set() };
+    let section = null;
+    for (const line of fs.readFileSync(MANIFEST, 'utf8').split('\n')) {
+      if (line.startsWith('## ')) { section = line.slice(3).trim(); continue; }
+      const m = line.match(/^\| (.+?) \| ([^|]+?) \|/);
+      if (!m) continue;
+      // Cells may be pad-aligned by an editor; keys must be trimmed or every
+      // lookup silently misses and the whole queue paints UNALLOCATED.
+      const cell = m[1].trim();
+      if (cell === 'construct' || cell === 'production' || cell.startsWith('---')) continue;
+      const key = cell.replace(/^`|`$/g, '');
+      if (section === 'Constructs') owner.constructs.set(key, m[2].trim());
+      else if (section === 'Overrides') owner.overrides.set(key, m[2].trim());
+      else if (section === 'Parked') owner.parked.add(key);
+    }
+    if (!owner.constructs.size) {
+      console.error(`\n✗ MANIFEST.md exists but its Constructs table parsed empty — fix the manifest (or delete it for construct grouping); refusing to report against a broken allocation.`);
+      process.exit(1);
+    }
+  }
+  const groupOf = (prod) => owner
+    ? (owner.overrides.get(prod) ?? owner.constructs.get(prod.split(' → ')[0]) ?? 'UNALLOCATED')
+    : prod.split(' → ')[0];
+  const groups = new Map();
   for (const i of uncovered) {
-    const lhs = names[i].split(' → ')[0];
-    if (!byLhs.has(lhs)) byLhs.set(lhs, []);
-    byLhs.get(lhs).push(names[i]);
+    const g = groupOf(names[i]);
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(names[i]);
   }
   console.log(`\n    ${bold('Coverage')} ${dim(`(exercised = reduced by at least one fixture)`)}`);
   const pct = ((100 * (denom.length - uncovered.length)) / denom.length).toFixed(1);
   console.log(`    ${(uncovered.length ? yellow : green)(String(denom.length - uncovered.length))} ${dim('/')} ${dim(String(denom.length))} ${dim(`productions (${pct}%)`)}`);
-  if (byLhs.size) {
-    console.log(`\n    ${bold('Uncovered, by construct')} ${dim(`— the M3 queue; ${VERBOSE ? 'every production shown' : 'counts only, --v for every production'}`)}`);
-    const lhss = [...byLhs.entries()].sort((a, b) => b[1].length - a[1].length);
-    for (const [lhs, rules] of lhss) {
-      console.log(`      ${pad(lhs, 24)} ${yellow(String(rules.length).padStart(3))}`);
-      if (VERBOSE) for (const r of rules) console.log(`        ${dim(r)}`);
+  if (groups.size) {
+    const title = owner ? 'Uncovered, by owning file (MANIFEST.md)' : 'Uncovered, by construct';
+    console.log(`\n    ${bold(title)} ${dim(`— the M3 queue; ${VERBOSE ? 'every production shown' : 'counts only, --v for every production'}`)}`);
+    // Files read in wave order; constructs by descending count.
+    const rows = [...groups.entries()].sort(owner ? (a, b) => a[0].localeCompare(b[0]) : (a, b) => b[1].length - a[1].length);
+    for (const [g, rules] of rows) {
+      const paint = g === 'UNALLOCATED' ? red : yellow;
+      console.log(`      ${pad(g, 24)} ${paint(String(rules.length).padStart(3))}`);
+      if (VERBOSE || g === 'UNALLOCATED') for (const r of rules) console.log(`        ${dim(r)}${owner?.parked.has(r) ? ' ' + yellow('· parked') : ''}`);
     }
   }
-  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, constructs: byLhs.size };
+  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, groups: groups.size, groupKind: owner ? 'files' : 'constructs', unallocated: groups.get('UNALLOCATED')?.length ?? 0 };
 }
 
 // ── the Mapping Audit (--map / --all): use-site identifier coverage, from the
@@ -2506,7 +2543,8 @@ console.log(`\n  ${bold('Totals')}`);
 if (gr) totalLine('Grammar', `${gr.total} productions: `
   + (gr.uncovered === 0
     ? green('every production exercised by the corpus')
-    : `${green(`${gr.covered} exercised`)}${dim(' · ')}${yellow(`${gr.uncovered} uncovered`)} ${dim(`across ${gr.constructs} constructs — the M3 queue`)}`));
+    : `${green(`${gr.covered} exercised`)}${dim(' · ')}${yellow(`${gr.uncovered} uncovered`)} ${dim(`across ${gr.groups} ${gr.groupKind} — the M3 queue`)}`
+      + (gr.unallocated ? `${dim(' · ')}${red(`${gr.unallocated} UNALLOCATED`)} ${dim('— the manifest owes an ownership decision')}` : '')));
 // The Mapping Audit's flagged reads are EXPECTED red (the mapping gap), so
 // they read as a gauge, never a regression count: the total is the census, and
 // the missing-span clause is the only part that would signal something new.
