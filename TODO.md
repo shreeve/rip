@@ -22,7 +22,7 @@ of completed work.
 
 Three deep reviews (Janus Go, rip server package, docs coherence) ran
 before Phase 7. A-list defects were fixed/pinned the same day; these are
-B-list real-but-deferrable items (janus included — no scratchpad there).
+B-list real-but-deferrable items.
 
 ### rip packages/server
 
@@ -56,28 +56,9 @@ B-list real-but-deferrable items (janus included — no scratchpad there).
       despite logging "retrying until the stale claim expires" — retry
       deadline and claim TTL are misaligned.
 
-### janus (tracked here; see janus/docs perf doc for measured levers)
+### janus
 
-- [ ] `dp.state` grows across reload epochs (fresh socket paths per
-      pool → one entry per worker per save in dev watch). GC entries
-      no app references, minding lock order in setUpstreams. (The
-      separate `dp.proxies` map is gone — folded into `upstreamState`
-      by the lock collapse, `fd1fe2f` — but the state map still only
-      grows.)
-- [ ] `replayable()` is narrower than the protocol wording: "no body
-      at all" vs "no body streamed to the worker". Safe (never double
-      delivery), just more client-visible 503s for bodied requests —
-      tighten the doc or widen the check.
-- [ ] A worker dying mid-response (ErrAbortHandler panic path) skips
-      `markUnhealthy` — the next request pays one extra failed dial.
-- [ ] Transient waiter-cap overshoot: the flight is deleted before
-      `done` closes, so a gap arrival can start a second flight while
-      holders are parked (briefly up to 2× cap).
-- [ ] Control TLS cert paths are hardcoded cwd-relative — needs a
-      Caddyfile knob before `control public` is used in anger.
-- [ ] No scoping on host claims or socket paths within the trust
-      domain (any control client can claim any host first-wins).
-      Pull INTO the Phase 7 / multi-tenant design.
+Janus items moved to `janus/TODO.md`.
 
 ---
 
