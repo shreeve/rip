@@ -18,15 +18,6 @@ of completed work.
 
 ---
 
-## Package moves
-
-- [ ] Move the `gate` package to the Janus project (owner ruling
-      2026-07-22: gate becomes a Janus enhancement). `packages/gate`
-      stays here until the Janus-side landing exists; remove it when
-      the move completes.
-
----
-
 ## Deferred findings — 2026-07-19 exit-gate reviews
 
 Three deep reviews (Janus Go, rip server package, docs coherence) ran
