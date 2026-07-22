@@ -6,13 +6,6 @@ in tests and permanent reference documentation.
 No item here authorizes a silent design choice. Product decisions are
 resolved before implementation depends on them.
 
-## Executable pending lane
-
-`test/battery-pending/` is the source of truth for deferred language
-and package behavior. Every row must continue to fail. When
-implementation makes a row pass, that row moves into `test/battery/`
-in the same change. The lane is currently empty.
-
 ## Package and application portfolio
 
 The compiler, feature runtimes, schema/ORM core, and editor integrations
@@ -38,32 +31,33 @@ but it must not block direct-path package implementation and tests.
 
 ### Application foundation
 
-- **Server:** the decision cores — routing, middleware, sessions,
-  OpenAPI, static/app serving, worker pool policy, TLS policy, proxy
-  policy, nginx/caddy configuration generation, mDNS, and development
-  watch transport — are merged (#94–#106), and S1 of the runnable
-  layer makes `rip server` actually serve: the listener (port
-  scan/EACCES fallback, explicit-cert TLS, graceful shutdown), the
-  v3 token-grammar bin (owner ruling 2026-07-15: `w:4 c:2 https:443
-  app@alias` tokens and `RIP_*` env vars, not `--flags`), the
-  serve.rip config loader with `E_*` diagnostics and `--check-config`,
-  in-process pool dispatch, and the dev SSE watch endpoint. Remaining
-  stages, pending: process workers and the control plane (S2), proxy
-  and stream execution (S3), rate/body limits (S4), ACME/dev-CA and
-  SNI TLS automation (S5), the file watcher driving live reload (S6),
-  and the rest of the v3 operational surface — realtime transport,
-  mDNS advertisement, structured startup reporting (S7).
-- **UI:** browser widgets and browser-side Tailwind integration.
-- **Database:** database client, embedding/adapter surfaces, and CLI.
+- **Server:** the edge belongs to Janus running with Caddy — proxy
+  and stream execution, and the TLS story (ACME, certificates, SNI)
+  — so none of that is Rip Server work; `packages/server` publishes
+  upstreams to the control plane and stops there. Remaining in Rip
+  Server itself, subject to that review: rate limiting at the app
+  tier (request-body limits ship as the `bodyLimit` middleware; a
+  rate limiter does not exist), realtime transport (no WebSocket
+  surface in the framework), mDNS advertisement, and structured
+  startup reporting. Process workers, control-plane registration
+  with heartbeats and upstream publication, and dev watch with live
+  reload are shipped.
+- **UI:** the headless widget catalog and its app-framework
+  integration. The browser interaction primitives the widgets build
+  on (`@rip-lang/ui/browser`: nav, dismiss, overlay, position, focus,
+  scroll) and the Tailwind compilation boundary (`@rip-lang/ui`
+  tailwind engine/inline/serve) are shipped with tests. Work begins
+  with Philip after the type-audit PR (#156) lands.
 
 ### Independent libraries and tools
 
 The first-party library portfolio is ported: CSV, decimal, XML (rsx),
 X12, HTTP, time, worker-swarm, interactive scripting, source printing,
-AI/MCP, and the authentication gate all ship with converted or new test
-suites. Host provisioning (stamp) is not ported by owner ruling. Each
-package earns its place through an independently runnable contract and
-current Rip types.
+AI/MCP, host provisioning (stamp), the database client (`rip-db` over
+duckdb-harbor, with its MCP server and CLI), and the authentication
+gate all ship with converted or new test suites. Each package earns
+its place through an independently runnable contract and current Rip
+types.
 
 ### Browser delivery
 
@@ -75,15 +69,6 @@ The browser product needs:
 
 This delivery layer is distinct from compiler runtime `inline`/`import`
 emission.
-
-### CLI completeness
-
-Open CLI surfaces include:
-
-- a headless project type checker;
-- an interactive REPL;
-- package tool/subcommand dispatch;
-- package linking or an equivalent source-development workflow.
 
 ## Language candidates
 
@@ -231,6 +216,5 @@ swaps.
 
 - One owner and one acceptance contract per item.
 - Syntax changes update all three editor grammars.
-- New behavior moves pending rows into the real battery.
 - Implemented items leave this file.
 - Completed probes and campaign ledgers do not accumulate here.
