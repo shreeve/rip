@@ -256,11 +256,23 @@ export type Ctx =
   redirect: (location: string, status?: number) => Response
   send: (path: string, type?: string) => Response
   header: (name: string, value?: string, opts?: { append?: boolean }) => string | null | undefined
-  cache: (duration: number | string) => void
+  cache: (duration: number | string | false) => void
   session: Record<string, any>
   req: CtxReq
 
 export type RouteHandler = (this: Ctx, c: Ctx, next?: () => Promise<void>) => any
+
+# Duration units for @cache. Every accepted spelling is listed — plurals
+# included — so nothing is inferred: `m` is minutes, a month is spelled
+# `mo`/`month(s)` (30 days by convention), and `ms` matches nothing.
+CACHE_UNITS =
+  s: 1, sec: 1, secs: 1, second: 1, seconds: 1
+  m: 60, min: 60, mins: 60, minute: 60, minutes: 60
+  h: 3600, hr: 3600, hrs: 3600, hour: 3600, hours: 3600
+  d: 86400, day: 86400, days: 86400
+  w: 604800, week: 604800, weeks: 604800
+  mo: 2592000, month: 2592000, months: 2592000
+  y: 31536000, yr: 31536000, yrs: 31536000, year: 31536000, years: 31536000
 
 # The helpers live on shared prototypes and take the context as `this`
 # (handler.call(c, c) semantics unchanged), so a request allocates two small
@@ -330,24 +342,40 @@ CtxProto =
       return
     @_out?.get(name) ?? null
 
+  # Sugar over standard Cache-Control — the same header steers a micro-cache
+  # (Janus), a CDN, and the browser alike:
+  #   @cache 10 / '90' / '36m' / '2 hours' / '1 month'  — freshness in seconds
+  #   @cache 0 / false / 'off' / 'no-store'             — never store
+  #   @cache 'forever'                                  — a year, immutable
+  # A directive that does not parse throws: a cache instruction the framework
+  # failed to read is a bug, never a preference to guess at.
   cache: (duration) ->
-    seconds = if typeof duration is 'number' then duration
-    else if typeof duration is 'string'
-      parts = duration.match(/^(\d+)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/i)
-      if parts
-        n = parseInt(parts[1])
-        switch parts[2][0].toLowerCase()
-          when 's' then n
-          when 'm' then n * 60
-          when 'h' then n * 3600
-          when 'd' then n * 86400
-          when 'w' then n * 604800
-          when 'y' then n * 31536000
-          else n
-      else parseInt(duration) or 0
-    else 0
     out = (@_out ?= new Headers())
-    out.set 'Cache-Control', "public, max-age=#{seconds}, immutable"
+
+    if duration is 0 or duration is false or duration is 'off' or duration is 'no-store'
+      out.set 'Cache-Control', 'no-store'
+      out.delete 'Expires'
+      return
+
+    if duration is 'forever'
+      out.set 'Cache-Control', 'public, max-age=31536000, immutable'
+      out.delete 'Expires'
+      return
+
+    seconds = 0
+    if typeof duration is 'number'
+      seconds = duration if Number.isInteger(duration)
+    else if typeof duration is 'string'
+      parts = duration.match(/^(\d+)\s*([a-z]+)$/i)
+      if parts
+        seconds = parseInt(parts[1], 10) * (CACHE_UNITS[parts[2].toLowerCase()] or 0)
+      else if /^\d+$/.test(duration)
+        seconds = parseInt(duration, 10)
+
+    unless seconds > 0
+      throw new TypeError "cache() takes a duration (10, '36m', '2 hours'), 'forever', or a never-store form (0, false, 'off', 'no-store'); got #{JSON.stringify(duration)}"
+
+    out.set 'Cache-Control', "public, max-age=#{seconds}"
     out.set 'Expires', new Date(Date.now() + seconds * 1000).toUTCString()
     return
 

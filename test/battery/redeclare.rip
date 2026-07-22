@@ -39,9 +39,13 @@ fail "def twice in a function body", "def outer\n  def x\n    1\n  def x\n    2\
 fail "export def then def", "export def f\n  1\ndef f\n  2", "'f' was already declared as def on line 1"
 
 # A parameter is a declaration; a declaring form for its name in the
-# body rejects (the silent argument-discard cell).
-fail "param then def in body", "def f(x)\n  def x\n    1\n  x", "'x' was already declared as parameter"
-fail "param then state in body", "def f(x)\n  x := 1\n  x", "'x' was already declared as parameter"
+# body rejects (the silent argument-discard cell) — and the message
+# names the parameter's line, the uniform shape every kind carries.
+fail "param then def in body", "def f(x)\n  def x\n    1\n  x", "'x' was already declared as parameter on line 1"
+fail "param then state in body", "def f(x)\n  x := 1\n  x", "'x' was already declared as parameter on line 1"
+fail "pattern param then state in body", "def f({a, b})\n  a := 1\n  a", "'a' was already declared as parameter on line 1"
+fail "arrow param then state in body", "f = (x) ->\n  x := 1\n  x", "'x' was already declared as parameter on line 1"
+fail "param on a later line names ITS line", "def f(x,\n      {a, b})\n  a := 1\n  a", "'a' was already declared as parameter on line 2"
 
 # The plain-then-declare order rejects inside function scopes too.
 fail "plain then state in def body", "def f\n  x = 1\n  x := 2\n  x", "'x' was already declared as plain on line 2"

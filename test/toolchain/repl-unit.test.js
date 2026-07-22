@@ -14,6 +14,7 @@ import {
   mintFresh, buildWrapper, resolveThemeName, buildTheme, ansiFor,
   colorizeLastLine, stripAnsi, encodeEntry, decodeEntry, displayWidth,
   makeImportResolver, describeError, Session, Repl, THEME_NAMES,
+  RecallTracker, isHistoryNavKey, Osc11Matcher,
 } from '../../src/repl.js';
 import { identifierRuns } from '../../src/lexer.js';
 import { CompileError } from '../../src/compile.js';
@@ -223,6 +224,174 @@ describe('history encoding', () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe('recall decode bookkeeping (decode applies ONLY to recalled, unedited lines)', () => {
+  test('a line placed by history navigation and submitted unedited decodes', () => {
+    const t = new RecallTracker();
+    t.navigated('if x⏎n  1', true);
+    expect(t.shouldDecode('if x⏎n  1')).toBe(true);
+  });
+
+  test('TYPED text that equals an encoded entry never decodes (no navigation happened)', () => {
+    const t = new RecallTracker();
+    expect(t.shouldDecode('if x⏎n  1')).toBe(false);
+  });
+
+  test('an edit after recall clears the mark — even a later byte-identical submit stays verbatim', () => {
+    const t = new RecallTracker();
+    t.navigated('if x⏎n  1', true);
+    t.touched('if x⏎n  1z'); // the buffer diverged: an edit
+    expect(t.shouldDecode('if x⏎n  1')).toBe(false);
+  });
+
+  test('a key that leaves the buffer unchanged (cursor movement) keeps the mark', () => {
+    const t = new RecallTracker();
+    t.navigated('if x⏎n  1', true);
+    t.touched('if x⏎n  1'); // right-arrow / home: same buffer
+    expect(t.shouldDecode('if x⏎n  1')).toBe(true);
+  });
+
+  test('navigating DOWN past the newest entry restores the typed line — readline says not-from-history, so no mark', () => {
+    const t = new RecallTracker();
+    t.navigated('a⏎nb', false); // historyIndex is -1: the saved in-progress line
+    expect(t.shouldDecode('a⏎nb')).toBe(false);
+  });
+
+  test('further navigation retargets the mark to the newly recalled entry', () => {
+    const t = new RecallTracker();
+    t.navigated('first⏎n1', true);
+    t.navigated('second⏎n2', true);
+    expect(t.shouldDecode('second⏎n2')).toBe(true);
+  });
+
+  test('the decision consumes the mark — the next submit starts fresh', () => {
+    const t = new RecallTracker();
+    t.navigated('e⏎n1', true);
+    expect(t.shouldDecode('e⏎n1')).toBe(true);
+    expect(t.shouldDecode('e⏎n1')).toBe(false);
+  });
+
+  test('a submit of DIFFERENT text than the mark stays verbatim and clears', () => {
+    const t = new RecallTracker();
+    t.navigated('e⏎n1', true);
+    expect(t.shouldDecode('other')).toBe(false);
+    expect(t.shouldDecode('e⏎n1')).toBe(false);
+  });
+
+  test('isHistoryNavKey: plain arrows and ctrl-p/ctrl-n navigate; everything else does not', () => {
+    expect(isHistoryNavKey({ name: 'up', ctrl: false, meta: false })).toBe(true);
+    expect(isHistoryNavKey({ name: 'down', ctrl: false, meta: false })).toBe(true);
+    expect(isHistoryNavKey({ name: 'p', ctrl: true, meta: false })).toBe(true);
+    expect(isHistoryNavKey({ name: 'n', ctrl: true, meta: false })).toBe(true);
+    expect(isHistoryNavKey({ name: 'p', ctrl: false, meta: false })).toBe(false);
+    expect(isHistoryNavKey({ name: 'up', ctrl: false, meta: true })).toBe(false);
+    expect(isHistoryNavKey({ name: 'a', ctrl: false, meta: false })).toBe(false);
+    expect(isHistoryNavKey(undefined)).toBe(false);
+  });
+
+  test('Repl wiring: observeKeyEffect samples rl state and resolveSubmitted decodes only under a live mark', () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const repl = new Repl({ input, output, env: { NO_COLOR: '1' } });
+    const encoded = encodeEntry('if x\n  1');
+    repl.decodeTable.set(encoded, 'if x\n  1');
+    // No navigation: the typed line passes through verbatim.
+    expect(repl.resolveSubmitted(encoded)).toBe(encoded);
+    // History navigation placed the line (readline's own verdict).
+    repl.rl = { line: encoded, historyIndex: 0 };
+    repl.observeKeyEffect({ name: 'up', ctrl: false, meta: false });
+    expect(repl.resolveSubmitted(encoded)).toBe('if x\n  1');
+    // Recall then edit: the mark clears the moment the buffer diverges.
+    repl.rl = { line: encoded, historyIndex: 0 };
+    repl.observeKeyEffect({ name: 'up', ctrl: false, meta: false });
+    repl.rl.line = encoded + 'z';
+    repl.observeKeyEffect({ name: 'z', ctrl: false, meta: false });
+    expect(repl.resolveSubmitted(encoded)).toBe(encoded);
+  });
+});
+
+describe('OSC 11 incremental reply matcher', () => {
+  const REPLY = '\x1b]11;rgb:1111/2222/3333\x07';
+  const PAYLOAD = 'rgb:1111/2222/3333';
+
+  test('a reply alone extracts with empty residue', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from(REPLY, 'latin1'))).toBe(true);
+    expect(m.reply).toBe(PAYLOAD);
+    expect(m.residue().length).toBe(0);
+    expect(m.hasPartial()).toBe(false);
+  });
+
+  test('keystrokes + reply + keystrokes in ONE chunk: the reply extracts, every other byte survives in order', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from(`abc${REPLY}def`, 'latin1'))).toBe(true);
+    expect(m.reply).toBe(PAYLOAD);
+    expect(m.residue().toString('utf8')).toBe('abcdef');
+  });
+
+  test('a reply split across 2 chunks extracts once complete', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from('ab\x1b]11;rgb:11', 'latin1'))).toBe(false);
+    expect(m.feed(Buffer.from('11/2222/3333\x07cd', 'latin1'))).toBe(true);
+    expect(m.reply).toBe(PAYLOAD);
+    expect(m.residue().toString('utf8')).toBe('abcd');
+  });
+
+  test('a reply split across 3 chunks — the split lands inside the 5-byte header', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from('\x1b]', 'latin1'))).toBe(false);
+    expect(m.hasPartial()).toBe(true);
+    expect(m.feed(Buffer.from('11;rgb:1111/2222', 'latin1'))).toBe(false);
+    expect(m.feed(Buffer.from('/3333\x07', 'latin1'))).toBe(true);
+    expect(m.reply).toBe(PAYLOAD);
+    expect(m.residue().length).toBe(0);
+  });
+
+  test('keystrokes only: no reply, no partial — every byte releases verbatim', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from('hello world', 'utf8'))).toBe(false);
+    expect(m.hasPartial()).toBe(false);
+    expect(m.residue().toString('utf8')).toBe('hello world');
+  });
+
+  test('a partial prefix pending at timeout: hasPartial reports it, and residue still returns EVERY byte verbatim', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from('xy\x1b]11;rgb:aa', 'latin1'))).toBe(false);
+    expect(m.hasPartial()).toBe(true);
+    expect(m.residue().toString('utf8')).toBe('xy\x1b]11;rgb:aa');
+  });
+
+  test('a lone ESC at buffer end counts as a possible prefix; a diverging next byte stops counting', () => {
+    const partial = new Osc11Matcher();
+    partial.feed(Buffer.from('q\x1b', 'latin1'));
+    expect(partial.hasPartial()).toBe(true);
+    const diverged = new Osc11Matcher();
+    diverged.feed(Buffer.from('q\x1bZ', 'latin1'));
+    expect(diverged.hasPartial()).toBe(false);
+  });
+
+  test('the ST terminator (ESC \\) ends a reply exactly like BEL', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from('a\x1b]11;rgb:aaaa/bbbb/cccc\x1b\\b', 'latin1'))).toBe(true);
+    expect(m.reply).toBe('rgb:aaaa/bbbb/cccc');
+    expect(m.residue().toString('utf8')).toBe('ab');
+  });
+
+  test('byte-level buffering: a multibyte glyph split across the chunk boundary survives intact', () => {
+    const glyph = Buffer.from('é', 'utf8'); // two UTF-8 bytes
+    const m = new Osc11Matcher();
+    expect(m.feed(glyph.subarray(0, 1))).toBe(false);
+    expect(m.feed(Buffer.concat([glyph.subarray(1), Buffer.from(REPLY, 'latin1')]))).toBe(true);
+    expect(m.residue().toString('utf8')).toBe('é');
+  });
+
+  test('exactly ONE reply extracts; a second one stays in the residue', () => {
+    const m = new Osc11Matcher();
+    expect(m.feed(Buffer.from(`${REPLY}${REPLY}`, 'latin1'))).toBe(true);
+    expect(m.reply).toBe(PAYLOAD);
+    expect(m.residue().toString('latin1')).toBe(REPLY);
   });
 });
 

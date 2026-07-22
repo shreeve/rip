@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Sinatra-style web framework — routes, smart responses, read() validation, and AsyncLocalStorage-powered request context",
+  "description": "Sinatra-style web framework — routes, smart responses, read() validation, and AsyncLocalStorage-powered request context; the same app runs standalone or under a worker pool behind Janus",
   "exports": {
     ".": "./server.rip",
     "./middleware": "./middleware.rip"
