@@ -130,14 +130,56 @@ get '/logo'   -> @cache 'forever'; @send 'logo.svg'
 ```
 
 Sugar over standard `Cache-Control`, so the same word steers a
-micro-cache (Janus), a CDN, and the browser alike. Durations take
-seconds (`10`, `'90'`) or a counted unit (`'36m'`, `'2 hours'`,
-`'1 month'` — 30 days; `m` always means minutes). `0`, `false`, `'off'`,
-and `'no-store'` all emit `no-store`; `'forever'` emits the canonical
-year-plus-`immutable`. Anything else throws — a cache directive that
-does not parse is a bug, never a guessed TTL. An edge cache in front
-may cap long freshness at its own ceiling (Janus: `ttl_max`); the
-header still reaches the browser intact.
+micro-cache (Janus), a CDN, and the browser alike.
+
+**Never store** — all emit `Cache-Control: no-store`:
+
+```coffee
+@cache 0
+@cache false
+@cache off            # bare word — off is rip's false
+@cache 'off'
+@cache 'no-store'
+```
+
+**Finite freshness** — emit `public, max-age=N` plus a matching
+`Expires`. Bare numbers and numeric strings are seconds; counted units
+take any listed spelling, singular or plural, with optional whitespace,
+case-insensitive:
+
+```coffee
+@cache 10             # max-age=10
+@cache '90'           # max-age=90
+@cache '30s'          # s / sec / secs / second / seconds
+@cache '36m'          # m / min / mins / minute / minutes — m is ALWAYS minutes
+@cache '2 hours'      # h / hr / hrs / hour / hours
+@cache '7 days'       # d / day / days
+@cache '2 weeks'      # w / week / weeks
+@cache '1 month'      # mo / month / months — 30 days by convention, never m
+@cache '1y'           # y / yr / yrs / year / years
+```
+
+**Forever** — the canonical HTTP forever, for fingerprinted assets that
+never change under one URL (browsers skip revalidation entirely):
+
+```coffee
+@cache 'forever'      # public, max-age=31536000, immutable
+```
+
+**Anything else throws** — a cache directive that does not parse is a
+bug, never a guessed TTL:
+
+```coffee
+@cache '1 fortnight'  # unknown unit
+@cache '5ms'          # milliseconds are not a cache duration
+@cache 'always'       # one canonical word for forever, and this isn't it
+@cache -1             # negative — a computed TTL gone wrong, not "forever"
+@cache 1.5            # fractional seconds aren't representable in max-age
+@cache ''             # empty string — almost always an interpolation bug
+```
+
+An edge cache in front may cap long freshness at its own ceiling
+(Janus: `ttl_max`); the header still reaches the browser intact.
 
 ## input: schemas and OpenAPI
 
