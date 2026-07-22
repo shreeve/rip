@@ -26,12 +26,6 @@ B-list real-but-deferrable items.
 
 ### rip packages/server
 
-- [ ] Middleware wraps only MATCHED routes: `logger` never logs 404s,
-      and unmatched requests never run the chain. Either document the
-      non-Koa semantics or route unmatched requests through the chain.
-      (Narrowed 2026-07-20: `cors({preflight: true})` now answers
-      OPTIONS before route matching, and `use(path, mw)` path scoping
-      works — `603ee80`. The unmatched-request/404 half remains open.)
 - [ ] Respawn edges: (a) a worker crashing MID-BOOT under readyWhen:1
       is never respawned (pool degraded until next save); (b) a
       deadline-expired-but-alive worker is neither killed nor
@@ -46,15 +40,6 @@ B-list real-but-deferrable items.
       unbuilt future work. (The scrub itself is done and documented:
       Janus's `ModifyResponse` deletes `Rip-Mark` from every client
       response, and the micro-cache stores post-scrub bytes.)
-
-### 2026-07-20 bench incident observations
-
-- [ ] A production rip-server exiting cleanly (exit 0) logs nothing
-      about why — no shutdown reason, no signal note. The manager
-      should say what ended it on the way out.
-- [ ] The 409 stale-claim retry gives up before the claim TTL expires,
-      despite logging "retrying until the stale claim expires" — retry
-      deadline and claim TTL are misaligned.
 
 ### janus
 
