@@ -120,6 +120,27 @@ Thrown errors become one JSON envelope: `{ error: { message, notice?,
 issues? } }`. Messages show for 4xx; 5xx and raw throws are masked to a
 generic status line so internals never leak.
 
+## notFound and onError
+
+Two registrable handlers cover the requests no route answers and the
+errors no handler catches:
+
+```coffee
+notFound -> @text 'lost', 404          # every unmatched request
+onError (err) -> @json { oops: err.status ?? 500 }, err.status ?? 500
+```
+
+`notFound (handler) ->` registers the catch-all for unmatched requests;
+without one the response is a plain 404. `onError (handler) ->` replaces
+the default error envelope for errors thrown from matched routes; the
+handler receives the error (and the context as both `this` and a second
+argument). Both handlers receive the request context and must return a
+`Response` — the ctx helpers (`@text`, `@json`, …) do; a bare return
+value is not smart-converted.
+
+Middleware and before/after filters wrap matched routes only — an
+unmatched request goes straight to `notFound`, never through the chain.
+
 ## @cache — response freshness, one word
 
 ```coffee
@@ -363,9 +384,10 @@ Env knobs (all in milliseconds, defaults per the protocol): `RIP_SETTLE_MS`
 (5000 SIGTERM→SIGKILL), `RIP_HEARTBEAT_MS` (5000), `RIP_HOLD_MS` (15000
 ring hold cap), `RIP_BOOT_DEADLINE_MS` (30000 per worker),
 `RIP_PPID_MS` (1000 orphan-watchdog cadence — a worker whose parent
-manager dies exits on its own), `RIP_REGISTER_409_MS` (20000 — how long a
-409 at registration retries before aborting, riding out a dead
-predecessor's still-live host claim), `RIP_HANDLER_DEADLINE_MS` (30000
+manager dies exits on its own), `RIP_REGISTER_409_MS` (30000 — how long a
+409 at registration retries before aborting, sized to outlive a dead
+predecessor's still-live host claim: heartbeat TTL 15s + reap-sweep lag up
+to 5s + retry spacing up to 5s, with margin), `RIP_HANDLER_DEADLINE_MS` (30000
 hung-handler watchdog: an in-flight request older than this recycles the
 worker; 0 disables), and `RIP_WAITER_CAP` (64 held rings, a count).
 Workers receive their in-flight cap via `WORKER_CONCURRENCY`, set by the

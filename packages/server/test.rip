@@ -189,6 +189,13 @@ test! "a throwing before filter is a masked 500 JSON envelope — no internals l
   eq res.headers.get('content-type'), 'application/json; charset=utf-8'
   eq (res.json!), { error: { message: 'Internal Server Error' } }
 
+test! "without a notFound handler an unmatched request is a plain 404", ->
+  resetGlobals()
+  get '/here' -> 'x'
+  res = handle! req('GET', '/gone')
+  eq res.status, 404
+  eq (res.text!), 'Not Found'
+
 # ==[ Filters and middleware order ]==
 
 console.log "\nFilters"
@@ -284,6 +291,19 @@ test! "middleware patterns are match-only: their :params never bind", ->
   res = handle! req('GET', '/api/v2/ping')
   eq seen.v, null           # the middleware pattern contributed no params...
   eq (res.json!), {}        # ...and none leak into the route's params either
+
+test! "middleware wraps matched routes only — an unmatched request never enters the chain", ->
+  resetGlobals()
+  hits = { n: 0 }
+  use (c, next) ->
+    hits.n += 1
+    await next()
+  get '/present' -> 'ok'
+  miss = handle! req('GET', '/absent')
+  eq miss.status, 404
+  eq hits.n, 0                  # unmatched: straight to notFound, the chain never runs
+  handle! req('GET', '/present')
+  eq hits.n, 1                  # matched: the same middleware runs
 
 test "use() rejects a pathless or handlerless registration loudly", ->
   throws (-> use('/api')), 'use() takes'
@@ -990,7 +1010,7 @@ test! "an orphaned worker (parent gone) exits on its own", ->
 
 console.log "\nPrebuild"
 
-import { buildArtifact } from './manager.rip'
+import { buildArtifact, REGISTER_409_MS } from './manager.rip'
 
 test! "buildArtifact bundles an app to one JS file a loader-free worker serves", ->
   dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')
@@ -1095,7 +1115,7 @@ writeFileSync join(mgrDir, 'app.rip'), appSource('hi')
 mgrProc = Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, '--control', janusSock, '--name', 'tapp', '-w', '2'],
   cwd: mgrDir
   stdin: 'ignore'
-  stdout: 'ignore'
+  stdout: 'pipe'                # lifecycle lines land here; shutdown asserts them
   stderr: 'inherit'
   env: { ...process.env, ...TEST_KNOBS }
 live = { doorbell: null, oldSocks: [] }
@@ -1216,6 +1236,9 @@ test! "shutdown publishes [], drains, and deletes the app", ->
   mgrProc.kill('SIGTERM')
   code = await mgrProc.exited
   eq code, 0
+  out = new Response(mgrProc.stdout).text!
+  ok /rip-server: SIGTERM — deregistering tapp \(app-\d+\), draining workers/.test(out),
+    "shutdown logs one line naming the signal: #{JSON.stringify(out)}"
   lastPut = allPuts()[allPuts().length - 1]
   eq lastPut.body.upstreams, []
   last = janusCalls[janusCalls.length - 1]
@@ -1365,6 +1388,15 @@ spawnManager = (dir, controlSock, args, extraEnv = {}, stderr = 'inherit') ->
 
 managerSockPuts = (calls) ->
   calls.filter (c) -> c.method is 'PUT' and c.body?.upstreams? and not c.body.upstreams.some (u) -> u.doorbell
+
+test "the default 409 retry window outlives a stale claim's worst case", ->
+  # Alignment with the pool protocol: janus holds a dead predecessor's claim
+  # for defaultHeartbeatTTL (15s, apps.go), its reap sweep ticks at TTL/3
+  # (the host frees up to 5s after expiry), and registerApp's backoff spaces
+  # retries up to 5s apart — so the first retry that can succeed lands by
+  # 25s. The default window must clear that worst case with margin.
+  ok not process.env.RIP_REGISTER_409_MS?, 'the default is under test — envNum resolves at import time'
+  ok REGISTER_409_MS > 15000 + 5000 + 5000, "REGISTER_409_MS default (#{REGISTER_409_MS}ms) must outlive the 25s worst case"
 
 test! "register retries a 409 within the TTL window and proceeds once the stale claim frees", ->
   ctlSock = join(tmpdir(), "rip-janus-409-#{Date.now()}-#{rand(1e6)}.sock")
