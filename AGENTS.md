@@ -24,6 +24,9 @@ Working ledgers (not permanent docs):
  live-verified facts only — never stale state. It is committed like
  any other file.
 
+Placement test for any new document: opened as part of WORKING →
+repository root; consulted for UNDERSTANDING → docs/.
+
 ## The Rules
 
 1. **Reject loudly; never tolerate silently.** Invalid grammar
