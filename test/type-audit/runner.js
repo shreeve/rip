@@ -3,15 +3,19 @@
 // independent dimensions, and every failure is categorized so the
 // number tells you WHERE the type story stands.
 //
-//   bun run type-audit                  # the Type Audit (dims 1–5), the default
+//   bun run type-audit                  # the Type Audit (dims 1–6), the default
+//   bun run type-audit --grammar        # the Grammar Gate ONLY (parser only)
+//   bun run type-audit --map            # the Mapping Audit ONLY (compiler output; no server)
+//   bun run type-audit --errors         # the Diagnostics Lane ONLY (drives the editor server)
 //   bun run type-audit --hover          # the Hover Audit ONLY (slower; drives LSP servers)
 //   bun run type-audit --token          # the Token Audit ONLY (drives the editor server)
-//   bun run type-audit --map            # the Mapping Audit ONLY (compiler output; no server)
-//   bun run type-audit --all            # all four audits
+//   bun run type-audit --all            # every audit, bottom-up: grammar → map → type → errors → hover + token
 //   bun run type-audit --v              # + list expected hover divergences / unasserted tokens
 //   bun run type-audit --update-hovers  # re-pin expected hovers (verify the change first)
 //
-// Four independent audits:
+// The independent audits (the AUDITS table below is the authoritative list —
+// it also carries the Grammar Gate, ROADMAP "M2", and the Diagnostics Lane,
+// ROADMAP "M3", which each document themselves at their sections):
 //
 // A · THE TYPE AUDIT — a per-fixture grid over six dimensions:
 //   1 compiles     rip --ts produces a face           (else: compiler-coverage gap)
@@ -189,9 +193,23 @@
 //   flag; re-validation, if the mapping internals change, recovers that
 //   cross-check from git rather than wiring a server into every run.
 //
-// Layout: fixtures/ holds typed programs 01–12, each `.rip` beside a
-// hand-written `.ts`/`.tsx` twin; hover-pins.json is the Hover Audit's
-// baseline for symbols the twin cannot judge. The fixtures' dependency
+// Layout: fixtures/ holds two fixture blocks — 01–12 and the M3 block from
+// 20; ROADMAP "M3" owns the migration between them — each `.rip` beside a
+// hand-written `.ts`/`.tsx` twin;
+// hover-pins.json is the Hover Audit's baseline for symbols the twin cannot
+// judge. fixtures/errors/ is where the M3 corpus's NEGATIVE tests live —
+// one unsuppressed error pair per family — and it belongs to the
+// Diagnostics Lane ALONE: the flat `fixtures` walk never descends into it,
+// and tsconfig.json excludes it from the twin type-check, so its
+// deliberately-unsuppressed errors cannot leak
+// into any other audit's denominator. Each error pair carries a
+// LINE-ALIGNED @ts-nocheck pragma (`# @ts-nocheck` / `// @ts-nocheck`), so
+// every authoring surface — `rip check`, the rip editor, VS Code's own
+// TypeScript on the twin — stays quiet about errors that are instrument
+// content. The pragmas cannot blind the lane: it strips them on the way
+// into each measurement and ENFORCES their presence per pair, so the
+// silencer applies to authoring only, never to a measurement, and a new
+// error fixture cannot forget it quietly. The fixtures' dependency
 // sandbox (react/zod/…) lives in THIS directory's package.json, never the
 // repository root's — the preflight below names what is missing.
 //
@@ -206,9 +224,12 @@
 // tsconfig itself because this runner JSON.parses it), and to drive
 // dim 5.
 //
-// The fixtures self-check: a `# @ts-expect-error` marks a line that
-// MUST error. If the face + tsgo satisfy every marker and add none,
-// the editor publishes nothing — that is dimension 3 passing.
+// The 01–12 block's fixtures self-check: a `# @ts-expect-error` marks a
+// line that MUST error, and if the face + tsgo satisfy every marker and
+// add none, the editor publishes nothing — that is dimension 3 passing.
+// M3-block fixtures (20+) carry no markers at all: their negatives live
+// in fixtures/errors/, asserted by the Diagnostics Lane, so for them
+// dimension 3 means zero diagnostics absolutely.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -227,6 +248,10 @@ const ROOT = path.resolve(HERE, '../..');
 const RIP = path.join(ROOT, 'bin/rip');
 const SERVER = path.join(ROOT, 'packages/vscode/src/server.js');
 const FIX = path.join(HERE, 'fixtures');
+// The Diagnostics Lane's fixtures — OUTSIDE the flat walk below by construction:
+// `fixtures` reads FIX non-recursively, so nothing in errors/ can join another
+// audit's denominator, and tsconfig.json excludes it from the twin type-check.
+const ERRD = path.join(FIX, 'errors');
 const HOVERS = path.join(HERE, 'hover-pins.json');
 const ARGV = process.argv.slice(2);
 // ── flags. THE COMMAND IS THE DOCUMENTATION. Every audit lives in this
@@ -241,10 +266,45 @@ const ARGV = process.argv.slice(2);
 // value, the one thing a reader most needs and is least likely to guess.
 const AUDITS = [
   {
+    key: 'grammar', flag: '--grammar', name: 'Grammar Gate',
+    // Parser only — no server, no tsgo, no compile even: the corpus is parsed
+    // with an instrumented Parser and each reduce records its rule.
+    runs: 'parser only',
+    blurb: 'which grammar productions the fixture corpus exercises, and which it never reduces',
+    judge: 'the GRAMMAR\'S OWN RULE LIST — a closed denominator: every production the\n'
+         + 'parser can reduce is enumerable, so "exercised by at least one fixture" is\n'
+         + 'checkable in a way no corpus-relative rate ever is. The uncovered list is\n'
+         + 'the M3 fixture-growth queue (see ROADMAP.md)',
+  },
+  {
+    key: 'map', flag: '--map', name: 'Mapping Audit',
+    // Touches no server: it reads the compiler's own
+    // mapping rows, so it is the one whose "drives the editor server" the usage
+    // line below must NOT claim (see `runs`).
+    runs: 'compiler output only',
+    blurb: 'every source identifier maps to a generated position holding the same text',
+    judge: 'the COMPILER OUTPUT alone — no server, no tsgo, no twin. A read is `placed`\n'
+         + 'when the precise map resolves it and `text`-true when that position holds its\n'
+         + 'own bytes; each failure is classified by the mapping row it fell to',
+  },
+  {
     key: 'main', flag: null, name: 'Type Audit',
     blurb: 'six dimensions per fixture: compiles, directives, verdict, runtime, twin, strict',
-    judge: 'the fixtures themselves — a `# @ts-expect-error` marks a line that MUST error,\n'
-         + 'so a clean verdict means every marker fired and nothing else did',
+    judge: 'the fixtures themselves. 01–12 self-check via `# @ts-expect-error` markers —\n'
+         + 'every marker must fire and nothing else may. M3 fixtures (20+) carry no\n'
+         + 'markers: they must publish ZERO diagnostics, their negatives living in\n'
+         + 'fixtures/errors/ under the Diagnostics Lane',
+  },
+  {
+    key: 'errors', flag: '--errors', name: 'Diagnostics Lane',
+    blurb: 'the corpus\'s negatives — unsuppressed error fixtures, every diagnostic asserted by code and position',
+    judge: 'the twin\'s OWN tsgo diagnostics — TypeScript\'s answer on the LINE-ALIGNED twin\n'
+         + 'fixes each expected code and line, and the flagged token\'s place in the rip\n'
+         + 'source fixes the expected column. ALL of the M3 corpus\'s negative tests live\n'
+         + 'here, in fixtures/errors/ (one error pair per family), OUTSIDE the shared\n'
+         + 'fixture walk: positive fixtures publish zero diagnostics absolutely, and only\n'
+         + 'this lane can see a mis-positioned diagnostic — suppression would consume the\n'
+         + 'evidence on the face',
   },
   {
     key: 'hover', flag: '--hover', name: 'Hover Audit',
@@ -258,28 +318,6 @@ const AUDITS = [
     blurb: 'semantic token + modifiers on every top-level declaration',
     judge: 'the .rip SOURCE ITSELF — a binding\'s form fixes what its token must be, so no\n'
          + 'twin and no baseline are involved and the check cannot self-confirm',
-  },
-  {
-    key: 'map', flag: '--map', name: 'Mapping Audit',
-    // The only audit that touches no server: it reads the compiler's own
-    // mapping rows, so it is the one whose "drives the editor server" the usage
-    // line below must NOT claim (see `runs`).
-    runs: 'compiler output only',
-    blurb: 'every source identifier maps to a generated position holding the same text',
-    judge: 'the COMPILER OUTPUT alone — no server, no tsgo, no twin. A read is `placed`\n'
-         + 'when the precise map resolves it and `text`-true when that position holds its\n'
-         + 'own bytes; each failure is classified by the mapping row it fell to',
-  },
-  {
-    key: 'grammar', flag: '--grammar', name: 'Grammar Gate',
-    // Parser only — no server, no tsgo, no compile even: the corpus is parsed
-    // with an instrumented Parser and each reduce records its rule.
-    runs: 'parser only',
-    blurb: 'which grammar productions the fixture corpus exercises, and which it never reduces',
-    judge: 'the GRAMMAR\'S OWN RULE LIST — a closed denominator: every production the\n'
-         + 'parser can reduce is enumerable, so "exercised by at least one fixture" is\n'
-         + 'checkable in a way no corpus-relative rate ever is. The uncovered list is\n'
-         + 'the M3 fixture-growth queue (see ROADMAP.md)',
   },
 ];
 const FLAGS = [
@@ -348,12 +386,13 @@ const RUN_HOVER = ranAudit('hover');
 const RUN_TOKENS = ranAudit('token');
 const RUN_MAP = ranAudit('map');
 const RUN_GRAMMAR = ranAudit('grammar');
+const RUN_ERRORS = ranAudit('errors');
 // The Mapping Audit reads the compiler's own mapping rows and touches no
 // server, so a run covering ONLY it needs neither the editor-server pool nor
 // tsgo. Everything else does. This gates both the pool construction and the
 // tsgo half of the preflight, so `bun run type-audit --map` is honest about
 // running from compiler output alone — it works with tsgo absent entirely.
-const NEED_SERVER = RUN_MAIN || RUN_HOVER || RUN_TOKENS;
+const NEED_SERVER = RUN_MAIN || RUN_HOVER || RUN_TOKENS || RUN_ERRORS;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const execFileP = promisify(execFile);
 // A face carries the whole reactive-runtime prelude, so it outgrows execFile's
@@ -430,6 +469,12 @@ process.on('SIGINT', () => { cleanupTemp(); process.exit(130); });
   }
 }
 
+// One tsc-diagnostic output line: `path(line,col): error TScode`. The
+// basename class admits dots — role-suffixed names (`NN-family.errors.ts`)
+// would otherwise truncate to `errors.ts` and mis-key every downstream
+// lookup, turning a twin full of errors into a silent green cell.
+const TSC_DIAG = /([\w.-]+\.tsx?)\((\d+),(\d+)\): error TS(\d+)/;
+
 // Count REAL directives only — comment-start position, the emitter's
 // own rule (a prose comment that merely MENTIONS "@ts-expect-error" is
 // not a directive in either surface).
@@ -475,7 +520,7 @@ async function runTwinTsc() {
   catch (err) { out = (err.stdout || '').toString() + (err.stderr || '').toString(); } // tsc exits non-zero when it finds errors
   const byFile = new Map();
   for (const line of out.split('\n')) {
-    const m = /([\w-]+\.tsx?)\(\d+,\d+\): error (TS\d+)/.exec(line);
+    const m = TSC_DIAG.exec(line);
     if (!m) continue;
     if (!byFile.has(m[1])) byFile.set(m[1], []);
     byFile.get(m[1]).push(line.trim());
@@ -749,6 +794,10 @@ class EditorServer {
   release(uri) { if (this.open === uri) this.open = null; }
   async start() {
     for (const f of fs.readdirSync(FIX)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(FIX, f), path.join(this.dir, f));
+    // No errors/ copy: the Diagnostics Lane opens its fixtures with in-memory
+    // text under `errors/…` URIs (distinct from every flat fixture by path
+    // alone), and the server compiles the didOpen text — it never reads an
+    // opened document from disk.
     const tscfg = path.join(HERE, 'tsconfig.json');
     if (fs.existsSync(tscfg)) fs.copyFileSync(tscfg, path.join(this.dir, 'tsconfig.json'));
     this.client = new LspClient('bun', [SERVER, '--stdio'], {
@@ -1297,6 +1346,9 @@ function mappingScan(src, code, mappings) {
 
 // ── run
 const fixtures = fs.readdirSync(FIX).filter((f) => f.endsWith('.rip')).sort();
+// The Diagnostics Lane's fixtures, listed here beside the flat walk so the
+// pool below can size itself to the lane's workload.
+const errorFixtures = fs.existsSync(ERRD) ? fs.readdirSync(ERRD).filter((f) => f.endsWith('.rip')).sort() : [];
 // ── shared presentation helpers
 const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (code, s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
@@ -1315,7 +1367,7 @@ const NAME_W = 18;
 const DIMS = [['compiles', 10], ['directives', 12], ['verdict', 10], ['runtime', 9], ['twin', 8], ['strict', 8]];
 const RULE_W = NAME_W + 1 + DIMS.reduce((a, [, w]) => a + w, 0) + (DIMS.length - 1);
 
-// Four sections scroll past in one `--all` run, so each needs a seam that
+// The sections scroll past in one `--all` run, so each needs a seam that
 // survives the wall of rows above it. The title rides in a reverse-video chip
 // (legible without spending colour, which is reserved for status), the subtitle
 // sits beside it, and a dotted rule CLOSES the header block: the break belongs
@@ -1350,17 +1402,25 @@ const auditBanner = (title, subtitle) => {
 //
 // The cost is N server processes. That is the price of the guarantee, and the
 // lanes pay it out of time they would otherwise spend idle.
-// Skipped entirely when the only audit is the Mapping one — it reads compiler
-// output and never opens a document, so paying for N server processes (and
-// requiring tsgo to start them) would break its "compiler output alone"
-// contract for no gain.
-const pool = NEED_SERVER
-  ? await Promise.all(Array.from({ length: LANES }, async () => {
-      const s = new EditorServer();
-      await s.start();
-      return s;
-    }))
-  : [];
+// Skipped entirely when no running audit opens a document (Mapping and Grammar
+// read compiler/parser output alone), sized to the widest workload the
+// running audits actually have (a bare --errors run over one fixture boots one
+// server, not LANES), and STARTED WITHOUT AWAITING — the serverless sections
+// run while the servers boot, and each server-driven section awaits readiness
+// on entry. The early .catch only parks the rejection so a boot failure
+// surfaces at that await, not as an unhandled rejection mid-Grammar-Gate.
+const POOL_SIZE = NEED_SERVER
+  ? Math.min(LANES, Math.max(1,
+      (RUN_MAIN || RUN_HOVER || RUN_TOKENS) ? fixtures.length : 0,
+      RUN_ERRORS ? errorFixtures.length : 0))
+  : 0;
+const poolP = Promise.all(Array.from({ length: POOL_SIZE }, async () => {
+  const s = new EditorServer();
+  await s.start();
+  return s;
+}));
+poolP.catch(() => {});
+let pool = [];
 
 // A coverage shortfall is not a low score — it means the audit did not run over
 // what it claims to cover, and every ratio below it is a fraction of the wrong
@@ -1375,137 +1435,62 @@ async function abort(headline, reasons) {
   process.exit(1);
 }
 
-// ── the Type Audit (dims 1–5) — the default; skipped by --hover
-let totalPass = 0, totalApplicable = 0, fails = 0;
-if (RUN_MAIN) {
-  const glyph = { pass: ['✓', green('✓')], fail: ['✗', red('✗')], skip: ['skip', yellow('skip')], '—': ['·', dim('·')], 'n/a': ['·', dim('·')] };
-  const cell = (s, n) => { const [v, col] = glyph[s] ?? [String(s), dim(String(s))]; return col + ' '.repeat(Math.max(0, n - v.length)); };
-  const dims = DIMS;
-
-  // Print the header immediately, then stream each fixture's row as it
-  // is computed, so the report fills in live.
-  auditBanner('TYPE AUDIT', `${fixtures.length} fixtures × ${dims.length} dimensions`);
-  console.log('  ' + dim(pad('fixture', NAME_W) + ' ' + dims.map(([d, w]) => pad(d, w)).join(' ')));
-  console.log('  ' + dim('─'.repeat(RULE_W)));
-
-  // Both batch passes are independent of each other AND of the per-fixture
-  // lanes, so they are KICKED OFF here and awaited inside the row that first
-  // needs them: a fixture's compile + runtime spawns overlap the tsc and
-  // `rip check` passes instead of queueing behind them. Serially these two
-  // added a dead stare at a bare header before the first row could print,
-  // which is precisely what the streaming grid exists to avoid.
-  const twinP = runTwinTsc();        // one strict tsc pass over all twins
-  const strictP = runStrictCheck();  // one rip.strict `rip check` pass over all fixtures
-
-  // Fixtures run a few at a time — each row is mostly waiting (a compiler spawn,
-  // the server's program build, two runtime spawns). Rows still PRINT in fixture
-  // order: `lanes` resolves in index order, so the grid fills top-to-bottom even
-  // though the work finishes out of order.
-  const rows = await lanes(fixtures, async (f, _i, lane) => {
-    const ripPath = path.join(FIX, f);
-    const twinBase = ['.tsx', '.ts'].map((e) => f.replace(/\.rip$/, e)).find((b) => fs.existsSync(path.join(FIX, b)));
-    const src = fs.readFileSync(ripPath, 'utf8');
-
-    const c = await dimCompiles(ripPath);
-    const row = { name: f, compiles: c.ok ? 'pass' : 'fail', compileDetail: c.detail };
-
-    if (c.ok) {
-      const sd = countDirectives(src), fd = countDirectives(c.face);
-      row.directives = sd === fd ? 'pass' : 'fail';
-      row.dirDetail = sd === fd ? `${fd}` : `src=${sd} face=${fd} (lost ${sd - fd})`;
-
-      // Count ERROR-severity only. Unused-local and deprecation arrive
-      // as Hint severity (fade/strikethrough, not a type error) and are
-      // expected on the fixtures' intentionally-unused bindings.
-      //
-      // The verdict and the runtime dimension do not touch each other — one
-      // asks the server, the other spawns two processes — so overlap them.
-      const [ds, rt] = await Promise.all([
-        pool[lane].verdict(f, src).then((all) => all.filter((d) => (d.severity ?? 1) <= 2)),
-        dimRuntime(ripPath, twinBase ? path.join(FIX, twinBase) : null),
-      ]);
-      row.verdict = ds.length === 0 ? 'pass' : 'fail';
-      row.verdictDetail = ds.length === 0 ? '0 errors' : `${ds.length} unexpected`;
-      row.diags = ds;
-      row.runtime = rt.status;
-      row.runtimeDetail = rt.detail;
-
-      const strict = await strictP;
-      if (strict.broken) await abort('The strict dimension could not run', [strict.broken]);
-      const st = dimStrict(f, strict.byFile);
-      row.strict = st.status;
-      row.strictDetail = st.detail;
-      row.strictErrs = st.errs;
-    } else {
-      row.directives = row.verdict = row.runtime = row.strict = '—';
-    }
-
-    const tw = twinBase ? dimTwin(twinBase, await twinP) : { status: 'n/a', detail: 'no twin' };
-    row.twin = tw.status;
-    row.twinDetail = tw.detail;
-    row.twinErrs = tw.errs;
-    return row;
-  }, { width: LANES, onDone: (row) => console.log(`  ${pad(row.name, NAME_W)} ${dims.map(([d, w]) => cell(row[d], w)).join(' ')}`) });
-
-  // COVERAGE, for the same reason the probe pass has one: the Score below is a
-  // ratio of the rows this loop produced. A fixture that fell out of the lanes
-  // would make it read "11 / 11 — all passing" over a corpus one short.
-  const missed = fixtures.filter((f, i) => !rows[i] || rows[i].name !== f);
-  if (missed.length) await abort('The Type Audit did not score every fixture', missed.map((f) => `${f}: no row produced`));
-
-  console.log(`\n  ${bold('Failures')} ${dim('(categorized)')}`);
-  let any = false;
-  for (const r of rows) {
-    const notes = [];
-    if (r.compiles === 'fail') notes.push([yellow('compiler-coverage gap'), r.compileDetail]);
-    if (r.directives === 'fail') notes.push([red('face-emission bug'), `directives ${r.dirDetail}`]);
-    if (r.verdict === 'fail') notes.push([red('type-face divergence'), r.verdictDetail]);
-    if (r.runtime === 'fail') notes.push([red('behavioral divergence'), r.runtimeDetail]);
-    if (r.twin === 'fail') notes.push([red('reference twin invalid'), r.twinDetail]);
-    // Neutral category — the DETAIL names the class. The label must not claim
-    // "implicit-any" when dimStrict just finished reporting that none of the
-    // errors are; that contradiction is the misattribution in miniature.
-    if (r.strict === 'fail') notes.push([yellow('fails under rip.strict'), r.strictDetail]);
-    if (notes.length) {
-      any = true;
-      console.log(`    ${bold(r.name)}`);
-      for (const [label, detail] of notes) console.log(`      ${dim('·')} ${label} ${dim('— ' + detail)}`);
-      // A failure always shows its evidence — no flag needed to learn WHY.
-      if (r.diags?.length) for (const d of r.diags) console.log(dim(`          ${d.range.start.line}:${d.range.start.character} [TS${d.code}] ${d.message}`));
-      if (r.twinErrs?.length) for (const e of r.twinErrs) console.log(dim(`          twin: ${e}`));
-      // The implicit-any evidence is bulky and REPETITIVE by nature: ONE
-      // untyped param fans out into a diagnostic per member access, all
-      // reported at the SAME source position. Showing the first N raw rows
-      // therefore spends every line on one site and teaches the reader nothing
-      // about the spread — so collapse by position first, and say both what
-      // was collapsed and what was elided. Never silently truncate.
-      if (r.strictErrs?.length) {
-        const sites = new Map();   // "line:column" → the diagnostics reported there
-        for (const e of r.strictErrs) {
-          const k = `${e.line}:${e.column}`;
-          if (!sites.has(k)) sites.set(k, []);
-          sites.get(k).push(e);
-        }
-        for (const [at, es] of [...sites].slice(0, 4)) {
-          const more = es.length > 1 ? dim(` (+${es.length - 1} more here)`) : '';
-          console.log(dim(`          strict: ${at} [TS${es[0].code}] ${es[0].message}`) + more);
-        }
-        const rest = sites.size - Math.min(sites.size, 4);
-        if (rest > 0) console.log(dim(`          strict: … and ${rest} more site${rest === 1 ? '' : 's'} (see \`rip check\` under rip.strict)`));
-      }
+// ── AUDIT RUN ORDER — bottom-up by instrument layer, so under --all each
+// section's failures explain the one after it: the Grammar Gate (can the
+// parser even reduce it) and the Mapping Audit (do the compiler's own rows
+// place every read) run first and need no server; then the Type Audit (the
+// face and its verdict), the Diagnostics Lane (each diagnostic's code and
+// position), and last the probe pass driving the slow LSP surfaces (hover,
+// tokens). The Totals at the bottom print in this same order.
+// ── the Grammar Gate (ROADMAP "M2"): which productions the corpus exercises.
+// Parser only — no compile, no server. Each fixture is parsed with an
+// instrumented Parser whose ctx.onReduce records every rule the parse reduces;
+// the denominator is the generated parser's own ruleNames table (index 0 is
+// the $accept pad), so the question "is every production exercised by at least
+// one fixture?" has a CLOSED answer no corpus-relative rate can give. The
+// uncovered list is the M3 fixture-growth queue — group it by LHS so a reader
+// sees which CONSTRUCTS are dark, not 200 interchangeable rows. Coverage here
+// is necessary, not sufficient: a rule can be exercised while its interaction
+// shapes (reorder × repetition, strings/comments in the frame) stay untested —
+// those are M3's adversarial tranche, not this gate's denominator.
+let gr = null;
+if (RUN_GRAMMAR) {
+  const names = Parser().ruleNames;
+  const denom = [];
+  for (let i = 1; i < names.length; i++) if (names[i]) denom.push(i);
+  auditBanner('GRAMMAR GATE', `productions the corpus reduces · ${denom.length} rules · ${fixtures.length} fixtures`);
+  const seen = new Set();
+  for (const f of fixtures) {
+    const before = seen.size;
+    const p = Parser({ onReduce: (id) => seen.add(id) });
+    p.lexer = makeParserLexer(path.join(FIX, f));
+    try {
+      p.parse(fs.readFileSync(path.join(FIX, f), 'utf8'));
+      console.log(`    ${green('✓')} ${pad(f, 20)} ${dim(`+${seen.size - before} new rules (${seen.size} cumulative)`)}`);
+    } catch (e) {
+      console.log(`    ${red('✗')} ${pad(f, 20)} ${dim(`parse failed — ${String(e.message ?? e).split('\n')[0]}`)}`);
     }
   }
-  if (!any) console.log('    ' + green('none'));
-
-  console.log(`\n  ${bold('Score')} ${dim('(pass / applicable)')}`);
-  for (const [d] of dims) {
-    const pass = rows.filter((r) => r[d] === 'pass').length;
-    const applicable = rows.filter((r) => r[d] === 'pass' || r[d] === 'fail').length;
-    totalPass += pass; totalApplicable += applicable;
-    const ratio = `${pass} / ${applicable}`;
-    console.log(`    ${pad(d, 12)} ${pass === applicable ? green(ratio) : pass === 0 ? red(ratio) : yellow(ratio)}`);
+  const uncovered = denom.filter((i) => !seen.has(i));
+  // Group by LHS: the construct is the unit a fixture author thinks in.
+  const byLhs = new Map();
+  for (const i of uncovered) {
+    const lhs = names[i].split(' → ')[0];
+    if (!byLhs.has(lhs)) byLhs.set(lhs, []);
+    byLhs.get(lhs).push(names[i]);
   }
-  fails = totalApplicable - totalPass;
+  console.log(`\n    ${bold('Coverage')} ${dim(`(exercised = reduced by at least one fixture)`)}`);
+  const pct = ((100 * (denom.length - uncovered.length)) / denom.length).toFixed(1);
+  console.log(`    ${(uncovered.length ? yellow : green)(String(denom.length - uncovered.length))} ${dim('/')} ${dim(String(denom.length))} ${dim(`productions (${pct}%)`)}`);
+  if (byLhs.size) {
+    console.log(`\n    ${bold('Uncovered, by construct')} ${dim(`— the M3 queue; ${VERBOSE ? 'every production shown' : 'counts only, --v for every production'}`)}`);
+    const lhss = [...byLhs.entries()].sort((a, b) => b[1].length - a[1].length);
+    for (const [lhs, rules] of lhss) {
+      console.log(`      ${pad(lhs, 24)} ${yellow(String(rules.length).padStart(3))}`);
+      if (VERBOSE) for (const r of rules) console.log(`        ${dim(r)}`);
+    }
+  }
+  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, constructs: byLhs.size };
 }
 
 // ── the Mapping Audit (--map / --all): use-site identifier coverage, from the
@@ -1659,60 +1644,336 @@ if (RUN_MAP) {
   // check the manual gauge fires only when someone runs it anyway.
 }
 
-// ── the Grammar Gate (ROADMAP "M2"): which productions the corpus exercises.
-// Parser only — no compile, no server. Each fixture is parsed with an
-// instrumented Parser whose ctx.onReduce records every rule the parse reduces;
-// the denominator is the generated parser's own ruleNames table (index 0 is
-// the $accept pad), so the question "is every production exercised by at least
-// one fixture?" has a CLOSED answer no corpus-relative rate can give. The
-// uncovered list is the M3 fixture-growth queue — group it by LHS so a reader
-// sees which CONSTRUCTS are dark, not 200 interchangeable rows. Coverage here
-// is necessary, not sufficient: a rule can be exercised while its interaction
-// shapes (reorder × repetition, strings/comments in the frame) stay untested —
-// those are M3's adversarial tranche, not this gate's denominator.
-let gr = null;
-if (RUN_GRAMMAR) {
-  const names = Parser().ruleNames;
-  const denom = [];
-  for (let i = 1; i < names.length; i++) if (names[i]) denom.push(i);
-  auditBanner('GRAMMAR GATE', `productions the corpus reduces · ${denom.length} rules · ${fixtures.length} fixtures`);
-  const seen = new Set();
-  for (const f of fixtures) {
-    const before = seen.size;
-    const p = Parser({ onReduce: (id) => seen.add(id) });
-    p.lexer = makeParserLexer(path.join(FIX, f));
-    try {
-      p.parse(fs.readFileSync(path.join(FIX, f), 'utf8'));
-      console.log(`    ${green('✓')} ${pad(f, 20)} ${dim(`+${seen.size - before} new rules (${seen.size} cumulative)`)}`);
-    } catch (e) {
-      console.log(`    ${red('✗')} ${pad(f, 20)} ${dim(`parse failed — ${String(e.message ?? e).split('\n')[0]}`)}`);
+// ── the Type Audit (dims 1–6) — the default; skipped when another audit is named without --all
+let totalPass = 0, totalApplicable = 0, fails = 0;
+if (RUN_MAIN) {
+  const glyph = { pass: ['✓', green('✓')], fail: ['✗', red('✗')], skip: ['skip', yellow('skip')], '—': ['·', dim('·')], 'n/a': ['·', dim('·')] };
+  const cell = (s, n) => { const [v, col] = glyph[s] ?? [String(s), dim(String(s))]; return col + ' '.repeat(Math.max(0, n - v.length)); };
+  const dims = DIMS;
+
+  pool = await poolP;
+  // Print the header immediately, then stream each fixture's row as it
+  // is computed, so the report fills in live.
+  auditBanner('TYPE AUDIT', `${fixtures.length} fixtures × ${dims.length} dimensions`);
+  console.log('  ' + dim(pad('fixture', NAME_W) + ' ' + dims.map(([d, w]) => pad(d, w)).join(' ')));
+  console.log('  ' + dim('─'.repeat(RULE_W)));
+
+  // Both batch passes are independent of each other AND of the per-fixture
+  // lanes, so they are KICKED OFF here and awaited inside the row that first
+  // needs them: a fixture's compile + runtime spawns overlap the tsc and
+  // `rip check` passes instead of queueing behind them. Serially these two
+  // added a dead stare at a bare header before the first row could print,
+  // which is precisely what the streaming grid exists to avoid.
+  const twinP = runTwinTsc();        // one strict tsc pass over all twins
+  const strictP = runStrictCheck();  // one rip.strict `rip check` pass over all fixtures
+
+  // Fixtures run a few at a time — each row is mostly waiting (a compiler spawn,
+  // the server's program build, two runtime spawns). Rows still PRINT in fixture
+  // order: `lanes` resolves in index order, so the grid fills top-to-bottom even
+  // though the work finishes out of order.
+  const rows = await lanes(fixtures, async (f, _i, lane) => {
+    const ripPath = path.join(FIX, f);
+    const twinBase = ['.tsx', '.ts'].map((e) => f.replace(/\.rip$/, e)).find((b) => fs.existsSync(path.join(FIX, b)));
+    const src = fs.readFileSync(ripPath, 'utf8');
+
+    const c = await dimCompiles(ripPath);
+    const row = { name: f, compiles: c.ok ? 'pass' : 'fail', compileDetail: c.detail };
+
+    if (c.ok) {
+      const sd = countDirectives(src), fd = countDirectives(c.face);
+      row.directives = sd === fd ? 'pass' : 'fail';
+      row.dirDetail = sd === fd ? `${fd}` : `src=${sd} face=${fd} (lost ${sd - fd})`;
+
+      // Count ERROR-severity only. Unused-local and deprecation arrive
+      // as Hint severity (fade/strikethrough, not a type error) and are
+      // expected on the fixtures' intentionally-unused bindings.
+      //
+      // The verdict and the runtime dimension do not touch each other — one
+      // asks the server, the other spawns two processes — so overlap them.
+      const [ds, rt] = await Promise.all([
+        pool[lane].verdict(f, src).then((all) => all.filter((d) => (d.severity ?? 1) <= 2)),
+        dimRuntime(ripPath, twinBase ? path.join(FIX, twinBase) : null),
+      ]);
+      row.verdict = ds.length === 0 ? 'pass' : 'fail';
+      row.verdictDetail = ds.length === 0 ? '0 errors' : `${ds.length} unexpected`;
+      row.diags = ds;
+      row.runtime = rt.status;
+      row.runtimeDetail = rt.detail;
+
+      const strict = await strictP;
+      if (strict.broken) await abort('The strict dimension could not run', [strict.broken]);
+      const st = dimStrict(f, strict.byFile);
+      row.strict = st.status;
+      row.strictDetail = st.detail;
+      row.strictErrs = st.errs;
+    } else {
+      row.directives = row.verdict = row.runtime = row.strict = '—';
+    }
+
+    const tw = twinBase ? dimTwin(twinBase, await twinP) : { status: 'n/a', detail: 'no twin' };
+    row.twin = tw.status;
+    row.twinDetail = tw.detail;
+    row.twinErrs = tw.errs;
+    return row;
+  }, { width: LANES, onDone: (row) => console.log(`  ${pad(row.name, NAME_W)} ${dims.map(([d, w]) => cell(row[d], w)).join(' ')}`) });
+
+  // COVERAGE, for the same reason the probe pass has one: the Score below is a
+  // ratio of the rows this loop produced. A fixture that fell out of the lanes
+  // would make it read "11 / 11 — all passing" over a corpus one short.
+  const missed = fixtures.filter((f, i) => !rows[i] || rows[i].name !== f);
+  if (missed.length) await abort('The Type Audit did not score every fixture', missed.map((f) => `${f}: no row produced`));
+
+  console.log(`\n  ${bold('Failures')} ${dim('(categorized)')}`);
+  let any = false;
+  for (const r of rows) {
+    const notes = [];
+    if (r.compiles === 'fail') notes.push([yellow('compiler-coverage gap'), r.compileDetail]);
+    if (r.directives === 'fail') notes.push([red('face-emission bug'), `directives ${r.dirDetail}`]);
+    if (r.verdict === 'fail') notes.push([red('type-face divergence'), r.verdictDetail]);
+    if (r.runtime === 'fail') notes.push([red('behavioral divergence'), r.runtimeDetail]);
+    if (r.twin === 'fail') notes.push([red('reference twin invalid'), r.twinDetail]);
+    // Neutral category — the DETAIL names the class. The label must not claim
+    // "implicit-any" when dimStrict just finished reporting that none of the
+    // errors are; that contradiction is the misattribution in miniature.
+    if (r.strict === 'fail') notes.push([yellow('fails under rip.strict'), r.strictDetail]);
+    if (notes.length) {
+      any = true;
+      console.log(`    ${bold(r.name)}`);
+      for (const [label, detail] of notes) console.log(`      ${dim('·')} ${label} ${dim('— ' + detail)}`);
+      // A failure always shows its evidence — no flag needed to learn WHY.
+      if (r.diags?.length) for (const d of r.diags) console.log(dim(`          ${d.range.start.line}:${d.range.start.character} [TS${d.code}] ${d.message}`));
+      if (r.twinErrs?.length) for (const e of r.twinErrs) console.log(dim(`          twin: ${e}`));
+      // The implicit-any evidence is bulky and REPETITIVE by nature: ONE
+      // untyped param fans out into a diagnostic per member access, all
+      // reported at the SAME source position. Showing the first N raw rows
+      // therefore spends every line on one site and teaches the reader nothing
+      // about the spread — so collapse by position first, and say both what
+      // was collapsed and what was elided. Never silently truncate.
+      if (r.strictErrs?.length) {
+        const sites = new Map();   // "line:column" → the diagnostics reported there
+        for (const e of r.strictErrs) {
+          const k = `${e.line}:${e.column}`;
+          if (!sites.has(k)) sites.set(k, []);
+          sites.get(k).push(e);
+        }
+        for (const [at, es] of [...sites].slice(0, 4)) {
+          const more = es.length > 1 ? dim(` (+${es.length - 1} more here)`) : '';
+          console.log(dim(`          strict: ${at} [TS${es[0].code}] ${es[0].message}`) + more);
+        }
+        const rest = sites.size - Math.min(sites.size, 4);
+        if (rest > 0) console.log(dim(`          strict: … and ${rest} more site${rest === 1 ? '' : 's'} (see \`rip check\` under rip.strict)`));
+      }
     }
   }
-  const uncovered = denom.filter((i) => !seen.has(i));
-  // Group by LHS: the construct is the unit a fixture author thinks in.
-  const byLhs = new Map();
-  for (const i of uncovered) {
-    const lhs = names[i].split(' → ')[0];
-    if (!byLhs.has(lhs)) byLhs.set(lhs, []);
-    byLhs.get(lhs).push(names[i]);
+  if (!any) console.log('    ' + green('none'));
+
+  console.log(`\n  ${bold('Score')} ${dim('(pass / applicable)')}`);
+  for (const [d] of dims) {
+    const pass = rows.filter((r) => r[d] === 'pass').length;
+    const applicable = rows.filter((r) => r[d] === 'pass' || r[d] === 'fail').length;
+    totalPass += pass; totalApplicable += applicable;
+    const ratio = `${pass} / ${applicable}`;
+    console.log(`    ${pad(d, 12)} ${pass === applicable ? green(ratio) : pass === 0 ? red(ratio) : yellow(ratio)}`);
   }
-  console.log(`\n    ${bold('Coverage')} ${dim(`(exercised = reduced by at least one fixture)`)}`);
-  const pct = ((100 * (denom.length - uncovered.length)) / denom.length).toFixed(1);
-  console.log(`    ${(uncovered.length ? yellow : green)(String(denom.length - uncovered.length))} ${dim('/')} ${dim(String(denom.length))} ${dim(`productions (${pct}%)`)}`);
-  if (byLhs.size) {
-    console.log(`\n    ${bold('Uncovered, by construct')} ${dim(`— the M3 queue; ${VERBOSE ? 'every production shown' : 'counts only, --v for every production'}`)}`);
-    const lhss = [...byLhs.entries()].sort((a, b) => b[1].length - a[1].length);
-    for (const [lhs, rules] of lhss) {
-      console.log(`      ${pad(lhs, 24)} ${yellow(String(rules.length).padStart(3))}`);
-      if (VERBOSE) for (const r of rules) console.log(`        ${dim(r)}`);
+  fails = totalApplicable - totalPass;
+}
+
+// ── the Diagnostics Lane (--errors / --all; ROADMAP "M3"): fixtures whose
+// errors are UNSUPPRESSED, each published diagnostic asserted by code AND
+// position. The verdict dimension can never see a mis-positioned diagnostic —
+// a fixture's `@ts-expect-error` is consumed inside tsgo, on the face, before
+// rip's mapping runs — so this lane keeps its fixtures bare and does the
+// positional bookkeeping itself. Expectations are DERIVED, never hand-pinned:
+// tsgo's run over the LINE-ALIGNED twin fixes each expected code and line,
+// and the flagged token's OCCURRENCE in that twin line, found at the same
+// rank in the rip source's same line, fixes the expected column. A twin that
+// stops aligning therefore fails loudly instead of drifting.
+let el = null;
+if (RUN_ERRORS) {
+  // Each regex mirrors ITS tool's honoring rule — not a tidier one — so
+  // whatever would silence a measurement is exactly what gets stripped and
+  // what enforcement accepts. Rip: a whole-line `# @ts-nocheck` comment,
+  // trailing words allowed (emitter.js TS_DIRECTIVE). tsgo: a `//` comment
+  // beginning with @ts-nocheck, equally lenient about a trailing tail
+  // (driven 2026-07-22: `// @ts-nocheck with trailing words` silences).
+  const RIP_NOCHECK = /^[ \t]*#[ \t]*@ts-nocheck(?=\s|$)/;
+  const TS_NOCHECK = /^\s*\/\/\/?\s*@ts-nocheck(?=\s|$)/;
+  // Boundary-clean occurrences of an identifier in a line — positions not
+  // embedded in a longer identifier. The OCCURRENCE INDEX is what transfers
+  // between the line-aligned pair: raw columns differ (`let `), and a bare
+  // indexOf lies whenever the token's text appears earlier as a substring.
+  const occurrencesOf = (line, token) => {
+    const out = [];
+    for (let i = line.indexOf(token); i >= 0; i = line.indexOf(token, i + 1)) {
+      if (!/[\w$]/.test(line[i - 1] ?? '') && !/[\w$]/.test(line[i + token.length] ?? '')) out.push(i);
     }
-  }
-  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, constructs: byLhs.size };
+    return out;
+  };
+  // A pragma both tools honor sits BEFORE the first statement — the emitter
+  // takes only `nochecks.find((t) => t.end <= firstStmt)` and TypeScript's
+  // @ts-nocheck is likewise file-level — so enforcement is positional too: a
+  // merely-present-but-late pragma is an ordinary comment to every authoring
+  // surface, which is exactly the regression this check exists to catch.
+  const pragmaLeads = (lines, pragmaRe, commentRe) => {
+    const pragma = lines.findIndex((l) => pragmaRe.test(l));
+    const code = lines.findIndex((l) => l.trim() && !commentRe.test(l));
+    return pragma >= 0 && (code < 0 || pragma < code);
+  };
+  auditBanner('DIAGNOSTICS LANE', `unsuppressed fixtures, code + position asserted · ${errorFixtures.length} file(s)`);
+  if (errorFixtures.length === 0) await abort('The Diagnostics Lane found no fixtures', [`${path.relative(ROOT, ERRD)} holds no .rip files`]);
+
+  // The twin pass: tsgo over fixtures/errors' twins in an instrument-owned
+  // workspace (the runStrictCheck pattern — the audit tsconfig excludes
+  // errors/, so the shared twin pass never sees these and this one must run
+  // its own). KICKED OFF, not awaited: the per-fixture lanes below start
+  // their server measurements immediately and each awaits this shared
+  // promise only where the expectation derivation first needs it.
+  const twinP = (async () => {
+    const tsc = tsgoBinaryPath();
+    const dir = mkTemp(path.join(os.tmpdir(), 'rip-audit-errors-'));
+    // Both files of an error pair carry an @ts-nocheck pragma, LINE-ALIGNED
+    // (`# @ts-nocheck` / `// @ts-nocheck`), so every authoring surface — `rip
+    // check`, the rip editor, VS Code's own TypeScript on the twin — stays
+    // quiet about errors that are instrument content. The instrument must not
+    // be blinded with them: the lane strips the pragma on the way into each
+    // measurement (here for the twin; at verdict() for the .rip), replacing
+    // its line to keep the pair aligned, and ENFORCES its placement per file
+    // below. A strip that ever misses fails loudly downstream — a silenced
+    // twin raises no errors, a silenced fixture publishes none, and the lane
+    // flags both, never a pass.
+    for (const f of fs.readdirSync(ERRD)) {
+      if (!/\.tsx?$/.test(f)) continue;
+      const src = fs.readFileSync(path.join(ERRD, f), 'utf8');
+      fs.writeFileSync(path.join(dir, f), src.split('\n').map((l) => (TS_NOCHECK.test(l) ? '//' : l)).join('\n'));
+    }
+    const tscfg = JSON.parse(fs.readFileSync(path.join(HERE, 'tsconfig.json'), 'utf8'));
+    tscfg.include = ['.'];
+    delete tscfg.exclude;
+    fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify(tscfg, null, 2));
+    // node_modules is symlinked for the same reason runStrictCheck symlinks
+    // it: an error twin importing the fixture sandbox (react/zod — the
+    // components/schema pairs) must resolve exactly as the flat twins do, or
+    // TS2307 module-resolution noise masquerades as derived expectations.
+    try { fs.symlinkSync(path.join(HERE, 'node_modules'), path.join(dir, 'node_modules'), 'dir'); } catch { /* absent → preflight already spoke */ }
+    let out = '';
+    try { out = (await execFileP(tsc, ['--noEmit', '-p', dir], { encoding: 'utf8', timeout: 120000 })).stdout; }
+    catch (err) { out = (err.stdout || '').toString() + (err.stderr || '').toString(); }
+    const byFile = new Map();
+    for (const line of out.split('\n')) {
+      const m = TSC_DIAG.exec(line);
+      if (!m) continue;
+      if (!byFile.has(m[1])) byFile.set(m[1], []);
+      byFile.get(m[1]).push({ line: Number(m[2]), col: Number(m[3]), code: Number(m[4]) });
+    }
+    return byFile;
+  })();
+  pool = await poolP;
+
+  const laneRows = await lanes(errorFixtures, async (f, _i, lane) => {
+    const src = fs.readFileSync(path.join(ERRD, f), 'utf8');
+    const ripLines = src.split('\n');
+    const problems = [];
+    // Bare errors means NO suppressing directive of any spelling — the
+    // emitter honors `@ts-ignore` exactly like `@ts-expect-error`
+    // (TS_DIRECTIVE), so a stray ignore would consume a diagnostic inside
+    // tsgo and masquerade as a `missing` violation here.
+    ripLines.forEach((l, i) => {
+      const m = l.match(/^[ \t]*#[ \t]*@ts-(expect-error|ignore)(?=\s|$)/);
+      if (m) problems.push({ kind: 'shape', note: `line ${i + 1} carries @ts-${m[1]} — this lane's fixtures must be unsuppressed` });
+    });
+
+    const twinBase = ['.tsx', '.ts'].map((e) => f.replace(/\.rip$/, e)).find((b) => fs.existsSync(path.join(ERRD, b)));
+    if (!twinBase) return { name: f, problems: [{ kind: 'shape', note: 'no twin — expectations cannot be derived' }], expected: [] };
+    const twinLines = fs.readFileSync(path.join(ERRD, twinBase), 'utf8').split('\n');
+
+    if (!pragmaLeads(ripLines, RIP_NOCHECK, /^\s*#/)) problems.push({ kind: 'shape', note: '`# @ts-nocheck` missing or below the first statement — the emitter honors it only before any statement, so `rip check` goes red for the whole directory' });
+    if (!pragmaLeads(twinLines, TS_NOCHECK, /^\s*\/\//)) problems.push({ kind: 'shape', note: `\`// @ts-nocheck\` missing or below the first statement in ${twinBase} — TypeScript honors it only at file level, so VS Code squiggles the twin` });
+
+    // The measurement is started FIRST — the server's publish (settle sleeps
+    // and all) runs while the shared twin pass finishes and expectations
+    // derive; nothing below before the final await depends on it.
+    const stripped = ripLines.map((l) => (RIP_NOCHECK.test(l) ? '#' : l)).join('\n');
+    const dsP = pool[lane].verdict(path.join('errors', f), stripped);
+
+    // Derive each expectation from the twin diagnostic: the flagged token at
+    // (line, col) of the TWIN, transferred to the SAME line of the rip source
+    // by OCCURRENCE RANK. Positions become LSP coordinates here (0-based
+    // line/character).
+    const twinByFile = await twinP;
+    const expected = [];
+    for (const d of twinByFile.get(twinBase) ?? []) {
+      const twinLine = twinLines[d.line - 1] ?? '';
+      // Identifier-only is a DERIVATION LIMIT, not corpus policy: TypeScript
+      // also anchors errors on literals, operators, and parens, and a family
+      // whose negatives legitimately flag such spans (operations, arity) is
+      // the cue to widen this extraction to whatever sits at the flagged
+      // position — never to reshape fixtures until the error lands on an
+      // identifier, which would drift the corpus toward shapes the harness
+      // can measure instead of shapes the type story needs tested.
+      const token = twinLine.slice(d.col - 1).match(/^[A-Za-z_$][\w$]*/)?.[0];
+      if (!token) { problems.push({ kind: 'shape', note: `twin ${d.line}:${d.col} TS${d.code}: no identifier at the flagged position — a derivation limit; widen the extraction here rather than reshaping the fixture` }); continue; }
+      // The measurement side is the PERMISSIVE editor (its workspace carries
+      // no package.json, so rip.strict is off and mapTsDiagnostic drops the
+      // implicit-any family before publishing). An expectation carrying one
+      // of those codes is structurally unassertable here — say so, instead
+      // of reporting a permanent `missing` that reads as a server bug.
+      if (SUPPRESSED_TS_CODES.has(d.code)) { problems.push({ kind: 'shape', note: `twin ${d.line}:${d.col} raises TS${d.code} — implicit-any family, which the permissive editor never publishes; this negative belongs with the strict dimension's shapes, not in the lane` }); continue; }
+      const rank = occurrencesOf(twinLine, token).indexOf(d.col - 1);
+      if (rank < 0) { problems.push({ kind: 'shape', note: `twin ${d.line}:${d.col} TS${d.code}: flagged position is not a clean occurrence of \`${token}\`` }); continue; }
+      const character = occurrencesOf(ripLines[d.line - 1] ?? '', token)[rank];
+      if (character === undefined) { problems.push({ kind: 'shape', note: `twin ${d.line}:${d.col} TS${d.code}: occurrence ${rank + 1} of \`${token}\` absent from the rip line — twin not line-aligned` }); continue; }
+      expected.push({ line: d.line - 1, character, code: d.code, token });
+    }
+    if (expected.length === 0) problems.push({ kind: 'shape', note: 'the twin raises no errors — an error fixture must have some' });
+
+    // Errors AND warnings — the verdict dimension's own rule (`severity <= 2`;
+    // a warning-severity diagnostic is still a diagnostic), and error
+    // fixtures are visible to no other audit, so a narrower filter here would
+    // make warnings on them invisible everywhere.
+    const ds = (await dsP).filter((d) => (d.severity ?? 1) <= 2);
+    const unmatched = [...ds];
+    for (const e of expected) {
+      // Exact column first, so two same-code diagnostics on one line each
+      // claim their own row instead of cross-pairing by publish order.
+      let i = unmatched.findIndex((d) => d.code === e.code && d.range.start.line === e.line && d.range.start.character === e.character);
+      if (i < 0) i = unmatched.findIndex((d) => d.code === e.code && d.range.start.line === e.line);
+      if (i < 0) {
+        const near = unmatched.find((d) => d.code === e.code);
+        problems.push({ kind: 'missing', note: `expected TS${e.code} at ${e.line + 1}:${e.character} (\`${e.token}\`) — never published${near ? ` (a TS${e.code} sits at ${near.range.start.line + 1}:${near.range.start.character} — possibly this one, mis-lined)` : ''}` });
+        continue;
+      }
+      const [d] = unmatched.splice(i, 1);
+      if (d.range.start.character !== e.character) {
+        problems.push({ kind: 'position', note: `TS${e.code} at line ${e.line + 1}: expected column ${e.character} (\`${e.token}\`), published ${d.range.start.character}` });
+      }
+    }
+    for (const d of unmatched) problems.push({ kind: 'stray', note: `unexpected ${(d.severity ?? 1) === 2 ? 'warning ' : ''}TS${d.code} at ${d.range.start.line + 1}:${d.range.start.character} — ${String(d.message).split('\n')[0]}` });
+    return { name: f, expected, problems };
+  }, {
+    width: LANES,
+    onDone: (r) => {
+      const ok = r.problems.length === 0;
+      console.log(`    ${ok ? green('✓') : red('✗')} ${pad(path.join('errors', r.name), 34)} ${dim(`${r.expected.length} diagnostic(s) asserted`)}`);
+      for (const p of r.problems) console.log(`        ${red('·')} ${yellow(p.kind)} ${dim(p.note)}`);
+    },
+  });
+  const missedErr = errorFixtures.filter((f, i) => !laneRows[i] || laneRows[i].name !== f);
+  if (missedErr.length) await abort('The Diagnostics Lane did not score every fixture', missedErr.map((f) => `${f}: no row produced`));
+  // No orphaned twins: a twin whose .rip was renamed away would otherwise
+  // have its asserted negatives vanish from every denominator, silently.
+  const orphanTwins = fs.readdirSync(ERRD).filter((t) => /\.tsx?$/.test(t) && !errorFixtures.includes(t.replace(/\.tsx?$/, '.rip')));
+  for (const o of orphanTwins) console.log(`    ${red('✗')} ${pad(path.join('errors', o), 34)} ${red('orphaned twin — no .rip pairs with it, so its negatives are asserted nowhere')}`);
+  el = {
+    files: laneRows.length,
+    asserted: laneRows.reduce((n, r) => n + r.expected.length, 0),
+    problems: [...laneRows.flatMap((r) => r.problems), ...orphanTwins.map((o) => ({ kind: 'orphan', note: `${o}: twin with no fixture` }))],
+  };
 }
 
 const PROBES = new Map();   // file → { decls, hovers, tokens, tmap }
 let hskip = 0;
 if (RUN_HOVER || RUN_TOKENS) {
+  pool = await poolP;
   // The Hover and Token audits ask DIFFERENT questions of the SAME open
   // document, so this pass opens each fixture once and takes whatever the
   // running audits need. It is also the slow part of the run — the server has
@@ -2230,7 +2491,7 @@ await Promise.all(pool.map((s) => s.stop()));
 
 // ── combined totals
 //
-// EVERY LINE NAMES ITS AUDIT. Under --all these three lines print together at
+// EVERY LINE NAMES ITS AUDIT. Under --all these totals lines print together at
 // the very end, directly beneath the LAST audit's section — so an unlabelled
 // "3 failing" reads as belonging to whatever section happens to sit above it.
 // That is not hypothetical: the Type Audit's failures were read as the Token
@@ -2239,9 +2500,13 @@ await Promise.all(pool.map((s) => s.stop()));
 const TOTAL_W = 12;
 const totalLine = (audit, text) => console.log('    ' + dim(pad(audit, TOTAL_W)) + text);
 console.log(`\n  ${bold('Totals')}`);
-if (RUN_MAIN) totalLine('Type', (fails === 0
-  ? green(`${totalApplicable} dimension checks: all passing`)
-  : `${totalApplicable} dimension checks: ${green(totalPass + ' passing')}, ${red(fails + ' failing')}`));
+// The Grammar Gate is a gauge toward M3, not a regression count: uncovered
+// productions are the fixture-growth queue, red only in the sense of "work
+// remains", so the count paints yellow until the corpus covers the grammar.
+if (gr) totalLine('Grammar', `${gr.total} productions: `
+  + (gr.uncovered === 0
+    ? green('every production exercised by the corpus')
+    : `${green(`${gr.covered} exercised`)}${dim(' · ')}${yellow(`${gr.uncovered} uncovered`)} ${dim(`across ${gr.constructs} constructs — the M3 queue`)}`));
 // The Mapping Audit's flagged reads are EXPECTED red (the mapping gap), so
 // they read as a gauge, never a regression count: the total is the census, and
 // the missing-span clause is the only part that would signal something new.
@@ -2251,13 +2516,13 @@ if (mp) totalLine('Mapping', `${mp.totReads} reads: `
     : `${yellow(`${mp.totFlag} unmapped`)} ${dim(`(${mp.unplaced} unplaced, ${mp.mistext} mis-texted · ${mp.synthetic} synthetic, ${mp.rewrite} rewrite)`)} ${dim('tracking the mapping gap (expected)')}`)
   + dim(` · ${mp.census} at-risk (census: no exact row)`)
   + (mp.missing ? ` · ${red(`${mp.missing} missing span${mp.missing === 1 ? '' : 's'}`)} ${dim('— a new class')}` : ''));
-// The Grammar Gate is a gauge toward M3, not a regression count: uncovered
-// productions are the fixture-growth queue, red only in the sense of "work
-// remains", so the count paints yellow until the corpus covers the grammar.
-if (gr) totalLine('Grammar', `${gr.total} productions: `
-  + (gr.uncovered === 0
-    ? green('every production exercised by the corpus')
-    : `${green(`${gr.covered} exercised`)}${dim(' · ')}${yellow(`${gr.uncovered} uncovered`)} ${dim(`across ${gr.constructs} constructs — the M3 queue`)}`));
+if (RUN_MAIN) totalLine('Type', (fails === 0
+  ? green(`${totalApplicable} dimension checks: all passing`)
+  : `${totalApplicable} dimension checks: ${green(totalPass + ' passing')}, ${red(fails + ' failing')}`));
+if (el) totalLine('Diagnostics', `${el.asserted} asserted over ${el.files} file(s): ` + (el.problems.length === 0
+  ? green('every code and position as TypeScript says')
+  : red(`${el.problems.length} violation${el.problems.length === 1 ? '' : 's'}`)
+    + dim(` (${['shape', 'missing', 'position', 'stray', 'orphan'].map((k) => [k, el.problems.filter((p) => p.kind === k).length]).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(', ')})`)));
 if (hp) totalLine('Hover', `${hp.probed} hover probes: `
   + (hp.gap === 0 && hp.snapChanged === 0 && hp.violations.length === 0
     ? green('twin parity + expected clean')
@@ -2290,7 +2555,7 @@ if (tk) {
     + memberClause + survivalClause);
 }
 
-// ── what this run did NOT cover. The default runs one of four audits, so say
+// ── what this run did NOT cover. The default runs one of the audits, so say
 // so on the way out: an audit nobody knows about is an audit nobody runs. Reads
 // `ran` straight off AUDITS, so EVERY audit can appear here — including the
 // default one, which a `--hover`/`--token` run silently skips.

@@ -1,0 +1,87 @@
+# 20-basics.rip — the corpus ground floor: program skeleton, every
+# literal form (numbers, strings, regex, heregex, symbols), `this`, parentheticals, do-IIFE
+
+# ── Number, boolean, null, undefined literals ──
+
+integer = 42
+float = 3.14
+hex = 0xff
+grouped = 1_000_000
+truthy = true
+falsy = false
+nil: null = null
+absent: undefined = undefined
+
+console.log('numbers:', integer, float, hex, grouped)
+console.log('others:', truthy, falsy, nil, absent)
+
+# ── Strings: quotes, interpolation (plain, empty, multiline), heredoc ──
+
+single = 'single quotes'
+double = "double quotes"
+interpolated = "mix of #{single} and #{double}"
+gap = "gap #{}end"
+multiline = "sum #{
+  integer + float
+}!"
+heredoc = """
+  alpha
+  beta
+"""
+
+console.log(interpolated, gap, multiline)
+console.log(heredoc)
+
+# ── Regex literals: plain, and heregex (whitespace, comments, interpolation) ──
+
+regex = /ab+c/g
+heregex = ///
+  ab+          # letters, then an interpolated tail
+  #{single}
+///i
+
+console.log('regex:', regex, heregex)
+
+# ── Symbol literals: `:name` is Symbol.for("name") ──
+
+symbol = :alpha
+console.log('symbol:', symbol)
+
+# ── `this`: the keyword, bare `@`, and the string-keyed `@'…'` ──
+
+host =
+  tag: 'host'
+  'data-x': 9
+  show: -> this.tag
+  whoami: -> String(@)
+  peek: -> @'data-x'
+
+console.log(host.show(), host.whoami(), host.peek())
+
+# ── Parentheticals: grouping, and the multiline body ──
+
+parenthetical = (integer + 1) * 2
+tall = (
+  integer +
+  float
+)
+
+console.log('parenthetical:', parenthetical, 'tall:', tall)
+
+# ── do-IIFE, and a function literal as a chain subject ──
+
+iife = do -> integer * 2
+seeded = do (seed = 5) -> seed + 1
+chain = -> 7
+.bind(null)
+noop = ->
+  # a comment-only body still parses — the empty block
+
+console.log('iife:', iife, 'seeded:', seeded)
+# the corpus default is explicit parens; this one paren-less call keeps the implicit spelling covered (21-operations owns invocation)
+console.log typeof chain, typeof noop
+
+# ── Program skeleton: a bare statement, and a trailing terminator on the last line ──
+
+debugger
+done = 'basics';

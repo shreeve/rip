@@ -1,0 +1,15 @@
+# 20-basics.errors.rip — the asserted-diagnostics lane, basics flavor. Every error
+# below is UNSUPPRESSED and the Diagnostics Lane (bun run type-audit --errors)
+# asserts each published diagnostic's code AND position against the twin. The
+# pragma below quiets the EDITOR only — the lane strips it, and enforces it.
+# @ts-nocheck
+
+wrongNumber: number = 'nope'
+wrongString: string = 42
+wrongBoolean: boolean = 'yes'
+wrongRegex: string = /ab+c/g
+wrongSymbol: string = :alpha
+wrongParenthetical: string = (1 + 2) * 3
+wrongIife: string = do -> 42
+wrongInterpolation: number = "sum #{1 + 2}"
+wrongProperty = 'abc'.missing

@@ -8,5 +8,10 @@
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["fixtures"]
+  "include": [
+    "fixtures"
+  ],
+  "exclude": [
+    "fixtures/errors"
+  ]
 }
