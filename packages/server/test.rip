@@ -1003,7 +1003,7 @@ test! "an orphaned worker (parent gone) exits on its own", ->
 
 console.log "\nPrebuild"
 
-import { buildArtifact, REGISTER_409_MS } from './manager.rip'
+import { buildArtifact, REGISTER_409_MS, scale } from './manager.rip'
 
 test! "buildArtifact bundles an app to one JS file a loader-free worker serves", ->
   dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')
@@ -1353,7 +1353,12 @@ stubJanus = (sockPath, calls, behave = null) ->
     unix: sockPath
     fetch: (rq) ->
       url = new URL(rq.url)
-      return new Response('janus', { status: 404 }) if rq.method is 'GET'
+      if rq.method is 'GET'
+        # Reachability probes and report read-backs — `behave` may answer;
+        # unanswered GETs stay 404 and are never recorded as control traffic.
+        override = behave?({ method: 'GET', path: url.pathname, body: null })
+        return override if override?
+        return new Response('janus', { status: 404 })
       body = null
       if rq.method is 'POST' or rq.method is 'PUT'
         body = try rq.json! catch then null
@@ -1371,11 +1376,11 @@ stubJanus = (sockPath, calls, behave = null) ->
         return new Response(null, { status: 204 })
       new Response('nope', { status: 404 })
 
-spawnManager = (dir, controlSock, args, extraEnv = {}, stderr = 'inherit') ->
+spawnManager = (dir, controlSock, args, extraEnv = {}, stderr = 'inherit', stdout = 'ignore') ->
   Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, '--control', controlSock, ...args],
     cwd: dir
     stdin: 'ignore'
-    stdout: 'ignore'
+    stdout: stdout
     stderr: stderr
     env: { ...process.env, ...TEST_KNOBS, ...extraEnv }
 
@@ -1677,3 +1682,104 @@ test! "manager -c 2 --no-watch plumbs the cap to workers: two in flight over one
     await proc.exited
     stub.stop(true)
     rmSync cDir, { recursive: true, force: true }
+
+# ==[ Manager: the startup report ]==
+
+console.log "\nStartup report"
+
+test "scale humanizes base-unit values: SI prefixes, fixed width, honest ???", ->
+  eq scale(0, 's'),       '  0 s'
+  eq scale(1.23e-7, 's'), '123ns'
+  eq scale(0.0567, 's'),  ' 57ms'
+  eq scale(0.789, 's'),   '789ms'
+  eq scale(1.5, 's'),     '1.5 s'
+  eq scale(12.34, 's'),   ' 12 s'
+  eq scale(9.97, 's'),    ' 10 s'    # rounding promotes across the 10 boundary
+  eq scale(48211, 'B'),   ' 48kB'
+  eq scale(NaN, 's'),     '??? s'
+  eq scale(-1, 's'),      '??? s'
+  eq scale(1e15, 's'),    '??? s'    # beyond T
+  eq scale(1e-13, 's'),   '??? s'    # beneath p
+  eq scale(0.15, 's', false), '150ms'
+  eq scale(5, 's', false),    '5.0s'
+
+# Captured once by the success test below; the mono pin asserts over the
+# same bytes.
+report = { out: null }
+
+test! "the startup report states the registration as janus holds it (read-backs)", ->
+  ctlSock = join(tmpdir(), "rip-janus-rep-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  seen = { reg: false }
+  stub = stubJanus ctlSock, calls, (call) ->
+    return null unless call.method is 'GET'
+    if call.path is '/1.0'
+      return Response.json { api_version: '1.0', type: 'janus' }
+    if call.path.startsWith('/1.0/apps/')
+      # Echo what this stub actually holds: the last upstreams PUT it took
+      puts = calls.filter (c) -> c.method is 'PUT'
+      held = if puts.length then puts[puts.length - 1].body.upstreams else []
+      seen.reg = true
+      return Response.json { id: call.path.split('/').pop(), name: 'repapp', hosts: ['repapp'], upstreams: held }
+    null
+  proc = spawnManager dir, ctlSock, ['--name', 'repapp', '-w', '2', '--no-watch'], {}, 'inherit', 'pipe'
+  try
+    waitFor! -> seen.reg              # the report's app read-back arrived
+    sleep! 300                        # the report prints right after it
+    proc.kill('SIGTERM')
+    code = await proc.exited
+    eq code, 0
+    out = new Response(proc.stdout).text!
+    report.out = out
+    version = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8')).version
+    ok out.includes("rip server v#{version}"), "names the server and version: #{JSON.stringify(out)}"
+    ok out.includes('app      repapp (app-x)'), "app line carries name and registered id: #{JSON.stringify(out)}"
+    ok out.includes("control  unix:#{ctlSock} — janus 1.0"), "control line carries the GET /1.0 read-back: #{JSON.stringify(out)}"
+    ok out.includes('workers  2'), 'workers line'
+    ok out.includes('watch    off'), 'watch line reflects --no-watch'
+    ok /✓ worker 1   \S+p1w1\.sock   .{4}s\n/.test(out), "worker 1 row with socket and scaled boot time: #{JSON.stringify(out)}"
+    ok /✓ worker 2   \S+p1w2\.sock/.test(out), 'worker 2 row'
+    ok out.includes('registered  2 upstreams published, heartbeating every 150ms'),
+      "registration facts come from the read-back: #{JSON.stringify(out)}"
+    ok out.includes('→ repapp registered with janus, 2 workers ready'), "the arrow line: #{JSON.stringify(out)}"
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test "piped manager stdout is mono — no ANSI escape bytes", ->
+  ok report.out?, 'the report test above captured stdout'
+  ok not /\x1b/.test(report.out), "no escape bytes in piped output: #{JSON.stringify(report.out)}"
+
+test! "a failed read-back is reported as a failure, never as success", ->
+  ctlSock = join(tmpdir(), "rip-janus-repfail-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  reads = []
+  # No GET behavior: every read-back gets the stub's stock 404
+  stub = stubJanus ctlSock, calls, (call) ->
+    reads.push call.path if call.method is 'GET' and call.path.startsWith('/1.0/apps/')
+    null
+  proc = spawnManager dir, ctlSock, ['--name', 'darkapp', '-w', '1', '--no-watch'], {}, 'inherit', 'pipe'
+  try
+    waitFor! -> reads.length >= 1
+    sleep! 300
+    proc.kill('SIGTERM')
+    await proc.exited
+    out = new Response(proc.stdout).text!
+    ok out.includes('control  unix:'), 'the control line still names the endpoint'
+    ok out.includes('read-back failed (GET /1.0 → 404)'), "the control read-back failure is named: #{JSON.stringify(out)}"
+    ok out.includes('registered  read-back failed (GET /1.0/apps/app-x → 404)'),
+      "the registration read-back failure is named: #{JSON.stringify(out)}"
+    ok out.includes('→ darkapp up, 1 worker ready — registration read-back failed'),
+      "the arrow line does not claim janus-held registration: #{JSON.stringify(out)}"
+    ok not out.includes('registered with janus'), 'no faked success'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }

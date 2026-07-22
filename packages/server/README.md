@@ -421,6 +421,43 @@ manager from `-c`, and their SIGTERM drain budget via
 `RIP_DRAIN_DEADLINE_MS`, derived from `RIP_KILL_MS` so a drain always
 finishes inside the manager's SIGTERM→SIGKILL ceiling.
 
+### The startup report
+
+Once the startup boot fully completes — every worker poll settled, the
+registration confirmed, the upstreams PUT landed — the manager prints
+one structured report:
+
+```text
+  rip server v4.0.0
+
+  app      acme (acme-x7k2p9)
+  control  unix:/run/janus/control.sock — janus 1.0
+  workers  4
+  watch    *.rip
+
+  ✓ worker 1   /tmp/rip-srv-eLm14s/p1w1.sock    27ms
+  ✓ worker 2   /tmp/rip-srv-eLm14s/p1w2.sock    27ms
+  ✓ worker 3   /tmp/rip-srv-eLm14s/p1w3.sock    27ms
+  ✓ worker 4   /tmp/rip-srv-eLm14s/p1w4.sock    26ms
+
+  registered  4 upstreams published, heartbeating every 5.0s
+
+  → acme registered with janus, 4 workers ready
+```
+
+The `janus 1.0` tag and the `registered` line are **read back** from the
+control plane after publishing — `GET /1.0` and `GET /1.0/apps/{id}`
+through the same client that registered — so the report states the
+registration as Janus holds it (the upstream count comes from the
+response body), never merely what this manager sent. A failed read-back
+is reported as a failure (`read-back failed (GET /1.0/apps/{id} → 404)`
+on the `registered` line, and the closing arrow drops the
+registered-with-janus claim), never as success. Per-worker boot times
+are spawn-to-`/ready`, humanized by the exported `scale` helper (SI
+prefixes from `T` down to `p`, fixed width: 3 digit characters, 1
+prefix character, the unit). Output is mono — no ANSI bytes — when
+`NO_COLOR` is set or stdout is not a TTY.
+
 ## The no-fork memory story
 
 Unicorn-era servers had a beautiful trick: load the app once in a master
@@ -483,7 +520,9 @@ a stub Janus `/1.0` control socket that records every call in order:
 readiness, drains, the dirty epoch (doorbell PUT before the ring's 204,
 sockets PUT before the 204), save coalescing, the identical-bytes no-op,
 boot-failure caching, prebuilt-artifact boots (loader-free workers,
-`import.meta.dir` preservation, loud build rejection), and shutdown.
+`import.meta.dir` preservation, loud build rejection), the startup
+report (`scale`, the read-back rule, honest read-back failure, mono
+piped output), and shutdown.
 
 ## Planned
 
@@ -498,8 +537,3 @@ shipped**; the rest of this README states only what is:
    the required-`!` rule on the bridge plane), a publish client with
    app-id plumbing (the manager holds `state.appId`; workers currently
    re-derive it by name), and membership-snapshot access.
-3. **Structured startup report** — composed from what the manager knows
-   plus read-backs of `GET /1.0` and `GET /1.0/apps/{id}`, so it reports
-   the registration as Janus holds it (control-plane surfaces: `/1.0`,
-   `/1.0/health`, `/1.0/apps[/{id}]`, `/1.0/tls/ask`, `/1.0/cache`,
-   `/1.0/hub`, `/1.0/apps/{id}/hub`).
