@@ -64,11 +64,31 @@ login in front of an unsecured app) lives in the Janus repository.
 
 ### Browser delivery
 
-The browser product needs:
+`<script type="text/rip">` compilation/loading and module/browser-safe
+package-graph handling are shipped and certified in CI: Node suites
+plus real-browser Playwright runs across Chromium, Firefox, and WebKit
+(`packages/browser-tests`) drive `processRipScripts` and the
+`assembleBundle` → `bootApp` → `launch` path end to end — SPA
+navigation, ETag revalidation, debug-gated source maps.
 
-- `<script type="text/rip">` compilation/loading;
-- module and browser-safe package graph handling;
-- integration with the app framework and development server.
+The remaining work is development-server integration:
+
+- a product surface that serves the page and bundle — today only the
+  certification fixture `packages/browser-tests/serve.mjs` serves
+  `index.html`/`bundle.json`;
+- the watch→browser transport (none exists in v4; the transport ruling
+  in [HMR.md](HMR.md) — WebSocket with a revision cursor — is built
+  new here);
+- `rip.browser` granularity: the flag is package-level, so
+  `@rip-lang/ui/browser` cannot travel while the package's Tailwind
+  half carries npm dependencies — subpath metadata, a package split,
+  or an assembly-time export filter needs an owner ruling;
+- CSS delivery.
+
+Production precompiled output (a CSP-clean path with no in-browser
+compiler) is deliberately deferred by owner leaning (2026-07-22: the
+compiler stays available on-the-fly; possibly a hybrid later); it does
+not block dev-server work.
 
 This delivery layer is distinct from compiler runtime `inline`/`import`
 emission.

@@ -37,9 +37,12 @@ B-list real-but-deferrable items.
       outage (one heartbeat closure per tick behind the blocked retry
       loop). Memory only, bounded by outage length.
 - [ ] `rip-mark` access log: surfacing the mark in an access log is
-      unbuilt future work. (The scrub itself is done and documented:
-      Janus's `ModifyResponse` deletes `Rip-Mark` from every client
-      response, and the micro-cache stores post-scrub bytes.)
+      unbuilt future work, and it is inherently Janus-side work — the
+      edge writes access logs (the logging contract in
+      packages/server/README.md). (The scrub itself is done and
+      documented: Janus's `ModifyResponse` deletes `Rip-Mark` from
+      every client response, and the micro-cache stores post-scrub
+      bytes.)
 
 ### janus
 
