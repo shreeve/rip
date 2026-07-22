@@ -1,6 +1,6 @@
 # Type audit — roadmap
 
-Internal build plan for the instrument. Runner: `runner.js`. Findings: `FINDINGS.md`.
+Internal build plan for the instrument. Runner: `runner.js`. Findings: `FINDINGS.md`. Hover rulings: `RULINGS.md`.
 
 ## Built
 
@@ -42,15 +42,44 @@ Coverage here is necessary, not sufficient — a production can be exercised whi
 
 Depends on nothing. Produces: the coverage number and the uncovered-rule list M3 consumes.
 
-## M3 — Corpus growth
+## M3 — Corpus rewrite
 
-*Not started.*
+*Planned in full; authoring not started.*
 
-Toward full coverage of the rules real code uses, driven by M2's gap list.
+Not additive growth: a REWRITE, executed as a strangler migration. The new corpus owns every production the grammar defines; the legacy fixtures (01–12) retire.
 
-New fixtures need no twins — both twin dimensions already return `n/a`.
+**The map.** Fifteen files from 20 (legacy keeps 01–12; the blocks coexist in `fixtures/` — filenames are KEYS, in `hover-pins.json` and in ledger citations, so nothing is renamed mid-migration; one optional atomic renumber-to-01 commit may close it).
 
-Depends on M2. Produces: fixtures. M1, M4, and M5 see only constructs the corpus contains, so their completeness is bounded here.
+| file | charter |
+| --- | --- |
+| `20-basics.rip` | program skeleton, all literals (strings, interpolation, heregex, regex), `this`, parentheticals, do-IIFE |
+| `21-operations.rip` | operators, invocation, arg lists, existence/presence |
+| `22-collections.rip` | objects, arrays, ranges, slices, splats, elisions, pick |
+| `23-assignments.rip` | every binding form — simple, compound, method, merge, destructured patterns/spreads/rests |
+| `24-conditionals.rip` | if/unless, switch/when, postfix forms, ternary |
+| `25-loops.rip` | `for` in all its forms, while/until, loop, comprehensions |
+| `26-exceptions.rip` | try/catch/finally, throw |
+| `27-functions.rip` | def, params (typed/default/splat), return, arrows |
+| `28-classes.rip` | class, super, statics, constructors, `new` forms |
+| `29-modules.rip` | import/export, every specifier form, `import.meta` |
+| `30-types.rip` | type aliases, interfaces, enums, generics, casts/`satisfies` |
+| `31-reactive.rip` | `:=`, `~=`, `=!`, effects, gates |
+| `32-components.rip` | component definition + render (structure, control flow, binds/events/refs/keys/slots), offer/accept |
+| `33-schema.rip` | field forms, defaults, optionals, computed, transforms |
+| `34-interactions.rip` | the adversarial tranche — emission reorder × repeated names, strings/comments inside frames, shapes minimized from real code |
+| `35-edges.rip` | reserved — only if residue productions survive the sweep-up |
+
+**Authoring.** In file order, 20 → 34: the first files set the conventions the rest imitate, and the order is a dependency ladder (each file reads using constructs already introduced) — a placement tiebreaker, not a law. Every coverage claim is verified through the gate (parse instrumented, confirm the reduction), never asserted. Grammar-dark families (loops, modules, operations) get minimal-honest coverage; the shape-starved ones (components, schema — grammar-covered yet the worst mapping territory in real code) get dense, real-shaped content. `34-interactions` has no slot — it grows as real-code sweeps surface shapes worth minimizing.
+
+**Oracles.** Line-aligned hand-written twins, written WITH the fixture, for `20-basics`, `21-operations`, `25-loops`, `27-functions`, `28-classes`, `29-modules`, `30-types`; analogy twins for `32-components` (TSX) and `33-schema` (zod), scoped to where the analogy is honest. Everything rip-native is pinned per RULINGS.md, which the components/schema files are gated on (offer/accept is parked there). Twins beyond the subset are M5's budget.
+
+**Negatives.** Inline in the family fixtures — no shadow error corpus. Every marker: head-line placement over a single-statement target, with mandatory expected code and reason (`# @ts-expect-error — TS2322: …`). Depends on the directive-placement and directive-scope findings landing first (see FINDINGS.md). One addition rides with the first negatives: an asserted-diagnostics lane — fixtures whose errors are UNSUPPRESSED, their exact diagnostics (code and position) asserted against the twin. Its fixtures live in `fixtures/errors/`, OUTSIDE the shared fixture walk (every other audit reads the flat `fixtures/` list — see `runner.js`'s single `fixtures` array), which is a necessity, not taste: verdict demands zero unsuppressed errors, and only this lane can see a mis-positioned diagnostic — everywhere else suppression consumes the evidence on the face.
+
+**Grammar credit** goes to positive fixtures mechanically: the gate walks the flat `fixtures/` list, and the error lane lives outside it, so an error fixture cannot cover a production even by accident — every production's home is a positive file whose charter names it, and retirement checks reason about the positive charters alone.
+
+**Retirement.** A legacy fixture retires only when, in one change: the gate shows zero coverage loss without it (needs a small runner enhancement first — per-fixture UNIQUE contribution; the cumulative `+N` cannot say what only one fixture provides); its distinctive mapping shapes exist in the new corpus; every ledger citation of it is updated (fixtures cited by open findings retire last); and its twin and pins leave with it.
+
+Depends on M2 (built), the directive findings, and RULINGS.md. Produces: the corpus — and M1, M4, and M5 see only constructs the corpus contains, so their completeness is bounded here.
 
 ## M4 — Spelling-invariance
 
