@@ -123,7 +123,7 @@ in the janus repo.
   before the handler runs; `GET /openapi.json` generates itself
 - **Middleware** — Koa-style `use` composition plus a built-in set:
   `cors`, `logger`, `compress`, `sessions` (signed or AES-256-GCM
-  encrypted), `csrf`, `secureHeaders`, `timeout`, `bodyLimit`, `htmlJson`
+  encrypted), `csrf`, `secureHeaders`, `timeout`, `htmlJson`
 - **Runs anywhere** — standalone `Bun.serve` on a port, or handed to a
   worker pool via `startHandler()`
 
