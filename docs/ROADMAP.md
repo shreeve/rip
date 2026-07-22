@@ -55,11 +55,12 @@ but it must not block direct-path package implementation and tests.
 
 The first-party library portfolio is ported: CSV, decimal, XML (rsx),
 X12, HTTP, time, worker-swarm, interactive scripting, source printing,
-AI/MCP, host provisioning (stamp), the database client (`rip-db` over
-duckdb-harbor, with its MCP server and CLI), and the authentication
-gate all ship with converted or new test suites. Each package earns
-its place through an independently runnable contract and current Rip
-types.
+AI/MCP, host provisioning (stamp), and the database client (`rip-db`
+over duckdb-harbor, with its MCP server and CLI) all ship with
+converted or new test suites. Each package earns its place through an
+independently runnable contract and current Rip types. Auth-wall
+functionality is Janus's job: the `guard` capability (edge-terminated
+login in front of an unsecured app) lives in the Janus repository.
 
 ### Browser delivery
 

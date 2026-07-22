@@ -53,10 +53,6 @@
         "@rip-lang/testing": "workspace:*",
       },
     },
-    "packages/gate": {
-      "name": "@rip-lang/gate",
-      "version": "0.0.0",
-    },
     "packages/highlight": {
       "name": "@rip-lang/highlight",
       "version": "4.0.0",
@@ -205,8 +201,6 @@
     "@rip-lang/db": ["@rip-lang/db@workspace:packages/db"],
 
     "@rip-lang/decimal": ["@rip-lang/decimal@workspace:packages/decimal"],
-
-    "@rip-lang/gate": ["@rip-lang/gate@workspace:packages/gate"],
 
     "@rip-lang/highlight": ["@rip-lang/highlight@workspace:packages/highlight"],
 
