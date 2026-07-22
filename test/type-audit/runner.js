@@ -1458,31 +1458,35 @@ async function abort(headline, reasons) {
 let gr = null;
 if (RUN_GRAMMAR) {
   const names = Parser().ruleNames;
-  const denom = [];
-  for (let i = 1; i < names.length; i++) if (names[i]) denom.push(i);
-  auditBanner('GRAMMAR GATE', `productions the corpus reduces · ${denom.length} rules · ${fixtures.length} fixtures`);
-  const seen = new Set();
-  for (const f of fixtures) {
-    const before = seen.size;
-    const p = Parser({ onReduce: (id) => seen.add(id) });
-    p.lexer = makeParserLexer(path.join(FIX, f));
-    try {
-      p.parse(fs.readFileSync(path.join(FIX, f), 'utf8'));
-      console.log(`    ${green('✓')} ${pad(f, NAME_W + 2)} ${dim(`+${seen.size - before} new rules (${seen.size} cumulative)`)}`);
-    } catch (e) {
-      console.log(`    ${red('✗')} ${pad(f, NAME_W + 2)} ${dim(`parse failed — ${String(e.message ?? e).split('\n')[0]}`)}`);
-    }
-  }
-  const uncovered = denom.filter((i) => !seen.has(i));
-  // Grouping key: the M3 manifest's OWNING FILE when MANIFEST.md exists — the
-  // decision record of which corpus file owns each construct's productions,
-  // with per-production overrides for bridges that carry another family's
-  // construct. The MEASUREMENT above is untouched; the manifest changes only
-  // how the report groups. A production the manifest fails to allocate paints
-  // red as UNALLOCATED — a grammar change demands an ownership decision, never
-  // a silent default — and a malformed manifest refuses rather than degrading.
-  // With no manifest (post-M3, once it is deleted), grouping is by LHS
-  // construct: the unit a fixture author thinks in.
+  // Productions no fixture can or should ever reduce, netted out of the
+  // denominator. This table is the GATE'S own record — part of the
+  // measurement, so it lives with the instrument and outlives the manifest,
+  // whose sections are grouping only. Two classes: LEXICALLY UNREACHABLE —
+  // the lexer mints TYPE_PARAMS only when the angle run's `=` is immediately
+  // followed by `component` on the same line, so the line-break layout
+  // variants of the assignment cross-product can never receive the token —
+  // and BANNED BY DESIGN — the emitter rejects a for loop that binds no
+  // variable, and the productions stay in the grammar as that error
+  // message's carrier. Self-policing against grammar drift: an excluded
+  // production a fixture reduces paints red (the exclusion claim is false),
+  // and a row naming no grammar production paints red (the row is stale), so
+  // a grammar change trims this table rather than being absorbed by it.
+  const EXCLUDED = new Map([
+    ['Assign → Assignable TYPE_PARAMS = TERMINATOR Expression', 'lexically unreachable — TYPE_PARAMS is minted only for same-line `= component`'],
+    ['Assign → Assignable TYPE_PARAMS = INDENT Expression OUTDENT', 'lexically unreachable — TYPE_PARAMS is minted only for same-line `= component`'],
+    ['ExportAssign → Identifier TYPE_PARAMS = TERMINATOR Expression', 'lexically unreachable — TYPE_PARAMS is minted only for same-line `= component`'],
+    ['ExportAssign → Identifier TYPE_PARAMS = INDENT Expression OUTDENT', 'lexically unreachable — TYPE_PARAMS is minted only for same-line `= component`'],
+    ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
+    ['For → FOR Range BY Expression Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
+  ]);
+  // The M3 manifest: grouping only — the decision record of which corpus file
+  // owns each construct's productions, with per-production overrides for
+  // bridges that carry another family's construct. The MEASUREMENT above and
+  // below is untouched by it. A production the manifest fails to allocate
+  // paints red as UNALLOCATED — a grammar change demands an ownership
+  // decision, never a silent default — and a malformed manifest refuses
+  // rather than degrading. With no manifest (post-M3, once it is deleted),
+  // grouping is by LHS construct: the unit a fixture author thinks in.
   const MANIFEST = path.join(HERE, 'MANIFEST.md');
   let owner = null;
   if (fs.existsSync(MANIFEST)) {
@@ -1506,6 +1510,27 @@ if (RUN_GRAMMAR) {
       process.exit(1);
     }
   }
+  const denom = [], excludedIdx = [];
+  for (let i = 1; i < names.length; i++) {
+    if (!names[i]) continue;
+    if (EXCLUDED.has(names[i])) excludedIdx.push(i); else denom.push(i);
+  }
+  const grammarNames = new Set(names.filter(Boolean));
+  const staleExcluded = [...EXCLUDED.keys()].filter((k) => !grammarNames.has(k));
+  auditBanner('GRAMMAR GATE', `productions the corpus reduces · ${denom.length} rules${excludedIdx.length ? ` (${excludedIdx.length} excluded)` : ''} · ${fixtures.length} fixtures`);
+  const seen = new Set();
+  for (const f of fixtures) {
+    const before = seen.size;
+    const p = Parser({ onReduce: (id) => seen.add(id) });
+    p.lexer = makeParserLexer(path.join(FIX, f));
+    try {
+      p.parse(fs.readFileSync(path.join(FIX, f), 'utf8'));
+      console.log(`    ${green('✓')} ${pad(f, NAME_W + 2)} ${dim(`+${seen.size - before} new rules (${seen.size} cumulative)`)}`);
+    } catch (e) {
+      console.log(`    ${red('✗')} ${pad(f, NAME_W + 2)} ${dim(`parse failed — ${String(e.message ?? e).split('\n')[0]}`)}`);
+    }
+  }
+  const uncovered = denom.filter((i) => !seen.has(i));
   const groupOf = (prod) => owner
     ? (owner.overrides.get(prod) ?? owner.constructs.get(prod.split(' → ')[0]) ?? 'UNALLOCATED')
     : prod.split(' → ')[0];
@@ -1518,6 +1543,13 @@ if (RUN_GRAMMAR) {
   console.log(`\n    ${bold('Coverage')} ${dim(`(exercised = reduced by at least one fixture)`)}`);
   const pct = ((100 * (denom.length - uncovered.length)) / denom.length).toFixed(1);
   console.log(`    ${(uncovered.length ? yellow : green)(String(denom.length - uncovered.length))} ${dim('/')} ${dim(String(denom.length))} ${dim(`productions (${pct}%)`)}`);
+  if (excludedIdx.length) {
+    console.log(`    ${dim(`${excludedIdx.length} excluded by the gate (unreachable or banned spellings) — netted from the denominator${VERBOSE ? '' : '; --v lists them'}`)}`);
+    if (VERBOSE) for (const i of excludedIdx) console.log(`        ${dim(names[i])} ${dim('·')} ${dim(EXCLUDED.get(names[i]))}`);
+  }
+  const falseExclusions = excludedIdx.filter((i) => seen.has(i));
+  for (const i of falseExclusions) console.log(`    ${red('✗')} ${red('excluded but reduced:')} ${names[i]} ${dim("— the exclusion claim is false; fix the gate's exclusion table")}`);
+  for (const k of staleExcluded) console.log(`    ${red('✗')} ${red('excluded row names no grammar production:')} ${k} ${dim("— stale; fix the gate's exclusion table")}`);
   if (groups.size) {
     const title = owner ? 'Uncovered, by owning file (MANIFEST.md)' : 'Uncovered, by construct';
     console.log(`\n    ${bold(title)} ${dim(`— the M3 queue; ${VERBOSE ? 'every production shown' : 'counts only, --v for every production'}`)}`);
@@ -1529,7 +1561,7 @@ if (RUN_GRAMMAR) {
       if (VERBOSE || g === 'UNALLOCATED') for (const r of rules) console.log(`        ${dim(r)}${owner?.parked.has(r) ? ' ' + yellow('· parked') : ''}`);
     }
   }
-  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, groups: groups.size, groupKind: owner ? 'files' : 'constructs', unallocated: groups.get('UNALLOCATED')?.length ?? 0 };
+  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, groups: groups.size, groupKind: owner ? 'files' : 'constructs', unallocated: groups.get('UNALLOCATED')?.length ?? 0, excluded: excludedIdx.length, badExclusions: falseExclusions.length + staleExcluded.length };
 }
 
 // ── the Mapping Audit (--map / --all): use-site identifier coverage, from the
@@ -2546,7 +2578,9 @@ if (gr) totalLine('Grammar', `${gr.total} productions: `
   + (gr.uncovered === 0
     ? green('every production exercised by the corpus')
     : `${green(`${gr.covered} exercised`)}${dim(' · ')}${yellow(`${gr.uncovered} uncovered`)} ${dim(`across ${gr.groups} ${gr.groupKind} — the M3 queue`)}`
-      + (gr.unallocated ? `${dim(' · ')}${red(`${gr.unallocated} UNALLOCATED`)} ${dim('— the manifest owes an ownership decision')}` : '')));
+      + (gr.unallocated ? `${dim(' · ')}${red(`${gr.unallocated} UNALLOCATED`)} ${dim('— the manifest owes an ownership decision')}` : ''))
+  + (gr.excluded ? `${dim(` · ${gr.excluded} excluded`)}` : '')
+  + (gr.badExclusions ? `${dim(' · ')}${red(`${gr.badExclusions} bad exclusion${gr.badExclusions === 1 ? '' : 's'}`)} ${dim("— fix the gate's exclusion table")}` : ''));
 // The Mapping Audit's flagged reads are EXPECTED red (the mapping gap), so
 // they read as a gauge, never a regression count: the total is the census, and
 // the missing-span clause is the only part that would signal something new.
