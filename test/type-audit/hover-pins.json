@@ -73,5 +73,8 @@
     "joined@58": "let joined: string",
     "first@64": "let first: string",
     "msg@70": "let msg: string"
+  },
+  "23-assignments.rip": {
+    "Chip@164": "let Chip: typeof Chip"
   }
 }

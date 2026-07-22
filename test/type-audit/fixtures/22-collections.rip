@@ -1,0 +1,98 @@
+# 22-collections.rip — objects, arrays, ranges, slices, splats, elisions,
+# pick: every collection shape — object and *{} map literals, sparse-array
+# elisions, range values, slice reads, array and object spreads, and the
+# pick family across plain, optional, and multiline heads
+
+# ── Object literals, and the `*{}` map literal ──
+
+person = { name: 'ada', role: 'engineer' }
+record = { type: 'row', class: 'wide' }
+profile: { name: string, nick?: string, tag?: string } = { name: 'grace' }
+maybePerson: { name: string, role: string } | null = person
+scores = *{ alpha: 1, beta: 2 }
+
+console.log('objects:', person.role, record.type, profile.name, scores.get('alpha'))
+
+# ── Arrays: dense, spread, and sparse-array elisions ──
+
+values = [10, 20, 30, 40, 50]
+extended = [0, ...values]
+sparse = [, 60, , 70]
+holes = [,,]
+padded = [80, ,]
+stacked = [90, ,
+  100, ,
+]
+ragged = [110, ,
+120]
+
+console.log('arrays:', extended.length, sparse.length, holes.length, padded.length, stacked.length, ragged.length)
+
+# ── Ranges — inclusive and exclusive — and slice reads ──
+
+upto = [1..5]
+strictly = [1...5]
+mid = values[1..3]
+tail = values[2..]
+front = values[..2]
+whole = values[..]
+
+console.log('ranges:', upto, strictly, mid, tail, front, whole)
+
+# ── Pick: shorthand, rename, defaults, keyword keys (tight braces), optional heads, multiline bodies ──
+
+duo = { ...person.{ name, role } }
+who = { ...person.{ name: label } }
+filled = { ...profile.{ nick = 'none' } }
+badged = { ...profile.{ tag: badge = 'core' } }
+branded = { ...record.{type, class} }
+opted = { ...maybePerson?.{ name } }
+tall = { ...person.{
+  name
+  role
+} }
+optTall = { ...maybePerson?.{
+  name
+  role
+} }
+wider = { ...person.{ name,
+  role } }
+
+console.log('picks:', duo, who, filled, badged, branded, opted, tall, optTall, wider)
+
+# ── Object spread: identifier, literal, parenthetical, member, soak, index, call, dammit, dynamic-import heads ──
+
+conf = { limits: { max: 9 } }
+maybeConf: { limits: { max: number } } | null = conf
+api = { fresh: -> { token: 'abc' } }
+makeDefaults = -> { retries: 2 }
+fetchDefaults = -> Promise.resolve({ ready: true })
+rows = [{ id: 1 }, { id: 2 }]
+
+clone = { ...person, copied: true }
+merged = { ...{ fresh: 1 }, stale: 0 }
+fallback = { ...(maybePerson ?? person) }
+capped = { ...conf.limits }
+soft = { ...maybeConf?.limits }
+firstRow = { ...rows[0] }
+secondRow = { ...rows[
+  1
+] }
+issued = { ...api.fresh() }
+defaulted = { ...makeDefaults(), audited: true }
+eager = { ...fetchDefaults! }
+
+console.log('spreads:', clone, merged, fallback, capped, soft, firstRow, secondRow, issued, defaulted, eager, { ...import('./22-collections.rip'), loaded: false })
+
+# ── Spread heads that need a class: `super()`, `super.method()`, and `this` ──
+
+class Row
+  base: -> { id: 0, shape: 'row' }
+
+class WideRow extends Row
+  base: -> { ...super(), width: 2 }
+  meta: -> { ...super.base(), noted: true }
+  dump: -> { ...this }
+
+wide = new WideRow()
+console.log('classes:', wide.base(), wide.meta(), wide.dump())

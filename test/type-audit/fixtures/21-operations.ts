@@ -87,7 +87,8 @@ let fetchNumber = function() { return Promise.resolve(7) }
 let awaited = await fetchNumber()
 let gotten = await fetchNumber()
 let bundle = await {
-  value: 9 }
+  value: 9,
+}
 let rawPath = String.raw`col\t${ten}`
 
 console.log('invoke:', loud, quiet, ran, awaited, gotten, bundle.value, rawPath)
@@ -99,8 +100,10 @@ let counterGenerator = function*() {
   yield
   yield* [2, 3]
   yield {
-    tag: 'end' }
-  return 'done' }
+    tag: 'end',
+  }
+  return 'done'
+}
 let collected = Array.from(counterGenerator())
 
 console.log('collected:', collected)
@@ -111,7 +114,8 @@ let classify = function(n: number, label: string | null = null) {
   if (n === 0) return 'zero'
   if (!(n > 0)) return 'negative'
   if (label == null) return 'unlabeled'
-  return label }
+  return label
+}
 
 console.log(classify(0), classify(-2), classify(3), classify(3, 'big'))
 

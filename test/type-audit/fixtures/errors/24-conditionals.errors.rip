@@ -1,0 +1,28 @@
+# 24-conditionals.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run type-audit --errors) asserts each one; @ts-nocheck quiets editors only.
+# @ts-nocheck
+
+text = 'abc'
+count = 42
+point = { x: 1 }
+
+wrongTernary: number = 'yes' if count > 0 else 0
+wrongDepth: number = 'deep' if count > 0 else
+  'shallow'
+wrongCompare = 'same' if text is count else 'not'
+wrongGuard: string = 'on'
+wrongGuard = 7 unless count > 0
+wrongBranch: number = 0
+wrongBranch = 'nope' if count > 0
+wrongToggle: boolean = true
+unless count > 0
+  wrongToggle = 'off'
+else
+  wrongToggle = 'on'
+wrongCase: number =
+  switch count
+    when 1, 2 then 'low'
+    else 'high'
+wrongProp = switch point.z
+  when 1 then 'one'
+  else 'none'

@@ -1,0 +1,19 @@
+# 22-collections.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run type-audit --errors) asserts each one; @ts-nocheck quiets editors only.
+# @ts-nocheck
+
+person = { name: 'ada' }
+list = [1, 2, 3]
+count = 42
+scores = *{ alpha: 1 }
+
+wrongElement = list[0].toUpperCase()
+wrongProperty = person.missing
+wrongIndex = list[person]
+wrongArraySpread = [...count]
+wrongIterable = [...person]
+wrongRange: string[] = [1..3]
+wrongSlice = list[0..count.length]
+wrongMapProp = scores.alpha
+wrongMapValue: string = scores.get('alpha')
+wrongPick: { name: number } = { ...person.{ name } }

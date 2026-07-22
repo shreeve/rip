@@ -86,6 +86,8 @@ Allocation principles: a production belongs to the construct it CARRIES, not its
 | `Invocation → SUPER Arguments`                 | 28-classes     | carries a super construct                 |
 | `Invocation → DYNAMIC_IMPORT Arguments`        | 29-modules     | carries a module construct                |
 | `Invocation → DYNAMIC_IMPORT DAMMIT Arguments` | 29-modules     | carries a module construct                |
+| `Assign → Assignable TYPE_PARAMS = Expression` | 32-components  | its sole carrier is a generic component target (`X<T> = component` — the lexer mints TYPE_PARAMS only there); covered by 23-assignments until 32 exists, then the spelling moves and 23 drops it |
+| `ExportAssign → Identifier TYPE_PARAMS = Expression` | 32-components  | same sole carrier, exported spelling |
 
 ## Parked
 

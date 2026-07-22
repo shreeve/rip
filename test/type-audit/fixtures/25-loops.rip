@@ -1,0 +1,159 @@
+# 25-loops.rip — the loop family: while/until in block, guarded, postfix,
+# and value spellings; loop and the counted loop; `for` over arrays (in),
+# objects (of), and iterators (as / as! / for await); comprehensions
+
+# ── while and until: the block forms ──
+
+count = 0
+while count < 3
+  count++
+fuse = 4
+until fuse is 0
+  fuse--
+
+console.log('blocks:', count, fuse)
+
+# ── Guarded blocks: `when` rides the head; the condition drives progress ──
+
+budget = 6
+evens = 0
+while budget-- > 0 when budget %% 2 is 0
+  evens++
+sand = 6
+tall = 0
+until sand-- is 0 when sand > 3
+  tall++
+
+console.log('guarded:', evens, tall)
+
+# ── while as a value: the loop collects each iteration's result ──
+
+countdown = 3
+held = while countdown > 0
+  countdown--
+  countdown
+
+console.log('held:', held)
+
+# ── Postfix while/until on an expression, plain and guarded ──
+
+tick = 0
+tick++ while tick < 3
+tock = 6
+tock-- until tock is 0
+cup = 6
+sips = 0
+sips++ while cup-- > 0 when cup %% 2 is 0
+jug = 6
+gulps = 0
+gulps++ until jug-- is 0 when jug > 2
+
+console.log('postfix:', tick, tock, sips, gulps)
+
+# ── Postfix while/until on a statement (`continue`), plain and guarded ──
+
+drain = [1, 2, 3]
+continue while drain.pop()?
+backlog = ['a', 'b']
+continue until backlog.shift() is undefined
+ticks = 3
+continue while ticks-- > 0 when ticks %% 2 is 0
+grains = 3
+continue until grains-- <= 0 when grains > 1
+
+console.log('drained:', drain.length, backlog.length, ticks, grains)
+
+# ── loop: the bare form runs until `break`; `loop n` counts with `it` ──
+
+spins = 0
+loop
+  spins++
+  if spins is 3
+    break
+waves = loop 3
+  it * 10
+
+console.log('loop:', spins, waves)
+
+# ── for…in over arrays: plain, guard, step, and the two guard/step orders ──
+
+scores = [3, 8, 5, 9]
+for score in scores
+  console.log('each:', score)
+for score in scores when score > 4
+  console.log('high:', score)
+for even in scores by 2
+  console.log('stepped:', even)
+for late, i in scores when i > 1 by 2
+  console.log('late:', late, i)
+for peak, j in scores by 2 when peak > 4
+  console.log('peak:', peak, j)
+
+# ── for…of over objects: keys, pairs, `own`, and guards ──
+
+ages: Record<string, number> = { ada: 36, grace: 45 }
+for name of ages
+  console.log('name:', name)
+for elder, age of ages when age > 40
+  console.log('elder:', elder, age)
+for own key of ages
+  console.log('own:', key)
+for own young, years of ages when years < 40
+  console.log('young:', young, years)
+
+# ── for…as: the iterator protocol, sync and async (`for await` / `as!`) ──
+
+pulses = ->
+  yield 2
+  yield 4
+  yield 6
+  'rest'
+for pulse as pulses()
+  console.log('pulse:', pulse)
+for strong as pulses() when strong > 2
+  console.log('strong:', strong)
+feed = ->
+  await Promise.resolve()
+  yield 10
+  yield 25
+  'done'
+for await bite as feed()
+  console.log('bite:', bite)
+for await big as feed() when big > 20
+  console.log('big:', big)
+for bang as! feed()
+  console.log('bang:', bang)
+for small as! feed() when small < 20
+  console.log('small:', small)
+
+# ── Comprehensions over for…in: map, guard, step, and the two orders ──
+
+nums = [1, 2, 3, 4]
+doubled = (n * 2 for n in nums)
+kept = (n for n in nums when n > 2)
+ranked = (n for n in nums by 2)
+guardStep = (n for n in nums when n > 1 by 2)
+stepGuard = (n for n in nums by 2 when n > 1)
+
+console.log('comprehend:', doubled, kept, ranked, guardStep, stepGuard)
+
+# ── Comprehensions over for…of and for…as, `own` and guards included ──
+
+keyList = (k for k of ages)
+elderList = (k for k, v of ages when v > 40)
+ownList = (k for own k of ages)
+youngList = (k for own k, v of ages when v < 40)
+louder = (p * 10 for p as pulses())
+several = (p for p as pulses() when p isnt 4)
+
+console.log('object:', keyList, elderList, ownList, youngList)
+console.log('iterator:', louder, several)
+
+# ── Async comprehensions: `for await`, and the `as!` spelling ──
+
+bites = (b for await b as feed())
+bigBites = (b for await b as feed() when b > 20)
+bangs = (b + 1 for b as! feed())
+smallBangs = (b for b as! feed() when b < 20)
+
+console.log('async:', bites, bigBites, bangs, smallBangs)

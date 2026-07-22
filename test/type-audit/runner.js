@@ -1363,7 +1363,9 @@ const pad = (s, n) => String(s).padEnd(n);
 // width, and every rule derives from it. No rule carries a hand-picked number:
 // two independently chosen widths agree only by luck, and stop agreeing the
 // moment a column moves.
-const NAME_W = 18;
+// Sized to the longest fixture name — a fixed width misaligns every column to
+// its right the moment a longer name lands. 18 is the floor.
+const NAME_W = Math.max(18, ...fixtures.map((f) => f.length));
 const DIMS = [['compiles', 10], ['directives', 12], ['verdict', 10], ['runtime', 9], ['twin', 8], ['strict', 8]];
 const RULE_W = NAME_W + 1 + DIMS.reduce((a, [, w]) => a + w, 0) + (DIMS.length - 1);
 
@@ -1466,9 +1468,9 @@ if (RUN_GRAMMAR) {
     p.lexer = makeParserLexer(path.join(FIX, f));
     try {
       p.parse(fs.readFileSync(path.join(FIX, f), 'utf8'));
-      console.log(`    ${green('✓')} ${pad(f, 20)} ${dim(`+${seen.size - before} new rules (${seen.size} cumulative)`)}`);
+      console.log(`    ${green('✓')} ${pad(f, NAME_W + 2)} ${dim(`+${seen.size - before} new rules (${seen.size} cumulative)`)}`);
     } catch (e) {
-      console.log(`    ${red('✗')} ${pad(f, 20)} ${dim(`parse failed — ${String(e.message ?? e).split('\n')[0]}`)}`);
+      console.log(`    ${red('✗')} ${pad(f, NAME_W + 2)} ${dim(`parse failed — ${String(e.message ?? e).split('\n')[0]}`)}`);
     }
   }
   const uncovered = denom.filter((i) => !seen.has(i));
@@ -1557,7 +1559,7 @@ if (RUN_MAP) {
       // silent: a shrinking denominator is exactly what the coverage line below
       // exists to make visible.
       skips.push(f);
-      console.log(`    ${yellow('skip')} ${pad(f, 20)} ${dim('does not compile — no face to walk: ' + ((e && e.message) || e))}`);
+      console.log(`    ${yellow('skip')} ${pad(f, NAME_W + 2)} ${dim('does not compile — no face to walk: ' + ((e && e.message) || e))}`);
       continue;
     }
     // Only `starts` is kept for the --v listing; `src` is not retained (nothing
@@ -1577,7 +1579,7 @@ if (RUN_MAP) {
     missing += scan.missingRows.length;
     for (const r of scan.missingRows) missingRows.push({ f, ...r });
     const flagged = scan.rows.length;
-    console.log(`    ${flagged === 0 ? green('✓') : yellow('•')} ${pad(f, 20)} ${dim(pad(scan.total + ' reads', 12))}`
+    console.log(`    ${flagged === 0 ? green('✓') : yellow('•')} ${pad(f, NAME_W + 2)} ${dim(pad(scan.total + ' reads', 12))}`
       + (flagged === 0 ? green('all placed') : yellow(`${flagged} unmapped`)));
   }
 
@@ -2074,7 +2076,7 @@ if (RUN_HOVER || RUN_TOKENS) {
   const probeOne = async (f, _i, lane = 0) => {
     const full = path.join(FIX, f);
     const src = fs.readFileSync(full, 'utf8');
-    if (!await compiles(full)) { hskip++; return { file: f, probe: null, line: `    ${yellow('skip')} ${pad(f, 20)} ${dim('does not compile — no face to probe')}` }; }
+    if (!await compiles(full)) { hskip++; return { file: f, probe: null, line: `    ${yellow('skip')} ${pad(f, NAME_W + 2)} ${dim('does not compile — no face to probe')}` }; }
 
     // This lane's own server and own oracle — never a neighbour's.
     const srv = pool[lane];
@@ -2121,7 +2123,7 @@ if (RUN_HOVER || RUN_TOKENS) {
     return {
       file: f,
       probe: { ...probe, tmap, members, survival },
-      line: `    ${green('✓')} ${pad(f, 20)} ${dim(`${pad(decls.length + ' decls', 10)}${RUN_TOKENS ? pad(probe.tokens.length + ' tokens', 12) : ''}${took}`)}`,
+      line: `    ${green('✓')} ${pad(f, NAME_W + 2)} ${dim(`${pad(decls.length + ' decls', 10)}${RUN_TOKENS ? pad(probe.tokens.length + ' tokens', 12) : ''}${took}`)}`,
     };
   };
 

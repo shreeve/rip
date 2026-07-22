@@ -1,0 +1,79 @@
+# 26-exceptions.rip — exception handling: every try shape (the block, the
+# inline expression, catch, finally), the identifier and bare catch
+# bindings, and throw in statement, indented-object, and expression positions
+# (the pattern bindings — catch {message}, catch [first] — are parked: the
+# lowering's minted binding stays unknown, so destructuring publishes
+# TS2339/TS2488 on every use — see FINDINGS.md and MANIFEST.md's Parked table)
+
+# ── try/catch: the classic block pair, an identifier binding ──
+
+parseConfig = (raw: string) ->
+  try
+    JSON.parse(raw)
+  catch error
+    console.log('parse failed:', error instanceof SyntaxError)
+    null
+
+console.log('config:', parseConfig('{"port":8080}'), parseConfig('not json'))
+
+# ── a handler-less try: the block alone, errors swallowed ──
+
+warmup: string | null = null
+try
+  warmup = JSON.parse('"ready"')
+
+console.log('warmup:', warmup)
+
+# ── a bare catch: no binding, recovery only ──
+
+tolerant = ->
+  try
+    JSON.parse('broken')
+  catch
+    'fallback'
+
+console.log('tolerant:', tolerant())
+
+# ── try/finally: cleanup without a handler ──
+
+closed = false
+readAll = ->
+  try
+    'contents'
+  finally
+    closed = true
+
+console.log('readAll:', readAll(), 'closed:', closed)
+
+# ── the full shape: catch and finally together ──
+
+settle = (risky: () => string) ->
+  outcome = 'pending'
+  try
+    outcome = risky()
+  catch failure
+    outcome = 'recovered'
+  finally
+    console.log('settled as', outcome)
+  outcome
+
+console.log(settle(-> 'delivered'), settle(-> throw new Error('nope')))
+
+# ── try as an expression: inline, and inline with a catch ──
+
+live = try JSON.parse('{"live":true}') as { live: boolean }
+backed: { live: boolean } = try JSON.parse('broken') catch e then { live: false }
+
+console.log('live:', live, 'backed:', backed)
+
+# ── throw: the indented-object payload, and the expression position ──
+
+reject = (code: number) ->
+  throw
+    code: code
+    retriable: code >= 500
+
+demand = (value: string | null) -> value ?? throw new Error('missing value')
+
+held = try reject(503) catch caught then caught
+console.log('held:', held, 'demand:', demand('present'))
