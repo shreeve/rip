@@ -1,7 +1,5 @@
-// 20-basics.errors.ts — the asserted-diagnostics twin, LINE-ALIGNED. tsgo's own
-// diagnostics on this file fix each expected code and line, and the flagged
-// token's position in the rip source fixes the expected column. The
-// pragma below quiets the EDITOR only — the lane strips it, and enforces it.
+// 20-basics.errors.ts — the line-aligned twin: tsgo's diagnostics here
+// derive each expected code and position; @ts-nocheck quiets editors only.
 // @ts-nocheck
 
 let wrongNumber: number = 'nope'

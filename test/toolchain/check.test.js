@@ -90,6 +90,40 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  test('the match operator publishes TS2531 on every use — an open gap, asserted as-is', () => {
+    // `text =~ /re/` lowers to `(_ = toMatchable(text).match(re))`, and the
+    // face's prelude types toMatchable `(v: any, allowNewlines?: boolean) =>
+    // string | null` — the null return is the deliberate loud-throw path for
+    // a multi-line receiver without /m, so the SIGNATURE is honest and the
+    // unguarded `.match` is not: every match expression publishes TS2531 on
+    // legal rip, permissive and strict alike. The regex-index sugar shares
+    // the emission spine (`regexIndex`, src/emitter.js) and flags identically.
+    //
+    // This is an OPEN gap, so this test asserts the current, wrong behavior
+    // on purpose — and says so. The day the emission is made null-clean, the
+    // TS2531 assertions below go red: that is the cue to invert this test to
+    // expect a clean pass, move `=~` and the regex-index spelling into the
+    // type audit's operations fixture (whose `verdict` dimension holds them
+    // from then on), and close the ledger row — not a regression.
+    // Deliberately NOT `test.failing`: under it any throw counts as a pass,
+    // so a dead server — or a checker that stopped reporting anything —
+    // would read as fixed. The liveness pair (a real TS2322 in the same
+    // workspace, asserted at its own position) keeps an empty run loud.
+    const dir = workspace({
+      'match.rip': "text = 'abc'\nfound = text =~ /b+/\ngrabbed = text[/b+/]\nconsole.log found, grabbed\n",
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('live.rip:1:1 - error TS2322');       // liveness: the checker really reports
+      // Each spelling's TS2531 is BOUND to its line, column left free — a
+      // partial fix on either spelling goes red, a mapped-column shift is not a fix.
+      expect(r.stdout).toMatch(/match\.rip:2:\d+ - error TS2531/);     // `=~` — TS2531 on a legal match
+      expect(r.stdout).toMatch(/match\.rip:3:\d+ - error TS2531/);     // `text[/re/]` — same root, same flag
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
   test('a render branch body and a loop row are type-checked through the typed factory params', () => {
     // A branch/loop body lowers to a block factory; the face types the
     // factory's self param `: this` (carried into the handle's p() by

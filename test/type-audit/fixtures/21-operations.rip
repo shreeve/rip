@@ -1,0 +1,132 @@
+# 21-operations.rip — operators, invocation, arg lists, existence/presence:
+# every operator family (arithmetic, bitwise, comparison, logic, relation,
+# update, unary, await/yield), and every call shape from explicit parens to
+# implicit, optional, do, dammit, tagged, and spread arguments
+
+# ── Arithmetic: + - * /, floor division //, true modulo %%, power **, unary +/- ──
+
+ten = 10
+three = 3
+arithmetic = ten + three * 2 - 4 / 2
+floored = ten // three
+modulo = -ten %% three
+raised = ten ** 2
+numeric = +'42'
+
+console.log('arithmetic:', arithmetic, floored, modulo, raised, numeric)
+
+# ── Bitwise and shifts: & | ^ ~ << >> >>> ──
+
+masked = ten & 6
+merged = ten | 1
+toggled = ten ^ 3
+inverted = ~ten
+shifted = ten << 2 >> 1 >>> 0
+
+console.log('bits:', masked, merged, toggled, inverted, shifted)
+
+# ── Comparison and logic: symbolic and word spellings ──
+# (the match operator =~ is parked: its emission publishes TS2531 on
+# every use — see FINDINGS.md)
+
+bigger = ten > three
+looser = ten >= 10 and three <= 3
+same = ten is 10
+differ = ten isnt three
+negated = not (ten < three)
+both = ten > 0 && three > 0
+either = false || 'fallback'
+
+console.log('compare:', bigger, looser, same, differ, negated, both, either)
+
+# ── Relations and unary words: in, of, instanceof, typeof, delete ──
+
+names = ['ada', 'grace']
+listed = 'ada' in names
+keyed = 'host' of { host: 1 }
+arrayish = names instanceof Array
+kindOf = typeof ten
+bag: Record<string, number> = { a: 1, b: 2 }
+removed = delete bag.a
+
+console.log('relation:', listed, keyed, arrayish, kindOf, removed)
+
+# ── Update operators: postfix and prefix ──
+
+counter = 0
+counter++
+counter--
+++counter
+--counter
+console.log('counter:', counter)
+
+# ── Existence ? and presence ?! — and the soak family ?. ?.[ ?.( ──
+
+port: number | null = null
+chosen = port ?? 8080
+exists = port?
+config: { host: string, retries?: number } | null = { host: 'local' }
+hostname = config?.host
+present = hostname?!
+retries = config?.retries ?? 0
+maybeList: number[] | null = [5, 6]
+first = maybeList?.[0]
+scale: ((n: number) => number) | null = (n: number) -> n * 2
+scaled = scale?.(21) ?? 42
+
+console.log('presence:', chosen, exists, hostname, present, retries, first, scaled)
+
+# ── Invocation: explicit parens, the implicit spelling, do, dammit, tagged ──
+
+greet = (name: string) -> "hi #{name}"
+loud = greet('ada').toUpperCase()
+quiet = greet 'grace'
+answer = -> 42
+ran = do answer
+fetchNumber = -> Promise.resolve(7)
+awaited = await fetchNumber()
+gotten = fetchNumber!
+bundle = await
+  value: 9
+rawPath = String.raw"col\t#{ten}"
+
+console.log 'invoke:', loud, quiet, ran, awaited, gotten, bundle.value, rawPath
+
+# ── yield: bare, valued, `yield from`, and the indented-object body ──
+
+counterGenerator = ->
+  yield 1
+  yield
+  yield from [2, 3]
+  yield
+    tag: 'end'
+  'done'
+collected = Array.from(counterGenerator())
+
+console.log('collected:', collected)
+
+# ── Return guards: and/or/?? short-circuit into a statement return ──
+
+classify = (n: number, label: string | null = null) ->
+  n is 0 and return 'zero'
+  n > 0 or return 'negative'
+  label ?? return 'unlabeled'
+  label
+
+console.log(classify(0), classify(-2), classify(3), classify(3, 'big'))
+
+# ── Arg lists: the indented block, the line-split tail, and spread args ──
+
+sum3 = (x: number, y: number, z: number) -> x + y + z
+stacked = sum3(
+  1
+  2
+  3
+)
+mixed = sum3 4,
+  5
+  6
+values = [7, 8]
+spread = Math.max(9, ...values)
+
+console.log('args:', stacked, mixed, spread)

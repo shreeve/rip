@@ -1,7 +1,5 @@
-# 20-basics.errors.rip — the asserted-diagnostics lane, basics flavor. Every error
-# below is UNSUPPRESSED and the Diagnostics Lane (bun run type-audit --errors)
-# asserts each published diagnostic's code AND position against the twin. The
-# pragma below quiets the EDITOR only — the lane strips it, and enforces it.
+# 20-basics.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run type-audit --errors) asserts each one; @ts-nocheck quiets editors only.
 # @ts-nocheck
 
 wrongNumber: number = 'nope'
