@@ -6906,7 +6906,14 @@ class Emitter {
               if (gate.key === null) {
                 this.b.emit(`'${gate.path}'`);
               } else {
-                this.b.emit(`{ path: '${gate.path}', key: (params, query) => `);
+                // The key fn is minted scaffold — its params carry explicit
+                // face-only `any` (the tsScaffoldAny doctrine) so a strict
+                // workspace never inherits implicit-any noise from them.
+                this.b.emit(`{ path: '${gate.path}', key: (params`);
+                if (this.ts) this.b.tsOnly(() => this.b.emit(': any'));
+                this.b.emit(', query');
+                if (this.ts) this.b.tsOnly(() => this.b.emit(': any'));
+                this.b.emit(') => ');
                 this.mark(gate.node, 'key', () => {
                   this.mark(gate.key, '$self', () => this.b.emit(gate.keyCode));
                 });

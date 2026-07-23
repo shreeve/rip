@@ -156,15 +156,3 @@ moduleUrl = import.meta.url
 tagTarget = -> new.target?.name ?? 'called plain'
 
 console.log('from file url:', moduleUrl.startsWith('file:'), tagTarget())
-
-# ── Generic component declaration: the one TYPE_PARAMS assignment ──
-# (the carried and indented TYPE_PARAMS spellings are parked: the lexer mints
-# TYPE_PARAMS only for a same-line `= component` head — see MANIFEST.md)
-
-Chip<TLabel extends string> = component
-  @label?: TLabel
-
-  render
-    span 'chip'
-
-console.log('generic component:', typeof Chip)

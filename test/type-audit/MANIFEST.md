@@ -137,7 +137,7 @@ The largest block is the export-of-X family: an `Export`/`ExportAssign` producti
 | `ExportAssign → Identifier TYPE EFFECT Expression` | 31-reactive | export-of-X: annotated effect, exported |
 | `ExportAssign → Identifier TYPE EFFECT TERMINATOR Expression` | 31-reactive | export-of-X: annotated effect, exported |
 | `ExportAssign → Identifier TYPE EFFECT Block` | 31-reactive | export-of-X: annotated effect, exported |
-| `Assign → Assignable TYPE_PARAMS = Expression` | 32-components  | its sole carrier is a generic component target (`X<T> = component` — the lexer mints TYPE_PARAMS only there); covered by 23-assignments until 32 exists, then the spelling moves and 23 drops it |
+| `Assign → Assignable TYPE_PARAMS = Expression` | 32-components  | its sole carrier is a generic component target (`X<T> = component` — the lexer mints TYPE_PARAMS only there) |
 | `ExportAssign → Identifier TYPE_PARAMS = Expression` | 32-components  | same sole carrier, exported spelling |
 
 ## Parked

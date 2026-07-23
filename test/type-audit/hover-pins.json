@@ -74,11 +74,22 @@
     "first@64": "let first: string",
     "msg@70": "let msg: string"
   },
-  "23-assignments.rip": {
-    "Chip@164": "let Chip: typeof Chip"
-  },
   "31-reactive.rip": {
     "pulse@104": "let pulse: number",
     "pulse@106": "let pulse: number"
+  },
+  "32-components.rip": {
+    "Badge@13": "const Badge: typeof Badge",
+    "Field@26": "let Field: typeof Field",
+    "Roster@42": "let Roster: typeof Roster",
+    "Panel@73": "const Panel: typeof Panel",
+    "Chip@91": "let Chip: typeof Chip",
+    "Options@97": "const Options: typeof Options",
+    "Picker@105": "let Picker: typeof Picker",
+    "Routed@118": "let Routed: typeof Routed",
+    "Give@134": "let Give: typeof Give",
+    "Take@140": "let Take: typeof Take",
+    "Quiet@148": "let Quiet: typeof Quiet",
+    "Terse@156": "let Terse: typeof Terse"
   }
 }

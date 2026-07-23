@@ -2,7 +2,7 @@
 
 The decided answers where no TypeScript oracle exists: the render DSL, schema bodies, rip's reactive vocabulary — and the semantic-token cases where rip's spelling and its lowering disagree.
 
-**This file is the intent; the pins are the measurement.** `hover-pins.json` records what the editor serves, reviewed against this file; a fixture comment beside a governed line cites its row here. A pin diverging from a ruling is either an unimplemented target (the pin asserts the interim) or a wrong pin — never an ambiguous ruling. Rulings change here first; pins follow, never the reverse.
+**This file is the intent; the pins are the measurement.** `hover-pins.json` records what the editor serves at top-level declarations, `ruled-pins.json` at the RULINGS-governed in-body positions (the Hover Audit's `ruled` gauge), both reviewed against this file; a fixture comment beside a governed line cites its row here. A pin diverging from a ruling is either an unimplemented target (the pin asserts the interim) or a wrong pin — never an ambiguous ruling. Rulings change here first; pins follow, never the reverse.
 
 ## Principles
 
@@ -28,20 +28,27 @@ The declaration hovers here have an honest interim that is not silence: the plai
 
 ## Components / render
 
+Measured 2026-07-23 over 32-components (the `ruled` gauge, ruled-pins.json). Two findings hold the red pins: the render-DSL finding (positions with no user symbol serve minted scaffold — the cover's `this`, `_elN` locals, the `__bind_value__` slot, the gate key-fn's params) and the member-wrapper finding (member declarations and gate targets serve the container wrapper where the value-type answer is the only truthful interim).
+
 | position | ruling (target) | interim |
 | --- | --- | --- |
-| `ref` in `input ref: inputEl` | `ref — writes <ElementType> into inputEl` (the user's own binding name) | null pin |
-| the name after `ref:` | the state binding, `<ElementType> \| null` | measure, then pin |
-| `key:` in a render loop | `key: string \| number — row identity` | null pin |
-| `slot` | `slot — the component's children`, typed where expressible | null pin |
-| element tag (`div`, `input`) | intrinsic element hover, TSX-style | null pin |
-| attr/prop name | the prop's type | measure, then pin |
-| event word (`click`) | the handler signature, event type included | measure, then pin |
-| bind target (`value` in `value <=> count`) | `value <=> — two-way bind, <prop type>` | null pin |
-| the name in a bind (`count`) | its VALUE type — never the wrapper | measure, then pin |
+| `ref` in `input ref: inputEl` | `ref — writes <ElementType> into inputEl` (the user's own binding name) | null pin — today the cover's `this`; the render-DSL finding |
+| the name after `ref:` | the state binding, `<ElementType> \| null` | null pin — today the cover's `this`; the render-DSL finding |
+| `key:` in a render loop | `key: string \| number — row identity` | null pin — today a minted scaffold local; the render-DSL finding |
+| `slot` | `slot — the component's children`, typed where expressible | null pin — today the cover's `this`; the render-DSL finding |
+| element tag (`div`, `input`) | intrinsic element hover, TSX-style | null pin — today the cover's `this`; the render-DSL finding |
+| attr name on an intrinsic (`class:`) | the prop's type | null pin — today the cover's `this`; the render-DSL finding |
+| prop name at a component use (`label:`) | the prop's type | pinned as measured — the props surface's declared type; the bind-slot arm rides the union by design |
+| event word (`click`) | the handler signature, event type included | null pin — today the cover's `this`; the render-DSL finding |
+| bind target (`value` in `value <=> count`) | `value <=> — two-way bind, <prop type>` | null pin — today the minted `__bind_value__` slot; the render-DSL finding |
+| the name in a bind (`count`) | its VALUE type — never the wrapper | null pin — today the bind cover's `__bind_value__`; the render-DSL finding |
 | render loop variable at a read | plain inferred type | blocked on the identifier-read finding |
-| `ctx` (branch factory param) | plain inferred type | measure, then pin |
-| component name at a use site | the component's signature (props) | measure, then pin |
+| member reads in branch/loop bodies (the factory's `ctx` is minted — no source position carries it) | plain inferred type | blocked on the identifier-read finding |
+| member declaration (state, computed, readonly, prop, ref cell) | minted kind, value-first — `(state) people: string[]` | null pin — the container wrapper is a leak (member-wrapper finding); the value-type answer is the only truthful interim |
+| gate target name (`stats <~ …`) | minted kind, value-first — the kind label undecided | null pin — wrapper leak; the member-wrapper finding |
+| gate operator `<~` and `@app.data` path segments | silence | pinned null — green, measured 2026-07-23 |
+| gate key (`params.id` / `@query.tab`) | plain inferred type | null pin — today the minted key-fn's own param; the render-DSL finding |
+| component name at a use site | the component's signature (props) | pinned null — green, measured 2026-07-23; the pin asserts the interim |
 | `offer` / `accept` | **PARKED** — model not settled; minimal grammar coverage, no pin | no pin |
 
 ## Schema

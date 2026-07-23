@@ -1,0 +1,161 @@
+# 32-components.rip — the component vocabulary: definition (plain, extends,
+# generic — both TYPE_PARAMS spellings live here per MANIFEST.md's Overrides),
+# typed props, render structure and control flow, binds, events, refs, keys,
+# slot, gates, and offer/accept. The TSX twin covers the JSX-analogous surface
+# only (ROADMAP.md, Oracles); gates, offer/accept, and the `<=>` channel have
+# no honest TSX spelling and are absent from it. Hover targets for render-DSL
+# and member positions are ruled in RULINGS.md (Components / render); their
+# in-body pins live in ruled-pins.json. Negatives pair in
+# fixtures/errors/32-components.errors.rip under the Diagnostics Lane.
+
+# ── Definition + typed props + render structure ──
+
+export Badge = component
+  @label: string
+  @tone?: 'info' | 'warn' := 'info'
+
+  shade ~= if tone is 'warn' then '#a60' else '#06f'
+
+  render
+    span class: "badge #{tone}", style: "color: #{shade}"
+      = label
+
+# `component extends <tag>` — rest props forward onto the first <input> the
+# render creates; the intrinsic bind (`value <=> value`) rides the tag.
+
+Field = component extends input
+  @label?: string
+  @value?: string := ''
+  @error?: string
+
+  render
+    div
+      if label
+        label label
+      input
+        value <=> value
+      if error
+        div error
+
+# ── Render control flow (if/unless/switch/for), events, refs, keys, slot ──
+
+Roster = component
+  @title?: string
+  people := ['Ada', 'Grace', 'Alan']
+  status := 'open'
+  query := ''
+  inputEl: HTMLInputElement | null := null
+  cap =! 3
+
+  bump: (e) -> p(e.clientX)
+
+  render
+    section
+      h1 title
+      span "#{cap} max"
+      input ref: inputEl
+        value <=> query
+      button @click: @bump, 'Inspect'
+      button @click: ((e) -> p(e.pointerType)), 'Probe'
+      unless people.length
+        p 'Nobody here'
+      switch status
+        when 'open' then span 'Open'
+        when 'closed' then span 'Closed'
+        else span 'Unknown'
+      ul
+        for person in people
+          li key: person, person
+      slot
+
+# ── Component use sites: props, two-way binds, children into slot ──
+
+export Panel = component
+  text := ''
+  count := 0
+
+  render
+    div
+      Field
+        label: 'Name'
+        value <=> text
+      Badge label: "#{count} clicks", tone: 'info'
+      Roster title: 'Team'
+        em 'from the panel slot'
+
+# ── Generic components: the two TYPE_PARAMS spellings (plain and exported).
+# The carried/indented layout variants can never receive the token — the
+# lexer mints TYPE_PARAMS only for a same-line `= component` head (the
+# grammar gate's own exclusion table) ──
+
+Chip<TLabel extends string> = component
+  @label?: TLabel
+
+  render
+    span 'chip'
+
+export Options<TValue extends string> = component
+  @options?: TValue[] := []
+
+  render
+    div
+      for opt in options
+        span key: opt, opt
+
+Picker = component
+  render
+    div
+      Chip label: 'alpha'
+      Options options: ['left', 'right']
+
+# ── Gates: every form — bare path, called path, keyed path, each with and
+# without an annotation. A gate exists only as a direct component body line;
+# its target stays private and its editor answers are ruled in RULINGS.md
+# (Components / render). A gated component is route-mounted: the face
+# declares `mount: never` and a private constructor (the negatives assert
+# both — fixtures/errors/32-components.errors.rip) ──
+
+Routed = component
+  stats <~ @app.data.stats
+  flags <~ @app.data.flags()
+  row <~ @app.data.rows(params.id)
+  user: { name: string } <~ @app.data.user
+  mode: string <~ @app.data.mode()
+  entry: number <~ @app.data.entries(@query.tab)
+
+  render
+    div
+      = user.name
+      span "#{mode}: #{entry}"
+
+# ── offer / accept: minimal grammar coverage only — the channel's model is
+# PARKED (RULINGS.md, Components / render: no pin lands while it is open) ──
+
+Give = component
+  offer theme := 'dark'
+
+  render
+    div 'give'
+
+Take = component
+  accept theme
+
+  render
+    span 'take'
+
+# ── render Expression (the block-less spelling): a logic-only component ──
+
+Quiet = component
+  note := 'silent'
+
+  render null
+
+# The trailing semicolon carries `ComponentBody → ComponentBody TERMINATOR`,
+# the 20-basics `done = 'basics';` idiom at component-body level.
+
+Terse = component
+  render null;
+
+console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel)
+console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse)
+console.log('rip-native constructs:', (typeof Routed is 'function'), (typeof Give is 'function'), (typeof Take is 'function'))

@@ -260,6 +260,17 @@ const HOVERS = path.join(HERE, 'hover-pins.json');
 // hover-pins.json: reviewed measurements, gated on RULINGS.md, asserting the
 // interim where a ledger row holds the target.
 const ERROR_PINS = path.join(HERE, 'error-pins.json');
+// The Hover Audit's RULINGS-governed IN-BODY positions (render-DSL words,
+// component member declarations, gate spellings) — positions declsOf cannot
+// reach, listed explicitly per fixture: 1-based line, 0-based character, the
+// token at that position (source-integrity: a pin whose token no longer sits
+// there is a rotted pin and fails the coverage gate), and the expected hover
+// (`null` = ruled silence / an unserved target's interim; text = a reviewed
+// truthful interim). Same discipline as hover-pins.json and error-pins.json:
+// reviewed measurements, gated on RULINGS.md (Components / render), asserting
+// the interim where a ledger row holds the target — the `ruled` gauge below
+// reports divergences red by agreement, soft, like the silence gauge.
+const RULED_PINS = path.join(HERE, 'ruled-pins.json');
 const ARGV = process.argv.slice(2);
 // ── flags. THE COMMAND IS THE DOCUMENTATION. Every audit lives in this
 // table, the default one included, and it is the only place that knows an audit
@@ -320,7 +331,9 @@ const AUDITS = [
     blurb: 'hover every top-level declaration through the editor server',
     judge: 'the hand-written .ts/.tsx twin (a real oracle), falling back to hover-pins.json\n'
          + 'where rip-native constructs have no twin — a baseline, so re-pin it carelessly\n'
-         + 'and it will certify whatever the editor currently emits',
+         + 'and it will certify whatever the editor currently emits; ruled-pins.json adds\n'
+         + 'the RULINGS-governed IN-BODY positions (render-DSL words, member declarations,\n'
+         + 'gate spellings) — the `ruled` gauge, red by agreement while their findings are open',
   },
   {
     key: 'token', flag: '--token', name: 'Token Audit',
@@ -2119,6 +2132,9 @@ if (RUN_ERRORS) {
 }
 
 const PROBES = new Map();   // file → { decls, hovers, tokens, tmap }
+// RULINGS-governed in-body hover positions, loaded once for the probe pass and
+// the coverage gate alike (see RULED_PINS above for the shape and discipline).
+const ruledPins = fs.existsSync(RULED_PINS) ? JSON.parse(fs.readFileSync(RULED_PINS, 'utf8')) : {};
 let hskip = 0;
 if (RUN_HOVER || RUN_TOKENS) {
   pool = await poolP;
@@ -2223,8 +2239,15 @@ if (RUN_HOVER || RUN_TOKENS) {
               .map((text, line) => (/^~>/.test(text) ? line : -1)).filter((l) => l >= 0)
               .map(async (line) => ({ line, hover: await srv.hover(uri, { line, character: 0 }) })))
           : [];
+        // RULINGS-governed in-body positions (ruled-pins.json) — probed on the
+        // same settled document, after the same readiness wait, so a null is
+        // the position's real answer, not an unbuilt program's.
+        const ruled = RUN_HOVER
+          ? await Promise.all((ruledPins[f] ?? []).map(async (rp) =>
+              ({ ...rp, hover: await srv.hover(uri, { line: rp.line - 1, character: rp.character }) })))
+          : [];
         const tokens = RUN_TOKENS ? await srv.tokens(uri) : null;
-        return { decls, hovers, tokens, silent };
+        return { decls, hovers, tokens, silent, ruled };
       }),
       twinBase ? twin.hoverTwin(path.join(FIX, twinBase)).catch(() => null) : Promise.resolve(null),
     ]);
@@ -2300,6 +2323,18 @@ if (RUN_HOVER || RUN_TOKENS) {
       if (p.hovers.length !== p.decls.length) gaps.push(`${f}: ${p.decls.length} declarations but ${p.hovers.length} hover answers`);
       const dead = p.hovers.filter((h) => h == null).length;
       if (dead) gaps.push(`${f}: ${dead} hover probe(s) returned no answer at all`);
+      // Ruled pins are positional, so they rot when the fixture shifts: every
+      // pin's token must still sit at its (line, character), and every pin
+      // must have been probed — a rotted or dropped pin is a coverage failure,
+      // never a silent shrink of the ruled denominator.
+      const pins = ruledPins[f] ?? [];
+      if ((p.ruled?.length ?? 0) !== pins.length) gaps.push(`${f}: probed ${p.ruled?.length ?? 0} ruled positions, ruled-pins.json lists ${pins.length}`);
+      const srcLines = src.split('\n');
+      for (const rp of pins) {
+        if ((srcLines[rp.line - 1] ?? '').slice(rp.character, rp.character + rp.token.length) !== rp.token) {
+          gaps.push(`${f}: ruled pin \`${rp.token}\` not at ${rp.line}:${rp.character} — the fixture moved under the pin (re-measure and re-pin)`);
+        }
+      }
     }
     if (RUN_TOKENS && (!p.tokens || !p.tokens.length)) gaps.push(`${f}: no semantic tokens returned`);
   }
@@ -2448,6 +2483,18 @@ if (RUN_HOVER) {
     prow('silence', silentRows.length - silentLeaks.length, silentLeaks.length ? red : green,
       `of ${silentRows.length} ruled-silent bare ~> positions serve null${silentLeaks.length ? ' — red by agreement: the open bare-effect finding (FINDINGS.md)' : ''}`);
   }
+  // The `ruled` gauge — RULINGS-governed in-body positions (ruled-pins.json:
+  // render-DSL words, member declarations, gate spellings) must serve their
+  // pinned answer: null where the ruling's interim is silence, text where a
+  // truthful interim is pinned. EXPECTED RED while the render-DSL and
+  // member-wrapper findings are open — the server serves scaffold symbols and
+  // container wrappers at positions ruled otherwise. Soft, like `silence`.
+  const ruledRows = [...PROBES].flatMap(([file, p]) => (p.ruled ?? []).map((r) => ({ file, ...r })));
+  const ruledDiverging = ruledRows.filter((r) => (r.expect ?? null) !== (r.hover ?? null));
+  if (ruledRows.length) {
+    prow('ruled', ruledRows.length - ruledDiverging.length, ruledDiverging.length ? red : green,
+      `of ${ruledRows.length} RULINGS-governed in-body positions serve their pin${ruledDiverging.length ? ' — red by agreement: the render-DSL and member-wrapper findings (FINDINGS.md)' : ''}`);
+  }
 
   if (gaps.length) {
     console.log(`\n    ${bold('Gaps — hover ≠ tsgo twin on a comparable type')} ${dim('(after quote / keyword / union-order normalization)')}`);
@@ -2469,6 +2516,14 @@ if (RUN_HOVER) {
   if (silentLeaks.length) {
     console.log(`\n    ${bold('Ruled-silent positions serving an answer')} ${dim('(bare ~> — RULINGS.md, Reactive; red by agreement while the bare-effect finding is open)')}`);
     for (const s of silentLeaks) console.log(`      ${red('✗')} ${s.file}:${s.line + 1}  ${dim(`→ ${s.hover}`)}`);
+  }
+  if (ruledDiverging.length) {
+    console.log(`\n    ${bold('Ruled positions diverging from their pins')} ${dim('(RULINGS.md, Components / render; red by agreement while the render-DSL and member-wrapper findings are open)')}`);
+    for (const r of ruledDiverging) {
+      console.log(`      ${red('✗')} ${r.file}:${r.line}:${r.character} ${bold(r.token)} ${dim(`[${r.rule}]`)}`);
+      console.log(`          ${dim('pin')} ${green(JSON.stringify(r.expect ?? null))}`);
+      console.log(`          ${dim('now')} ${yellow(JSON.stringify(r.hover ?? null))}`);
+    }
   }
   if (VERBOSE) for (const [label, rowset] of [['rip-native (expected divergences — twin uses React/zod)', natives], ['pinned-only (no twin symbol)', pinnedOnly]]) {
     if (!rowset.length) continue;

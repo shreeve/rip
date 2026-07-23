@@ -13863,7 +13863,13 @@ ${pad ?? ""}`);
               if (gate.key === null) {
                 this.b.emit(`'${gate.path}'`);
               } else {
-                this.b.emit(`{ path: '${gate.path}', key: (params, query) => `);
+                this.b.emit(`{ path: '${gate.path}', key: (params`);
+                if (this.ts)
+                  this.b.tsOnly(() => this.b.emit(": any"));
+                this.b.emit(", query");
+                if (this.ts)
+                  this.b.tsOnly(() => this.b.emit(": any"));
+                this.b.emit(") => ");
                 this.mark(gate.node, "key", () => {
                   this.mark(gate.key, "$self", () => this.b.emit(gate.keyCode));
                 });
