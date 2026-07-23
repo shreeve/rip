@@ -253,6 +253,13 @@ const FIX = path.join(HERE, 'fixtures');
 // audit's denominator, and tsconfig.json excludes it from the twin type-check.
 const ERRD = path.join(FIX, 'errors');
 const HOVERS = path.join(HERE, 'hover-pins.json');
+// The Diagnostics Lane's pinned expectations — ADDITIVE per error pair, for
+// exactly the diagnostics no honest twin line can spell (a lowering's second
+// publish). Rows the twin CAN judge stay derived; a pin that duplicates a
+// derived row is flagged, never silently merged. Same discipline as
+// hover-pins.json: reviewed measurements, gated on RULINGS.md, asserting the
+// interim where a ledger row holds the target.
+const ERROR_PINS = path.join(HERE, 'error-pins.json');
 const ARGV = process.argv.slice(2);
 // ── flags. THE COMMAND IS THE DOCUMENTATION. Every audit lives in this
 // table, the default one included, and it is the only place that knows an audit
@@ -300,7 +307,9 @@ const AUDITS = [
     blurb: 'the corpus\'s negatives — unsuppressed error fixtures, every diagnostic asserted by code and position',
     judge: 'the twin\'s OWN tsgo diagnostics — TypeScript\'s answer on the LINE-ALIGNED twin\n'
          + 'fixes each expected code and line, and the flagged token\'s place in the rip\n'
-         + 'source fixes the expected column. ALL of the M3 corpus\'s negative tests live\n'
+         + 'source fixes the expected column; error-pins.json adds the diagnostics no\n'
+         + 'honest twin line can spell (a lowering\'s second publish), additively and\n'
+         + 'never shadowing a derived row. ALL of the M3 corpus\'s negative tests live\n'
          + 'here, in fixtures/errors/ (one error pair per family), OUTSIDE the shared\n'
          + 'fixture walk: positive fixtures publish zero diagnostics absolutely, and only\n'
          + 'this lane can see a mis-positioned diagnostic — suppression would consume the\n'
@@ -1219,6 +1228,17 @@ const IS_ARROW = /^\s*(?:\([^)]*\))?\s*(?::\s*[^-=]+)?\s*(?:->|=>)/;
 // REPORTED (--v) rather than scored.
 function expectedTokenType(d, form) {
   if (d.keyword) return KEYWORD_TOKEN[d.keyword] ?? null;
+  // A named EFFECT binding holds the disposer — a callable — so an
+  // UNANNOTATED name classifies `function` in every form (inline, carried,
+  // block): the value is the information, the class-expression doctrine.
+  // An ANNOTATED effect (`x: Function ~>`) is governed by its annotation
+  // instead — tsgo's own rule, identical on the equivalent plain-TS line —
+  // so asserting against it is an expectation this audit cannot defend:
+  // reported, never scored, like the dual classes below. Ruled in
+  // RULINGS.md (Tokens). Decided before the value-side scan because the
+  // carried forms hide their body from a line-shaped read, and the
+  // disposer is the value regardless.
+  if (form === 'effect') return /:.+~>/.test(d.code) ? null : 'function';
   const val = valueSide(d.code, form);
   // A carried value (`name =` with the expression on the next line) is
   // invisible to this line-shaped scan, so no type expectation exists to
@@ -1972,6 +1992,14 @@ if (RUN_ERRORS) {
   })();
   pool = await poolP;
 
+  const errorPins = fs.existsSync(ERROR_PINS) ? JSON.parse(fs.readFileSync(ERROR_PINS, 'utf8')) : {};
+  // A pin file entry naming no fixture is a key that rotted — the fixture
+  // renamed or retired under it — and its pinned negatives are asserted
+  // nowhere from that moment. Loud, like the orphaned-twin check below.
+  for (const k of Object.keys(errorPins)) {
+    if (!errorFixtures.includes(k)) console.log(`    ${red('✗')} ${pad(k, ERR_NAME_W)} ${red('error-pins.json entry with no fixture — its pinned negatives are asserted nowhere')}`);
+  }
+
   const laneRows = await lanes(errorFixtures, async (f, _i, lane) => {
     const src = fs.readFileSync(path.join(ERRD, f), 'utf8');
     const ripLines = src.split('\n');
@@ -2026,6 +2054,23 @@ if (RUN_ERRORS) {
       const character = occurrencesOf(ripLines[d.line - 1] ?? '', token)[rank];
       if (character === undefined) { problems.push({ kind: 'shape', note: `twin ${d.line}:${d.col} TS${d.code}: occurrence ${rank + 1} of \`${token}\` absent from the rip line — twin not line-aligned` }); continue; }
       expected.push({ line: d.line - 1, character, code: d.code, token });
+    }
+    // Pinned expectations join AFTER derivation, additively (see ERROR_PINS).
+    // A pin lands only where the twin cannot judge; one that duplicates a
+    // derived row exactly (line+code+character — a lowering's SECOND publish
+    // legitimately shares its line and code with the derived first) is a
+    // redundant pin, flagged loudly: a pin shadowing live derivation is
+    // exactly the rot the twin exists to prevent. A near-miss pin cannot
+    // sneak through either — it and the derived row would then contest one
+    // published diagnostic, and the loser reports `missing`. Pin lines are
+    // 1-based (how the fixture reads), columns 0-based (LSP, like every
+    // expectation here).
+    for (const p of errorPins[f] ?? []) {
+      if (expected.some((e) => e.line === p.line - 1 && e.code === p.code && e.character === p.character)) {
+        problems.push({ kind: 'shape', note: `pin TS${p.code} at ${p.line}:${p.character}: the twin already derives this exact expectation — pins are for what derivation cannot spell` });
+        continue;
+      }
+      expected.push({ line: p.line - 1, character: p.character, code: p.code, token: p.token ?? '(pinned)' });
     }
     if (expected.length === 0) problems.push({ kind: 'shape', note: 'the twin raises no errors — an error fixture must have some' });
 
@@ -2165,8 +2210,21 @@ if (RUN_HOVER || RUN_TOKENS) {
         const hovers = RUN_HOVER
           ? await Promise.all(decls.map((d) => srv.hover(uri, { line: d.line, character: d.character })))
           : [];
+        // Ruled-silent positions — the bare `~>` operator at column 0
+        // (RULINGS.md, Reactive: punctuation is silent, permanently).
+        // Probed after the same readiness wait as the declarations, so a
+        // null here is the position's real answer, not an unbuilt
+        // program's. Today the server leaks the runtime's `__effect`
+        // symbol at these positions — the open bare-effect finding — so
+        // the `silence` gauge below is red by agreement until the server
+        // declines to answer.
+        const silent = RUN_HOVER
+          ? await Promise.all(src.split('\n')
+              .map((text, line) => (/^~>/.test(text) ? line : -1)).filter((l) => l >= 0)
+              .map(async (line) => ({ line, hover: await srv.hover(uri, { line, character: 0 }) })))
+          : [];
         const tokens = RUN_TOKENS ? await srv.tokens(uri) : null;
-        return { decls, hovers, tokens };
+        return { decls, hovers, tokens, silent };
       }),
       twinBase ? twin.hoverTwin(path.join(FIX, twinBase)).catch(() => null) : Promise.resolve(null),
     ]);
@@ -2311,12 +2369,20 @@ if (RUN_HOVER) {
   // HEURISTIC (source-text, not resolved): a schema INSTANCE is spotted
   // by a `.parse()` on a Capitalized receiver, excluding JSON/Date.
   // Erring here HIDES a gap, so keep it as narrow as the fixtures allow.
+  // The reactive clause is LEGACY-SCOPED: 08's React twin approximates
+  // reactivity with useState, so its reactive rows have no oracle — but the
+  // M3 reactive twin is plain TS written to BE the oracle (ROADMAP.md,
+  // Oracles; RULINGS.md, Reactive: the twin agrees live, so no pin), and
+  // classifying its rows native would silently retire that oracle the run
+  // it landed. Component/schema clauses stay corpus-wide: those analogies
+  // (TSX/zod) remain approximations in every fixture that carries them.
+  const M3 = (f) => Number.parseInt(f, 10) >= 20;
   const ripNative = (r) => {
     const t = r.text ?? '';
     return /=\s*component\b/.test(t)
       || /=\s*schema\b/.test(t)
       || /\b(?!JSON\b|Date\b)[A-Z]\w*\.parse(?:Async)?\s*\(/.test(t)
-      || /~>|~=|:=/.test(t);
+      || (!M3(r.file) && /~>|~=|:=/.test(t));
   };
 
   // Outcomes per probe, twin side:
@@ -2372,6 +2438,16 @@ if (RUN_HOVER) {
   prow('expected', snapChanged.length, snapChanged.length ? red : green,
     UPDATE_HOVERS || pinned === null ? 'updated' : (snapChanged.length ? 'changed vs hover-pins.json' : `${pinnedCount} pinned, unchanged`));
   prow('invariant', violations.length, violations.length ? red : green, violations.length ? 'initialized binding hovers `any`' : '');
+  // The `silence` gauge — ruled-silent positions (bare `~>` operators) must
+  // serve null. EXPECTED RED while the bare-effect finding is open: the
+  // server leaks the runtime's `__effect` symbol there today, and this
+  // gauge is that row's gate — soft, like the token audit's enum rows.
+  const silentRows = [...PROBES].flatMap(([file, p]) => (p.silent ?? []).map((s) => ({ file, ...s })));
+  const silentLeaks = silentRows.filter((s) => s.hover !== null);
+  if (silentRows.length) {
+    prow('silence', silentRows.length - silentLeaks.length, silentLeaks.length ? red : green,
+      `of ${silentRows.length} ruled-silent bare ~> positions serve null${silentLeaks.length ? ' — red by agreement: the open bare-effect finding (FINDINGS.md)' : ''}`);
+  }
 
   if (gaps.length) {
     console.log(`\n    ${bold('Gaps — hover ≠ tsgo twin on a comparable type')} ${dim('(after quote / keyword / union-order normalization)')}`);
@@ -2389,6 +2465,10 @@ if (RUN_HOVER) {
   if (violations.length) {
     console.log(`\n    ${bold('Invariant violations')}`);
     for (const v of violations) console.log(`      ${red('✗')} ${dim(v)}`);
+  }
+  if (silentLeaks.length) {
+    console.log(`\n    ${bold('Ruled-silent positions serving an answer')} ${dim('(bare ~> — RULINGS.md, Reactive; red by agreement while the bare-effect finding is open)')}`);
+    for (const s of silentLeaks) console.log(`      ${red('✗')} ${s.file}:${s.line + 1}  ${dim(`→ ${s.hover}`)}`);
   }
   if (VERBOSE) for (const [label, rowset] of [['rip-native (expected divergences — twin uses React/zod)', natives], ['pinned-only (no twin symbol)', pinnedOnly]]) {
     if (!rowset.length) continue;

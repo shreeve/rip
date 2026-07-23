@@ -84,7 +84,7 @@ Allocation principles: a production belongs to the construct it CARRIES, not its
 | ComputedAssign           | 31-reactive     |
 | Readonly                 | 31-reactive     |
 | Effect                   | 31-reactive     |
-| Gate                     | 31-reactive     |
+| Gate                     | 32-components   |
 | Component                | 32-components   |
 | ComponentBlock           | 32-components   |
 | ComponentLine            | 32-components   |
@@ -98,7 +98,7 @@ The largest block is the export-of-X family: an `Export`/`ExportAssign` producti
 
 | production                                     | file           | why                                       |
 | ---------------------------------------------- | -------------- | ----------------------------------------- |
-| `Expression → Gate`                            | 31-reactive    | carries a reactive construct              |
+| `Expression → Gate`                            | 32-components  | carries a gate construct — a gate is emitter-rejected outside a direct component-body line, so covering it means writing a component |
 | `Expression → ReactiveAssign`                  | 31-reactive    | carries a reactive construct              |
 | `Expression → ComputedAssign`                  | 31-reactive    | carries a reactive construct              |
 | `Expression → Readonly`                        | 31-reactive    | carries a reactive construct              |

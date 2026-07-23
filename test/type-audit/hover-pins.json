@@ -76,5 +76,9 @@
   },
   "23-assignments.rip": {
     "Chip@164": "let Chip: typeof Chip"
+  },
+  "31-reactive.rip": {
+    "pulse@104": "let pulse: number",
+    "pulse@106": "let pulse: number"
   }
 }

@@ -1,0 +1,18 @@
+{
+  "31-reactive.errors.rip": [
+    {
+      "line": 8,
+      "character": 10,
+      "code": 1360,
+      "token": "number",
+      "why": "the := lowering's satisfies guard \u2014 the second publish of the wrong-initializer double, mapped onto the annotation span; asserts the interim while the double-publish row is open (FINDINGS.md)"
+    },
+    {
+      "line": 9,
+      "character": 25,
+      "code": 2322,
+      "token": "count * 2",
+      "why": "the ~= lowering's value-level second publish on the derivation expression; asserts the interim while the double-publish row is open (FINDINGS.md)"
+    }
+  ]
+}

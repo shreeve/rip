@@ -13,6 +13,19 @@ The decided answers where no TypeScript oracle exists: the render DSL, schema bo
 - **Hovers are signatures, not sentences.** The register is TypeScript's own: the term, its type, at most a few words of gloss (`key: string | number — row identity`). Never tutorial prose — a hover that explains behavior in a full sentence is talking down, and one that names a concept no doc teaches is talking past.
 - **Value positions get plain answers.** A render loop variable, `ctx`, an event param, the state behind a bind, `it` in a transform: the inferred type, no DSL dressing.
 
+## Reactive
+
+The declaration hovers here have an honest interim that is not silence: the plain `let`/`const` value-type answer is TRUE — it misses only the minted kind. The interim-is-silence rule bans wrong answers as stand-ins; a truthful answer short of its target is pinned-or-twin-validated as the interim, and the divergence arrives with the minted label. These rows govern the exported spellings identically (driven 2026-07-23: `export` changes nothing on the hover surface).
+
+| position | ruling (target) | interim |
+| --- | --- | --- |
+| `:=` name at its declaration (plain, annotated, opt-marked) | `(state) count: number` — minted kind, value type | `let count: number` — the plain-TS twin agrees live, so no pin |
+| `~=` name at its declaration | `(computed) doubled: number` | `const doubled: number` — twin agrees, no pin |
+| `=!` name at its declaration | `(readonly) limit: 100` — the literal type stands: a readonly binding is a const, and const infers the literal, TS's own convention | `const limit: 100` — twin agrees, no pin |
+| named `~>` at its declaration | `(effect) logger: () => void` — the disposer is the binding's value | `const logger: () => void` — twin agrees, no pin |
+| bare `~>` operator | silence — punctuation is silent, permanently | today serves the runtime's `__effect` signature, a machinery leak; the open bare-effect finding (FINDINGS.md) holds it |
+| the `?` opt marker on a reactive binding | silence | — |
+
 ## Components / render
 
 | position | ruling (target) | interim |
@@ -56,3 +69,6 @@ The semantic token names the construct the user DECLARED, judged at rip's level 
 | class-expression binding (`Blank = class`) | token type `class` — the spelling itself declares a class; tsgo's classification is correct | the invariant expects `class` |
 | cast to a constructor type (`X = value as new () => …`) | no expectation — variable by spelling, class by shape; dual like `X = schema` | reported, never scored |
 | enum name (`enum Direction`) | token type `enum` — the declared construct; the lowering's companion type must not leak into the color | the invariant expects `enum` and stays red; the open enum-token finding (FINDINGS.md) holds the server's reclassification |
+| state name at a WRITE site (`count = 5` off `count := 0`) | no `readonly` modifier — the binding is writable in rip; the lowering's const cell must not leak into the color | the server clears `readonly` on declaration spans only, so the write site still carries it; the open use-site-readonly finding (FINDINGS.md) holds the correction's reach |
+| named effect binding, unannotated (`watcher ~> …`) | token type `function`, with `readonly` — the binding's value is the disposer, a callable; tsgo's classification of the value is the informative answer, the class-expression doctrine | the invariant expects `function` in every form, inline and carried alike |
+| named effect binding, annotated (`logger: Function ~> …`) | the annotation governs the classification — tsgo's own rule, identical on the equivalent plain-TS line | reported, never scored — dual like `X = schema`; asserting against the annotation is an expectation the audit cannot defend |

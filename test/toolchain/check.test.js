@@ -124,6 +124,24 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  test('a write to a computed is an emitter decline, bound to the write line', () => {
+    // `doubled = 5` off `doubled ~= …` is REJECTED at compile — a real
+    // message, never broken output (the for-range-ban model). This is the
+    // decline's home: the spelling cannot enter the Diagnostics Lane, whose
+    // error pairs need a face to publish from, and an emitter decline aborts
+    // the compile before any face exists. The readonly-write beside it
+    // (`limit = 7` off `limit =! 100`) is NOT this class — it compiles and
+    // publishes TS2588, which the lane derives from the reactive pair's twin.
+    const dir = workspace({
+      'writecomp.rip': 'doubled ~= 2 * 2\ndoubled = 5\nconsole.log(doubled)\n',
+    });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toMatch(/writecomp\.rip:2:\d+ - error: emitter: cannot assign to computed 'doubled'/);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
   test('a render branch body and a loop row are type-checked through the typed factory params', () => {
     // A branch/loop body lowers to a block factory; the face types the
     // factory's self param `: this` (carried into the handle's p() by
