@@ -53,18 +53,21 @@ Measured 2026-07-23 over 32-components (the `ruled` gauge, hover-pins.json's `po
 
 ## Schema
 
+Measured 2026-07-23 over 33-schema's spellings (the `ruled` gauge, hover-pins.json's `positions`). The schema body is wholesale silent today — every in-body position serves null, which IS the ruled interim — so the null pins are green while the minted-kind targets stay unserved; no finding holds them, the component-name-at-use-site precedent. The declaration and companion-type rows serve truthful answers and pin as measured — except the `:mixin` declaration, which serves the runtime's own class; the mixin-declaration finding (FINDINGS.md) holds that pin.
+
 | position | ruling (target) | interim |
 | --- | --- | --- |
-| schema name at declaration | type-first: structure leads, value nature noted after | measure, then pin |
-| field name (`name! string`) | `(field) name: string`, required/optional visible | measure, then pin |
+| schema name at declaration | type-first: structure leads, value nature noted after | pinned as measured (`decls`) — the value-first `let Person: Schema<Person, Person>` is truthful short of the target, the reactive doctrine |
+| schema name at declaration (`:mixin`) | user vocabulary, never the machinery — the exact spelling undecided: a mixin has no parse surface, so `Schema<…>` would over-promise | pinned as measured (`decls`) — `let Stamped: __SchemaDef` is a leak; the mixin-declaration finding (FINDINGS.md) holds it |
+| field name (`name! string`) | `(field) name: string`, required/optional visible | pinned null — green, measured 2026-07-23 |
 | field type word | the type, same as an annotation | blocked on the identifier-read finding |
-| `!` / `?` markers | silence | — |
-| default-value expression | normal expression hovers | — |
-| computed field name | `(computed) total: number` | measure, then pin |
-| `it` in a transform | `it: T` — the field's value type | measure, then pin |
-| companion type at a use site | the structural type, expanded like any alias | measure, then pin |
+| `!` / `?` markers | silence — punctuation is silent, permanently | pinned null — green, measured 2026-07-23 |
+| default-value expression | normal expression hovers | pinned null — silence today, measured 2026-07-23; the pin moves the day expression hovers reach the default bracket |
+| computed field name | `(computed) total: number` | pinned null — green, measured 2026-07-23 |
+| `it` in a transform | `it: <input record>` — the record under validation (driven 2026-07-23: a transform receives the whole raw record, never the field's own value) | pinned null — green, measured 2026-07-23 |
+| companion type at a use site | the structural type, expanded like any alias | pinned as measured — the annotation position serves the full expansion (the target, already served); a value-position use serves the schema value's own type, the plain-answer rule |
 
-"Measure, then pin": current behavior undriven — no pin lands on an unmeasured today. "Blocked on the identifier-read finding": pinnable when that fix lands (see FINDINGS.md).
+"Blocked on the identifier-read finding": pinnable when that fix lands (see FINDINGS.md).
 
 ## Tokens
 

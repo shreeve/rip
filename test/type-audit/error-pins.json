@@ -30,5 +30,14 @@
       "token": "label",
       "why": "the two-way bind mismatch (number state into a string prop) — no TSX line can spell the <=> channel; the container-typed message is the channel's real contract; pinned per the components ruling (RULINGS.md)"
     }
+  ],
+  "33-schema.errors.rip": [
+    {
+      "line": 27,
+      "character": 0,
+      "code": 2322,
+      "token": "wrongGetter",
+      "why": "a :shape callable's output types unknown, so the typed read rejects — rip-native: the twin's transform-derived total is honestly a number, so no zod line can spell it; asserts the interim while the callable-unknown finding is open (FINDINGS.md)"
+    }
   ]
 }

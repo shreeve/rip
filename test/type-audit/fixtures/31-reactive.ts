@@ -23,6 +23,8 @@ console.log(count, label, mood, tone, maybe, maybeCarried, maybeDropped, maybeTy
 
 const doubled = count * 2
 const half = count / 2
+const quartered = count / 4
+const tripled: number = count * 3
 const sized = label.length
 const sizedCarried = label.length + 1
 const sizedDropped = label.length + 2
@@ -32,7 +34,7 @@ const ratioDropped: number = count / 6
 const summaryCarried: string = 'summary carried'
 const summaryDropped: string = 'summary dropped'
 
-console.log(doubled, half, sized, sizedCarried, sizedDropped, ratio, ratioCarried, ratioDropped, summaryCarried, summaryDropped)
+console.log(doubled, half, quartered, tripled, sized, sizedCarried, sizedDropped, ratio, ratioCarried, ratioDropped, summaryCarried, summaryDropped)
 
 // ── Readonly (=!) ──
 
@@ -45,10 +47,11 @@ const capDropped = 12
 const capTyped: number = 13
 const capTypedCarried: number = 14
 const capTypedDropped: number = 15
+const floor: number = 200
 const ceiling: number = 201
 const ceilingDropped: number = 202
 
-console.log(limit, limitCarried, limitDropped, cap, capCarried, capDropped, capTyped, capTypedCarried, capTypedDropped, ceiling, ceilingDropped)
+console.log(limit, limitCarried, limitDropped, cap, capCarried, capDropped, capTyped, capTypedCarried, capTypedDropped, floor, ceiling, ceilingDropped)
 
 // ── Effects (~>): named (the binding is the disposer), bare, annotated ──
 
@@ -60,6 +63,7 @@ console.log('bare carried ran')
 console.log('bare dropped ran')
 const typedCarriedEffect: Function = (() => { console.log('typed carried effect ran'); return () => {} })()
 const typedDroppedEffect: Function = (() => { console.log('typed dropped effect ran'); return () => {} })()
+const typedInlineEffect: Function = (() => { console.log('typed inline effect ran'); return () => {} })()
 
 // ── Reactivity in motion: the re-fired watcher is replayed by hand ──
 
@@ -78,6 +82,7 @@ watcherCarried()
 watcherDropped()
 typedCarriedEffect()
 typedDroppedEffect()
+typedInlineEffect()
 
 // ── Exported spellings ──
 

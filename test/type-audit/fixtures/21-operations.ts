@@ -36,8 +36,9 @@ let differ = ten !== three
 let negated = !(ten < three)
 let both = ten > 0 && three > 0
 let either = false || 'fallback'
+let sized = ten > three ? 'ten' : 'three'
 
-console.log('compare:', bigger, looser, same, differ, negated, both, either)
+console.log('compare:', bigger, looser, same, differ, negated, both, either, sized)
 
 // ── Relations and unary words: in, of, instanceof, typeof, delete ──
 

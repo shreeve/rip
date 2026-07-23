@@ -36,8 +36,9 @@ differ = ten isnt three
 negated = not (ten < three)
 both = ten > 0 && three > 0
 either = false || 'fallback'
+sized = ten > three ? 'ten' : 'three'
 
-console.log('compare:', bigger, looser, same, differ, negated, both, either)
+console.log('compare:', bigger, looser, same, differ, negated, both, either, sized)
 
 # ── Relations and unary words: in, of, instanceof, typeof, delete ──
 

@@ -1,0 +1,147 @@
+# 33-schema.rip — the schema vocabulary: field forms (`!`, `?`), types
+# (primitives, literal unions, arrays, nested schemas), coercion, constraints,
+# defaults, transforms (`-> it.X`), the `:shape` callable surface, and the
+# kinds — `:input` (default), `:shape`, `:enum`, `:union`, `:mixin`, and
+# `:model` in minimal presence (persistence is outside this file's charter).
+# The zod twin covers the analogy-honest surface only (ROADMAP.md, Oracles).
+# Hover targets are ruled in RULINGS.md (Schema); in-body pins live in
+# hover-pins.json's positions section. Negatives pair in
+# fixtures/errors/33-schema.errors.rip.
+
+# ── Field forms: required, optional, defaults, literal unions, arrays,
+# nested schemas (RULINGS.md, Schema: field names are ruled `(field)`,
+# interim silence) ──
+
+Address = schema
+  street! string
+  city!   string
+  zip?    string
+
+Person = schema
+  name!    string
+  age?     number
+  role     string, ['guest']
+  tier!    'basic' | 'pro'
+  scores!  number[]
+  home?    Address
+
+ada = Person.parse({ name: 'Ada', age: 36, tier: 'pro', scores: [3, 9], home: { street: 'Loop Rd', city: 'London' } })
+guest = Person.parse({ name: 'Guest', tier: 'basic', scores: [] })
+
+console.log("person: #{ada.name} #{ada.role} #{ada.tier} #{ada.home?.city}")
+console.log("guest: #{guest.name} #{guest.role} #{guest.age ?? 0} #{guest.scores.length}")
+
+# ── Coercion built-ins and constraints: `~type`, ranges, regex ──
+
+Reading = schema
+  celsius! ~number
+  taken!   ~datetime
+  label!   string, 2..40
+  ref!     string, /^[A-Z]{2}-\d+$/
+
+reading = Reading.parse({ celsius: '21.5', taken: '2026-07-23T10:00:00Z', label: 'north wing', ref: 'AB-42' })
+
+console.log("reading: #{reading.celsius} #{reading.taken.toISOString()} #{reading.label} #{reading.ref}")
+
+# ── Transforms: `it` is the record under validation (RULINGS.md, Schema) ──
+
+Vendor = schema
+  id!          -> it.Id
+  displayName! -> it.DisplayName
+
+vendor = Vendor.parse({ Id: 'V-9', DisplayName: 'Acme Corp' })
+
+console.log("vendor: #{vendor.id} #{vendor.displayName}")
+
+# ── The callable surface on :shape: computed (~>), eager derived (!>),
+# methods. Each getter reads FIELDS only, and the callable-unknown finding
+# (FINDINGS.md) holds every typed read of their output: a sibling-callable
+# read (`total` reading `@subtotal`) cannot check — in-body casts and
+# annotations are stripped with the descriptor's JS — so `total` recomputes
+# from the fields. `@ensure` is absent for the same root: its predicate's
+# param is an implicit any under strict and nothing the author writes can
+# type it (the parked shape, held by the finding) ──
+
+Cart = schema :shape
+  items!    number[]
+  taxRate!  number
+  subtotal: !> @items.reduce(((a, b) -> a + b), 0)
+  total:    ~> @items.reduce(((a, b) -> a + b), 0) * (1 + @taxRate)
+  describe: -> "#{@items.length} items"
+
+# The method call rides a cast — a bare `cart.describe()` publishes while the
+# callable-unknown finding is open (FINDINGS.md); the cast is the workaround
+# shape this fixture carries, the promoted-param precedent.
+cart = Cart.parse({ items: [700, 550], taxRate: 0.1 })
+
+console.log("cart: #{cart.subtotal} #{cart.total} #{(cart.describe as () => string)()}")
+
+# ── :enum ──
+
+Status = schema :enum
+  :open
+  :closed
+
+console.log("status: #{Status.parse('open')}")
+
+# ── :union with @on: single-literal tags dispatch per constituent ──
+
+EmailContact = schema
+  kind!    'email'
+  address! string
+
+PhoneContact = schema
+  kind!   'phone'
+  number! string
+
+Contact = schema :union
+  @on :kind
+  EmailContact
+  PhoneContact
+
+reach = Contact.parse({ kind: 'phone', number: '555-0100' })
+
+console.log("contact: #{reach.kind}")
+if reach.kind is 'phone'
+  console.log("dial: #{reach.number}")
+
+# ── :mixin: fields fold into the including schema ──
+
+Stamped = schema :mixin
+  createdBy! string
+
+Doc = schema
+  @mixin Stamped
+  title! string
+
+doc = Doc.parse({ title: 'Charter', createdBy: 'ada' })
+
+console.log("doc: #{doc.title} by #{doc.createdBy}")
+
+# ── :model and the named-coercer registry: minimal presence — a :model's
+# persistence surface is out of charter, and `~:email` parses only under a
+# runtime registration, so neither is ever parsed here ──
+
+Account = schema :model
+  handle!  string
+  contact! ~:email
+
+console.log("model: #{typeof Account}")
+
+# ── The inline `;` body spelling ──
+
+Tiny = schema; note string
+
+console.log("tiny: #{typeof Tiny}")
+
+# ── Companion types at use sites: the bare name is the compile-time type
+# (RULINGS.md, Schema: the structural type, expanded like any alias) ──
+
+def describePerson(p: Person): string
+  return "#{p.name} (#{p.role})"
+
+def cheapest(readings: Reading[]): Reading
+  return readings[0]
+
+console.log(describePerson(ada))
+console.log("cheapest: #{cheapest([reading]).ref}")

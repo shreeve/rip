@@ -24,8 +24,12 @@ let stacked = [90, ,
   100, ,
 ]
 let ragged = [110, , 120]
+let layered = [
+  130,
+  140,
+]
 
-console.log('arrays:', extended.length, sparse.length, holes.length, padded.length, stacked.length, ragged.length)
+console.log('arrays:', extended.length, sparse.length, holes.length, padded.length, stacked.length, ragged.length, layered.length)
 
 // ── Ranges — inclusive and exclusive — and slice reads ──
 

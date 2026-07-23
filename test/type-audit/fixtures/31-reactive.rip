@@ -36,6 +36,9 @@ console.log(count, label, mood, tone, maybe, maybeCarried, maybeDropped, maybeTy
 doubled ~= count * 2
 half ~=
 count / 2
+quartered ~=
+  count / 4
+tripled: number ~= count * 3
 sized? ~= label.length
 sizedCarried? ~=
 label.length + 1
@@ -51,7 +54,7 @@ summaryCarried: string ~=
 summaryDropped: string ~=
   'summary dropped'
 
-console.log(doubled, half, sized, sizedCarried, sizedDropped, ratio, ratioCarried, ratioDropped, summaryCarried, summaryDropped)
+console.log(doubled, half, quartered, tripled, sized, sizedCarried, sizedDropped, ratio, ratioCarried, ratioDropped, summaryCarried, summaryDropped)
 
 # ── Readonly (=!): a const with the literal standing (RULINGS.md, Reactive) ──
 
@@ -70,12 +73,13 @@ capTypedCarried?: number =!
 14
 capTypedDropped?: number =!
   15
+floor: number =! 200
 ceiling: number =!
 201
 ceilingDropped: number =!
   202
 
-console.log(limit, limitCarried, limitDropped, cap, capCarried, capDropped, capTyped, capTypedCarried, capTypedDropped, ceiling, ceilingDropped)
+console.log(limit, limitCarried, limitDropped, cap, capCarried, capDropped, capTyped, capTypedCarried, capTypedDropped, floor, ceiling, ceilingDropped)
 
 # ── Effects (~>): named (the binding is the disposer), bare, annotated.
 # Hovering a bare `~>` operator is ruled silent (RULINGS.md, Reactive);
@@ -95,6 +99,7 @@ typedCarriedEffect: Function ~>
 console.log('typed carried effect ran')
 typedDroppedEffect: Function ~>
   console.log('typed dropped effect ran')
+typedInlineEffect: Function ~> console.log('typed inline effect ran')
 
 # ── Reactivity in motion: a write notifies its effect; a disposed effect
 # stays quiet ──
@@ -113,6 +118,7 @@ watcherCarried()
 watcherDropped()
 typedCarriedEffect()
 typedDroppedEffect()
+typedInlineEffect()
 
 # ── Exported spellings: the export side only (an importer's view is the
 # ledger's open question) ──
