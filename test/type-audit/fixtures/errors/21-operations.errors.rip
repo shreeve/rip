@@ -5,7 +5,7 @@
 text = 'abc'
 count = 42
 point = { x: 1 }
-pair = (a: number, b: number) -> a + b
+pair = (left: number, right: number) -> left + right
 
 wrongLeft = text * 2
 wrongRight = 2 * text

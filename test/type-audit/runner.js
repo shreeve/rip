@@ -1220,8 +1220,20 @@ const IS_ARROW = /^\s*(?:\([^)]*\))?\s*(?::\s*[^-=]+)?\s*(?:->|=>)/;
 function expectedTokenType(d, form) {
   if (d.keyword) return KEYWORD_TOKEN[d.keyword] ?? null;
   const val = valueSide(d.code, form);
+  // A carried value (`name =` with the expression on the next line) is
+  // invisible to this line-shaped scan, so no type expectation exists to
+  // defend — same contract as the undecidables below.
+  if (!val.trim()) return null;
   if (/^\s*schema\b/.test(val)) return null;         // dual value+type — see above
   if (/^\s*component\b/.test(val)) return 'class';   // the component lowering emits a class
+  // A class expression declares a class — the name is `new`-ed and
+  // extended, and tsgo classifies it `class`, the informative answer
+  // (RULINGS.md, Tokens).
+  if (/^\s*class\b/.test(val)) return 'class';
+  // A cast to a constructor type (`X = value as new () => …`) is a
+  // variable by spelling and a class by shape — dual like schema, so
+  // reported rather than scored.
+  if (/\bas\s+new\b/.test(val)) return null;
   // A function-valued PLAIN binding classifies as `function`, not
   // `variable` — TS's own rule, and the right one. Restricted to `plain`:
   // an arrow handed to `:=`/`~=` is wrapped in a cell, so the NAME stays a
@@ -1230,8 +1242,23 @@ function expectedTokenType(d, form) {
   return 'variable';
 }
 function expectedToken(d) {
-  const form = d.keyword ?? bindingForm(d.code);
-  return { type: expectedTokenType(d, form), readonly: d.keyword ? null : READONLY_FORMS.has(form), form };
+  const raw = d.keyword ?? bindingForm(d.code);
+  const type = expectedTokenType(d, raw);
+  // An exported plain VALUE binding lowers to `export const` by the
+  // emitter's stated design ("never a hoisted write"), so the name IS
+  // readonly — ruled in RULINGS.md (Tokens); the writable-exports question
+  // lives in FINDINGS.md's export-reassignment row, and if that ruling
+  // ever flips the emission, this expectation goes red at exactly that
+  // flip. Scoped to value bindings (variable/function): a component- or
+  // class-valued export lowers to its own declaration form, and a carried
+  // value cannot be read from this line — neither can defend a readonly
+  // expectation in either direction, so neither asserts one.
+  const exportedPlain = !d.keyword && raw === 'plain' && /^export\s/.test(d.code);
+  let readonly;
+  if (d.keyword) readonly = null;
+  else if (exportedPlain) readonly = (type === 'variable' || type === 'function') ? true : null;
+  else readonly = READONLY_FORMS.has(raw);
+  return { type, readonly, form: exportedPlain ? 'export' : raw };
 }
 
 // No-oracle invariant: an initialized binding (`name = expr`) whose RHS
@@ -1366,8 +1393,12 @@ const pad = (s, n) => String(s).padEnd(n);
 // Sized to the longest fixture name — a fixed width misaligns every column to
 // its right the moment a longer name lands. 18 is the floor.
 const NAME_W = Math.max(18, ...fixtures.map((f) => f.length));
+// Every audit table pads its name column to the longest name plus two, then
+// one joining space — the same gap everywhere. The lane's labels carry the
+// errors/ prefix, so its width derives from its own list.
+const ERR_NAME_W = Math.max(18, ...errorFixtures.map((f) => path.join('errors', f).length)) + 2;
 const DIMS = [['compiles', 10], ['directives', 12], ['verdict', 10], ['runtime', 9], ['twin', 8], ['strict', 8]];
-const RULE_W = NAME_W + 1 + DIMS.reduce((a, [, w]) => a + w, 0) + (DIMS.length - 1);
+const RULE_W = NAME_W + 3 + DIMS.reduce((a, [, w]) => a + w, 0) + (DIMS.length - 1);
 
 // The sections scroll past in one `--all` run, so each needs a seam that
 // survives the wall of rows above it. The title rides in a reverse-video chip
@@ -1478,6 +1509,7 @@ if (RUN_GRAMMAR) {
     ['ExportAssign → Identifier TYPE_PARAMS = INDENT Expression OUTDENT', 'lexically unreachable — TYPE_PARAMS is minted only for same-line `= component`'],
     ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
     ['For → FOR Range BY Expression Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
+    ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier has no binding name (the emitter currently passes it through verbatim); the aliased spelling is ImportSpecifier → DEFAULT AS Identifier'],
   ]);
   // The M3 manifest: grouping only — the decision record of which corpus file
   // owns each construct's productions, with per-production overrides for
@@ -1726,7 +1758,7 @@ if (RUN_MAIN) {
   // Print the header immediately, then stream each fixture's row as it
   // is computed, so the report fills in live.
   auditBanner('TYPE AUDIT', `${fixtures.length} fixtures × ${dims.length} dimensions`);
-  console.log('  ' + dim(pad('fixture', NAME_W) + ' ' + dims.map(([d, w]) => pad(d, w)).join(' ')));
+  console.log('  ' + dim(pad('fixture', NAME_W + 2) + ' ' + dims.map(([d, w]) => pad(d, w)).join(' ')));
   console.log('  ' + dim('─'.repeat(RULE_W)));
 
   // Both batch passes are independent of each other AND of the per-fixture
@@ -1786,7 +1818,7 @@ if (RUN_MAIN) {
     row.twinDetail = tw.detail;
     row.twinErrs = tw.errs;
     return row;
-  }, { width: LANES, onDone: (row) => console.log(`  ${pad(row.name, NAME_W)} ${dims.map(([d, w]) => cell(row[d], w)).join(' ')}`) });
+  }, { width: LANES, onDone: (row) => console.log(`  ${pad(row.name, NAME_W + 2)} ${dims.map(([d, w]) => cell(row[d], w)).join(' ')}`) });
 
   // COVERAGE, for the same reason the probe pass has one: the Score below is a
   // ratio of the rows this loop produced. A fixture that fell out of the lanes
@@ -2024,7 +2056,7 @@ if (RUN_ERRORS) {
     width: LANES,
     onDone: (r) => {
       const ok = r.problems.length === 0;
-      console.log(`    ${ok ? green('✓') : red('✗')} ${pad(path.join('errors', r.name), 34)} ${dim(`${r.expected.length} diagnostic(s) asserted`)}`);
+      console.log(`    ${ok ? green('✓') : red('✗')} ${pad(path.join('errors', r.name), ERR_NAME_W)} ${dim(`${r.expected.length} diagnostic(s) asserted`)}`);
       for (const p of r.problems) console.log(`        ${red('·')} ${yellow(p.kind)} ${dim(p.note)}`);
     },
   });
@@ -2521,14 +2553,14 @@ if (RUN_TOKENS) {
     // aligned under the fixture column (adapting to terminal width) — every name
     // visible by default, but never soft-wrapped into a jumble.
     const byFileOf = (rows) => { const m = new Map(); for (const r of rows) { if (!m.has(r.file)) m.set(r.file, []); m.get(r.file).push(r); } return m; };
-    const COL = 6 + 18 + 1 + 3 + 3;                                  // leading + filename + sp + count + gap = name column
+    const COL = 6 + (NAME_W + 2) + 1 + 3 + 3;                        // leading + filename + sp + count + gap = name column
     const WRAP = Math.max(80, process.stdout.columns || 120) - 2;
     const dropSection = (title, byFile, tally, nameOf) => {
       console.log(`\n    ${bold(title)} ${dim('— the mapping gap, expected red')}`);
       for (const [file, entries] of byFile) {
         // filename stays plain (the terminal linkifies it) and full — never
         // dimmed and never stripped of `.rip`, so the click target survives.
-        const head = `      ${pad(file, 18)} ${dim(String(tally(entries)).padStart(3))}   `;
+        const head = `      ${pad(file, NAME_W + 2)} ${dim(String(tally(entries)).padStart(3))}   `;
         const rows = []; let line = '';
         for (const n of entries.map(nameOf)) {
           const next = line ? `${line}, ${n}` : n;

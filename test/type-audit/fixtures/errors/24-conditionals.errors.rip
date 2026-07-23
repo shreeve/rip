@@ -23,6 +23,6 @@ wrongCase: number =
   switch count
     when 1, 2 then 'low'
     else 'high'
-wrongProp = switch point.z
+wrongProperty = switch point.z
   when 1 then 'one'
   else 'none'

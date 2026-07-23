@@ -14,6 +14,6 @@ wrongArraySpread = [...count]
 wrongIterable = [...person]
 wrongRange: string[] = [1..3]
 wrongSlice = list[0..count.length]
-wrongMapProp = scores.alpha
+wrongMapProperty = scores.alpha
 wrongMapValue: string = scores.get('alpha')
 wrongPick: { name: number } = { ...person.{ name } }

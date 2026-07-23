@@ -1,6 +1,6 @@
-# Hover rulings — what the editor says at rip-native positions
+# Editor-surface rulings — what the editor answers at rip-native positions
 
-The decided answers where no TypeScript oracle exists: the render DSL, schema bodies, rip's reactive vocabulary.
+The decided answers where no TypeScript oracle exists: the render DSL, schema bodies, rip's reactive vocabulary — and the semantic-token cases where rip's spelling and its lowering disagree.
 
 **This file is the intent; the pins are the measurement.** `hover-pins.json` records what the editor serves, reviewed against this file; a fixture comment beside a governed line cites its row here. A pin diverging from a ruling is either an unimplemented target (the pin asserts the interim) or a wrong pin — never an ambiguous ruling. Rulings change here first; pins follow, never the reverse.
 
@@ -45,3 +45,14 @@ The decided answers where no TypeScript oracle exists: the render DSL, schema bo
 | companion type at a use site | the structural type, expanded like any alias | measure, then pin |
 
 "Measure, then pin": current behavior undriven — no pin lands on an unmeasured today. "Blocked on the identifier-read finding": pinnable when that fix lands (see FINDINGS.md).
+
+## Tokens
+
+The semantic token names the construct the user DECLARED, judged at rip's level — never the binding operator alone, and never the lowering alone. The measuring invariant is the Token Audit's `expectedToken` (runner.js); these rows are the decided cases.
+
+| position | ruling | today |
+| --- | --- | --- |
+| exported plain binding (`export flag = 1`) | `readonly` — the emission is `export const` by the emitter's stated design, and no writable exported plain binding exists | the invariant expects readonly in export position; the export-reassignment row in FINDINGS.md owns the loud-rejection half, and a writable-exports ruling would flip this row with the emission |
+| class-expression binding (`Blank = class`) | token type `class` — the spelling itself declares a class; tsgo's classification is correct | the invariant expects `class` |
+| cast to a constructor type (`X = value as new () => …`) | no expectation — variable by spelling, class by shape; dual like `X = schema` | reported, never scored |
+| enum name (`enum Direction`) | token type `enum` — the declared construct; the lowering's companion type must not leak into the color | the invariant expects `enum` and stays red; the open enum-token finding (FINDINGS.md) holds the server's reclassification |

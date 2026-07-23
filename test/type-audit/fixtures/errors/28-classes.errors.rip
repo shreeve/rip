@@ -1,0 +1,15 @@
+# 28-classes.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run type-audit --errors) asserts each one; @ts-nocheck quiets editors only.
+# @ts-nocheck
+
+notAClass = 42
+class Gauge
+  level: number = 0
+  constructor: (level: number) ->
+    @level = level
+
+wrongTarget = new notAClass
+wrongArity = new Gauge()
+wrongMember = new Gauge(1).depth
+wrongKind: string = new Gauge(2)
+class WrongBase extends notAClass

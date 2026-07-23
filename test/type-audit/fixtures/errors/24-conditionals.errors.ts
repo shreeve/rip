@@ -23,6 +23,6 @@ let wrongCase: number =
   (() => { switch (count) {
     case 1: case 2: return 'low'
     default: return 'high' } })()
-let wrongProp = (() => { switch (point.z) {
+let wrongProperty = (() => { switch (point.z) {
   case 1: return 'one'
   default: return 'none' } })()

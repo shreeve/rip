@@ -14,6 +14,6 @@ let wrongArraySpread = [...count]
 let wrongIterable = [...person]
 let wrongRange: string[] = Array.from({ length: 3 }, (_, i) => i + 1)
 let wrongSlice = list.slice(0, count.length + 1)
-let wrongMapProp = scores.alpha
+let wrongMapProperty = scores.alpha
 let wrongMapValue: string = scores.get('alpha')
 let wrongPick: { name: number } = { ...{ name: person.name } }

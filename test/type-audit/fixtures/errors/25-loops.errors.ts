@@ -5,7 +5,7 @@
 let notIterable = 42
 let plainObject = { a: 1 }
 let words = ['alpha', 'beta']
-let counts = [1, 2, 3].map((n) => n)
+let counts = [1, 2, 3].map((num) => num)
 
 for (let wrongItem of notIterable) {
   console.log(wrongItem) }

@@ -5,7 +5,7 @@
 notIterable = 42
 plainObject = { a: 1 }
 words = ['alpha', 'beta']
-counts = (n for n in [1, 2, 3])
+counts = (num for num in [1, 2, 3])
 
 for wrongItem in notIterable
   console.log(wrongItem)

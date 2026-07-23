@@ -5,7 +5,7 @@
 let text = 'abc'
 let count = 42
 let point = { x: 1 }
-let pair = function(a: number, b: number) { return a + b }
+let pair = function(left: number, right: number) { return left + right }
 
 let wrongLeft = text * 2
 let wrongRight = 2 * text

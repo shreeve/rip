@@ -1,0 +1,112 @@
+# 29-modules.rip — import/export: every import head (side-effect, default,
+# namespace, empty and named lists, the combined forms), aliased and
+# default-as specifiers, multiline specifier lists, exported bindings in
+# every layout, local and re-exporting specifier lists, export default,
+# dynamic import in both forms, and import.meta
+# (the bare `default` import specifier — import { default } — is omitted:
+# its emission is that same spelling, which is not importable JavaScript,
+# so no runnable fixture can carry it)
+
+# ── import heads: side-effect, default, namespace, empty and named lists ──
+
+import './29-modules-lib.rip'
+import theme from './29-modules-lib.rip'
+import * as lib from './29-modules-lib.rip'
+import { } from './29-modules-lib.rip'
+import { host } from './29-modules-lib.rip'
+import { port as libPort, station } from './29-modules-lib.rip'
+import { default as sameTheme } from './29-modules-lib.rip'
+
+console.log('imports:', theme.depth, lib.port, host, libPort, station, sameTheme.theme)
+
+# ── combined heads: default beside a namespace, default beside a list ──
+
+import combo, * as whole from './29-modules-lib.rip'
+import paired, { describe } from './29-modules-lib.rip'
+
+describe()
+console.log('combined:', combo.theme, whole.host, paired.depth)
+
+# ── multiline specifier lists: the indented block, and the carried tail ──
+
+import {
+  host as blockHost
+  port as blockPort
+} from './29-modules-lib.rip'
+import { station as tailStation,
+  describe as tailDescribe } from './29-modules-lib.rip'
+
+console.log('layouts:', blockHost, blockPort, tailStation, typeof tailDescribe)
+
+# ── the hub and the alias consumed: resold names, resold defaults ──
+
+import hubTheme from './29-modules-hub.rip'
+import { host as hubHost } from './29-modules-hub.rip'
+import accents from './29-modules-alias.rip'
+
+console.log('resold:', hubTheme.theme, hubHost, accents.accent)
+
+# ── exported bindings: plain, typed, void — inline, carried, indented ──
+
+export plainFlag = 'direct'
+export carriedFlag =
+'carried'
+export droppedFlag =
+  'indented'
+export typedFlag: string = 'typed direct'
+export typedCarried: string =
+'typed carried'
+export typedDropped: string =
+  'typed indented'
+export announce! = -> console.log('announce ran')
+export announceCarried! =
+-> console.log('announce carried ran')
+export announceDropped! =
+  -> console.log('announce indented ran')
+
+announce()
+announceCarried()
+announceDropped()
+console.log('bindings:', plainFlag, carriedFlag, droppedFlag, typedFlag, typedCarried, typedDropped)
+
+# ── local export lists: empty, single, aliased pairs, and both layouts ──
+
+sectionA = 'alpha'
+sectionB = 'beta'
+sectionC = 'gamma'
+sectionD = 'delta'
+sectionE = 'epsilon'
+sectionF = 'zeta'
+
+export { }
+export { sectionA }
+export { sectionB as second, sectionC }
+export {
+  sectionD
+  sectionE as blockE
+}
+export { sectionF,
+  sectionA as tailA }
+
+console.log('sections:', sectionA, sectionB, sectionC, sectionD, sectionE, sectionF)
+
+# ── re-exports through specifier lists: empty, aliased, the default resold ──
+
+export { } from './29-modules-lib.rip'
+export { host as resoldHost, station as resoldStation } from './29-modules-lib.rip'
+export { default as resoldTheme } from './29-modules-lib.rip'
+
+# ── export default: the expression form ──
+
+export default host.toUpperCase()
+
+# ── dynamic import: the promise form awaited inline, and the bang form ──
+
+lazyHost = (await import('./29-modules-lib.rip')).host
+bangPort = import!('./29-modules-lib.rip').port
+
+console.log('dynamic:', lazyHost, bangPort)
+
+# ── import.meta: the module knows its own address ──
+
+console.log('meta:', import.meta.url.includes('29-modules'))

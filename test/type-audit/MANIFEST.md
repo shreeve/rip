@@ -148,5 +148,7 @@ The largest block is the export-of-X family: an `Export`/`ExportAssign` producti
 | `SimpleAssignable → Subjectable INDEX_START Expression , Expression INDEX_END` | the open match-operator finding closes (FINDINGS.md) — the regex-index spelling shares its root |
 | `Catch → CATCH Object Block`              | the open pattern-catch finding closes (FINDINGS.md)  |
 | `Catch → CATCH Array Block`               | the open pattern-catch finding closes (FINDINGS.md)  |
+| `NewSpine → NewSpine ?. Property`         | the open new-on-optional-chain finding closes (FINDINGS.md) — the emission cannot parse as JS |
+| `NewSpine → NewSpine TEMPLATE_TAG String` | the open new-on-tagged-template finding closes (FINDINGS.md) — the emission leaks the sexpr head |
 
 Productions no fixture can or should ever reduce (lexically unreachable spellings, banned-by-design error carriers) are not parked here — they are excluded from the denominator by the gate itself, whose exclusion table in runner.js is part of the measurement and outlives this file.
