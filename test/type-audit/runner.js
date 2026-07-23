@@ -11,7 +11,6 @@
 //   bun run type-audit --token          # the Token Audit ONLY (drives the editor server)
 //   bun run type-audit --all            # every audit, bottom-up: grammar → map → type → errors → hover + token
 //   bun run type-audit --v              # + list expected hover divergences / unasserted tokens
-//   bun run type-audit --update-hovers  # re-pin expected hovers (verify the change first)
 //
 // The independent audits (the AUDITS table below is the authoritative list —
 // it also carries the Grammar Gate, ROADMAP "M2", and the Diagnostics Lane,
@@ -84,14 +83,16 @@
 //     there.
 //   · EXPECTED HOVERS (correctness baseline): every symbol the twin
 //     CANNOT validate — rip-native (component/schema/reactive) and any
-//     symbol with no twin — is pinned in hover-pins.json, seeded
-//     from values certified against the v3 oracle. The live hover must
-//     match its expected value. `--update-hovers` re-pins, but VERIFY
-//     the change is correct first: this is a correctness baseline, not a
-//     photo of whatever the editor emitted. Twin-checked symbols are NOT
-//     pinned here — the twin validates them live, and pinning raw text
-//     would flag harmless changes (union-member order) it normalizes
-//     away. (The write-only-`any` class is caught for ALL symbols by the
+//     symbol with no twin — is pinned in hover-pins.json (its `decls`
+//     sections). The live hover must match its expected value. Pins are
+//     HAND-MAINTAINED, per row, reviewed against RULINGS.md — there is
+//     no mechanical re-pin: on a divergence or an unpinned symbol the
+//     run prints a paste-ready row, and adopting it is an explicit edit,
+//     so the baseline can never silently become a photo of whatever the
+//     editor emitted. Twin-checked symbols are NOT pinned here — the
+//     twin validates them live, and pinning raw text would flag harmless
+//     changes (union-member order) it normalizes away. (The
+//     write-only-`any` class is caught for ALL symbols by the
 //     oracle-free invariant below.)
 //
 // C · THE TOKEN AUDIT (--token / --all) — request semanticTokens/full
@@ -196,8 +197,9 @@
 // Layout: fixtures/ holds two fixture blocks — 01–12 and the M3 block from
 // 20; ROADMAP "M3" owns the migration between them — each `.rip` beside a
 // hand-written `.ts`/`.tsx` twin;
-// hover-pins.json is the Hover Audit's baseline for symbols the twin cannot
-// judge. fixtures/errors/ is where the M3 corpus's NEGATIVE tests live —
+// hover-pins.json is the Hover Audit's pin file — declaration baselines for
+// symbols the twin cannot judge, and the RULINGS-governed in-body positions.
+// fixtures/errors/ is where the M3 corpus's NEGATIVE tests live —
 // one unsuppressed error pair per family — and it belongs to the
 // Diagnostics Lane ALONE: the flat `fixtures` walk never descends into it,
 // and tsconfig.json excludes it from the twin type-check, so its
@@ -252,6 +254,24 @@ const FIX = path.join(HERE, 'fixtures');
 // `fixtures` reads FIX non-recursively, so nothing in errors/ can join another
 // audit's denominator, and tsconfig.json excludes it from the twin type-check.
 const ERRD = path.join(FIX, 'errors');
+// The Hover Audit's pin file, HAND-MAINTAINED per row (no mechanical
+// re-pin exists; the run prints paste-ready rows for divergences and
+// unpinned symbols). Two sections per fixture, one discipline — reviewed
+// measurements, gated on RULINGS.md, asserting the interim where a ledger
+// row holds the target:
+//   `decls` — declaration baselines for symbols the twin cannot judge
+//     (rip-native / no twin symbol), keyed by NAME (+ `occurrence` for
+//     repeats) so a fixture edit that only moves lines cannot rot them;
+//     positions resolve through the declsOf walk each run, and a pin
+//     naming no declaration fails the coverage gate.
+//   `positions` — the RULINGS-governed IN-BODY positions (render-DSL
+//     words, component member declarations, gate spellings) declsOf
+//     cannot reach: 1-based line, 0-based character, the token at that
+//     position (source-integrity: a pin whose token no longer sits there
+//     is a rotted pin and fails the coverage gate), and the expected
+//     hover (`null` = ruled silence / an unserved target's interim;
+//     text = a reviewed truthful interim). The `ruled` gauge below
+//     reports divergences red by agreement, soft, like the silence gauge.
 const HOVERS = path.join(HERE, 'hover-pins.json');
 // The Diagnostics Lane's pinned expectations — ADDITIVE per error pair, for
 // exactly the diagnostics no honest twin line can spell (a lowering's second
@@ -260,17 +280,6 @@ const HOVERS = path.join(HERE, 'hover-pins.json');
 // hover-pins.json: reviewed measurements, gated on RULINGS.md, asserting the
 // interim where a ledger row holds the target.
 const ERROR_PINS = path.join(HERE, 'error-pins.json');
-// The Hover Audit's RULINGS-governed IN-BODY positions (render-DSL words,
-// component member declarations, gate spellings) — positions declsOf cannot
-// reach, listed explicitly per fixture: 1-based line, 0-based character, the
-// token at that position (source-integrity: a pin whose token no longer sits
-// there is a rotted pin and fails the coverage gate), and the expected hover
-// (`null` = ruled silence / an unserved target's interim; text = a reviewed
-// truthful interim). Same discipline as hover-pins.json and error-pins.json:
-// reviewed measurements, gated on RULINGS.md (Components / render), asserting
-// the interim where a ledger row holds the target — the `ruled` gauge below
-// reports divergences red by agreement, soft, like the silence gauge.
-const RULED_PINS = path.join(HERE, 'ruled-pins.json');
 const ARGV = process.argv.slice(2);
 // ── flags. THE COMMAND IS THE DOCUMENTATION. Every audit lives in this
 // table, the default one included, and it is the only place that knows an audit
@@ -330,9 +339,10 @@ const AUDITS = [
     key: 'hover', flag: '--hover', name: 'Hover Audit',
     blurb: 'hover every top-level declaration through the editor server',
     judge: 'the hand-written .ts/.tsx twin (a real oracle), falling back to hover-pins.json\n'
-         + 'where rip-native constructs have no twin — a baseline, so re-pin it carelessly\n'
-         + 'and it will certify whatever the editor currently emits; ruled-pins.json adds\n'
-         + 'the RULINGS-governed IN-BODY positions (render-DSL words, member declarations,\n'
+         + 'where rip-native constructs have no twin. The pin file is hand-maintained per\n'
+         + 'row (no mechanical re-pin — the run prints paste-ready rows instead): `decls`\n'
+         + 'sections hold the declaration baselines, `positions` sections the\n'
+         + 'RULINGS-governed IN-BODY positions (render-DSL words, member declarations,\n'
          + 'gate spellings) — the `ruled` gauge, red by agreement while their findings are open',
   },
   {
@@ -346,7 +356,6 @@ const FLAGS = [
   ['--all', 'every audit'],
   ['--serial', 'probe one fixture at a time — the control for the concurrent pass'],
   ['--v', '+ expected hover divergences, unasserted tokens, and every flagged mapping read, in full'],
-  ['--update-hovers', 're-pin expected hovers (verify the change is correct FIRST)'],
   ['--help', '-h', 'this message'],
 ];
 // Every accepted flag: the audits' own, plus the modifiers above (a row may
@@ -388,18 +397,15 @@ if (unknown.length) {
   process.exit(1);
 }
 const VERBOSE = ARGV.includes('--v');
-const UPDATE_HOVERS = ARGV.includes('--update-hovers');
 // Fixtures probe a few at a time because the cost is waiting, not computing.
 // `--serial` collapses that to one lane: if a result ever looks wrong, run it
 // and see whether concurrency was the cause. The two must agree — and if they
 // ever do not, the concurrent path is the bug, not the answer.
 const LANES = ARGV.includes('--serial') ? 1 : 4;
 // Which audits this run covers — computed once, ON the table, so no other site
-// can disagree with it. `--update-hovers` implies the Hover Audit (it re-pins
-// from a live run); a named audit suppresses the default one; `--all` runs
+// can disagree with it. A named audit suppresses the default one; `--all` runs
 // everything.
 for (const a of AUDITS) a.ran = a.flag ? (ARGV.includes(a.flag) || ARGV.includes('--all')) : false;
-if (UPDATE_HOVERS) AUDITS.find((a) => a.key === 'hover').ran = true;
 const named = AUDITS.some((a) => a.ran);
 AUDITS.find((a) => a.key === 'main').ran = !named || ARGV.includes('--all');
 const ranAudit = (key) => AUDITS.find((a) => a.key === key).ran;
@@ -2132,9 +2138,11 @@ if (RUN_ERRORS) {
 }
 
 const PROBES = new Map();   // file → { decls, hovers, tokens, tmap }
-// RULINGS-governed in-body hover positions, loaded once for the probe pass and
-// the coverage gate alike (see RULED_PINS above for the shape and discipline).
-const ruledPins = fs.existsSync(RULED_PINS) ? JSON.parse(fs.readFileSync(RULED_PINS, 'utf8')) : {};
+// The pin file, loaded once for the probe pass, the coverage gate, and the
+// comparison alike (see HOVERS above for the shape and discipline).
+const hoverPins = fs.existsSync(HOVERS) ? JSON.parse(fs.readFileSync(HOVERS, 'utf8')) : {};
+const declPinsOf = (f) => hoverPins[f]?.decls ?? [];
+const positionPinsOf = (f) => hoverPins[f]?.positions ?? [];
 let hskip = 0;
 if (RUN_HOVER || RUN_TOKENS) {
   pool = await poolP;
@@ -2239,11 +2247,11 @@ if (RUN_HOVER || RUN_TOKENS) {
               .map((text, line) => (/^~>/.test(text) ? line : -1)).filter((l) => l >= 0)
               .map(async (line) => ({ line, hover: await srv.hover(uri, { line, character: 0 }) })))
           : [];
-        // RULINGS-governed in-body positions (ruled-pins.json) — probed on the
-        // same settled document, after the same readiness wait, so a null is
-        // the position's real answer, not an unbuilt program's.
+        // RULINGS-governed in-body positions (hover-pins.json `positions`) —
+        // probed on the same settled document, after the same readiness wait,
+        // so a null is the position's real answer, not an unbuilt program's.
         const ruled = RUN_HOVER
-          ? await Promise.all((ruledPins[f] ?? []).map(async (rp) =>
+          ? await Promise.all(positionPinsOf(f).map(async (rp) =>
               ({ ...rp, hover: await srv.hover(uri, { line: rp.line - 1, character: rp.character }) })))
           : [];
         const tokens = RUN_TOKENS ? await srv.tokens(uri) : null;
@@ -2323,16 +2331,26 @@ if (RUN_HOVER || RUN_TOKENS) {
       if (p.hovers.length !== p.decls.length) gaps.push(`${f}: ${p.decls.length} declarations but ${p.hovers.length} hover answers`);
       const dead = p.hovers.filter((h) => h == null).length;
       if (dead) gaps.push(`${f}: ${dead} hover probe(s) returned no answer at all`);
-      // Ruled pins are positional, so they rot when the fixture shifts: every
-      // pin's token must still sit at its (line, character), and every pin
-      // must have been probed — a rotted or dropped pin is a coverage failure,
-      // never a silent shrink of the ruled denominator.
-      const pins = ruledPins[f] ?? [];
-      if ((p.ruled?.length ?? 0) !== pins.length) gaps.push(`${f}: probed ${p.ruled?.length ?? 0} ruled positions, ruled-pins.json lists ${pins.length}`);
+      // Position pins are positional, so they rot when the fixture shifts:
+      // every pin's token must still sit at its (line, character), and every
+      // pin must have been probed — a rotted or dropped pin is a coverage
+      // failure, never a silent shrink of the ruled denominator.
+      const pins = positionPinsOf(f);
+      if ((p.ruled?.length ?? 0) !== pins.length) gaps.push(`${f}: probed ${p.ruled?.length ?? 0} ruled positions, hover-pins.json lists ${pins.length}`);
       const srcLines = src.split('\n');
       for (const rp of pins) {
         if ((srcLines[rp.line - 1] ?? '').slice(rp.character, rp.character + rp.token.length) !== rp.token) {
           gaps.push(`${f}: ruled pin \`${rp.token}\` not at ${rp.line}:${rp.character} — the fixture moved under the pin (re-measure and re-pin)`);
+        }
+      }
+      // Decl pins are name-keyed, so their one rot mode is the declaration
+      // leaving the fixture (or an occurrence miscount): a pin naming no
+      // declaration would otherwise be asserted nowhere, silently.
+      const occCount = new Map();
+      for (const d of decls) occCount.set(d.name, (occCount.get(d.name) ?? 0) + 1);
+      for (const dp of declPinsOf(f)) {
+        if ((occCount.get(dp.name) ?? 0) <= (dp.occurrence ?? 0)) {
+          gaps.push(`${f}: decl pin \`${dp.name}\`${dp.occurrence ? `#${dp.occurrence}` : ''} names no declaration — the pin rotted (declaration removed or renamed)`);
         }
       }
     }
@@ -2347,7 +2365,6 @@ let hp = null;
 if (RUN_HOVER) {
   auditBanner('HOVER AUDIT', `twin oracle + expected hovers · ${fixtures.length} files`);
 
-  const pinned = fs.existsSync(HOVERS) ? JSON.parse(fs.readFileSync(HOVERS, 'utf8')) : null;
   const allRows = [];
   let anyCount = 0, probeCount = 0;
 
@@ -2355,7 +2372,7 @@ if (RUN_HOVER) {
     const occ = new Map();
     decls.forEach((d, i) => {
       const k = occ.get(d.name) ?? 0; occ.set(d.name, k + 1);
-      allRows.push({ ...d, hover: hovers[i], ts: tmap ? (tmap.get(`${d.name}#${k}`) ?? null) : null, file: f });
+      allRows.push({ ...d, occurrence: k, hover: hovers[i], ts: tmap ? (tmap.get(`${d.name}#${k}`) ?? null) : null, file: f });
       probeCount++;
       // `any` OR no answer at all. A null hover is a probe that FAILED, never a
       // typed one — testing `hovers[i] ?? ''` against the `any` pattern would
@@ -2439,28 +2456,41 @@ if (RUN_HOVER) {
   }
   const violations = allRows.filter(invariantHit).map((r) => `${r.file}:${r.line + 1} ${r.name} (${r.text}) → \`${r.hover}\``);
 
-  // ── hover-pins comparison — the pinned file covers ONLY what the
+  // ── decl-pin comparison — the `decls` sections cover ONLY what the
   // twin can't validate live (rip-native + no-twin). Twin-checked symbols
   // are judged by the twin oracle every run; pinning their raw text would
-  // flag harmless changes (union order) the twin normalizes away.
+  // flag harmless changes (union order) the twin normalizes away. Pins are
+  // matched by name (+ occurrence), never by line, so a fixture edit that
+  // only moves lines touches nothing here. Three failure classes, none
+  // silent: a pin whose measured hover DIVERGED (drift to review), a
+  // non-twin-covered symbol with NO pin (a new declaration must be pinned
+  // by hand — the paste-ready row prints below), and a pin on a symbol the
+  // twin now covers (shadowing live judgment — remove it). Rot (a pin
+  // naming no declaration) already failed the coverage gate above.
   const twinCovered = (r) => r.ts != null && !ripNative(r);
-  const liveScoped = {};
+  const pasteRow = (r) => `{ "name": ${JSON.stringify(r.name)}, ${r.occurrence ? `"occurrence": ${r.occurrence}, ` : ''}"expect": ${JSON.stringify(r.hover)} }`;
   let pinnedCount = 0;
-  for (const r of allRows) {
-    if (twinCovered(r)) continue;
-    (liveScoped[r.file] ??= {})[`${r.name}@${r.line + 1}`] = r.hover;
-    pinnedCount++;
-  }
-  let snapChanged = [];
-  if (UPDATE_HOVERS || pinned === null) {
-    fs.writeFileSync(HOVERS, JSON.stringify(liveScoped, null, 2) + '\n');
-  } else {
-    for (const f of Object.keys({ ...pinned, ...liveScoped })) {
-      const want = pinned[f] ?? {}, got = liveScoped[f] ?? {};
-      for (const k of new Set([...Object.keys(want), ...Object.keys(got)])) {
-        if ((want[k] ?? null) !== (got[k] ?? null)) snapChanged.push(`${f} ${k}: ${JSON.stringify(want[k] ?? null)} → ${JSON.stringify(got[k] ?? null)}`);
+  const snapChanged = [];
+  for (const [f, p] of PROBES) {
+    const pinByKey = new Map(declPinsOf(f).map((dp) => [`${dp.name}#${dp.occurrence ?? 0}`, dp]));
+    for (const r of allRows) {
+      if (r.file !== f) continue;
+      const dp = pinByKey.get(`${r.name}#${r.occurrence}`);
+      pinByKey.delete(`${r.name}#${r.occurrence}`);
+      if (twinCovered(r)) {
+        if (dp) snapChanged.push(`${f} ${r.name}: pinned, but the twin now covers it live — remove the pin (it shadows the oracle)`);
+        continue;
       }
+      if (!dp) snapChanged.push(`${f} ${r.name}@${r.line + 1}: unpinned — add to decls: ${pasteRow(r)}`);
+      else if ((dp.expect ?? null) !== (r.hover ?? null)) {
+        pinnedCount++;
+        snapChanged.push(`${f} ${r.name}: ${JSON.stringify(dp.expect ?? null)} → ${JSON.stringify(r.hover ?? null)} — if correct, re-pin: ${pasteRow(r)}`);
+      } else pinnedCount++;
     }
+    // Leftovers matched no probed declaration for OTHER reasons than rot
+    // (e.g. the fixture stopped compiling and was skipped) — the coverage
+    // gate owns the rot case; anything surviving to here is still loud.
+    for (const dp of pinByKey.values()) snapChanged.push(`${f} ${dp.name}: pin matched no probed declaration`);
   }
 
   const probed = allRows.length;
@@ -2471,7 +2501,7 @@ if (RUN_HOVER) {
   prow('rip-native', tally.native, dim, 'component / schema / reactive — twin uses React/zod, no oracle');
   prow('pinned-only', tally.pinnedOnly, dim, 'no twin symbol — covered by hover-pins');
   prow('expected', snapChanged.length, snapChanged.length ? red : green,
-    UPDATE_HOVERS || pinned === null ? 'updated' : (snapChanged.length ? 'changed vs hover-pins.json' : `${pinnedCount} pinned, unchanged`));
+    snapChanged.length ? 'diverging vs hover-pins.json decls' : `${pinnedCount} pinned, unchanged`);
   prow('invariant', violations.length, violations.length ? red : green, violations.length ? 'initialized binding hovers `any`' : '');
   // The `silence` gauge — ruled-silent positions (bare `~>` operators) must
   // serve null. EXPECTED RED while the bare-effect finding is open: the
@@ -2483,7 +2513,7 @@ if (RUN_HOVER) {
     prow('silence', silentRows.length - silentLeaks.length, silentLeaks.length ? red : green,
       `of ${silentRows.length} ruled-silent bare ~> positions serve null${silentLeaks.length ? ' — red by agreement: the open bare-effect finding (FINDINGS.md)' : ''}`);
   }
-  // The `ruled` gauge — RULINGS-governed in-body positions (ruled-pins.json:
+  // The `ruled` gauge — RULINGS-governed in-body positions (hover-pins.json `positions`:
   // render-DSL words, member declarations, gate spellings) must serve their
   // pinned answer: null where the ruling's interim is silence, text where a
   // truthful interim is pinned. EXPECTED RED while the render-DSL and
@@ -2505,7 +2535,7 @@ if (RUN_HOVER) {
     }
   }
   if (snapChanged.length) {
-    console.log(`\n    ${bold('Expected-hover changes')} ${dim('(--update-hovers re-pins them — verify correctness first)')}`);
+    console.log(`\n    ${bold('Expected-hover divergences')} ${dim('(hand-edit hover-pins.json decls — verify correctness first; paste-ready rows above)')}`);
     for (const c of snapChanged.slice(0, VERBOSE ? Infinity : 10)) console.log(`      ${red('✗')} ${dim(c)}`);
     if (snapChanged.length > 10 && !VERBOSE) console.log(`      ${dim(`… ${snapChanged.length - 10} more (--v for all)`)}`);
   }

@@ -1,95 +1,570 @@
 {
   "01-basic.rip": {
-    "notNullable@83": "let notNullable: string",
-    "implicitAny@85": "let implicitAny: (x: any) => any"
+    "decls": [
+      {
+        "name": "notNullable",
+        "expect": "let notNullable: string"
+      },
+      {
+        "name": "implicitAny",
+        "expect": "let implicitAny: (x: any) => any"
+      }
+    ]
   },
   "06-functions.rip": {
-    "String@305": "var String: StringConstructor Allows manipulation and formatting of text strings and determination and location of substrings within strings."
+    "decls": [
+      {
+        "name": "String",
+        "expect": "var String: StringConstructor Allows manipulation and formatting of text strings and determination and location of substrings within strings."
+      }
+    ]
   },
   "08-reactive.rip": {
-    "clicks@4": "let clicks: number",
-    "username@5": "let username: string",
-    "enabled@6": "let enabled: boolean",
-    "tags@7": "let tags: string[]",
-    "clicksDoubled@10": "const clicksDoubled: number",
-    "greeting@11": "const greeting: string",
-    "hasTags@12": "const hasTags: boolean",
-    "clickLogger@15": "const clickLogger: Function",
-    "badClicks@29": "let badClicks: number",
-    "badName@31": "let badName: string",
-    "badEnabled@33": "let badEnabled: boolean",
-    "badTags@35": "let badTags: string[]",
-    "badComputed@38": "const badComputed: string"
+    "decls": [
+      {
+        "name": "clicks",
+        "expect": "let clicks: number"
+      },
+      {
+        "name": "username",
+        "expect": "let username: string"
+      },
+      {
+        "name": "enabled",
+        "expect": "let enabled: boolean"
+      },
+      {
+        "name": "tags",
+        "expect": "let tags: string[]"
+      },
+      {
+        "name": "clicksDoubled",
+        "expect": "const clicksDoubled: number"
+      },
+      {
+        "name": "greeting",
+        "expect": "const greeting: string"
+      },
+      {
+        "name": "hasTags",
+        "expect": "const hasTags: boolean"
+      },
+      {
+        "name": "clickLogger",
+        "expect": "const clickLogger: Function"
+      },
+      {
+        "name": "badClicks",
+        "expect": "let badClicks: number"
+      },
+      {
+        "name": "badName",
+        "expect": "let badName: string"
+      },
+      {
+        "name": "badEnabled",
+        "expect": "let badEnabled: boolean"
+      },
+      {
+        "name": "badTags",
+        "expect": "let badTags: string[]"
+      },
+      {
+        "name": "badComputed",
+        "expect": "const badComputed: string"
+      }
+    ]
   },
   "09-components.rip": {
-    "Input@9": "const Input: typeof Input",
-    "Button@23": "const Button: typeof Button",
-    "Form@39": "const Form: typeof Form",
-    "PropTypeTests@76": "const PropTypeTests: typeof PropTypeTests",
-    "BindingTypeTests@95": "const BindingTypeTests: typeof BindingTypeTests",
-    "TypeTestComp@110": "const TypeTestComp: typeof TypeTestComp",
-    "RenderCondTest@145": "const RenderCondTest: typeof RenderCondTest",
-    "FilterGapTest@178": "const FilterGapTest: typeof FilterGapTest",
-    "EventHandlerTest@208": "const EventHandlerTest: typeof EventHandlerTest",
-    "Select@227": "const Select: typeof Select",
-    "GenericUsageTests@249": "const GenericUsageTests: typeof GenericUsageTests",
-    "cart@290": "let cart: Cart",
-    "CartDemo@296": "const CartDemo: typeof CartDemo",
-    "CartTypeTests@312": "const CartTypeTests: typeof CartTypeTests",
-    "DefaultedMethodParams@343": "const DefaultedMethodParams: typeof DefaultedMethodParams",
-    "DefaultedMethodParamsTests@358": "const DefaultedMethodParamsTests: typeof DefaultedMethodParamsTests",
-    "EqualsFormMethods@381": "const EqualsFormMethods: typeof EqualsFormMethods",
-    "EqualsFormMethodTests@391": "const EqualsFormMethodTests: typeof EqualsFormMethodTests",
-    "RefTests@410": "const RefTests: typeof RefTests",
-    "RefMismatchTests@426": "const RefMismatchTests: typeof RefMismatchTests",
-    "RefForwardChild@446": "const RefForwardChild: typeof RefForwardChild",
-    "RefForwardParent@452": "const RefForwardParent: typeof RefForwardParent",
-    "ConstMembers@467": "const ConstMembers: typeof ConstMembers",
-    "ConstMemberTests@476": "const ConstMemberTests: typeof ConstMemberTests"
+    "decls": [
+      {
+        "name": "Input",
+        "expect": "const Input: typeof Input"
+      },
+      {
+        "name": "Button",
+        "expect": "const Button: typeof Button"
+      },
+      {
+        "name": "Form",
+        "expect": "const Form: typeof Form"
+      },
+      {
+        "name": "PropTypeTests",
+        "expect": "const PropTypeTests: typeof PropTypeTests"
+      },
+      {
+        "name": "BindingTypeTests",
+        "expect": "const BindingTypeTests: typeof BindingTypeTests"
+      },
+      {
+        "name": "TypeTestComp",
+        "expect": "const TypeTestComp: typeof TypeTestComp"
+      },
+      {
+        "name": "RenderCondTest",
+        "expect": "const RenderCondTest: typeof RenderCondTest"
+      },
+      {
+        "name": "FilterGapTest",
+        "expect": "const FilterGapTest: typeof FilterGapTest"
+      },
+      {
+        "name": "EventHandlerTest",
+        "expect": "const EventHandlerTest: typeof EventHandlerTest"
+      },
+      {
+        "name": "Select",
+        "expect": "const Select: typeof Select"
+      },
+      {
+        "name": "GenericUsageTests",
+        "expect": "const GenericUsageTests: typeof GenericUsageTests"
+      },
+      {
+        "name": "cart",
+        "expect": "let cart: Cart"
+      },
+      {
+        "name": "CartDemo",
+        "expect": "const CartDemo: typeof CartDemo"
+      },
+      {
+        "name": "CartTypeTests",
+        "expect": "const CartTypeTests: typeof CartTypeTests"
+      },
+      {
+        "name": "DefaultedMethodParams",
+        "expect": "const DefaultedMethodParams: typeof DefaultedMethodParams"
+      },
+      {
+        "name": "DefaultedMethodParamsTests",
+        "expect": "const DefaultedMethodParamsTests: typeof DefaultedMethodParamsTests"
+      },
+      {
+        "name": "EqualsFormMethods",
+        "expect": "const EqualsFormMethods: typeof EqualsFormMethods"
+      },
+      {
+        "name": "EqualsFormMethodTests",
+        "expect": "const EqualsFormMethodTests: typeof EqualsFormMethodTests"
+      },
+      {
+        "name": "RefTests",
+        "expect": "const RefTests: typeof RefTests"
+      },
+      {
+        "name": "RefMismatchTests",
+        "expect": "const RefMismatchTests: typeof RefMismatchTests"
+      },
+      {
+        "name": "RefForwardChild",
+        "expect": "const RefForwardChild: typeof RefForwardChild"
+      },
+      {
+        "name": "RefForwardParent",
+        "expect": "const RefForwardParent: typeof RefForwardParent"
+      },
+      {
+        "name": "ConstMembers",
+        "expect": "const ConstMembers: typeof ConstMembers"
+      },
+      {
+        "name": "ConstMemberTests",
+        "expect": "const ConstMemberTests: typeof ConstMemberTests"
+      }
+    ]
   },
   "10-validation.rip": {
-    "User@43": "let User: Schema<User, User>",
-    "alice@53": "let alice: User",
-    "bob@54": "let bob: User",
-    "OrderItem@71": "let OrderItem: Schema<OrderItem, OrderItem>",
-    "OrderMeta@77": "let OrderMeta: Schema<OrderMeta, OrderMeta>",
-    "Order@80": "let Order: Schema<Order, OrderData>",
-    "order@93": "let order: Order",
-    "IntroStep@125": "let IntroStep: Schema<IntroStep, IntroStep>",
-    "TaskStep@130": "let TaskStep: Schema<TaskStep, TaskStep>",
-    "FinalStep@135": "let FinalStep: Schema<FinalStep, FinalStep>",
-    "Step@140": "let Step: { parse(data: unknown): Step; safe(data: unknown): SchemaSafeResult<Step>; ok(data: unknown): boolean; parseAsync(data: unknown): Promise<Step>; safeAsync(data: unknown): Promise<SchemaSafeResult<Step>>; okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<Step>; }",
-    "Workflow@146": "let Workflow: Schema<Workflow, Workflow>",
-    "workflow@150": "let workflow: Workflow",
-    "QBCustomer@177": "let QBCustomer: Schema<QBCustomer, QBCustomer>",
-    "customer@181": "let customer: QBCustomer"
+    "decls": [
+      {
+        "name": "User",
+        "expect": "let User: Schema<User, User>"
+      },
+      {
+        "name": "alice",
+        "expect": "let alice: User"
+      },
+      {
+        "name": "bob",
+        "expect": "let bob: User"
+      },
+      {
+        "name": "OrderItem",
+        "expect": "let OrderItem: Schema<OrderItem, OrderItem>"
+      },
+      {
+        "name": "OrderMeta",
+        "expect": "let OrderMeta: Schema<OrderMeta, OrderMeta>"
+      },
+      {
+        "name": "Order",
+        "expect": "let Order: Schema<Order, OrderData>"
+      },
+      {
+        "name": "order",
+        "expect": "let order: Order"
+      },
+      {
+        "name": "IntroStep",
+        "expect": "let IntroStep: Schema<IntroStep, IntroStep>"
+      },
+      {
+        "name": "TaskStep",
+        "expect": "let TaskStep: Schema<TaskStep, TaskStep>"
+      },
+      {
+        "name": "FinalStep",
+        "expect": "let FinalStep: Schema<FinalStep, FinalStep>"
+      },
+      {
+        "name": "Step",
+        "expect": "let Step: { parse(data: unknown): Step; safe(data: unknown): SchemaSafeResult<Step>; ok(data: unknown): boolean; parseAsync(data: unknown): Promise<Step>; safeAsync(data: unknown): Promise<SchemaSafeResult<Step>>; okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<Step>; }"
+      },
+      {
+        "name": "Workflow",
+        "expect": "let Workflow: Schema<Workflow, Workflow>"
+      },
+      {
+        "name": "workflow",
+        "expect": "let workflow: Workflow"
+      },
+      {
+        "name": "QBCustomer",
+        "expect": "let QBCustomer: Schema<QBCustomer, QBCustomer>"
+      },
+      {
+        "name": "customer",
+        "expect": "let customer: QBCustomer"
+      }
+    ]
   },
   "11-inference.rip": {
-    "total@38": "let total: number",
-    "label@40": "let label: string",
-    "active@42": "let active: boolean",
-    "result@48": "let result: number",
-    "upper@56": "let upper: string",
-    "joined@58": "let joined: string",
-    "first@64": "let first: string",
-    "msg@70": "let msg: string"
+    "decls": [
+      {
+        "name": "total",
+        "occurrence": 1,
+        "expect": "let total: number"
+      },
+      {
+        "name": "label",
+        "occurrence": 1,
+        "expect": "let label: string"
+      },
+      {
+        "name": "active",
+        "occurrence": 1,
+        "expect": "let active: boolean"
+      },
+      {
+        "name": "result",
+        "occurrence": 1,
+        "expect": "let result: number"
+      },
+      {
+        "name": "upper",
+        "occurrence": 1,
+        "expect": "let upper: string"
+      },
+      {
+        "name": "joined",
+        "occurrence": 1,
+        "expect": "let joined: string"
+      },
+      {
+        "name": "first",
+        "occurrence": 1,
+        "expect": "let first: string"
+      },
+      {
+        "name": "msg",
+        "occurrence": 1,
+        "expect": "let msg: string"
+      }
+    ]
   },
   "31-reactive.rip": {
-    "pulse@104": "let pulse: number",
-    "pulse@106": "let pulse: number"
+    "decls": [
+      {
+        "name": "pulse",
+        "occurrence": 1,
+        "expect": "let pulse: number"
+      },
+      {
+        "name": "pulse",
+        "occurrence": 2,
+        "expect": "let pulse: number"
+      }
+    ]
   },
   "32-components.rip": {
-    "Badge@13": "const Badge: typeof Badge",
-    "Field@26": "let Field: typeof Field",
-    "Roster@42": "let Roster: typeof Roster",
-    "Panel@73": "const Panel: typeof Panel",
-    "Chip@91": "let Chip: typeof Chip",
-    "Options@97": "const Options: typeof Options",
-    "Picker@105": "let Picker: typeof Picker",
-    "Routed@118": "let Routed: typeof Routed",
-    "Give@134": "let Give: typeof Give",
-    "Take@140": "let Take: typeof Take",
-    "Quiet@148": "let Quiet: typeof Quiet",
-    "Terse@156": "let Terse: typeof Terse"
+    "decls": [
+      {
+        "name": "Badge",
+        "expect": "const Badge: typeof Badge"
+      },
+      {
+        "name": "Field",
+        "expect": "let Field: typeof Field"
+      },
+      {
+        "name": "Roster",
+        "expect": "let Roster: typeof Roster"
+      },
+      {
+        "name": "Panel",
+        "expect": "const Panel: typeof Panel"
+      },
+      {
+        "name": "Chip",
+        "expect": "let Chip: typeof Chip"
+      },
+      {
+        "name": "Options",
+        "expect": "const Options: typeof Options"
+      },
+      {
+        "name": "Picker",
+        "expect": "let Picker: typeof Picker"
+      },
+      {
+        "name": "Routed",
+        "expect": "let Routed: typeof Routed"
+      },
+      {
+        "name": "Give",
+        "expect": "let Give: typeof Give"
+      },
+      {
+        "name": "Take",
+        "expect": "let Take: typeof Take"
+      },
+      {
+        "name": "Quiet",
+        "expect": "let Quiet: typeof Quiet"
+      },
+      {
+        "name": "Terse",
+        "expect": "let Terse: typeof Terse"
+      }
+    ],
+    "positions": [
+      {
+        "line": 56,
+        "character": 12,
+        "token": "ref",
+        "expect": null,
+        "rule": "ref word",
+        "why": "typed-channel target; interim silence — today serves the cover's `this` (render-DSL finding)"
+      },
+      {
+        "line": 56,
+        "character": 17,
+        "token": "inputEl",
+        "expect": null,
+        "rule": "name after ref:",
+        "why": "target is the state binding's type; today serves the cover's `this`"
+      },
+      {
+        "line": 68,
+        "character": 13,
+        "token": "key",
+        "expect": null,
+        "rule": "key: in a render loop",
+        "why": "today serves a minted scaffold local (`_elN`)"
+      },
+      {
+        "line": 69,
+        "character": 6,
+        "token": "slot",
+        "expect": null,
+        "rule": "slot",
+        "why": "today serves the cover's `this`"
+      },
+      {
+        "line": 78,
+        "character": 4,
+        "token": "div",
+        "expect": null,
+        "rule": "element tag",
+        "why": "intrinsic-element target; today serves the cover's `this`"
+      },
+      {
+        "line": 56,
+        "character": 6,
+        "token": "input",
+        "expect": null,
+        "rule": "element tag",
+        "why": "intrinsic-element target; today serves the cover's `this`"
+      },
+      {
+        "line": 20,
+        "character": 9,
+        "token": "class",
+        "expect": null,
+        "rule": "attr/prop name (intrinsic)",
+        "why": "the prop's type is the target; today serves the cover's `this`"
+      },
+      {
+        "line": 58,
+        "character": 14,
+        "token": "click",
+        "expect": null,
+        "rule": "event word",
+        "why": "handler-signature target; today serves the cover's `this`"
+      },
+      {
+        "line": 81,
+        "character": 8,
+        "token": "value",
+        "expect": null,
+        "rule": "bind target (component)",
+        "why": "today serves the minted `__bind_value__` slot"
+      },
+      {
+        "line": 81,
+        "character": 18,
+        "token": "text",
+        "expect": null,
+        "rule": "name in a bind",
+        "why": "VALUE-type target; today serves the whole bind cover's `__bind_value__`"
+      },
+      {
+        "line": 36,
+        "character": 8,
+        "token": "value",
+        "expect": null,
+        "rule": "bind target (intrinsic)",
+        "why": "today serves the cover's `this`"
+      },
+      {
+        "line": 121,
+        "character": 24,
+        "token": "params",
+        "expect": null,
+        "rule": "gate key params",
+        "why": "plain-inferred target; today serves the minted key-fn's own param"
+      },
+      {
+        "line": 121,
+        "character": 31,
+        "token": "id",
+        "expect": null,
+        "rule": "gate key params",
+        "why": "plain-inferred target; today serves bare `any` off the minted param"
+      },
+      {
+        "line": 44,
+        "character": 2,
+        "token": "people",
+        "expect": null,
+        "rule": "member declaration (state)",
+        "why": "minted-kind value-first target; the container wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 17,
+        "character": 2,
+        "token": "shade",
+        "expect": null,
+        "rule": "member declaration (computed)",
+        "why": "wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 48,
+        "character": 2,
+        "token": "cap",
+        "expect": null,
+        "rule": "member declaration (readonly)",
+        "why": "wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 27,
+        "character": 3,
+        "token": "label",
+        "expect": null,
+        "rule": "member declaration (prop)",
+        "why": "wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 47,
+        "character": 2,
+        "token": "inputEl",
+        "expect": null,
+        "rule": "member declaration (ref cell)",
+        "why": "wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 119,
+        "character": 2,
+        "token": "stats",
+        "expect": null,
+        "rule": "gate target name",
+        "why": "minted-kind value-first target (kind label undecided); wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 122,
+        "character": 2,
+        "token": "user",
+        "expect": null,
+        "rule": "gate target name",
+        "why": "annotated spelling; wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 119,
+        "character": 8,
+        "token": "<~",
+        "expect": null,
+        "rule": "gate operator",
+        "why": "punctuation is silent, permanently — measured null 2026-07-23, green"
+      },
+      {
+        "line": 119,
+        "character": 12,
+        "token": "app",
+        "expect": null,
+        "rule": "gate path segment",
+        "why": "ruled silent — measured null 2026-07-23, green"
+      },
+      {
+        "line": 119,
+        "character": 16,
+        "token": "data",
+        "expect": null,
+        "rule": "gate path segment",
+        "why": "ruled silent — measured null 2026-07-23, green"
+      },
+      {
+        "line": 119,
+        "character": 21,
+        "token": "stats",
+        "expect": null,
+        "rule": "gate path segment",
+        "why": "the path leaf; ruled silent — measured null 2026-07-23, green"
+      },
+      {
+        "line": 79,
+        "character": 6,
+        "token": "Field",
+        "expect": null,
+        "rule": "component name at a use site",
+        "why": "props-signature target; measured null 2026-07-23 — the pin asserts the interim"
+      },
+      {
+        "line": 80,
+        "character": 8,
+        "token": "label",
+        "expect": "(property) label?: string | { value: string; read(): string; } | undefined",
+        "rule": "attr/prop name (component)",
+        "why": "the props surface's real declared type — truthful interim; the container arm rides the bind slot by design"
+      },
+      {
+        "line": 59,
+        "character": 23,
+        "token": "e",
+        "expect": "(parameter) e: PointerEvent & { target: any; currentTarget: any; }",
+        "rule": "value position (handler param)",
+        "why": "correct today — the principles' value-position answer, pinned as-is"
+      }
+    ]
   }
 }

@@ -44,7 +44,7 @@ Depends on nothing. Produces: the coverage number and the uncovered-rule list M3
 
 ## M3 — Corpus rewrite
 
-*Authoring underway: `20-basics` through `32-components` landed — twin and error-lane pair each; the Diagnostics Lane itself (`bun run type-audit --errors`, over `fixtures/errors/`) arrived with the first, the pinned-negatives lane (`error-pins.json`) and the hover `silence` gauge with `31-reactive`, and the `ruled` gauge (`ruled-pins.json` — the RULINGS-governed in-body hover positions) with `32-components`. Files 33–34 remain. Productions a positive fixture cannot yet carry are parked — MANIFEST.md's Parked table, each row held by an open FINDINGS.md row — and spellings no fixture can or should ever reduce (lexically unreachable, banned by design) are excluded from the denominator by the gate's own exclusion table in runner.js.*
+*Authoring underway: `20-basics` through `32-components` landed — twin and error-lane pair each; the Diagnostics Lane itself (`bun run type-audit --errors`, over `fixtures/errors/`) arrived with the first, the pinned-negatives lane (`error-pins.json`) and the hover `silence` gauge with `31-reactive`, and the `ruled` gauge (hover-pins.json's `positions` sections — the RULINGS-governed in-body hover positions) with `32-components`. Files 33–34 remain. Productions a positive fixture cannot yet carry are parked — MANIFEST.md's Parked table, each row held by an open FINDINGS.md row — and spellings no fixture can or should ever reduce (lexically unreachable, banned by design) are excluded from the denominator by the gate's own exclusion table in runner.js.*
 
 Not additive growth: a REWRITE, executed as a strangler migration. The new corpus owns every production the grammar defines; the legacy fixtures (01–12) retire.
 

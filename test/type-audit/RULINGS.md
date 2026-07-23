@@ -2,7 +2,7 @@
 
 The decided answers where no TypeScript oracle exists: the render DSL, schema bodies, rip's reactive vocabulary — and the semantic-token cases where rip's spelling and its lowering disagree.
 
-**This file is the intent; the pins are the measurement.** `hover-pins.json` records what the editor serves at top-level declarations, `ruled-pins.json` at the RULINGS-governed in-body positions (the Hover Audit's `ruled` gauge), both reviewed against this file; a fixture comment beside a governed line cites its row here. A pin diverging from a ruling is either an unimplemented target (the pin asserts the interim) or a wrong pin — never an ambiguous ruling. Rulings change here first; pins follow, never the reverse.
+**This file is the intent; the pins are the measurement.** `hover-pins.json` records what the editor serves — top-level declarations in its `decls` sections, the RULINGS-governed in-body positions in its `positions` sections (the Hover Audit's `ruled` gauge) — every row hand-maintained and reviewed against this file (no mechanical re-pin exists; the run prints paste-ready rows, and adopting one is an explicit edit); a fixture comment beside a governed line cites its row here. A pin diverging from a ruling is either an unimplemented target (the pin asserts the interim) or a wrong pin — never an ambiguous ruling. Rulings change here first; pins follow, never the reverse.
 
 ## Principles
 
@@ -28,7 +28,7 @@ The declaration hovers here have an honest interim that is not silence: the plai
 
 ## Components / render
 
-Measured 2026-07-23 over 32-components (the `ruled` gauge, ruled-pins.json). Two findings hold the red pins: the render-DSL finding (positions with no user symbol serve minted scaffold — the cover's `this`, `_elN` locals, the `__bind_value__` slot, the gate key-fn's params) and the member-wrapper finding (member declarations and gate targets serve the container wrapper where the value-type answer is the only truthful interim).
+Measured 2026-07-23 over 32-components (the `ruled` gauge, hover-pins.json's `positions`). Two findings hold the red pins: the render-DSL finding (positions with no user symbol serve minted scaffold — the cover's `this`, `_elN` locals, the `__bind_value__` slot, the gate key-fn's params) and the member-wrapper finding (member declarations and gate targets serve the container wrapper where the value-type answer is the only truthful interim).
 
 | position | ruling (target) | interim |
 | --- | --- | --- |

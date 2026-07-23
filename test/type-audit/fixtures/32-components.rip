@@ -5,7 +5,7 @@
 # only (ROADMAP.md, Oracles); gates, offer/accept, and the `<=>` channel have
 # no honest TSX spelling and are absent from it. Hover targets for render-DSL
 # and member positions are ruled in RULINGS.md (Components / render); their
-# in-body pins live in ruled-pins.json. Negatives pair in
+# in-body pins live in hover-pins.json's positions sections. Negatives pair in
 # fixtures/errors/32-components.errors.rip under the Diagnostics Lane.
 
 # ── Definition + typed props + render structure ──
