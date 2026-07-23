@@ -6,8 +6,12 @@
     "jsx": "react-jsx",
     "noEmit": true,
     "skipLibCheck": true,
-    "strict": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["fixtures"]
+  "include": [
+    "fixtures"
+  ],
+  "exclude": [
+    "fixtures/errors"
+  ]
 }

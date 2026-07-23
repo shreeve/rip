@@ -1,0 +1,12 @@
+# 31-reactive.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run type-audit --errors) asserts each one; @ts-nocheck quiets editors only.
+# @ts-nocheck
+
+count := 0
+limit =! 100
+
+wrongState: number := 'oops'
+wrongComputed: string ~= count * 2
+wrongReadonly: number =! 'nope'
+wrongEffect: number ~> console.log(count)
+limit = 7

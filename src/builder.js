@@ -179,44 +179,6 @@ export class CodeBuilder {
     this.endMark();
   }
 
-  // ── probe emission (the place-or-decline check) ───────────────────
-  //
-  // A directive's placement decision needs the governed statement's
-  // ACTUAL face emission (single line or not) — unknowable from the
-  // tree without duplicating every lowering decision. The probe
-  // protocol: checkpoint, emit once, inspect; when the emission turns
-  // out single-line, roll back and re-emit with the directive line in
-  // front. Rollback requires mark-BALANCED emission between
-  // checkpoint and rollback (statements are; the guard rejects
-  // anything else), and kills the exactness memo — its chunk indices
-  // die with the truncation.
-
-  checkpoint() {
-    return {
-      length: this.length, chunks: this.chunks.length, rows: this.rows.length,
-      tsRegions: this.tsRegions.length, marks: this.markStack.length,
-    };
-  }
-
-  // Does the emission since `cp` span multiple lines? One TRAILING
-  // newline is layout, not a second line (class member rows own their
-  // line break; statement-position emissions end before theirs).
-  multiLineSince(cp) {
-    const text = this.chunks.slice(cp.chunks).join('');
-    return (text.endsWith('\n') ? text.slice(0, -1) : text).includes('\n');
-  }
-
-  rollback(cp) {
-    if (this.markStack.length !== cp.marks) {
-      throw new Error('builder: rollback across an open-mark boundary — probe emission must be mark-balanced');
-    }
-    this.chunks.length = cp.chunks;
-    this.length = cp.length;
-    this.rows.length = cp.rows;
-    this.tsRegions.length = cp.tsRegions;
-    this.exactRanges.clear();
-  }
-
   // Does the region emitted during frame `f` equal its source span
   // verbatim? Equivalent to joining the region's chunks and comparing
   // the strings, but never joins: the length gate answers most cover

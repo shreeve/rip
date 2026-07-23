@@ -1,7 +1,7 @@
 {
   "name": "vscode-rip",
   "displayName": "Rip Language",
-  "description": "Rip language support — syntax highlighting, hover, diagnostics, completions, go-to-definition, references, rename, signature help, semantic tokens, code actions, outline, inlay hints, and document links through the Rip compiler and the TypeScript 7 LSP server",
+  "description": "Rip language support — syntax highlighting, hover, diagnostics, completions, go-to-definition, references, rename, signature help, semantic tokens, code actions, outline, and document links through the Rip compiler and the TypeScript 7 LSP server",
   "version": "4.0.0",
   "publisher": "rip-lang",
   "license": "MIT",
@@ -14,9 +14,6 @@
   "engines": {
     "vscode": "^1.80.0"
   },
-  "activationEvents": [
-    "onLanguage:rip"
-  ],
   "categories": [
     "Programming Languages"
   ],
@@ -91,13 +88,13 @@
     }
   },
   "scripts": {
-    "test": "RIP_REQUIRE_TSGO=1 bun test --timeout 30000",
+    "test": "bun ../../scripts/preflight.mjs && bun test --timeout 30000",
     "package": "bun scripts/package.js",
     "install-vscode": "bun ../../scripts/install-ext.mjs rip vscode",
     "install-cursor": "bun ../../scripts/install-ext.mjs rip cursor"
   },
   "dependencies": {
-    "typescript": "7.0.2",
+    "typescript": "catalog:",
     "vscode-languageclient": "9.0.1",
     "vscode-languageserver": "9.0.1",
     "vscode-languageserver-textdocument": "1.0.12"

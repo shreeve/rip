@@ -1,0 +1,17 @@
+# 29-modules-lib.rip — the module the 29-family imports: named exports (plain,
+# typed, void), a local promoted through the specifier list, and the module
+# default in its indented-object form
+
+station = 'relay'
+
+export host = 'localhost'
+export port: number = 4010
+export describe! = -> console.log('lib describes', host)
+
+export { station }
+
+export default
+  theme: 'dark'
+  depth: 2
+
+console.log('lib loaded:', station)

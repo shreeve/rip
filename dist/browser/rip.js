@@ -1446,7 +1446,7 @@ function findTopLevelArrowIdx(tokens) {
   }
   return -1;
 }
-function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null) {
+function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null, tsFace = false) {
   const segs = [];
   const emit = (s) => {
     if (segs.length && typeof segs[segs.length - 1] === "string")
@@ -1462,7 +1462,7 @@ function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thi
   descriptor.entries.forEach((e, i) => {
     if (i > 0)
       emit(", ");
-    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs);
+    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs, tsFace);
   });
   emit("]");
   if (adapterCode)
@@ -1481,7 +1481,7 @@ function fnSegments(fnCode, thisType, emit, emitTs) {
   emitTs(`this: ${thisType}${code[thisAt] === ")" ? "" : ", "}`);
   emit(code.slice(thisAt));
 }
-function entrySegments(e, fnCode, thisType, emit, emitTs) {
+function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false) {
   switch (e.tag) {
     case "computed":
     case "method":
@@ -1494,6 +1494,15 @@ function entrySegments(e, fnCode, thisType, emit, emitTs) {
       emit("}");
       return;
     default:
+      if (tsFace && e.tag === "field" && fnCode !== undefined && typeof fnCode !== "string" && fnText(fnCode).startsWith("it", fnCode.thisAt)) {
+        const whole = entryLiteral(e, fnCode);
+        const fn = fnText(fnCode);
+        const cut = whole.length - 1 - fn.length + fnCode.thisAt + "it".length;
+        emit(whole.slice(0, cut));
+        emitTs(": any");
+        emit(whole.slice(cut));
+        return;
+      }
       emit(entryLiteral(e, fnCode));
   }
 }
@@ -6251,6 +6260,7 @@ var parserInstance = {
     return t;
   })(),
   ruleTable: [0, 0, 3, 0, 3, 1, 4, 1, 4, 3, 4, 2, 5, 1, 5, 1, 8, 1, 8, 1, 8, 1, 8, 1, 8, 1, 8, 1, 13, 1, 13, 2, 13, 3, 13, 4, 11, 2, 11, 4, 11, 4, 11, 5, 11, 7, 11, 6, 11, 9, 29, 1, 29, 3, 29, 4, 29, 4, 29, 6, 32, 1, 32, 3, 32, 1, 32, 3, 24, 1, 26, 3, 12, 3, 12, 5, 12, 2, 12, 2, 12, 2, 12, 2, 12, 2, 12, 2, 12, 2, 12, 2, 12, 3, 12, 5, 12, 4, 12, 5, 12, 7, 42, 3, 42, 4, 42, 5, 42, 4, 42, 5, 42, 6, 42, 4, 42, 5, 42, 6, 42, 4, 42, 5, 42, 6, 42, 4, 42, 5, 42, 6, 42, 4, 42, 5, 42, 4, 42, 4, 42, 5, 42, 6, 42, 4, 42, 5, 42, 4, 39, 1, 39, 3, 39, 4, 39, 4, 39, 6, 57, 1, 57, 3, 57, 3, 57, 1, 57, 3, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 58, 1, 58, 1, 58, 1, 58, 1, 58, 1, 58, 1, 58, 1, 58, 1, 58, 2, 58, 1, 58, 3, 72, 1, 72, 1, 72, 1, 72, 1, 72, 1, 82, 1, 82, 1, 82, 1, 23, 1, 23, 3, 91, 1, 91, 2, 93, 3, 93, 5, 93, 2, 93, 1, 83, 1, 83, 3, 20, 1, 100, 1, 61, 3, 61, 3, 61, 4, 61, 4, 61, 5, 61, 4, 61, 5, 61, 6, 61, 4, 61, 5, 61, 6, 61, 5, 61, 6, 61, 7, 61, 4, 61, 5, 61, 6, 61, 3, 61, 5, 61, 4, 61, 3, 61, 4, 61, 4, 61, 5, 61, 6, 16, 1, 16, 1, 16, 1, 43, 3, 43, 4, 43, 5, 43, 4, 43, 5, 43, 6, 43, 5, 43, 6, 43, 7, 43, 4, 43, 5, 43, 6, 44, 3, 44, 4, 44, 3, 44, 4, 44, 5, 44, 4, 44, 5, 44, 6, 44, 5, 44, 4, 44, 5, 44, 4, 62, 3, 62, 5, 62, 7, 62, 4, 62, 6, 62, 8, 45, 3, 45, 4, 45, 5, 45, 4, 45, 5, 45, 6, 45, 5, 45, 6, 45, 7, 45, 4, 45, 5, 45, 6, 46, 3, 46, 4, 46, 3, 46, 2, 46, 3, 46, 2, 46, 4, 46, 5, 46, 4, 102, 1, 102, 1, 102, 3, 102, 3, 102, 4, 102, 6, 102, 6, 102, 4, 102, 6, 102, 5, 102, 7, 102, 5, 102, 5, 102, 7, 102, 7, 102, 3, 102, 3, 80, 2, 80, 2, 80, 2, 80, 3, 80, 4, 127, 2, 126, 1, 126, 1, 126, 1, 126, 1, 126, 1, 126, 3, 126, 3, 126, 4, 126, 3, 112, 1, 112, 1, 59, 5, 59, 6, 59, 2, 132, 1, 132, 1, 76, 2, 77, 1, 77, 1, 111, 2, 111, 2, 106, 2, 106, 3, 106, 4, 141, 1, 141, 3, 141, 4, 141, 4, 141, 6, 143, 1, 143, 2, 142, 1, 142, 2, 140, 1, 140, 2, 145, 1, 145, 2, 47, 4, 47, 5, 146, 0, 146, 1, 146, 3, 146, 4, 146, 6, 148, 1, 148, 1, 148, 3, 148, 3, 148, 5, 148, 3, 148, 5, 148, 4, 148, 6, 150, 2, 150, 2, 154, 1, 154, 1, 154, 1, 154, 1, 154, 1, 154, 2, 154, 2, 154, 2, 154, 2, 154, 3, 154, 3, 154, 4, 154, 6, 154, 2, 154, 5, 154, 5, 154, 7, 154, 7, 120, 1, 120, 3, 120, 4, 120, 6, 157, 1, 157, 3, 157, 3, 157, 5, 158, 1, 158, 1, 152, 1, 152, 1, 152, 1, 149, 1, 149, 1, 149, 3, 149, 4, 159, 1, 159, 1, 74, 5, 117, 3, 117, 2, 117, 2, 117, 1, 41, 4, 41, 5, 41, 5, 41, 6, 41, 5, 41, 6, 21, 0, 21, 3, 130, 0, 130, 1, 130, 3, 130, 4, 130, 6, 161, 1, 161, 3, 161, 2, 161, 1, 162, 1, 162, 2, 162, 3, 162, 2, 163, 1, 163, 1, 163, 1, 163, 1, 164, 2, 165, 1, 40, 1, 40, 2, 40, 3, 40, 4, 40, 2, 40, 3, 40, 4, 40, 5, 40, 3, 40, 5, 14, 3, 69, 2, 70, 2, 70, 4, 172, 3, 173, 1, 173, 3, 173, 2, 174, 1, 174, 1, 174, 2, 174, 2, 71, 2, 71, 2, 78, 3, 78, 4, 78, 6, 75, 2, 75, 2, 75, 3, 75, 2, 75, 3, 128, 2, 128, 4, 110, 1, 110, 3, 110, 4, 110, 4, 110, 6, 144, 1, 144, 1, 30, 0, 30, 1, 54, 2, 54, 3, 73, 3, 73, 5, 9, 2, 9, 4, 9, 1, 67, 3, 67, 3, 67, 5, 67, 5, 67, 3, 67, 3, 67, 3, 67, 3, 67, 5, 67, 5, 67, 5, 67, 5, 67, 1, 186, 3, 186, 4, 188, 4, 188, 5, 188, 2, 190, 3, 190, 5, 63, 1, 63, 1, 63, 3, 63, 3, 63, 3, 63, 3, 63, 7, 63, 5, 64, 2, 64, 2, 64, 3, 64, 3, 64, 4, 64, 5, 195, 3, 195, 3, 195, 3, 195, 2, 68, 2, 68, 4, 66, 5, 66, 7, 66, 4, 66, 6, 200, 1, 200, 2, 201, 3, 201, 4, 203, 1, 203, 3, 65, 5, 65, 7, 65, 7, 65, 9, 65, 9, 65, 5, 65, 7, 65, 6, 65, 8, 65, 5, 65, 7, 65, 6, 65, 8, 65, 5, 65, 7, 65, 3, 65, 5, 65, 5, 65, 7, 65, 7, 65, 9, 65, 9, 65, 5, 65, 7, 65, 6, 65, 8, 65, 5, 65, 7, 65, 6, 65, 8, 65, 5, 65, 7, 213, 1, 205, 1, 205, 3, 185, 2, 185, 3, 60, 2, 60, 2, 60, 2, 60, 2, 60, 2, 60, 2, 60, 2, 60, 5, 60, 2, 60, 2, 60, 2, 60, 2, 60, 4, 60, 1, 60, 2, 60, 4, 60, 3, 60, 2, 60, 2, 60, 3, 60, 3, 60, 3, 60, 3, 60, 3, 60, 3, 60, 3, 60, 3, 60, 3, 60, 3, 60, 3, 60, 3, 60, 3, 60, 3, 60, 3, 60, 3, 60, 3],
+  ruleNames: ["$accept → Root $end", "Root → ε", "Root → Body", "Body → Line", "Body → Body TERMINATOR Line", "Body → Body TERMINATOR", "Line → Expression", "Line → Statement", "Statement → Return", "Statement → STATEMENT", "Statement → Import", "Statement → Export", "Statement → TypeDecl", "Statement → Enum", "TypeDecl → TYPE_DECL", "TypeDecl → Assignable TYPE", "TypeDecl → Assignable OPT_MARKER TYPE", "TypeDecl → DEF Identifier OptParams TYPE", "Import → IMPORT String", "Import → IMPORT ImportDefaultSpecifier FROM String", "Import → IMPORT ImportNamespaceSpecifier FROM String", "Import → IMPORT { } FROM String", "Import → IMPORT { ImportSpecifierList OptComma } FROM String", "Import → IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String", "Import → IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String", "ImportSpecifierList → ImportSpecifier", "ImportSpecifierList → ImportSpecifierList , ImportSpecifier", "ImportSpecifierList → ImportSpecifierList OptComma TERMINATOR ImportSpecifier", "ImportSpecifierList → INDENT ImportSpecifierList OptComma OUTDENT", "ImportSpecifierList → ImportSpecifierList OptComma INDENT ImportSpecifierList OptComma OUTDENT", "ImportSpecifier → Identifier", "ImportSpecifier → Identifier AS Identifier", "ImportSpecifier → DEFAULT", "ImportSpecifier → DEFAULT AS Identifier", "ImportDefaultSpecifier → Identifier", "ImportNamespaceSpecifier → IMPORT_ALL AS Identifier", "Export → EXPORT { }", "Export → EXPORT { ExportSpecifierList OptComma }", "Export → EXPORT Class", "Export → EXPORT Def", "Export → EXPORT Enum", "Export → EXPORT ExportAssign", "Export → EXPORT ReactiveAssign", "Export → EXPORT ComputedAssign", "Export → EXPORT Readonly", "Export → EXPORT Effect", "Export → EXPORT DEFAULT Expression", "Export → EXPORT DEFAULT INDENT Object OUTDENT", "Export → EXPORT EXPORT_ALL FROM String", "Export → EXPORT { } FROM String", "Export → EXPORT { ExportSpecifierList OptComma } FROM String", "ExportAssign → Identifier = Expression", "ExportAssign → Identifier = TERMINATOR Expression", "ExportAssign → Identifier = INDENT Expression OUTDENT", "ExportAssign → Identifier TYPE = Expression", "ExportAssign → Identifier TYPE = TERMINATOR Expression", "ExportAssign → Identifier TYPE = INDENT Expression OUTDENT", "ExportAssign → Identifier TYPE_PARAMS = Expression", "ExportAssign → Identifier TYPE_PARAMS = TERMINATOR Expression", "ExportAssign → Identifier TYPE_PARAMS = INDENT Expression OUTDENT", "ExportAssign → Identifier VOID_MARKER = Expression", "ExportAssign → Identifier VOID_MARKER = TERMINATOR Expression", "ExportAssign → Identifier VOID_MARKER = INDENT Expression OUTDENT", "ExportAssign → Identifier TYPE REACTIVE_ASSIGN Expression", "ExportAssign → Identifier TYPE REACTIVE_ASSIGN TERMINATOR Expression", "ExportAssign → Identifier TYPE REACTIVE_ASSIGN INDENT Expression OUTDENT", "ExportAssign → Identifier TYPE COMPUTED_ASSIGN Expression", "ExportAssign → Identifier TYPE COMPUTED_ASSIGN TERMINATOR Expression", "ExportAssign → Identifier TYPE COMPUTED_ASSIGN Block", "ExportAssign → Identifier TYPE READONLY_ASSIGN Expression", "ExportAssign → Identifier TYPE READONLY_ASSIGN TERMINATOR Expression", "ExportAssign → Identifier TYPE READONLY_ASSIGN INDENT Expression OUTDENT", "ExportAssign → Identifier TYPE EFFECT Expression", "ExportAssign → Identifier TYPE EFFECT TERMINATOR Expression", "ExportAssign → Identifier TYPE EFFECT Block", "ExportSpecifierList → ExportSpecifier", "ExportSpecifierList → ExportSpecifierList , ExportSpecifier", "ExportSpecifierList → ExportSpecifierList OptComma TERMINATOR ExportSpecifier", "ExportSpecifierList → INDENT ExportSpecifierList OptComma OUTDENT", "ExportSpecifierList → ExportSpecifierList OptComma INDENT ExportSpecifierList OptComma OUTDENT", "ExportSpecifier → Identifier", "ExportSpecifier → Identifier AS Identifier", "ExportSpecifier → Identifier AS DEFAULT", "ExportSpecifier → DEFAULT", "ExportSpecifier → DEFAULT AS Identifier", "Expression → Value", "Expression → Code", "Expression → Operation", "Expression → Assign", "Expression → ReactiveAssign", "Expression → ComputedAssign", "Expression → Gate", "Expression → Readonly", "Expression → Effect", "Expression → If", "Expression → Try", "Expression → For", "Expression → Switch", "Expression → While", "Expression → Throw", "Expression → Def", "Expression → Class", "Expression → Schema", "Expression → Component", "Expression → Render", "Value → Assignable", "Value → Literal", "Value → Parenthetical", "Value → Range", "Value → Invocation", "Value → DoIife", "Value → This", "Value → Super", "Value → Value DAMMIT", "Value → NewValue", "Value → Value TEMPLATE_TAG String", "Literal → Atom", "Literal → Regex", "Literal → UNDEFINED", "Literal → NULL", "Literal → BOOL", "Atom → NUMBER", "Atom → String", "Atom → SYMBOL", "String → STRING", "String → STRING_START Interpolations STRING_END", "Interpolations → InterpolationChunk", "Interpolations → Interpolations InterpolationChunk", "InterpolationChunk → INTERPOLATION_START Body INTERPOLATION_END", "InterpolationChunk → INTERPOLATION_START INDENT Body OUTDENT INTERPOLATION_END", "InterpolationChunk → INTERPOLATION_START INTERPOLATION_END", "InterpolationChunk → String", "Regex → REGEX", "Regex → HEREGEX_START Interpolations HEREGEX_END", "Identifier → IDENTIFIER", "Property → PROPERTY", "Assign → Assignable = Expression", "Assign → STRING = Expression", "Assign → STRING TYPE = Expression", "Assign → Assignable = TERMINATOR Expression", "Assign → Assignable = INDENT Expression OUTDENT", "Assign → Assignable TYPE = Expression", "Assign → Assignable TYPE = TERMINATOR Expression", "Assign → Assignable TYPE = INDENT Expression OUTDENT", "Assign → Assignable OPT_MARKER = Expression", "Assign → Assignable OPT_MARKER = TERMINATOR Expression", "Assign → Assignable OPT_MARKER = INDENT Expression OUTDENT", "Assign → Assignable OPT_MARKER TYPE = Expression", "Assign → Assignable OPT_MARKER TYPE = TERMINATOR Expression", "Assign → Assignable OPT_MARKER TYPE = INDENT Expression OUTDENT", "Assign → Assignable TYPE_PARAMS = Expression", "Assign → Assignable TYPE_PARAMS = TERMINATOR Expression", "Assign → Assignable TYPE_PARAMS = INDENT Expression OUTDENT", "Assign → SimpleAssignable COMPOUND_ASSIGN Expression", "Assign → SimpleAssignable COMPOUND_ASSIGN INDENT Expression OUTDENT", "Assign → SimpleAssignable COMPOUND_ASSIGN TERMINATOR Expression", "Assign → SimpleAssignable METHOD_ASSIGN Expression", "Assign → MERGE_ASSIGN SimpleAssignable = Expression", "Assign → Identifier VOID_MARKER = Expression", "Assign → Identifier VOID_MARKER = TERMINATOR Expression", "Assign → Identifier VOID_MARKER = INDENT Expression OUTDENT", "Assignable → SimpleAssignable", "Assignable → Array", "Assignable → Object", "ReactiveAssign → Assignable REACTIVE_ASSIGN Expression", "ReactiveAssign → Assignable REACTIVE_ASSIGN TERMINATOR Expression", "ReactiveAssign → Assignable REACTIVE_ASSIGN INDENT Expression OUTDENT", "ReactiveAssign → Assignable OPT_MARKER REACTIVE_ASSIGN Expression", "ReactiveAssign → Assignable OPT_MARKER REACTIVE_ASSIGN TERMINATOR Expression", "ReactiveAssign → Assignable OPT_MARKER REACTIVE_ASSIGN INDENT Expression OUTDENT", "ReactiveAssign → Assignable OPT_MARKER TYPE REACTIVE_ASSIGN Expression", "ReactiveAssign → Assignable OPT_MARKER TYPE REACTIVE_ASSIGN TERMINATOR Expression", "ReactiveAssign → Assignable OPT_MARKER TYPE REACTIVE_ASSIGN INDENT Expression OUTDENT", "ReactiveAssign → Assignable TYPE REACTIVE_ASSIGN Expression", "ReactiveAssign → Assignable TYPE REACTIVE_ASSIGN TERMINATOR Expression", "ReactiveAssign → Assignable TYPE REACTIVE_ASSIGN INDENT Expression OUTDENT", "ComputedAssign → Assignable COMPUTED_ASSIGN Expression", "ComputedAssign → Assignable COMPUTED_ASSIGN TERMINATOR Expression", "ComputedAssign → Assignable COMPUTED_ASSIGN Block", "ComputedAssign → Assignable OPT_MARKER COMPUTED_ASSIGN Expression", "ComputedAssign → Assignable OPT_MARKER COMPUTED_ASSIGN TERMINATOR Expression", "ComputedAssign → Assignable OPT_MARKER COMPUTED_ASSIGN Block", "ComputedAssign → Assignable OPT_MARKER TYPE COMPUTED_ASSIGN Expression", "ComputedAssign → Assignable OPT_MARKER TYPE COMPUTED_ASSIGN TERMINATOR Expression", "ComputedAssign → Assignable OPT_MARKER TYPE COMPUTED_ASSIGN Block", "ComputedAssign → Assignable TYPE COMPUTED_ASSIGN Expression", "ComputedAssign → Assignable TYPE COMPUTED_ASSIGN TERMINATOR Expression", "ComputedAssign → Assignable TYPE COMPUTED_ASSIGN Block", "Gate → Assignable GATE Value", "Gate → Assignable GATE Value CALL_START CALL_END", "Gate → Assignable GATE Value CALL_START ArgList OptComma CALL_END", "Gate → Assignable TYPE GATE Value", "Gate → Assignable TYPE GATE Value CALL_START CALL_END", "Gate → Assignable TYPE GATE Value CALL_START ArgList OptComma CALL_END", "Readonly → Assignable READONLY_ASSIGN Expression", "Readonly → Assignable READONLY_ASSIGN TERMINATOR Expression", "Readonly → Assignable READONLY_ASSIGN INDENT Expression OUTDENT", "Readonly → Assignable OPT_MARKER READONLY_ASSIGN Expression", "Readonly → Assignable OPT_MARKER READONLY_ASSIGN TERMINATOR Expression", "Readonly → Assignable OPT_MARKER READONLY_ASSIGN INDENT Expression OUTDENT", "Readonly → Assignable OPT_MARKER TYPE READONLY_ASSIGN Expression", "Readonly → Assignable OPT_MARKER TYPE READONLY_ASSIGN TERMINATOR Expression", "Readonly → Assignable OPT_MARKER TYPE READONLY_ASSIGN INDENT Expression OUTDENT", "Readonly → Assignable TYPE READONLY_ASSIGN Expression", "Readonly → Assignable TYPE READONLY_ASSIGN TERMINATOR Expression", "Readonly → Assignable TYPE READONLY_ASSIGN INDENT Expression OUTDENT", "Effect → Assignable EFFECT Expression", "Effect → Assignable EFFECT TERMINATOR Expression", "Effect → Assignable EFFECT Block", "Effect → EFFECT Expression", "Effect → EFFECT TERMINATOR Expression", "Effect → EFFECT Block", "Effect → Assignable TYPE EFFECT Expression", "Effect → Assignable TYPE EFFECT TERMINATOR Expression", "Effect → Assignable TYPE EFFECT Block", "SimpleAssignable → Identifier", "SimpleAssignable → ThisProperty", "SimpleAssignable → Subjectable . Property", "SimpleAssignable → Subjectable ?. Property", "SimpleAssignable → Subjectable INDEX_START Expression INDEX_END", "SimpleAssignable → Subjectable INDEX_START Expression , Expression INDEX_END", "SimpleAssignable → Subjectable INDEX_START INDENT Expression OUTDENT INDEX_END", "SimpleAssignable → Subjectable INDEX_START Slice INDEX_END", "SimpleAssignable → Subjectable INDEX_START INDENT Slice OUTDENT INDEX_END", "SimpleAssignable → Subjectable ES6_OPTIONAL_INDEX INDEX_START Expression INDEX_END", "SimpleAssignable → Subjectable ES6_OPTIONAL_INDEX INDEX_START INDENT Expression OUTDENT INDEX_END", "SimpleAssignable → Subjectable PICK_START PickList OptComma PICK_END", "SimpleAssignable → Subjectable OPTPICK_START PickList OptComma PICK_END", "SimpleAssignable → Subjectable PICK_START INDENT PickList OptComma OUTDENT PICK_END", "SimpleAssignable → Subjectable OPTPICK_START INDENT PickList OptComma OUTDENT PICK_END", "SimpleAssignable → IMPORT_META . Property", "SimpleAssignable → NEW_TARGET . Property", "NewValue → NEW NewSpine", "NewValue → NEW NewValue", "NewValue → NEW NewCall", "NewValue → NEW NewSpine DAMMIT", "NewValue → NEW NewSpine DAMMIT Arguments", "NewCall → NewSpine Arguments", "NewSpine → Identifier", "NewSpine → ThisProperty", "NewSpine → This", "NewSpine → Parenthetical", "NewSpine → Super", "NewSpine → NewSpine . Property", "NewSpine → NewSpine ?. Property", "NewSpine → NewSpine INDEX_START Expression INDEX_END", "NewSpine → NewSpine TEMPLATE_TAG String", "Subjectable → Value", "Subjectable → Code", "Code → PARAM_START ParamList PARAM_END ArrowKind Block", "Code → PARAM_START ParamList PARAM_END TYPE ArrowKind Block", "Code → ArrowKind Block", "ArrowKind → ->", "ArrowKind → =>", "DoIife → DO_IIFE Code", "This → THIS", "This → @", "ThisProperty → @ Property", "ThisProperty → @ STRING", "Array → [ ]", "Array → [ Elisions ]", "Array → [ ArgElisionList OptElisions ]", "ArgElisionList → ArgElision", "ArgElisionList → ArgElisionList , ArgElision", "ArgElisionList → ArgElisionList OptComma TERMINATOR ArgElision", "ArgElisionList → INDENT ArgElisionList OptElisions OUTDENT", "ArgElisionList → ArgElisionList OptElisions INDENT ArgElisionList OptElisions OUTDENT", "ArgElision → Arg", "ArgElision → Elisions Arg", "OptElisions → OptComma", "OptElisions → , Elisions", "Elisions → Elision", "Elisions → Elisions Elision", "Elision → ,", "Elision → Elision TERMINATOR", "Object → { AssignList OptComma }", "Object → MAP_START { AssignList OptComma }", "AssignList → ε", "AssignList → AssignObj", "AssignList → AssignList , AssignObj", "AssignList → AssignList OptComma TERMINATOR AssignObj", "AssignList → AssignList OptComma INDENT AssignList OptComma OUTDENT", "AssignObj → ObjAssignable", "AssignObj → ObjRestValue", "AssignObj → ObjAssignable : Expression", "AssignObj → Regex : Expression", "AssignObj → ObjAssignable : INDENT Expression OUTDENT", "AssignObj → SimpleObjAssignable = Expression", "AssignObj → SimpleObjAssignable = INDENT Expression OUTDENT", "AssignObj → SimpleObjAssignable VOID_MARKER : Expression", "AssignObj → SimpleObjAssignable VOID_MARKER : INDENT Expression OUTDENT", "ObjRestValue → ... SimpleObjAssignable", "ObjRestValue → ... ObjSpreadExpr", "ObjSpreadExpr → SimpleObjAssignable", "ObjSpreadExpr → Object", "ObjSpreadExpr → Parenthetical", "ObjSpreadExpr → Super", "ObjSpreadExpr → This", "ObjSpreadExpr → SUPER Arguments", "ObjSpreadExpr → DYNAMIC_IMPORT Arguments", "ObjSpreadExpr → SimpleObjAssignable Arguments", "ObjSpreadExpr → ObjSpreadExpr Arguments", "ObjSpreadExpr → ObjSpreadExpr . Property", "ObjSpreadExpr → ObjSpreadExpr ?. Property", "ObjSpreadExpr → ObjSpreadExpr INDEX_START Expression INDEX_END", "ObjSpreadExpr → ObjSpreadExpr INDEX_START INDENT Expression OUTDENT INDEX_END", "ObjSpreadExpr → ObjSpreadExpr DAMMIT", "ObjSpreadExpr → ObjSpreadExpr PICK_START PickList OptComma PICK_END", "ObjSpreadExpr → ObjSpreadExpr OPTPICK_START PickList OptComma PICK_END", "ObjSpreadExpr → ObjSpreadExpr PICK_START INDENT PickList OptComma OUTDENT PICK_END", "ObjSpreadExpr → ObjSpreadExpr OPTPICK_START INDENT PickList OptComma OUTDENT PICK_END", "PickList → PickItem", "PickList → PickList , PickItem", "PickList → PickList OptComma TERMINATOR PickItem", "PickList → PickList OptComma INDENT PickList OptComma OUTDENT", "PickItem → PickKey", "PickItem → PickKey : PickKey", "PickItem → PickKey = Expression", "PickItem → PickKey : PickKey = Expression", "PickKey → Identifier", "PickKey → Property", "SimpleObjAssignable → Identifier", "SimpleObjAssignable → Property", "SimpleObjAssignable → ThisProperty", "ObjAssignable → SimpleObjAssignable", "ObjAssignable → Atom", "ObjAssignable → [ Expression ]", "ObjAssignable → @ [ Expression ]", "RangeDots → ..", "RangeDots → ...", "Range → [ Expression RangeDots Expression ]", "Slice → Expression RangeDots Expression", "Slice → Expression RangeDots", "Slice → RangeDots Expression", "Slice → RangeDots", "Def → DEF Identifier OptParams Block", "Def → DEF Identifier OptParams TYPE Block", "Def → DEF Identifier TYPE_PARAMS OptParams Block", "Def → DEF Identifier TYPE_PARAMS OptParams TYPE Block", "Def → DEF Identifier VOID_MARKER OptParams Block", "Def → DEF Identifier VOID_MARKER OptParams TYPE Block", "OptParams → ε", "OptParams → CALL_START ParamList CALL_END", "ParamList → ε", "ParamList → Param", "ParamList → ParamList , Param", "ParamList → ParamList OptComma TERMINATOR Param", "ParamList → ParamList OptComma INDENT ParamList OptComma OUTDENT", "Param → TypedParamVar", "Param → TypedParamVar = Expression", "Param → ... TypedParamVar", "Param → ...", "TypedParamVar → ParamVar", "TypedParamVar → ParamVar TYPE", "TypedParamVar → ParamVar OPT_MARKER TYPE", "TypedParamVar → ParamVar OPT_MARKER", "ParamVar → Identifier", "ParamVar → Array", "ParamVar → Object", "ParamVar → ThisProperty", "Splat → ... Expression", "ClassName → Identifier", "Class → CLASS", "Class → CLASS Block", "Class → CLASS EXTENDS Expression", "Class → CLASS EXTENDS Expression Block", "Class → CLASS ClassName", "Class → CLASS ClassName Block", "Class → CLASS ClassName EXTENDS Expression", "Class → CLASS ClassName EXTENDS Expression Block", "Class → CLASS ThisProperty Block", "Class → CLASS ThisProperty EXTENDS Expression Block", "Enum → ENUM Identifier Block", "Schema → SCHEMA SCHEMA_BODY", "Component → COMPONENT ComponentBlock", "Component → COMPONENT EXTENDS Expression ComponentBlock", "ComponentBlock → INDENT ComponentBody OUTDENT", "ComponentBody → ComponentLine", "ComponentBody → ComponentBody TERMINATOR ComponentLine", "ComponentBody → ComponentBody TERMINATOR", "ComponentLine → Expression", "ComponentLine → Statement", "ComponentLine → OFFER Expression", "ComponentLine → ACCEPT IDENTIFIER", "Render → RENDER Block", "Render → RENDER Expression", "Super → SUPER . Property", "Super → SUPER INDEX_START Expression INDEX_END", "Super → SUPER INDEX_START INDENT Expression OUTDENT INDEX_END", "Invocation → Value Arguments", "Invocation → SUPER Arguments", "Invocation → Value ES6_OPTIONAL_CALL Arguments", "Invocation → DYNAMIC_IMPORT Arguments", "Invocation → DYNAMIC_IMPORT DAMMIT Arguments", "Arguments → CALL_START CALL_END", "Arguments → CALL_START ArgList OptComma CALL_END", "ArgList → Arg", "ArgList → ArgList , Arg", "ArgList → ArgList OptComma TERMINATOR Arg", "ArgList → INDENT ArgList OptComma OUTDENT", "ArgList → ArgList OptComma INDENT ArgList OptComma OUTDENT", "Arg → Expression", "Arg → Splat", "OptComma → ε", "OptComma → ,", "Block → INDENT OUTDENT", "Block → INDENT Body OUTDENT", "Parenthetical → ( Body )", "Parenthetical → ( INDENT Body OUTDENT )", "Return → RETURN Expression", "Return → RETURN INDENT Object OUTDENT", "Return → RETURN", "While → WHILE Expression Block", "While → UNTIL Expression Block", "While → WHILE Expression WHEN Expression Block", "While → UNTIL Expression WHEN Expression Block", "While → Expression WHILE Expression", "While → Statement WHILE Expression", "While → Expression UNTIL Expression", "While → Statement UNTIL Expression", "While → Expression WHILE Expression WHEN Expression", "While → Statement WHILE Expression WHEN Expression", "While → Expression UNTIL Expression WHEN Expression", "While → Statement UNTIL Expression WHEN Expression", "While → Loop", "IfBlock → IF Expression Block", "IfBlock → IF Expression Block IfElseTail", "IfElseTail → ELSE IF Expression Block", "IfElseTail → ELSE IF Expression Block IfElseTail", "IfElseTail → ELSE Block", "UnlessBlock → UNLESS Expression Block", "UnlessBlock → UNLESS Expression Block ELSE Block", "If → IfBlock", "If → UnlessBlock", "If → Statement POST_IF Expression", "If → Expression POST_IF Expression", "If → Statement POST_UNLESS Expression", "If → Expression POST_UNLESS Expression", "If → Expression POST_IF Expression ELSE INDENT Expression OUTDENT", "If → Expression POST_IF Expression ELSE Expression", "Try → TRY Block", "Try → TRY Expression", "Try → TRY Expression Catch", "Try → TRY Block Catch", "Try → TRY Block FINALLY Block", "Try → TRY Block Catch FINALLY Block", "Catch → CATCH Identifier Block", "Catch → CATCH Object Block", "Catch → CATCH Array Block", "Catch → CATCH Block", "Throw → THROW Expression", "Throw → THROW INDENT Object OUTDENT", "Switch → SWITCH Expression INDENT Cases OUTDENT", "Switch → SWITCH Expression INDENT Cases ELSE Block OUTDENT", "Switch → SWITCH INDENT Cases OUTDENT", "Switch → SWITCH INDENT Cases ELSE Block OUTDENT", "Cases → When", "Cases → Cases When", "When → LEADING_WHEN SimpleArgs Block", "When → LEADING_WHEN SimpleArgs Block TERMINATOR", "SimpleArgs → Expression", "SimpleArgs → SimpleArgs , Expression", "For → FOR ForVariables FORIN Expression Block", "For → FOR ForVariables FORIN Expression WHEN Expression Block", "For → FOR ForVariables FORIN Expression BY Expression Block", "For → FOR ForVariables FORIN Expression WHEN Expression BY Expression Block", "For → FOR ForVariables FORIN Expression BY Expression WHEN Expression Block", "For → FOR ForVariables FOROF Expression Block", "For → FOR ForVariables FOROF Expression WHEN Expression Block", "For → FOR OWN ForVariables FOROF Expression Block", "For → FOR OWN ForVariables FOROF Expression WHEN Expression Block", "For → FOR ForVariables FORAS Expression Block", "For → FOR ForVariables FORAS Expression WHEN Expression Block", "For → FOR AWAIT ForVariables FORAS Expression Block", "For → FOR AWAIT ForVariables FORAS Expression WHEN Expression Block", "For → FOR ForVariables FORASAWAIT Expression Block", "For → FOR ForVariables FORASAWAIT Expression WHEN Expression Block", "For → FOR Range Block", "For → FOR Range BY Expression Block", "For → Expression FOR ForVariables FORIN Expression", "For → Expression FOR ForVariables FORIN Expression WHEN Expression", "For → Expression FOR ForVariables FORIN Expression BY Expression", "For → Expression FOR ForVariables FORIN Expression WHEN Expression BY Expression", "For → Expression FOR ForVariables FORIN Expression BY Expression WHEN Expression", "For → Expression FOR ForVariables FOROF Expression", "For → Expression FOR ForVariables FOROF Expression WHEN Expression", "For → Expression FOR OWN ForVariables FOROF Expression", "For → Expression FOR OWN ForVariables FOROF Expression WHEN Expression", "For → Expression FOR ForVariables FORAS Expression", "For → Expression FOR ForVariables FORAS Expression WHEN Expression", "For → Expression FOR AWAIT ForVariables FORAS Expression", "For → Expression FOR AWAIT ForVariables FORAS Expression WHEN Expression", "For → Expression FOR ForVariables FORASAWAIT Expression", "For → Expression FOR ForVariables FORASAWAIT Expression WHEN Expression", "ForValue → ParamVar", "ForVariables → ForValue", "ForVariables → ForValue , ForValue", "Loop → LOOP Block", "Loop → LOOP Expression Block", "Operation → -- SimpleAssignable", "Operation → ++ SimpleAssignable", "Operation → SimpleAssignable --", "Operation → SimpleAssignable ++", "Operation → Value ?", "Operation → Value PRESENCE", "Operation → Expression CAST", "Operation → Expression TERNARY Expression : Expression", "Operation → UNARY Expression", "Operation → DO Expression", "Operation → UNARY_MATH Expression", "Operation → AWAIT Expression", "Operation → AWAIT INDENT Object OUTDENT", "Operation → YIELD", "Operation → YIELD Expression", "Operation → YIELD INDENT Object OUTDENT", "Operation → YIELD FROM Expression", "Operation → - Expression", "Operation → + Expression", "Operation → Expression ** Expression", "Operation → Expression + Expression", "Operation → Expression - Expression", "Operation → Expression MATH Expression", "Operation → Expression SHIFT Expression", "Operation → Expression & Expression", "Operation → Expression ^ Expression", "Operation → Expression | Expression", "Operation → Expression COMPARE Expression", "Operation → Expression MATCH Expression", "Operation → Expression RELATION Expression", "Operation → Expression && Expression", "Operation → Expression || Expression", "Operation → Expression ?? Expression", "Operation → Expression && Return", "Operation → Expression || Return", "Operation → Expression ?? Return"],
   ruleActions: (rule, vals, locs, shared) => {
     const $ = vals;
     const $0 = vals.length - 1;
@@ -7136,6 +7146,8 @@ var parserInstance = {
         locs.push(lexer.loc ?? null);
         symbol = null;
       } else if (action < 0) {
+        if (this.ctx?.onReduce)
+          this.ctx.onReduce(-action);
         len = this.ruleTable[-action * 2 + 1];
         span = (() => {
           if (len) {
@@ -7506,31 +7518,6 @@ class CodeBuilder {
     });
     fn();
     this.endMark();
-  }
-  checkpoint() {
-    return {
-      length: this.length,
-      chunks: this.chunks.length,
-      rows: this.rows.length,
-      tsRegions: this.tsRegions.length,
-      marks: this.markStack.length
-    };
-  }
-  multiLineSince(cp) {
-    const text = this.chunks.slice(cp.chunks).join("");
-    return (text.endsWith(`
-`) ? text.slice(0, -1) : text).includes(`
-`);
-  }
-  rollback(cp) {
-    if (this.markStack.length !== cp.marks) {
-      throw new Error("builder: rollback across an open-mark boundary — probe emission must be mark-balanced");
-    }
-    this.chunks.length = cp.chunks;
-    this.length = cp.length;
-    this.rows.length = cp.rows;
-    this.tsRegions.length = cp.tsRegions;
-    this.exactRanges.clear();
   }
   matchesSource(f) {
     if (this.source === null)
@@ -8014,66 +8001,6 @@ function buildSchemaTypeStory(programSexpr) {
   };
 }
 
-// src/ambients.js
-var HOST_AMBIENTS = {
-  process: [
-    "declare var process: {",
-    "  env: Record<string, string | undefined>;",
-    "  argv: string[];",
-    "  argv0: string;",
-    "  execPath: string;",
-    "  platform: string;",
-    "  arch: string;",
-    "  pid: number;",
-    "  version: string;",
-    "  versions: Record<string, string>;",
-    "  exitCode: number | undefined;",
-    "  cwd(): string;",
-    "  chdir(directory: string): void;",
-    "  exit(code?: number): never;",
-    "  nextTick(callback: (...args: any[]) => void, ...args: any[]): void;",
-    "  on(event: string, listener: (...args: any[]) => void): void;",
-    "  hrtime: { (time?: [number, number]): [number, number]; bigint(): bigint };",
-    "  stdout: { write(chunk: string | Uint8Array): boolean };",
-    "  stderr: { write(chunk: string | Uint8Array): boolean };",
-    "  stdin: { on(event: string, listener: (...args: any[]) => void): void };",
-    "  [key: string]: any;",
-    "}"
-  ].join(`
-`),
-  Bun: [
-    "declare var Bun: {",
-    "  version: string;",
-    "  revision: string;",
-    "  main: string;",
-    "  argv: string[];",
-    "  env: Record<string, string | undefined>;",
-    "  file(path: string | URL, options?: { type?: string }): any;",
-    "  write(destination: any, input: any): Promise<number>;",
-    "  spawn(command: string[], options?: any): any;",
-    "  spawnSync(command: string[], options?: any): any;",
-    "  serve(options: any): any;",
-    "  listen(options: any): any;",
-    "  connect(options: any): Promise<any>;",
-    "  sleep(ms: number): Promise<void>;",
-    "  sleepSync(ms: number): void;",
-    "  which(command: string, options?: any): string | null;",
-    "  hash(input: string | Uint8Array, seed?: number): number | bigint;",
-    "  resolveSync(specifier: string, parent: string): string;",
-    "  fileURLToPath(url: string | URL): string;",
-    "  pathToFileURL(path: string): URL;",
-    "  inspect(value: any, options?: any): string;",
-    "  readableStreamToText(stream: any): Promise<string>;",
-    "  readableStreamToJSON(stream: any): Promise<any>;",
-    "  readableStreamToArrayBuffer(stream: any): Promise<ArrayBuffer>;",
-    "  nanoseconds(): number;",
-    "  $: any;",
-    "  [key: string]: any;",
-    "}"
-  ].join(`
-`)
-};
-
 // src/typetext.js
 class TypeTextError extends Error {
   constructor(message) {
@@ -8409,8 +8336,15 @@ var renderTarget = (target, type, optional) => {
   const name = renderPattern(target);
   return `${name}${optional ? "?" : ""}: ${tidyType(type)}`;
 };
+var optionalReader = (stores) => (p) => {
+  const id = stores.idOf(p);
+  return id !== null && !!stores.role(id, "optionalMarker");
+};
 var renderParam = (p, isOptional) => {
-  const opt = isOptional?.(p) ?? false;
+  if (typeof isOptional !== "function") {
+    throw new TypeTextError("renderParam: an optionality reader is required (use optionalReader(stores)) — " + "omitting it silently drops every `?` marker, which type-checks and so cannot be caught downstream");
+  }
+  const opt = isOptional(p);
   if (typeof p === "string")
     return `${p}${opt ? "?" : ""}: any`;
   if (isTypedWrapper(p)) {
@@ -8662,7 +8596,8 @@ function componentTypeInfo(stores, source, node) {
   return {
     extendsTag,
     members,
-    roleText
+    roleText,
+    isOptionalParam: optionalReader(stores)
   };
 }
 var segmentsText = (segs) => segs.map((s) => s.text).join("");
@@ -8843,7 +8778,7 @@ function instanceTypeLines(info, selfType) {
       const declared = info.roleText(m.func, "returnType");
       const base = declared ?? (m.isVoid ? "void" : "any");
       const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push(`${m.name}${renderParams(m.func[1])}: ${ret};`);
+      lines.push(`${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};`);
       continue;
     }
     lines.push(`${m.kind === "readonly" ? "readonly " : ""}${m.name}${segmentsText(memberTypeSegments(m, ": "))};`);
@@ -8944,6 +8879,7 @@ class Emitter {
     this.importSpans = [];
     this.pins = pins;
     this.pinnables = [];
+    this.mutables = [];
     this.strict = strict;
     this.ts = face === "ts";
     this.pendingHoistTypes = new Map;
@@ -9685,12 +9621,60 @@ class Emitter {
     if (this.ts)
       this.b.tsOnly(() => this.b.emit(`: any${suffix}`));
   }
-  tsHandlerCast(fn) {
+  capturedExprText(node) {
+    const prevB = this.b;
+    this.b = new CodeBuilder(this.stores, { source: prevB.source });
+    try {
+      this.withExpression(() => this.expr(node));
+      return this.b.code;
+    } finally {
+      this.b = prevB;
+    }
+  }
+  static isTypeofPathNode(x) {
+    if (typeof x === "string")
+      return isIdentifierName(x);
+    return isNode4(x) && x[0] === "." && x.length === 3 && typeof x[2] === "string" && isIdentifierName(x[2]) && Emitter.isTypeofPathNode(x[1]);
+  }
+  tsIterElementTypeText(iter, unsafeNames, resolvableRoots) {
+    if (!this.ts || iter === undefined || !Emitter.isTypeofPathNode(iter))
+      return null;
+    const leaves = new Set;
+    Emitter.collectLeafNames(iter, leaves);
+    for (const n of leaves)
+      if (unsafeNames.has(n))
+        return null;
+    const text = this.capturedExprText(iter);
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(text))
+      return null;
+    const root = text.split(".", 1)[0];
+    if (!resolvableRoots.has(root) && !this.scopes.some((s) => s.has(root)))
+      return null;
+    return `NonNullable<typeof ${text}> extends readonly (infer __E)[] ? __E : any`;
+  }
+  tsLoopItemTypeText(entry, rec, entryIndex) {
+    if (!this.ts || entry.iter === undefined)
+      return null;
+    const unsafe = new Set([rec.self, ...rec.renameHazardNames]);
+    for (let i = entryIndex;i < rec.loopStack.length; i++) {
+      unsafe.add(rec.loopStack[i].itemVar);
+      unsafe.add(rec.loopStack[i].indexVar);
+    }
+    return this.tsIterElementTypeText(entry.iter, unsafe, new Set([rec.self, ...rec.paramNames]));
+  }
+  tsEventTypeText(events) {
+    const known = events.filter((e) => DOM_EVENTS.has(e));
+    if (known.length === 0)
+      return null;
+    const map = known.map((e) => `HTMLElementEventMap['${e}']`).join(" | ");
+    return `${known.length > 1 ? `(${map})` : map} & { target: any; currentTarget: any }`;
+  }
+  tsHandlerCast(fn, evTypeText = null) {
     if (!this.ts)
       return fn();
     this.b.tsOnly(() => this.b.emit("("));
     fn();
-    this.b.tsOnly(() => this.b.emit(") as any"));
+    this.b.tsOnly(() => this.b.emit(evTypeText === null ? ") as any" : `) as (e: ${evTypeText}) => unknown`));
   }
   tsComponentCtor(info, pad) {
     if (info.members.some((m) => m.kind === "gate")) {
@@ -9740,7 +9724,7 @@ class Emitter {
     this.tsDirectiveMap = new Map;
     this.tsNocheck = null;
     this.pendingHoistDirectives = [];
-    if (!this.ts || trivia.length === 0)
+    if (trivia.length === 0)
       return;
     const lineStarts = [0];
     for (let i = 0;i < source.length; i++) {
@@ -9810,7 +9794,7 @@ class Emitter {
       this.tsDirectiveMap.set(target.el, attached);
     }
     const firstStmt = elements.length > 0 ? elements[0].start : Infinity;
-    this.tsNocheck = nochecks.find((t) => t.end <= firstStmt) ?? null;
+    this.tsNocheck = this.ts ? nochecks.find((t) => t.end <= firstStmt) ?? null : null;
   }
   tsDirectiveLine(d, pad, padFirst = false) {
     this.b.tsOnly(() => {
@@ -9851,7 +9835,7 @@ class Emitter {
     if (!sigs)
       return;
     for (const sig of sigs) {
-      const params = this.tsRendered(sig, () => renderParams(sig[2]));
+      const params = this.tsRendered(sig, () => renderParams(sig[2], optionalReader(this.stores)));
       const directives = this.tsDirectiveMap.get(sig);
       if (directives !== undefined) {
         this.tsDirectiveMap.delete(sig);
@@ -10944,7 +10928,7 @@ class Emitter {
     this.mark(node, "$self", () => {
       this.b.emit("__schema(");
       this.mark(node, "body", () => {
-        const segments = descriptorSegments(descriptor, schemaName, fns, fns.get("adapter") ?? null, story?.thisTypes ?? null);
+        const segments = descriptorSegments(descriptor, schemaName, fns, fns.get("adapter") ?? null, story?.thisTypes ?? null, this.ts);
         for (const seg of segments) {
           if (typeof seg === "string")
             this.b.emit(seg);
@@ -13296,7 +13280,10 @@ ${pad ?? ""}`);
     }
     this.mark(node, "annotation", () => this.mark(node, "$self", () => {
       this.b.emit("const ");
+      const nameStart = this.b.offset;
       this.mark(node, "target", () => this.b.emit(target));
+      if (head === "state" && this.ts)
+        this.mutables.push([nameStart, this.b.offset]);
       if (this.ts && this.annotationText(node) !== null) {
         const ro = head === "computed" ? "readonly " : "";
         this.tsAnnotate(node, "annotation", containerType(this.annotationText(node), ro));
@@ -13876,7 +13863,13 @@ ${pad ?? ""}`);
               if (gate.key === null) {
                 this.b.emit(`'${gate.path}'`);
               } else {
-                this.b.emit(`{ path: '${gate.path}', key: (params, query) => `);
+                this.b.emit(`{ path: '${gate.path}', key: (params`);
+                if (this.ts)
+                  this.b.tsOnly(() => this.b.emit(": any"));
+                this.b.emit(", query");
+                if (this.ts)
+                  this.b.tsOnly(() => this.b.emit(": any"));
+                this.b.emit(") => ");
                 this.mark(gate.node, "key", () => {
                   this.mark(gate.key, "$self", () => this.b.emit(gate.keyCode));
                 });
@@ -14064,8 +14057,29 @@ ${pad ?? ""}`);
       this.scopes.pop();
       this.b.emit(`${pad}}
 `);
+      const methodEventNames = new Map;
+      if (this.ts && renderNode !== null) {
+        const scanHandlers = (x) => {
+          if (!isNode4(x))
+            return;
+          if (x[0] === ":" && x.length === 3 && isNode4(x[1]) && x[1][0] === "." && x[1][1] === "this" && typeof x[1][2] === "string" && DOM_EVENTS.has(x[1][2])) {
+            const v = x[2];
+            const m = typeof v === "string" && members.has(v) ? v : isNode4(v) && v[0] === "." && v[1] === "this" && v.length === 3 && typeof v[2] === "string" && members.has(v[2]) ? v[2] : null;
+            if (m !== null) {
+              if (!methodEventNames.has(m))
+                methodEventNames.set(m, new Set);
+              methodEventNames.get(m).add(x[1][2]);
+            }
+          }
+          for (const el of x)
+            scanHandlers(el);
+        };
+        scanHandlers(renderNode);
+      }
       const emitCallable = ({ name, func, isVoid, node: owner }) => {
         const [, params, block] = func;
+        const evNames = methodEventNames.get(name);
+        const evParamType = evNames !== undefined ? this.tsEventTypeText([...evNames]) : null;
         this.b.emit(pad);
         this.mark(owner, "$self", () => {
           if (Emitter.containsAwait(block))
@@ -14074,7 +14088,7 @@ ${pad ?? ""}`);
             this.b.emit("*");
           this.mark(owner, "target", () => this.mark(owner, "key", () => this.b.emit(name)));
           this.b.emit("(");
-          this.emitParams(params);
+          this.emitParams(params, evParamType);
           this.b.emit(")");
           this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, owner);
           this.b.emit(" ");
@@ -14132,7 +14146,8 @@ ${pad ?? ""}`);
       forceNonStatic: false,
       root: null,
       params: null,
-      originNode: renderNode
+      originNode: renderNode,
+      renameHazardNames: new Set
     };
     this.rstate = {
       elCount: 0,
@@ -14261,16 +14276,22 @@ ${pad ?? ""}`);
       this.tsDirectiveLine(d, pad, true);
   }
   replayCreates(rec, pad) {
-    for (const { node, fn, semi } of rec.creates) {
-      this.renderDirectives(node, pad);
-      this.b.emit(pad);
-      if (node != null)
-        this.mark(node, "$self", fn);
-      else
-        fn();
-      this.b.emit(semi ? `;
+    const prevPad = this.replayPad;
+    this.replayPad = pad;
+    try {
+      for (const { node, fn, semi } of rec.creates) {
+        this.renderDirectives(node, pad);
+        this.b.emit(pad);
+        if (node != null)
+          this.mark(node, "$self", fn);
+        else
+          fn();
+        this.b.emit(semi ? `;
 ` : `
 `);
+      }
+    } finally {
+      this.replayPad = prevPad;
     }
   }
   replaySetups(rec, pad) {
@@ -14876,6 +14897,7 @@ ${pad ?? ""}`);
         eventBindings.push({ pair, event: key[2], value });
         return;
       }
+      takePropDirectives(pair);
       if (typeof key !== "string") {
         throw this.positionedError(pair, "emitter: computed prop keys are not supported on a child component", markNode ?? this.rstate.node);
       }
@@ -14956,6 +14978,28 @@ ${pad ?? ""}`);
       scanAt = m.index + word.length;
       return [m.index, m.index + word.length];
     };
+    const propDirs = new Map;
+    const takePropDirectives = (pair) => {
+      if (!this.tsDirectivesArmed)
+        return;
+      const attached = this.tsDirectiveMap.get(pair);
+      if (attached === undefined)
+        return;
+      this.tsDirectiveMap.delete(pair);
+      propDirs.set(pair, [...propDirs.get(pair) ?? [], ...attached]);
+    };
+    const rehomeObjectDirectives = (obj) => {
+      if (!this.tsDirectivesArmed)
+        return;
+      const attached = this.tsDirectiveMap.get(obj);
+      if (attached === undefined)
+        return;
+      const firstPair = obj.slice(1).find((p) => isNode4(p));
+      if (firstPair === undefined || R.suppressedPairs.has(firstPair))
+        return;
+      this.tsDirectiveMap.delete(obj);
+      this.tsDirectiveMap.set(firstPair, [...attached, ...this.tsDirectiveMap.get(firstPair) ?? []]);
+    };
     const domItems = [];
     const isTextChild = (arg) => !isNode4(arg) && !(typeof arg === "string" && ((isHtmlTag2(arg.split(/[#.]/)[0]) || isComponentName2(arg.split(/[#.]/)[0])) && this.renderVarKind(arg) === null && this.resolveBareRead(arg) === null));
     const classifyChild = (arg) => {
@@ -14974,6 +15018,7 @@ ${pad ?? ""}`);
     };
     for (const arg of args) {
       if (isObject(arg)) {
+        rehomeObjectDirectives(arg);
         for (const pair of arg.slice(1))
           addPair(pair);
         scanAdvance(arg);
@@ -14982,6 +15027,7 @@ ${pad ?? ""}`);
         const stmts = isBlock2(block) ? block.slice(1) : block != null ? [block] : [];
         for (const child of stmts) {
           if (isObject(child)) {
+            rehomeObjectDirectives(child);
             for (const pair of child.slice(1))
               addPair(pair);
             scanAdvance(child);
@@ -15059,9 +15105,21 @@ ${pad ?? ""}`);
       if (props.length === 0) {
         this.b.emit("{}");
       } else {
-        this.b.emit("{ ");
+        const multi = propDirs.size > 0;
+        const inner = this.replayPad + "  ";
+        this.b.emit(multi ? "{" : "{ ");
         props.forEach((p, i) => {
-          if (i > 0)
+          if (multi) {
+            if (i > 0)
+              this.b.emit(",");
+            this.b.emit(`
+`);
+            const dirs = p.pair !== null ? propDirs.get(p.pair) : undefined;
+            if (this.ts && dirs !== undefined)
+              for (const d of dirs)
+                this.tsDirectiveLine(d, inner, true);
+            this.b.emit(inner);
+          } else if (i > 0)
             this.b.emit(", ");
           const emitPair = () => {
             const mid = isNode4(markNode) ? this.stores.idOf(markNode) : null;
@@ -15079,7 +15137,8 @@ ${pad ?? ""}`);
           else
             emitPair();
         });
-        this.b.emit(" }");
+        this.b.emit(multi ? `
+${this.replayPad}}` : " }");
       }
       this.b.emit(");");
     });
@@ -15116,7 +15175,9 @@ ${pad ?? ""}`);
       Emitter.collectLeafNames(value, evUsed);
       const ev = Emitter.mintName("e", evUsed);
       this.renderLine(pair, () => {
-        this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}) => ${this.runtimeName("__batch")}(() => (`);
+        this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}`);
+        this.tsScaffoldAny();
+        this.b.emit(`) => ${this.runtimeName("__batch")}(() => (`);
         this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
         this.b.emit(`)(${ev})))`);
       });
@@ -15188,6 +15249,26 @@ ${pad ?? ""}`);
   }
   renderAttributes(el, objExpr) {
     const R = this.rstate;
+    if (this.ts && this.tsDirectivesArmed && this.tsDirectiveMap.has(objExpr)) {
+      const firstPair = objExpr.slice(1).find((p) => isNode4(p));
+      const replays = firstPair !== undefined && firstPair.length === 3 && !R.suppressedPairs.has(firstPair) && (() => {
+        let k = firstPair[1];
+        if (typeof k !== "string")
+          return true;
+        if (k.startsWith('"') && k.endsWith('"'))
+          k = k.slice(1, -1);
+        if ((k === "class" || k === "className") && R.pendingClassArgs !== null && R.pendingClassEl === el)
+          return false;
+        if (k === "ref" && this.rstate.sink.kind !== "class")
+          return false;
+        return true;
+      })();
+      if (replays) {
+        const attached = this.tsDirectiveMap.get(objExpr);
+        this.tsDirectiveMap.delete(objExpr);
+        this.tsDirectiveMap.set(firstPair, [...attached, ...this.tsDirectiveMap.get(firstPair) ?? []]);
+      }
+    }
     for (const pair of objExpr.slice(1)) {
       if (!isNode4(pair) || pair.length !== 3) {
         throw this.positionedError(pair, "emitter: unsupported attribute form in render", objExpr);
@@ -15207,7 +15288,9 @@ ${pad ?? ""}`);
         const ev = Emitter.mintName("e", evUsed);
         this.renderLine(pair, () => {
           const self = this.renderSelf ?? "this";
-          this.b.emit(`${el}.addEventListener('${eventName}', (${ev}) => ${this.runtimeName("__batch")}(() => `);
+          this.b.emit(`${el}.addEventListener('${eventName}', (${ev}`);
+          this.tsScaffoldAny();
+          this.b.emit(`) => ${this.runtimeName("__batch")}(() => `);
           if (typeof value === "string" && this.renderVarKind(value) === null && this.cframes[this.cframes.length - 1].members.has(value)) {
             if (this.ts)
               this.b.tsOnly(() => this.b.emit("("));
@@ -15216,8 +15299,9 @@ ${pad ?? ""}`);
               this.b.tsOnly(() => this.b.emit(" as any)"));
             this.b.emit(`(${ev})`);
           } else {
+            const evType = this.ts && isFunc2(value) && (value[1].length === 0 || value[1].length === 1 && typeof value[1][0] === "string") ? this.tsEventTypeText([eventName]) : null;
             this.b.emit("(");
-            this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
+            this.tsHandlerCast(() => this.withExpression(() => this.expr(value)), evType);
             this.b.emit(`)(${ev})`);
           }
           this.b.emit("))");
@@ -15461,6 +15545,7 @@ ${pad ?? ""}`);
     const headerSet = new Set(ownVars);
     const bodySpells = new Set;
     Emitter.collectLeafNames(part, bodySpells);
+    const renameHazardNames = new Set(parent.renameHazardNames ?? []);
     const remap = (n) => {
       if (!headerSet.has(n)) {
         headerSet.add(n);
@@ -15470,6 +15555,8 @@ ${pad ?? ""}`);
       while (headerSet.has(cand) || bodySpells.has(cand))
         cand += "_";
       headerSet.add(cand);
+      renameHazardNames.add(n);
+      renameHazardNames.add(cand);
       return cand;
     };
     const visibleOuter = parent.loopStack.map((v) => ({ ...v, itemVar: remap(v.itemVar), indexVar: remap(v.indexVar) }));
@@ -15497,7 +15584,8 @@ ${pad ?? ""}`);
       isStatic: false,
       originNode,
       hasKids: false,
-      kidsVar: null
+      kidsVar: null,
+      renameHazardNames
     };
     R.records.push(rec);
     const prevSlot = R.transitionSlot;
@@ -15630,7 +15718,7 @@ ${pad ?? ""}`);
       this.checkSetupLocalRefs(keyExpr, node);
       this.checkCrossScopeLocals(keyExpr, node);
     }
-    const rec = this.walkFactory(body, "loop", node, { itemVar, indexVar, reactiveSource });
+    const rec = this.walkFactory(body, "loop", node, { itemVar, indexVar, reactiveSource, iter, node });
     if (keyExpr !== null) {
       if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals)) {
         throw this.positionedError(node, "emitter: a `key:` expression must be evaluable in the loop HEADER scope — it reads a render local declared " + "inside the loop body, which lives in the row factory (derive the key from the item inline: `key: item.id`)");
@@ -15811,7 +15899,14 @@ ${pad ?? ""}`);
       this.withExpression(() => this.expr(iter));
       this.b.emit(`, ${self}, ${self}.${rec.name}, `);
       if (keyExpr !== null) {
-        this.b.emit(`(${itemVar}, ${indexVar}) => `);
+        const keyItemType = this.tsIterElementTypeText(iter, new Set([itemVar, indexVar, ...rec.renameHazardNames]), new Set([self, ...outer]));
+        this.b.emit(`(${itemVar}`);
+        if (keyItemType !== null)
+          this.b.tsOnly(() => this.b.emit(`: ${keyItemType}`));
+        this.b.emit(`, ${indexVar}`);
+        if (this.ts)
+          this.b.tsOnly(() => this.b.emit(": number"));
+        this.b.emit(") => ");
         this.withBindings([itemVar, indexVar], () => this.withExpression(() => {
           const wrap = Emitter.needsGrouping(keyExpr, "operand") || isObject(keyExpr);
           if (wrap)
@@ -15852,22 +15947,76 @@ ${pad ?? ""}`);
     const kidC = rec.kidsVar !== null ? Emitter.mintName("__c", used) : null;
     const kidE = rec.kidsVar !== null ? Emitter.mintName("__e", used) : null;
     const needsP = !rec.isStatic;
+    const ctxType = this.ts ? Emitter.mintName("__Ctx", used) : null;
+    const paramTypes = new Map;
+    const paramNodes = new Map;
+    rec.loopStack.forEach((entry) => {
+      if (entry.node !== undefined) {
+        paramNodes.set(entry.itemVar, entry.node);
+        paramNodes.set(entry.indexVar, entry.node);
+      }
+    });
+    if (this.ts) {
+      this.withRecordContext(rec, () => {
+        rec.loopStack.forEach((entry, i) => {
+          const t = this.tsLoopItemTypeText(entry, rec, i);
+          if (t !== null)
+            paramTypes.set(entry.itemVar, t);
+          paramTypes.set(entry.indexVar, "number");
+        });
+      });
+    }
+    const emitTypedParams = (names, selfType, typeOf) => {
+      names.forEach((n, i) => {
+        if (i > 0)
+          this.b.emit(", ");
+        const emitOne = () => {
+          this.b.emit(n);
+          if (!this.ts)
+            return;
+          const t = i === 0 ? selfType : typeOf(n, i);
+          if (t != null)
+            this.b.tsOnly(() => this.b.emit(`: ${t}`));
+        };
+        const owner = paramNodes.get(n);
+        if (owner !== undefined)
+          this.mark(owner, "$self", emitOne);
+        else
+          emitOne();
+      });
+    };
     this.mark(renderNode, "$self", () => {
       this.withRecordContext(rec, () => {
-        this.b.emit(`${pad}${rec.name}(${headerParams.join(", ")}) {
+        this.b.emit(`${pad}${rec.name}(`);
+        emitTypedParams(headerParams, "this", (n) => paramTypes.get(n));
+        this.b.emit(`) {
 `);
-        if (rec.vars.size > 0)
-          this.b.emit(`${p2}let ${[...rec.vars].join(", ")};
+        if (this.ts)
+          this.b.tsOnly(() => this.b.emit(`${p2}type ${ctxType} = typeof ${self};
+`));
+        if (rec.vars.size > 0) {
+          this.b.emit(`${p2}let `);
+          [...rec.vars].forEach((v, i) => {
+            if (i > 0)
+              this.b.emit(", ");
+            this.b.emit(v);
+            this.tsScaffoldAny();
+          });
+          this.b.emit(`;
 `);
+        }
         if (rec.kidsVar !== null) {
           this.b.emit(`${p2}let ${rec.kidsVar}`);
           this.tsScaffoldAny("[]");
           this.b.emit(` = [];
 `);
         }
-        if (hasFrame)
-          this.b.emit(`${p2}let ${frameVar};
+        if (hasFrame) {
+          this.b.emit(`${p2}let ${frameVar}`);
+          this.tsScaffoldAny();
+          this.b.emit(`;
 `);
+        }
         this.b.emit(`${p2}return {
 `);
         if (rec.isStatic)
@@ -15888,7 +16037,11 @@ ${pad ?? ""}`);
 `);
         this.b.emit(`${p3}},
 `);
-        this.b.emit(`${p3}m(target, anchor) {
+        this.b.emit(`${p3}m(target`);
+        this.tsScaffoldAny();
+        this.b.emit(", anchor");
+        this.tsScaffoldAny();
+        this.b.emit(`) {
 `);
         if (fragChildren !== undefined) {
           for (const child of fragChildren) {
@@ -15907,7 +16060,13 @@ ${pad ?? ""}`);
         }
         this.b.emit(`${p3}},
 `);
-        this.b.emit(`${p3}p(${(needsP ? pParams : headerParams).join(", ")}) {
+        this.b.emit(`${p3}p(`);
+        if (needsP) {
+          emitTypedParams(pParams, ctxType, (n, i) => `typeof ${rec.paramNames[i - 1]}`);
+        } else {
+          emitTypedParams(headerParams, ctxType, (n) => paramTypes.get(n));
+        }
+        this.b.emit(`) {
 `);
         if (needsP && rec.paramNames.length > 0) {
           this.b.emit(`${p4}${rec.paramNames.map((n, i) => `${n} = ${pParams[i + 1]};`).join(" ")}
@@ -15926,7 +16085,9 @@ ${pad ?? ""}`);
         }
         this.b.emit(`${p3}},
 `);
-        this.b.emit(`${p3}d(detaching) {
+        this.b.emit(`${p3}d(detaching`);
+        this.tsScaffoldAny();
+        this.b.emit(`) {
 `);
         if (rec.kidsVar !== null) {
           this.b.emit(`${p4}for (const ${kidC} of ${rec.kidsVar}) { try { ${kidC}.unmount?.({removeDOM: detaching}); } catch (${kidE}) { console.error('[Rip] factory child unmount error:', ${kidE}); } }
@@ -16037,7 +16198,9 @@ ${pad ?? ""}`);
     Emitter.collectLeafNames(value, evUsed);
     const ev = Emitter.mintName("e", evUsed);
     this.renderLine(pair, () => {
-      this.b.emit(`${el}.addEventListener('${event}', (${ev}) => { `);
+      this.b.emit(`${el}.addEventListener('${event}', (${ev}`);
+      this.tsScaffoldAny();
+      this.b.emit(") => { ");
       this.withExpression(() => this.expr(value));
       this.b.emit(` = ${ev}.${accessor};`);
       if (touch !== null) {
@@ -17257,7 +17420,7 @@ ${"  ".repeat(ind)}`);
       extractions: trailing.map((name, i) => `const ${name} = _rest[_rest.length - ${trailing.length - i}];`)
     };
   }
-  emitParams(params) {
+  emitParams(params, firstParamTypeText = null) {
     Emitter.expansionSplit(params).list.forEach((p, i) => {
       if (Emitter.atParamName(p) !== null || isNode4(p) && p[0] === "default" && Emitter.atParamName(p[1]) !== null) {
         throw this.positionedError(isNode4(p) ? p : params, "emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here");
@@ -17265,6 +17428,9 @@ ${"  ".repeat(ind)}`);
       if (i > 0)
         this.b.emit(", ");
       this.emitParam(p);
+      if (i === 0 && firstParamTypeText !== null && typeof p === "string" && this.ts) {
+        this.b.tsOnly(() => this.b.emit(`: ${firstParamTypeText}`));
+      }
     });
   }
   func(node) {
@@ -18716,33 +18882,6 @@ return { ${unit.names.join(", ")} };
       });
     }
   }
-  if (face === "ts") {
-    const ambients = Object.keys(HOST_AMBIENTS).filter((name) => {
-      if (bound.has(name))
-        return false;
-      const one = new Set([name]);
-      return trees.some(({ tree, isDecl }) => referencesNames(tree, one, isDecl));
-    });
-    if (ambients.length > 0) {
-      const programId = stores.idOf(parseResult.sexpr);
-      const start = builder.offset;
-      builder.tsOnly(() => builder.emit(ambients.map((name) => HOST_AMBIENTS[name]).join(`
-`) + `
-`));
-      if (programId !== null) {
-        builder.rows.push({
-          nodeId: programId,
-          role: "hostAmbients",
-          mappingKind: "synthetic",
-          sourceStart: 0,
-          sourceEnd: 0,
-          generatedStart: start,
-          generatedEnd: builder.offset,
-          fileId: 0
-        });
-      }
-    }
-  }
   emitter.tsDirectivesArmed = true;
   if (ambient.length > 0) {
     const reactive = new Set;
@@ -18790,7 +18929,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -18908,10 +19047,7 @@ function emitDeclarations({ sexpr, stores, source }) {
       return null;
     return normalizeTypeText(source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, ""));
   };
-  const isOptionalParam = (node) => {
-    const id = stores.idOf(node);
-    return id !== null && !!stores.role(id, "optionalMarker");
-  };
+  const isOptionalParam = optionalReader(stores);
   const typeParamsOf = (node) => {
     const id = stores.idOf(node);
     if (id === null)
@@ -19359,6 +19495,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     replImportResolver: emitted.replImportResolver,
     tsRegions: emitted.tsRegions,
     pinnables: emitted.pinnables,
+    mutables: emitted.mutables,
     imports: emitted.imports,
     trivia: result.trivia ?? [],
     get declarations() {

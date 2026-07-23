@@ -101,8 +101,8 @@ export BindingTypeTests = component
       # Correct: string <=> string — no error
       Input
         value <=> email
-      # @ts-expect-error — Type 'number' is not assignable to type 'string'
       Input
+        # @ts-expect-error — Type 'number' is not assignable to type 'string'
         value <=> count
 
 # ── Negative: type safety inside component bodies ──
@@ -135,6 +135,12 @@ export TypeTestComp = component
 #
 # Conditionals, switch discriminants, loop iterables, and text expressions
 # in render blocks are type-checked. Typos emit into the stub so TS catches them.
+# Branch and loop BODIES are checked too, through the typed factory params
+# (the fragment's context takes the instance type, a loop item its iterable's
+# element type) — but their gate lives in check.test.js and drives the error
+# BARE: a directive above a branch head governs the whole indented block, so
+# a planted body error here could never pin separately from the head-line
+# typo it rides under.
 
 export RenderCondTest = component
   label := ''
@@ -187,22 +193,27 @@ export FilterGapTest = component
 
 # ── Event handler typing ──
 #
-# Both inline and named method refs are typed:
-#   @click: (e) -> ...        # inline — contextual typing from __RipEvents
-#   @submit: @handleSubmit    # named — stub injects HTMLElementEventMap type
+# Both inline and named method refs type `e` from HTMLElementEventMap:
+#   @click: (e) -> ...        # inline — the handler expression casts to the
+#                             # event's function type, typing `e` contextually
+#   @submit: @handleSubmit    # named — the render block is pre-scanned for
+#                             # @event: @method bindings and the method's
+#                             # first bare param takes the event type
 #
-# The stub pre-scans the render block for @event: @method bindings
-# and annotates the first untyped parameter with the event type.
+# `e.target` stays deliberately `any` — the event may have bubbled from any
+# descendant — while the event's own surface (key, clientX, preventDefault)
+# checks for real. Gated by check.test.js's handler case, which drives a
+# garbage member through `e` bare on both shapes.
 
 export EventHandlerTest = component
-  # Named method refs — stub injects event parameter types
+  # Named method refs — the pre-scan annotates the definitions
   handleSubmit: (e) -> e.preventDefault()
   handleClick: (e) -> p e.clientX
 
   render
     form @submit: @handleSubmit
       button @click: @handleClick, 'Click'
-      # Inline handlers — contextual typing from __RipEvents
+      # Inline handlers — contextually typed through the emitted cast
       button @click: (e) -> p e.clientX, 'Inline'
       input @keydown: (e) -> p e.key
 

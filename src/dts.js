@@ -41,7 +41,7 @@
 
 import {
   TypeTextError, tidyType, normalizeTypeText, renderTypeDecl,
-  renderParams, paramTyped,
+  renderParams, paramTyped, optionalReader,
 } from './typetext.js';
 import { buildSchemaTypeStory, SchemaTypeError } from './schema-types.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers } from './emitter.js';
@@ -119,14 +119,9 @@ export function emitDeclarations({ sexpr, stores, source }) {
     return normalizeTypeText(source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, ''));
   };
 
-  // Is a param optional? The `?` is the side-band optionalMarker role
-  // (grammar-dropped), the same role the face emitter reads — so the
-  // declaration carries `name?: T` (and a bare `name?` defaults to
-  // `name?: any`), matching the face rather than dropping the marker.
-  const isOptionalParam = (node) => {
-    const id = stores.idOf(node);
-    return id !== null && !!stores.role(id, 'optionalMarker');
-  };
+  // The SHARED optionality reader — the same one the TS face uses, so
+  // the declaration and the face cannot drift on `?` (see typetext.js).
+  const isOptionalParam = optionalReader(stores);
 
   // ── declaring statements ───────────────────────────────────────────
 

@@ -17,7 +17,8 @@
 // workspace (tsconfig + installed @types) so a failing symptom proves
 // the server ignores it.
 //
-// Opt-in via RIP_REQUIRE_TSGO (this package's `bun run test` arms it);
+// Skips when tsgo is unavailable; the package's `bun run test` runs a
+// preflight that turns a missing binary into a hard failure first, and
 // the repo's root suite excludes packages/** mechanically. Driven
 // through the real src/server.js (see support/gaps-server.mjs).
 import { test, expect, describe } from 'bun:test';
@@ -25,13 +26,6 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { tsgoAvailable, session } from './support/gaps-server.mjs';
-
-const RUN = !!process.env.RIP_REQUIRE_TSGO && tsgoAvailable;
-if (process.env.RIP_REQUIRE_TSGO && !tsgoAvailable) {
-  test('tsgo present (RIP_REQUIRE_TSGO)', () => {
-    throw new Error('RIP_REQUIRE_TSGO is set but tsgo was not found — run `bun install` in packages/vscode');
-  });
-}
 
 // Set up a REAL workspace dir with the given files, open `ripSrc` as a.rip
 // inside it (rootUri = the dir), and return fn(api, ripPath). `files` maps
@@ -64,7 +58,7 @@ const PROBE_TYPES = {
   'node_modules/@types/probe/index.d.ts': 'declare const RIP_PROBE_GLOBAL: number;\n',
 };
 
-describe.skipIf(!RUN)('the editor behaves like a standard TS project', () => {
+describe.skipIf(!tsgoAvailable)('the editor behaves like a standard TS project', () => {
   // Your tsconfig sets lib es2023 (no dom). `document` is a DOM global,
   // so it errors — your lib governs, dom is not forced in over it.
   test('your tsconfig governs: DOM is not forced in when your lib omits it', async () => {

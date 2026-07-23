@@ -1,0 +1,23 @@
+# 26-exceptions.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run type-audit --errors) asserts each one; @ts-nocheck quiets editors only.
+# @ts-nocheck
+
+reasonCode = 500
+
+wrongMaybe: string = try 'value'
+wrongUnion: number = try 'text' catch e then 0
+wrongBuilt = -> throw new Error(reasonCode)
+wrongAccess = ->
+  try
+    'ok'
+  catch error
+    error.message
+# (wrongPluck holds the open pattern-catch gap's TS2339, not a blessed
+# negative — see FINDINGS.md; red here on a lowering change is the cue to
+# invert it into 26-exceptions. The array spelling cannot derive in this
+# lane — TS2488 anchors on the pattern's `[` — so check.test.js holds it.)
+wrongPluck = ->
+  try
+    'ok'
+  catch { message }
+    message

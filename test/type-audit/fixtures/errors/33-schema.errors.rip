@@ -1,0 +1,27 @@
+# 33-schema.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run type-audit --errors) asserts each one. The wrongGetter row is
+# PINNED (error-pins.json — a :shape callable's output types unknown while
+# the callable-unknown finding is open, and the twin's transform-derived
+# field is honestly a number); every other row derives from the twin.
+# @ts-nocheck
+
+Person = schema
+  name!  string
+  tag!   'a' | 'b'
+
+Cart = schema :shape
+  items! number[]
+  total: ~> @items.length
+
+Color = schema :enum
+  :red
+  :green
+
+# the schema declarations close above; the negatives follow
+
+wrongAssign: Person = { name: 42, tag: 'a' }
+wrongLiteral: Person = { name: 'ok', tag: 'c' }
+wrongRead = Person.parse({ name: 'x', tag: 'a' }).nope
+wrongEnum: Color = 'mauve'
+wrongConstruct = new Person()
+wrongGetter: number = Cart.parse({ items: [3] }).total

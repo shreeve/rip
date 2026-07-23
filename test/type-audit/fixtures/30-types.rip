@@ -1,0 +1,144 @@
+# 30-types.rip — the erased-type surface: type aliases (simple, union,
+# function, object — inline and indented block), typeof, generic aliases
+# (parameters and a constraint), interfaces (extension, optional and
+# method members, generic), enums (bare members auto-number, explicit
+# number and string values, exported), the bare typed forward
+# declaration, bodiless def overload signatures, and `as` casts
+# (chained, on a call, on a parenthetical). `satisfies` is deliberately
+# absent: rip has no source spelling for it — the emitter uses it
+# internally for computed lowerings only. Generic def signatures live
+# with 27-functions.
+
+# ── type aliases: simple, union, function ──
+
+type Port = number
+type Flag = boolean | 'auto'
+type Format = (value: number) => string
+
+port: Port = 8080
+flag: Flag = 'auto'
+fmt: Format = (value) -> '$' + String(value)
+
+console.log('port:', port, 'flag:', flag, 'fmt:', fmt(3))
+
+# ── object aliases: the inline literal and the indented block ──
+
+type Host = { name: string, port?: number }
+
+type Bounds =
+  low: number
+  high: number
+
+host: Host = { name: 'edge' }
+bounds: Bounds = { low: 1, high: 9 }
+
+console.log('host:', host.name, host.port ?? port, 'bounds:', bounds.low, bounds.high)
+
+# ── typeof: a value's inferred shape, named ──
+
+defaults = { theme: 'dark', depth: 2 }
+type Defaults = typeof defaults
+
+tuned: Defaults = { theme: 'light', depth: 3 }
+
+console.log('tuned:', tuned.theme, tuned.depth)
+
+# ── generic aliases: parameters and a constraint ──
+
+type Boxed<T> = { item: T }
+type Mapper<T, R> = (input: T) => R
+type Keyed<T extends { id: number }> = T & { key: string }
+
+boxed: Boxed<string> = { item: 'pearl' }
+stringify: Mapper<number, string> = (input) -> String(input)
+keyed: Keyed<{ id: number }> = { id: 4, key: 'k4' }
+
+console.log('boxed:', boxed.item, stringify(8), keyed.key)
+
+# ── interfaces: extension, optional and method members, generic ──
+
+interface Signal
+  name: string
+  level: number
+
+interface Alarm extends Signal
+  acknowledged: boolean
+
+interface Sink
+  accept(entry: string): string
+  flush?: () => void
+
+interface Registry<T>
+  entries: T[]
+  find(key: string): T | undefined
+
+alarm: Alarm = { name: 'smoke', level: 2, acknowledged: false }
+sink: Sink = { accept: (entry) -> 'sunk ' + entry }
+registry: Registry<Alarm> = { entries: [alarm], find: (key) -> registry.entries.find((s) -> s.name == key) }
+
+console.log('alarm:', alarm.level, sink.accept('log'), sink.flush?(), registry.find('smoke')?.acknowledged)
+
+# ── enums: one const object, forward and reverse entries; bare ──
+# members auto-number, explicit numerics thread the counter, and a
+# string member needs a value
+
+enum Direction
+  north
+  south
+
+enum Status
+  draft = 'D'
+  final = 'F'
+
+export enum Priority
+  low = 1
+  standby
+  urgent = 9
+
+pick: Status = Status.final
+
+console.log('direction:', Direction, Direction.north, Direction[1])
+console.log('status:', Status.draft, 'priority:', Priority.standby, Priority.urgent)
+console.log('pick:', pick)
+
+# ── the bare typed forward declaration: `name: T` alone, erased, the ──
+# binding hoisted with a definite-assignment face (spelled inside a def
+# body: the module-level spelling's hoisted binding answers no hover, so
+# it cannot sit at a probed column-0 position)
+
+def choosePort(): Port
+  chosen: Port
+  if (Direction.north < Direction.south) then chosen = 443 else chosen = 80
+  chosen
+
+console.log('chosen:', choosePort())
+
+# ── bodiless def signatures: the overload face of one implementation ──
+
+def describe(id: number): string
+def describe(id: string): string
+def describe(id: number | string): string
+  "entry #{id}"
+
+console.log(describe(7), describe('seven'))
+
+# ── exported type declarations: the same erased statement, exported ──
+
+export type Outcome = 'ok' | 'failed'
+
+export interface Manifest
+  version: number
+
+outcome: Outcome = 'ok'
+manifest: Manifest = { version: 4 }
+
+console.log('outcome:', outcome, manifest.version)
+
+# ── casts: `as` narrows for the checker and erases at runtime ──
+
+payload: unknown = 'stored'
+text = payload as string
+count = (JSON.parse('[3,4]') as number[]).length
+veiled = payload as unknown as { deep: boolean }
+
+console.log('cast:', text.length, count, typeof veiled)

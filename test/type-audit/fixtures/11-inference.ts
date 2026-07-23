@@ -128,6 +128,10 @@ expectNum(matches)
 
 console.log(out, matches)
 
+// Write-only: assigned once, never read. Declared the same way the face
+// declares it, so the twin oracle judges the hover.
+let neverRead = filterBy('z')
+
 // ──────────────────────────────────────────────────
 // Block-confined inside functions
 // ──────────────────────────────────────────────────

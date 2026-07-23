@@ -1,0 +1,15 @@
+# 29-modules.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run type-audit --errors) asserts each one; @ts-nocheck quiets editors only.
+# @ts-nocheck
+
+target = './elsewhere.js'
+
+wrongMeta: number = import.meta.url
+wrongWhole: number = import.meta
+wrongPiece = import.meta.missing
+wrongEager: string = import(target)
+export wrongTyped: number = 'text'
+# (import-RESOLUTION negatives — a named import the module never exports, a
+# specifier no file answers — cannot live in this lane: the editor side's
+# workspace resolves only the flat fixture copies, the twin side's only its
+# own errors/ twins, so no specifier resolves for both judges at once.)

@@ -1,0 +1,26 @@
+# 27-functions.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run type-audit --errors) asserts each one; @ts-nocheck quiets editors only.
+# @ts-nocheck
+
+def scale(amount: number): number
+  amount * 2
+
+def join(...parts: string[]): string
+  parts.join('-')
+
+def notify!(message: string)
+  console.log(message)
+
+def pick<T>(value: T): T
+  value
+
+label = 'seven'
+extra = 2
+
+wrongArgument = scale(label)
+wrongReturn: string = scale(3)
+wrongMissing = scale()
+wrongExtra = scale(extra, extra)
+wrongRest = join(extra)
+wrongVoid: number = notify(label)
+wrongPick: number = pick(label)

@@ -1,0 +1,139 @@
+# 27-functions.rip — functions: def in every shape (plain, parenless,
+# return-typed, generic, void-marked with !, exported), the param surface
+# (typed, default, optional, splat rest, the ... expansion, destructured
+# object/array patterns, promoted @-props), the param-list layouts, every
+# return form, and both arrow kinds (the bare optional and the expansion
+# bind inside contextually typed arrows — a def spelling of either is an
+# implicit any that strict correctly refuses)
+
+# ── def: plain, annotated return, parenless, and parenless-with-type ──
+
+def double(n: number)
+  n * 2
+
+def clamp(value: number, lo: number, hi: number): number
+  Math.min(hi, Math.max(lo, value))
+
+def tick
+  console.log('tick')
+
+def stamp: string
+  'ready'
+
+tick()
+console.log('defs:', double(21), clamp(15, 0, 10), stamp())
+
+# ── generic defs: inferred and annotated returns ──
+
+def wrap<T>(value: T)
+  [value]
+
+def pairOf<T, U>(a: T, b: U): [T, U]
+  [a, b]
+
+console.log('generic:', wrap(7), pairOf('id', 3))
+
+# ── void defs: the bang suppresses the implicit return ──
+
+def announce!(subject: string)
+  console.log('announcing', subject)
+
+def persist!(entry: string): void
+  console.log('persisted', entry)
+
+announce('launch')
+persist('log line')
+
+# ── params: the default, the optional, and the splat rest ──
+
+def formal(name: string, title: string = 'Mx')
+  "#{title} #{name}"
+
+def shorten(text: string, limit?: number)
+  text.slice(0, limit ?? text.length)
+
+def total(...nums: number[]): number
+  nums.reduce(((acc, n) => acc + n), 0)
+
+console.log('params:', formal('Lovelace'), formal('Hopper', 'Adm'), shorten('typing', 3), total(1, 2, 3))
+
+# ── bare optional and the ... expansion: contextually typed arrows ──
+
+labelOf: (name: string, title?: string) => string = (name: string, title?) ->
+  if title then "#{title} #{name}" else name
+
+bracket: (...parts: number[]) => number[] = (first: number, ..., last: number) -> [first, last]
+
+console.log('contextual:', labelOf('ada'), labelOf('grace', 'Dr'), bracket(4, 5, 6, 7))
+
+# ── param-list layouts: the split tail and the indented block ──
+
+def compose(prefix: string,
+  suffix: string)
+  prefix + suffix
+
+def volume(
+  width: number
+  height: number
+  depth: number
+)
+  width * height * depth
+
+console.log('layouts:', compose('data', 'base'), volume(2, 3, 4))
+
+# ── destructured params: object and array patterns ──
+
+def introduce({ name, age }: { name: string, age: number })
+  "#{name} is #{age}"
+
+def endpoints([head, ...tail]: number[])
+  [head, tail.length]
+
+console.log('patterns:', introduce({ name: 'Grace', age: 85 }), endpoints([3, 4, 5]))
+
+# ── promoted params: @-props assign straight to the instance ──
+
+class Badge
+  owner: string
+  level: number
+  constructor: (@owner: string, @level: number = 1) ->
+  describe: -> "#{@owner} at level #{@level}"
+
+badge = new Badge('ada')
+console.log('badge:', badge.describe())
+
+# ── return: bare, valued, and the indented-object payload ──
+
+def drain(queue: string[])
+  if queue.length is 0
+    return
+  console.log('draining', queue.length)
+
+def firstWord(text: string)
+  return text.split(' ')[0]
+
+def summarize(host: string, port: number)
+  return
+    host: host
+    port: port
+    ready: true
+
+drain([])
+drain(['a', 'b'])
+console.log('returns:', firstWord('deep types'), summarize('local', 8080))
+
+# ── arrows: thin with a return type, fat, and the parameterless forms ──
+
+caption = (n: number): string -> "count=#{n}"
+increment = (n: number) => n + 1
+seed = -> 42
+idle = () -> 'idle'
+
+console.log('arrows:', caption(7), increment(41), seed(), idle())
+
+# ── export def: the function crosses the module boundary ──
+
+export def shared(flag: boolean)
+  if flag then 'on' else 'off'
+
+console.log('shared:', shared(true))

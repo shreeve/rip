@@ -1,0 +1,26 @@
+# 25-loops.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run type-audit --errors) asserts each one; @ts-nocheck quiets editors only.
+# @ts-nocheck
+
+notIterable = 42
+plainObject = { a: 1 }
+words = ['alpha', 'beta']
+counts = (num for num in [1, 2, 3])
+
+for wrongItem in notIterable
+  console.log(wrongItem)
+for wrongKey of notIterable
+  console.log(wrongKey)
+for wrongAs as notIterable
+  console.log(wrongAs)
+for await wrongAwait as plainObject
+  console.log(wrongAwait)
+for wrongFactor in words
+  wrongProduct = wrongFactor * 2
+wrongMember = (w.missing for w in words)
+wrongMath = counts.toUpperCase()
+wrongGuard = (n for n in counts when n.length)
+supply = 2
+gathered = while supply-- > 0
+  supply
+wrongElement = gathered.toUpperCase()

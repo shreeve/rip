@@ -76,8 +76,8 @@ badNullable: number | null = 'oops'
 
 # ── Strict-mode regression sentinels (do not "fix" these) ──
 # These directives only stay "used" while strictNullChecks + noImplicitAny
-# are on. If createTypeCheckSettings is weakened, TypeScript reports TS2578
-# (unused @ts-expect-error) and the audit fails. See AGENTS.md.
+# are on — a posture riding tsgo's strict-by-default, not a tsconfig pin.
+# If that default weakens, TS2578 (unused @ts-expect-error) fails the audit.
 
 # @ts-expect-error — strictNullChecks: null not assignable to string
 notNullable: string = null

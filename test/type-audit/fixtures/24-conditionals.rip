@@ -1,0 +1,80 @@
+# 24-conditionals.rip — control flow that chooses: if/else-if/else and
+# unless blocks, every postfix guard spelling, the if/else ternary, and
+# switch/when — subjects, multi-value cases, condition-less cases, else
+
+# ── if: bare, full chain, chain ending in else-if, and the inline then-else ──
+
+score = 72
+flags: string[] = []
+if score > 0
+  flags.push('scored')
+if score > 90
+  flags.push('gold')
+else if score > 50
+  flags.push('silver')
+else
+  flags.push('bronze')
+if score > 200
+  flags.push('epic')
+else if score > 60
+  flags.push('solid')
+parity = if score % 2 is 0 then 'even' else 'odd'
+
+console.log('flags:', flags, 'parity:', parity)
+
+# ── unless: the block form, and unless/else ──
+
+unless score > 100
+  flags.push('capped')
+unless score > 50
+  flags.push('low')
+else
+  flags.push('high')
+
+console.log('after unless:', flags)
+
+# ── Postfix guards: statement and expression, if and unless ──
+
+describe = (n: number) ->
+  return 'zero' if n is 0
+  return 'negative' unless n >= 0
+  console.log('describing:', n) if n > 1000
+  n = n + 1 unless n is 7
+  String(n)
+
+console.log(describe(0), describe(-3), describe(7), describe(41))
+
+# ── Ternary: the inline else, and the indented-else tail ──
+
+size = 'big' if score > 50 else 'small'
+depth = 'deep' if score > 90 else
+  'shallow'
+
+console.log('size:', size, 'depth:', depth)
+
+# ── switch on a subject: single and multi-value whens, with and without else ──
+
+grade =
+  switch score
+    when 100 then 'perfect'
+    when 72, 73 then 'expected'
+    else 'other'
+mood = switch parity
+  when 'even'
+    'calm'
+  when 'odd'
+    'wild'
+
+console.log('grade:', grade, 'mood:', mood)
+
+# ── Condition-less switch: the first true when wins ──
+
+tier = switch
+  when score > 90 then 'high'
+  when score > 50 then 'mid'
+  else 'low'
+band = switch
+  when score > 200 then 'off the chart'
+  when score > 0 then 'on the chart'
+
+console.log('tier:', tier, 'band:', band)

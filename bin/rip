@@ -28,6 +28,8 @@ Usage:
   rip [options] file.rip [args...]   Run a .rip file (its .rip imports compile transitively)
   rip [options] dir [args...]        Run dir/index.rip
   rip [options]                      Read source from stdin (when piped)
+  rip check [paths...]               Type-check .rip files/dirs headlessly, no editor
+                                     (default: the current directory; 'rip check --help')
   rip schema <verb> [args...]        Schema evolution: status | plan | make | migrate
                                      (run 'rip schema --help' for the full surface)
   rip server [entry] [flags...]      Run a @rip-lang/server app under the worker-pool
@@ -82,6 +84,7 @@ Options:
 
 Examples:
   rip app.rip                        Run app.rip
+  rip check src                      Type-check every .rip under src/
   rip -c app.rip                     Show the compiled JavaScript
   rip -o app.js -m app.rip           Compile to app.js with an inline source map
   rip -o dist/app.js --dts app.rip   Compile to dist/app.js + dist/app.d.ts
@@ -109,6 +112,21 @@ const args = process.argv.slice(2);
 if (args[0] === 'schema') {
   const schemaCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/schema-cli.js');
   const r = spawnSync('bun', [`--preload=${loaderPath}`, schemaCliPath, ...args.slice(1)], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  process.exit(r.status ?? 1);
+}
+
+// `rip check` — the headless type-checker: drive the editor's own
+// faces→mirror→tsgo→map-back pipeline over the given files/dirs and
+// report type diagnostics on the .rip source. Dispatched before option
+// parsing, like `schema` (a file literally named `check` runs as
+// `rip ./check`). No loader preload — the checker spawns the language
+// server, which owns compilation.
+if (args[0] === 'check') {
+  const checkCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/check.js');
+  const r = spawnSync('bun', [checkCliPath, ...args.slice(1)], {
     stdio: 'inherit',
     env: process.env,
   });
@@ -173,6 +191,7 @@ if (args.length > 0 && !args[0].startsWith('-') && !args[0].includes('/') && !ar
 
   fail(`rip: unknown command '${name}'\n\nRun 'rip --help' for usage.`);
 }
+
 const takesArgument = new Set(['-o', '--output', '--explain', '--explain-generated', '--dts-dir', '--runtime', '--face', '-e', '--eval']);
 let fileIndex = -1;
 for (let i = 0; i < args.length; i++) {

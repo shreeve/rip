@@ -1,0 +1,151 @@
+# 31-reactive.rip — the reactive vocabulary: state (:=), computed (~=),
+# readonly (=!), and effects (~>) in every form — inline, carried, indented,
+# opt-marked, annotated — plus every exported spelling. Gates (`<~`) live with
+# the component file: a gate exists only in a component body (MANIFEST.md).
+# Hover targets for every declaration here are ruled in RULINGS.md (Reactive);
+# what an IMPORTER of the exported bindings sees is an open question the
+# ledger carries (FINDINGS.md) — this file covers the export side only.
+
+# ── State (:=): inline, carried, indented; opt-marked; annotated ──
+
+count := 0
+label: string := 'idle'
+mood :=
+'steady'
+tone :=
+  'calm'
+maybe? := 1
+maybeCarried? :=
+2
+maybeDropped? :=
+  3
+maybeTyped?: number :=
+4
+maybeTypedDropped?: number :=
+  5
+typedCarried: string :=
+'typed carried'
+typedDropped: string :=
+  'typed dropped'
+
+console.log(count, label, mood, tone, maybe, maybeCarried, maybeDropped, maybeTyped, maybeTypedDropped, typedCarried, typedDropped)
+
+# ── Computed (~=): derives from its dependencies; a write to one is an
+# emitter error (asserted in check.test.js, never here) ──
+
+doubled ~= count * 2
+half ~=
+count / 2
+quartered ~=
+  count / 4
+tripled: number ~= count * 3
+sized? ~= label.length
+sizedCarried? ~=
+label.length + 1
+sizedDropped? ~=
+  label.length + 2
+ratio?: number ~= count / 4
+ratioCarried?: number ~=
+count / 5
+ratioDropped?: number ~=
+  count / 6
+summaryCarried: string ~=
+'summary carried'
+summaryDropped: string ~=
+  'summary dropped'
+
+console.log(doubled, half, quartered, tripled, sized, sizedCarried, sizedDropped, ratio, ratioCarried, ratioDropped, summaryCarried, summaryDropped)
+
+# ── Readonly (=!): a const with the literal standing (RULINGS.md, Reactive) ──
+
+limit =! 100
+limitCarried =!
+101
+limitDropped =!
+  102
+cap? =! 10
+capCarried? =!
+11
+capDropped? =!
+  12
+capTyped?: number =! 13
+capTypedCarried?: number =!
+14
+capTypedDropped?: number =!
+  15
+floor: number =! 200
+ceiling: number =!
+201
+ceilingDropped: number =!
+  202
+
+console.log(limit, limitCarried, limitDropped, cap, capCarried, capDropped, capTyped, capTypedCarried, capTypedDropped, floor, ceiling, ceilingDropped)
+
+# ── Effects (~>): named (the binding is the disposer), bare, annotated.
+# Hovering a bare `~>` operator is ruled silent (RULINGS.md, Reactive);
+# today's machinery answer is an open finding (FINDINGS.md) ──
+
+watcher ~> console.log('watcher sees', count)
+watcherCarried ~>
+console.log('carried watcher ran')
+watcherDropped ~>
+  console.log('dropped watcher ran')
+~> console.log('bare effect sees', label)
+~>
+console.log('bare carried ran')
+~>
+  console.log('bare dropped ran')
+typedCarriedEffect: Function ~>
+console.log('typed carried effect ran')
+typedDroppedEffect: Function ~>
+  console.log('typed dropped effect ran')
+typedInlineEffect: Function ~> console.log('typed inline effect ran')
+
+# ── Reactivity in motion: a write notifies its effect; a disposed effect
+# stays quiet ──
+
+pulse := 1
+pulseWatcher ~> console.log('pulse is', pulse)
+pulse = 3
+pulseWatcher()
+pulse = 9
+console.log('pulse settled at', pulse)
+
+# ── Disposal: a named effect's binding is its disposer ──
+
+watcher()
+watcherCarried()
+watcherDropped()
+typedCarriedEffect()
+typedDroppedEffect()
+typedInlineEffect()
+
+# ── Exported spellings: the export side only (an importer's view is the
+# ledger's open question) ──
+
+export tally := 0
+export banner: string := 'ready'
+export bannerCarried: string :=
+'ready carried'
+export bannerDropped: string :=
+  'ready dropped'
+export tallyTwice ~= tally * 2
+export note: string ~= 'note inline'
+export noteCarried: string ~=
+'note carried'
+export noteDropped: string ~=
+  'note dropped'
+export flagMax =! 50
+export span: number =! 60
+export spanCarried: number =!
+61
+export spanDropped: number =!
+  62
+export sentry ~> console.log('sentry sees', tally)
+export sentryTyped: Function ~> console.log('typed sentry ran')
+export sentryCarried: Function ~>
+console.log('carried sentry ran')
+export sentryDropped: Function ~>
+  console.log('dropped sentry ran')
+
+console.log('exports:', tally, tallyTwice, banner, bannerCarried, bannerDropped, note, noteCarried, noteDropped, flagMax, span, spanCarried, spanDropped)

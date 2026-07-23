@@ -328,8 +328,9 @@ alters surface syntax updates ALL THREE in the same change.
  (deps come from the repo-root `bun install`; no package-local lock).
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus-expected` — regenerate the corpus expected outputs.
-- `bun run type-audit` — the typed-editor scoreboard
- (test/type-audit/README.md has the full surface).
+- `bun run type-audit` — the typed-editor scoreboard. Three audits (type,
+  hover, token); the default runs only the first. `--help` is the full
+  surface — what each audit measures, and what it is judged against.
 - `bun run ext` — build and install the VS Code extension.
 - `bun run link-global` — make THIS checkout the machine's global rip:
  symlinks `rip` and every package bin into `~/.bun`, and points

@@ -1,0 +1,13 @@
+# 20-basics.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run type-audit --errors) asserts each one; @ts-nocheck quiets editors only.
+# @ts-nocheck
+
+wrongNumber: number = 'nope'
+wrongString: string = 42
+wrongBoolean: boolean = 'yes'
+wrongRegex: string = /ab+c/g
+wrongSymbol: string = :alpha
+wrongParenthetical: string = (1 + 2) * 3
+wrongIife: string = do -> 42
+wrongInterpolation: number = "sum #{1 + 2}"
+wrongProperty = 'abc'.missing

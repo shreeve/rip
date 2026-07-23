@@ -1,0 +1,40 @@
+# 32-components.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run type-audit --errors) asserts each one. The bind and ref rows are
+# PINNED (error-pins.json — no honest TSX line can spell the `<=>` channel,
+# and React's ref rejection fires for a different reason than the cell
+# mismatch); every other row derives from the line-aligned twin.
+# @ts-nocheck
+
+Chip = component
+  @label?: string
+  @count?: number := 0
+
+  render
+    div 'chip'
+
+Gated = component
+  stats <~ @app.data.stats
+
+  render
+    div 'gated'
+
+Wrong = component
+  wrongCell: HTMLInputElement | null := null
+  amount := 0
+
+  render
+    div
+      Chip label: 123
+      Chip count: 'five'
+      div ref: wrongCell
+      Chip
+        label <=> amount
+      if wrongTypo
+        span 'unreachable'
+      if wrongText
+        span 'fallback'
+
+# the twin's Wrong body closes above; the gated-contract negatives follow
+
+wrongMount = Gated.mount()
+wrongConstruct = new Gated({})

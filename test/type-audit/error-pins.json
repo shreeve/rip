@@ -1,0 +1,43 @@
+{
+  "31-reactive.errors.rip": [
+    {
+      "line": 8,
+      "character": 10,
+      "code": 1360,
+      "token": "number",
+      "why": "the := lowering's satisfies guard — the second publish of the wrong-initializer double, mapped onto the annotation span; asserts the interim while the double-publish row is open (FINDINGS.md)"
+    },
+    {
+      "line": 9,
+      "character": 25,
+      "code": 2322,
+      "token": "count * 2",
+      "why": "the ~= lowering's value-level second publish on the derivation expression; asserts the interim while the double-publish row is open (FINDINGS.md)"
+    }
+  ],
+  "32-components.errors.rip": [
+    {
+      "line": 29,
+      "character": 10,
+      "code": 2322,
+      "token": "ref",
+      "why": "the ref-cell mismatch (an HTMLInputElement cell on a div) — rip-native: React's ref rejection fires for a different reason (a raw element is not a Ref shape), so the twin cannot honestly judge it; pinned per the components ruling (RULINGS.md)"
+    },
+    {
+      "line": 31,
+      "character": 8,
+      "code": 2322,
+      "token": "label",
+      "why": "the two-way bind mismatch (number state into a string prop) — no TSX line can spell the <=> channel; the container-typed message is the channel's real contract; pinned per the components ruling (RULINGS.md)"
+    }
+  ],
+  "33-schema.errors.rip": [
+    {
+      "line": 27,
+      "character": 0,
+      "code": 2322,
+      "token": "wrongGetter",
+      "why": "a :shape callable's output types unknown, so the typed read rejects — rip-native: the twin's transform-derived total is honestly a number, so no zod line can spell it; asserts the interim while the callable-unknown finding is open (FINDINGS.md)"
+    }
+  ]
+}

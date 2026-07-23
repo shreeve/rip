@@ -23,16 +23,13 @@ jobs:
         with:
           bun-version: 1.3.14
 
-      - name: Install TypeScript as an external tool (pinned; never a repository dependency)
-        run: npm install -g typescript@7.0.2
-
       # Single frozen-lockfile gate. Bun workspaces + linker=hoisted mean
       # `bun install` from a package directory still resolves against the
       # ROOT bun.lock — a per-package frozen install is not isolation, and
       # a stale root lock surfaces as a misleading package-step failure.
       # Package budgets live in each package.json (see
       # test/toolchain/dependencies.test.js); the root lock owns versions.
-      - name: Install workspace dependencies
+      - name: Install (one workspace install provisions every member; compiler purity is gated separately)
         run: bun install --frozen-lockfile
 
       - name: Full suite, extended tier included
@@ -55,6 +52,8 @@ jobs:
 
       - name: Extension suite (packages/vscode — its own suite, its own boundary)
         working-directory: packages/vscode
+        # No install: the workspace root install above already provisioned
+        # this member (deps hoisted; tsgo resolves through the store).
         run: bun run test
 
       - name: UI package suite (packages/ui — its own suite, its own boundary)
