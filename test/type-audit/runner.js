@@ -194,14 +194,20 @@
 //   flag; re-validation, if the mapping internals change, recovers that
 //   cross-check from git rather than wiring a server into every run.
 //
-// Layout: fixtures/ holds two fixture blocks — 01–12 and the M3 block from
-// 20; ROADMAP "M3" owns the migration between them — each `.rip` beside a
-// hand-written `.ts`/`.tsx` twin;
+// Layout: corpus/ holds the corpus in two CHARTER buckets — each `.rip`
+// beside a hand-written `.ts`/`.tsx` twin:
+//   corpus/grammar/  fixtures chartered by the closed denominators (the
+//                    grammar gate's productions, the census's type kinds);
+//                    each must uniquely reduce at least one production.
+//   corpus/claims/   fixtures chartered by CLAIMS.md — ruled behaviors no
+//                    denominator can derive; each must be a named carrier
+//                    of at least one CLAIMS row. Unique production
+//                    reduction is neither required nor accepted here.
 // hover-pins.json is the Hover Audit's pin file — declaration baselines for
 // symbols the twin cannot judge, and the RULINGS-governed in-body positions.
-// fixtures/errors/ is where the M3 corpus's NEGATIVE tests live —
+// corpus/errors/ is where the corpus's NEGATIVE tests live —
 // one unsuppressed error pair per family — and it belongs to the
-// Diagnostics Lane ALONE: the flat `fixtures` walk never descends into it,
+// Diagnostics Lane ALONE: the fixture walk never descends into it,
 // and tsconfig.json excludes it from the twin type-check, so its
 // deliberately-unsuppressed errors cannot leak
 // into any other audit's denominator. Each error pair carries a
@@ -226,12 +232,11 @@
 // tsconfig itself because this runner JSON.parses it), and to drive
 // dim 5.
 //
-// The 01–12 block's fixtures self-check: a `# @ts-expect-error` marks a
-// line that MUST error, and if the face + tsgo satisfy every marker and
-// add none, the editor publishes nothing — that is dimension 3 passing.
-// M3-block fixtures (20+) carry no markers at all: their negatives live
-// in fixtures/errors/, asserted by the Diagnostics Lane, so for them
-// dimension 3 means zero diagnostics absolutely.
+// No fixture carries `# @ts-expect-error` markers: negatives live in
+// corpus/errors/, asserted by the Diagnostics Lane, so dimension 3 means
+// zero diagnostics absolutely. (The marker machinery below survives the
+// legacy corpus that used it — a marker, if one ever appears, must still
+// fire exactly.)
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -249,11 +254,13 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
 const RIP = path.join(ROOT, 'bin/rip');
 const SERVER = path.join(ROOT, 'packages/vscode/src/server.js');
-const FIX = path.join(HERE, 'fixtures');
-// The Diagnostics Lane's fixtures — OUTSIDE the flat walk below by construction:
-// `fixtures` reads FIX non-recursively, so nothing in errors/ can join another
-// audit's denominator, and tsconfig.json excludes it from the twin type-check.
-const ERRD = path.join(FIX, 'errors');
+const CORPUS = path.join(HERE, 'corpus');
+const FIX = path.join(CORPUS, 'grammar');
+const CLM = path.join(CORPUS, 'claims');
+// The Diagnostics Lane's fixtures — a SIBLING of the positive buckets, so
+// nothing in errors/ can join another audit's denominator, and
+// tsconfig.json excludes it from the twin type-check.
+const ERRD = path.join(CORPUS, 'errors');
 // The Hover Audit's pin file, HAND-MAINTAINED per row (no mechanical
 // re-pin exists; the run prints paste-ready rows for divergences and
 // unpinned symbols). Two sections per fixture, one discipline — reviewed
@@ -317,10 +324,10 @@ const AUDITS = [
   {
     key: 'main', flag: null, name: 'Type Audit',
     blurb: 'six dimensions per fixture: compiles, directives, verdict, runtime, twin, strict',
-    judge: 'the fixtures themselves. 01–12 self-check via `# @ts-expect-error` markers —\n'
-         + 'every marker must fire and nothing else may. M3 fixtures (20+) carry no\n'
-         + 'markers: they must publish ZERO diagnostics, their negatives living in\n'
-         + 'fixtures/errors/ under the Diagnostics Lane',
+    judge: 'the fixtures themselves. No fixture carries `# @ts-expect-error` markers:\n'
+         + 'every fixture must publish ZERO diagnostics, its negatives living in\n'
+         + 'corpus/errors/ under the Diagnostics Lane. (A marker, if one ever appears,\n'
+         + 'must still fire exactly.)',
   },
   {
     key: 'errors', flag: '--errors', name: 'Diagnostics Lane',
@@ -329,8 +336,8 @@ const AUDITS = [
          + 'fixes each expected code and line, and the flagged token\'s place in the rip\n'
          + 'source fixes the expected column; error-pins.json adds the diagnostics no\n'
          + 'honest twin line can spell (a lowering\'s second publish), additively and\n'
-         + 'never shadowing a derived row. ALL of the M3 corpus\'s negative tests live\n'
-         + 'here, in fixtures/errors/ (one error pair per family), OUTSIDE the shared\n'
+         + 'never shadowing a derived row. ALL of the corpus\'s negative tests live\n'
+         + 'here, in corpus/errors/ (one error pair per family), OUTSIDE the shared\n'
          + 'fixture walk: positive fixtures publish zero diagnostics absolutely, and only\n'
          + 'this lane can see a mis-positioned diagnostic — suppression would consume the\n'
          + 'evidence on the face',
@@ -597,9 +604,9 @@ function dimTwin(twinBase, byFile) {
 const IMPLICIT_ANY = (code) => SUPPRESSED_TS_CODES.has(code);
 async function runStrictCheck() {
   const dir = mkTemp(path.join(os.tmpdir(), 'rip-audit-strict-'));
-  for (const f of fs.readdirSync(FIX)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(FIX, f), path.join(dir, f));
+  for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(d, f), path.join(dir, f));
   const tscfg = JSON.parse(fs.readFileSync(path.join(HERE, 'tsconfig.json'), 'utf8'));
-  tscfg.include = ['.'];   // the fixtures are flat here, not under fixtures/
+  tscfg.include = ['.'];   // the fixtures are flat here, not under corpus/
   fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify(tscfg, null, 2));
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ rip: { strict: true } }, null, 2));
   try { fs.symlinkSync(path.join(HERE, 'node_modules'), path.join(dir, 'node_modules'), 'dir'); } catch { /* absent → preflight already spoke */ }
@@ -821,7 +828,7 @@ class EditorServer {
   }
   release(uri) { if (this.open === uri) this.open = null; }
   async start() {
-    for (const f of fs.readdirSync(FIX)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(FIX, f), path.join(this.dir, f));
+    for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(d, f), path.join(this.dir, f));
     // No errors/ copy: the Diagnostics Lane opens its fixtures with in-memory
     // text under `errors/…` URIs (distinct from every flat fixture by path
     // alone), and the server compiles the didOpen text — it never reads an
@@ -994,7 +1001,7 @@ class TwinOracle {
 // covered.
 //
 // Faces live in ONE shared dir named `<base>.rip.ts`, so a cross-file import
-// (`from './27-functions.rip'`) resolves to its sibling face: TS appends `.ts`
+// (`from './08-functions.rip'`) resolves to its sibling face: TS appends `.ts`
 // to the `.rip` specifier, which is exactly why the server's mirror carries
 // that name. tsgo echoes the legend the CLIENT declares, so declare the full
 // one the real server advertises (server.js `TSGO_CLIENT_CAPABILITIES`) — an
@@ -1411,7 +1418,22 @@ function mappingScan(src, code, mappings) {
 }
 
 // ── run
-const fixtures = fs.readdirSync(FIX).filter((f) => f.endsWith('.rip')).sort();
+// The positive corpus spans BOTH charter buckets; every lane treats them
+// identically (the buckets differ only in which instrument justifies a
+// fixture's existence — judged in the grammar gate). Basenames must be
+// unique across buckets: twins, pins, and CLAIMS carriers all key on them.
+const grammarFixtures = fs.readdirSync(FIX).filter((f) => f.endsWith('.rip')).sort();
+const claimsFixtures = fs.existsSync(CLM) ? fs.readdirSync(CLM).filter((f) => f.endsWith('.rip')).sort() : [];
+{
+  const dup = grammarFixtures.filter((f) => claimsFixtures.includes(f));
+  if (dup.length) {
+    console.error(`✗ fixture basename collision across corpus buckets: ${dup.join(', ')} — twins, pins, and CLAIMS carriers key on basenames, so every fixture name must be unique corpus-wide.`);
+    process.exit(1);
+  }
+}
+const fixDirOf = (f) => (claimsFixtures.includes(f) ? CLM : FIX);
+const fixPath = (f) => path.join(fixDirOf(f), f);
+const fixtures = [...grammarFixtures, ...claimsFixtures].sort();
 // The Diagnostics Lane's fixtures, listed here beside the flat walk so the
 // pool below can size itself to the lane's workload.
 const errorFixtures = fs.existsSync(ERRD) ? fs.readdirSync(ERRD).filter((f) => f.endsWith('.rip')).sort() : [];
@@ -1611,17 +1633,23 @@ if (RUN_GRAMMAR) {
     const next = h ? [...anc, h] : anc;
     for (const c of n) walkPairs(c, next);
   };
+  // Both buckets parse (the containment matrix is corpus-wide), but only
+  // grammar-bucket reductions count toward coverage and unique
+  // contribution: a claims fixture's charter is CLAIMS.md, so its
+  // reductions must never let a production read as covered — deleting the
+  // fixture would then drop coverage no claims instrument watches.
   for (const f of fixtures) {
+    const grammarBucket = fixDirOf(f) === FIX;
     const before = seen.size;
     const mine = new Set();
-    const p = Parser({ onReduce: (id) => { seen.add(id); mine.add(id); } });
-    p.lexer = makeParserLexer(path.join(FIX, f));
-    perFixture.set(f, mine);
+    const p = Parser({ onReduce: grammarBucket ? (id) => { seen.add(id); mine.add(id); } : () => {} });
+    p.lexer = makeParserLexer(fixPath(f));
+    if (grammarBucket) perFixture.set(f, mine);
     try {
-      const tree = p.parse(fs.readFileSync(path.join(FIX, f), 'utf8'));
+      const tree = p.parse(fs.readFileSync(fixPath(f), 'utf8'));
       walkPairs(tree?.sexpr, []);
       for (const id of mine) reducers.set(id, (reducers.get(id) ?? 0) + 1);
-      console.log(`    ${green('✓')} ${pad(f, NAME_W + 2)} ${dim(`+${seen.size - before} new rules (${seen.size} cumulative)`)}`);
+      console.log(`    ${green('✓')} ${pad(f, NAME_W + 2)} ${dim(grammarBucket ? `+${seen.size - before} new rules (${seen.size} cumulative)` : 'claims-chartered — carriage judged under Corpus claims')}`);
     } catch (e) {
       console.log(`    ${red('✗')} ${pad(f, NAME_W + 2)} ${dim(`parse failed — ${String(e.message ?? e).split('\n')[0]}`)}`);
     }
@@ -1648,11 +1676,11 @@ if (RUN_GRAMMAR) {
   // not a verbose detail); per-fixture unique counts under --v.
   {
     const uniqueOf = (f) => [...(perFixture.get(f) ?? [])].filter((id) => reducers.get(id) === 1).length;
-    const removable = fixtures.filter((f) => uniqueOf(f) === 0);
+    const removable = grammarFixtures.filter((f) => uniqueOf(f) === 0);
     console.log(`    ${dim(removable.length
       ? `removable with zero coverage loss (no unique reductions): ${removable.join(', ')}`
-      : 'every fixture reduces at least one production no other fixture does')}`);
-    if (VERBOSE) for (const f of fixtures) console.log(`        ${dim(`${pad(f, NAME_W + 2)} ${String(uniqueOf(f)).padStart(3)} unique`)}`);
+      : 'every grammar fixture reduces at least one production no other fixture does')}`);
+    if (VERBOSE) for (const f of grammarFixtures) console.log(`        ${dim(`${pad(f, NAME_W + 2)} ${String(uniqueOf(f)).padStart(3)} unique`)}`);
   }
   // ── NEGATIVE COVERAGE — the error lane measured against the positive
   // corpus's own claims. The denominator problem: positives get theirs from
@@ -1773,7 +1801,7 @@ if (RUN_GRAMMAR) {
     // Each distinct text, wrapped per its token kind into a standalone
     // parseable statement.
     const typeTexts = new Map();
-    for (const [dir, dirFiles] of [[FIX, fixtures], [ERRD, errorFixtures]]) {
+    for (const [dir, dirFiles] of [[FIX, grammarFixtures], [CLM, claimsFixtures], [ERRD, errorFixtures]]) {
       for (const f of dirFiles) for (const t of typeTokensOf(path.join(dir, f))) {
         if (!typeTexts.has(t.value)) typeTexts.set(t.value, t.kind === 'TYPE_DECL' ? t.value
           : t.kind === 'TYPE_PARAMS' ? `type __W${t.value} = 0`
@@ -1781,15 +1809,15 @@ if (RUN_GRAMMAR) {
       }
     }
     const { byText: kindsByText, universe: kindUniverse } = await classifyTypeTexts(typeTexts);
-    const sideKinds = (dir, files) => {
+    const sideKinds = (pairs) => {
       const counts = new Map();
-      for (const f of files) for (const t of typeTokensOf(path.join(dir, f))) {
+      for (const [dir, files] of pairs) for (const f of files) for (const t of typeTokensOf(path.join(dir, f))) {
         for (const k of kindsByText.get(t.value) ?? []) counts.set(k, (counts.get(k) ?? 0) + 1);
       }
       return counts;
     };
-    const posVocab = sideKinds(FIX, fixtures);
-    const negVocab = sideKinds(ERRD, errorFixtures);
+    const posVocab = sideKinds([[FIX, grammarFixtures], [CLM, claimsFixtures]]);
+    const negVocab = sideKinds([[ERRD, errorFixtures]]);
     const claimed = [...posVocab].filter(([, n]) => n > 0);
     const unfalsified = claimed.filter(([c]) => (negVocab.get(c) ?? 0) === 0).map(([c]) => c);
     // A kind list wraps on its own indented lines — a single long line pushes
@@ -1867,8 +1895,10 @@ if (RUN_GRAMMAR) {
       const carrierOk = (c) => {
         if (!c || c === 'ABSENT' || c === '—') return c === '—' ? 'na' : 'absent';
         const [file, symbol] = c.split(':');
-        const full = path.join(FIX, file);
-        if (!fs.existsSync(full)) return 'missing';
+        // Carriers may live in either bucket — grammar fixtures can carry
+        // bonus claims; the bucket encodes a fixture's PRIMARY charter.
+        const full = [FIX, CLM].map((d) => path.join(d, file)).find((p) => fs.existsSync(p));
+        if (!full) return 'missing';
         return new RegExp(`\\b${symbol}\\b`).test(fs.readFileSync(full, 'utf8')) ? 'ok' : 'missing';
       };
       const rows = [];
@@ -1885,9 +1915,19 @@ if (RUN_GRAMMAR) {
         if (!hit) cellsMissing++;
         rows.push(`${hit ? green('✓') : red('✗')} ${c.construct} inside ${c.inside}${hit ? '' : ' ' + dim('— no fixture carries this cell')}`);
       }
+      // The claims bucket's retirement standard — the mirror of the grammar
+      // bucket's unique-contribution line: a corpus/claims fixture justified
+      // by NO CLAIMS row is removable (or mis-bucketed) and paints red.
+      const carrierFiles = new Set(behaviors.flatMap((b) => [b.carrier, b.neg])
+        .filter((c) => c && c !== 'ABSENT' && c !== '—').map((c) => c.split(':')[0]));
+      let claimsOrphans = 0;
+      for (const f of claimsFixtures) if (!carrierFiles.has(f)) {
+        claimsOrphans++;
+        rows.push(`${red('✗')} ${f} ${dim('— a claims fixture no CLAIMS row names: removable, or mis-bucketed under corpus/claims')}`);
+      }
       console.log(`\n    ${bold('Corpus claims')} ${dim('(CLAIMS.md — behaviors and containment cells; the no-denominator coverage record)')}`);
       for (const r of rows) console.log(`      ${r}`);
-      ng.claimsAbsent = absent; ng.claimsBroken = broken; ng.cellsMissing = cellsMissing;
+      ng.claimsAbsent = absent; ng.claimsBroken = broken + claimsOrphans; ng.cellsMissing = cellsMissing;
     }
   }
   const falseExclusions = excludedIdx.filter((i) => seen.has(i));
@@ -1921,7 +1961,7 @@ if (RUN_MAP) {
   const skips = [];
 
   for (const f of fixtures) {
-    const full = path.join(FIX, f);
+    const full = fixPath(f);
     const src = fs.readFileSync(full, 'utf8');
     let scan;
     try {
@@ -2086,8 +2126,8 @@ if (RUN_MAIN) {
   // order: `lanes` resolves in index order, so the grid fills top-to-bottom even
   // though the work finishes out of order.
   const rows = await lanes(fixtures, async (f, _i, lane) => {
-    const ripPath = path.join(FIX, f);
-    const twinBase = ['.tsx', '.ts'].map((e) => f.replace(/\.rip$/, e)).find((b) => fs.existsSync(path.join(FIX, b)));
+    const ripPath = fixPath(f);
+    const twinBase = ['.tsx', '.ts'].map((e) => f.replace(/\.rip$/, e)).find((b) => fs.existsSync(path.join(fixDirOf(f), b)));
     const src = fs.readFileSync(ripPath, 'utf8');
 
     const c = await dimCompiles(ripPath);
@@ -2106,7 +2146,7 @@ if (RUN_MAIN) {
       // asks the server, the other spawns two processes — so overlap them.
       const [ds, rt] = await Promise.all([
         pool[lane].verdict(f, src).then((all) => all.filter((d) => (d.severity ?? 1) <= 2)),
-        dimRuntime(ripPath, twinBase ? path.join(FIX, twinBase) : null),
+        dimRuntime(ripPath, twinBase ? path.join(fixDirOf(f), twinBase) : null),
       ]);
       row.verdict = ds.length === 0 ? 'pass' : 'fail';
       row.verdictDetail = ds.length === 0 ? '0 errors' : `${ds.length} unexpected`;
@@ -2454,7 +2494,7 @@ if (RUN_HOVER || RUN_TOKENS) {
       include: ['*.rip.ts'],
     }));
     for (const f of fixtures) {
-      const full = path.join(FIX, f);
+      const full = fixPath(f);
       if (!await compiles(full)) continue;   // a fixture with no face has nothing to survive
       try {
         const { code, mappings } = compile(fs.readFileSync(full, 'utf8'), { path: full, runtimeDelivery: 'inline', face: 'ts' });
@@ -2479,7 +2519,7 @@ if (RUN_HOVER || RUN_TOKENS) {
   const t0 = Date.now();
 
   const probeOne = async (f, _i, lane = 0) => {
-    const full = path.join(FIX, f);
+    const full = fixPath(f);
     const src = fs.readFileSync(full, 'utf8');
     if (!await compiles(full)) { hskip++; return { file: f, probe: null, line: `    ${yellow('skip')} ${pad(f, NAME_W + 2)} ${dim('does not compile — no face to probe')}` }; }
 
@@ -2488,7 +2528,7 @@ if (RUN_HOVER || RUN_TOKENS) {
     const twin = twins[lane] ?? null;
 
     const started = Date.now();
-    const twinBase = twin ? ['.tsx', '.ts'].map((e) => f.replace(/\.rip$/, e)).find((b) => fs.existsSync(path.join(FIX, b))) : null;
+    const twinBase = twin ? ['.tsx', '.ts'].map((e) => f.replace(/\.rip$/, e)).find((b) => fs.existsSync(path.join(fixDirOf(f), b))) : null;
     const decls = declsOf(src);
     // Type-body members ride alongside the declarations — the token audit's
     // PRESENCE invariant probes both. Computed here so the
@@ -2529,7 +2569,7 @@ if (RUN_HOVER || RUN_TOKENS) {
         const tokens = RUN_TOKENS ? await srv.tokens(uri) : null;
         return { decls, hovers, tokens, silent, ruled };
       }),
-      twinBase ? twin.hoverTwin(path.join(FIX, twinBase)).catch(() => null) : Promise.resolve(null),
+      twinBase ? twin.hoverTwin(path.join(fixDirOf(f), twinBase)).catch(() => null) : Promise.resolve(null),
     ]);
 
     // Face-survival (the mapping gap's use sites): raw face tokens run through the
@@ -2576,12 +2616,12 @@ if (RUN_HOVER || RUN_TOKENS) {
   // concurrency above safe to trust — not the gauge, which is a quality
   // measure, not a completeness one.
   const want = [];
-  for (const f of fixtures) if (await compiles(path.join(FIX, f))) want.push(f);
+  for (const f of fixtures) if (await compiles(fixPath(f))) want.push(f);
   const gaps = [];
   for (const f of want) {
     const p = PROBES.get(f);
     if (!p) { gaps.push(`${f}: compiles, but was never probed`); continue; }
-    const src = fs.readFileSync(path.join(FIX, f), 'utf8');
+    const src = fs.readFileSync(fixPath(f), 'utf8');
     const decls = declsOf(src);
     if (p.decls.length !== decls.length) gaps.push(`${f}: probed ${p.decls.length} declarations, source has ${decls.length}`);
     if (RUN_TOKENS) {
@@ -2700,13 +2740,15 @@ if (RUN_HOVER) {
   // classifying its rows native would silently retire that oracle the run
   // it landed. Component/schema clauses stay corpus-wide: those analogies
   // (TSX/zod) remain approximations in every fixture that carries them.
-  const M3 = (f) => Number.parseInt(f, 10) >= 20;
+  // Reactive spellings (`:=`/`~=`/`~>`) are NOT rip-native here: the
+  // reactive twin is a deliberate plain-TS oracle (state → let, computed →
+  // const — ROADMAP.md, Oracles). The legacy corpus's reactive twin wasn't,
+  // and a numeric M3-block discriminator guarded it until legacy retired.
   const ripNative = (r) => {
     const t = r.text ?? '';
     return /=\s*component\b/.test(t)
       || /=\s*schema\b/.test(t)
-      || /\b(?!JSON\b|Date\b)[A-Z]\w*\.parse(?:Async)?\s*\(/.test(t)
-      || (!M3(r.file) && /~>|~=|:=/.test(t));
+      || /\b(?!JSON\b|Date\b)[A-Z]\w*\.parse(?:Async)?\s*\(/.test(t);
   };
 
   // Outcomes per probe, twin side:

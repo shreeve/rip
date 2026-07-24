@@ -8,137 +8,137 @@ Allocation principles: a production belongs to the construct it CARRIES, not its
 
 | construct                | file            |
 | ------------------------ | --------------- |
-| String                   | 20-basics       |
-| Interpolations           | 20-basics       |
-| InterpolationChunk       | 20-basics       |
-| Regex                    | 20-basics       |
-| This                     | 20-basics       |
-| ThisProperty             | 20-basics       |
-| DoIife                   | 20-basics       |
-| Operation                | 21-operations   |
-| Invocation               | 21-operations   |
-| SimpleArgs               | 24-conditionals |
-| ArgElision               | 22-collections  |
-| ArgElisionList           | 22-collections  |
-| Object                   | 22-collections  |
-| Array                    | 22-collections  |
-| Elisions                 | 22-collections  |
-| Elision                  | 22-collections  |
-| OptElisions              | 22-collections  |
-| Range                    | 22-collections  |
-| RangeDots                | 22-collections  |
-| Slice                    | 22-collections  |
-| PickList                 | 22-collections  |
-| PickItem                 | 22-collections  |
-| PickKey                  | 22-collections  |
-| ObjSpreadExpr            | 22-collections  |
-| Assign                   | 23-assignments  |
-| AssignList               | 23-assignments  |
-| SimpleAssignable         | 23-assignments  |
-| ObjAssignable            | 23-assignments  |
-| SimpleObjAssignable      | 23-assignments  |
-| AssignObj                | 23-assignments  |
-| ObjRestValue             | 23-assignments  |
-| If                       | 24-conditionals |
-| IfBlock                  | 24-conditionals |
-| IfElseTail               | 24-conditionals |
-| UnlessBlock              | 24-conditionals |
-| Switch                   | 24-conditionals |
-| Cases                    | 24-conditionals |
-| When                     | 24-conditionals |
-| For                      | 25-loops        |
-| ForVariables             | 25-loops        |
-| ForValue                 | 25-loops        |
-| While                    | 25-loops        |
-| Loop                     | 25-loops        |
-| Try                      | 26-exceptions   |
-| Catch                    | 26-exceptions   |
-| Throw                    | 26-exceptions   |
-| Def                      | 27-functions    |
-| Code                     | 27-functions    |
-| ArrowKind                | 27-functions    |
-| ParamList                | 27-functions    |
-| OptParams                | 27-functions    |
-| Param                    | 27-functions    |
-| ParamVar                 | 27-functions    |
-| TypedParamVar            | 27-functions    |
-| Return                   | 27-functions    |
-| Class                    | 28-classes      |
-| ClassName                | 28-classes      |
-| Super                    | 28-classes      |
-| NewSpine                 | 28-classes      |
-| NewValue                 | 28-classes      |
-| NewCall                  | 28-classes      |
-| Import                   | 29-modules      |
-| Export                   | 29-modules      |
-| ExportAssign             | 29-modules      |
-| ImportSpecifierList      | 29-modules      |
-| ImportSpecifier          | 29-modules      |
-| ImportDefaultSpecifier   | 29-modules      |
-| ImportNamespaceSpecifier | 29-modules      |
-| ExportSpecifierList      | 29-modules      |
-| ExportSpecifier          | 29-modules      |
-| Enum                     | 30-types        |
-| TypeDecl                 | 30-types        |
-| ReactiveAssign           | 31-reactive     |
-| ComputedAssign           | 31-reactive     |
-| Readonly                 | 31-reactive     |
-| Effect                   | 31-reactive     |
-| Gate                     | 32-components   |
-| Component                | 32-components   |
-| ComponentBlock           | 32-components   |
-| ComponentLine            | 32-components   |
-| ComponentBody            | 32-components   |
-| Render                   | 32-components   |
-| Schema                   | 33-schema       |
+| String                   | 01-basics       |
+| Interpolations           | 01-basics       |
+| InterpolationChunk       | 01-basics       |
+| Regex                    | 01-basics       |
+| This                     | 01-basics       |
+| ThisProperty             | 01-basics       |
+| DoIife                   | 01-basics       |
+| Operation                | 02-operations   |
+| Invocation               | 02-operations   |
+| SimpleArgs               | 05-conditionals |
+| ArgElision               | 03-collections  |
+| ArgElisionList           | 03-collections  |
+| Object                   | 03-collections  |
+| Array                    | 03-collections  |
+| Elisions                 | 03-collections  |
+| Elision                  | 03-collections  |
+| OptElisions              | 03-collections  |
+| Range                    | 03-collections  |
+| RangeDots                | 03-collections  |
+| Slice                    | 03-collections  |
+| PickList                 | 03-collections  |
+| PickItem                 | 03-collections  |
+| PickKey                  | 03-collections  |
+| ObjSpreadExpr            | 03-collections  |
+| Assign                   | 04-assignments  |
+| AssignList               | 04-assignments  |
+| SimpleAssignable         | 04-assignments  |
+| ObjAssignable            | 04-assignments  |
+| SimpleObjAssignable      | 04-assignments  |
+| AssignObj                | 04-assignments  |
+| ObjRestValue             | 04-assignments  |
+| If                       | 05-conditionals |
+| IfBlock                  | 05-conditionals |
+| IfElseTail               | 05-conditionals |
+| UnlessBlock              | 05-conditionals |
+| Switch                   | 05-conditionals |
+| Cases                    | 05-conditionals |
+| When                     | 05-conditionals |
+| For                      | 06-loops        |
+| ForVariables             | 06-loops        |
+| ForValue                 | 06-loops        |
+| While                    | 06-loops        |
+| Loop                     | 06-loops        |
+| Try                      | 07-exceptions   |
+| Catch                    | 07-exceptions   |
+| Throw                    | 07-exceptions   |
+| Def                      | 08-functions    |
+| Code                     | 08-functions    |
+| ArrowKind                | 08-functions    |
+| ParamList                | 08-functions    |
+| OptParams                | 08-functions    |
+| Param                    | 08-functions    |
+| ParamVar                 | 08-functions    |
+| TypedParamVar            | 08-functions    |
+| Return                   | 08-functions    |
+| Class                    | 09-classes      |
+| ClassName                | 09-classes      |
+| Super                    | 09-classes      |
+| NewSpine                 | 09-classes      |
+| NewValue                 | 09-classes      |
+| NewCall                  | 09-classes      |
+| Import                   | 10-modules      |
+| Export                   | 10-modules      |
+| ExportAssign             | 10-modules      |
+| ImportSpecifierList      | 10-modules      |
+| ImportSpecifier          | 10-modules      |
+| ImportDefaultSpecifier   | 10-modules      |
+| ImportNamespaceSpecifier | 10-modules      |
+| ExportSpecifierList      | 10-modules      |
+| ExportSpecifier          | 10-modules      |
+| Enum                     | 11-types        |
+| TypeDecl                 | 11-types        |
+| ReactiveAssign           | 12-reactive     |
+| ComputedAssign           | 12-reactive     |
+| Readonly                 | 12-reactive     |
+| Effect                   | 12-reactive     |
+| Gate                     | 13-components   |
+| Component                | 13-components   |
+| ComponentBlock           | 13-components   |
+| ComponentLine            | 13-components   |
+| ComponentBody            | 13-components   |
+| Render                   | 13-components   |
+| Schema                   | 14-schema       |
 
 ## Overrides
 
-The largest block is the export-of-X family: an `Export`/`ExportAssign` production whose right-hand side is another file's construct sits with that file, because covering it means writing that construct — `export count := 0` is reactive authoring, and the reactive rulings (RULINGS.md) gate 31-reactive, not 29-modules. 29-modules keeps the frames any expression can fill (default exports, specifier lists, re-exports, plain `ExportAssign`).
+The largest block is the export-of-X family: an `Export`/`ExportAssign` production whose right-hand side is another file's construct sits with that file, because covering it means writing that construct — `export count := 0` is reactive authoring, and the reactive rulings (RULINGS.md) gate 12-reactive, not 10-modules. 10-modules keeps the frames any expression can fill (default exports, specifier lists, re-exports, plain `ExportAssign`).
 
 | production                                     | file           | why                                       |
 | ---------------------------------------------- | -------------- | ----------------------------------------- |
-| `Expression → Gate`                            | 32-components  | carries a gate construct — a gate is emitter-rejected outside a direct component-body line, so covering it means writing a component |
-| `Expression → ReactiveAssign`                  | 31-reactive    | carries a reactive construct              |
-| `Expression → ComputedAssign`                  | 31-reactive    | carries a reactive construct              |
-| `Expression → Readonly`                        | 31-reactive    | carries a reactive construct              |
-| `Expression → Effect`                          | 31-reactive    | carries a reactive construct              |
-| `Expression → Try`                             | 26-exceptions  | carries an exception construct            |
-| `Expression → While`                           | 25-loops       | carries a loop construct                  |
-| `Expression → Throw`                           | 26-exceptions  | carries an exception construct            |
-| `Expression → Class`                           | 28-classes     | carries a class construct                 |
-| `Expression → Def`                             | 27-functions   | carries a function construct              |
-| `Expression → Schema`                          | 33-schema      | carries a schema construct                |
-| `Value → Range`                                | 22-collections | carries a range construct                 |
-| `Value → Super`                                | 28-classes     | carries a super construct                 |
-| `Statement → Enum`                             | 30-types       | carries an enum construct                 |
-| `Statement → Import`                           | 29-modules     | carries a module construct                |
-| `Statement → Export`                           | 29-modules     | carries a module construct                |
-| `Root → ε`                                     | 35-edges       | the empty program — an edge, not a family |
-| `Invocation → SUPER Arguments`                 | 28-classes     | carries a super construct                 |
-| `Invocation → DYNAMIC_IMPORT Arguments`        | 29-modules     | carries a module construct                |
-| `Invocation → DYNAMIC_IMPORT DAMMIT Arguments` | 29-modules     | carries a module construct                |
-| `Export → EXPORT Class`                        | 28-classes     | export-of-X: carries a class construct    |
-| `Export → EXPORT Def`                          | 27-functions   | export-of-X: carries a function construct |
-| `Export → EXPORT Enum`                         | 30-types       | export-of-X: carries an enum construct    |
-| `Export → EXPORT ReactiveAssign`               | 31-reactive    | export-of-X: carries a reactive construct |
-| `Export → EXPORT ComputedAssign`               | 31-reactive    | export-of-X: carries a reactive construct |
-| `Export → EXPORT Readonly`                     | 31-reactive    | export-of-X: carries a reactive construct |
-| `Export → EXPORT Effect`                       | 31-reactive    | export-of-X: carries a reactive construct |
-| `ExportAssign → Identifier TYPE REACTIVE_ASSIGN Expression` | 31-reactive | export-of-X: annotated reactive, exported |
-| `ExportAssign → Identifier TYPE REACTIVE_ASSIGN TERMINATOR Expression` | 31-reactive | export-of-X: annotated reactive, exported |
-| `ExportAssign → Identifier TYPE REACTIVE_ASSIGN INDENT Expression OUTDENT` | 31-reactive | export-of-X: annotated reactive, exported |
-| `ExportAssign → Identifier TYPE COMPUTED_ASSIGN Expression` | 31-reactive | export-of-X: annotated computed, exported |
-| `ExportAssign → Identifier TYPE COMPUTED_ASSIGN TERMINATOR Expression` | 31-reactive | export-of-X: annotated computed, exported |
-| `ExportAssign → Identifier TYPE COMPUTED_ASSIGN Block` | 31-reactive | export-of-X: annotated computed, exported |
-| `ExportAssign → Identifier TYPE READONLY_ASSIGN Expression` | 31-reactive | export-of-X: annotated readonly, exported |
-| `ExportAssign → Identifier TYPE READONLY_ASSIGN TERMINATOR Expression` | 31-reactive | export-of-X: annotated readonly, exported |
-| `ExportAssign → Identifier TYPE READONLY_ASSIGN INDENT Expression OUTDENT` | 31-reactive | export-of-X: annotated readonly, exported |
-| `ExportAssign → Identifier TYPE EFFECT Expression` | 31-reactive | export-of-X: annotated effect, exported |
-| `ExportAssign → Identifier TYPE EFFECT TERMINATOR Expression` | 31-reactive | export-of-X: annotated effect, exported |
-| `ExportAssign → Identifier TYPE EFFECT Block` | 31-reactive | export-of-X: annotated effect, exported |
-| `Assign → Assignable TYPE_PARAMS = Expression` | 32-components  | its sole carrier is a generic component target (`X<T> = component` — the lexer mints TYPE_PARAMS only there) |
-| `ExportAssign → Identifier TYPE_PARAMS = Expression` | 32-components  | same sole carrier, exported spelling |
+| `Expression → Gate`                            | 13-components  | carries a gate construct — a gate is emitter-rejected outside a direct component-body line, so covering it means writing a component |
+| `Expression → ReactiveAssign`                  | 12-reactive    | carries a reactive construct              |
+| `Expression → ComputedAssign`                  | 12-reactive    | carries a reactive construct              |
+| `Expression → Readonly`                        | 12-reactive    | carries a reactive construct              |
+| `Expression → Effect`                          | 12-reactive    | carries a reactive construct              |
+| `Expression → Try`                             | 07-exceptions  | carries an exception construct            |
+| `Expression → While`                           | 06-loops       | carries a loop construct                  |
+| `Expression → Throw`                           | 07-exceptions  | carries an exception construct            |
+| `Expression → Class`                           | 09-classes     | carries a class construct                 |
+| `Expression → Def`                             | 08-functions   | carries a function construct              |
+| `Expression → Schema`                          | 14-schema      | carries a schema construct                |
+| `Value → Range`                                | 03-collections | carries a range construct                 |
+| `Value → Super`                                | 09-classes     | carries a super construct                 |
+| `Statement → Enum`                             | 11-types       | carries an enum construct                 |
+| `Statement → Import`                           | 10-modules     | carries a module construct                |
+| `Statement → Export`                           | 10-modules     | carries a module construct                |
+| `Root → ε`                                     | 16-edges       | the empty program — an edge, not a family |
+| `Invocation → SUPER Arguments`                 | 09-classes     | carries a super construct                 |
+| `Invocation → DYNAMIC_IMPORT Arguments`        | 10-modules     | carries a module construct                |
+| `Invocation → DYNAMIC_IMPORT DAMMIT Arguments` | 10-modules     | carries a module construct                |
+| `Export → EXPORT Class`                        | 09-classes     | export-of-X: carries a class construct    |
+| `Export → EXPORT Def`                          | 08-functions   | export-of-X: carries a function construct |
+| `Export → EXPORT Enum`                         | 11-types       | export-of-X: carries an enum construct    |
+| `Export → EXPORT ReactiveAssign`               | 12-reactive    | export-of-X: carries a reactive construct |
+| `Export → EXPORT ComputedAssign`               | 12-reactive    | export-of-X: carries a reactive construct |
+| `Export → EXPORT Readonly`                     | 12-reactive    | export-of-X: carries a reactive construct |
+| `Export → EXPORT Effect`                       | 12-reactive    | export-of-X: carries a reactive construct |
+| `ExportAssign → Identifier TYPE REACTIVE_ASSIGN Expression` | 12-reactive | export-of-X: annotated reactive, exported |
+| `ExportAssign → Identifier TYPE REACTIVE_ASSIGN TERMINATOR Expression` | 12-reactive | export-of-X: annotated reactive, exported |
+| `ExportAssign → Identifier TYPE REACTIVE_ASSIGN INDENT Expression OUTDENT` | 12-reactive | export-of-X: annotated reactive, exported |
+| `ExportAssign → Identifier TYPE COMPUTED_ASSIGN Expression` | 12-reactive | export-of-X: annotated computed, exported |
+| `ExportAssign → Identifier TYPE COMPUTED_ASSIGN TERMINATOR Expression` | 12-reactive | export-of-X: annotated computed, exported |
+| `ExportAssign → Identifier TYPE COMPUTED_ASSIGN Block` | 12-reactive | export-of-X: annotated computed, exported |
+| `ExportAssign → Identifier TYPE READONLY_ASSIGN Expression` | 12-reactive | export-of-X: annotated readonly, exported |
+| `ExportAssign → Identifier TYPE READONLY_ASSIGN TERMINATOR Expression` | 12-reactive | export-of-X: annotated readonly, exported |
+| `ExportAssign → Identifier TYPE READONLY_ASSIGN INDENT Expression OUTDENT` | 12-reactive | export-of-X: annotated readonly, exported |
+| `ExportAssign → Identifier TYPE EFFECT Expression` | 12-reactive | export-of-X: annotated effect, exported |
+| `ExportAssign → Identifier TYPE EFFECT TERMINATOR Expression` | 12-reactive | export-of-X: annotated effect, exported |
+| `ExportAssign → Identifier TYPE EFFECT Block` | 12-reactive | export-of-X: annotated effect, exported |
+| `Assign → Assignable TYPE_PARAMS = Expression` | 13-components  | its sole carrier is a generic component target (`X<T> = component` — the lexer mints TYPE_PARAMS only there) |
+| `ExportAssign → Identifier TYPE_PARAMS = Expression` | 13-components  | same sole carrier, exported spelling |
 
 ## Parked
 

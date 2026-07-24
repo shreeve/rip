@@ -1,5 +1,5 @@
 {
-  "31-reactive.errors.rip": [
+  "12-reactive.errors.rip": [
     {
       "line": 8,
       "character": 10,
@@ -15,7 +15,7 @@
       "why": "the ~= lowering's value-level second publish on the derivation expression; asserts the interim while the double-publish row is open (FINDINGS.md)"
     }
   ],
-  "32-components.errors.rip": [
+  "13-components.errors.rip": [
     {
       "line": 29,
       "character": 10,
@@ -31,7 +31,7 @@
       "why": "the two-way bind mismatch (number state into a string prop) — no TSX line can spell the <=> channel; the container-typed message is the channel's real contract; pinned per the components ruling (RULINGS.md)"
     }
   ],
-  "33-schema.errors.rip": [
+  "14-schema.errors.rip": [
     {
       "line": 27,
       "character": 0,

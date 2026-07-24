@@ -1,5 +1,5 @@
 {
-  "31-reactive.rip": {
+  "12-reactive.rip": {
     "decls": [
       {
         "name": "pulse",
@@ -13,7 +13,7 @@
       }
     ]
   },
-  "32-components.rip": {
+  "13-components.rip": {
     "decls": [
       {
         "name": "Badge",
@@ -283,7 +283,7 @@
       }
     ]
   },
-  "33-schema.rip": {
+  "14-schema.rip": {
     "decls": [
       {
         "name": "Address",

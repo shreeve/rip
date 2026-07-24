@@ -28,7 +28,7 @@ The declaration hovers here have an honest interim that is not silence: the plai
 
 ## Components / render
 
-Measured 2026-07-23 over 32-components (the `ruled` gauge, hover-pins.json's `positions`). Two findings hold the red pins: the render-DSL finding (positions with no user symbol serve minted scaffold — the cover's `this`, `_elN` locals, the `__bind_value__` slot, the gate key-fn's params) and the member-wrapper finding (member declarations and gate targets serve the container wrapper where the value-type answer is the only truthful interim).
+Measured 2026-07-23 over 13-components (the `ruled` gauge, hover-pins.json's `positions`). Two findings hold the red pins: the render-DSL finding (positions with no user symbol serve minted scaffold — the cover's `this`, `_elN` locals, the `__bind_value__` slot, the gate key-fn's params) and the member-wrapper finding (member declarations and gate targets serve the container wrapper where the value-type answer is the only truthful interim).
 
 | position | ruling (target) | interim |
 | --- | --- | --- |
@@ -53,7 +53,7 @@ Measured 2026-07-23 over 32-components (the `ruled` gauge, hover-pins.json's `po
 
 ## Schema
 
-Measured 2026-07-23 over 33-schema's spellings (the `ruled` gauge, hover-pins.json's `positions`). The schema body is wholesale silent today — every in-body position serves null, which IS the ruled interim — so the null pins are green while the minted-kind targets stay unserved; no finding holds them, the component-name-at-use-site precedent. The declaration and companion-type rows serve truthful answers and pin as measured — except the `:mixin` declaration, which serves the runtime's own class; the mixin-declaration finding (FINDINGS.md) holds that pin.
+Measured 2026-07-23 over 14-schema's spellings (the `ruled` gauge, hover-pins.json's `positions`). The schema body is wholesale silent today — every in-body position serves null, which IS the ruled interim — so the null pins are green while the minted-kind targets stay unserved; no finding holds them, the component-name-at-use-site precedent. The declaration and companion-type rows serve truthful answers and pin as measured — except the `:mixin` declaration, which serves the runtime's own class; the mixin-declaration finding (FINDINGS.md) holds that pin.
 
 | position | ruling (target) | interim |
 | --- | --- | --- |

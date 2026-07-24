@@ -1,0 +1,7 @@
+# 10-modules-hub.rip — the re-export hub: the lib resold whole — its named
+# surface through the star form, its default kept as this module's default
+
+export * from './10-modules-lib.rip'
+export { default } from './10-modules-lib.rip'
+
+console.log('hub open')

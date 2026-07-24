@@ -10,8 +10,8 @@ A carrier is `fixture:symbol` — the fixture file and a symbol the gate verifie
 | --- | --- | --- |
 | an inferred binding is enforced at reassignment (`total = 'oops'` after number) | ABSENT | ABSENT |
 | switch on a union discriminant narrows the arm (`.radius` safe in the `circle` case) | ABSENT | ABSENT |
-| an evolving let read by a hoisted def types through the pin pass | 27-functions.rip:formatOf | — |
-| a write-only binding hovers its value type, never `any` | 20-basics.rip:recorded | — |
+| an evolving let read by a hoisted def types through the pin pass | 08-functions.rip:formatOf | — |
+| a write-only binding hovers its value type, never `any` | 01-basics.rip:recorded | — |
 
 ## Containment
 

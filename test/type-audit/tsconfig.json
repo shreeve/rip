@@ -9,9 +9,10 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": [
-    "fixtures"
+    "corpus/grammar",
+    "corpus/claims"
   ],
   "exclude": [
-    "fixtures/errors"
+    "corpus/errors"
   ]
 }
