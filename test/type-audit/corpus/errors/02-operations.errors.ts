@@ -18,3 +18,4 @@ let wrongArity = pair(1)
 let wrongArgument = pair(1, text)
 let wrongExist = missingName != null
 let wrongDelete = delete point.x
+let wrongScale: ((n: number) => number) | null = 7

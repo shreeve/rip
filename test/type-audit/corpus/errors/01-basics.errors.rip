@@ -11,3 +11,4 @@ wrongParenthetical: string = (1 + 2) * 3
 wrongIife: string = do -> 42
 wrongInterpolation: number = "sum #{1 + 2}"
 wrongProperty = 'abc'.missing
+wrongAbsent: undefined = 'here'

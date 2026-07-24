@@ -11,6 +11,12 @@ type Sized = { size: number }
 type Constrained<T extends Code> = { key: T }
 interface Route
   path: string
+interface Beacon
+  level: number
+interface Strobe extends Beacon
+  hue: string
+veiled: unknown = 'kept'
+notify: () => void = -> undefined
 label = 'five'
 enum Tier
   free
@@ -25,3 +31,6 @@ wrongMember = Tier.pro
 wrongMode: Mode = 'maybe'
 wrongJoined: Named & Sized = { name: 'kit' }
 wrongConstrained: Constrained<string> | null = null
+wrongStrobe: Strobe = { hue: 'crimson' }
+wrongVeiled: string = veiled
+wrongNotify: string = notify()

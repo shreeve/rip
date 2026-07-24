@@ -11,6 +11,12 @@ type Sized = { size: number }
 type Constrained<T extends Code> = { key: T }
 interface Route {
   path: string }
+interface Beacon {
+  level: number }
+interface Strobe extends Beacon {
+  hue: string }
+let veiled: unknown = 'kept'
+let notify: () => void = () => undefined
 let label = 'five'
 const Tier = {
   free: 0, 0: 'free',
@@ -25,3 +31,6 @@ let wrongMember = Tier.pro
 let wrongMode: Mode = 'maybe'
 let wrongJoined: Named & Sized = { name: 'kit' }
 let wrongConstrained: Constrained<string> | null = null
+let wrongStrobe: Strobe = { hue: 'crimson' }
+let wrongVeiled: string = veiled
+let wrongNotify: string = notify()

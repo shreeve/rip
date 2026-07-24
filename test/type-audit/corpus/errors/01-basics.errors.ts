@@ -11,3 +11,4 @@ let wrongParenthetical: string = (1 + 2) * 3
 let wrongIife: string = (function() { return 42 })()
 let wrongInterpolation: number = `sum ${1 + 2}`
 let wrongProperty = 'abc'.missing
+let wrongAbsent: undefined = 'here'

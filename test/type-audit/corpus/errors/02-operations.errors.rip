@@ -18,3 +18,4 @@ wrongArity = pair(1)
 wrongArgument = pair(1, text)
 wrongExist = missingName?
 wrongDelete = delete point.x
+wrongScale: ((n: number) => number) | null = 7
