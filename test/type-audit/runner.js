@@ -2420,15 +2420,22 @@ if (RUN_ERRORS) {
     const expected = [];
     for (const d of twinByFile.get(twinBase) ?? []) {
       const twinLine = twinLines[d.line - 1] ?? '';
-      // Identifier-only is a DERIVATION LIMIT, not corpus policy: TypeScript
-      // also anchors errors on literals, operators, and parens, and a family
-      // whose negatives legitimately flag such spans (operations, arity) is
-      // the cue to widen this extraction to whatever sits at the flagged
-      // position — never to reshape fixtures until the error lands on an
-      // identifier, which would drift the corpus toward shapes the harness
-      // can measure instead of shapes the type story needs tested.
-      const token = twinLine.slice(d.col - 1).match(/^[A-Za-z_$][\w$]*/)?.[0];
-      if (!token) { problems.push({ kind: 'shape', note: `twin ${d.line}:${d.col} TS${d.code}: no identifier at the flagged position — a derivation limit; widen the extraction here rather than reshaping the fixture` }); continue; }
+      // What can be extracted is a DERIVATION LIMIT, not corpus policy:
+      // TypeScript anchors errors on literals as readily as on names — a
+      // wrong tuple element is flagged on the element — so the extraction
+      // covers identifiers and literal spellings both. It still cannot
+      // anchor on an operator, paren, or bracket; a family whose negatives
+      // legitimately flag such a span is the cue to widen this further,
+      // never to reshape fixtures until the error lands on something the
+      // harness can read, which would drift the corpus toward shapes it can
+      // measure instead of shapes the type story needs tested.
+      //
+      // A literal transfers by the same occurrence rank as a name because the
+      // twin is line-aligned and copies literals verbatim; where it cannot
+      // (rip's `#{}` interpolation against a template), the rank lookup below
+      // reports the absence rather than silently missing it.
+      const token = twinLine.slice(d.col - 1).match(/^(?:[A-Za-z_$][\w$]*|'[^']*'|"[^"]*"|-?\d[\w.]*)/)?.[0];
+      if (!token) { problems.push({ kind: 'shape', note: `twin ${d.line}:${d.col} TS${d.code}: no identifier or literal at the flagged position — a derivation limit; widen the extraction here rather than reshaping the fixture` }); continue; }
       // The measurement side is the PERMISSIVE editor (its workspace carries
       // no package.json, so rip.strict is off and mapTsDiagnostic drops the
       // implicit-any family before publishing). An expectation carrying one

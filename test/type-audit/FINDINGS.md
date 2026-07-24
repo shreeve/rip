@@ -45,6 +45,7 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [35](#35-a-wrong--initializer-publishes-twice-in-lowering-vocabulary) | A wrong `:=`/`~=` initializer publishes twice, in lowering vocabulary | `compiler` | the Diagnostics Lane's 12-reactive pins (`error-pins.json`) assert the double **as the interim** — they go red the day the emission publishes once, the cue to retire them |
 | [34](#34-the-bare-effect-operator-hovers-the-runtimes-machinery) | The bare `~>` operator hovers the runtime's machinery | `editor` | the Hover Audit's `silence` gauge — ruled-silent bare-effect positions must serve null; red by agreement (soft: the audit exits 0) until the server declines to answer |
 | [13](#13-single-rooted-tsconfig--no-per-project-resolution) | Single-rooted tsconfig — no monorepo support | `config` | **none** |
+| [50](#50-a-tuple-elements-diagnostic-is-positioned-on-the-whole-element-list) | A tuple element's diagnostic is positioned on the whole element list | `compiler` | the Diagnostics Lane (`runner.js`) — 11-types' wrongEntry and wrongTrailing rows report position violations; red by agreement (soft: the audit exits 0) until the span maps to the offending element |
 | [32](#32-reassigning-an-exported-plain-binding-double-declares) | Reassigning an exported plain binding double-declares | `compiler` | **none** — the spelling's output does not build, so no fixture can carry it; the fix's gate is the spelling entering 10-modules |
 | [28](#28-a-postfix-cast-on-an-inline-try-body-detaches-the-catch-arm) | A postfix cast on an inline try body detaches the catch arm | `compiler` | **none** — the spelling cannot compile, so no fixture can carry it; the fix's gate is the spelling entering 07-exceptions, where `compiles` and `verdict` hold it |
 | [29](#29-new-on-an-optional-chain-emits-an-unconstructable-spelling) | `new` on an optional chain emits an unconstructable spelling | `compiler` | **none** — the emission cannot parse as JS, so no fixture can carry it; the production is parked ([MANIFEST.md](MANIFEST.md)); the fix's gate is the spelling entering 09-classes |
@@ -359,6 +360,18 @@ Both the editor and `rip check` generate ONE tsconfig at the mirror root that `e
 **Blast radius.** Shared: generalize `generatedMirror` + add a `nearestTsconfig(dir, anchor)` walk in `mirror.js`. `rip check` ([src/check.js](../../src/check.js)): after materialization, emit one wrapper per distinct owning tsconfig — small, self-contained. Editor ([server.js](../../packages/vscode/src/server.js)): larger — emit/refresh wrappers during closure materialization and on `tsconfig.json` (or extends-chain) changes via the existing watcher; no session multiplexing. The pin pass and single-session architecture are untouched.
 
 **vs v3** — not established. v3 *is* re-runnable, so this could be settled either way; nobody has driven a monorepo through it. Framed as a missing capability, not a driven v3 regression.
+
+### 50. A tuple element's diagnostic is positioned on the whole element list
+
+`pair: [string, number] = ['a', label]` — with `label` a string — publishes TS2322 spanning `'a', label`, both elements, where TypeScript flags `label` alone. The editor squiggle therefore blames an element that is correct, and on a longer tuple the reader is told the list is wrong instead of which slot is.
+
+Isolated by construct (driven 2026-07-24, the census drain): a plain array (`nums: number[] = [1, label]`) flags `label`, an object literal (`{ hits: label }`) flags the key `hits` as TypeScript does, and only the FIXED-LENGTH tuple widens to the whole element list. A rest tuple is unaffected — `[string, ...number[]]` reports the whole-value message on the binding, which is TypeScript's own shape for it. The published span begins at the first element in every failing case, exactly the offset of the elements skipped.
+
+**It is a mapping fault, not a checker one.** The face is line-identical to the twin (`let pair: [string, number] = ["a", label];`), so TypeScript answers the same for both; only the span mapped back to rip source differs.
+
+**Why the suite missed it.** The corpus had no tuple negative at all — `TupleType` was claimed by a positive fixture and falsified by a whole-value mismatch, neither of which puts a wrong ELEMENT in the error lane. The census drain is what first wrote one.
+
+**Status.** ⬜ **Open** (2026-07-24) — gated by the Diagnostics Lane's position rows on 11-types' `wrongEntry` and `wrongTrailing`, red by agreement: the audit prints both violations and still exits 0, which is where every audit stands while no exit-code contract exists. The fixtures stay in their element-level form on purpose — assigning a whole wrong value instead would turn the lane green while testing nothing positional.
 
 ### 32. Reassigning an exported plain binding double-declares
 
