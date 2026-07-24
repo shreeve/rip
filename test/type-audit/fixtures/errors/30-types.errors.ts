@@ -5,6 +5,10 @@
 type Code = number
 type Chart = { mode: string }
 type Crate<T> = { item: T }
+type Mode = 'on' | 'off'
+type Named = { name: string }
+type Sized = { size: number }
+type Constrained<T extends Code> = { key: T }
 interface Route {
   path: string }
 let label = 'five'
@@ -18,3 +22,6 @@ let wrongCrate: Crate<number> = { item: 'pearl' }
 let wrongRoute: Route = {}
 let wrongCast = (label as number)
 let wrongMember = Tier.pro
+let wrongMode: Mode = 'maybe'
+let wrongJoined: Named & Sized = { name: 'kit' }
+let wrongConstrained: Constrained<string> | null = null

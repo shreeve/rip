@@ -342,7 +342,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // block: the bug stays loud and the directive reports unused (TS2578),
   // tsc's verdict for a marker that did nothing. The hatch for an error
   // interior to a render element is a directive on the offending line
-  // itself (the audit corpus's 09-components drives that form). The
+  // itself (the inline component-prop and two-way-bind cases below). The
   // single-line file is the in-run control: suppression itself still
   // works, so the loud block bugs mean "not governed", not "broken".
   test('a directive governs the head line only — a bug inside the indented block surfaces, the directive reads unused', () => {
@@ -424,6 +424,50 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(diags.filter((d) => d.file.endsWith('acked.rip'))).toEqual([]);
       const sib = diags.filter((d) => d.file.endsWith('sibling.rip'));
       expect(sib.map((d) => [d.code, d.line])).toEqual([[2322, 14]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // The two-way-bind spelling of the same interior-directive contract: a
+  // marker above a `value <=> state` line governs exactly the bind's face
+  // line — the acknowledged type mismatch is absorbed with no TS2578, and
+  // the identical unacknowledged bind stays loud.
+  test('an inline directive above a two-way bind governs the bind line', () => {
+    const field = [
+      'export Field = component',
+      "  @value: string := ''",
+      '',
+      '  render',
+      '    span value',
+      '',
+    ];
+    const dir = workspace({
+      'bound.rip': [...field,
+        'export Bound = component',
+        '  count := 0',
+        '',
+        '  render',
+        '    div',
+        '      Field',
+        "        # @ts-expect-error — Type 'number' is not assignable to type 'string'",
+        '        value <=> count',
+      ].join('\n') + '\n',
+      'loud.rip': [...field,
+        'export Loud = component',
+        '  count := 0',
+        '',
+        '  render',
+        '    div',
+        '      Field',
+        '        value <=> count',
+      ].join('\n') + '\n',
+    });
+    try {
+      const r = check(dir, ['--json']);
+      expect(r.status).toBe(1);
+      const diags = JSON.parse(r.stdout);
+      expect(diags.filter((d) => d.file.endsWith('bound.rip'))).toEqual([]);
+      const loud = diags.filter((d) => d.file.endsWith('loud.rip'));
+      expect(loud.map((d) => d.code)).toEqual([2322]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 

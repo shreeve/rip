@@ -81,6 +81,11 @@ console.log('iife:', iife, 'seeded:', seeded)
 // the corpus default is explicit parens; this one paren-less call keeps the implicit spelling covered (21-operations owns invocation)
 console.log(typeof chain, typeof noop)
 
+// ── a write-only binding: assigned from a call, never read — its hover must
+// still answer the call's value type ──
+
+let recorded = Date.now()
+
 // ── Program skeleton: a bare statement, and a trailing terminator on the last line ──
 
 debugger

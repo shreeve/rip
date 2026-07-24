@@ -14,3 +14,4 @@ text .= missing()
 wrongMaybe?: number = 'nine'
 { absent } = point
 wrongPick = point.{ absent2: got }
+wrongOptional: { theme: string, depth?: number } = { theme: 'dark', depth: 'deep' }

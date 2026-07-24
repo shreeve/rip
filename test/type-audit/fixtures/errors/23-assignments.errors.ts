@@ -14,3 +14,4 @@ Object.assign(box ??= {}, { size: 'big' })
 let wrongMaybe: number = 'nine'
 let { absent } = point
 let wrongPick = { got: point.absent2 }
+let wrongOptional: { theme: string, depth?: number } = { theme: 'dark', depth: 'deep' }

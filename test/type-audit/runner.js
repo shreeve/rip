@@ -242,7 +242,7 @@ import { promisify } from 'node:util';
 import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.js';
 import { compile } from '../../src/compile.js';
 import { Parser } from '../../src/parser.js';
-import { makeParserLexer } from '../../src/lexer.js';
+import { makeParserLexer, tokenize } from '../../src/lexer.js';
 import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, offsetToPosition } from '../../packages/vscode/src/translate.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -994,7 +994,7 @@ class TwinOracle {
 // covered.
 //
 // Faces live in ONE shared dir named `<base>.rip.ts`, so a cross-file import
-// (`from './06-functions.rip'`) resolves to its sibling face: TS appends `.ts`
+// (`from './27-functions.rip'`) resolves to its sibling face: TS appends `.ts`
 // to the `.rip` specifier, which is exactly why the server's mirror carries
 // that name. tsgo echoes the legend the CLIENT declares, so declare the full
 // one the real server advertises (server.js `TSGO_CLIENT_CAPABILITIES`) — an
@@ -1590,12 +1590,37 @@ if (RUN_GRAMMAR) {
   const staleExcluded = [...EXCLUDED.keys()].filter((k) => !grammarNames.has(k));
   auditBanner('GRAMMAR GATE', `productions the corpus reduces · ${denom.length} rules${excludedIdx.length ? ` (${excludedIdx.length} excluded)` : ''} · ${fixtures.length} fixtures`);
   const seen = new Set();
+  // Reducers per production, for UNIQUE contribution — the retirement
+  // instrument: a fixture whose every reduction some other fixture also
+  // performs is removable with zero coverage loss, and only a per-fixture
+  // count can say so (the cumulative `+N` above cannot).
+  const reducers = new Map();
+  const perFixture = new Map();
+  // Containment pairs — (construct inside ancestor), transitive, from the
+  // parse tree. Production counting is context-free, so switch-in-render
+  // and switch-anywhere are indistinguishable to the gate; this matrix is
+  // what CLAIMS.md's Containment cells join against. Curated construct
+  // heads only: a call puts its callee in head position, so raw heads are
+  // noisy.
+  const CONSTRUCT_HEADS = new Set(['component', 'render', 'schema', 'class', 'if', 'unless', 'switch', 'when', 'for-in', 'for-of', 'for-as', 'while', 'until', 'loop', 'try', 'catch', 'finally', 'throw', 'state', 'computed', 'effect', 'gate', 'readonly', 'def', '->', '=>', 'export', 'import', 'enum']);
+  const pairsSeen = new Set();
+  const walkPairs = (n, anc) => {
+    if (!Array.isArray(n)) return;
+    const h = typeof n[0] === 'string' && CONSTRUCT_HEADS.has(n[0]) ? n[0] : null;
+    if (h) for (const a of anc) pairsSeen.add(`${h} inside ${a}`);
+    const next = h ? [...anc, h] : anc;
+    for (const c of n) walkPairs(c, next);
+  };
   for (const f of fixtures) {
     const before = seen.size;
-    const p = Parser({ onReduce: (id) => seen.add(id) });
+    const mine = new Set();
+    const p = Parser({ onReduce: (id) => { seen.add(id); mine.add(id); } });
     p.lexer = makeParserLexer(path.join(FIX, f));
+    perFixture.set(f, mine);
     try {
-      p.parse(fs.readFileSync(path.join(FIX, f), 'utf8'));
+      const tree = p.parse(fs.readFileSync(path.join(FIX, f), 'utf8'));
+      walkPairs(tree?.sexpr, []);
+      for (const id of mine) reducers.set(id, (reducers.get(id) ?? 0) + 1);
       console.log(`    ${green('✓')} ${pad(f, NAME_W + 2)} ${dim(`+${seen.size - before} new rules (${seen.size} cumulative)`)}`);
     } catch (e) {
       console.log(`    ${red('✗')} ${pad(f, NAME_W + 2)} ${dim(`parse failed — ${String(e.message ?? e).split('\n')[0]}`)}`);
@@ -1618,6 +1643,253 @@ if (RUN_GRAMMAR) {
     console.log(`    ${dim(`${excludedIdx.length} excluded by the gate (unreachable or banned spellings) — netted from the denominator${VERBOSE ? '' : '; --v lists them'}`)}`);
     if (VERBOSE) for (const i of excludedIdx) console.log(`        ${dim(names[i])} ${dim('·')} ${dim(EXCLUDED.get(names[i]))}`);
   }
+  // Unique contribution: which fixtures the coverage would survive losing.
+  // Non-unique fixtures list ALWAYS (a removable fixture is a standing fact,
+  // not a verbose detail); per-fixture unique counts under --v.
+  {
+    const uniqueOf = (f) => [...(perFixture.get(f) ?? [])].filter((id) => reducers.get(id) === 1).length;
+    const removable = fixtures.filter((f) => uniqueOf(f) === 0);
+    console.log(`    ${dim(removable.length
+      ? `removable with zero coverage loss (no unique reductions): ${removable.join(', ')}`
+      : 'every fixture reduces at least one production no other fixture does')}`);
+    if (VERBOSE) for (const f of fixtures) console.log(`        ${dim(`${pad(f, NAME_W + 2)} ${String(uniqueOf(f)).padStart(3)} unique`)}`);
+  }
+  // ── NEGATIVE COVERAGE — the error lane measured against the positive
+  // corpus's own claims. The denominator problem: positives get theirs from
+  // the grammar, but "wrong programs" has no inherent universe — so the
+  // denominator here is the POSITIVE CORPUS ITSELF, on the polarity
+  // principle the token invariant already states: a claim class the
+  // positives make with no negative demonstrating its rejection is untested
+  // in the direction that matters. Two layers with different standing:
+  // TYPE VOCABULARY is CONTRACTUAL — every class the positives claim must
+  // have at least one error-lane instance, and an unfalsified class paints
+  // red (the type-level text is invisible to the parser: a TYPE token is
+  // one token, so tuples, index signatures, constraints live beneath the
+  // production grid). Productions-per-family remains a GAUGE — which
+  // families have any negative at all, on the gate's own denominator;
+  // report-only until its contract is ruled. Classification is textual and
+  // conservative.
+  let ng = null;
+  {
+    // Parses each type text as its own virtual file (attribution by file,
+    // immune to a text parsing as several statements) through the pinned
+    // tsgo's unstable ASYNC API — bun-compatible, unlike the sync channel,
+    // which reads a raw stdio fd bun does not expose — and records the TS
+    // type-AST node kinds per text.
+    const classifyTypeTexts = async (texts) => {
+      const { API } = await import('typescript/unstable/async');
+      const { createVirtualFileSystem } = await import('typescript/unstable/fs');
+      const { SyntaxKind } = await import('typescript/unstable/ast');
+      const ordered = [...texts.keys()];
+      const vfiles = { '/p/tsconfig.json': `{"files":[${ordered.map((_, i) => `"t${i}.ts"`).join(',')}],"compilerOptions":{"noEmit":true}}` };
+      ordered.forEach((k, i) => { vfiles[`/p/t${i}.ts`] = texts.get(k) + '\n'; });
+      const api = new API({ fs: createVirtualFileSystem(vfiles), cwd: '/p' });
+      const snap = await api.updateSnapshot({ openProject: '/p/tsconfig.json' });
+      const program = snap.getProjects()[0].program;
+      const kindName = new Map(Object.entries(SyntaxKind).map(([n, v]) => [v, n]));
+      // THE CENSUS UNIVERSE — every kind TS's type grammar defines, so the
+      // claimed/unclaimed report never depends on anyone thinking of a kind.
+      // The structural set is mechanical (the FirstTypeNode..LastTypeNode
+      // range). The rest are TS's own definitions transcribed: the
+      // KeywordTypeSyntaxKind union, the LiteralType payload keywords, the
+      // readonly member modifier, the type-member signatures, and the
+      // carrier kinds the walker records. The transcription cannot rot
+      // silently: a claimed kind outside this universe paints red below,
+      // demanding the derivation be extended.
+      const structural = Object.entries(SyntaxKind)
+        .filter(([n, v]) => typeof v === 'number' && !/^(First|Last)/.test(n) && v >= SyntaxKind.FirstTypeNode && v <= SyntaxKind.LastTypeNode)
+        .map(([n]) => n);
+      const universe = [...new Set([
+        ...structural,
+        'AnyKeyword', 'BigIntKeyword', 'BooleanKeyword', 'IntrinsicKeyword', 'NeverKeyword', 'NumberKeyword',
+        'ObjectKeyword', 'StringKeyword', 'SymbolKeyword', 'UndefinedKeyword', 'UnknownKeyword', 'VoidKeyword',
+        'NullKeyword', 'TrueKeyword', 'FalseKeyword', 'ReadonlyKeyword',
+        'PropertySignature', 'MethodSignature', 'CallSignature', 'ConstructSignature', 'IndexSignature',
+        'TypeParameter', 'Parameter', 'ExpressionWithTypeArguments',
+        // Derived pseudo-kinds — distinctions a bare kind cannot carry.
+        'OptionalPropertySignature', 'ConstrainedTypeParameter', 'SelfReferentialAlias',
+      ])].sort();
+      const TYPE_NODE = /Type|Keyword|Signature|TypeReference|Parameter/;
+      // Declaration modifiers ride statements, not types — not claims.
+      // (ReadonlyKeyword stays: a readonly member IS a type-level claim.)
+      const NOT_A_CLAIM = new Set(['ExportKeyword', 'DeclareKeyword', 'DefaultKeyword']);
+      const out = new Map();
+      for (let i = 0; i < ordered.length; i++) {
+        const sf = await program.getSourceFile(`/p/t${i}.ts`);
+        const kinds = new Set();
+        const walk = (n, aliasName) => {
+          const k = kindName.get(n.kind);
+          // Self-reference is judged against the ENCLOSING alias only — two
+          // aliases in one text referencing each other are not recursion.
+          if (k === 'TypeAliasDeclaration') aliasName = n.name?.text ?? null;
+          if (TYPE_NODE.test(k) && !NOT_A_CLAIM.has(k)) {
+            kinds.add(k);
+            // tsgo's nodes carry the optional marker as postfixToken; the
+            // kind check keeps a definite-assignment `!` from counting as `?`.
+            if (k === 'PropertySignature' && n.postfixToken && kindName.get(n.postfixToken.kind) === 'QuestionToken') kinds.add('OptionalPropertySignature');
+            if (k === 'TypeParameter' && n.constraint) kinds.add('ConstrainedTypeParameter');
+            if (k === 'TypeReference' && aliasName && n.typeName?.text === aliasName) kinds.add('SelfReferentialAlias');
+          }
+          n.forEachChild?.((c) => { walk(c, aliasName); });
+        };
+        if (sf) walk(sf, null);
+        // The wrapper's own alias scaffolding is not a claim.
+        kinds.delete('TypeAliasDeclaration');
+        out.set(ordered[i], [...kinds]);
+      }
+      await api.close?.();
+      return { byText: out, universe };
+    };
+    const negSeen = new Set();
+    let negParsed = 0;
+    for (const f of errorFixtures) {
+      const p = Parser({ onReduce: (id) => negSeen.add(id) });
+      p.lexer = makeParserLexer(path.join(ERRD, f));
+      try { p.parse(fs.readFileSync(path.join(ERRD, f), 'utf8')); negParsed++; } catch { /* an unparseable negative is the lane's failure to report, not this gauge's */ }
+    }
+    const famPos = new Map(), famNeg = new Map();
+    for (const i of denom) {
+      if (!seen.has(i)) continue;
+      const g = groupOf(names[i]);
+      famPos.set(g, (famPos.get(g) ?? 0) + 1);
+      if (negSeen.has(i)) famNeg.set(g, (famNeg.get(g) ?? 0) + 1);
+    }
+    const famZero = [...famPos.keys()].filter((g) => !(famNeg.get(g) > 0)).sort();
+    // TYPE VOCABULARY, classified by TypeScript's own grammar, live: every
+    // type-level text in the corpus (TYPE/TYPE_DECL/TYPE_PARAMS/CAST tokens
+    // — everything beneath the parser's one-token opacity) is parsed
+    // through the pinned tsgo each run, and the type-AST node kinds are the
+    // classes. The taxonomy is TS's: closed, not curated — and in-process
+    // classification can never be stale. Three derived pseudo-kinds carry
+    // distinctions a bare kind cannot: OptionalPropertySignature,
+    // ConstrainedTypeParameter, SelfReferentialAlias.
+    const TYPE_TOKEN_KINDS = new Set(['TYPE', 'TYPE_DECL', 'TYPE_PARAMS', 'CAST']);
+    const typeTokensOf = (file) => {
+      try {
+        return tokenize(fs.readFileSync(file, 'utf8'), path.basename(file)).tokens
+          .filter((t) => TYPE_TOKEN_KINDS.has(t.kind) && typeof t.value === 'string');
+      } catch { return []; }
+    };
+    // Each distinct text, wrapped per its token kind into a standalone
+    // parseable statement.
+    const typeTexts = new Map();
+    for (const [dir, dirFiles] of [[FIX, fixtures], [ERRD, errorFixtures]]) {
+      for (const f of dirFiles) for (const t of typeTokensOf(path.join(dir, f))) {
+        if (!typeTexts.has(t.value)) typeTexts.set(t.value, t.kind === 'TYPE_DECL' ? t.value
+          : t.kind === 'TYPE_PARAMS' ? `type __W${t.value} = 0`
+          : `type __W = ${t.value}`);
+      }
+    }
+    const { byText: kindsByText, universe: kindUniverse } = await classifyTypeTexts(typeTexts);
+    const sideKinds = (dir, files) => {
+      const counts = new Map();
+      for (const f of files) for (const t of typeTokensOf(path.join(dir, f))) {
+        for (const k of kindsByText.get(t.value) ?? []) counts.set(k, (counts.get(k) ?? 0) + 1);
+      }
+      return counts;
+    };
+    const posVocab = sideKinds(FIX, fixtures);
+    const negVocab = sideKinds(ERRD, errorFixtures);
+    const claimed = [...posVocab].filter(([, n]) => n > 0);
+    const unfalsified = claimed.filter(([c]) => (negVocab.get(c) ?? 0) === 0).map(([c]) => c);
+    // A kind list wraps on its own indented lines — a single long line pushes
+    // past the terminal and dangles unindented fragments.
+    const wrapList = (items, paintFn) => {
+      const width = Math.max(60, (process.stdout.columns || 120) - 10);
+      let line = '';
+      const flush = () => { if (line) console.log(`        ${paintFn(line)}`); line = ''; };
+      for (const c of items) {
+        const next = line ? `${line}, ${c}` : c;
+        if (next.length > width) { flush(); line = c; } else line = next;
+      }
+      flush();
+    };
+    // ── TYPE-VOCABULARY CENSUS — positive coverage on the closed universe.
+    // The grammar gate cannot see below the parser's one-token type opacity,
+    // so this is that world's denominator: every kind TS's type grammar
+    // defines, claimed or queued — a kind nobody thought of is still a
+    // queue item. Exclusions are rulings, named and reasoned, netted from
+    // the denominator; a false or stale exclusion paints red, as does a
+    // claimed kind the universe derivation does not contain.
+    const EXCLUDED_KINDS = new Map([
+      ['TemplateLiteralTypeSpan', 'a constituent of TemplateLiteralType — it cannot appear without its parent, so the parent is the claimable kind'],
+      ['IntrinsicKeyword', 'reserved for lib.d.ts internals (`intrinsic`) — not writable in user code'],
+    ]);
+    const claimedSet = new Set(claimed.map(([c]) => c));
+    const universeSet = new Set(kindUniverse);
+    const censusDenom = kindUniverse.filter((k) => !EXCLUDED_KINDS.has(k));
+    const kindQueue = censusDenom.filter((k) => !claimedSet.has(k));
+    const claimedOutside = [...claimedSet].filter((k) => !universeSet.has(k)).sort();
+    const falseKindExclusions = [...EXCLUDED_KINDS.keys()].filter((k) => claimedSet.has(k));
+    const staleKindExclusions = [...EXCLUDED_KINDS.keys()].filter((k) => !universeSet.has(k));
+    console.log(`\n    ${bold('Type vocabulary census')} ${dim(`(the sub-token denominator: every kind in TS's own type grammar, enumerated from the pinned tsgo)`)}`);
+    console.log(`    ${dim(`${claimedSet.size} / ${censusDenom.length} kinds claimed by the positives`)}${EXCLUDED_KINDS.size ? dim(` · ${EXCLUDED_KINDS.size} excluded by the gate — netted from the denominator; --v lists them`) : ''}`);
+    if (kindQueue.length) {
+      console.log(`    ${yellow(`${kindQueue.length} unclaimed — the vocabulary queue:`)}`);
+      wrapList(kindQueue, yellow);
+    } else console.log(`    ${green('every kind claimed or excluded')}`);
+    if (VERBOSE) for (const [k, why] of EXCLUDED_KINDS) console.log(`        ${pad(k, 26)} ${dim(`excluded — ${why}`)}`);
+    for (const k of claimedOutside) console.log(`    ${red('✗')} ${red('claimed kind outside the census universe:')} ${k} ${dim('— extend the universe derivation in classifyTypeTexts')}`);
+    for (const k of falseKindExclusions) console.log(`    ${red('✗')} ${red('excluded but claimed:')} ${k} ${dim("— the exclusion claim is false; fix the census exclusion table")}`);
+    for (const k of staleKindExclusions) console.log(`    ${red('✗')} ${red('excluded kind not in the universe:')} ${k} ${dim("— stale; fix the census exclusion table")}`);
+    console.log(`\n    ${bold('Negative coverage')} ${dim(`(the error lane against the positive corpus's own claims — vocabulary contractual, family fractions a gauge)`)}`);
+    console.log(`    ${dim(`${negParsed} error fixtures reduce ${negSeen.size} productions`)}${famZero.length ? `${dim(' · families with no negative at all: ')}${yellow(famZero.join(', '))}` : ''}`);
+    if (VERBOSE) for (const [g, n] of [...famPos.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      console.log(`        ${pad(g, 24)} ${dim(`${String(famNeg.get(g) ?? 0).padStart(3)} of ${String(n).padStart(3)} exercised constructs appear in a negative`)}`);
+    }
+    console.log(`    ${dim(`type vocabulary: positives claim ${claimed.length} classes`)}${unfalsified.length ? `${dim(' · ')}${red(`${unfalsified.length} unfalsified (no negative instance) — every claimed class needs one`)}` : `${dim(' · ')}${green('every claimed class has a negative instance')}`}`);
+    if (unfalsified.length) wrapList(unfalsified, red);
+    if (VERBOSE) for (const [c, n] of claimed) console.log(`        ${pad(c, 24)} ${dim(`${String(n).padStart(4)} in positives · ${String(negVocab.get(c) ?? 0).padStart(3)} in the error lane`)}`);
+    ng = {
+      famZero: famZero.length, vocabClaimed: claimed.length, vocabUnfalsified: unfalsified.length,
+      kindDenom: censusDenom.length, kindQueued: kindQueue.length,
+      kindBad: claimedOutside.length + falseKindExclusions.length + staleKindExclusions.length,
+    };
+    // ── CORPUS CLAIMS (CLAIMS.md) — the decision record for coverage with
+    // no syntactic denominator: checker behaviors (carrier presence-checked
+    // here, semantics held by the ordinary dimensions) and containment
+    // cells (joined against the matrix above). Type kinds are NOT here —
+    // the census above owns them on a closed denominator. ABSENT is a
+    // ruled, uncarried claim — red on purpose, the queue's memory, like a
+    // parked production.
+    const CLAIMS = path.join(HERE, 'CLAIMS.md');
+    if (fs.existsSync(CLAIMS)) {
+      const behaviors = [], cells = [];
+      let section = null;
+      for (const line of fs.readFileSync(CLAIMS, 'utf8').split('\n')) {
+        if (line.startsWith('## ')) { section = line.slice(3).trim(); continue; }
+        if (!line.startsWith('|')) continue;
+        const row = line.split('|').slice(1, -1).map((s) => s.trim());
+        if (!row.length || row[0].startsWith('---') || ['behavior', 'construct'].includes(row[0])) continue;
+        if (section === 'Behaviors') behaviors.push({ behavior: row[0], carrier: row[1], neg: row[2] });
+        else if (section === 'Containment') cells.push({ construct: row[0], inside: row[1] });
+      }
+      const carrierOk = (c) => {
+        if (!c || c === 'ABSENT' || c === '—') return c === '—' ? 'na' : 'absent';
+        const [file, symbol] = c.split(':');
+        const full = path.join(FIX, file);
+        if (!fs.existsSync(full)) return 'missing';
+        return new RegExp(`\\b${symbol}\\b`).test(fs.readFileSync(full, 'utf8')) ? 'ok' : 'missing';
+      };
+      const rows = [];
+      let absent = 0, broken = 0;
+      for (const b of behaviors) {
+        const s1 = carrierOk(b.carrier), s2 = carrierOk(b.neg);
+        if (s1 === 'missing' || s2 === 'missing') { broken++; rows.push(`${red('✗')} ${b.behavior} ${dim('— carrier missing:')} ${red(s1 === 'missing' ? b.carrier : b.neg)}`); }
+        else if (s1 === 'absent' || s2 === 'absent') { absent++; rows.push(`${yellow('·')} ${b.behavior} ${dim('— ruled, uncarried')}`); }
+        else rows.push(`${green('✓')} ${b.behavior} ${dim(`(${b.carrier})`)}`);
+      }
+      let cellsMissing = 0;
+      for (const c of cells) {
+        const hit = pairsSeen.has(`${c.construct} inside ${c.inside}`);
+        if (!hit) cellsMissing++;
+        rows.push(`${hit ? green('✓') : red('✗')} ${c.construct} inside ${c.inside}${hit ? '' : ' ' + dim('— no fixture carries this cell')}`);
+      }
+      console.log(`\n    ${bold('Corpus claims')} ${dim('(CLAIMS.md — behaviors and containment cells; the no-denominator coverage record)')}`);
+      for (const r of rows) console.log(`      ${r}`);
+      ng.claimsAbsent = absent; ng.claimsBroken = broken; ng.cellsMissing = cellsMissing;
+    }
+  }
   const falseExclusions = excludedIdx.filter((i) => seen.has(i));
   for (const i of falseExclusions) console.log(`    ${red('✗')} ${red('excluded but reduced:')} ${names[i]} ${dim("— the exclusion claim is false; fix the gate's exclusion table")}`);
   for (const k of staleExcluded) console.log(`    ${red('✗')} ${red('excluded row names no grammar production:')} ${k} ${dim("— stale; fix the gate's exclusion table")}`);
@@ -1632,7 +1904,7 @@ if (RUN_GRAMMAR) {
       if (VERBOSE || g === 'UNALLOCATED') for (const r of rules) console.log(`        ${dim(r)}${owner?.parked.has(r) ? ' ' + yellow('· parked') : ''}`);
     }
   }
-  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, groups: groups.size, groupKind: owner ? 'files' : 'constructs', unallocated: groups.get('UNALLOCATED')?.length ?? 0, excluded: excludedIdx.length, badExclusions: falseExclusions.length + staleExcluded.length };
+  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, groups: groups.size, groupKind: owner ? 'files' : 'constructs', unallocated: groups.get('UNALLOCATED')?.length ?? 0, excluded: excludedIdx.length, badExclusions: falseExclusions.length + staleExcluded.length, negatives: ng };
 }
 
 // ── the Mapping Audit (--map / --all): use-site identifier coverage, from the
@@ -2766,7 +3038,49 @@ await Promise.all(pool.map((s) => s.stop()));
 // Audit's, which was reporting all-green two lines lower. A totals line that
 // can be misattributed is worse than no totals line.
 const TOTAL_W = 12;
-const totalLine = (audit, text) => console.log('    ' + dim(pad(audit, TOTAL_W)) + text);
+// Wrap on VISIBLE width (ANSI-stripped) at ` · ` segment boundaries: a totals
+// line longer than the terminal would otherwise hard-break mid-word at column
+// zero, dangling unindented fragments under the audit-name column. Every
+// totals line is built as ` · `-joined segments, so breaking there keeps each
+// clause whole; a continuation line leads with its separator. ANSI state
+// persists across the break, so a styled segment keeps its paint even when
+// its opening code lands on the previous line.
+const totalLine = (audit, text) => {
+  const avail = Math.max(60, (process.stdout.columns || Number(process.env.COLUMNS) || 200) - (4 + TOTAL_W) - 1);
+  const visible = (s) => s.replace(/\x1b\[[0-9;]*m/g, '').length;
+  // Split only at TOP-LEVEL separators — a ` · ` inside a parenthetical is
+  // part of its clause, and breaking there tears the parens across lines.
+  // (ANSI escape codes contain no parens, so depth-counting the styled
+  // string is safe.)
+  const segs = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    else if (depth === 0 && ch === ' ' && text.startsWith(' · ', i)) { segs.push(text.slice(start, i)); start = i + 3; i += 2; }
+  }
+  segs.push(text.slice(start));
+  const lines = [];
+  let line = '', len = 0;
+  const put = (piece, sep) => {
+    const w = visible(piece);
+    if (!line) { line = piece; len = w; }
+    else if (len + sep.length + w > avail) { lines.push(line); line = (sep === ' · ' ? '· ' : '') + piece; len = (sep === ' · ' ? 2 : 0) + w; }
+    else { line += sep + piece; len += sep.length + w; }
+  };
+  for (const seg of segs) {
+    if (visible(seg) > avail) {
+      // A segment too long to ever fit whole word-wraps within itself.
+      const words = seg.split(' ');
+      put(words[0], ' · ');
+      for (const wd of words.slice(1)) put(wd, ' ');
+    } else put(seg, ' · ');
+  }
+  if (line) lines.push(line);
+  console.log('    ' + dim(pad(audit, TOTAL_W)) + lines[0]);
+  for (const l of lines.slice(1)) console.log(' '.repeat(4 + TOTAL_W) + l);
+};
 console.log(`\n  ${bold('Totals')}`);
 // The Grammar Gate is a gauge toward M3, not a regression count: uncovered
 // productions are the fixture-growth queue, red only in the sense of "work
@@ -2777,7 +3091,10 @@ if (gr) totalLine('Grammar', `${gr.total} productions: `
     : `${green(`${gr.covered} exercised`)}${dim(' · ')}${yellow(`${gr.uncovered} uncovered`)} ${dim(`across ${gr.groups} ${gr.groupKind} — the M3 queue`)}`
       + (gr.unallocated ? `${dim(' · ')}${red(`${gr.unallocated} UNALLOCATED`)} ${dim('— the manifest owes an ownership decision')}` : ''))
   + (gr.excluded ? `${dim(` · ${gr.excluded} excluded`)}` : '')
-  + (gr.badExclusions ? `${dim(' · ')}${red(`${gr.badExclusions} bad exclusion${gr.badExclusions === 1 ? '' : 's'}`)} ${dim("— fix the gate's exclusion table")}` : ''));
+  + (gr.badExclusions ? `${dim(' · ')}${red(`${gr.badExclusions} bad exclusion${gr.badExclusions === 1 ? '' : 's'}`)} ${dim("— fix the gate's exclusion table")}` : '')
+  + (gr.negatives ? `${dim(' · vocabulary: ')}${gr.negatives.kindQueued ? yellow(`${gr.negatives.vocabClaimed}/${gr.negatives.kindDenom} type kinds claimed — the census queue`) : green(`all ${gr.negatives.kindDenom} type kinds claimed`)}${gr.negatives.kindBad ? dim(' · ') + red(`${gr.negatives.kindBad} census violation${gr.negatives.kindBad === 1 ? '' : 's'}`) : ''}` : '')
+  + (gr.negatives ? `${dim(' · negatives: ')}${gr.negatives.vocabUnfalsified ? red(`${gr.negatives.vocabUnfalsified}/${gr.negatives.vocabClaimed} vocabulary classes unfalsified`) : green(`all ${gr.negatives.vocabClaimed} vocabulary classes falsified`)}${gr.negatives.famZero ? dim(` · ${gr.negatives.famZero} family(ies) without negatives (gauge)`) : ''}` : '')
+  + (gr.negatives && (gr.negatives.claimsAbsent != null) ? `${dim(' · claims: ')}${(gr.negatives.claimsBroken || gr.negatives.cellsMissing) ? red(`${gr.negatives.claimsBroken + gr.negatives.cellsMissing} red`) + (gr.negatives.claimsAbsent ? dim(` + ${gr.negatives.claimsAbsent} ruled-uncarried`) : '') : gr.negatives.claimsAbsent ? yellow(`${gr.negatives.claimsAbsent} ruled-uncarried`) : green('all carried')}` : ''));
 // The Mapping Audit's flagged reads are EXPECTED red (the mapping gap), so
 // they read as a gauge, never a regression count: the total is the census, and
 // the missing-span clause is the only part that would signal something new.

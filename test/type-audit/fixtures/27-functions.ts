@@ -169,3 +169,15 @@ export function shared(flag: boolean) {
 }
 
 console.log('shared:', shared(true))
+
+// ── a def reading a top-level binding: the binding stays hoisted (a def is
+// callable from above its own statement), so its type reaches the editor
+// through the pin pass — this is the corpus's live pinnable ──
+
+let FORMATS = { json: 'application/json', text: 'text/plain' }
+
+function formatOf(name: string) {
+  return name === 'json' ? FORMATS.json : FORMATS.text
+}
+
+console.log('format:', formatOf('json'))

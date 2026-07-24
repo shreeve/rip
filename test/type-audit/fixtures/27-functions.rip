@@ -137,3 +137,14 @@ export def shared(flag: boolean)
   if flag then 'on' else 'off'
 
 console.log('shared:', shared(true))
+
+# ── a def reading a top-level binding: the binding stays hoisted (a def is
+# callable from above its own statement), so its type reaches the editor
+# through the pin pass — this is the corpus's live pinnable ──
+
+FORMATS = { json: 'application/json', text: 'text/plain' }
+
+def formatOf(name: string)
+  if name is 'json' then FORMATS.json else FORMATS.text
+
+console.log('format:', formatOf('json'))

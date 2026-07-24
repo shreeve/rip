@@ -15,7 +15,7 @@ let wrongAccess = function() {
 // (wrongPluck holds the open pattern-catch gap's TS2339, not a blessed
 // negative — see FINDINGS.md; red here on a lowering change is the cue to
 // invert it into 26-exceptions. The array spelling cannot derive in this
-// lane — TS2488 anchors on the pattern's `[` — so check.test.js holds it.)
+// lane — TS2488 anchors on the pattern's `[` — and no lane holds it yet.)
 let wrongPluck = function() {
   try {
     return 'ok'

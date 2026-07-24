@@ -12,4 +12,5 @@ wrongTarget = new notAClass
 wrongArity = new Gauge()
 wrongMember = new Gauge(1).depth
 wrongKind: string = new Gauge(2)
+wrongQuery: typeof Gauge = new Gauge(3)
 class WrongBase extends notAClass
