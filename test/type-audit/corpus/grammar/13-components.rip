@@ -6,7 +6,7 @@
 # no honest TSX spelling and are absent from it. Hover targets for render-DSL
 # and member positions are ruled in RULINGS.md (Components / render); their
 # in-body pins live in hover-pins.json's positions sections. Negatives pair in
-# fixtures/errors/13-components.errors.rip under the Diagnostics Lane.
+# corpus/errors/13-components.errors.rip under the Diagnostics Lane.
 
 # ── Definition + typed props + render structure ──
 
@@ -113,7 +113,7 @@ Picker = component
 # its target stays private and its editor answers are ruled in RULINGS.md
 # (Components / render). A gated component is route-mounted: the face
 # declares `mount: never` and a private constructor (the negatives assert
-# both — fixtures/errors/13-components.errors.rip) ──
+# both — corpus/errors/13-components.errors.rip) ──
 
 Routed = component
   stats <~ @app.data.stats

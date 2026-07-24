@@ -114,7 +114,6 @@ The largest block is the export-of-X family: an `Export`/`ExportAssign` producti
 | `Statement → Enum`                             | 11-types       | carries an enum construct                 |
 | `Statement → Import`                           | 10-modules     | carries a module construct                |
 | `Statement → Export`                           | 10-modules     | carries a module construct                |
-| `Root → ε`                                     | 16-edges       | the empty program — an edge, not a family |
 | `Invocation → SUPER Arguments`                 | 09-classes     | carries a super construct                 |
 | `Invocation → DYNAMIC_IMPORT Arguments`        | 10-modules     | carries a module construct                |
 | `Invocation → DYNAMIC_IMPORT DAMMIT Arguments` | 10-modules     | carries a module construct                |

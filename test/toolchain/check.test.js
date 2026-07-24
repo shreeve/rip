@@ -79,6 +79,26 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  // The degenerate input every editor produces the moment a file is created.
+  // It is a legal program — `Root → ε` — but the type audit cannot hold it: a
+  // corpus fixture spelling it declares nothing, so every audit dimension
+  // passes by having nothing to check, and the production is excluded there
+  // for exactly that reason. The guarantee itself is real and belongs here,
+  // where it is asserted rather than assumed: an empty file compiles, checks
+  // clean, and reports as a checked file rather than vanishing from the run.
+  test('an empty file is a legal program: compiles, checks clean, and counts as checked', () => {
+    const dir = workspace({ 'empty.rip': '' });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('No type errors');
+      expect(r.stdout).toContain('1 file checked');   // present in the run, not skipped
+      const compiled = spawnSync('bun', [BIN, '-c', 'empty.rip'], { cwd: dir, encoding: 'utf8', timeout: 60_000 });
+      expect(compiled.status).toBe(0);
+      expect((compiled.stdout ?? '').trim()).toBe('');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
   test('a type error surfaces at the .rip position and exits 1', () => {
     const dir = workspace({ 'bad.rip': "n: number = 'oops'\nconsole.log n\n" });
     try {

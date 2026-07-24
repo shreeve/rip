@@ -6,7 +6,7 @@
 # The zod twin covers the analogy-honest surface only (ROADMAP.md, Oracles).
 # Hover targets are ruled in RULINGS.md (Schema); in-body pins live in
 # hover-pins.json's positions section. Negatives pair in
-# fixtures/errors/14-schema.errors.rip.
+# corpus/errors/14-schema.errors.rip.
 
 # ── Field forms: required, optional, defaults, literal unions, arrays,
 # nested schemas (RULINGS.md, Schema: field names are ruled `(field)`,

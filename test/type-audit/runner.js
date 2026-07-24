@@ -1562,13 +1562,16 @@ if (RUN_GRAMMAR) {
   // Productions no fixture can or should ever reduce, netted out of the
   // denominator. This table is the GATE'S own record — part of the
   // measurement, so it lives with the instrument and outlives the manifest,
-  // whose sections are grouping only. Two classes: LEXICALLY UNREACHABLE —
+  // whose sections are grouping only. Three classes: LEXICALLY UNREACHABLE —
   // the lexer mints TYPE_PARAMS only when the angle run's `=` is immediately
   // followed by `component` on the same line, so the line-break layout
   // variants of the assignment cross-product can never receive the token —
-  // and BANNED BY DESIGN — the emitter rejects a for loop that binds no
+  // BANNED BY DESIGN — the emitter rejects a for loop that binds no
   // variable, and the productions stay in the grammar as that error
-  // message's carrier. Self-policing against grammar drift: an excluded
+  // message's carrier — and CARRIED ONLY BY A VACUOUS FIXTURE: the empty
+  // program reduces `Root → ε` and nothing else, so a fixture holding it
+  // passes every dimension by having nothing to check, and buys a coverage
+  // point with a file that cannot fail. Self-policing against grammar drift: an excluded
   // production a fixture reduces paints red (the exclusion claim is false),
   // and a row naming no grammar production paints red (the row is stale), so
   // a grammar change trims this table rather than being absorbed by it.
@@ -1580,6 +1583,7 @@ if (RUN_GRAMMAR) {
     ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
     ['For → FOR Range BY Expression Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
     ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier has no binding name (the emitter currently passes it through verbatim); the aliased spelling is ImportSpecifier → DEFAULT AS Identifier'],
+    ['Root → ε', 'carried only by a vacuous fixture — the empty program is its sole carrier and declares nothing, so it asserts nothing on any dimension; that an empty file compiles and checks clean is guarded in test/toolchain/check.test.js instead'],
   ]);
   // The M3 manifest: grouping only — the decision record of which corpus file
   // owns each construct's productions, with per-production overrides for
@@ -1677,7 +1681,7 @@ if (RUN_GRAMMAR) {
   const pct = ((100 * (denom.length - uncovered.length)) / denom.length).toFixed(1);
   console.log(`    ${(uncovered.length ? yellow : green)(String(denom.length - uncovered.length))} ${dim('/')} ${dim(String(denom.length))} ${dim(`productions (${pct}%)`)}`);
   if (excludedIdx.length) {
-    console.log(`    ${dim(`${excludedIdx.length} excluded by the gate (unreachable or banned spellings) — netted from the denominator${VERBOSE ? '' : '; --v lists them'}`)}`);
+    console.log(`    ${dim(`${excludedIdx.length} excluded by the gate (unreachable, banned, or coverable only by a fixture that asserts nothing) — netted from the denominator${VERBOSE ? '' : '; --v lists them'}`)}`);
     if (VERBOSE) for (const i of excludedIdx) console.log(`        ${dim(names[i])} ${dim('·')} ${dim(EXCLUDED.get(names[i]))}`);
   }
   // Unique contribution: which fixtures the coverage would survive losing.
@@ -1935,9 +1939,10 @@ if (RUN_GRAMMAR) {
       const carrierOk = (c) => {
         if (!c || c === 'ABSENT' || c === '—') return c === '—' ? 'na' : 'absent';
         const [file, symbol] = c.split(':');
-        // Carriers may live in either bucket — grammar fixtures can carry
-        // bonus claims; the bucket encodes a fixture's PRIMARY charter.
-        const full = [FIX, CLM].map((d) => path.join(d, file)).find((p) => fs.existsSync(p));
+        // Carriers may live in any bucket — grammar fixtures can carry bonus
+        // claims (the bucket encodes a fixture's PRIMARY charter), and a
+        // claim's fire side lives in the error lane.
+        const full = [FIX, CLM, ERRD].map((d) => path.join(d, file)).find((p) => fs.existsSync(p));
         if (!full) return 'missing';
         return new RegExp(`\\b${symbol}\\b`).test(fs.readFileSync(full, 'utf8')) ? 'ok' : 'missing';
       };
