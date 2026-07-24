@@ -121,10 +121,10 @@ test('every gate the ledger names resolves — a renamed gate cannot rot in the 
   const ledger = readFileSync(join(ROOT, LEDGER), 'utf8');
   const runner = readFileSync(join(ROOT, RUNNER), 'utf8');
 
-  // The type audit's six dimensions, read from the runner's OWN declaration
+  // The type audit's five dimensions, read from the runner's OWN declaration
   // rather than copied — renaming one there fails here instead of drifting.
   const dims = [...(/const DIMS = \[(.+?)\];/s.exec(runner)?.[1] ?? '').matchAll(/'([a-z-]+)'/g)].map((m) => m[1]);
-  expect(dims.length, 'could not read DIMS out of runner.js — the parse below is stale').toBe(6);
+  expect(dims.length, 'could not read DIMS out of runner.js — the parse below is stale').toBe(5);
 
   // The token audit's invariants and the mapping audit's census are not in DIMS
   // (that table is the type audit's). Listed here, but each is asserted to still

@@ -16,18 +16,17 @@
 // it also carries the Grammar Gate, ROADMAP "M2", and the Diagnostics Lane,
 // ROADMAP "M3", which each document themselves at their sections):
 //
-// A · THE TYPE AUDIT — a per-fixture grid over six dimensions:
+// A · THE TYPE AUDIT — a per-fixture grid over five dimensions:
 //   1 compiles     rip --ts produces a face           (else: compiler-coverage gap)
-//   2 directives   face carries all @ts-expect-error  (else: face-emission bug)
-//   3 verdict      the editor server publishes ZERO Error-severity
-//                  diagnostics — every intended error is
-//                  @ts-expect-error-suppressed, none stray
+//   2 verdict      the editor server publishes ZERO Error-severity
+//                  diagnostics — the corpus carries no suppressions
+//                  (the preflight refuses them), so zero means zero
 //                                                     (else: type-face divergence)
-//   4 runtime      rip <fixture> stdout == bun <twin> stdout
+//   3 runtime      rip <fixture> stdout == bun <twin> stdout
 //                                                     (else: behavioral divergence)
-//   5 twin         the .ts/.tsx companion type-checks under the strict
+//   4 twin         the .ts/.tsx companion type-checks under the strict
 //                  tsconfig                           (else: reference twin invalid)
-//   6 strict       `rip check` under rip.strict reports ZERO errors —
+//   5 strict       `rip check` under rip.strict reports ZERO errors —
 //                  i.e. the face carries no implicit `any`
 //                                                     (else: implicit-any hole)
 //
@@ -232,11 +231,10 @@
 // tsconfig itself because this runner JSON.parses it), and to drive
 // dim 5.
 //
-// No fixture carries `# @ts-expect-error` markers: negatives live in
-// corpus/errors/, asserted by the Diagnostics Lane, so dimension 3 means
-// zero diagnostics absolutely. (The marker machinery below survives the
-// legacy corpus that used it — a marker, if one ever appears, must still
-// fire exactly.)
+// No positive fixture carries suppression directives — the preflight
+// REFUSES them (a marker consumes a diagnostic before any dimension can
+// see it): negatives live in corpus/errors/, asserted by the Diagnostics
+// Lane, so the verdict dimension means zero diagnostics absolutely.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -323,11 +321,11 @@ const AUDITS = [
   },
   {
     key: 'main', flag: null, name: 'Type Audit',
-    blurb: 'six dimensions per fixture: compiles, directives, verdict, runtime, twin, strict',
-    judge: 'the fixtures themselves. No fixture carries `# @ts-expect-error` markers:\n'
-         + 'every fixture must publish ZERO diagnostics, its negatives living in\n'
-         + 'corpus/errors/ under the Diagnostics Lane. (A marker, if one ever appears,\n'
-         + 'must still fire exactly.)',
+    blurb: 'five dimensions per fixture: compiles, verdict, runtime, twin, strict',
+    judge: 'the fixtures themselves. No positive fixture may carry a suppression\n'
+         + 'directive (the preflight refuses them): every fixture must publish ZERO\n'
+         + 'diagnostics, its negatives living in corpus/errors/ under the Diagnostics\n'
+         + 'Lane.',
   },
   {
     key: 'errors', flag: '--errors', name: 'Diagnostics Lane',
@@ -510,11 +508,6 @@ process.on('SIGINT', () => { cleanupTemp(); process.exit(130); });
 // lookup, turning a twin full of errors into a silent green cell.
 const TSC_DIAG = /([\w.-]+\.tsx?)\((\d+),(\d+)\): error TS(\d+)/;
 
-// Count REAL directives only — comment-start position, the emitter's
-// own rule (a prose comment that merely MENTIONS "@ts-expect-error" is
-// not a directive in either surface).
-const countDirectives = (text) => (text.match(/^[ \t]*(?:#|\/\/)[ \t]*@ts-expect-error(?=\s|$)/gm) ?? []).length;
-
 // Does a fixture produce a face? One answer per file per run, shared by every
 // audit that asks — the answer cannot change within a run.
 //
@@ -530,12 +523,12 @@ const compiles = (ripPath) => {
   return compiled.get(ripPath);
 };
 
-// ── dimension 1: compiles (+ capture the face for dimension 2)
+// ── dimension 1: compiles
 async function dimCompiles(ripPath) {
   try {
-    const { stdout: face } = await execFileP('bun', [RIP, '--ts', ripPath], { encoding: 'utf8', timeout: 30000, maxBuffer: MAX_FACE });
+    await execFileP('bun', [RIP, '--ts', ripPath], { encoding: 'utf8', timeout: 30000, maxBuffer: MAX_FACE });
     compiled.set(ripPath, Promise.resolve(true));
-    return { ok: true, face };
+    return { ok: true };
   } catch (err) {
     compiled.set(ripPath, Promise.resolve(false));
     const msg = (err.stderr || err.stdout || err.message || '').toString().split('\n').find((l) => l.trim()) ?? 'compile failed';
@@ -1434,6 +1427,22 @@ const claimsFixtures = fs.existsSync(CLM) ? fs.readdirSync(CLM).filter((f) => f.
 const fixDirOf = (f) => (claimsFixtures.includes(f) ? CLM : FIX);
 const fixPath = (f) => path.join(fixDirOf(f), f);
 const fixtures = [...grammarFixtures, ...claimsFixtures].sort();
+// The corpus BANS suppression directives in positive fixtures: a marker
+// consumes a diagnostic before any dimension can see it, so a smuggled one
+// rots the corpus silently — verdict would stay green over a suppressed
+// error. Refused here, for every audit mode, at comment-start position (a
+// prose mention is not a directive). corpus/errors/ is exempt — its
+// line-aligned @ts-nocheck pragma pair is the Diagnostics Lane's own
+// enforced discipline — and the carriage FEATURE (a rip marker surviving
+// onto the face) is gated in test/lang/tsface.test.js, not here.
+{
+  const smuggled = fixtures.filter((f) =>
+    /^[ \t]*(?:#|\/\/)[ \t]*@ts-(?:expect-error|ignore|nocheck)(?=\s|$)/m.test(fs.readFileSync(fixPath(f), 'utf8')));
+  if (smuggled.length) {
+    console.error(`✗ suppression directive in a positive fixture: ${smuggled.join(', ')} — the corpus bans @ts-expect-error/@ts-ignore/@ts-nocheck in positives (a marker consumes the diagnostic the dimensions must see); negatives belong in corpus/errors/.`);
+    process.exit(1);
+  }
+}
 // The Diagnostics Lane's fixtures, listed here beside the flat walk so the
 // pool below can size itself to the lane's workload.
 const errorFixtures = fs.existsSync(ERRD) ? fs.readdirSync(ERRD).filter((f) => f.endsWith('.rip')).sort() : [];
@@ -1458,7 +1467,7 @@ const NAME_W = Math.max(18, ...fixtures.map((f) => f.length));
 // one joining space — the same gap everywhere. The lane's labels carry the
 // errors/ prefix, so its width derives from its own list.
 const ERR_NAME_W = Math.max(18, ...errorFixtures.map((f) => path.join('errors', f).length)) + 2;
-const DIMS = [['compiles', 10], ['directives', 12], ['verdict', 10], ['runtime', 9], ['twin', 8], ['strict', 8]];
+const DIMS = [['compiles', 10], ['verdict', 10], ['runtime', 9], ['twin', 8], ['strict', 8]];
 const RULE_W = NAME_W + 3 + DIMS.reduce((a, [, w]) => a + w, 0) + (DIMS.length - 1);
 
 // The sections scroll past in one `--all` run, so each needs a seam that
@@ -1714,7 +1723,11 @@ if (RUN_GRAMMAR) {
       const api = new API({ fs: createVirtualFileSystem(vfiles), cwd: '/p' });
       const snap = await api.updateSnapshot({ openProject: '/p/tsconfig.json' });
       const program = snap.getProjects()[0].program;
-      const kindName = new Map(Object.entries(SyntaxKind).map(([n, v]) => [v, n]));
+      // Range markers (FirstTypeNode, LastKeyword, …) alias REAL kind values
+      // — FirstTypeNode IS TypePredicate's number — so they must never enter
+      // the name map, or a kind gets recorded under its marker alias.
+      const kindEntries = Object.entries(SyntaxKind).filter(([n, v]) => typeof v === 'number' && !/^(First|Last)/.test(n));
+      const kindName = new Map(kindEntries.map(([n, v]) => [v, n]));
       // THE CENSUS UNIVERSE — every kind TS's type grammar defines, so the
       // claimed/unclaimed report never depends on anyone thinking of a kind.
       // The structural set is mechanical (the FirstTypeNode..LastTypeNode
@@ -1724,19 +1737,37 @@ if (RUN_GRAMMAR) {
       // carrier kinds the walker records. The transcription cannot rot
       // silently: a claimed kind outside this universe paints red below,
       // demanding the derivation be extended.
-      const structural = Object.entries(SyntaxKind)
-        .filter(([n, v]) => typeof v === 'number' && !/^(First|Last)/.test(n) && v >= SyntaxKind.FirstTypeNode && v <= SyntaxKind.LastTypeNode)
+      const structural = kindEntries
+        .filter(([, v]) => v >= SyntaxKind.FirstTypeNode && v <= SyntaxKind.LastTypeNode)
         .map(([n]) => n);
       const universe = [...new Set([
         ...structural,
         'AnyKeyword', 'BigIntKeyword', 'BooleanKeyword', 'IntrinsicKeyword', 'NeverKeyword', 'NumberKeyword',
         'ObjectKeyword', 'StringKeyword', 'SymbolKeyword', 'UndefinedKeyword', 'UnknownKeyword', 'VoidKeyword',
         'NullKeyword', 'TrueKeyword', 'FalseKeyword', 'ReadonlyKeyword',
+        // Modifier keywords that ARE walkable children in type contexts
+        // (`abstract new () => T`, `asserts x is T`). The keyof/unique/
+        // readonly operators are NOT children — TypeOperator holds the
+        // operator as a property, so TypeOperator is their claimable kind.
+        'AbstractKeyword', 'AssertsKeyword',
         'PropertySignature', 'MethodSignature', 'CallSignature', 'ConstructSignature', 'IndexSignature',
         'TypeParameter', 'Parameter', 'ExpressionWithTypeArguments',
         // Derived pseudo-kinds — distinctions a bare kind cannot carry.
         'OptionalPropertySignature', 'ConstrainedTypeParameter', 'SelfReferentialAlias',
       ])].sort();
+      // The universe's transcribed parts are guarded on BOTH sides: a
+      // claimed kind outside the universe paints red below (live), and this
+      // hash pins the pinned TypeScript's whole type-relevant name surface —
+      // a pin bump that adds or renames kinds fails here, forcing the
+      // derivation to be re-reviewed instead of silently missing new
+      // vocabulary. Recompute: sorted TYPE_NODE-matching non-marker names.
+      const surface = kindEntries.map(([n]) => n).filter((n) => /Type|Keyword|Signature|TypeReference|Parameter/.test(n)).sort().join(' ');
+      const SURFACE_HASH = 'f86b9639022d9dc0';
+      const surfaceHash = (await import('node:crypto')).createHash('sha256').update(surface).digest('hex').slice(0, 16);
+      if (surfaceHash !== SURFACE_HASH) {
+        console.error(`\n✗ the pinned TypeScript's type-kind surface changed (hash ${surfaceHash}, pinned ${SURFACE_HASH}) — re-derive the census universe in classifyTypeTexts, then update the pinned hash.`);
+        process.exit(1);
+      }
       const TYPE_NODE = /Type|Keyword|Signature|TypeReference|Parameter/;
       // Declaration modifiers ride statements, not types — not claims.
       // (ReadonlyKeyword stays: a readonly member IS a type-level claim.)
@@ -1842,6 +1873,15 @@ if (RUN_GRAMMAR) {
     const EXCLUDED_KINDS = new Map([
       ['TemplateLiteralTypeSpan', 'a constituent of TemplateLiteralType — it cannot appear without its parent, so the parent is the claimable kind'],
       ['IntrinsicKeyword', 'reserved for lib.d.ts internals (`intrinsic`) — not writable in user code'],
+      // Kinds rip's type sub-language rejects BY DESIGN — reasons cite the
+      // lexer's own errors. If the lexer ever admits one, its text claims
+      // the kind and the excluded-but-claimed red fires. MappedType is
+      // lexer-rejected but NOT excluded — the open mapped-type finding
+      // holds its queue row (a generic validator collision, not a
+      // considered rejection); ThisType is claimable (a class method's
+      // return annotation carries it).
+      ['TemplateLiteralType', 'rip\'s dedicated rejection — "template-literal types are not supported — a Rip type cannot contain \'`\'" (the backtick is rip\'s own token)'],
+      ['ConstructSignature', "rip's lexer rejects `new (` inside a type body; the annotation-position ConstructorType (`new () => T`) is the claimable spelling"],
     ]);
     const claimedSet = new Set(claimed.map(([c]) => c));
     const universeSet = new Set(kindUniverse);
@@ -2134,10 +2174,6 @@ if (RUN_MAIN) {
     const row = { name: f, compiles: c.ok ? 'pass' : 'fail', compileDetail: c.detail };
 
     if (c.ok) {
-      const sd = countDirectives(src), fd = countDirectives(c.face);
-      row.directives = sd === fd ? 'pass' : 'fail';
-      row.dirDetail = sd === fd ? `${fd}` : `src=${sd} face=${fd} (lost ${sd - fd})`;
-
       // Count ERROR-severity only. Unused-local and deprecation arrive
       // as Hint severity (fade/strikethrough, not a type error) and are
       // expected on the fixtures' intentionally-unused bindings.
@@ -2161,7 +2197,7 @@ if (RUN_MAIN) {
       row.strictDetail = st.detail;
       row.strictErrs = st.errs;
     } else {
-      row.directives = row.verdict = row.runtime = row.strict = '—';
+      row.verdict = row.runtime = row.strict = '—';
     }
 
     const tw = twinBase ? dimTwin(twinBase, await twinP) : { status: 'n/a', detail: 'no twin' };
@@ -2182,7 +2218,6 @@ if (RUN_MAIN) {
   for (const r of rows) {
     const notes = [];
     if (r.compiles === 'fail') notes.push([yellow('compiler-coverage gap'), r.compileDetail]);
-    if (r.directives === 'fail') notes.push([red('face-emission bug'), `directives ${r.dirDetail}`]);
     if (r.verdict === 'fail') notes.push([red('type-face divergence'), r.verdictDetail]);
     if (r.runtime === 'fail') notes.push([red('behavioral divergence'), r.runtimeDetail]);
     if (r.twin === 'fail') notes.push([red('reference twin invalid'), r.twinDetail]);
@@ -2742,8 +2777,7 @@ if (RUN_HOVER) {
   // (TSX/zod) remain approximations in every fixture that carries them.
   // Reactive spellings (`:=`/`~=`/`~>`) are NOT rip-native here: the
   // reactive twin is a deliberate plain-TS oracle (state → let, computed →
-  // const — ROADMAP.md, Oracles). The legacy corpus's reactive twin wasn't,
-  // and a numeric M3-block discriminator guarded it until legacy retired.
+  // const — ROADMAP.md, Oracles), so those declarations are twin-judged.
   const ripNative = (r) => {
     const t = r.text ?? '';
     return /=\s*component\b/.test(t)
