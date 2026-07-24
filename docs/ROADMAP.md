@@ -76,9 +76,9 @@ The remaining work is development-server integration:
 - a product surface that serves the page and bundle — today only the
   certification fixture `packages/browser-tests/serve.mjs` serves
   `index.html`/`bundle.json`;
-- the watch→browser transport (none exists in v4; the transport ruling
-  in [HMR.md](HMR.md) — WebSocket with a revision cursor — is built
-  new here);
+- the watch→browser transport (none exists in v4; for Workspace door
+  work follow [WORKSPACE.md](WORKSPACE.md) Q2 — Hub ding, HTTP bytes —
+  not HMR.md’s inline-WebSocket payload row);
 - `rip.browser` granularity: the flag is package-level, so
   `@rip-lang/ui/browser` cannot travel while the package's Tailwind
   half carries npm dependencies — subpath metadata, a package split,
@@ -88,7 +88,10 @@ The remaining work is development-server integration:
 Production precompiled output (a CSP-clean path with no in-browser
 compiler) is deliberately deferred by owner leaning (2026-07-22: the
 compiler stays available on-the-fly; possibly a hybrid later); it does
-not block dev-server work.
+not block dev-server work. That deferral does **not** override
+Workspace **M0** on the Workspace path — see
+[WORKSPACE.md](WORKSPACE.md) (signed cells + CSP without
+`unsafe-eval` on the happy path).
 
 This delivery layer is distinct from compiler runtime `inline`/`import`
 emission.
@@ -217,12 +220,26 @@ Bindings produced by schema algebra can type through the TypeScript
 face, but shipping `.d.ts` declarations require an explicit,
 mapping-safe representation of argument literals.
 
+## Rip Workspace
+
+Living constitution (plan + backout charter) for the browser mutation
+door and Pure Rip passport model: [WORKSPACE.md](WORKSPACE.md).
+Experimental until apply research lands; not a Janus capability.
+Q4 scenario suite (**S1–S15**) + Probe 0/1: **Research / apply** in
+that file. Door (M1) and apply stay separate. Sealed populate (M0)
+may run in production once M0 exit holds; live-mutate / apply stay
+off until refresh contract tests pass.
+
 ## Hot module replacement
 
-The active architecture and phased acceptance contract live in
-[HMR.md](HMR.md). Work begins with honest last-known-good live reload,
-then module delivery, narrow remount, patch, state migration, and
-transactional graph polish.
+Framework-refresh aspiration and phased tests: [HMR.md](HMR.md).
+Mutations enter via Workspace ([WORKSPACE.md](WORKSPACE.md)); refresh
+decides how living instances adopt them. **Transport note:** Workspace
+**Q2** locks Hub ding + HTTP bodies for the Workspace door — that
+supersedes HMR.md rows that put update payloads on a WebSocket.
+Apply research track and scenario suite live under WORKSPACE.md
+**Research / apply**; HMR.md Layer B remains the aspirational ladder
+once evidence lands.
 
 ## Rip-native hypermedia
 
