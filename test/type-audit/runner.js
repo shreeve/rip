@@ -246,6 +246,7 @@ import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../.
 import { compile } from '../../src/compile.js';
 import { Parser } from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
+import { renderTypeDecl } from '../../src/typetext.js';
 import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, offsetToPosition } from '../../packages/vscode/src/translate.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -1772,10 +1773,16 @@ if (RUN_GRAMMAR) {
         console.error(`\n✗ the pinned TypeScript's type-kind surface changed (hash ${surfaceHash}, pinned ${SURFACE_HASH}) — re-derive the census universe in classifyTypeTexts, then update the pinned hash.`);
         process.exit(1);
       }
-      const TYPE_NODE = /Type|Keyword|Signature|TypeReference|Parameter/;
-      // Declaration modifiers ride statements, not types — not claims.
-      // (ReadonlyKeyword stays: a readonly member IS a type-level claim.)
-      const NOT_A_CLAIM = new Set(['ExportKeyword', 'DeclareKeyword', 'DefaultKeyword']);
+      // What the walker RECORDS is the universe itself, not a name pattern.
+      // A pattern can silently miss a kind the universe contains — a name
+      // carrying none of its words (NamedTupleMember) would then sit
+      // unclaimable no matter what any fixture spells, which is the exact
+      // blindness the closed denominator exists to remove. Membership makes
+      // the two sides one list by construction.
+      // Declaration modifiers (export/declare/default) and the wrapper's own
+      // alias scaffolding are excluded by the same membership: they ride
+      // statements, not types, so the universe never contains them.
+      const CLAIMABLE = new Set(universe);
       const out = new Map();
       for (let i = 0; i < ordered.length; i++) {
         const sf = await program.getSourceFile(`/p/t${i}.ts`);
@@ -1785,7 +1792,7 @@ if (RUN_GRAMMAR) {
           // Self-reference is judged against the ENCLOSING alias only — two
           // aliases in one text referencing each other are not recursion.
           if (k === 'TypeAliasDeclaration') aliasName = n.name?.text ?? null;
-          if (TYPE_NODE.test(k) && !NOT_A_CLAIM.has(k)) {
+          if (CLAIMABLE.has(k)) {
             kinds.add(k);
             // tsgo's nodes carry the optional marker as postfixToken; the
             // kind check keeps a definite-assignment `!` from counting as `?`.
@@ -1796,8 +1803,6 @@ if (RUN_GRAMMAR) {
           n.forEachChild?.((c) => { walk(c, aliasName); });
         };
         if (sf) walk(sf, null);
-        // The wrapper's own alias scaffolding is not a claim.
-        kinds.delete('TypeAliasDeclaration');
         out.set(ordered[i], [...kinds]);
       }
       await api.close?.();
@@ -1835,10 +1840,20 @@ if (RUN_GRAMMAR) {
     };
     // Each distinct text, wrapped per its token kind into a standalone
     // parseable statement.
+    // A declaration rip rejects has no TS form to classify; it reaches the
+    // census only from an error fixture, where the raw text is the honest
+    // thing to hand over.
+    const declText = (raw) => { try { return renderTypeDecl(raw).join('\n'); } catch { return raw; } };
     const typeTexts = new Map();
     for (const [dir, dirFiles] of [[FIX, grammarFixtures], [CLM, claimsFixtures], [ERRD, errorFixtures]]) {
       for (const f of dirFiles) for (const t of typeTokensOf(path.join(dir, f))) {
-        if (!typeTexts.has(t.value)) typeTexts.set(t.value, t.kind === 'TYPE_DECL' ? t.value
+        // A TYPE_DECL carries rip's own indented spelling, which is not
+        // TypeScript — handed over raw, its members never parse and the kinds
+        // inside them read as absent. renderTypeDecl is the SAME renderer the
+        // face and the declaration pipeline emit through, so the census
+        // classifies the declaration the compiler actually produces rather
+        // than a second opinion about what it would produce.
+        if (!typeTexts.has(t.value)) typeTexts.set(t.value, t.kind === 'TYPE_DECL' ? declText(t.value)
           : t.kind === 'TYPE_PARAMS' ? `type __W${t.value} = 0`
           : `type __W = ${t.value}`);
       }

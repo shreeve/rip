@@ -51,6 +51,8 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [30](#30-new-on-a-tagged-template-leaks-the-sexpr-head) | `new` on a tagged template leaks the sexpr head | `compiler` | **none** — the emission references undeclared names, so no fixture can carry it; the production is parked ([MANIFEST.md](MANIFEST.md)); the fix's gate is the spelling entering 09-classes |
 | [46](#46-a-mapped-type-is-rejected-by-the-type-body-validator) | A mapped type is rejected by the type-body validator | `compiler` | **none while unruled** — the MappedType row stands in the census queue (no spelling compiles); the exit is the language owner's ruling: admit (the fix's gate is the kind entering 11-types, contract negative alongside) or rule out (the row closes into the census exclusion table) |
 | [45](#45-a-type-predicate-inside-a-type-body-collides-with-rips-is) | A type predicate inside a type body collides with rip's `is` | `compiler` | **none** — the body spelling is lexer-rejected, so no fixture can carry it, and the surviving def-return spelling drains the census row past it; the boundaries note ([ROADMAP.md](ROADMAP.md)) records the constraint |
+| [48](#48-a-method-member-in-an-inline-type-body-is-rejected) | A method member in an inline type body is rejected | `compiler` | **none** — the indented spelling claims the kind, so the census stays silent about the inline gap; the fix's gate is the inline spelling entering 11-types under `compiles` |
+| [49](#49-an-import-type-cannot-name-a-rip-module) | An import type cannot name a `.rip` module | `compiler` | **none** — the specifier does not resolve, so no fixture can carry it; the fix's gate is the ImportType kind entering 11-types with a contract negative |
 | [23](#23-the-tier-3-pin-probe-cannot-be-retired-by-more-declare-in-place) | Pin probe can't be retired by more declare-in-place | `hoist` | **none while the probe stands** — nothing fails; one open question could hand it a gate |
 | [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | `editor` | **none, and none is honest** — upstream; a naive gate is platform-dependent |
 
@@ -412,6 +414,22 @@ Both the editor and `rip check` generate ONE tsconfig at the mirror root that `e
 
 **Status.** ⬜ **Open** (2026-07-24) — no mechanical gate while the spelling is lexer-rejected: a fixture cannot carry it, and the census cannot distinguish which SPELLING claimed a kind (any `TypePredicate` claim, def-return included, drains the queue row). The boundaries note (ROADMAP.md, the error-pair conventions) records the constraint for census-queue authoring; re-drive the census probe on any change to the lexer's type-run collection.
 
+### 48. A method member in an inline type body is rejected
+
+`type Greeter = { greet(n: number): string }` does not compile: the type-body validator reads the member's parameter list as executable code — *"code expression ('(') in a type body — types erase and cannot execute"* (driven 2026-07-24, the census drain). It is the same generic check that rejects mapped types, firing on a name followed by a paren, and it is not a considered ruling that the type sub-language omits object methods: the sibling call signature `{ (value: number): string }` compiles inline, and the indented spelling of the very same member compiles too — `interface Sink` carries `accept(entry: string): string`. Closed finding C2 admitted this shorthand into type bodies; its fix reached the indented form and left the inline literal behind.
+
+**Why the suite missed it.** No fixture spelled a method member inline, and the indented spelling works, so nothing failed. The census cannot report the gap either — it records that a kind is claimed, never which SPELLING claimed it, and the indented member claims MethodSignature.
+
+**Status.** ⬜ **Open** (2026-07-24) — no mechanical gate: the kind is claimed, so the queue is silent, and no fixture can carry a spelling that does not compile. The boundaries note ([ROADMAP.md](ROADMAP.md)) records the constraint for census-queue authoring; the fix's gate is the inline spelling entering 11-types, where `compiles` holds it.
+
+### 49. An import type cannot name a `.rip` module
+
+`c: import('./lib.rip').Crate = …` publishes TS2307 — *Cannot find module './lib.rip' or its corresponding type declarations* — while the static spelling `import { Crate } from './lib.rip'` resolves the same type from the same file and checks clean (both driven 2026-07-24, the census drain). The sibling module is compiled into the program for an import STATEMENT and not for an import TYPE, so the specifier rewriting that makes `.rip` resolvable never reaches the type position. Against a `.ts` module the import type resolves and enforces normally, with the rejection landing on the rip line — so the defect is the `.rip` specifier, not the construct.
+
+**Why the suite missed it.** No fixture spells an import type anywhere; `ImportType` sat unclaimed until the census enumerated TS's type grammar as a closed universe.
+
+**Status.** ⬜ **Open** (2026-07-24) — the ImportType kind stands in the census queue. The corpus cannot carry the working spelling either: a `.ts` module dropped into the grammar bucket would read as a fixture's twin, so the kind waits on the `.rip` specifier resolving.
+
 ### 23. The Tier 3 pin probe cannot be retired by more declare-in-place
 
 A binding that stays hoist-split and is **also** read from inside a closure is an evolving `let` TypeScript declines to infer (`TS7034` — an evolving `let` serves only same-function references), so no site in the real face knows its type. The Tier 3 pin probe recovers those types by manufacturing a declaration site and hovering it ([pins.js](../../packages/vscode/src/pins.js)), in the editor and in `rip check`'s batch alike, and feeds the answers back through `compile()` as pins — so the type lands in the **face**, where every consumer reads it.
@@ -474,3 +492,4 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 20 | Render branch/loop bodies unchecked (`ctx`, loop items) | `check`'s typed-factory-params case; audit `strict` (13-components' render branches and loops) |
 | 24 | A `schema` block's implicit `it` untyped | audit `strict` (14-schema's transforms); `schema-types`' transform case |
 | 25 | Event handler parameters get no event type | `check`'s handler case; `dom-vocab-lib` |
+| 47 | Census blind to indented type declarations | the type-vocabulary census (`runner.js`) — soft: MethodSignature is claimed only from an indented interface, so the queue silently grows if the declaration rendering is dropped |

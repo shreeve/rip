@@ -1,6 +1,9 @@
 // 11-types.ts — the erased-type surface twin: aliases, typeof, generics,
-// interfaces, enums, the forward declaration, overload signatures, and
-// `as` casts. Enums mirror rip's lowering — one const object holding
+// interfaces, enums, the forward declaration, overload signatures,
+// `as` casts, and the type vocabulary the census counts (keyword types,
+// operators, tuples, conditionals, self-reference, a call signature, the
+// narrowing annotations, `this`, an abstract construct signature).
+// Enums mirror rip's lowering — one const object holding
 // forward and reverse entries plus a same-name companion type — because
 // that pair is the construct's honest TypeScript shape (a native TS enum
 // would diverge at runtime: string enums get no reverse entries there).
@@ -141,3 +144,119 @@ let count = (JSON.parse('[3,4]') as number[]).length
 let veiled = payload as unknown as { deep: boolean }
 
 console.log('cast:', text.length, count, typeof veiled)
+
+// ── keyword types: the primitive vocabulary an annotation can name ──
+
+type Loose = any
+type Bag = object
+type Marked = symbol
+type Huge = bigint
+type Yes = true
+type No = false
+
+let loose: Loose = 'anything'
+let bag: Bag = { crate: true }
+let marked: Marked = Symbol('mark')
+let huge: Huge = 9007199254740993n
+let yes: Yes = true
+let no: No = false
+
+console.log('keywords:', loose, typeof bag, typeof marked, huge, yes, no)
+
+// ── never: the return of a function that only throws ──
+
+function refuse(reason: string): never {
+  throw new Error(reason)
+}
+
+console.log('never:', typeof refuse)
+
+// ── operators and access: keyof, readonly, indexed access, index signature ──
+
+type HostKey = keyof Host
+type Frozen = readonly string[]
+type Locked = { readonly id: number }
+type HostName = Host['name']
+type Counts = { [label: string]: number }
+
+let hostKey: HostKey = 'name'
+let frozen: Frozen = ['a', 'b']
+let locked: Locked = { id: 7 }
+let hostName: HostName = 'edge'
+let counts: Counts = { hits: 3 }
+
+console.log('operators:', hostKey, frozen[0], locked.id, hostName, counts.hits)
+
+// ── tuples: named members, an optional tail, a rest element ──
+
+type Entry = [first: string, second: number]
+type Trailing = [string, number?]
+type Trail = [string, ...number[]]
+
+let entry: Entry = ['a', 1]
+let trailing: Trailing = ['b']
+let trail: Trail = ['c', 2, 3]
+
+console.log('tuples:', entry[0], entry[1], trailing[0], trail.length)
+
+// ── conditional types: the branch, and `infer` inside it ──
+
+type IsText<T> = T extends string ? 'yes' : 'no'
+type Elem<T> = T extends Array<infer U> ? U : never
+
+let isText: IsText<string> = 'yes'
+let elem: Elem<number[]> = 5
+
+console.log('conditional:', isText, elem)
+
+// ── a self-referential alias: the type names itself ──
+
+type Branch = { label: string, kids: Branch[] }
+
+let branch: Branch = { label: 'root', kids: [{ label: 'leaf', kids: [] }] }
+
+console.log('recursive:', branch.label, branch.kids.length, branch.kids[0].label)
+
+// ── a call signature: the callable object type ──
+
+type Formatter = { (value: number): string }
+
+let formatter: Formatter = (value) => '#' + String(value)
+
+console.log('callable:', formatter(5))
+
+// ── narrowing annotations: the type predicate and the assertion ──
+
+function looksText(value: unknown): value is string {
+  return typeof value === 'string'
+}
+
+function mustText(value: unknown): asserts value is string {
+  if (typeof value !== 'string') {
+    throw new Error('not text')
+  }
+}
+
+console.log('predicate:', looksText('a'), looksText(1), typeof mustText)
+
+// ── `this` as a return type: the method that returns its receiver ──
+
+class Tally {
+  count: number = 0
+  bump(): this {
+    this.count = this.count + 1
+    return this
+  }
+}
+
+console.log('this:', new Tally().bump().bump().count)
+
+// ── an abstract construct signature ──
+
+type Shaped = { id: number }
+
+let maker: (abstract new () => Shaped) = class {
+  id: number = 3
+}
+
+console.log('abstract:', typeof maker)
