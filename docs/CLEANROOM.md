@@ -1,4 +1,4 @@
-# REWRITE — the clean-room engine plan
+# CLEANROOM — the clean-room engine rewrite plan
 
 What we intend to do once Rip v4 runs and works as we want: rewrite the
 engine — lexer, parser, emitter — from scratch, clean room, with full

@@ -11,15 +11,21 @@ Permanent documentation:
 - [docs/HMR.md](docs/HMR.md) — HMR design and acceptance contract.
 - [docs/FRAME.md](docs/FRAME.md) — Rip-native hypermedia design and acceptance contract.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work.
+- [docs/CLEANROOM.md](docs/CLEANROOM.md) — the clean-room engine
+ rewrite plan (activates when v4 is declared done).
 
 Working ledgers (not permanent docs):
 
 - `TODO.md` — open design/correctness notes ONLY. Remove items when
   fixed or moved into real docs/tests; git history and PR bodies are
   the record of completed work. No done-items archive.
-- `HANDOFF.md` — untracked, machine-local session launch document.
-  Read it first when starting a session; rewrite it at session
-  boundaries with live-verified facts. Never commit it.
+- `HANDOFF.md` — the tracked session launch document. Read it first
+ when starting a session; rewrite it at session boundaries with
+ live-verified facts only — never stale state. It is committed like
+ any other file.
+
+Placement test for any new document: opened as part of WORKING →
+repository root; consulted for UNDERSTANDING → docs/.
 
 ## The Rules
 

@@ -35,15 +35,17 @@ reload is a fallback, not the default once framework refresh exists.
 
 ## Current baseline
 
-Rip currently compiles and runs modules through Bun and can emit feature
-runtimes inline or by import. It does not ship a browser entry, app
-framework, development server, watch transport, module graph, or
-state-preserving refresh.
+Rip compiles and runs modules through Bun and can emit feature runtimes
+inline or by import. The browser entry, module graph (`assembleBundle`
+→ `bootApp` → `launch`), and app framework are shipped and certified in
+real browsers (`packages/browser-tests`). No product surface serves the
+page and bundle (only the certification fixture does), no watch→browser
+transport exists, and there is no state-preserving refresh.
 
-HMR therefore depends on the browser-delivery, app, and server
-foundations in `ROADMAP.md`. The first HMR phase establishes an honest
-last-known-good reload path; later phases add module and framework
-refresh.
+HMR therefore depends on the dev-server integration work in
+`ROADMAP.md` (Browser delivery). The first HMR phase establishes an
+honest last-known-good reload path; later phases add module and
+framework refresh.
 
 ## Two-layer architecture
 
@@ -296,13 +298,13 @@ signature decisions remain deterministic unit tests.
 
 Decided at stage entry, before implementation depends on them:
 
-- **Transport: WebSocket, unified.** One dev transport carries both
-  file-watch reloads and HMR updates. The existing SSE watch transport
-  migrates to WS — SSE's HTTP/1.1 six-connection-per-origin ceiling
-  starves the app's own requests once a few dev tabs are open, and a
-  bidirectional channel is wanted for targeted updates and client→server
-  error/state reporting. Reconnection carries a revision cursor so a
-  reconnecting client resumes from its last-applied revision.
+- **Transport: WebSocket, unified.** One dev transport, built new,
+  carries both file-watch reloads and HMR updates. SSE is rejected:
+  its HTTP/1.1 six-connection-per-origin ceiling starves the app's own
+  requests once a few dev tabs are open, and a bidirectional channel
+  is wanted for targeted updates and client→server error/state
+  reporting. Reconnection carries a revision cursor so a reconnecting
+  client resumes from its last-applied revision.
 - **API: Rip-native, no `import.meta.hot` shim.** Rip owns its dev
   server and runtime and replaces Vite rather than running under it, so
   there is no external API to be compatible with. The HMR API keeps
