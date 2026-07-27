@@ -1,0 +1,23 @@
+# 21-checking.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run audit --diagnostics) asserts each one; @ts-nocheck quiets editors only.
+# @ts-nocheck
+
+type Placard = { heading: string }
+type Knobs = { mode?: string, depth?: number }
+type Ring = { form: 'ring', radius: number }
+type Tile = { form: 'tile', side: number }
+type Facet = Ring | Tile
+
+def wrongSwitchArm(facet: Facet)
+  switch facet.form
+    when 'ring' then facet.side
+    else facet.radius
+
+def wrongChainArm(facet: Facet)
+  if facet.form is 'ring'
+    facet.side
+  else
+    facet.radius
+
+wrongExcess: Placard = { heading: 'hello', footnote: 'extra' }
+wrongKnobs: Knobs = { unrelated: 1 }

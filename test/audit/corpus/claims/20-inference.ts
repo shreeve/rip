@@ -1,6 +1,5 @@
-// 20-inference.ts — the twin oracle for CLAIMS.md's inference rows: plain
-// TypeScript spelling the same shapes, so the hover audit can ask TS itself
-// what each binding's type is and the runtime dimension can diff the bytes.
+// 20-inference.ts — the twin oracle: reassignment, arithmetic, lib generics,
+// contextual callbacks, inferred returns, branch-written and hoisted bindings, destructured parameters
 
 // ── An inferred binding carries its type through a legal reassignment ──
 
@@ -56,9 +55,8 @@ if (tallies.length > 2) {
 }
 console.log('tideline:', tideline.toUpperCase())
 
-// ── A block-confined binding read by a HOISTED function, where the read sits
-// above the statement that assigns. The destructured spelling of the same
-// thing is absent on purpose — see the .rip ──
+// ── A block-confined binding read by a HOISTED function. The destructured
+// spelling is absent on purpose — see the .rip ──
 
 let ribbon = ''
 if (labels.length > 1) {

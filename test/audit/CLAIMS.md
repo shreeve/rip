@@ -27,15 +27,15 @@ A carrier is `fixture:symbol` — the fixture file and a symbol the gate verifie
 
 | behavior | carrier | negative carrier |
 | --- | --- | --- |
-| the excess-property check fires on a fresh object literal | ABSENT | ABSENT |
-| the weak-type rule: `{}` satisfies an all-optional type, a literal carrying only unknown keys rejects | ABSENT | ABSENT |
+| the excess-property check fires on a fresh object literal | 21-checking.rip:inheritedPlacard | 21-checking.errors.rip:wrongExcess |
+| the weak-type rule: `{}` satisfies an all-optional type, a literal carrying only unknown keys rejects | 21-checking.rip:noKnobs | 21-checking.errors.rip:wrongKnobs |
 
 ### Narrowing
 
 | behavior | carrier | negative carrier |
 | --- | --- | --- |
-| switch on a union discriminant narrows the arm (`.radius` safe in the `circle` case) | ABSENT | ABSENT |
-| a union companion narrows per discriminant across an else-if chain and a loop body | ABSENT | ABSENT |
+| switch on a union discriminant narrows the arm (`.radius` safe in the `circle` case) | 21-checking.rip:spanOf | 21-checking.errors.rip:wrongSwitchArm |
+| a union companion narrows per discriminant across an else-if chain and a loop body | 21-checking.rip:notes | 21-checking.errors.rip:wrongChainArm |
 
 ### Type-vocabulary behaviors
 

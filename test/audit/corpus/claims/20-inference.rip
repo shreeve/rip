@@ -1,8 +1,5 @@
-# 20-inference.rip — CLAIMS.md's inference-and-enforcement rows: what the
-# checker CONCLUDES where no production or token can be counted. Chartered by
-# CLAIMS.md alone, so every shape here is syntax the grammar bucket already
-# reduces — this file must never be the reason a production reads as covered.
-# The rejections these rows demand live in corpus/errors/20-inference.errors.rip.
+# 20-inference.rip — what the checker infers and enforces: reassignment, arithmetic,
+# lib generics, contextual callbacks, inferred returns, branch-written and hoisted bindings, destructured parameters
 
 # ── An inferred binding carries its type through a legal reassignment ──
 
@@ -55,12 +52,10 @@ else
   tideline = 'few'
 console.log('tideline:', tideline.toUpperCase())
 
-# ── A block-confined binding read by a HOISTED def, where the read sits above
-# the statement that assigns: the pin pass's own shape. The DESTRUCTURED
-# spelling of the same thing is absent on purpose — it is implicitly any under
-# strict, held by the open destructured-hoisting finding, so it cannot enter a
-# positive fixture until that closes. Destructuring itself types fine, which is
-# what the ordinary-flow read below holds ──
+# ── A block-confined binding read by a HOISTED def: the pin pass's own shape.
+# The destructured spelling is absent on purpose — implicitly any under strict,
+# held by the open destructured-hoisting finding. Destructuring itself types
+# fine, which the ordinary-flow read below holds ──
 
 if (labels.length > 1)
   ribbon = labels[0]
