@@ -255,6 +255,7 @@ import { compile } from '../../src/compile.js';
 import { Parser } from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
 import { renderTypeDecl } from '../../src/typetext.js';
+import { judge } from './contract.js';
 import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, offsetToPosition } from '../../packages/vscode/src/translate.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -3272,5 +3273,45 @@ if (tk) {
     for (const a of skipped) console.log(`    ${dim('·')} ${bold(a.name)} ${dim(`— ${a.blurb}`)}\n      ${dim(`bun run audit${a.flag ? ' ' + a.flag : ''}`)}`);
     console.log(`    ${dim('·')} ${dim('all of them:')} ${dim('bun run audit')}${dim(' (no flag)')}   ${dim('· full flag list:')} ${dim('--help')}`);
   }
+}
+
+// ── the contract (contract.js holds the invariants, and the reason each red one
+// is tolerated). The gauges above are read by a person; THIS decides the exit
+// code, so the run can be gated without gating on a queue that is expected
+// non-zero.
+//
+// A reason is a sentence, not a clause, so it goes on its OWN indented lines
+// rather than trailing the verdict: a hanging wrap under a 30-column name would
+// leave two words per line at any normal width, and letting the terminal break
+// it dangles fragments at column zero (the defect `totalLine` exists to prevent,
+// one section up).
+{
+  const reason = (text) => {
+    const avail = Math.max(40, (process.stdout.columns || Number(process.env.COLUMNS) || 200) - 9);
+    const out = [];
+    let line = '';
+    for (const word of text.split(' ')) {
+      if (line && line.length + 1 + word.length > avail) { out.push(line); line = word; }
+      else line = line ? `${line} ${word}` : word;
+    }
+    if (line) out.push(line);
+    for (const l of out) console.log(`        ${dim(l)}`);
+  };
+  const { verdicts, failures } = judge({
+    states: { gr, mp, el, hp, tk, fails },
+    ran: (lane) => AUDITS.find((a) => a.key === lane).ran,
+  });
+  const judged = verdicts.filter((v) => v.state !== 'skipped');
+  console.log(`\n  ${bold('Contract')} ${dim(`(${judged.length} invariant${judged.length === 1 ? '' : 's'} judged${verdicts.length - judged.length ? `, ${verdicts.length - judged.length} unjudged — their lane did not run` : ''})`)}`);
+  for (const v of judged.filter((x) => x.state !== 'green')) {
+    if (v.state === 'red-expected') { console.log(`    ${yellow('·')} ${pad(v.name, 26)} ${dim('red by agreement')}`); reason(v.redBecause); }
+    if (v.state === 'red-new') { console.log(`    ${red('✗')} ${pad(v.name, 26)} ${red('BROKEN')}`); reason(`this must hold: ${v.property}`); }
+    if (v.state === 'recovered') { console.log(`    ${red('✗')} ${pad(v.name, 26)} ${red('RECOVERED')}`); reason('red by agreement, now holding — delete its `redBecause`, which would otherwise mask the next break here'); }
+  }
+  const held = judged.filter((v) => v.state === 'red-expected').length;
+  const clean = judged.filter((v) => v.state === 'green').length;
+  console.log(`    ${failures.length ? red(`${failures.length} failing`) : green('contract holds')}${dim(` · ${clean} green · ${held} red by agreement`)}`);
+  console.log('');
+  if (failures.length) process.exit(1);
 }
 console.log('');
