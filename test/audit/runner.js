@@ -2104,7 +2104,17 @@ if (RUN_GRAMMAR) {
     // parked production.
     const CLAIMS = path.join(HERE, 'CLAIMS.md');
     if (fs.existsSync(CLAIMS)) {
-      const behaviors = [], cells = [];
+      // A ruled row can be uncarried for two DIFFERENT reasons, and ABSENT
+      // alone cannot tell them apart: it is queued (nobody has authored the
+      // fixture yet) or it is BLOCKED (a defect makes the shape unable to
+      // enter a positive fixture at all — the strict dimension or the verdict
+      // would reject it). The Parked table separates them, the same way
+      // MANIFEST.md parks a production a fixture cannot yet reduce, so the
+      // queue count means "work available" rather than "work available plus
+      // work impossible". Self-policing: a park naming no row is stale, and a
+      // park whose row is now CARRIED is stale too — the block cleared, so the
+      // park is what needs deleting.
+      const behaviors = [], cells = [], parks = [];
       let section = null;
       for (const line of fs.readFileSync(CLAIMS, 'utf8').split('\n')) {
         if (line.startsWith('## ')) { section = line.slice(3).trim(); continue; }
@@ -2113,6 +2123,7 @@ if (RUN_GRAMMAR) {
         if (!row.length || row[0].startsWith('---') || ['behavior', 'construct'].includes(row[0])) continue;
         if (section === 'Behaviors') behaviors.push({ behavior: row[0], carrier: row[1], neg: row[2] });
         else if (section === 'Containment') cells.push({ construct: row[0], inside: row[1] });
+        else if (section === 'Parked') parks.push({ behavior: row[0], until: row[1] });
       }
       const carrierOk = (c) => {
         if (!c || c === 'ABSENT' || c === '—') return c === '—' ? 'na' : 'absent';
@@ -2125,13 +2136,24 @@ if (RUN_GRAMMAR) {
         return new RegExp(`\\b${symbol}\\b`).test(fs.readFileSync(full, 'utf8')) ? 'ok' : 'missing';
       };
       const rows = [];
-      let absent = 0, broken = 0;
+      const parkedBy = new Map(parks.map((p) => [p.behavior, p.until]));
+      let absent = 0, broken = 0, parked = 0;
+      const staleParks = [];
       for (const b of behaviors) {
         const s1 = carrierOk(b.carrier), s2 = carrierOk(b.neg);
+        const until = parkedBy.get(b.behavior);
         if (s1 === 'missing' || s2 === 'missing') { broken++; rows.push(`${red('✗')} ${b.behavior} ${dim('— carrier missing:')} ${red(s1 === 'missing' ? b.carrier : b.neg)}`); }
-        else if (s1 === 'absent' || s2 === 'absent') { absent++; rows.push(`${yellow('·')} ${b.behavior} ${dim('— ruled, uncarried')}`); }
-        else rows.push(`${green('✓')} ${b.behavior} ${dim(`(${b.carrier})`)}`);
+        else if (s1 === 'absent' || s2 === 'absent') {
+          if (until) { parked++; rows.push(`${yellow('·')} ${b.behavior} ${dim(`— PARKED until ${until}`)}`); }
+          else { absent++; rows.push(`${yellow('·')} ${b.behavior} ${dim('— ruled, uncarried')}`); }
+        } else {
+          if (until) staleParks.push(b.behavior);
+          rows.push(`${green('✓')} ${b.behavior} ${dim(`(${b.carrier})`)}`);
+        }
       }
+      const orphanParks = parks.filter((p) => !behaviors.some((b) => b.behavior === p.behavior)).map((p) => p.behavior);
+      for (const p of staleParks) rows.push(`${red('✗')} ${p} ${dim('— parked, but CARRIED: the block cleared, so delete the park row')}`);
+      for (const p of orphanParks) rows.push(`${red('✗')} ${p} ${dim('— a park naming no Behaviors row: stale, or the row text drifted')}`);
       let cellsMissing = 0;
       for (const c of cells) {
         const hit = pairsSeen.has(`${c.construct} inside ${c.inside}`);
@@ -2151,6 +2173,7 @@ if (RUN_GRAMMAR) {
       console.log(`\n    ${bold('Corpus claims')} ${dim('(CLAIMS.md — behaviors and containment cells; the no-denominator coverage record)')}`);
       for (const r of rows) console.log(`      ${r}`);
       ng.claimsAbsent = absent; ng.claimsBroken = broken + claimsOrphans; ng.cellsMissing = cellsMissing;
+      ng.claimsParked = parked; ng.claimsBadParks = staleParks.length + orphanParks.length;
     }
   }
   const falseExclusions = excludedIdx.filter((i) => seen.has(i));
@@ -3362,7 +3385,7 @@ if (gr) totalLine('Grammar', `${gr.total} productions: `
   + (gr.negatives ? `${dim(' · vocabulary: ')}${gr.negatives.kindQueued ? yellow(`${gr.negatives.vocabClaimed}/${gr.negatives.kindDenom} type kinds claimed — the census queue`) : green(`all ${gr.negatives.kindDenom} type kinds claimed`)}${gr.negatives.kindBad ? dim(' · ') + red(`${gr.negatives.kindBad} census violation${gr.negatives.kindBad === 1 ? '' : 's'}`) : ''}` : '')
   + (gr.negatives ? `${dim(' · negatives: ')}${gr.negatives.vocabUnfalsified ? red(`${gr.negatives.vocabUnfalsified}/${gr.negatives.vocabClaimed} vocabulary classes unfalsified`) : green(`all ${gr.negatives.vocabClaimed} vocabulary classes falsified`)}${gr.negatives.famZero ? dim(` · ${gr.negatives.famZero} family(ies) without negatives (gauge)`) : ''}` : '')
   + (gr.negatives?.headsTotal ? `${dim(' · containment: ')}${dim(`${gr.negatives.pairs} pairs over `)}${gr.negatives.headsUnseen ? red(`${gr.negatives.headsTotal - gr.negatives.headsUnseen}/${gr.negatives.headsTotal} heads spelled`) : green(`all ${gr.negatives.headsTotal} heads`)}` : '')
-  + (gr.negatives && (gr.negatives.claimsAbsent != null) ? `${dim(' · claims: ')}${(gr.negatives.claimsBroken || gr.negatives.cellsMissing) ? red(`${gr.negatives.claimsBroken + gr.negatives.cellsMissing} red`) + (gr.negatives.claimsAbsent ? dim(` + ${gr.negatives.claimsAbsent} ruled-uncarried`) : '') : gr.negatives.claimsAbsent ? yellow(`${gr.negatives.claimsAbsent} ruled-uncarried`) : green('all carried')}` : ''));
+  + (gr.negatives && (gr.negatives.claimsAbsent != null) ? `${dim(' · claims: ')}${(gr.negatives.claimsBroken || gr.negatives.cellsMissing || gr.negatives.claimsBadParks) ? red(`${gr.negatives.claimsBroken + gr.negatives.cellsMissing + gr.negatives.claimsBadParks} red`) + (gr.negatives.claimsAbsent ? dim(` + ${gr.negatives.claimsAbsent} ruled-uncarried`) : '') : gr.negatives.claimsAbsent ? yellow(`${gr.negatives.claimsAbsent} ruled-uncarried`) : green('all carried')}${gr.negatives.claimsParked ? dim(` · ${gr.negatives.claimsParked} parked`) : ''}` : ''));
 // The Mapping Audit's flagged reads are EXPECTED red (the mapping gap), so
 // they read as a gauge, never a regression count: the total is the census, and
 // the missing-span clause is the only part that would signal something new.

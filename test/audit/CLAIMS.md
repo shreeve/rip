@@ -95,6 +95,16 @@ The census owns which type KINDS the corpus claims; these rows own what the chec
 | a callable body is sub-compiled rip and runs | ABSENT | ABSENT |
 | a schema companion resolves inside generic type arguments (`Promise<Person>`) | ABSENT | ABSENT |
 
+## Parked
+
+A ruled row is uncarried for one of two reasons, and ABSENT alone cannot tell them apart: nobody has authored the fixture yet, or a DEFECT makes the shape unable to enter a positive fixture at all — the `strict` dimension or `verdict` would reject it, so authoring cannot clear the row until the defect closes. Parked rows are the second kind, netted out of the queue so its count means work available rather than work available plus work impossible. A park names the row verbatim, so the gate can join it live.
+
+The park expires in one direction: the row becomes CARRIED. The gate paints red then, and red for a park naming no row at all, so a park cannot quietly shrink the queue forever.
+
+| behavior | until |
+| --- | --- |
+| a destructured binding types through the pin pass — the same hoisted read, bound by a pattern rather than assigned | the open destructured-hoisting finding closes (FINDINGS.md) — the pin pass reaches a plainly-assigned binding but not one bound by a pattern, so the shape is implicitly `any` under strict |
+
 ## Containment
 
 | construct | inside |

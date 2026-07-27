@@ -71,6 +71,16 @@ export const CONTRACT = [
     red: (s) => (s.gr.negatives?.headsUnseen ?? 0) > 0,
   },
   {
+    // A park is a claim that a defect — not an absence of effort — is why a
+    // row is uncarried. It expires in one direction only: the row becomes
+    // carried, at which point the park is the stale thing. Left unpoliced it
+    // would quietly shrink the queue forever, which is the one way this
+    // bookkeeping could lie about how much work is left.
+    name: 'claims.parks', lane: 'grammar',
+    property: 'every parked claim names a live Behaviors row that is still uncarried',
+    red: (s) => (s.gr.negatives?.claimsBadParks ?? 0) > 0,
+  },
+  {
     name: 'grammar.census', lane: 'grammar',
     property: "every type text the corpus carries classifies against TypeScript's own type grammar",
     red: (s) => (s.gr.negatives?.kindBad ?? 0) > 0,
