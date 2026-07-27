@@ -715,18 +715,23 @@ function declsOf(src) {
     const m = text.match(DECL);
     if (!m || KEYWORDS.has(m[2])) return;
     const keyword = m[1], name = m[2];
+    // DECL's match ENDS at the name, so this is the name's exact column.
+    // Searching for the name instead would find it inside its own prefix —
+    // `export port` answers 2, the `port` in `export`, which both mis-places
+    // the probe and makes the follow-token test below read the wrong bytes.
+    const character = m[0].length - name.length;
     // Only actual DECLARATIONS, not usage statements. A keyword form
     // (def/class/…) always declares. A bare name declares only when its
     // next token is an assignment / annotation / reactive operator
     // (= : := ~= ~>); a name followed by `.`/`(`/`[` is a usage
     // (console.log(…)) — which the old heuristic wrongly probed.
     if (!keyword) {
-      const after = text.slice(text.indexOf(name) + name.length);
+      const after = text.slice(character + name.length);
       if (!/^!?\s*(?:<[^>]*>)?\s*(?:~[=>]|[:=])/.test(after)) return;
     }
     // `code` is the line with strings blanked and comments cut — the token
     // audit classifies binding forms off it (`codeOf` is hoisted).
-    out.push({ name, keyword: keyword ?? null, line, character: text.indexOf(name), text: text.trim(), code: codeOf(text.trim()) });
+    out.push({ name, keyword: keyword ?? null, line, character, text: text.trim(), code: codeOf(text.trim()) });
   });
   return out;
 }
@@ -789,14 +794,26 @@ function typeMembersOf(src) {
 // This variant captures the bound identifier so a rip decl can be
 // matched to its twin by (name, occurrence) — occurrence keeps
 // same-named rows distinct.
-const TS_DECL = /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|const|let|var|class|interface|enum|type)\s+([A-Za-z_$][\w$]*)/;
+// Two branches: a keyword declaration, and a BARE ASSIGNMENT — which rip's own
+// `declsOf` treats as a declaration (`ledger = 34` re-declares nothing but is
+// the site a hover answers about), so the twin has to enumerate it or the rip
+// side has a probe with no oracle and falls back to a pin. The trailing
+// `[^=>]` is load-bearing twice over: `=` would let `x == y` through, and `>`
+// would let a line-start `x => …` register the ARROW'S PARAMETER as a
+// declaration, which would shift every later `name#occurrence` for that name.
+const TS_DECL = /^(?:(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|const|let|var|class|interface|enum|type)\s+([A-Za-z_$][\w$]*)|([A-Za-z_$][\w$]*)\s*=[^=>])/;
 function tsDeclsOf(src) {
   const out = [];
   src.split('\n').forEach((text, line) => {
     if (/^\s/.test(text) || !text.trim()) return;
     const m = text.match(TS_DECL);
     if (!m) return;
-    out.push({ name: m[1], line, character: text.indexOf(m[1], m[0].length - m[1].length) });
+    // The keyword branch's match ENDS at the name, so its offset is exact; the
+    // bare-assignment branch is anchored, so the name starts at column 0.
+    // Searching for the name instead would find it inside its own keyword —
+    // `export const port` answers 2, the `port` in `export`.
+    const name = m[1] ?? m[2];
+    out.push({ name, line, character: m[1] ? m[0].length - m[1].length : 0 });
   });
   return out;
 }

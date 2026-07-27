@@ -1,18 +1,4 @@
 {
-  "12-reactive.rip": {
-    "decls": [
-      {
-        "name": "pulse",
-        "occurrence": 1,
-        "expect": "let pulse: number"
-      },
-      {
-        "name": "pulse",
-        "occurrence": 2,
-        "expect": "let pulse: number"
-      }
-    ]
-  },
   "13-components.rip": {
     "decls": [
       {
