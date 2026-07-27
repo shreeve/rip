@@ -330,7 +330,7 @@ alters surface syntax updates ALL THREE in the same change.
 - `bun run corpus-expected` — regenerate the corpus expected outputs.
 - `bun run audit` — the typed-editor scoreboard, and NOT `bun audit`,
   which is Bun's dependency scanner. Six lanes (grammar, mapping, type,
-  diagnostics, hover, token); no flag runs EVERY lane (~21s), and a lane's
+  diagnostics, hover, token); no flag runs EVERY lane, and a lane's
   own flag narrows the run to it — `--type` is the fast authoring loop.
   `--help` is the full surface: what each lane measures, and what it is
   judged against.

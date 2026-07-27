@@ -76,7 +76,7 @@
 // corpus. Do not fix a red row by suppressing; read the failure's note,
 // which names what is actually there.
 //
-// B · THE HOVER AUDIT (--hover / --all) — hover every top-level
+// B · THE HOVER AUDIT (--hover) — hover every top-level
 //   declaration through the editor server and judge each answer against
 //   the best available reference:
 //
@@ -102,7 +102,7 @@
 //     write-only-`any` class is caught for ALL symbols by the
 //     oracle-free invariant below.)
 //
-// C · THE TOKEN AUDIT (--token / --all) — request semanticTokens/full
+// C · THE TOKEN AUDIT (--token) — request semanticTokens/full
 //   from the editor server for every fixture and judge each token that
 //   lands on a top-level declaration.
 //
@@ -163,7 +163,7 @@
 //   carry the same bogus `readonly` as its declaration, and nothing verifies
 //   the modifier there). A clean run is a statement about those sites.
 //
-// D · THE MAPPING AUDIT (--map / --all) — the one audit that starts no
+// D · THE MAPPING AUDIT (--map) — the one audit that starts no
 //   server and asks no oracle: it reads the compiler's OWN mapping rows
 //   and checks, for every identifier in the source, that it maps to a
 //   generated position holding the same text. The three audits above all
@@ -368,7 +368,6 @@ const AUDITS = [
   },
 ];
 const FLAGS = [
-  ['--all', 'every lane — what no flag already means, kept for the fingers that type it'],
   ['--serial', 'probe one fixture at a time — the control for the concurrent pass'],
   ['--verbose', '-v', '+ expected hover divergences, unasserted tokens, and every flagged mapping read, in full'],
   ['--help', '-h', 'this message'],
@@ -422,12 +421,12 @@ const LANES = ARGV.includes('--serial') ? 1 : 4;
 // naming none runs them ALL, because the alternative — defaulting to one lane —
 // defaults to the only lane whose clean run is contractual, so the bare command
 // would print an all-green screen while every lane that can carry news sat
-// unrun. `--all` is that same default, spelled. The whole run costs ~21s
-// (measured 2026-07-27: grammar 0.3s, map 0.2s, type 5.9s, diagnostics 4.2s,
-// hover 11.7s, token 4.8s), so speed never bought enough to justify the
-// silence; `--type` is the fast loop for whoever is authoring a fixture.
+// unrun. Speed never bought enough to justify that silence — the run is
+// dominated by waiting on the editor server, and the two lanes holding closed
+// denominators are the cheapest of the six. `--type` is the fast loop for
+// whoever is authoring a fixture.
 const named = AUDITS.some((a) => ARGV.includes(a.flag));
-for (const a of AUDITS) a.ran = !named || ARGV.includes('--all') || ARGV.includes(a.flag);
+for (const a of AUDITS) a.ran = !named || ARGV.includes(a.flag);
 const ranAudit = (key) => AUDITS.find((a) => a.key === key).ran;
 const RUN_MAIN = ranAudit('main');
 const RUN_HOVER = ranAudit('hover');
@@ -1485,7 +1484,7 @@ const ERR_NAME_W = Math.max(18, ...errorFixtures.map((f) => path.join('errors', 
 const DIMS = [['compiles', 10], ['verdict', 10], ['runtime', 9], ['twin', 8], ['strict', 8]];
 const RULE_W = NAME_W + 3 + DIMS.reduce((a, [, w]) => a + w, 0) + (DIMS.length - 1);
 
-// The sections scroll past in one `--all` run, so each needs a seam that
+// The sections scroll past in one full run, so each needs a seam that
 // survives the wall of rows above it. The title rides in a reverse-video chip
 // (legible without spending colour, which is reserved for status), the subtitle
 // sits beside it, and a dotted rule CLOSES the header block: the break belongs
@@ -1553,7 +1552,7 @@ async function abort(headline, reasons) {
   process.exit(1);
 }
 
-// ── AUDIT RUN ORDER — bottom-up by instrument layer, so under --all each
+// ── AUDIT RUN ORDER — bottom-up by instrument layer, so in a full run each
 // section's failures explain the one after it: the Grammar Gate (can the
 // parser even reduce it) and the Mapping Audit (do the compiler's own rows
 // place every read) run first and need no server; then the Type Audit (the
@@ -2022,7 +2021,7 @@ if (RUN_GRAMMAR) {
   gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, groups: groups.size, groupKind: owner ? 'files' : 'constructs', unallocated: groups.get('UNALLOCATED')?.length ?? 0, excluded: excludedIdx.length, badExclusions: falseExclusions.length + staleExcluded.length, negatives: ng };
 }
 
-// ── the Mapping Audit (--map / --all): use-site identifier coverage, from the
+// ── the Mapping Audit (--map): use-site identifier coverage, from the
 // compiler's own rows. No server, no tsgo, no twin — so it runs here, before
 // the probe pass spins up any of them.
 let mp = null;
@@ -2173,7 +2172,7 @@ if (RUN_MAP) {
   // check the manual gauge fires only when someone runs it anyway.
 }
 
-// ── the Type Audit (dims 1–6) — the default; skipped when another audit is named without --all
+// ── the Type Audit (dims 1–6) — runs unless another lane is named
 let totalPass = 0, totalApplicable = 0, fails = 0;
 if (RUN_MAIN) {
   const glyph = { pass: ['✓', green('✓')], fail: ['✗', red('✗')], skip: ['skip', yellow('skip')], '—': ['·', dim('·')], 'n/a': ['·', dim('·')] };
@@ -3149,7 +3148,7 @@ await Promise.all(pool.map((s) => s.stop()));
 
 // ── combined totals
 //
-// EVERY LINE NAMES ITS AUDIT. Under --all these totals lines print together at
+// EVERY LINE NAMES ITS AUDIT. In a full run these totals lines print together at
 // the very end, directly beneath the LAST audit's section — so an unlabelled
 // "3 failing" reads as belonging to whatever section happens to sit above it.
 // That is not hypothetical: the Type Audit's failures were read as the Token

@@ -4,7 +4,7 @@ Internal build plan for the instrument. Runner: `runner.js`. Findings: `FINDINGS
 
 ## Built
 
-Six lanes, each judged by a different reference so they can't all fail the same way. `bun run audit` with no flag runs every one (~21s); a lane's own flag narrows the run to it.
+Six lanes, each judged by a different reference so they can't all fail the same way. `bun run audit` with no flag runs every one; a lane's own flag narrows the run to it.
 
 | audit | flag | probes | judged against |
 | --- | --- | --- | --- |
