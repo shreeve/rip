@@ -9,6 +9,7 @@ type Placard = { heading: string }
 let exactPlacard: Placard = { heading: 'welcome' }
 let widenedSource = { heading: 'notice', footnote: 'small print' }
 let inheritedPlacard: Placard = widenedSource
+
 console.log('placards:', exactPlacard.heading, inheritedPlacard.heading)
 
 // ── The weak-type rule: an all-optional type accepts the empty literal, and
@@ -19,6 +20,7 @@ type Knobs = { mode?: string, depth?: number }
 let noKnobs: Knobs = {}
 let someKnobs: Knobs = { mode: 'quiet' }
 let allKnobs: Knobs = { mode: 'loud', depth: 3 }
+
 console.log('knobs:', noKnobs.mode, someKnobs.mode, allKnobs.depth)
 
 // ── switch on a union discriminant narrows the arm ──
@@ -50,4 +52,5 @@ let notes = facets.map((facet) => {
     return `bar ${facet.length}`
   }
 })
+
 console.log('notes:', notes)

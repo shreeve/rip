@@ -1,0 +1,27 @@
+# 22-vocabulary.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run audit --diagnostics) asserts each one; @ts-nocheck quiets editors only.
+# @ts-nocheck
+
+type Twig = { label: string, shoots: Twig[] }
+type Tallies = { [slot: string]: number, entries: number }
+type Crate = { inner: { depth: number } }
+type Firm = { note: string | undefined }
+
+coordinate: [string, number] = ['origin', 12]
+
+def measure(sample: string): number
+def measure(sample: number): string
+def measure(sample: string | number): number | string
+  if typeof sample is 'string' then sample.length else String(sample)
+
+def echoOf<T extends string>(sample: T)
+  sample
+
+wrongAxis: number = coordinate[0]
+wrongTwig: Twig = { label: 'trunk', shoots: [{ label: 7, shoots: [] }] }
+wrongTallies: Tallies = { alpha: 1 }
+wrongCrate: Crate = { inner: { depth: 'far' } }
+wrongOverload: string = measure('alpha')
+wrongEcho = echoOf(7)
+wrongFirm: Firm = {}
+wrongDrift: string | undefined = 42

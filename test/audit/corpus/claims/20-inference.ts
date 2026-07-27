@@ -5,6 +5,7 @@
 
 let ledger = 12
 ledger = 34
+
 console.log('ledger:', ledger.toFixed(0))
 
 // ── Arithmetic infers through the operators: number by number is number ──
@@ -12,6 +13,7 @@ console.log('ledger:', ledger.toFixed(0))
 let width = 4
 let height = 2.5
 let area = (width * height)
+
 console.log('area:', area.toFixed(2))
 
 // ── Library generics carry instantiated element types, including the
@@ -28,12 +30,14 @@ function add(a: number, b: number) {
 let summed = tallies.reduce(add, 0)
 let labels = ['alpha', 'beta']
 let upper = labels.map((w) => w.toUpperCase())
+
 console.log('generics:', twiced, retained, summed.toFixed(0), upper)
 
 // ── Contextual typing reaches an unannotated callback parameter: `n` is
 // number inside map, with no annotation written and no implicit any ──
 
 let formatted = tallies.map((n) => n.toFixed(1))
+
 console.log('formatted:', formatted)
 
 // ── An unannotated function's inferred return governs its call sites ──
@@ -53,6 +57,7 @@ if (tallies.length > 2) {
 } else {
   tideline = 'few'
 }
+
 console.log('tideline:', tideline.toUpperCase())
 
 // ── A block-confined binding read by a HOISTED function. The destructured
@@ -68,6 +73,7 @@ function recount() {
 }
 
 let { json: media } = { json: 'application/json' }
+
 console.log('media:', media.toUpperCase())
 
 console.log('recount:', recount())

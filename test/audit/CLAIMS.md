@@ -43,23 +43,23 @@ The census owns which type KINDS the corpus claims; these rows own what the chec
 
 | behavior | carrier | negative carrier |
 | --- | --- | --- |
-| tuple positional typing at access sites — each index reads its own member type | ABSENT | ABSENT |
-| a recursive alias resolves and checks a deep literal | ABSENT | ABSENT |
-| an index signature admits extra keys while its named members stay required | ABSENT | ABSENT |
-| a deep mismatch positions on the inner member, not the outer binding | ABSENT | ABSENT |
+| tuple positional typing at access sites — each index reads its own member type | 22-vocabulary.rip:axisPair | 22-vocabulary.errors.rip:wrongAxis |
+| a recursive alias resolves and checks a deep literal | 22-vocabulary.rip:canopy | 22-vocabulary.errors.rip:wrongTwig |
+| an index signature admits extra keys while its named members stay required | 22-vocabulary.rip:counters | 22-vocabulary.errors.rip:wrongTallies |
+| a deep mismatch positions on the inner member, not the outer binding | 22-vocabulary.rip:packed | 22-vocabulary.errors.rip:wrongCrate |
 | interface heritage demands both base and derived members | ABSENT | 11-types.errors.rip:wrongStrobe |
 | `typeof` widens literal properties — a `typeof defaults` alias types string, not `'dark'` | 11-types.rip:tuned | ABSENT |
-| overload resolution picks the matched signature's return, where the overloads' returns differ | ABSENT | ABSENT |
-| generic call-site inference preserves literal types and enforces the constraint | ABSENT | ABSENT |
-| a union-with-`undefined` member demands its key where `?:` does not | ABSENT | ABSENT |
-| a nullable-union TARGET accepts each arm and rejects outside them — a string-or-`undefined` and a number-or-`null` binding, where those arms meet strict-null checking | ABSENT | ABSENT |
+| overload resolution picks the matched signature's return, where the overloads' returns differ | 22-vocabulary.rip:overloadPair | 22-vocabulary.errors.rip:wrongOverload |
+| generic call-site inference preserves literal types and enforces the constraint | 22-vocabulary.rip:narrowed | 22-vocabulary.errors.rip:wrongEcho |
+| a union-with-`undefined` member demands its key where `?:` does not | 22-vocabulary.rip:optionality | 22-vocabulary.errors.rip:wrongFirm |
+| a nullable-union TARGET accepts each arm and rejects outside them — a string-or-`undefined` and a number-or-`null` binding, where those arms meet strict-null checking | 22-vocabulary.rip:nullables | 22-vocabulary.errors.rip:wrongDrift |
 
 ### Functions and async
 
 | behavior | carrier | negative carrier |
 | --- | --- | --- |
-| dammit-await types as the awaited value, and a `Promise<T>` annotation validates an async body | ABSENT | ABSENT |
-| a fat arrow with an explicit return type emits inline and enforces that return | ABSENT | ABSENT |
+| dammit-await types as the awaited value, and a `Promise<T>` annotation validates an async body | 23-functions.rip:harvested | 23-functions.errors.rip:wrongPromised |
+| a fat arrow with an explicit return type emits inline and enforces that return | 23-functions.rip:doubler | 23-functions.errors.rip:wrongArrow |
 | prototype augmentation (`String::titleCase: () => string = -> …`) types the write, the call sites, and hover | ABSENT | ABSENT |
 
 ### Modules

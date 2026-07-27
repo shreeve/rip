@@ -1,0 +1,10 @@
+# 23-functions.errors.rip — intentional negatives: the Diagnostics Lane
+# (bun run audit --diagnostics) asserts each one; @ts-nocheck quiets editors only.
+# @ts-nocheck
+
+def fetchCount(): Promise<number>
+  Promise.resolve(9)
+
+wrongPromised = (): Promise<number> => Promise.resolve('text')
+wrongHarvest: string = fetchCount!
+wrongArrow: (n: number) => string = (n) => n

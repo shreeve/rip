@@ -1,0 +1,18 @@
+# 23-functions.rip — what the checker concludes about function faces: the
+# dammit call-and-await, and a fat arrow's declared return
+
+# ── The dammit operator calls AND awaits, so it types as the awaited value,
+# not the promise; the `Promise<T>` annotation validates the body that fills it ──
+
+def fetchCount(): Promise<number>
+  Promise.resolve(9)
+
+harvested = fetchCount!
+
+console.log('dammit:', harvested.toFixed(0))
+
+# ── A fat arrow with an explicit return type emits inline and enforces it ──
+
+doubler: (n: number) => string = (n) => String(n * 2)
+
+console.log('arrow:', doubler(4))
