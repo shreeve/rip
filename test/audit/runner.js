@@ -2133,7 +2133,15 @@ if (RUN_GRAMMAR) {
         // claim's fire side lives in the error lane.
         const full = [FIX, CLM, ERRD].map((d) => path.join(d, file)).find((p) => fs.existsSync(p));
         if (!full) return 'missing';
-        return new RegExp(`\\b${symbol}\\b`).test(fs.readFileSync(full, 'utf8')) ? 'ok' : 'missing';
+        // A carrier must name a DECLARATION, not merely bytes. A text search
+        // over the file is satisfied by the symbol in a comment or a string,
+        // so a claim whose fixture was deleted still reads carried — the one
+        // failure this registry exists to prevent. `declsOf` is the same
+        // extractor the hover and token lanes probe from, so a carrier means
+        // exactly what those lanes would visit. It also removes an
+        // interpolation: the old pattern spliced the symbol in unescaped, so a
+        // carrier carrying a regex metacharacter matched more than it named.
+        return declsOf(fs.readFileSync(full, 'utf8')).some((d) => d.name === symbol) ? 'ok' : 'missing';
       };
       const rows = [];
       const parkedBy = new Map(parks.map((p) => [p.behavior, p.until]));
