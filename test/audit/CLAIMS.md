@@ -19,7 +19,6 @@ A carrier is `fixture:symbol` — the fixture file and a symbol the gate verifie
 | an evolving let read by a hoisted def types through the pin pass | 08-functions.rip:formatOf | — |
 | a block-confined evolving let types through the pin pass — a branch-written binding read by a def above its own statement | 20-inference.rip:recount | 20-inference.errors.rip:wrongHoisted |
 | a destructured binding types through the pin pass — the same hoisted read, bound by a pattern rather than assigned | ABSENT | ABSENT |
-| an annotated declaration under a wrong initializer still hovers its DECLARED type, not the initializer's | ABSENT | ABSENT |
 | destructured bindings carry their source property's type, enforced at use | 20-inference.rip:introduceAll | 20-inference.errors.rip:wrongDestructured |
 | a write-only binding hovers its value type, never `any` | 01-basics.rip:recorded | — |
 | call arity survives paren injection — the implicit spelling is checked like the explicit one | 02-operations.rip:quiet | ABSENT |
