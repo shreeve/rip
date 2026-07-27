@@ -295,6 +295,81 @@ const HOVERS = path.join(HERE, 'hover-pins.json');
 // hover-pins.json: reviewed measurements, gated on RULINGS.md, asserting the
 // interim where a ledger row holds the target.
 const ERROR_PINS = path.join(HERE, 'error-pins.json');
+// ONE terminal width for every wrap in this file. Four sites used to read it
+// independently, with three different fallbacks (120, 120, 200, 200) and only
+// two honouring COLUMNS — so one run could wrap its totals at 200 and its kind
+// lists at 120, and a narrow terminal was reported to only some of them.
+// Reading COLUMNS is also what makes any of this EXERCISABLE: a piped stdout
+// has no `columns`, so `COLUMNS=80 bun run audit | cat` is the only way to see
+// what an 80-column terminal sees.
+//
+// The 60-column floor lives HERE and nowhere else. Each wrap site used to
+// carry its own (60, 40, 80), which is how a narrow run could still print a
+// 76-column totals line: the site's floor outvoted the terminal, after its
+// indent had already been spent. One floor, applied before any indent is
+// subtracted, means the widest PROSE line this file emits is
+// `max(60, terminal)` — and nothing quietly exceeds it.
+const TERM_W = Math.max(60, process.stdout.columns || Number(process.env.COLUMNS) || 120);
+// A styled string's PRINTED width — ANSI escapes occupy no columns, so every
+// wrap decision must measure with this rather than `.length`.
+const visibleW = (s) => s.replace(/\x1b\[[0-9;]*m/g, '').length;
+// Wrap `text` to `width`, indenting continuation lines by `indent` spaces.
+// Splits on spaces, so an unbroken token longer than the width overhangs
+// rather than being cut: a truncated production name or carrier is worse than
+// a long line, since the whole point of printing it is that it can be looked
+// up. Styling survives the break — ANSI state persists across a newline.
+const wrapText = (text, width, indent) => {
+  const out = [];
+  // `null` rather than `''` for "no line yet": splitting on spaces turns a
+  // LEADING run of spaces into empty words, and a truthiness test treats the
+  // partly-built line as still-empty and swallows them. Text that opens with
+  // spaces is exactly the multi-line case — a compiler elaboration indents
+  // its continuation, and that indent is information about nesting.
+  let line = null;
+  for (const word of text.split(' ')) {
+    if (line === null) { line = word; continue; }
+    if (visibleW(line) + 1 + visibleW(word) > width) { out.push(line); line = ' '.repeat(indent) + word; }
+    else line += ' ' + word;
+  }
+  if (line) out.push(line);
+  return out;
+};
+// PROSE wraps; GRID ROWS DO NOT. A table row's columns are its meaning — a
+// wrapped row dangles half its cells under the name column and destroys the
+// alignment that makes the column scannable — so rows print at their natural
+// width (bounded by their own column widths) and only prose comes through
+// here. Continuations hang two spaces in, so a wrapped sentence never reads as
+// a new bullet.
+const wrapAt = (indent, text) => {
+  for (const l of wrapText(text, TERM_W - indent, 2)) console.log(' '.repeat(indent) + l);
+};
+// `wrapAt` for a line that is already fully composed — leading blank lines,
+// indent and all. It reads the indent off the string rather than being told
+// it, so converting a prose call site is `console.log` → `out` and nothing
+// else: the template stays exactly as written, which is what keeps these long
+// interpolated lines legible in the source.
+const out = (s) => {
+  const lead = s.match(/^\n*/)[0];
+  const body = s.slice(lead.length);
+  // The indent can sit BEHIND a styling escape — `dim('          text')` puts
+  // the escape first — so it is read off the VISIBLE text and stripped in a
+  // way that leaves any leading escape in place. Reading it off the raw
+  // string instead sees zero indent, and the continuation lines lose the
+  // column their first line sits in.
+  const indent = body.replace(/\x1b\[[0-9;]*m/g, '').match(/^ */)[0].length;
+  if (lead) process.stdout.write(lead);
+  // A newline INSIDE the line is a HARD BREAK, not whitespace between words:
+  // tsgo elaborates an assignability error across several lines, and handing
+  // that to a space-splitting wrapper drops everything after the first
+  // newline to column zero and then measures the rest of the line against an
+  // offset that is already wrong. Each part wraps on its own at the same
+  // indent, keeping its own leading spaces — the elaboration's nesting is
+  // information, so it is preserved rather than trimmed.
+  for (const part of body.replace(/^((?:\x1b\[[0-9;]*m)*) +/, '$1').split('\n')) {
+    if (part) wrapAt(indent, part); else console.log('');
+  }
+};
+
 const ARGV = process.argv.slice(2);
 // ── flags. THE COMMAND IS THE DOCUMENTATION. Every audit lives in this
 // table, the default one included, and it is the only place that knows an audit
@@ -379,25 +454,42 @@ const KNOWN = new Set([
   ...AUDITS.map((a) => a.flag).filter(Boolean),
   ...FLAGS.flatMap((row) => row.filter((c) => c.startsWith('-'))),
 ]);
-const usage = () => [
-  'The audit gauge — a progress scoreboard (not a pass/fail gate) for rip\'s',
-  'typed-editor story: the compiler\'s TS face plus the tsgo-brokered editor,',
-  'measured over the typed fixtures in ./corpus. Not part of `bun test`.',
-  '',
-  'Usage: bun run audit [flag]',
-  '',
-  `  ${'(no flag)'.padEnd(16)} EVERY lane — the default, because a lane left unrun reports nothing`,
-  ...AUDITS.filter((a) => a.flag).map((a) => `  ${a.flag.padEnd(16)} the ${a.name} only (${a.runs ?? 'drives the editor server'})`),
-  ...FLAGS.map((row) => `  ${row.slice(0, -1).join(', ').padEnd(16)} ${row.at(-1)}`),
-  '',
-  'The audits, and what each is judged against:',
-  '',
-  ...AUDITS.flatMap((a) => [
-    `  ${a.name} (${a.flag ?? 'default'}) — ${a.blurb}`,
-    ...a.judge.split('\n').map((l, i) => `    ${i === 0 ? 'judged against: ' : '                '}${l}`),
+// Help is the one screen a reader meets before they know anything, so it wraps
+// to THEIR terminal rather than to a width chosen when it was written. The
+// `judge` texts carry their own hand-placed newlines — those are reflow points,
+// not layout, so they collapse to spaces and the paragraph re-wraps whole.
+const usage = () => {
+  const para = (text, indent, hang) => wrapText(text.replace(/\s*\n\s*/g, ' '), TERM_W - indent, hang)
+    .map((l) => ' '.repeat(indent) + l);
+  // A flag and its description are a two-column row: the description wraps
+  // under itself, never back under the flag.
+  const row = (label, text) => {
+    const [first, ...more] = wrapText(text, TERM_W - 19, 0);
+    return [`  ${label.padEnd(16)} ${first}`, ...more.map((l) => ' '.repeat(19) + l)];
+  };
+  return [
+    ...para('The audit gauge — a progress scoreboard (not a pass/fail gate) for rip\'s typed-editor story: '
+      + 'the compiler\'s TS face plus the tsgo-brokered editor, measured over the typed fixtures in ./corpus. '
+      + 'Not part of `bun test`.', 0, 0),
     '',
-  ]),
-].join('\n');
+    'Usage: bun run audit [flag]',
+    '',
+    ...row('(no flag)', 'EVERY lane — the default, because a lane left unrun reports nothing'),
+    ...AUDITS.filter((a) => a.flag).flatMap((a) => row(a.flag, `the ${a.name} only (${a.runs ?? 'drives the editor server'})`)),
+    ...FLAGS.flatMap((r) => row(r.slice(0, -1).join(', '), r.at(-1))),
+    '',
+    'The audits, and what each is judged against:',
+    '',
+    ...AUDITS.flatMap((a) => [
+      ...para(`${a.name} (${a.flag ?? 'default'}) — ${a.blurb}`, 2, 2),
+      ...(() => {
+        const [first, ...more] = wrapText(a.judge.replace(/\s*\n\s*/g, ' '), TERM_W - 20, 0);
+        return [`    judged against: ${first}`, ...more.map((l) => ' '.repeat(20) + l)];
+      })(),
+      '',
+    ]),
+  ].join('\n');
+};
 if (ARGV.includes('--help') || ARGV.includes('-h')) { console.log('\n' + usage()); process.exit(0); }
 // An unknown flag must NOT fall through to the default audit and report green —
 // a typo'd `--tokens` would look like a clean Token Audit that never ran.
@@ -1524,9 +1616,18 @@ const RULE_W = NAME_W + 3 + DIMS.reduce((a, [, w]) => a + w, 0) + (DIMS.length -
 // render a heavier glyph; others implement bold as a brighter foreground, which
 // reverse swaps into a brighter background), so if this reads thin, the fix is
 // an explicit pair like `1;30;47` — bold black on white, never using reverse.
+// The rule is the GRID's width, but it must never exceed the TERMINAL's: a
+// rule that wraps prints a second stub line of dots under the first, which
+// reads as a rendering fault rather than a seam. The subtitle drops to its own
+// wrapped line when the chip leaves it too little room to sit alongside.
 const auditBanner = (title, subtitle) => {
-  console.log(`\n\n  ${paint('1;7', ` ${title} `)}${subtitle ? '  ' + dim(subtitle) : ''}`);
-  console.log(`  ${dim('┈'.repeat(RULE_W))}\n`);
+  const chip = `  ${paint('1;7', ` ${title} `)}`;
+  const room = TERM_W - visibleW(chip) - 2;
+  if (subtitle && visibleW(subtitle) > room) {
+    console.log(`\n\n${chip}`);
+    wrapAt(2, dim(subtitle));
+  } else console.log(`\n\n${chip}${subtitle ? '  ' + dim(subtitle) : ''}`);
+  console.log(`  ${dim('┈'.repeat(Math.min(RULE_W, TERM_W - 2)))}\n`);
 };
 
 // ── the server pool: ONE EDITOR SERVER PER LANE.
@@ -1761,7 +1862,7 @@ if (RUN_GRAMMAR) {
     // A claims fixture parses but contributes no coverage, so it must not wear
     // the ✓ a contributing fixture wears: one mark, two meanings, and the
     // weaker meaning is the one a reader would assume.
-    if (!r.grammarBucket) { console.log(`    ${dim('·')} ${pad(r.f, NAME_W + 2)} ${dim('claims-chartered — carriage judged under Corpus claims')}`); continue; }
+    if (!r.grammarBucket) { console.log(`    ${dim('·')} ${pad(r.f, NAME_W + 2)} ${dim('claims-chartered — judged under Corpus claims')}`); continue; }
     const u = uniqueOf(r.f);
     console.log(`    ${green('✓')} ${pad(r.f, NAME_W + 2)} ${dim(`${String(r.reduced).padStart(3)} rules · `)}${(u ? dim : yellow)(`${String(u).padStart(3)} unique`)}`);
   }
@@ -1775,19 +1876,19 @@ if (RUN_GRAMMAR) {
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push(names[i]);
   }
-  console.log(`\n    ${bold('Coverage')} ${dim(`(exercised = reduced by at least one fixture)`)}`);
+  out(`\n    ${bold('Coverage')} ${dim(`(exercised = reduced by at least one fixture)`)}`);
   const pct = ((100 * (denom.length - uncovered.length)) / denom.length).toFixed(1);
   console.log(`    ${(uncovered.length ? yellow : green)(String(denom.length - uncovered.length))} ${dim('/')} ${dim(String(denom.length))} ${dim(`productions (${pct}%)`)}`);
   if (excludedIdx.length) {
-    console.log(`    ${dim(`${excludedIdx.length} excluded by the gate (unreachable, banned, or coverable only by a fixture that asserts nothing) — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`)}`);
-    if (VERBOSE) for (const i of excludedIdx) console.log(`        ${dim(names[i])} ${dim('·')} ${dim(EXCLUDED.get(names[i]))}`);
+    out(`    ${dim(`${excludedIdx.length} excluded by the gate (unreachable, banned, or coverable only by a fixture that asserts nothing) — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`)}`);
+    if (VERBOSE) for (const i of excludedIdx) out(`        ${dim(names[i])} ${dim('·')} ${dim(EXCLUDED.get(names[i]))}`);
   }
   // The verdict on the unique column above: a fixture with no unique
   // reductions is deletable at zero coverage cost, and that is a standing
   // fact rather than a verbose detail, so it states itself either way.
   {
     const removable = grammarFixtures.filter((f) => uniqueOf(f) === 0);
-    console.log(`    ${removable.length
+    out(`    ${removable.length
       ? yellow(`removable with zero coverage loss (no unique reductions): ${removable.join(', ')}`)
       : dim('every grammar fixture reduces at least one production no other fixture does')}`);
   }
@@ -1968,7 +2069,7 @@ if (RUN_GRAMMAR) {
     // A kind list wraps on its own indented lines — a single long line pushes
     // past the terminal and dangles unindented fragments.
     const wrapList = (items, paintFn) => {
-      const width = Math.max(60, (process.stdout.columns || 120) - 10);
+      const width = TERM_W - 10;
       let line = '';
       const flush = () => { if (line) console.log(`        ${paintFn(line)}`); line = ''; };
       for (const c of items) {
@@ -2082,35 +2183,35 @@ if (RUN_GRAMMAR) {
     const falseSpellingExclusions = [...EXCLUDED_SPELLINGS.keys()].filter((s) => spellingSeen.has(s));
     const staleSpellingExclusions = [...EXCLUDED_SPELLINGS.keys()]
       .filter((s) => !rewrittenAll.some((r) => r.spelling === s));
-    console.log(`\n    ${bold('Lexer-spelling census')} ${dim("(the denominator below the productions: spellings the lexer rewrites before the parser sees them)")}`);
+    out(`\n    ${bold('Lexer-spelling census')} ${dim("(the denominator below the productions: spellings the lexer rewrites before the parser sees them)")}`);
     // Deliberately NOT a fraction. This queue is a gauge — the next line says
     // so — and a `5 / 9` printed between two closed-denominator scores reads
     // as the worst mark on the screen, which is a comparison the prose then
     // has to spend a sentence undoing. A count of what is tracked carries the
     // same information and invites no ranking against the obligations.
-    console.log(`    ${dim(`${spellings.length} spellings tracked`)}${dim(` · ${rewritten.length} from the lexer's alias table, ${MINTS.length} curated mints`)}${EXCLUDED_SPELLINGS.size ? dim(` · ${EXCLUDED_SPELLINGS.size} excluded by the gate — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`) : ''}`);
-    if (VERBOSE) for (const [s, why] of EXCLUDED_SPELLINGS) console.log(`        ${pad(s, 8)} ${dim(`excluded — ${why}`)}`);
+    out(`    ${dim(`${spellings.length} spellings tracked`)}${dim(` · ${rewritten.length} from the lexer's alias table, ${MINTS.length} curated mints`)}${EXCLUDED_SPELLINGS.size ? dim(` · ${EXCLUDED_SPELLINGS.size} excluded by the gate — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`) : ''}`);
+    if (VERBOSE) for (const [s, why] of EXCLUDED_SPELLINGS) out(`        ${pad(s, 8)} ${dim(`excluded — ${why}`)}`);
     if (darkSpellings.length) {
-      console.log(`    ${yellow(`${darkSpellings.length} never written by the corpus — candidates, not obligations:`)}`);
+      out(`    ${yellow(`${darkSpellings.length} never written by the corpus — candidates, not obligations:`)}`);
       for (const s of darkSpellings) console.log(`        ${yellow(pad(s.spelling, 8))} ${dim(`→ ${s.becomes}`)}`);
-    } else console.log(`    ${green('every rewritten spelling is written somewhere in the corpus')}`);
+    } else out(`    ${green('every rewritten spelling is written somewhere in the corpus')}`);
     if (VERBOSE) for (const s of spellings.filter((x) => spellingSeen.has(x.spelling))) {
-      console.log(`        ${pad(s.spelling, 8)} ${dim(`→ ${s.becomes} · lexes as ${[...spellingSeen.get(s.spelling)].join(', ')}`)}`);
+      out(`        ${pad(s.spelling, 8)} ${dim(`→ ${s.becomes} · lexes as ${[...spellingSeen.get(s.spelling)].join(', ')}`)}`);
     }
-    for (const m of staleMints) console.log(`    ${red('✗')} ${red(`curated mint no longer minted:`)} ${m.spelling} ${dim(`— \`${m.probe}\` does not produce it; the lexer changed, so fix or retire the row`)}`);
-    for (const s of falseSpellingExclusions) console.log(`    ${red('✗')} ${red('excluded but written:')} ${s} ${dim('— the redundancy claim is false; count the spelling or stop writing it')}`);
-    for (const s of staleSpellingExclusions) console.log(`    ${red('✗')} ${red('excluded spelling the lexer no longer rewrites:')} ${s} ${dim('— stale; fix the spelling exclusion table')}`);
+    for (const m of staleMints) out(`    ${red('✗')} ${red(`curated mint no longer minted:`)} ${m.spelling} ${dim(`— \`${m.probe}\` does not produce it; the lexer changed, so fix or retire the row`)}`);
+    for (const s of falseSpellingExclusions) out(`    ${red('✗')} ${red('excluded but written:')} ${s} ${dim('— the redundancy claim is false; count the spelling or stop writing it')}`);
+    for (const s of staleSpellingExclusions) out(`    ${red('✗')} ${red('excluded spelling the lexer no longer rewrites:')} ${s} ${dim('— stale; fix the spelling exclusion table')}`);
 
-    console.log(`\n    ${bold('Type vocabulary census')} ${dim(`(the sub-token denominator: every kind in TS's own type grammar, enumerated from the pinned tsgo)`)}`);
-    console.log(`    ${dim(`${claimedSet.size} / ${censusDenom.length} kinds claimed by the positives`)}${EXCLUDED_KINDS.size ? dim(` · ${EXCLUDED_KINDS.size} excluded by the gate — netted from the denominator; -v lists them`) : ''}`);
+    out(`\n    ${bold('Type vocabulary census')} ${dim(`(the sub-token denominator: every kind in TS's own type grammar, enumerated from the pinned tsgo)`)}`);
+    out(`    ${dim(`${claimedSet.size} / ${censusDenom.length} kinds claimed by the positives`)}${EXCLUDED_KINDS.size ? dim(` · ${EXCLUDED_KINDS.size} excluded by the gate — netted from the denominator; -v lists them`) : ''}`);
     if (kindQueue.length) {
-      console.log(`    ${yellow(`${kindQueue.length} unclaimed — the vocabulary queue:`)}`);
+      out(`    ${yellow(`${kindQueue.length} unclaimed — the vocabulary queue:`)}`);
       wrapList(kindQueue, yellow);
-    } else console.log(`    ${green('every kind claimed or excluded')}`);
-    if (VERBOSE) for (const [k, why] of EXCLUDED_KINDS) console.log(`        ${pad(k, 26)} ${dim(`excluded — ${why}`)}`);
-    for (const k of claimedOutside) console.log(`    ${red('✗')} ${red('claimed kind outside the census universe:')} ${k} ${dim('— extend the universe derivation in classifyTypeTexts')}`);
-    for (const k of falseKindExclusions) console.log(`    ${red('✗')} ${red('excluded but claimed:')} ${k} ${dim("— the exclusion claim is false; fix the census exclusion table")}`);
-    for (const k of staleKindExclusions) console.log(`    ${red('✗')} ${red('excluded kind not in the universe:')} ${k} ${dim("— stale; fix the census exclusion table")}`);
+    } else out(`    ${green('every kind claimed or excluded')}`);
+    if (VERBOSE) for (const [k, why] of EXCLUDED_KINDS) out(`        ${pad(k, 26)} ${dim(`excluded — ${why}`)}`);
+    for (const k of claimedOutside) out(`    ${red('✗')} ${red('claimed kind outside the census universe:')} ${k} ${dim('— extend the universe derivation in classifyTypeTexts')}`);
+    for (const k of falseKindExclusions) out(`    ${red('✗')} ${red('excluded but claimed:')} ${k} ${dim("— the exclusion claim is false; fix the census exclusion table")}`);
+    for (const k of staleKindExclusions) out(`    ${red('✗')} ${red('excluded kind not in the universe:')} ${k} ${dim("— stale; fix the census exclusion table")}`);
     // ── CONTAINMENT HEADS — what the matrix can express at all. The cells
     // CLAIMS.md rules are joined against pairs of these, so a head no
     // fixture produces is the matrix advertising a capability it does not
@@ -2119,20 +2220,20 @@ if (RUN_GRAMMAR) {
     // because the fix is a decision either way — drop the head if the
     // parser never mints it, or spell it in a fixture if it does.
     const headsUnseen = [...CONSTRUCT_HEADS].filter((h) => !headsSeen.has(h)).sort();
-    console.log(`\n    ${bold('Containment heads')} ${dim('(the matrix\'s vocabulary: pairs of these are what CLAIMS.md cells can name)')}`);
+    out(`\n    ${bold('Containment heads')} ${dim('(the matrix\'s vocabulary: pairs of these are what CLAIMS.md cells can name)')}`);
     // The pair count does NOT belong here: it has no denominator and can only
     // rise, so on its own it is a number a reader cannot act on. Where it
     // means something is next to the cells it is the pool for, so it prints
     // with the Containment summary under Corpus claims.
-    console.log(`    ${(headsUnseen.length ? red : green)(String(headsSeen.size))} ${dim('/')} ${dim(String(CONSTRUCT_HEADS.size))} ${dim('heads spelled by a fixture')}`);
-    for (const h of headsUnseen) console.log(`    ${red('✗')} ${red(`curated head no fixture produces: ${h}`)} ${dim('— drop it if the parser never mints it, or spell it if it does')}`);
+    out(`    ${(headsUnseen.length ? red : green)(String(headsSeen.size))} ${dim('/')} ${dim(String(CONSTRUCT_HEADS.size))} ${dim('heads spelled by a fixture')}`);
+    for (const h of headsUnseen) out(`    ${red('✗')} ${red(`curated head no fixture produces: ${h}`)} ${dim('— drop it if the parser never mints it, or spell it if it does')}`);
 
-    console.log(`\n    ${bold('Negative coverage')} ${dim(`(the error lane against the positive corpus's own claims — vocabulary contractual, family fractions a gauge)`)}`);
-    console.log(`    ${dim(`${negParsed} error fixtures reduce ${negSeen.size} productions`)}${famZero.length ? `${dim(' · families with no negative at all: ')}${yellow(famZero.join(', '))}` : ''}`);
+    out(`\n    ${bold('Negative coverage')} ${dim(`(the error lane against the positive corpus's own claims — vocabulary contractual, family fractions a gauge)`)}`);
+    out(`    ${dim(`${negParsed} error fixtures reduce ${negSeen.size} productions`)}${famZero.length ? `${dim(' · families with no negative at all: ')}${yellow(famZero.join(', '))}` : ''}`);
     if (VERBOSE) for (const [g, n] of [...famPos.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-      console.log(`        ${pad(g, 24)} ${dim(`${String(famNeg.get(g) ?? 0).padStart(3)} of ${String(n).padStart(3)} exercised constructs appear in a negative`)}`);
+      out(`        ${pad(g, 24)} ${dim(`${String(famNeg.get(g) ?? 0).padStart(3)} of ${String(n).padStart(3)} exercised constructs appear in a negative`)}`);
     }
-    console.log(`    ${dim(`type vocabulary: positives claim ${claimed.length} classes`)}${unfalsified.length ? `${dim(' · ')}${red(`${unfalsified.length} unfalsified (no negative instance) — every claimed class needs one`)}` : `${dim(' · ')}${green('every claimed class has a negative instance')}`}`);
+    out(`    ${dim(`type vocabulary: positives claim ${claimed.length} classes`)}${unfalsified.length ? `${dim(' · ')}${red(`${unfalsified.length} unfalsified (no negative instance) — every claimed class needs one`)}` : `${dim(' · ')}${green('every claimed class has a negative instance')}`}`);
     if (unfalsified.length) wrapList(unfalsified, red);
     if (VERBOSE) for (const [c, n] of claimed) console.log(`        ${pad(c, 24)} ${dim(`${String(n).padStart(4)} in positives · ${String(negVocab.get(c) ?? 0).padStart(3)} in the error lane`)}`);
     ng = {
@@ -2237,28 +2338,28 @@ if (RUN_GRAMMAR) {
         claimsOrphans++;
         loud.push(`${red('✗')} ${f} ${dim('— a claims fixture no CLAIMS row names: removable, or mis-bucketed under corpus/claims')}`);
       }
-      console.log(`\n    ${bold('Corpus claims')} ${dim('(CLAIMS.md — behaviors and containment cells; the no-denominator coverage record)')}`);
-      console.log(`    ${dim('behaviors: ')}${green(`${carried} carried`)}${absent ? `${dim(' · ')}${yellow(`${absent} ruled, uncarried`)}` : ''}${parked ? `${dim(' · ')}${yellow(`${parked} parked`)}` : ''}${VERBOSE ? '' : dim(' — -v lists every row')}`);
+      out(`\n    ${bold('Corpus claims')} ${dim('(CLAIMS.md — behaviors and containment cells; the no-denominator coverage record)')}`);
+      out(`    ${dim('behaviors: ')}${green(`${carried} carried`)}${absent ? `${dim(' · ')}${yellow(`${absent} ruled, uncarried`)}` : ''}${parked ? `${dim(' · ')}${yellow(`${parked} parked`)}` : ''}${VERBOSE ? '' : dim(' — -v lists every row')}`);
       // The pair count lands here, where it is not a bare rising number but
       // the pool the cells below are drawn from.
-      console.log(`    ${dim('containment: ')}${(cellsMissing ? red : green)(`${cells.length - cellsMissing} of ${cells.length} cells carried`)}${dim(` · ${pairsSeen.size} pairs available to name`)}`);
-      for (const r of (VERBOSE ? [...loud, ...quiet] : loud)) console.log(`      ${r}`);
+      out(`    ${dim('containment: ')}${(cellsMissing ? red : green)(`${cells.length - cellsMissing} of ${cells.length} cells carried`)}${dim(` · ${pairsSeen.size} pairs available to name`)}`);
+      for (const r of (VERBOSE ? [...loud, ...quiet] : loud)) out(`      ${r}`);
       ng.claimsAbsent = absent; ng.claimsBroken = broken + claimsOrphans; ng.cellsMissing = cellsMissing;
       ng.claimsParked = parked; ng.claimsBadParks = staleParks.length + orphanParks.length;
     }
   }
   const falseExclusions = excludedIdx.filter((i) => seen.has(i));
-  for (const i of falseExclusions) console.log(`    ${red('✗')} ${red('excluded but reduced:')} ${names[i]} ${dim("— the exclusion claim is false; fix the gate's exclusion table")}`);
-  for (const k of staleExcluded) console.log(`    ${red('✗')} ${red('excluded row names no grammar production:')} ${k} ${dim("— stale; fix the gate's exclusion table")}`);
+  for (const i of falseExclusions) out(`    ${red('✗')} ${red('excluded but reduced:')} ${names[i]} ${dim("— the exclusion claim is false; fix the gate's exclusion table")}`);
+  for (const k of staleExcluded) out(`    ${red('✗')} ${red('excluded row names no grammar production:')} ${k} ${dim("— stale; fix the gate's exclusion table")}`);
   if (groups.size) {
     const title = owner ? 'Uncovered, by owning file (MANIFEST.md)' : 'Uncovered, by construct';
-    console.log(`\n    ${bold(title)} ${dim(`— the M3 queue; ${VERBOSE ? 'every production shown' : 'counts only, -v for every production'}`)}`);
+    out(`\n    ${bold(title)} ${dim(`— the M3 queue; ${VERBOSE ? 'every production shown' : 'counts only, -v for every production'}`)}`);
     // Files read in wave order; constructs by descending count.
     const rows = [...groups.entries()].sort(owner ? (a, b) => a[0].localeCompare(b[0]) : (a, b) => b[1].length - a[1].length);
     for (const [g, rules] of rows) {
       const paint = g === 'UNALLOCATED' ? red : yellow;
       console.log(`      ${pad(g, 24)} ${paint(String(rules.length).padStart(3))}`);
-      if (VERBOSE || g === 'UNALLOCATED') for (const r of rules) console.log(`        ${dim(r)}${owner?.parked.has(r) ? ' ' + yellow('· parked') : ''}`);
+      if (VERBOSE || g === 'UNALLOCATED') for (const r of rules) out(`        ${dim(r)}${owner?.parked.has(r) ? ' ' + yellow('· parked') : ''}`);
     }
   }
   gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, groups: groups.size, groupKind: owner ? 'files' : 'constructs', unallocated: groups.get('UNALLOCATED')?.length ?? 0, excluded: excludedIdx.length, badExclusions: falseExclusions.length + staleExcluded.length, negatives: ng };
@@ -2321,9 +2422,9 @@ if (RUN_MAP) {
   // rewrite REFUSES (no resolved position to hold wrong text), mark-width
   // RESOLVES to the wrong bytes — so `unplaced` and `mistext` partition the
   // flagged set, and each is the root the other cannot catch.
-  console.log(`\n  ${bold('Invariants')} ${dim(`(${totFlag} of ${totReads} reads unmapped — every position from the compiler's own rows)`)}`);
+  out(`\n  ${bold('Invariants')} ${dim(`(${totFlag} of ${totReads} reads unmapped — every position from the compiler's own rows)`)}`);
   const invLine = (label, n, note) =>
-    console.log(`    ${pad(label, 10)} ${(n === 0 ? green : yellow)(String(n).padStart(4))}   ${dim(note)}`);
+    out(`    ${pad(label, 10)} ${(n === 0 ? green : yellow)(String(n).padStart(4))}   ${dim(note)}`);
   invLine('unplaced', unplaced, '`placed` fails — the precise map REFUSES, a rewrite breaks the cover\'s verbatim prefix');
   invLine('mistext', mistext, '`text` fails — resolves, but to the WRONG bytes: mark-width, so a hover at the use site names the wrong symbol');
 
@@ -2335,8 +2436,8 @@ if (RUN_MAP) {
   // source spans drives it to zero — no downstream resolver tweak can — which is
   // why THIS number is the gate, not the symptom count. Same mapping rows, no
   // server, no oracle.
-  console.log(`\n  ${bold('Census')} ${dim('(reads with no exact row — the mitigation-proof at-risk population)')}`);
-  console.log(`    ${pad('census', 10)} ${(census === 0 ? green : yellow)(String(census).padStart(4))}   ${dim(`of ${totReads} reads — ${totFlag} broken today (flagged above) + ${byLuck} resolving by luck (one face rewrite from breaking)`)}`);
+  out(`\n  ${bold('Census')} ${dim('(reads with no exact row — the mitigation-proof at-risk population)')}`);
+  out(`    ${pad('census', 10)} ${(census === 0 ? green : yellow)(String(census).padStart(4))}   ${dim(`of ${totReads} reads — ${totFlag} broken today (flagged above) + ${byLuck} resolving by luck (one face rewrite from breaking)`)}`);
   // The decomposition is exact BY CONSTRUCTION — a flagged read always lacks an
   // exact row (see mappingScan) — so census === broken-today + by-luck. Checked,
   // not assumed: it rests on the compiler keeping synthetic rows zero-width on
@@ -2355,8 +2456,8 @@ if (RUN_MAP) {
   const rootTotal = (m) => [...m.values()].reduce((a, b) => a + b, 0);
   console.log(`\n  ${bold('Roots')} ${dim('(classified from the mapping row each read fell to)')}`);
   const rootLine = (label, n, note, roles) => {
-    console.log(`    ${pad(label, 10)} ${(n === 0 ? green : yellow)(String(n).padStart(4))}   ${dim(note)}`);
-    if (roles) console.log(`    ${' '.repeat(15)}${dim(roles)}`);
+    out(`    ${pad(label, 10)} ${(n === 0 ? green : yellow)(String(n).padStart(4))}   ${dim(note)}`);
+    if (roles) out(`    ${' '.repeat(15)}${dim(roles)}`);
   };
   rootLine('synthetic', rootTotal(byRootRole.synthetic), 'a mark carries glyphs its source span does not', roleBreak(byRootRole.synthetic));
   rootLine('rewrite', rootTotal(byRootRole.rewrite), 'a string literal re-rendered double-quoted', roleBreak(byRootRole.rewrite));
@@ -2368,7 +2469,7 @@ if (RUN_MAP) {
   // does not abort — but it prints red and names every offender, because it
   // would be a NEW finding, not a known one.
   if (missing === 0) {
-    console.log(`\n  ${green('✓')} ${dim(`every flagged read has a containing row — no genuinely missing span`)}`);
+    out(`\n  ${green('✓')} ${dim(`every flagged read has a containing row — no genuinely missing span`)}`);
   } else {
     console.log(`\n  ${red('✗')} ${bold(`${missing} flagged read(s) with NO containing row`)} ${dim('— a missing span, a new class not seen before:')}`);
     for (const r of missingRows.slice(0, 10)) console.log(`      ${red('·')} ${bold(r.name)} ${dim(`@ ${r.f} offset ${r.offset}`)}`);
@@ -2381,8 +2482,14 @@ if (RUN_MAP) {
   // the mapping row's role, and — for a mistext — the face bytes it landed on,
   // which is exactly what a hover at that position would answer about. Cross-
   // check any row against the real editor by hovering `line:col` in the fixture.
+  //
+  // These rows do NOT wrap, and are the largest deliberate exception in the
+  // file: six aligned columns over 500-odd rows, where the alignment IS how a
+  // reader scans for the one row they want. Wrapping the tail would stagger
+  // every column after it. A narrow terminal loses the last column here; the
+  // alternative loses the listing.
   if (VERBOSE && totFlag) {
-    console.log(`\n  ${bold('Flagged reads')} ${dim('(-v — every one, so each can be checked against the editor at its line:col)')}`);
+    out(`\n  ${bold('Flagged reads')} ${dim('(-v — every one, so each can be checked against the editor at its line:col)')}`);
     for (const pf of perFile) {
       if (!pf.rows.length) continue;
       console.log(`\n    ${bold(pf.f)} ${dim(`(${pf.rows.length})`)}`);
@@ -2507,7 +2614,7 @@ if (RUN_MAIN) {
       console.log(`    ${bold(r.name)}`);
       for (const [label, detail] of notes) console.log(`      ${dim('·')} ${label} ${dim('— ' + detail)}`);
       // A failure always shows its evidence — no flag needed to learn WHY.
-      if (r.diags?.length) for (const d of r.diags) console.log(dim(`          ${d.range.start.line}:${d.range.start.character} [TS${d.code}] ${d.message}`));
+      if (r.diags?.length) for (const d of r.diags) out(dim(`          ${d.range.start.line}:${d.range.start.character} [TS${d.code}] ${d.message}`));
       if (r.twinErrs?.length) for (const e of r.twinErrs) console.log(dim(`          twin: ${e}`));
       // The implicit-any evidence is bulky and REPETITIVE by nature: ONE
       // untyped param fans out into a diagnostic per member access, all
@@ -2524,7 +2631,7 @@ if (RUN_MAIN) {
         }
         for (const [at, es] of [...sites].slice(0, 4)) {
           const more = es.length > 1 ? dim(` (+${es.length - 1} more here)`) : '';
-          console.log(dim(`          strict: ${at} [TS${es[0].code}] ${es[0].message}`) + more);
+          out(dim(`          strict: ${at} [TS${es[0].code}] ${es[0].message}`) + more);
         }
         const rest = sites.size - Math.min(sites.size, 4);
         if (rest > 0) console.log(dim(`          strict: … and ${rest} more site${rest === 1 ? '' : 's'} (see \`rip check\` under rip.strict)`));
@@ -2752,7 +2859,7 @@ if (RUN_ERRORS) {
     onDone: (r) => {
       const ok = r.problems.length === 0;
       console.log(`    ${ok ? green('✓') : red('✗')} ${pad(path.join('errors', r.name), ERR_NAME_W)} ${dim(`${r.expected.length} diagnostic(s) asserted`)}`);
-      for (const p of r.problems) console.log(`        ${red('·')} ${yellow(p.kind)} ${dim(p.note)}`);
+      for (const p of r.problems) out(`        ${red('·')} ${yellow(p.kind)} ${dim(p.note)}`);
     },
   });
   const missedErr = errorFixtures.filter((f, i) => !laneRows[i] || laneRows[i].name !== f);
@@ -2988,7 +3095,7 @@ if (RUN_HOVER || RUN_TOKENS) {
     if (RUN_TOKENS && (!p.tokens || !p.tokens.length)) gaps.push(`${f}: no semantic tokens returned`);
   }
   if (gaps.length) await abort('The probe pass did not cover the corpus', gaps);
-  console.log(`    ${green('✓')} ${dim(`coverage: ${want.length} compiling fixture(s), ${want.reduce((n, f) => n + PROBES.get(f).decls.length, 0)} declarations — all probed, all answered`)}`);
+  out(`    ${green('✓')} ${dim(`coverage: ${want.length} compiling fixture(s), ${want.reduce((n, f) => n + PROBES.get(f).decls.length, 0)} declarations — all probed, all answered`)}`);
 }
 
 // ── the Hover Audit: twin oracle (correctness) + expected hovers (baseline)
@@ -3127,7 +3234,7 @@ if (RUN_HOVER) {
 
   const probed = allRows.length;
   console.log(`\n  ${bold('Parity')} ${dim(`(${probed} probes${hskip ? `, ${hskip} file(s) skipped` : ''})`)}`);
-  const prow = (label, n, color, note) => console.log(`    ${pad(label, 12)} ${color(String(n).padStart(3))}${note ? '   ' + dim(note) : ''}`);
+  const prow = (label, n, color, note) => out(`    ${pad(label, 12)} ${color(String(n).padStart(3))}${note ? '   ' + dim(note) : ''}`);
   prow('agree', tally.agree, green, tally.order ? `incl. ${tally.order} union-order` : '');
   prow('gaps', tally.gap, tally.gap ? yellow : green, tally.gap ? 'hover ≠ tsgo twin on a comparable type' : '');
   prow('rip-native', tally.native, dim, 'component / schema / reactive — twin uses React/zod, no oracle');
@@ -3161,9 +3268,9 @@ if (RUN_HOVER) {
   if (gaps.length) {
     console.log(`\n    ${bold('Gaps — hover ≠ tsgo twin on a comparable type')} ${dim('(after quote / keyword / union-order normalization)')}`);
     for (const r of gaps) {
-      console.log(`      ${yellow('✗')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text})`)}`);
-      console.log(`          ${dim('tsgo')} ${green(r.ts)}`);
-      console.log(`          ${dim('rip ')} ${yellow(r.hover)}`);
+      out(`      ${yellow('✗')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text})`)}`);
+      out(`          ${dim('tsgo')} ${green(r.ts)}`);
+      out(`          ${dim('rip ')} ${yellow(r.hover)}`);
     }
   }
   if (snapChanged.length) {
@@ -3176,29 +3283,29 @@ if (RUN_HOVER) {
     for (const v of violations) console.log(`      ${red('✗')} ${dim(v)}`);
   }
   if (silentLeaks.length) {
-    console.log(`\n    ${bold('Ruled-silent positions serving an answer')} ${dim('(bare ~> — RULINGS.md, Reactive; red by agreement while the bare-effect finding is open)')}`);
-    for (const s of silentLeaks) console.log(`      ${red('✗')} ${s.file}:${s.line + 1}  ${dim(`→ ${s.hover}`)}`);
+    out(`\n    ${bold('Ruled-silent positions serving an answer')} ${dim('(bare ~> — RULINGS.md, Reactive; red by agreement while the bare-effect finding is open)')}`);
+    for (const s of silentLeaks) out(`      ${red('✗')} ${s.file}:${s.line + 1}  ${dim(`→ ${s.hover}`)}`);
   }
   if (ruledDiverging.length) {
-    console.log(`\n    ${bold('Ruled positions diverging from their pins')} ${dim('(RULINGS.md, Components / render; red by agreement while the render-DSL and member-wrapper findings are open)')}`);
+    out(`\n    ${bold('Ruled positions diverging from their pins')} ${dim('(RULINGS.md, Components / render; red by agreement while the render-DSL and member-wrapper findings are open)')}`);
     for (const r of ruledDiverging) {
       console.log(`      ${red('✗')} ${r.file}:${r.line}:${r.character} ${bold(r.token)} ${dim(`[${r.rule}]`)}`);
-      console.log(`          ${dim('pin')} ${green(JSON.stringify(r.expect ?? null))}`);
-      console.log(`          ${dim('now')} ${yellow(JSON.stringify(r.hover ?? null))}`);
+      out(`          ${dim('pin')} ${green(JSON.stringify(r.expect ?? null))}`);
+      out(`          ${dim('now')} ${yellow(JSON.stringify(r.hover ?? null))}`);
     }
   }
   if (VERBOSE) for (const [label, rowset] of [['rip-native (expected divergences — twin uses React/zod)', natives], ['pinned-only (no twin symbol)', pinnedOnly]]) {
     if (!rowset.length) continue;
     console.log(`\n    ${dim(label)}`);
     for (const r of rowset) {
-      console.log(`      ${green('•')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text})`)}`);
-      if (r.ts != null) console.log(`          ${dim('tsgo')} ${dim(r.ts)}`);
-      console.log(`          ${dim('rip ')} ${dim(r.hover)}`);
+      out(`      ${green('•')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text})`)}`);
+      if (r.ts != null) out(`          ${dim('tsgo')} ${dim(r.ts)}`);
+      out(`          ${dim('rip ')} ${dim(r.hover)}`);
     }
   }
 
   const typedRatio = `${probeCount - anyCount} / ${probeCount}`;
-  console.log(`\n  ${bold('Gauge')} ${dim('(hover probes answering a real type, not `any` — keep this full)')}`);
+  out(`\n  ${bold('Gauge')} ${dim('(hover probes answering a real type, not `any` — keep this full)')}`);
   console.log(`    ${pad('typed hovers', 12)} ${anyCount === 0 ? green(typedRatio) : yellow(typedRatio)}`);
 
   hp = { probed, gap: tally.gap, snapChanged: snapChanged.length, violations };
@@ -3294,13 +3401,13 @@ if (RUN_TOKENS) {
       if (!rows.length) return;
       console.log(`\n    ${bold(label)}`);
       for (const r of rows) {
-        console.log(`      ${red('✗')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text})`)}`);
+        out(`      ${red('✗')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text})`)}`);
         render(r);
       }
     };
 
-    console.log(`\n  ${bold('Invariants')} ${dim(`(${probed} declarations${tskip ? `, ${tskip} file(s) skipped` : ''} — every expectation derived from .rip syntax)`)}`);
-    const irow = (label, bad, den, note) => console.log(
+    out(`\n  ${bold('Invariants')} ${dim(`(${probed} declarations${tskip ? `, ${tskip} file(s) skipped` : ''} — every expectation derived from .rip syntax)`)}`);
+    const irow = (label, bad, den, note) => out(
       `    ${pad(label, 12)} ${(bad ? red : green)(String(den - bad).padStart(3))} ${dim('/')} ${dim(String(den).padStart(3))}${bad ? '   ' + yellow(`${bad} violation${bad === 1 ? '' : 's'}`) : ''}${note ? '   ' + dim(note) : ''}`);
     irow('present', missing.length, probed, 'a declared name gets a token');
     irow('type', badType.length, typeAsserted, `token type matches the declaring form${unasserted.length ? ` · ${unasserted.length} unasserted` : ''}`);
@@ -3313,7 +3420,7 @@ if (RUN_TOKENS) {
       const gaps = memberMissing.length;
       const note = gaps ? yellow(`${gaps} gap${gaps === 1 ? '' : 's'}`) + '   ' + dim('type-body member tokens drop — expected red until the mapping fix')
                         : dim('type-body member tokens — the mapping fix appears to have landed; retire this gauge');
-      console.log(`    ${pad('member', 12)} ${(gaps ? red : green)(String(memberProbed - gaps).padStart(3))} ${dim('/')} ${dim(String(memberProbed).padStart(3))}   ${note}`);
+      out(`    ${pad('member', 12)} ${(gaps ? red : green)(String(memberProbed - gaps).padStart(3))} ${dim('/')} ${dim(String(memberProbed).padStart(3))}   ${note}`);
     }
     // Face-survival — USE-SITE token drops (the mapping gap), the direction the
     // source-enumerated invariants above cannot see: a classified source
@@ -3326,7 +3433,7 @@ if (RUN_TOKENS) {
       const den = survSurvived + dropTotal;
       const note = dropTotal ? yellow(`${dropTotal} drop${dropTotal === 1 ? '' : 's'}`) + '   ' + dim('classified source identifiers the server drops at use sites — expected red until the mapping fix')
                              : dim('use-site tokens — the mapping fix appears to have landed; retire this gauge');
-      console.log(`    ${pad('survival', 12)} ${(dropTotal ? red : green)(String(survSurvived).padStart(3))} ${dim('/')} ${dim(String(den).padStart(3))}   ${note}`);
+      out(`    ${pad('survival', 12)} ${(dropTotal ? red : green)(String(survSurvived).padStart(3))} ${dim('/')} ${dim(String(den).padStart(3))}   ${note}`);
       // Silent guard (surfaces only on failure): count-based uses the server's
       // tokens directly, so `delivered ⊆ classified` holds by construction —
       // EXCEPT if this standalone FaceOracle's tsgo drifts from the server's.
@@ -3351,7 +3458,7 @@ if (RUN_TOKENS) {
     // visible by default, but never soft-wrapped into a jumble.
     const byFileOf = (rows) => { const m = new Map(); for (const r of rows) { if (!m.has(r.file)) m.set(r.file, []); m.get(r.file).push(r); } return m; };
     const COL = 6 + (NAME_W + 2) + 1 + 3 + 3;                        // leading + filename + sp + count + gap = name column
-    const WRAP = Math.max(80, process.stdout.columns || 120) - 2;
+    const WRAP = TERM_W - 2;
     const dropSection = (title, byFile, tally, nameOf) => {
       console.log(`\n    ${bold(title)} ${dim('— the mapping gap, expected red')}`);
       for (const [file, entries] of byFile) {
@@ -3372,15 +3479,15 @@ if (RUN_TOKENS) {
     // Both polarities, per binding form — a vacuity check on the readonly
     // invariant above, not decoration.
     if (byForm.size) {
-      console.log(`\n    ${dim('readonly coverage by form')} ${dim('(both polarities must appear, or the invariant proves nothing)')}`);
+      out(`\n    ${dim('readonly coverage by form')} ${dim('(both polarities must appear, or the invariant proves nothing)')}`);
       for (const [form, s] of [...byForm].sort()) {
         const tally = s.bad ? `${green(`${s.ok} ok`)}, ${red(`${s.bad} bad`)}` : green(`${s.ok} ok`);
         console.log(`      ${pad(form, 10)} ${dim(`expect ${s.want ? 'readonly' : 'writable'}`)}  ${tally}`);
       }
     }
     if (VERBOSE && unasserted.length) {
-      console.log(`\n    ${dim('unasserted — rip source does not pin a token type (schema declares a value AND a type)')}`);
-      for (const r of unasserted) console.log(`      ${dim('•')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text}) → ${fmt(r.got)}`)}`);
+      out(`\n    ${dim('unasserted — rip source does not pin a token type (schema declares a value AND a type)')}`);
+      for (const r of unasserted) out(`      ${dim('•')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text}) → ${fmt(r.got)}`)}`);
     }
 
     tk = { probed, missing, badType, badReadonly, memberProbed, memberMissing, survSurvived, survDrops, survUnclassified };
@@ -3406,8 +3513,8 @@ const TOTAL_W = 12;
 // persists across the break, so a styled segment keeps its paint even when
 // its opening code lands on the previous line.
 const totalLine = (audit, text) => {
-  const avail = Math.max(60, (process.stdout.columns || Number(process.env.COLUMNS) || 200) - (4 + TOTAL_W) - 1);
-  const visible = (s) => s.replace(/\x1b\[[0-9;]*m/g, '').length;
+  const avail = TERM_W - (4 + TOTAL_W) - 1;
+  const visible = visibleW;
   // Split only at TOP-LEVEL separators — a ` · ` inside a parenthetical is
   // part of its clause, and breaking there tears the parens across lines.
   // (ANSI escape codes contain no parens, so depth-counting the styled
@@ -3430,7 +3537,12 @@ const totalLine = (audit, text) => {
     else { line += sep + piece; len += sep.length + w; }
   };
   for (const seg of segs) {
-    if (visible(seg) > avail) {
+    // `avail - 2` because a continuation line spends two columns on its
+    // leading `· `: a segment sized between avail-2 and avail read as "fits
+    // whole", then overflowed by up to two columns once that prefix was
+    // added — which is exactly how a totals line landed at 81 on an
+    // 80-column terminal.
+    if (visible(seg) > avail - 2) {
       // A segment too long to ever fit whole word-wraps within itself.
       const words = seg.split(' ');
       put(words[0], ' · ');
@@ -3558,9 +3670,14 @@ if (tk) {
   const skipped = AUDITS.filter((a) => !a.ran);
   const covered = AUDITS.filter((a) => a.ran).map((a) => a.name).join(' + ') || 'nothing';
   if (skipped.length) {
-    console.log(`\n  ${dim('Not run')} ${dim(`(this run: ${covered})`)}`);
-    for (const a of skipped) console.log(`    ${dim('·')} ${bold(a.name)} ${dim(`— ${a.blurb}`)}\n      ${dim(`bun run audit${a.flag ? ' ' + a.flag : ''}`)}`);
-    console.log(`    ${dim('·')} ${dim('all of them:')} ${dim('bun run audit')}${dim(' (no flag)')}   ${dim('· full flag list:')} ${dim('--help')}`);
+    out(`\n  ${dim('Not run')} ${dim(`(this run: ${covered})`)}`);
+    for (const a of skipped) {
+      // The blurb wraps; the command below it never does — it is meant to be
+      // copied, and a wrapped command line is a command that does not run.
+      out(`    ${dim('·')} ${bold(a.name)} ${dim(`— ${a.blurb}`)}`);
+      console.log(`      ${dim(`bun run audit${a.flag ? ' ' + a.flag : ''}`)}`);
+    }
+    out(`    ${dim('·')} ${dim('all of them:')} ${dim('bun run audit')}${dim(' (no flag)')}   ${dim('· full flag list:')} ${dim('--help')}`);
   }
 }
 
@@ -3575,23 +3692,13 @@ if (tk) {
 // it dangles fragments at column zero (the defect `totalLine` exists to prevent,
 // one section up).
 {
-  const reason = (text) => {
-    const avail = Math.max(40, (process.stdout.columns || Number(process.env.COLUMNS) || 200) - 9);
-    const out = [];
-    let line = '';
-    for (const word of text.split(' ')) {
-      if (line && line.length + 1 + word.length > avail) { out.push(line); line = word; }
-      else line = line ? `${line} ${word}` : word;
-    }
-    if (line) out.push(line);
-    for (const l of out) console.log(`        ${dim(l)}`);
-  };
+  const reason = (text) => { for (const l of wrapText(text, TERM_W - 8, 0)) console.log(`        ${dim(l)}`); };
   const { verdicts, failures } = judge({
     states: { gr, mp, el, hp, tk, fails },
     ran: (lane) => AUDITS.find((a) => a.key === lane).ran,
   });
   const judged = verdicts.filter((v) => v.state !== 'skipped');
-  console.log(`\n  ${bold('Contract')} ${dim(`(${judged.length} invariant${judged.length === 1 ? '' : 's'} judged${verdicts.length - judged.length ? `, ${verdicts.length - judged.length} unjudged — their lane did not run` : ''})`)}`);
+  out(`\n  ${bold('Contract')} ${dim(`(${judged.length} invariant${judged.length === 1 ? '' : 's'} judged${verdicts.length - judged.length ? `, ${verdicts.length - judged.length} unjudged — their lane did not run` : ''})`)}`);
   for (const v of judged.filter((x) => x.state !== 'green')) {
     if (v.state === 'red-expected') { console.log(`    ${yellow('·')} ${pad(v.name, 26)} ${dim('red by agreement')}`); reason(v.redBecause); }
     if (v.state === 'red-new') { console.log(`    ${red('✗')} ${pad(v.name, 26)} ${red('BROKEN')}`); reason(`this must hold: ${v.property}`); }
@@ -3599,7 +3706,7 @@ if (tk) {
   }
   const held = judged.filter((v) => v.state === 'red-expected').length;
   const clean = judged.filter((v) => v.state === 'green').length;
-  console.log(`    ${failures.length ? red(`${failures.length} failing`) : green('contract holds')}${dim(` · ${clean} green · ${held} red by agreement`)}`);
+  out(`    ${failures.length ? red(`${failures.length} failing`) : green('contract holds')}${dim(` · ${clean} green · ${held} red by agreement`)}`);
   console.log('');
   if (failures.length) process.exit(1);
 }
