@@ -1,5 +1,5 @@
-// 23-functions.ts — the twin oracle: the dammit call-and-await, and a fat
-// arrow's declared return
+// 23-functions.ts — the twin oracle: the dammit call-and-await, a fat arrow's
+// declared return, and prototype augmentation at its call sites
 
 // ── The dammit operator calls AND awaits, so it types as the awaited value ──
 
@@ -16,3 +16,14 @@ console.log('dammit:', harvested.toFixed(0))
 let doubler: (n: number) => string = (n) => String(n * 2)
 
 console.log('arrow:', doubler(4))
+
+// ── Prototype augmentation: the write types, and so does every call site ──
+
+declare global {
+  interface String { titleCase(): string }
+}
+String.prototype.titleCase = function(): string { return this.toUpperCase() }
+
+let titled = 'hello'.titleCase()
+
+console.log('proto:', titled)

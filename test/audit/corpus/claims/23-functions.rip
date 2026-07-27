@@ -1,5 +1,5 @@
 # 23-functions.rip — what the checker concludes about function faces: the
-# dammit call-and-await, and a fat arrow's declared return
+# dammit call-and-await, a fat arrow's declared return, and prototype augmentation at its call sites
 
 # ── The dammit operator calls AND awaits, so it types as the awaited value,
 # not the promise; the `Promise<T>` annotation validates the body that fills it ──
@@ -16,3 +16,14 @@ console.log('dammit:', harvested.toFixed(0))
 doubler: (n: number) => string = (n) => String(n * 2)
 
 console.log('arrow:', doubler(4))
+
+# ── Prototype augmentation: the write types, and so does every call site. The
+# emission, declaration text, and decline classes are gated in battery/prototype.rip;
+# what is this corpus's alone is whether the augmented member checks where it is USED ──
+
+String::titleCase: () => string = ->
+  @toUpperCase()
+
+titled = 'hello'.titleCase()
+
+console.log('proto:', titled)

@@ -1,4 +1,12 @@
 {
+  "23-functions.rip": {
+    "decls": [
+      {
+        "name": "titleCase",
+        "expect": "(property) String.titleCase: () => string"
+      }
+    ]
+  },
   "13-components.rip": {
     "decls": [
       {

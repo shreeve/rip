@@ -714,12 +714,23 @@ function declsOf(src) {
     if (/^\s*#/.test(text) || !text.trim() || /^\s/.test(text)) return;
     const m = text.match(DECL);
     if (!m || KEYWORDS.has(m[2])) return;
-    const keyword = m[1], name = m[2];
+    const keyword = m[1];
     // DECL's match ENDS at the name, so this is the name's exact column.
     // Searching for the name instead would find it inside its own prefix —
     // `export port` answers 2, the `port` in `export`, which both mis-places
     // the probe and makes the follow-token test below read the wrong bytes.
-    const character = m[0].length - name.length;
+    let name = m[2], character = m[0].length - name.length;
+    // `Base::member` declares the MEMBER on Base's prototype, never Base.
+    // Read as a bare name it declares `String`, and the probe then answers
+    // about TypeScript's own global constructor — text no twin can match and
+    // no pin should hold, being lib.d.ts prose that moves on every TS bump.
+    // Re-pointing also puts the follow-token test past the member, where the
+    // annotation or assignment that makes it a declaration actually sits.
+    const proto = text.slice(character + name.length).match(/^(\?*::)([A-Za-z_$][\w$]*)/);
+    if (proto) {
+      character += name.length + proto[1].length;
+      name = proto[2];
+    }
     // Only actual DECLARATIONS, not usage statements. A keyword form
     // (def/class/…) always declares. A bare name declares only when its
     // next token is an assignment / annotation / reactive operator

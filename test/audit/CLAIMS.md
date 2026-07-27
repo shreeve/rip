@@ -60,7 +60,7 @@ The census owns which type KINDS the corpus claims; these rows own what the chec
 | --- | --- | --- |
 | dammit-await types as the awaited value, and a `Promise<T>` annotation validates an async body | 23-functions.rip:harvested | 23-functions.errors.rip:wrongPromised |
 | a fat arrow with an explicit return type emits inline and enforces that return | 23-functions.rip:doubler | 23-functions.errors.rip:wrongArrow |
-| prototype augmentation (`String::titleCase: () => string = -> …`) types the write, the call sites, and hover | ABSENT | ABSENT |
+| prototype augmentation (`String::titleCase: () => string = -> …`) types the write, the call sites, and hover | 23-functions.rip:titled | 23-functions.errors.rip:wrongTitled |
 
 ### Modules
 
