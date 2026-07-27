@@ -1719,9 +1719,20 @@ if (RUN_GRAMMAR) {
   // contribution: a claims fixture's charter is CLAIMS.md, so its
   // reductions must never let a production read as covered — deleting the
   // fixture would then drop coverage no claims instrument watches.
+  // Rows are BUFFERED rather than printed as each fixture parses, because the
+  // per-fixture number worth reading is UNIQUE contribution — how many
+  // productions this fixture alone reduces — and that is not knowable until
+  // every fixture has parsed. What this replaces, marginal `+N new rules`, was
+  // a function of ALPHABETICAL ORDER: `01-basics` collected +79 for going
+  // first while holding only 11 productions uniquely, and `12-reactive` showed
+  // +64 while holding 57 — so the column ranked the corpus by filename and
+  // inverted the real one. `rules` (breadth) and `unique` (irreplaceability)
+  // are both order-independent, and together they answer the two questions a
+  // fixture list is read for: how much does this file exercise, and what would
+  // deleting it cost.
+  const fixtureRows = [];
   for (const f of fixtures) {
     const grammarBucket = fixDirOf(f) === FIX;
-    const before = seen.size;
     const mine = new Set();
     const p = Parser({ onReduce: grammarBucket ? (id) => { seen.add(id); mine.add(id); } : () => {} });
     p.lexer = makeParserLexer(fixPath(f));
@@ -1730,10 +1741,29 @@ if (RUN_GRAMMAR) {
       const tree = p.parse(fs.readFileSync(fixPath(f), 'utf8'));
       walkPairs(tree?.sexpr, []);
       for (const id of mine) reducers.set(id, (reducers.get(id) ?? 0) + 1);
-      console.log(`    ${green('✓')} ${pad(f, NAME_W + 2)} ${dim(grammarBucket ? `+${seen.size - before} new rules (${seen.size} cumulative)` : 'claims-chartered — carriage judged under Corpus claims')}`);
+      fixtureRows.push({ f, ok: true, grammarBucket, reduced: mine.size });
     } catch (e) {
-      console.log(`    ${red('✗')} ${pad(f, NAME_W + 2)} ${dim(`parse failed — ${String(e.message ?? e).split('\n')[0]}`)}`);
+      // `ok` carries the outcome, never the message: a discriminant that is
+      // the message text is falsy exactly when the message is empty, and a
+      // parse failure would then fall through to the pass branches and print
+      // as a fixture that parsed. For the same reason the first NON-EMPTY
+      // line is taken — an error whose text opens with a newline still names
+      // itself.
+      const lines = String(e?.message ?? e).split('\n');
+      fixtureRows.push({ f, ok: false, failed: lines.find((l) => l.trim()) ?? 'no message' });
     }
+  }
+  // Which fixtures the coverage would survive losing — the retirement
+  // instrument, now the fixture list's own column.
+  const uniqueOf = (f) => [...(perFixture.get(f) ?? [])].filter((id) => reducers.get(id) === 1).length;
+  for (const r of fixtureRows) {
+    if (!r.ok) { console.log(`    ${red('✗')} ${pad(r.f, NAME_W + 2)} ${dim(`parse failed — ${r.failed}`)}`); continue; }
+    // A claims fixture parses but contributes no coverage, so it must not wear
+    // the ✓ a contributing fixture wears: one mark, two meanings, and the
+    // weaker meaning is the one a reader would assume.
+    if (!r.grammarBucket) { console.log(`    ${dim('·')} ${pad(r.f, NAME_W + 2)} ${dim('claims-chartered — carriage judged under Corpus claims')}`); continue; }
+    const u = uniqueOf(r.f);
+    console.log(`    ${green('✓')} ${pad(r.f, NAME_W + 2)} ${dim(`${String(r.reduced).padStart(3)} rules · `)}${(u ? dim : yellow)(`${String(u).padStart(3)} unique`)}`);
   }
   const uncovered = denom.filter((i) => !seen.has(i));
   const groupOf = (prod) => owner
@@ -1752,16 +1782,14 @@ if (RUN_GRAMMAR) {
     console.log(`    ${dim(`${excludedIdx.length} excluded by the gate (unreachable, banned, or coverable only by a fixture that asserts nothing) — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`)}`);
     if (VERBOSE) for (const i of excludedIdx) console.log(`        ${dim(names[i])} ${dim('·')} ${dim(EXCLUDED.get(names[i]))}`);
   }
-  // Unique contribution: which fixtures the coverage would survive losing.
-  // Non-unique fixtures list ALWAYS (a removable fixture is a standing fact,
-  // not a verbose detail); per-fixture unique counts under -v.
+  // The verdict on the unique column above: a fixture with no unique
+  // reductions is deletable at zero coverage cost, and that is a standing
+  // fact rather than a verbose detail, so it states itself either way.
   {
-    const uniqueOf = (f) => [...(perFixture.get(f) ?? [])].filter((id) => reducers.get(id) === 1).length;
     const removable = grammarFixtures.filter((f) => uniqueOf(f) === 0);
-    console.log(`    ${dim(removable.length
-      ? `removable with zero coverage loss (no unique reductions): ${removable.join(', ')}`
-      : 'every grammar fixture reduces at least one production no other fixture does')}`);
-    if (VERBOSE) for (const f of grammarFixtures) console.log(`        ${dim(`${pad(f, NAME_W + 2)} ${String(uniqueOf(f)).padStart(3)} unique`)}`);
+    console.log(`    ${removable.length
+      ? yellow(`removable with zero coverage loss (no unique reductions): ${removable.join(', ')}`)
+      : dim('every grammar fixture reduces at least one production no other fixture does')}`);
   }
   // ── NEGATIVE COVERAGE — the error lane measured against the positive
   // corpus's own claims. The denominator problem: positives get theirs from
@@ -2055,7 +2083,12 @@ if (RUN_GRAMMAR) {
     const staleSpellingExclusions = [...EXCLUDED_SPELLINGS.keys()]
       .filter((s) => !rewrittenAll.some((r) => r.spelling === s));
     console.log(`\n    ${bold('Lexer-spelling census')} ${dim("(the denominator below the productions: spellings the lexer rewrites before the parser sees them)")}`);
-    console.log(`    ${dim(`${spellings.length - darkSpellings.length} / ${spellings.length} spellings exercised`)}${dim(` · ${rewritten.length} from the lexer's alias table, ${MINTS.length} curated mints`)}${EXCLUDED_SPELLINGS.size ? dim(` · ${EXCLUDED_SPELLINGS.size} excluded by the gate — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`) : ''}`);
+    // Deliberately NOT a fraction. This queue is a gauge — the next line says
+    // so — and a `5 / 9` printed between two closed-denominator scores reads
+    // as the worst mark on the screen, which is a comparison the prose then
+    // has to spend a sentence undoing. A count of what is tracked carries the
+    // same information and invites no ranking against the obligations.
+    console.log(`    ${dim(`${spellings.length} spellings tracked`)}${dim(` · ${rewritten.length} from the lexer's alias table, ${MINTS.length} curated mints`)}${EXCLUDED_SPELLINGS.size ? dim(` · ${EXCLUDED_SPELLINGS.size} excluded by the gate — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`) : ''}`);
     if (VERBOSE) for (const [s, why] of EXCLUDED_SPELLINGS) console.log(`        ${pad(s, 8)} ${dim(`excluded — ${why}`)}`);
     if (darkSpellings.length) {
       console.log(`    ${yellow(`${darkSpellings.length} never written by the corpus — candidates, not obligations:`)}`);
@@ -2087,7 +2120,11 @@ if (RUN_GRAMMAR) {
     // parser never mints it, or spell it in a fixture if it does.
     const headsUnseen = [...CONSTRUCT_HEADS].filter((h) => !headsSeen.has(h)).sort();
     console.log(`\n    ${bold('Containment heads')} ${dim('(the matrix\'s vocabulary: pairs of these are what CLAIMS.md cells can name)')}`);
-    console.log(`    ${(headsUnseen.length ? red : green)(String(headsSeen.size))} ${dim('/')} ${dim(String(CONSTRUCT_HEADS.size))} ${dim(`heads spelled by a fixture · ${pairsSeen.size} pairs seen`)}`);
+    // The pair count does NOT belong here: it has no denominator and can only
+    // rise, so on its own it is a number a reader cannot act on. Where it
+    // means something is next to the cells it is the pool for, so it prints
+    // with the Containment summary under Corpus claims.
+    console.log(`    ${(headsUnseen.length ? red : green)(String(headsSeen.size))} ${dim('/')} ${dim(String(CONSTRUCT_HEADS.size))} ${dim('heads spelled by a fixture')}`);
     for (const h of headsUnseen) console.log(`    ${red('✗')} ${red(`curated head no fixture produces: ${h}`)} ${dim('— drop it if the parser never mints it, or spell it if it does')}`);
 
     console.log(`\n    ${bold('Negative coverage')} ${dim(`(the error lane against the positive corpus's own claims — vocabulary contractual, family fractions a gauge)`)}`);
@@ -2154,30 +2191,41 @@ if (RUN_GRAMMAR) {
         // carrier carrying a regex metacharacter matched more than it named.
         return declsOf(fs.readFileSync(full, 'utf8')).some((d) => d.name === symbol) ? 'ok' : 'missing';
       };
-      const rows = [];
+      // Rows are split by WHAT A RUN CAN NEWLY SAY about them. A red (a
+      // carrier that stopped existing, a cell nothing satisfies, a stale
+      // park) and a PARKED row (work a defect is blocking) are news, and
+      // print unconditionally. A carried ✓ and a ruled-uncarried · are not:
+      // they restate CLAIMS.md, which is in the repo, and they cannot change
+      // without someone editing that file — so by default they are counted,
+      // and `-v` prints them, exactly as the M3 production queue three
+      // sections down has always behaved. The reason is not brevity for its
+      // own sake: 47 unchanging lines around 4 that matter is how a reader
+      // learns to skip the section.
+      const loud = [], quiet = [];
       const parkedBy = new Map(parks.map((p) => [p.behavior, p.until]));
-      let absent = 0, broken = 0, parked = 0;
+      let absent = 0, broken = 0, parked = 0, carried = 0;
       const staleParks = [];
       for (const b of behaviors) {
         const s1 = carrierOk(b.carrier), s2 = carrierOk(b.neg);
         const until = parkedBy.get(b.behavior);
-        if (s1 === 'missing' || s2 === 'missing') { broken++; rows.push(`${red('✗')} ${b.behavior} ${dim('— carrier missing:')} ${red(s1 === 'missing' ? b.carrier : b.neg)}`); }
+        if (s1 === 'missing' || s2 === 'missing') { broken++; loud.push(`${red('✗')} ${b.behavior} ${dim('— carrier missing:')} ${red(s1 === 'missing' ? b.carrier : b.neg)}`); }
         else if (s1 === 'absent' || s2 === 'absent') {
-          if (until) { parked++; rows.push(`${yellow('·')} ${b.behavior} ${dim(`— PARKED until ${until}`)}`); }
-          else { absent++; rows.push(`${yellow('·')} ${b.behavior} ${dim('— ruled, uncarried')}`); }
+          if (until) { parked++; loud.push(`${yellow('·')} ${b.behavior} ${dim(`— PARKED until ${until}`)}`); }
+          else { absent++; quiet.push(`${yellow('·')} ${b.behavior} ${dim('— ruled, uncarried')}`); }
         } else {
+          carried++;
           if (until) staleParks.push(b.behavior);
-          rows.push(`${green('✓')} ${b.behavior} ${dim(`(${b.carrier})`)}`);
+          quiet.push(`${green('✓')} ${b.behavior} ${dim(`(${b.carrier})`)}`);
         }
       }
       const orphanParks = parks.filter((p) => !behaviors.some((b) => b.behavior === p.behavior)).map((p) => p.behavior);
-      for (const p of staleParks) rows.push(`${red('✗')} ${p} ${dim('— parked, but CARRIED: the block cleared, so delete the park row')}`);
-      for (const p of orphanParks) rows.push(`${red('✗')} ${p} ${dim('— a park naming no Behaviors row: stale, or the row text drifted')}`);
+      for (const p of staleParks) loud.push(`${red('✗')} ${p} ${dim('— parked, but CARRIED: the block cleared, so delete the park row')}`);
+      for (const p of orphanParks) loud.push(`${red('✗')} ${p} ${dim('— a park naming no Behaviors row: stale, or the row text drifted')}`);
       let cellsMissing = 0;
       for (const c of cells) {
         const hit = pairsSeen.has(`${c.construct} inside ${c.inside}`);
         if (!hit) cellsMissing++;
-        rows.push(`${hit ? green('✓') : red('✗')} ${c.construct} inside ${c.inside}${hit ? '' : ' ' + dim('— no fixture carries this cell')}`);
+        (hit ? quiet : loud).push(`${hit ? green('✓') : red('✗')} ${c.construct} inside ${c.inside}${hit ? '' : ' ' + dim('— no fixture carries this cell')}`);
       }
       // The claims bucket's retirement standard — the mirror of the grammar
       // bucket's unique-contribution line: a corpus/claims fixture justified
@@ -2187,10 +2235,14 @@ if (RUN_GRAMMAR) {
       let claimsOrphans = 0;
       for (const f of claimsFixtures) if (!carrierFiles.has(f)) {
         claimsOrphans++;
-        rows.push(`${red('✗')} ${f} ${dim('— a claims fixture no CLAIMS row names: removable, or mis-bucketed under corpus/claims')}`);
+        loud.push(`${red('✗')} ${f} ${dim('— a claims fixture no CLAIMS row names: removable, or mis-bucketed under corpus/claims')}`);
       }
       console.log(`\n    ${bold('Corpus claims')} ${dim('(CLAIMS.md — behaviors and containment cells; the no-denominator coverage record)')}`);
-      for (const r of rows) console.log(`      ${r}`);
+      console.log(`    ${dim('behaviors: ')}${green(`${carried} carried`)}${absent ? `${dim(' · ')}${yellow(`${absent} ruled, uncarried`)}` : ''}${parked ? `${dim(' · ')}${yellow(`${parked} parked`)}` : ''}${VERBOSE ? '' : dim(' — -v lists every row')}`);
+      // The pair count lands here, where it is not a bare rising number but
+      // the pool the cells below are drawn from.
+      console.log(`    ${dim('containment: ')}${(cellsMissing ? red : green)(`${cells.length - cellsMissing} of ${cells.length} cells carried`)}${dim(` · ${pairsSeen.size} pairs available to name`)}`);
+      for (const r of (VERBOSE ? [...loud, ...quiet] : loud)) console.log(`      ${r}`);
       ng.claimsAbsent = absent; ng.claimsBroken = broken + claimsOrphans; ng.cellsMissing = cellsMissing;
       ng.claimsParked = parked; ng.claimsBadParks = staleParks.length + orphanParks.length;
     }
@@ -3393,18 +3445,63 @@ console.log(`\n  ${bold('Totals')}`);
 // The Grammar Gate is a gauge toward M3, not a regression count: uncovered
 // productions are the fixture-growth queue, red only in the sense of "work
 // remains", so the count paints yellow until the corpus covers the grammar.
-if (gr) totalLine('Grammar', `${gr.total} productions: `
-  + (gr.uncovered === 0
-    ? green('every production exercised by the corpus')
-    : `${green(`${gr.covered} exercised`)}${dim(' · ')}${yellow(`${gr.uncovered} uncovered`)} ${dim(`across ${gr.groups} ${gr.groupKind} — the M3 queue`)}`
-      + (gr.unallocated ? `${dim(' · ')}${red(`${gr.unallocated} UNALLOCATED`)} ${dim('— the manifest owes an ownership decision')}` : ''))
-  + (gr.excluded ? `${dim(` · ${gr.excluded} excluded`)}` : '')
-  + (gr.badExclusions ? `${dim(' · ')}${red(`${gr.badExclusions} bad exclusion${gr.badExclusions === 1 ? '' : 's'}`)} ${dim("— fix the gate's exclusion table")}` : '')
-  + (gr.negatives ? `${dim(' · spellings: ')}${gr.negatives.darkSpellings ? yellow(`${gr.negatives.spellings - gr.negatives.darkSpellings}/${gr.negatives.spellings} rewritten spellings written`) : green(`all ${gr.negatives.spellings} rewritten spellings written`)}${gr.negatives.staleMints ? dim(' · ') + red(`${gr.negatives.staleMints} stale mint${gr.negatives.staleMints === 1 ? '' : 's'}`) : ''}` : '')
-  + (gr.negatives ? `${dim(' · vocabulary: ')}${gr.negatives.kindQueued ? yellow(`${gr.negatives.vocabClaimed}/${gr.negatives.kindDenom} type kinds claimed — the census queue`) : green(`all ${gr.negatives.kindDenom} type kinds claimed`)}${gr.negatives.kindBad ? dim(' · ') + red(`${gr.negatives.kindBad} census violation${gr.negatives.kindBad === 1 ? '' : 's'}`) : ''}` : '')
-  + (gr.negatives ? `${dim(' · negatives: ')}${gr.negatives.vocabUnfalsified ? red(`${gr.negatives.vocabUnfalsified}/${gr.negatives.vocabClaimed} vocabulary classes unfalsified`) : green(`all ${gr.negatives.vocabClaimed} vocabulary classes falsified`)}${gr.negatives.famZero ? dim(` · ${gr.negatives.famZero} family(ies) without negatives (gauge)`) : ''}` : '')
-  + (gr.negatives?.headsTotal ? `${dim(' · containment: ')}${dim(`${gr.negatives.pairs} pairs over `)}${gr.negatives.headsUnseen ? red(`${gr.negatives.headsTotal - gr.negatives.headsUnseen}/${gr.negatives.headsTotal} heads spelled`) : green(`all ${gr.negatives.headsTotal} heads`)}` : '')
-  + (gr.negatives && (gr.negatives.claimsAbsent != null) ? `${dim(' · claims: ')}${(gr.negatives.claimsBroken || gr.negatives.cellsMissing || gr.negatives.claimsBadParks) ? red(`${gr.negatives.claimsBroken + gr.negatives.cellsMissing + gr.negatives.claimsBadParks} red`) + (gr.negatives.claimsAbsent ? dim(` + ${gr.negatives.claimsAbsent} ruled-uncarried`) : '') : gr.negatives.claimsAbsent ? yellow(`${gr.negatives.claimsAbsent} ruled-uncarried`) : green('all carried')}${gr.negatives.claimsParked ? dim(` · ${gr.negatives.claimsParked} parked`) : ''}` : ''));
+//
+// The gate reports at three DIFFERENT STANDINGS, and a totals line that
+// strings them together with one separator lets none of them be read: a
+// closed-denominator score (520/526), a contractual result (every claimed
+// vocabulary class falsified), and a gauge (3 spellings never written) each
+// mean something different by being off. So the line groups them and SAYS
+// WHICH IS WHICH — obligations, whose violation is red and demands a fix, and
+// queues, which are work remaining and can only be worked down. Groups are
+// joined by ` · ` (the wrap boundary, so a group never tears) and their own
+// members by `, `.
+if (gr) {
+  const n = gr.negatives ?? {};
+  const s = (k, one, many = one + 's') => `${k} ${k === 1 ? one : many}`;
+  // Obligations: every one of these is a claim the gate makes about itself or
+  // about the corpus, and a nonzero count is a defect, not a backlog.
+  const broken = [];
+  if (gr.badExclusions) broken.push(`${s(gr.badExclusions, 'bad exclusion')} — fix the gate's exclusion table`);
+  if (gr.unallocated) broken.push(`${gr.unallocated} UNALLOCATED — the manifest owes an ownership decision`);
+  if (n.badSpellingExclusions || n.staleMints) broken.push(s((n.badSpellingExclusions ?? 0) + (n.staleMints ?? 0), 'spelling-census violation'));
+  if (n.kindBad) broken.push(s(n.kindBad, 'census violation'));
+  if (n.vocabUnfalsified) broken.push(`${n.vocabUnfalsified}/${n.vocabClaimed} vocabulary classes unfalsified`);
+  if (n.headsUnseen) broken.push(`${s(n.headsUnseen, 'containment head')} no fixture spells`);
+  // The claims registry is the one input here that can be ABSENT: everything
+  // else is derived from the grammar or the corpus and always measured, but
+  // CLAIMS.md is a file, and when it is missing the whole section is skipped
+  // and these counters are never set. `0 red` and `nothing was read` are the
+  // same number, so the standing has to be carried separately — an unread
+  // registry must never be summarised as a held obligation.
+  const claimsRead = n.claimsAbsent != null;
+  const claimsRed = (n.claimsBroken ?? 0) + (n.cellsMissing ?? 0) + (n.claimsBadParks ?? 0);
+  if (claimsRead && claimsRed) broken.push(`${s(claimsRed, 'claims row')} red`);
+  // Queues: yellow because work remains, never because anything is wrong.
+  const queues = [];
+  if (gr.uncovered) queues.push(`${s(gr.uncovered, 'production')} uncovered across ${gr.groups} ${gr.groupKind} (M3)`);
+  if (n.kindQueued) queues.push(`${s(n.kindQueued, 'type kind')} unclaimed (census)`);
+  if (n.claimsAbsent) queues.push(`${n.claimsAbsent} claims ruled-uncarried`);
+  if (n.darkSpellings) queues.push(`${n.darkSpellings} of ${n.spellings} spellings never written`);
+  if (n.famZero) queues.push(`${s(n.famZero, 'family', 'families')} without negatives`);
+  if (n.claimsParked) queues.push(`${n.claimsParked} parked`);
+  // The green text NAMES what it checked, so it can only ever claim ground
+  // actually covered: each clause is pushed by the same condition that made
+  // its measurement possible, and a measurement that did not run contributes
+  // no clause rather than a zero.
+  const held = ['exclusions true'];
+  if (n.headsTotal) held.push(`${n.headsTotal} containment heads spelled`);
+  if (n.vocabClaimed) held.push(`${n.vocabClaimed} vocabulary classes falsified`);
+  if (claimsRead) held.push('every claims carrier and cell live');
+  totalLine('Grammar', `${gr.total} productions${gr.excluded ? dim(` · ${gr.excluded} excluded`) : ''}: `
+    + (gr.uncovered === 0 ? green('every production exercised by the corpus') : green(`${gr.covered} exercised`))
+    + `${dim(' · obligations: ')}${broken.length ? red(broken.join(', ')) : green(`all hold — ${held.join(', ')}`)}`
+    // An absent registry is NEWS, not silence: the gate prints no Corpus
+    // claims section at all in that case, so without this the only trace of
+    // a deleted CLAIMS.md is the absence of something a reader has to
+    // remember to miss.
+    + (claimsRead ? '' : `${dim(' · ')}${yellow('claims: CLAIMS.md absent — not judged')}`)
+    + (queues.length ? `${dim(' · queues: ')}${yellow(queues.join(', '))}` : `${dim(' · ')}${green('no queue — nothing ruled and unbuilt')}`));
+}
 // The Mapping Audit's flagged reads are EXPECTED red (the mapping gap), so
 // they read as a gauge, never a regression count: the total is the census, and
 // the missing-span clause is the only part that would signal something new.
