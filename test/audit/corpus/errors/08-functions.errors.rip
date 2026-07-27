@@ -1,5 +1,5 @@
 # 08-functions.errors.rip — intentional negatives: the Diagnostics Lane
-# (bun run type-audit --errors) asserts each one; @ts-nocheck quiets editors only.
+# (bun run audit --errors) asserts each one; @ts-nocheck quiets editors only.
 # @ts-nocheck
 
 def scale(amount: number): number

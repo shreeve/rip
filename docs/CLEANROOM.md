@@ -24,7 +24,7 @@ contract, and the corpus was built accordingly:
 - **The generated-scopes inventory** pins every emitter-introduced
   function scope with its control-flow policy.
 - **Mapping/explain tests** pin source-map fidelity offset by offset.
-- **The type-audit scoreboard** pins the editor surface.
+- **The audit scoreboard** pins the editor surface.
 - **Every confirmed defect becomes a permanent pin** in the same
   commit as its fix — the spec grows monotonically harder to violate.
 

@@ -20,7 +20,7 @@ import { describeExtended } from '../support/extended.js';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '../..');
 const BIN = path.join(ROOT, 'bin/rip');
-const TSCONFIG = path.join(ROOT, 'test/type-audit/tsconfig.json');
+const TSCONFIG = path.join(ROOT, 'test/audit/tsconfig.json');
 
 // A fresh workspace: the fixtures' tsconfig (so tsgo runs the same
 // posture the audit does — strictness riding tsgo's strict-by-default)

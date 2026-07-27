@@ -1,5 +1,5 @@
 # 01-basics.errors.rip — intentional negatives: the Diagnostics Lane
-# (bun run type-audit --errors) asserts each one; @ts-nocheck quiets editors only.
+# (bun run audit --errors) asserts each one; @ts-nocheck quiets editors only.
 # @ts-nocheck
 
 wrongNumber: number = 'nope'

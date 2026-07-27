@@ -11,7 +11,7 @@
 // TypeScript's VERSION is spelled once — in the workspace catalog. The
 // two packages that own it as their own concern reference it as
 // `catalog:` (the root's test toolchain, and the shipped editor
-// extension, whose vsix carries and declares it). The type-audit
+// extension, whose vsix carries and declares it). The audit
 // harness never ships and only borrows the editor's resolver, so it
 // declares no TypeScript at all. The editor-integration package stays
 // inside a minimal, enumerated dependency budget — anything beyond it is
@@ -74,12 +74,12 @@ test('TypeScript is declared once — every reference is `catalog:`, no literal 
   // The two owners reference the catalog.
   expect(readPkg('package.json').devDependencies.typescript).toBe('catalog:');
   expect(readPkg('packages/vscode/package.json').dependencies.typescript).toBe('catalog:');
-  // type-audit only borrows the editor's resolver — it declares no TypeScript.
-  const audit = readPkg('test/type-audit/package.json');
+  // audit only borrows the editor's resolver — it declares no TypeScript.
+  const audit = readPkg('test/audit/package.json');
   expect(audit.dependencies?.typescript).toBeUndefined();
   expect(audit.devDependencies?.typescript).toBeUndefined();
   // No manifest spells a literal TS version anywhere but the catalog.
-  for (const rel of ['package.json', 'packages/vscode/package.json', 'test/type-audit/package.json']) {
+  for (const rel of ['package.json', 'packages/vscode/package.json', 'test/audit/package.json']) {
     const p = readPkg(rel);
     for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
       const v = p[field]?.typescript;

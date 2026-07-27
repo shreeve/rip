@@ -22,7 +22,7 @@ import { describeExtended } from '../support/extended.js';
 // One binding per form. `plain` and `state` are writable in rip; `pinned`,
 // `computed` and `effect` are not — the compiler rejects a write to them.
 // (Certified by compiling each form followed by a reassignment; the rule is
-// documented in test/type-audit/runner.js's token-machinery header.)
+// documented in test/audit/runner.js's token-machinery header.)
 const SRC = [
   'plain = 1',                       // line 0 — let, writable
   'pinned =! 2',                     // line 1 — const, immutable

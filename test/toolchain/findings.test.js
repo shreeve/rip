@@ -1,5 +1,5 @@
 // The findings ledger's integrity, as a standing gate — two rules, both about
-// test/type-audit/FINDINGS.md.
+// test/audit/FINDINGS.md.
 //
 // 1. IDS STAY INSIDE. Its rows are numbered so one row can cite another;
 //    nothing outside the file cites one (sole exemption: HANDOFF.md — see
@@ -42,7 +42,7 @@ import { readFileSync, readdirSync, lstatSync } from 'fs';
 import { join, relative, sep } from 'path';
 
 const ROOT = join(import.meta.dir, '../..');
-const LEDGER = join('test', 'type-audit', 'FINDINGS.md');   // sep-correct: compared against relative()
+const LEDGER = join('test', 'audit', 'FINDINGS.md');   // sep-correct: compared against relative()
 // HANDOFF.md is exempt from rule 1 on the rule's own premise. The rule bans
 // citations from things LONGER-lived than a row, because they outlive the row
 // and rot. HANDOFF.md is the one document shorter-lived than the rows: its
@@ -52,7 +52,7 @@ const LEDGER = join('test', 'type-audit', 'FINDINGS.md');   // sep-correct: comp
 // argument is not the denylist erosion warned about below; a second exemption
 // citing this one as precedent, without its own lifetime argument, would be.
 const HANDOFF = 'HANDOFF.md';
-const RUNNER = join('test', 'type-audit', 'runner.js');
+const RUNNER = join('test', 'audit', 'runner.js');
 // `.rip` is the editor's generated mirror — untracked scratch that holds
 // compiled faces of whatever happened to be open, so scanning it makes this
 // gate's verdict depend on whether VS Code was running. `.claude` is the
@@ -137,7 +137,7 @@ test('every gate the ledger names resolves — a renamed gate cannot rot in the 
   const testFiles = new Set(walk(join(ROOT, 'test')).concat(walk(join(ROOT, 'packages')))
     .filter((f) => f.endsWith('.test.js'))
     .map((f) => f.split(sep).pop().replace(/\.test\.js$/, '')));
-  const auditFiles = new Set(readdirSync(join(ROOT, 'test', 'type-audit')));
+  const auditFiles = new Set(readdirSync(join(ROOT, 'test', 'audit')));
   const known = new Set([...dims, ...invariants, ...testFiles, ...auditFiles]);
 
   // A table row's LAST cell is its Gate. Inside it, a backticked token is a
@@ -155,7 +155,7 @@ test('every gate the ledger names resolves — a renamed gate cannot rot in the 
   expect(
     unresolved,
     'the ledger names a gate that does not resolve to a test file, an audit\n'
-    + 'dimension, or a file in test/type-audit/:\n\n'
+    + 'dimension, or a file in test/audit/:\n\n'
     + `${unresolved.join('\n')}\n\n`
     + 'Either the gate was renamed and the row now points at nothing, or the\n'
     + 'Gate cell is wearing backticks around prose. In a Gate cell, a backticked\n'

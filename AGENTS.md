@@ -328,7 +328,7 @@ alters surface syntax updates ALL THREE in the same change.
  (deps come from the repo-root `bun install`; no package-local lock).
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus-expected` — regenerate the corpus expected outputs.
-- `bun run type-audit` — the typed-editor scoreboard. Six lanes (grammar,
+- `bun run audit` — the typed-editor scoreboard. Six lanes (grammar,
   mapping, type, diagnostics, hover, token); the default runs the type
   lane alone, `--all` runs every one. `--help` is the full surface — what
   each audit measures, and what it is judged against.

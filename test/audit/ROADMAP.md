@@ -126,7 +126,7 @@ Depends on the server + new twins. Produces: the content-level checks #22 asks f
 
 *Not started. Its precondition is met: the non-type lanes exist.*
 
-The umbrella `type audit` collides with its own default member (also *Type Audit*) and undersells the five lanes that are not about types. Rename the family to **Audit** — `bun run type-audit` → `bun run audit`, `test/type-audit/` → `test/audit/`, plus the script and doc references. The default member keeps the name *Type Audit*.
+The umbrella `type audit` collides with its own default member (also *Type Audit*) and undersells the five lanes that are not about types. Rename the family to **Audit** — `bun run audit` → `bun run audit`, `test/audit/` → `test/audit/`, plus the script and doc references. The default member keeps the name *Type Audit*.
 
 **Bare, not an adjective.** The lanes share a METHOD, not a subject: each measures rip's output against a reference rip did not author. Any subject-adjective misnames the majority and re-misnames the family the next time a lane lands — *Editor Audit* fails on the count as badly as *type* does, since grammar, mapping, and type never speak to the editor server.
 

@@ -18,7 +18,7 @@
     "test:rip": "bun test test/battery.test.js --timeout 15000",
     "test:all": "bun scripts/preflight.mjs && RIP_EXTENDED=1 RIP_REQUIRE_TSC=1 bun test --timeout 15000",
     "ext": "bun scripts/install-ext.mjs",
-    "type-audit": "bun test/type-audit/runner.js"
+    "audit": "bun test/audit/runner.js"
   },
   "bin": {
     "rip": "bin/rip"

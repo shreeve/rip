@@ -1,6 +1,6 @@
 // An LSP client against the REAL rip editor server, for gates whose claim
 // is about the SESSION rather than a compile: config reactivity, completion
-// scope. (Hovers are settled by the type-audit runner — twin oracle, plus
+// scope. (Hovers are settled by the audit runner — twin oracle, plus
 // hover-pins.json for the rip-native remainder — not from here.)
 //
 // LSP is the whole protocol, so a session-shaped claim is expressible as a
@@ -19,7 +19,7 @@ import { LspClient, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '../..');
 const SERVER = path.join(ROOT, 'packages/vscode/src/server.js');
-const TSCONFIG = path.join(ROOT, 'test/type-audit/tsconfig.json');
+const TSCONFIG = path.join(ROOT, 'test/audit/tsconfig.json');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

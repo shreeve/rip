@@ -257,6 +257,6 @@ roadmap work.
 | schema type rendering | `src/schema-types.js` |
 | component type rendering | `src/component-types.js` |
 | editor broker | `packages/vscode/src/` |
-| type gates | `test/lang/`, `test/toolchain/`, `test/type-audit/` |
+| type gates | `test/lang/`, `test/toolchain/`, `test/audit/` |
 
 Open type/editor work is tracked in [ROADMAP.md](ROADMAP.md).

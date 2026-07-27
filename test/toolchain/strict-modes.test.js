@@ -17,7 +17,7 @@
 // as one that kept it hidden under strict; a single-mode gate is blind
 // to one of those, whichever mode it picks.
 //
-// This is the gate the type-audit runner cannot be: it copies only a
+// This is the gate the audit runner cannot be: it copies only a
 // tsconfig.json into its workspace and never writes a package.json, so
 // rip.strict is always false there and the strict path never runs.
 
@@ -32,7 +32,7 @@ import { describeExtended } from '../support/extended.js';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '../..');
 const SERVER = path.join(ROOT, 'packages/vscode/src/server.js');
-const TSCONFIG = path.join(ROOT, 'test/type-audit/tsconfig.json');
+const TSCONFIG = path.join(ROOT, 'test/audit/tsconfig.json');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

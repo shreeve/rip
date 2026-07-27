@@ -1,16 +1,16 @@
-// The type-audit — a PROGRESS GAUGE (not a pass/fail gate): a
+// The audit — a PROGRESS GAUGE (not a pass/fail gate): a
 // categorized scoreboard over the fixtures. Each fixture is scored on
 // independent dimensions, and every failure is categorized so the
 // number tells you WHERE the type story stands.
 //
-//   bun run type-audit                  # the Type Audit (dims 1–6), the default
-//   bun run type-audit --grammar        # the Grammar Gate ONLY (parser only)
-//   bun run type-audit --map            # the Mapping Audit ONLY (compiler output; no server)
-//   bun run type-audit --errors         # the Diagnostics Lane ONLY (drives the editor server)
-//   bun run type-audit --hover          # the Hover Audit ONLY (slower; drives LSP servers)
-//   bun run type-audit --token          # the Token Audit ONLY (drives the editor server)
-//   bun run type-audit --all            # every audit, bottom-up: grammar → map → type → errors → hover + token
-//   bun run type-audit --v              # + list expected hover divergences / unasserted tokens
+//   bun run audit                  # the Type Audit (dims 1–6), the default
+//   bun run audit --grammar        # the Grammar Gate ONLY (parser only)
+//   bun run audit --map            # the Mapping Audit ONLY (compiler output; no server)
+//   bun run audit --errors         # the Diagnostics Lane ONLY (drives the editor server)
+//   bun run audit --hover          # the Hover Audit ONLY (slower; drives LSP servers)
+//   bun run audit --token          # the Token Audit ONLY (drives the editor server)
+//   bun run audit --all            # every audit, bottom-up: grammar → map → type → errors → hover + token
+//   bun run audit --v              # + list expected hover divergences / unasserted tokens
 //
 // The independent audits (the AUDITS table below is the authoritative list —
 // it also carries the Grammar Gate, ROADMAP "M2", and the Diagnostics Lane,
@@ -371,11 +371,11 @@ const KNOWN = new Set([
   ...FLAGS.flatMap((row) => row.filter((c) => c.startsWith('-'))),
 ]);
 const usage = () => [
-  'The type-audit gauge — a progress scoreboard (not a pass/fail gate) for rip\'s',
+  'The audit gauge — a progress scoreboard (not a pass/fail gate) for rip\'s',
   'typed-editor story: the compiler\'s TS face plus the tsgo-brokered editor,',
   'measured over the typed fixtures in ./corpus. Not part of `bun test`.',
   '',
-  'Usage: bun run type-audit [flag]',
+  'Usage: bun run audit [flag]',
   '',
   `  ${'(no flag)'.padEnd(16)} the Type Audit only — fast, the default`,
   ...AUDITS.filter((a) => a.flag).map((a) => `  ${a.flag.padEnd(16)} the ${a.name} only (${a.runs ?? 'drives the editor server'})`),
@@ -424,7 +424,7 @@ const RUN_ERRORS = ranAudit('errors');
 // The Mapping Audit reads the compiler's own mapping rows and touches no
 // server, so a run covering ONLY it needs neither the editor-server pool nor
 // tsgo. Everything else does. This gates both the pool construction and the
-// tsgo half of the preflight, so `bun run type-audit --map` is honest about
+// tsgo half of the preflight, so `bun run audit --map` is honest about
 // running from compiler output alone — it works with tsgo absent entirely.
 const NEED_SERVER = RUN_MAIN || RUN_HOVER || RUN_TOKENS || RUN_ERRORS;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -493,12 +493,12 @@ process.on('SIGINT', () => { cleanupTemp(); process.exit(130); });
     const auditPkg = JSON.parse(fs.readFileSync(path.join(HERE, 'package.json'), 'utf8'));
     const corpus = [...Object.keys(auditPkg.dependencies ?? {}), ...Object.keys(auditPkg.devDependencies ?? {})];
     const gone = corpus.filter((d) => !fs.existsSync(path.join(HERE, 'node_modules', d, 'package.json')));
-    if (gone.length) missing.push(`the fixture corpus (${gone.join(', ')}) — run \`bun install\` in test/type-audit/`);
+    if (gone.length) missing.push(`the fixture corpus (${gone.join(', ')}) — run \`bun install\` in test/audit/`);
   }
   if (missing.length) {
     console.error('\n✗ The type audit cannot run — dependencies are missing:');
     for (const m of missing) console.error(`  • ${m}`);
-    console.error('\nInstall them, then re-run `bun run type-audit`.\n');
+    console.error('\nInstall them, then re-run `bun run audit`.\n');
     process.exit(1);
   }
 }
@@ -3256,8 +3256,8 @@ if (tk) {
   const covered = AUDITS.filter((a) => a.ran).map((a) => a.name).join(' + ') || 'nothing';
   if (skipped.length) {
     console.log(`\n  ${dim('Not run')} ${dim(`(this run: ${covered})`)}`);
-    for (const a of skipped) console.log(`    ${dim('·')} ${bold(a.name)} ${dim(`— ${a.blurb}`)}\n      ${dim(`bun run type-audit${a.flag ? ' ' + a.flag : ''}`)}`);
-    console.log(`    ${dim('·')} ${dim('all of them:')} ${dim('bun run type-audit --all')}   ${dim('· full flag list:')} ${dim('--help')}`);
+    for (const a of skipped) console.log(`    ${dim('·')} ${bold(a.name)} ${dim(`— ${a.blurb}`)}\n      ${dim(`bun run audit${a.flag ? ' ' + a.flag : ''}`)}`);
+    console.log(`    ${dim('·')} ${dim('all of them:')} ${dim('bun run audit --all')}   ${dim('· full flag list:')} ${dim('--help')}`);
   }
 }
 console.log('');
