@@ -1287,7 +1287,7 @@ const IS_ARROW = /^\s*(?:\([^)]*\))?\s*(?::\s*[^-=]+)?\s*(?:->|=>)/;
 // expectation it cannot defend: a harness that cries wolf is worse than no
 // harness. The undecidable case is `X = schema`, which declares a value
 // AND a type; tsgo calls the name a `type`, which is defensible, so it is
-// REPORTED (--v) rather than scored.
+// REPORTED (-v) rather than scored.
 function expectedTokenType(d, form) {
   if (d.keyword) return KEYWORD_TOKEN[d.keyword] ?? null;
   // A named EFFECT binding holds the disposer — a callable — so an
@@ -1445,7 +1445,7 @@ function mappingScan(src, code, mappings) {
     // and synthetic rows are zero-width source, so `at` holds only covers).
     const row = at[0];
     const root = /['"`]/.test(src.slice(row.sourceStart, offset)) ? 'rewrite' : 'synthetic';
-    // `gen`/`hit` make the failure self-describing under --v: where the precise
+    // `gen`/`hit` make the failure self-describing under -v: where the precise
     // map landed (null if it refused) and the bytes actually sitting there — for
     // a mistext, the wrong text a hover at this read would answer about.
     rows.push({ name, offset, placed, text, role: row.role, root, gen: g, hit: g === null ? null : code.slice(g, g + name.length) });
@@ -1749,12 +1749,12 @@ if (RUN_GRAMMAR) {
   const pct = ((100 * (denom.length - uncovered.length)) / denom.length).toFixed(1);
   console.log(`    ${(uncovered.length ? yellow : green)(String(denom.length - uncovered.length))} ${dim('/')} ${dim(String(denom.length))} ${dim(`productions (${pct}%)`)}`);
   if (excludedIdx.length) {
-    console.log(`    ${dim(`${excludedIdx.length} excluded by the gate (unreachable, banned, or coverable only by a fixture that asserts nothing) — netted from the denominator${VERBOSE ? '' : '; --v lists them'}`)}`);
+    console.log(`    ${dim(`${excludedIdx.length} excluded by the gate (unreachable, banned, or coverable only by a fixture that asserts nothing) — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`)}`);
     if (VERBOSE) for (const i of excludedIdx) console.log(`        ${dim(names[i])} ${dim('·')} ${dim(EXCLUDED.get(names[i]))}`);
   }
   // Unique contribution: which fixtures the coverage would survive losing.
   // Non-unique fixtures list ALWAYS (a removable fixture is a standing fact,
-  // not a verbose detail); per-fixture unique counts under --v.
+  // not a verbose detail); per-fixture unique counts under -v.
   {
     const uniqueOf = (f) => [...(perFixture.get(f) ?? [])].filter((id) => reducers.get(id) === 1).length;
     const removable = grammarFixtures.filter((f) => uniqueOf(f) === 0);
@@ -2055,7 +2055,7 @@ if (RUN_GRAMMAR) {
     const staleSpellingExclusions = [...EXCLUDED_SPELLINGS.keys()]
       .filter((s) => !rewrittenAll.some((r) => r.spelling === s));
     console.log(`\n    ${bold('Lexer-spelling census')} ${dim("(the denominator below the productions: spellings the lexer rewrites before the parser sees them)")}`);
-    console.log(`    ${dim(`${spellings.length - darkSpellings.length} / ${spellings.length} spellings exercised`)}${dim(` · ${rewritten.length} from the lexer's alias table, ${MINTS.length} curated mints`)}${EXCLUDED_SPELLINGS.size ? dim(` · ${EXCLUDED_SPELLINGS.size} excluded by the gate — netted from the denominator${VERBOSE ? '' : '; --v lists them'}`) : ''}`);
+    console.log(`    ${dim(`${spellings.length - darkSpellings.length} / ${spellings.length} spellings exercised`)}${dim(` · ${rewritten.length} from the lexer's alias table, ${MINTS.length} curated mints`)}${EXCLUDED_SPELLINGS.size ? dim(` · ${EXCLUDED_SPELLINGS.size} excluded by the gate — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`) : ''}`);
     if (VERBOSE) for (const [s, why] of EXCLUDED_SPELLINGS) console.log(`        ${pad(s, 8)} ${dim(`excluded — ${why}`)}`);
     if (darkSpellings.length) {
       console.log(`    ${yellow(`${darkSpellings.length} never written by the corpus — candidates, not obligations:`)}`);
@@ -2069,7 +2069,7 @@ if (RUN_GRAMMAR) {
     for (const s of staleSpellingExclusions) console.log(`    ${red('✗')} ${red('excluded spelling the lexer no longer rewrites:')} ${s} ${dim('— stale; fix the spelling exclusion table')}`);
 
     console.log(`\n    ${bold('Type vocabulary census')} ${dim(`(the sub-token denominator: every kind in TS's own type grammar, enumerated from the pinned tsgo)`)}`);
-    console.log(`    ${dim(`${claimedSet.size} / ${censusDenom.length} kinds claimed by the positives`)}${EXCLUDED_KINDS.size ? dim(` · ${EXCLUDED_KINDS.size} excluded by the gate — netted from the denominator; --v lists them`) : ''}`);
+    console.log(`    ${dim(`${claimedSet.size} / ${censusDenom.length} kinds claimed by the positives`)}${EXCLUDED_KINDS.size ? dim(` · ${EXCLUDED_KINDS.size} excluded by the gate — netted from the denominator; -v lists them`) : ''}`);
     if (kindQueue.length) {
       console.log(`    ${yellow(`${kindQueue.length} unclaimed — the vocabulary queue:`)}`);
       wrapList(kindQueue, yellow);
@@ -2200,7 +2200,7 @@ if (RUN_GRAMMAR) {
   for (const k of staleExcluded) console.log(`    ${red('✗')} ${red('excluded row names no grammar production:')} ${k} ${dim("— stale; fix the gate's exclusion table")}`);
   if (groups.size) {
     const title = owner ? 'Uncovered, by owning file (MANIFEST.md)' : 'Uncovered, by construct';
-    console.log(`\n    ${bold(title)} ${dim(`— the M3 queue; ${VERBOSE ? 'every production shown' : 'counts only, --v for every production'}`)}`);
+    console.log(`\n    ${bold(title)} ${dim(`— the M3 queue; ${VERBOSE ? 'every production shown' : 'counts only, -v for every production'}`)}`);
     // Files read in wave order; constructs by descending count.
     const rows = [...groups.entries()].sort(owner ? (a, b) => a[0].localeCompare(b[0]) : (a, b) => b[1].length - a[1].length);
     for (const [g, rules] of rows) {
@@ -2242,7 +2242,7 @@ if (RUN_MAP) {
       console.log(`    ${yellow('skip')} ${pad(f, NAME_W + 2)} ${dim('does not compile — no face to walk: ' + ((e && e.message) || e))}`);
       continue;
     }
-    // Only `starts` is kept for the --v listing; `src` is not retained (nothing
+    // Only `starts` is kept for the -v listing; `src` is not retained (nothing
     // reads it back), and `walked` is just `perFile.length`.
     perFile.push({ f, ...scan, starts: lineStartsOf(src) });
     totReads += scan.total;
@@ -2323,14 +2323,14 @@ if (RUN_MAP) {
     if (missingRows.length > 10) console.log(`      ${dim(`… ${missingRows.length - 10} more`)}`);
   }
 
-  // ── --v: every flagged read, per fixture, made self-describing so it can be
+  // ── -v: every flagged read, per fixture, made self-describing so it can be
   // verified by hand. Each row names the invariant it broke (`unplaced` = the
   // precise map refused; `mistext` = it resolved to the wrong bytes), the root,
   // the mapping row's role, and — for a mistext — the face bytes it landed on,
   // which is exactly what a hover at that position would answer about. Cross-
   // check any row against the real editor by hovering `line:col` in the fixture.
   if (VERBOSE && totFlag) {
-    console.log(`\n  ${bold('Flagged reads')} ${dim('(--v — every one, so each can be checked against the editor at its line:col)')}`);
+    console.log(`\n  ${bold('Flagged reads')} ${dim('(-v — every one, so each can be checked against the editor at its line:col)')}`);
     for (const pf of perFile) {
       if (!pf.rows.length) continue;
       console.log(`\n    ${bold(pf.f)} ${dim(`(${pf.rows.length})`)}`);
@@ -3117,7 +3117,7 @@ if (RUN_HOVER) {
   if (snapChanged.length) {
     console.log(`\n    ${bold('Expected-hover divergences')} ${dim('(hand-edit hover-pins.json decls — verify correctness first; paste-ready rows above)')}`);
     for (const c of snapChanged.slice(0, VERBOSE ? Infinity : 10)) console.log(`      ${red('✗')} ${dim(c)}`);
-    if (snapChanged.length > 10 && !VERBOSE) console.log(`      ${dim(`… ${snapChanged.length - 10} more (--v for all)`)}`);
+    if (snapChanged.length > 10 && !VERBOSE) console.log(`      ${dim(`… ${snapChanged.length - 10} more (-v for all)`)}`);
   }
   if (violations.length) {
     console.log(`\n    ${bold('Invariant violations')}`);
