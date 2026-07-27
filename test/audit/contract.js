@@ -52,6 +52,25 @@ export const CONTRACT = [
     red: (s) => (s.gr.negatives?.staleMints ?? 0) > 0,
   },
   {
+    // The alias table is read live, so it cannot rot — but the rulings netted
+    // out of it can, in both directions: a spelling excluded as redundant that
+    // the corpus nonetheless writes, and an exclusion naming a spelling the
+    // lexer stopped rewriting.
+    name: 'lexer.exclusions', lane: 'grammar',
+    property: 'every excluded spelling is still rewritten by the lexer and still unwritten by the corpus',
+    red: (s) => (s.gr.negatives?.badSpellingExclusions ?? 0) > 0,
+  },
+  {
+    // The containment matrix is bounded by its curated head list, so an
+    // entry nothing spells makes the matrix advertise cells no fixture could
+    // ever satisfy. Invariant, not a queue: unreachable heads and untested
+    // ones both resolve by a decision, and neither is drained by authoring
+    // against the cell.
+    name: 'containment.heads', lane: 'grammar',
+    property: 'every curated containment head is spelled by at least one fixture, so every cell the matrix can name is satisfiable',
+    red: (s) => (s.gr.negatives?.headsUnseen ?? 0) > 0,
+  },
+  {
     name: 'grammar.census', lane: 'grammar',
     property: "every type text the corpus carries classifies against TypeScript's own type grammar",
     red: (s) => (s.gr.negatives?.kindBad ?? 0) > 0,

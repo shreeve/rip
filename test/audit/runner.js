@@ -1652,12 +1652,36 @@ if (RUN_GRAMMAR) {
   // and switch-anywhere are indistinguishable to the gate; this matrix is
   // what CLAIMS.md's Containment cells join against. Curated construct
   // heads only: a call puts its callee in head position, so raw heads are
-  // noisy.
-  const CONSTRUCT_HEADS = new Set(['component', 'render', 'schema', 'class', 'if', 'unless', 'switch', 'when', 'for-in', 'for-of', 'for-as', 'while', 'until', 'loop', 'try', 'catch', 'finally', 'throw', 'state', 'computed', 'effect', 'gate', 'readonly', 'def', '->', '=>', 'export', 'import', 'enum']);
+  // noisy, and data heads (`object`, `array`, `block`) sit under nearly
+  // every construct, so their cells are satisfied by accident rather than
+  // by a shape anyone chose.
+  //
+  // The list is SELF-POLICING, because a head nobody can spell makes the
+  // matrix claim a capability it does not have: a curated head no fixture
+  // produces paints red below. Two things hide there and both need a
+  // decision rather than an absence — a head the parser never mints (rip
+  // lowers `unless` to `if` and `until` to `while`, and `catch`/`finally`
+  // are positional children of `try`, so a cell naming any of them could
+  // never be satisfied by any fixture) and a head that is merely untested
+  // (reachable, so its cells are candidates, but the matrix cannot express
+  // them until something spells it).
+  const CONSTRUCT_HEADS = new Set([
+    'component', 'render', 'schema', 'class', 'if', 'switch', 'when', 'for-in', 'for-of', 'for-as',
+    'while', 'loop', 'try', 'throw', 'state', 'computed', 'effect', 'gate', 'readonly', 'def',
+    '->', '=>', 'export', 'import', 'enum',
+    // Constructs whose containment is a distinct type question and which
+    // the matrix could not express before: whether a cast's type survives
+    // its context, whether a comprehension's element type does, whether a
+    // nested type declaration resolves, and whether the suspension forms
+    // carry their awaited type out of the construct holding them.
+    'cast', 'comprehension', 'type-decl', 'do-iife', 'await', 'yield',
+  ]);
   const pairsSeen = new Set();
+  const headsSeen = new Set();
   const walkPairs = (n, anc) => {
     if (!Array.isArray(n)) return;
     const h = typeof n[0] === 'string' && CONSTRUCT_HEADS.has(n[0]) ? n[0] : null;
+    if (h) headsSeen.add(h);
     if (h) for (const a of anc) pairsSeen.add(`${h} inside ${a}`);
     const next = h ? [...anc, h] : anc;
     for (const c of n) walkPairs(c, next);
@@ -1954,9 +1978,27 @@ if (RUN_GRAMMAR) {
       { spelling: '::', probe: 'A::m = 1', what: 'prototype member access' },
       { spelling: '?::', probe: 'a = b?::c', what: 'the soak form of prototype access' },
     ];
-    const rewritten = Object.entries(ALIASES)
+    // Spellings netted out of the denominator by ruling, so the queue holds
+    // only candidates a fixture could actually settle. The bar is NOT "some
+    // other suite covers it" — that is the triage every queue row already
+    // faces — but that the spelling's own type question cannot be distinct:
+    // the tokens it produces are byte-identical to those of a spelling the
+    // production denominator already covers, so no fixture written in it
+    // could answer anything a fixture in the other spelling does not.
+    //
+    // Self-policing on both sides, as the census exclusions are: an excluded
+    // spelling the corpus writes paints red (the redundancy claim is false —
+    // if it was worth writing, it was worth counting), and an exclusion
+    // naming a spelling the lexer no longer rewrites paints red (stale), so
+    // an alias-table change trims this rather than being absorbed by it.
+    const EXCLUDED_SPELLINGS = new Map([
+      ['on', '`true` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
+      ['off', '`false` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
+    ]);
+    const rewrittenAll = Object.entries(ALIASES)
       .filter(([word, [, value]]) => value !== word)
       .map(([word, [kind, value]]) => ({ spelling: word, becomes: `${kind === value ? kind : `${kind} ${value}`}` }));
+    const rewritten = rewrittenAll.filter((s) => !EXCLUDED_SPELLINGS.has(s.spelling));
     // What the corpus actually writes: a token whose SOURCE BYTES are the
     // spelling. Reading the source rather than the value is the whole point —
     // by the time the parser sees `&&`, the `and` is gone.
@@ -1981,8 +2023,12 @@ if (RUN_GRAMMAR) {
     });
     const spellings = [...rewritten, ...MINTS.map((m) => ({ spelling: m.spelling, becomes: m.what }))];
     const darkSpellings = spellings.filter((s) => !spellingSeen.has(s.spelling));
+    const falseSpellingExclusions = [...EXCLUDED_SPELLINGS.keys()].filter((s) => spellingSeen.has(s));
+    const staleSpellingExclusions = [...EXCLUDED_SPELLINGS.keys()]
+      .filter((s) => !rewrittenAll.some((r) => r.spelling === s));
     console.log(`\n    ${bold('Lexer-spelling census')} ${dim("(the denominator below the productions: spellings the lexer rewrites before the parser sees them)")}`);
-    console.log(`    ${dim(`${spellings.length - darkSpellings.length} / ${spellings.length} spellings exercised`)}${dim(` · ${rewritten.length} from the lexer's alias table, ${MINTS.length} curated mints`)}`);
+    console.log(`    ${dim(`${spellings.length - darkSpellings.length} / ${spellings.length} spellings exercised`)}${dim(` · ${rewritten.length} from the lexer's alias table, ${MINTS.length} curated mints`)}${EXCLUDED_SPELLINGS.size ? dim(` · ${EXCLUDED_SPELLINGS.size} excluded by the gate — netted from the denominator${VERBOSE ? '' : '; --v lists them'}`) : ''}`);
+    if (VERBOSE) for (const [s, why] of EXCLUDED_SPELLINGS) console.log(`        ${pad(s, 8)} ${dim(`excluded — ${why}`)}`);
     if (darkSpellings.length) {
       console.log(`    ${yellow(`${darkSpellings.length} never written by the corpus — candidates, not obligations:`)}`);
       for (const s of darkSpellings) console.log(`        ${yellow(pad(s.spelling, 8))} ${dim(`→ ${s.becomes}`)}`);
@@ -1991,6 +2037,8 @@ if (RUN_GRAMMAR) {
       console.log(`        ${pad(s.spelling, 8)} ${dim(`→ ${s.becomes} · lexes as ${[...spellingSeen.get(s.spelling)].join(', ')}`)}`);
     }
     for (const m of staleMints) console.log(`    ${red('✗')} ${red(`curated mint no longer minted:`)} ${m.spelling} ${dim(`— \`${m.probe}\` does not produce it; the lexer changed, so fix or retire the row`)}`);
+    for (const s of falseSpellingExclusions) console.log(`    ${red('✗')} ${red('excluded but written:')} ${s} ${dim('— the redundancy claim is false; count the spelling or stop writing it')}`);
+    for (const s of staleSpellingExclusions) console.log(`    ${red('✗')} ${red('excluded spelling the lexer no longer rewrites:')} ${s} ${dim('— stale; fix the spelling exclusion table')}`);
 
     console.log(`\n    ${bold('Type vocabulary census')} ${dim(`(the sub-token denominator: every kind in TS's own type grammar, enumerated from the pinned tsgo)`)}`);
     console.log(`    ${dim(`${claimedSet.size} / ${censusDenom.length} kinds claimed by the positives`)}${EXCLUDED_KINDS.size ? dim(` · ${EXCLUDED_KINDS.size} excluded by the gate — netted from the denominator; --v lists them`) : ''}`);
@@ -2002,6 +2050,18 @@ if (RUN_GRAMMAR) {
     for (const k of claimedOutside) console.log(`    ${red('✗')} ${red('claimed kind outside the census universe:')} ${k} ${dim('— extend the universe derivation in classifyTypeTexts')}`);
     for (const k of falseKindExclusions) console.log(`    ${red('✗')} ${red('excluded but claimed:')} ${k} ${dim("— the exclusion claim is false; fix the census exclusion table")}`);
     for (const k of staleKindExclusions) console.log(`    ${red('✗')} ${red('excluded kind not in the universe:')} ${k} ${dim("— stale; fix the census exclusion table")}`);
+    // ── CONTAINMENT HEADS — what the matrix can express at all. The cells
+    // CLAIMS.md rules are joined against pairs of these, so a head no
+    // fixture produces is the matrix advertising a capability it does not
+    // have: any cell naming it is unsatisfiable, and the row would sit red
+    // with no authoring that could clear it. Red rather than a queue,
+    // because the fix is a decision either way — drop the head if the
+    // parser never mints it, or spell it in a fixture if it does.
+    const headsUnseen = [...CONSTRUCT_HEADS].filter((h) => !headsSeen.has(h)).sort();
+    console.log(`\n    ${bold('Containment heads')} ${dim('(the matrix\'s vocabulary: pairs of these are what CLAIMS.md cells can name)')}`);
+    console.log(`    ${(headsUnseen.length ? red : green)(String(headsSeen.size))} ${dim('/')} ${dim(String(CONSTRUCT_HEADS.size))} ${dim(`heads spelled by a fixture · ${pairsSeen.size} pairs seen`)}`);
+    for (const h of headsUnseen) console.log(`    ${red('✗')} ${red(`curated head no fixture produces: ${h}`)} ${dim('— drop it if the parser never mints it, or spell it if it does')}`);
+
     console.log(`\n    ${bold('Negative coverage')} ${dim(`(the error lane against the positive corpus's own claims — vocabulary contractual, family fractions a gauge)`)}`);
     console.log(`    ${dim(`${negParsed} error fixtures reduce ${negSeen.size} productions`)}${famZero.length ? `${dim(' · families with no negative at all: ')}${yellow(famZero.join(', '))}` : ''}`);
     if (VERBOSE) for (const [g, n] of [...famPos.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
@@ -2012,9 +2072,11 @@ if (RUN_GRAMMAR) {
     if (VERBOSE) for (const [c, n] of claimed) console.log(`        ${pad(c, 24)} ${dim(`${String(n).padStart(4)} in positives · ${String(negVocab.get(c) ?? 0).padStart(3)} in the error lane`)}`);
     ng = {
       darkSpellings: darkSpellings.length, spellings: spellings.length, staleMints: staleMints.length,
+      badSpellingExclusions: falseSpellingExclusions.length + staleSpellingExclusions.length,
       famZero: famZero.length, vocabClaimed: claimed.length, vocabUnfalsified: unfalsified.length,
       kindDenom: censusDenom.length, kindQueued: kindQueue.length,
       kindBad: claimedOutside.length + falseKindExclusions.length + staleKindExclusions.length,
+      headsUnseen: headsUnseen.length, headsTotal: CONSTRUCT_HEADS.size, pairs: pairsSeen.size,
     };
     // ── CORPUS CLAIMS (CLAIMS.md) — the decision record for coverage with
     // no syntactic denominator: checker behaviors (carrier presence-checked
@@ -3282,6 +3344,7 @@ if (gr) totalLine('Grammar', `${gr.total} productions: `
   + (gr.negatives ? `${dim(' · spellings: ')}${gr.negatives.darkSpellings ? yellow(`${gr.negatives.spellings - gr.negatives.darkSpellings}/${gr.negatives.spellings} rewritten spellings written`) : green(`all ${gr.negatives.spellings} rewritten spellings written`)}${gr.negatives.staleMints ? dim(' · ') + red(`${gr.negatives.staleMints} stale mint${gr.negatives.staleMints === 1 ? '' : 's'}`) : ''}` : '')
   + (gr.negatives ? `${dim(' · vocabulary: ')}${gr.negatives.kindQueued ? yellow(`${gr.negatives.vocabClaimed}/${gr.negatives.kindDenom} type kinds claimed — the census queue`) : green(`all ${gr.negatives.kindDenom} type kinds claimed`)}${gr.negatives.kindBad ? dim(' · ') + red(`${gr.negatives.kindBad} census violation${gr.negatives.kindBad === 1 ? '' : 's'}`) : ''}` : '')
   + (gr.negatives ? `${dim(' · negatives: ')}${gr.negatives.vocabUnfalsified ? red(`${gr.negatives.vocabUnfalsified}/${gr.negatives.vocabClaimed} vocabulary classes unfalsified`) : green(`all ${gr.negatives.vocabClaimed} vocabulary classes falsified`)}${gr.negatives.famZero ? dim(` · ${gr.negatives.famZero} family(ies) without negatives (gauge)`) : ''}` : '')
+  + (gr.negatives?.headsTotal ? `${dim(' · containment: ')}${dim(`${gr.negatives.pairs} pairs over `)}${gr.negatives.headsUnseen ? red(`${gr.negatives.headsTotal - gr.negatives.headsUnseen}/${gr.negatives.headsTotal} heads spelled`) : green(`all ${gr.negatives.headsTotal} heads`)}` : '')
   + (gr.negatives && (gr.negatives.claimsAbsent != null) ? `${dim(' · claims: ')}${(gr.negatives.claimsBroken || gr.negatives.cellsMissing) ? red(`${gr.negatives.claimsBroken + gr.negatives.cellsMissing} red`) + (gr.negatives.claimsAbsent ? dim(` + ${gr.negatives.claimsAbsent} ruled-uncarried`) : '') : gr.negatives.claimsAbsent ? yellow(`${gr.negatives.claimsAbsent} ruled-uncarried`) : green('all carried')}` : ''));
 // The Mapping Audit's flagged reads are EXPECTED red (the mapping gap), so
 // they read as a gauge, never a regression count: the total is the census, and

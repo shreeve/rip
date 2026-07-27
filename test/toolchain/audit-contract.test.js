@@ -27,7 +27,7 @@ const withRed = (name, why) => withoutReds().map((c) => (c.name === name ? { ...
 // shape the predicates touch. Built fresh per test: a shared object mutated by
 // one case would leak into the next.
 const cleanStates = () => ({
-  gr: { unallocated: 0, badExclusions: 0, negatives: { kindBad: 0, vocabUnfalsified: 0, claimsBroken: 0, cellsMissing: 0, staleMints: 0 } },
+  gr: { unallocated: 0, badExclusions: 0, negatives: { kindBad: 0, vocabUnfalsified: 0, claimsBroken: 0, cellsMissing: 0, staleMints: 0, headsUnseen: 0, badSpellingExclusions: 0 } },
   mp: { missing: 0 },
   fails: 0,
   el: { problems: [] },
@@ -86,6 +86,8 @@ describe('the audit contract judges in both directions', () => {
       'grammar.allocation': (s) => { s.gr.unallocated = 1; },
       'grammar.exclusions': (s) => { s.gr.badExclusions = 1; },
       'lexer.mints': (s) => { s.gr.negatives.staleMints = 1; },
+      'lexer.exclusions': (s) => { s.gr.negatives.badSpellingExclusions = 1; },
+      'containment.heads': (s) => { s.gr.negatives.headsUnseen = 1; },
       'grammar.census': (s) => { s.gr.negatives.kindBad = 1; },
       'negatives.falsifiability': (s) => { s.gr.negatives.vocabUnfalsified = 1; },
       'claims.carriers': (s) => { s.gr.negatives.claimsBroken = 1; },

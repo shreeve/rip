@@ -17,6 +17,8 @@ A carrier is `fixture:symbol` — the fixture file and a symbol the gate verifie
 | an unannotated def's inferred return is enforced at its call sites | ABSENT | ABSENT |
 | a branch-written top-level binding types later same-scope reads (evolving let, no def involved) | ABSENT | ABSENT |
 | an evolving let read by a hoisted def types through the pin pass | 08-functions.rip:formatOf | — |
+| a block-confined evolving let and a destructured one type through the pin pass — the hoisting shapes the probe's design question is about | ABSENT | ABSENT |
+| an annotated declaration under a wrong initializer still hovers its DECLARED type, not the initializer's | ABSENT | ABSENT |
 | destructured bindings carry their source property's type, enforced at use | ABSENT | ABSENT |
 | a write-only binding hovers its value type, never `any` | 01-basics.rip:recorded | — |
 | call arity survives paren injection — the implicit spelling is checked like the explicit one | 02-operations.rip:quiet | ABSENT |
@@ -50,6 +52,7 @@ The census owns which type KINDS the corpus claims; these rows own what the chec
 | overload resolution picks the matched signature's return, where the overloads' returns differ | ABSENT | ABSENT |
 | generic call-site inference preserves literal types and enforces the constraint | ABSENT | ABSENT |
 | a union-with-`undefined` member demands its key where `?:` does not | ABSENT | ABSENT |
+| a nullable-union TARGET accepts each arm and rejects outside them — a string-or-`undefined` and a number-or-`null` binding, where those arms meet strict-null checking | ABSENT | ABSENT |
 
 ### Functions and async
 
@@ -73,10 +76,12 @@ The census owns which type KINDS the corpus claims; these rows own what the chec
 | member-kind faces reached through an instance: `=!` rejects writes, `:=` exposes `.value`, `~=` computes, `=` stays plain | ABSENT | ABSENT |
 | method faces: typed parameters keep their types, defaulted parameters become optional | ABSENT | ABSENT |
 | `component extends <tag>` forwards use-site intrinsics typed from the element | ABSENT | ABSENT |
+| a literal-union prop keeps its union at the use site rather than widening to its base type | ABSENT | ABSENT |
 | a generic component's constraint violation rejects at the use site | ABSENT | ABSENT |
 | ref-cell nullability: a non-nullable cell rejects, an Element-or-null cell accepts any tag | ABSENT | ABSENT |
 | a render-head typo beyond `if` (unless, switch, for, `=`) rejects at the head line | ABSENT | ABSENT |
 | a wrong-typed write to component state inside a method rejects, while the legal write types | ABSENT | ABSENT |
+| array-typed reactive state keeps its ELEMENT type through the cell — `string[] := [...]` rejects a number element and types a read | ABSENT | ABSENT |
 | a forwarded element ref — a child `ref:` into a `<=>` bound parent cell — checks end to end | ABSENT | ABSENT |
 | indented alias method members enforce their call arguments | ABSENT | ABSENT |
 
