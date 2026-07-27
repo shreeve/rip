@@ -164,10 +164,10 @@ loose: Loose = 'anything'
 bag: Bag = { crate: true }
 marked: Marked = Symbol('mark')
 huge: Huge = 9007199254740993n
-yes: Yes = true
-no: No = false
+affirmed: Yes = true
+denied: No = false
 
-console.log('keywords:', loose, typeof bag, typeof marked, huge, yes, no)
+console.log('keywords:', loose, typeof bag, typeof marked, huge, affirmed, denied)
 
 # ── never: the return of a def that only throws ──
 

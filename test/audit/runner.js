@@ -253,7 +253,7 @@ import { promisify } from 'node:util';
 import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.js';
 import { compile } from '../../src/compile.js';
 import { Parser } from '../../src/parser.js';
-import { makeParserLexer, tokenize } from '../../src/lexer.js';
+import { makeParserLexer, tokenize, ALIASES } from '../../src/lexer.js';
 import { renderTypeDecl } from '../../src/typetext.js';
 import { judge } from './contract.js';
 import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, offsetToPosition } from '../../packages/vscode/src/translate.js';
@@ -1924,6 +1924,74 @@ if (RUN_GRAMMAR) {
     const claimedOutside = [...claimedSet].filter((k) => !universeSet.has(k)).sort();
     const falseKindExclusions = [...EXCLUDED_KINDS.keys()].filter((k) => claimedSet.has(k));
     const staleKindExclusions = [...EXCLUDED_KINDS.keys()].filter((k) => !universeSet.has(k));
+    // ── LEXER-SPELLING CENSUS — the denominator BELOW the productions.
+    //
+    // Production counting is blind to any feature the lexer implements by
+    // rewriting bytes into tokens that already exist: `a and b` reduces the
+    // same `&&` rule as `a && b`, so the gate reads full coverage while a
+    // spelling the language admits goes untried. `A::m` is the sharper case —
+    // three tokens minted over two bytes, reducing ordinary property rules.
+    //
+    // The denominator is the LEXER'S OWN table, read live (src/lexer.js
+    // exports it, as Solar exports `ruleNames`), so adding an alias there adds
+    // a census row here with nobody's help. The blind-spot half is derived, not
+    // listed: an alias whose emitted value differs from the word the user typed
+    // is exactly a spelling the parser cannot distinguish. Aliases that keep
+    // their own spelling (`typeof`, `instanceof`) reach the parser as
+    // themselves, so the production denominator already covers them.
+    //
+    // Scanner MINTS have no table, so they are curated — and a curated list
+    // rots. The guard is a probe rather than a hash: each mint names a source
+    // that must still produce it, driven every run, so a lexer change that
+    // retires a spelling fails here instead of leaving a row that measures
+    // nothing. (A hash over lexer.js would churn on every unrelated edit.)
+    //
+    // The queue is a GAUGE: a dark spelling is a candidate, not an obligation.
+    // The battery gates these behaviorally — `is`/`isnt` compile-and-run rows,
+    // a whole file for `::` — so a row earns a fixture only where the TYPE
+    // question is distinct and unanswered.
+    const MINTS = [
+      { spelling: '::', probe: 'A::m = 1', what: 'prototype member access' },
+      { spelling: '?::', probe: 'a = b?::c', what: 'the soak form of prototype access' },
+    ];
+    const rewritten = Object.entries(ALIASES)
+      .filter(([word, [, value]]) => value !== word)
+      .map(([word, [kind, value]]) => ({ spelling: word, becomes: `${kind === value ? kind : `${kind} ${value}`}` }));
+    // What the corpus actually writes: a token whose SOURCE BYTES are the
+    // spelling. Reading the source rather than the value is the whole point —
+    // by the time the parser sees `&&`, the `and` is gone.
+    const spellingSeen = new Map();
+    for (const f of [...grammarFixtures, ...claimsFixtures]) {
+      const text = fs.readFileSync(fixPath(f), 'utf8');
+      let toks;
+      try { toks = tokenize(text, fixPath(f)).tokens; } catch { continue; }
+      for (const t of toks) {
+        if (t.start == null || t.end == null || t.end <= t.start) continue;
+        const src = text.slice(t.start, t.end);
+        if (!spellingSeen.has(src)) spellingSeen.set(src, new Set());
+        spellingSeen.get(src).add(t.kind);
+      }
+    }
+    // Drive each mint's probe: the curated row must still describe the lexer.
+    const staleMints = MINTS.filter((m) => {
+      try {
+        const { tokens } = tokenize(m.probe, '<mint-probe>');
+        return !tokens.some((t) => m.probe.slice(t.start, t.end) === m.spelling);
+      } catch { return true; }
+    });
+    const spellings = [...rewritten, ...MINTS.map((m) => ({ spelling: m.spelling, becomes: m.what }))];
+    const darkSpellings = spellings.filter((s) => !spellingSeen.has(s.spelling));
+    console.log(`\n    ${bold('Lexer-spelling census')} ${dim("(the denominator below the productions: spellings the lexer rewrites before the parser sees them)")}`);
+    console.log(`    ${dim(`${spellings.length - darkSpellings.length} / ${spellings.length} spellings exercised`)}${dim(` · ${rewritten.length} from the lexer's alias table, ${MINTS.length} curated mints`)}`);
+    if (darkSpellings.length) {
+      console.log(`    ${yellow(`${darkSpellings.length} never written by the corpus — candidates, not obligations:`)}`);
+      for (const s of darkSpellings) console.log(`        ${yellow(pad(s.spelling, 8))} ${dim(`→ ${s.becomes}`)}`);
+    } else console.log(`    ${green('every rewritten spelling is written somewhere in the corpus')}`);
+    if (VERBOSE) for (const s of spellings.filter((x) => spellingSeen.has(x.spelling))) {
+      console.log(`        ${pad(s.spelling, 8)} ${dim(`→ ${s.becomes} · lexes as ${[...spellingSeen.get(s.spelling)].join(', ')}`)}`);
+    }
+    for (const m of staleMints) console.log(`    ${red('✗')} ${red(`curated mint no longer minted:`)} ${m.spelling} ${dim(`— \`${m.probe}\` does not produce it; the lexer changed, so fix or retire the row`)}`);
+
     console.log(`\n    ${bold('Type vocabulary census')} ${dim(`(the sub-token denominator: every kind in TS's own type grammar, enumerated from the pinned tsgo)`)}`);
     console.log(`    ${dim(`${claimedSet.size} / ${censusDenom.length} kinds claimed by the positives`)}${EXCLUDED_KINDS.size ? dim(` · ${EXCLUDED_KINDS.size} excluded by the gate — netted from the denominator; --v lists them`) : ''}`);
     if (kindQueue.length) {
@@ -1943,6 +2011,7 @@ if (RUN_GRAMMAR) {
     if (unfalsified.length) wrapList(unfalsified, red);
     if (VERBOSE) for (const [c, n] of claimed) console.log(`        ${pad(c, 24)} ${dim(`${String(n).padStart(4)} in positives · ${String(negVocab.get(c) ?? 0).padStart(3)} in the error lane`)}`);
     ng = {
+      darkSpellings: darkSpellings.length, spellings: spellings.length, staleMints: staleMints.length,
       famZero: famZero.length, vocabClaimed: claimed.length, vocabUnfalsified: unfalsified.length,
       kindDenom: censusDenom.length, kindQueued: kindQueue.length,
       kindBad: claimedOutside.length + falseKindExclusions.length + staleKindExclusions.length,
@@ -3210,6 +3279,7 @@ if (gr) totalLine('Grammar', `${gr.total} productions: `
       + (gr.unallocated ? `${dim(' · ')}${red(`${gr.unallocated} UNALLOCATED`)} ${dim('— the manifest owes an ownership decision')}` : ''))
   + (gr.excluded ? `${dim(` · ${gr.excluded} excluded`)}` : '')
   + (gr.badExclusions ? `${dim(' · ')}${red(`${gr.badExclusions} bad exclusion${gr.badExclusions === 1 ? '' : 's'}`)} ${dim("— fix the gate's exclusion table")}` : '')
+  + (gr.negatives ? `${dim(' · spellings: ')}${gr.negatives.darkSpellings ? yellow(`${gr.negatives.spellings - gr.negatives.darkSpellings}/${gr.negatives.spellings} rewritten spellings written`) : green(`all ${gr.negatives.spellings} rewritten spellings written`)}${gr.negatives.staleMints ? dim(' · ') + red(`${gr.negatives.staleMints} stale mint${gr.negatives.staleMints === 1 ? '' : 's'}`) : ''}` : '')
   + (gr.negatives ? `${dim(' · vocabulary: ')}${gr.negatives.kindQueued ? yellow(`${gr.negatives.vocabClaimed}/${gr.negatives.kindDenom} type kinds claimed — the census queue`) : green(`all ${gr.negatives.kindDenom} type kinds claimed`)}${gr.negatives.kindBad ? dim(' · ') + red(`${gr.negatives.kindBad} census violation${gr.negatives.kindBad === 1 ? '' : 's'}`) : ''}` : '')
   + (gr.negatives ? `${dim(' · negatives: ')}${gr.negatives.vocabUnfalsified ? red(`${gr.negatives.vocabUnfalsified}/${gr.negatives.vocabClaimed} vocabulary classes unfalsified`) : green(`all ${gr.negatives.vocabClaimed} vocabulary classes falsified`)}${gr.negatives.famZero ? dim(` · ${gr.negatives.famZero} family(ies) without negatives (gauge)`) : ''}` : '')
   + (gr.negatives && (gr.negatives.claimsAbsent != null) ? `${dim(' · claims: ')}${(gr.negatives.claimsBroken || gr.negatives.cellsMissing) ? red(`${gr.negatives.claimsBroken + gr.negatives.cellsMissing} red`) + (gr.negatives.claimsAbsent ? dim(` + ${gr.negatives.claimsAbsent} ruled-uncarried`) : '') : gr.negatives.claimsAbsent ? yellow(`${gr.negatives.claimsAbsent} ruled-uncarried`) : green('all carried')}` : ''));

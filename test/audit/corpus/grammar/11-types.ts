@@ -158,10 +158,10 @@ let loose: Loose = 'anything'
 let bag: Bag = { crate: true }
 let marked: Marked = Symbol('mark')
 let huge: Huge = 9007199254740993n
-let yes: Yes = true
-let no: No = false
+let affirmed: Yes = true
+let denied: No = false
 
-console.log('keywords:', loose, typeof bag, typeof marked, huge, yes, no)
+console.log('keywords:', loose, typeof bag, typeof marked, huge, affirmed, denied)
 
 // ── never: the return of a function that only throws ──
 

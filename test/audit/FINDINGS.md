@@ -26,6 +26,7 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 
 | # | Finding | Tags | Gate |
 | --- | --- | --- | --- |
+| [51](#51-a-boolean-alias-word-names-a-binding-and-every-read-becomes-the-literal) | A boolean alias word names a binding, and every read of it becomes the literal — a wrong VALUE, silently | `compiler` | **none** — the shape cannot enter a positive fixture while it miscompiles; the fix's gate is a `battery` rejection row |
 | [21](#21-an-identifier-read-carries-no-source-span) | Identifier reads carry no source span — hover, definition, diagnostics, tokens | `editor`, `compiler` | `census` — **red by design**, the root all four surfaces share; `member` + `survival` on the token surface |
 | [22](#22-completion-and-signature-help-fail-on-an-incomplete-expression) | Completion & signature help fail on an incomplete expression | `editor`, `compiler` | **none** — a content audit for each would catch them; neither built |
 | [40](#40-a-component-members-reactive-initializer-is-never-type-checked) | A component member's reactive initializer is never type-checked | `compiler` | **none** — a `check` case asserting the silence as the gap is the honest interim, unbuilt; the fix's gate is the member negatives entering 13-components' error pair |
@@ -62,6 +63,25 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 **The `strict` dimension's clean run is contractual** — a red row there is a discovery, not residue; the runner's header states the curation rules.
 
 ## Findings
+
+### 51. A boolean alias word names a binding, and every read becomes the literal
+
+```
+yes: boolean = false
+console.log('binding says:', yes)     # prints: true
+```
+
+The declaration stands — the face reads `let yes: boolean = false` — and every subsequent READ of that binding is replaced by `true`. The binding is unreachable from the moment it exists, and the program prints the opposite of what its source says. No diagnostic, no squiggle: the face type-checks clean, because a literal satisfies the annotation.
+
+**The declaration is collateral, not a decision.** A word followed by a colon is captured as a property KEY before it is classified at all ([lexer.js](../../src/lexer.js), the identifier branch), which is what lets `when: 1` and `if: 2` be pairs — the alias table is not consulted for another sixty lines. An annotated declaration has the same `word :` shape as a pair, so it inherits the exemption without anyone choosing it. The read has no colon, falls through to the alias table, and becomes the literal.
+
+**Four spellings, and only four, fail silently** — a fact that follows from what the misread lowers to rather than from a list. The misread has to be a legal expression to go unnoticed. Driven 2026-07-27, one probe per class: a keyword name (`if: number = 2`) rejects at the parser on `POST_IF`; an operator alias (`is: number = 2`) rejects on `COMPARE`, and so do `and`, `or`, `not`, `isnt`, because an operator in argument position does not parse. Only the VALUE aliases — `yes`, `no`, `on`, `off` — lower to `BOOL`, which is legal wherever an expression is, so only those four reach runtime wrong.
+
+**The fix belongs in the scanner, at the declaration.** Making a read yield to an in-scope binding would need scope knowledge in a scanner that has none, which is the wrong layer. Rejecting the DECLARATION is tractable and has its precedent in the same file: `RESERVED_WORDS` exists so certain words never reach the parser as an identifier. The rejection must be narrower than "no alias word before a colon" — `{ yes: 1 }` stays legal, since nothing later reads a binding — so it has to separate a key inside a literal from an annotated declaration at statement level, which is scanner state the lexer already keeps for other decisions.
+
+**Why the suite missed it.** Nothing anywhere declares a binding named for a value alias. The battery's only `yes`/`no` are string literals in ternary rows, and this corpus wrote `yes: Yes = true` and `no: No = false` — the two cases where the literal the read collapses to EQUALS the binding's value, so the fixture printed the right answer while demonstrating nothing. `runtime` passed, `verdict` passed, and the mistake was invisible in both. The lexer-spelling census is what surfaced it: `yes` and `no` counted as exercised BOOL aliases, and the only site claiming them was a read that was never meant to be one.
+
+**Status.** ⬜ **Open** (2026-07-27) — **no gate**, honestly: a positive fixture cannot carry the shape while it miscompiles, and `rip check` cannot see it because the face is clean. The fix's gate is a `battery` rejection row for the declaration, at which point the census's `yes`/`no` rows go dark and want an exclusion naming `true`/`false` as the spelling that carries their lowering.
 
 ### 21. An identifier read carries no source span
 
@@ -371,7 +391,7 @@ Isolated by construct (driven 2026-07-24, the census drain): a plain array (`num
 
 **Why the suite missed it.** The corpus had no tuple negative at all — `TupleType` was claimed by a positive fixture and falsified by a whole-value mismatch, neither of which puts a wrong ELEMENT in the error lane. The census drain is what first wrote one.
 
-**Status.** ⬜ **Open** (2026-07-24) — gated by the Diagnostics Lane's position rows on 11-types' `wrongEntry` and `wrongTrailing`, red by agreement: the audit prints both violations and still exits 0, which is where every audit stands while no exit-code contract exists. The fixtures stay in their element-level form on purpose — assigning a whole wrong value instead would turn the lane green while testing nothing positional.
+**Status.** ⬜ **Open** (2026-07-24) — gated by the Diagnostics Lane's position rows on 11-types' `wrongEntry` and `wrongTrailing`, red by agreement: the contract carries `diagnostics.positions` with this row's reason, so the run reports both violations and still exits 0 — and fails the day the span narrows and the reason is not deleted with it. The fixtures stay in their element-level form on purpose — assigning a whole wrong value instead would turn the lane green while testing nothing positional.
 
 ### 32. Reassigning an exported plain binding double-declares
 

@@ -44,6 +44,14 @@ export const CONTRACT = [
     red: (s) => s.gr.badExclusions > 0,
   },
   {
+    // The alias half of the spelling census needs no invariant: it is read from
+    // the lexer's own table, so it cannot fall out of step. The curated mints
+    // can, and a row that no longer describes the lexer measures nothing.
+    name: 'lexer.mints', lane: 'grammar',
+    property: "every curated mint spelling is still minted by the lexer, driven by its own probe",
+    red: (s) => (s.gr.negatives?.staleMints ?? 0) > 0,
+  },
+  {
     name: 'grammar.census', lane: 'grammar',
     property: "every type text the corpus carries classifies against TypeScript's own type grammar",
     red: (s) => (s.gr.negatives?.kindBad ?? 0) > 0,

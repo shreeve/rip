@@ -8,7 +8,7 @@ Six lanes, each judged by a different reference so they can't all fail the same 
 
 | audit | flag | probes | judged against |
 | --- | --- | --- | --- |
-| Grammar Gate | `--grammar` | which productions the corpus reduces — carrying the type-vocabulary census, the negative-coverage contract, and the CLAIMS.md join | the parser's own rule list and TypeScript's own type grammar — closed denominators nobody here chose; parser only |
+| Grammar Gate | `--grammar` | which productions the corpus reduces — carrying the lexer-spelling and type-vocabulary censuses, the negative-coverage contract, and the CLAIMS.md join | the parser's own rule list and TypeScript's own type grammar — closed denominators nobody here chose; parser only |
 | Mapping Audit | `--map` | every source identifier maps to a generated position holding the same text | the compiler output alone — no server, no tsgo, no twin |
 | Type Audit | `--type` | five dimensions per fixture: compiles, verdict, runtime, twin, strict | the fixtures — suppression directives are refused in positives, so every one publishes zero diagnostics; directive CARRIAGE is gated in test/lang/tsface.test.js |
 | Diagnostics Lane | `--diagnostics` | the corpus's negatives — every diagnostic asserted by code AND position | the line-aligned twin's own tsgo diagnostics, with `error-pins.json` for rows no honest twin can spell |
@@ -21,7 +21,7 @@ Each closed denominator has a bottom and stays there once drained. The AXIS LIST
 
 **The charter: claims are tests, populations are the audit.** A test asserts one claim and must be GREEN; this instrument measures a POPULATION against a denominator and may be RED. Capability is not the line — `check.test.js` drives `rip check` over tsgo, and four `test/toolchain` suites drive the real LSP. What a test cannot hold is the answer's SHAPE: a census over a closed set is a report, and gating its number blesses a baseline while losing the actionable list; a red held by agreement is expressible only by asserting the wrong behavior as current, which inverts when the bug is fixed; and a ruled-uncarried row is neither pass nor fail. So a lone reproducible defect with a known-correct answer belongs in a test — this instrument's job is to FIND it, not hold it, which is why the empty program left for `check.test.js`.
 
-**Complete means, for every stage:** its denominator is NAMED, or the absence of one is ruled with its replacing registry named; the denominator is DRAINED — every item exercised, parked behind an open FINDINGS row, or excluded by a ruled table; every registry row is CARRIED IN BOTH POLARITIES; and a gate FAILS IN BOTH DIRECTIONS when that stops holding. The last clause makes the others assertable: until the exit-code contract lands, nothing fails, so completion cannot be claimed.
+**Complete means, for every stage:** its denominator is NAMED, or the absence of one is ruled with its replacing registry named; the denominator is DRAINED — every item exercised, parked behind an open FINDINGS row, or excluded by a ruled table; every registry row is CARRIED IN BOTH POLARITIES; and a gate FAILS IN BOTH DIRECTIONS when that stops holding. The last clause is what makes the others assertable, and it is what the exit-code contract provides.
 
 **A census yields CANDIDATES, not obligations.** The suites partition by QUESTION: the battery owns behavior and emitted bytes, `test/lang` and `test/schema` own the face's TEXT, this corpus owns whether that face type-checks and answers. A spelling gated elsewhere can still be dark here, and only that gap is this program's — `::` is the worked example, its emission, declaration text, and eight decline classes already gated in [prototype.rip](../battery/prototype.rip), leaving the call sites and hover. Every queue row passes this triage before authoring, and records the verdict.
 
@@ -29,7 +29,7 @@ Each closed denominator has a bottom and stays there once drained. The AXIS LIST
 
 | stage | denominator | state |
 | --- | --- | --- |
-| lexer spellings | the lexer's `ALIASES`/`KEYWORDS`/`STATEMENTS` tables read live, plus a mint list guarded against lexer drift | none built — a spelling the lexer normalizes (`and`, `is`, `on`, `::`) earns production credit it never proved; the battery gates these behaviorally, so the queue is candidates for the type question alone |
+| lexer spellings | the lexer's own alias table, read live, plus a curated mint list each guarded by a probe that must still produce it | built — an alias whose emitted value differs from the word typed is a spelling the parser cannot distinguish, so it earns production credit it never proved; the queue is a gauge, and the battery gates these behaviorally, so a row earns a fixture only where the type question is distinct |
 | parser productions | the parser's own rule list (`Parser().ruleNames`) | drained; remainder parked behind open findings |
 | type sub-language | TypeScript's own type grammar, classified in-process by node kind | drained; remainder finding-held |
 | checker semantics | none possible — CLAIMS.md's Behaviors is the registry | ruled rows outrun their carriers; the claims bucket is where they land |
@@ -54,7 +54,7 @@ Depends on nothing. Produces: use-site position coverage and the root classifier
 
 *Built.* `--grammar`. Parses the corpus with an instrumented Parser — Solar's generated module carries `ruleNames` and a `ctx.onReduce` hook — and reports which productions no fixture reduces, grouped by owning file (`--verbose` lists every one). The denominator is the parser's own rule list, so coverage is judged against a CLOSED set rather than a corpus-relative rate.
 
-Coverage here is necessary, not sufficient: production counting is context-free and cannot distinguish switch-in-render from switch-anywhere, so interaction shapes are measured by the containment matrix this same gate builds from the parse trees, joined against CLAIMS.md's ruled cells.
+Coverage here is necessary, not sufficient, and the gate carries the two censuses that say why. BELOW the productions: a feature the lexer implements by rewriting bytes into existing tokens earns production credit it never proved — `a and b` reduces the same rule as `a && b`, and `A::m` mints three tokens over two bytes to reduce ordinary property rules. The denominator is the lexer's own alias table read live, plus curated scanner mints, each guarded by a probe that must still produce it rather than by a hash that would churn. ABOVE them: production counting is context-free and cannot distinguish switch-in-render from switch-anywhere, so interaction shapes are measured by the containment matrix this gate builds from the parse trees, joined against CLAIMS.md's ruled cells.
 
 Depends on nothing. Produces: the coverage number and the uncovered-rule list M3 consumes.
 
