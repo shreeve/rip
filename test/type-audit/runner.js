@@ -373,7 +373,7 @@ const KNOWN = new Set([
 const usage = () => [
   'The type-audit gauge — a progress scoreboard (not a pass/fail gate) for rip\'s',
   'typed-editor story: the compiler\'s TS face plus the tsgo-brokered editor,',
-  'measured over the typed fixtures in ./fixtures. Not part of `bun test`.',
+  'measured over the typed fixtures in ./corpus. Not part of `bun test`.',
   '',
   'Usage: bun run type-audit [flag]',
   '',
@@ -1556,7 +1556,8 @@ async function abort(headline, reasons) {
 // sees which CONSTRUCTS are dark, not 200 interchangeable rows. Coverage here
 // is necessary, not sufficient: a rule can be exercised while its interaction
 // shapes (reorder × repetition, strings/comments in the frame) stay untested —
-// those are M3's adversarial tranche, not this gate's denominator.
+// those are the containment matrix's territory, joined against CLAIMS.md's
+// ruled cells below, not this gate's denominator.
 let gr = null;
 if (RUN_GRAMMAR) {
   const names = Parser().ruleNames;

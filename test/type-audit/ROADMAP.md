@@ -4,16 +4,18 @@ Internal build plan for the instrument. Runner: `runner.js`. Findings: `FINDINGS
 
 ## Built
 
-Four audits, each judged by a different reference so they can't all fail the same way.
+Six lanes, each judged by a different reference so they can't all fail the same way.
 
 | audit | flag | probes | judged against |
 | --- | --- | --- | --- |
+| Grammar Gate | `--grammar` | which of the grammar's productions the corpus reduces, and which it never does — carrying the type-vocabulary census, the negative-coverage contract, and the CLAIMS.md join | the parser's OWN rule list and TypeScript's own type grammar — closed denominators nobody here chose; parser only, no compile, no server |
+| Mapping Audit | `--map` | every source identifier maps to a generated position holding the same text | the compiler output alone — no server, no tsgo, no twin (its logic validated against the editor once, then the scaffold retired) |
 | Type Audit | *(default)* | five dimensions per fixture: compiles, verdict, runtime, twin, strict | the fixtures — suppression directives are refused in positives (the runner's preflight): every fixture publishes zero diagnostics, its negatives asserted by the Diagnostics Lane; directive CARRIAGE is gated in test/lang/tsface.test.js |
+| Diagnostics Lane | `--errors` | the corpus's negatives — every published diagnostic asserted by code AND position | the LINE-ALIGNED twin's own tsgo diagnostics, with `error-pins.json` carrying the rows no honest twin can spell |
 | Hover Audit | `--hover` | hover every top-level declaration through the editor server | the hand-written `.ts/.tsx` twin, falling back to `hover-pins.json` |
 | Token Audit | `--token` | semantic token + modifiers on every top-level declaration | the `.rip` source itself — no twin, no baseline, cannot self-confirm |
-| Mapping Audit | `--map` | every source identifier maps to a generated position holding the same text | the compiler output alone — no server, no tsgo, no twin (its logic validated against the editor once, then the scaffold retired) |
 
-The first three probe declarations or type verdicts. None asks, of an identifier at a *use* site: where does it map, and is that the right place? The Mapping Audit does — from the compiler's own rows, so it needs no server. It closed the gap below.
+The Type, Hover, and Token audits probe declarations or type verdicts. None asks, of an identifier at a *use* site: where does it map, and is that the right place? The Mapping Audit does — from the compiler's own rows, so it needs no server. It closed the gap below.
 
 ## Why the gap bites
 
@@ -38,17 +40,17 @@ Depends on nothing. Produces: use-site position coverage and the root classifier
 
 *Built.* `bun run type-audit --grammar`. Parses the corpus with an instrumented Parser — Solar's generated module carries a `ruleNames` table and a `ctx.onReduce` hook (src/grammar/solar.rip), so each reduce records its production — and reports which of the grammar's productions no fixture ever reduces, grouped by construct (`--v` lists every production). The denominator is the parser's own rule list, so "exercised by at least one fixture" is judged against a CLOSED set rather than any corpus-relative rate; the run prints the live coverage number. Parser only: no compile, no server, no tsgo.
 
-Coverage here is necessary, not sufficient — a production can be exercised while its interaction shapes (emission reorder × repeated names, strings and comments inside the frame) stay untested. Those belong to M3's adversarial tranche, not to this gate's denominator.
+Coverage here is necessary, not sufficient — a production can be exercised while its interaction shapes (emission reorder × repeated names, strings and comments inside the frame) stay untested. Production counting is context-free and cannot distinguish switch-in-render from switch-anywhere, so those shapes are measured by the containment matrix this same gate builds from the parse trees, joined against CLAIMS.md's ruled cells — not by this denominator.
 
 Depends on nothing. Produces: the coverage number and the uncovered-rule list M3 consumes.
 
 ## M3 — Corpus rewrite
 
-*Authoring underway: `01-basics` through `14-schema` landed — twin and error-lane pair each; the Diagnostics Lane itself (`bun run type-audit --errors`, over `corpus/errors/`) arrived with the first, the pinned-negatives lane (`error-pins.json`) and the hover `silence` gauge with `12-reactive`, and the `ruled` gauge (hover-pins.json's `positions` sections — the RULINGS-governed in-body hover positions) with `13-components`. `15-interactions` remains; the twelve legacy fixtures are retired. Productions a positive fixture cannot yet carry are parked — MANIFEST.md's Parked table, each row held by an open FINDINGS.md row — and spellings no fixture can or should ever reduce (lexically unreachable, banned by design) are excluded from the denominator by the gate's own exclusion table in runner.js.*
+*The grammar bucket is authored: `01-basics` through `14-schema` landed — twin and error-lane pair each; the Diagnostics Lane itself (`bun run type-audit --errors`, over `corpus/errors/`) arrived with the first, the pinned-negatives lane (`error-pins.json`) and the hover `silence` gauge with `12-reactive`, and the `ruled` gauge (hover-pins.json's `positions` sections — the RULINGS-governed in-body hover positions) with `13-components`. The twelve legacy fixtures are retired. The remainder is the claims bucket, which is born empty and authored to CLAIMS.md's ruled rows. Productions a positive fixture cannot yet carry are parked — MANIFEST.md's Parked table, each row held by an open FINDINGS.md row — and spellings no fixture can or should ever reduce (lexically unreachable, banned by design) are excluded from the denominator by the gate's own exclusion table in runner.js.*
 
 Not additive growth: a REWRITE, executed as a strangler migration. The new corpus owns every production the grammar defines; the twelve legacy fixtures are retired.
 
-**The map.** Sixteen grammar-bucket files (renumbered to 01+ once the legacy corpus retired; filenames are KEYS, in `hover-pins.json` and in ledger citations, so nothing renames casually). The corpus splits by charter: `corpus/grammar/` fixtures are justified by the closed denominators below, `corpus/claims/` fixtures by CLAIMS.md rows — each bucket held to its own retirement standard by the gate.
+**The map.** Fourteen grammar-bucket files (renumbered to 01+ once the legacy corpus retired; filenames are KEYS, in `hover-pins.json` and in ledger citations, so nothing renames casually). The corpus splits by charter: `corpus/grammar/` fixtures are justified by the closed denominators below, `corpus/claims/` fixtures by CLAIMS.md rows — each bucket held to its own retirement standard by the gate. The claims bucket numbers independently from 01, and basenames stay unique corpus-wide (twins, pins, and carriers all key on them — the gate refuses a collision).
 
 | file | charter |
 | --- | --- |
@@ -66,8 +68,6 @@ Not additive growth: a REWRITE, executed as a strangler migration. The new corpu
 | `12-reactive.rip` | `:=`, `~=`, `=!`, effects |
 | `13-components.rip` | component definition + render (structure, control flow, binds/events/refs/keys/slots), gates, offer/accept |
 | `14-schema.rip` | field forms, defaults, optionals, computed, transforms |
-| `15-interactions.rip` | the adversarial tranche — emission reorder × repeated names, strings/comments inside frames, shapes minimized from real code |
-| `16-edges.rip` | reserved — only if residue productions survive the sweep-up |
 
 **Authoring.**
 
@@ -75,7 +75,7 @@ Not additive growth: a REWRITE, executed as a strangler migration. The new corpu
 - **The ladder is a tiebreaker, not a law.** The order remains a dependency ladder (each file reads using constructs already introduced); charter-boundary calls for ambiguous productions are settled in MANIFEST.md, not per-author.
 - **The register.** Explicit call parens by default (matching the twins; the implicit spelling stays covered, densely in `02-operations` whose charter owns invocation); single quotes unless rip's interpolation syntax forces double; padded braces on inline object and type literals in both pair members (`{ host: 1 }` — the TS standard, and the dominant register in this repo's own rip sources); negatives in the family's error fixture, never inline (see **Negatives**).
 - **Verified, never asserted.** Every coverage claim goes through the gate: parse instrumented, confirm the reduction.
-- **Density follows starvation.** Grammar-dark families (loops, modules, operations) get minimal-honest coverage; the shape-starved ones (components, schema — grammar-covered yet the worst mapping territory in real code) get dense, real-shaped content. `15-interactions` has no slot — it grows as real-code sweeps surface shapes worth minimizing.
+- **Density follows starvation.** Grammar-dark families (loops, modules, operations) get minimal-honest coverage; the shape-starved ones (components, schema — grammar-covered yet the worst mapping territory in real code) get dense, real-shaped content.
 
 **Oracles.** Hand-written twins, written WITH the fixture, for `01-basics`, `02-operations`, `06-loops`, `08-functions`, `09-classes`, `10-modules`, `11-types`, and `12-reactive` — the reactive twin is plain TS (`:=` → `let`, `~=`/`=!` → `const`, an effect's disposer spelled as a value), honest for the type story because the editor's ruled answers are value types; where a write re-fires an effect the twin hand-replays the flush, so runtime parity there asserts a predicted trace, not an independent derivation. Analogy twins for `13-components` (TSX) and `14-schema` (zod), scoped to where the analogy is honest. Positive twins are STANDARD-TS-formatted — every closing brace on its own line at conventional indentation, as a formatter would produce, never line-parity with the `.rip`: correspondence is by construct order and symbol name, the fixture is never edited for the twin's sake, and the twin running longer than its fixture is desired — it showcases rip's concision. Error pairs (`corpus/errors/`) remain strictly line-aligned, because the Diagnostics Lane derives expected positions from them. Everything rip-native is pinned per RULINGS.md, which the components/schema files are gated on (offer/accept is parked there). Twins beyond the subset are M5's budget.
 
@@ -92,13 +92,17 @@ Not additive growth: a REWRITE, executed as a strangler migration. The new corpu
 
 - **No exit-code contract yet — deliberately deferred.** The runner exits non-zero only on STRUCTURAL refusals (bad argv, a malformed manifest, a suppression directive in a positive fixture, a moved TypeScript surface, a probe pass that did not cover the corpus). Its own findings — invariant violations, position violations, unfalsified classes — print red and exit 0, and `bun run type-audit` sits outside `test` and `test:all`, which collect `*.test.js` only. So the audits are read by a person, not gated. Wiring them to a CI gate is not a flag: several reds are permanent by agreement, each held by an open FINDINGS row, so a build that fails on any red fails forever. It needs the expected-red set declared where the runner can join it live (the `error-pins.json` pattern — prose `why`, never a row's number, which would rot when the row closes), gating contractual invariants while gauges stay informational, and failing in BOTH directions: fewer reds than declared means a finding closed and its row needs retiring, which is exactly the signal a one-directional baseline swallows.
 
+**The claims bucket** carries what no syntactic denominator reaches, and it is where the remaining authoring lives. Two classes of coverage land here, both ruled into CLAIMS.md before a fixture exists: CHECKER BEHAVIORS — narrowing, inference enforcement, the component consumer face, schema projection — where the semantics have no token or production to count; and CONTAINMENT cells, the construct-inside-construct shapes production counting is context-free about. Interaction coverage is this bucket's charter: a cross-context shape becomes a ruled cell the gate checks against the containment matrix it walks from the parse trees, so an interaction the corpus lacks paints red as data rather than sitting in prose as a to-do.
+
+The matrix reaches only the constructs its head set names (`CONSTRUCT_HEADS` in runner.js). Cast, pattern, and param heads are absent, so cast placement (in an operand, in an index result, inside a parenthetical) and the pattern-inside-param family are not yet expressible as cells at all — head curation is a prerequisite for ruling them, and until it happens a green Containment section understates what is dark. Grammar-bucket fixtures may satisfy claims rows as carriers; a claims fixture exists when no grammar charter can honestly hold the shape.
+
 **Grammar credit** goes to `corpus/grammar/` fixtures alone: the gate counts reductions only from the grammar bucket, so neither an error fixture nor a claims fixture can cover a production even by accident — every production's home is a grammar fixture whose charter names it, and retirement checks reason about the grammar charters alone. The claims bucket has its own mirror standard: every `corpus/claims/` fixture must be a named carrier of at least one CLAIMS.md row, judged live by the gate.
 
 **Retirement.** The legacy fixtures are retired — twins and pins with them, every ledger citation re-grounded on the new corpus. The gate's unique-contribution line is the standing instrument: a fixture it lists as removable contributes nothing the rest of the corpus lacks, and a healthy corpus reads "every fixture reduces at least one production no other fixture does."
 
 The mapping census RISES throughout: every new fixture adds at-risk reads to a gauge that is red by design while the identifier-read finding stays open (see FINDINGS.md). Expected, and the point — the grown corpus is what makes that census meaningful when the fix lands. Nothing to fix here.
 
-Depends on M2 (built), RULINGS.md — the components/schema files and their pinned negatives are gated on it — and MANIFEST.md (the ownership decision record the gate joins against — claim lists stay live in the gate's own output, so nothing is regenerated). Produces: the corpus — and M1, M4, and M5 see only constructs the corpus contains, so their completeness is bounded here.
+Depends on M2 (built), RULINGS.md — the components/schema files and their pinned negatives are gated on it — MANIFEST.md (the ownership decision record the gate joins against — claim lists stay live in the gate's own output, so nothing is regenerated), and CLAIMS.md, which owns the claims bucket's charter the way MANIFEST.md owns the grammar bucket's: a claims fixture cannot be authored before its row is ruled. Produces: the corpus — and M1, M4, and M5 see only constructs the corpus contains, so their completeness is bounded here.
 
 ## M4 — Spelling-invariance
 
@@ -120,10 +124,18 @@ Hover *content* at use sites; completion; signature help. What M4 can't reach by
 
 Depends on server + new twins. Produces: the content-level checks #22 asks for.
 
-## M6 — Rename to Editor Audit
+## M6 — Rename to Audit, and the default surface
 
-*Not started; last, deliberately.*
+*Not started. Its precondition is met: the non-type lanes exist.*
 
-The umbrella `type audit` collides with its own default member (also *Type Audit*) and undersells the non-type members. Once those members exist, rename the family to **Editor Audit**: `bun run type-audit` → `bun run editor-audit`, plus the `FINDINGS.md` and doc references; the default member keeps the name *Type Audit*. Not bare *audit* — that reads as `bun audit`, dependency-security auditing.
+The umbrella `type audit` collides with its own default member (also *Type Audit*) and undersells the five lanes that are not about types. Rename the family to **Audit** — `bun run type-audit` → `bun run audit`, `test/type-audit/` → `test/audit/`, plus the script, `FINDINGS.md`, and doc references. The default member keeps the name *Type Audit*.
 
-Depends on M1–M5. Renaming before they exist is churn for no benefit. Produces: a name that fits what the instrument became.
+**Bare, not an adjective.** The lanes share a METHOD, not a subject: each measures rip's own output against a reference rip did not author. Any subject-adjective misnames the majority, and re-misnames the family the next time a lane lands — *Editor Audit* fails on the count as badly as *type* does, since grammar, mapping, and type never speak to the editor server.
+
+**`bun audit` is not a collision** (verified, bun 1.3.14): `bun run audit` reaches the script even though `audit` names a builtin, and bare `bun audit` stays Bun's dependency scanner. The residual is a mistype: this repo has a lockfile, so `bun audit` prints vulnerability output instead of failing — but the two outputs share nothing, so it cannot read as a scoreboard that ran. (The repo's own `test` script argues neither way: `bun test` and `bun run test` are near-aliases, differing only by a `--timeout` the suite does not need.) Prose spells it `the audit (bun run audit)` on first mention.
+
+**The default runs every lane**, with `--type` for the fast loop and `--all` still accepted. Measured 2026-07-27, all six cost 21s — grammar 0.3s, mapping 0.2s, type 5.9s, diagnostics 4.2s, hover 11.7s, token 4.8s — and the type lane's clean run is contractual, so a type-only default prints an all-green screen while every lane that can carry news goes unrun. The two cheapest lanes are the two holding closed denominators.
+
+**One flag per lane, named for its lane:** `--grammar`, `--map`, `--type`, `--diagnostics`, `--hover`, `--token`. `--errors` becomes `--diagnostics` — it names the corpus directory it reads rather than the lane, which asserts diagnostics by code and position; the plural is then principled, tracking a set per file against hover's and token's one answer per position. `--map` keeps its abbreviation: it names the source map, the artifact the lane audits. `--v` becomes `--verbose` with a `-v` alias, matching `--help`/`-h`. `--serial` is a mode, not a lane.
+
+Depends on nothing outstanding — M1–M3 are built, and M4/M5 add surfaces to existing lanes rather than new nouns. Produces: a name that fits what the instrument became, a default that reports the whole instrument, and a flag per lane that names it.
