@@ -4,13 +4,13 @@ Internal build plan for the instrument. Runner: `runner.js`. Findings: `FINDINGS
 
 ## Built
 
-Six lanes, each judged by a different reference so they can't all fail the same way.
+Six lanes, each judged by a different reference so they can't all fail the same way. `bun run audit` with no flag runs every one (~21s); a lane's own flag narrows the run to it.
 
 | audit | flag | probes | judged against |
 | --- | --- | --- | --- |
 | Grammar Gate | `--grammar` | which productions the corpus reduces — carrying the type-vocabulary census, the negative-coverage contract, and the CLAIMS.md join | the parser's own rule list and TypeScript's own type grammar — closed denominators nobody here chose; parser only |
 | Mapping Audit | `--map` | every source identifier maps to a generated position holding the same text | the compiler output alone — no server, no tsgo, no twin |
-| Type Audit | *(default)* | five dimensions per fixture: compiles, verdict, runtime, twin, strict | the fixtures — suppression directives are refused in positives, so every one publishes zero diagnostics; directive CARRIAGE is gated in test/lang/tsface.test.js |
+| Type Audit | `--type` | five dimensions per fixture: compiles, verdict, runtime, twin, strict | the fixtures — suppression directives are refused in positives, so every one publishes zero diagnostics; directive CARRIAGE is gated in test/lang/tsface.test.js |
 | Diagnostics Lane | `--diagnostics` | the corpus's negatives — every diagnostic asserted by code AND position | the line-aligned twin's own tsgo diagnostics, with `error-pins.json` for rows no honest twin can spell |
 | Hover Audit | `--hover` | hover every top-level declaration through the editor server | the hand-written `.ts/.tsx` twin, falling back to `hover-pins.json` |
 | Token Audit | `--token` | semantic token + modifiers on every top-level declaration | the `.rip` source itself — no twin, no baseline, cannot self-confirm |
@@ -121,19 +121,3 @@ Depends on the server; benefits from M3. Produces: surface coverage across the L
 Hover CONTENT at use sites, completion, signature help — what M4 cannot reach by symmetry alone, checked against hand-written twins.
 
 Depends on the server + new twins. Produces: the content-level checks #22 asks for.
-
-## M6 — Rename to Audit, and the default surface
-
-*Not started. Its precondition is met: the non-type lanes exist.*
-
-The umbrella `type audit` collides with its own default member (also *Type Audit*) and undersells the five lanes that are not about types. Rename the family to **Audit** — `bun run audit` → `bun run audit`, `test/audit/` → `test/audit/`, plus the script and doc references. The default member keeps the name *Type Audit*.
-
-**Bare, not an adjective.** The lanes share a METHOD, not a subject: each measures rip's output against a reference rip did not author. Any subject-adjective misnames the majority and re-misnames the family the next time a lane lands — *Editor Audit* fails on the count as badly as *type* does, since grammar, mapping, and type never speak to the editor server.
-
-**`bun audit` is not a collision** (verified, bun 1.3.14): `bun run audit` reaches the script even though `audit` names a builtin, and bare `bun audit` stays Bun's dependency scanner. The residual is a mistype: this repo has a lockfile, so `bun audit` prints vulnerability output instead of failing — but the two outputs share nothing, so it cannot read as a scoreboard that ran. Prose spells it `the audit (bun run audit)` on first mention.
-
-**The default runs every lane**, with `--type` for the fast loop and `--all` still accepted. Measured 2026-07-27, all six cost 21s — grammar 0.3s, mapping 0.2s, type 5.9s, diagnostics 4.2s, hover 11.7s, token 4.8s — and the type lane's clean run is contractual, so a type-only default prints an all-green screen while every lane that can carry news goes unrun.
-
-**One flag per lane, named for its lane:** `--grammar`, `--map`, `--type`, `--diagnostics`, `--hover`, `--token`. `--errors` becomes `--diagnostics` — it named the corpus directory rather than the lane, which asserts diagnostics by code and position; the plural is then principled, tracking a set per file against hover's and token's one answer per position. `--map` keeps its abbreviation: it names the source map, the artifact the lane audits. `--v` becomes `--verbose` with a `-v` alias. `--serial` is a mode, not a lane.
-
-Depends on nothing outstanding — M1–M3 are built, and M4/M5 add surfaces to existing lanes rather than new nouns. Produces: a name that fits what the instrument became, a default that reports the whole instrument, and a flag per lane that names it.

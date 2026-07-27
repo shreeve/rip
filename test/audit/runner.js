@@ -422,7 +422,10 @@ const LANES = ARGV.includes('--serial') ? 1 : 4;
 // naming none runs them ALL, because the alternative — defaulting to one lane —
 // defaults to the only lane whose clean run is contractual, so the bare command
 // would print an all-green screen while every lane that can carry news sat
-// unrun. `--all` is that same default, spelled.
+// unrun. `--all` is that same default, spelled. The whole run costs ~21s
+// (measured 2026-07-27: grammar 0.3s, map 0.2s, type 5.9s, diagnostics 4.2s,
+// hover 11.7s, token 4.8s), so speed never bought enough to justify the
+// silence; `--type` is the fast loop for whoever is authoring a fixture.
 const named = AUDITS.some((a) => ARGV.includes(a.flag));
 for (const a of AUDITS) a.ran = !named || ARGV.includes('--all') || ARGV.includes(a.flag);
 const ranAudit = (key) => AUDITS.find((a) => a.key === key).ran;
