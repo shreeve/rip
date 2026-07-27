@@ -47,8 +47,8 @@ The census owns which type KINDS the corpus claims; these rows own what the chec
 | a recursive alias resolves and checks a deep literal | 22-vocabulary.rip:canopy | 22-vocabulary.errors.rip:wrongTwig |
 | an index signature admits extra keys while its named members stay required | 22-vocabulary.rip:counters | 22-vocabulary.errors.rip:wrongTallies |
 | a deep mismatch positions on the inner member, not the outer binding | 22-vocabulary.rip:packed | 22-vocabulary.errors.rip:wrongCrate |
-| interface heritage demands both base and derived members | ABSENT | 11-types.errors.rip:wrongStrobe |
-| `typeof` widens literal properties — a `typeof defaults` alias types string, not `'dark'` | 11-types.rip:tuned | ABSENT |
+| interface heritage demands both base and derived members | 11-types.rip:alarm | 11-types.errors.rip:wrongStrobe |
+| `typeof` widens literal properties — a `typeof defaults` alias types string, not `'dark'` | 11-types.rip:tuned | 11-types.errors.rip:wrongPreset |
 | overload resolution picks the matched signature's return, where the overloads' returns differ | 22-vocabulary.rip:overloadPair | 22-vocabulary.errors.rip:wrongOverload |
 | generic call-site inference preserves literal types and enforces the constraint | 22-vocabulary.rip:narrowed | 22-vocabulary.errors.rip:wrongEcho |
 | a union-with-`undefined` member demands its key where `?:` does not | 22-vocabulary.rip:optionality | 22-vocabulary.errors.rip:wrongFirm |
@@ -102,6 +102,7 @@ The park expires in one direction: the row becomes CARRIED. The gate paints red 
 
 | behavior | until |
 | --- | --- |
+| call arity survives paren injection — the implicit spelling is checked like the explicit one | the open paren-injected-arity finding closes (FINDINGS.md) — the code survives injection but the position lands on the first argument, so the negative cannot assert both |
 | a destructured binding types through the pin pass — the same hoisted read, bound by a pattern rather than assigned | the open destructured-hoisting finding closes (FINDINGS.md) — the pin pass reaches a plainly-assigned binding but not one bound by a pattern, so the shape is implicitly `any` under strict |
 
 ## Containment

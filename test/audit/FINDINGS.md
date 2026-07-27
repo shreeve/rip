@@ -36,6 +36,7 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [27](#27-a-pattern-catch-destructures-unknown) | A pattern catch publishes TS2339/TS2488 from its own lowering | `compiler` | **none** — the corpus parks both pattern spellings ([MANIFEST.md](MANIFEST.md)'s Parked table); a `check` case in the match-operator style is the honest interim gate, unbuilt |
 | [31](#31-a-promoted-param-declares-no-field) | A promoted `@`-param declares no field — TS2339 on every member use | `compiler` | **none** — 08-functions carries promotion only alongside manual field declarations; a `check` case in the match-operator style is the honest interim gate, unbuilt |
 | [52](#52-a-destructured-binding-read-by-a-hoisted-def-is-implicitly-any-under-strict) | A destructured binding read by a hoisted def is implicitly `any` under strict | `strict`, `hoist` | **none** — the shape cannot enter a positive fixture while it fails the `strict` dimension; the fix's gate is the destructured spelling entering the inference claims fixture, where `strict` holds it |
+| [53](#53-a-paren-injected-calls-arity-error-lands-on-the-wrong-argument) | A paren-injected call's arity error lands on the wrong argument | `editor`, `compiler` | **none** — the negative cannot enter the error lane while the position is wrong; the fix's gate is that negative joining 02-operations' error pair |
 | [43](#43-a-schema-callables-output-types-unknown) | A schema callable's output types `unknown` — false errors on every typed read | `compiler` | the Diagnostics Lane's 14-schema pin (`error-pins.json`) asserts the typed-read rejection **as the interim** — it goes red the day callable outputs type, the cue to retire it |
 | [36](#36-a-reactive-import-serves-the-raw-cell) | A reactive import serves the raw cell — no deref, writes don't build | `compiler`, `capability` | **none while the semantics are unsettled** — auto-deref vs cell-as-API is the language owner's ruling; this row's exit is that ruling, which hands it an ordinary gate either way |
 | [41](#41-a-forward-referenced-class-or-component-pins-the-probes-own-symbol) | A forward-referenced class or component pins the probe's own symbol — TS2304 on legal code | `editor`, `hoist` | **none** — a `check` case asserting the TS2304 as the gap is the honest interim, unbuilt; the fix's gate is the forward-reference spelling entering the corpus, where `verdict` holds it |
@@ -279,6 +280,24 @@ So it is neither destructuring nor hoisting alone — it is destructuring reache
 **Why the suite missed it.** Nothing had ever destructured at the top level and read the result from a `def`: the corpus's one live pinnable ([08-functions.rip](corpus/grammar/08-functions.rip) `formatOf`) reads a plainly-assigned object, and `bun test` asserts the operator's runtime values, where the annotation is invisible. Authoring [claims/20-inference.rip](corpus/claims/20-inference.rip) for the pin-pass claim is what surfaced it — the fixture was written with both spellings, and the `strict` dimension rejected the destructured one.
 
 **Status.** ⬜ **Open** (2026-07-27) — **no gate**: the shape cannot enter a positive fixture while it fails the `strict` dimension, and the corpus keeps only the block-confined spelling with the destructured one named as absent on purpose. The fix's gate is that spelling entering `claims/20-inference.rip`, where `strict` holds it and the pin-pass claim's carrier goes green.
+
+### 53. A paren-injected call's arity error lands on the wrong argument
+
+```
+pair = (left: number, right: number) -> left + right
+pair 1, count, count      # TS2554 positions on `1`, not on the excess `count`
+pair(1, count, count)     # the same call, explicitly parenthesised, positions correctly
+```
+
+rip injects the parens a paren-less call omits, and the emitted face is byte-identical to what the explicit spelling emits — so tsgo raises the same TS2554, on the same argument, in both cases. Only the journey back differs: mapped to source, the implicit spelling's diagnostic lands on the FIRST argument rather than the excess one. The code survives paren injection; the position does not.
+
+**Driven** (2026-07-27, the Diagnostics Lane over `02-operations.errors.rip`): the two spellings in one file, arguments identical. The explicit call asserts clean. The implicit one reports `position TS2554: expected column 36 (\`count\`), published 26` — column 26 is the literal `1`.
+
+**Why this is the identifier-read root wearing an argument list.** The injected `(…)` emits as one cover row, and an argument inside it has no source span of its own, so the resolver answers with the cover's left edge — the same mechanism that makes `console.log total` hover about `console.log`. What is new is the surface: a diagnostic, not a hover, and one whose CODE is correct, so nothing outside a position-asserting lane would notice.
+
+**Why the suite missed it.** `bun test` asserts that the paren-less call runs and that its emitted bytes round-trip, both of which hold. Nothing asserted where a diagnostic on such a call lands, because the corpus had no paren-less negative — the explicit-arity negative in 02-operations covers the code and says nothing about the spelling.
+
+**Status.** ⬜ **Open** (2026-07-27) — **no gate**: the negative cannot enter the error lane while the position is wrong, since the Diagnostics Lane asserts code AND position and pinning it would certify the mis-position as intended. The claims row is parked. The fix's gate is that negative entering 02-operations' error pair, where the lane holds it by both.
 
 ### 43. A schema callable's output types `unknown`
 

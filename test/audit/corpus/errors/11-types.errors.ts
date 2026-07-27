@@ -73,3 +73,6 @@ class WrongTally {
   bump(): this {
     return this } }
 let wrongThis: number = new WrongTally().bump()
+let presets = { theme: 'dark', depth: 2 }
+type Presets = typeof presets
+let wrongPreset: Presets = { theme: 7, depth: 3 }
