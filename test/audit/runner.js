@@ -3,14 +3,22 @@
 // independent dimensions, and every failure is categorized so the
 // number tells you WHERE the type story stands.
 //
-//   bun run audit                  # the Type Audit (dims 1–6), the default
+//   bun run audit                  # EVERY lane, bottom-up: grammar → map → type → diagnostics → hover + token
 //   bun run audit --grammar        # the Grammar Gate ONLY (parser only)
 //   bun run audit --map            # the Mapping Audit ONLY (compiler output; no server)
-//   bun run audit --errors         # the Diagnostics Lane ONLY (drives the editor server)
+//   bun run audit --type           # the Type Audit ONLY — the fast loop while authoring
+//   bun run audit --diagnostics    # the Diagnostics Lane ONLY (drives the editor server)
 //   bun run audit --hover          # the Hover Audit ONLY (slower; drives LSP servers)
 //   bun run audit --token          # the Token Audit ONLY (drives the editor server)
-//   bun run audit --all            # every audit, bottom-up: grammar → map → type → errors → hover + token
-//   bun run audit --v              # + list expected hover divergences / unasserted tokens
+//   bun run audit --verbose        # + list expected hover divergences / unasserted tokens
+//
+// A FLAG NAMES ITS LANE, and that is the whole naming rule — the flag is the
+// lane's own noun, never the directory it reads or an abbreviation of the
+// question. `--diagnostics` is plural on purpose: the lane asserts a SET per
+// file, where hover and token probe one answer per position, so number tracks
+// what is counted rather than following its neighbours. `--map` keeps its
+// short spelling because it names the source map, the artifact the lane
+// audits. `--serial` is a mode, not a lane, and stays outside the set.
 //
 // The independent audits (the AUDITS table below is the authoritative list —
 // it also carries the Grammar Gate, ROADMAP "M2", and the Diagnostics Lane,
@@ -321,7 +329,8 @@ const AUDITS = [
          + 'own bytes; each failure is classified by the mapping row it fell to',
   },
   {
-    key: 'main', flag: null, name: 'Type Audit',
+    key: 'main', flag: '--type', name: 'Type Audit',
+    runs: 'compiles, runs, and type-checks each fixture',
     blurb: 'five dimensions per fixture: compiles, verdict, runtime, twin, strict',
     judge: 'the fixtures themselves. No positive fixture may carry a suppression\n'
          + 'directive (the preflight refuses them): every fixture must publish ZERO\n'
@@ -329,7 +338,7 @@ const AUDITS = [
          + 'Lane.',
   },
   {
-    key: 'errors', flag: '--errors', name: 'Diagnostics Lane',
+    key: 'errors', flag: '--diagnostics', name: 'Diagnostics Lane',
     blurb: 'the corpus\'s negatives — unsuppressed error fixtures, every diagnostic asserted by code and position',
     judge: 'the twin\'s OWN tsgo diagnostics — TypeScript\'s answer on the LINE-ALIGNED twin\n'
          + 'fixes each expected code and line, and the flagged token\'s place in the rip\n'
@@ -359,9 +368,9 @@ const AUDITS = [
   },
 ];
 const FLAGS = [
-  ['--all', 'every audit'],
+  ['--all', 'every lane — what no flag already means, kept for the fingers that type it'],
   ['--serial', 'probe one fixture at a time — the control for the concurrent pass'],
-  ['--v', '+ expected hover divergences, unasserted tokens, and every flagged mapping read, in full'],
+  ['--verbose', '-v', '+ expected hover divergences, unasserted tokens, and every flagged mapping read, in full'],
   ['--help', '-h', 'this message'],
 ];
 // Every accepted flag: the audits' own, plus the modifiers above (a row may
@@ -377,7 +386,7 @@ const usage = () => [
   '',
   'Usage: bun run audit [flag]',
   '',
-  `  ${'(no flag)'.padEnd(16)} the Type Audit only — fast, the default`,
+  `  ${'(no flag)'.padEnd(16)} EVERY lane — the default, because a lane left unrun reports nothing`,
   ...AUDITS.filter((a) => a.flag).map((a) => `  ${a.flag.padEnd(16)} the ${a.name} only (${a.runs ?? 'drives the editor server'})`),
   ...FLAGS.map((row) => `  ${row.slice(0, -1).join(', ').padEnd(16)} ${row.at(-1)}`),
   '',
@@ -402,18 +411,20 @@ if (unknown.length) {
   console.error(`\n✗ Unknown flag: ${unknown.join(', ')}${hint ? ` — did you mean ${hint}?` : ''}\n\n${usage()}`);
   process.exit(1);
 }
-const VERBOSE = ARGV.includes('--v');
+const VERBOSE = ARGV.includes('--verbose') || ARGV.includes('-v');
 // Fixtures probe a few at a time because the cost is waiting, not computing.
 // `--serial` collapses that to one lane: if a result ever looks wrong, run it
 // and see whether concurrency was the cause. The two must agree — and if they
 // ever do not, the concurrent path is the bug, not the answer.
 const LANES = ARGV.includes('--serial') ? 1 : 4;
 // Which audits this run covers — computed once, ON the table, so no other site
-// can disagree with it. A named audit suppresses the default one; `--all` runs
-// everything.
-for (const a of AUDITS) a.ran = a.flag ? (ARGV.includes(a.flag) || ARGV.includes('--all')) : false;
-const named = AUDITS.some((a) => a.ran);
-AUDITS.find((a) => a.key === 'main').ran = !named || ARGV.includes('--all');
+// can disagree with it. NAMING a lane narrows the run to the lanes named;
+// naming none runs them ALL, because the alternative — defaulting to one lane —
+// defaults to the only lane whose clean run is contractual, so the bare command
+// would print an all-green screen while every lane that can carry news sat
+// unrun. `--all` is that same default, spelled.
+const named = AUDITS.some((a) => ARGV.includes(a.flag));
+for (const a of AUDITS) a.ran = !named || ARGV.includes('--all') || ARGV.includes(a.flag);
 const ranAudit = (key) => AUDITS.find((a) => a.key === key).ran;
 const RUN_MAIN = ranAudit('main');
 const RUN_HOVER = ranAudit('hover');
@@ -1508,7 +1519,7 @@ const auditBanner = (title, subtitle) => {
 // lanes pay it out of time they would otherwise spend idle.
 // Skipped entirely when no running audit opens a document (Mapping and Grammar
 // read compiler/parser output alone), sized to the widest workload the
-// running audits actually have (a bare --errors run over one fixture boots one
+// running audits actually have (a bare --diagnostics run over one fixture boots one
 // server, not LANES), and STARTED WITHOUT AWAITING — the serverless sections
 // run while the servers boot, and each server-driven section awaits readiness
 // on entry. The early .catch only parks the rejection so a boot failure
@@ -2288,7 +2299,7 @@ if (RUN_MAIN) {
   fails = totalApplicable - totalPass;
 }
 
-// ── the Diagnostics Lane (--errors / --all; ROADMAP "M3"): fixtures whose
+// ── the Diagnostics Lane (--diagnostics; ROADMAP "M3"): fixtures whose
 // errors are UNSUPPRESSED, each published diagnostic asserted by code AND
 // position. The verdict dimension can never see a mis-positioned diagnostic —
 // a fixture's `@ts-expect-error` is consumed inside tsgo, on the face, before
@@ -3257,7 +3268,7 @@ if (tk) {
   if (skipped.length) {
     console.log(`\n  ${dim('Not run')} ${dim(`(this run: ${covered})`)}`);
     for (const a of skipped) console.log(`    ${dim('·')} ${bold(a.name)} ${dim(`— ${a.blurb}`)}\n      ${dim(`bun run audit${a.flag ? ' ' + a.flag : ''}`)}`);
-    console.log(`    ${dim('·')} ${dim('all of them:')} ${dim('bun run audit --all')}   ${dim('· full flag list:')} ${dim('--help')}`);
+    console.log(`    ${dim('·')} ${dim('all of them:')} ${dim('bun run audit')}${dim(' (no flag)')}   ${dim('· full flag list:')} ${dim('--help')}`);
   }
 }
 console.log('');

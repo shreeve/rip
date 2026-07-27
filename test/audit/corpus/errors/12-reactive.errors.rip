@@ -1,5 +1,5 @@
 # 12-reactive.errors.rip — intentional negatives: the Diagnostics Lane
-# (bun run audit --errors) asserts each one; @ts-nocheck quiets editors only.
+# (bun run audit --diagnostics) asserts each one; @ts-nocheck quiets editors only.
 # @ts-nocheck
 
 count := 0

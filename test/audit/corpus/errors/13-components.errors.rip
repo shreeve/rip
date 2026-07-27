@@ -1,5 +1,5 @@
 # 13-components.errors.rip — intentional negatives: the Diagnostics Lane
-# (bun run audit --errors) asserts each one. The bind and ref rows are
+# (bun run audit --diagnostics) asserts each one. The bind and ref rows are
 # PINNED (error-pins.json — no honest TSX line can spell the `<=>` channel,
 # and React's ref rejection fires for a different reason than the cell
 # mismatch); every other row derives from the line-aligned twin.

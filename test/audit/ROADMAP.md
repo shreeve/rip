@@ -11,7 +11,7 @@ Six lanes, each judged by a different reference so they can't all fail the same 
 | Grammar Gate | `--grammar` | which productions the corpus reduces — carrying the type-vocabulary census, the negative-coverage contract, and the CLAIMS.md join | the parser's own rule list and TypeScript's own type grammar — closed denominators nobody here chose; parser only |
 | Mapping Audit | `--map` | every source identifier maps to a generated position holding the same text | the compiler output alone — no server, no tsgo, no twin |
 | Type Audit | *(default)* | five dimensions per fixture: compiles, verdict, runtime, twin, strict | the fixtures — suppression directives are refused in positives, so every one publishes zero diagnostics; directive CARRIAGE is gated in test/lang/tsface.test.js |
-| Diagnostics Lane | `--errors` | the corpus's negatives — every diagnostic asserted by code AND position | the line-aligned twin's own tsgo diagnostics, with `error-pins.json` for rows no honest twin can spell |
+| Diagnostics Lane | `--diagnostics` | the corpus's negatives — every diagnostic asserted by code AND position | the line-aligned twin's own tsgo diagnostics, with `error-pins.json` for rows no honest twin can spell |
 | Hover Audit | `--hover` | hover every top-level declaration through the editor server | the hand-written `.ts/.tsx` twin, falling back to `hover-pins.json` |
 | Token Audit | `--token` | semantic token + modifiers on every top-level declaration | the `.rip` source itself — no twin, no baseline, cannot self-confirm |
 
@@ -52,7 +52,7 @@ Depends on nothing. Produces: use-site position coverage and the root classifier
 
 ## M2 — Grammar gate
 
-*Built.* `--grammar`. Parses the corpus with an instrumented Parser — Solar's generated module carries `ruleNames` and a `ctx.onReduce` hook — and reports which productions no fixture reduces, grouped by owning file (`--v` lists every one). The denominator is the parser's own rule list, so coverage is judged against a CLOSED set rather than a corpus-relative rate.
+*Built.* `--grammar`. Parses the corpus with an instrumented Parser — Solar's generated module carries `ruleNames` and a `ctx.onReduce` hook — and reports which productions no fixture reduces, grouped by owning file (`--verbose` lists every one). The denominator is the parser's own rule list, so coverage is judged against a CLOSED set rather than a corpus-relative rate.
 
 Coverage here is necessary, not sufficient: production counting is context-free and cannot distinguish switch-in-render from switch-anywhere, so interaction shapes are measured by the containment matrix this same gate builds from the parse trees, joined against CLAIMS.md's ruled cells.
 
@@ -134,6 +134,6 @@ The umbrella `type audit` collides with its own default member (also *Type Audit
 
 **The default runs every lane**, with `--type` for the fast loop and `--all` still accepted. Measured 2026-07-27, all six cost 21s — grammar 0.3s, mapping 0.2s, type 5.9s, diagnostics 4.2s, hover 11.7s, token 4.8s — and the type lane's clean run is contractual, so a type-only default prints an all-green screen while every lane that can carry news goes unrun.
 
-**One flag per lane, named for its lane:** `--grammar`, `--map`, `--type`, `--diagnostics`, `--hover`, `--token`. `--errors` becomes `--diagnostics` — it names the corpus directory rather than the lane, which asserts diagnostics by code and position; the plural is then principled, tracking a set per file against hover's and token's one answer per position. `--map` keeps its abbreviation: it names the source map, the artifact the lane audits. `--v` becomes `--verbose` with a `-v` alias. `--serial` is a mode, not a lane.
+**One flag per lane, named for its lane:** `--grammar`, `--map`, `--type`, `--diagnostics`, `--hover`, `--token`. `--errors` becomes `--diagnostics` — it named the corpus directory rather than the lane, which asserts diagnostics by code and position; the plural is then principled, tracking a set per file against hover's and token's one answer per position. `--map` keeps its abbreviation: it names the source map, the artifact the lane audits. `--v` becomes `--verbose` with a `-v` alias. `--serial` is a mode, not a lane.
 
 Depends on nothing outstanding — M1–M3 are built, and M4/M5 add surfaces to existing lanes rather than new nouns. Produces: a name that fits what the instrument became, a default that reports the whole instrument, and a flag per lane that names it.
