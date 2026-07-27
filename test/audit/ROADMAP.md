@@ -62,7 +62,7 @@ Depends on nothing. Produces: the coverage number and the uncovered-rule list M3
 
 *The grammar bucket is authored: `01-basics` through `14-schema`, twin and error-lane pair each. The twelve legacy fixtures are retired. The remainder is the claims bucket, born empty and authored to CLAIMS.md's ruled rows. Productions a positive fixture cannot yet carry are parked in MANIFEST.md, each row held by an open FINDINGS.md row; spellings no fixture can or should ever reduce are excluded from the denominator by the gate's own table in runner.js.*
 
-Not additive growth: a REWRITE, executed as a strangler migration. The corpus splits by charter — `corpus/grammar/` fixtures justified by the closed denominators, `corpus/claims/` fixtures by CLAIMS.md rows — each bucket held to its own retirement standard by the gate. The claims bucket numbers independently from 01; basenames stay unique corpus-wide, since twins, pins, and carriers all key on them.
+Not additive growth: a REWRITE, executed as a strangler migration. The corpus splits by charter — `corpus/grammar/` fixtures justified by the closed denominators, `corpus/claims/` fixtures by CLAIMS.md rows — each bucket held to its own retirement standard by the gate. The grammar bucket numbers from 01 and the claims bucket from 20, so the prefix itself says which charter a fixture answers to and the two never collide in `corpus/errors/`, where both buckets' pairs share one directory. Basenames stay unique corpus-wide either way — twins, pins, and carriers all key on them.
 
 | file | charter |
 | --- | --- |

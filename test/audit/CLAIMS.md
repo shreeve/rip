@@ -10,16 +10,17 @@ A carrier is `fixture:symbol` — the fixture file and a symbol the gate verifie
 
 | behavior | carrier | negative carrier |
 | --- | --- | --- |
-| an inferred binding is enforced at reassignment (`total = 'oops'` after number) | ABSENT | ABSENT |
-| arithmetic infers through operators — a number-by-number product types number | ABSENT | ABSENT |
-| lib-generic results carry instantiated element types (`map`/`filter`/`reduce`, including the point-free spelling) | ABSENT | ABSENT |
-| contextual typing reaches an unannotated callback parameter — no implicit any inside `map` | ABSENT | ABSENT |
-| an unannotated def's inferred return is enforced at its call sites | ABSENT | ABSENT |
-| a branch-written top-level binding types later same-scope reads (evolving let, no def involved) | ABSENT | ABSENT |
+| an inferred binding is enforced at reassignment (`total = 'oops'` after number) | 20-inference.rip:ledger | 20-inference.errors.rip:tally |
+| arithmetic infers through operators — a number-by-number product types number | 20-inference.rip:area | 20-inference.errors.rip:wrongProduct |
+| lib-generic results carry instantiated element types (`map`/`filter`/`reduce`, including the point-free spelling) | 20-inference.rip:summed | 20-inference.errors.rip:wrongElements |
+| contextual typing reaches an unannotated callback parameter — no implicit any inside `map` | 20-inference.rip:formatted | 20-inference.errors.rip:wrongCallback |
+| an unannotated def's inferred return is enforced at its call sites | 20-inference.rip:magnify | 20-inference.errors.rip:wrongReturn |
+| a branch-written top-level binding types later same-scope reads (evolving let, no def involved) | 20-inference.rip:tideline | 20-inference.errors.rip:wrongBranch |
 | an evolving let read by a hoisted def types through the pin pass | 08-functions.rip:formatOf | — |
-| a block-confined evolving let and a destructured one type through the pin pass — the hoisting shapes the probe's design question is about | ABSENT | ABSENT |
+| a block-confined evolving let types through the pin pass — a branch-written binding read by a def above its own statement | 20-inference.rip:recount | 20-inference.errors.rip:wrongHoisted |
+| a destructured binding types through the pin pass — the same hoisted read, bound by a pattern rather than assigned | ABSENT | ABSENT |
 | an annotated declaration under a wrong initializer still hovers its DECLARED type, not the initializer's | ABSENT | ABSENT |
-| destructured bindings carry their source property's type, enforced at use | ABSENT | ABSENT |
+| destructured bindings carry their source property's type, enforced at use | 20-inference.rip:introduceAll | 20-inference.errors.rip:wrongDestructured |
 | a write-only binding hovers its value type, never `any` | 01-basics.rip:recorded | — |
 | call arity survives paren injection — the implicit spelling is checked like the explicit one | 02-operations.rip:quiet | ABSENT |
 

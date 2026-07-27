@@ -1,0 +1,94 @@
+# 20-inference.rip — CLAIMS.md's inference-and-enforcement rows: what the
+# checker CONCLUDES where no production or token can be counted. Chartered by
+# CLAIMS.md alone, so every shape here is syntax the grammar bucket already
+# reduces — this file must never be the reason a production reads as covered.
+# The rejections these rows demand live in corpus/errors/20-inference.errors.rip.
+
+# ── An inferred binding carries its type through a legal reassignment ──
+
+ledger = 12
+ledger = 34
+console.log('ledger:', ledger.toFixed(0))
+
+# ── Arithmetic infers through the operators: number by number is number ──
+
+width = 4
+height = 2.5
+area = (width * height)
+console.log('area:', area.toFixed(2))
+
+# ── Library generics carry instantiated element types, including the
+# point-free spelling where the callback is a named def rather than a literal ──
+
+tallies = [1, 2, 3]
+twiced = tallies.map((n) -> (n * 2))
+retained = tallies.filter((n) -> (n > 1))
+
+def add(a: number, b: number)
+  (a + b)
+
+summed = tallies.reduce(add, 0)
+labels = ['alpha', 'beta']
+upper = labels.map((w) -> w.toUpperCase())
+console.log('generics:', twiced, retained, summed.toFixed(0), upper)
+
+# ── Contextual typing reaches an unannotated callback parameter: `n` is
+# number inside map, with no annotation written and no implicit any ──
+
+formatted = tallies.map((n) -> n.toFixed(1))
+console.log('formatted:', formatted)
+
+# ── An unannotated def's inferred return governs its call sites ──
+
+def magnify(factor: number)
+  (factor * 100)
+
+console.log('scaled:', magnify(1.5).toFixed(0))
+
+# ── A branch-written binding types later same-scope reads: no def involved,
+# so this is the checker's own flow analysis rather than the pin pass ──
+
+tideline = ''
+if (tallies.length > 2)
+  tideline = 'many'
+else
+  tideline = 'few'
+console.log('tideline:', tideline.toUpperCase())
+
+# ── A block-confined binding read by a HOISTED def, where the read sits above
+# the statement that assigns: the pin pass's own shape. The DESTRUCTURED
+# spelling of the same thing is absent on purpose — it is implicitly any under
+# strict, held by the open destructured-hoisting finding, so it cannot enter a
+# positive fixture until that closes. Destructuring itself types fine, which is
+# what the ordinary-flow read below holds ──
+
+if (labels.length > 1)
+  ribbon = labels[0]
+
+def recount()
+  "#{ribbon}/plain"
+
+{ json: media } = { json: 'application/json' }
+console.log('media:', media.toUpperCase())
+
+console.log('recount:', recount())
+
+# ── Destructured bindings carry their source property's type, enforced at
+# use — every parameter spelling: plain, renamed, nested, defaulted, array ──
+
+def introduceAll({ name, years: age }: { name: string, years: number })
+  "#{name} is #{age}"
+
+def burrowed({ inner: { tone } }: { inner: { tone: string } })
+  tone.toUpperCase()
+
+def withDefault({ label = 'none' }: { label?: string })
+  label.trim()
+
+def arrayed([first, second]: number[])
+  ((first + second) * 2)
+
+console.log('plain:', introduceAll({ name: 'Ada', years: 36 }))
+console.log('burrowed:', burrowed({ inner: { tone: 'warm' } }))
+console.log('withDefault:', withDefault({}))
+console.log('arrayed:', arrayed([2, 3]).toFixed(0))

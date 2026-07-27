@@ -35,6 +35,7 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [26](#26-the-match-operators-emission-is-never-null-clean) | The match operator publishes TS2531 on every use | `compiler` | `check`'s match-operator case — asserts the TS2531 **as the gap**; it goes red the day the emission is fixed, the cue to invert it and move the operator into the corpus, where `verdict` holds it |
 | [27](#27-a-pattern-catch-destructures-unknown) | A pattern catch publishes TS2339/TS2488 from its own lowering | `compiler` | **none** — the corpus parks both pattern spellings ([MANIFEST.md](MANIFEST.md)'s Parked table); a `check` case in the match-operator style is the honest interim gate, unbuilt |
 | [31](#31-a-promoted-param-declares-no-field) | A promoted `@`-param declares no field — TS2339 on every member use | `compiler` | **none** — 08-functions carries promotion only alongside manual field declarations; a `check` case in the match-operator style is the honest interim gate, unbuilt |
+| [52](#52-a-destructured-binding-read-by-a-hoisted-def-is-implicitly-any-under-strict) | A destructured binding read by a hoisted def is implicitly `any` under strict | `strict`, `hoist` | **none** — the shape cannot enter a positive fixture while it fails the `strict` dimension; the fix's gate is the destructured spelling entering the inference claims fixture, where `strict` holds it |
 | [43](#43-a-schema-callables-output-types-unknown) | A schema callable's output types `unknown` — false errors on every typed read | `compiler` | the Diagnostics Lane's 14-schema pin (`error-pins.json`) asserts the typed-read rejection **as the interim** — it goes red the day callable outputs type, the cue to retire it |
 | [36](#36-a-reactive-import-serves-the-raw-cell) | A reactive import serves the raw cell — no deref, writes don't build | `compiler`, `capability` | **none while the semantics are unsettled** — auto-deref vs cell-as-API is the language owner's ruling; this row's exit is that ruling, which hands it an ordinary gate either way |
 | [41](#41-a-forward-referenced-class-or-component-pins-the-probes-own-symbol) | A forward-referenced class or component pins the probe's own symbol — TS2304 on legal code | `editor`, `hoist` | **none** — a `check` case asserting the TS2304 as the gap is the honest interim, unbuilt; the fix's gate is the forward-reference spelling entering the corpus, where `verdict` holds it |
@@ -254,6 +255,30 @@ v4 offers auto-import candidates only from the ACTIVE PROGRAM (open files + tran
 **The root is the emission's class walk.** The parameter's annotation is in hand at the promotion site; the fix is emitting the declaration it implies — a class field (`owner: string`) or TypeScript's own parameter-property spelling, which is this exact feature. When it lands, the field-less form joins 08-functions and `verdict` holds it.
 
 **Status.** ⬜ **Open** (2026-07-23) — no gate. A `check` case in the match-operator style — the TS2339 pair asserted **as the gap**, liveness-paired — is the honest interim gate, unbuilt.
+
+### 52. A destructured binding read by a hoisted def is implicitly `any` under strict
+
+```
+{ json: media } = { json: 'application/json' }
+def mediaType()
+  media                                  # strict: TS7034 at the pattern, TS7005 here
+```
+
+The pin pass annotates a top-level binding that a hoisted `def` reads — a `def` is callable from above its own statement, so the binding's type has to reach the editor some other way, and supplying it is what the pass is for. It does not reach a binding introduced by a DESTRUCTURING PATTERN. Under `rip.strict` the pair fires: TS7034 where the pattern binds, TS7005 at the read. Permissive mode is silent and the emitted value is correct, so nothing is mistyped at runtime — what is missing is only the annotation the pass would have written.
+
+**The shape is narrow, and the boundary is clean.** Driven with `rip check` under `rip.strict` (2026-07-27), four one-file programs:
+
+| binding | read by a hoisted def | read in ordinary flow |
+| --- | --- | --- |
+| `{ json } = …` | **TS7034 + TS7005** | clean |
+| `{ json: media } = …` | **TS7034 + TS7005** | clean |
+| `plain = …` | clean | clean |
+
+So it is neither destructuring nor hoisting alone — it is destructuring reached through the hoisted-read path, and the rename is irrelevant. The plain-assignment row is the pass working, which is what makes this a gap in its coverage rather than a question about whether the pass exists.
+
+**Why the suite missed it.** Nothing had ever destructured at the top level and read the result from a `def`: the corpus's one live pinnable ([08-functions.rip](corpus/grammar/08-functions.rip) `formatOf`) reads a plainly-assigned object, and `bun test` asserts the operator's runtime values, where the annotation is invisible. Authoring [claims/20-inference.rip](corpus/claims/20-inference.rip) for the pin-pass claim is what surfaced it — the fixture was written with both spellings, and the `strict` dimension rejected the destructured one.
+
+**Status.** ⬜ **Open** (2026-07-27) — **no gate**: the shape cannot enter a positive fixture while it fails the `strict` dimension, and the corpus keeps only the block-confined spelling with the destructured one named as absent on purpose. The fix's gate is that spelling entering `claims/20-inference.rip`, where `strict` holds it and the pin-pass claim's carrier goes green.
 
 ### 43. A schema callable's output types `unknown`
 
