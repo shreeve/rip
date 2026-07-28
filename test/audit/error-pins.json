@@ -42,21 +42,21 @@
   ],
   "25-components.errors.rip": [
     {
-      "line": 46,
+      "line": 47,
       "character": 12,
       "code": 2322,
       "token": "ref",
       "why": "a non-nullable cell receiving an element ref — the cell's own nullability is what rejects, and React's ref rejection fires for a different reason (a raw element is not a Ref shape), so the twin cannot honestly judge it; pinned per the components ruling (RULINGS.md)"
     },
     {
-      "line": 47,
+      "line": 48,
       "character": 14,
       "code": 2322,
       "token": "ref",
       "why": "a tag-typed cell on a foreign tag — the same rip-native ref surface as the row above, one tag apart; pinned per the components ruling (RULINGS.md)"
     },
     {
-      "line": 48,
+      "line": 49,
       "character": 12,
       "code": 2322,
       "token": "inner",

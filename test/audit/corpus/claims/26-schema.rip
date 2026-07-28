@@ -1,0 +1,56 @@
+# 26-schema.rip — what a schema's projected companion does for a consumer.
+
+# ── A schema-array field projects the nested companion, and a deep read types the leaf ──
+
+Hop = schema
+  port!  string
+  miles! number
+
+Waybill = schema
+  code!  string
+  hops!  Hop[]
+
+waybill = Waybill.parse({ code: 'W-1', hops: [{ port: 'Dover', miles: 21 }, { port: 'Calais', miles: 34 }] })
+
+leafPort: string = waybill.hops[0].port
+leafMiles: number = waybill.hops[1].miles
+
+console.log('nested:', leafPort, leafMiles)
+
+# ── A plain datetime field projects Date, and parse coerces an ISO string into one ──
+
+Stamp = schema
+  at! datetime
+
+stamped = Stamp.parse({ at: '2026-07-28T09:00:00Z' })
+minted: Date = stamped.at
+
+console.log('datetime:', minted.toISOString())
+
+# ── A callable body is sub-compiled rip and runs: the getter derives, the method interpolates, and both reach the caller ──
+# The method call rides a cast, and no negative pairs this row: a type error inside a callable body publishes on the schema's HEAD line rather than the offending one (FINDINGS.md).
+
+Parcel = schema :shape
+  label! string
+  units! number
+  price! number
+
+  weight: ~> @units * @price
+  slip:   -> "#{@label}/#{@units}"
+
+parcel = Parcel.parse({ label: 'crate', units: 3, price: 4 })
+
+console.log('callable:', parcel.weight, (parcel.slip() as string))
+
+# ── A schema companion resolves inside generic type arguments ──
+
+def fetchHop(): Promise<Hop>
+  Promise.resolve(Hop.parse({ port: 'Ostend', miles: 12 }))
+
+def heldHops(): Hop[]
+  [Hop.parse({ port: 'Bruges', miles: 8 })]
+
+fetched = fetchHop!
+held = heldHops()
+
+console.log('generic args:', fetched.port, held[0].miles)

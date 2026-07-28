@@ -1,4 +1,5 @@
 // 25-components.errors.tsx — the line-aligned twin: tsgo's diagnostics derive each expected code and position; the ref and `<=>` rows have no honest TSX spelling, so they stay quiet here and are pinned on the rip side.
+// TSX has no single-quote rewrite, so the method-argument row's position comes from the rip side alone.
 // @ts-nocheck
 import { ComponentProps, useRef, Ref } from 'react'
 class Knob {
@@ -7,7 +8,7 @@ class Knob {
 }
 
 const knob = new Knob()
-const wrongStep = knob.tally('nope')
+const wrongStep = knob.tally("nope")
 
 type SwatchProps = ComponentProps<'input'> & { caption?: string }
 

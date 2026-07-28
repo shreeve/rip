@@ -39,7 +39,6 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [55](#55-a-computed-members-type-is-inferred-from-its-expressions-form-so-most-bodies-type-any) | A computed member's type is inferred from its expression's form, so most bodies type `any` | `compiler` | **none** — the fix's gate is a consumer-face claims row whose computed body reads a property rather than multiplying |
 | [54](#54-a-generic-components-shipped-declarations-reference-a-type-parameter-they-never-declare) | A generic component's shipped declarations reference a type parameter they never declare | `compiler` | **none** — the audit reads the face the checker serves, never the emitted declarations; the fix's gate is a type parameter on dts-tsc's component fixture |
 | [53](#53-a-paren-injected-calls-arity-error-lands-on-the-wrong-argument) | A paren-injected call's arity error lands on the wrong argument | `editor`, `compiler` | **none** — the negative cannot enter the error lane while the position is wrong; the fix's gate is that negative joining 02-operations' error pair |
-| [56](#56-an-explicit-calls-argument-type-diagnostic-lands-on-the-open-paren) | An explicit call's argument-type diagnostic lands on the open paren | `editor`, `compiler` | **none** — 25-components' error pair spells the row paren-less on purpose, since the explicit spelling cannot assert both code and position; the fix's gate is the explicit spelling replacing it there |
 | [43](#43-a-schema-callables-output-types-unknown) | A schema callable's output types `unknown` — false errors on every typed read | `compiler` | the Diagnostics Lane's 14-schema pin (`error-pins.json`) asserts the typed-read rejection **as the interim** — it goes red the day callable outputs type, the cue to retire it |
 | [36](#36-a-reactive-import-serves-the-raw-cell) | A reactive import serves the raw cell — no deref, writes don't build | `compiler`, `capability` | **none while the semantics are unsettled** — auto-deref vs cell-as-API is the language owner's ruling; this row's exit is that ruling, which hands it an ordinary gate either way |
 | [41](#41-a-forward-referenced-class-or-component-pins-the-probes-own-symbol) | A forward-referenced class or component pins the probe's own symbol — TS2304 on legal code | `editor`, `hoist` | **none** — a `check` case asserting the TS2304 as the gap is the honest interim, unbuilt; the fix's gate is the forward-reference spelling entering the corpus, where `verdict` holds it |
@@ -102,6 +101,21 @@ An identifier READ gets no mapping row of its own — it inherits the **cover** 
 | semantic token | `console.log('total:', total)` | dropped |
 
 The diagnostics row needs a *bad* name — a resolving `total` raises nothing to mis-place — so it reads `totalz`; the other three need a resolving one. Same construct, same cover, same collapse.
+
+**The diagnostics surface, driven again on an ARGUMENT-TYPE rejection** (2026-07-28, `rip check` over four spellings of one call, expected column 11 in every row):
+
+| argument | face | published |
+| --- | --- | --- |
+| `widen('lit')` | `widen("lit")` — quote rewritten | **10 — the open paren** |
+| `widen("lit")` | byte-identical | 11 — the argument |
+| `widen(true)` | byte-identical | 11 |
+| `widen(word)` | byte-identical | 11 |
+
+Same trigger table as above, one surface over: the prefix holds to the rewritten byte and no further, so the resolver answers with the cover's left edge — which for an explicitly parenthesised call is the `(`, one byte left of the argument. The paren-less spelling positions correctly here, the opposite of the paren-injected arity row, because *that* row's diagnostic belongs on an EXCESS argument the cover's edge never coincides with. Neither spelling generalizes; the quote does.
+
+**A third surface, the widest cover in the corpus** (driven 2026-07-28). A type error inside a schema callable body publishes its correct code on the schema's HEAD line — `bad: ~> @units.toUpperCase()` two lines down reports at the `:shape` marker. [schema.js](../../src/schema.js) states the mechanism in its own header: the block collapses to two tokens and *"the schema rule's annotation records the SCHEMA_BODY span as the `body` role"* — one span for the entire body, so anything inside it resolves to that span's start. Driven as the cover rather than assumed: rename the binding from `Alpha` to `LongerName` and the anchor moves five columns with it. Sub-compilation is not the cause; the single role span is. It matters more here than elsewhere because a schema body is the largest cover the corpus contains, and callables are the only in-body construct that reaches the checker at all — a wrong-typed default or transform publishes nothing (its own row), so every diagnostic a schema body can raise lands on the head line.
+
+**This is why the corpus's own style guide is the failing combination** — explicit parens plus single quotes is the house idiom, so an error-lane row written the natural way mis-positions and one written with a double quote does not. [25-components.errors.rip](corpus/errors/25-components.errors.rip)'s method-argument row is double-quoted for exactly this reason and says so at the citation. Four other fixtures already assert TS2345 — 02-operations, 08-functions twice, and 22-vocabulary — and every one of their arguments is an identifier or a numeric literal, which the face emits byte-identically. So the rewrite path had never been reached, not because argument-type rejections were unasserted, but because none of them was spelled with the quote that moves.
 
 Checking itself is **sound** — the same diagnostics fire with the same codes, and the compiled JS is unaffected; only *where* an answer lands is wrong. It misleads, it does not let a bug through — which is what would rank it under any unchecked-code hole, and what still separates it from everything below it.
 
@@ -351,22 +365,6 @@ Most real computeds are in the second list.
 **Why the suite missed it, and why a fixture would too.** Nothing had asserted a computed's type from outside its component. Worse, the shape that a fixture author reaches for first — `total ~= (price * quantity)` — is arithmetic, which is exactly the form that works. A claims row for the consumer face written that way goes green while every property-access computed in real code is silently unchecked.
 
 **Status.** ⬜ **Open** (2026-07-27) — **no gate**. The fix's gate is a consumer-face claims row whose `~=` member reads a property rather than multiplying, where the type audit's `strict` dimension and the error lane's negative both hold it. Whether this shares a root with the untyped-runtime-destructure finding is unverified — that one concerns member-initializer checking inside a component-carrying file, this one the declared member type, and I have not read the emitter path.
-
-### 56. An explicit call's argument-type diagnostic lands on the open paren
-
-```
-a = plainCall('nope')     # TS2345 positions on `(`, not on the argument
-b = held.tally('nope')    # the method spelling, same miss
-c = plainCall 'nope'      # the paren-less spelling positions correctly
-```
-
-A wrong-typed argument raises the right code and lands one column left of the argument, on the opening paren. Driven 2026-07-28, `rip check` over the three spellings above: the two explicit calls publish at columns 13 and 14 where the argument sits at 14 and 15; the paren-less call publishes on the argument itself. Plain function and method behave identically, so the trigger is the paren, not the callee.
-
-**This is the identifier-read root again, and it is the INVERSE of the paren-injected arity row.** An argument inside a call's argument list has no source span of its own, so the resolver answers with the cover's left edge — and the two spellings differ only in where that edge falls. Explicit parens put it on the `(`, one byte left of the first argument. Paren-less has no `(`, so the edge and the first argument coincide and a first-argument diagnostic lands right. That is why the arity row reports the opposite pair: its diagnostic belongs on an EXCESS argument, which the cover's edge never coincides with, so the paren-less spelling misses there and the explicit one lands. Same root, two codes, opposite spellings — neither row generalizes to the other.
-
-**Why the suite missed it.** TS2345 is asserted exactly once in the whole corpus, by the row this finding was found authoring — no error fixture had ever put a wrong-typed argument in an explicit call. The arity negative in 02-operations covers the code on a paren-less call and says nothing about an argument-type rejection in either spelling.
-
-**Status.** ⬜ **Open** (2026-07-28) — **no gate**: the Diagnostics Lane asserts code and position, so an explicit-call negative cannot enter without certifying the mis-position. [25-components.errors.rip](corpus/errors/25-components.errors.rip) spells its method-argument row paren-less on purpose and says so at the citation — the promoted-param precedent, a corpus shaped around a defect. The fix's gate is the explicit spelling replacing it there, where the lane holds both.
 
 ### 43. A schema callable's output types `unknown`
 

@@ -1,0 +1,22 @@
+# 26-schema.errors.rip — intentional negatives, each asserted by the Diagnostics Lane (bun run audit --diagnostics).
+# @ts-nocheck
+
+Stop = schema
+  quay!    string
+  leagues! number
+
+Manifest = schema
+  ticket! string
+  stops!  Stop[]
+
+manifest = Manifest.parse({ ticket: 'M-1', stops: [{ quay: 'Hull', leagues: 5 }] })
+wrongLeaf: number = manifest.stops[0].quay
+
+Postmark = schema
+  sent! datetime
+
+postmark = Postmark.parse({ sent: '2026-07-28T09:00:00Z' })
+wrongStamp: string = postmark.sent
+
+wrongPromise: Promise<Stop> = Promise.resolve({ quay: 42, leagues: 5 })
+wrongList: Stop[] = [{ quay: 42, leagues: 5 }]

@@ -1,4 +1,5 @@
-# 25-components.errors.rip — intentional negatives asserted by the Diagnostics Lane; the ref and `<=>` rows are pinned (error-pins.json), and the method-argument row is paren-less because the explicit spelling mis-anchors (FINDINGS.md).
+# 25-components.errors.rip — intentional negatives asserted by the Diagnostics Lane; the ref and `<=>` rows are pinned (error-pins.json).
+# The method-argument row is DOUBLE-quoted on purpose: a single-quoted literal is rewritten in the face, so its diagnostic falls back to the call's open paren (FINDINGS.md).
 # @ts-nocheck
 
 Knob = component
@@ -7,7 +8,7 @@ Knob = component
   render null
 
 knob = new Knob({})
-wrongStep = knob.tally 'nope'
+wrongStep = knob.tally("nope")
 
 Swatch = component extends input
   @caption?: string

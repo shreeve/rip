@@ -64,10 +64,9 @@ The census owns which type KINDS the corpus claims; these rows own what the chec
 
 ### Modules
 
-| behavior | carrier | negative carrier |
-| --- | --- | --- |
-| an imported def's type governs the importer's call sites, and the rejection lands on the importing line | ABSENT | ABSENT |
-| a missing module specifier publishes cannot-find-module | — | ABSENT |
+Neither module behavior is a row, and one constraint explains both: no error fixture here imports anything, and none can. The two judges resolve different workspaces — the editor side sees only the flat fixture copies, the twin side only its own `errors/` twins — so no specifier resolves for both at once ([10-modules.errors.rip](corpus/errors/10-modules.errors.rip) states the constraint at the lane). That rules out a missing-specifier negative and a wrong-use-of-an-import negative alike.
+
+What that costs is FALSIFIABILITY, not coverage. 10-modules.rip imports across every specifier form and `verdict` holds it, so the corpus does show that imports resolve and type-check. It cannot show that an imported type is ENFORCED: driven 2026-07-28, retyping the lib's `port` export to `any` leaves all five dimensions green on all four module fixtures, because a positive demands zero published diagnostics and `any` publishes none. An enforcement claim is only ever held by a negative, so these stay notes — a carried row here would count toward the corpus's coverage while proving nothing.
 
 ### Components — the consumer face
 
@@ -88,10 +87,10 @@ The census owns which type KINDS the corpus claims; these rows own what the chec
 
 | behavior | carrier | negative carrier |
 | --- | --- | --- |
-| a schema-array field projects nested companions, and a deep read types the leaf | ABSENT | ABSENT |
-| a plain datetime field projects Date, and parse coerces an ISO string | ABSENT | ABSENT |
-| a callable body is sub-compiled rip and runs | ABSENT | ABSENT |
-| a schema companion resolves inside generic type arguments (`Promise<Person>`) | ABSENT | ABSENT |
+| a schema-array field projects nested companions, and a deep read types the leaf | 26-schema.rip:leafPort | 26-schema.errors.rip:wrongLeaf |
+| a plain datetime field projects Date, and parse coerces an ISO string | 26-schema.rip:minted | 26-schema.errors.rip:wrongStamp |
+| a callable body is sub-compiled rip and runs | 26-schema.rip:parcel | — |
+| a schema companion resolves inside generic type arguments (`Promise<Person>`) | 26-schema.rip:fetched | 26-schema.errors.rip:wrongPromise |
 
 ## Parked
 

@@ -470,5 +470,37 @@
         "expect": "let Cuff: typeof Cuff"
       }
     ]
+  },
+  "26-schema.rip": {
+    "decls": [
+      {
+        "name": "Hop",
+        "expect": "let Hop: Schema<Hop, Hop>"
+      },
+      {
+        "name": "Waybill",
+        "expect": "let Waybill: Schema<Waybill, Waybill>"
+      },
+      {
+        "name": "waybill",
+        "expect": "let waybill: Waybill"
+      },
+      {
+        "name": "Stamp",
+        "expect": "let Stamp: Schema<Stamp, Stamp>"
+      },
+      {
+        "name": "stamped",
+        "expect": "let stamped: Stamp"
+      },
+      {
+        "name": "Parcel",
+        "expect": "let Parcel: Schema<Parcel, ParcelData>"
+      },
+      {
+        "name": "parcel",
+        "expect": "let parcel: Parcel"
+      }
+    ]
   }
 }
