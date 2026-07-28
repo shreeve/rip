@@ -5,6 +5,8 @@
 import { test, eq, ok, throws } from '@rip-lang/testing'
 import { createWorkspace } from '@rip-lang/workspace'
 import * as mod from '@rip-lang/workspace'
+import { connectFeed } from '@rip-lang/workspace/feed'
+import * as feedMod from '@rip-lang/workspace/feed'
 import { readFileSync } from 'fs'
 
 # A workspace born through the door, plus an event log attached after birth.
@@ -25,20 +27,23 @@ console.log "\nPackage"
 test "named exports", ->
   eq Object.keys(mod).sort(), ['createWorkspace']
   eq typeof createWorkspace, 'function'
+  eq Object.keys(feedMod).sort(), ['connectFeed']
+  eq typeof connectFeed, 'function'
 
 test "zero runtime deps", ->
   pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
   eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
-  eq pkg.files, ['workspace.rip', 'README.md']
+  eq pkg.files, ['workspace.rip', 'feed.rip', 'README.md']
 
 test "declares browser safety and earns it", ->
   pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
   eq pkg.rip, { browser: true }
-  source = readFileSync("#{import.meta.dir}/workspace.rip", 'utf8')
-  eq /^\s*import\b/m.test(source), false
-  eq /\bBun\.|node:|process\.|globalThis/.test(source), false
+  for file in ['workspace.rip', 'feed.rip']
+    source = readFileSync("#{import.meta.dir}/#{file}", 'utf8')
+    eq /^\s*import\b/m.test(source), false
+    eq /\bBun\.|node:|process\.|globalThis/.test(source), false
 
 # ==[ Store view: ComponentsStore parity ]==
 
@@ -425,3 +430,197 @@ test "ids and paths enumerate the bag", ->
   { ws } = seeded()
   eq ws.ids().sort(), ['c1', 'c2']
   eq ws.paths().sort(), ['app.rip', 'routes/hi.rip']
+
+# ==[ Feed: the hub subscriber ]==
+
+console.log "\nFeed"
+
+# Two macrotask turns flush every microtask chain a ding apply spawns
+# (fetch → text → set).
+settle = ->
+  await new Promise (resolve) -> setTimeout resolve, 0
+  await new Promise (resolve) -> setTimeout resolve, 0
+  return
+
+# A socket factory whose sockets are driven by hand: tests fire onopen /
+# onmessage / onclose directly.
+fakeHub = ->
+  sockets = []
+  factory = (url) ->
+    s =
+      url: url
+      isClosed: false
+      onopen: null
+      onmessage: null
+      onclose: null
+      onerror: null
+    s.close = ->
+      s.isClosed = true
+      s.onclose?()
+      return
+    sockets.push s
+    s
+  { factory, sockets }
+
+# A fetch keyed by exact URL: a hit answers 200 with the mapped text,
+# a miss answers 404. Every call is recorded.
+fakeFetch = (routes) ->
+  calls = []
+  fn = (url) ->
+    calls.push url
+    body = routes[url]
+    if body isnt undefined
+      { ok: true, status: 200, text: (-> body), json: (-> JSON.parse(body)) }
+    else
+      { ok: false, status: 404, text: (-> ''), json: (-> null) }
+  { fn, calls }
+
+emptyManifest = JSON.stringify { cells: [] }
+
+openFeed = (ws, routes, extra = {}) ->
+  { fn, calls } = fakeFetch routes
+  { factory, sockets } = fakeHub()
+  reports = []
+  feed = connectFeed ws, {
+    hub: 'ws://test/hub'
+    makeSocket: factory
+    fetch: fn
+    report: (...args) -> reports.push args
+    backoff: { min: 1, max: 2 }
+    ...extra
+  }
+  { feed, calls, sockets, reports }
+
+test "connectFeed validates its workspace and rejects a sealed one", ->
+  throws (-> connectFeed(null)), 'expects a workspace'
+  throws (-> connectFeed({})), 'expects a workspace'
+  ws = createWorkspace()
+  ws.seal()
+  throws (-> connectFeed(ws)), 'sealed workspace'
+
+test! "a ding fetches the rev-keyed cell and mutates the passport", ->
+  ws = createWorkspace()
+  ws.populate [{ id: '_route/index.rip', path: '_route/index.rip', rev: 1, source: 'v1' }]
+  { feed, calls, sockets, reports } = openFeed ws,
+    '/__rip/manifest': JSON.stringify { cells: [{ id: '_route/index.rip', path: '_route/index.rip', rev: 1 }] }
+    '/__rip/cells/_route/index.rip?rev=2': 'v2'
+  s = sockets[0]
+  eq s.url, 'ws://test/hub'
+  s.onopen()
+  await settle()
+  ok feed.connected()
+  s.onmessage { data: JSON.stringify { ding: { id: '_route/index.rip', rev: 2 } } }
+  await settle()
+  eq ws.passport('_route/index.rip').rev, 2
+  eq ws.read('_route/index.rip'), 'v2'
+  ok calls.includes('/__rip/cells/_route/index.rip?rev=2')
+  eq reports, []
+  feed.close()
+  eq feed.connected(), false
+
+test! "a stale or duplicate ding never touches the network", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 3, source: 'v3' }]
+  { feed, calls, sockets } = openFeed ws, { '/__rip/manifest': emptyManifest }
+  sockets[0].onopen()
+  await settle()
+  before = calls.length
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 3 } } }
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2 } } }
+  await settle()
+  eq calls.length, before
+  eq ws.passport('a.rip').rev, 3
+  feed.close()
+
+test! "a ding for an unknown id births the passport at its id path", ->
+  ws = createWorkspace()
+  { feed, sockets } = openFeed ws,
+    '/__rip/manifest': emptyManifest
+    '/__rip/cells/_app/new.rip?rev=1': 'fresh'
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: '_app/new.rip', rev: 1 } } }
+  await settle()
+  eq ws.passport('_app/new.rip'), { id: '_app/new.rip', path: '_app/new.rip', rev: 1, source: 'fresh', compiled: undefined }
+  feed.close()
+
+test! "a delete ding removes the passport without a fetch", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
+  { feed, calls, sockets } = openFeed ws, { '/__rip/manifest': emptyManifest }
+  sockets[0].onopen()
+  await settle()
+  before = calls.length
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2, kind: 'delete' } } }
+  await settle()
+  eq ws.passport('a.rip'), undefined
+  eq calls.length, before
+  feed.close()
+
+test! "malformed frames and dings are reported and the feed survives", ->
+  ws = createWorkspace()
+  { feed, sockets, reports } = openFeed ws,
+    '/__rip/manifest': emptyManifest
+    '/__rip/cells/ok.rip?rev=1': 'good'
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: 'not json' }
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 5, rev: 'x' } } }
+  await settle()
+  eq reports.length, 2
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'ok.rip', rev: 1 } } }
+  await settle()
+  eq ws.read('ok.rip'), 'good'
+  feed.close()
+
+test! "an array frame applies every ding object and ignores foreign events", ->
+  ws = createWorkspace()
+  { feed, sockets } = openFeed ws,
+    '/__rip/manifest': emptyManifest
+    '/__rip/cells/a.rip?rev=1': 'aa'
+    '/__rip/cells/b.rip?rev=1': 'bb'
+  sockets[0].onopen()
+  await settle()
+  frame = [{ ding: { id: 'a.rip', rev: 1 } }, { chat: 'hello' }, { ding: { id: 'b.rip', rev: 1 } }]
+  sockets[0].onmessage { data: JSON.stringify frame }
+  await settle()
+  eq ws.read('a.rip'), 'aa'
+  eq ws.read('b.rip'), 'bb'
+  feed.close()
+
+test! "a cell miss resyncs from the manifest, which never deletes local mints", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
+  ws.write 'local.rip', 'mine'               # an editor's local mint — not the server's
+  { feed, sockets, reports } = openFeed ws,
+    '/__rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 4 }] }
+    '/__rip/cells/a.rip?rev=4': 'v4'
+  sockets[0].onopen()                        # open-resync already advances a.rip to rev 4
+  await settle()
+  eq ws.passport('a.rip').rev, 4
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 9 } } }
+  await settle()                             # rev 9 has no cell: miss reported, manifest re-walked
+  eq ws.passport('a.rip').rev, 4
+  eq ws.read('local.rip'), 'mine'
+  ok reports.some (args) -> String(args[0]).includes('cell fetch missed')
+  feed.close()
+
+test! "a dropped socket reconnects with backoff and resyncs; close() stops it", ->
+  ws = createWorkspace()
+  { feed, calls, sockets } = openFeed ws, { '/__rip/manifest': emptyManifest }
+  sockets[0].onopen()
+  await settle()
+  manifestFetches = -> calls.filter((u) -> u is '/__rip/manifest').length
+  eq manifestFetches(), 1
+  sockets[0].onclose()
+  eq feed.connected(), false
+  await new Promise (resolve) -> setTimeout resolve, 20
+  eq sockets.length, 2
+  sockets[1].onopen()
+  await settle()
+  ok feed.connected()
+  eq manifestFetches(), 2
+  feed.close()
+  await new Promise (resolve) -> setTimeout resolve, 20
+  eq sockets.length, 2                       # closed: no further reconnect
+

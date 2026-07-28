@@ -16,11 +16,11 @@ store.
 
 This is the **experimental Workspace door bag** governed by
 [docs/WORKSPACE.md](../../docs/WORKSPACE.md) (version 0.0.0, matching
-`@rip-lang/app`). Wire formats, cell signing, hashes, manifests, and
-the hub/WebSocket subscriber are open research there — this package is
-records + door + view, nothing more.
+`@rip-lang/app`). Cell signing and hashes are open research there —
+this package is records + door + view, plus the hub subscriber that
+feeds the door (`@rip-lang/workspace/feed`).
 
-**Runtime:** browser-safe (`rip.browser: true`). One `.rip` file.
+**Runtime:** browser-safe (`rip.browser: true`). Two `.rip` files.
 
 ## Quick Start
 
@@ -101,6 +101,40 @@ error-isolated: one throwing watcher never silences the rest.
 One deliberate deviation: `setCompiled` for a path with no passport
 throws — a projection with no passport has no home in the bag.
 
+## The feed
+
+`@rip-lang/workspace/feed` is the dev/watch hub subscriber — the
+browser half of the door. It opens the app's Janus hub WebSocket
+(default `ws(s)://<host>/hub`), listens for `ding` events, and turns
+them into passport mutations:
+
+```coffee
+import { createWorkspace } from '@rip-lang/workspace'
+import { connectFeed } from '@rip-lang/workspace/feed'
+
+ws = createWorkspace()
+ws.populate ledgerCells
+feed = connectFeed ws            # dev/watch only — production has no hub
+# … later
+feed.close()
+```
+
+- A ding carries `{ id, rev }` only — code bytes never ride the hub.
+  The feed HTTP-fetches the rev-keyed cell (`/__rip/cells/<id>?rev=N`)
+  and applies it through `set`; the bag's rev cursor owns staleness, so
+  stale and duplicate dings are skipped before the network.
+- A ding with `kind: 'delete'` removes the passport without a fetch.
+- A cell fetch that misses resyncs from the manifest
+  (`/__rip/manifest`). Resync is additive-and-forward only: it never
+  deletes, because the bag legally holds passports the server feed does
+  not own (an editor's local mints).
+- The socket reconnects with exponential backoff and resyncs on every
+  open; `close()` stops it for good. A sealed workspace rejects the
+  feed at the door — production has no hub.
+- Every transport seam is injectable for tests and embedding:
+  `hub`, `makeSocket`, `fetch`, `cellUrl`, `manifestUrl`, `report`,
+  `backoff`.
+
 ## Inspection
 
 ```coffee
@@ -119,5 +153,6 @@ bun run test
 
 The suite pins the package surface (exports, zero-dependency posture,
 browser safety), interface parity with the app's component store, the
-door rules (populate birth, the set rev cursor, rename identity), and
-the seal lock.
+door rules (populate birth, the set rev cursor, rename identity), the
+seal lock, and the feed (ding apply, stale skip, delete dings, miss →
+manifest resync, reconnect backoff).
