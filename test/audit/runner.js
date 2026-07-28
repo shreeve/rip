@@ -602,7 +602,7 @@ process.on('SIGINT', () => { cleanupTemp(); process.exit(130); });
     if (gone.length) missing.push(`the fixture corpus (${gone.join(', ')}) — run \`bun install\` in test/audit/`);
   }
   if (missing.length) {
-    console.error('\n✗ The type audit cannot run — dependencies are missing:');
+    console.error('\n✗ The audit cannot run — dependencies are missing:');
     for (const m of missing) console.error(`  • ${m}`);
     console.error('\nInstall them, then re-run `bun run audit`.\n');
     process.exit(1);
@@ -3388,7 +3388,7 @@ if (RUN_TOKENS) {
   const blind = pool.filter((s) => !s.legend);
   if (blind.length) {
     await abort(
-      `The token audit cannot run — ${blind.length} of ${pool.length} server(s) advertised no semanticTokens legend`,
+      `The Token Audit cannot run — ${blind.length} of ${pool.length} server(s) advertised no semanticTokens legend`,
       [`the capability comes from tsgo at startup (server.js \`semanticTokensLegend\`); a missing one means that broker never came up`],
     );
   }

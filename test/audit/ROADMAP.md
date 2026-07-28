@@ -1,4 +1,4 @@
-# Type audit — roadmap
+# Audit — roadmap
 
 Internal build plan for the instrument. Runner: `runner.js`. Findings: `FINDINGS.md`. Hover rulings: `RULINGS.md`.
 

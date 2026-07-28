@@ -80,7 +80,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   }, 60_000);
 
   // The degenerate input every editor produces the moment a file is created.
-  // It is a legal program — `Root → ε` — but the type audit cannot hold it: a
+  // It is a legal program — `Root → ε` — but the audit cannot hold it: a
   // corpus fixture spelling it declares nothing, so every audit dimension
   // passes by having nothing to check, and the production is excluded there
   // for exactly that reason. The guarantee itself is real and belongs here,
@@ -123,7 +123,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     // on purpose — and says so. The day the emission is made null-clean, the
     // TS2531 assertions below go red: that is the cue to invert this test to
     // expect a clean pass, move `=~` and the regex-index spelling into the
-    // type audit's operations fixture (whose `verdict` dimension holds them
+    // the audit's operations fixture (whose `verdict` dimension holds them
     // from then on), and close the ledger row — not a regression.
     // Deliberately NOT `test.failing`: under it any throw counts as a pass,
     // so a dead server — or a checker that stopped reporting anything —
