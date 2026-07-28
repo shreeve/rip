@@ -123,7 +123,7 @@ export const CONTRACT = [
   {
     name: 'diagnostics.positions', lane: 'errors',
     property: 'every diagnostic lands on the span its twin puts it on',
-    redBecause: "a tuple element's diagnostic is positioned on the whole element list rather than the offending element, so 11-types' wrong-element rows land wide — delete this when the span narrows to the element",
+    redBecause: "a rewritten literal earlier in an element list widens its neighbours' diagnostics to the whole list rather than the offending element, so 11-types' wrong-element rows land wide — their single-quoted leading literal is load-bearing, and double-quoting them would narrow the span without fixing anything; delete this when the span narrows to the element",
     red: (s) => s.el.problems.some((p) => p.kind === 'position'),
   },
   {
