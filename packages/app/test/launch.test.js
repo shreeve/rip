@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { launch, source, unwrapStash } from '@rip-lang/app';
+import { createComponents, launch, source, unwrapStash } from '@rip-lang/app';
 import { __Component } from '../../../src/runtime/components.js';
 
 const node = name => ({
@@ -182,6 +182,32 @@ describe('launch', () => {
     result.components.write('_route/late.rip', 'export Late = component');
     result.components.setCompiled('_route/late.rip', { Late: Home });
     expect(result.router.match('/late')).not.toBeNull();
+  });
+
+  test('an injected components store is used as-is and drives the app', async () => {
+    const store = createComponents();
+    const host = node('host');
+    const result = launch({
+      bundle: bundle(),
+      components: store,
+      target: host,
+      adapter: fakeAdapter('/'),
+    });
+    running.push(result);
+    expect(result.components).toBe(store);
+    expect(store.read('_route/index.rip')).toBe('export Home = component');
+    await Bun.sleep(0);
+    await Bun.sleep(0);
+    expect(host.children.map(child => child.name)).toEqual(['home']);
+    store.write('_route/late.rip', 'export Late = component');
+    store.setCompiled('_route/late.rip', { Late: Home });
+    expect(result.router.match('/late')).not.toBeNull();
+  });
+
+  test('a malformed injected components store rejects loudly', () => {
+    expect(() => boot({ components: [] })).toThrow(/components must be an object/);
+    expect(() => boot({ components: { read: () => {} } })).toThrow(/missing 'write'/);
+    expect(globalThis.__ripApp).toBeUndefined();
   });
 });
 
