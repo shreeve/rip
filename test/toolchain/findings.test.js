@@ -247,11 +247,19 @@ test('a slot citing v3 evidence by direction points the right way', () => {
     if (v3At < 0) continue;
     paras.forEach((p, i) => {
       if (!/^\*\*(The fix|Why \(code\))(?=[ .,—:*'])/.test(p)) return;
-      if (!/\bv3\b/.test(p)) return;
-      const saysBelow = /\((?:also )?below\)|\bbelow\b(?=[,.)])/.test(p);
-      const saysAbove = /\((?:also )?above\)|\babove\b(?=[,.)])/.test(p);
-      if (saysBelow && v3At < i) backwards.push(`  ${id}\n     cites v3 as "below"; the vs v3 slot is ABOVE it`);
-      if (saysAbove && v3At > i) backwards.push(`  ${id}\n     cites v3 as "above"; the vs v3 slot is BELOW it`);
+      // Proximity, not paragraph scope. A slot paragraph routinely points at
+      // several things at once — "the reproduction above" beside "v3 … (below)"
+      // — so a paragraph-wide test flags the sentence that is right. Only a
+      // directional parenthetical trailing a v3 clause is unambiguous enough
+      // to judge.
+      for (const m of p.matchAll(/\((?:also )?(above|below)\)/g)) {
+        if (!/\bv3\b[^.]{0,60}$/.test(p.slice(0, m.index))) continue;
+        const said = m[1];
+        const actual = v3At > i ? 'below' : 'above';
+        if (said !== actual) {
+          backwards.push(`  ${id}\n     cites v3 as "${said}"; the vs v3 slot is ${actual.toUpperCase()} it`);
+        }
+      }
     });
   }
 
