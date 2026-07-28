@@ -1,10 +1,11 @@
-# HANDOFF — session launch document (2026-07-22, afternoon)
+# HANDOFF — session launch document (2026-07-27, early morning)
 
 The tracked session launch document (see AGENTS.md, working ledgers):
 read it first when starting a session; rewrite it at session
 boundaries with live-verified facts only. Every fact below was
-verified live on 2026-07-22 ~2 PM (UTC-6) against git, gh, the files,
-and fresh suite runs.
+verified live on 2026-07-27 ~1:30 AM (UTC-6) against git, gh, the
+files, and fresh suite runs, except where an older verification date
+is stated explicitly.
 
 ## Orientation
 
@@ -20,136 +21,110 @@ and fresh suite runs.
   `bun run test:rip` (battery only, sub-second) · `bun run type-audit`
   · `bun run parser` · `bun run corpus-expected`.
 
-## State of main (code @ 588b41f, 2026-07-22 afternoon)
+## State of main (tip 316f9ab, landed 2026-07-24)
 
 - Suites, re-run live at this handoff: repo-root `bun run test:all` →
-  **5954 pass / 0 fail** (25.4s); packages/server `bun run test` (its
+  **5954 pass / 0 fail** (26.2s); packages/server `bun run test` (its
   own loop) → **134/134**; `bun run type-audit` → **60 dimension
-  checks, all passing**. Main's CI (588b41f) is green.
-- Landed on main today (2026-07-22), after the 4 AM handoff rewrite
-  `98d0976`:
-  - `0a30f9c` — two owner rulings: the clean-room rewrite plan is
-    `docs/CLEANROOM.md` (renamed, retitled, de-orphaned into the
-    AGENTS.md and README permanent-doc lists), and
-    `packages/UPGRADE.md` is deleted (its last open item — the gate
-    package's v3-comparison pass — was killed by the gate-moves-to-
-    Janus ruling; the rest was a done-items archive, which doctrine
-    forbids).
-  - `4808504` — AGENTS.md gains the document-placement test: opened
-    as part of WORKING → repository root; consulted for
-    UNDERSTANDING → docs/.
-  - **#184** (`5fe7d1d`, merge `3507a6b`) — `packages/gate` removed:
-    the auth wall is Janus's job. The v4 port was built against the
-    discarded v4 server contract and was not a working artifact; its
-    three genuine hardening ideas carry into the Janus capability's
-    contract. This completed and removed TODO.md's "Package moves"
-    item on this side.
-  - **#185** (`ad97104`, merge `588b41f`) — the Janus auth-wall
-    capability is named **auth**, not guard (the reserved URL is
-    `/auth`; the capability name agrees with its front door).
+  checks, all passing**. Main's CI (316f9ab) is green.
+- Main has NOT moved since 2026-07-24. The single landing since the
+  2026-07-22 true-up (`73d71f3`) is `316f9ab` — **docs/WORKSPACE.md,
+  the Rip Workspace constitution** (owner rulings 2026-07-23, polish
+  2026-07-24), plus its ROADMAP wiring. It locks Q1–Q5 (Pure Rip with
+  invisible Projection; signed cells and CSP without `unsafe-eval` on
+  the happy path; Hub ding only in dev, HTTP carries bytes and never
+  bodies; stable path-derived-at-birth component ids; research-first
+  apply quality against the written S1–S15 scenario suite; M1 without
+  RipFS/OPFS), fixes the door-vs-apply split (door = the contract;
+  apply = a replaceable engine in packages/refresh), assigns package
+  ownership, sets kill-switch rules under `RIP_WORKSPACE=1`, and
+  defines milestones M0 (sealed populate) and M1 (live-mutate door).
+  Experimental until apply research lands; never a Janus capability.
+- Everything on main since the last CODE landing (`588b41f`,
+  2026-07-22) is docs-only (HANDOFF, TODO, HMR.md, ROADMAP.md,
+  WORKSPACE.md — verified by diff), so the 2026-07-22 code
+  reconnaissance below still describes the live code.
 
 ## PR #156 and the findings series
 
 - **PR #156** "Type-audit verify-and-resolve (preview)" — DRAFT, head
-  `8aaa7f9`, CI SUCCESS, mergeStateStatus CLEAN. Philip's overnight
-  work (merged into the branch at `954598b`, ~4:34 AM UTC-6):
-  - `20bc61d` — the Grammar Gate (M2): report which productions the
-    corpus reduces.
-  - `be2cd43` — closes findings #18 and #19 (see below).
-  - `7a189ba` — the M3 plan and hover rulings: the corpus rewrite,
-    documented.
+  `bb04a63`, CI SUCCESS, mergeStateStatus CLEAN, and now FULLY caught
+  up with main: two catch-up merges landed 2026-07-24 (`a5f84e7`
+  through 73d71f3, then `bb04a63` through 316f9ab), so the merge-base
+  with main is 316f9ab itself. Diff vs main: 156 files,
+  +13,562/−5,252.
+- **No weekend work landed**: the branch head is unchanged since
+  2026-07-24, and Philip's findings ledger
+  (`test/type-audit/FINDINGS.md` on the branch) still runs to
+  **finding #50**. Recent open findings include the type sub-language
+  boundary cases (#45 type predicates vs rip's `is`, #46 mapped types
+  rejected by the type-body validator, #48 method members in inline
+  type bodies, #49 import type cannot name a `.rip` module) and #50
+  (tuple-element diagnostics positioned on the whole list).
+- Still blocked solely on owner + Philip go/no-go; UI work begins with
+  Philip after it lands.
+- **PR #162 (finding #8, cold auto-import) is CLOSED** — closed by the
+  owner 2026-07-24 16:38 UTC, not merged, no comment or landing note
+  recorded on the PR. Its branch `steve-types-6` was deleted from the
+  remote 2026-07-27 06:43 UTC (minutes before this handoff).
+- **PR #165 (finding #21 second try, identifier read mappings)** —
+  OPEN, head `bfd668f`, mergeStateStatus DIRTY (conflicts with main),
+  now 88 commits behind, no CI on its head. Its subject is the top of
+  #156's findings road; its fate (rework vs close) is an open owner
+  decision.
+- **Branch inventory is clean**: main, `type-audit-verify-and-resolve`
+  (#156), `steve-types-21.2` (#165) — local and remote, nothing else.
 
-  Then four more commits this afternoon: `ef9dd20` (M3 pre-flight:
-  the wave manifest), `8b97ac3` (manifest slimmed to decisions, gate
-  joins live), `9fda36b` (M3 continues: 21-operations, and finding
-  #26 — the match operator is never null-clean), `8aaa7f9` (M3 wave
-  1: 22-collections through 26-exceptions, pushed ~2 PM UTC-6).
-  The branch's merge-base with main is `6d62d33` — it has NOT caught
-  up with today's main landings (0a30f9c..588b41f), though GitHub
-  reports it CLEAN (no conflicts). Still blocked solely on owner +
-  Philip go/no-go; UI work begins with Philip after it lands.
-- **PRs #159 and #160 closed** (2026-07-22, 10:42 UTC): their content
-  landed in `be2cd43` on the #156 branch, with resolution notes on
-  each PR. Independently verified earlier today by re-running the
-  gates on the branch: check.test.js directive cases, the tsface
-  strip-identity pin, the editor suite, and the branch's type-audit
-  (72/72) all green. #18 landed STRICTER than PR #160: a directive
-  governs the line DIRECTLY beneath it — a blank line beneath the
-  directive leaves it governing nothing (next-line adjacency, matching
-  the emitter's attachment pre-pass), vs the PR's next-non-blank rule.
-  #19 landed as a REDESIGN fixing two defects PR #159 had: broken
-  strip identity (the pair-per-line layout now binds to source shape,
-  emission stays ts-gated — pinned in tsface.test.js) and missing
-  decline gates (re-homing an object-attached directive is
-  line-preserving or nothing).
-- **PRs #158 and #161 closed by the owner at 20:12 UTC today** — no
-  comment, no landing note on either; their branches
-  (steve-types-2, steve-types-5) still exist local+remote. The
-  closures happened minutes before this handoff; the reason is not
-  recorded anywhere verifiable.
-- **Open PRs now: #156, #162** (finding #8: cold auto-import via
-  export index, head `8adcb4a`), **#165** (finding #21 second try:
-  exact source mappings for identifier reads, head `bfd668f`).
-- **Branch state:** steve-types-1/3/4 deleted local+remote (owner
-  instruction, this morning). Remaining besides main:
-  type-audit-verify-and-resolve, steve-types-2/5/6/21.2 (2 and 5
-  back the just-closed #158/#161; 6 and 21.2 back open #162/#165),
-  and the merged-but-undeleted remote `rename-guard-to-auth` (#185).
+## Browser delivery / Rip Workspace (the big next-session context)
 
-## Browser delivery — reconnaissance (the big next-session context)
+The 2026-07-22 reconnaissance stands (code unchanged since; see
+above): script-tag loading and module/package-graph delivery are
+SHIPPED and Playwright-certified in CI; no product surface serves
+`index.html`/`bundle.json` (only the certification fixture
+`packages/browser-tests/serve.mjs`); no watch→browser transport
+exists anywhere in v4.
 
-Verified against the code today. Of ROADMAP's three browser-delivery
-bullets, (a) and (b) are SHIPPED and Playwright-certified in CI:
+WORKSPACE.md resolved two of the three rulings that were pending at
+the last handoff:
 
-- **Script-tag loading works end-to-end**: `processRipScripts`
-  (src/browser-scripts.js, dist/browser/rip.js — the byte-gated
-  bundle).
-- **Module/package-graph delivery works end-to-end**:
-  `assembleBundle` (src/bundle.js) → `bootApp` (src/browser-boot.js)
-  → `launch` — SPA navigation, ETag revalidation (304), debug-gated
-  source maps. 54 Node tests (browser-scripts 14, browser-modules 18,
-  browser-boot 14, browser-bundle 8) plus packages/browser-tests
-  (5 Playwright specs × Chromium/Firefox/WebKit) run in CI.
+1. **Dev watch transport — SETTLED (Q2)**: Hub ding (Janus's existing
+   hub carries tiny invalidate notices in watch mode), HTTP carries
+   the bytes, the Hub never carries bodies. This supersedes HMR.md's
+   inline-WebSocket payload rows (ROADMAP says so explicitly).
+2. **Serving split — SETTLED (ownership table)**: the muscles (disk
+   watch, path→id map, rev bump, HTTP cells/manifest) live in
+   `packages/server` as a thin feed; the reactive bag is
+   `packages/workspace`, never inside server; the doorbell is Janus.
+   Bootstrap order: flag on → `packages/workspace` → thin server
+   feed → Hub doorbell.
+3. **`rip.browser` granularity — STILL OPEN** (ROADMAP): the flag is
+   package-level, so `@rip-lang/ui/browser` cannot travel while the
+   package's Tailwind half carries npm deps. Subpath metadata vs a
+   package split vs an assembly-time export filter — no ruling.
 
-The REAL remaining work is bullet (c), dev-server integration:
-
-- **No product surface serves `index.html`/`bundle.json`** — the only
-  server is the certification fixture
-  `packages/browser-tests/serve.mjs`.
-- **No watch→browser transport exists anywhere in v4** — rg finds no
-  SSE/EventSource/WebSocket watch machinery in src/ or
-  packages/server (docs/HMR.md's claim of an existing SSE watch
-  transport was FALSE against the code; corrected this handoff — the
-  WS transport will be built new, not migrated).
-- **`@rip-lang/ui/browser` cannot travel**: `rip.browser` is
-  package-level (src/bundle.js rejects a package without the
-  manifest flag), and ui can't claim it — its Tailwind half carries
-  npm deps (css-tree, tailwindcss). Concrete blocker for the Philip
-  UI stage.
-- **No CSP-clean precompiled-JS path.** Owner leaning (2026-07-22
-  midday): probably NEVER pure-JS-only — the compiler stays available
-  on-the-fly; possibly hybrid later. Decision deliberately deferred;
-  it does not block dev-server work.
-
-**Three load-bearing rulings pending (owner has NOT ruled):**
-
-1. **Serving hook** — natural split: bundle assembly manager-side per
-   epoch, serving worker-side, doorbell/epoch as the revision source.
-2. **Dev watch transport** — HMR ruled WebSocket, but edge doctrine
-   gives WebSocket termination to Janus's hub: is dev exempt (plain
-   local WS from the worker) or does it ride the hub?
-3. **`rip.browser` granularity** — subpath metadata vs splitting
-   ui/browser into its own package vs an assembly-time export filter.
+The CSP-clean precompile leaning (2026-07-22: probably never
+pure-JS-only; the compiler stays available on-the-fly) stands but
+does NOT override Workspace M0 on the Workspace path (signed cells +
+CSP without `unsafe-eval` on the happy path).
 
 ## Open decisions / in-flight
 
-- PR #156 go/no-go (above).
-- The three browser-delivery rulings (above).
-- Pending owner rulings from before: misc/PLAN.md + misc/FINALIZE.md
-  deletion (recommended: delete — stale campaign machinery); the
-  three untriaged misc/ directories (analysis/, server-v4-discarded/,
-  vite/ — all still present); the bare-optional-parameters strict
-  contract (docs/ROADMAP.md, Type and editor directions).
+- **PR #156 go/no-go** (owner + Philip) — the gating decision for the
+  whole findings series and the UI stage after it.
+- **Philip's queued language rulings**, all verified open in the
+  ledger: finding **#36** (a reactive import serves the raw cell —
+  auto-deref vs cell-as-API), **#45** (type predicates inside type
+  bodies collide with rip's `is`), **#46** (admit or ban mapped
+  types).
+- **Fate of PR #165** (DIRTY, 88 behind; subject is top of #156's
+  findings road).
+- **`rip.browser` granularity** (above).
+- Pending owner rulings from before (all still unruled; the files are
+  still present): misc/PLAN.md + misc/FINALIZE.md deletion
+  (recommended: delete — stale campaign machinery); the three
+  untriaged misc/ directories (analysis/, server-v4-discarded/,
+  vite/); the bare-optional-parameters strict contract
+  (docs/ROADMAP.md, Type and editor directions).
 
 ## Standing state (unchanged, spot-checked)
 
@@ -160,35 +135,34 @@ The REAL remaining work is bullet (c), dev-server integration:
   publishing upstreams to the control plane.
 - **Server remaining in-framework work** (README Planned + ROADMAP):
   the `--bridge` registration flag, hub ergonomics, and the opt-in
-  file logging knob. TODO.md's server B-list stays open; its
-  rip-mark access-log item now carries the note that it is
-  inherently Janus-side work (the edge writes access logs).
+  file logging knob — plus, new since WORKSPACE.md, the thin
+  Workspace feed (muscles) when that work starts.
 - **Unnamed flake watch stands**: an unreproduced single-failure
-  test:all run (two sightings, 2026-07-20/21; evidence points at
-  timing sensitivity under machine load). If a logged run ever fails,
-  capture the test NAME verbatim — identifying it matters more than
-  the green rerun. (Today's logged runs: all green.)
+  test:all run (two sightings, 2026-07-20/21; timing sensitivity
+  under machine load suspected). If a logged run ever fails, capture
+  the test NAME verbatim — identifying it matters more than the green
+  rerun. (This handoff's runs: all green.)
 
 ## Next session: recommended starting point
 
-- **Dev-server integration is the highest-leverage block**, and the
-  reconnaissance above is its map: get the three rulings, then wire
-  bundle/HTML serving into packages/server, build the WS watch
-  transport (HMR Phase 0 — honest live reload), and settle
-  `rip.browser` granularity so ui/browser can travel. It is the
-  prerequisite for HMR (docs/HMR.md) and FRAME (docs/FRAME.md).
+- **Workspace M0 / dev-server integration** is the highest-leverage
+  block, and WORKSPACE.md is now its constitution: the transport and
+  serving-split rulings are in hand, so the work is wiring the thin
+  server feed and `packages/workspace` under the kill-switch rules,
+  plus settling `rip.browser` granularity so ui/browser can travel.
+- The **#156 go/no-go** is the gating OWNER action — everything in
+  the findings series and the Philip UI stage queues behind it.
 - The server Planned items (--bridge flag, hub ergonomics, file
   logging knob) are small and independent — good parallel work.
-- The syntax reference (TODO.md, grammar drill-down) parallelizes with
-  anything; owner-deprioritized.
 
 ## Upstream Bun thread
 
 - **PR [oven-sh/bun#29291](https://github.com/oven-sh/bun/pull/29291)**
   (ESM bytecode without `--compile`): OPEN, head `fa97f46`, sole gate
-  unchanged: codeowner review (REVIEW_REQUIRED). Re-verified via gh
-  at this handoff. When it merges: canary build, then revisit the
-  prebuild bytecode decision in `packages/server/manager.rip`.
+  unchanged: codeowner review (REVIEW_REQUIRED). No activity since
+  2026-07-20; re-verified via gh at this handoff. When it merges:
+  canary build, then revisit the prebuild bytecode decision in
+  `packages/server/manager.rip`.
 - Issue [oven-sh/bun#34835](https://github.com/oven-sh/bun/issues/34835)
   (mmap the bytecode sidecar): OPEN, still exactly one comment (the
   owner's 2026-07-20 RoboBun-review request, cc @alii) — no maintainer
@@ -214,16 +188,15 @@ The REAL remaining work is bullet (c), dev-server integration:
 
 ## Operational notes (this environment)
 
-- The `user-ai` MCP: the Anthropic leg is OUT OF CREDITS (verified
-  2026-07-22 early morning — the API returns a credit-balance error);
-  the GPT leg works.
+- The `user-ai` MCP: the Anthropic leg was OUT OF CREDITS as of
+  2026-07-22 early morning (the API returned a credit-balance error);
+  the GPT leg worked. Not re-verified this session.
 - `.handoff/bunpr-bench` — Bun #29291 validation evidence (benchmarks,
   memory results, upstream source excerpts). 15 MB, in-repo but
   invisible to git via `.git/info/exclude`. KEEP while Bun #29291 and
   #34835 are open; delete freely once both resolve. (Still present.)
-- The /tmp scratch assets from prior sessions are GONE (only
-  `/tmp/rip-report-demo` remains); `/tmp/janus-bench` no longer
-  exists. Rebuild probes fresh if needed.
+- /tmp scratch: only `/tmp/rip-report-demo` remains; `/tmp/janus-bench`
+  is gone. Rebuild probes fresh if needed.
 - Background subagents intermittently stalled right after their
   opening message (three occurrences 2026-07-21; unverified since).
   Recovery that worked every time: interrupt + resume with "restate
