@@ -10,11 +10,11 @@
 import { test, eq, ok, throws } from '@rip-lang/testing'
 import * as mod from '@rip-lang/server'
 import { get, post, put, patch, del, all, use, prefix, before, after, onError, notFound, raw,
-         fetch as handle, App, resetGlobals, requestContext, startHandler, start,
+         fetch as handle, App, resetGlobals, requestContext, startHandler, start, client,
          read, error, notice, bail, ctx, session, subrequest, mark,
          mimeType, errorEnvelope, openapi } from '@rip-lang/server'
 import { cors, logger, compress, sessions, csrf, secureHeaders, timeout, htmlJson } from '@rip-lang/server/middleware'
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs'
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -33,7 +33,7 @@ test "public entry exposes the DSL surface, named exports only", ->
   names = Object.keys(mod)
   for name in ['get', 'post', 'put', 'patch', 'del', 'all', 'use', 'prefix',
                'before', 'after', 'onError', 'notFound', 'raw',
-               'start', 'startHandler', 'fetch', 'App',
+               'start', 'startHandler', 'fetch', 'App', 'client',
                'read', 'error', 'notice', 'bail',
                'ctx', 'session', 'env', 'subrequest', 'mark',
                'mimeType', 'errorEnvelope', 'openapi', 'resetGlobals']
@@ -749,6 +749,112 @@ test! "forever is the canonical HTTP forever: a year, immutable", ->
 test! "a directive that does not parse throws — never a guessed TTL", ->
   for path in ['/c/word', '/c/unit', '/c/ms', '/c/neg', '/c/empty', '/c/frac']
     eq (handle! req('GET', path)).status, 500
+
+# ==[ client() — browser delivery through the DSL ]==
+#
+# These run standalone-mode assembly in-process: the suite runs under the
+# rip loader, so client() resolves the compiler-src bundle.js from the
+# --preload in execArgv exactly as an app run via `rip app.rip` would.
+
+console.log "\nclient()"
+
+CLIENT_STASH = """
+import { source } from '@rip-lang/app'
+export appStash = {
+  user: source fetch: -> (await fetch('/user.json')).json()
+}
+"""
+
+CLIENT_ROUTE = """
+export Home = component
+  render
+    h1#title "home"
+"""
+
+writeClientDir = (dir, route = CLIENT_ROUTE) ->
+  mkdirSync join(dir, 'client', '_route'), { recursive: true }
+  mkdirSync join(dir, 'client', '_app'), { recursive: true }
+  writeFileSync join(dir, 'client', '_route', 'index.rip'), route
+  writeFileSync join(dir, 'client', '_app', 'stash.rip'), CLIENT_STASH
+
+clientAppDir = mkdtempSync join(import.meta.dir, 'tmp-client-')
+writeClientDir clientAppDir
+resetGlobals()
+client! join(clientAppDir, 'client')
+
+test! "client(dir) serves the boot page at GET /: runtime import, bundle url, mount point", ->
+  res = handle! req('GET', '/')
+  eq res.status, 200
+  ok res.headers.get('content-type').includes('text/html')
+  html = res.text!
+  ok html.includes('/__rip/rip.js'), 'imports the served browser runtime'
+  ok html.includes('/__rip/bundle.json'), 'boots from the served bundle'
+  ok html.includes('id="app"'), 'carries the mount point'
+  ok html.includes('debug'), 'the ?debug query param reaches bootApp'
+
+test! "GET /__rip/bundle.json ships the client modules and the boot package", ->
+  res = handle! req('GET', '/__rip/bundle.json')
+  eq res.status, 200
+  eq res.headers.get('content-type'), 'application/json'
+  bundle = res.json!
+  ok bundle.modules['_route/index.rip']?, 'the route module travels under its store path'
+  ok bundle.modules['_app/stash.rip']?, 'the stash module travels under its store path'
+  ok Object.keys(bundle.modules).some((k) -> k.startsWith('_pkg/app/')), 'the app package modules travel'
+  ok bundle.packages['@rip-lang/app']?, 'the boot package is claimed'
+
+test! "the bundle ETag round-trips as a 304", ->
+  first = handle! req('GET', '/__rip/bundle.json')
+  etag = first.headers.get('etag')
+  ok etag?.startsWith('"'), "the ETag is quoted: #{etag}"
+  res = handle! req('GET', '/__rip/bundle.json', { headers: { 'If-None-Match': etag } })
+  eq res.status, 304
+  eq res.headers.get('etag'), etag
+
+test! "GET /__rip/rip.js answers the browser runtime as JavaScript", ->
+  res = handle! req('GET', '/__rip/rip.js')
+  eq res.status, 200
+  eq res.headers.get('content-type'), 'application/javascript'
+  ok (res.text!).length > 0
+
+test! "the SPA fallback answers HTML navigations; everything else stays a 404", ->
+  page = handle! req('GET', '/profile', { headers: { Accept: 'text/html,application/xhtml+xml' } })
+  eq page.status, 200
+  ok (page.text!).includes('id="app"'), 'an unmatched HTML navigation gets the boot page'
+  api = handle! req('GET', '/nope', { headers: { Accept: 'application/json' } })
+  eq api.status, 404
+
+test! "a client/index.html replaces the generated boot page", ->
+  writeFileSync join(clientAppDir, 'client', 'index.html'),
+    '<!doctype html><title>custom</title><div id="app"></div>'
+  resetGlobals()
+  client! join(clientAppDir, 'client')
+  res = handle! req('GET', '/')
+  eq res.status, 200
+  ok (res.text!).includes('custom'), 'the app-provided page ships'
+  ok res.headers.get('etag')?, 'file serving keeps ETag revalidation'
+
+test! "a client module importing a server-only package rejects loudly at client()", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-client-')
+  mkdirSync join(dir, 'client', '_route'), { recursive: true }
+  writeFileSync join(dir, 'client', '_route', 'index.rip'), """
+  import { get } from '@rip-lang/server'
+  export Home = component
+    render
+      h1 "x"
+  """
+  resetGlobals()
+  err = null
+  try
+    client! join(dir, 'client')
+  catch e
+    err = e
+  ok err?, 'a server-only import must not assemble'
+  ok err.message.includes('_route/index.rip'), "names the importer: #{err.message}"
+  ok err.message.includes('@rip-lang/server'), "names the package: #{err.message}"
+  rmSync dir, { recursive: true, force: true }
+
+rmSync clientAppDir, { recursive: true, force: true }
+resetGlobals()
 
 # ==============================================================================
 # Worker + manager runtimes — real subprocesses over unix sockets, against a
@@ -1714,6 +1820,56 @@ test! "manager -c 2 --no-watch plumbs the cap to workers: two in flight over one
     await proc.exited
     stub.stop(true)
     rmSync cDir, { recursive: true, force: true }
+
+# ==[ Manager: browser delivery — the bundle rides the pool ]==
+
+console.log "\nManager browser delivery"
+
+test! "a client/ dir ships through the pool: boot page, bundle ETag, per-epoch reassembly", ->
+  ctlSock = join(tmpdir(), "rip-janus-client-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), """
+  import { get, client, start } from '@rip-lang/server'
+  client!()
+  get '/hi' -> 'hi'
+  start()
+  """
+  writeClientDir dir
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'clientapp', '-w', '1']
+  try
+    sock1 = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    page = uds!(sock1, '/', { headers: { Accept: 'text/html' } })
+    eq page.status, 200
+    ok (page.text!).includes('id="app"'), 'the worker serves the boot page'
+    b1 = uds!(sock1, '/__rip/bundle.json')
+    eq b1.status, 200
+    etag1 = b1.headers.get('etag')
+    ok etag1?, 'the bundle carries an ETag'
+    bundle = b1.json!
+    ok bundle.modules['_route/index.rip']?, 'the manager-assembled bundle ships the client module'
+    # A client edit is an epoch like any other: settle cuts admission, the
+    # ring boots against a REASSEMBLED bundle — its ETag must differ.
+    bell = calls.find((c) -> c.method is 'PUT' and c.body?.upstreams?.some((u) -> u.doorbell)).body.upstreams[0].path
+    writeFileSync join(dir, 'client', '_route', 'index.rip'), CLIENT_ROUTE.replace('"home"', '"home v2"')
+    waitFor! -> calls.filter((c) -> c.method is 'PUT' and c.body?.upstreams?.some((u) -> u.doorbell)).length >= 2
+    res = uds!(bell, '/ring')
+    eq res.status, 204
+    sock2 = waitFor! ->
+      puts = managerSockPuts(calls).filter (c) -> c.body.upstreams.length is 1
+      fresh = puts[puts.length - 1]?.body.upstreams[0].path
+      if fresh? and fresh isnt sock1 then fresh else null
+    b2 = uds!(sock2, '/__rip/bundle.json')
+    eq b2.status, 200
+    etag2 = b2.headers.get('etag')
+    ok etag2? and etag2 isnt etag1, "the new epoch reassembled the bundle: #{etag1} vs #{etag2}"
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
 
 # ==[ Manager: the startup report ]==
 

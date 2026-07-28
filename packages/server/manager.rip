@@ -19,13 +19,26 @@ import { tmpdir } from 'node:os'
 
 # The compiler compiling THIS process is the one that builds artifacts —
 # resolved from the loader's --preload path, loaded once, on first build.
+_srcDir = null
+loaderSrcDir = ->
+  return _srcDir if _srcDir?
+  preload = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
+  abort "rip-server: the rip loader is missing from execArgv — run via `rip server`" unless preload?
+  _srcDir = dirname(resolve(preload))
+
 _compile = null
 loadCompiler = ->
   return _compile if _compile?
-  preload = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
-  abort "rip-server: the rip loader is missing from execArgv — run via `rip server`" unless preload?
-  mod = import!(join(dirname(resolve(preload)), 'compile.js'))
+  mod = import!(join(loaderSrcDir(), 'compile.js'))
   _compile = mod.compile
+
+# Bundle assembly requires the compiler, so it runs here in the manager —
+# never in a prebuilt worker. Cached like _compile.
+_assemble = null
+loadAssembler = ->
+  return _assemble if _assemble?
+  mod = import!(join(loaderSrcDir(), 'bundle.js'))
+  _assemble = mod.assembleBundle
 
 # --- Tunables — env-overridable, defaults per the pool protocol ----------------
 
@@ -101,6 +114,7 @@ export state =
   controlUnix: null    # unix socket path to the control plane, or
   controlBase: null    # http(s) base URL
   workerJs: null       # the worker runtime, prebuilt to plain JS at startup
+  browserRuntime: null # dist/browser/rip.js, copied into runDir when client/ exists
   buildCounter: 0      # one app artifact per boot epoch, uniquely named
   runDir: null         # tmpdir holding the doorbell, worker sockets, artifacts
   bellPath: null
@@ -296,9 +310,37 @@ export buildArtifact = (entry, outfile) ->
   Bun.write! outfile, result.outputs[0].text!
   outfile
 
+# The app's browser bundle, reassembled every epoch alongside the artifact:
+# each .rip under <appDir>/client, keyed by its path relative to client/,
+# through the compiler-src assembleBundle. No client dir means no bundle
+# (null). An assembly failure throws — it rides the same boot-failure
+# caching as a compile failure, so rings answer 503 with the diagnostic.
+clientModules = (dir) ->
+  out = {}
+  walk = (at, prefix) ->
+    for e in readdirSync(at, { withFileTypes: true })
+      continue if e.name.startsWith('.')
+      full = join(at, e.name)
+      if e.isDirectory()
+        walk full, "#{prefix}#{e.name}/"
+      else if e.name.endsWith('.rip')
+        out["#{prefix}#{e.name}"] = readFileSync(full, 'utf8')
+  walk dir, ''
+  out
+
+buildBundle = ->
+  clientDir = join(cfg.appDir, 'client')
+  return null unless existsSync(clientDir)
+  assemble = loadAssembler!()
+  text = JSON.stringify assemble({ modules: clientModules(clientDir), packagesDir: join(loaderSrcDir(), '..', 'packages') })
+  out = join(state.runDir, "b#{state.buildCounter}-bundle.json")
+  Bun.write! out, text
+  out
+
 buildApp = ->
   state.buildCounter += 1
-  buildArtifact! cfg.entry, join(state.runDir, "b#{state.buildCounter}-app.js")
+  artifact = buildArtifact! cfg.entry, join(state.runDir, "b#{state.buildCounter}-app.js")
+  { artifact, bundle: buildBundle!() }
 
 # ==============================================================================
 # Workers and pools
@@ -309,11 +351,16 @@ workerPath =! join(import.meta.dir, 'worker.rip')
 spawnWorker = (pool) ->
   pool.serial += 1
   sock = join(state.runDir, "p#{pool.n}w#{pool.serial}.sock")
+  env = { ...process.env, APP_ARTIFACT: pool.artifact, SOCKET_PATH: sock, WORKER_ID: "#{pool.n}.#{pool.serial}", WORKER_CONCURRENCY: "#{cfg.concurrency}", RIP_DRAIN_DEADLINE_MS: "#{WORKER_DRAIN_MS}" }
+  if pool.bundle?
+    env.RIP_BUNDLE_PATH = pool.bundle
+    env.RIP_BROWSER_RUNTIME = state.browserRuntime
+    env.RIP_CLIENT_DIR = join(cfg.appDir, 'client')
   proc = Bun.spawn ['bun', state.workerJs],
     stdout: 'inherit'
     stderr: 'inherit'
     stdin: 'ignore'
-    env: { ...process.env, APP_ARTIFACT: pool.artifact, SOCKET_PATH: sock, WORKER_ID: "#{pool.n}.#{pool.serial}", WORKER_CONCURRENCY: "#{cfg.concurrency}", RIP_DRAIN_DEADLINE_MS: "#{WORKER_DRAIN_MS}" }
+    env: env
   w = { sock, proc, ready: false, spawnedAt: Date.now(), readyAt: null }
   monitorWorker pool, w
   w
@@ -358,9 +405,9 @@ pollWorker = (w) ->
       return { ok: false, w, error: lastBody or 'worker boot deadline expired' }
     sleep! 25
 
-spawnPool = (artifact) ->
+spawnPool = (artifact, bundle) ->
   state.poolCounter += 1
-  pool = { n: state.poolCounter, serial: 0, workers: [], polls: [], retired: false, artifact }
+  pool = { n: state.poolCounter, serial: 0, workers: [], polls: [], retired: false, artifact, bundle }
   for i in [0...cfg.workers]
     pool.workers.push spawnWorker(pool)
   pool.polls = pool.workers.map (w) -> pollWorker(w)
@@ -437,6 +484,7 @@ retirePool = (pool, graceMs = DRAIN_MS) ->
     for w in pool.workers
       try unlinkSync w.sock
     try unlinkSync pool.artifact if pool.artifact?   # per-epoch, dies with the pool
+    try unlinkSync pool.bundle if pool.bundle?
     return
 
 scrapPool = (pool) -> retirePool pool, 0
@@ -481,18 +529,19 @@ kickBoot = ->
 bootLoop = ->
   loop
     state.dirty = false
-    artifact = null
+    build = null
     try
-      artifact = buildApp!()
+      build = buildApp!()
     catch err
       continue if state.dirty        # files changed mid-build; the failure may be stale
       state.bootFailure = err?.message or String(err)
       warn "rip-server: app build failed: #{state.bootFailure}"
       throw err
     if state.dirty                   # saved during the build — this artifact is stale
-      try unlinkSync artifact
+      try unlinkSync build.artifact
+      try unlinkSync build.bundle if build.bundle?
       continue
-    pool = spawnPool(artifact)
+    pool = spawnPool(build.artifact, build.bundle)
     try
       awaitReady! pool, state.readyWhen
     catch err
@@ -863,6 +912,15 @@ export main = (argv) ->
     state.workerJs = buildArtifact! workerPath, join(state.runDir, 'worker.js')
   catch e
     abort "rip-server: cannot build the worker runtime: #{e?.message or e}"
+
+  # An app with a client/ dir serves the browser runtime from the run
+  # tmpdir — copied once per manager start. A missing runtime file is a
+  # toolchain defect, not an app error: abort.
+  if existsSync(join(cfg.appDir, 'client'))
+    runtimeSrc = join(loaderSrcDir(), '..', 'dist', 'browser', 'rip.js')
+    abort "rip-server: browser runtime missing at #{runtimeSrc} — a client/ dir requires dist/browser/rip.js" unless existsSync(runtimeSrc)
+    state.browserRuntime = join(state.runDir, 'rip.js')
+    Bun.write! state.browserRuntime, Bun.file(runtimeSrc)
 
   startDoorbell()
 

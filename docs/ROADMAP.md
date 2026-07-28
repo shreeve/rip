@@ -71,11 +71,11 @@ plus real-browser Playwright runs across Chromium, Firefox, and WebKit
 `assembleBundle` → `bootApp` → `launch` path end to end — SPA
 navigation, ETag revalidation, debug-gated source maps.
 
-The remaining work is development-server integration:
+The page/bundle product surface is `client()` in `@rip-lang/server`
+(manager-assembled per boot epoch, worker-served; the certification
+fixture `packages/browser-tests/serve.mjs` remains the browser-CI
+harness). The remaining work is development-server integration:
 
-- a product surface that serves the page and bundle — today only the
-  certification fixture `packages/browser-tests/serve.mjs` serves
-  `index.html`/`bundle.json`;
 - the watch→browser transport (none exists in v4; for Workspace door
   work follow [WORKSPACE.md](WORKSPACE.md) Q2 — Hub ding, HTTP bytes —
   not HMR.md’s inline-WebSocket payload row);

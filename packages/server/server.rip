@@ -12,6 +12,7 @@
 # Public exports:
 #   DSL:        get, post, put, patch, del, all, use, prefix
 #   Server:     start, startHandler, fetch, App
+#   Browser:    client
 #   Filters:    raw, before, after
 #   Handlers:   onError, notFound
 #   Errors:     error!, notice!, bail!
@@ -24,7 +25,8 @@
 # ==============================================================================
 
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { posix } from 'node:path'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { posix, join, resolve, dirname } from 'node:path'
 
 # ==============================================================================
 # Module State
@@ -810,6 +812,108 @@ export App = (fn) ->
   resetGlobals()
   fn?.()
   startHandler()
+
+# ==============================================================================
+# Browser delivery — client()
+# ==============================================================================
+#
+# A directory named client/ next to the app entry holds the browser app:
+# every .rip file under it, keyed by its path relative to client/, becomes a
+# bundle module ('_route/index.rip', '_app/stash.rip' — the store-path
+# vocabulary @rip-lang/app boots from). client(dir) registers the delivery
+# surface: GET / answers the boot page (client/index.html when present, else
+# a generated one), GET /__rip/bundle.json ships the bundle with ETag
+# revalidation, GET /__rip/rip.js ships the browser runtime, and a notFound
+# fallback answers the boot page for GET requests accepting text/html — an
+# app's own later notFound registration replaces it.
+#
+# Two modes, decided by environment:
+#   worker (RIP_BUNDLE_PATH set) — the manager assembled the bundle before
+#     any worker spawned; read it once and cache bytes + ETag in memory.
+#     The process dies on reload, so staleness is impossible.
+#   standalone (no RIP_BUNDLE_PATH) — the process runs under the rip loader,
+#     so the compiler is loadable; assemble at call time, failing fast.
+
+clientModules = (dir) ->
+  out = {}
+  walk = (at, prefix) ->
+    for e in readdirSync(at, { withFileTypes: true })
+      continue if e.name.startsWith('.')
+      full = join(at, e.name)
+      if e.isDirectory()
+        walk full, "#{prefix}#{e.name}/"
+      else if e.name.endsWith('.rip')
+        out["#{prefix}#{e.name}"] = readFileSync(full, 'utf8')
+  walk dir, ''
+  out
+
+BOOT_PAGE = """
+<!doctype html>
+<meta charset="utf-8">
+<title>rip app</title>
+<div id="app"></div>
+<script type="module">
+  import { bootApp } from '/__rip/rip.js'
+  const debug = new URLSearchParams(location.search).has('debug')
+  bootApp({ url: '/__rip/bundle.json', debug })
+</script>
+"""
+
+export client = (dir = null) ->
+  bundleText = null
+  clientDir = null
+  runtimePath = null
+
+  if process.env.RIP_BUNDLE_PATH?
+    bundleText = readFileSync(process.env.RIP_BUNDLE_PATH, 'utf8')
+    runtimePath = process.env.RIP_BROWSER_RUNTIME
+    clientDir = process.env.RIP_CLIENT_DIR or null
+  else
+    clientDir = resolve(dir ?? 'client')
+    unless existsSync(clientDir)
+      throw new Error "client() found no client directory at #{clientDir}"
+    preload = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
+    unless preload?
+      throw new Error "client() cannot assemble the bundle: the rip loader is missing from execArgv — serving a browser app standalone requires running via `rip`"
+    srcDir = dirname(resolve(preload))
+    packagesDir = join(srcDir, '..', 'packages')
+    unless existsSync(packagesDir)
+      throw new Error "client() cannot assemble the bundle: no packages directory at #{packagesDir}"
+    runtimePath = join(srcDir, '..', 'dist', 'browser', 'rip.js')
+    unless existsSync(runtimePath)
+      throw new Error "client() cannot serve the browser runtime: nothing at #{runtimePath}"
+    # The specifier is a computed variable ON PURPOSE: worker artifacts are
+    # produced by Bun.build over this module, and a static (or statically
+    # analyzable) import here would drag the compiler into every worker,
+    # destroying the no-compiler-in-workers memory story. A variable
+    # specifier defeats the bundler's static analysis.
+    bundleModule = join(srcDir, 'bundle.js')
+    { assembleBundle } = import!(bundleModule)
+    bundleText = JSON.stringify assembleBundle({ modules: clientModules(clientDir), packagesDir })
+
+  etag = "\"#{Bun.hash(bundleText).toString(16)}\""
+  indexHtml = if clientDir? then join(clientDir, 'index.html') else null
+  indexHtml = null unless indexHtml? and existsSync(indexHtml)
+
+  bootPage = (c) ->
+    if indexHtml?
+      c.send indexHtml, 'text/html; charset=UTF-8'
+    else
+      c.html BOOT_PAGE
+
+  get '/', (c) -> bootPage(c)
+  get '/__rip/bundle.json', (c) ->
+    if c.req.header('if-none-match') is etag
+      return new Response(null, { status: 304, headers: { 'ETag': etag } })
+    c.body bundleText, 200, { 'Content-Type': 'application/json', 'ETag': etag }
+  get '/__rip/rip.js', (c) -> c.send runtimePath
+  # SPA fallback: an unmatched GET that accepts HTML answers the boot page,
+  # so client-side routes deep-link; everything else stays a plain 404.
+  notFound (c) ->
+    if c.req.method is 'GET' and (c.req.header('accept') or '').includes('text/html')
+      return bootPage(c)
+    new Response('Not Found', { status: 404 })
+  return
 
 # ==============================================================================
 # Utility: Get Current Environment/Context

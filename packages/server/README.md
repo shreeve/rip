@@ -314,6 +314,57 @@ request path is outside its pattern. `sessions` cookies are HMAC-signed by
 default or AES-256-GCM sealed with `encrypt: true`; `csrf` implements
 double-submit with HMAC binding.
 
+## Serving a browser app — client()
+
+An app serves its own SPA through one registration:
+
+```coffee
+import { get, client, start } from '@rip-lang/server'
+
+client!()                    # client/ next to the app entry, or client!('path/to/dir')
+get '/api/users' -> users()  # API routes coexist with the SPA
+start()
+```
+
+**The directory convention.** A directory named `client/` next to the app
+entry holds the browser app. Every `.rip` file under it, keyed by its path
+relative to `client/`, becomes a bundle module — `client/_route/index.rip`
+travels as `_route/index.rip`, the store-path vocabulary `@rip-lang/app`
+boots from. The bundle carries every browser-safe `@rip-lang` package the
+modules reach (`rip.browser: true` in the package manifest); a server-only
+or unknown import rejects assembly loudly, naming the importer and the
+package.
+
+**Three routes plus a fallback.** `client()` registers:
+
+- `GET /` — the boot page. If `client/index.html` exists it is served
+  as-is (with ETag revalidation); otherwise a minimal generated page
+  mounts `<div id="app">` and boots via a module script.
+- `GET /__rip/bundle.json` — the bundle, `Content-Type: application/json`
+  with a quoted ETag; a matching `If-None-Match` answers 304 with no body.
+- `GET /__rip/rip.js` — the browser runtime, served with the same
+  file/ETag machinery as `@send`.
+- A `notFound` fallback answering the boot page for GET requests whose
+  `Accept` includes `text/html` — so client-side routes deep-link — and a
+  plain 404 for everything else. An app's own later `notFound`
+  registration replaces it.
+
+**Standalone vs pooled.** Standalone (`rip app.rip`), the process runs
+under the rip loader, so `client()` loads the bundle assembler from the
+compiler's src directory and assembles at call time — fail fast, loud.
+Under the pool, the **manager** assembles the bundle once per boot epoch
+(alongside the app artifact, inside the same failure path: an assembly
+error caches as a boot failure and rings answer 503 with the diagnostic)
+and passes its path to workers via `RIP_BUNDLE_PATH` — workers read the
+prebuilt file and never carry the compiler. A save under `client/` is an
+epoch like any other: the watcher's content-hash gate covers every `.rip`
+under the app directory, so the next ring serves a reassembled bundle
+with a fresh ETag.
+
+**Debug builds.** `?debug=1` on the boot page turns on source maps: the
+generated page reads the query param and passes `debug` to `bootApp`,
+exactly as the browser certification fixture does.
+
 ## Running under Janus — the pool runtime
 
 The package is three concepts — the DSL is the only part an app ever
@@ -543,13 +594,18 @@ bun run test
 The suite drives the exported fetch handler end-to-end — routing, smart
 responses, error envelopes, the full `read()` vocabulary, session/context
 helpers, `input:` schema validation with the generated OpenAPI document,
-and every built-in middleware — with no live socket. The worker and
+every built-in middleware, and the `client()` browser-delivery surface
+(boot page, bundle with ETag/304, runtime route, SPA fallback, the
+`index.html` override, and the loud server-only-import rejection) — with
+no live socket. The worker and
 manager runtimes then run as real subprocesses over unix sockets against
 a stub Janus `/1.0` control socket that records every call in order:
 readiness, drains, the dirty epoch (doorbell PUT before the ring's 204,
 sockets PUT before the 204), save coalescing, the identical-bytes no-op,
 boot-failure caching, prebuilt-artifact boots (loader-free workers,
-`import.meta.dir` preservation, loud build rejection), `--bridge`
+`import.meta.dir` preservation, loud build rejection), browser delivery
+through the pool (manager-assembled bundle, per-epoch reassembly with a
+fresh ETag), `--bridge`
 registration (carried `bridge_path`, loud startup rejection), the
 publish client (envelope round-trip, loud non-2xx), the startup report
 (`scale`, the read-back rule — the `bridge` line included, honest
