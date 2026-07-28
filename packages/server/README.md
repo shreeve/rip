@@ -338,9 +338,10 @@ Janus ──UDS─────────►│  WORKER    (worker.rip)      �
 ```
 
 The manager implements the Rip Server half of the pool coordination
-protocol: it POSTs `{name, hosts}` to `/1.0/apps` (retrying a 409 for 30s
-by default — sized so a dead predecessor's claim, held for Janus's 15s
-heartbeat TTL plus its reap-sweep lag, expires inside the window),
+protocol: it POSTs `{name, hosts, bridge_path?}` to `/1.0/apps` (retrying
+a 409 for 30s by default — sized so a dead predecessor's claim, held for
+Janus's 15s heartbeat TTL plus its reap-sweep lag, expires inside the
+window),
 heartbeats every 5s from the moment of registration, owns a persistent
 doorbell socket, and spawns workers on unique unix socket paths,
 publishing them with atomic full-list PUTs. A boot failure is cached and
@@ -348,10 +349,17 @@ answered 503 with the error; the next content-changing save clears it. On
 SIGINT/SIGTERM it logs one lifecycle line —
 `rip-server: <SIGNAL> — deregistering <name> (<appId>), draining workers`
 — publishes an empty upstream list, drains, and DELETEs the registration.
-Registration carries `name` and `hosts` only: a hub app's `bridge_path` is
-wired today with a manual `PATCH /1.0/apps/{id}` — the
-[counter demo](https://github.com/shreeve/janus/blob/main/docs/counter/index.md)
-documents the exact command (a `--bridge` flag is planned; see below).
+Registration carries `name`, `hosts`, and — with `--bridge <path>` — the
+hub app's `bridge_path`, so a bridge endpoint is wired at launch with no
+follow-up `PATCH /1.0/apps/{id}`. The path must start with `/`; anything
+else is refused at startup. Server-initiated hub broadcasts have a
+manager-internal publish client: `publish(directives)` POSTs a directive
+object or list to `POST /1.0/apps/{id}/hub/publish` through the same
+control-plane client that registered, and returns the delivery envelope
+(`objects`, `deliveries`, `unknown_targets`); a non-2xx answer is a loud
+error carrying status and body. Nothing in the manager calls it yet — the
+framework-level hub ergonomics that will are planned (see **Planned**
+below).
 
 Workers never carry the Rip compiler. The manager compiles the app **once
 per boot epoch** — `Bun.build` with a `.rip` plugin over the compiler it is
@@ -382,6 +390,7 @@ rip server [app-entry] [options]   # app-entry defaults to ./app.rip, then ./ind
 | --- | --- |
 | `--name <n>` | App name for registration (default: the app directory's name) |
 | `--host <h>` | Public host to claim; repeatable (default: the app name) |
+| `--bridge <path>` | Hub bridge endpoint, registered as `bridge_path` (must start with `/`) — Janus POSTs every hub socket event to it |
 | `-w, --workers <n>` | Worker processes (default: 2) |
 | `-c, --concurrency <n>` | Concurrent requests per worker (default: 1). Refused with watch on — `--eager` included — raise `c` only with watch off (`--no-watch`, or `RIP_ENV=production`); see the sizing maxim below |
 | `--watch` / `--no-watch` | File watching + hot reload (default ON unless `RIP_ENV=production`) |
@@ -445,11 +454,12 @@ one structured report:
   → acme registered with janus, 4 workers ready
 ```
 
-The `janus 1.0` tag and the `registered` line are **read back** from the
-control plane after publishing — `GET /1.0` and `GET /1.0/apps/{id}`
-through the same client that registered — so the report states the
-registration as Janus holds it (the upstream count comes from the
-response body), never merely what this manager sent. A failed read-back
+The `janus 1.0` tag, the `bridge` line (printed only under `--bridge`),
+and the `registered` line are **read back** from the control plane after
+publishing — `GET /1.0` and `GET /1.0/apps/{id}` through the same client
+that registered — so the report states the registration as Janus holds it
+(the upstream count and the bridge path come from the response body),
+never merely what this manager sent. A failed read-back
 is reported as a failure (`read-back failed (GET /1.0/apps/{id} → 404)`
 on the `registered` line, and the closing arrow drops the
 registered-with-janus claim), never as success. Per-worker boot times
@@ -539,24 +549,24 @@ a stub Janus `/1.0` control socket that records every call in order:
 readiness, drains, the dirty epoch (doorbell PUT before the ring's 204,
 sockets PUT before the 204), save coalescing, the identical-bytes no-op,
 boot-failure caching, prebuilt-artifact boots (loader-free workers,
-`import.meta.dir` preservation, loud build rejection), the startup
-report (`scale`, the read-back rule, honest read-back failure, mono
-piped output), and shutdown.
+`import.meta.dir` preservation, loud build rejection), `--bridge`
+registration (carried `bridge_path`, loud startup rejection), the
+publish client (envelope round-trip, loud non-2xx), the startup report
+(`scale`, the read-back rule — the `bridge` line included, honest
+read-back failure, mono piped output), and shutdown.
 
 ## Planned
 
 Approved near-term work — everything in this section is **not yet
 shipped**; the rest of this README states only what is:
 
-1. **`--bridge` manager flag** — registration carries `bridge_path`, so a
-   hub app needs no manual `PATCH /1.0/apps/{id}` after launch.
-2. **Hub ergonomics in the framework** — bridge-frame dispatch
+1. **Hub ergonomics in the framework** — bridge-frame dispatch
    (open/text/close routed like methods), directive-response helpers for
    the sigil grammar (`!` / `@` / `+` / `-` / `?` / `<` / `*`, including
-   the required-`!` rule on the bridge plane), a publish client with
-   app-id plumbing (the manager holds `state.appId`; workers currently
-   re-derive it by name), and membership-snapshot access.
-3. **Opt-in file logging** — a `logs:` config knob or the `RIP_LOG_DIR`
+   the required-`!` rule on the bridge plane), worker-side publishing
+   (the manager-internal client exists; workers cannot reach it yet),
+   and membership-snapshot access.
+2. **Opt-in file logging** — a `logs:` config knob or the `RIP_LOG_DIR`
    env var redirects the merged server stream to `logs/server.log`;
    stdout stays the default. The edge's access log can be pointed at
    the same directory via the Caddyfile (`logs/access.log`) — its

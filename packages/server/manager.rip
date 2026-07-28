@@ -65,6 +65,7 @@ Usage:
 Options:
   --name <n>          App name for registration (default: the app directory's name)
   --host <h>          Public host to claim; repeatable (default: the app name)
+  --bridge <path>     Hub bridge endpoint, registered as bridge_path (must start with /)
   -w, --workers <n>   Worker processes (default: 2)
   -c, --concurrency <n>  Concurrent requests per worker (default: 1; c > 1 requires watch off)
   --watch             Watch app files and hot-reload (default ON unless RIP_ENV=production)
@@ -86,13 +87,16 @@ cfg =
   appDir: null         # directory the watcher covers
   name: null
   hosts: []
+  bridge: null         # hub bridge endpoint, registered as bridge_path
   workers: 2
   concurrency: 1
   watch: false
   eager: false
   control: null
 
-state =
+# Exported: the manager is a process singleton, and its module state IS the
+# process state — in-process tests (the publish client) configure it directly.
+export state =
   appId: null
   controlUnix: null    # unix socket path to the control plane, or
   controlBase: null    # http(s) base URL
@@ -142,10 +146,12 @@ cfetch = (method, path, body = null) ->
 registerApp = ->
   backoff = 200
   deadline409 = null
+  reg = { name: cfg.name, hosts: cfg.hosts }
+  reg.bridge_path = cfg.bridge if cfg.bridge?
   loop
     res = null
     try
-      res = cfetch! 'POST', '/1.0/apps', { name: cfg.name, hosts: cfg.hosts }
+      res = cfetch! 'POST', '/1.0/apps', reg
     if res?
       if res.status is 201            # per the pool protocol: created, only
         body = res.json!
@@ -210,6 +216,20 @@ heartbeatOnce = ->
 
 deleteApp = ->
   try cfetch! 'DELETE', "/1.0/apps/#{state.appId}"
+
+# POST a directive object/list to the app's hub publish plane. Hot-plane by
+# contract (janus: publish touches hub state only — never upstreams, never
+# the doorbell), so it never rides the writer chain: a broadcast must not
+# queue behind an upstreams retry. Returns the parsed delivery envelope
+# ({objects, deliveries, unknown_targets}); a non-2xx answer throws carrying
+# status and body, never a silent swallow.
+export publish = (directives) ->
+  throw new Error("rip-server: publish before registration — no app id") unless state.appId?
+  res = cfetch! 'POST', "/1.0/apps/#{state.appId}/hub/publish", directives
+  unless res.ok
+    detail = res.text!
+    throw new Error("rip-server: publish failed (#{res.status}): #{detail}")
+  res.json!
 
 # ==============================================================================
 # Prebuild — one JS artifact per boot epoch, built by the manager
@@ -679,6 +699,16 @@ startupReport = ->
     lines.push "  #{label('control')}#{c}#{target}#{r} #{d}— #{plane.type} #{plane.api_version}#{r}"
   else
     lines.push "  #{label('control')}#{c}#{target}#{r} #{d}—#{r} #{y}read-back failed (#{planeErr})#{r}"
+  # The bridge line states what janus holds (GET /1.0/apps/{id} returns
+  # bridge_path), never merely what this manager sent.
+  if cfg.bridge?
+    if reg?
+      if reg.bridge_path is cfg.bridge
+        lines.push "  #{label('bridge')}#{reg.bridge_path}"
+      else
+        lines.push "  #{label('bridge')}#{y}read-back mismatch (janus holds #{JSON.stringify(reg.bridge_path ?? null)})#{r}"
+    else
+      lines.push "  #{label('bridge')}#{y}read-back failed (#{regErr})#{r}"
   lines.push "  #{label('workers')}#{cfg.workers}"
   lines.push "  #{label('watch')}#{if cfg.watch then "*.rip#{if cfg.eager then ', eager' else ''}" else "#{y}off#{r}"}"
 
@@ -733,7 +763,7 @@ shutdown = (reason) ->
   exit 0
 
 parseArgs = (argv) ->
-  args = { entry: null, name: null, hosts: [], workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, control: process.env.JANUS_CONTROL or null }
+  args = { entry: null, name: null, hosts: [], bridge: null, workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, control: process.env.JANUS_CONTROL or null }
   i = 0
   while i < argv.length
     a = argv[i]
@@ -744,6 +774,10 @@ parseArgs = (argv) ->
     switch a
       when '--name' then args.name = nextValue()
       when '--host' then args.hosts.push nextValue()
+      when '--bridge'
+        raw = nextValue()
+        abort "rip-server: --bridge takes a /-prefixed path, got #{raw}" unless raw.startsWith('/')
+        args.bridge = raw
       when '--workers', '-w'
         args.workers = parseInt(nextValue())
         abort "rip-server: --workers takes a positive integer" unless Number.isFinite(args.workers) and args.workers >= 1
@@ -787,6 +821,7 @@ export main = (argv) ->
   cfg.entry = resolveEntry(args.entry)
   cfg.appDir = dirname(cfg.entry)
   cfg.name = args.name or basename(cfg.appDir)
+  cfg.bridge = args.bridge
   cfg.workers = args.workers
   cfg.concurrency = args.concurrency
   cfg.eager = args.eager

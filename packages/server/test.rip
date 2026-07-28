@@ -1003,7 +1003,7 @@ test! "an orphaned worker (parent gone) exits on its own", ->
 
 console.log "\nPrebuild"
 
-import { buildArtifact, REGISTER_409_MS, scale } from './manager.rip'
+import { buildArtifact, REGISTER_409_MS, scale, publish, state as managerState } from './manager.rip'
 
 test! "buildArtifact bundles an app to one JS file a loader-free worker serves", ->
   dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')
@@ -1122,7 +1122,7 @@ test! "manager registers the app, then publishes the doorbell before anything el
   waitFor! -> janusCalls.length > 0
   eq janusCalls[0].method, 'POST'
   eq janusCalls[0].path, '/1.0/apps'
-  eq janusCalls[0].body, { name: 'tapp', hosts: ['tapp'] }
+  eq janusCalls[0].body, { name: 'tapp', hosts: ['tapp'] }   # no --bridge: no bridge_path key
   waitFor! -> allPuts().length >= 1
   first = allPuts()[0]
   eq first.body.upstreams.length, 1
@@ -1232,6 +1232,7 @@ test! "shutdown publishes [], drains, and deletes the app", ->
   out = new Response(mgrProc.stdout).text!
   ok /rip-server: SIGTERM — deregistering tapp \(app-\d+\), draining workers/.test(out),
     "shutdown logs one line naming the signal: #{JSON.stringify(out)}"
+  ok not out.includes('bridge'), "no --bridge: the report has no bridge line: #{JSON.stringify(out)}"
   lastPut = allPuts()[allPuts().length - 1]
   eq lastPut.body.upstreams, []
   last = janusCalls[janusCalls.length - 1]
@@ -1372,6 +1373,9 @@ stubJanus = (sockPath, calls, behave = null) ->
         return Response.json { ok: true }
       if rq.method is 'POST' and url.pathname.endsWith('/heartbeat')
         return new Response(null, { status: 204 })
+      if rq.method is 'POST' and url.pathname.endsWith('/hub/publish')
+        n = if Array.isArray(body) then body.length else 1
+        return Response.json { objects: n, deliveries: n, unknown_targets: 0 }
       if rq.method is 'DELETE'
         return new Response(null, { status: 204 })
       new Response('nope', { status: 404 })
@@ -1444,6 +1448,34 @@ test! "register accepts only 201 — a 200 from POST /apps is retried, never tru
     try proc.kill('SIGKILL')
     await proc.exited
     stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "--bridge registers bridge_path with the app", ->
+  ctlSock = join(tmpdir(), "rip-janus-bridge-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'bridgeapp', '-w', '1', '--no-watch', '--bridge', '/hub']
+  try
+    reg = waitFor! -> calls.find (c) -> c.method is 'POST' and c.path is '/1.0/apps'
+    eq reg.body, { name: 'bridgeapp', hosts: ['bridgeapp'], bridge_path: '/hub' }
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "--bridge without a leading / is a loud startup rejection", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnManager dir, '/nonexistent.sock', ['--name', 'badbridge', '--bridge', 'hub'], {}, 'pipe'
+  try
+    errText = new Response(proc.stderr).text!
+    code = await proc.exited
+    ok code isnt 0, 'rejection exits nonzero'
+    ok errText.includes('--bridge takes a /-prefixed path, got hub'), "names the flag and value: #{errText}"
+  finally
     rmSync dir, { recursive: true, force: true }
 
 test! "a 409 outlasting the retry window still aborts with the claim message", ->
@@ -1718,13 +1750,15 @@ test! "the startup report states the registration as janus holds it (read-backs)
     if call.path is '/1.0'
       return Response.json { api_version: '1.0', type: 'janus' }
     if call.path.startsWith('/1.0/apps/')
-      # Echo what this stub actually holds: the last upstreams PUT it took
+      # Echo what this stub actually holds: the last upstreams PUT it took,
+      # and the bridge_path the registration POST carried
       puts = calls.filter (c) -> c.method is 'PUT'
       held = if puts.length then puts[puts.length - 1].body.upstreams else []
+      regPost = calls.find (c) -> c.method is 'POST' and c.path is '/1.0/apps'
       seen.reg = true
-      return Response.json { id: call.path.split('/').pop(), name: 'repapp', hosts: ['repapp'], upstreams: held }
+      return Response.json { id: call.path.split('/').pop(), name: 'repapp', hosts: ['repapp'], upstreams: held, bridge_path: regPost?.body?.bridge_path }
     null
-  proc = spawnManager dir, ctlSock, ['--name', 'repapp', '-w', '2', '--no-watch'], {}, 'inherit', 'pipe'
+  proc = spawnManager dir, ctlSock, ['--name', 'repapp', '-w', '2', '--no-watch', '--bridge', '/hub'], {}, 'inherit', 'pipe'
   try
     waitFor! -> seen.reg              # the report's app read-back arrived
     sleep! 300                        # the report prints right after it
@@ -1737,6 +1771,7 @@ test! "the startup report states the registration as janus holds it (read-backs)
     ok out.includes("rip server v#{version}"), "names the server and version: #{JSON.stringify(out)}"
     ok out.includes('app      repapp (app-x)'), "app line carries name and registered id: #{JSON.stringify(out)}"
     ok out.includes("control  unix:#{ctlSock} — janus 1.0"), "control line carries the GET /1.0 read-back: #{JSON.stringify(out)}"
+    ok out.includes('bridge   /hub'), "bridge line states the read-back bridge_path: #{JSON.stringify(out)}"
     ok out.includes('workers  2'), 'workers line'
     ok out.includes('watch    off'), 'watch line reflects --no-watch'
     ok /✓ worker 1   \S+p1w1\.sock   .{4}s\n/.test(out), "worker 1 row with socket and scaled boot time: #{JSON.stringify(out)}"
@@ -1754,6 +1789,40 @@ test "piped manager stdout is mono — no ANSI escape bytes", ->
   ok report.out?, 'the report test above captured stdout'
   ok not /\x1b/.test(report.out), "no escape bytes in piped output: #{JSON.stringify(report.out)}"
 
+test! "a bridge read-back that disagrees with what was sent is a loud mismatch, never success", ->
+  ctlSock = join(tmpdir(), "rip-janus-repmis-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  seen = { reg: false }
+  stub = stubJanus ctlSock, calls, (call) ->
+    return null unless call.method is 'GET'
+    if call.path is '/1.0'
+      return Response.json { api_version: '1.0', type: 'janus' }
+    if call.path.startsWith('/1.0/apps/')
+      puts = calls.filter (c) -> c.method is 'PUT'
+      held = if puts.length then puts[puts.length - 1].body.upstreams else []
+      seen.reg = true
+      # The control plane holds a DIFFERENT bridge_path than the one sent.
+      return Response.json { id: call.path.split('/').pop(), name: 'misapp', hosts: ['misapp'], upstreams: held, bridge_path: '/other' }
+    null
+  proc = spawnManager dir, ctlSock, ['--name', 'misapp', '-w', '1', '--no-watch', '--bridge', '/hub'], {}, 'inherit', 'pipe'
+  try
+    waitFor! -> seen.reg
+    sleep! 300
+    proc.kill('SIGTERM')
+    code = await proc.exited
+    eq code, 0
+    out = new Response(proc.stdout).text!
+    ok out.includes('bridge   read-back mismatch (janus holds "/other")'),
+      "the bridge line names the held value, never claims success: #{JSON.stringify(out)}"
+    ok not out.includes('bridge   /hub'), "the sent value is never reported as held: #{JSON.stringify(out)}"
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
 test! "a failed read-back is reported as a failure, never as success", ->
   ctlSock = join(tmpdir(), "rip-janus-repfail-#{Date.now()}-#{rand(1e6)}.sock")
   dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
@@ -1764,7 +1833,7 @@ test! "a failed read-back is reported as a failure, never as success", ->
   stub = stubJanus ctlSock, calls, (call) ->
     reads.push call.path if call.method is 'GET' and call.path.startsWith('/1.0/apps/')
     null
-  proc = spawnManager dir, ctlSock, ['--name', 'darkapp', '-w', '1', '--no-watch'], {}, 'inherit', 'pipe'
+  proc = spawnManager dir, ctlSock, ['--name', 'darkapp', '-w', '1', '--no-watch', '--bridge', '/hooks'], {}, 'inherit', 'pipe'
   try
     waitFor! -> reads.length >= 1
     sleep! 300
@@ -1773,6 +1842,8 @@ test! "a failed read-back is reported as a failure, never as success", ->
     out = new Response(proc.stdout).text!
     ok out.includes('control  unix:'), 'the control line still names the endpoint'
     ok out.includes('read-back failed (GET /1.0 → 404)'), "the control read-back failure is named: #{JSON.stringify(out)}"
+    ok out.includes('bridge   read-back failed (GET /1.0/apps/app-x → 404)'),
+      "the bridge line never states merely what was sent: #{JSON.stringify(out)}"
     ok out.includes('registered  read-back failed (GET /1.0/apps/app-x → 404)'),
       "the registration read-back failure is named: #{JSON.stringify(out)}"
     ok out.includes('→ darkapp up, 1 worker ready — registration read-back failed'),
@@ -1783,3 +1854,67 @@ test! "a failed read-back is reported as a failure, never as success", ->
     await proc.exited
     stub.stop(true)
     rmSync dir, { recursive: true, force: true }
+
+# ==[ Manager: the publish client ]==
+#
+# publish() rides the manager's own control-plane client (cfetch), so these
+# tests drive the imported module in-process: configure its exported state
+# (control target + app id) exactly as a completed registration would.
+
+console.log "\nManager publish client"
+
+test! "publish() rejects loudly before registration — no app id, no POST", ->
+  eq managerState.appId, null
+  err = null
+  try
+    publish! [{ '@': ['#lobby'] }]
+  catch e
+    err = e
+  ok err?, 'publish without an app id must throw'
+  ok err.message.includes('publish before registration'), "names the precondition: #{err.message}"
+
+test! "publish() POSTs the directives to the app's hub publish plane and returns the envelope", ->
+  pubSock = join(tmpdir(), "rip-janus-pub-#{Date.now()}-#{rand(1e6)}.sock")
+  calls = []
+  stub = stubJanus pubSock, calls
+  managerState.controlUnix = pubSock
+  managerState.appId = 'app-pub'
+  try
+    directives = [{ '@': ['#lobby'], morph: '<b>hi</b>' }, { '@': ['#lobby'], title: 'x' }]
+    env = publish! directives
+    call = calls[calls.length - 1]
+    eq call.method, 'POST'
+    eq call.path, '/1.0/apps/app-pub/hub/publish'
+    eq call.body, directives
+    eq env, { objects: 2, deliveries: 2, unknown_targets: 0 }
+    one = { '@': ['#lobby'], morph: '<i>solo</i>' }
+    env = publish! one                # a single directive object ships unwrapped
+    eq calls[calls.length - 1].body, one
+    eq env, { objects: 1, deliveries: 1, unknown_targets: 0 }
+  finally
+    managerState.controlUnix = null
+    managerState.appId = null
+    stub.stop(true)
+
+test! "publish() surfaces a non-2xx answer as an error carrying status and body", ->
+  pubSock = join(tmpdir(), "rip-janus-pub409-#{Date.now()}-#{rand(1e6)}.sock")
+  calls = []
+  stub = stubJanus pubSock, calls, (call) ->
+    if call.method is 'POST' and call.path.endsWith('/hub/publish')
+      return new Response('hub is enabled on no host', { status: 409 })
+    null
+  managerState.controlUnix = pubSock
+  managerState.appId = 'app-pub'
+  try
+    err = null
+    try
+      publish! [{ '@': ['#lobby'] }]
+    catch e
+      err = e
+    ok err?, 'a non-2xx answer must throw'
+    ok err.message.includes('publish failed (409)'), "carries the status: #{err.message}"
+    ok err.message.includes('hub is enabled on no host'), "carries the body: #{err.message}"
+  finally
+    managerState.controlUnix = null
+    managerState.appId = null
+    stub.stop(true)
