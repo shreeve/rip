@@ -858,7 +858,10 @@ clientModules = (dir) ->
   walk dir, ''
   out
 
-BOOT_PAGE = """
+# The generated boot page. Under RIP_WORKSPACE=1 the bootApp call
+# carries `workspace: true` — the browser half of the dev door; flag
+# off, the emitted page is byte-identical to the plain boot.
+BOOT_PAGE = (workspace) -> """
 <!doctype html>
 <meta charset="utf-8">
 <title>rip app</title>
@@ -866,11 +869,12 @@ BOOT_PAGE = """
 <script type="module">
   import { bootApp } from '/__rip/rip.js'
   const debug = new URLSearchParams(location.search).has('debug')
-  bootApp({ url: '/__rip/bundle.json', debug })
+  bootApp({ url: '/__rip/bundle.json', debug#{if workspace then ', workspace: true' else ''} })
 </script>
 """
 
 export client = (dir = null) ->
+  workspace = process.env.RIP_WORKSPACE is '1'
   bundleText = null
   clientDir = null
   runtimePath = null
@@ -900,7 +904,11 @@ export client = (dir = null) ->
     # specifier defeats the bundler's static analysis.
     bundleModule = join(srcDir, 'bundle.js')
     { assembleBundle } = import!(bundleModule)
-    bundleText = JSON.stringify assembleBundle({ modules: clientModules(clientDir), packagesDir })
+    assembly: Record<string, any> = { modules: clientModules(clientDir), packagesDir }
+    # The flag's browser half boots through @rip-lang/workspace, so
+    # standalone assembly claims it exactly as the manager does.
+    assembly.claims = ['@rip-lang/workspace'] if workspace
+    bundleText = JSON.stringify assembleBundle(assembly)
 
   etag = "\"#{Bun.hash(bundleText).toString(16)}\""
   indexHtml = if clientDir? then join(clientDir, 'index.html') else null
@@ -910,10 +918,9 @@ export client = (dir = null) ->
     if indexHtml?
       c.send indexHtml, 'text/html; charset=UTF-8'
     else
-      c.html BOOT_PAGE
+      c.html BOOT_PAGE(workspace)
 
   get '/', (c) -> bootPage(c)
-  workspace = process.env.RIP_WORKSPACE is '1'
   if workspace and process.env.RIP_BUNDLE_PATH?
     # Dev-feed freshness: the manager rewrites this pool's bundle file in
     # place on a cell change, so the handler re-reads and re-tags per

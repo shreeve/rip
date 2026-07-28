@@ -941,6 +941,11 @@ test! "the bundle route re-reads per request — a rewrite shows without re-regi
   eq fresh.status, 200
   ok fresh.headers.get('etag') isnt etag1, 'the ETag tracks the rewritten file'
 
+test! "the generated boot page under the flag opens the workspace door", ->
+  res = handle! req('GET', '/')
+  eq res.status, 200
+  ok (res.text!).includes('workspace: true'), 'bootApp boots in workspace mode'
+
 for k of feedEnv
   if savedFeedEnv[k]? then process.env[k] = savedFeedEnv[k] else delete process.env[k]
 
@@ -953,6 +958,7 @@ test! "flag off: no feed routes, and the bundle stays the boot-time cached bytes
     eq (handle! req('GET', '/__rip/manifest')).status, 404
     eq (handle! req('GET', "/__rip/cells/#{FEED_CELL_ID}?rev=1")).status, 404
     eq (handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })).status, 404
+    ok not ((handle! req('GET', '/')).text!).includes('workspace'), 'flag off, the boot page never mentions the door'
     etag1 = (handle! req('GET', '/__rip/bundle.json')).headers.get('etag')
     writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: { 'y.rip': 'y' }, packages: {} })
     res = handle! req('GET', '/__rip/bundle.json')
@@ -960,6 +966,23 @@ test! "flag off: no feed routes, and the bundle stays the boot-time cached bytes
   finally
     delete process.env.RIP_BUNDLE_PATH
     resetGlobals()
+
+test! "standalone assembly under the flag claims @rip-lang/workspace into the bundle", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-client-')
+  writeClientDir dir
+  savedFlag = process.env.RIP_WORKSPACE
+  process.env.RIP_WORKSPACE = '1'
+  try
+    resetGlobals()
+    client! join(dir, 'client')
+    bundle = (handle! req('GET', '/__rip/bundle.json')).json!
+    ok bundle.packages['@rip-lang/workspace']?, 'the workspace package is claimed'
+    ok bundle.modules['_pkg/workspace/feed.rip']?, 'the feed module travels'
+    ok ((handle! req('GET', '/')).text!).includes('workspace: true'), 'the boot page opens the door'
+  finally
+    if savedFlag? then process.env.RIP_WORKSPACE = savedFlag else delete process.env.RIP_WORKSPACE
+    resetGlobals()
+    rmSync dir, { recursive: true, force: true }
 
 rmSync feedDir, { recursive: true, force: true }
 resetGlobals()

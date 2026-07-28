@@ -334,7 +334,11 @@ clientModules = (dir) ->
 
 assembleBundleText = ->
   assemble = loadAssembler!()
-  JSON.stringify assemble({ modules: clientModules(join(cfg.appDir, 'client')), packagesDir: join(loaderSrcDir(), '..', 'packages') })
+  opts: Record<string, any> = { modules: clientModules(join(cfg.appDir, 'client')), packagesDir: join(loaderSrcDir(), '..', 'packages') }
+  # The dev door boots in the browser through @rip-lang/workspace, so
+  # the flag claims it into every bundle this manager assembles.
+  opts.claims = ['@rip-lang/workspace'] if WORKSPACE
+  JSON.stringify assemble(opts)
 
 buildBundle = ->
   return null unless existsSync(join(cfg.appDir, 'client'))
