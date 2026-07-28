@@ -36,6 +36,7 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [27](#27-a-pattern-catch-destructures-unknown) | A pattern catch publishes TS2339/TS2488 from its own lowering | `compiler` | **none** — the corpus parks both pattern spellings ([MANIFEST.md](MANIFEST.md)'s Parked table); a `check` case in the match-operator style is the honest interim gate, unbuilt |
 | [31](#31-a-promoted-param-declares-no-field) | A promoted `@`-param declares no field — TS2339 on every member use | `compiler` | **none** — 08-functions carries promotion only alongside manual field declarations; a `check` case in the match-operator style is the honest interim gate, unbuilt |
 | [52](#52-a-destructured-binding-read-by-a-hoisted-def-is-implicitly-any-under-strict) | A destructured binding read by a hoisted def is implicitly `any` under strict | `strict`, `hoist` | **none** — the shape cannot enter a positive fixture while it fails the `strict` dimension; the fix's gate is the destructured spelling entering the inference claims fixture, where `strict` holds it |
+| [55](#55-a-computed-members-type-is-inferred-from-its-expressions-form-so-most-bodies-type-any) | A computed member's type is inferred from its expression's form, so most bodies type `any` | `compiler` | **none** — the fix's gate is a consumer-face claims row whose computed body reads a property rather than multiplying |
 | [54](#54-a-generic-components-shipped-declarations-reference-a-type-parameter-they-never-declare) | A generic component's shipped declarations reference a type parameter they never declare | `compiler` | **none** — the audit reads the face the checker serves, never the emitted declarations; the fix's gate is a type parameter on dts-tsc's component fixture |
 | [53](#53-a-paren-injected-calls-arity-error-lands-on-the-wrong-argument) | A paren-injected call's arity error lands on the wrong argument | `editor`, `compiler` | **none** — the negative cannot enter the error lane while the position is wrong; the fix's gate is that negative joining 02-operations' error pair |
 | [43](#43-a-schema-callables-output-types-unknown) | A schema callable's output types `unknown` — false errors on every typed read | `compiler` | the Diagnostics Lane's 14-schema pin (`error-pins.json`) asserts the typed-read rejection **as the interim** — it goes red the day callable outputs type, the cue to retire it |
@@ -325,6 +326,28 @@ The type-parameter list is dropped from both the instance interface and the cons
 **Why the suite missed it.** [dts-tsc.test.js](../toolchain/dts-tsc.test.js) does exactly the right thing — compiles a component's shipped declarations against a consumer program — but its fixture is `export Counter = component` with no type parameter, so the generic path has never been emitted into a compiler. Nothing else looks at declaration text for components at all: the audit's lanes read the checker's face, never the `.d.ts`.
 
 **Status.** ⬜ **Open** (2026-07-27) — **no gate**, and the gate does not belong in this corpus: the audit judges the face the checker serves, which is correct here. The fix's gate is a type parameter on `dts-tsc.test.js`'s component fixture, where a consumer already compiles against the emitted declarations and would fail on the unbound name.
+
+### 55. A computed member's type is inferred from its expression's FORM, so most bodies type `any`
+
+```
+count := 3
+words: string[] := ['a']
+
+fromArith    ~= (count * 2)      # readonly value: number
+fromProperty ~= words.length     # readonly value: any
+bareRead     ~= count            # readonly value: any
+concat       ~= (count + 1)      # readonly value: any
+```
+
+The declared type comes from the shape of the body, never from resolving what the body reads. An operator whose result type is fixed supplies it — `*` gives number, a comparison or `!` gives boolean, a literal gives its own type, and `((count * 2) + 1)` works because the inner `*` settles it. Everything else is `any`: a bare member read, a property access, an index, a method call, a ternary, and `+` — which is overloaded, so it resolves only when a sub-expression already fixed the type.
+
+Most real computeds are in the second list.
+
+**It reaches the consumer, not just the emission.** Driven (2026-07-27, `rip check` under `rip.strict`): a consumer assigning `p.nestedArith.value` to a mismatched type rejects with TS2322, while `p.bareNumberRead.value` and `p.concat.value` assign to anything at all. So this is the face the CHECKER serves, unlike the generic-declaration gap where the checker is correct and only the emitted `.d.ts` is wrong.
+
+**Why the suite missed it, and why a fixture would too.** Nothing had asserted a computed's type from outside its component. Worse, the shape that a fixture author reaches for first — `total ~= (price * quantity)` — is arithmetic, which is exactly the form that works. A claims row for the consumer face written that way goes green while every property-access computed in real code is silently unchecked.
+
+**Status.** ⬜ **Open** (2026-07-27) — **no gate**. The fix's gate is a consumer-face claims row whose `~=` member reads a property rather than multiplying, where the type audit's `strict` dimension and the error lane's negative both hold it. Whether this shares a root with the untyped-runtime-destructure finding is unverified — that one concerns member-initializer checking inside a component-carrying file, this one the declared member type, and I have not read the emitter path.
 
 ### 43. A schema callable's output types `unknown`
 
