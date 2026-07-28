@@ -74,7 +74,7 @@ The census owns which type KINDS the corpus claims; these rows own what the chec
 | behavior | carrier | negative carrier |
 | --- | --- | --- |
 | member-kind faces reached through an instance: `=!` rejects writes, `:=` exposes `.value`, `~=` computes, `=` stays plain | ABSENT | ABSENT |
-| method faces: typed parameters keep their types, defaulted parameters become optional | ABSENT | ABSENT |
+| method faces: typed parameters keep their types in both member layouts (inline body and indented body), defaulted parameters become optional | ABSENT | ABSENT |
 | `component extends <tag>` forwards use-site intrinsics typed from the element | ABSENT | ABSENT |
 | a literal-union prop keeps its union at the use site rather than widening to its base type | ABSENT | ABSENT |
 | a generic component's constraint violation rejects at the use site | ABSENT | ABSENT |
@@ -83,7 +83,6 @@ The census owns which type KINDS the corpus claims; these rows own what the chec
 | a wrong-typed write to component state inside a method rejects, while the legal write types | ABSENT | ABSENT |
 | array-typed reactive state keeps its ELEMENT type through the cell — `string[] := [...]` rejects a number element and types a read | ABSENT | ABSENT |
 | a forwarded element ref — a child `ref:` into a `<=>` bound parent cell — checks end to end | ABSENT | ABSENT |
-| indented alias method members enforce their call arguments | ABSENT | ABSENT |
 
 ### Schema
 
@@ -104,6 +103,10 @@ The park expires in one direction: the row becomes CARRIED. The gate paints red 
 | --- | --- |
 | call arity survives paren injection — the implicit spelling is checked like the explicit one | the open paren-injected-arity finding closes (FINDINGS.md) — the code survives injection but the position lands on the first argument, so the negative cannot assert both |
 | a destructured binding types through the pin pass — the same hoisted read, bound by a pattern rather than assigned | the open destructured-hoisting finding closes (FINDINGS.md) — the pin pass reaches a plainly-assigned binding but not one bound by a pattern, so the shape is implicitly `any` under strict |
+| member-kind faces reached through an instance: `=!` rejects writes, `:=` exposes `.value`, `~=` computes, `=` stays plain | the open computed-member-type finding closes (FINDINGS.md) — `=!`, `:=` and `=` all hold, but a `~=` member's declared type comes from its body's FORM, so a bare-read computed types `any` and accepts any annotation; a fixture would go green on three kinds and prove nothing about the fourth |
+| a render-head typo beyond `if` (unless, switch, for, `=`) rejects at the head line | the identifier-read span finding closes (FINDINGS.md) — every head publishes TS2304 on the right line, but the column is the construct's cover start rather than the name, and the Diagnostics Lane asserts both, so pinning it would certify the mis-position |
+| a wrong-typed write to component state inside a method rejects, while the legal write types | the untyped-runtime-destructure finding closes (FINDINGS.md) — the method body IS checked, but no wrong write to a member publishes at all, so the row's own subject is dark |
+| array-typed reactive state keeps its ELEMENT type through the cell — `string[] := [...]` rejects a number element and types a read | the untyped-runtime-destructure finding closes (FINDINGS.md) — the read half holds and types the element, but the wrong-element initializer publishes nothing, so the row has no negative to name |
 
 ## Containment
 
