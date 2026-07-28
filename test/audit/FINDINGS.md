@@ -12,6 +12,20 @@
 
 **IDs are doc-internal** — nothing outside this file cites one (a row is engineered to disappear), and numbers are never reused or renumbered: the filing commit is the durable provenance. [findings.test.js](../toolchain/findings.test.js) enforces and explains this.
 
+**Completeness — five slots, every row, gated.** A row is not a report of a symptom; it is everything the person who fixes it would otherwise have to rediscover. Each slot is recognized by its marker, because a section a gate cannot see goes missing silently — which is how a row shipped with its symptom driven and its root never diagnosed.
+
+| slot | marker | what it holds |
+| --- | --- | --- |
+| root | `**Why (code)` | what in the code produces this, cited by file and symbol |
+| fix | `**The fix` | where it belongs, what it must NOT do, and a precedent if one exists — or, where the fix needs a decision, the ruling required and who makes it |
+| escape | `**Why the suite missed it` | which instrument should have caught it, and why it did not |
+| prior | `**vs v3` | driven both sides, or explicitly why v3 cannot be asked |
+| exit | `**Status.**` | open date, and the gate (or an honest none, plus what the fix's gate would be) |
+
+**Root and fix are separate slots on purpose.** They are easy to merge into one paragraph and the merge costs the two most valuable sentences: *what the fix must not do*, and *which precedent it should follow*. Both are earned by driving, exist nowhere in the code, and die with the body — #21's "do not solve this at query time" and #26's "softening the annotation is the one fix this row rules out" are the shape. A prescribed fix is the root's proof, too: a root that cannot be turned into a fix shape is not diagnosed yet. What a row must NOT carry is the diff — a prescribed implementation is a prediction, and reads as wrong the day someone fixes it another way.
+
+**A slot with nothing to say is still filled, honestly.** "Root not diagnosed, and here is what would settle it" is complete; silence is not.
+
 **Tags group by root** — `compiler` (parser/emitter) · `strict` (implicit-any & safety) · `directive` (the `@ts-expect-error` family) · `hoist` · `config` · `editor` · `capability`. Labels, not partitions: a row that shares a fix with two roots carries both.
 
 **Conventions.** Code is cited by file and symbol, **never by line number** — greppable, and survives an edit above it; when a cited symbol is deleted, say so at the citation. Gates are cited by name and by whether they are green, **never by pass count** — counts drift when a fixture is added, going stale while the finding has not changed. **Positions** are LSP coordinates (**1-based line, 0-based column**), what the gates assert and the editor consumes; `rip check` prints 1-based/1-based, so the same diagnostic reads one column higher there.
@@ -53,6 +67,7 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [13](#13-single-rooted-tsconfig--no-per-project-resolution) | Single-rooted tsconfig — no monorepo support | `config` | **none** |
 | [50](#50-a-tuple-elements-diagnostic-is-positioned-on-the-whole-element-list) | A tuple element's diagnostic is positioned on the whole element list | `compiler` | the Diagnostics Lane (`runner.js`) — 11-types' wrongEntry and wrongTrailing rows report position violations; red by agreement (soft: the audit exits 0) until the span maps to the offending element |
 | [32](#32-reassigning-an-exported-plain-binding-double-declares) | Reassigning an exported plain binding double-declares | `compiler` | **none** — the spelling's output does not build, so no fixture can carry it; the fix's gate is the spelling entering 10-modules |
+| [58](#58-a-classed-svg-element-emits-an-unclosed-setattribute-call) | A classed SVG element emits an unclosed call — the module does not parse | `compiler` | **none** — the emission does not parse, so no fixture can carry it; the fix's gate is the spelling entering 13-components |
 | [28](#28-a-postfix-cast-on-an-inline-try-body-detaches-the-catch-arm) | A postfix cast on an inline try body detaches the catch arm | `compiler` | **none** — the spelling cannot compile, so no fixture can carry it; the fix's gate is the spelling entering 07-exceptions, where `compiles` and `verdict` hold it |
 | [29](#29-new-on-an-optional-chain-emits-an-unconstructable-spelling) | `new` on an optional chain emits an unconstructable spelling | `compiler` | **none** — the emission cannot parse as JS, so no fixture can carry it; the production is parked ([MANIFEST.md](MANIFEST.md)); the fix's gate is the spelling entering 09-classes |
 | [30](#30-new-on-a-tagged-template-leaks-the-sexpr-head) | `new` on a tagged template leaks the sexpr head | `compiler` | **none** — the emission references undeclared names, so no fixture can carry it; the production is parked ([MANIFEST.md](MANIFEST.md)); the fix's gate is the spelling entering 09-classes |
@@ -78,13 +93,15 @@ console.log('binding says:', yes)     # prints: true
 
 The declaration stands — the face reads `let yes: boolean = false` — and every subsequent READ of that binding is replaced by `true`. The binding is unreachable from the moment it exists, and the program prints the opposite of what its source says. No diagnostic, no squiggle: the face type-checks clean, because a literal satisfies the annotation.
 
-**The declaration is collateral, not a decision.** A word followed by a colon is captured as a property KEY before it is classified at all ([lexer.js](../../src/lexer.js), the identifier branch), which is what lets `when: 1` and `if: 2` be pairs — the alias table is not consulted for another sixty lines. An annotated declaration has the same `word :` shape as a pair, so it inherits the exemption without anyone choosing it. The read has no colon, falls through to the alias table, and becomes the literal.
+**Why (code) — the declaration is collateral, not a decision.** A word followed by a colon is captured as a property KEY before it is classified at all ([lexer.js](../../src/lexer.js), the identifier branch), which is what lets `when: 1` and `if: 2` be pairs — the alias table is not consulted for another sixty lines. An annotated declaration has the same `word :` shape as a pair, so it inherits the exemption without anyone choosing it. The read has no colon, falls through to the alias table, and becomes the literal.
 
 **Four spellings, and only four, fail silently** — a fact that follows from what the misread lowers to rather than from a list. The misread has to be a legal expression to go unnoticed. Driven 2026-07-27, one probe per class: a keyword name (`if: number = 2`) rejects at the parser on `POST_IF`; an operator alias (`is: number = 2`) rejects on `COMPARE`, and so do `and`, `or`, `not`, `isnt`, because an operator in argument position does not parse. Only the VALUE aliases — `yes`, `no`, `on`, `off` — lower to `BOOL`, which is legal wherever an expression is, so only those four reach runtime wrong.
 
 **The fix belongs in the scanner, at the declaration.** Making a read yield to an in-scope binding would need scope knowledge in a scanner that has none, which is the wrong layer. Rejecting the DECLARATION is tractable and has its precedent in the same file: `RESERVED_WORDS` exists so certain words never reach the parser as an identifier. The rejection must be narrower than "no alias word before a colon" — `{ yes: 1 }` stays legal, since nothing later reads a binding — so it has to separate a key inside a literal from an annotated declaration at statement level, which is scanner state the lexer already keeps for other decisions.
 
 **Why the suite missed it.** Nothing anywhere declares a binding named for a value alias. The battery's only `yes`/`no` are string literals in ternary rows, and this corpus wrote `yes: Yes = true` and `no: No = false` — the two cases where the literal the read collapses to EQUALS the binding's value, so the fixture printed the right answer while demonstrating nothing. `runtime` passed, `verdict` passed, and the mistake was invisible in both. The lexer-spelling census is what surfaced it: `yes` and `no` counted as exercised BOOL aliases, and the only site claiming them was a read that was never meant to be one.
+
+**vs v3 — not a regression** (driven both sides, 2026-07-28). v3 prints `true` for the same two lines. Both the pair exemption in the identifier branch and the alias table predate this repo, so the shape has always miscompiled; the lexer-spelling census is what made it visible, not a change that made it wrong.
 
 **Status.** ⬜ **Open** (2026-07-27) — **no gate**, honestly: a positive fixture cannot carry the shape while it miscompiles, and `rip check` cannot see it because the face is clean. The fix's gate is a `battery` rejection row for the declaration, at which point the census's `yes`/`no` rows go dark and want an exclusion naming `true`/`false` as the spelling that carries their lowering.
 
@@ -150,7 +167,7 @@ A source enumeration cannot see a use, and a classified-name-vs-delivered count 
 
 **The corpus rate sits between the two, so for this row it is a fair instrument** — the rate is uniform because the triggers are ordinary syntax, not a shape that needs scale to appear. (It is not fair for #23, where the corpus under-counts by two orders of magnitude and carries the wrong shape.) The census exceeds the broken-today subset by design — the remainder resolve only while their cover's prefix holds, which is what the census counts and a symptom gate would not; medlabs' worst file is `app/components/icon.rip` at 94%.
 
-**Root (code) — three categories, each losing the span at a different point.**
+**Why (code) — three categories, each losing the span at a different point.**
 
 - **List elements** (call arguments). The list *is* a node with a span — `console.log a, b` yields one node over `a, b` — but per-element spans are never derived: [parser.js](../../src/parser.js) records one row per **role**, and for a spread role `childNodeId` stays null, because [stores.js](../../src/stores.js) takes per-element spans only from *"the children's own NodeStore rows"* and a bare identifier is a primitive string in the tree (`["...", "console", "log"], "total"`), which has none. The span exists transiently at the accumulator's reduce (`locs`) and dies when the stack pops.
 - **Annotation names.** The `annotation` role's span is `": number"` — it includes the operator — and `number` gets no node.
@@ -162,20 +179,24 @@ A source enumeration cannot see a use, and a classified-name-vs-delivered count 
 
 **Why the suite missed it.** Every token gate was source-enumerated at declarations — `declsOf` (column-0), plus [semantic-tokens.test.js](../toolchain/semantic-tokens.test.js) and the `readonly` sweep on column-0 `:=`/`=!`/`~=` names. A name's *declaration* gets a token, so every gate passed while its *use* was never in any set. The editor suite's definition tests are the sharper miss: they **do** drive use sites (`// total at its read`, `// answer at its use` — [editor-features.test.js](../../packages/vscode/test/editor-features.test.js)), and pass because their fixtures are `next = total + 1` and `double = answer * 2` — binop operands, which the emitter's read guard gives an exact row. Right position, source that cannot fail. And `declsOf`'s own comment names the construct it excludes — *"a name followed by `.`/`(`/`[` is a usage (`console.log(…)`) — which the old heuristic wrongly probed"* — a refinement that was correct on its own terms and removed the only shape in the corpus that carries the defect.
 
-**vs v3 — established for TOKENS (driven both sides, 2026-07-15), unestablished for the other three.** v3 compiles to TS, runs `getEncodedSemanticClassifications`, and remaps the spans back (rip-lang 3.17.5 `packages/vscode/src/lsp.js`) — it is not remap-free, so a token surviving there is a property of its remap, not of classifying on raw source. The token verdict **splits by surface**:
+**vs v3 — established for TOKENS (driven both sides, 2026-07-15) and for HOVER and DEFINITION (2026-07-28, below); diagnostics unestablished.** v3 compiles to TS, runs `getEncodedSemanticClassifications`, and remaps the spans back (rip-lang 3.17.5 `packages/vscode/src/lsp.js`) — it is not remap-free, so a token surviving there is a property of its remap, not of classifying on raw source. The token verdict **splits by surface**:
 
 - **Type-body members — regression.** `type Circle = { kind: 'circle', radius: number }`: v3 classifies `radius` `property`, v4 drops it. The `member` gauge tracks a genuine v4 loss — v3's remap survives the quote rewrite where v4's cover-prefix does not.
 - **Use sites — mostly inherited, causes inverted.** `console.log('total:', total)`: both drop the use, so no outcome change on the common single-quoted form. But the cause is opposite — v4 drops it to quote-normalization (`console.log("total:", total)` **rescues** it in v4, which is the trigger table above), while v3 drops it to the call-argument context regardless of quotes (double-quoting does **not** rescue it in v3). A bare `x = total` and a minimal reactive read (`x = clicks` off `clicks := 0`) classify in **both**. So the `console.log`-argument drops — the bulk of the `survival` count — are v3-inherited, not v4 drift.
 
 Unsettled on tokens: 08's reactive reads drop in v4 only in render/component context (the minimal read survives both); that exact context was not reproduced on v3. Net for tokens: the **member** surface is the established v4 regression; the **use-site** surface is largely a shared, pre-existing limitation.
 
-**Unsettled everywhere else, and it is the bigger question.** Whether v3 *hovers* a read correctly, resolves its definition, or positions its diagnostics — the three surfaces this row now turns on — was never driven. Re-drivable at 3.17.5 (`~/Code/shreeve/rip-lang`); worth settling before assuming those three are v4 drift, since the token split above shows the answer can invert per surface.
+**Hover and definition — established, both v4 regressions** (driven both sides, 2026-07-28, the real servers over stdio at the argument read in `console.log('total:', total)`). v3 hovers **`let total: any`** and resolves the definition; v4 hovers **`(method) Console.log(...data: any[]): void`** and returns null. **Why** v3 answers correctly is not established. The token verdict above records v3 remapping spans back rather than avoiding a round trip, so this is a difference between two remaps, not between having one and not — and the nearest available explanation is the one the member surface already shows, v3's remap surviving the quote rewrite that collapses v4's cover-prefix. That is inference; it was not driven for hover. What IS driven is the outcome, and unlike the use-site TOKEN surface these two do not split: v3 is right and v4 is wrong on the ordinary single-quoted form.
+
+**Diagnostics stay unsettled.** v3's position on a failing read was not driven. The tuple-span and paren-injected-arity rows both record v3 positioning correctly on THEIR shapes, which is suggestive and is not this surface.
 
 ### 22. Completion and signature help fail on an incomplete expression
 
 The broker builds its TypeScript face from a **successful** compile, so it can serve a request only where the source parses — but the two features whose trigger is an *incomplete* expression fire precisely where it does not. The trigger byte is the same byte that breaks the parse: type a member-access dot and pause (`items.‸`), or sit inside an open call (`add(‸`), and the buffer no longer parses, so no face carries the member-access / call context and the request has nothing to map into. rip's compiler throws where TypeScript's error-tolerant parser recovers — which is why the hand-written twin serves the correct answer on the identical incomplete text and the broker does not. What you actually get instead is nothing, or (for completion) the wrong list; the popup works only once the expression is complete enough to parse, which is backwards from how these features are used.
 
-**Two surfaces, one root.** Member completion at a bare dot and signature help inside an open call. Both are un-parseable at the cursor (`bin/rip --ts` on `items.` → `Unexpected end of input — expected PROPERTY`; on `add(` and `add(1,` → a parse error at the `(`), so neither has a face. They differ only in fallback: completion has a statement-context one (it serves *something* wrong), signature help has none (it serves plain null).
+**Why (code) — two surfaces, one root.** Member completion at a bare dot and signature help inside an open call. Both are un-parseable at the cursor (`bin/rip --ts` on `items.` → `Unexpected end of input — expected PROPERTY`; on `add(` and `add(1,` → a parse error at the `(`), so neither has a face. They differ only in fallback: completion has a statement-context one (it serves *something* wrong), signature help has none (it serves plain null).
+
+**The fix — an error-tolerant face, or a fixup at the cursor.** v3's dot rewrite (below) is the cheap end and is proven on this exact surface, but it is per-trigger: signature help's open paren needs its own. The general form is a parser that recovers where TypeScript's does, which serves both. **Not** by widening the staleness fallback — serving the last good face's scope list is what produces the wrong list today, and a better-chosen wrong list is still wrong.
 
 **Status.** ⬜ **Open** (2026-07-15) — no fix, no gate. A completion content audit (twin-oracled on the item set + resolved `detail`) and a signature-help audit (on the label + `activeParameter`) would catch the two surfaces and, sharing this root, retire together the day the parse gap closes — but both are unbuilt, and the extension tests exercise only the parseable form of each (below), which is why the suite is green.
 
@@ -213,13 +234,17 @@ Signature help is the harsher surface: with no statement-context fallback, every
 
 Of the four component member forms, three silently accept a wrong-typed initializer — driven 2026-07-23, `rip check` over one component: `wrongPlain: string = 42` publishes TS2322; `wrongMember: number := 'oops'`, `wrongComputed: string ~= 7 * 3`, and `wrongReadonly: number =! 'nope'` publish **nothing**. The annotation declares on the class (hover, props, and consumers all see it), and the initializer that violates it is never checked anywhere — not in the editor, not in `rip check`, permissive and strict alike. An unchecked-code hole, not a mislead: a wrong member type flows into every read of the member with no diagnostic anywhere on the road.
 
-**Two mechanisms, one surface.** In a component-carrying file, runtime delivery switches to the components table, and the face's runtime destructure loses the reactive `types` annotations the reactive table's own delivery carries — `const { __state, __computed, … } = (() => …)` is UNTYPED there (compare any `:=`-only file, whose destructure is annotated with the generic signatures). So `__state(…)`/`__computed(…)` infer from the raw runtime JS, return effectively-`any`, and the `_init` assignment lines (`this.wrongMember = __state("oops")`) never check. Reproduced in minimal TS with the generic signatures present: both mismatches then fire TS2322 — typing the destructure is sufficient for `:=`/`~=` members. The `=!` member has its own micro-root: its one legitimate constructor-seam write is spelled `(this as any).wrongReadonly = …` to quiet TS2540, and the `as any` swallows the value check with it — that cast needs a shape that keeps the member's type (a typed this-cast, or a `satisfies` on the value).
+**Why (code) — two mechanisms, one surface.** In a component-carrying file, runtime delivery switches to the components table, and the face's runtime destructure loses the reactive `types` annotations the reactive table's own delivery carries — `const { __state, __computed, … } = (() => …)` is UNTYPED there (compare any `:=`-only file, whose destructure is annotated with the generic signatures). So `__state(…)`/`__computed(…)` infer from the raw runtime JS, return effectively-`any`, and the `_init` assignment lines (`this.wrongMember = __state("oops")`) never check. Reproduced in minimal TS with the generic signatures present: both mismatches then fire TS2322 — typing the destructure is sufficient for `:=`/`~=` members. The `=!` member has its own micro-root: its one legitimate constructor-seam write is spelled `(this as any).wrongReadonly = …` to quiet TS2540, and the `as any` swallows the value check with it — that cast needs a shape that keeps the member's type (a typed this-cast, or a `satisfies` on the value).
 
 **The scope is every write to a member, not only its initializer.** Driven 2026-07-28 under `rip.strict`: a wrong-typed write inside a method publishes nothing for state (`@count = 'oops'`), for a prop (`@value = 'nope'`), and for a **plain non-reactive member** (`@plainField = 'flat'`) — the last of which has no cell, no `__state` call, and an honest `declare plainField: number` on the class. The method body itself IS checked (a `nonexistentHelper(1)` call in the same method publishes TS2304), so this is member access specifically. The wider root is the same destructure one level up: `__Component` rides the components table too, so the face opens `const { …, __Component, … } = (() => {` with no annotation and `class Writer extends __Component` inherits an effectively-`any` base, which stops the class's own `declare` members being enforced. That is why typing the destructure is the whole fix and why it reaches further than the initializer surface — a plain member's declaration is already correct and still unchecked.
 
 **Riding evidence.** The same untyped destructure collapses the wrong-initializer double (the two-publish row above) to a single TS1360 in component-carrying files — the annotated-const TS2322 needs a typed `__state` and is gone; only the `satisfies` guard still fires (driven 2026-07-23, a top-level `wrongState: number := 'oops'` beside a component).
 
 **Why the suite missed it.** Nothing in the suite ever asserted a member declaration's own initializer — component negatives asserted member WRITES (`count = 'hello'` in a method) and prop construction sites. Deriving 13-components' error pair is what surfaced it: the member-initializer negatives publish nothing, so the Diagnostics Lane cannot carry them, and the pair had to be authored without them.
+
+**vs v3 — regression** (driven both sides, 2026-07-28, `rip check` over the same four-member component). v3 publishes **all four**: `wrongPlain`, `wrongMember`, `wrongComputed` and `wrongReadonly` each raise TS2322 on the member name. v4 publishes the plain one. The mechanism is the destructure above read from the other side — v3's delivery annotates its runtime table (`declare people: Signal<any>`, the generic signatures present), so an initializer checks against the member's declared type; typing v4's destructure is therefore not a speculative fix but a restoration of the shape that already checks.
+
+**The fix — type the runtime destructure.** Sufficient for the `:=`/`~=` members by the minimal-TS reproduction above, and one level up it restores enforcement of the class's own `declare` members through `__Component`. v3's delivery is annotated (above), so this is restoration rather than design. The `=!` member needs its own micro-fix alongside: its constructor-seam write is spelled `(this as any).x = …` to quiet TS2540 and the cast swallows the value check with it, so it wants a shape that keeps the member's type — a typed this-cast, or a `satisfies` on the value.
 
 **Status.** ⬜ **Open** (2026-07-23) — no gate. A `check` case in the match-operator style — the SILENCE asserted as the gap, liveness-paired with a genuine error in the same workspace — is the honest interim gate, unbuilt. The fix's gate is the member-initializer negatives entering 13-components' error pair, where the Diagnostics Lane holds them by code and position.
 
@@ -229,13 +254,21 @@ Of the four component member forms, three silently accept a wrong-typed initiali
 
 **Why (code).** The face carries the schema body as an untyped runtime descriptor — `__schema({ …, entries: [{tag: "field", name: "role", …, constraints: {default: "guest"}}, …] })` — where a default is a bare JS value and a transform is a bare JS function, neither related by any face type to the field's declared type, so tsgo has nothing to check. The declared types themselves project into the companion ([schema-types.js](../../src/schema-types.js)), which is why the assignment surface checks; only the descriptor's own values are dark.
 
+**vs v3 — not a regression** (driven both sides, 2026-07-28, the same wrong-typed default and transform). v3 publishes nothing either, permissive and strict alike: its descriptor is untyped in the same way. The hole is as old as the schema face.
+
 **Why the suite missed it.** [schema.test.js](../schema/schema.test.js) asserts the runtime rejection as correct behavior — which it is; nothing ever type-checked a face carrying a wrong-typed default or transform. Deriving 14-schema's error pair is what surfaced it: the misdeclaration negatives publish nothing, so the Diagnostics Lane cannot carry them and the pair was authored without them.
+
+**The fix — relate the descriptor's values to the field they belong to.** The declared types already project into the companion ([schema-types.js](../../src/schema-types.js)); what is missing is a face in which a default and a transform's return are checked against their field — a typed descriptor shape, or a projection that types them alongside the fields. **Not** a runtime-only assertion: the validator already rejects both on `.parse()`, and this row exists because that rejection arrives too late to help.
 
 **Status.** ⬜ **Open** (2026-07-23) — no gate. A `check` case in the match-operator style — the SILENCE asserted as the gap, liveness-paired with a genuine error in the same workspace — is the honest interim gate, unbuilt. The fix's gate is the misdeclaration negatives entering 14-schema's error pair, where the Diagnostics Lane holds them by code and position.
 
 ### 8. Auto-import is closure-scoped
 
 v4 offers auto-import candidates only from the ACTIVE PROGRAM (open files + transitive imports) plus `node_modules`/`@types`. A workspace `.rip` nothing open imports is not offered until you open/import it — the feature's headline case (import from a file you have *not* opened) is defeated for `.rip`→`.rip`; only npm/`@types` work fully.
+
+**The fix — widen candidacy without widening the program.** The `include` reach-up below is what binds the candidate set to the closure, so that is where the change goes. v3 got a wider set free from a whole-workspace root (also below), which proves one is serviceable — but is not the shape to copy: **not** by materializing every mirror eagerly, since the closure exists to bound session cost. The fix has to offer a file as a candidate without compiling it.
+
+**Why the suite missed it.** Auto-import was exercised only through the closure, where it works. Nothing probed a file no open buffer reached, because until the mirror model existed there was no reason to think reachability could differ from workspace membership.
 
 **Status.** ⬜ **Open** (2026-07-14). No fix has landed, but the finding is **gated** — [auto-import.test.js](../toolchain/auto-import.test.js) drives real completion requests against the server. What works is asserted green (a candidate reachable through the closure *is* offered — a genuine guard against auto-import breaking altogether; opening the orphan *does* bring it in, which is what proves the candidate set is exactly the tsgo program). The gap itself is an **expected failure** asserting the correct behavior — an unimported workspace `.rip` should be offered from cold — so it stays red by agreement while this is open and converts to a real failure the day the scope widens. Pinning the broken behavior as if it were correct would be worse than no coverage: a green test certifying the gap.
 
@@ -253,7 +286,13 @@ v4 offers auto-import candidates only from the ACTIVE PROGRAM (open files + tran
 
 **Why the suite missed it.** `bun test` asserts the operator's runtime values, and nothing ever type-checked an `=~` face: `Expression MATCH Expression` was grammar-dark until the M3 sweep — authoring 02-operations is what surfaced this. The corpus **parks the operator**: a positive fixture cannot carry it (the `verdict` dimension means zero published diagnostics, and M3 fixtures carry no directives), and the Diagnostics Lane cannot assert it as a negative (TS2531 anchors on a call expression that the line-aligned twin can only spell as TS18047 on a bare identifier — the codes cannot be made to agree, and blessing the diagnostic would certify the bug as intended). The corpus's traces are the parked note in [02-operations.rip](corpus/grammar/02-operations.rip) and [MANIFEST.md](MANIFEST.md)'s Parked rows — the operator, and the regex-index spelling that shares its root; the gate lives outside it. [check.test.js](../toolchain/check.test.js)'s match-operator case drives the real CLI and asserts the current, wrong behavior on purpose — TS2531 bound to each spelling's line (columns left free: a mapped-column shift is not a fix), liveness-paired with a genuine TS2322 in the same workspace so a checker that stopped reporting anything cannot impersonate the fix (the auto-import pattern, and for the same reason not `test.failing`). It goes red the day the emission is fixed — the cue to invert it, not a regression.
 
-**The root is the emission's type story, not the runtime's semantics.** The `null` return is load-bearing — it is the loud-throw path — so the fix belongs in how the emitted spine acknowledges that branch, not in softening `toMatchable`'s honest signature. When it lands, `=~` (and the regex-index spelling) join 02-operations and the `verdict` dimension holds both.
+**vs v3 — v4-only, and v4 is the honest side** (driven both sides, 2026-07-28). v3's shadow never annotates `toMatchable`, so the emitted spine invokes `.match` on an untyped value and nothing publishes. The spine is otherwise identical on both sides — `(_ = toMatchable(text).match(/b+/))` — so the diagnostic is the price of v4 typing its own prelude truthfully, not a new defect in the lowering. This is also why softening the annotation back to v3's silence is the one fix this row rules out.
+
+**Why (code) — the emission's type story, not the runtime's semantics.** The `null` return is load-bearing — it is the loud-throw path — so the union is honest and the defect is the unguarded `.match` on it.
+
+**The fix — acknowledge the null branch in the emitted spine.** The lowering owns both halves of the expression, so it can narrow its own call. **Not** by softening `toMatchable`'s signature: that buys back exactly v3's silence, where the same spine publishes nothing only because the helper was never typed — this row exists because that silence was wrong. The pattern-catch row is the precedent, minting an annotation scoped to its own lowering rather than changing a runtime contract. When it lands, `=~` (and the regex-index spelling) join 02-operations and the `verdict` dimension holds both.
+
+**Status.** ⬜ **Open** (2026-07-22) — gated as the interim by `check`'s match-operator case, described above: it asserts the TS2531 **as the gap**, so the fix inverts it — the cue to move the operator into the corpus, where `verdict` holds it.
 
 ### 27. A pattern catch destructures `unknown`
 
@@ -263,7 +302,11 @@ v4 offers auto-import candidates only from the ACTIVE PROGRAM (open files + tran
 
 **Why the suite missed it.** `bun test` asserts the pattern bindings' runtime values, and nothing ever type-checked a pattern catch's face: `Catch → CATCH Object Block` and `Catch → CATCH Array Block` were grammar-dark until the M3 sweep — authoring 07-exceptions is what surfaced this, the same road #26 arrived by. The corpus parks both spellings (a positive fixture cannot carry them — `verdict` means zero published diagnostics, and M3 fixtures carry no directives — and the Diagnostics Lane cannot bless the codes without certifying the bug as intended); the traces are the parked note in [07-exceptions.rip](corpus/grammar/07-exceptions.rip) and [MANIFEST.md](MANIFEST.md)'s Parked rows.
 
-**The root is the lowering's type story.** TypeScript permits exactly two catch annotations, `any` and `unknown` — so the pattern branch can acknowledge its own destructure by minting `catch (_err: any)` (or casting at the destructure), scoped to the pattern lowering alone, leaving the identifier spelling's honest `unknown` untouched. When it lands, both pattern spellings join 07-exceptions and `verdict` holds them.
+**vs v3 — v4-only** (driven both sides, 2026-07-28). The lowering is the same shape — v3 emits `catch (error) { ({message} = error); … }` — but v3 types every catch binding `any`, strict or not, so neither the pattern destructure nor the identifier spelling's `e.message` publishes anything there. v4's `unknown` is TypeScript's own correct behavior under strict, which is why the fix belongs in the pattern lowering's own annotation and not in loosening the catch type back.
+
+**Why (code) — the lowering's type story.** TypeScript permits exactly two catch annotations, `any` and `unknown` — and the pattern branch mints its binding, so it can annotate it.
+
+**The fix — mint the annotation on the pattern branch alone.** `catch (_err: any)`, or a cast at the destructure, scoped to the pattern lowering. **Not** a global loosening of the catch type: the identifier spelling's `unknown` is honest, and the user can govern it the ordinary TypeScript ways (`instanceof`, a cast), so widening it would trade a real safety property for a lowering's convenience. When it lands, both pattern spellings join 07-exceptions and `verdict` holds them.
 
 **Status.** ⬜ **Open** (2026-07-22) — no gate. A `check` case in the match-operator style — the TS2339/TS2488 asserted **as the gap**, liveness-paired — is the honest interim gate, unbuilt; it would go red the day the emission is fixed, the cue to invert it.
 
@@ -273,7 +316,13 @@ v4 offers auto-import candidates only from the ACTIVE PROGRAM (open files + tran
 
 **The workaround is the corpus's current shape.** 08-functions carries `ParamVar → ThisProperty` only alongside explicit field declarations in the class body (`owner: string` beside the `@owner` param) — which type-checks, and which is exactly the redundancy promotion exists to remove.
 
-**The root is the emission's class walk.** The parameter's annotation is in hand at the promotion site; the fix is emitting the declaration it implies — a class field (`owner: string`) or TypeScript's own parameter-property spelling, which is this exact feature. When it lands, the field-less form joins 08-functions and `verdict` holds it.
+**Why (code) — the emission's class walk.** The parameter's annotation is in hand at the promotion site, and the walk emits the assignment without the declaration it implies.
+
+**The fix — emit the field the promotion implies.** A class field (`owner: string`), or TypeScript's own parameter-property spelling, which is this exact feature. v3's shadow already declares it (below), so the shape is known-good rather than proposed. Aim it at the CHECK MIRROR: the shipped `.d.ts` is correct on both sides, so only the mirror is wrong. When it lands, the field-less form joins 08-functions and `verdict` holds it.
+
+**vs v3 — regression** (driven both sides, 2026-07-28). v3's checked face declares the field the promotion implies — `class Crate { owner: string; constructor(owner: string) { this.owner = owner; } }` — and `rip check` is clean on the field-less spelling. Both compilers' shipped `.d.ts` already carry `owner: string`; only v4's checked face omits it, so the two artifacts have diverged and the fix is to the mirror, not to the declaration emitter.
+
+**Why the suite missed it.** Every fixture exercising promotion also declares the field the emission omits — the workaround above — so the face type-checks and nothing fails. The field-less form the construct exists for is spelled nowhere.
 
 **Status.** ⬜ **Open** (2026-07-23) — no gate. A `check` case in the match-operator style — the TS2339 pair asserted **as the gap**, liveness-paired — is the honest interim gate, unbuilt.
 
@@ -299,6 +348,12 @@ So it is neither destructuring nor hoisting alone — it is destructuring reache
 
 **Why the suite missed it.** Nothing had ever destructured at the top level and read the result from a `def`: the corpus's one live pinnable ([08-functions.rip](corpus/grammar/08-functions.rip) `formatOf`) reads a plainly-assigned object, and `bun test` asserts the operator's runtime values, where the annotation is invisible. Authoring [claims/20-inference.rip](corpus/claims/20-inference.rip) for the pin-pass claim is what surfaced it — the fixture was written with both spellings, and the `strict` dimension rejected the destructured one.
 
+**vs v3 — not reachable there** (driven 2026-07-28). v3 publishes nothing on the same program under `rip.strict`, but that says nothing about its pin pass: v3's strict fires `strictNullChecks` (`x: string = null` rejects) and never fires `noImplicitAny` (an unannotated param is silent), which is the closed implicit-any row from the other side. With the family inert there is no TS7034/TS7005 pair for any binding, destructured or plain, so the coverage question this row asks cannot be put to v3 at all.
+
+**Why (code) — the pin pass's carrier set has no pattern case.** The pass annotates a hoisted top-level binding by manufacturing a declaration site and pinning the answer back; a name introduced by a destructuring PATTERN never enters that set, so no annotation is written and the hoisted read falls to TypeScript's evolving-`let` refusal. Named from the pass's behaviour — the boundary table above is driven one variable at a time — not from reading [pins.js](../../packages/vscode/src/pins.js)'s carrier construction, which is what would confirm it.
+
+**The fix — admit pattern bindings to the carrier set.** By the time the pass runs each name a pattern introduces is a binding like any other; what it lacks is the per-name span the pattern's elements do not carry, which is the identifier-read row's shape appearing once more. **Not** by annotating the pattern as a whole — the read is of one name, and a whole-pattern annotation over-constrains its siblings.
+
 **Status.** ⬜ **Open** (2026-07-27) — **no gate**: the shape cannot enter a positive fixture while it fails the `strict` dimension, and the corpus keeps only the block-confined spelling with the destructured one named as absent on purpose. The fix's gate is that spelling entering `claims/20-inference.rip`, where `strict` holds it and the pin-pass claim's carrier goes green.
 
 ### 53. A paren-injected call's arity error lands on the wrong argument
@@ -313,9 +368,13 @@ rip injects the parens a paren-less call omits, and the emitted face is byte-ide
 
 **Driven** (2026-07-27, the Diagnostics Lane over `02-operations.errors.rip`): the two spellings in one file, arguments identical. The explicit call asserts clean. The implicit one reports `position TS2554: expected column 36 (\`count\`), published 26` — column 26 is the literal `1`.
 
-**Why this is the identifier-read root wearing an argument list.** The injected `(…)` emits as one cover row, and an argument inside it has no source span of its own, so the resolver answers with the cover's left edge — the same mechanism that makes `console.log total` hover about `console.log`. What is new is the surface: a diagnostic, not a hover, and one whose CODE is correct, so nothing outside a position-asserting lane would notice.
+**Why (code) — the identifier-read root wearing an argument list.** The injected `(…)` emits as one cover row, and an argument inside it has no source span of its own, so the resolver answers with the cover's left edge — the same mechanism that makes `console.log total` hover about `console.log`. What is new is the surface: a diagnostic, not a hover, and one whose CODE is correct, so nothing outside a position-asserting lane would notice.
 
 **Why the suite missed it.** `bun test` asserts that the paren-less call runs and that its emitted bytes round-trip, both of which hold. Nothing asserted where a diagnostic on such a call lands, because the corpus had no paren-less negative — the explicit-arity negative in 02-operations covers the code and says nothing about the spelling.
+
+**vs v3 — regression** (driven both sides, 2026-07-28, both spellings in one file). v3 positions **both** on the excess argument — the paren-less call and the explicit one land identically on the third `count`. So paren injection costs v3 nothing positional, which is the sharpest available statement that the injected cover is v4's own construct and not an inevitable consequence of the sugar.
+
+**The fix rides the identifier-read row.** Give the injected argument list's elements real spans and the diagnostic lands on the offending argument with nothing to fix separately — that row's `markSpan`/`SPAN_ROLES` move is the whole of it. **Not** a resolver special-case for injected covers: that corrects the arity diagnostic and leaves every other consumer of the same cover wrong.
 
 **Status.** ⬜ **Open** (2026-07-27) — **no gate**: the negative cannot enter the error lane while the position is wrong, since the Diagnostics Lane asserts code AND position and pinning it would certify the mis-position as intended. The claims row is parked. The fix's gate is that negative entering 02-operations' error pair, where the lane holds it by both.
 
@@ -343,6 +402,12 @@ The type-parameter list is dropped from both the instance interface and the cons
 
 **Why the suite missed it.** [dts-tsc.test.js](../toolchain/dts-tsc.test.js) does exactly the right thing — compiles a component's shipped declarations against a consumer program — but its fixture is `export Counter = component` with no type parameter, so the generic path has never been emitted into a compiler. Nothing else looks at declaration text for components at all: the audit's lanes read the checker's face, never the `.d.ts`.
 
+**vs v3 — regression** (driven both sides, 2026-07-28, `-d` over the same four-line component). v3 emits `export declare class Listing<TItem extends string>` — the parameter list survives onto the declaration, so the shipped `.d.ts` compiles and a consumer can supply the argument.
+
+**Why (code) — the declaration emitter drops the parameter list and keeps every reference to it.** The type-parameter list reaches neither the instance interface nor the constructor, while the members that reference it emit verbatim, so the two halves of one file disagree. Only the emitted `.d.ts` path is affected — the in-memory face binds the parameter correctly, which is why no amount of checking source finds it.
+
+**The fix — carry the list onto both shipped declarations.** It is in hand where the members are emitted, since those members already reference it; the interface and the constructor each need it re-stated. v3's declaration (above) is the target text, so nothing here is designed. **Not** by erasing the references to match — that silently widens a generic component's props to `unknown` for every consumer.
+
 **Status.** ⬜ **Open** (2026-07-27) — **no gate**, and the gate does not belong in this corpus: the audit judges the face the checker serves, which is correct here. The fix's gate is a type parameter on `dts-tsc.test.js`'s component fixture, where a consumer already compiles against the emitted declarations and would fail on the unbound name.
 
 ### 55. A computed member's type is inferred from its expression's FORM, so most bodies type `any`
@@ -365,6 +430,12 @@ Most real computeds are in the second list.
 
 **Why the suite missed it, and why a fixture would too.** Nothing had asserted a computed's type from outside its component. Worse, the shape that a fixture author reaches for first — `total ~= (price * quantity)` — is arithmetic, which is exactly the form that works. A claims row for the consumer face written that way goes green while every property-access computed in real code is silently unchecked.
 
+**vs v3 — v4 is ahead** (driven both sides, 2026-07-28, `-d` over the same four computeds). v3 types ALL four `Computed<any>`, the arithmetic form included. So form-driven inference is a partial gain over a blanket `any`, not a regression from something that resolved — this row measures the distance from partial to resolved, and there is nothing to restore.
+
+**Why (code) — not diagnosed, and this is the honest state.** The behaviour is characterized exactly (the table above: an operator with a fixed result type supplies it, everything else mints `any`), but the emitter path computing a computed member's declared type has not been read — so which function makes the choice, and whether it shares the untyped-destructure root one row over, is unestablished. Reading [component-types.js](../../src/component-types.js)'s computed-member branch against the four spellings above is what would settle it.
+
+**The fix — resolve the body instead of pattern-matching its form.** The declared type should come from what the expression evaluates to, which tsgo computes for free if the face states the member as an inference over the body rather than a form-derived literal; the schema-callable row's `ReturnType<typeof …>` is the nearest precedent, and v3 used exactly that shape there. **Not** by extending the operator table — every form admitted leaves the next one `any`, and the table is precisely what makes property reads, most real computeds, silently unchecked.
+
 **Status.** ⬜ **Open** (2026-07-27) — **no gate**. The fix's gate is a consumer-face claims row whose `~=` member reads a property rather than multiplying, where the type audit's `strict` dimension and the error lane's negative both hold it. Whether this shares a root with the untyped-runtime-destructure finding is unverified — that one concerns member-initializer checking inside a component-carrying file, this one the declared member type, and I have not read the emitter path.
 
 ### 43. A schema callable's output types `unknown`
@@ -373,9 +444,13 @@ Every `:shape` callable — computed getter (`~>`), eager derived (`!>`), method
 
 **The corpus's current shape.** 14-schema reads callable outputs through interpolation alone (where `unknown` coerces silently), casts the one method call at the use site (a use-site cast survives; only in-body ones are stripped), recomputes `total` from fields instead of reading `@subtotal`, and carries no `@ensure` — every one a workaround, the promoted-param precedent.
 
-**Why (code).** Callable bodies are sub-compiled at emission and land as plain JS function values in the untyped `__schema({…})` descriptor; the companion projection ([schema-types.js](../../src/schema-types.js)) types fields from their declared types but has no type information for a callable — no annotation slot exists in the field-line grammar ([schema.js](../../src/schema.js) `parseCallableLine`), and no inference crosses the descriptor — so it mints `unknown`, optional. The fix needs one of two roads: a type slot in the callable grammar the projection can read, or a face shape that lets tsgo infer the body's return type. Which is the language owner's call; either way the projection stops minting `unknown`.
+**Why (code).** Callable bodies are sub-compiled at emission and land as plain JS function values in the untyped `__schema({…})` descriptor; the companion projection ([schema-types.js](../../src/schema-types.js)) types fields from their declared types but has no type information for a callable — no annotation slot exists in the field-line grammar ([schema.js](../../src/schema.js) `parseCallableLine`), and no inference crosses the descriptor — so it mints `unknown`, optional. 
+
+**The fix — one of two roads, and the language owner picks.** A type slot in the callable grammar the projection can read, or a face shape that lets tsgo infer the body's return type. v3 built the second (below, `ReturnType<typeof …>` over an emitted behavior object), so it is demonstrated rather than hypothetical. Either way the projection stops minting `unknown`. **Not** by casting at use sites — that is the corpus's current workaround and it hides the gap instead of closing it.
 
 **Why the suite missed it.** Nothing in the suite reads a callable's output in a typed position: the corpus interpolates its getters (`"#{order.name}"`, where `unknown` coerces without a diagnostic — the workaround shape above), and [schema-types.test.js](../schema/schema-types.test.js) types the transform's `it` (the closed schema-`it` row) but never a callable's OUTPUT.
+
+**vs v3 — regression, and it names one of the two roads** (driven both sides, 2026-07-28). v3's checked face types the callable by DERIVING it: it emits the behavior object beside the companion and spells the member `readonly total: ReturnType<typeof __Cart__behavior.total>`, so `sum: number = cart.total + 1` checks clean where v4 raises TS18046. That is the second road above — a face shape tsgo can infer through — already built once, so the choice between it and a grammar type slot is not between one proven and one hypothetical. Note the shipped `.d.ts` says `unknown` in BOTH: v3's derivation reaches its own checker and not its consumers, so adopting it closes the in-project surface and leaves the consumer surface open.
 
 **Status.** ⬜ **Open** (2026-07-23) — gated as the interim: the Diagnostics Lane's 14-schema pin (`error-pins.json`, the `wrongGetter` row) asserts the typed-read rejection by code and position, so the lane is green while the behavior stands and flips loudly the day callable outputs type — the cue to retire the pin, drop the fixture's workaround shapes, and let `verdict` hold typed reads in 14-schema.
 
@@ -385,7 +460,13 @@ Reactivity is module-scoped at the compiler level: the importer's face carries a
 
 **Why the suite missed it.** Every reactive gate — battery, corpus, editor suite — exercises reactivity inside one module; 10-modules' import fixtures import functions, classes, and values, never a reactive binding. Authoring 12-reactive's export sections is what surfaced it: the export side compiles, runs, and checks clean standalone, so nothing forced the importer's view into any test.
 
+**vs v3 — not a regression** (driven both sides, 2026-07-28, the same two-file probe). v3's importer emits the bare `import { count }` and the read prints the cell object, identically. So the model has never been settled in either version — which strengthens the reading below that this is a ruling to make rather than behavior to restore.
+
 **What is genuinely open is the model, not a defect.** Two coherent designs: the cell IS the cross-module API (importers consume `count.value` explicitly — today's behavior), or the compiler tracks reactive exports and derefs in importers (which needs reactivity metadata to cross the module boundary). The mechanism already leans toward the first, from two directions: the unwrap set is built from the declaring scope's OWN reactive names by design ([emitter.js](../../src/emitter.js) `collectReactiveNames`), and the cell carries a primitive-coercion protocol (`valueOf`/`toString`/`Symbol.toPrimitive` — [reactive.js](../../src/runtime/reactive.js) `__primitiveCoercion`) whose only beneficiary is a consumer holding the raw cell: in-module reads compile to `.value` and never coerce, so arithmetic and interpolation on an IMPORTED cell already yield the value, and only non-coercing contexts (`console.log`) show the object. But a leaning mechanism is not a stated invariant — the export-reassignment row could rule from the emitter's own asserted intent, and no such assertion exists for the importer surface. Which model is intended is the language owner's ruling.
+
+**Why (code) — the unwrap set is scoped to the declaring module.** `collectReactiveNames` ([emitter.js](../../src/emitter.js)) builds the deref set from the declaring scope's OWN reactive names, so an imported name is never in it and the importer emits the binding verbatim. The cell's primitive-coercion protocol (`__primitiveCoercion`, [reactive.js](../../src/runtime/reactive.js)) exists only for a consumer holding a raw cell — the same design read from the runtime side.
+
+**The fix is a ruling, and each answer names its own work.** If the cell IS the cross-module API, the fix is a loud rejection of the bare import write (the bundler already refuses it) plus the documentation that makes `.value` the stated contract. If importers should deref, reactivity metadata has to cross the module boundary and `collectReactiveNames` grows an import-aware pass. The language owner decides; these are not compatible halves, and neither is a default.
 
 **Status.** ⬜ **Open** (2026-07-23) — no gate while the semantics are unsettled; the exit is the ruling, which hands it an ordinary gate either way (a runtime-parity fixture importing a reactive binding, or an asserted loud rejection of the bare read). 12-reactive covers the export productions — its whole allocation — without an importer fixture, so the corpus does not block on this row.
 
@@ -397,9 +478,13 @@ Reference a class or component above its declaration — `Parent` rendering `Chi
 
 **Why the forward reference is what arms it.** The pin probe rounds only on bindings that STAYED hoisted and are closure-read. A class declared before its uses takes declare-in-place and never enters the probe set; the forward reference is what forces the hoist split, which is why the corpus — ladder-ordered by authoring convention, children before parents — never carried the shape, and why nothing failed until it was driven by hand.
 
-**The fix's floor, and its ceiling.** The floor is one more clause in the unusable-answer filter: an answer naming a probe symbol is self-referential and caches as null — the probe round's own doctrine ("every failure path lands on the status quo"), leaving the binding an unpinned evolving `any` rather than a false error. The ceiling — substituting the real binding name into the answer (`typeof Box`) — is NOT a free upgrade: annotating a binding with its own `typeof` is circular at the declaration site, so the substitution needs a shape that avoids self-annotation, a design step beyond the filter fix. When either lands, the forward-reference spelling enters the corpus (a claims fixture, or 13-components' use-site section) and `verdict` holds it.
+**The fix — a floor and a ceiling.** The floor is one more clause in the unusable-answer filter: an answer naming a probe symbol is self-referential and caches as null — the probe round's own doctrine ("every failure path lands on the status quo"), leaving the binding an unpinned evolving `any` rather than a false error. The ceiling — substituting the real binding name into the answer (`typeof Box`) — is NOT a free upgrade: annotating a binding with its own `typeof` is circular at the declaration site, so the substitution needs a shape that avoids self-annotation, a design step beyond the filter fix. When either lands, the forward-reference spelling enters the corpus (a claims fixture, or 13-components' use-site section) and `verdict` holds it.
 
 **Why the suite missed it.** The pin-probe row below records the probe round as correct — which it was, on every driven shape until this one: the probe corpus was implicitly declaration-ordered, exactly like the fixture corpus, so no probe RHS was ever a class expression. The corpus cannot carry the shape while it publishes (positive fixtures demand zero diagnostics), which is also why the interim gate must live in `check`'s style, asserting the wrong behavior as the gap.
+
+**Why (code) — the unusable-answer filter has no self-reference clause.** [parseProbeHover](../../packages/vscode/src/pins.js) rejects no-fence, `any` and truncation, and nothing else — so the self-referential answer described above passes it, and feeds back through `compile()` as a pin naming a symbol from a probe file already deleted.
+
+**vs v3 — not driven, and there is no counterpart.** v3 has no pin probe at all: its in-process LanguageService mutates binder symbols instead (recorded in full on the pin-probe row), so the mechanism that mints this diagnostic does not exist there. Whether v3 types the same forward-referenced spellings correctly by its own route is undriven — two spellings through `ripv3 check` would settle it.
 
 **Status.** ⬜ **Open** (2026-07-23) — no gate. A `check` case in the match-operator style — the TS2304 asserted **as the gap**, liveness-paired — is the honest interim gate, unbuilt; it goes red the day the filter (or a substitution shape) lands, the cue to invert it and move the spelling into the corpus.
 
@@ -413,6 +498,10 @@ Hovering a render-DSL word answers a minted symbol, stated without hedging — d
 
 **Why (code).** These positions carry no user symbol — the span maps into minted scaffold (the factory's self param, a scaffold element local, the `__bind_` props slot, the key fn) and tsgo truthfully describes what sits there; the hover path never declines. The fix is server-side, the ruled-target program: the compiler knows which spans are DSL words with no user symbol, and the hover path either declines (the interim) or serves the ruled channel answer once minted.
 
+**vs v3 — not a regression** (driven both sides, 2026-07-28, the real servers over stdio). A read inside a render body answers **`this: this`** in BOTH — the factory's self, the identical scaffold leak. So this row argues for a target neither compiler has ever met, which is what makes it a ruling's row rather than a restoration: the `ruled` gauge is asking for an answer that has to be built, not one that was lost. v3's definition resolves at that position where v4's returns null, but that split belongs to the identifier-read row's definition surface, not to this one's hover claim.
+
+**The fix — decline, then serve the ruled answer.** The hover path refuses these spans (the interim the ruling demands) and serves the minted channel answer once one lands; the span information it needs is the root's, above. **Not** by letting tsgo's truthful description of the scaffold stand: an answer stated without hedging about a symbol the user never wrote is exactly what the register bans.
+
 **Status.** ⬜ **Open** (2026-07-23) — gated softly: the Hover Audit's `ruled` gauge hovers every pinned position and expects the ruling's interim (null at these rows), red by agreement (the audit exits 0) while the server serves scaffold symbols. Green — the server declining, or serving a ruled target once one lands (rulings change first, pins follow) — retires this row.
 
 ### 39. A component member's declaration hovers the container wrapper
@@ -425,6 +514,10 @@ Hovering a component member at its declaration answers the container: `(property
 
 **Why the suite missed it.** Member declarations are indented, so `declsOf` (column-0) never probed one; the twin is not an oracle for components, so no comparison ever landed there either.
 
+**vs v3 — regression** (driven both sides, 2026-07-28, the real servers over stdio). At the same position on `people: string[] := []`, v3 answers **`(property) W.people: string[]`** — the value type, which is the ruled target's type half already served. So the wrapper is not a limitation both sides inherit and the ruling has to argue into existence: v3's answer is already the one this row asks for, and the container is what v4 added.
+
+**The fix — value-first at the declaration.** Either road above serves it; v3 already answers with the value type (also above), so the interim is demonstrated rather than proposed. **Not** by changing `memberDeclareSegments`' container type — a consumer really does write `ref.b.value`, so the container is right where it is; this is about which vocabulary a DECLARATION speaks.
+
 **Status.** ⬜ **Open** (2026-07-23) — gated softly: the `ruled` gauge's member-declaration and gate-target pins expect null (the interim while the wrapper stands ruled-out and the value-type answer is unserved), red by agreement. Green — the server serving the value-type interim or the minted-kind target — retires this row; the pins then move to the served answer, rulings first.
 
 ### 44. A `:mixin` declaration hovers the runtime's machinery
@@ -435,6 +528,10 @@ Hovering a `:mixin` schema at its declaration answers `let Stamped: __SchemaDef`
 
 **Why the suite missed it.** No fixture declared a bare `:mixin` before 14-schema, and the hover audit's decls surface pins schema names rather than twin-judging them — nothing compared the answer to the register until the pin round measured it.
 
+**The fix — cast the mixin binding like every other schema kind.** The cast every other kind already gets is described above; the mixin binding is the one that falls through. The target spelling is the open part: a mixin is not instantiable, so `Schema<Stamped, Stamped>` would promise a parse surface it refuses — the honest type is the language owner's call, and RULINGS.md holds that row open.
+
+**vs v3 — not driven.** The `:mixin` declaration's hover was never run against v3. Re-drivable at 3.17.5 with 14-schema's `Stamped`; worth settling before assuming the machinery leak is v4-introduced, since the schema companion's shape differs between the two.
+
 **Status.** ⬜ **Open** (2026-07-23) — gated as the interim: the Hover Audit's 14-schema `Stamped` decls pin (`hover-pins.json`) asserts the measured machinery answer, so the audit is green while the leak stands and flips loudly the day the face's typing changes — the cue to rule the target spelling (RULINGS.md, Schema) and move the pin.
 
 ### 33. An enum name's semantic token says `type`, not `enum`
@@ -443,7 +540,13 @@ Hovering a `:mixin` schema at its declaration answers `let Stamped: __SchemaDef`
 
 **The ruling (RULINGS.md, Tokens).** The token names the construct the user declared, judged at rip's level — an `enum` keyword gets an `enum` token; the lowering must not leak into the color. Same doctrine that retired the reactive-`readonly` row (Closed table): the editor's answer follows rip's semantics, not the emission's accidents.
 
-**Root and fix are editor-side, and the mechanism exists.** `ripSemanticTokens` ([server.js](../../packages/vscode/src/server.js)) already applies source-informed corrections — it clears TypeScript's `readonly` bit for reactive bindings from the compiler's `mutables` span list. Enum names are one more such correction: the compiler knows which names an ENUM declared, and the server rewrites the token type on those spans. rip's lowering does not change.
+**Why (code) — the correction machinery exists and enum names are in no span set.** `ripSemanticTokens` ([server.js](../../packages/vscode/src/server.js)) already applies source-informed corrections, clearing TypeScript's `readonly` bit for reactive bindings from the compiler's `mutables` span list. So overriding tsgo's answer is a solved problem here; enum names simply belong to no correction's spans, and the mapped position lands on the companion type alias the lowering mints.
+
+**The fix — one more source-informed correction.** The compiler knows which names an `enum` declared; the server rewrites the token type on those spans, exactly as the `readonly` correction does. **Not** by changing the lowering — it is deliberate, for the runtime reason stated above, and altering it to satisfy a classifier would trade a runtime property for a colour.
+
+**vs v3 — regression at USE sites, inherited at the declaration** (driven both sides, 2026-07-28, the real servers over stdio, `enum Color` read through `c: Color = Color.Red`). v3 classifies both use positions — the annotation and the value — **`enum`**, and the declaration itself `variable [declaration,readonly]`. v4 answers `type [readonly]` at all three. So the correction v3 is missing is the DECLARATION, and the two use positions are a v4 loss. That is a statement about the answers, not the paths — why v3's use positions classify `enum` where v4's do not was never driven, and the root above names v4's half only.
+
+**Why the suite missed it.** The Token Audit derives its expectation from rip SOURCE, and until 11-types carried enums there was no `enum` keyword to derive one from. The `readonly` invariant that already probed these names asserts a modifier, not a type, so it passed on all three.
 
 **Status.** ⬜ **Open** (2026-07-23) — gated softly: the Token Audit's enum rows expect `enum` and stay red by agreement (the audit exits 0; nothing hard-gates). Green retires this row.
 
@@ -464,9 +567,13 @@ where the unmarked spelling emits one initialized declaration (`let plainFn = fu
 
 **It reaches every void-marked binding, not a corner.** The marker REQUIRES a function value — `voidNum! = 42` is refused by the emitter (*"the void marker … requires a function value"*) — so there is no void-marked binding whose token is right.
 
-**The split is not required by the lowering.** The void annotation lands on the function expression, which a single initialized declaration carries just as well: `let report = function(): void { … }`. The annotated spelling is the proof it is expressible — it says `void` in the type and emits one statement. So the fix is the emission's shape, not the annotation.
+**Why (code) — the marker empties the span the token is read at.** The split shown above leaves the declaration carrying no value, so tsgo has nothing but a bare `let` to classify. The unmarked and annotated spellings emit one initialized declaration and classify `function`, which isolates the split as the whole cause.
+
+**The fix — emit one initialized declaration.** The void annotation lands on the function expression, which `let report = function(): void { … }` carries just as well; the annotated spelling is the proof it is expressible, saying `void` in the type and emitting one statement. So the change is the emission's shape, not the annotation — and **not** a server-side token correction, which would paint over a split that has no reason to exist.
 
 **Why the suite missed it.** The Token Audit derives its expectation from rip SOURCE ([runner.js](runner.js) `expectedTokenType`, the arrow test), and the source pins `function` correctly — nothing ever compared the two spellings' EMISSIONS, which is where they diverge. The hover surface is unaffected: 04-assignments' declaration probes are clean, because hover resolves the binding's type through the assignment while the token reads only the declaration's own span.
+
+**vs v3 — not driven.** The void-marked spelling's token was never run against v3. Re-drivable at 3.17.5; check the EMISSION first — a v3 that emits one initialized declaration would classify `function` for free, which would make the split, not the classifier, the whole of the difference.
 
 **Status.** ⬜ **Open** (2026-07-28) — gated softly: the Token Audit's wrong-type row on this binding stays red by agreement (the audit exits 0). The agreement is SHARED with the enum-token row and names both causes, so it clears only when both close; greening one leaves the other's red standing with the reason still true.
 
@@ -474,9 +581,13 @@ where the unmarked spelling emits one initialized declaration (`let plainFn = fu
 
 `count = 5` off `count := 0` carries the `readonly` token modifier at the write — a writable binding, colored immutable at the exact position that proves it writable. The declaration is correct: `ripSemanticTokens` ([server.js](../../packages/vscode/src/server.js)) clears TypeScript's `readonly` bit from the compiler's `mutables` span list, and the DECLARATION span is in that list — driven 2026-07-23, exported and plain spellings alike (`export count := 0` tokens `variable [declaration]`, no readonly; the write site on the next line tokens `variable [readonly]`). tsgo is classifying the face, where the cell is a `const`; the correction exists precisely to stop that lowering leaking into the color, and it stops at declarations.
 
-**Root and fix are editor-side, and the mechanism exists** — the same one as the enum-token row: the compiler knows which names are writable state; the correction's span set needs to include their write sites, not only their declarations. Whether `mutables` should carry use-site spans or the server should derive them is an implementation choice inside the existing correction.
+**Why (code) — the correction's span set stops at declarations.** `ripSemanticTokens` clears the `readonly` bit from the compiler's `mutables` list, and that list carries declaration spans only — so a write site keeps tsgo's answer off the face, where the cell really is a `const`.
+
+**The fix — widen the span set to use sites.** The compiler knows which names are writable state; whether `mutables` carries write-site spans or the server derives them is an implementation choice inside the existing correction. The enum-token row shares the machinery and would ride the same change.
 
 **Why the suite missed it.** [semantic-tokens.test.js](../toolchain/semantic-tokens.test.js) and the token audit's `readonly` invariant probe column-0 declarations — the fix that closed the reactive-readonly row was gated there, so its gate certified exactly the spans it corrected. No token gate visits a use site; that is the same declaration-only blind spot the identifier-read finding records for the mapping layer, but this token SURVIVES and maps — the span is right, the modifier is wrong — so the mapping census will not catch it and closing that row would strand this one.
+
+**vs v3 — not driven.** The reactive write site's modifier was never run against v3. The token surface's other rows are driven both sides (the identifier-read row's token split), so this is a hole in that coverage rather than a known inheritance.
 
 **Status.** ⬜ **Open** (2026-07-23) — gated softly: the declaration heuristic probes a column-0 reassignment line, so 12-reactive's `pulse` write sites land in the token audit's `readonly` invariant, which expects writable and stays red by agreement (the audit exits 0) while the correction stops at declaration spans. Green retires this row. The ruling lives in RULINGS.md (Tokens): no `readonly` at a state write site. **The gate rides an accident worth naming:** it exists because `declsOf` happens to count a bare reassignment as a declaration — a refinement excluding reassignments from the probe set, correct on its own terms, would evaporate this gate silently, the exact shape the identifier-read row's "why the suite missed it" records. If that heuristic ever tightens, this row's expectation must move into an explicit use-site probe in the same invariant, in the same change.
 
@@ -486,7 +597,11 @@ One wrong line, two squiggles — and the first one talks emission. `wrongState:
 
 **Why the suite missed it.** A directive consumes however many diagnostics land on its line — a double publishes, the marker fires, green — so marker-based negatives structurally cannot see a double. The Diagnostics Lane is the first instrument that asserts each published diagnostic individually, and deriving 12-reactive's error pair is what surfaced both the double and the prose.
 
-**The root is the emission's redundant guard, not the annotation.** The annotated cell type already carries the constraint (it alone produces the name-anchored TS2322); the `satisfies` on the initializer re-states it and produces the second. The prose half is the same doctrine as the closed reactive-hover row: the user's error should speak value types, which the cell's structural assignability message does not. When the emission publishes once, in value vocabulary, the pinned expectations below go red — the cue to retire them, not a regression.
+**vs v3 — regression on both halves** (driven both sides, 2026-07-28, the same `wrongState: number := 'oops'`). v3 publishes **once**, and in value vocabulary: a single TS2322 reading *Type 'string' is not assignable to type 'number'*. So neither the count nor the prose is inherited — v3 plants no `satisfies` guard on the initializer and its message never mentions a cell. The fix's shape is therefore already demonstrated rather than merely argued for.
+
+**Why (code) — the emission's redundant guard, not the annotation.** The annotated cell type already carries the constraint (it alone produces the name-anchored TS2322); the `satisfies` on the initializer re-states it and produces the second. The prose half is the same doctrine as the closed reactive-hover row: the user's error should speak value types, which the cell's structural assignability message does not.
+
+**The fix — drop the guard, publish in value vocabulary.** By the root above the `satisfies` is pure duplication: the annotated cell type already produces the name-anchored error on its own. v3 publishes exactly the target — one error, value-typed (above) — so this is a demonstrated shape, not a proposal. When the emission publishes once, the pinned expectations below go red — the cue to retire them, not a regression.
 
 **Status.** ⬜ **Open** (2026-07-23) — gated as the interim: the Diagnostics Lane's 12-reactive pins (`error-pins.json`) assert the measured double — code and position, the hover-pins discipline — so the lane is green while the behavior stands and flips loudly the day it changes. The twin-derivable rows beside them (`=!`, effect, the TS2588 write) stay derived and are not this row's subject. **The gate's scope is the count, not the prose:** the lane asserts codes and positions, and no instrument asserts message text — so an emission change that keeps both diagnostics but cleans the wrapper vocabulary flips nothing. The prose half rides the same fix in every likely shape (one publish, value-typed), but if it ever lands separately, this row does not close on the gate alone — the body's prose claim must be re-driven.
 
@@ -498,11 +613,19 @@ Hovering the operator of a bare effect (`~> console.log(…)`, column 0) answers
 
 **Why the suite missed it.** The hover audit probes `declsOf` declarations — a line opening with `~>` declares nothing, so no probe had ever landed on the operator until the corpus carried the bare form.
 
+**The fix — decline at the operator's span.** The hover path returns null there, which is the ruled answer and permanently so (RULINGS.md, Reactive: punctuation is silent). The compiler already knows the span carries no user binding, per the root above. The render-DSL row wants the same suppression at the same layer, and the two would ride one change.
+
+**vs v3 — not driven.** The bare `~>` operator's hover was never run against v3. Re-drivable at 3.17.5; the named spelling is unaffected on both sides, so only the operator position is in question.
+
 **Status.** ⬜ **Open** (2026-07-23) — gated softly: the Hover Audit's `silence` gauge ([runner.js](runner.js), the probe pass) hovers every column-0 bare-`~>` position and expects null, red by agreement (the audit exits 0) while the server serves the machinery answer. Green — the server declining to answer — retires this row.
 
 ### 13. Single-rooted tsconfig — no per-project resolution
 
 Both the editor and `rip check` generate ONE tsconfig at the mirror root that `extends` only `<workspaceRoot>/tsconfig.json` ([mirror.js](../../packages/vscode/src/mirror.js) `generatedMirror`: `extends: '../../tsconfig.json'`, `rootDirs: ['.', '../..']`). Every `.rip` file is type-checked under the ROOT's `compilerOptions`; a nested package's own `tsconfig.json` — its `types`, `lib`, `jsx`, `strict`, `paths` — is ignored. `package.json#rip` (`strict`/`noCheck`) is already resolved per-file via `readProjectConfig` (nearest `package.json`, [config.js](../../src/config.js)), so the two config systems disagree: rip policy is per-package, tsconfig is flat. A second symptom: the editor roots the mirror at the VS Code folder while `rip check`'s `findWorkspaceRoot` walks to the nearest `package.json`/`tsconfig.json`/`.git` marker — so in a monorepo the same file can extend DIFFERENT tsconfigs in the two surfaces. A third artifact rides the same flat root: the host floor (`hostFloorDts`, [mirror.js](../../packages/vscode/src/mirror.js)) is generated once per mirror from the WORKSPACE root's `rip.strict` and installed types, so a nested project's own strictness or `@types/bun` cannot govern whether ITS files see the floor — the wrapper fix below must emit the floor per project, from each project's own gate answers.
+
+**Why (code) — one call site, and its reach-ups are literals.** All three symptoms above follow from `generatedMirror` emitting a single config whose `extends` and `rootDirs` are string constants rather than computed relatives. There is no seam at which a nested project could be consulted — which is why the fix below is additive, a second config per project, rather than a rework of how any one file resolves.
+
+**Why the suite missed it.** Every gate runs in a single-package workspace, where a flat root is indistinguishable from a correct per-project one — there has never been a fixture with two tsconfigs to disagree. The two surfaces' differing roots (the editor's folder against `findWorkspaceRoot`'s marker walk) are invisible for exactly the same reason.
 
 **Status.** ⬜ **Open** (no fix). The fix approach is **verified feasible** — driven against real tsgo (see below).
 
@@ -522,9 +645,13 @@ Both the editor and `rip check` generate ONE tsconfig at the mirror root that `e
 
 Isolated by construct (driven 2026-07-24, the census drain): a plain array (`nums: number[] = [1, label]`) flags `label`, an object literal (`{ hits: label }`) flags the key `hits` as TypeScript does, and only the FIXED-LENGTH tuple widens to the whole element list. A rest tuple is unaffected — `[string, ...number[]]` reports the whole-value message on the binding, which is TypeScript's own shape for it. The published span begins at the first element in every failing case, exactly the offset of the elements skipped.
 
-**It is a mapping fault, not a checker one.** The face is line-identical to the twin (`let pair: [string, number] = ["a", label];`), so TypeScript answers the same for both; only the span mapped back to rip source differs.
+**Why (code) — a mapping fault, not a checker one.** The face is line-identical to the twin (`let pair: [string, number] = ["a", label];`), so TypeScript answers the same for both; only the span mapped back to rip source differs.
 
 **Why the suite missed it.** The corpus had no tuple negative at all — `TupleType` was claimed by a positive fixture and falsified by a whole-value mismatch, neither of which puts a wrong ELEMENT in the error lane. The census drain is what first wrote one.
+
+**vs v3 — regression** (driven both sides, 2026-07-28, the same `pair: [string, number] = ['a', label]`). v3 flags `label` alone, TypeScript's own span; v4 widens to both elements. Since the face is line-identical on both sides, this isolates the fault to the mapping layer with no appeal to a checker difference.
+
+**The fix rides the identifier-read row.** The face is line-identical to the twin, so nothing in the checker changes: the tuple's element list needs per-element spans, which is that row's `markSpan`/`SPAN_ROLES` move applied to one more list shape. v3 narrows correctly (above), so the target span is not in question.
 
 **Status.** ⬜ **Open** (2026-07-24) — gated by the Diagnostics Lane's position rows on 11-types' `wrongEntry` and `wrongTrailing`, red by agreement: the contract carries `diagnostics.positions` with this row's reason, so the run reports both violations and still exits 0 — and fails the day the span narrows and the reason is not deleted with it. The fixtures stay in their element-level form on purpose — assigning a whole wrong value instead would turn the lane green while testing nothing positional.
 
@@ -532,9 +659,42 @@ Isolated by construct (driven 2026-07-24, the census drain): a plain array (`num
 
 `export flag = 1` alone emits `export const flag = 1;` — coherent, and the reason the editor's semantic token for an exported plain binding reads `readonly`. Add a later reassignment (`flag = 2`) and the two lowerings collide: the reassignment makes the binding an evolving let, so the hoist pass emits `let flag;` at the top — **and the export pass still emits `export const flag = 1;`**. The output declares `flag` twice and does not build (driven 2026-07-23: `bun` refuses the module with "flag has already been declared"). So an exported plain binding today is const when never reassigned and broken when reassigned — there is no writable spelling, whatever the intent.
 
-**Const is the stated design; the missing half is the loud rejection.** The emitter's export lowering asserts its position twice — *"An exported plain assign is `export const …` — a real declaration (never a hoisted write)"* ([emitter.js](../../src/emitter.js), the export walk and the hoist-boundary comment) — so the defect is the hoist pass violating that invariant on the reassignment path, not an unsettled semantics question. The fix consistent with the design: reject the reassignment with a real error (the for-range ban is the model — a message, never broken output). The token surface is ruled accordingly (RULINGS.md, Tokens): an exported plain binding expects `readonly`, and if writable exports ever become a deliberate feature — an emission change, the language owner's call — that expectation goes red at exactly the flip, which is the instrument speaking when semantics change.
+**vs v3 — not a regression** (driven both sides, 2026-07-28). v3 emits the same collision — `let count;` from the hoist pass and `export const count = 1;` from the export pass, in the same output. The invariant the emitter states has been violated on this path in both.
+
+**Why (code) — the hoist pass violates the export pass's stated invariant.** The emitter's export lowering asserts its position twice — *"An exported plain assign is `export const …` — a real declaration (never a hoisted write)"* ([emitter.js](../../src/emitter.js), the export walk and the hoist-boundary comment) — so the defect is one pass breaking another's stated invariant, not an unsettled semantics question.
+
+**The fix — reject the reassignment loudly.** The for-range ban is the model: a message, never broken output. **Not** by making the export writable — const is the emitter's own asserted design, so a writable export is a language change and the language owner's call, not a defect fix. The token surface is ruled accordingly (RULINGS.md, Tokens): an exported plain binding expects `readonly`, and if writable exports ever become a deliberate feature — an emission change, the language owner's call — that expectation goes red at exactly the flip, which is the instrument speaking when semantics change.
+
+**Why the suite missed it.** 10-modules carries exported plain bindings and never reassigns one — the two lowerings collide only when both fire on the same name, and no fixture put them together. `bun test` asserts the never-reassigned form's bytes, which are correct.
 
 **Status.** ⬜ **Open** (2026-07-23) — no gate: the spelling's output does not build, so no fixture can carry it. When the rejection lands, the never-reassigned spelling remains 10-modules' covered form and the reassignment becomes an asserted compile error.
+
+### 58. A classed SVG element emits an unclosed `setAttribute` call
+
+```
+export Icon = component
+  render
+    svg class: 'animate-spin'
+```
+
+emits `this._el0.setAttribute('class', "animate-spin";` — the closing paren is absent, so the module does not parse. Driven 2026-07-28 against three independent parsers, which agree: tsgo publishes TS1005 (*`)` expected*), `bun build` refuses with *Expected ")" but found ";"*, and node rejects the same bytes as ESM. Every other attribute on the same element closes correctly (`viewBox` and `fill` beside it emit whole), and a `div` carrying the identical `class:` is unaffected.
+
+**Why (code) — the close is arity-matched to the wrong call.** The static `class` branch ([emitter.js](../../src/emitter.js), the class-attribute walk) opens on the element kind — `setAttribute('class', ` for SVG, `${el}.className = ` for HTML — which is a CALL on one side and an ASSIGNMENT on the other. Its only close is the `if (compound)` emit of `')'`, and that paren balances the `__clsx(` the branch may have opened, never the `setAttribute(`. So the assignment side needs no close and gets none, correctly; the call side needs one and never gets one, at either arity:
+
+| SVG `class:` value | opens | closes | result |
+| --- | --- | --- | --- |
+| a plain string (`'animate-spin'`) | `setAttribute(` | none | one short |
+| compound (`['spin', on and 'go']`) | `setAttribute(` + `__clsx(` | `__clsx`'s only | one short |
+
+**The fix's shape is ten lines above it.** The REACTIVE class branch has the same two openings and branches its close the way it branches its open — `this.b.emit(isSvg ? '));' : ');')` — and emits whole (driven: `setAttribute('class', __clsx(this.cls.value));`). The static branch needs the same `isSvg` conditional on its close; nothing else about the lowering changes.
+
+**It reaches shipped code.** medlabs carries two occurrences. Any component whose render tree contains a classed SVG produces a module that can be neither built nor type-checked, so every other diagnostic in that file is unreachable behind the parse failure — which is what puts a loud row this far up among the loud ones.
+
+**Why the suite missed it.** No fixture spells `class:` on an SVG element: 13-components' SVG content carries geometry attributes, and every classed element in the corpus is HTML, which takes the `className` branch. `bun test` asserts emitted bytes for the shapes it carries, and this shape is carried nowhere, so nothing ever compared them.
+
+**vs v3 — regression** (driven both sides, 2026-07-28). v3 emits `this._el0.setAttribute('class', 'animate-spin');` — closed, and the same module builds.
+
+**Status.** ⬜ **Open** (2026-07-28) — no gate: the emission does not parse, so no fixture can carry it. The fix's gate is the spelling entering 13-components, where `compiles` and `runtime` hold it.
 
 ### 28. A postfix cast on an inline try body detaches the catch arm
 
@@ -544,13 +704,23 @@ Isolated by construct (driven 2026-07-24, the census drain): a plain array (`num
 
 **Why the suite missed it.** Nothing ever spelled a cast on an inline try body. The Grammar Gate counts productions, not interaction shapes — cast × inline-try is precisely the interaction class the containment matrix exists to measure, and it is one the matrix cannot yet name: `CONSTRUCT_HEADS` carries no cast head, so the cell is unrulable until the heads are curated ([ROADMAP.md](ROADMAP.md), M3) — and this one surfaced by hand while authoring 07-exceptions, whose try-expression section sidesteps the combination today: the cast rides the handler-less form, and the handled form types itself through a declaration annotation instead.
 
+**vs v3 — both wrong, v3 more quietly** (driven both sides, 2026-07-28). v3 PARSES the spelling and drops the handler: `x = try f() as number catch e then 0` emits `(() => { try { return f(); } catch {} })()` — no binding, no `0`, the catch arm silently gone. So the combination is unsupported on both sides, and v4 refusing it at the parser is the better of the two failures. Nothing to restore here; the fix is new work either way.
+
+**The fix — let the cast close before the try-level attachment is decided.** The parenthesized operand already does this (`try (f() as T) catch …` compiles), so the change is reaching that state without the parens — a precedence or lookahead adjustment where `Try → TRY Expression Catch` meets `left CAST`. **Not** by dropping the inline handler form: it is committed corpus everywhere the cast is absent.
+
 **Status.** ⬜ **Open** (2026-07-22) — loud (a compile error, not a wrong answer) and narrow, which is why it sits at the bottom of the unblocked rows. No gate: the spelling cannot enter a fixture while it fails to compile. The fix's gate is the unparenthesized spelling entering 07-exceptions, where `compiles` and `verdict` hold it.
 
 ### 29. `new` on an optional chain emits an unconstructable spelling
 
 `new Registry?.Box` compiles and emits the optional chain into `new` verbatim — `new Registry?.Box;` — which JavaScript rejects at parse time: *Cannot call constructor in an optional chain* (driven 2026-07-23, reproduced under bun; tsgo flags the face TS2351). Every spelling of the production is affected, so no fixture can carry it: the corpus parks `NewSpine → NewSpine ?. Property` ([MANIFEST.md](MANIFEST.md)'s Parked table), which is why 09-classes' gate queue holds one row it cannot clear.
 
-**The root is the new-spine emission.** JS permits constructing through an optional chain only when the chain is sealed before `new` applies — `new (Registry?.Box)()` — so the fix is the emitter parenthesizing the spine when it carries `?.`. Found by the M3 wave-2 author, independently reproduced by its reviewer, and re-driven for this row. When it lands, the spelling joins 09-classes and `compiles`/`runtime`/`verdict` hold it.
+**vs v3 — not a regression** (driven both sides, 2026-07-28). v3 emits the same unconstructable spelling, byte for byte. Pre-existing, and dark until the grammar gate enumerated the production.
+
+**Why (code) — the new-spine emission.** The walk emits the chain into `new` verbatim, and JS permits constructing through an optional chain only when the chain is sealed first.
+
+**The fix — parenthesize the spine when it carries `?.`.** `new (Registry?.Box)()` — one case in the new-spine walk. Found by the M3 wave-2 author, independently reproduced by its reviewer, and re-driven for this row. When it lands, the spelling joins 09-classes and `compiles`/`runtime`/`verdict` hold it.
+
+**Why the suite missed it.** `NewSpine → NewSpine ?. Property` was grammar-dark until the M3 sweep enumerated the productions: no fixture had spelled `new` on an optional chain, and no gate ran the emission's output.
 
 **Status.** ⬜ **Open** (2026-07-23) — no gate while the emission is broken; the parked manifest row is the queue's memory of it.
 
@@ -558,7 +728,13 @@ Isolated by construct (driven 2026-07-24, the census drain): a plain array (`num
 
 `new tag"hi"` emits `new tagged-template(tag, "hi");` — the emitter's new-spine walk has no tagged-template case, so the internal sexpr head `tagged-template` leaks into the output as bare identifiers, parsing as the subtraction `tagged - template(...)`: TS2304 (*Cannot find name*) from the checker and ReferenceError at runtime (driven 2026-07-23). Every spelling of the production is affected, so no fixture can carry it: the corpus parks `NewSpine → NewSpine TEMPLATE_TAG String` ([MANIFEST.md](MANIFEST.md)'s Parked table), the second of 09-classes' two held rows.
 
-**The root is a missing case, not a wrong one** — the ordinary tagged-template expression lowers correctly; only the new-spine walk falls through to the generic path that prints the sexpr head raw. Found by the M3 wave-2 author, independently reproduced by its reviewer, and re-driven for this row. When the case lands, the spelling joins 09-classes and the ordinary dimensions hold it.
+**vs v3 — not a regression** (driven both sides, 2026-07-28). v3 leaks the same sexpr head, byte for byte: `new tagged-template(tag, "hi");`. Pre-existing, and dark for the same reason as the optional-chain spine beside it.
+
+**Why (code) — a missing case, not a wrong one** — the ordinary tagged-template expression lowers correctly; only the new-spine walk falls through to the generic path that prints the sexpr head raw.
+
+**The fix — add the tagged-template case to the new-spine walk.** The correct lowering already exists on the ordinary expression path, so the case is copied rather than designed. Found by the M3 wave-2 author, independently reproduced by its reviewer, and re-driven for this row. When it lands, the spelling joins 09-classes and the ordinary dimensions hold it.
+
+**Why the suite missed it.** `NewSpine → NewSpine TEMPLATE_TAG String` was grammar-dark until the M3 sweep, the same road as the optional-chain spine beside it — and the tagged-template family looked covered, because its ordinary form is.
 
 **Status.** ⬜ **Open** (2026-07-23) — no gate while the emission is broken; the parked manifest row is the queue's memory of it.
 
@@ -568,7 +744,13 @@ Isolated by construct (driven 2026-07-24, the census drain): a plain array (`num
 
 **Why the suite missed it.** No fixture spells a mapped type anywhere — `MappedType` sat unclaimed and invisible until the census enumerated TS's type grammar as a closed universe and the expressibility probe drove each queued kind through the compiler.
 
+**vs v3 — regression** (driven both sides, 2026-07-28). v3 has no type-body validator and compiles the spelling, emitting `type Copy<T> = {[K in keyof T]: T[K]};` verbatim onto the face. That narrows the ruling below: mapped types were expressible until this validator, so ruling them out is removing a capability rather than declining to add one — which is a different decision, and the one the language owner should be asked.
+
 **Whether to admit them is the language owner's call.** If yes, the fix is scoped: the validator admits `in` between `[` and `]` inside a type body (mapped-type syntax is the only TS grammar that puts it there). If no — a deliberate simplicity ruling — this row closes into the census exclusion table with that ruling as its reason, beside template-literal types.
+
+**Why (code) — a generic code-in-type-body check with no mapped-type case.** The validator scans a type body for tokens it reads as executable and rejects `in` among them. Mapped-type syntax is the one TypeScript grammar that puts `in` between `[` and `]`, and the check carries no exception for that position.
+
+**The fix is a ruling, and admitting is the narrow side of it.** Admit `in` between `[` and `]` inside a type body — the only place TS grammar puts it — or rule mapped types out and close this into the census exclusion table beside template-literal types. v3 compiles the spelling (above), which is what makes this a decision about removing a capability — and the version of the question the language owner should actually be handed.
 
 **Status.** ⬜ **Open** (2026-07-24) — gated softly: `MappedType` stands in the census queue (`bun run audit --grammar`) and cannot drain while the lexer rejects every spelling; the row closes when the kind is admitted and claimed, or rules into the exclusion table.
 
@@ -580,6 +762,12 @@ Isolated by construct (driven 2026-07-24, the census drain): a plain array (`num
 
 **Whether this is design or defect is the language owner's call** — the sibling rejections (mapped types, `this`-types) are deliberate exclusions with their own error messages, but this one is not a considered rejection of predicates-in-bodies: it is the operator rewrite firing where TS grammar owns the word, and the error text blames a `==` the user never wrote.
 
+**vs v3 — shared root, opposite failure mode** (driven both sides, 2026-07-28). The `is`→`==` rewrite reaches into the type body in v3 too — but v3 has no validator to catch its product, so the spelling COMPILES and emits `check :(value: unknown) => value == string` onto the face, where tsgo then reports TS2749 and TS2693 against the user's legal predicate syntax. The rewrite is the defect on both sides; v4's rejection is the louder half of the same bug, and the only version that stops before shipping a broken face. So the fix is the rewrite yielding inside a type body, which corrects both — not a validator carve-out, which would only restore v3's silent corruption.
+
+**Why (code) — the `is`→`==` rewrite runs inside type bodies.** rip rewrites `is` to `==` wherever it appears, the type sub-language included, and the validator then rejects the `==` its own rewrite produced — which is why the error blames an operator the user never wrote. The def-return position escapes because the rewrite does not reach a return annotation.
+
+**The fix — make the rewrite yield inside a type body.** Correcting the validator alone would restore v3's behaviour, which is worse: there the same rewrite compiles and ships `value == string` onto the face (above). Scoping the rewrite closes both compilers' defect; a validator carve-out closes only the loud half.
+
 **Status.** ⬜ **Open** (2026-07-24) — no mechanical gate while the spelling is lexer-rejected: a fixture cannot carry it, and the census cannot distinguish which SPELLING claimed a kind (any `TypePredicate` claim, def-return included, drains the queue row). The boundaries note (ROADMAP.md, the error-pair conventions) records the constraint for census-queue authoring; re-drive the census probe on any change to the lexer's type-run collection.
 
 ### 48. A method member in an inline type body is rejected
@@ -588,6 +776,12 @@ Isolated by construct (driven 2026-07-24, the census drain): a plain array (`num
 
 **Why the suite missed it.** No fixture spelled a method member inline, and the indented spelling works, so nothing failed. The census cannot report the gap either — it records that a kind is claimed, never which SPELLING claimed it, and the indented member claims MethodSignature.
 
+**vs v3 — regression** (driven both sides, 2026-07-28). v3 compiles the inline spelling and emits `type Greeter = { greet(n: number): string; };`. So this is not C2's fix stopping short of a form that never worked — the form worked, and the validator is what reaches it. Same root as the mapped-type row, same reframing: a capability removed, not one unbuilt.
+
+**Why (code) — the same code-in-type-body check, firing on a name followed by a paren.** The validator reads the parameter list as executable and refuses it. The two spellings that DO compile, above, are what isolate this to the check's reach rather than to the type sub-language's scope.
+
+**The fix — admit a name followed by a parameter list inside a type body.** C2 admitted this shorthand and its fix reached the indented form only; the inline literal needs the same admission at the validator. The inline call signature already passing is the precedent for the exact shape, and v3 compiles the spelling (above).
+
 **Status.** ⬜ **Open** (2026-07-24) — no mechanical gate: the kind is claimed, so the queue is silent, and no fixture can carry a spelling that does not compile. The boundaries note ([ROADMAP.md](ROADMAP.md)) records the constraint for census-queue authoring; the fix's gate is the inline spelling entering 11-types, where `compiles` holds it.
 
 ### 49. An import type cannot name a `.rip` module
@@ -595,6 +789,12 @@ Isolated by construct (driven 2026-07-24, the census drain): a plain array (`num
 `c: import('./lib.rip').Crate = …` publishes TS2307 — *Cannot find module './lib.rip' or its corresponding type declarations* — while the static spelling `import { Crate } from './lib.rip'` resolves the same type from the same file and checks clean (both driven 2026-07-24, the census drain). The sibling module is compiled into the program for an import STATEMENT and not for an import TYPE, so the specifier rewriting that makes `.rip` resolvable never reaches the type position. Against a `.ts` module the import type resolves and enforces normally, with the rejection landing on the rip line — so the defect is the `.rip` specifier, not the construct.
 
 **Why the suite missed it.** No fixture spells an import type anywhere; `ImportType` sat unclaimed until the census enumerated TS's type grammar as a closed universe.
+
+**vs v3 — not reachable there** (driven 2026-07-28). v3's `rip check` accepts a directory only — handed a file it dies in `findRipFiles` on a `readdirSync` — so the sibling is always in the program and the import type always resolves. Under a whole-directory check v4 resolves it too; the rejection needs the single-file path. So this is a resolution gap that a v4 CAPABILITY exposed rather than one v4 introduced, and v3 cannot be driven to answer either way.
+
+**Why (code) — the specifier rewrite never reaches type position.** The asymmetry above is the whole of it: whatever pulls a sibling in and rewrites its specifier runs for an import statement and has no type-position counterpart, so the module is absent from the program whenever an import type is its only reference.
+
+**The fix — rewrite the specifier in type position, and pull the module in.** Both halves are required: resolution alone still leaves the sibling uncompiled when nothing else imports it. A `.ts` module already resolves and enforces normally from an import type, so the type-position machinery works — only the `.rip` specifier and the program-membership step are missing.
 
 **Status.** ⬜ **Open** (2026-07-24) — the ImportType kind stands in the census queue. The corpus cannot carry the working spelling either: a `.ts` module dropped into the grammar bucket would read as a fixture's twin, so the kind waits on the `.rip` specifier resolving.
 
@@ -606,15 +806,25 @@ A binding that stays hoist-split and is **also** read from inside a closure is a
 
 **So widening declare-in-place cannot retire the probe** — not because it only records top-level writes, but because the `def` hazard it declines is real: the write genuinely may not have run. What widening *would* reach is the block-confined shape — a binding first written inside an `if` and never read outside it, which could declare in place with no hazard at all. Driven: declared in place, tsgo infers the binding's type natively and the `TS7034`/`TS7005` pair disappears — a tsgo property, reproducible with any block-confined binding. **That shape is rounding error in real code** — which is why the corpus is the wrong instrument for this row, and why the 222 above was measured outside it.
 
+**Why (code) — nothing here is wrong; the constraint is the checker's boundary.** Given the inference refusal above, the type has to come from somewhere outside the face. Across an out-of-process checker there is no `Program` and no symbol to mutate, so a query is the only route to one at all — which makes the probe the architecture rather than a workaround inside it.
+
+**The fix — settle the open question below, then rule.** If the face can carry a TS-only value declaration that types the binding with no round trip, the probe becomes unnecessary and this row leaves by the ordinary gate its Status names. If it cannot, the row closes on a ruling. **Not** by widening declare-in-place — driven above, that reaches only the block-confined shape, which is rounding error in real code.
+
+**Why the suite missed it.** Nothing missed anything, and that is the row's own point: it was filed from a design question rather than a failure, so there is no escape to explain. The probe round's one driven defect is a separate row with its own exit.
+
 **Status.** ⬜ **Open** (2026-07-17) — not a defect: this row's subject is the probe's ARCHITECTURE, and on that there is nothing to fail today. (The probe round does have one driven defect — a self-referential answer on a forward-referenced class-expression binding pins a dangling symbol — but that is #41's row, with its own root and exit; it does not reopen this one's design question.) **Gate: none while the probe stands** — but "none possible" would overstate it. If the in-face declaration below turns out to work, the probe becomes unnecessary and the gate is immediate: count the bindings still needing a pin, expect zero. So this row's exit is a **ruling** only if that question answers no; answer yes and it leaves through the same door as every other row.
 
-**v3's alternative does not exist here, and is not a choice to weigh.** `patchUninitializedTypes` (rip-lang 3.17.5, `src/typecheck.js`) does not infer a type onto the hoist line: it takes the `ts` module and the live LanguageService, calls `checker.getSymbolAtLocation`, and injects types by mutating binder symbols on DocumentRegistry-shared SourceFiles (`sym.flags |= ts.SymbolFlags.Transient; sym.links = { type }`) — its own comment records the price, symbols released by hand or "every rebuilt program leaks (~50MB/compile → GBs over an editing session)". The tsgo broker is a separate process spoken to over LSP: no `ts` module, no `Program`, no symbol to mutate. **Across an out-of-process checker a query is the only route to a type at all** — so the probe is not a workaround deferring a fix, it is the architecture doing the only thing available, and its answer lands in the face rather than in one response. See the upstream rule under [How to read this ledger](#how-to-read-this-ledger).
+**vs v3 — not a choice to weigh.** `patchUninitializedTypes` (rip-lang 3.17.5, `src/typecheck.js`) does not infer a type onto the hoist line: it takes the `ts` module and the live LanguageService, calls `checker.getSymbolAtLocation`, and injects types by mutating binder symbols on DocumentRegistry-shared SourceFiles (`sym.flags |= ts.SymbolFlags.Transient; sym.links = { type }`) — its own comment records the price, symbols released by hand or "every rebuilt program leaks (~50MB/compile → GBs over an editing session)". The tsgo broker is a separate process spoken to over LSP: no `ts` module, no `Program`, no symbol to mutate. **Across an out-of-process checker a query is the only route to a type at all** — so the probe is not a workaround deferring a fix, it is the architecture doing the only thing available, and its answer lands in the face rather than in one response. See the upstream rule under [How to read this ledger](#how-to-read-this-ledger).
 
 **What is genuinely open** is narrower than a choice of mechanism: whether the face could carry a TS-only value declaration (`const __p = <first-write RHS>; let x: typeof __p;`) as a recorded region, typing the binding with no round trip. It needs the RHS to resolve in the declaring scope — true of the constants that dominate the 222, false where the RHS reads a block-local — and it needs the strip gate to admit a stripped value declaration, which a JS capture would break. **Undriven.** Settle that before ruling on the probe; the ruling is cheap and wrong if this turns out to be possible.
 
 ### 16. Library globals lose the `defaultLibrary` modifier
 
 Symbols declared in `lib.*.d.ts` reach the editor with **no `defaultLibrary` modifier**, so VS Code falls back to `variable.other.readwrite` / `entity.name.function` instead of the `support.*` scopes themes reserve for the standard library. Token *types* are correct; only the modifier is missing. Driven on `console`, `Math`, `parseInt` and `isNaN`, and true of the whole class — the lookup that sets the bit never consults the symbol, and **not one token** in the fixture carries it. The only finding here whose cause is outside rip.
+
+**The fix — none here, and that is the finding.** The bit never arrives, so `ripSemanticTokens` has nothing to forward and no local change can synthesize one honestly; the cause, the causal experiment and the upstream issue are all below. The constraint to carry is the gating hazard's: **never** close this by asserting the modifier's ABSENCE.
+
+**Why the suite missed it.** The modifier surface is only half-watched: `readonly` is gated and nothing asserts `defaultLibrary` — or any modifier on a LIBRARY symbol, since both that gate and the token audit probe rip's own declarations. No instrument had ever looked at a `lib.*.d.ts` name.
 
 **Status.** ⬜ **Open** (2026-07-14). **Upstream, in tsgo**: rip cannot fix it in `ripSemanticTokens` because the bit never arrives to forward. Filed as [microsoft/typescript-go#4635](https://github.com/microsoft/typescript-go/issues/4635). Blocked — it sits last on the road because no amount of work here moves it, not because it matters least.
 
@@ -631,7 +841,7 @@ Also driven straight against the tsgo binary, bypassing rip: **not a single toke
 
 **Platform-conditional — the gating hazard.** On a case-SENSITIVE filesystem the canonicalization is the identity function and the bug does not occur, so a gate asserting `console` carries `defaultLibrary` **fails on macOS/Windows and passes on Linux**. Reporting differently by platform is worse than no gate, and the expected-failure device (#8) does not fit — an expected failure that passes on half the platforms is not one. Hence Gate **none**. **Never close this by asserting the modifier's ABSENCE:** that pins an upstream bug into the suite and certifies it correct. The honest gate becomes writable the day #4635 lands.
 
-**vs v3** — **regression** (driven, above). v3 classifies in-process through the JS TypeScript LanguageService (`getEncodedSemanticClassifications`), which canonicalizes correctly, so the same code on the same machine gets the bit. It surfaced late because the modifier surface is only half-watched: `readonly` is gated, and nothing asserts `defaultLibrary` — or any modifier on a *library* symbol, since both that gate and the token audit probe rip's own declarations.
+**vs v3** — **regression** (driven, above). v3 classifies in-process through the JS TypeScript LanguageService (`getEncodedSemanticClassifications`), which canonicalizes correctly, so the same code on the same machine gets the bit. It surfaced late for the reason the escape slot above records.
 
 ## Closed
 
