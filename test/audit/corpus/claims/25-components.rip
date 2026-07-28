@@ -1,0 +1,81 @@
+# 25-components.rip — the component consumer face. Four more rows are parked (CLAIMS.md).
+
+# ── Method faces: a typed parameter keeps its type in both member layouts, a defaulted parameter becomes optional, and the body's return reaches the caller ──
+
+Dial = component
+  reading := 0
+
+  tally: (step: number, label = 'unit') -> "#{label}:#{step}"
+
+  spanning: (step: number) ->
+    doubled = (step * 2)
+    (doubled + 1)
+
+  render null
+
+probe = new Dial({})
+tallied: string = probe.tally(2)
+spanned: number = probe.spanning(3)
+dialled: string = probe.tally(4, 'step')
+
+console.log('methods:', tallied, spanned, dialled)
+
+# ── `component extends <tag>`: the use site accepts the element's own intrinsics, typed from the tag ──
+
+Prompt = component extends input
+  @caption?: string
+
+  render
+    input
+
+# ── A literal-union prop keeps its union at the use site rather than widening to string ──
+
+Ribbon = component
+  @tone?: 'info' | 'warn' := 'info'
+
+  render
+    span 'ribbon'
+
+# ── A generic component's constraint governs the use site ──
+
+Palette<TShade extends string> = component
+  @shades?: TShade[] := []
+
+  render
+    div 'palette'
+
+Stage = component
+  render
+    div
+      Prompt placeholder: 'type here'
+      Ribbon tone: 'warn'
+      Palette shades: ['dawn', 'dusk']
+
+# ── Ref-cell nullability: an element-typed cell takes its own tag, an Element-or-null cell takes any ──
+
+Anchors = component
+  promptEl: HTMLInputElement | null := null
+  anyEl: Element | null := null
+
+  render
+    div
+      input ref: promptEl
+      section ref: anyEl
+
+# ── A forwarded element ref: the child's own `ref:` lands in the parent's cell through the `<=>` channel ──
+
+Sleeve = component
+  @inner?: HTMLInputElement | null := null
+
+  render
+    input ref: inner
+
+Cuff = component
+  sleeveEl: HTMLInputElement | null := null
+
+  render
+    div
+      Sleeve inner <=> sleeveEl
+
+console.log('use sites:', typeof Prompt, typeof Ribbon, typeof Palette, typeof Stage)
+console.log('refs:', typeof Anchors, typeof Sleeve, typeof Cuff)

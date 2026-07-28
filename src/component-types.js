@@ -34,7 +34,7 @@
 // joins the same segments as plain text — one assembly, two
 // consumers, no drift.
 
-import { tidyType, normalizeTypeText, renderParams } from './typetext.js';
+import { tidyType, normalizeTypeText, renderParams, optionalReader } from './typetext.js';
 import { attributeNamesFor } from './dom-vocab.js';
 
 const isNode = (x) => Array.isArray(x);
@@ -217,6 +217,16 @@ export function componentTypeInfo(stores, source, node) {
     extendsTag,
     members,
     roleText,
+    // The shared optionality reader, carried on `info` because BOTH
+    // signature emitters render a component's instance type through
+    // the same instanceTypeLines() — so a dropped `?` here is dropped
+    // in the face AND the .d.ts identically. They agree, and are both
+    // wrong: the face's own method body keeps `note?` while the
+    // instance type it declares says `note` is required, so a legal
+    // call draws a spurious TS2554. Agreeing outputs mean no
+    // face/dts diff can see it, and both are valid TS, so no tsc gate
+    // can either. Read the role; never assume.
+    isOptionalParam: optionalReader(stores),
   };
 }
 
@@ -475,7 +485,7 @@ export function instanceTypeLines(info, selfType) {
       const declared = info.roleText(m.func, 'returnType');
       const base = declared ?? (m.isVoid ? 'void' : 'any');
       const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push(`${m.name}${renderParams(m.func[1])}: ${ret};`);
+      lines.push(`${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};`);
       continue;
     }
     lines.push(`${m.kind === 'readonly' ? 'readonly ' : ''}${m.name}${segmentsText(memberTypeSegments(m, ': '))};`);

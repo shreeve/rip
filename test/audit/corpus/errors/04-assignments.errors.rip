@@ -1,0 +1,16 @@
+# 04-assignments.errors.rip — intentional negatives, each asserted by the Diagnostics Lane (bun run audit --diagnostics).
+# @ts-nocheck
+
+text = 'abc'
+port: number = 3000
+point = { x: 1 }
+box = { size: 1 }
+text -= 1
+port = 'high'
+text .= missing()
+*>box = { size: 'big' }
+
+wrongMaybe?: number = 'nine'
+{ absent } = point
+wrongPick = point.{ absent2: got }
+wrongOptional: { theme: string, depth?: number } = { theme: 'dark', depth: 'deep' }

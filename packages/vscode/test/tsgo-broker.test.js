@@ -5,10 +5,10 @@
 // typescript@7 server.
 //
 // Requires the extension's dependencies (`bun install` in
-// packages/vscode). Absent, the suite skips with a loud notice —
-// RIP_REQUIRE_TSGO=1 (armed by this package's canonical `bun run test`
-// script, and therefore by its CI step) turns absence into a failure
-// so the gate cannot go quietly toothless.
+// packages/vscode). Absent, the suite skips with a loud notice; the
+// package's canonical `bun run test` runs a preflight that turns a
+// missing tsgo into a hard failure first, so the gate cannot go quietly
+// toothless.
 import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,18 +27,10 @@ try {
 } catch { /* dependencies not installed */ }
 
 if (!tsgoAvailable) {
-  if (process.env.RIP_REQUIRE_TSGO) {
-    test('tsgo present (RIP_REQUIRE_TSGO)', () => {
-      throw new Error(
-        'RIP_REQUIRE_TSGO is set but tsgo was not found — run `bun install` in packages/vscode',
-      );
-    });
-  } else {
-    console.warn(
-      '\n⚠ packages/vscode dependencies are not installed — the tsgo broker tests are SKIPPED. ' +
-      'Run `bun install` in packages/vscode to enable them.\n',
-    );
-  }
+  console.warn(
+    '\n⚠ packages/vscode dependencies are not installed — the tsgo broker tests are SKIPPED. ' +
+    'Run `bun install` in packages/vscode to enable them.\n',
+  );
 }
 
 describe.skipIf(!tsgoAvailable)('rip → tsgo → rip round trip', () => {

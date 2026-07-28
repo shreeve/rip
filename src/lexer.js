@@ -1972,7 +1972,7 @@ const RESERVED_WORDS = new Set([
 
 // Word aliases for operators: the token VALUE is the
 // operator; the span covers the word.
-const ALIASES = {
+export const ALIASES = {
   __proto__: null,
   and: ['&&', '&&'],
   or: ['||', '||'],

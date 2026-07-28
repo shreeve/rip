@@ -49,7 +49,7 @@ but it must not block direct-path package implementation and tests.
   on (`@rip-lang/ui/browser`: nav, dismiss, overlay, position, focus,
   scroll) and the Tailwind compilation boundary (`@rip-lang/ui`
   tailwind engine/inline/serve) are shipped with tests. Work begins
-  with Philip after the type-audit PR (#156) lands.
+  with Philip after the audit PR (#156) lands.
 
 ### Independent libraries and tools
 

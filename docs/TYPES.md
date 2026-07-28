@@ -240,7 +240,7 @@ roadmap work.
 - **Face validity:** corpus faces pass `tsc --noEmit`.
 - **Fuzz drift:** seeded annotated constructs preserve strip identity
   and produce their required TS regions.
-- **Type audit:** real Rip fixtures compare compilation, diagnostics,
+- **Audit:** real Rip fixtures compare compilation, diagnostics,
   runtime behavior, and editor answers against TypeScript twins.
 - **Mapping:** annotations, diagnostics, hover, and definitions
   round-trip through exact UTF-16 offsets.
@@ -257,6 +257,6 @@ roadmap work.
 | schema type rendering | `src/schema-types.js` |
 | component type rendering | `src/component-types.js` |
 | editor broker | `packages/vscode/src/` |
-| type gates | `test/lang/`, `test/toolchain/`, `test/type-audit/` |
+| type gates | `test/lang/`, `test/toolchain/`, `test/audit/` |
 
 Open type/editor work is tracked in [ROADMAP.md](ROADMAP.md).

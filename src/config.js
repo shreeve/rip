@@ -8,9 +8,6 @@
 //              checked. tsgo always runs strict; this flag never
 //              weakens checking of annotated code — it only decides
 //              whether MISSING annotations get complained about.
-//   checkAll — coverage policy for the batch checker: check every
-//              non-@nocheck file, not just annotated ones. Carried by
-//              this seam; the batch checker is its consumer.
 //   noCheck  — glob list of paths NOT type-checked in the editor: their
 //              diagnostics are silenced, but the files stay in the
 //              program so imports still resolve — the project-glob form
@@ -29,7 +26,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 
 export function readProjectConfig(dir) {
-  const config = { strict: false, checkAll: false, noCheck: [], repl: null, _configDir: null };
+  const config = { strict: false, noCheck: [], repl: null, _configDir: null };
   try {
     let d = resolve(dir);
     for (;;) {
@@ -38,7 +35,6 @@ export function readProjectConfig(dir) {
         const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
         if (pkg.rip && typeof pkg.rip === 'object') {
           config.strict = pkg.rip.strict === true;
-          config.checkAll = pkg.rip.checkAll === true;
           // Normalize to the canonical string[]: a bare string is a
           // single glob; an array is filtered to its string entries;
           // anything else leaves the [] default.

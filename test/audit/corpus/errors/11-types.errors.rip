@@ -1,0 +1,77 @@
+# 11-types.errors.rip — intentional negatives, each asserted by the Diagnostics Lane (bun run audit --diagnostics).
+# @ts-nocheck
+
+type Code = number
+type Chart = { mode: string }
+type Crate<T> = { item: T }
+type Mode = 'on' | 'off'
+type Named = { name: string }
+type Sized = { size: number }
+type Constrained<T extends Code> = { key: T }
+interface Route
+  path: string
+  serve(id: number): string
+interface Beacon
+  level: number
+interface Strobe extends Beacon
+  hue: string
+veiled: unknown = 'kept'
+notify: () => void = -> undefined
+label = 'five'
+enum Tier
+  free
+  paid
+type Loose = any
+type Locked = { readonly id: number }
+type Counts = { [label: string]: number }
+type Entry = [first: string, second: number]
+type Trailing = [string, number?]
+type Trail = [string, ...number[]]
+type IsText<T> = T extends string ? 'yes' : 'no'
+type Elem<T> = T extends Array<infer U> ? U : never
+type Branch = { label: string, kids: Branch[] }
+type Formatter = { (value: number): string }
+locked: Locked = { id: 1 }
+
+wrongAlias: Code = 'zero'
+wrongShape: Chart = { mode: 4 }
+wrongCrate: Crate<number> = { item: 'pearl' }
+wrongRoute: Route = {}
+wrongCast = (label as number)
+wrongMember = Tier.pro
+wrongMode: Mode = 'maybe'
+wrongJoined: Named & Sized = { name: 'kit' }
+wrongConstrained: Constrained<string> | null = null
+wrongStrobe: Strobe = { hue: 'crimson' }
+wrongVeiled: string = veiled
+wrongNotify: string = notify()
+wrongLoose: Loose[] = 5
+wrongObject: object = 5
+wrongSymbol: symbol = 'sym'
+wrongBigint: bigint = 5
+wrongTrue: true = false
+wrongFalse: false = true
+wrongNever: never = 1
+wrongKeyof: keyof Chart = 'nope'
+locked.id = 5
+wrongIndexed: Chart['mode'] = 4
+wrongCounts: Counts = { hits: 'x' }
+wrongEntry: Entry = ['a', 'b']
+wrongTrailing: Trailing = ['a', label]
+wrongTrail: Trail = ['a', label]
+wrongIsText: IsText<number> = 'yes'
+wrongElem: Elem<string[]> = 5
+wrongBranch: Branch = { label: 'r', kids: [{ label: 2, kids: [] }] }
+wrongFormatter: Formatter = 5
+wrongAbstract: (abstract new () => Chart) = 5
+def wrongPredicate(value: number): value is string
+  true
+def wrongAsserts(value: number): asserts value is string
+  undefined
+class WrongTally
+  bump: (): this ->
+    @
+wrongThis: number = new WrongTally().bump()
+presets = { theme: 'dark', depth: 2 }
+type Presets = typeof presets
+wrongPreset: Presets = { theme: 7, depth: 3 }

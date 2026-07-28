@@ -58,7 +58,6 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { startTsgo } from './tsgo.js';
 import { buildProbe, parseProbeHover } from './pins.js';
@@ -67,10 +66,12 @@ import {
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, generatedSpanToSource,
   generatedEditSpanToSource, generatedInsertionToSource, insertionAboveAttachedDirectives,
-  isNocheckDirectiveRow, wholeImportLinesEdit, generatedCursorToSource, exactSpanMapper,
+  isNocheckDirectiveRow, wholeImportLinesEdit, exactSpanMapper,
   staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
-  SUPPRESSED_TS_CODES, diagnosticTagsFor,
+  SUPPRESSED_TS_CODES,
 } from './translate.js';
+import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
+import { generatedMirror as buildGeneratedMirror, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -103,7 +104,7 @@ async function loadProjectConfigReader() {
       return (await import(candidate.href)).readProjectConfig;
     }
   }
-  return () => ({ strict: false, checkAll: false, noCheck: [], _configDir: null });
+  return () => ({ strict: false, noCheck: [], _configDir: null });
 }
 
 const connection = createConnection(ProposedFeatures.all);
@@ -250,120 +251,30 @@ function loadCache() {
 }
 
 // JSONC → parseable JSON (comments stripped).
-const stripJsonComments = (text) =>
-  text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-
-// Resolve one `extends` specifier the way TS does, bounded: relative and
-// absolute paths get the exact / +.json / +/tsconfig.json attempts; bare
-// package specifiers resolve node-style from the extending config's
-// directory. Null when unresolvable.
-function resolveExtends(spec, fromDir) {
-  const attempts = [];
-  if (spec.startsWith('.') || path.isAbsolute(spec)) {
-    const base = path.resolve(fromDir, spec);
-    attempts.push(base, base + '.json', path.join(base, 'tsconfig.json'));
-    for (const p of attempts) {
-      if (fs.existsSync(p) && fs.statSync(p).isFile()) return p;
-    }
-    return null;
-  }
-  const req = createRequire(path.join(fromDir, 'noop.js'));
-  for (const candidate of [spec, spec + '.json', spec + '/tsconfig.json']) {
-    try { return req.resolve(candidate); } catch { /* next */ }
-  }
-  return null;
-}
-
-// Does the user's config — ANYWHERE in its resolved `extends` chain —
-// set compilerOptions.types? Injecting types:["*"] over a chain that
-// narrows types would clobber the user's narrowing, so unresolvable or
-// unreadable links answer TRUE (conservative: never clobber what we
-// cannot see). The visited files are recorded (userConfigChain) so the
-// watcher can re-govern when a chain member changes. Bounded depth,
-// cycles guarded.
+// The user's resolved `extends` chain, recorded by generatedMirror
+// (below) so the watcher can re-govern when a chain member changes.
 const userConfigChain = new Set();
 
-function chainSetsTypes(configPath, visited = new Set(), depth = 0) {
-  if (depth > 16 || visited.has(configPath)) return false; // cycle/degenerate: nothing set types on this path
-  visited.add(configPath);
-  userConfigChain.add(configPath);
-  let text;
-  try { text = fs.readFileSync(configPath, 'utf8'); } catch { return true; }
-  const stripped = stripJsonComments(text);
-  let parsed;
-  try { parsed = JSON.parse(stripped); } catch {
-    // Unparsable (trailing commas etc.): a textual probe decides `types`;
-    // an extends we cannot follow is conservative.
-    if (/"types"\s*:/.test(stripped)) return true;
-    return /"extends"\s*:/.test(stripped);
-  }
-  if (parsed?.compilerOptions?.types !== undefined) return true;
-  if (parsed?.extends === undefined) return false;
-  const bases = Array.isArray(parsed.extends) ? parsed.extends : [parsed.extends];
-  return bases.some((spec) => {
-    if (typeof spec !== 'string') return true;
-    const next = resolveExtends(spec, path.dirname(configPath));
-    if (!next) {
-      connection.console.log(`[rip] tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`);
-      return true;
-    }
-    return chainSetsTypes(next, visited, depth + 1);
+// The generated mirror-root files (tsconfig + host floor) — the pure
+// builder lives in mirror.js (shared with the batch `rip check`); here
+// it is fed the server's workspace/fallback state and its config-chain
+// set.
+function generatedMirror() {
+  return buildGeneratedMirror({
+    workspaceRoot, mirrorRootIsFallback, chain: userConfigChain,
+    onUnresolved: (spec) =>
+      connection.console.log(`[rip] tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
   });
 }
 
-// The generated mirror-root tsconfig. Overrides applied over the
-// user's config (or the defaults): noImplicitAny stays ON (it
-// activates the evolving-`let` inference; the implicit-any family is
-// suppressed per-code in translate.js), noEmit (the project never emits;
-// also what legalizes allowImportingTsExtensions), and rootDirs merging
-// the mirror tree with the real workspace (a .rip file importing a
-// real .ts sibling resolves).
-function generatedTsconfig() {
-  const overrides = {
-    noImplicitAny: true,
-    noEmit: true,
-    allowImportingTsExtensions: true,
-  };
-  if (!mirrorRootIsFallback) overrides.rootDirs = ['.', '../..'];
-  // Workspace AMBIENT declarations (`rip-env.d.ts` and kin) join the
-  // program: an augmentation the project declares — a prototype
-  // extension's global interface, a window field — governs in the
-  // editor exactly as it does under a workspace-root tsc run. The
-  // mirror root sits two levels below the workspace. An explicit
-  // `exclude` REPLACES the built-in defaults, so `node_modules` is
-  // restated alongside the `../../` reach-up (the defaults cover only
-  // config-relative names).
-  const include = ['**/*.ts'];
-  const exclude = ['node_modules'];
-  if (!mirrorRootIsFallback) {
-    include.push('../../**/*.d.ts');
-    exclude.push('../../**/node_modules');
-  }
-  const userConfig = !mirrorRootIsFallback && workspaceRoot
-    ? path.join(workspaceRoot, 'tsconfig.json') : null;
-  if (userConfig && fs.existsSync(userConfig)) {
-    userConfigChain.clear();
-    if (!chainSetsTypes(userConfig)) overrides.types = ['*'];
-    return { extends: '../../tsconfig.json', compilerOptions: overrides, include, exclude };
-  }
-  userConfigChain.clear();
-  return {
-    compilerOptions: {
-      target: 'esnext', module: 'esnext', lib: ['esnext', 'dom'],
-      types: ['*'],
-      ...overrides,
-    },
-    include,
-    exclude,
-  };
-}
-
-// Idempotent: an unchanged config never rewrites (no spurious mtime for
-// tsgo to reload on).
+// Idempotent: an unchanged file never rewrites (no spurious mtime for
+// tsgo to reload on). The host floor is written even when inactive —
+// always-present, content varies — so a gate flip is a plain Changed
+// event with no create/delete lifecycle.
 function writeGeneratedTsconfig() {
-  const configPath = path.join(mirrorRoot, 'tsconfig.json');
-  const content = JSON.stringify(generatedTsconfig(), null, 2);
-  ensureOwnedFile(configPath, content);
+  const mirror = generatedMirror();
+  ensureOwnedFile(path.join(mirrorRoot, 'tsconfig.json'), JSON.stringify(mirror.tsconfig, null, 2));
+  ensureOwnedFile(path.join(mirrorRoot, HOST_FLOOR_NAME), mirror.hostFloorDts);
 }
 
 // A .rip uri's mirror path: workspace files keep their relative structure
@@ -371,17 +282,9 @@ function writeGeneratedTsconfig() {
 // files outside the workspace (or non-file URIs) mirror under
 // __external__ so distinct buffers never collide.
 function mirrorPathOf(uri) {
-  let rel;
-  if (uri.startsWith('file://')) {
-    const fsPath = fileURLToPath(uri);
-    if (workspaceRoot && (fsPath.startsWith(workspaceRoot + path.sep))) {
-      rel = path.relative(workspaceRoot, fsPath);
-    } else {
-      rel = path.join('__external__', fsPath.replace(/^[/\\]/, '').replace(/:/g, ''));
-    }
-  } else {
-    rel = path.join('__external__', uri.replace(/[^A-Za-z0-9._-]+/g, '_'));
-  }
+  const rel = uri.startsWith('file://')
+    ? mirrorRelForFsPath(fileURLToPath(uri), workspaceRoot)
+    : path.join('__external__', uri.replace(/[^A-Za-z0-9._-]+/g, '_'));
   return path.join(mirrorRoot, rel) + '.ts';
 }
 
@@ -467,7 +370,6 @@ const TSGO_CLIENT_CAPABILITIES = {
         },
       },
     },
-    inlayHint: {},
     semanticTokens: {
       requests: { full: true, range: true },
       tokenTypes: [
@@ -486,15 +388,13 @@ const TSGO_CLIENT_CAPABILITIES = {
   workspace: { configuration: true, didChangeWatchedFiles: {}, symbol: {} },
 };
 
-// tsgo keys inlay hints (and other preference-driven behavior) on
-// workspace/configuration answers — every hint class defaults OFF
-// The broker FORWARDS tsgo's asks to the editor when
-// the client declared configuration support, so the user's own
-// typescript.* settings govern hints on .rip files exactly as they do
-// on .ts files (plain-TS parity — VS Code ships the typescript.*
-// contributions regardless of our extension); a client without
-// configuration support answers null per item, which leaves tsgo's
-// own defaults in charge — hints stay off, honestly.
+// tsgo drives preference-sensitive behavior off workspace/configuration
+// answers. The broker FORWARDS tsgo's asks to the editor when the
+// client declared configuration support, so the user's own typescript.*
+// settings govern .rip files exactly as they do .ts files (plain-TS
+// parity — VS Code ships the typescript.* contributions regardless of
+// our extension); a client without configuration support answers null
+// per item, which leaves tsgo's own defaults in charge.
 async function tsgoConfigurationRequest(params) {
   const items = params?.items ?? [];
   if (!clientSupportsConfiguration) return items.map(() => null);
@@ -585,35 +485,9 @@ function stateOf(uri) {
 // plus their TRANSITIVE .rip imports, materialized on demand — never an
 // unconditional whole-workspace pass.
 
-// The relative .rip import targets of a compiled file, read from the
-// compiler's OWN stores (never scanned from generated text — the
-// never-list): import/export nodes carry a `source` role whose exact
-// source span is the specifier string; dynimport nodes carry an `args`
-// span, followed only when it is a single static string literal (a
-// computed specifier is a recorded closure miss).
-function ripImportsOf(stores, sourceText, fromDir) {
-  const targets = [];
-  const addSpec = (spec) => {
-    if (!spec.endsWith('.rip')) return;
-    if (!spec.startsWith('./') && !spec.startsWith('../')) return;
-    targets.push(path.resolve(fromDir, spec));
-  };
-  for (const kind of ['import', 'export']) {
-    for (const node of stores.nodesByKind(kind)) {
-      const src = stores.role(node.nodeId, 'source');
-      if (!src || typeof src.sourceStart !== 'number') continue;
-      addSpec(sourceText.slice(src.sourceStart, src.sourceEnd).replace(/^['"`]|['"`]$/g, ''));
-    }
-  }
-  for (const node of stores.nodesByKind('dynimport')) {
-    const args = stores.role(node.nodeId, 'args');
-    if (!args || typeof args.sourceStart !== 'number') continue;
-    const raw = sourceText.slice(args.sourceStart, args.sourceEnd);
-    const literal = /^\(\s*(['"`])([^'"`]+)\1\s*\)$/.exec(raw);
-    if (literal) addSpec(literal[2]);
-  }
-  return targets;
-}
+// ripImportsOf — the relative .rip import targets of a compiled file,
+// read from the compiler's OWN stores — lives in mirror.js (shared with
+// the batch `rip check`, which walks the same closure).
 
 // ---- cross-file mappings: the closure cache is TEXT-only, so a
 // result landing inside an UNOPENED mirror (a definition target, a
@@ -950,7 +824,6 @@ connection.onInitialize(async (params) => {
         full: true,
         range: true,
       },
-      inlayHintProvider: true,
       documentLinkProvider: {},
     },
   };
@@ -996,133 +869,32 @@ process.on('exit', () => {
 // fields carry [start, end) offsets when the failure has a source
 // position; the rare message-only errors mark the first character.
 function compileErrorDiagnostic(err, text, lineStarts) {
-  const start = typeof err.start === 'number' ? err.start : 0;
-  const end = typeof err.end === 'number' && err.end > start ? err.end : Math.min(start + 1, text.length);
-  // The message's first line is `path:line:col: reason`; the position
-  // prefix and the excerpt lines below it repeat what the editor
-  // already shows inline, so the diagnostic carries the reason alone.
-  let reason = String(err.message).split('\n')[0];
-  if (err.path && reason.startsWith(`${err.path}:`)) {
-    reason = reason.slice(err.path.length + 1).replace(/^\d+:\d+:\s*/, '');
-  }
+  // Reason + [start, end) span come from the shared formatter
+  // (diagnostics.js), so the editor and the batch `rip check` render a
+  // CompileError identically.
+  const { reason, start, end } = compileErrorInfo(err, text.length);
   return {
     severity: 1,
     source: 'rip',
     message: reason,
     range: {
       start: offsetToPosition(lineStarts, start),
-      end: offsetToPosition(lineStarts, Math.min(end, text.length)),
+      end: offsetToPosition(lineStarts, end),
     },
   };
 }
 
-// A tsgo diagnostic mapped onto .rip source, or null when it is a
-// suppressed implicit-any code or its generated span has no honest
-// source mapping (synthetic/injected regions). Under rip.strict the
-// implicit-any family passes through — a strict project ASKED to be
-// told where annotations are missing (presentation-only gate, E).
-function mapTsDiagnostic(good, d) {
-  if (!good.strict && SUPPRESSED_TS_CODES.has(d.code)) return null;
-  const s = positionToOffset(good.genLineStarts, good.code.length, d.range.start);
-  const e = positionToOffset(good.genLineStarts, good.code.length, d.range.end);
-  const span = generatedSpanToSource(good.mappings, s, e);
-  if (!span) return null;
-  // tsgo supplies Unnecessary/Deprecated tags itself now that
-  // tagSupport rides the pull slot (the capability declaration below
-  // has the seam); the translate.js code sets are the fallback for any
-  // item tsgo leaves untagged, so VS Code renders the unused/
-  // deprecated classes faded/struck, never underlined.
-  const tags = d.tags ?? diagnosticTagsFor(d.code);
-  // Suggestion-class rendering needs an EXACT span (the rendering
-  // seam): a fade/strike-through paints its whole
-  // range, and a COVER-mapped range paints bytes the user never wrote
-  // — a minted name's unused hint (`_init(props)` on a prop-less
-  // component) would fade the entire construct. Error-class
-  // diagnostics keep the cover fallback (a visible error on the
-  // enclosing construct beats a dropped one); tagged hints drop
-  // unless the offending bytes are the user's own. The check reads
-  // the START row only — the accepted residual: a tagged hint
-  // starting exact but extending past its row still paints, CLAMPED
-  // by generatedSpanToSource to the exact row's own source span, so
-  // the fade can be wider than the hint but never leaves the user's
-  // bytes for that construct.
-  if (tags.length > 0) {
-    const row = good.mappings.bestAtGenerated(s);
-    if (!row || row.mappingKind !== 'exact') return null;
-  }
-  return {
-    severity: d.severity ?? 1,
-    code: d.code,
-    source: 'rip/ts',
-    message: d.message,
-    ...(tags.length ? { tags } : {}),
-    range: {
-      start: offsetToPosition(good.srcLineStarts, span[0]),
-      end: offsetToPosition(good.srcLineStarts, span[1]),
-    },
-  };
-}
+// mapTsDiagnostic / ripDirectiveLines / applyRipDirectives — the
+// diagnostic-mapping core — live in diagnostics.js (shared with the
+// batch `rip check`).
 
 // Re-pull TS diagnostics for one open document WITHOUT recompiling — the
 // cross-file freshness path: an edit elsewhere in the program can change
 // this document's diagnostics while its own text (and mappings) are
-// unchanged. Only runs while the buffer matches its lastGood compile; a
-// Rip-level `@ts-expect-error` semantics : a face
-// directive comment governs only its immediate next FACE line, which
-// multi-line lowerings (render scaffolds, wrapped component creates,
-// IIFE values) structurally defeat — the acknowledged error lands
-// lines deeper, leaks to the user, and the directive surfaces a
-// spurious TS2578. The broker owns the semantics instead, over RIP
-// positions: an error whose mapped line sits directly under a source
-// directive line suppresses (directive used), and the face-level
-// TS2578 for a USED directive drops. A directive that rescues nothing
-// keeps its TS2578 — unused stays loud, exactly tsc's contract.
-// A directive governs the next SOURCE STATEMENT — including its
-// indented block (rip's statement unit): a marker above a render
-// element must absorb an error on the element's bind/prop lines
-// inside it. Computed as: the governed range runs from the directive's
-// next non-blank line through the last consecutive line indented
-// DEEPER than that first line. One directive still absorbs only
-// within its own statement; unused stays loud.
-function ripDirectiveLines(good) {
-  if (good._directiveRanges === undefined) {
-    const src = good.source.split('\n');
-    const indentOf = (l) => /^[ \t]*/.exec(l)[0].length;
-    const ranges = [];
-    src.forEach((l, i) => {
-      if (!/^[ \t]*#[ \t]*@ts-(expect-error|ignore)(\s|$)/.test(l)) return;
-      let start = i + 1;
-      while (start < src.length && src[start].trim() === '') start++;
-      if (start >= src.length) return;
-      const head = indentOf(src[start]);
-      let end = start;
-      while (end + 1 < src.length &&
-             (src[end + 1].trim() === '' || indentOf(src[end + 1]) > head)) end++;
-      ranges.push({ line: i, start, end });
-    });
-    good._directiveRanges = ranges;
-  }
-  return good._directiveRanges;
-}
-function applyRipDirectives(good, mapped) {
-  const ranges = ripDirectiveLines(good);
-  if (ranges.length === 0) return mapped;
-  const is2578 = (m) => String(m.code) === '2578';
-  const used = new Set();
-  const survivors = [];
-  for (const m of mapped) {
-    const line = m.range.start.line;
-    if (!is2578(m)) {
-      const r = ranges.find((g) => line >= g.start && line <= g.end);
-      if (r) { used.add(r.line); continue; }
-    }
-    survivors.push(m);
-  }
-  return survivors.filter((m) => !(is2578(m) && used.has(m.range.start.line)));
-}
-
-// stale buffer's own refresh owns its publishing (positions from two
-// buffer versions never mix).
+// unchanged. Only runs while the buffer matches its lastGood compile;
+// the stale buffer's own refresh owns its publishing (positions from two
+// buffer versions never mix). The `@ts-expect-error` semantics and the
+// TS2578 handling live in applyRipDirectives (diagnostics.js).
 async function repullDiagnostics(uri) {
   const state = states.get(uri);
   const good = state?.lastGood;
@@ -1154,37 +926,13 @@ function repullOpenDocuments(exceptUri = null) {
   }
 }
 
-// A rip.noCheck glob → anchored regex, matched against a project-root-
-// relative posix path. `**/` spans zero-or-more directories (so
-// `**/*.rip` matches a root file too), a trailing/standalone `**` spans
-// anything, `*` stays within one segment, `?` is one non-slash char.
-function globToRegex(glob) {
-  let re = '';
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i];
-    if (c === '*') {
-      if (glob[i + 1] === '*') {
-        if (glob[i + 2] === '/') { re += '(?:.*/)?'; i += 2; } // `**/` → zero+ dirs
-        else { re += '.*'; i += 1; }                           // `**`  → anything
-      } else { re += '[^/]*'; }                                // `*`   → one segment
-    } else if (c === '?') { re += '[^/]'; }
-    else if ('.+^${}()|[]\\'.includes(c)) { re += '\\' + c; }  // escape regex specials
-    else { re += c; }
-  }
-  return new RegExp(`^${re}$`);
-}
-
-// Does this document match its project's rip.noCheck? Globs resolve
-// relative to the config's directory (the project root, _configDir),
-// so `legacy/**` means legacy under THIS package, never a sibling's.
+// Does this document match its project's rip.noCheck? (globToRegex /
+// isNoCheckPath live in diagnostics.js — shared with the batch checker.)
 function isNoCheck(uri, state) {
-  if (!state.noCheck?.length || !state.configDir || !uri.startsWith('file://')) return false;
+  if (!uri.startsWith('file://')) return false;
   let fsPath;
   try { fsPath = fileURLToPath(uri); } catch { return false; }
-  let rel = path.relative(state.configDir, fsPath);
-  if (rel.startsWith('..')) return false; // outside the project boundary
-  rel = rel.split(path.sep).join('/');
-  return state.noCheck.some((g) => globToRegex(g).test(rel));
+  return isNoCheckPath(fsPath, state.configDir, state.noCheck);
 }
 
 async function refresh(document) {
@@ -1240,6 +988,10 @@ async function refresh(document) {
     mappings: result.mappings,
     stores: result.stores,
     trivia: result.trivia,
+    // Generated spans of `:=` state names — writable in rip though the face
+    // binds their cell `const`. Semantic tokens clear TypeScript's `readonly`
+    // on exactly these.
+    mutables: result.mutables,
     srcLineStarts,
     genLineStarts: lineStartsOf(result.code),
     strict: state.strict === true, // rides the compile it governed
@@ -1472,9 +1224,19 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
       // docs present. package.json edits are rare, so refresh ALL open
       // docs and let each re-resolve its own nearest config (resolution
       // is per-doc, so this is correct in a monorepo — every doc lands on
-      // its own answer). Skip dependency churn: an install rewrites
-      // node_modules/**/package.json and must not recompile the world.
-      if (!fsPath.includes(`${path.sep}node_modules${path.sep}`)) refreshAllForConfig = true;
+      // its own answer). The generated tsconfig ALSO depends on
+      // package.json now — hostFloorPath reads the workspace's
+      // rip.strict to decide whether the host floor joins the program —
+      // so the same edit regenerates it and re-governs tsgo, not just
+      // presentation. (The floor's other input, node_modules/@types
+      // presence, stays reload-only: VS Code's default watcher excludes
+      // node_modules, so an install's events never arrive.) Skip
+      // dependency churn: an install rewrites node_modules/**/package.json
+      // and must not recompile the world.
+      if (!fsPath.includes(`${path.sep}node_modules${path.sep}`)) {
+        refreshAllForConfig = true;
+        configChanged = true;
+      }
       continue;
     }
     if (!fsPath.endsWith('.rip')) continue;
@@ -1509,8 +1271,12 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
   if (configChanged && mirrorRootReady) {
     // A pre-materialization config change has nothing to re-govern; the
     // first materialization generates from the current user config.
+    // The host floor forwards too: its content can flip while the
+    // tsconfig text stays identical (a rip.strict toggle changes only
+    // the floor), and tsgo re-reads only what it is told changed.
     writeGeneratedTsconfig();
     forward.push({ uri: 'file://' + path.join(mirrorRoot, 'tsconfig.json'), type: FileChangeType.Changed });
+    forward.push({ uri: 'file://' + path.join(mirrorRoot, HOST_FLOOR_NAME), type: FileChangeType.Changed });
   }
   if (refreshAllForConfig) {
     // A package.json#rip edit re-governs every open doc's presentation
@@ -1744,13 +1510,22 @@ function reorderUnionHover(ctx, contents) {
   return { ...contents, value: reordered };
 }
 
-// Reactive-cell hovers present the VALUE type (finding #10): the
+// Reactive-cell hovers present the VALUE type: the
 // author reads `clicks := 0` as a number, not as its container. A
 // hover whose type is EXACTLY the cell shape `{ value: T; read(): T }`
 // (both Ts equal — the brand doctrine keeps user literals out of this
 // shape) rewrites to `let N: T` for a state (mutable value, the old runtime's
 // spelling) or `const N: T` for a computed (readonly). Anything else
 // passes through untouched.
+//
+// ONE RULE, UNIFORMLY APPLIED: infer when unannotated, honor the annotation
+// when present. The pass-through above is where the second half is enacted,
+// so it is deliberate and not a gap — an annotated effect
+// (`clickLogger: Function ~> …`) hovers `Function` and is left alone, never
+// narrowed to `() => void`. An annotation is the author's statement of the
+// type and the hover shows it back; whether it is a GOOD annotation is the
+// author's business. The editor's job is to be honest about what the source
+// says, not to second-guess it.
 function presentReactiveCellHover(contents) {
   const value = contents?.value;
   if (typeof value !== 'string') return null;
@@ -2078,8 +1853,24 @@ connection.onSignatureHelp(async (params) => {
 // mapped tokens DEDUP by source span — modifiers union, the
 // declaration modifier from the hoist line survives on the merged
 // token.
+//
+// Reactive STATE (`:=`) is the one form where TypeScript's modifiers lie. Its
+// lowering binds a cell with `const`, so tsgo classifies the identifier
+// `readonly` — true of the container, false of the name: `clicks = 5` is legal
+// rip and lowers to `clicks.value = 5`. Forwarded as-is, the editor paints the
+// only reactive form you may assign to as a constant. The compile reports the
+// generated span of each state name (`mutables`), and the bit is cleared there
+// and nowhere else — `=!`, `~=` and `~>` also emit `const` and really ARE
+// immutable, so they keep it.
 function ripSemanticTokens(ctx, data) {
   const mapSpan = exactSpanMapper(ctx.good.mappings);
+  const roIndex = semanticTokensLegend?.tokenModifiers?.indexOf('readonly') ?? -1;
+  const roBit = roIndex < 0 ? 0 : (1 << roIndex);
+  // Keyed by START offset: a state name's span IS the token, so the token's
+  // generated start equals the span's exactly. A set lookup per token, rather
+  // than a scan of every span for every token on a surface that fires on each
+  // edit.
+  const mutableStarts = new Set((ctx.good.mutables ?? []).map(([s]) => s));
   const tokens = new Map(); // start → { start, length, type, modifiers }
   let line = 0, char = 0;
   for (let i = 0; i + 4 < data.length; i += 5) {
@@ -2094,12 +1885,16 @@ function ripSemanticTokens(ctx, data) {
     const curStart = ctx.align.toCurrent(srcStart);
     const curEnd = ctx.align.toCurrent(srcStart + length, { exclusiveEnd: true });
     if (curStart === null || curEnd !== curStart + length) continue;
+    // Cleared BEFORE the dedup union below, or a second generated manifestation
+    // of the same name would put the bit straight back.
+    let modifiers = data[i + 4];
+    if (roBit && mutableStarts.has(genStart)) modifiers &= ~roBit;
     const key = curStart * 0x100000 + length;
     const existing = tokens.get(key);
     if (existing && existing.type === data[i + 3]) {
-      existing.modifiers |= data[i + 4];
+      existing.modifiers |= modifiers;
     } else if (!existing) {
-      tokens.set(key, { start: curStart, length, type: data[i + 3], modifiers: data[i + 4] });
+      tokens.set(key, { start: curStart, length, type: data[i + 3], modifiers });
     }
   }
   const builder = new SemanticTokensBuilder();
@@ -2211,90 +2006,6 @@ connection.onDocumentLinks((params) => {
     }
   }
   return links;
-});
-
-// ---- inlay hints: preferences flow from the EDITOR through the
-// workspace/configuration forward (tsgoConfigurationRequest — the
-// user's typescript.inlayHints.* settings govern, plain-TS parity),
-// so tsgo computes hints against the face and the broker only maps.
-// Hoisting scatters a Rip range's constructs across generated space
-// (the semantic-tokens argument), so tsgo answers over the WHOLE face
-// and mapped hints filter to the requested Rip range. Each hint's
-// position maps through the cursor flavor (a type hint sits one past
-// the name it annotates — `let k‸: number`); hints landing on
-// synthetic bytes drop. Two generated manifestations of one
-// source site (a hoist line and its assignment) dedup to one hint.
-// Label-part locations map like any other result location — and they
-// double as the scaffolding detector: a hint whose label points into
-// UNMAPPABLE generated bytes describes a construct the user never
-// wrote (the reactive lowering's `__state(0)` draws an
-// `initialValue:` parameter hint from the injected runtime), so the
-// WHOLE hint drops; a location into a real .ts/.d.ts passes through.
-// textEdits (double-click-to-insert — the annotation Rip also spells
-// `: T`) map through the standing edit path, dropped from the hint
-// when unverifiable rather than landing wrong.
-function ripInlayHint(ctx, hint) {
-  const genOffset = positionToOffset(ctx.good.genLineStarts, ctx.good.code.length, hint.position);
-  const srcOffset = generatedCursorToSource(ctx.good.mappings, genOffset, ctx.good.source, ctx.good.code);
-  if (srcOffset === null) return null;
-  const curOffset = ctx.align.toCurrent(srcOffset, { exclusiveEnd: true });
-  if (curOffset === null) return null;
-  const mapped = {
-    ...hint,
-    position: offsetToPosition(ctx.curLineStarts, curOffset),
-  };
-  if (typeof hint.label === 'string') {
-    mapped.label = scrubFaceArtifacts(hint.label);
-  } else if (Array.isArray(hint.label)) {
-    mapped.label = [];
-    for (const part of hint.label) {
-      const out = { ...part, value: scrubFaceArtifacts(part.value ?? '') };
-      if (out.location) {
-        const loc = ripLocation(out.location.uri, out.location.range);
-        if (!loc) return null; // scaffolding-sourced hint: drop whole
-        out.location = loc;
-      }
-      mapped.label.push(out);
-    }
-  }
-  if (typeof hint.tooltip === 'string') mapped.tooltip = scrubFaceArtifacts(hint.tooltip);
-  if (hint.textEdits?.length) {
-    const edits = faceEditsToCurrent(ctx, hint.textEdits);
-    if (edits) mapped.textEdits = edits;
-    else delete mapped.textEdits;
-  }
-  return mapped;
-}
-
-connection.languages.inlayHint.on(async (params) => {
-  await tsgoReady;
-  const ctx = requestContext(params);
-  if (!ctx) return null;
-  const result = await tsgoRequest('textDocument/inlayHint', {
-    textDocument: { uri: ctx.state.tsUri },
-    range: {
-      start: offsetToPosition(ctx.good.genLineStarts, 0),
-      end: offsetToPosition(ctx.good.genLineStarts, ctx.good.code.length),
-    },
-  }, 'inlay hints');
-  if (!Array.isArray(result)) return null;
-  const startOffset = positionToOffset(ctx.curLineStarts, ctx.currentText.length, params.range.start);
-  const endOffset = positionToOffset(ctx.curLineStarts, ctx.currentText.length, params.range.end);
-  const hints = [];
-  const seen = new Set();
-  for (const hint of result) {
-    const mapped = ripInlayHint(ctx, hint);
-    if (!mapped) continue;
-    const off = positionToOffset(ctx.curLineStarts, ctx.currentText.length, mapped.position);
-    if (off < startOffset || off > endOffset) continue;
-    const labelText = typeof mapped.label === 'string'
-      ? mapped.label : mapped.label.map((p) => p.value).join('');
-    const key = `${off}:${mapped.kind ?? ''}:${labelText}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    hints.push(mapped);
-  }
-  return hints;
 });
 
 // ---- document symbols (outline) and workspace symbols: tsgo's

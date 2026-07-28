@@ -208,9 +208,14 @@ describe('schema type story on the TS face', () => {
     expect(f.code).not.toContain('MQuery');
   });
 
-  test('field transforms stay uninjected (the runtime calls them unbound)', () => {
+  test('field transforms stay uninjected (the runtime calls them unbound); `it` declares the raw-input boundary', () => {
+    // No `this` param — the runtime calls transforms unbound. The
+    // `it` param types face-only `any`: it receives the WHOLE raw
+    // input pre-validation, whose wire shape is what the transform
+    // exists to absorb — a declared boundary, not an omission
+    // (`unknown` would reject this very probe's `it.trim()`).
     const f = face('S = schema :shape\n  a! string, -> it.trim()');
-    expect(f.code).toContain('transform: (function(it) {');
+    expect(f.code).toContain('transform: (function(it: any) {');
     expect(f.code).not.toContain('this:');
   });
 

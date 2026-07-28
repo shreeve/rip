@@ -411,8 +411,31 @@ const renderTarget = (target, type, optional) => {
   return `${name}${optional ? '?' : ''}: ${tidyType(type)}`;
 };
 
+// Is this parameter optional? The `?` is the side-band optionalMarker
+// role (the grammar drops the token), so answering takes the stores —
+// and BOTH signature emitters must answer it the same way.
+//
+// This is the single definition, and `renderParam` REQUIRES it. It used
+// to be an optional argument defaulting to "not optional", which made
+// correctness opt-in: `dts.js` once forgot to pass it and every optional
+// param lost its `?` in the declarations; later the TS face's overload
+// rows (`tsOverloadSigs`) forgot it too, and emitted `b: string` where
+// the `.d.ts` said `b?: string`. Both outputs type-check in isolation,
+// so tsc can never catch that class — only the two disagreeing can.
+// A forgetful caller now throws instead of silently dropping the marker.
+export const optionalReader = (stores) => (p) => {
+  const id = stores.idOf(p);
+  return id !== null && !!stores.role(id, 'optionalMarker');
+};
+
 export const renderParam = (p, isOptional) => {
-  const opt = isOptional?.(p) ?? false;
+  if (typeof isOptional !== 'function') {
+    throw new TypeTextError(
+      'renderParam: an optionality reader is required (use optionalReader(stores)) — ' +
+      'omitting it silently drops every `?` marker, which type-checks and so cannot be caught downstream',
+    );
+  }
+  const opt = isOptional(p);
   if (typeof p === 'string') return `${p}${opt ? '?' : ''}: any`;
   if (isTypedWrapper(p)) {
     // A bare optional param (`title?`) is a typed-var with no type —

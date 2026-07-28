@@ -18,8 +18,8 @@
 //      spelling keeps hoisted read-before-assign quiet).
 //
 // Same availability guard as the broker suite: dependencies absent →
-// loud skip; RIP_REQUIRE_TSGO (the package's canonical test script)
-// makes absence fail.
+// skip; the package's `bun run test` preflight turns a missing tsgo into
+// a hard failure first.
 import { test, expect, describe } from 'bun:test';
 import path from 'node:path';
 import { execSync } from 'node:child_process';

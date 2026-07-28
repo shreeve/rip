@@ -1,0 +1,20 @@
+# 02-operations.errors.rip — intentional negatives, each asserted by the Diagnostics Lane (bun run audit --diagnostics).
+# @ts-nocheck
+
+text = 'abc'
+count = 42
+point = { x: 1 }
+pair = (left: number, right: number) -> left + right
+
+wrongLeft = text * 2
+wrongRight = 2 * text
+wrongUpdate = text++
+wrongCompare = text is count
+wrongInstance = text instanceof count
+wrongCall = count()
+wrongOptionalCall = count?.(1)
+wrongArity = pair(1)
+wrongArgument = pair(1, text)
+wrongExist = missingName?
+wrongDelete = delete point.x
+wrongScale: ((n: number) => number) | null = 7

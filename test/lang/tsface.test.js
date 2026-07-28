@@ -22,7 +22,7 @@
 //      (rule 5); an unknown face rejects at the API boundary.
 //
 // The face's TypeScript VALIDITY is gated separately in
-// test/tsface-tsc.test.js (the RIP_TSC external-tool pattern).
+// test/lang/tsface-tsc.test.js (against the repo's pinned TypeScript).
 import { describe, test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
@@ -60,9 +60,9 @@ const REGION_SHAPES = [
   /^constructor\(props\??: \{ .*\{ super\(props\); \}$/su, // the component props ctor (M12-E)
   /^as any\)?$/u,                                          // scaffold/handler quieting casts (M12-E)
   /^\) as any$/u,                                          // handler cast's TS-only close (arrow-safe grouping)
-  /^satisfies \S/u,                                        // reactive value enforcement (finding #3): `v satisfies T`
+  /^satisfies \S/u,                                        // reactive value enforcement: `v satisfies T`
   /^\($/u,                                                 // computed-lambda wrap opener for `) satisfies () => T`
-  /^\) satisfies \(\) => \S/su,                            // computed return enforcement (finding #3)
+  /^\) satisfies \(\) => \S/su,                            // computed return enforcement
   new RegExp(String.raw`^(export )?type ${ID}`, 'u'),      // alias / enum companion / schema alias
   new RegExp(String.raw`^(export )?interface ${ID}`, 'u'), // interface / schema intrinsic block
   new RegExp(String.raw`^function ${ID}\(.*\): [^;]+;$`, 'su'), // overload signature
@@ -297,7 +297,7 @@ describe('TS-face emission pins', () => {
   test('reactive containers type as the branded { value: T; read(): T } (computed readonly); readonly/effect handles as T', () => {
     const code = ts('count: number := 0\ntotal: number ~= count * 2\nro: string =! "s"\nh: Function ~> console.log(count)\n').code;
     // Annotated reactives also ENFORCE the value via face-only
-    // `satisfies` (finding #3).
+    // `satisfies`.
     expect(code).toContain('const count: { value: number; read(): number } = __state(0 satisfies number);');
     expect(code).toContain('const total: { readonly value: number; read(): number } = __computed((() => (count.value * 2)) satisfies () => number);');
     expect(code).toContain('const ro: string = "s";');
@@ -533,7 +533,7 @@ describe('TS directive comments', () => {
     );
   });
 
-  test('multi-line lowered values PLACE — the directive governs the statement head line (finding #6: never silently dropped)', () => {
+  test('multi-line lowered values PLACE — the directive governs the statement head line, never silently dropped', () => {
     // Comprehension value: the directive rides above the IIFE head.
     pin(
  'items = [1, 2]\n# @ts-expect-error\ndoubled = (x * 2 for x in items)\ndoubled = []\n',
@@ -609,6 +609,30 @@ describe('TS directive comments', () => {
     expect(r.code.slice(row.generatedStart, row.generatedEnd)).toBe('// @ts-expect-error boom');
     // JS mode carries no directive rows — the channel is face-only.
     expect(js(src).mappings.rows.some((m) => m.role === 'tsDirective')).toBe(false);
+  });
+
+  test('an inline child-prop directive keeps the strip identity — the per-pair layout is mode-uniform', () => {
+    // A directive on one prop line switches the ctor object to ONE
+    // PAIR PER LINE so TypeScript's next-line rule governs that pair
+    // alone. The layout decision must bind to the SOURCE shape, not
+    // the face: JS mode emits the same pair-per-line bytes minus the
+    // directive lines, or stripping the face could never restore them.
+    const src =
+      'export Kid = component\n  @value?: string := ""\n  @label?: string := ""\n  render\n    div\n      = value\n\n'
+      + 'export C = component\n  count := 0\n  render\n    Kid\n      # @ts-expect-error bind\n      value <=> count\n      label: 42\n';
+    const faced = ts(src);
+    // The comment sits above ITS pair only — the undirected sibling
+    // stays on an ungoverned line (siblings must not be blinded).
+    expect(faced.code).toMatch(/new Kid\(\{\n\s*\/\/ @ts-expect-error bind\n\s*__bind_value__.*,\n\s*label: 42\n\s*\}\);/);
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
+    expect(js(src).code).not.toContain('@ts-');
+
+    // The DOM-attribute form rides its own replay line in both modes;
+    // pinned here so the two inline forms hold the identity together.
+    const dom = 'export C = component\n  render\n    div\n      span\n        # @ts-expect-error inline\n        title: 1\n';
+    const domFaced = ts(dom);
+    expect(domFaced.code).toMatch(/\/\/ @ts-expect-error inline\n\s*this\._el\d+\.setAttribute\('title'/);
+    expect(stripFace(domFaced.code, domFaced.tsRegions)).toBe(js(dom).code);
   });
 });
 

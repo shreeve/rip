@@ -982,6 +982,14 @@ class Generator
     export default parser
     """
 
+  # ruleId → "Lhs → rhs …" (ε for an empty production), indexed by rule id
+  # (index 0 is the accept pad, left as null). The grammar gate's denominator:
+  # which productions exist, so a corpus run can name the ones never reduced.
+  _ruleNames: ->
+    names = []
+    names[r.id] = "#{r.lhs} → #{if r.symbols[0] is '' then 'ε' else r.symbols.join ' '}" for r in @rules
+    names
+
   _generateModuleCore: ->
     tableCode = @_generateTableCode @parseTable
 
@@ -992,6 +1000,7 @@ class Generator
       accumulators: #{JSON.stringify @accumulators},
       parseTable: #{tableCode},
       ruleTable: #{JSON.stringify @ruleTable},
+      ruleNames: #{JSON.stringify @_ruleNames()},
       ruleActions: #{@ruleActions},
       #{String(@parse).replace(/^function /, '')},
       ctx: {},
@@ -1110,6 +1119,9 @@ class Generator
         symbol = null
 
       else if action < 0  # REDUCE
+        # Coverage hook: an instrument (the grammar gate) may set ctx.onReduce
+        # to observe which rules a parse exercises; unset, this is one guard.
+        @ctx.onReduce(-action) if @ctx?.onReduce
         len = @ruleTable[(-action) * 2 + 1]
 
         # Span of the whole reduction: from the first RHS symbol's start to

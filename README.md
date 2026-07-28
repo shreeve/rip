@@ -38,7 +38,7 @@ bun run test           # fast compiler/runtime suite
 bun run test:all       # canonical extended suite
 bun run parser         # regenerate src/parser.js
 bun run corpus-expected
-bun run type-audit
+bun run audit
 ```
 
 ## REPL

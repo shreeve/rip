@@ -224,7 +224,7 @@ const CONSTRUCTS = [
     };
   },
   (rng, id) => ({
-    // Always-place (finding #6): the directive emits above the
+    // Always-place: the directive emits above the
     // switch-valued declaration's multi-line lowering, so the code
     // beneath carries a REAL violation for it to suppress — the
     // composed batch stays clean, and a directive that failed to

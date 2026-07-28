@@ -1,0 +1,506 @@
+{
+  "23-functions.rip": {
+    "decls": [
+      {
+        "name": "titleCase",
+        "expect": "(property) String.titleCase: () => string"
+      }
+    ]
+  },
+  "13-components.rip": {
+    "decls": [
+      {
+        "name": "Badge",
+        "expect": "const Badge: typeof Badge"
+      },
+      {
+        "name": "Field",
+        "expect": "let Field: typeof Field"
+      },
+      {
+        "name": "Roster",
+        "expect": "let Roster: typeof Roster"
+      },
+      {
+        "name": "Panel",
+        "expect": "const Panel: typeof Panel"
+      },
+      {
+        "name": "Chip",
+        "expect": "let Chip: typeof Chip"
+      },
+      {
+        "name": "Options",
+        "expect": "const Options: typeof Options"
+      },
+      {
+        "name": "Picker",
+        "expect": "let Picker: typeof Picker"
+      },
+      {
+        "name": "Routed",
+        "expect": "let Routed: typeof Routed"
+      },
+      {
+        "name": "Give",
+        "expect": "let Give: typeof Give"
+      },
+      {
+        "name": "Take",
+        "expect": "let Take: typeof Take"
+      },
+      {
+        "name": "Quiet",
+        "expect": "let Quiet: typeof Quiet"
+      },
+      {
+        "name": "Terse",
+        "expect": "let Terse: typeof Terse"
+      }
+    ],
+    "positions": [
+      {
+        "line": 48,
+        "character": 12,
+        "token": "ref",
+        "expect": null,
+        "rule": "ref word",
+        "why": "typed-channel target; interim silence — today serves the cover's `this` (render-DSL finding)"
+      },
+      {
+        "line": 48,
+        "character": 17,
+        "token": "inputEl",
+        "expect": null,
+        "rule": "name after ref:",
+        "why": "target is the state binding's type; today serves the cover's `this`"
+      },
+      {
+        "line": 60,
+        "character": 13,
+        "token": "key",
+        "expect": null,
+        "rule": "key: in a render loop",
+        "why": "today serves a minted scaffold local (`_elN`)"
+      },
+      {
+        "line": 61,
+        "character": 6,
+        "token": "slot",
+        "expect": null,
+        "rule": "slot",
+        "why": "today serves the cover's `this`"
+      },
+      {
+        "line": 70,
+        "character": 4,
+        "token": "div",
+        "expect": null,
+        "rule": "element tag",
+        "why": "intrinsic-element target; today serves the cover's `this`"
+      },
+      {
+        "line": 48,
+        "character": 6,
+        "token": "input",
+        "expect": null,
+        "rule": "element tag",
+        "why": "intrinsic-element target; today serves the cover's `this`"
+      },
+      {
+        "line": 13,
+        "character": 9,
+        "token": "class",
+        "expect": null,
+        "rule": "attr/prop name (intrinsic)",
+        "why": "the prop's type is the target; today serves the cover's `this`"
+      },
+      {
+        "line": 50,
+        "character": 14,
+        "token": "click",
+        "expect": null,
+        "rule": "event word",
+        "why": "handler-signature target; today serves the cover's `this`"
+      },
+      {
+        "line": 73,
+        "character": 8,
+        "token": "value",
+        "expect": null,
+        "rule": "bind target (component)",
+        "why": "today serves the minted `__bind_value__` slot"
+      },
+      {
+        "line": 73,
+        "character": 18,
+        "token": "text",
+        "expect": null,
+        "rule": "name in a bind",
+        "why": "VALUE-type target; today serves the whole bind cover's `__bind_value__`"
+      },
+      {
+        "line": 28,
+        "character": 8,
+        "token": "value",
+        "expect": null,
+        "rule": "bind target (intrinsic)",
+        "why": "today serves the cover's `this`"
+      },
+      {
+        "line": 108,
+        "character": 24,
+        "token": "params",
+        "expect": null,
+        "rule": "gate key params",
+        "why": "plain-inferred target; today serves the minted key-fn's own param"
+      },
+      {
+        "line": 108,
+        "character": 31,
+        "token": "id",
+        "expect": null,
+        "rule": "gate key params",
+        "why": "plain-inferred target; today serves bare `any` off the minted param"
+      },
+      {
+        "line": 36,
+        "character": 2,
+        "token": "people",
+        "expect": null,
+        "rule": "member declaration (state)",
+        "why": "minted-kind value-first target; the container wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 10,
+        "character": 2,
+        "token": "shade",
+        "expect": null,
+        "rule": "member declaration (computed)",
+        "why": "wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 40,
+        "character": 2,
+        "token": "cap",
+        "expect": null,
+        "rule": "member declaration (readonly)",
+        "why": "wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 19,
+        "character": 3,
+        "token": "label",
+        "expect": null,
+        "rule": "member declaration (prop)",
+        "why": "wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 39,
+        "character": 2,
+        "token": "inputEl",
+        "expect": null,
+        "rule": "member declaration (ref cell)",
+        "why": "wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 106,
+        "character": 2,
+        "token": "stats",
+        "expect": null,
+        "rule": "gate target name",
+        "why": "minted-kind value-first target (kind label undecided); wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 109,
+        "character": 2,
+        "token": "user",
+        "expect": null,
+        "rule": "gate target name",
+        "why": "annotated spelling; wrapper is a leak (member-wrapper finding)"
+      },
+      {
+        "line": 106,
+        "character": 8,
+        "token": "<~",
+        "expect": null,
+        "rule": "gate operator",
+        "why": "punctuation is silent, permanently — measured null 2026-07-23, green"
+      },
+      {
+        "line": 106,
+        "character": 12,
+        "token": "app",
+        "expect": null,
+        "rule": "gate path segment",
+        "why": "ruled silent — measured null 2026-07-23, green"
+      },
+      {
+        "line": 106,
+        "character": 16,
+        "token": "data",
+        "expect": null,
+        "rule": "gate path segment",
+        "why": "ruled silent — measured null 2026-07-23, green"
+      },
+      {
+        "line": 106,
+        "character": 21,
+        "token": "stats",
+        "expect": null,
+        "rule": "gate path segment",
+        "why": "the path leaf; ruled silent — measured null 2026-07-23, green"
+      },
+      {
+        "line": 71,
+        "character": 6,
+        "token": "Field",
+        "expect": null,
+        "rule": "component name at a use site",
+        "why": "props-signature target; measured null 2026-07-23 — the pin asserts the interim"
+      },
+      {
+        "line": 72,
+        "character": 8,
+        "token": "label",
+        "expect": "(property) label?: string | { value: string; read(): string; } | undefined",
+        "rule": "attr/prop name (component)",
+        "why": "the props surface's real declared type — truthful interim; the container arm rides the bind slot by design"
+      },
+      {
+        "line": 51,
+        "character": 23,
+        "token": "e",
+        "expect": "(parameter) e: PointerEvent & { target: any; currentTarget: any; }",
+        "rule": "value position (handler param)",
+        "why": "correct today — the principles' value-position answer, pinned as-is"
+      }
+    ]
+  },
+  "14-schema.rip": {
+    "decls": [
+      {
+        "name": "Address",
+        "expect": "let Address: Schema<Address, Address>"
+      },
+      {
+        "name": "Person",
+        "expect": "let Person: Schema<Person, Person>"
+      },
+      {
+        "name": "ada",
+        "expect": "let ada: Person"
+      },
+      {
+        "name": "guest",
+        "expect": "let guest: Person"
+      },
+      {
+        "name": "Reading",
+        "expect": "let Reading: Schema<Reading, Reading>"
+      },
+      {
+        "name": "reading",
+        "expect": "let reading: Reading"
+      },
+      {
+        "name": "Vendor",
+        "expect": "let Vendor: Schema<Vendor, Vendor>"
+      },
+      {
+        "name": "vendor",
+        "expect": "let vendor: Vendor"
+      },
+      {
+        "name": "Cart",
+        "expect": "let Cart: Schema<Cart, CartData>"
+      },
+      {
+        "name": "cart",
+        "expect": "let cart: Cart"
+      },
+      {
+        "name": "Status",
+        "expect": "let Status: { parse(data: unknown): Status; safe(data: unknown): SchemaSafeResult<Status>; ok(data: unknown): data is Status; parseAsync(data: unknown): Promise<Status>; safeAsync(data: unknown): Promise<SchemaSafeResult<Status>>; okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<Status>; }"
+      },
+      {
+        "name": "EmailContact",
+        "expect": "let EmailContact: Schema<EmailContact, EmailContact>"
+      },
+      {
+        "name": "PhoneContact",
+        "expect": "let PhoneContact: Schema<PhoneContact, PhoneContact>"
+      },
+      {
+        "name": "Contact",
+        "expect": "let Contact: { parse(data: unknown): Contact; safe(data: unknown): SchemaSafeResult<Contact>; ok(data: unknown): boolean; parseAsync(data: unknown): Promise<Contact>; safeAsync(data: unknown): Promise<SchemaSafeResult<Contact>>; okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<Contact>; }"
+      },
+      {
+        "name": "reach",
+        "expect": "let reach: Contact"
+      },
+      {
+        "name": "Stamped",
+        "expect": "let Stamped: __SchemaDef"
+      },
+      {
+        "name": "Doc",
+        "expect": "let Doc: Schema<Doc, Doc>"
+      },
+      {
+        "name": "doc",
+        "expect": "let doc: Doc"
+      },
+      {
+        "name": "Account",
+        "expect": "let Account: ModelSchema<Account, AccountData, number, AccountCreate>"
+      },
+      {
+        "name": "Tiny",
+        "expect": "let Tiny: Schema<Tiny, Tiny>"
+      }
+    ],
+    "positions": [
+      {
+        "line": 13,
+        "character": 2,
+        "token": "name",
+        "expect": null,
+        "rule": "field name",
+        "why": "ruled (field) name: string; the body serves silence, the ruled interim — green, measured 2026-07-23"
+      },
+      {
+        "line": 13,
+        "character": 6,
+        "token": "!",
+        "expect": null,
+        "rule": "! marker",
+        "why": "punctuation is silent, permanently — green, measured 2026-07-23"
+      },
+      {
+        "line": 14,
+        "character": 5,
+        "token": "?",
+        "expect": null,
+        "rule": "? marker",
+        "why": "punctuation is silent, permanently — green, measured 2026-07-23"
+      },
+      {
+        "line": 15,
+        "character": 20,
+        "token": "'guest'",
+        "expect": null,
+        "rule": "default-value expression",
+        "why": "ruled normal expression hovers; today the bracket serves silence — the pin moves when expression hovers reach it"
+      },
+      {
+        "line": 55,
+        "character": 2,
+        "token": "subtotal",
+        "expect": null,
+        "rule": "computed field name",
+        "why": "the !> spelling of the computed row; ruled (computed), interim silence — green, measured 2026-07-23"
+      },
+      {
+        "line": 56,
+        "character": 2,
+        "token": "total",
+        "expect": null,
+        "rule": "computed field name",
+        "why": "ruled (computed) total: number, interim silence — green, measured 2026-07-23"
+      },
+      {
+        "line": 41,
+        "character": 18,
+        "token": "it",
+        "expect": null,
+        "rule": "it in a transform",
+        "why": "ruled it: <input record> — the record under validation; interim silence — green, measured 2026-07-23"
+      },
+      {
+        "line": 124,
+        "character": 22,
+        "token": "Person",
+        "expect": "type Person = { name: string; age?: number; role?: string; tier: \"basic\" | \"pro\"; scores: number[]; home?: Address; }",
+        "rule": "companion type at a use site",
+        "why": "the annotation position serves the full structural expansion — the ruled target, already served; measured 2026-07-23"
+      },
+      {
+        "line": 20,
+        "character": 6,
+        "token": "Person",
+        "expect": "let Person: Schema<Person, Person>",
+        "rule": "companion type at a use site",
+        "why": "a value-position use serves the schema value's own type — the plain-answer rule; measured 2026-07-23"
+      }
+    ]
+  },
+  "25-components.rip": {
+    "decls": [
+      {
+        "name": "Dial",
+        "expect": "let Dial: typeof Dial"
+      },
+      {
+        "name": "Prompt",
+        "expect": "let Prompt: typeof Prompt"
+      },
+      {
+        "name": "Ribbon",
+        "expect": "let Ribbon: typeof Ribbon"
+      },
+      {
+        "name": "Palette",
+        "expect": "let Palette: typeof Palette"
+      },
+      {
+        "name": "Stage",
+        "expect": "let Stage: typeof Stage"
+      },
+      {
+        "name": "Anchors",
+        "expect": "let Anchors: typeof Anchors"
+      },
+      {
+        "name": "Sleeve",
+        "expect": "let Sleeve: typeof Sleeve"
+      },
+      {
+        "name": "Cuff",
+        "expect": "let Cuff: typeof Cuff"
+      }
+    ]
+  },
+  "26-schema.rip": {
+    "decls": [
+      {
+        "name": "Hop",
+        "expect": "let Hop: Schema<Hop, Hop>"
+      },
+      {
+        "name": "Waybill",
+        "expect": "let Waybill: Schema<Waybill, Waybill>"
+      },
+      {
+        "name": "waybill",
+        "expect": "let waybill: Waybill"
+      },
+      {
+        "name": "Stamp",
+        "expect": "let Stamp: Schema<Stamp, Stamp>"
+      },
+      {
+        "name": "stamped",
+        "expect": "let stamped: Stamp"
+      },
+      {
+        "name": "Parcel",
+        "expect": "let Parcel: Schema<Parcel, ParcelData>"
+      },
+      {
+        "name": "parcel",
+        "expect": "let parcel: Parcel"
+      }
+    ]
+  }
+}

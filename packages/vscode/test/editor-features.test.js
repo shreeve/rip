@@ -25,12 +25,13 @@
 //   CODE ACTIONS: the auto-import quickfix maps its edit onto Rip source.
 //
 // Same availability guard as the other live suites: dependencies absent →
-// loud skip; RIP_REQUIRE_TSGO (the package's canonical test script) makes
-// absence fail (tsgo-broker.test.js owns the loud notice).
+// skip; the package's `bun run test` preflight turns a missing tsgo into a
+// hard failure first (tsgo-broker.test.js owns the loud skip notice).
 import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { decodeSemanticTokens } from '../src/tsgo.js';
 
 let tsgoAvailable = false;
 try {
@@ -51,21 +52,6 @@ function makeWorkspace(files) {
   return ws;
 }
 
-// The editor-side inlay-hint preferences the harness answers when the
-// server forwards tsgo's workspace/configuration asks (the same
-// nested shape VS Code's typescript.* settings deliver): every hint
-// class ON, so the mapping surface is fully exercisable.
-const INLAY_SETTINGS = {
-  inlayHints: {
-    parameterNames: { enabled: 'all', suppressWhenArgumentMatchesName: false },
-    parameterTypes: { enabled: true },
-    variableTypes: { enabled: true, suppressWhenTypeMatchesName: false },
-    propertyDeclarationTypes: { enabled: true },
-    functionLikeReturnTypes: { enabled: true },
-    enumMemberValues: { enabled: true },
-  },
-};
-
 // One live session over a fresh workspace; the api wraps every feature
 // request in current-buffer coordinates.
 async function inWorkspace(files, fn) {
@@ -79,7 +65,7 @@ async function inWorkspace(files, fn) {
       if (m === 'window/logMessage') logs.push(p.message);
     },
   });
-  client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => INLAY_SETTINGS));
+  client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => ({})));
   const uriOf = (rel) => 'file://' + path.join(ws, rel);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   async function awaitPublish(rel, sinceLen) {
@@ -132,7 +118,6 @@ async function inWorkspace(files, fn) {
     prepareRename: (rel, line, character) => client.request('textDocument/prepareRename', at(rel, line, character)),
     rename: (rel, line, character, newName) => client.request('textDocument/rename', { ...at(rel, line, character), newName }),
     documentSymbol: (rel) => client.request('textDocument/documentSymbol', { textDocument: { uri: uriOf(rel) } }),
-    inlayHint: (rel, range) => client.request('textDocument/inlayHint', { textDocument: { uri: uriOf(rel) }, range }),
     documentLink: (rel) => client.request('textDocument/documentLink', { textDocument: { uri: uriOf(rel) } }),
     workspaceSymbol: (query) => client.request('workspace/symbol', { query }),
     semanticTokens: (rel) => client.request('textDocument/semanticTokens/full', { textDocument: { uri: uriOf(rel) } }),
@@ -173,22 +158,9 @@ function applyEdits(text, edits) {
   return out;
 }
 
-// Decode a semantic-tokens data array into absolute {line, character,
-// length, type, modifiers} rows against a legend.
-function decodeTokens(data, legend) {
-  const out = [];
-  let line = 0, char = 0;
-  for (let i = 0; i + 4 < data.length; i += 5) {
-    line += data[i];
-    char = data[i] === 0 ? char + data[i + 1] : data[i + 1];
-    out.push({
-      line, character: char, length: data[i + 2],
-      type: legend.tokenTypes[data[i + 3]],
-      modifiers: data[i + 4],
-    });
-  }
-  return out;
-}
+// Semantic-token decoding is LSP wire format, shared from the tsgo client
+// (`decodeSemanticTokens`) rather than hand-rolled per consumer.
+const decodeTokens = decodeSemanticTokens;
 
 const UTIL = 'export def shout(s: string): string\n  s.toUpperCase()\nexport answer = 42\n';
 
@@ -659,50 +631,6 @@ describe.skipIf(!tsgoAvailable)('document and workspace symbols', () => {
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('inlay hints', () => {
-  test('parameter-name hints land on Rip argument positions; runtime-sourced hints drop whole', async () => {
-    await inWorkspace({}, async (api) => {
-      const SRC = [
-        'def add(a: number, b: number): number', // 0
-        '  a + b',                                // 1
-        'k = add(1, 2)',                          // 2
-        'count := 0',                             // 3 (reactive: lowers to __state(0))
-        '',
-      ].join('\n');
-      await api.open('app.rip', SRC);
-      const hints = await api.inlayHint('app.rip', {
-        start: { line: 0, character: 0 }, end: { line: 4, character: 0 },
-      });
-      const labelOf = (h) => (typeof h.label === 'string' ? h.label : h.label.map((p) => p.value).join(''));
-
-      // The call's parameter-name hints sit before the Rip arguments.
-      const a = hints.find((h) => labelOf(h) === 'a:');
-      const b = hints.find((h) => labelOf(h) === 'b:');
-      expect(a.position).toEqual({ line: 2, character: 8 });
-      expect(b.position).toEqual({ line: 2, character: 11 });
-      // Their label locations point at the Rip parameter declarations.
-      const aLoc = a.label.find((p) => p.location)?.location;
-      expect(aLoc.uri).toBe(api.uriOf('app.rip'));
-      expect(aLoc.range.start).toEqual({ line: 0, character: 8 });
-
-      // The reactive lowering calls the INJECTED runtime (`__state(0)`);
-      // its `initialValue:` parameter hint is sourced from scaffolding
-      // the user never wrote — the whole hint drops.
-      expect(hints.some((h) => labelOf(h).includes('initialValue'))).toBe(false);
-
-      // A range request answers exactly the range. Tier 1's declare-
-      // in-place gives the binding an initializer, so tsgo now ALSO
-      // offers its inferred-type hint (`: number`) at the rip name —
-      // a feature the hoisted shape could never produce.
-      const line2 = await api.inlayHint('app.rip', {
-        start: { line: 2, character: 0 }, end: { line: 3, character: 0 },
-      });
-      expect(line2.map(labelOf).sort()).toEqual([': number', 'a:', 'b:']);
-      for (const h of line2) expect(h.position.line).toBe(2);
-    });
-  }, 30000);
-});
-
 describe.skipIf(!tsgoAvailable)('document links (the trivia channel serves)', () => {
   test('relative paths in COMMENTS linkify; strings that look like paths and missing files do not', async () => {
     await inWorkspace({
@@ -996,6 +924,76 @@ describe.skipIf(!tsgoAvailable)('TS directives reach the editor (directive inher
       expect(diags).toHaveLength(1);
       expect(diags[0].code).toBe(2578);
       expect(diags[0].range.start.line).toBe(1);
+    });
+  }, 30000);
+
+  // tsc's directives govern ERRORS, never the suggestion classes: a
+  // suppressed line still dims its unused binding (driven against tsgo on a
+  // plain .ts module — the TS2322 goes, the TS6133 stays, for BOTH directive
+  // spellings). Rip must not be stronger than the thing it emulates.
+  //
+  // The two cases below differ in WHERE the error is absorbed, which is the
+  // whole reason both exist:
+  //
+  //   · single-line — the face directive sits directly above the one emitted
+  //     statement, so TSGO absorbs the error at the face. applyRipDirectives
+  //     never sees it; only the hint reaches the governed-line check.
+  //   · multi-line lowering — the face directive governs only its next FACE
+  //     line, so an error landing on a LATER line of the same statement's
+  //     lowering LEAKS past it and reaches applyRipDirectives over rip
+  //     positions, mapped back onto the head line the directive governs.
+  //     That is the only path on which the governed-line check absorbs a
+  //     real error, marks the directive used, and drops tsgo's now-spurious
+  //     TS2578 — so it is the only case that exercises those branches.
+  test('a directive absorbs the ERROR, never the unused-local fade (TS6133 survives, tagged)', async () => {
+    await inWorkspace({}, async (api) => {
+      await api.open('app.rip', '# @ts-expect-error\nbadCount: number = "oops"\n');
+      const diags = api.diagnostics('app.rip');
+
+      // The TS2322 is gone (tsgo absorbed it at the face); the fade is not.
+      expect(diags).toHaveLength(1);
+      expect(diags[0].code).toBe(6133);
+      expect(diags[0].severity).toBe(4);
+      expect(diags[0].tags).toEqual([1]);      // Unnecessary — VS Code fades it
+      expect(diags[0].range.start.line).toBe(1);
+
+      // Negative control: read the binding and the fade goes. A green run
+      // above therefore means the hint SURVIVED the directive, not that
+      // TS6133 fires unconditionally.
+      await api.change('app.rip', '# @ts-expect-error\nbadCount: number = "oops"\nconsole.log badCount\n');
+      expect(api.diagnostics('app.rip')).toEqual([]);
+
+      // `@ts-ignore` takes the SAME range path (ripDirectiveLines matches
+      // both spellings), and tsc treats it the same way — so the fade must
+      // survive it too. Nothing else pins this.
+      await api.change('app.rip', '# @ts-ignore\nbadCount: number = "oops"\n');
+      const ignored = api.diagnostics('app.rip');
+      expect(ignored).toHaveLength(1);
+      expect(ignored[0].code).toBe(6133);
+      expect(ignored[0].tags).toEqual([1]);
+    });
+  }, 30000);
+
+  test('a LEAKED error (multi-line lowering) is absorbed over rip positions and marks the directive used', async () => {
+    await inWorkspace({}, async (api) => {
+      // A child component's prop errors land on the CTOR face line, but a
+      // directive above the ELEMENT emits above the mount scaffold's first
+      // line — a face line with no error — so tsgo reports the TS2322 live
+      // plus a spurious TS2578. Both map back onto rip positions: the
+      // TS2322 onto the `Chip label: 123` head line the directive governs —
+      // absorbed, and absorbing it marked the directive USED, so the TS2578
+      // drops. A hint alone would NOT have marked it used: that guard is
+      // pinned by check.test.js ('an unused @ts-expect-error stays loud').
+      const chip = 'export Chip = component\n  @label: string := ""\n\n  render\n    span label\n\n';
+      await api.open('app.rip',
+        chip + 'export App = component\n  render\n    div\n      # @ts-expect-error — label expects string\n      Chip label: 123\n');
+      expect(api.diagnostics('app.rip')).toEqual([]);
+
+      // Control: drop the directive and the leaked error is REAL and loud —
+      // so the green assertion above means "absorbed", not "nothing fired".
+      await api.change('app.rip',
+        chip + 'export App = component\n  render\n    div\n      Chip label: 123\n');
+      expect(api.diagnostics('app.rip').map((d) => d.code)).toContain(2322);
     });
   }, 30000);
 });

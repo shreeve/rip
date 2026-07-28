@@ -1,10 +1,9 @@
-// The TS face's TypeScript-validity gate : the INDEPENDENT
-// verification that face output is real TypeScript — `tsc` under the
-// external-tool exception (the RIP_TSC pattern, exactly as
-// test/dts-tsc.test.js runs the declaration gate; RIP_REQUIRE_TSC=1
-// makes a missing tsc a FAILURE and the extended-tier script —
-// `bun run test:all`, where these tsc-spawning tiers live —
-// sets it).
+// The TS face's TypeScript-validity gate: the INDEPENDENT
+// verification that face output is real TypeScript — `tsc` is the
+// repository's pinned TypeScript (test/support/tsc.js resolveTsc),
+// exactly as test/toolchain/dts-tsc.test.js runs the declaration gate.
+// These tsc-spawning tiers run under the extended-tier script
+// (`bun run test:all`); a missing install throws (loud), never skips.
 //
 // Two tiers, because the corpus is a COMPILATION fixture set, not a
 // type-correct program set (files reference undefined names, mix types
@@ -20,7 +19,7 @@
 //   2. CLEAN rows: self-contained typed programs must check with ZERO
 //      diagnostics — annotations engage the checker for real — and a
 //      deliberate violation must FAIL, so the gate has teeth.
-import { describe, test, expect } from 'bun:test';
+import { test, expect } from 'bun:test';
 import { mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { join } from 'path';
@@ -28,28 +27,13 @@ import { tmpdir } from 'os';
 import { compile } from '../../src/compile.js';
 import { describeExtended, EXTENDED } from '../support/extended.js';
 import { tscBatch } from '../support/tscbatch.js';
+import { resolveTsc } from '../support/tsc.js';
 
-const TSC = process.env.RIP_TSC ?? Bun.which('tsc');
+// tsc is the repository's pinned TypeScript (resolveTsc), resolved only
+// in the extended tier that spawns it. A missing install throws here —
+// loud, a broken environment — never a silent skip.
+const TSC = EXTENDED ? resolveTsc() : null;
 const TSC_TIMEOUT = 120_000;
-
-if (!TSC && !process.env.RIP_REQUIRE_TSC) {
-  console.warn(
- '\n⚠ RIP_TSC is not set and no `tsc` is on PATH — the M10-B TS-face validity ' +
- 'gate is SKIPPED. Install TypeScript or point RIP_TSC at a tsc executable to run it.\n',
-  );
-}
-
-describe('the tsc floor (never skipped)', () => {
-  test('RIP_REQUIRE_TSC=1 makes a missing tsc a FAILURE here too', () => {
-    if (process.env.RIP_REQUIRE_TSC && !TSC) {
-      throw new Error(
- 'RIP_REQUIRE_TSC is set but no tsc was found (set RIP_TSC or put tsc on PATH) — ' +
- 'the TS-face validity gate cannot run in a required-validation environment',
-      );
-    }
-    expect(Boolean(TSC) || !process.env.RIP_REQUIRE_TSC).toBe(true);
-  });
-});
 
 // The feature-runtime names (set — reactive, schema, and the
 // M12 component family), ambient-declared: faces compile under
@@ -67,7 +51,8 @@ const AMBIENT =
 // tsc over a set of {name: text} files in a fresh temp dir; returns
 // the combined diagnostic output. noImplicitAny stays OFF — unannotated
 // Rip is legal, and the editor path suppresses the implicit-any family
-// per-code instead (the  posture, kept by ).
+// per-code instead (the gradual-typing posture — `SUPPRESSED_TS_CODES`
+// in packages/vscode/src/translate.js).
 const tscRun = (files) => {
   const dir = mkdtempSync(join(tmpdir(), 'rip-tsface-'));
   try {
@@ -78,13 +63,13 @@ const tscRun = (files) => {
     }
     // noImplicitAny pinned OFF explicitly (TS 6 CLI defaults it on):
     // unannotated Rip is legal, and the editor path suppresses the
-    // implicit-any family per-code instead (the  posture, ).
+    // implicit-any family per-code instead (the gradual-typing posture).
     const r = spawnSync(TSC, ['--noEmit', '--target', 'es2022', '--lib', 'es2022,dom', '--module', 'esnext', '--noImplicitAny', 'false', ...names], {
       cwd: dir,
       encoding: 'utf8',
     });
     if (r.error) {
-      throw new Error(`cannot run tsc at ${TSC} (${r.error.message}) — fix RIP_TSC or PATH`);
+      throw new Error(`cannot run tsc at ${TSC} (${r.error.message}) — try re-running \`bun install\``);
     }
     return { status: r.status, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   } finally {
@@ -95,10 +80,10 @@ const tscRun = (files) => {
 const corpusDir = join(import.meta.dir, '../corpus');
 const corpusFiles = readdirSync(corpusDir).filter((f) => f.endsWith('.rip')).sort();
 
-// The rows run in the EXTENDED tier only ,
-// and only with a tsc located; absence stays loud under
-// RIP_REQUIRE_TSC through the floor test above.
-const describeTscExtended = TSC ? describeExtended : describe.skipIf(true);
+// The rows run in the EXTENDED tier only; tsc is the repo's pinned
+// TypeScript, so absence is a loud install error (resolveTsc throws),
+// never a silent skip.
+const describeTscExtended = describeExtended;
 
 describeTscExtended('tier 1: every corpus TS face parses as TypeScript (no TS1xxx diagnostics)', () => {
   test('the whole corpus, one tsc program', () => {
@@ -153,9 +138,10 @@ const CLEAN_ROWS = [
  'count: number = 3\nratio: number = 1.5\n# @ts-expect-error totals mix\nbadTotal: string = count + ratio',
  'name = "world"\nn: number\n# @ts-expect-error interpolation is a string\nn = "hi #{name}"',
  'items: string[] = ["a", "b"]\nflag: boolean\n# @ts-expect-error element is a string\nflag = items[0]',
-    // the callback spelled `=>` keeps the whole statement one face
-    // line, so the directive places (the `->` twin lowers to a
-    // multi-line function body and DECLINES — the decline tests)
+    // the callback spelled `=>` keeps the whole statement on one face
+    // line, so the directive governs the error directly. Its `->` twin
+    // lowers to a multi-line function body and is pinned in PLACED_ROWS
+    // instead, where WHERE the error lands is the thing under test.
  'items: number[] = [1, 2, 3]\n# @ts-expect-error reduce yields a number\ntotal: string = items.reduce(((acc, n) => acc + n), 0)',
  'type Pair = [number, string]\np: Pair\np = [1, "a"]\n# @ts-expect-error index 1 is the string arm\nk: number = p[1]',
  '# @ts-ignore\nbroken: number = "s"\nbroken = 2',
@@ -408,18 +394,13 @@ describeTscExtended('tier 2: self-contained typed faces check CLEAN — annotati
   }, TSC_TIMEOUT);
 });
 
-// The DECLINE rows:
-// positions where suppression would be IMPRECISE decline placement —
-// the face carries NO directive bytes, tsc reports the real error
-// under its own code, and no TS2578 appears (nothing placed, nothing
-// unused). [source, the error code that must stay visible].
-// Under always-place (finding #6) every directive reaches the face.
-// A directive governs ONE generated line, so the outcome divides by
-// where the error lands: on the governed line → suppressed, clean;
-// INSIDE a multi-line lowering → the inner error stays VISIBLE and
-// @ts-expect-error additionally draws TS2578 — loud on both counts,
-// never a silent swallow. Rows: [src, visibleCodes, expect2578].
-const DECLINE_ROWS = [
+// The PLACED rows: every directive reaches the face, and these pin where
+// the error lands relative to the ONE generated line a directive governs.
+// On the governed line → suppressed, clean. INSIDE a multi-line lowering →
+// the inner error stays VISIBLE and `@ts-expect-error` additionally draws
+// TS2578 — loud on both counts, never a silent swallow.
+// Rows: [src, visibleCodes, expect2578].
+const PLACED_ROWS = [
   // comprehension-valued: the error lives INSIDE the lowered IIFE —
   // visible, plus the unused-directive report
   ['items: string[] = ["a"]\n# @ts-expect-error\nbad = (s.nope() for s in items)\nbad = []', ['TS2339'], true],
@@ -436,13 +417,13 @@ const DECLINE_ROWS = [
   ['# @ts-expect-error\na: Missing\nb: AlsoMissing\na = 1\nb = 2', ['TS2304'], false],
 ];
 
-describeTscExtended('the placed rows: every directive PLACES (finding #6) — suppression lands, siblings stay visible', () => {
+describeTscExtended('the placed rows: every directive PLACES — suppression lands, siblings stay visible', () => {
   let batch = null;
   const files = { 'ambient.d.ts': AMBIENT };
   if (EXTENDED && TSC) {
-    for (const [i, [src]] of DECLINE_ROWS.entries()) {
+    for (const [i, [src]] of PLACED_ROWS.entries()) {
       const faced = compile(src, { runtimeDelivery: 'none', face: 'ts' });
-      files[`decline${i}.ts`] = `${faced.code}\nexport {};\n`;
+      files[`placed${i}.ts`] = `${faced.code}\nexport {};\n`;
     }
   }
   const runBatch = () => {
@@ -450,19 +431,19 @@ describeTscExtended('the placed rows: every directive PLACES (finding #6) — su
     return batch;
   };
 
-  for (const [i, [src, visibleCodes, expect2578]] of DECLINE_ROWS.entries()) {
+  for (const [i, [src, visibleCodes, expect2578]] of PLACED_ROWS.entries()) {
     test(JSON.stringify(src), () => {
       // The directive reaches the face (the always-place posture).
-      expect(files[`decline${i}.ts`]).toContain('@ts-');
-      const errors = runBatch().byFile.get(`decline${i}.ts`) ?? [];
+      expect(files[`placed${i}.ts`]).toContain('@ts-');
+      const errors = runBatch().byFile.get(`placed${i}.ts`) ?? [];
       if (visibleCodes.length === 0) {
         // The governed error is suppressed; nothing else fires.
         expect(errors,
-          `expected a clean file:\n${errors.join('\n')}\n---\n${files[`decline${i}.ts`]}`).toEqual([]);
+          `expected a clean file:\n${errors.join('\n')}\n---\n${files[`placed${i}.ts`]}`).toEqual([]);
       }
       for (const code of visibleCodes) {
         expect(errors.some((e) => e.includes(code)),
-          `expected ${code} to stay visible:\n${errors.join('\n')}\n---\n${files[`decline${i}.ts`]}`).toBe(true);
+          `expected ${code} to stay visible:\n${errors.join('\n')}\n---\n${files[`placed${i}.ts`]}`).toBe(true);
       }
       expect(errors.some((e) => e.includes('TS2578'))).toBe(expect2578);
     }, TSC_TIMEOUT);

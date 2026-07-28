@@ -17,32 +17,19 @@
 // to isolate it, and
 //   bun scripts/fuzz-tsface.mjs <seed>
 // to print the program, its face, and the recorded regions.
-import { describe, test, expect } from 'bun:test';
+import { test, expect } from 'bun:test';
 import { compile } from '../../src/compile.js';
 import { stripFace } from '../../src/emitter.js';
 import { describeExtended, EXTENDED } from '../support/extended.js';
 import { tscBatch } from '../support/tscbatch.js';
+import { resolveTsc } from '../support/tsc.js';
 import { generateProgram, CONSTRUCT_KINDS } from '../support/fuzz-tsface.mjs';
 
-const TSC = process.env.RIP_TSC ?? Bun.which('tsc');
+// tsc is the repository's pinned TypeScript (resolveTsc), resolved only
+// in the extended tier that spawns it. A missing install throws here —
+// loud, a broken environment — never a silent skip.
+const TSC = EXTENDED ? resolveTsc() : null;
 const TSC_TIMEOUT = 60_000;
-
-// The tsc floor, NEVER skipped (the gate files' policy, mirrored
-// here): the printed reproduction path filters the run to THIS file,
-// which excludes the other gates' floor tests — without its own
-// floor, a single-file run with tsc missing would pass 0-fail while
-// the tsc-clean tier silently skipped.
-describe('the tsc floor (never skipped)', () => {
-  test('RIP_REQUIRE_TSC=1 makes a missing tsc a FAILURE here too', () => {
-    if (process.env.RIP_REQUIRE_TSC && !TSC) {
-      throw new Error(
-        'RIP_REQUIRE_TSC is set but no tsc was found (set RIP_TSC or put tsc on PATH) — ' +
-        'the fuzz tsc-clean tier cannot run in a required-validation environment',
-      );
-    }
-    expect(Boolean(TSC) || !process.env.RIP_REQUIRE_TSC).toBe(true);
-  });
-});
 
 // The seed corpus: 48 programs (~230 constructs) per run, or exactly
 // one under RIP_FUZZ_SEED (the reproduction path).
@@ -108,7 +95,7 @@ const AMBIENT =
   '__transition: any, __handleComponentError: any, __detach: any, __ownerFrame: any, ' +
   '__pushOwner: any, __popOwner: any, __detachRef: any;\n';
 
-const describeTscExtended = TSC ? describeExtended : describe.skipIf(true);
+const describeTscExtended = describeExtended;
 
 describeTscExtended('fuzz: every composed face is tsc-clean (one batched program)', () => {
   let batch = null;

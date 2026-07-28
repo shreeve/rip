@@ -1,0 +1,23 @@
+# 14-schema.errors.rip — intentional negatives asserted by the Diagnostics Lane; the wrongGetter row is pinned (error-pins.json) while the callable-unknown finding is open.
+# @ts-nocheck
+
+Person = schema
+  name!  string
+  tag!   'a' | 'b'
+
+Cart = schema :shape
+  items! number[]
+  total: ~> @items.length
+
+Color = schema :enum
+  :red
+  :green
+
+# the schema declarations close above; the negatives follow
+
+wrongAssign: Person = { name: 42, tag: 'a' }
+wrongLiteral: Person = { name: 'ok', tag: 'c' }
+wrongRead = Person.parse({ name: 'x', tag: 'a' }).nope
+wrongEnum: Color = 'mauve'
+wrongConstruct = new Person()
+wrongGetter: number = Cart.parse({ items: [3] }).total

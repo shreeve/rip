@@ -1,0 +1,25 @@
+# 23-functions.rip — what the checker concludes about function faces.
+
+# ── The dammit operator calls AND awaits, so it types as the awaited value, not the promise ──
+
+def fetchCount(): Promise<number>
+  Promise.resolve(9)
+
+harvested = fetchCount!
+
+console.log('dammit:', harvested.toFixed(0))
+
+# ── A fat arrow with an explicit return type emits inline and enforces it ──
+
+doubler: (n: number) => string = (n) => String(n * 2)
+
+console.log('arrow:', doubler(4))
+
+# ── Prototype augmentation: the write types, and so does every call site. Emission and decline classes are gated in battery/prototype.rip; this corpus owns the USE sites ──
+
+String::titleCase: () => string = ->
+  @toUpperCase()
+
+titled = 'hello'.titleCase()
+
+console.log('proto:', titled)

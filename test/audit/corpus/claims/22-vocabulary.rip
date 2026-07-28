@@ -1,0 +1,78 @@
+# 22-vocabulary.rip — what the checker DOES with the shapes the census counts.
+
+# ── Tuple positions type independently: each index reads its own member ──
+
+coordinate: [string, number] = ['origin', 12]
+axisName = coordinate[0]
+axisStep = coordinate[1]
+axisPair: [string, number] = [axisName, axisStep]
+
+console.log('tuple:', axisPair)
+
+# ── A recursive alias resolves, and checks all the way down a deep literal ──
+
+type Twig = { label: string, shoots: Twig[] }
+
+canopy: Twig = { label: 'trunk', shoots: [{ label: 'limb', shoots: [{ label: 'bud', shoots: [] }] }] }
+
+console.log('recursive:', canopy.shoots[0].shoots[0].label)
+
+# ── An index signature admits extra keys while its named members stay required ──
+
+type Tallies = { [slot: string]: number, entries: number }
+
+counters: Tallies = { entries: 2, alpha: 1, beta: 5 }
+
+console.log('index:', counters.entries.toFixed(0), counters.alpha.toFixed(0))
+
+# ── A deep member is checked at its own depth, which is where its rejection lands too ──
+
+type Crate = { inner: { depth: number } }
+
+packed: Crate = { inner: { depth: 3 } }
+
+console.log('deep:', packed.inner.depth.toFixed(0))
+
+# ── Overload resolution picks the MATCHED signature's return, where the overloads' returns differ ──
+
+def measure(sample: string): number
+def measure(sample: number): string
+def measure(sample: string | number): number | string
+  if typeof sample is 'string' then sample.length else String(sample)
+
+measuredLength = measure('alpha')
+measuredLabel = measure(7)
+overloadPair: [number, string] = [measuredLength, measuredLabel]
+
+console.log('overloads:', overloadPair)
+
+# ── Generic call-site inference preserves the literal type rather than widening it to the constraint ──
+
+def echoOf<T extends string>(sample: T)
+  sample
+
+echoed = echoOf('narrow')
+narrowed: 'narrow' = echoed
+
+console.log('generic:', narrowed.toUpperCase())
+
+# ── A union-with-`undefined` member DEMANDS its key; `?:` does not ──
+
+type Firm = { note: string | undefined }
+type Lax = { note?: string }
+
+stated: Firm = { note: undefined }
+omitted: Lax = {}
+optionality = [stated.note, omitted.note]
+
+console.log('optionality:', optionality)
+
+# ── A nullable-union target accepts each arm ──
+
+drift: string | undefined = 'settled'
+drift = undefined
+sounding: number | null = 4
+sounding = null
+nullables: [string | undefined, number | null] = [drift, sounding]
+
+console.log('nullable:', nullables)

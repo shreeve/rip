@@ -1,0 +1,13 @@
+# 23-functions.errors.rip — intentional negatives, each asserted by the Diagnostics Lane (bun run audit --diagnostics).
+# @ts-nocheck
+
+def fetchCount(): Promise<number>
+  Promise.resolve(9)
+
+String::titleCase: () => string = ->
+  @toUpperCase()
+
+wrongPromised = (): Promise<number> => Promise.resolve('text')
+wrongHarvest: string = fetchCount!
+wrongArrow: (n: number) => string = (n) => n
+wrongTitled: number = 'hello'.titleCase()
