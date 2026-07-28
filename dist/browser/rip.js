@@ -3885,7 +3885,14 @@ function rewriteTypes(tokens, mintId, text, fail) {
   const frameTop = () => frames[frames.length - 1] ?? null;
   let pendingClassBody = false;
   const classIndents = [];
-  const inClassBody = () => classIndents.length > 0 && classIndents[classIndents.length - 1];
+  const inClassBody = () => classIndents.length > 0 && !!classIndents[classIndents.length - 1];
+  const classBodyKind = () => classIndents[classIndents.length - 1] ?? false;
+  const rejectValueWordBinding = (nameTok) => {
+    const lowered = VALUE_WORDS.get(nameTok.value);
+    if (lowered === undefined)
+      return;
+    fail(`'${nameTok.value}' cannot name a binding — every read of '${nameTok.value}' ` + `lowers to \`${lowered}\`, so the binding would be unreachable`, nameTok.start, nameTok.end);
+  };
   let classHeadDepth = -1;
   let classHeadRunDepth = 0;
   let prevSiblingKV = false, curLineKV = false;
@@ -4172,8 +4179,10 @@ function rewriteTypes(tokens, mintId, text, fail) {
       if ((prev.kind === "PROPERTY" || prev.kind === "IDENTIFIER") && beforePrev?.kind === "DEF") {
         const last = claim("TYPE", tok, i + 1, {});
         if (last >= 0) {
-          if (prev.kind === "PROPERTY")
+          if (prev.kind === "PROPERTY") {
+            rejectValueWordBinding(prev);
             prev.kind = "IDENTIFIER";
+          }
           i = last;
           continue;
         }
@@ -4197,6 +4206,7 @@ function rewriteTypes(tokens, mintId, text, fail) {
               if (beforePrev.kind === "PROPERTY")
                 beforePrev.kind = "IDENTIFIER";
             } else if (prev.kind === "PROPERTY" && tokens[i - 2]?.kind !== "@") {
+              rejectValueWordBinding(prev);
               prev.kind = "IDENTIFIER";
             }
             f.sawType = true;
@@ -4226,8 +4236,11 @@ function rewriteTypes(tokens, mintId, text, fail) {
       if (frames.length === 0 && (namedColon || stringNamedColon) && typedDeclEq(tokens, i) >= 0) {
         const last = claim("TYPE", tok, i + 1, {});
         if (last >= 0) {
-          if (nameTok.kind === "PROPERTY" && !isAtName)
+          if (nameTok.kind === "PROPERTY" && !isAtName) {
+            if (classBodyKind() !== "class")
+              rejectValueWordBinding(nameTok);
             nameTok.kind = "IDENTIFIER";
+          }
           curLineKV = false;
           i = last;
           continue;
@@ -4257,8 +4270,11 @@ function rewriteTypes(tokens, mintId, text, fail) {
         if (end > i + 1 && isCompleteTypeExpr(tokens, i + 1, end)) {
           const last = claim("TYPE", tok, i + 1, {});
           if (last >= 0) {
-            if (nameTok.kind === "PROPERTY" && !isAtName)
+            if (nameTok.kind === "PROPERTY" && !isAtName) {
+              if (classBodyKind() === "component")
+                rejectValueWordBinding(nameTok);
               nameTok.kind = "IDENTIFIER";
+            }
             i = last;
             continue;
           }
@@ -4270,8 +4286,10 @@ function rewriteTypes(tokens, mintId, text, fail) {
         if (decision) {
           const last = claim("TYPE", tok, i + 1, {});
           if (last >= 0) {
-            if (prev.kind === "PROPERTY")
+            if (prev.kind === "PROPERTY") {
+              rejectValueWordBinding(prev);
               prev.kind = "IDENTIFIER";
+            }
             curLineKV = false;
             i = last;
             continue;
@@ -4296,7 +4314,7 @@ function rewriteTypes(tokens, mintId, text, fail) {
         classHeadDepth = -1;
     }
     if (kd === "CLASS" || kd === "COMPONENT")
-      pendingClassBody = true;
+      pendingClassBody = kd === "CLASS" ? "class" : "component";
     else if (kd === "THEN")
       pendingClassBody = false;
     else if (kd === "INDENT") {
@@ -4464,6 +4482,17 @@ var ALIASES = {
   on: ["BOOL", "true"],
   off: ["BOOL", "false"]
 };
+var VALUE_WORDS = new Map([
+  ["yes", "true"],
+  ["no", "false"],
+  ["on", "true"],
+  ["off", "false"],
+  ["true", "true"],
+  ["false", "false"],
+  ["null", "null"],
+  ["undefined", "undefined"],
+  ["this", "this"]
+]);
 var TAGGABLE = new Set(["IDENTIFIER", "PROPERTY", ")", "CALL_END", "]", "INDEX_END"]);
 var OPS4 = { ">>>=": "COMPOUND_ASSIGN" };
 var OPS3 = {
