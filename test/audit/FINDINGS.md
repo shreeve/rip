@@ -36,6 +36,7 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [27](#27-a-pattern-catch-destructures-unknown) | A pattern catch publishes TS2339/TS2488 from its own lowering | `compiler` | **none** — the corpus parks both pattern spellings ([MANIFEST.md](MANIFEST.md)'s Parked table); a `check` case in the match-operator style is the honest interim gate, unbuilt |
 | [31](#31-a-promoted-param-declares-no-field) | A promoted `@`-param declares no field — TS2339 on every member use | `compiler` | **none** — 08-functions carries promotion only alongside manual field declarations; a `check` case in the match-operator style is the honest interim gate, unbuilt |
 | [52](#52-a-destructured-binding-read-by-a-hoisted-def-is-implicitly-any-under-strict) | A destructured binding read by a hoisted def is implicitly `any` under strict | `strict`, `hoist` | **none** — the shape cannot enter a positive fixture while it fails the `strict` dimension; the fix's gate is the destructured spelling entering the inference claims fixture, where `strict` holds it |
+| [54](#54-a-generic-components-shipped-declarations-reference-a-type-parameter-they-never-declare) | A generic component's shipped declarations reference a type parameter they never declare | `compiler` | **none** — the audit reads the face the checker serves, never the emitted declarations; the fix's gate is a type parameter on dts-tsc's component fixture |
 | [53](#53-a-paren-injected-calls-arity-error-lands-on-the-wrong-argument) | A paren-injected call's arity error lands on the wrong argument | `editor`, `compiler` | **none** — the negative cannot enter the error lane while the position is wrong; the fix's gate is that negative joining 02-operations' error pair |
 | [43](#43-a-schema-callables-output-types-unknown) | A schema callable's output types `unknown` — false errors on every typed read | `compiler` | the Diagnostics Lane's 14-schema pin (`error-pins.json`) asserts the typed-read rejection **as the interim** — it goes red the day callable outputs type, the cue to retire it |
 | [36](#36-a-reactive-import-serves-the-raw-cell) | A reactive import serves the raw cell — no deref, writes don't build | `compiler`, `capability` | **none while the semantics are unsettled** — auto-deref vs cell-as-API is the language owner's ruling; this row's exit is that ruling, which hands it an ordinary gate either way |
@@ -298,6 +299,32 @@ rip injects the parens a paren-less call omits, and the emitted face is byte-ide
 **Why the suite missed it.** `bun test` asserts that the paren-less call runs and that its emitted bytes round-trip, both of which hold. Nothing asserted where a diagnostic on such a call lands, because the corpus had no paren-less negative — the explicit-arity negative in 02-operations covers the code and says nothing about the spelling.
 
 **Status.** ⬜ **Open** (2026-07-27) — **no gate**: the negative cannot enter the error lane while the position is wrong, since the Diagnostics Lane asserts code AND position and pinning it would certify the mis-position as intended. The claims row is parked. The fix's gate is that negative entering 02-operations' error pair, where the lane holds it by both.
+
+### 54. A generic component's shipped declarations reference a type parameter they never declare
+
+```
+export Listing<TItem extends string> = component
+  @items?: TItem[] := []
+```
+
+emits
+
+```ts
+export interface Listing {                      // no <TItem>
+  items: { value: TItem[]; read(): TItem[] };   // TS2304: Cannot find name 'TItem'
+};
+declare let Listing: {
+  new (props?: { items?: TItem[] | … }): Listing;   // and again, four more times
+};
+```
+
+The type-parameter list is dropped from both the instance interface and the constructor, while every reference to it survives in the members. The declaration file does not compile: seven TS2304 for that four-line component, fourteen for [13-components.rip](corpus/grammar/13-components.rip)'s two generic components. A TypeScript consumer importing a generic component from the shipped `.d.ts` gets `Cannot find name` for a parameter it cannot see or supply.
+
+**The checker's face is fine, and that is why this is invisible.** `rip check` reads an in-memory face where the parameter IS bound — a use-site constraint violation rejects correctly there (driven 2026-07-27: `new Listing({ items: [1, 2] })` publishes TS2322 twice). Only the emitted declarations lose it. Two surfaces, one right and one wrong, so no amount of checking source finds this.
+
+**Why the suite missed it.** [dts-tsc.test.js](../toolchain/dts-tsc.test.js) does exactly the right thing — compiles a component's shipped declarations against a consumer program — but its fixture is `export Counter = component` with no type parameter, so the generic path has never been emitted into a compiler. Nothing else looks at declaration text for components at all: the audit's lanes read the checker's face, never the `.d.ts`.
+
+**Status.** ⬜ **Open** (2026-07-27) — **no gate**, and the gate does not belong in this corpus: the audit judges the face the checker serves, which is correct here. The fix's gate is a type parameter on `dts-tsc.test.js`'s component fixture, where a consumer already compiles against the emitted declarations and would fail on the unbound name.
 
 ### 43. A schema callable's output types `unknown`
 
