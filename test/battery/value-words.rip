@@ -1,0 +1,76 @@
+# Test: value words never name a binding
+# `yes`/`no`/`on`/`off` (the BOOL aliases) and the literal keywords
+# (`true`, `false`, `null`, `undefined`, `this`) always READ as their
+# value token, before scope exists — a binding so named would be
+# unreachable, every read silently the literal. Annotated binding
+# sites reject positioned at the name. Property keys, class fields,
+# and promoted params stay legal: their reads are property accesses,
+# which never consult the word tables.
+
+import { test, code, fail, type } from '../support/testing.js'
+
+# ==============================================================================
+# The rejection: annotated binding sites
+# ==============================================================================
+
+# Statement-level annotated declarations, every assign head.
+fail "annotated declaration", "off: boolean = false\noff", "'off' cannot name a binding — every read of 'off' lowers to `false`, so the binding would be unreachable"
+fail "annotated state declaration", "on: boolean := true\non", "'on' cannot name a binding — every read of 'on' lowers to `true`, so the binding would be unreachable"
+fail "annotated readonly declaration", "yes: number =! 1\nyes", "'yes' cannot name a binding — every read of 'yes' lowers to `true`, so the binding would be unreachable"
+fail "annotated declaration in a def body", "def f\n  no: number = 2\n  no\nf()", "'no' cannot name a binding — every read of 'no' lowers to `false`, so the binding would be unreachable"
+fail "annotated export declaration", "export off: number = 2", "'off' cannot name a binding"
+
+# The literal keywords reject on the same law.
+fail "undefined as declaration name", "undefined: number = 2\nundefined", "'undefined' cannot name a binding — every read of 'undefined' lowers to `undefined`, so the binding would be unreachable"
+fail "true as declaration name", "true: boolean = false\ntrue", "'true' cannot name a binding — every read of 'true' lowers to `true`, so the binding would be unreachable"
+fail "null as declaration name", "null: number = 2\nnull", "'null' cannot name a binding — every read of 'null' lowers to `null`, so the binding would be unreachable"
+fail "this as declaration name", "this: number = 2", "'this' cannot name a binding — every read of 'this' lowers to `this`, so the binding would be unreachable"
+
+# Annotated parameters — def, arrow, and the parameterless def's name
+# (its return annotation is what smuggles the word past the scanner).
+fail "annotated def parameter", "def toggle(off: boolean)\n  off\ntoggle(true)", "'off' cannot name a binding — every read of 'off' lowers to `false`, so the binding would be unreachable"
+fail "annotated arrow parameter", "g = (yes: number) -> yes\ng(1)", "'yes' cannot name a binding — every read of 'yes' lowers to `true`, so the binding would be unreachable"
+fail "this as parameter name", "f = (this: Window) -> 1", "'this' cannot name a binding — every read of 'this' lowers to `this`, so the binding would be unreachable"
+fail "parameterless def named for an alias", "def no: number\n  42\nno", "'no' cannot name a binding — every read of 'no' lowers to `false`, so the binding would be unreachable"
+
+# Component members read BARE in render and methods, so a value-word
+# member is unreachable — both the initialized and the bare typed form
+# reject.
+fail "component member named off", "A = component\n  off: boolean := false\n  render\n    div\n      = off", "'off' cannot name a binding — every read of 'off' lowers to `false`, so the binding would be unreachable"
+fail "component bare typed member named on", "A = component\n  on: boolean\n  render\n    div", "'on' cannot name a binding — every read of 'on' lowers to `true`, so the binding would be unreachable"
+
+# ==============================================================================
+# The negative space: property positions stay legal
+# ==============================================================================
+
+# Object keys — nothing later reads a binding.
+test "value words as object keys", "a = { on: 1, off: 2, yes: 3, no: 4 }\na.on + a.off + a.yes + a.no", 10
+
+# A class field so named stays reachable: reads are `@`/`this.`
+# property accesses.
+test "class field named off", "class A\n  off: boolean = false\n  m: -> @off\nnew A().m()", false
+
+# A bare typed class field (no initializer) claims and erases.
+test "bare typed class field named off", "class A\n  off: boolean\ntypeof A", "function"
+
+# A promoted parameter's name stays PROPERTY (`@off` is the binding).
+test "promoted parameter named off", "class A\n  constructor: (@off: boolean) ->\nnew A(true).off", true
+
+# A component @-prop so named stays legal for the same reason.
+test 'component @-prop named off', '''
+    A = component
+      @off?: boolean := false
+      render
+        div
+          = @off
+    inst = A.new()
+    inst._init({})
+    typeof inst._create
+''', 'function'
+
+# A `this`-typed parameter inside a TYPE ALIAS is type text, not a
+# binding site.
+test "this-param in a type alias", "type H = (this: Window, x: number) => any\n1", 1
+
+# The aliases keep their VALUE reading everywhere an expression is.
+test "alias reads still lower", "x = off\ny = on\n[x, y]", [false, true]

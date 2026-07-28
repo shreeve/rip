@@ -2161,6 +2161,8 @@ if (RUN_GRAMMAR) {
     const EXCLUDED_SPELLINGS = new Map([
       ['on', '`true` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
       ['off', '`false` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
+      ['yes', '`true` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
+      ['no', '`false` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
     ]);
     const rewrittenAll = Object.entries(ALIASES)
       .filter(([word, [, value]]) => value !== word)
