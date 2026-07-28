@@ -1,9 +1,9 @@
-# HANDOFF — session launch document (2026-07-27, early morning)
+# HANDOFF — session launch document (2026-07-28, midday)
 
 The tracked session launch document (see AGENTS.md, working ledgers):
 read it first when starting a session; rewrite it at session
 boundaries with live-verified facts only. Every fact below was
-verified live on 2026-07-27 ~1:30 AM (UTC-6) against git, gh, the
+verified live on 2026-07-28 ~12:15 PM (UTC-6) against git, gh, the
 files, and fresh suite runs, except where an older verification date
 is stated explicitly.
 
@@ -18,113 +18,114 @@ is stated explicitly.
   with enumerated corpus diffs; no AI attribution in commits.
 - Commands: `bun run test:all` (CANONICAL suite — completion claims run
   against this, not the fast loop) · `bun run test` (fast loop) ·
-  `bun run test:rip` (battery only, sub-second) · `bun run type-audit`
-  · `bun run parser` · `bun run corpus-expected`.
+  `bun run test:rip` (battery only, sub-second) · `bun run audit`
+  (the typed-editor scoreboard; `--help` for the lanes) ·
+  `bun run parser` · `bun run corpus-expected`.
 
-## State of main (tip 316f9ab, landed 2026-07-24)
+## State of main (tip 997c8ed, landed 2026-07-28)
 
-- Suites, re-run live at this handoff: repo-root `bun run test:all` →
-  **5954 pass / 0 fail** (26.2s); packages/server `bun run test` (its
-  own loop) → **134/134**; `bun run type-audit` → **60 dimension
-  checks, all passing**. Main's CI (316f9ab) is green.
-- Main has NOT moved since 2026-07-24. The single landing since the
-  2026-07-22 true-up (`73d71f3`) is `316f9ab` — **docs/WORKSPACE.md,
-  the Rip Workspace constitution** (owner rulings 2026-07-23, polish
-  2026-07-24), plus its ROADMAP wiring. It locks Q1–Q5 (Pure Rip with
-  invisible Projection; signed cells and CSP without `unsafe-eval` on
-  the happy path; Hub ding only in dev, HTTP carries bytes and never
-  bodies; stable path-derived-at-birth component ids; research-first
-  apply quality against the written S1–S15 scenario suite; M1 without
-  RipFS/OPFS), fixes the door-vs-apply split (door = the contract;
-  apply = a replaceable engine in packages/refresh), assigns package
-  ownership, sets kill-switch rules under `RIP_WORKSPACE=1`, and
-  defines milestones M0 (sealed populate) and M1 (live-mutate door).
-  Experimental until apply research lands; never a Janus capability.
-- Everything on main since the last CODE landing (`588b41f`,
-  2026-07-22) is docs-only (HANDOFF, TODO, HMR.md, ROADMAP.md,
-  WORKSPACE.md — verified by diff), so the 2026-07-22 code
-  reconnaissance below still describes the live code.
+- **PR #156 "Audit: six lanes, a rewritten corpus, and headless
+  `rip check`" is MERGED** — true-merge `997c8ed`, 2026-07-28 10:23
+  MDT, CI green on the merge commit. Diff vs the prior main tip
+  (`5185026`): 191 files, +16,490/−5,728 — a CODE landing (emitter,
+  lexer, `src/check.js`, `src/dts.js`, `bin/rip` dispatch), not
+  docs-only. What it brought:
+  - `test/type-audit/` is now **`test/audit/`**; the command is
+    **`bun run audit`** (`bun test/audit/runner.js`) — six lanes:
+    grammar, mapping, type, diagnostics, hover, token. NOTE: the
+    fixture corpus needs a one-time `bun install` in `test/audit/`
+    (dayjs, react, react-dom, zod, zustand, @types/react{,-dom}) or
+    the runner refuses loudly.
+  - **Headless `rip check`** (`src/check.js`, `rip check` from
+    `bin/rip`).
+  - The findings ledger (`test/audit/FINDINGS.md`) restructured as
+    **"a road, not a record"**: numbering runs to **#59**, **38 open
+    rows** ordered by user reach, a 24-row Closed table (closed
+    bodies are deleted; the gate is the record). Claims queue
+    drained; the corpus rewritten consumer-face.
+- **PR #165 (finding #21 second try, identifier read mappings) is
+  CLOSED unmerged** — 2026-07-28 10:24 MDT, no comment (the same
+  pattern as #158/#161/#162). Finding #21 stays open on the road; its
+  `census` gate is red by design.
+- **The PR queue is EMPTY and the branch inventory is minimal**: zero
+  open PRs; the only remote branch is `main`; the only local branch
+  is `main`; working tree clean at `997c8ed`.
+- Suites, re-run live at this handoff on `997c8ed`:
+  - repo-root `bun run test:all` → **6086 pass / 0 fail** (60.8s);
+  - packages/server `bun run test` (its own loop) → **134/134**;
+  - `bun run audit` → **Type lane: 115 dimension checks, all
+    passing**; Grammar 526 productions, 520 exercised, obligations
+    all hold; Diagnostics 179 asserted, 2 position violations (red by
+    agreement, finding #50); Hover 563 probes, twin parity + expected
+    clean; Token 562 probes, 6 invariant violations (red by
+    agreement, #33/#57/#37); Mapping 3506 reads, 586 unmapped + 758
+    at-risk (tracking the mapping gap, #21 — expected). **Contract
+    holds: 15 green, 3 red by agreement.** Counts drift as fixtures
+    land; the gate names are the stable citation (FINDINGS.md
+    conventions).
 
-## PR #156 and the findings series
+## The findings road (test/audit/FINDINGS.md on main)
 
-- **PR #156** "Type-audit verify-and-resolve (preview)" — DRAFT, head
-  `bb04a63`, CI SUCCESS, mergeStateStatus CLEAN, and now FULLY caught
-  up with main: two catch-up merges landed 2026-07-24 (`a5f84e7`
-  through 73d71f3, then `bb04a63` through 316f9ab), so the merge-base
-  with main is 316f9ab itself. Diff vs main: 156 files,
-  +13,562/−5,252.
-- **No weekend work landed**: the branch head is unchanged since
-  2026-07-24, and Philip's findings ledger
-  (`test/type-audit/FINDINGS.md` on the branch) still runs to
-  **finding #50**. Recent open findings include the type sub-language
-  boundary cases (#45 type predicates vs rip's `is`, #46 mapped types
-  rejected by the type-body validator, #48 method members in inline
-  type bodies, #49 import type cannot name a `.rip` module) and #50
-  (tuple-element diagnostics positioned on the whole list).
-- Still blocked solely on owner + Philip go/no-go; UI work begins with
-  Philip after it lands.
-- **PR #162 (finding #8, cold auto-import) is CLOSED** — closed by the
-  owner 2026-07-24 16:38 UTC, not merged, no comment or landing note
-  recorded on the PR. Its branch `steve-types-6` was deleted from the
-  remote 2026-07-27 06:43 UTC (minutes before this handoff).
-- **PR #165 (finding #21 second try, identifier read mappings)** —
-  OPEN, head `bfd668f`, mergeStateStatus DIRTY (conflicts with main),
-  now 88 commits behind, no CI on its head. Its subject is the top of
-  #156's findings road; its fate (rework vs close) is an open owner
-  decision.
-- **Branch inventory is clean**: main, `type-audit-verify-and-resolve`
-  (#156), `steve-types-21.2` (#165) — local and remote, nothing else.
+Top of the road, in its own recommendation order: **#51** (a boolean
+alias word — `yes`/`no`/`on`/`off` — naming an annotated binding
+makes every read the literal: a silent wrong VALUE, the forbidden
+defect class), **#21** (identifier reads carry no source span — the
+root under four editor surfaces), **#22** (completion/signature help
+on incomplete expressions), **#40** (component member
+initializers/writes never type-checked), **#42** (schema
+defaults/transforms never type-checked).
 
-## Browser delivery / Rip Workspace (the big next-session context)
+- **IN FLIGHT: finding #51** — a parallel agent is investigating it
+  right now (session of 2026-07-28). If it proves a quick fix, that
+  agent lands it as its own PR into main and deletes its branch.
+  Verified NOT landed as of this handoff (zero open PRs, main still
+  at `997c8ed`); whoever reads this next should check
+  `git log origin/main` before assuming either state.
 
-The 2026-07-22 reconnaissance stands (code unchanged since; see
-above): script-tag loading and module/package-graph delivery are
+## Owner decision docket — DEFERRED by owner 2026-07-28
+
+The owner explicitly deferred these today; record them, do not
+resolve them:
+
+- **Finding #36** — a reactive import serves the raw cell:
+  auto-deref vs cell-as-API (language ruling).
+- **Finding #45** — type predicates inside type bodies collide with
+  rip's `is` (language ruling).
+- **Finding #46** — mapped types: admit or ban (language ruling).
+- **`rip.browser` granularity** (docs/ROADMAP.md): the flag is
+  package-level, so `@rip-lang/ui/browser` cannot travel while the
+  package's Tailwind half carries npm deps. Subpath metadata vs a
+  package split vs an assembly-time export filter — no ruling.
+- **misc/ triage**: misc/PLAN.md + misc/FINALIZE.md deletion
+  (recommended: delete — stale campaign machinery) and the three
+  untriaged misc/ directories (analysis/, server-v4-discarded/,
+  vite/).
+
+Carried from before, still unruled: the bare-optional-parameters
+strict contract (docs/ROADMAP.md, Type and editor directions).
+
+## Browser delivery / Rip Workspace
+
+The 2026-07-22 reconnaissance stands — #156 touched nothing under
+`packages/server` or the browser packages (verified by diff at this
+handoff): script-tag loading and module/package-graph delivery are
 SHIPPED and Playwright-certified in CI; no product surface serves
 `index.html`/`bundle.json` (only the certification fixture
 `packages/browser-tests/serve.mjs`); no watch→browser transport
 exists anywhere in v4.
 
-WORKSPACE.md resolved two of the three rulings that were pending at
-the last handoff:
-
-1. **Dev watch transport — SETTLED (Q2)**: Hub ding (Janus's existing
-   hub carries tiny invalidate notices in watch mode), HTTP carries
-   the bytes, the Hub never carries bodies. This supersedes HMR.md's
-   inline-WebSocket payload rows (ROADMAP says so explicitly).
-2. **Serving split — SETTLED (ownership table)**: the muscles (disk
-   watch, path→id map, rev bump, HTTP cells/manifest) live in
-   `packages/server` as a thin feed; the reactive bag is
-   `packages/workspace`, never inside server; the doorbell is Janus.
-   Bootstrap order: flag on → `packages/workspace` → thin server
-   feed → Hub doorbell.
-3. **`rip.browser` granularity — STILL OPEN** (ROADMAP): the flag is
-   package-level, so `@rip-lang/ui/browser` cannot travel while the
-   package's Tailwind half carries npm deps. Subpath metadata vs a
-   package split vs an assembly-time export filter — no ruling.
-
-The CSP-clean precompile leaning (2026-07-22: probably never
-pure-JS-only; the compiler stays available on-the-fly) stands but
-does NOT override Workspace M0 on the Workspace path (signed cells +
-CSP without `unsafe-eval` on the happy path).
-
-## Open decisions / in-flight
-
-- **PR #156 go/no-go** (owner + Philip) — the gating decision for the
-  whole findings series and the UI stage after it.
-- **Philip's queued language rulings**, all verified open in the
-  ledger: finding **#36** (a reactive import serves the raw cell —
-  auto-deref vs cell-as-API), **#45** (type predicates inside type
-  bodies collide with rip's `is`), **#46** (admit or ban mapped
-  types).
-- **Fate of PR #165** (DIRTY, 88 behind; subject is top of #156's
-  findings road).
-- **`rip.browser` granularity** (above).
-- Pending owner rulings from before (all still unruled; the files are
-  still present): misc/PLAN.md + misc/FINALIZE.md deletion
-  (recommended: delete — stale campaign machinery); the three
-  untriaged misc/ directories (analysis/, server-v4-discarded/,
-  vite/); the bare-optional-parameters strict contract
-  (docs/ROADMAP.md, Type and editor directions).
+docs/WORKSPACE.md (landed 2026-07-24) is the Rip Workspace
+constitution: Q1–Q5 locked (Pure Rip with invisible Projection;
+signed cells and CSP without `unsafe-eval` on the happy path; Hub
+ding only in dev, HTTP carries bytes and never bodies; stable
+path-derived-at-birth component ids; research-first apply quality;
+M1 without RipFS/OPFS), door-vs-apply split fixed, package ownership
+assigned, kill-switch rules under `RIP_WORKSPACE=1`, milestones M0
+(sealed populate) and M1 (live-mutate door). The dev watch transport
+and serving split are SETTLED there; `rip.browser` granularity is
+the remaining open ruling (deferred, above). The CSP-clean precompile
+leaning (2026-07-22) stands but does not override Workspace M0 on the
+Workspace path.
 
 ## Standing state (unchanged, spot-checked)
 
@@ -135,8 +136,8 @@ CSP without `unsafe-eval` on the happy path).
   publishing upstreams to the control plane.
 - **Server remaining in-framework work** (README Planned + ROADMAP):
   the `--bridge` registration flag, hub ergonomics, and the opt-in
-  file logging knob — plus, new since WORKSPACE.md, the thin
-  Workspace feed (muscles) when that work starts.
+  file logging knob — plus the thin Workspace feed (muscles) when
+  that work starts.
 - **Unnamed flake watch stands**: an unreproduced single-failure
   test:all run (two sightings, 2026-07-20/21; timing sensitivity
   under machine load suspected). If a logged run ever fails, capture
@@ -145,24 +146,26 @@ CSP without `unsafe-eval` on the happy path).
 
 ## Next session: recommended starting point
 
-- **Workspace M0 / dev-server integration** is the highest-leverage
-  block, and WORKSPACE.md is now its constitution: the transport and
-  serving-split rulings are in hand, so the work is wiring the thin
-  server feed and `packages/workspace` under the kill-switch rules,
-  plus settling `rip.browser` granularity so ui/browser can travel.
-- The **#156 go/no-go** is the gating OWNER action — everything in
-  the findings series and the Philip UI stage queues behind it.
-- The server Planned items (--bridge flag, hub ergonomics, file
-  logging knob) are small and independent — good parallel work.
+- **The findings road is now the shared main-branch queue** — #51 is
+  in flight (check whether it landed); #21 is the biggest
+  multi-surface root and the subject the closed #165 attempted.
+- **The Philip UI stage is unblocked** by the #156 landing
+  (docs/ROADMAP.md, UI bullet) — coordination with Philip, not solo
+  work.
+- **Workspace M0 / dev-server integration** remains the
+  highest-leverage product block; WORKSPACE.md is its constitution,
+  and the work is wiring the thin server feed and
+  `packages/workspace` under the kill-switch rules.
+- The owner's deferred docket (above) gates #36/#45/#46 and
+  `rip.browser`; do not resolve them unilaterally.
 
 ## Upstream Bun thread
 
 - **PR [oven-sh/bun#29291](https://github.com/oven-sh/bun/pull/29291)**
   (ESM bytecode without `--compile`): OPEN, head `fa97f46`, sole gate
-  unchanged: codeowner review (REVIEW_REQUIRED). No activity since
-  2026-07-20; re-verified via gh at this handoff. When it merges:
-  canary build, then revisit the prebuild bytecode decision in
-  `packages/server/manager.rip`.
+  unchanged: codeowner review (REVIEW_REQUIRED). Re-verified via gh
+  at this handoff. When it merges: canary build, then revisit the
+  prebuild bytecode decision in `packages/server/manager.rip`.
 - Issue [oven-sh/bun#34835](https://github.com/oven-sh/bun/issues/34835)
   (mmap the bytecode sidecar): OPEN, still exactly one comment (the
   owner's 2026-07-20 RoboBun-review request, cc @alii) — no maintainer
@@ -188,15 +191,19 @@ CSP without `unsafe-eval` on the happy path).
 
 ## Operational notes (this environment)
 
+- `test/audit/` needs its own `bun install` (fixture corpus) before
+  `bun run audit` runs — done on this machine 2026-07-28; a fresh
+  clone will hit the loud refusal once.
 - The `user-ai` MCP: the Anthropic leg was OUT OF CREDITS as of
   2026-07-22 early morning (the API returned a credit-balance error);
-  the GPT leg worked. Not re-verified this session.
+  the GPT leg worked. Not re-verified since.
 - `.handoff/bunpr-bench` — Bun #29291 validation evidence (benchmarks,
   memory results, upstream source excerpts). 15 MB, in-repo but
   invisible to git via `.git/info/exclude`. KEEP while Bun #29291 and
-  #34835 are open; delete freely once both resolve. (Still present.)
-- /tmp scratch: only `/tmp/rip-report-demo` remains; `/tmp/janus-bench`
-  is gone. Rebuild probes fresh if needed.
+  #34835 are open; delete freely once both resolve.
+- /tmp scratch: `/tmp/rip-report-demo` was the last survivor as of
+  2026-07-27; not re-verified this session. Rebuild probes fresh if
+  needed.
 - Background subagents intermittently stalled right after their
   opening message (three occurrences 2026-07-21; unverified since).
   Recovery that worked every time: interrupt + resume with "restate

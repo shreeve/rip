@@ -48,8 +48,8 @@ but it must not block direct-path package implementation and tests.
   integration. The browser interaction primitives the widgets build
   on (`@rip-lang/ui/browser`: nav, dismiss, overlay, position, focus,
   scroll) and the Tailwind compilation boundary (`@rip-lang/ui`
-  tailwind engine/inline/serve) are shipped with tests. Work begins
-  with Philip after the audit PR (#156) lands.
+  tailwind engine/inline/serve) are shipped with tests. The gating
+  audit PR (#156) landed 2026-07-28; the work proceeds with Philip.
 
 ### Independent libraries and tools
 
