@@ -858,9 +858,10 @@ clientModules = (dir) ->
   walk dir, ''
   out
 
-# The generated boot page. Under RIP_WORKSPACE=1 the bootApp call
-# carries `workspace: true` — the browser half of the dev door; flag
-# off, the emitted page is byte-identical to the plain boot.
+# The generated boot page. In worker mode under RIP_WORKSPACE=1 the
+# bootApp call carries `workspace: true` — the browser half of the dev
+# door; everywhere else the emitted page is byte-identical to the
+# plain boot.
 BOOT_PAGE = (workspace) -> """
 <!doctype html>
 <meta charset="utf-8">
@@ -914,11 +915,17 @@ export client = (dir = null) ->
   indexHtml = if clientDir? then join(clientDir, 'index.html') else null
   indexHtml = null unless indexHtml? and existsSync(indexHtml)
 
+  # The page opens the door only where the feed surface exists — worker
+  # mode, where the manager wrote the manifest and cells. Standalone has
+  # no manager and no feed routes: a workspace-mode boot there would die
+  # on its manifest fetch, so the flag alone never opens the door.
+  door = workspace and process.env.RIP_MANIFEST_PATH?
+
   bootPage = (c) ->
     if indexHtml?
       c.send indexHtml, 'text/html; charset=UTF-8'
     else
-      c.html BOOT_PAGE(workspace)
+      c.html BOOT_PAGE(door)
 
   get '/', (c) -> bootPage(c)
   if workspace and process.env.RIP_BUNDLE_PATH?

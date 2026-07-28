@@ -978,7 +978,10 @@ test! "standalone assembly under the flag claims @rip-lang/workspace into the bu
     bundle = (handle! req('GET', '/__rip/bundle.json')).json!
     ok bundle.packages['@rip-lang/workspace']?, 'the workspace package is claimed'
     ok bundle.modules['_pkg/workspace/feed.rip']?, 'the feed module travels'
-    ok ((handle! req('GET', '/')).text!).includes('workspace: true'), 'the boot page opens the door'
+    # Standalone has no manager and therefore no manifest/cell routes: a
+    # workspace-mode boot would die on its manifest fetch, so the page
+    # opens the door only in worker mode (RIP_MANIFEST_PATH present).
+    ok not ((handle! req('GET', '/')).text!).includes('workspace: true'), 'standalone never opens the door'
   finally
     if savedFlag? then process.env.RIP_WORKSPACE = savedFlag else delete process.env.RIP_WORKSPACE
     resetGlobals()
