@@ -139,7 +139,12 @@ export const CONTRACT = [
   {
     name: 'token.type', lane: 'token',
     property: "each declaration's token type is the one its binding form fixes",
-    redBecause: 'an enum name\'s token says `type` where its declaring form fixes `enum` — delete this when the server classifies enum declarations by their own form',
+    // TWO open rows share this red, and it does not clear until both do:
+    // the enum names, and the void-marked binding whose hoist-split declaration
+    // hides its function value. Naming only one would strand the other the day
+    // that one closes — the shape the ledger warns about, since a reader
+    // deleting a satisfied reason would leave a red nothing explains.
+    redBecause: 'an enum name\'s token says `type` where its declaring form fixes `enum`, and a void-marked binding says `variable` where its arrow fixes `function` — delete this when the server classifies enum declarations by their own form AND the void lowering stops splitting its declaration',
     red: (s) => s.tk.badType.length > 0,
   },
   {

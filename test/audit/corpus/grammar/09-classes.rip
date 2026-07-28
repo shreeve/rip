@@ -114,6 +114,15 @@ hatched = new new Hatch
 
 console.log('hatched:', hatched.chirp)
 
+# ── Prototype access: the `::` read, and the `?::` soak when the target may be absent ──
+
+speaker = Animal::speak
+
+def speakerOf(maybe: typeof Animal | undefined)
+  maybe?::speak
+
+console.log('prototype:', typeof speaker, typeof speakerOf(Animal), speakerOf(undefined))
+
 # ── An exported class rides the same declaration form ──
 
 export class Shipped

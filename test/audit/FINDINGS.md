@@ -46,6 +46,7 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [39](#39-a-component-members-declaration-hovers-the-container-wrapper) | A component member's declaration hovers the container wrapper | `editor` | the `ruled` gauge's member-declaration and gate-target pins — red by agreement (soft) |
 | [44](#44-a-mixin-declaration-hovers-the-runtimes-machinery) | A `:mixin` declaration hovers the runtime's machinery | `editor`, `compiler` | the Hover Audit's 14-schema mixin decls pin (`hover-pins.json`) asserts the machinery answer **as the interim** — it flips the day the face's typing changes, the cue to re-rule and re-pin |
 | [33](#33-an-enum-names-semantic-token-says-type-not-enum) | An enum name's semantic token says `type`, not `enum` | `editor` | the Token Audit's enum rows — red by agreement (soft: the audit exits 0) until the server reclassifies |
+| [57](#57-a-void-marked-bindings-token-says-variable-where-its-arrow-says-function) | A void-marked binding's token says `variable`, not `function` | `editor`, `compiler` | the Token Audit's wrong-type row on 04-assignments' void binding — red by agreement (soft: the audit exits 0), shared with the enum rows until both close |
 | [37](#37-a-state-write-site-keeps-the-lowerings-readonly-color) | A state write site keeps the lowering's `readonly` color | `editor` | the token audit's `readonly` invariant at 12-reactive's state write sites — red by agreement (soft: the audit exits 0) until the correction reaches use-site spans |
 | [35](#35-a-wrong--initializer-publishes-twice-in-lowering-vocabulary) | A wrong `:=`/`~=` initializer publishes twice, in lowering vocabulary | `compiler` | the Diagnostics Lane's 12-reactive pins (`error-pins.json`) assert the double **as the interim** — they go red the day the emission publishes once, the cue to retire them |
 | [34](#34-the-bare-effect-operator-hovers-the-runtimes-machinery) | The bare `~>` operator hovers the runtime's machinery | `editor` | the Hover Audit's `silence` gauge — ruled-silent bare-effect positions must serve null; red by agreement (soft: the audit exits 0) until the server declines to answer |
@@ -445,6 +446,29 @@ Hovering a `:mixin` schema at its declaration answers `let Stamped: __SchemaDef`
 **Root and fix are editor-side, and the mechanism exists.** `ripSemanticTokens` ([server.js](../../packages/vscode/src/server.js)) already applies source-informed corrections — it clears TypeScript's `readonly` bit for reactive bindings from the compiler's `mutables` span list. Enum names are one more such correction: the compiler knows which names an ENUM declared, and the server rewrites the token type on those spans. rip's lowering does not change.
 
 **Status.** ⬜ **Open** (2026-07-23) — gated softly: the Token Audit's enum rows expect `enum` and stay red by agreement (the audit exits 0; nothing hard-gates). Green retires this row.
+
+### 57. A void-marked binding's token says `variable` where its arrow says `function`
+
+```
+report! = -> console.log('report ran')
+```
+
+emits a SPLIT — a bare hoisted declaration and a separate assignment:
+
+```ts
+let report;
+report = function(): void { … };
+```
+
+where the unmarked spelling emits one initialized declaration (`let plainFn = function() { … }`). A semantic token is read at the DECLARATION span, and that span now carries no value, so tsgo answers `variable` for a name whose value is a function. Driven 2026-07-28 across three spellings: plain and annotated (`typedFn: () => void = -> …`) both emit one declaration and classify `function`; only the void-marked one splits.
+
+**It reaches every void-marked binding, not a corner.** The marker REQUIRES a function value — `voidNum! = 42` is refused by the emitter (*"the void marker … requires a function value"*) — so there is no void-marked binding whose token is right.
+
+**The split is not required by the lowering.** The void annotation lands on the function expression, which a single initialized declaration carries just as well: `let report = function(): void { … }`. The annotated spelling is the proof it is expressible — it says `void` in the type and emits one statement. So the fix is the emission's shape, not the annotation.
+
+**Why the suite missed it.** The Token Audit derives its expectation from rip SOURCE ([runner.js](runner.js) `expectedTokenType`, the arrow test), and the source pins `function` correctly — nothing ever compared the two spellings' EMISSIONS, which is where they diverge. The hover surface is unaffected: 04-assignments' declaration probes are clean, because hover resolves the binding's type through the assignment while the token reads only the declaration's own span.
+
+**Status.** ⬜ **Open** (2026-07-28) — gated softly: the Token Audit's wrong-type row on this binding stays red by agreement (the audit exits 0). The agreement is SHARED with the enum-token row and names both causes, so it clears only when both close; greening one leaves the other's red standing with the reason still true.
 
 ### 37. A state write site keeps the lowering's `readonly` color
 

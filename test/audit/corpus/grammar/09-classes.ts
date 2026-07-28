@@ -160,6 +160,16 @@ let hatched = new (new Hatch())()
 
 console.log('hatched:', hatched.chirp)
 
+// ── Prototype access: the `::` read, and the `?::` soak when the target may be absent ──
+
+const speaker = Animal.prototype.speak
+
+function speakerOf(maybe: typeof Animal | undefined) {
+  return maybe?.prototype.speak
+}
+
+console.log('prototype:', typeof speaker, typeof speakerOf(Animal), speakerOf(undefined))
+
 // ── An exported class rides the same declaration form ──
 
 export class Shipped {

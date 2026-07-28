@@ -1408,6 +1408,16 @@ function expectedTokenType(d, form) {
   // variable by spelling and a class by shape — dual like schema, so
   // reported rather than scored.
   if (/\bas\s+new\b/.test(val)) return null;
+  // A prototype access (`A::m`, `a?::m`) is a variable by spelling and
+  // whatever the member is by value — a method classifies `function`, a data
+  // property `variable`, and this line-shaped scan cannot resolve which.
+  // Undecidable, so reported rather than scored: the same contract as the
+  // constructor cast above, and the rulings' own doctrine that a callable
+  // VALUE is the informative answer (RULINGS.md, Tokens — the named-effect
+  // row). Scoring `variable` here would manufacture a red on correct
+  // behavior, and `token.type` is red by agreement for an unrelated reason,
+  // so that red would be invisible.
+  if (/^\s*[A-Za-z_$][\w$.]*\??::/.test(val)) return null;
   // A function-valued PLAIN binding classifies as `function`, not
   // `variable` — TS's own rule, and the right one. Restricted to `plain`:
   // an arrow handed to `:=`/`~=` is wrapped in a cell, so the NAME stays a
