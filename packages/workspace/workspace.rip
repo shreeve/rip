@@ -1,0 +1,333 @@
+# ==============================================================================
+# @rip-lang/workspace — Rip Workspace: the reactive passport bag
+#
+# One bag of component records ("passports") in the browser. Producers
+# mutate the bag through the door (populate / set / seal); the app reads
+# it through a path-keyed view that implements the exact ComponentsStore
+# interface from @rip-lang/app, so launch() can take it as an injected
+# store. Records + door + view — nothing more.
+# ==============================================================================
+
+export type WorkspaceEvent = 'create' | 'change' | 'delete'
+
+export type Passport =
+  id: string
+  path: string
+  rev: number
+  source: string
+  compiled: Record<string, unknown> | undefined
+
+export type Workspace =
+  read: (path: string) => string | undefined
+  write: (path: string, content: string) => void
+  del: (path: string) => void
+  exists: (path: string) => boolean
+  size: () => number
+  list: (dir?: string) => string[]
+  listAll: (dir?: string) => string[]
+  load: (sources: Record<string, string>) => void
+  watch: (fn: (event: WorkspaceEvent, path: string) => void) => () => void
+  getCompiled: (path: string) => Record<string, unknown> | undefined
+  setCompiled: (path: string, module: Record<string, unknown>) => void
+  populate: (cells: Passport[]) => void
+  set: (cell: Record<string, unknown>) => boolean
+  seal: () => void
+  sealed: () => boolean
+  passport: (pathOrId: string) => Passport | undefined
+  ids: () => string[]
+  paths: () => string[]
+
+validPath = (path) ->
+  unless typeof path is 'string' and path.length > 0
+    throw new TypeError 'Rip Workspace: component path must be a non-empty string'
+  segments = path.split '/'
+  invalidSegment = segments.some (segment) -> not segment or segment is '.' or segment is '..'
+  filename = segments[-1]
+  fileAsDirectory = segments.slice(0, -1).some (segment) -> segment.endsWith '.rip'
+  if path.includes('\\') or invalidSegment or fileAsDirectory or filename is '.rip' or not filename.endsWith('.rip')
+    throw new TypeError "Rip Workspace: invalid component path '#{path}'"
+  path
+
+validContent = (content) ->
+  unless typeof content is 'string'
+    throw new TypeError 'Rip Workspace: component source must be a string'
+  content
+
+validDirectory = (dir) ->
+  return '' if dir is '' or not dir?
+  unless typeof dir is 'string'
+    throw new TypeError 'Rip Workspace: component directory must be a string'
+  segments = dir.split '/'
+  if dir.includes('\\') or segments.some((segment) -> not segment or segment is '.' or segment is '..')
+    throw new TypeError "Rip Workspace: invalid component directory '#{dir}'"
+  dir
+
+validId = (id) ->
+  unless typeof id is 'string' and id.length > 0
+    throw new TypeError 'Rip Workspace: passport id must be a non-empty string'
+  id
+
+validRev = (rev) ->
+  unless Number.isInteger(rev) and rev >= 0
+    throw new TypeError 'Rip Workspace: passport rev must be a non-negative integer'
+  rev
+
+validModule = (module) ->
+  unless module? and typeof module is 'object' and not Array.isArray(module)
+    throw new TypeError 'Rip Workspace: compiled component module must be an object'
+  module
+
+export def createWorkspace(): Workspace
+  passports = new Map()
+  pathToId = new Map()
+  watchers = new Set()
+  locked = false
+
+  guard = (operation) ->
+    if locked
+      throw new Error "Rip Workspace: #{operation} on a sealed workspace"
+    return
+
+  notify = (event, path) ->
+    for watcher in Array.from(watchers)
+      try
+        watcher event, path
+      catch error
+        console.error '[Rip] workspace watcher error:', error
+    return
+
+  byPath = (path) ->
+    id = pathToId.get path
+    if id? then passports.get(id) else undefined
+
+  # B′: the id is path-derived at birth. A locally minted passport (an
+  # editor write, not a server cell) uses its birth path as its id.
+  mintId = (path) ->
+    if passports.has path
+      throw new Error "Rip Workspace: cannot mint id '#{path}'; a passport already holds that id"
+    path
+
+  claimPath = (path, id) ->
+    holder = pathToId.get path
+    if holder? and holder isnt id
+      throw new Error "Rip Workspace: path '#{path}' already labels passport '#{holder}'"
+    return
+
+  applySource = (record, content) ->
+    passports.set record.id, { ...record, rev: record.rev + 1, source: content, compiled: undefined }
+    return
+
+  birthPassport = (path, content) ->
+    id = mintId path
+    passports.set id, { id, path, rev: 0, source: content, compiled: undefined }
+    pathToId.set path, id
+    return
+
+  workspace =
+    # --- ComponentsStore view (path-keyed) ---
+
+    read: (path) ->
+      byPath(validPath(path))?.source
+
+    write: (path, content) ->
+      guard 'write'
+      path = validPath path
+      content = validContent content
+      record = byPath path
+      if record
+        applySource record, content
+        notify 'change', path
+      else
+        birthPassport path, content
+        notify 'create', path
+      return
+
+    del: (path) ->
+      guard 'del'
+      path = validPath path
+      record = byPath path
+      if record
+        passports.delete record.id
+        pathToId.delete path
+      notify 'delete', path
+      return
+
+    exists: (path) ->
+      pathToId.has validPath(path)
+
+    size: -> passports.size
+
+    list: (dir = '') ->
+      dir = validDirectory dir
+      prefix = if dir then dir + '/' else ''
+      result = []
+      for [path] in pathToId
+        if path.startsWith prefix
+          rest = path.slice prefix.length
+          result.push path unless rest.includes '/'
+      result
+
+    listAll: (dir = '') ->
+      dir = validDirectory dir
+      prefix = if dir then dir + '/' else ''
+      result = []
+      result.push path for [path] in pathToId when path.startsWith(prefix)
+      result
+
+    load: (sources) ->
+      guard 'load'
+      unless sources? and typeof sources is 'object' and not Array.isArray(sources)
+        throw new TypeError 'Rip Workspace: component load expects a source object'
+      for own path, content of sources
+        path = validPath path
+        content = validContent content
+        record = byPath path
+        if record
+          applySource record, content
+        else
+          birthPassport path, content
+      return
+
+    watch: (fn) ->
+      unless typeof fn is 'function'
+        throw new TypeError 'Rip Workspace: component watch expects a function'
+      watchers.add fn
+      disposed = false
+      ->
+        return if disposed
+        disposed = true
+        watchers.delete fn
+        return
+
+    getCompiled: (path) ->
+      byPath(validPath(path))?.compiled
+
+    setCompiled: (path, module) ->
+      guard 'setCompiled'
+      path = validPath path
+      module = validModule module
+      record = byPath path
+      unless record
+        throw new Error "Rip Workspace: setCompiled for unknown component path '#{path}'"
+      passports.set record.id, { ...record, compiled: module }
+      return
+
+    # --- Door ---
+
+    populate: (cells) ->
+      guard 'populate'
+      unless Array.isArray cells
+        throw new TypeError 'Rip Workspace: populate expects an array of passport records'
+      if passports.size > 0
+        throw new Error 'Rip Workspace: populate requires an empty workspace; mutate with set'
+      seenIds = new Set()
+      seenPaths = new Set()
+      records = []
+      for cell in cells
+        unless cell? and typeof cell is 'object' and not Array.isArray(cell)
+          throw new TypeError 'Rip Workspace: populate expects passport records'
+        id = validId cell.id
+        path = validPath cell.path
+        rev = validRev cell.rev
+        source = validContent cell.source
+        compiled = if cell.compiled? then validModule cell.compiled else undefined
+        if seenIds.has id
+          throw new Error "Rip Workspace: duplicate passport id '#{id}' in populate"
+        if seenPaths.has path
+          throw new Error "Rip Workspace: duplicate passport path '#{path}' in populate"
+        seenIds.add id
+        seenPaths.add path
+        records.push { id, path, rev, source, compiled }
+      # Validate everything above, commit everything below: a rejected
+      # populate leaves the bag untouched.
+      for record in records
+        passports.set record.id, record
+        pathToId.set record.path, record.id
+      return
+
+    set: (cell) ->
+      guard 'set'
+      unless cell? and typeof cell is 'object' and not Array.isArray(cell)
+        throw new TypeError 'Rip Workspace: set expects a passport record'
+      id = validId cell.id
+      rev = validRev cell.rev
+      current = passports.get id
+
+      unless current
+        # A delete for an id the bag no longer holds is the replayed
+        # ding Q8 defends against, not an error.
+        return false if cell.deleted is true
+        unless cell.path? and cell.source?
+          throw new Error "Rip Workspace: set of unknown passport '#{id}' requires a full record (id, path, rev, source)"
+        path = validPath cell.path
+        source = validContent cell.source
+        compiled = if cell.compiled? then validModule cell.compiled else undefined
+        claimPath path, id
+        passports.set id, { id, path, rev, source, compiled }
+        pathToId.set path, id
+        notify 'create', path
+        return true
+
+      # Q8: the rev cursor. A stale or duplicate cell is ignored —
+      # no mutation, no event — and the caller can observe the verdict.
+      return false unless rev > current.rev
+
+      if cell.deleted is true
+        passports.delete id
+        pathToId.delete current.path
+        notify 'delete', current.path
+        return true
+
+      newPath = if cell.path? then validPath cell.path else current.path
+      renamed = newPath isnt current.path
+      hasSource = cell.source isnt undefined and cell.source isnt null
+      hasCompiled = cell.compiled isnt undefined and cell.compiled isnt null
+      unless hasSource or hasCompiled or renamed
+        throw new Error "Rip Workspace: set for passport '#{id}' carries nothing to apply (source, compiled, path, or deleted)"
+      claimPath newPath, id if renamed
+      source = if hasSource then validContent cell.source else current.source
+      compiled = if hasCompiled
+        validModule cell.compiled
+      else if hasSource
+        undefined   # new source invalidates the old projection
+      else
+        current.compiled
+
+      oldPath = current.path
+      pathToId.delete oldPath if renamed
+      passports.set id, { id, path: newPath, rev, source, compiled }
+      pathToId.set newPath, id
+      if renamed
+        # Path-keyed observers see a rename as the old label vanishing
+        # and the new one appearing; the id underneath never changes.
+        notify 'delete', oldPath
+        notify 'create', newPath
+      else
+        notify 'change', newPath
+      true
+
+    seal: ->
+      if locked
+        throw new Error 'Rip Workspace: workspace is already sealed'
+      locked = true
+      return
+
+    sealed: -> locked
+
+    # --- Inspection ---
+
+    passport: (pathOrId) ->
+      unless typeof pathOrId is 'string' and pathOrId.length > 0
+        throw new TypeError 'Rip Workspace: passport lookup expects a passport id or component path'
+      record = passports.get pathOrId
+      unless record
+        id = pathToId.get pathOrId
+        record = if id? then passports.get(id) else undefined
+      return undefined unless record
+      { ...record }
+
+    ids: -> Array.from passports.keys()
+
+    paths: -> Array.from pathToId.keys()
+
+  workspace

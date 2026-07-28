@@ -1,0 +1,23 @@
+{
+  "name": "@rip-lang/workspace",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reactive bag of component passports for the browser — populate, set, seal, plus a drop-in component store view — zero dependencies",
+  "exports": {
+    ".": "./workspace.rip"
+  },
+  "scripts": {
+    "test": "rip test.rip"
+  },
+  "rip": {
+    "browser": true
+  },
+  "files": [
+    "workspace.rip",
+    "README.md"
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
+}
