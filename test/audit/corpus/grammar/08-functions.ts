@@ -1,10 +1,4 @@
-// 08-functions.ts — functions: def in every shape (plain, parenless,
-// return-typed, generic, void-marked with !, exported), the param surface
-// (typed, default, optional, splat rest, the ... expansion, destructured
-// object/array patterns, promoted @-props), the param-list layouts, every
-// return form, and both arrow kinds (the bare optional and the expansion
-// bind inside contextually typed arrows — a def spelling of either is an
-// implicit any that strict correctly refuses)
+// 08-functions.ts — the twin oracle for 08-functions.rip.
 
 // ── def: plain, annotated return, parenless, and parenless-with-type ──
 
@@ -170,9 +164,7 @@ export function shared(flag: boolean) {
 
 console.log('shared:', shared(true))
 
-// ── a def reading a top-level binding: the binding stays hoisted (a def is
-// callable from above its own statement), so its type reaches the editor
-// through the pin pass — this is the corpus's live pinnable ──
+// ── a def reading a top-level binding: the binding stays hoisted (a def is callable from above its own statement), so its type reaches the editor through the pin pass — this is the corpus's live pinnable ──
 
 let FORMATS = { json: 'application/json', text: 'text/plain' }
 

@@ -1,6 +1,4 @@
-# 05-conditionals.rip — control flow that chooses: if/else-if/else and
-# unless blocks, every postfix guard spelling, the if/else ternary, and
-# switch/when — subjects, multi-value cases, condition-less cases, else
+# 05-conditionals.rip — control flow that chooses: if/unless, the postfix guards, the ternary, and switch.
 
 # ── if: bare, full chain, chain ending in else-if, and the inline then-else ──
 

@@ -1,5 +1,4 @@
-// 07-exceptions.errors.ts — the line-aligned twin: tsgo's diagnostics here
-// derive each expected code and position; @ts-nocheck quiets editors only.
+// 07-exceptions.errors.ts — the line-aligned twin: tsgo's diagnostics here derive each expected code and position.
 // @ts-nocheck
 
 let reasonCode = 500
@@ -12,10 +11,8 @@ let wrongAccess = function() {
     return 'ok'
   } catch (error) {
     return error.message } }
-// (wrongPluck holds the open pattern-catch gap's TS2339, not a blessed
-// negative — see FINDINGS.md; red here on a lowering change is the cue to
-// invert it into 07-exceptions. The array spelling cannot derive in this
-// lane — TS2488 anchors on the pattern's `[` — and no lane holds it yet.)
+// wrongPluck holds the open pattern-catch gap's TS2339, not a blessed negative (FINDINGS.md): red here on a lowering change is the cue to invert it into 07-exceptions.
+// The array spelling cannot derive in this lane — TS2488 anchors on the pattern's `[` — and no lane holds it yet.
 let wrongPluck = function() {
   try {
     return 'ok'

@@ -1,5 +1,4 @@
-# 20-inference.rip — what the checker infers and enforces: reassignment, arithmetic,
-# lib generics, contextual callbacks, inferred returns, branch-written and hoisted bindings, destructured parameters
+# 20-inference.rip — what the checker infers and enforces.
 
 # ── An inferred binding carries its type through a legal reassignment ──
 
@@ -16,8 +15,7 @@ area = (width * height)
 
 console.log('area:', area.toFixed(2))
 
-# ── Library generics carry instantiated element types, including the
-# point-free spelling where the callback is a named def rather than a literal ──
+# ── Library generics carry instantiated element types, including the point-free spelling ──
 
 tallies = [1, 2, 3]
 twiced = tallies.map((n) -> (n * 2))
@@ -32,8 +30,7 @@ upper = labels.map((w) -> w.toUpperCase())
 
 console.log('generics:', twiced, retained, summed.toFixed(0), upper)
 
-# ── Contextual typing reaches an unannotated callback parameter: `n` is
-# number inside map, with no annotation written and no implicit any ──
+# ── Contextual typing reaches an unannotated callback parameter: no implicit any inside map ──
 
 formatted = tallies.map((n) -> n.toFixed(1))
 
@@ -46,8 +43,7 @@ def magnify(factor: number)
 
 console.log('scaled:', magnify(1.5).toFixed(0))
 
-# ── A branch-written binding types later same-scope reads: no def involved,
-# so this is the checker's own flow analysis rather than the pin pass ──
+# ── A branch-written binding types later same-scope reads: flow analysis, not the pin pass ──
 
 tideline = ''
 if (tallies.length > 2)
@@ -57,10 +53,7 @@ else
 
 console.log('tideline:', tideline.toUpperCase())
 
-# ── A block-confined binding read by a HOISTED def: the pin pass's own shape.
-# The destructured spelling is absent on purpose — implicitly any under strict,
-# held by the open destructured-hoisting finding. Destructuring itself types
-# fine, which the ordinary-flow read below holds ──
+# ── A block-confined binding read by a HOISTED def: the pin pass's own shape. The destructured spelling is absent on purpose (an open finding); destructuring itself types fine, held by the ordinary-flow read below ──
 
 if (labels.length > 1)
   ribbon = labels[0]
@@ -74,8 +67,7 @@ console.log('media:', media.toUpperCase())
 
 console.log('recount:', recount())
 
-# ── Destructured bindings carry their source property's type, enforced at
-# use — every parameter spelling: plain, renamed, nested, defaulted, array ──
+# ── Destructured bindings carry their source property's type, enforced at use — every parameter spelling ──
 
 def introduceAll({ name, years: age }: { name: string, years: number })
   "#{name} is #{age}"

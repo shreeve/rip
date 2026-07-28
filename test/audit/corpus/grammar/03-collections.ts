@@ -1,7 +1,4 @@
-// 03-collections.ts — objects, arrays, ranges, slices, splats, elisions,
-// pick: every collection shape — object and *{} map literals, sparse-array
-// elisions, range values, slice reads, array and object spreads, and the
-// pick family across plain, optional, and multiline heads
+// 03-collections.ts — the twin oracle for 03-collections.rip.
 
 // ── Object literals, and the `*{}` map literal ──
 

@@ -1,5 +1,4 @@
-// 10-modules.errors.ts — the line-aligned twin: tsgo's diagnostics here
-// derive each expected code and position; @ts-nocheck quiets editors only.
+// 10-modules.errors.ts — the line-aligned twin: tsgo's diagnostics here derive each expected code and position.
 // @ts-nocheck
 
 let target = './elsewhere.js'

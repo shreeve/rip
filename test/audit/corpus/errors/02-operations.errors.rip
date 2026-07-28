@@ -1,5 +1,4 @@
-# 02-operations.errors.rip — intentional negatives: the Diagnostics Lane
-# (bun run audit --diagnostics) asserts each one; @ts-nocheck quiets editors only.
+# 02-operations.errors.rip — intentional negatives, each asserted by the Diagnostics Lane (bun run audit --diagnostics).
 # @ts-nocheck
 
 text = 'abc'

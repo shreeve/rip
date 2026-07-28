@@ -1,7 +1,4 @@
-// 02-operations.ts — operators, invocation, arg lists, existence/presence:
-// every operator family (arithmetic, bitwise, comparison, logic, relation,
-// update, unary, await/yield), and every call shape from explicit parens to
-// implicit, optional, do, dammit, tagged, and spread arguments
+// 02-operations.ts — the twin oracle for 02-operations.rip.
 
 // ── Arithmetic: + - * /, floor division //, true modulo %%, power **, unary +/- ──
 
@@ -26,8 +23,7 @@ let shifted = ten << 2 >> 1 >>> 0
 console.log('bits:', masked, merged, toggled, inverted, shifted)
 
 // ── Comparison and logic: symbolic and word spellings ──
-// (the match operator =~ is parked: its emission publishes TS2531 on
-// every use — see FINDINGS.md)
+// The match operator =~ is PARKED: its emission publishes TS2531 on every use (FINDINGS.md).
 
 let bigger = ten > three
 let looser = ten >= 10 && three <= 3

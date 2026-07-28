@@ -1,14 +1,14 @@
 {
   "12-reactive.errors.rip": [
     {
-      "line": 8,
+      "line": 7,
       "character": 10,
       "code": 1360,
       "token": "number",
       "why": "the := lowering's satisfies guard — the second publish of the wrong-initializer double, mapped onto the annotation span; asserts the interim while the double-publish row is open (FINDINGS.md)"
     },
     {
-      "line": 9,
+      "line": 8,
       "character": 25,
       "code": 2322,
       "token": "count * 2",
@@ -17,14 +17,14 @@
   ],
   "13-components.errors.rip": [
     {
-      "line": 29,
+      "line": 25,
       "character": 10,
       "code": 2322,
       "token": "ref",
       "why": "the ref-cell mismatch (an HTMLInputElement cell on a div) — rip-native: React's ref rejection fires for a different reason (a raw element is not a Ref shape), so the twin cannot honestly judge it; pinned per the components ruling (RULINGS.md)"
     },
     {
-      "line": 31,
+      "line": 27,
       "character": 8,
       "code": 2322,
       "token": "label",
@@ -33,11 +33,34 @@
   ],
   "14-schema.errors.rip": [
     {
-      "line": 27,
+      "line": 23,
       "character": 0,
       "code": 2322,
       "token": "wrongGetter",
       "why": "a :shape callable's output types unknown, so the typed read rejects — rip-native: the twin's transform-derived total is honestly a number, so no zod line can spell it; asserts the interim while the callable-unknown finding is open (FINDINGS.md)"
+    }
+  ],
+  "25-components.errors.rip": [
+    {
+      "line": 46,
+      "character": 12,
+      "code": 2322,
+      "token": "ref",
+      "why": "a non-nullable cell receiving an element ref — the cell's own nullability is what rejects, and React's ref rejection fires for a different reason (a raw element is not a Ref shape), so the twin cannot honestly judge it; pinned per the components ruling (RULINGS.md)"
+    },
+    {
+      "line": 47,
+      "character": 14,
+      "code": 2322,
+      "token": "ref",
+      "why": "a tag-typed cell on a foreign tag — the same rip-native ref surface as the row above, one tag apart; pinned per the components ruling (RULINGS.md)"
+    },
+    {
+      "line": 48,
+      "character": 12,
+      "code": 2322,
+      "token": "inner",
+      "why": "a forwarded element ref whose cell types a different tag than the child's own ref — no TSX line can spell the <=> channel, and the container-typed message is the channel's real contract; pinned per the components ruling (RULINGS.md)"
     }
   ]
 }

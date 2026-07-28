@@ -1,12 +1,7 @@
-# 12-reactive.rip — the reactive vocabulary: state (:=), computed (~=),
-# readonly (=!), and effects (~>) in every form — inline, carried, indented,
-# opt-marked, annotated — plus every exported spelling. Gates (`<~`) live with
-# the component file: a gate exists only in a component body (MANIFEST.md).
-# Hover targets for every declaration here are ruled in RULINGS.md (Reactive);
-# what an IMPORTER of the exported bindings sees is an open question the
-# ledger carries (FINDINGS.md) — this file covers the export side only.
+# 12-reactive.rip — the reactive vocabulary in every form, the export side only.
 
 # ── State (:=): inline, carried, indented; opt-marked; annotated ──
+# Gates (`<~`) live with the component file: a gate exists only in a component body (MANIFEST.md).
 
 count := 0
 label: string := 'idle'
@@ -30,8 +25,7 @@ typedDropped: string :=
 
 console.log(count, label, mood, tone, maybe, maybeCarried, maybeDropped, maybeTyped, maybeTypedDropped, typedCarried, typedDropped)
 
-# ── Computed (~=): derives from its dependencies; a write to one is an
-# emitter error (asserted in check.test.js, never here) ──
+# ── Computed (~=): derives from its dependencies; a write to one is an emitter error, asserted in check.test.js and never here ──
 
 doubled ~= count * 2
 half ~=
@@ -81,9 +75,8 @@ ceilingDropped: number =!
 
 console.log(limit, limitCarried, limitDropped, cap, capCarried, capDropped, capTyped, capTypedCarried, capTypedDropped, floor, ceiling, ceilingDropped)
 
-# ── Effects (~>): named (the binding is the disposer), bare, annotated.
-# Hovering a bare `~>` operator is ruled silent (RULINGS.md, Reactive);
-# today's machinery answer is an open finding (FINDINGS.md) ──
+# ── Effects (~>): named (the binding is the disposer), bare, annotated ──
+# Hovering a bare `~>` operator is ruled silent (RULINGS.md, Reactive); today's machinery answer is an open finding (FINDINGS.md).
 
 watcher ~> console.log('watcher sees', count)
 watcherCarried ~>
@@ -101,8 +94,7 @@ typedDroppedEffect: Function ~>
   console.log('typed dropped effect ran')
 typedInlineEffect: Function ~> console.log('typed inline effect ran')
 
-# ── Reactivity in motion: a write notifies its effect; a disposed effect
-# stays quiet ──
+# ── Reactivity in motion: a write notifies its effect; a disposed effect stays quiet ──
 
 pulse := 1
 pulseWatcher ~> console.log('pulse is', pulse)
@@ -120,8 +112,7 @@ typedCarriedEffect()
 typedDroppedEffect()
 typedInlineEffect()
 
-# ── Exported spellings: the export side only (an importer's view is the
-# ledger's open question) ──
+# ── Exported spellings: the export side only — an importer's view is the ledger's open question (FINDINGS.md) ──
 
 export tally := 0
 export banner: string := 'ready'

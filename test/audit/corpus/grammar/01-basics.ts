@@ -1,5 +1,4 @@
-// 01-basics.ts — the corpus ground floor: program skeleton, every
-// literal form (numbers, strings, regex, heregex, symbols), `this`, parentheticals, do-IIFE
+// 01-basics.ts — the twin oracle for 01-basics.rip.
 
 // ── Number, boolean, null, undefined literals ──
 
@@ -81,8 +80,7 @@ console.log('iife:', iife, 'seeded:', seeded)
 // the corpus default is explicit parens; this one paren-less call keeps the implicit spelling covered (02-operations owns invocation)
 console.log(typeof chain, typeof noop)
 
-// ── a write-only binding: assigned from a call, never read — its hover must
-// still answer the call's value type ──
+// ── a write-only binding: assigned from a call, never read — its hover must still answer the call's value type ──
 
 let recorded = Date.now()
 

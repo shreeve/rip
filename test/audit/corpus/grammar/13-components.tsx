@@ -1,13 +1,5 @@
-// 13-components.tsx — the TSX analogy twin, scoped to where the analogy is
-// honest (ROADMAP.md, Oracles): typed props, render structure, control flow,
-// events, refs, keys, slot/children, generic components. Gates, offer/accept,
-// and the `<=>` bind channel have no honest TSX spelling and are deliberately
-// absent — their runtime line below is a predicted trace, the reactive twin's
-// hand-replay device. State members spell as plain let/const (the 12-reactive
-// doctrine): the ruled editor answers are value types, so React's state
-// machinery would put another ecosystem's wrappers beside them; React remains
-// only where the analogy lives — JSX, props types, refs, event types.
-// Correspondence is by construct order and symbol name, never line parity.
+// 13-components.tsx — the twin oracle for 13-components.rip.
+// Gates, offer/accept, and the `<=>` channel have no honest TSX spelling and are deliberately absent, so the rip-native runtime line below is a PREDICTED trace, hand-replayed to keep the output byte-identical.
 
 import { ComponentProps, MouseEventHandler, useRef } from 'react'
 

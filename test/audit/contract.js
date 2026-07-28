@@ -81,6 +81,16 @@ export const CONTRACT = [
     red: (s) => (s.gr.negatives?.claimsBadParks ?? 0) > 0,
   },
   {
+    // The corpus's one comment rule, and the only half of it that is exactly
+    // checkable: a `── … ──` divider opens and closes on the same line. No
+    // threshold, no heuristic, and the fix is always joining the lines —
+    // never deleting a note, which is why the header LENGTH beside it is
+    // reported as a gauge instead of gated here.
+    name: 'corpus.dividers', lane: 'grammar',
+    property: 'every corpus section divider opens and closes on its own line, so no comment is a reflowed paragraph',
+    red: (s) => (s.gr.negatives?.splitDividers ?? 0) > 0,
+  },
+  {
     name: 'grammar.census', lane: 'grammar',
     property: "every type text the corpus carries classifies against TypeScript's own type grammar",
     red: (s) => (s.gr.negatives?.kindBad ?? 0) > 0,

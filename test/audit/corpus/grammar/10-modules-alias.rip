@@ -1,5 +1,4 @@
-# 10-modules-alias.rip — the aliased default: a local binding promoted to the
-# module's default export through the specifier list, never `export default`
+# 10-modules-alias.rip — the aliased default: a local promoted through the specifier list, never `export default`.
 
 palette = { accent: 'teal', tone: 'calm' }
 

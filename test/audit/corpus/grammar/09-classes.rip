@@ -1,9 +1,4 @@
-# 09-classes.rip — classes: the named, anonymous, extends, and @-targeted
-# declaration forms, constructors, statics, super in all its forms, and the
-# constructable new-spine shapes (two spines are deliberately omitted: the
-# optional-chain callee `new a?.b` emits the optional chain JavaScript bans
-# inside `new` — a parse-time SyntaxError — and the tagged-template callee
-# `new tag"x"` emits a callee that names no binding; neither emission can run)
+# 09-classes.rip — class declaration forms, constructors, statics, super, and the constructable new-spines.
 
 # ── Named declarations: the empty class, and the bodyless extends ──
 
@@ -74,6 +69,7 @@ rex = new Dog('Rex')
 console.log('dog:', rex.describe(), rex.formal(), rex.keyed(), rex.tall())
 
 # ── New spines: member, index, parenthetical, this-property, super ──
+# Two spines are PARKED: `new a?.b` emits an optional chain JavaScript bans inside `new`, and `new tag"x"` emits a callee naming no binding — neither runs (FINDINGS.md).
 
 blueprints = { marker: Marker, animal: Animal }
 viaDot = new blueprints.marker
@@ -112,8 +108,7 @@ class Hatchery
   constructor: ->
     return Chick
 
-# the cast records what TypeScript cannot express: this constructor
-# genuinely returns a class, so constructing it yields a constructor
+# the cast records what TypeScript cannot express: this constructor genuinely returns a class, so constructing it yields a constructor
 Hatch = Hatchery as new () => new () => { chirp: string }
 hatched = new new Hatch
 

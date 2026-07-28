@@ -1,5 +1,4 @@
-// 20-inference.ts — the twin oracle: reassignment, arithmetic, lib generics,
-// contextual callbacks, inferred returns, branch-written and hoisted bindings, destructured parameters
+// 20-inference.ts — the twin oracle.
 
 // ── An inferred binding carries its type through a legal reassignment ──
 
@@ -16,8 +15,7 @@ let area = (width * height)
 
 console.log('area:', area.toFixed(2))
 
-// ── Library generics carry instantiated element types, including the
-// point-free spelling where the callback is a named function ──
+// ── Library generics carry instantiated element types, including the point-free spelling ──
 
 let tallies = [1, 2, 3]
 let twiced = tallies.map((n) => (n * 2))
@@ -33,8 +31,7 @@ let upper = labels.map((w) => w.toUpperCase())
 
 console.log('generics:', twiced, retained, summed.toFixed(0), upper)
 
-// ── Contextual typing reaches an unannotated callback parameter: `n` is
-// number inside map, with no annotation written and no implicit any ──
+// ── Contextual typing reaches an unannotated callback parameter: no implicit any inside map ──
 
 let formatted = tallies.map((n) => n.toFixed(1))
 
@@ -48,8 +45,7 @@ function magnify(factor: number) {
 
 console.log('scaled:', magnify(1.5).toFixed(0))
 
-// ── A branch-written binding types later same-scope reads: no function
-// involved, so this is the checker's own flow analysis rather than the pin pass ──
+// ── A branch-written binding types later same-scope reads: flow analysis, not the pin pass ──
 
 let tideline = ''
 if (tallies.length > 2) {
@@ -60,8 +56,7 @@ if (tallies.length > 2) {
 
 console.log('tideline:', tideline.toUpperCase())
 
-// ── A block-confined binding read by a HOISTED function. The destructured
-// spelling is absent on purpose — see the .rip ──
+// ── A block-confined binding read by a HOISTED function. The destructured spelling is absent on purpose — see the .rip ──
 
 let ribbon = ''
 if (labels.length > 1) {
@@ -78,8 +73,7 @@ console.log('media:', media.toUpperCase())
 
 console.log('recount:', recount())
 
-// ── Destructured bindings carry their source property's type, enforced at
-// use — every parameter spelling: plain, renamed, nested, defaulted, array ──
+// ── Destructured bindings carry their source property's type, enforced at use — every parameter spelling ──
 
 function introduceAll({ name, years: age }: { name: string, years: number }) {
   return `${name} is ${age}`

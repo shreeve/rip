@@ -1,10 +1,4 @@
-# 08-functions.rip — functions: def in every shape (plain, parenless,
-# return-typed, generic, void-marked with !, exported), the param surface
-# (typed, default, optional, splat rest, the ... expansion, destructured
-# object/array patterns, promoted @-props), the param-list layouts, every
-# return form, and both arrow kinds (the bare optional and the expansion
-# bind inside contextually typed arrows — a def spelling of either is an
-# implicit any that strict correctly refuses)
+# 08-functions.rip — def in every shape, the whole param surface, every return form, and both arrow kinds.
 
 # ── def: plain, annotated return, parenless, and parenless-with-type ──
 
@@ -58,6 +52,7 @@ def total(...nums: number[]): number
 console.log('params:', formal('Lovelace'), formal('Hopper', 'Adm'), shorten('typing', 3), total(1, 2, 3))
 
 # ── bare optional and the ... expansion: contextually typed arrows ──
+# Both bind only inside a contextually typed arrow — a def spelling of either is an implicit any that strict correctly refuses.
 
 labelOf: (name: string, title?: string) => string = (name: string, title?) ->
   if title then "#{title} #{name}" else name
@@ -138,9 +133,7 @@ export def shared(flag: boolean)
 
 console.log('shared:', shared(true))
 
-# ── a def reading a top-level binding: the binding stays hoisted (a def is
-# callable from above its own statement), so its type reaches the editor
-# through the pin pass — this is the corpus's live pinnable ──
+# ── a def reading a top-level binding: it stays hoisted because a def is callable from above its own statement, so its type reaches the editor through the pin pass — the corpus's live pinnable ──
 
 FORMATS = { json: 'application/json', text: 'text/plain' }
 

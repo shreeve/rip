@@ -1,5 +1,4 @@
-// 10-modules-alias.ts — the aliased default: a local binding promoted to the
-// module's default export through the specifier list, never `export default`
+// 10-modules-alias.ts — the twin oracle for 10-modules-alias.rip.
 
 let palette = { accent: 'teal', tone: 'calm' }
 

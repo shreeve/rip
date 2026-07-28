@@ -1,7 +1,4 @@
-// 04-assignments.ts — every binding form: simple assignment (inline, carried,
-// indented), typed and optional-marked declarations, void, compound, method,
-// and merge assignment, destructured patterns with defaults/rests, string-named
-// class fields, computed and void object keys, and index/slice/pick targets
+// 04-assignments.ts — the twin oracle for 04-assignments.rip.
 
 // ── Simple assignment: inline, value carried to the next line, indented body ──
 
@@ -119,8 +116,7 @@ let card = new MediaCard()
 console.log(card.describe())
 
 // ── Index targets: the inline and indented key, slices, and the optional index ──
-// (the regex-capture index text[/re/, n] is parked: its emission publishes
-// TS2531 on every use, the match operator's root — see FINDINGS.md)
+// The regex-capture index text[/re/, n] is PARKED: its emission publishes TS2531 on every use, the match operator's root (FINDINGS.md).
 
 let scores = [10, 20, 30, 40]
 let flatKey = scores[1]

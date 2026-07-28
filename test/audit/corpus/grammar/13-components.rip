@@ -1,14 +1,7 @@
-# 13-components.rip — the component vocabulary: definition (plain, extends,
-# generic — both TYPE_PARAMS spellings live here per MANIFEST.md's Overrides),
-# typed props, render structure and control flow, binds, events, refs, keys,
-# slot, gates, and offer/accept. The TSX twin covers the JSX-analogous surface
-# only (ROADMAP.md, Oracles); gates, offer/accept, and the `<=>` channel have
-# no honest TSX spelling and are absent from it. Hover targets for render-DSL
-# and member positions are ruled in RULINGS.md (Components / render); their
-# in-body pins live in hover-pins.json's positions sections. Negatives pair in
-# corpus/errors/13-components.errors.rip under the Diagnostics Lane.
+# 13-components.rip — the component vocabulary: definition, typed props, render, binds, events, refs, keys, slot, gates, offer/accept.
 
 # ── Definition + typed props + render structure ──
+# The TSX twin covers the JSX-analogous surface only (ROADMAP.md, Oracles); gates, offer/accept, and the `<=>` channel have no honest TSX spelling and are absent from it.
 
 export Badge = component
   @label: string
@@ -20,8 +13,7 @@ export Badge = component
     span class: "badge #{tone}", style: "color: #{shade}"
       = label
 
-# `component extends <tag>` — rest props forward onto the first <input> the
-# render creates; the intrinsic bind (`value <=> value`) rides the tag.
+# `component extends <tag>` — rest props forward onto the first <input> the render creates; the intrinsic bind (`value <=> value`) rides the tag.
 
 Field = component extends input
   @label?: string
@@ -83,10 +75,8 @@ export Panel = component
       Roster title: 'Team'
         em 'from the panel slot'
 
-# ── Generic components: the two TYPE_PARAMS spellings (plain and exported).
-# The carried/indented layout variants can never receive the token — the
-# lexer mints TYPE_PARAMS only for a same-line `= component` head (the
-# grammar gate's own exclusion table) ──
+# ── Generic components: the two TYPE_PARAMS spellings, plain and exported ──
+# The carried/indented layout variants can never receive the token: the lexer mints TYPE_PARAMS only for a same-line `= component` head (the grammar gate's own exclusion table).
 
 Chip<TLabel extends string> = component
   @label?: TLabel
@@ -108,12 +98,9 @@ Picker = component
       Chip label: 'alpha'
       Options options: ['left', 'right']
 
-# ── Gates: every form — bare path, called path, keyed path, each with and
-# without an annotation. A gate exists only as a direct component body line;
-# its target stays private and its editor answers are ruled in RULINGS.md
-# (Components / render). A gated component is route-mounted: the face
-# declares `mount: never` and a private constructor (the negatives assert
-# both — corpus/errors/13-components.errors.rip) ──
+# ── Gates: every form — bare path, called path, keyed path, each with and without an annotation ──
+# A gate exists only as a direct component body line; its target stays private and its editor answers are ruled in RULINGS.md (Components / render).
+# A gated component is route-mounted: the face declares `mount: never` and a private constructor, both asserted by the negatives.
 
 Routed = component
   stats <~ @app.data.stats
@@ -128,8 +115,8 @@ Routed = component
       = user.name
       span "#{mode}: #{entry}"
 
-# ── offer / accept: minimal grammar coverage only — the channel's model is
-# PARKED (RULINGS.md, Components / render: no pin lands while it is open) ──
+# ── offer / accept: minimal grammar coverage only ──
+# The channel's model is PARKED: no pin lands while it is open (RULINGS.md, Components / render).
 
 Give = component
   offer theme := 'dark'
@@ -150,8 +137,7 @@ Quiet = component
 
   render null
 
-# The trailing semicolon carries `ComponentBody → ComponentBody TERMINATOR`,
-# the 01-basics `done = 'basics';` idiom at component-body level.
+# The trailing semicolon carries `ComponentBody → ComponentBody TERMINATOR`, the 01-basics `done = 'basics';` idiom at component-body level.
 
 Terse = component
   render null;

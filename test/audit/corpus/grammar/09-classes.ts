@@ -1,9 +1,5 @@
-// 09-classes.ts — classes: the named, anonymous, extends, and @-targeted
-// declaration forms, constructors, statics, super in all its forms, and the
-// constructable new-spine shapes (two spines are deliberately omitted: the
-// optional-chain callee `new a?.b` emits the optional chain JavaScript bans
-// inside `new` — a parse-time SyntaxError — and the tagged-template callee
-// `new tag"x"` emits a callee that names no binding; neither emission can run)
+// 09-classes.ts — the twin oracle for 09-classes.rip.
+// Two new-spines are deliberately omitted here as on the rip side: neither `new a?.b` nor `new tag"x"` emits a runnable spelling (FINDINGS.md).
 
 // ── Named declarations: the empty class, and the bodyless extends ──
 
@@ -158,8 +154,7 @@ class Hatchery {
   }
 }
 
-// the cast records what TypeScript cannot express: this constructor
-// genuinely returns a class, so constructing it yields a constructor
+// the cast records what TypeScript cannot express: this constructor genuinely returns a class, so constructing it yields a constructor
 let Hatch = Hatchery as new () => new () => { chirp: string }
 let hatched = new (new Hatch())()
 

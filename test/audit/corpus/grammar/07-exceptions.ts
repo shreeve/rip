@@ -1,9 +1,4 @@
-// 07-exceptions.ts — exception handling: every try shape (the block, the
-// inline expression, catch, finally), the identifier and bare catch
-// bindings, and throw in statement, indented-object, and expression positions
-// (the pattern bindings — catch {message}, catch [first] — are parked: the
-// lowering's minted binding stays unknown, so destructuring publishes
-// TS2339/TS2488 on every use — see FINDINGS.md and MANIFEST.md's Parked table)
+// 07-exceptions.ts — the twin oracle for 07-exceptions.rip.
 
 // ── try/catch: the classic block pair, an identifier binding ──
 

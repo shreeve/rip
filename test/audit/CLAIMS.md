@@ -74,15 +74,15 @@ The census owns which type KINDS the corpus claims; these rows own what the chec
 | behavior | carrier | negative carrier |
 | --- | --- | --- |
 | member-kind faces reached through an instance: `=!` rejects writes, `:=` exposes `.value`, `~=` computes, `=` stays plain | ABSENT | ABSENT |
-| method faces: typed parameters keep their types in both member layouts (inline body and indented body), defaulted parameters become optional | ABSENT | ABSENT |
-| `component extends <tag>` forwards use-site intrinsics typed from the element | ABSENT | ABSENT |
-| a literal-union prop keeps its union at the use site rather than widening to its base type | ABSENT | ABSENT |
-| a generic component's constraint violation rejects at the use site | ABSENT | ABSENT |
-| ref-cell nullability: a non-nullable cell rejects, an Element-or-null cell accepts any tag | ABSENT | ABSENT |
+| method faces: typed parameters keep their types in both member layouts (inline body and indented body), defaulted parameters become optional | 25-components.rip:tallied | 25-components.errors.rip:wrongStep |
+| `component extends <tag>` forwards use-site intrinsics typed from the element | 25-components.rip:Prompt | 25-components.errors.rip:Swatch |
+| a literal-union prop keeps its union at the use site rather than widening to its base type | 25-components.rip:Ribbon | 25-components.errors.rip:Tint |
+| a generic component's constraint violation rejects at the use site | 25-components.rip:Palette | 25-components.errors.rip:Palettes |
+| ref-cell nullability: a non-nullable cell rejects, an Element-or-null cell accepts any tag | 25-components.rip:Anchors | 25-components.errors.rip:Shell |
 | a render-head typo beyond `if` (unless, switch, for, `=`) rejects at the head line | ABSENT | ABSENT |
 | a wrong-typed write to component state inside a method rejects, while the legal write types | ABSENT | ABSENT |
 | array-typed reactive state keeps its ELEMENT type through the cell — `string[] := [...]` rejects a number element and types a read | ABSENT | ABSENT |
-| a forwarded element ref — a child `ref:` into a `<=>` bound parent cell — checks end to end | ABSENT | ABSENT |
+| a forwarded element ref — a child `ref:` into a `<=>` bound parent cell — checks end to end | 25-components.rip:Cuff | 25-components.errors.rip:Liner |
 
 ### Schema
 

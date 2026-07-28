@@ -1,8 +1,4 @@
-// 14-schema.errors.ts — the line-aligned twin: tsgo's diagnostics here
-// derive each expected code and position. The wrongGetter row has no
-// honest zod spelling — the transform-derived total is a real number
-// here, so its line stays quiet and the rip side pins it
-// (error-pins.json).
+// 14-schema.errors.ts — the line-aligned twin: tsgo's diagnostics derive each expected code and position; the wrongGetter row has no honest zod spelling, so its line stays quiet and the rip side pins it.
 // @ts-nocheck
 import { z } from 'zod'
 const Person = z.object({

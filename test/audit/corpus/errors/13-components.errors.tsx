@@ -1,8 +1,4 @@
-// 13-components.errors.tsx — the line-aligned twin: tsgo's diagnostics here
-// derive each expected code and position. The bind and ref rows have no
-// honest TSX spelling and are pinned on the rip side (error-pins.json), so
-// their lines stay quiet here; the Gated class spells the designed contract
-// (mount: never, private constructor) the gated lowering mints.
+// 13-components.errors.tsx — the line-aligned twin: tsgo's diagnostics derive each expected code and position; the bind and ref rows stay quiet here and are pinned on the rip side, and the Gated class spells the mount: never contract the gated lowering mints.
 // @ts-nocheck
 
 type ChipProps = {

@@ -1,7 +1,4 @@
-// 12-reactive.ts — the plain-TS twin of the reactive vocabulary: state → let,
-// computed and readonly → const, an effect's disposer spelled as a value
-// (ROADMAP.md, Oracles). Where a write re-fires an effect, the twin replays
-// the flush by hand — those lines are marked.
+// 12-reactive.ts — the twin oracle for 12-reactive.rip.
 
 // ── State (:=): inline, carried, indented; opt-marked; annotated ──
 

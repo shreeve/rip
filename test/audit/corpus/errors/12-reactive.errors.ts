@@ -1,5 +1,4 @@
-// 12-reactive.errors.ts — the line-aligned twin: tsgo's diagnostics here
-// derive each expected code and position; @ts-nocheck quiets editors only.
+// 12-reactive.errors.ts — the line-aligned twin: tsgo's diagnostics here derive each expected code and position.
 // @ts-nocheck
 
 let count = 0

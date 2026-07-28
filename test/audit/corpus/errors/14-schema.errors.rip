@@ -1,8 +1,4 @@
-# 14-schema.errors.rip — intentional negatives: the Diagnostics Lane
-# (bun run audit --diagnostics) asserts each one. The wrongGetter row is
-# PINNED (error-pins.json — a :shape callable's output types unknown while
-# the callable-unknown finding is open, and the twin's transform-derived
-# field is honestly a number); every other row derives from the twin.
+# 14-schema.errors.rip — intentional negatives asserted by the Diagnostics Lane; the wrongGetter row is pinned (error-pins.json) while the callable-unknown finding is open.
 # @ts-nocheck
 
 Person = schema

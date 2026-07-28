@@ -1,12 +1,4 @@
-// 11-types.ts — the erased-type surface twin: aliases, typeof, generics,
-// interfaces, enums, the forward declaration, overload signatures,
-// `as` casts, and the type vocabulary the census counts (keyword types,
-// operators, tuples, conditionals, self-reference, a call signature, the
-// narrowing annotations, `this`, an abstract construct signature).
-// Enums mirror rip's lowering — one const object holding
-// forward and reverse entries plus a same-name companion type — because
-// that pair is the construct's honest TypeScript shape (a native TS enum
-// would diverge at runtime: string enums get no reverse entries there).
+// 11-types.ts — the twin oracle for 11-types.rip.
 
 // ── type aliases: simple, union, function ──
 

@@ -1,6 +1,4 @@
-// 06-loops.ts — the loop family: while/until in block, guarded, postfix,
-// and value spellings; loop and the counted loop; `for` over arrays (in),
-// objects (of), and iterators (as / as! / for await); comprehensions
+// 06-loops.ts — the twin oracle for 06-loops.rip.
 
 // ── while and until: the block forms ──
 

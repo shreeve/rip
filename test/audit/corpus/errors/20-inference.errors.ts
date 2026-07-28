@@ -1,5 +1,4 @@
-// 20-inference.errors.ts — the line-aligned twin: tsgo's diagnostics here
-// derive each expected code and position; @ts-nocheck quiets editors only.
+// 20-inference.errors.ts — the line-aligned twin: tsgo's diagnostics here derive each expected code and position.
 // @ts-nocheck
 
 let counts = [1, 2, 3]

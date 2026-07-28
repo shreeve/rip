@@ -2228,6 +2228,57 @@ if (RUN_GRAMMAR) {
     out(`    ${(headsUnseen.length ? red : green)(String(headsSeen.size))} ${dim('/')} ${dim(String(CONSTRUCT_HEADS.size))} ${dim('heads spelled by a fixture')}`);
     for (const h of headsUnseen) out(`    ${red('✗')} ${red(`curated head no fixture produces: ${h}`)} ${dim('— drop it if the parser never mints it, or spell it if it does')}`);
 
+    // ── COMMENT CONVENTION — one rule enforced, one reported. A corpus
+    // comment is never a reflowed paragraph: a section divider opens `── `
+    // and closes ` ──` on its OWN line, however long. That half is exact —
+    // no threshold and no judgment — and its only
+    // remediation is joining the lines, never deleting a note. The header's
+    // LENGTH is a gauge instead of an invariant on purpose: any cap would be
+    // a number with no denominator behind it, and the only way to satisfy a
+    // tripped cap is to delete prose — which would push authors to drop
+    // exactly the workaround notes a reader cannot reconstruct from the code.
+    // Reported every run, because a header reaching eighteen lines unnoticed
+    // is what this measures.
+    const commentFiles = [
+      ...fs.readdirSync(FIX).map((f) => [FIX, f]),
+      ...fs.readdirSync(CLM).map((f) => [CLM, f]),
+      ...fs.readdirSync(ERRD).map((f) => [ERRD, f]),
+    ].filter(([, f]) => /\.(rip|ts|tsx)$/.test(f));
+    const splitDividers = [];
+    const headerLines = [];
+    // A rip line opening `#` is not necessarily a comment: `#{…}` is string
+    // interpolation, and inside a heredoc or heregex a `#` line is content
+    // whose bytes the runtime dimension compares. Two conditions keep this
+    // exact without parsing rip. A comment is `#` alone or `# ` — hash-SPACE
+    // — which excludes interpolation by construction. And a DIVIDER is only
+    // recognized at column 0, where all 330 of the corpus's dividers sit and
+    // where content nested inside a construct cannot reach.
+    for (const [dir, f] of commentFiles) {
+      const commentOf = f.endsWith('.rip')
+        ? (t) => (t === '#' ? '' : t.startsWith('# ') ? t.slice(2) : null)
+        : (t) => (t === '//' ? '' : t.startsWith('// ') ? t.slice(3) : null);
+      const lines = fs.readFileSync(path.join(dir, f), 'utf8').split('\n');
+      let head = 0;
+      while (head < lines.length && commentOf(lines[head]) !== null) head++;
+      headerLines.push([f, head]);
+      lines.forEach((l, i) => {
+        if (l !== l.trimStart()) return;            // indented: inside a construct, not a divider
+        const body = commentOf(l);
+        if (body === null) return;
+        const t = body.trim();
+        if (t.startsWith('── ') && !t.endsWith('──')) splitDividers.push([f, i + 1, t]);
+      });
+    }
+    out(`\n    ${bold('Comment convention')} ${dim('(a divider opens and closes on one line — exact; header length is a gauge)')}`);
+    // Count FILES, not divider hits: one file can wrap several dividers, and
+    // subtracting a hit count from a file count would understate how much of
+    // the corpus is clean (and can go negative).
+    const filesWithSplit = new Set(splitDividers.map(([f]) => f)).size;
+    out(`    ${(filesWithSplit ? red : green)(String(commentFiles.length - filesWithSplit))} ${dim('/')} ${dim(String(commentFiles.length))} ${dim('files whose dividers all close on their own line')}`);
+    for (const [f, ln, body] of splitDividers) out(`    ${red('✗')} ${red(`${f}:${ln} divider wraps`)} ${dim(`— join the lines: ${body.slice(0, 60)}…`)}`);
+    const deepHeaders = headerLines.filter(([, n]) => n > 3).sort((a, b) => b[1] - a[1]);
+    out(`    ${dim(`headers: ${headerLines.filter(([, n]) => n <= 3).length} of ${headerLines.length} at 3 lines or fewer`)}${deepHeaders.length ? `${dim(' · deepest: ')}${yellow(deepHeaders.slice(0, 3).map(([f, n]) => `${f} (${n})`).join(', '))}` : ''}`);
+
     out(`\n    ${bold('Negative coverage')} ${dim(`(the error lane against the positive corpus's own claims — vocabulary contractual, family fractions a gauge)`)}`);
     out(`    ${dim(`${negParsed} error fixtures reduce ${negSeen.size} productions`)}${famZero.length ? `${dim(' · families with no negative at all: ')}${yellow(famZero.join(', '))}` : ''}`);
     if (VERBOSE) for (const [g, n] of [...famPos.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
@@ -2243,6 +2294,7 @@ if (RUN_GRAMMAR) {
       kindDenom: censusDenom.length, kindQueued: kindQueue.length,
       kindBad: claimedOutside.length + falseKindExclusions.length + staleKindExclusions.length,
       headsUnseen: headsUnseen.length, headsTotal: CONSTRUCT_HEADS.size, pairs: pairsSeen.size,
+      splitDividers: splitDividers.length,
     };
     // ── CORPUS CLAIMS (CLAIMS.md) — the decision record for coverage with
     // no syntactic denominator: checker behaviors (carrier presence-checked

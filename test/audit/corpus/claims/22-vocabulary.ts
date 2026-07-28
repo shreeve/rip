@@ -1,5 +1,4 @@
-// 22-vocabulary.ts — the twin oracle: tuple positions, recursive aliases, index
-// signatures, deep members, overload returns, generic call-site inference, and the two ways a member can be optional
+// 22-vocabulary.ts — the twin oracle.
 
 // ── Tuple positions type independently: each index reads its own member ──
 
@@ -34,8 +33,7 @@ let packed: Crate = { inner: { depth: 3 } }
 
 console.log('deep:', packed.inner.depth.toFixed(0))
 
-// ── Overload resolution picks the MATCHED signature's return, where the
-// overloads' returns differ ──
+// ── Overload resolution picks the MATCHED signature's return, where the overloads' returns differ ──
 
 function measure(sample: string): number
 function measure(sample: number): string
@@ -49,8 +47,7 @@ let overloadPair: [number, string] = [measuredLength, measuredLabel]
 
 console.log('overloads:', overloadPair)
 
-// ── Generic call-site inference preserves the literal type rather than
-// widening it to the constraint ──
+// ── Generic call-site inference preserves the literal type rather than widening it to the constraint ──
 
 function echoOf<T extends string>(sample: T) {
   return sample

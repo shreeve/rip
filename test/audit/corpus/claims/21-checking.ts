@@ -1,8 +1,6 @@
-// 21-checking.ts — the twin oracle: excess-property freshness, the weak-type
-// rule, switch and else-if narrowing
+// 21-checking.ts — the twin oracle.
 
-// ── The excess-property check fires on a FRESH object literal, and only on a
-// fresh one: the same extra key is legal once it arrives through a binding ──
+// ── The excess-property check fires on a FRESH object literal only: the same extra key is legal once it arrives through a binding ──
 
 type Placard = { heading: string }
 
@@ -12,8 +10,7 @@ let inheritedPlacard: Placard = widenedSource
 
 console.log('placards:', exactPlacard.heading, inheritedPlacard.heading)
 
-// ── The weak-type rule: an all-optional type accepts the empty literal, and
-// any subset of its own members ──
+// ── The weak-type rule: an all-optional type accepts the empty literal, and any subset of its own members ──
 
 type Knobs = { mode?: string, depth?: number }
 

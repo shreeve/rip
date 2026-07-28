@@ -1,11 +1,4 @@
-// 10-modules.ts — import/export: every import head (side-effect, default,
-// namespace, empty and named lists, the combined forms), aliased and
-// default-as specifiers, multiline specifier lists, exported bindings in
-// every layout, local and re-exporting specifier lists, export default,
-// dynamic import in both forms, and import.meta
-// (the bare `default` import specifier — import { default } — is omitted:
-// its emission is that same spelling, which is not importable JavaScript,
-// so no runnable fixture can carry it)
+// 10-modules.ts — the twin oracle for 10-modules.rip.
 
 // ── import heads: side-effect, default, namespace, empty and named lists ──
 

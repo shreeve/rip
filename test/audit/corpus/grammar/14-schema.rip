@@ -1,16 +1,8 @@
-# 14-schema.rip — the schema vocabulary: field forms (`!`, `?`), types
-# (primitives, literal unions, arrays, nested schemas), coercion, constraints,
-# defaults, transforms (`-> it.X`), the `:shape` callable surface, and the
-# kinds — `:input` (default), `:shape`, `:enum`, `:union`, `:mixin`, and
-# `:model` in minimal presence (persistence is outside this file's charter).
-# The zod twin covers the analogy-honest surface only (ROADMAP.md, Oracles).
-# Hover targets are ruled in RULINGS.md (Schema); in-body pins live in
-# hover-pins.json's positions section. Negatives pair in
-# corpus/errors/14-schema.errors.rip.
+# 14-schema.rip — the schema vocabulary: field forms, types, coercion, constraints, defaults, transforms, callables, and the kinds.
 
-# ── Field forms: required, optional, defaults, literal unions, arrays,
-# nested schemas (RULINGS.md, Schema: field names are ruled `(field)`,
-# interim silence) ──
+# ── Field forms: required, optional, defaults, literal unions, arrays, nested schemas ──
+# Field names are ruled `(field)` with interim silence (RULINGS.md, Schema).
+# The zod twin covers the analogy-honest surface only (ROADMAP.md, Oracles).
 
 Address = schema
   street! string
@@ -53,14 +45,9 @@ vendor = Vendor.parse({ Id: 'V-9', DisplayName: 'Acme Corp' })
 
 console.log("vendor: #{vendor.id} #{vendor.displayName}")
 
-# ── The callable surface on :shape: computed (~>), eager derived (!>),
-# methods. Each getter reads FIELDS only, and the callable-unknown finding
-# (FINDINGS.md) holds every typed read of their output: a sibling-callable
-# read (`total` reading `@subtotal`) cannot check — in-body casts and
-# annotations are stripped with the descriptor's JS — so `total` recomputes
-# from the fields. `@ensure` is absent for the same root: its predicate's
-# param is an implicit any under strict and nothing the author writes can
-# type it (the parked shape, held by the finding) ──
+# ── The callable surface on :shape: computed (~>), eager derived (!>), methods ──
+# Each getter reads FIELDS only: the callable-unknown finding (FINDINGS.md) holds every typed read of a callable's output, so `total` recomputes from the fields rather than reading `@subtotal` — in-body casts and annotations are stripped with the descriptor's JS.
+# `@ensure` is PARKED for the same root: its predicate's param is an implicit any under strict and no spelling can type it.
 
 Cart = schema :shape
   items!    number[]
@@ -69,9 +56,7 @@ Cart = schema :shape
   total:    ~> @items.reduce(((a, b) -> a + b), 0) * (1 + @taxRate)
   describe: -> "#{@items.length} items"
 
-# The method call rides a cast — a bare `cart.describe()` publishes while the
-# callable-unknown finding is open (FINDINGS.md); the cast is the workaround
-# shape this fixture carries, the promoted-param precedent.
+# The method call rides a cast — a bare `cart.describe()` publishes while the callable-unknown finding is open (FINDINGS.md); the cast is this fixture's workaround shape, the promoted-param precedent.
 cart = Cart.parse({ items: [700, 550], taxRate: 0.1 })
 
 console.log("cart: #{cart.subtotal} #{cart.total} #{(cart.describe as () => string)()}")
@@ -118,9 +103,8 @@ doc = Doc.parse({ title: 'Charter', createdBy: 'ada' })
 
 console.log("doc: #{doc.title} by #{doc.createdBy}")
 
-# ── :model and the named-coercer registry: minimal presence — a :model's
-# persistence surface is out of charter, and `~:email` parses only under a
-# runtime registration, so neither is ever parsed here ──
+# ── :model and the named-coercer registry: minimal presence ──
+# A :model's persistence surface is out of charter, and `~:email` parses only under a runtime registration, so neither is ever parsed here.
 
 Account = schema :model
   handle!  string
@@ -134,8 +118,8 @@ Tiny = schema; note string
 
 console.log("tiny: #{typeof Tiny}")
 
-# ── Companion types at use sites: the bare name is the compile-time type
-# (RULINGS.md, Schema: the structural type, expanded like any alias) ──
+# ── Companion types at use sites: the bare name is the compile-time type ──
+# The structural type, expanded like any alias (RULINGS.md, Schema).
 
 def describePerson(p: Person): string
   return "#{p.name} (#{p.role})"

@@ -1,5 +1,4 @@
-// 02-operations.errors.ts — the line-aligned twin: tsgo's diagnostics here
-// derive each expected code and position; @ts-nocheck quiets editors only.
+// 02-operations.errors.ts — the line-aligned twin: tsgo's diagnostics here derive each expected code and position.
 // @ts-nocheck
 
 let text = 'abc'

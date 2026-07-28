@@ -1,5 +1,4 @@
-// 23-functions.ts — the twin oracle: the dammit call-and-await, a fat arrow's
-// declared return, and prototype augmentation at its call sites
+// 23-functions.ts — the twin oracle.
 
 // ── The dammit operator calls AND awaits, so it types as the awaited value ──
 

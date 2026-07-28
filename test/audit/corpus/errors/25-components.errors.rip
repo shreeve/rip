@@ -1,0 +1,48 @@
+# 25-components.errors.rip — intentional negatives asserted by the Diagnostics Lane; the ref and `<=>` rows are pinned (error-pins.json), and the method-argument row is paren-less because the explicit spelling mis-anchors (FINDINGS.md).
+# @ts-nocheck
+
+Knob = component
+  tally: (step: number) -> (step + 1)
+
+  render null
+
+knob = new Knob({})
+wrongStep = knob.tally 'nope'
+
+Swatch = component extends input
+  @caption?: string
+
+  render
+    input
+
+Tint = component
+  @tone?: 'info' | 'warn' := 'info'
+
+  render
+    span 'tint'
+
+Palettes<TShade extends string> = component
+  @shades?: TShade[] := []
+
+  render
+    div 'palettes'
+
+Liner = component
+  @inner?: HTMLInputElement | null := null
+
+  render
+    input ref: inner
+
+Shell = component
+  strictEl: HTMLInputElement := null
+  wrongTag: HTMLInputElement | null := null
+  wrongSleeve: HTMLDivElement | null := null
+
+  render
+    div
+      Swatch placeholder: 42
+      Tint tone: 'nope'
+      Palettes shades: [1, 2]
+      input ref: strictEl
+      section ref: wrongTag
+      Liner inner <=> wrongSleeve

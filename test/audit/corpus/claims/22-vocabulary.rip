@@ -1,5 +1,4 @@
-# 22-vocabulary.rip — what the checker DOES with the shapes the census counts:
-# tuple positions, recursive aliases, index signatures, deep members, overload returns, generic call-site inference, and the two ways a member can be optional
+# 22-vocabulary.rip — what the checker DOES with the shapes the census counts.
 
 # ── Tuple positions type independently: each index reads its own member ──
 
@@ -26,8 +25,7 @@ counters: Tallies = { entries: 2, alpha: 1, beta: 5 }
 
 console.log('index:', counters.entries.toFixed(0), counters.alpha.toFixed(0))
 
-# ── A deep member is checked at its own depth, which is where its rejection
-# lands too — the error lane's twin fixes that position ──
+# ── A deep member is checked at its own depth, which is where its rejection lands too ──
 
 type Crate = { inner: { depth: number } }
 
@@ -35,8 +33,7 @@ packed: Crate = { inner: { depth: 3 } }
 
 console.log('deep:', packed.inner.depth.toFixed(0))
 
-# ── Overload resolution picks the MATCHED signature's return, where the
-# overloads' returns differ ──
+# ── Overload resolution picks the MATCHED signature's return, where the overloads' returns differ ──
 
 def measure(sample: string): number
 def measure(sample: number): string
@@ -49,8 +46,7 @@ overloadPair: [number, string] = [measuredLength, measuredLabel]
 
 console.log('overloads:', overloadPair)
 
-# ── Generic call-site inference preserves the literal type rather than widening
-# it to the constraint ──
+# ── Generic call-site inference preserves the literal type rather than widening it to the constraint ──
 
 def echoOf<T extends string>(sample: T)
   sample

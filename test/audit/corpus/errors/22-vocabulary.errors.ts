@@ -1,5 +1,4 @@
-// 22-vocabulary.errors.ts — the line-aligned twin: tsgo's diagnostics here
-// derive each expected code and position; @ts-nocheck quiets editors only.
+// 22-vocabulary.errors.ts — the line-aligned twin: tsgo's diagnostics here derive each expected code and position.
 // @ts-nocheck
 
 type Twig = { label: string, shoots: Twig[] }

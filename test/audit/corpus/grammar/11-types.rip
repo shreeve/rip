@@ -1,23 +1,8 @@
-# 11-types.rip — the erased-type surface: type aliases (simple, union,
-# function, object — inline and indented block), typeof, generic aliases
-# (parameters and a constraint), interfaces (extension, optional and
-# method members, generic), enums (bare members auto-number, explicit
-# number and string values, exported), the bare typed forward
-# declaration, bodiless def overload signatures, and `as` casts
-# (chained, on a call, on a parenthetical). `satisfies` is deliberately
-# absent: rip has no source spelling for it — the emitter uses it
-# internally for computed lowerings only. Generic def signatures live
-# with 08-functions.
-#
-# The sections after the casts carry the type VOCABULARY the census
-# counts — keyword types, operators and access forms, tuple shapes,
-# conditionals with `infer`, self-reference, a call signature, the
-# narrowing annotations, `this` as a return, and an abstract construct
-# signature. The position-constrained spellings among them — parenthesized
-# constructor types, `this` only as a method return, a predicate only as a
-# def return — follow the boundaries note (ROADMAP.md).
+# 11-types.rip — the erased-type surface, and the type VOCABULARY the census counts.
 
 # ── type aliases: simple, union, function ──
+# `satisfies` is deliberately absent: rip has no source spelling for it, and the emitter uses it internally for computed lowerings only.
+# Generic def signatures live with 08-functions; the position-constrained spellings below follow the boundaries note (ROADMAP.md).
 
 type Port = number
 type Flag = boolean | 'auto'
@@ -86,9 +71,7 @@ registry: Registry<Alarm> = { entries: [alarm], find: (key) -> registry.entries.
 
 console.log('alarm:', alarm.level, sink.accept('log'), sink.flush?(), registry.find('smoke')?.acknowledged)
 
-# ── enums: one const object, forward and reverse entries; bare ──
-# members auto-number, explicit numerics thread the counter, and a
-# string member needs a value
+# ── enums: one const object, forward and reverse entries; bare members auto-number, explicit numerics thread the counter, and a string member needs a value ──
 
 enum Direction
   north
@@ -109,10 +92,8 @@ console.log('direction:', Direction, Direction.north, Direction[1])
 console.log('status:', Status.draft, 'priority:', Priority.standby, Priority.urgent)
 console.log('pick:', pick)
 
-# ── the bare typed forward declaration: `name: T` alone, erased, the ──
-# binding hoisted with a definite-assignment face (spelled inside a def
-# body: the module-level spelling's hoisted binding answers no hover, so
-# it cannot sit at a probed column-0 position)
+# ── the bare typed forward declaration: `name: T` alone, erased, the binding hoisted with a definite-assignment face ──
+# Spelled inside a def body: the module-level spelling's hoisted binding answers no hover, so it cannot sit at a probed column-0 position.
 
 def choosePort(): Port
   chosen: Port
@@ -222,9 +203,8 @@ branch: Branch = { label: 'root', kids: [{ label: 'leaf', kids: [] }] }
 
 console.log('recursive:', branch.label, branch.kids.length, branch.kids[0].label)
 
-# ── a call signature: the callable object type. Its sibling — a NAMED ──
-# method member — compiles only in an indented body (the interfaces above),
-# never in an inline one, so the two spellings live apart in this file.
+# ── a call signature: the callable object type ──
+# Its sibling, a NAMED method member, compiles only in an indented body (the interfaces above) and never in an inline one, so the two spellings live apart in this file (FINDINGS.md).
 
 type Formatter = { (value: number): string }
 
@@ -253,8 +233,7 @@ class Tally
 
 console.log('this:', new Tally().bump().bump().count)
 
-# ── an abstract construct signature: parenthesized, since a bare `new` ──
-# at annotation start parses as an expression
+# ── an abstract construct signature: parenthesized, since a bare `new` at annotation start parses as an expression ──
 
 type Shaped = { id: number }
 

@@ -1,14 +1,9 @@
-// 14-schema.ts — the zod analogy twin for 14-schema.rip, scoped to where the
-// analogy is honest (ROADMAP.md, Oracles). Not claimed as analogy: the lazy
-// computed getter and the method (parity-only spellings on the transform
-// output), the named-coercer registry, and the :model kind. Hover rows for
-// every schema symbol are pinned, never twin-judged (the runner's rip-native
-// rule), so this file's job is the type story and byte-identical output.
+// 14-schema.ts — the twin oracle for 14-schema.rip.
+// Every schema symbol's hover is pinned rather than twin-judged (the runner's rip-native rule), so this file owes only the type story and byte-identical output.
 
 import { z } from 'zod'
 
-// ── Field forms: required, optional, defaults, literal unions, arrays,
-// nested schemas ──
+// ── Field forms: required, optional, defaults, literal unions, arrays, nested schemas ──
 
 const AddressSchema = z.object({
   street: z.string(),
@@ -62,9 +57,7 @@ let vendor = VendorSchema.parse({ Id: 'V-9', DisplayName: 'Acme Corp' })
 
 console.log(`vendor: ${vendor.id} ${vendor.displayName}`)
 
-// ── The callable surface: eager transform for the derived field; the lazy
-// getter and the method are parity-only spellings. No `.refine()` — the
-// fixture cannot carry `@ensure` under strict (the callable-unknown finding) ──
+// ── The callable surface: eager transform for the derived field; the lazy getter and the method are parity-only spellings. No `.refine()` — the fixture cannot carry `@ensure` under strict (the callable-unknown finding) ──
 
 const CartSchema = z.object({
   items: z.number().array(),
@@ -127,8 +120,7 @@ let doc = DocSchema.parse({ title: 'Charter', createdBy: 'ada' })
 
 console.log(`doc: ${doc.title} by ${doc.createdBy}`)
 
-// ── :model and the named-coercer registry: declare-only in the fixture; the
-// twin mirrors the runtime surface actually exercised (a value exists) ──
+// ── :model and the named-coercer registry: declare-only in the fixture; the twin mirrors the runtime surface actually exercised (a value exists) ──
 
 const AccountSchema = z.object({
   handle: z.string(),

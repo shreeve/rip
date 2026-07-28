@@ -1,6 +1,4 @@
-// 10-modules-lib.ts — the module the 29-family imports: named exports (plain,
-// typed, void), a local promoted through the specifier list, and the module
-// default in its indented-object form
+// 10-modules-lib.ts — the twin oracle for 10-modules-lib.rip.
 
 let station = 'relay'
 

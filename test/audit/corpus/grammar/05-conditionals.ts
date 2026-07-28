@@ -1,6 +1,4 @@
-// 05-conditionals.ts — control flow that chooses: if/else-if/else and
-// unless blocks, every postfix guard spelling, the if/else ternary, and
-// switch/when — subjects, multi-value cases, condition-less cases, else
+// 05-conditionals.ts — the twin oracle for 05-conditionals.rip.
 
 // ── if: bare, full chain, chain ending in else-if, and the inline then-else ──
 
