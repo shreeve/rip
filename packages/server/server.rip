@@ -833,6 +833,17 @@ export App = (fn) ->
 #     The process dies on reload, so staleness is impossible.
 #   standalone (no RIP_BUNDLE_PATH) — the process runs under the rip loader,
 #     so the compiler is loadable; assemble at call time, failing fast.
+#
+# Under RIP_WORKSPACE=1 (docs/WORKSPACE.md — experimental) worker mode adds
+# the dev feed: GET /__rip/manifest (no-store, read per request), rev-keyed
+# immutable cell bytes at /__rip/cells/<id>?rev=N, a per-request bundle
+# re-read (the manager rewrites the pool's bundle in place on a cell
+# change), and the hub bridge endpoint enrolling dev sockets into the
+# DEV_CHANNEL. Flag off, client() registers exactly the surface above.
+
+# The hub channel dev clients enroll in under RIP_WORKSPACE=1 — mirrored as
+# DEV_CHANNEL in manager.rip (workers never import manager code).
+DEV_CHANNEL = '/rip/dev'
 
 clientModules = (dir) ->
   out = {}
@@ -902,11 +913,52 @@ export client = (dir = null) ->
       c.html BOOT_PAGE
 
   get '/', (c) -> bootPage(c)
-  get '/__rip/bundle.json', (c) ->
-    if c.req.header('if-none-match') is etag
-      return new Response(null, { status: 304, headers: { 'ETag': etag } })
-    c.body bundleText, 200, { 'Content-Type': 'application/json', 'ETag': etag }
+  workspace = process.env.RIP_WORKSPACE is '1'
+  if workspace and process.env.RIP_BUNDLE_PATH?
+    # Dev-feed freshness: the manager rewrites this pool's bundle file in
+    # place on a cell change, so the handler re-reads and re-tags per
+    # request — a dev-only cost. Flag off keeps the boot-time cached bytes.
+    get '/__rip/bundle.json', (c) ->
+      text = readFileSync(process.env.RIP_BUNDLE_PATH, 'utf8')
+      live = "\"#{Bun.hash(text).toString(16)}\""
+      if c.req.header('if-none-match') is live
+        return new Response(null, { status: 304, headers: { 'ETag': live } })
+      c.body text, 200, { 'Content-Type': 'application/json', 'ETag': live }
+  else
+    get '/__rip/bundle.json', (c) ->
+      if c.req.header('if-none-match') is etag
+        return new Response(null, { status: 304, headers: { 'ETag': etag } })
+      c.body bundleText, 200, { 'Content-Type': 'application/json', 'ETag': etag }
   get '/__rip/rip.js', (c) -> c.send runtimePath
+
+  if workspace and process.env.RIP_MANIFEST_PATH?
+    get '/__rip/manifest', (c) ->
+      # Read per request: the manager rewrites the manifest on every cell
+      # change, and no-store keeps every cache out of the freshness path.
+      c.body readFileSync(process.env.RIP_MANIFEST_PATH, 'utf8'), 200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+
+  if workspace and process.env.RIP_CELLS_DIR?
+    # Cell bytes are addressed by (id, rev) in the URL (Q8): a rev-keyed
+    # answer is immutable and cacheable; an unversioned request is rejected,
+    # never guessed at. The filename encoding mirrors the manager's — the
+    # percent-encoded id can never contain the literal '@' separator.
+    get '/__rip/cells/*', (c) ->
+      rev = c.req.query('rev')
+      unless rev? and /^[1-9]\d*$/.test(rev)
+        error 'unversioned cell URLs are rejected — address a cell as /__rip/cells/<id>?rev=N (docs/WORKSPACE.md, Q8)', 400
+      id = try decodeURIComponent(c.req.path.slice('/__rip/cells/'.length)) catch then error('malformed percent-encoding in cell id', 400)
+      file = join(process.env.RIP_CELLS_DIR, "#{encodeURIComponent(id)}@#{rev}")
+      error "unknown cell (#{id}, rev #{rev})", 404 unless existsSync(file)
+      c.body readFileSync(file, 'utf8'), 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=31536000, immutable' }
+
+  if workspace and process.env.RIP_BRIDGE_PATH?
+    # Janus POSTs every hub socket event here; answering an open with
+    # {"+": [DEV_CHANNEL]} enrolls that connection into the dev channel.
+    post process.env.RIP_BRIDGE_PATH, (c) ->
+      frame = c.req.header('sec-websocket-frame')
+      return c.json { '+': [DEV_CHANNEL] } if frame is 'open'
+      return new Response(null, { status: 204 }) if frame is 'text' or frame is 'close'
+      error "missing or unknown Sec-WebSocket-Frame header (got #{JSON.stringify(frame ?? null)})", 400
   # SPA fallback: an unmatched GET that accepts HTML answers the boot page,
   # so client-side routes deep-link; everything else stays a plain 404.
   notFound (c) ->

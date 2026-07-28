@@ -13,7 +13,7 @@
 # Never on the data path: client traffic flows Janus → worker socket.
 # ==============================================================================
 
-import { watch, readdirSync, readFileSync, existsSync, statSync, unlinkSync, mkdtempSync, rmSync } from 'node:fs'
+import { watch, readdirSync, readFileSync, existsSync, statSync, unlinkSync, mkdtempSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { join, resolve, dirname, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -117,12 +117,16 @@ export state =
   browserRuntime: null # dist/browser/rip.js, copied into runDir when client/ exists
   buildCounter: 0      # one app artifact per boot epoch, uniquely named
   runDir: null         # tmpdir holding the doorbell, worker sockets, artifacts
+  cellsDir: null       # RIP_WORKSPACE=1: rev-keyed cell files under runDir/cells
+  manifestPath: null   # RIP_WORKSPACE=1: the atomically rewritten cell manifest
+  cells: {}            # RIP_WORKSPACE=1: id (birth path under client/) → { id, rev, hash, retired }
   bellPath: null
   bell: null
   watcher: null
   settleTimer: null
   hbTimer: null
   lastHash: null       # content hash of the watched *.rip files
+  lastFiles: null      # per-file content hashes from the same walk (change classification)
   lastUpstreams: []    # the registry's current statement (re-PUT after re-register)
   dirty: false         # files changed since the last upstreams PUT
   doorbellPublished: false
@@ -328,19 +332,129 @@ clientModules = (dir) ->
   walk dir, ''
   out
 
-buildBundle = ->
-  clientDir = join(cfg.appDir, 'client')
-  return null unless existsSync(clientDir)
+assembleBundleText = ->
   assemble = loadAssembler!()
-  text = JSON.stringify assemble({ modules: clientModules(clientDir), packagesDir: join(loaderSrcDir(), '..', 'packages') })
+  JSON.stringify assemble({ modules: clientModules(join(cfg.appDir, 'client')), packagesDir: join(loaderSrcDir(), '..', 'packages') })
+
+buildBundle = ->
+  return null unless existsSync(join(cfg.appDir, 'client'))
   out = join(state.runDir, "b#{state.buildCounter}-bundle.json")
-  Bun.write! out, text
+  Bun.write! out, assembleBundleText!()
   out
 
 buildApp = ->
   state.buildCounter += 1
   artifact = buildArtifact! cfg.entry, join(state.runDir, "b#{state.buildCounter}-app.js")
-  { artifact, bundle: buildBundle!() }
+  bundle = buildBundle!()
+  syncCells!() if WORKSPACE and bundle?
+  { artifact, bundle }
+
+# ==============================================================================
+# The workspace dev feed — RIP_WORKSPACE=1 (docs/WORKSPACE.md)
+# ==============================================================================
+#
+# Flag on, a save touching ONLY client/ feeds the live pool in place: mint or
+# bump (id, rev) cells, rewrite the manifest and the current pool's bundle,
+# then ding /rip/dev with {id, rev} envelopes — no new epoch, no pool reload,
+# no doorbell. Flag off, none of this code runs and every save takes the
+# dirty-epoch path above, byte-identically.
+
+WORKSPACE =! process.env.RIP_WORKSPACE is '1'
+
+# The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
+# server.rip (workers never import manager code).
+DEV_CHANNEL =! '/rip/dev'
+
+sha256hex = (text) -> new Bun.CryptoHasher('sha256').update(text).digest('hex')
+
+# A cell filename encodes (id, rev) unambiguously: the id is percent-encoded
+# (it contains slashes), so the literal '@' separator can never appear inside
+# it. Mirrored by the cell route in server.rip.
+cellFile = (id, rev) -> join(state.cellsDir, "#{encodeURIComponent(id)}@#{rev}")
+
+# Sync the registry against the client tree and write what changed. A new
+# path mints its id — the birth path, Q3/B′ — at rev 1; a changed path bumps
+# its rev; a deleted path retires: dropped from the manifest, its rev-keyed
+# files staying on disk and answering (Q8), and the retirement OCCUPIES its
+# own rev so the delete ding is rev-guarded like any mutation. A path
+# returning after retirement resumes its rev sequence — restarting at rev 1
+# would rewrite an existing (id, rev) file, and rev-keyed files are
+# immutable. A rename is retire + mint (id persistence across renames is
+# open research). Returns the changed { id, rev, deleted? } entries.
+syncCells = ->
+  state.cellsDir ?= join(state.runDir, 'cells')
+  state.manifestPath ?= join(state.runDir, 'manifest.json')
+  mkdirSync state.cellsDir, { recursive: true }
+  modules = clientModules(join(cfg.appDir, 'client'))
+  changed = []
+  for path, source of modules
+    h = sha256hex(source)
+    entry = state.cells[path]
+    if not entry?
+      entry = { id: path, rev: 1, hash: h, retired: false }
+      state.cells[path] = entry
+      changed.push entry
+    else if entry.retired
+      entry.retired = false
+      entry.rev += 1
+      entry.hash = h
+      changed.push entry
+    else if entry.hash isnt h
+      entry.rev += 1
+      entry.hash = h
+      changed.push entry
+  for path, entry of state.cells
+    if not modules[path]? and not entry.retired
+      entry.retired = true
+      entry.rev += 1
+      changed.push { id: entry.id, rev: entry.rev, deleted: true }
+  # Revs only move forward within a run, so every write below creates a
+  # fresh (id, rev) file — an existing one is never rewritten. A retirement
+  # has no bytes: its rev exists only in the ding.
+  for entry in changed when not entry.deleted
+    Bun.write! cellFile(entry.id, entry.rev), modules[entry.id]
+  live = []
+  for path, entry of state.cells
+    live.push { id: entry.id, path: path, rev: entry.rev } unless entry.retired
+  live.sort (a, b) -> if a.path < b.path then -1 else 1
+  # tmp + rename: workers read the manifest per request and must never see
+  # a torn document.
+  tmp = "#{state.manifestPath}.tmp"
+  Bun.write! tmp, JSON.stringify({ cells: live })
+  renameSync tmp, state.manifestPath
+  changed
+
+# Rewrite the live pool's bundle file in place (tmp + rename — workers
+# re-read it per request under the flag), so a hard refresh never serves
+# stale first-paint code.
+refreshPoolBundle = ->
+  pool = state.currentPool
+  return unless pool?.bundle?
+  tmp = "#{pool.bundle}.tmp"
+  Bun.write! tmp, assembleBundleText!()
+  renameSync tmp, pool.bundle
+
+# The cell path: cells, manifest, and the bundle are durable BEFORE the ding
+# names the new revs. A reassembly or publish failure warns and never blocks
+# the cell path or crashes the manager — the cell bytes are already servable.
+onCellChange = ->
+  changed = syncCells!()
+  try
+    refreshPoolBundle!()
+  catch e
+    warn "rip-server: bundle reassembly failed on the cell path: #{e?.message or e}"
+  dings = changed.map (c) ->
+    ding = { id: c.id, rev: c.rev }
+    ding.kind = 'delete' if c.deleted is true
+    { '@': [DEV_CHANNEL], ding }
+  i = 0
+  while i < dings.length                 # the publish plane caps 16 objects per frame
+    try
+      publish! dings.slice(i, i + 16)
+    catch e
+      warn "rip-server: dev ding publish failed: #{e?.message or e}"
+    i += 16
+  return
 
 # ==============================================================================
 # Workers and pools
@@ -356,6 +470,10 @@ spawnWorker = (pool) ->
     env.RIP_BUNDLE_PATH = pool.bundle
     env.RIP_BROWSER_RUNTIME = state.browserRuntime
     env.RIP_CLIENT_DIR = join(cfg.appDir, 'client')
+    if WORKSPACE
+      env.RIP_CELLS_DIR = state.cellsDir
+      env.RIP_MANIFEST_PATH = state.manifestPath
+      env.RIP_BRIDGE_PATH = cfg.bridge if cfg.bridge?
   proc = Bun.spawn ['bun', state.workerJs],
     stdout: 'inherit'
     stderr: 'inherit'
@@ -628,7 +746,6 @@ ignoredPath = (rel) ->
   false
 
 hashApp = ->
-  hasher = new Bun.CryptoHasher('sha256')
   files = []
   walk = (dir) ->
     entries = []
@@ -642,20 +759,48 @@ hashApp = ->
         files.push(full)
   walk cfg.appDir
   files.sort()
+  # Per-file hashes feed both the whole-tree gate and (flag on) the
+  # client-only change classification in settle.
+  map = {}
+  hasher = new Bun.CryptoHasher('sha256')
   for f in files
+    one = new Bun.CryptoHasher('sha256')
+    try one.update readFileSync(f)
+    map[f] = one.digest 'hex'
     hasher.update f
-    try hasher.update readFileSync(f)
-  hasher.digest 'hex'
+    hasher.update map[f]
+  { hash: hasher.digest('hex'), files: map }
+
+# Every changed, added, or removed path between two walks lies under
+# client/ — then the save is a cell feed, not a reload.
+clientOnlyChange = (prev, cur) ->
+  boundary = join(cfg.appDir, 'client') + '/'
+  for path, h of cur
+    return false if prev[path] isnt h and not path.startsWith(boundary)
+  for path of prev
+    return false if not cur[path]? and not path.startsWith(boundary)
+  true
 
 settle = ->
   state.settleTimer = null
-  h = hashApp()
-  return if h is state.lastHash
-  state.lastHash = h
+  snap = hashApp()
+  return if snap.hash is state.lastHash
+  prev = state.lastFiles
+  state.lastHash = snap.hash
+  state.lastFiles = snap.files
+  # RIP_WORKSPACE=1: a save touching only client/ mutates a LIVE pool in
+  # place. With no live pool to feed (admission already cut, a cached boot
+  # failure, mid-reload) the save joins the pending epoch exactly as a
+  # server save would. Flag off, every save takes the path below.
+  if WORKSPACE and prev? and state.currentPool? and not state.dirty and not state.bootFailure? and clientOnlyChange(prev, snap.files)
+    onCellChange().catch (e) -> warn "rip-server: cell update failed: #{e?.message or e}"
+    return
   onContentChange()
 
 startWatcher = ->
-  state.lastHash = hashApp()
+  snap = hashApp()
+  state.lastHash = snap.hash
+  state.lastFiles = snap.files
   state.watcher = watch cfg.appDir, { recursive: true }, (event, filename) ->
     return if state.shuttingDown or ignoredPath(filename)
     clearTimeout state.settleTimer if state.settleTimer?

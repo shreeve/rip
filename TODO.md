@@ -50,6 +50,19 @@ Janus items moved to `janus/TODO.md`.
 
 ---
 
+## Workspace dev feed — open edges
+
+- [ ] Epoch-path dings: a full reload (server or mixed save under
+      `RIP_WORKSPACE=1`) rebuilds cells in `buildApp` but publishes no
+      dings, and hub sockets survive app reloads at Janus — so connected
+      browsers hear nothing about client cells that changed in that
+      epoch until their next reconnect resync. Decide in Phase C
+      (apply policy for server changes is likely a full page reload
+      anyway); if the door keeps in-place apply for these, the manager
+      must ding after the pool swap.
+
+---
+
 ## Related pointers
 
 - Janus repo: control `/1.0` + cold capabilities **ping**, **control**,

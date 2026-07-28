@@ -14,7 +14,7 @@ import { get, post, put, patch, del, all, use, prefix, before, after, onError, n
          read, error, notice, bail, ctx, session, subrequest, mark,
          mimeType, errorEnvelope, openapi } from '@rip-lang/server'
 import { cors, logger, compress, sessions, csrf, secureHeaders, timeout, htmlJson } from '@rip-lang/server/middleware'
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs'
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -856,6 +856,114 @@ test! "a client module importing a server-only package rejects loudly at client(
 rmSync clientAppDir, { recursive: true, force: true }
 resetGlobals()
 
+# ==[ client() dev feed — the worker half of RIP_WORKSPACE=1 ]==
+#
+# Worker-mode client() with the feed env set: the manifest, rev-keyed cell,
+# bridge, and fresh-bundle routes — driven in-process through the fetch
+# handler against files a manager would have written.
+
+console.log "\nclient() dev feed"
+
+FEED_CELL_ID = '_route/index.rip'
+feedDir = mkdtempSync join(import.meta.dir, 'tmp-feed-')
+mkdirSync join(feedDir, 'cells'), { recursive: true }
+writeFileSync join(feedDir, 'cells', "#{encodeURIComponent(FEED_CELL_ID)}@1"), CLIENT_ROUTE
+writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, path: FEED_CELL_ID, rev: 1 }] })
+writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: {}, packages: {} })
+
+feedEnv =
+  RIP_WORKSPACE: '1'
+  RIP_BUNDLE_PATH: join(feedDir, 'bundle.json')
+  RIP_CELLS_DIR: join(feedDir, 'cells')
+  RIP_MANIFEST_PATH: join(feedDir, 'manifest.json')
+  RIP_BRIDGE_PATH: '/hub'
+
+savedFeedEnv = {}
+for k, v of feedEnv
+  savedFeedEnv[k] = process.env[k]
+  process.env[k] = v
+resetGlobals()
+client!()
+
+test! "GET /__rip/manifest is no-store and read per request", ->
+  res = handle! req('GET', '/__rip/manifest')
+  eq res.status, 200
+  eq res.headers.get('content-type'), 'application/json'
+  eq res.headers.get('cache-control'), 'no-store'
+  eq (res.json!), { cells: [{ id: FEED_CELL_ID, path: FEED_CELL_ID, rev: 1 }] }
+  # a manager rewrite shows on the very next request — nothing is cached
+  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, path: FEED_CELL_ID, rev: 2 }] })
+  eq ((handle! req('GET', '/__rip/manifest')).json!).cells[0].rev, 2
+  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, path: FEED_CELL_ID, rev: 1 }] })
+
+test! "a rev-keyed cell answers immutable text/plain source bytes", ->
+  res = handle! req('GET', "/__rip/cells/#{FEED_CELL_ID}?rev=1")
+  eq res.status, 200
+  eq res.headers.get('content-type'), 'text/plain; charset=utf-8'
+  eq res.headers.get('cache-control'), 'public, max-age=31536000, immutable'
+  eq (res.text!), CLIENT_ROUTE
+
+test! "a cell URL without a valid positive-integer rev is a 400 naming the rule", ->
+  for path in ["/__rip/cells/#{FEED_CELL_ID}", "/__rip/cells/#{FEED_CELL_ID}?rev=0", "/__rip/cells/#{FEED_CELL_ID}?rev=abc", "/__rip/cells/#{FEED_CELL_ID}?rev=1.5"]
+    res = handle! req('GET', path)
+    eq res.status, 400
+    ok ((res.json!).error.message).includes('unversioned cell URLs are rejected'), "names the rule for #{path}"
+
+test! "an unknown (id, rev) is a 404", ->
+  eq (handle! req('GET', "/__rip/cells/#{FEED_CELL_ID}?rev=9")).status, 404
+  eq (handle! req('GET', '/__rip/cells/nope.rip?rev=1')).status, 404
+
+test! "a bridge open enrolls the connection into /rip/dev", ->
+  res = handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })
+  eq res.status, 200
+  ok res.headers.get('content-type').includes('application/json')
+  eq (res.json!), { '+': ['/rip/dev'] }
+
+test! "bridge text and close frames answer 204 with no directives", ->
+  for frame in ['text', 'close']
+    res = handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': frame } })
+    eq res.status, 204
+    eq (res.text!), ''
+
+test! "a missing or unknown frame header is a 400 naming the header", ->
+  for headers in [{}, { 'Sec-WebSocket-Frame': 'dance' }]
+    res = handle! req('POST', '/hub', { headers })
+    eq res.status, 400
+    ok ((res.json!).error.message).includes('Sec-WebSocket-Frame'), 'names the header'
+
+test! "the bundle route re-reads per request — a rewrite shows without re-registration", ->
+  first = handle! req('GET', '/__rip/bundle.json')
+  eq first.status, 200
+  etag1 = first.headers.get('etag')
+  eq (handle! req('GET', '/__rip/bundle.json', { headers: { 'If-None-Match': etag1 } })).status, 304
+  writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: { 'x.rip': 'x' }, packages: {} })
+  fresh = handle! req('GET', '/__rip/bundle.json')
+  eq fresh.status, 200
+  ok fresh.headers.get('etag') isnt etag1, 'the ETag tracks the rewritten file'
+
+for k of feedEnv
+  if savedFeedEnv[k]? then process.env[k] = savedFeedEnv[k] else delete process.env[k]
+
+test! "flag off: no feed routes, and the bundle stays the boot-time cached bytes", ->
+  writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: {}, packages: {} })
+  process.env.RIP_BUNDLE_PATH = join(feedDir, 'bundle.json')
+  try
+    resetGlobals()
+    client!()
+    eq (handle! req('GET', '/__rip/manifest')).status, 404
+    eq (handle! req('GET', "/__rip/cells/#{FEED_CELL_ID}?rev=1")).status, 404
+    eq (handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })).status, 404
+    etag1 = (handle! req('GET', '/__rip/bundle.json')).headers.get('etag')
+    writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: { 'y.rip': 'y' }, packages: {} })
+    res = handle! req('GET', '/__rip/bundle.json')
+    eq res.headers.get('etag'), etag1   # cached at client() time; the process dies on reload
+  finally
+    delete process.env.RIP_BUNDLE_PATH
+    resetGlobals()
+
+rmSync feedDir, { recursive: true, force: true }
+resetGlobals()
+
 # ==============================================================================
 # Worker + manager runtimes — real subprocesses over unix sockets, against a
 # stub Janus /1.0 control socket that records every call in order. Timing is
@@ -868,6 +976,7 @@ SERVER_BIN = "#{import.meta.dir}/server.rip"
 
 TEST_KNOBS =
   RIP_ENV: 'development'
+  RIP_WORKSPACE: ''       # subprocess flag-off default; dev-feed tests override with '1'
   RIP_SETTLE_MS: '60'
   RIP_HEARTBEAT_MS: '150'
   RIP_DRAIN_MS: '100'
@@ -1865,6 +1974,110 @@ test! "a client/ dir ships through the pool: boot page, bundle ETag, per-epoch r
     eq b2.status, 200
     etag2 = b2.headers.get('etag')
     ok etag2? and etag2 isnt etag1, "the new epoch reassembled the bundle: #{etag1} vs #{etag2}"
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+# ==[ Manager: the workspace dev feed — RIP_WORKSPACE=1 through a live pool ]==
+
+console.log "\nManager workspace dev feed"
+
+wsAppSource = (msg) -> """
+import { get, client, start } from '@rip-lang/server'
+client!()
+get '/hi' -> '#{msg}'
+start()
+"""
+
+test! "a client-only edit feeds cells in place: ding, rev bump, immutable old rev, fresh bundle, no reload", ->
+  ctlSock = join(tmpdir(), "rip-janus-ws-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), wsAppSource('hi')
+  writeClientDir dir
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'wsapp', '-w', '1', '--bridge', '/hub'], { RIP_WORKSPACE: '1' }
+  puts = -> calls.filter (c) -> c.method is 'PUT'
+  try
+    sock = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    m1 = uds!(sock, '/__rip/manifest')
+    eq m1.status, 200
+    eq m1.headers.get('cache-control'), 'no-store'
+    eq (m1.json!), { cells: [
+      { id: '_app/stash.rip',   path: '_app/stash.rip',   rev: 1 }
+      { id: '_route/index.rip', path: '_route/index.rip', rev: 1 }
+    ] }
+    c1 = uds!(sock, '/__rip/cells/_route/index.rip?rev=1')
+    eq c1.status, 200
+    eq c1.headers.get('cache-control'), 'public, max-age=31536000, immutable'
+    eq (c1.text!), CLIENT_ROUTE
+    etag1 = (uds!(sock, '/__rip/bundle.json')).headers.get('etag')
+    putsAt = puts().length
+    v2 = CLIENT_ROUTE.replace('"home"', '"home v2"')
+    writeFileSync join(dir, 'client', '_route', 'index.rip'), v2
+    pub = waitFor! -> calls.find (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
+    eq pub.path, '/1.0/apps/app-x/hub/publish'
+    eq pub.body, [{ '@': ['/rip/dev'], ding: { id: '_route/index.rip', rev: 2 } }]
+    m2 = (uds!(sock, '/__rip/manifest')).json!
+    eq m2.cells.find((e) -> e.path is '_route/index.rip').rev, 2
+    eq ((uds!(sock, '/__rip/cells/_route/index.rip?rev=2')).text!), v2
+    eq ((uds!(sock, '/__rip/cells/_route/index.rip?rev=1')).text!), CLIENT_ROUTE   # old revs keep answering
+    eq (uds!(sock, '/__rip/cells/_route/index.rip')).status, 400                   # unversioned → rejected
+    eq (uds!(sock, '/__rip/cells/_route/index.rip?rev=9')).status, 404
+    open = uds!(sock, '/hub', { method: 'POST', headers: { 'Sec-WebSocket-Frame': 'open' } })
+    eq open.status, 200
+    eq (open.json!), { '+': ['/rip/dev'] }
+    # no reload: no doorbell cut, no sockets churn — the SAME worker socket
+    # answers, and its bundle ETag moved with the in-place rewrite
+    eq puts().length, putsAt
+    etag2 = (uds!(sock, '/__rip/bundle.json')).headers.get('etag')
+    ok etag2? and etag2 isnt etag1, "the live pool's bundle was rewritten in place: #{etag1} vs #{etag2}"
+    # A deletion rides the same stream: the retirement occupies its own rev,
+    # dings with kind 'delete', leaves the manifest, and its old rev-keyed
+    # cells keep answering (Q8) — still no reload.
+    unlinkSync join(dir, 'client', '_app', 'stash.rip')
+    pubs = -> calls.filter (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
+    retirement = waitFor! -> pubs()[1]
+    eq retirement.body, [{ '@': ['/rip/dev'], ding: { id: '_app/stash.rip', rev: 2, kind: 'delete' } }]
+    m3 = (uds!(sock, '/__rip/manifest')).json!
+    eq m3.cells.map((e) -> e.path), ['_route/index.rip']
+    eq ((uds!(sock, '/__rip/cells/_app/stash.rip?rev=1')).text!), CLIENT_STASH
+    eq (uds!(sock, '/__rip/cells/_app/stash.rip?rev=2')).status, 404   # a retirement has no bytes
+    eq puts().length, putsAt
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "flag on, a non-client edit still cuts admission and reloads through the doorbell", ->
+  ctlSock = join(tmpdir(), "rip-janus-wsfull-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), wsAppSource('v1')
+  writeClientDir dir
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'wsfull', '-w', '1'], { RIP_WORKSPACE: '1' }
+  bells = -> calls.filter (c) -> c.method is 'PUT' and c.body?.upstreams?.some (u) -> u.doorbell
+  try
+    sock1 = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    eq ((uds!(sock1, '/hi')).text!), 'v1'
+    bellsAt = bells().length
+    writeFileSync join(dir, 'app.rip'), wsAppSource('v2')
+    waitFor! -> bells().length > bellsAt          # the save cut admission — a full epoch, not a cell feed
+    ok not calls.some((c) -> c.path.endsWith('/hub/publish')), 'no ding for a server edit'
+    bell = bells()[0].body.upstreams[0].path
+    res = uds!(bell, '/ring')
+    eq res.status, 204
+    sock2 = waitFor! ->
+      fresh = managerSockPuts(calls).filter((c) -> c.body.upstreams.length is 1)
+      last = fresh[fresh.length - 1]?.body.upstreams[0].path
+      if last? and last isnt sock1 then last else null
+    eq ((uds!(sock2, '/hi')).text!), 'v2'
   finally
     try proc.kill('SIGKILL')
     await proc.exited
