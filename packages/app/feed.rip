@@ -2,13 +2,17 @@
 # The workspace feed — the hub subscriber half of the door (@rip-lang/app)
 #
 # connectFeed(workspace, opts) opens the app's Janus hub socket and turns
-# ding events into passport mutations: a ding carries only { id, rev }
-# (Q2 — never bodies over the hub), the cell bytes ride HTTP at a
-# rev-keyed URL (Q8), and workspace.set applies them — the bag's rev
-# cursor owns staleness, so out-of-order fetches are harmless. A cell
-# fetch that misses (the manager restarted, revs reset) resyncs from the
-# manifest. Dev/watch only by constitution: production has no hub, and a
-# sealed workspace rejects the feed at the door.
+# ding events into passport mutations: a ding carries only { id, rev,
+# hash } (Q2 — never bodies over the hub), the cell bytes ride HTTP at a
+# rev-and-hash-keyed URL (Q8), and workspace.set applies them — the bag's
+# rev cursor owns staleness, so out-of-order fetches are harmless. The
+# hash in the URL is what makes the browser's immutable cache sound:
+# revs restart when a manager restarts, so a bare (id, rev) URL can name
+# DIFFERENT bytes across runs and a year-long cache hit would serve the
+# old run's cell silently; with the content hash in the URL, a cache hit
+# is byte-correct by construction. A cell fetch that misses resyncs from
+# the manifest. Dev/watch only by constitution: production has no hub,
+# and a sealed workspace rejects the feed at the door.
 # ==============================================================================
 
 export type Feed =
@@ -47,8 +51,12 @@ export def connectFeed(workspace, opts = {}): Feed
   # The default cell URL percent-encodes each path segment: a legal
   # filename containing '%', '#', or '?' must build a URL the server can
   # decode, and the slashes stay visible (the cell route matches a splat
-  # and canonicalizes by decode → re-encode).
-  cellUrl = opts.cellUrl ?? (id, rev) -> "/@rip/cells/#{id.split('/').map(encodeURIComponent).join('/')}?rev=#{rev}"
+  # and canonicalizes by decode → re-encode). The content hash rides as
+  # `h` so the URL varies iff the bytes do — the cross-run cache soundness
+  # above.
+  cellUrl = opts.cellUrl ?? (id, rev, hash) ->
+    base = "/@rip/cells/#{id.split('/').map(encodeURIComponent).join('/')}?rev=#{rev}"
+    if typeof hash is 'string' and hash isnt '' then "#{base}&h=#{hash}" else base
   manifestUrl = opts.manifestUrl ?? '/@rip/manifest'
   report = opts.report ?? (...args) -> console.error(...args)
   backoffMin = opts.backoff?.min ?? FEED_BACKOFF_MIN
@@ -115,7 +123,7 @@ export def connectFeed(workspace, opts = {}): Feed
         continue
       current = workspace.passport entry.id
       continue if current? and current.rev >= entry.rev
-      cres = fetchBytes! cellUrl(entry.id, entry.rev)
+      cres = fetchBytes! cellUrl(entry.id, entry.rev, entry.hash)
       unless cres.ok
         report "[Rip] workspace feed: cell fetch missed (#{cres.status}) for '#{entry.id}' rev #{entry.rev} during resync"
         clean = false
@@ -138,14 +146,14 @@ export def connectFeed(workspace, opts = {}): Feed
     unless ding? and typeof ding is 'object' and typeof ding.id is 'string' and Number.isInteger(ding.rev)
       report '[Rip] workspace feed: malformed ding:', ding
       return
-    { id, rev, kind } = ding
+    { id, rev, kind, hash } = ding
     if kind is 'delete'
       delete wants[id]         # a retirement supersedes any pending want
       workspace.set { id, rev, deleted: true }
       return
     current = workspace.passport id
     return if current? and rev <= current.rev      # stale before the fetch — skip the network
-    res = fetchBytes! cellUrl(id, rev)
+    res = fetchBytes! cellUrl(id, rev, hash)
     unless res.ok
       report "[Rip] workspace feed: cell fetch missed (#{res.status}) for '#{id}' rev #{rev} — resyncing from the manifest"
       wants[id] = Math.max rev, wants[id] ?? 0

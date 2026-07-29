@@ -511,6 +511,27 @@ test! "a ding fetches the rev-keyed cell and mutates the passport", ->
   feed.close()
   eq feed.connected(), false
 
+test! "a hashed ding and a hashed manifest entry fetch hash-keyed URLs — the cross-run cache pin", ->
+  # Revs restart across manager runs while cell responses cache immutable
+  # for a year: a bare (id, rev) URL collides across runs and the browser
+  # would silently apply the OLD run's bytes. The content hash in the URL
+  # is the fix — the URL varies iff the bytes do.
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
+  { feed, calls, sockets } = openFeed ws,
+    '/@rip/manifest': JSON.stringify { cells: [{ id: 'b.rip', path: 'b.rip', rev: 1, hash: 'beadfeedbeadfeed' }] }
+    '/@rip/cells/a.rip?rev=2&h=cafef00dcafef00d': 'v2'
+    '/@rip/cells/b.rip?rev=1&h=beadfeedbeadfeed': 'bb'
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2, hash: 'cafef00dcafef00d' } } }
+  await settle()
+  eq ws.read('a.rip'), 'v2'
+  eq ws.read('b.rip'), 'bb'
+  ok calls.includes('/@rip/cells/a.rip?rev=2&h=cafef00dcafef00d'), "the ding fetch rides the hash: #{JSON.stringify calls}"
+  ok calls.includes('/@rip/cells/b.rip?rev=1&h=beadfeedbeadfeed'), "the resync fetch rides the hash: #{JSON.stringify calls}"
+  feed.close()
+
 test! "a stale or duplicate ding never touches the network", ->
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 3, source: 'v3' }]

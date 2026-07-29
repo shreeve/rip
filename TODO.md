@@ -50,21 +50,6 @@ Janus items moved to `janus/TODO.md`.
 
 ---
 
-## Workspace dev feed — open edges
-
-- [ ] One unexplained missed ding (2026-07-28, live Janus run): a
-      `app/mood.rip` rev-2 ding published ~15s after a manager
-      re-registration (409 host-claim retry window) never applied in a
-      freshly booted tab — no report was captured (console hook was
-      installed later); hub counters showed publishes 1 / deliveries 2 /
-      conns 2, so delivery-vs-enrollment is ambiguous. Six consecutive
-      dings applied cleanly afterward. If it recurs with a hooked
-      console, capture the feed report verbatim. (The structural
-      no-retry gap that could have silenced it is closed: a miss now
-      registers a want and resyncs with backoff until satisfied.)
-
----
-
 ## Related pointers
 
 - Janus repo: control `/1.0` + cold capabilities **ping**, **control**,

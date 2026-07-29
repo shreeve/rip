@@ -879,6 +879,10 @@ resetGlobals()
 
 console.log "\nclient() dev feed"
 
+# The content-hash discriminator that rides manifests, dings, and cell
+# URLs — mirrors the manager's shortHash (sha256, 16 hex chars).
+cellHash = (s) -> new Bun.CryptoHasher('sha256').update(s).digest('hex').slice(0, 16)
+
 FEED_CELL_ID = 'app/routes/index.rip'
 feedDir = mkdtempSync join(import.meta.dir, 'tmp-feed-')
 mkdirSync join(feedDir, 'cells'), { recursive: true }
@@ -916,6 +920,18 @@ test! "a rev-keyed cell answers immutable text/plain source bytes", ->
   eq res.headers.get('content-type'), 'text/plain; charset=utf-8'
   eq res.headers.get('cache-control'), 'public, max-age=31536000, immutable'
   eq (res.text!), CLIENT_ROUTE
+
+test! "the h discriminator gates the immutable answer: a match serves, a mismatch is an unknown cell", ->
+  # Revs restart across manager runs while these responses cache immutable
+  # for a year: without h in the URL, a returning browser silently applies
+  # the OLD run's bytes on an (id, rev) collision. Serving bytes under a
+  # URL whose h names DIFFERENT bytes would poison that cache slot.
+  hit = handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1&h=#{cellHash(CLIENT_ROUTE)}")
+  eq hit.status, 200
+  eq (hit.text!), CLIENT_ROUTE
+  miss = handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1&h=0123456789abcdef")
+  eq miss.status, 404
+  ok ((miss.json!).error.message).includes('does not match these bytes'), 'names the mismatch'
 
 test! "a cell URL without a valid positive-integer rev is a 400 naming the rule", ->
   for path in ["/@rip/cells/#{FEED_CELL_ID}", "/@rip/cells/#{FEED_CELL_ID}?rev=0", "/@rip/cells/#{FEED_CELL_ID}?rev=abc", "/@rip/cells/#{FEED_CELL_ID}?rev=1.5"]
@@ -2058,8 +2074,8 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
     eq m1.status, 200
     eq m1.headers.get('cache-control'), 'no-store'
     eq (m1.json!), { cells: [
-      { id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1 }
-      { id: 'app/stash.rip',        path: 'app/stash.rip',        rev: 1 }
+      { id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1, hash: cellHash(CLIENT_ROUTE) }
+      { id: 'app/stash.rip',        path: 'app/stash.rip',        rev: 1, hash: cellHash(CLIENT_STASH) }
     ] }
     c1 = uds!(sock, '/@rip/cells/app/routes/index.rip?rev=1')
     eq c1.status, 200
@@ -2071,11 +2087,17 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
     writeFileSync join(dir, 'app', 'routes', 'index.rip'), v2
     pub = waitFor! -> calls.find (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
     eq pub.path, '/1.0/apps/app-x/hub/publish'
-    eq pub.body, [{ '@': ['/rip/dev'], ding: { id: 'app/routes/index.rip', rev: 2 } }]
+    eq pub.body, [{ '@': ['/rip/dev'], ding: { id: 'app/routes/index.rip', rev: 2, hash: cellHash(v2) } }]
     m2 = (uds!(sock, '/@rip/manifest')).json!
     eq m2.cells.find((e) -> e.path is 'app/routes/index.rip').rev, 2
     eq ((uds!(sock, '/@rip/cells/app/routes/index.rip?rev=2')).text!), v2
     eq ((uds!(sock, '/@rip/cells/app/routes/index.rip?rev=1')).text!), CLIENT_ROUTE   # old revs keep answering
+    # The hash discriminator: the URL varies iff the bytes do (revs restart
+    # across manager runs while the browser caches these responses immutable
+    # for a year — a bare (id, rev) collision would silently serve the old
+    # run's bytes). A matching h answers; a mismatched h is an unknown cell.
+    eq ((uds!(sock, "/@rip/cells/app/routes/index.rip?rev=2&h=#{cellHash(v2)}")).text!), v2
+    eq (uds!(sock, "/@rip/cells/app/routes/index.rip?rev=2&h=#{cellHash(CLIENT_ROUTE)}")).status, 404
     eq (uds!(sock, '/@rip/cells/app/routes/index.rip')).status, 400                   # unversioned → rejected
     eq (uds!(sock, '/@rip/cells/app/routes/index.rip?rev=9')).status, 404
     open = uds!(sock, '/hub', { method: 'POST', headers: { 'Sec-WebSocket-Frame': 'open' } })
@@ -2408,10 +2430,10 @@ test! "concurrent cell-path runs serialize: a second save never interleaves a pa
     await p1
     await p2
     eq manifestDuringPublish.length, 2
-    eq manifestDuringPublish[0].cells, [{ id: 'app/x.rip', path: 'app/x.rip', rev: 1 }]
-    eq manifestDuringPublish[1].cells, [{ id: 'app/x.rip', path: 'app/x.rip', rev: 2 }]
+    eq manifestDuringPublish[0].cells, [{ id: 'app/x.rip', path: 'app/x.rip', rev: 1, hash: cellHash('export A = 1') }]
+    eq manifestDuringPublish[1].cells, [{ id: 'app/x.rip', path: 'app/x.rip', rev: 2, hash: cellHash('export A = 2') }]
     m = JSON.parse readFileSync(manifestPath, 'utf8')
-    eq m.cells, [{ id: 'app/x.rip', path: 'app/x.rip', rev: 2 }]
+    eq m.cells, [{ id: 'app/x.rip', path: 'app/x.rip', rev: 2, hash: cellHash('export A = 2') }]
   finally
     managerCfg.appDir = saved.appDir
     managerState.runDir = saved.runDir
@@ -2458,7 +2480,7 @@ test! "a bundle rewrite failure holds the manifest back; the next clean save wri
     onCellChange!()
     ok existsSync(goodBundle), 'the pool bundle is rewritten'
     m = JSON.parse readFileSync(manifestPath, 'utf8')
-    eq m.cells, [{ id: 'app/x.rip', path: 'app/x.rip', rev: 2 }]
+    eq m.cells, [{ id: 'app/x.rip', path: 'app/x.rip', rev: 2, hash: cellHash('export A = 2') }]
   finally
     managerCfg.appDir = saved.appDir
     managerState.runDir = saved.runDir

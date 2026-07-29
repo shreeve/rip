@@ -951,18 +951,28 @@ export client = (dir = null) ->
       c.body readFileSync(process.env.RIP_MANIFEST_PATH, 'utf8'), 200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
 
   if process.env.RIP_CELLS_DIR?
-    # Cell bytes are addressed by (id, rev) in the URL (Q8): a rev-keyed
-    # answer is immutable and cacheable; an unversioned request is rejected,
-    # never guessed at. The filename encoding mirrors the manager's — the
-    # percent-encoded id can never contain the literal '@' separator.
+    # Cell bytes are addressed by (id, rev) plus the content-hash
+    # discriminator `h` in the URL (Q8): the immutable-cacheable answer is
+    # sound only because the URL varies iff the bytes do — revs restart
+    # across manager runs, and a bare (id, rev) URL would let a returning
+    # browser's cache serve the OLD run's bytes silently. An unversioned
+    # request is rejected, never guessed at; a request whose `h` does not
+    # match the bytes is an unknown cell — answering it would poison the
+    # requester's cache under that URL. The filename encoding mirrors the
+    # manager's — the percent-encoded id can never contain the literal '@'
+    # separator.
     get '/@rip/cells/*', (c) ->
       rev = c.req.query('rev')
       unless rev? and /^[1-9]\d*$/.test(rev)
-        error 'unversioned cell URLs are rejected — address a cell as /@rip/cells/<id>?rev=N (docs/WORKSPACE.md, Q8)', 400
+        error 'unversioned cell URLs are rejected — address a cell as /@rip/cells/<id>?rev=N&h=<hash> (docs/WORKSPACE.md, Q8)', 400
       id = try decodeURIComponent(c.req.path.slice('/@rip/cells/'.length)) catch then error('malformed percent-encoding in cell id', 400)
       file = join(process.env.RIP_CELLS_DIR, "#{encodeURIComponent(id)}@#{rev}")
       error "unknown cell (#{id}, rev #{rev})", 404 unless existsSync(file)
-      c.body readFileSync(file, 'utf8'), 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=31536000, immutable' }
+      bytes = readFileSync(file, 'utf8')
+      h = c.req.query('h')
+      if h? and h isnt new Bun.CryptoHasher('sha256').update(bytes).digest('hex').slice(0, 16)
+        error "unknown cell (#{id}, rev #{rev}, h #{h}) — the named hash does not match these bytes", 404
+      c.body bytes, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=31536000, immutable' }
 
   if process.env.RIP_BRIDGE_PATH?
     # Janus POSTs every hub socket event here; answering an open with

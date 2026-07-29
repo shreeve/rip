@@ -35,7 +35,7 @@ so by mutating the Workspace.
 | # | Ruling |
 |---|---|
 | **Q1** | Pure Rip. Projection (compiled JS / later WASM) is invisible. Production = sealed Workspace + Projection-cache hit by default. Signed Projection cells. CSP without `unsafe-eval` on the happy path. Janus = admission and (in watch mode) doorbell only — no Rip meaning at the edge. |
-| **Q2** | Hub ding **only in dev/watch**. Production = no Hub. Hub never carries bodies; HTTP carries bytes. Ding envelope stub: `id` + `rev` (+ optional `kind`); never source or Projection. |
+| **Q2** | Hub ding **only in dev/watch**. Production = no Hub. Hub never carries bodies; HTTP carries bytes. Ding envelope stub: `id` + `rev` + `hash` (+ optional `kind`); never source or Projection. *(Amended 2026-07-29: the content-hash discriminator joined the envelope with the Q8 amendment — it is freshness addressing, not a body.)* |
 | **Q3** | **B′** — stable component id, path-derived at birth; path is a label; renames keep the id. |
 | **Q4** | **C + research-first** — apply quality is measured against the written scenario suite (**S1–S15**) and automated tests; industry systems (Vite / Vue SFC HMR / React Fast Refresh) are **citations**, not a slogan stand-in. Reload is an escape hatch, never the marketed product. Not “done” until research + tests land. |
 | **Q5** | **C** — M1 without RipFS/OPFS. Manager watches disk → Hub ding → HTTP → `Workspace.set`. OPFS/RipFS may arrive later as an optional backpack; they are never durable truth. |
@@ -69,7 +69,7 @@ forever and “CSP later” are **rejected** as M0 rewrites.
 |---|---|
 | **Q6** | **M0 and M1 are independent exits.** M1 (the dev door) may land first under `RIP_WORKSPACE=1` with dev-mode in-browser compile; M0 (signed cells, CSP without `unsafe-eval`) gates **production populate** only and is unweakened. D6 reads: the dev door never leaks into production — flag off is unchanged and production has no Hub. |
 | **Q7** | **The bag subsumes the app's component store.** The Workspace implements the `ComponentsStore` interface (`packages/app/components.rip`) as its app-facing view — path-keyed through the path→id map, passports underneath. `launch()` accepts an injected components store; flag off, it creates its own store exactly as today (D1). When the Workspace earns the default, `createComponents` retires and the bag is the only store. Two live stores of browser code never coexist. |
-| **Q8** | **Cell freshness is structural.** Cell bytes are addressed by `(id, rev)` in the URL; a rev-keyed response is immutable and cacheable (micro-cache, browser cache, CDN alike). The manifest route is `no-store`. A client applies a cell only when its rev matches the ding's rev; on mismatch it refetches the manifest (S14's foothold). Unversioned cell URLs are rejected — freshness never rests on a header convention or a purge side effect. |
+| **Q8** | **Cell freshness is structural.** Cell bytes are addressed by `(id, rev)` plus a content-hash discriminator `h` in the URL; the response is immutable and cacheable (micro-cache, browser cache, CDN alike) because the URL varies iff the bytes do. *(Amended 2026-07-29: revs restart across manager runs, so a bare `(id, rev)` URL collides across runs and a year-long immutable cache hit silently serves the old run's bytes — proven live; the hash makes a cache hit byte-correct by construction, and a request whose `h` mismatches the bytes is an unknown cell.)* The manifest route is `no-store`. A client applies a cell only when its rev matches the ding's rev; on mismatch it refetches the manifest (S14's foothold). Unversioned cell URLs are rejected — freshness never rests on a header convention or a purge side effect. |
 | **Q9** | **Package shape confirmed.** `packages/workspace` and `packages/refresh` stay separate browser-side packages while experimental (kill switch #2); `packages/server` keeps only the muscles. If the Workspace earns the default, its merge destination is `packages/app`, never `packages/server`. |
 
 ### Ruling 2026-07-29 (Q10)
@@ -171,8 +171,8 @@ Reject loudly if any of these appear:
 - One passport record type; flexible packaging, not three protocols.
 - Prod = seal + Projection-cache hit; no compiler on the happy path;
   signed cells + CSP without `unsafe-eval` on that path.
-- Dev = same model, door open, Hub ding only (`id` + `rev`, optional
-  `kind`).
+- Dev = same model, door open, Hub ding only (`id` + `rev` + `hash`,
+  optional `kind`).
 - Spec here before a large package explosion.
 - Present tense only; no “legacy compat” fog.
 
@@ -321,7 +321,7 @@ still match RFR’s ladder.
 
 | Industry concept | Rip mapping (locked constraints) |
 |---|---|
-| Dev notify channel | **Hub ding only** in watch (Q2). Envelope: `id` + `rev` (+ optional `kind`); **never bodies**. |
+| Dev notify channel | **Hub ding only** in watch (Q2). Envelope: `id` + `rev` + `hash` (+ optional `kind`); **never bodies**. |
 | Module / cell bytes | **HTTP** fetch into `Workspace.set` (Q5 M1). Not Hub payload. Not SSE body bus. |
 | Module identity | Passport **B′** id, path-derived at birth; path is a label (Q3). |
 | Compiled form | **Projection** invisible to authors (Q1); apply swaps Projection behind the passport. |
@@ -379,8 +379,8 @@ Probe 0 observables (honesty bar, not a protocol):
 | # | Observable |
 |---|---|
 | D1 | A plain boot (no `workspace` option — standalone pages) → current Rip path unchanged |
-| D2 | Disk change → Hub ding with `id` + `rev` (no body) |
-| D3 | Client HTTP-fetches cell / manifest bytes (cells rev-keyed, Q8) |
+| D2 | Disk change → Hub ding with `id` + `rev` + `hash` (no body) |
+| D3 | Client HTTP-fetches cell / manifest bytes (cells rev-and-hash-keyed, Q8) |
 | D4 | `Workspace.set` mutates the passport (rev / hashes advance) |
 | D5 | UI shows a visible change attributable to that mutation |
 | D6 | Seal / no-Hub path still holds for production populate (M0) |

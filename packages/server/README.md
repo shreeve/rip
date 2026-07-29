@@ -387,18 +387,23 @@ In watch mode:
   rename retires the old id and mints a new one at rev 1 (id persistence
   across renames is open research). Revs start at 1 and bump once per
   content change; the registry lives in the manager's memory for the run.
-  `GET /@rip/manifest` answers `{"cells": [{id, path, rev}, …]}` sorted
-  by path, `Cache-Control: no-store`, read per request. Cell bytes — the
-  file's **source text**, dev-mode in-browser compile — are addressed by
-  `(id, rev)` in the URL: `GET /@rip/cells/<id>?rev=N` answers
-  `text/plain` with `Cache-Control: public, max-age=31536000, immutable`,
-  and old revs keep answering for the manager run. A request without a
-  valid positive-integer `rev` is a 400 — unversioned cell URLs are
-  rejected, never guessed at. An unknown `(id, rev)` is a 404.
+  `GET /@rip/manifest` answers `{"cells": [{id, path, rev, hash}, …]}`
+  sorted by path, `Cache-Control: no-store`, read per request. Cell
+  bytes — the file's **source text**, dev-mode in-browser compile — are
+  addressed by `(id, rev)` plus the content-hash discriminator in the
+  URL: `GET /@rip/cells/<id>?rev=N&h=<hash>` answers `text/plain` with
+  `Cache-Control: public, max-age=31536000, immutable`, and old revs
+  keep answering for the manager run. The hash (16 hex chars of sha256)
+  is what makes the immutable answer sound: revs restart across manager
+  runs, so a bare `(id, rev)` URL would let a returning browser's cache
+  serve the OLD run's bytes silently — with `h`, the URL varies iff the
+  bytes do. A request without a valid positive-integer `rev` is a 400 —
+  unversioned cell URLs are rejected, never guessed at. An unknown
+  `(id, rev)`, or an `h` that does not match the bytes, is a 404.
 - **The ding.** After the cells, the manifest, and the rewritten bundle
   are durable, the manager publishes one directive per changed cell to
-  the hub channel `/rip/dev` — the envelope is `{id, rev}` only; source
-  and compiled bodies never ride the hub (HTTP carries the bytes). A
+  the hub channel `/rip/dev` — the envelope is `{id, rev, hash}` only;
+  source and compiled bodies never ride the hub (HTTP carries the bytes). A
   deleted client file retires: it leaves the manifest, its retirement
   occupies its own rev, and the ding carries `kind: "delete"` (no bytes
   for that rev — old revs keep answering). A publish failure warns and

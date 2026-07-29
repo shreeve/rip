@@ -364,9 +364,9 @@ buildApp = ->
 #
 # A save touching ONLY app/ feeds the live pool in place: mint or bump
 # (id, rev) cells, rewrite the current pool's bundle and the manifest, then
-# ding /rip/dev with {id, rev} envelopes — no new epoch, no pool reload, no
-# doorbell. Any other save takes the dirty-epoch path above and dings the
-# swap (kind 'epoch') once the new pool is live.
+# ding /rip/dev with {id, rev, hash} envelopes — no new epoch, no pool
+# reload, no doorbell. Any other save takes the dirty-epoch path above and
+# dings the swap (kind 'epoch') once the new pool is live.
 
 # The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
 # server.rip (workers never import manager code). Exported so the mirror
@@ -374,6 +374,16 @@ buildApp = ->
 export DEV_CHANNEL =! '/rip/dev'
 
 sha256hex = (text) -> new Bun.CryptoHasher('sha256').update(text).digest('hex')
+
+# The content-hash discriminator that rides cell URLs (manifest entries
+# and dings). Revs restart when a manager restarts, so a bare (id, rev)
+# URL can name DIFFERENT bytes across runs — and cell responses are
+# cached immutable for a year, so a returning browser would silently
+# apply the OLD run's bytes on a URL collision. With the hash in the
+# URL, the URL varies iff the bytes do: a cache hit is byte-correct by
+# construction. 16 hex chars (64 bits) of sha256 — collision needs the
+# same id, the same rev, AND a 64-bit hash collision.
+shortHash = (hash) -> hash.slice(0, 16)
 
 # A cell filename encodes (id, rev) unambiguously: the id is percent-encoded
 # (it contains slashes), so the literal '@' separator can never appear inside
@@ -433,7 +443,7 @@ syncCells = ->
 writeManifest = ->
   live = []
   for path, entry of state.cells
-    live.push { id: entry.id, path: path, rev: entry.rev } unless entry.retired
+    live.push { id: entry.id, path: path, rev: entry.rev, hash: shortHash(entry.hash) } unless entry.retired
   live.sort (a, b) -> if a.path < b.path then -1 else 1
   tmp = "#{state.manifestPath}.tmp"
   Bun.write! tmp, JSON.stringify({ cells: live })
@@ -480,7 +490,10 @@ runCellChange = ->
     warn "rip-server: bundle/manifest rewrite failed on the cell path — manifest held back: #{e?.message or e}"
   dings = changed.map (c) ->
     ding = { id: c.id, rev: c.rev }
-    ding.kind = 'delete' if c.deleted is true
+    if c.deleted is true
+      ding.kind = 'delete'
+    else
+      ding.hash = shortHash(c.hash)
     { '@': [DEV_CHANNEL], ding }
   i = 0
   while i < dings.length                 # the publish plane caps 16 objects per frame
