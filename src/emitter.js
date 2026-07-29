@@ -47,6 +47,13 @@ const RENDER_BINDING_HEADS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', 
 const RENDER_LOCAL_RE = /^[A-Za-z_$][\w$]*$/;
 const JS_OP = { '==': '===', '!=': '!==' };
 
+// What a value word has already become by the time a pattern is walked.
+// The scanner's own table (lexer.js VALUE_WORDS) maps the SOURCE spellings
+// — `yes`/`no`/`on`/`off` and the literal keywords — onto these; only the
+// lowered side survives into the tree, so this is the set a destructuring
+// target can never legally be.
+const PATTERN_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'this']);
+
 const isNode = (x) => Array.isArray(x);
 const isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 3;
 
@@ -1774,25 +1781,46 @@ class Emitter {
   // TARGET patterns (assignment targets, catch bindings — catch lowers
   // through an assignment) the same shape rejects: "Cannot use
   // 'rest' expression as a destructuring target".
-  patternNames(p, out = [], binding = false) {
+  // `at` carries the nearest enclosing pattern NODE down the walk, and
+  // exists only so a rejected leaf can be positioned. A leaf is a bare
+  // string with no NodeStore row of its own, so it has no span — and an
+  // unpositioned error about `false` is unreadable in a file whose source
+  // says `no`. The enclosing node's span covers the pattern, which puts
+  // the caret on the text the author actually typed.
+  patternNames(p, out = [], binding = false, at = null) {
     if (!isNode(p)) {
-      if (typeof p === 'string' && p !== ',') out.push(p);
+      if (typeof p === 'string' && p !== ',') {
+        // A VALUE WORD reaches here already lowered — `no` is the string
+        // `false`, indistinguishable from an identifier, because the alias
+        // table rewrote it in the scanner before anything decided this was
+        // a binding site — the same law the scanner enforces where an
+        // annotation makes a value word a binding NAME, one layer over
+        // (lexer.js, `rejectValueWordBinding`). A literal is
+        // never a legal destructuring target, so the pattern is the place
+        // that can still tell: an identifier binds, a literal cannot.
+        // Without this the name enters the hoist line and the module emits
+        // `let false`, which no JavaScript engine parses.
+        if (PATTERN_LITERALS.has(p)) {
+          throw this.positionedError(at, `emitter: \`${p}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
+        }
+        out.push(p);
+      }
       return out;
     }
-    if (p[0] === 'array') for (const el of p.slice(1)) this.patternNames(el, out, binding);
+    if (p[0] === 'array') for (const el of p.slice(1)) this.patternNames(el, out, binding, p);
     else if (p[0] === 'object') {
       for (const pair of p.slice(1)) {
-        if (pair[0] === null) this.patternNames(pair[1], out, binding);
-        else if (pair[0] === ':') this.patternNames(pair[2], out, binding);
-        else if (pair[0] === '=') this.patternNames(pair[1], out, binding);
-        else if (pair[0] === '...') this.patternNames(pair[1], out, binding);
+        if (pair[0] === null) this.patternNames(pair[1], out, binding, p);
+        else if (pair[0] === ':') this.patternNames(pair[2], out, binding, p);
+        else if (pair[0] === '=') this.patternNames(pair[1], out, binding, p);
+        else if (pair[0] === '...') this.patternNames(pair[1], out, binding, p);
       }
     } else if (p[0] === 'rest') {
       if (!binding) throw this.positionedError(p, "emitter: Cannot use 'rest' expression as a destructuring target (destructuring rest is spelled '...name')");
-      this.patternNames(p[1], out, binding);
-    } else if (p[0] === '...') this.patternNames(p[1], out, binding);
-    else if (p[0] === 'default') this.patternNames(p[1], out, binding);
-    else if (p[0] === 'typed-var') this.patternNames(p[1], out, binding);
+      this.patternNames(p[1], out, binding, p);
+    } else if (p[0] === '...') this.patternNames(p[1], out, binding, p);
+    else if (p[0] === 'default') this.patternNames(p[1], out, binding, p);
+    else if (p[0] === 'typed-var') this.patternNames(p[1], out, binding, p);
     return out;
   }
 
@@ -8572,7 +8600,15 @@ class Emitter {
             `if (${instVar} && ${instVar}._state === 'mounting') {\n` +
             `${pad}  ${elVar} = ${instVar}._mountSetup(document.createComment('rip:child-error: ${name}'));\n`,
           );
-          if (rec.kind !== 'class') {
+          // _first tracks the setup-returned node ONLY when the child
+          // IS the block's first top-level node (c() latched the same
+          // var). A child nested inside another element must never
+          // hijack _first: the reconciler uses _first as an
+          // insertBefore reference against the block's PARENT, and an
+          // interior node is no child of it.
+          const fragChildren = this.rstate.fragChildren.get(rec.root);
+          const firstNode = fragChildren !== undefined ? fragChildren[0] : rec.root;
+          if (rec.kind !== 'class' && firstNode === elVar) {
             this.b.emit(`${pad}  `);
             if (this.ts) this.b.tsOnly(() => this.b.emit('('));
             this.b.emit('this');

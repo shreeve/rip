@@ -2,11 +2,12 @@
 // bundle fetch with ETag revalidation, the module graph compiling the
 // app package and every route, launch wiring, navigation, and render
 // gates — the same path the real-browser certification drives.
-import { describe, expect, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bootApp, fetchBundle } from '../../src/browser.js';
 import { assembleBundle } from '../../src/bundle.js';
+import { installRecordingDOM } from '../support/recording-dom.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -48,18 +49,18 @@ const fakeAdapter = (initial = '/') => {
 };
 
 const APP_MODULES = {
-  '_app/stash.rip': [
+  'app/stash.rip': [
     "import { source } from '@rip-lang/app'",
     'export appStash = {',
     '  user: source fetch: -> Promise.resolve { name: "Ada" }',
     '}',
   ].join('\n'),
-  '_route/index.rip': [
+  'app/routes/index.rip': [
     'export Home = component',
     '  render',
     '    h1 "home"',
   ].join('\n'),
-  '_route/about.rip': [
+  'app/routes/about.rip': [
     'export About = component',
     '  render',
     '    h1 "about"',
@@ -161,21 +162,21 @@ describe('bootApp', () => {
     try {
       await Bun.sleep(0);
       await Bun.sleep(0);
-      expect(result.router.current.route.file).toBe('_route/index.rip');
+      expect(result.router.current.route.file).toBe('app/routes/index.rip');
       expect(globalThis.__ripApp).toBe(result.app);
       result.router.push('/about');
       await Bun.sleep(0);
       await Bun.sleep(0);
-      expect(result.router.current.route.file).toBe('_route/about.rip');
+      expect(result.router.current.route.file).toBe('app/routes/about.rip');
       expect(result.app.data.title).toBe('probe');
     } finally {
       result.destroy();
     }
   });
 
-  test('the app stash flows from _app/stash.rip and gates prefetch through it', async () => {
+  test('the app stash flows from app/stash.rip and gates prefetch through it', async () => {
     const bundle = assemble();
-    bundle.modules['_route/profile.rip'] = [
+    bundle.modules['app/routes/profile.rip'] = [
       'export Profile = component',
       '  user <~ @app.data.user',
       '  render',
@@ -195,7 +196,7 @@ describe('bootApp', () => {
         await Bun.sleep(1);
         user = result.app.data.user;
       }
-      expect(result.router.current.route.file).toBe('_route/profile.rip');
+      expect(result.router.current.route.file).toBe('app/routes/profile.rip');
       expect(user).toEqual({ name: 'Ada' });
       expect(failures.map(f => f.path)).not.toContain('user');
     } finally {
@@ -205,15 +206,15 @@ describe('bootApp', () => {
 
   test('a route that fails to compile rejects the boot at its own position', async () => {
     const bundle = assemble();
-    bundle.modules['_route/broken.rip'] = 'x = ((';
+    bundle.modules['app/routes/broken.rip'] = 'x = ((';
     await expect(bootApp({ bundle, target: node('host'), adapter: fakeAdapter('/') }))
-      .rejects.toThrow(/_route\/broken\.rip/);
+      .rejects.toThrow(/app\/routes\/broken\.rip/);
   });
 
   test('render gates prefetch through the boot path', async () => {
     const bundle = assembleBundle({
       modules: {
-        '_route/index.rip': [
+        'app/routes/index.rip': [
           'export Profile = component',
           '  user <~ @app.data.user',
           '  render',
@@ -249,17 +250,17 @@ describe('boot graph reconciliation', () => {
   test('a reboot recompiles unchanged importers of a changed module', async () => {
     const make = tag => assembleBundle({
       modules: {
-        '_app/util.rip': `export tag = '${tag}'`,
-        '_route/index.rip': "import { tag } from '../_app/util.rip'\nexport Home = -> tag",
+        'app/util.rip': `export tag = '${tag}'`,
+        'app/routes/index.rip': "import { tag } from '../util.rip'\nexport Home = -> tag",
       },
       packagesDir: resolve(root, 'packages'),
     });
     const first = await bootOf(make('one'));
-    expect(first.components.getCompiled('_route/index.rip').Home()).toBe('one');
+    expect(first.components.getCompiled('app/routes/index.rip').Home()).toBe('one');
     first.destroy();
     const second = await bootOf(make('two'));
     try {
-      expect(second.components.getCompiled('_route/index.rip').Home()).toBe('two');
+      expect(second.components.getCompiled('app/routes/index.rip').Home()).toBe('two');
     } finally {
       second.destroy();
     }
@@ -267,16 +268,16 @@ describe('boot graph reconciliation', () => {
 
   test('a module a later bundle does not carry stops resolving', async () => {
     const modules = {
-      '_route/index.rip': "import { x } from '../_app/helper.rip'\nexport Home = -> x",
+      'app/routes/index.rip': "import { x } from '../helper.rip'\nexport Home = -> x",
     };
     const withHelper = assembleBundle({
-      modules: { ...modules, '_app/helper.rip': 'export x = 1' },
+      modules: { ...modules, 'app/helper.rip': 'export x = 1' },
       packagesDir: resolve(root, 'packages'),
     });
     const without = assembleBundle({ modules, packagesDir: resolve(root, 'packages') });
     const first = await bootOf(withHelper);
     first.destroy();
-    await expect(bootOf(without)).rejects.toThrow(/'\.\.\/_app\/helper\.rip', which is not in the bundle/);
+    await expect(bootOf(without)).rejects.toThrow(/'\.\.\/helper\.rip', which is not in the bundle/);
   });
 
   test('a later bundle may carry packages the first did not', async () => {
@@ -285,13 +286,13 @@ describe('boot graph reconciliation', () => {
     const withValidate = assembleBundle({
       modules: {
         ...APP_MODULES,
-        '_route/check.rip': "import { check } from '@rip-lang/validate'\nexport ok = -> check('a@b.co', 'email')",
+        'app/routes/check.rip': "import { check } from '@rip-lang/validate'\nexport ok = -> check('a@b.co', 'email')",
       },
       packagesDir: resolve(root, 'packages'),
     });
     const second = await bootOf(withValidate);
     try {
-      expect(second.components.getCompiled('_route/check.rip').ok()).toBe('a@b.co');
+      expect(second.components.getCompiled('app/routes/check.rip').ok()).toBe('a@b.co');
     } finally {
       second.destroy();
     }
@@ -315,6 +316,285 @@ describe('boot graph reconciliation', () => {
     try {
       expect(table.get('__rip_bundle_etag:/app.json')).toBe('v1');
       expect([...table.keys()].every(key => key.startsWith('__rip_bundle_'))).toBe(true);
+    } finally {
+      result.destroy();
+    }
+  });
+});
+
+// The Workspace door (docs/WORKSPACE.md, Probe 0): populate from the
+// manifest, ding → HTTP → set → passport mutation → visible update,
+// with remount labeled escape. The feed's seams (hub socket, fetch)
+// are hand-driven fakes; the recording DOM makes the update visible.
+describe('bootApp workspace mode', () => {
+  let doc;
+  beforeAll(() => {
+    doc = installRecordingDOM();
+  });
+
+  const routeSource = (name, text) => [
+    `export ${name} = component`,
+    '  render',
+    `    h1 "${text}"`,
+  ].join('\n');
+
+  const WS_MODULES = {
+    'app/routes/index.rip': routeSource('Home', 'home v1'),
+    'app/routes/about.rip': routeSource('About', 'about v1'),
+  };
+
+  const MANIFEST = {
+    cells: [
+      { id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1 },
+      { id: 'app/routes/about.rip', path: 'app/routes/about.rip', rev: 1 },
+    ],
+  };
+
+  const assembleWorkspace = () => assembleBundle({
+    modules: WS_MODULES,
+    packagesDir: resolve(root, 'packages'),
+    claims: ['@rip-lang/workspace'],
+  });
+
+  const fakeFetch = table => {
+    const calls = [];
+    const impl = async url => {
+      calls.push(url);
+      const body = table.get(url);
+      if (body === undefined) {
+        return { ok: false, status: 404, json: async () => null, text: async () => '' };
+      }
+      return { ok: true, status: 200, json: async () => JSON.parse(body), text: async () => body };
+    };
+    impl.calls = calls;
+    return impl;
+  };
+
+  const fakeHub = () => {
+    const sockets = [];
+    return {
+      sockets,
+      makeSocket: url => {
+        const socket = { url, close() { this.onclose?.(); } };
+        sockets.push(socket);
+        return socket;
+      },
+    };
+  };
+
+  const until = async (predicate, tries = 500) => {
+    for (let i = 0; i < tries; i += 1) {
+      if (predicate()) return;
+      await Bun.sleep(1);
+    }
+    throw new Error('until: the condition never became true');
+  };
+
+  // Slightly above the escape's 25ms coalesce window, so a settled
+  // remount is deterministic to await.
+  const settleEscape = () => Bun.sleep(40);
+
+  const manifestTable = (manifest = MANIFEST) => new Map([
+    ['/@rip/manifest', JSON.stringify(manifest)],
+  ]);
+
+  const bootWorkspace = async ({ table, hub, reports = [], bundle = null }) => {
+    const target = doc.createElement('div');
+    const fetch = fakeFetch(table);
+    const result = await bootApp({
+      bundle: bundle ?? assembleWorkspace(),
+      target,
+      adapter: fakeAdapter('/'),
+      workspace: true,
+      manifestUrl: '/@rip/manifest',
+      feed: {
+        hub: 'ws://test/dev',
+        makeSocket: hub.makeSocket,
+        fetch,
+        report: (...args) => reports.push(args.map(String).join(' ')),
+        backoff: { min: 1, max: 2 },
+      },
+    });
+    return { result, target, fetch };
+  };
+
+  test('without opts.workspace the boot is untouched: no bag, no feed, no manifest fetch (D1)', async () => {
+    const fetch = fakeFetch(manifestTable());
+    const hub = fakeHub();
+    const result = await bootApp({
+      bundle: assembleWorkspace(),
+      target: doc.createElement('div'),
+      adapter: fakeAdapter('/'),
+      manifestUrl: '/@rip/manifest',
+      feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch },
+    });
+    try {
+      expect(result.workspace).toBeUndefined();
+      expect(result.feed).toBeUndefined();
+      expect(fetch.calls).toEqual([]);
+      expect(hub.sockets).toEqual([]);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a workspace boot from a bundle object without a manifest url rejects by name', async () => {
+    const hub = fakeHub();
+    await expect(bootApp({
+      bundle: assembleWorkspace(),
+      target: doc.createElement('div'),
+      adapter: fakeAdapter('/'),
+      workspace: true,
+      feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch: fakeFetch(manifestTable()) },
+    })).rejects.toThrow(/manifestUrl/);
+  });
+
+  test('a bundle without the workspace package rejects naming the flag and the claim', async () => {
+    await expect(bootApp({
+      bundle: assembleBundle({ modules: WS_MODULES, packagesDir: resolve(root, 'packages') }),
+      target: doc.createElement('div'),
+      adapter: fakeAdapter('/'),
+      workspace: true,
+      manifestUrl: '/@rip/manifest',
+      feed: { fetch: fakeFetch(manifestTable()) },
+    })).rejects.toThrow(/@rip-lang\/workspace.*RIP_WORKSPACE/s);
+  });
+
+  test('populate seeds one passport per manifest cell the bundle carries, at the manifest rev', async () => {
+    const manifest = {
+      cells: [...MANIFEST.cells, { id: 'app/routes/extra.rip', path: 'app/routes/extra.rip', rev: 3 }],
+    };
+    const hub = fakeHub();
+    const { result } = await bootWorkspace({ table: manifestTable(manifest), hub });
+    try {
+      expect(result.workspace.passport('app/routes/index.rip').rev).toBe(1);
+      expect(result.workspace.passport('app/routes/about.rip').rev).toBe(1);
+      // A manifest cell the bundle does not carry is skipped; the
+      // feed's open resync owns it.
+      expect(result.workspace.passport('app/routes/extra.rip')).toBeUndefined();
+      expect(result.workspace.paths().sort()).toEqual(['app/routes/about.rip', 'app/routes/index.rip']);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a ding fetches the rev-keyed cell and advances the passport (D3/D4)', async () => {
+    const table = manifestTable();
+    const v2 = routeSource('Home', 'home v2');
+    table.set('/@rip/cells/app/routes/index.rip?rev=2', v2);
+    const hub = fakeHub();
+    const { result, fetch } = await bootWorkspace({ table, hub });
+    try {
+      const socket = hub.sockets[0];
+      socket.onopen();
+      await until(() => fetch.calls.includes('/@rip/manifest'));
+      socket.onmessage({ data: JSON.stringify({ ding: { id: 'app/routes/index.rip', rev: 2 } }) });
+      await until(() => result.workspace.passport('app/routes/index.rip').rev === 2);
+      expect(fetch.calls).toContain('/@rip/cells/app/routes/index.rip?rev=2');
+      const passport = result.workspace.passport('app/routes/index.rip');
+      expect(passport.source).toBe(v2);
+      expect(passport.compiled).toBeDefined();
+      await settleEscape();
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a cell that fails to compile reports and leaves the last good revision live (S10)', async () => {
+    const table = manifestTable();
+    table.set('/@rip/cells/app/routes/index.rip?rev=2', 'x = ((');
+    const hub = fakeHub();
+    const reports = [];
+    const { result } = await bootWorkspace({ table, hub, reports });
+    try {
+      const before = result.workspace.passport('app/routes/index.rip');
+      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/routes/index.rip', rev: 2 } }) });
+      await until(() => reports.some(line => line.includes('app/routes/index.rip')));
+      const after = result.workspace.passport('app/routes/index.rip');
+      expect(after.rev).toBe(1);
+      expect(after.source).toBe(before.source);
+      expect(after.compiled).toBe(before.compiled);
+      expect(reports.join('\n')).toContain('failed to compile');
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a route ding remounts, the target shows the new content, and the remount is labeled escape', async () => {
+    const table = manifestTable();
+    const v2 = routeSource('Home', 'home v2');
+    table.set('/@rip/cells/app/routes/index.rip?rev=2', v2);
+    const hub = fakeHub();
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (...args) => void logs.push(args.join(' '));
+    let boot = null;
+    try {
+      boot = await bootWorkspace({ table, hub });
+      const { result, target } = boot;
+      await until(() => target.textContent.includes('home v1'));
+      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/routes/index.rip', rev: 2 } }) });
+      await until(() => result.workspace.passport('app/routes/index.rip').rev === 2);
+      await settleEscape();
+      await until(() => target.textContent.includes('home v2'));
+      const escapeLines = logs.filter(line => line.includes('escape'));
+      expect(escapeLines).toEqual(['[Rip] workspace: change applied by remount (escape, not hot apply)']);
+      expect(result.router.current.route.file).toBe('app/routes/index.rip');
+    } finally {
+      console.log = originalLog;
+      boot?.result.destroy();
+    }
+  });
+
+  test('a ding to a DEPENDENCY recompiles its importers: the remount shows the new value through the importing route', async () => {
+    // The loader invalidates importers transitively; the remount must
+    // read its projections THROUGH the loader, or the route keeps the
+    // stale module that closed over the old dependency.
+    const modules = {
+      'app/badge.rip': "export LABEL = 'badge v1'",
+      'app/routes/index.rip': [
+        "import { LABEL } from '../badge.rip'",
+        'export Home = component',
+        '  render',
+        '    h1 "#{LABEL}"',
+      ].join('\n'),
+    };
+    const manifest = {
+      cells: [
+        { id: 'app/badge.rip', path: 'app/badge.rip', rev: 1 },
+        { id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1 },
+      ],
+    };
+    const bundle = assembleBundle({
+      modules,
+      packagesDir: resolve(root, 'packages'),
+      claims: ['@rip-lang/workspace'],
+    });
+    const table = new Map([['/@rip/manifest', JSON.stringify(manifest)]]);
+    table.set('/@rip/cells/app/badge.rip?rev=2', "export LABEL = 'badge v2'");
+    const hub = fakeHub();
+    const { result, target } = await bootWorkspace({ table, hub, bundle });
+    try {
+      await until(() => target.textContent.includes('badge v1'));
+      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/badge.rip', rev: 2 } }) });
+      await until(() => result.workspace.passport('app/badge.rip').rev === 2);
+      await settleEscape();
+      await until(() => target.textContent.includes('badge v2'));
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a delete ding removes the passport and the remount survives against the shrunken bag', async () => {
+    const hub = fakeHub();
+    const { result } = await bootWorkspace({ table: manifestTable(), hub });
+    try {
+      expect(result.workspace.passport('app/routes/about.rip')).toBeDefined();
+      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/routes/about.rip', rev: 2, kind: 'delete' } }) });
+      await until(() => result.workspace.passport('app/routes/about.rip') === undefined);
+      expect(result.workspace.paths()).toEqual(['app/routes/index.rip']);
+      await settleEscape();
+      await until(() => result.router.current?.route?.file === 'app/routes/index.rip');
     } finally {
       result.destroy();
     }

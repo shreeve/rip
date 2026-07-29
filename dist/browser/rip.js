@@ -3885,7 +3885,14 @@ function rewriteTypes(tokens, mintId, text, fail) {
   const frameTop = () => frames[frames.length - 1] ?? null;
   let pendingClassBody = false;
   const classIndents = [];
-  const inClassBody = () => classIndents.length > 0 && classIndents[classIndents.length - 1];
+  const inClassBody = () => classIndents.length > 0 && !!classIndents[classIndents.length - 1];
+  const classBodyKind = () => classIndents[classIndents.length - 1] ?? false;
+  const rejectValueWordBinding = (nameTok) => {
+    const lowered = VALUE_WORDS.get(nameTok.value);
+    if (lowered === undefined)
+      return;
+    fail(`'${nameTok.value}' cannot name a binding — every read of '${nameTok.value}' ` + `lowers to \`${lowered}\`, so the binding would be unreachable`, nameTok.start, nameTok.end);
+  };
   let classHeadDepth = -1;
   let classHeadRunDepth = 0;
   let prevSiblingKV = false, curLineKV = false;
@@ -4172,8 +4179,10 @@ function rewriteTypes(tokens, mintId, text, fail) {
       if ((prev.kind === "PROPERTY" || prev.kind === "IDENTIFIER") && beforePrev?.kind === "DEF") {
         const last = claim("TYPE", tok, i + 1, {});
         if (last >= 0) {
-          if (prev.kind === "PROPERTY")
+          if (prev.kind === "PROPERTY") {
+            rejectValueWordBinding(prev);
             prev.kind = "IDENTIFIER";
+          }
           i = last;
           continue;
         }
@@ -4197,6 +4206,7 @@ function rewriteTypes(tokens, mintId, text, fail) {
               if (beforePrev.kind === "PROPERTY")
                 beforePrev.kind = "IDENTIFIER";
             } else if (prev.kind === "PROPERTY" && tokens[i - 2]?.kind !== "@") {
+              rejectValueWordBinding(prev);
               prev.kind = "IDENTIFIER";
             }
             f.sawType = true;
@@ -4226,8 +4236,11 @@ function rewriteTypes(tokens, mintId, text, fail) {
       if (frames.length === 0 && (namedColon || stringNamedColon) && typedDeclEq(tokens, i) >= 0) {
         const last = claim("TYPE", tok, i + 1, {});
         if (last >= 0) {
-          if (nameTok.kind === "PROPERTY" && !isAtName)
+          if (nameTok.kind === "PROPERTY" && !isAtName) {
+            if (classBodyKind() !== "class")
+              rejectValueWordBinding(nameTok);
             nameTok.kind = "IDENTIFIER";
+          }
           curLineKV = false;
           i = last;
           continue;
@@ -4257,8 +4270,11 @@ function rewriteTypes(tokens, mintId, text, fail) {
         if (end > i + 1 && isCompleteTypeExpr(tokens, i + 1, end)) {
           const last = claim("TYPE", tok, i + 1, {});
           if (last >= 0) {
-            if (nameTok.kind === "PROPERTY" && !isAtName)
+            if (nameTok.kind === "PROPERTY" && !isAtName) {
+              if (classBodyKind() === "component")
+                rejectValueWordBinding(nameTok);
               nameTok.kind = "IDENTIFIER";
+            }
             i = last;
             continue;
           }
@@ -4270,8 +4286,10 @@ function rewriteTypes(tokens, mintId, text, fail) {
         if (decision) {
           const last = claim("TYPE", tok, i + 1, {});
           if (last >= 0) {
-            if (prev.kind === "PROPERTY")
+            if (prev.kind === "PROPERTY") {
+              rejectValueWordBinding(prev);
               prev.kind = "IDENTIFIER";
+            }
             curLineKV = false;
             i = last;
             continue;
@@ -4296,7 +4314,7 @@ function rewriteTypes(tokens, mintId, text, fail) {
         classHeadDepth = -1;
     }
     if (kd === "CLASS" || kd === "COMPONENT")
-      pendingClassBody = true;
+      pendingClassBody = kd === "CLASS" ? "class" : "component";
     else if (kd === "THEN")
       pendingClassBody = false;
     else if (kd === "INDENT") {
@@ -4464,6 +4482,17 @@ var ALIASES = {
   on: ["BOOL", "true"],
   off: ["BOOL", "false"]
 };
+var VALUE_WORDS = new Map([
+  ["yes", "true"],
+  ["no", "false"],
+  ["on", "true"],
+  ["off", "false"],
+  ["true", "true"],
+  ["false", "false"],
+  ["null", "null"],
+  ["undefined", "undefined"],
+  ["this", "this"]
+]);
 var TAGGABLE = new Set(["IDENTIFIER", "PROPERTY", ")", "CALL_END", "]", "INDEX_END"]);
 var OPS4 = { ">>>=": "COMPOUND_ASSIGN" };
 var OPS3 = {
@@ -8799,6 +8828,7 @@ var ASSIGNS = new Set(["=", "void-assign", "+=", "-=", "*=", "/=", "%=", "**=", 
 var RENDER_BINDING_HEADS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??="]);
 var RENDER_LOCAL_RE = /^[A-Za-z_$][\w$]*$/;
 var JS_OP = { "==": "===", "!=": "!==" };
+var PATTERN_LITERALS = new Set(["true", "false", "null", "undefined", "this"]);
 var isNode4 = (x) => Array.isArray(x);
 var isBinary = (x) => isNode4(x) && BINOPS.has(x[0]) && x.length === 3;
 var PROTO_GENERIC_PARAMS = {
@@ -9855,36 +9885,40 @@ class Emitter {
       });
     }
   }
-  patternNames(p, out = [], binding = false) {
+  patternNames(p, out = [], binding = false, at = null) {
     if (!isNode4(p)) {
-      if (typeof p === "string" && p !== ",")
+      if (typeof p === "string" && p !== ",") {
+        if (PATTERN_LITERALS.has(p)) {
+          throw this.positionedError(at, `emitter: \`${p}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
+        }
         out.push(p);
+      }
       return out;
     }
     if (p[0] === "array")
       for (const el of p.slice(1))
-        this.patternNames(el, out, binding);
+        this.patternNames(el, out, binding, p);
     else if (p[0] === "object") {
       for (const pair of p.slice(1)) {
         if (pair[0] === null)
-          this.patternNames(pair[1], out, binding);
+          this.patternNames(pair[1], out, binding, p);
         else if (pair[0] === ":")
-          this.patternNames(pair[2], out, binding);
+          this.patternNames(pair[2], out, binding, p);
         else if (pair[0] === "=")
-          this.patternNames(pair[1], out, binding);
+          this.patternNames(pair[1], out, binding, p);
         else if (pair[0] === "...")
-          this.patternNames(pair[1], out, binding);
+          this.patternNames(pair[1], out, binding, p);
       }
     } else if (p[0] === "rest") {
       if (!binding)
         throw this.positionedError(p, "emitter: Cannot use 'rest' expression as a destructuring target (destructuring rest is spelled '...name')");
-      this.patternNames(p[1], out, binding);
+      this.patternNames(p[1], out, binding, p);
     } else if (p[0] === "...")
-      this.patternNames(p[1], out, binding);
+      this.patternNames(p[1], out, binding, p);
     else if (p[0] === "default")
-      this.patternNames(p[1], out, binding);
+      this.patternNames(p[1], out, binding, p);
     else if (p[0] === "typed-var")
-      this.patternNames(p[1], out, binding);
+      this.patternNames(p[1], out, binding, p);
     return out;
   }
   static isPattern(x) {
@@ -15190,7 +15224,9 @@ ${this.replayPad}}` : " }");
           this.b.emit(`if (${instVar} && ${instVar}._state === 'mounting') {
 ` + `${pad}  ${elVar} = ${instVar}._mountSetup(document.createComment('rip:child-error: ${name}'));
 `);
-          if (rec.kind !== "class") {
+          const fragChildren = this.rstate.fragChildren.get(rec.root);
+          const firstNode = fragChildren !== undefined ? fragChildren[0] : rec.root;
+          if (rec.kind !== "class" && firstNode === elVar) {
             this.b.emit(`${pad}  `);
             if (this.ts)
               this.b.tsOnly(() => this.b.emit("("));
@@ -22896,6 +22932,7 @@ function createModuleLoader({ components: registry, packages = {}, debug = false
 }
 // src/browser-boot.js
 var APP_PACKAGE = "@rip-lang/app";
+var WORKSPACE_PACKAGE = "@rip-lang/workspace";
 var bootGraphs = new Map;
 var browserFetchText = async (url, etag) => {
   const headers = etag ? { "If-None-Match": etag } : {};
@@ -23005,14 +23042,65 @@ async function bootApp(opts = {}) {
     }
   }
   const app = await loader.import(`${appEntry.root}/${appEntry.entry}`);
+  const workspaceMode = opts.workspace === true;
+  let createWorkspace = null;
+  let connectFeed = null;
+  let manifestUrl = null;
+  let fetchBytes = null;
+  let bag = null;
+  if (workspaceMode) {
+    const wsEntry = bundle.packages?.[WORKSPACE_PACKAGE];
+    if (!wsEntry) {
+      throw new Error(`rip: workspace mode requires the '${WORKSPACE_PACKAGE}' package, which this bundle does not carry — ` + "serve under RIP_WORKSPACE=1 so assembly claims it");
+    }
+    ({ createWorkspace } = await loader.import(`${wsEntry.root}/${wsEntry.entry}`));
+    const feedSub = wsEntry.exports?.["./feed"];
+    if (!feedSub) {
+      throw new Error(`rip: the '${WORKSPACE_PACKAGE}' package carries no './feed' export`);
+    }
+    ({ connectFeed } = await loader.import(`${wsEntry.root}/${feedSub}`));
+    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf("/") + 1)}manifest` : null);
+    if (!manifestUrl) {
+      throw new Error("rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl");
+    }
+    fetchBytes = opts.feed?.fetch ?? ((url) => fetch(url));
+    const res = await fetchBytes(manifestUrl);
+    if (!res.ok) {
+      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
+    }
+    const manifest = await res.json();
+    bag = createWorkspace();
+    const records = [];
+    for (const entry of manifest?.cells ?? []) {
+      const path = typeof entry.path === "string" ? entry.path : entry.id;
+      const source = (bundle.modules ?? {})[path];
+      if (source === undefined)
+        continue;
+      records.push({ id: entry.id, path, rev: entry.rev, source });
+    }
+    bag.populate(records);
+  }
   const compiled = {};
   for (const path of Object.keys(bundle.modules ?? {})) {
-    if (path.startsWith("_route/") || path.startsWith("_app/")) {
+    if (path.startsWith("app/")) {
       compiled[path] = { ...await loader.import(path) };
     }
   }
-  return app.launch({
-    bundle: { modules: bundle.modules, compiled, data: bundle.data },
+  if (!workspaceMode) {
+    return app.launch({
+      bundle: { modules: bundle.modules, compiled, data: bundle.data },
+      target: opts.target,
+      adapter: opts.adapter,
+      base: opts.base,
+      hash: opts.hash,
+      persist: opts.persist,
+      storage: opts.storage,
+      onError: opts.onError
+    });
+  }
+  const launchWith = (compiledModules) => app.launch({
+    bundle: { compiled: compiledModules, data: bundle.data },
+    components: bag,
     target: opts.target,
     adapter: opts.adapter,
     base: opts.base,
@@ -23021,6 +23109,90 @@ async function bootApp(opts = {}) {
     storage: opts.storage,
     onError: opts.onError
   });
+  let current = launchWith(compiled);
+  const report = opts.feed?.report ?? ((...args) => console.error(...args));
+  let destroyed = false;
+  let timer = null;
+  let remounting = false;
+  const handle = {};
+  const remount = async () => {
+    timer = null;
+    if (destroyed)
+      return;
+    if (remounting) {
+      timer = setTimeout(remount, 25);
+      return;
+    }
+    remounting = true;
+    try {
+      const snapshot = {};
+      for (const path of bag.paths()) {
+        let module = null;
+        try {
+          module = { ...await loader.import(path) };
+          bag.setCompiled(path, module);
+        } catch (error) {
+          report(`[Rip] workspace: '${path}' failed to recompile for the remount — keeping its last good projection`, error);
+          module = bag.getCompiled(path);
+        }
+        if (module)
+          snapshot[path] = module;
+      }
+      if (destroyed)
+        return;
+      current.destroy();
+      current = launchWith(snapshot);
+      Object.assign(handle, current, stable);
+      console.log("[Rip] workspace: change applied by remount (escape, not hot apply)");
+    } finally {
+      remounting = false;
+    }
+  };
+  const unwatch = bag.watch((_event, path) => {
+    if (!path.startsWith("app/"))
+      return;
+    timer ??= setTimeout(remount, 25);
+  });
+  const door = {
+    passport: bag.passport,
+    sealed: bag.sealed,
+    set: async (cell) => {
+      if (cell.deleted === true) {
+        const path2 = bag.passport(cell.id)?.path;
+        if (path2 !== undefined) {
+          files.delete(path2);
+          loader.invalidate(path2);
+        }
+        return bag.set(cell);
+      }
+      const path = cell.path ?? cell.id;
+      files.set(path, cell.source);
+      loader.invalidate(path);
+      let module;
+      try {
+        module = await loader.import(path);
+      } catch (error) {
+        report(`[Rip] workspace: '${path}' rev ${cell.rev} failed to compile — keeping the last good revision`, error);
+        return false;
+      }
+      return bag.set({ ...cell, compiled: { ...module } });
+    }
+  };
+  const feed = connectFeed(door, { ...opts.feed ?? {}, manifestUrl, report });
+  const destroy = () => {
+    if (destroyed)
+      return;
+    destroyed = true;
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    unwatch();
+    feed.close();
+    current.destroy();
+  };
+  const stable = { workspace: bag, feed, destroy };
+  return Object.assign(handle, current, stable);
 }
 // src/browser.js
 function compileToJS(source, options = {}) {

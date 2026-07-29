@@ -1174,10 +1174,32 @@ export function rewriteTypes(tokens, mintId, text, fail) {
   // (a head line that ends in TERMINATOR or THEN without one has no
   // block body); nested indents inside the body (method bodies,
   // switch arms, defaults) push false. Typed FIELDS claim only when
-  // the innermost indent is a class body.
+  // the innermost indent is a class body. Entries carry the body's
+  // KIND ('class' | 'component' | false): a class field is read
+  // through `@`/`this.` (a property access), but a component member
+  // is read BARE in render and methods — so the value-word rejection
+  // below must tell them apart.
   let pendingClassBody = false;
   const classIndents = [];
-  const inClassBody = () => classIndents.length > 0 && classIndents[classIndents.length - 1];
+  const inClassBody = () => classIndents.length > 0 && !!classIndents[classIndents.length - 1];
+  const classBodyKind = () => classIndents[classIndents.length - 1] ?? false;
+
+  // A bare read of a VALUE WORD lowers to its token before scope
+  // exists (`off` → BOOL false, `null` → NULL), so a binding under
+  // one of these names is unreachable: every read is the literal,
+  // silently. Reject at the site that mints the binding NAME — the
+  // annotated-declaration claims below, where key capture is what
+  // let the word past classification. Property keys (`{ on: 1 }`),
+  // class fields (read `@off`), and promoted params stay legal:
+  // their reads are property accesses, which never consult the
+  // word tables.
+  const rejectValueWordBinding = (nameTok) => {
+    const lowered = VALUE_WORDS.get(nameTok.value);
+    if (lowered === undefined) return;
+    fail(`'${nameTok.value}' cannot name a binding — every read of '${nameTok.value}' ` +
+      `lowers to \`${lowered}\`, so the binding would be unreachable`,
+      nameTok.start, nameTok.end);
+  };
 
   // Class-HEAD generic tracking: armed at CLASS with the bracket
   // depth the head lives at; a `<` at that depth before the head
@@ -1579,7 +1601,10 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       if ((prev.kind === 'PROPERTY' || prev.kind === 'IDENTIFIER') && beforePrev?.kind === 'DEF') {
         const last = claim('TYPE', tok, i + 1, {});
         if (last >= 0) {
-          if (prev.kind === 'PROPERTY') prev.kind = 'IDENTIFIER';
+          if (prev.kind === 'PROPERTY') {
+            rejectValueWordBinding(prev);
+            prev.kind = 'IDENTIFIER';
+          }
           i = last;
           continue;
         }
@@ -1621,6 +1646,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
               // ThisProperty grammar reads `@ Property` (`(@url:
               // string)`); every other annotated param name reads
               // as a plain Identifier.
+              rejectValueWordBinding(prev);
               prev.kind = 'IDENTIFIER';
             }
             f.sawType = true;
@@ -1694,7 +1720,13 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       if (frames.length === 0 && (namedColon || stringNamedColon) && typedDeclEq(tokens, i) >= 0) {
         const last = claim('TYPE', tok, i + 1, {});
         if (last >= 0) {
-          if (nameTok.kind === 'PROPERTY' && !isAtName) nameTok.kind = 'IDENTIFIER';
+          if (nameTok.kind === 'PROPERTY' && !isAtName) {
+            // A class FIELD so named stays reachable (`@off` reads it);
+            // a component member's reads are bare, a statement
+            // binding's always are — both reject.
+            if (classBodyKind() !== 'class') rejectValueWordBinding(nameTok);
+            nameTok.kind = 'IDENTIFIER';
+          }
           curLineKV = false;
           i = last;
           continue;
@@ -1726,7 +1758,13 @@ export function rewriteTypes(tokens, mintId, text, fail) {
         if (end > i + 1 && isCompleteTypeExpr(tokens, i + 1, end)) {
           const last = claim('TYPE', tok, i + 1, {});
           if (last >= 0) {
-            if (nameTok.kind === 'PROPERTY' && !isAtName) nameTok.kind = 'IDENTIFIER';
+            if (nameTok.kind === 'PROPERTY' && !isAtName) {
+              // Same split as the initializer claim above: a class
+              // field's reads are property accesses; a component
+              // member's are bare.
+              if (classBodyKind() === 'component') rejectValueWordBinding(nameTok);
+              nameTok.kind = 'IDENTIFIER';
+            }
             i = last;
             continue;
           }
@@ -1748,7 +1786,10 @@ export function rewriteTypes(tokens, mintId, text, fail) {
         if (decision) {
           const last = claim('TYPE', tok, i + 1, {});
           if (last >= 0) {
-            if (prev.kind === 'PROPERTY') prev.kind = 'IDENTIFIER';
+            if (prev.kind === 'PROPERTY') {
+              rejectValueWordBinding(prev);
+              prev.kind = 'IDENTIFIER';
+            }
             curLineKV = false;
             i = last;
             continue;
@@ -1798,7 +1839,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     // categorizer reads). Consumed claims never reach here, but every
     // run they eat is INDENT/OUTDENT-balanced, so the stack stays
     // true.
-    if (kd === 'CLASS' || kd === 'COMPONENT') pendingClassBody = true;
+    if (kd === 'CLASS' || kd === 'COMPONENT') pendingClassBody = kd === 'CLASS' ? 'class' : 'component';
     else if (kd === 'THEN') pendingClassBody = false;
     else if (kd === 'INDENT') {
       classIndents.push(pendingClassBody);
@@ -1988,6 +2029,17 @@ export const ALIASES = {
   on: ['BOOL', 'true'],
   off: ['BOOL', 'false'],
 };
+
+// Words whose bare READ always lowers to a value token — the BOOL
+// aliases plus the literal keywords — mapped to what the read
+// becomes. rewriteTypes consults this to reject a binding NAMED for
+// one (rejectValueWordBinding): the binding would be unreachable,
+// since no read can ever resolve to it.
+const VALUE_WORDS = new Map([
+  ['yes', 'true'], ['no', 'false'], ['on', 'true'], ['off', 'false'],
+  ['true', 'true'], ['false', 'false'],
+  ['null', 'null'], ['undefined', 'undefined'], ['this', 'this'],
+]);
 
 // Value-ending token kinds that can HEAD a tagged template: a string
 // right against one of these (or bridged by `$`) is `tag\`…\``, never

@@ -40,7 +40,6 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 
 | # | Finding | Tags | Gate |
 | --- | --- | --- | --- |
-| [51](#51-a-boolean-alias-word-names-a-binding-and-every-read-becomes-the-literal) | A boolean alias word names a binding, and every read of it becomes the literal — a wrong VALUE, silently | `compiler` | **none** — the shape cannot enter a positive fixture while it miscompiles; the fix's gate is a `battery` rejection row |
 | [21](#21-an-identifier-read-carries-no-source-span) | Identifier reads carry no source span — hover, definition, diagnostics, tokens | `editor`, `compiler` | `census` — **red by design**, the root all four surfaces share; `member` + `survival` on the token surface |
 | [22](#22-completion-and-signature-help-fail-on-an-incomplete-expression) | Completion & signature help fail on an incomplete expression | `editor`, `compiler` | **none** — a content audit for each would catch them; neither built |
 | [40](#40-a-component-members-initializer-and-in-method-writes-are-never-type-checked) | A component member's initializer and in-method writes are never type-checked | `compiler` | **none** — a `check` case asserting the silence as the gap is the honest interim, unbuilt; the fix's gate is the member negatives entering 13-components' error pair, and three parked claims rows ([CLAIMS.md](CLAIMS.md)) |
@@ -84,27 +83,6 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 **The `strict` dimension's clean run is contractual** — a red row there is a discovery, not residue; the runner's header states the curation rules.
 
 ## Findings
-
-### 51. A boolean alias word names a binding, and every read becomes the literal
-
-```
-yes: boolean = false
-console.log('binding says:', yes)     # prints: true
-```
-
-The declaration stands — the face reads `let yes: boolean = false` — and every subsequent READ of that binding is replaced by `true`. The binding is unreachable from the moment it exists, and the program prints the opposite of what its source says. No diagnostic, no squiggle: the face type-checks clean, because a literal satisfies the annotation.
-
-**Why (code) — the declaration is collateral, not a decision.** A word followed by a colon is captured as a property KEY before it is classified at all ([lexer.js](../../src/lexer.js), the identifier branch), which is what lets `when: 1` and `if: 2` be pairs — the alias table is not consulted for another sixty lines. An annotated declaration has the same `word :` shape as a pair, so it inherits the exemption without anyone choosing it. The read has no colon, falls through to the alias table, and becomes the literal.
-
-**Four spellings, and only four, fail silently** — a fact that follows from what the misread lowers to rather than from a list. The misread has to be a legal expression to go unnoticed. Driven 2026-07-27, one probe per class: a keyword name (`if: number = 2`) rejects at the parser on `POST_IF`; an operator alias (`is: number = 2`) rejects on `COMPARE`, and so do `and`, `or`, `not`, `isnt`, because an operator in argument position does not parse. Only the VALUE aliases — `yes`, `no`, `on`, `off` — lower to `BOOL`, which is legal wherever an expression is, so only those four reach runtime wrong.
-
-**The fix belongs in the scanner, at the declaration.** Making a read yield to an in-scope binding would need scope knowledge in a scanner that has none, which is the wrong layer. Rejecting the DECLARATION is tractable and has its precedent in the same file: `RESERVED_WORDS` exists so certain words never reach the parser as an identifier. The rejection must be narrower than "no alias word before a colon" — `{ yes: 1 }` stays legal, since nothing later reads a binding — so it has to separate a key inside a literal from any ANNOTATED BINDING SITE. Statement level is not the whole of that: driven 2026-07-28, an annotated parameter miscompiles identically (`def toggle(off: boolean)` prints the wrong branch, and the face type-checks clean), and a discriminator scoped to statements would leave it open. Property and promoted positions are safe.
-
-**Why the suite missed it.** Nothing anywhere declares a binding named for a value alias. The battery's only `yes`/`no` are string literals in ternary rows, and this corpus wrote `yes: Yes = true` and `no: No = false` — the two cases where the literal the read collapses to EQUALS the binding's value, so the fixture printed the right answer while demonstrating nothing. `runtime` passed, `verdict` passed, and the mistake was invisible in both. The lexer-spelling census is what surfaced it: `yes` and `no` counted as exercised BOOL aliases, and the only site claiming them was a read that was never meant to be one.
-
-**vs v3 — not a regression** (driven both sides, 2026-07-28). v3 prints `true` for the same two lines. Both the pair exemption in the identifier branch and the alias table predate this repo, so the shape has always miscompiled; the lexer-spelling census is what made it visible, not a change that made it wrong.
-
-**Status.** ⬜ **Open** (2026-07-27) — **no gate**, honestly: a positive fixture cannot carry the shape while it miscompiles, and `rip check` cannot see it because the face is clean. The fix's gate is a `battery` rejection row for the declaration, at which point the census's four value-alias rows — `yes`, `no`, `on`, `off`, which sit in its queue together for exactly as long as this row is open — want one exclusion naming `true`/`false` as the spelling that carries their lowering.
 
 ### 21. An identifier read carries no source span
 
@@ -716,6 +694,7 @@ emits `this._el0.setAttribute('class', "animate-spin";` — the closing paren is
 
 **Status.** ⬜ **Open** (2026-07-28) — no gate: the emission does not parse, so no fixture can carry it. The fix's gate is the spelling entering 13-components, where `compiles` and `runtime` hold it.
 
+
 ### 28. A postfix cast on an inline try body detaches the catch arm
 
 `x = try f() as T catch e then y` does not parse — the reported error is an unexpected INDENT at the catch arm's own body. Driven 2026-07-22 across cast shapes: `as number`, `as { a: number }`, `as number[]` all fail identically, so the trigger is the cast itself, not a brace type. The same spelling without the cast parses (`try f() catch e then y` is committed corpus), and the cast without the catch parses (`x = try f() as T`); it is exactly the combination that breaks. The workaround is one pair of parens on the cast operand: `try (f() as T) catch e then y` compiles.
@@ -886,3 +865,5 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 24 | A `schema` block's implicit `it` untyped | audit `strict` (14-schema's transforms); `schema-types`' transform case |
 | 25 | Event handler parameters get no event type | `check`'s handler case; `dom-vocab-lib` |
 | 47 | Census blind to indented type declarations | the type-vocabulary census (`runner.js`) — soft: MethodSignature is claimed only from an indented interface, so the queue silently grows if the declaration rendering is dropped |
+| 51 | A value word names a binding — every read became the literal, silently | `battery` (value-words.rip): rejection rows for every annotated binding site, property-position rows for the legal negative space |
+| 60 | A value word in a destructuring pattern bound — the module did not parse | `battery` (value-words.rip): rejection rows for every pattern form, negative-space rows for ordinary names |

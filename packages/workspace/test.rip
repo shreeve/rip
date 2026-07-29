@@ -1,0 +1,626 @@
+# ==============================================================================
+# @rip-lang/workspace tests — passport bag: door, rev cursor, store view, seal
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import { createWorkspace } from '@rip-lang/workspace'
+import * as mod from '@rip-lang/workspace'
+import { connectFeed } from '@rip-lang/workspace/feed'
+import * as feedMod from '@rip-lang/workspace/feed'
+import { readFileSync } from 'fs'
+
+# A workspace born through the door, plus an event log attached after birth.
+seeded = ->
+  ws = createWorkspace()
+  ws.populate [
+    { id: 'c1', path: 'app.rip',       rev: 3, source: 'export App = component' }
+    { id: 'c2', path: 'routes/hi.rip', rev: 1, source: 'export Hi = component' }
+  ]
+  events = []
+  ws.watch (event, path) -> events.push [event, path]
+  { ws, events }
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "named exports", ->
+  eq Object.keys(mod).sort(), ['createWorkspace']
+  eq typeof createWorkspace, 'function'
+  eq Object.keys(feedMod).sort(), ['connectFeed']
+  eq typeof connectFeed, 'function'
+
+test "zero runtime deps", ->
+  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
+    eq pkg[field], undefined
+  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  eq pkg.files, ['workspace.rip', 'feed.rip', 'README.md']
+
+test "declares browser safety and earns it", ->
+  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
+  eq pkg.rip, { browser: true }
+  for file in ['workspace.rip', 'feed.rip']
+    source = readFileSync("#{import.meta.dir}/#{file}", 'utf8')
+    eq /^\s*import\b/m.test(source), false
+    eq /\bBun\.|node:|process\.|globalThis/.test(source), false
+
+# ==[ Store view: ComponentsStore parity ]==
+
+console.log "\nStore view"
+
+test "writes and reads source and compiled modules", ->
+  ws = createWorkspace()
+  first = { App: { name: 'App' } }
+  ws.write 'app.rip', 'export App = component'
+  eq ws.read('app.rip'), 'export App = component'
+  ws.setCompiled 'app.rip', first
+  ok ws.getCompiled('app.rip') is first
+  ws.write 'app.rip', 'export App = component\n  render null'
+  ok ws.read('app.rip').includes('render null')
+  eq ws.getCompiled('app.rip'), undefined
+
+test "rejects malformed and directory-shaped component paths", ->
+  ws = createWorkspace()
+  for path in ['/app.rip', 'routes//app.rip', 'routes/app.rip/', './app.rip', 'routes/../app.rip', 'routes/admin', 'routes/app.rip/child.rip', 'a\\b.rip', '.rip']
+    throws (-> ws.write(path, 'source')), 'invalid component path'
+
+test "rejects non-string paths and content", ->
+  ws = createWorkspace()
+  throws (-> ws.write('', 'source')), 'non-empty string'
+  throws (-> ws.write(null, 'source')), 'non-empty string'
+  throws (-> ws.write('app.rip', null)), 'must be a string'
+  throws (-> ws.read(42)), 'non-empty string'
+
+test "exists and size", ->
+  ws = createWorkspace()
+  eq ws.exists('app.rip'), false
+  eq ws.size(), 0
+  ws.write 'app.rip', 'a'
+  ws.write 'routes/hi.rip', 'b'
+  eq ws.exists('app.rip'), true
+  eq ws.exists('nope.rip'), false
+  eq ws.size(), 2
+
+test "list is one level; listAll is recursive", ->
+  ws = createWorkspace()
+  ws.load
+    'app.rip': 'a'
+    'routes/hi.rip': 'b'
+    'routes/admin/users.rip': 'c'
+  eq ws.list(), ['app.rip']
+  eq ws.list('routes'), ['routes/hi.rip']
+  eq ws.listAll('routes'), ['routes/hi.rip', 'routes/admin/users.rip']
+  eq ws.listAll().length, 3
+  throws (-> ws.list('routes//admin')), 'invalid component directory'
+  throws (-> ws.list(42)), 'directory must be a string'
+
+test "load is bulk write and fires no events", ->
+  { ws, events } = seeded()
+  ws.load
+    'app.rip': 'updated'
+    'fresh.rip': 'born'
+  eq ws.read('app.rip'), 'updated'
+  eq ws.read('fresh.rip'), 'born'
+  eq events, []
+  throws (-> ws.load(null)), 'source object'
+  throws (-> ws.load(['app.rip'])), 'source object'
+
+test "load clears compiled for rewritten paths", ->
+  ws = createWorkspace()
+  ws.write 'app.rip', 'v1'
+  ws.setCompiled 'app.rip', { App: {} }
+  ws.load { 'app.rip': 'v2' }
+  eq ws.getCompiled('app.rip'), undefined
+
+test "del removes source and compiled and fires delete", ->
+  { ws, events } = seeded()
+  ws.setCompiled 'app.rip', { App: {} }
+  ws.del 'app.rip'
+  eq ws.exists('app.rip'), false
+  eq ws.read('app.rip'), undefined
+  eq ws.getCompiled('app.rip'), undefined
+  eq events, [['delete', 'app.rip']]
+
+test "del of an unknown path still fires delete", ->
+  { ws, events } = seeded()
+  ws.del 'ghost.rip'
+  eq events, [['delete', 'ghost.rip']]
+  eq ws.size(), 2
+
+test "watch sees create, change, delete", ->
+  { ws, events } = seeded()
+  ws.write 'new.rip', 'a'
+  ws.write 'new.rip', 'b'
+  ws.del 'new.rip'
+  eq events, [['create', 'new.rip'], ['change', 'new.rip'], ['delete', 'new.rip']]
+
+test "watch disposer is idempotent; non-function rejects", ->
+  ws = createWorkspace()
+  seen = []
+  stop = ws.watch (event, path) -> seen.push event
+  ws.write 'a.rip', 'x'
+  stop()
+  stop()
+  ws.write 'a.rip', 'y'
+  eq seen, ['create']
+  throws (-> ws.watch(null)), 'watch expects a function'
+
+test "a throwing watcher never silences the rest", ->
+  ws = createWorkspace()
+  seen = []
+  original = console.error
+  console.error = ->
+  try
+    ws.watch -> throw new Error 'boom'
+    ws.watch (event, path) -> seen.push [event, path]
+    ws.write 'a.rip', 'x'
+  finally
+    console.error = original
+  eq seen, [['create', 'a.rip']]
+
+test "setCompiled validates its module and requires a passport", ->
+  ws = createWorkspace()
+  ws.write 'app.rip', 'src'
+  throws (-> ws.setCompiled('app.rip', null)), 'must be an object'
+  throws (-> ws.setCompiled('app.rip', [1])), 'must be an object'
+  throws (-> ws.setCompiled('ghost.rip', {})), "unknown component path 'ghost.rip'"
+  eq ws.getCompiled('ghost.rip'), undefined
+
+# ==[ Door: populate ]==
+
+console.log "\nDoor: populate"
+
+test "populate seeds the bag; ids are taken as given", ->
+  { ws } = seeded()
+  eq ws.size(), 2
+  eq ws.read('app.rip'), 'export App = component'
+  eq ws.ids().sort(), ['c1', 'c2']
+  eq ws.paths().sort(), ['app.rip', 'routes/hi.rip']
+  eq ws.passport('c1').path, 'app.rip'
+
+test "populate fires no watch events", ->
+  ws = createWorkspace()
+  events = []
+  ws.watch (event, path) -> events.push [event, path]
+  ws.populate [{ id: 'c1', path: 'app.rip', rev: 0, source: 'src' }]
+  eq events, []
+
+test "populate carries compiled cells", ->
+  ws = createWorkspace()
+  module = { App: {} }
+  ws.populate [{ id: 'c1', path: 'app.rip', rev: 0, source: 'src', compiled: module }]
+  ok ws.getCompiled('app.rip') is module
+
+test "populate is birth: a second populate rejects", ->
+  { ws } = seeded()
+  throws (-> ws.populate([{ id: 'c9', path: 'x.rip', rev: 0, source: 's' }])), 'requires an empty workspace'
+
+test "populate rejects malformed input", ->
+  ws = createWorkspace()
+  throws (-> ws.populate(null)), 'expects an array'
+  throws (-> ws.populate({})), 'expects an array'
+  throws (-> ws.populate([null])), 'expects passport records'
+  throws (-> ws.populate([{ id: '', path: 'a.rip', rev: 0, source: 's' }])), 'id must be a non-empty string'
+  throws (-> ws.populate([{ id: 'c1', path: 'bad', rev: 0, source: 's' }])), 'invalid component path'
+  throws (-> ws.populate([{ id: 'c1', path: 'a.rip', rev: -1, source: 's' }])), 'non-negative integer'
+  throws (-> ws.populate([{ id: 'c1', path: 'a.rip', rev: 1.5, source: 's' }])), 'non-negative integer'
+  throws (-> ws.populate([{ id: 'c1', path: 'a.rip', rev: '3', source: 's' }])), 'non-negative integer'
+  throws (-> ws.populate([{ id: 'c1', path: 'a.rip', rev: 0, source: null }])), 'source must be a string'
+  throws (-> ws.populate([{ id: 'c1', path: 'a.rip', rev: 0, source: 's', compiled: [] }])), 'must be an object'
+
+test "populate rejects duplicate ids and duplicate paths", ->
+  ws = createWorkspace()
+  throws (->
+    ws.populate [
+      { id: 'c1', path: 'a.rip', rev: 0, source: 's' }
+      { id: 'c1', path: 'b.rip', rev: 0, source: 's' }
+    ]), "duplicate passport id 'c1'"
+  throws (->
+    ws.populate [
+      { id: 'c1', path: 'a.rip', rev: 0, source: 's' }
+      { id: 'c2', path: 'a.rip', rev: 0, source: 's' }
+    ]), "duplicate passport path 'a.rip'"
+
+test "a rejected populate leaves the bag empty", ->
+  ws = createWorkspace()
+  throws (->
+    ws.populate [
+      { id: 'c1', path: 'a.rip', rev: 0, source: 's' }
+      { id: 'c2', path: 'broken', rev: 0, source: 's' }
+    ]), 'invalid component path'
+  eq ws.size(), 0
+  eq ws.ids(), []
+
+# ==[ Door: set, the rev cursor ]==
+
+console.log "\nDoor: set"
+
+test "a stale or duplicate rev is ignored, observably", ->
+  { ws, events } = seeded()
+  ws.setCompiled 'app.rip', { App: {} }
+  events.length = 0
+  eq ws.set({ id: 'c1', rev: 3, source: 'duplicate' }), false
+  eq ws.set({ id: 'c1', rev: 2, source: 'stale' }), false
+  eq ws.read('app.rip'), 'export App = component'
+  eq ws.passport('c1').rev, 3
+  ok ws.getCompiled('app.rip')?
+  eq events, []
+
+test "a newer rev applies and fires change", ->
+  { ws, events } = seeded()
+  eq ws.set({ id: 'c1', rev: 4, source: 'v4' }), true
+  eq ws.read('app.rip'), 'v4'
+  eq ws.passport('c1').rev, 4
+  eq events, [['change', 'app.rip']]
+
+test "new source clears compiled unless the cell carries one", ->
+  { ws } = seeded()
+  ws.setCompiled 'app.rip', { App: {} }
+  ws.set { id: 'c1', rev: 4, source: 'v4' }
+  eq ws.getCompiled('app.rip'), undefined
+  module = { App: { fresh: true } }
+  ws.set { id: 'c1', rev: 5, source: 'v5', compiled: module }
+  ok ws.getCompiled('app.rip') is module
+
+test "a compiled-only cell swaps the projection", ->
+  { ws, events } = seeded()
+  module = { App: {} }
+  eq ws.set({ id: 'c1', rev: 4, compiled: module }), true
+  ok ws.getCompiled('app.rip') is module
+  eq ws.read('app.rip'), 'export App = component'
+  eq events, [['change', 'app.rip']]
+
+test "an unknown id with a full record creates", ->
+  { ws, events } = seeded()
+  eq ws.set({ id: 'c3', rev: 0, path: 'routes/new.rip', source: 'born' }), true
+  eq ws.read('routes/new.rip'), 'born'
+  eq ws.passport('c3').rev, 0
+  eq events, [['create', 'routes/new.rip']]
+
+test "an unknown id without a full record rejects", ->
+  { ws } = seeded()
+  throws (-> ws.set({ id: 'c9', rev: 0, source: 'no path' })), "unknown passport 'c9' requires a full record"
+  throws (-> ws.set({ id: 'c9', rev: 0, path: 'x.rip' })), "unknown passport 'c9' requires a full record"
+
+test "set validates its cell", ->
+  { ws } = seeded()
+  throws (-> ws.set(null)), 'set expects a passport record'
+  throws (-> ws.set([])), 'set expects a passport record'
+  throws (-> ws.set({ rev: 4 })), 'id must be a non-empty string'
+  throws (-> ws.set({ id: 'c1' })), 'non-negative integer'
+  throws (-> ws.set({ id: 'c1', rev: 4 })), 'carries nothing to apply'
+  throws (-> ws.set({ id: 'c1', rev: 4, path: 'app.rip' })), 'carries nothing to apply'
+  throws (-> ws.set({ id: 'c1', rev: 4, source: 42 })), 'source must be a string'
+  throws (-> ws.set({ id: 'c1', rev: 4, compiled: [] })), 'must be an object'
+  eq ws.passport('c1').rev, 3
+
+test "a new path re-labels the id", ->
+  { ws, events } = seeded()
+  eq ws.set({ id: 'c1', rev: 4, path: 'main.rip' }), true
+  eq ws.passport('c1').path, 'main.rip'
+  eq ws.exists('app.rip'), false
+  eq ws.read('main.rip'), 'export App = component'
+  eq events, [['delete', 'app.rip'], ['create', 'main.rip']]
+
+test "rename and source travel in one cell", ->
+  { ws } = seeded()
+  ws.set { id: 'c1', rev: 4, path: 'main.rip', source: 'moved' }
+  eq ws.read('main.rip'), 'moved'
+  eq ws.passport('c1').rev, 4
+
+test "renaming onto an occupied path rejects", ->
+  { ws } = seeded()
+  throws (-> ws.set({ id: 'c1', rev: 4, path: 'routes/hi.rip' })), "already labels passport 'c2'"
+  eq ws.passport('c1').path, 'app.rip'
+
+test "creating on an occupied path rejects", ->
+  { ws } = seeded()
+  throws (-> ws.set({ id: 'c9', rev: 0, path: 'app.rip', source: 's' })), "already labels passport 'c1'"
+
+test "deleted: true removes the record, rev-guarded", ->
+  { ws, events } = seeded()
+  eq ws.set({ id: 'c1', rev: 3, deleted: true }), false
+  eq ws.exists('app.rip'), true
+  eq ws.set({ id: 'c1', rev: 4, deleted: true }), true
+  eq ws.exists('app.rip'), false
+  eq ws.passport('c1'), undefined
+  eq events, [['delete', 'app.rip']]
+
+test "a delete for an id the bag no longer holds is ignored", ->
+  { ws, events } = seeded()
+  ws.set { id: 'c1', rev: 4, deleted: true }
+  events.length = 0
+  eq ws.set({ id: 'c1', rev: 4, deleted: true }), false
+  eq events, []
+
+# ==[ Door meets view ]==
+
+console.log "\nDoor meets view"
+
+test "write to a door-born path bumps its rev by 1", ->
+  { ws } = seeded()
+  ws.write 'app.rip', 'edited'
+  eq ws.passport('c1').rev, 4
+  eq ws.read('app.rip'), 'edited'
+
+test "write to a new path mints a local id from the birth path", ->
+  ws = createWorkspace()
+  ws.write 'routes/new.rip', 'born'
+  record = ws.passport('routes/new.rip')
+  eq record.id, 'routes/new.rip'
+  eq record.rev, 0
+
+test "minting rejects when a passport already holds that id", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'b.rip', rev: 0, source: 's' }]
+  throws (-> ws.write('a.rip', 'x')), "cannot mint id 'a.rip'"
+
+test "renames keep the id across a later write", ->
+  { ws } = seeded()
+  ws.set { id: 'c1', rev: 4, path: 'main.rip' }
+  ws.write 'main.rip', 'edited'
+  eq ws.passport('c1').rev, 5
+  eq ws.passport('main.rip').id, 'c1'
+
+# ==[ Seal ]==
+
+console.log "\nSeal"
+
+test "seal locks every mutator loudly", ->
+  { ws } = seeded()
+  eq ws.sealed(), false
+  ws.seal()
+  eq ws.sealed(), true
+  throws (-> ws.populate([])), 'populate on a sealed workspace'
+  throws (-> ws.set({ id: 'c1', rev: 9, source: 's' })), 'set on a sealed workspace'
+  throws (-> ws.write('app.rip', 's')), 'write on a sealed workspace'
+  throws (-> ws.del('app.rip')), 'del on a sealed workspace'
+  throws (-> ws.load({ 'app.rip': 's' })), 'load on a sealed workspace'
+  throws (-> ws.setCompiled('app.rip', {})), 'setCompiled on a sealed workspace'
+
+test "sealing twice rejects", ->
+  ws = createWorkspace()
+  ws.seal()
+  throws (-> ws.seal()), 'already sealed'
+
+test "reads still work after seal", ->
+  { ws } = seeded()
+  ws.setCompiled 'app.rip', { App: {} }
+  ws.seal()
+  eq ws.read('app.rip'), 'export App = component'
+  eq ws.exists('app.rip'), true
+  eq ws.size(), 2
+  eq ws.list(), ['app.rip']
+  eq ws.listAll('routes'), ['routes/hi.rip']
+  ok ws.getCompiled('app.rip')?
+  eq ws.passport('c1').id, 'c1'
+  eq ws.ids().length, 2
+  eq ws.paths().length, 2
+  stop = ws.watch ->
+  stop()
+
+# ==[ Inspection ]==
+
+console.log "\nInspection"
+
+test "passport resolves by id or by path", ->
+  { ws } = seeded()
+  byId = ws.passport('c1')
+  byPath = ws.passport('app.rip')
+  eq byId, byPath
+  eq byId, { id: 'c1', path: 'app.rip', rev: 3, source: 'export App = component', compiled: undefined }
+
+test "passport returns a defensive copy", ->
+  { ws } = seeded()
+  copy = ws.passport('c1')
+  copy.rev = 999
+  copy.source = 'tampered'
+  eq ws.passport('c1').rev, 3
+  eq ws.read('app.rip'), 'export App = component'
+
+test "passport of an unknown key is undefined; non-strings reject", ->
+  { ws } = seeded()
+  eq ws.passport('ghost.rip'), undefined
+  eq ws.passport('c9'), undefined
+  throws (-> ws.passport('')), 'passport lookup expects'
+  throws (-> ws.passport(42)), 'passport lookup expects'
+
+test "ids and paths enumerate the bag", ->
+  { ws } = seeded()
+  eq ws.ids().sort(), ['c1', 'c2']
+  eq ws.paths().sort(), ['app.rip', 'routes/hi.rip']
+
+# ==[ Feed: the hub subscriber ]==
+
+console.log "\nFeed"
+
+# Two macrotask turns flush every microtask chain a ding apply spawns
+# (fetch → text → set).
+settle = ->
+  await new Promise (resolve) -> setTimeout resolve, 0
+  await new Promise (resolve) -> setTimeout resolve, 0
+  return
+
+# A socket factory whose sockets are driven by hand: tests fire onopen /
+# onmessage / onclose directly.
+fakeHub = ->
+  sockets = []
+  factory = (url) ->
+    s =
+      url: url
+      isClosed: false
+      onopen: null
+      onmessage: null
+      onclose: null
+      onerror: null
+    s.close = ->
+      s.isClosed = true
+      s.onclose?()
+      return
+    sockets.push s
+    s
+  { factory, sockets }
+
+# A fetch keyed by exact URL: a hit answers 200 with the mapped text,
+# a miss answers 404. Every call is recorded.
+fakeFetch = (routes) ->
+  calls = []
+  fn = (url) ->
+    calls.push url
+    body = routes[url]
+    if body isnt undefined
+      { ok: true, status: 200, text: (-> body), json: (-> JSON.parse(body)) }
+    else
+      { ok: false, status: 404, text: (-> ''), json: (-> null) }
+  { fn, calls }
+
+emptyManifest = JSON.stringify { cells: [] }
+
+openFeed = (ws, routes, extra = {}) ->
+  { fn, calls } = fakeFetch routes
+  { factory, sockets } = fakeHub()
+  reports = []
+  feed = connectFeed ws, {
+    hub: 'ws://test/hub'
+    makeSocket: factory
+    fetch: fn
+    report: (...args) -> reports.push args
+    backoff: { min: 1, max: 2 }
+    ...extra
+  }
+  { feed, calls, sockets, reports }
+
+test "connectFeed validates its workspace and rejects a sealed one", ->
+  throws (-> connectFeed(null)), 'expects a workspace'
+  throws (-> connectFeed({})), 'expects a workspace'
+  ws = createWorkspace()
+  ws.seal()
+  throws (-> connectFeed(ws)), 'sealed workspace'
+
+test! "a ding fetches the rev-keyed cell and mutates the passport", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1, source: 'v1' }]
+  { feed, calls, sockets, reports } = openFeed ws,
+    '/@rip/manifest': JSON.stringify { cells: [{ id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1 }] }
+    '/@rip/cells/app/routes/index.rip?rev=2': 'v2'
+  s = sockets[0]
+  eq s.url, 'ws://test/hub'
+  s.onopen()
+  await settle()
+  ok feed.connected()
+  s.onmessage { data: JSON.stringify { ding: { id: 'app/routes/index.rip', rev: 2 } } }
+  await settle()
+  eq ws.passport('app/routes/index.rip').rev, 2
+  eq ws.read('app/routes/index.rip'), 'v2'
+  ok calls.includes('/@rip/cells/app/routes/index.rip?rev=2')
+  eq reports, []
+  feed.close()
+  eq feed.connected(), false
+
+test! "a stale or duplicate ding never touches the network", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 3, source: 'v3' }]
+  { feed, calls, sockets } = openFeed ws, { '/@rip/manifest': emptyManifest }
+  sockets[0].onopen()
+  await settle()
+  before = calls.length
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 3 } } }
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2 } } }
+  await settle()
+  eq calls.length, before
+  eq ws.passport('a.rip').rev, 3
+  feed.close()
+
+test! "a ding for an unknown id births the passport at its id path", ->
+  ws = createWorkspace()
+  { feed, sockets } = openFeed ws,
+    '/@rip/manifest': emptyManifest
+    '/@rip/cells/app/new.rip?rev=1': 'fresh'
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'app/new.rip', rev: 1 } } }
+  await settle()
+  eq ws.passport('app/new.rip'), { id: 'app/new.rip', path: 'app/new.rip', rev: 1, source: 'fresh', compiled: undefined }
+  feed.close()
+
+test! "a delete ding removes the passport without a fetch", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
+  { feed, calls, sockets } = openFeed ws, { '/@rip/manifest': emptyManifest }
+  sockets[0].onopen()
+  await settle()
+  before = calls.length
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2, kind: 'delete' } } }
+  await settle()
+  eq ws.passport('a.rip'), undefined
+  eq calls.length, before
+  feed.close()
+
+test! "malformed frames and dings are reported and the feed survives", ->
+  ws = createWorkspace()
+  { feed, sockets, reports } = openFeed ws,
+    '/@rip/manifest': emptyManifest
+    '/@rip/cells/ok.rip?rev=1': 'good'
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: 'not json' }
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 5, rev: 'x' } } }
+  await settle()
+  eq reports.length, 2
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'ok.rip', rev: 1 } } }
+  await settle()
+  eq ws.read('ok.rip'), 'good'
+  feed.close()
+
+test! "an array frame applies every ding object and ignores foreign events", ->
+  ws = createWorkspace()
+  { feed, sockets } = openFeed ws,
+    '/@rip/manifest': emptyManifest
+    '/@rip/cells/a.rip?rev=1': 'aa'
+    '/@rip/cells/b.rip?rev=1': 'bb'
+  sockets[0].onopen()
+  await settle()
+  frame = [{ ding: { id: 'a.rip', rev: 1 } }, { chat: 'hello' }, { ding: { id: 'b.rip', rev: 1 } }]
+  sockets[0].onmessage { data: JSON.stringify frame }
+  await settle()
+  eq ws.read('a.rip'), 'aa'
+  eq ws.read('b.rip'), 'bb'
+  feed.close()
+
+test! "a cell miss resyncs from the manifest, which never deletes local mints", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
+  ws.write 'local.rip', 'mine'               # an editor's local mint — not the server's
+  { feed, sockets, reports } = openFeed ws,
+    '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 4 }] }
+    '/@rip/cells/a.rip?rev=4': 'v4'
+  sockets[0].onopen()                        # open-resync already advances a.rip to rev 4
+  await settle()
+  eq ws.passport('a.rip').rev, 4
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 9 } } }
+  await settle()                             # rev 9 has no cell: miss reported, manifest re-walked
+  eq ws.passport('a.rip').rev, 4
+  eq ws.read('local.rip'), 'mine'
+  ok reports.some (args) -> String(args[0]).includes('cell fetch missed')
+  feed.close()
+
+test! "a dropped socket reconnects with backoff and resyncs; close() stops it", ->
+  ws = createWorkspace()
+  { feed, calls, sockets } = openFeed ws, { '/@rip/manifest': emptyManifest }
+  sockets[0].onopen()
+  await settle()
+  manifestFetches = -> calls.filter((u) -> u is '/@rip/manifest').length
+  eq manifestFetches(), 1
+  sockets[0].onclose()
+  eq feed.connected(), false
+  await new Promise (resolve) -> setTimeout resolve, 20
+  eq sockets.length, 2
+  sockets[1].onopen()
+  await settle()
+  ok feed.connected()
+  eq manifestFetches(), 2
+  feed.close()
+  await new Promise (resolve) -> setTimeout resolve, 20
+  eq sockets.length, 2                       # closed: no further reconnect
+

@@ -2263,26 +2263,15 @@ if (RUN_GRAMMAR) {
     // naming a spelling the lexer no longer rewrites paints red (stale), so
     // an alias-table change trims this rather than being absorbed by it.
     //
-    // The four value aliases — `yes`, `no`, `on`, `off` — are NOT here, and
-    // that is the ruling rather than an omission. They lower to byte-identical
-    // BOOL tokens, which is the bar, but FINDINGS #51 holds all four as one
-    // class: an annotated binding named for any of them silently becomes the
-    // literal, and the census is what surfaced that. Netting them out would
-    // retire the instrument that found the bug while the bug is open. They
-    // leave the queue together when #51 closes, under one exclusion naming
-    // `true`/`false` as the spelling that carries their lowering.
-    const EXCLUDED_SPELLINGS = new Map([]);
-    // A dark spelling is normally a CANDIDATE — write a fixture and it goes
-    // green. These are not: they are dark because a finding holds them, so the
-    // queue would otherwise invite work that cannot be done and read as four
-    // fixtures nobody has got around to. Same distinction the production queue
-    // draws between parked and available, and for the same reason: a count
-    // means nothing until a reader knows which half of it can be worked.
-    // Self-policing: a row naming a spelling the census does not track is
-    // stale and paints red, so an alias-table change trims this rather than
-    // leaving a hold over nothing.
-    const HELD_SPELLINGS = new Map([
-      ['yes', 'FINDINGS #51'], ['no', 'FINDINGS #51'], ['on', 'FINDINGS #51'], ['off', 'FINDINGS #51'],
+    // All four value words are here now that #51 is closed: a binding named
+    // for one is REJECTED at every annotated site, so in the positions a
+    // fixture can legally carry, the spelling and its literal are
+    // interchangeable and the bar is met.
+    const EXCLUDED_SPELLINGS = new Map([
+      ['on', '`true` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
+      ['off', '`false` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
+      ['yes', '`true` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
+      ['no', '`false` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
     ]);
     const rewrittenAll = Object.entries(ALIASES)
       .filter(([word, [, value]]) => value !== word)
@@ -2328,24 +2317,10 @@ if (RUN_GRAMMAR) {
     // same information and invites no ranking against the obligations.
     out(`    ${dim(`${spellings.length} spellings tracked`)}${dim(` · ${rewritten.length} read live from the lexer's alias table, ${MINTS.length} hand-listed with a probe each`)}${EXCLUDED_SPELLINGS.size ? dim(` · ${EXCLUDED_SPELLINGS.size} excluded by the gate — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`) : ''}`);
     if (VERBOSE) for (const [s, why] of EXCLUDED_SPELLINGS) out(`        ${pad(s, 8)} ${dim(`excluded — ${why}`)}`);
-    const heldDark = darkSpellings.filter((s) => HELD_SPELLINGS.has(s.spelling));
-    const staleHolds = [...HELD_SPELLINGS.keys()].filter((s) => !spellings.some((x) => x.spelling === s));
     if (darkSpellings.length) {
-      const openN = darkSpellings.length - heldDark.length;
-      out(`    ${yellow(`${darkSpellings.length} never written by the corpus — ${heldDark.length === darkSpellings.length
-        ? 'every one held by an open finding'
-        : heldDark.length
-          ? `${openN} available to write, ${heldDark.length} held by an open finding`
-          : 'candidates, not obligations'}:`)}`);
-      // The `becomes` column only pads when something follows it — a padded
-      // last column is trailing whitespace, which shows up in a diff and in
-      // any editor that strips it.
-      for (const s of darkSpellings) {
-        const held = HELD_SPELLINGS.get(s.spelling);
-        console.log(`        ${yellow(pad(s.spelling, 8))} ${dim(`→ ${held ? pad(s.becomes, 12) : s.becomes}`)}${held ? dim(`· held by ${held}`) : ''}`);
-      }
+      out(`    ${yellow(`${darkSpellings.length} never written by the corpus — candidates, not obligations:`)}`);
+      for (const s of darkSpellings) console.log(`        ${yellow(pad(s.spelling, 8))} ${dim(`→ ${s.becomes}`)}`);
     } else out(`    ${green('every rewritten spelling is written somewhere in the corpus')}`);
-    for (const s of staleHolds) out(`    ${red('✗')} ${red('held spelling the census does not track:')} ${s} ${dim('— stale; fix the spelling hold table')}`);
     if (VERBOSE) for (const s of spellings.filter((x) => spellingSeen.has(x.spelling))) {
       out(`        ${pad(s.spelling, 8)} ${dim(`→ ${s.becomes} · lexes as ${[...spellingSeen.get(s.spelling)].join(', ')}`)}`);
     }

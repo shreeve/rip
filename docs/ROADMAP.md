@@ -48,8 +48,8 @@ but it must not block direct-path package implementation and tests.
   integration. The browser interaction primitives the widgets build
   on (`@rip-lang/ui/browser`: nav, dismiss, overlay, position, focus,
   scroll) and the Tailwind compilation boundary (`@rip-lang/ui`
-  tailwind engine/inline/serve) are shipped with tests. Work begins
-  with Philip after the audit PR (#156) lands.
+  tailwind engine/inline/serve) are shipped with tests. The gating
+  audit PR (#156) landed 2026-07-28; the work proceeds with Philip.
 
 ### Independent libraries and tools
 
@@ -71,11 +71,11 @@ plus real-browser Playwright runs across Chromium, Firefox, and WebKit
 `assembleBundle` → `bootApp` → `launch` path end to end — SPA
 navigation, ETag revalidation, debug-gated source maps.
 
-The remaining work is development-server integration:
+The page/bundle product surface is `client()` in `@rip-lang/server`
+(manager-assembled per boot epoch, worker-served; the certification
+fixture `packages/browser-tests/serve.mjs` remains the browser-CI
+harness). The remaining work is development-server integration:
 
-- a product surface that serves the page and bundle — today only the
-  certification fixture `packages/browser-tests/serve.mjs` serves
-  `index.html`/`bundle.json`;
 - the watch→browser transport (none exists in v4; for Workspace door
   work follow [WORKSPACE.md](WORKSPACE.md) Q2 — Hub ding, HTTP bytes —
   not HMR.md’s inline-WebSocket payload row);

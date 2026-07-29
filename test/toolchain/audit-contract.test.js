@@ -83,6 +83,7 @@ describe('the audit contract judges in both directions', () => {
     // never fire is a contract clause that gates nothing, and a row that fires
     // when another's input changes would mask its neighbour.
     const fire = {
+      'grammar.parses': (s) => { s.gr.unparsed = 1; },
       'grammar.allocation': (s) => { s.gr.unallocated = 1; },
       'grammar.exclusions': (s) => { s.gr.badExclusions = 1; },
       'lexer.mints': (s) => { s.gr.negatives.staleMints = 1; },

@@ -2,10 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { ariaCurrent, buildRoutes, createRouter, ownsAnchor } from '@rip-lang/app';
 
 const FILES = [
-  '_route/index.rip',
-  '_route/users/index.rip',
-  '_route/users/[id].rip',
-  '_route/about.rip',
+  'app/routes/index.rip',
+  'app/routes/users/index.rip',
+  'app/routes/users/[id].rip',
+  'app/routes/about.rip',
 ];
 
 const fakeAdapter = (initial = '/') => {
@@ -160,7 +160,7 @@ describe('aria reconciliation', () => {
 
   test('protocol-relative and backslashed hrefs are never owned, even by a catch-all', () => {
     const router = createRouter({
-      routes: buildRoutes(['_route/[...rest].rip']),
+      routes: buildRoutes(['app/routes/[...rest].rip']),
       adapter: fakeAdapter('/x'),
     });
     router.init();
@@ -199,7 +199,7 @@ describe('aria reconciliation', () => {
 
   test('two walkers never fight over shared anchors', () => {
     const routerA = makeRouter('/about');
-    const routerB = createRouter({ routes: buildRoutes(['_route/users/index.rip']), adapter: fakeAdapter('/users') });
+    const routerB = createRouter({ routes: buildRoutes(['app/routes/users/index.rip']), adapter: fakeAdapter('/users') });
     routerB.init();
     const about = anchor('/about');
     const users = anchor('/users');

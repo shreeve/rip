@@ -1,0 +1,177 @@
+# ==============================================================================
+# @rip-lang/workspace feed — the hub subscriber half of the door
+#
+# connectFeed(workspace, opts) opens the app's Janus hub socket and turns
+# ding events into passport mutations: a ding carries only { id, rev }
+# (Q2 — never bodies over the hub), the cell bytes ride HTTP at a
+# rev-keyed URL (Q8), and workspace.set applies them — the bag's rev
+# cursor owns staleness, so out-of-order fetches are harmless. A cell
+# fetch that misses (the manager restarted, revs reset) resyncs from the
+# manifest. Dev/watch only by constitution: production has no hub, and a
+# sealed workspace rejects the feed at the door.
+# ==============================================================================
+
+export type Feed =
+  close: () => void
+  connected: () => boolean
+  resync: () => Promise<void>
+
+FEED_BACKOFF_MIN = 250
+FEED_BACKOFF_MAX = 8000
+
+defaultHubUrl = ->
+  if typeof location is 'undefined'
+    throw new Error 'Rip Workspace: connectFeed needs a hub URL (no location to derive one from)'
+  scheme = if location.protocol is 'https:' then 'wss' else 'ws'
+  "#{scheme}://#{location.host}/hub"
+
+defaultSocketFactory = ->
+  if typeof WebSocket is 'undefined'
+    throw new Error 'Rip Workspace: connectFeed needs a socket factory (no global WebSocket)'
+  (url) -> new WebSocket(url)
+
+defaultFetch = ->
+  if typeof fetch is 'undefined'
+    throw new Error 'Rip Workspace: connectFeed needs a fetch (no global fetch)'
+  (url) -> fetch(url)
+
+export def connectFeed(workspace, opts = {}): Feed
+  unless workspace? and typeof workspace.set is 'function' and typeof workspace.passport is 'function' and typeof workspace.sealed is 'function'
+    throw new TypeError 'Rip Workspace: connectFeed expects a workspace'
+  if workspace.sealed()
+    throw new Error 'Rip Workspace: connectFeed on a sealed workspace — production has no hub'
+
+  hubUrl = opts.hub ?? defaultHubUrl()
+  makeSocket = opts.makeSocket ?? defaultSocketFactory()
+  fetchBytes = opts.fetch ?? defaultFetch()
+  cellUrl = opts.cellUrl ?? (id, rev) -> "/@rip/cells/#{id}?rev=#{rev}"
+  manifestUrl = opts.manifestUrl ?? '/@rip/manifest'
+  report = opts.report ?? (...args) -> console.error(...args)
+  backoffMin = opts.backoff?.min ?? FEED_BACKOFF_MIN
+  backoffMax = opts.backoff?.max ?? FEED_BACKOFF_MAX
+
+  closed = false
+  isOpen = false
+  socket = null
+  attempts = 0
+  timer = null
+
+  # Reconciliation is additive-and-forward only: the manifest advances
+  # what it names and never deletes — the bag legally holds passports the
+  # server feed does not own (an editor's local mints). Deletions ride
+  # dings alone.
+  resync = ->
+    res = fetchBytes! manifestUrl
+    unless res.ok
+      report "[Rip] workspace feed: manifest fetch failed (#{res.status})"
+      return
+    manifest = res.json!()
+    cells = manifest?.cells
+    unless Array.isArray cells
+      report '[Rip] workspace feed: malformed manifest:', manifest
+      return
+    for entry in cells
+      unless entry? and typeof entry.id is 'string' and Number.isInteger(entry.rev)
+        report '[Rip] workspace feed: malformed manifest entry:', entry
+        continue
+      current = workspace.passport entry.id
+      continue if current? and current.rev >= entry.rev
+      cres = fetchBytes! cellUrl(entry.id, entry.rev)
+      unless cres.ok
+        report "[Rip] workspace feed: cell fetch missed (#{cres.status}) for '#{entry.id}' rev #{entry.rev} during resync"
+        continue
+      source = cres.text!()
+      cell = { id: entry.id, rev: entry.rev, source }
+      unless current?
+        cell.path = if typeof entry.path is 'string' then entry.path else entry.id
+      workspace.set cell
+    return
+
+  applyDing = (ding) ->
+    unless ding? and typeof ding is 'object' and typeof ding.id is 'string' and Number.isInteger(ding.rev)
+      report '[Rip] workspace feed: malformed ding:', ding
+      return
+    { id, rev, kind } = ding
+    if kind is 'delete'
+      workspace.set { id, rev, deleted: true }
+      return
+    current = workspace.passport id
+    return if current? and rev <= current.rev      # stale before the fetch — skip the network
+    res = fetchBytes! cellUrl(id, rev)
+    unless res.ok
+      report "[Rip] workspace feed: cell fetch missed (#{res.status}) for '#{id}' rev #{rev} — resyncing from the manifest"
+      resync!()
+      return
+    source = res.text!()
+    cell = { id, rev, source }
+    # An unknown id is a component born upstream: set needs the full
+    # record, and the birth path IS the id (B′).
+    cell.path = id unless workspace.passport(id)?
+    workspace.set cell
+    return
+
+  handleFrame = (text) ->
+    frame = null
+    try
+      frame = JSON.parse text
+    catch
+      report '[Rip] workspace feed: unparseable hub frame:', text
+      return
+    objects = if Array.isArray(frame) then frame else [frame]
+    for obj in objects
+      continue unless obj? and typeof obj is 'object' and obj.ding isnt undefined
+      applyDing(obj.ding).catch (error) ->
+        report '[Rip] workspace feed: ding apply failed:', error
+    return
+
+  schedule = ->
+    return if closed or timer?
+    delay = Math.min backoffMin * 2 ** attempts, backoffMax
+    attempts += 1
+    timer = setTimeout (->
+      timer = null
+      connect()
+    ), delay
+    return
+
+  connect = ->
+    return if closed
+    try
+      socket = makeSocket hubUrl
+    catch error
+      report '[Rip] workspace feed: socket open failed:', error
+      schedule()
+      return
+    socket.onopen = ->
+      isOpen = true
+      attempts = 0
+      # Catch up on dings missed while disconnected (and on the gap
+      # between the page's populate and this connection).
+      resync().catch (error) ->
+        report '[Rip] workspace feed: resync failed:', error
+      return
+    socket.onmessage = (event) ->
+      handleFrame String(event.data)
+      return
+    socket.onclose = ->
+      isOpen = false
+      schedule()
+      return
+    socket.onerror = -> return     # onclose follows; never double-schedule
+    return
+
+  connect()
+
+  feed =
+    close: ->
+      return if closed
+      closed = true
+      if timer?
+        clearTimeout timer
+        timer = null
+      try socket?.close()
+      return
+    connected: -> isOpen and not closed
+    resync: -> resync()
+
+  feed
