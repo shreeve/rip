@@ -68,15 +68,25 @@ rex = new Dog('Rex')
 
 console.log('dog:', rex.describe(), rex.formal(), rex.keyed(), rex.tall())
 
-# ── New spines: member, index, parenthetical, this-property, super ──
-# Two spines are PARKED: `new a?.b` emits an optional chain JavaScript bans inside `new`, and `new tag"x"` emits a callee naming no binding — neither runs (FINDINGS.md).
+# ── New spines: member, index, parenthetical, soaking, tagged, this-property, super ──
 
 blueprints = { marker: Marker, animal: Animal }
+nested = { inner: blueprints }
+mintClass = (parts: TemplateStringsArray) -> class Minted
+  label: -> parts[0]
+
 viaDot = new blueprints.marker
 viaIndex = new blueprints['marker']
 viaParen = new (blueprints.animal)('Via')
+viaSoak = new blueprints?.marker
+viaSoakCall = new blueprints?.animal('Soaked')
+viaSoakBelow = new nested?.inner.marker
+viaSoakIndex = new nested?.inner['marker']
+viaTag = new mintClass"minted"
 
 console.log('spines:', viaDot instanceof Marker, viaIndex instanceof Marker, viaParen.name)
+console.log('soaks:', viaSoak instanceof Marker, viaSoakCall.name, viaSoakBelow instanceof Marker, viaSoakIndex instanceof Marker)
+console.log('tag:', viaTag.label(), (new mintClass"chained").label())
 
 class Kennel
   Tenant: typeof Dog = Dog
@@ -111,8 +121,10 @@ class Hatchery
 # the cast records what TypeScript cannot express: this constructor genuinely returns a class, so constructing it yields a constructor
 Hatch = Hatchery as new () => new () => { chirp: string }
 hatched = new new Hatch
+mints = { hatch: Hatch }
+hatchedSoak = new new mints?.hatch
 
-console.log('hatched:', hatched.chirp)
+console.log('hatched:', hatched.chirp, hatchedSoak.chirp)
 
 # ── Prototype access: the `::` read, and the `?::` soak when the target may be absent ──
 

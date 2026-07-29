@@ -65,8 +65,6 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [13](#13-single-rooted-tsconfig--no-per-project-resolution) | Single-rooted tsconfig — no monorepo support | `config` | **none** — no gate can see the gap in a single-package workspace; the fix's gate is a two-tsconfig workspace driven through `check` and the editor session, per-project posture asserted in both |
 | [50](#50-a-rewritten-literal-widens-its-neighbours-diagnostics-to-the-whole-element-list) | A rewritten literal widens its neighbours' diagnostics to the whole element list | `compiler` | the Diagnostics Audit (`runner.js`) — 11-types' wrongEntry row reports a position violation, held by the contract's diagnostics.positions.element; red by agreement (soft: the audit exits 0) until the span lands on the offending element. Its wrongTrailing neighbour now positions correctly, which isolates this row to a rewritten LITERAL: a read in the same slot carries its own span (#21) |
 | [32](#32-reassigning-an-exported-plain-binding-double-declares) | Reassigning an exported plain binding double-declares | `compiler` | **none** — the spelling's output does not build, so no fixture can carry it; the fix's gate is the spelling entering 10-modules |
-| [29](#29-new-on-an-optional-chain-emits-an-unconstructable-spelling) | `new` on an optional chain emits an unconstructable spelling | `compiler` | **none** — the emission cannot parse as JS, so no fixture can carry it; the production is parked ([MANIFEST.md](MANIFEST.md)); the fix's gate is the spelling entering 09-classes |
-| [30](#30-new-on-a-tagged-template-leaks-the-sexpr-head) | `new` on a tagged template leaks the sexpr head | `compiler` | **none** — the emission references undeclared names, so no fixture can carry it; the production is parked ([MANIFEST.md](MANIFEST.md)); the fix's gate is the spelling entering 09-classes |
 | [49](#49-an-import-type-cannot-name-a-rip-module) | An import type cannot name a `.rip` module | `compiler` | **none** — the specifier does not resolve, so no fixture can carry it; the fix's gate is the ImportType kind entering 11-types with a contract negative |
 | [23](#23-an-in-face-value-declaration-could-retire-the-tier-3-pin-probe) | An in-face value declaration could retire the Tier 3 pin probe | `hoist` | **none today** — nothing fails; adoption hands it an ordinary gate (bindings still needing a pin, expect zero) |
 | [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | `editor` | **none, and none is honest** — upstream; a naive gate is platform-dependent |
@@ -578,34 +576,6 @@ The leading literal is not the variable: double-quoting it changes nothing while
 
 **Status.** ⬜ **Open** (2026-07-23) — no gate: the spelling's output does not build, so no fixture can carry it. When the rejection lands, the never-reassigned spelling remains 10-modules' covered form and the reassignment becomes an asserted compile error.
 
-### 29. `new` on an optional chain emits an unconstructable spelling
-
-`new Registry?.Box` compiles and emits the optional chain into `new` verbatim — `new Registry?.Box;` — which JavaScript rejects at parse time: *Cannot call constructor in an optional chain* (driven 2026-07-23, reproduced under bun; tsgo flags the face TS2351). Every spelling of the production is affected, so no fixture can carry it: the corpus parks `NewSpine → NewSpine ?. Property` ([MANIFEST.md](MANIFEST.md)'s Parked table), which is why 09-classes' gate queue holds one row it cannot clear.
-
-**Why (code) — the new-spine emission.** The walk emits the chain into `new` verbatim, and JS permits constructing through an optional chain only when the chain is sealed first.
-
-**The fix — parenthesize the spine when it carries `?.`.** `new (Registry?.Box)()` — one case in the new-spine walk. Found by the M3 wave-2 author, independently reproduced by its reviewer, and re-driven for this row. When it lands, the spelling joins 09-classes and `compiles`/`runtime`/`verdict` hold it.
-
-**Why the suite missed it.** `NewSpine → NewSpine ?. Property` was grammar-dark until the M3 sweep enumerated the productions: no fixture had spelled `new` on an optional chain, and no gate ran the emission's output.
-
-**vs v3 — split by spelling** (driven both sides, 2026-07-28). On the CALL form (`new Registry?.Box()`) v3 emits the same unconstructable bytes — not a regression, pre-existing, dark until the grammar audit enumerated the production. On the bare form this row quotes, v3 silently DROPS the soak and emits `new Registry.Box`, which parses and runs with different semantics. So v3 is not a clean baseline here: it trades an unconstructable emission for a silently wrong one, and neither is the answer.
-
-**Status.** ⬜ **Open** (2026-07-23) — no gate while the emission is broken; the parked manifest row is the queue's memory of it.
-
-### 30. `new` on a tagged template leaks the sexpr head
-
-`new tag"hi"` emits `new tagged-template(tag, "hi");` — the emitter's new-spine walk has no tagged-template case, so the internal sexpr head `tagged-template` leaks into the output as bare identifiers, parsing as the subtraction `tagged - template(...)`: TS2304 (*Cannot find name*) from the checker and ReferenceError at runtime (driven 2026-07-23). Every spelling of the production is affected, so no fixture can carry it: the corpus parks `NewSpine → NewSpine TEMPLATE_TAG String` ([MANIFEST.md](MANIFEST.md)'s Parked table), the second of 09-classes' two held rows.
-
-**Why (code) — a missing case, not a wrong one** — the ordinary tagged-template expression lowers correctly; only the new-spine walk falls through to the generic path that prints the sexpr head raw.
-
-**The fix — add the tagged-template case to the new-spine walk.** The correct lowering already exists on the ordinary expression path, so the case is copied rather than designed. Found by the M3 wave-2 author, independently reproduced by its reviewer, and re-driven for this row. When it lands, the spelling joins 09-classes and the ordinary dimensions hold it.
-
-**Why the suite missed it.** `NewSpine → NewSpine TEMPLATE_TAG String` was grammar-dark until the M3 sweep, the same road as the optional-chain spine beside it — and the tagged-template family looked covered, because its ordinary form is.
-
-**vs v3 — not a regression** (driven both sides, 2026-07-28). v3 leaks the same sexpr head, byte for byte: `new tagged-template(tag, "hi");`. Pre-existing, and dark for the same reason as the optional-chain spine beside it.
-
-**Status.** ⬜ **Open** (2026-07-23) — no gate while the emission is broken; the parked manifest row is the queue's memory of it.
-
 ### 49. An import type cannot name a `.rip` module
 
 `c: import('./lib.rip').Crate = …` publishes TS2307 — *Cannot find module './lib.rip' or its corresponding type declarations* — while the static spelling `import { Crate } from './lib.rip'` resolves the same type from the same file and checks clean (both driven 2026-07-24, the census drain). The sibling module is compiled into the program for an import STATEMENT and not for an import TYPE, so the specifier rewriting that makes `.rip` resolvable never reaches the type position. Against a `.ts` module the import type resolves and enforces normally, with the rejection landing on the rip line — so the defect is the `.rip` specifier, not the construct.
@@ -697,3 +667,5 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 48 | A method member in an inline type body rejected | audit `compiles` and `types`' shorthand-admission rows |
 | 28 | A postfix cast on an inline try body detached the catch arm | audit `compiles`, `verdict` |
 | 58 | A classed SVG element emitted an unclosed call | audit `runtime`, `verdict`, `strict`, on both static arities — `compiles` stays green on the broken emission and holds nothing here |
+| 30 | `new` on a tagged template leaked the sexpr head | audit `compiles`/`verdict`/`runtime`, and `battery` (classes.rip) pinning the bytes; the parked production cleared |
+| 29 | `new` on an optional chain emitted an unconstructable spelling | audit `verdict`/`runtime`/`strict`, and `battery` (classes.rip) over every link kind and both construction walks — the new-expression and the ruby construction sugar, which reached the same unsealed chain by its own route; the parked production cleared. The seal coalesces rather than only parenthesizing — parens alone are spec-legal and node takes them, but bun's module parser refuses a chain that is its own tail value, so the campaign's prescribed spelling does not run |

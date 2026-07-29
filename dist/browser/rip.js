@@ -8984,6 +8984,8 @@ var typeIdentifierTokens = (text, base = 0) => {
 };
 var isNode4 = (x) => Array.isArray(x);
 var isBinary = (x) => isNode4(x) && BINOPS.has(x[0]) && x.length === 3;
+var SPINE_HEADS = new Set([".", "?.", "[]", "optindex"]);
+var isRubyNew = (x) => isNode4(x) && x[0] === "." && x.length === 3 && x[2] === "new";
 var PROTO_GENERIC_PARAMS = {
   Array: "<T>",
   ReadonlyArray: "<T>",
@@ -17818,8 +17820,35 @@ ${"  ".repeat(ind)}`);
       this.mark(node, "operator", () => this.b.emit("new"));
       this.b.emit(" ");
       this.mark(node, "operand", () => {
-        if (isNode4(operand) && (operand[0] === "." || operand[0] === "?.")) {
+        if (isNode4(operand) && SPINE_HEADS.has(operand[0]) && Emitter.optionalGuard(operand)) {
+          this.b.emit("(");
+          this.expr(operand);
+          this.b.emit(" ?? undefined)()");
+        } else if (isNode4(operand) && (operand[0] === "." || operand[0] === "?.")) {
           this.member(operand);
+        } else if (isNode4(operand) && operand[0] === "new" && operand.length === 2 && Emitter.optionalGuard(operand[1])) {
+          this.b.emit("(");
+          this.newExpr(operand);
+          this.b.emit(")()");
+        } else if (isNode4(operand) && operand[0] === "tagged-template") {
+          this.b.emit("(");
+          this.taggedTemplate(operand);
+          this.b.emit(")()");
+        } else if (isNode4(operand) && isNode4(operand[0]) && !isRubyNew(operand[0]) && SPINE_HEADS.has(operand[0][0]) && Emitter.optionalGuard(operand[0])) {
+          this.mark(operand, "$self", () => {
+            this.b.emit("(");
+            this.expr(operand[0]);
+            this.b.emit(" ?? undefined)");
+            this.mark(operand, "args", () => {
+              this.b.emit("(");
+              operand.slice(1).forEach((arg, i) => {
+                if (i > 0)
+                  this.b.emit(", ");
+                this.callArg(arg);
+              });
+              this.b.emit(")");
+            });
+          });
         } else if (isNode4(operand) && operand[0] === "dammit!") {
           if (operand.parenthesized)
             this.b.emit("(");
@@ -18276,7 +18305,7 @@ ${"  ".repeat(ind)}`);
           if (isNode4(ctor)) {
             this.b.emit("(");
             this.expr(ctor);
-            this.b.emit(")");
+            this.b.emit(Emitter.optionalGuard(ctor) ? " ?? undefined)" : ")");
           } else
             this.expr(ctor);
         });

@@ -85,6 +85,16 @@ const typeIdentifierTokens = (text, base = 0) => {
 
 const isNode = (x) => Array.isArray(x);
 const isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 3;
+// The four links a member/index spine is built from. A spine carrying
+// an optional link anywhere along it cannot be constructed THROUGH —
+// `new a?.b` is a syntax error, not a runtime one — so it seals first;
+// `Emitter.optionalGuard` is the walk that finds the link, and it
+// already descends every one of these.
+const SPINE_HEADS = new Set(['.', '?.', '[]', 'optindex']);
+// `X.new` as a CALL is rip's construction sugar, not a property read,
+// so a callee wearing it belongs to the call walk's own branch — a
+// spine test would otherwise swallow it and emit the property.
+const isRubyNew = (x) => isNode(x) && x[0] === '.' && x.length === 3 && x[2] === 'new';
 
 // The standard generic globals' type parameters: augmenting a generic
 // interface must repeat its parameter list (`interface Array<T>`), and
@@ -11647,8 +11657,59 @@ class Emitter {
       this.mark(node, 'operator', () => this.b.emit('new'));
       this.b.emit(' ');
       this.mark(node, 'operand', () => {
-        if (isNode(operand) && (operand[0] === '.' || operand[0] === '?.')) {
+        if (isNode(operand) && SPINE_HEADS.has(operand[0]) && Emitter.optionalGuard(operand)) {
+          // A soaking spine seals into a VALUE before `new` reaches
+          // it, at every link kind — a member tail and an index tail
+          // fail the same way. `?? undefined` is the seal rather than
+          // parens alone: parens are what the spec asks for and node
+          // takes them, but bun's MODULE parser refuses a parenthesized
+          // chain whose tail value is the chain itself (its own `eval`
+          // does not), so parens alone would trade a module node
+          // rejects for one bun rejects. The coalesce changes nothing
+          // semantically: a short-circuited chain is already undefined,
+          // and constructing it throws either way.
+          this.b.emit('(');
+          this.expr(operand);
+          this.b.emit(' ?? undefined)()');
+        } else if (isNode(operand) && (operand[0] === '.' || operand[0] === '?.')) {
           this.member(operand);
+        } else if (isNode(operand) && operand[0] === 'new' && operand.length === 2 &&
+                   Emitter.optionalGuard(operand[1])) {
+          // `new new a?.b` — the inner construction is the constructor,
+          // and its spine has to seal before either `new` reaches it.
+          // Only the soaking case reroutes; an ordinary `new new X`
+          // keeps the path that already lowers it.
+          this.b.emit('(');
+          this.newExpr(operand);
+          this.b.emit(')()');
+        } else if (isNode(operand) && operand[0] === 'tagged-template') {
+          // The tag call IS the constructor — `new tag"hi"` constructs
+          // what the tag returns. The ordinary expression path already
+          // lowers the template correctly, so the case is copied, and
+          // sealing keeps `new` from binding to the tag instead.
+          this.b.emit('(');
+          this.taggedTemplate(operand);
+          this.b.emit(')()');
+        } else if (isNode(operand) && isNode(operand[0]) && !isRubyNew(operand[0]) &&
+                   SPINE_HEADS.has(operand[0][0]) && Emitter.optionalGuard(operand[0])) {
+          // The same seal with the call's own argument list kept:
+          // `new Registry?.Box(a)` → `new (Registry?.Box ?? undefined)(a)`.
+          // The `.new` branch of the call walk is the precedent — a
+          // non-primary constructor expression groups so `new` binds
+          // to it whole.
+          this.mark(operand, '$self', () => {
+            this.b.emit('(');
+            this.expr(operand[0]);
+            this.b.emit(' ?? undefined)');
+            this.mark(operand, 'args', () => {
+              this.b.emit('(');
+              operand.slice(1).forEach((arg, i) => {
+                if (i > 0) this.b.emit(', ');
+                this.callArg(arg);
+              });
+              this.b.emit(')');
+            });
+          });
         } else if (isNode(operand) && operand[0] === 'dammit!') {
           // `new (f!)` → `new (await f())()`. Source parens selected
           // the program (sealed Value-dammit as the constructor).
@@ -12275,7 +12336,9 @@ class Emitter {
           if (isNode(ctor)) {
             this.b.emit('(');
             this.expr(ctor);
-            this.b.emit(')');
+            // A soaking target cannot be constructed THROUGH here any
+            // more than under `new` — same seal, same reason.
+            this.b.emit(Emitter.optionalGuard(ctor) ? ' ?? undefined)' : ')');
           } else this.expr(ctor);
         });
         this.mark(node, 'args', () => {
