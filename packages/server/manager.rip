@@ -119,9 +119,9 @@ export state =
   browserRuntime: null # dist/browser/rip.js, copied into runDir when app/ exists
   buildCounter: 0      # one app artifact per boot epoch, uniquely named
   runDir: null         # tmpdir holding the doorbell, worker sockets, artifacts
-  cellsDir: null       # RIP_WORKSPACE=1: rev-keyed cell files under runDir/cells
-  manifestPath: null   # RIP_WORKSPACE=1: the atomically rewritten cell manifest
-  cells: {}            # RIP_WORKSPACE=1: id (birth store path, 'app/…') → { id, rev, hash, retired }
+  cellsDir: null       # rev-keyed cell files under runDir/cells
+  manifestPath: null   # the atomically rewritten cell manifest
+  cells: {}            # id (birth store path, 'app/…') → { id, rev, hash, retired }
   bellPath: null
   bell: null
   watcher: null
@@ -339,11 +339,7 @@ clientModules = (dir) ->
 
 assembleBundleText = ->
   assemble = loadAssembler!()
-  opts: Record<string, any> = { modules: clientModules(join(cfg.appDir, 'app')), packagesDir: join(loaderSrcDir(), '..', 'packages') }
-  # The dev door boots in the browser through @rip-lang/workspace, so
-  # the flag claims it into every bundle this manager assembles.
-  opts.claims = ['@rip-lang/workspace'] if WORKSPACE
-  JSON.stringify assemble(opts)
+  JSON.stringify assemble { modules: clientModules(join(cfg.appDir, 'app')), packagesDir: join(loaderSrcDir(), '..', 'packages') }
 
 buildBundle = ->
   return null unless existsSync(join(cfg.appDir, 'app'))
@@ -355,7 +351,7 @@ buildApp = ->
   state.buildCounter += 1
   artifact = buildArtifact! cfg.entry, join(state.runDir, "b#{state.buildCounter}-app.js")
   bundle = buildBundle!()
-  if WORKSPACE and bundle?
+  if bundle?
     # The bundle is durable (buildBundle wrote it) BEFORE the manifest
     # names the new revs — the correlation invariant below.
     syncCells!()
@@ -363,16 +359,14 @@ buildApp = ->
   { artifact, bundle }
 
 # ==============================================================================
-# The workspace dev feed — RIP_WORKSPACE=1 (docs/WORKSPACE.md)
+# The workspace dev feed (docs/WORKSPACE.md)
 # ==============================================================================
 #
-# Flag on, a save touching ONLY app/ feeds the live pool in place: mint or
-# bump (id, rev) cells, rewrite the manifest and the current pool's bundle,
-# then ding /rip/dev with {id, rev} envelopes — no new epoch, no pool reload,
-# no doorbell. Flag off, none of this code runs and every save takes the
-# dirty-epoch path above, byte-identically.
-
-WORKSPACE =! process.env.RIP_WORKSPACE is '1'
+# A save touching ONLY app/ feeds the live pool in place: mint or bump
+# (id, rev) cells, rewrite the current pool's bundle and the manifest, then
+# ding /rip/dev with {id, rev} envelopes — no new epoch, no pool reload, no
+# doorbell. Any other save takes the dirty-epoch path above and dings the
+# swap (kind 'epoch') once the new pool is live.
 
 # The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
 # server.rip (workers never import manager code). Exported so the mirror
@@ -511,10 +505,9 @@ spawnWorker = (pool) ->
     env.RIP_BUNDLE_PATH = pool.bundle
     env.RIP_BROWSER_RUNTIME = state.browserRuntime
     env.RIP_CLIENT_DIR = join(cfg.appDir, 'app')
-    if WORKSPACE
-      env.RIP_CELLS_DIR = state.cellsDir
-      env.RIP_MANIFEST_PATH = state.manifestPath
-      env.RIP_BRIDGE_PATH = cfg.bridge if cfg.bridge?
+    env.RIP_CELLS_DIR = state.cellsDir
+    env.RIP_MANIFEST_PATH = state.manifestPath
+    env.RIP_BRIDGE_PATH = cfg.bridge if cfg.bridge?
   proc = Bun.spawn ['bun', state.workerJs],
     stdout: 'inherit'
     stderr: 'inherit'
@@ -720,7 +713,7 @@ bootLoop = ->
       return if state.dirty or state.shuttingDown
       putUpstreams! readySocks(pool)
     state.currentPool = pool
-    dingEpoch pool.n if WORKSPACE and state.everServed
+    dingEpoch pool.n if state.everServed
     state.everServed = true
     state.doorbellPublished = false
     attachLateJoins pool
@@ -843,11 +836,10 @@ settle = ->
   prev = state.lastFiles
   state.lastHash = snap.hash
   state.lastFiles = snap.files
-  # RIP_WORKSPACE=1: a save touching only app/ mutates a LIVE pool in
-  # place. With no live pool to feed (admission already cut, a cached boot
-  # failure, mid-reload) the save joins the pending epoch exactly as a
-  # server save would. Flag off, every save takes the path below.
-  if WORKSPACE and prev? and state.currentPool? and not state.dirty and not state.bootFailure? and clientOnlyChange(prev, snap.files)
+  # A save touching only app/ mutates a LIVE pool in place. With no live
+  # pool to feed (admission already cut, a cached boot failure, mid-reload)
+  # the save joins the pending epoch exactly as a server save would.
+  if prev? and state.currentPool? and not state.dirty and not state.bootFailure? and clientOnlyChange(prev, snap.files)
     onCellChange().catch (e) -> warn "rip-server: cell update failed: #{e?.message or e}"
     return
   onContentChange()

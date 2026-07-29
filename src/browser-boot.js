@@ -20,7 +20,6 @@
 import { createModuleLoader } from './browser-modules.js';
 
 const APP_PACKAGE = '@rip-lang/app';
-const WORKSPACE_PACKAGE = '@rip-lang/workspace';
 
 const bootGraphs = new Map();
 
@@ -185,26 +184,12 @@ export async function bootApp(opts = {}) {
 
   const app = await loader.import(`${appEntry.root}/${appEntry.entry}`);
 
-  let createWorkspace = null;
-  let connectFeed = null;
   let bag = null;
   if (workspaceMode) {
-    // The workspace package rides the bundle like the app package
-    // does, and loads through the same graph — never a second copy.
-    const wsEntry = bundle.packages?.[WORKSPACE_PACKAGE];
-    if (!wsEntry) {
-      throw new Error(
-        `rip: workspace mode requires the '${WORKSPACE_PACKAGE}' package, which this bundle does not carry — ` +
-        'serve under RIP_WORKSPACE=1 so assembly claims it',
-      );
-    }
-    ({ createWorkspace } = await loader.import(`${wsEntry.root}/${wsEntry.entry}`));
-    const feedSub = wsEntry.exports?.['./feed'];
-    if (!feedSub) {
-      throw new Error(`rip: the '${WORKSPACE_PACKAGE}' package carries no './feed' export`);
-    }
-    ({ connectFeed } = await loader.import(`${wsEntry.root}/${feedSub}`));
-    bag = createWorkspace();
+    // The workspace is part of the app package (docs/WORKSPACE.md, Q9):
+    // createWorkspace and connectFeed ride the same module the launch
+    // does — one graph, never a second copy.
+    bag = app.createWorkspace();
     const records = [];
     for (const entry of manifest?.cells ?? []) {
       const path = typeof entry.path === 'string' ? entry.path : entry.id;
@@ -359,7 +344,7 @@ export async function bootApp(opts = {}) {
       return bag.set({ ...cell, compiled: { ...module } });
     },
   };
-  const feed = connectFeed(door, { ...(opts.feed ?? {}), manifestUrl, report });
+  const feed = app.connectFeed(door, { ...(opts.feed ?? {}), manifestUrl, report });
 
   const destroy = () => {
     if (destroyed) return;

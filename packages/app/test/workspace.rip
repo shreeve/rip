@@ -1,12 +1,14 @@
 # ==============================================================================
-# @rip-lang/workspace tests — passport bag: door, rev cursor, store view, seal
+# @rip-lang/app workspace tests — passport bag: door, rev cursor, store view,
+# seal, and the hub feed. Run via `rip test/workspace.rip` (the rip test
+# harness, not bun:test — chained in the package's test script).
 # ==============================================================================
 
 import { test, eq, ok, throws } from '@rip-lang/testing'
-import { createWorkspace } from '@rip-lang/workspace'
-import * as mod from '@rip-lang/workspace'
-import { connectFeed } from '@rip-lang/workspace/feed'
-import * as feedMod from '@rip-lang/workspace/feed'
+import { createWorkspace } from '../workspace.rip'
+import * as mod from '../workspace.rip'
+import { connectFeed } from '../feed.rip'
+import * as feedMod from '../feed.rip'
 import { readFileSync } from 'fs'
 
 # A workspace born through the door, plus an event log attached after birth.
@@ -30,18 +32,9 @@ test "named exports", ->
   eq Object.keys(feedMod).sort(), ['connectFeed']
   eq typeof connectFeed, 'function'
 
-test "zero runtime deps", ->
-  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
-  for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
-    eq pkg[field], undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
-  eq pkg.files, ['workspace.rip', 'feed.rip', 'README.md']
-
-test "declares browser safety and earns it", ->
-  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
-  eq pkg.rip, { browser: true }
+test "the workspace modules stay dependency-free and browser-safe", ->
   for file in ['workspace.rip', 'feed.rip']
-    source = readFileSync("#{import.meta.dir}/#{file}", 'utf8')
+    source = readFileSync("#{import.meta.dir}/../#{file}", 'utf8')
     eq /^\s*import\b/m.test(source), false
     eq /\bBun\.|node:|process\.|globalThis/.test(source), false
 

@@ -1,5 +1,5 @@
 # ==============================================================================
-# @rip-lang/workspace feed — the hub subscriber half of the door
+# The workspace feed — the hub subscriber half of the door (@rip-lang/app)
 #
 # connectFeed(workspace, opts) opens the app's Janus hub socket and turns
 # ding events into passport mutations: a ding carries only { id, rev }

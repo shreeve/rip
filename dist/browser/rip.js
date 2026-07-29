@@ -22927,7 +22927,6 @@ function createModuleLoader({ components: registry, packages = {}, debug = false
 }
 // src/browser-boot.js
 var APP_PACKAGE = "@rip-lang/app";
-var WORKSPACE_PACKAGE = "@rip-lang/workspace";
 var bootGraphs = new Map;
 var browserFetchText = async (url, etag) => {
   const headers = etag ? { "If-None-Match": etag } : {};
@@ -23053,21 +23052,9 @@ async function bootApp(opts = {}) {
     }
   }
   const app = await loader.import(`${appEntry.root}/${appEntry.entry}`);
-  let createWorkspace = null;
-  let connectFeed = null;
   let bag = null;
   if (workspaceMode) {
-    const wsEntry = bundle.packages?.[WORKSPACE_PACKAGE];
-    if (!wsEntry) {
-      throw new Error(`rip: workspace mode requires the '${WORKSPACE_PACKAGE}' package, which this bundle does not carry — ` + "serve under RIP_WORKSPACE=1 so assembly claims it");
-    }
-    ({ createWorkspace } = await loader.import(`${wsEntry.root}/${wsEntry.entry}`));
-    const feedSub = wsEntry.exports?.["./feed"];
-    if (!feedSub) {
-      throw new Error(`rip: the '${WORKSPACE_PACKAGE}' package carries no './feed' export`);
-    }
-    ({ connectFeed } = await loader.import(`${wsEntry.root}/${feedSub}`));
-    bag = createWorkspace();
+    bag = app.createWorkspace();
     const records = [];
     for (const entry of manifest?.cells ?? []) {
       const path = typeof entry.path === "string" ? entry.path : entry.id;
@@ -23183,7 +23170,7 @@ async function bootApp(opts = {}) {
       return bag.set({ ...cell, compiled: { ...module } });
     }
   };
-  const feed = connectFeed(door, { ...opts.feed ?? {}, manifestUrl, report });
+  const feed = app.connectFeed(door, { ...opts.feed ?? {}, manifestUrl, report });
   const destroy = () => {
     if (destroyed)
       return;

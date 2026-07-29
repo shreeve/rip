@@ -871,7 +871,7 @@ test! "client() warns when its SPA fallback replaces an earlier notFound registr
 rmSync clientAppDir, { recursive: true, force: true }
 resetGlobals()
 
-# ==[ client() dev feed — the worker half of RIP_WORKSPACE=1 ]==
+# ==[ client() dev feed — the worker half of the workspace door ]==
 #
 # Worker-mode client() with the feed env set: the manifest, rev-keyed cell,
 # bridge, and fresh-bundle routes — driven in-process through the fetch
@@ -887,7 +887,6 @@ writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEE
 writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: {}, packages: {} })
 
 feedEnv =
-  RIP_WORKSPACE: '1'
   RIP_BUNDLE_PATH: join(feedDir, 'bundle.json')
   RIP_CELLS_DIR: join(feedDir, 'cells')
   RIP_MANIFEST_PATH: join(feedDir, 'manifest.json')
@@ -956,7 +955,7 @@ test! "the bundle route re-reads per request — a rewrite shows without re-regi
   eq fresh.status, 200
   ok fresh.headers.get('etag') isnt etag1, 'the ETag tracks the rewritten file'
 
-test! "the generated boot page under the flag opens the workspace door", ->
+test! "the generated boot page opens the workspace door where the feed surface exists", ->
   res = handle! req('GET', '/')
   eq res.status, 200
   ok (res.text!).includes('workspace: true'), 'bootApp boots in workspace mode'
@@ -964,7 +963,7 @@ test! "the generated boot page under the flag opens the workspace door", ->
 for k of feedEnv
   if savedFeedEnv[k]? then process.env[k] = savedFeedEnv[k] else delete process.env[k]
 
-test! "flag off: no feed routes, and the bundle stays the boot-time cached bytes", ->
+test! "without the manager's feed env there are no feed routes and no door; the worker bundle still re-reads", ->
   writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: {}, packages: {} })
   process.env.RIP_BUNDLE_PATH = join(feedDir, 'bundle.json')
   try
@@ -973,32 +972,33 @@ test! "flag off: no feed routes, and the bundle stays the boot-time cached bytes
     eq (handle! req('GET', '/@rip/manifest')).status, 404
     eq (handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1")).status, 404
     eq (handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })).status, 404
-    ok not ((handle! req('GET', '/')).text!).includes('workspace'), 'flag off, the boot page never mentions the door'
+    ok not ((handle! req('GET', '/')).text!).includes('workspace'), 'no manifest env, no door'
+    # Worker mode re-reads the bundle per request — the manager rewrites
+    # it in place on a cell change, and Janus absorbs the cost.
     etag1 = (handle! req('GET', '/@rip/bundle.json')).headers.get('etag')
     writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: { 'y.rip': 'y' }, packages: {} })
     res = handle! req('GET', '/@rip/bundle.json')
-    eq res.headers.get('etag'), etag1   # cached at client() time; the process dies on reload
+    ok res.headers.get('etag') isnt etag1, 'the rewrite shows on the next request'
   finally
     delete process.env.RIP_BUNDLE_PATH
     resetGlobals()
 
-test! "standalone assembly under the flag claims @rip-lang/workspace into the bundle", ->
+test! "the workspace rides the app package — one claim, no second package, door still closed standalone", ->
   dir = mkdtempSync join(import.meta.dir, 'tmp-client-')
   writeClientDir dir
-  savedFlag = process.env.RIP_WORKSPACE
-  process.env.RIP_WORKSPACE = '1'
   try
     resetGlobals()
     client! join(dir, 'app')
     bundle = (handle! req('GET', '/@rip/bundle.json')).json!
-    ok bundle.packages['@rip-lang/workspace']?, 'the workspace package is claimed'
-    ok bundle.modules['_pkg/workspace/feed.rip']?, 'the feed module travels'
+    ok bundle.packages['@rip-lang/app']?, 'the app package is claimed'
+    eq bundle.packages['@rip-lang/workspace'], undefined
+    ok bundle.modules['_pkg/app/workspace.rip']?, 'the workspace module travels inside the app package'
+    ok bundle.modules['_pkg/app/feed.rip']?, 'the feed module travels inside the app package'
     # Standalone has no manager and therefore no manifest/cell routes: a
     # workspace-mode boot would die on its manifest fetch, so the page
     # opens the door only in worker mode (RIP_MANIFEST_PATH present).
     ok not ((handle! req('GET', '/')).text!).includes('workspace: true'), 'standalone never opens the door'
   finally
-    if savedFlag? then process.env.RIP_WORKSPACE = savedFlag else delete process.env.RIP_WORKSPACE
     resetGlobals()
     rmSync dir, { recursive: true, force: true }
 
@@ -1017,7 +1017,6 @@ SERVER_BIN = "#{import.meta.dir}/server.rip"
 
 TEST_KNOBS =
   RIP_ENV: 'development'
-  RIP_WORKSPACE: ''       # subprocess flag-off default; dev-feed tests override with '1'
   RIP_SETTLE_MS: '60'
   RIP_HEARTBEAT_MS: '150'
   RIP_DRAIN_MS: '100'
@@ -2004,9 +2003,16 @@ test! "an app/ dir ships through the pool: boot page, bundle ETag, per-epoch rea
     ok etag1?, 'the bundle carries an ETag'
     bundle = b1.json!
     ok bundle.modules['app/routes/index.rip']?, 'the manager-assembled bundle ships the client module'
-    # A client edit is an epoch like any other: settle cuts admission, the
-    # ring boots against a REASSEMBLED bundle — its ETag must differ.
+    # A MIXED save (server + client together) is an epoch: settle cuts
+    # admission, the ring boots against a REASSEMBLED bundle — its ETag
+    # must differ. (A client-only save takes the cell path instead.)
     bell = calls.find((c) -> c.method is 'PUT' and c.body?.upstreams?.some((u) -> u.doorbell)).body.upstreams[0].path
+    writeFileSync join(dir, 'app.rip'), """
+    import { get, client, start } from '@rip-lang/server'
+    client!()
+    get '/hi' -> 'hi v2'
+    start()
+    """
     writeFileSync join(dir, 'app', 'routes', 'index.rip'), CLIENT_ROUTE.replace('"home"', '"home v2"')
     waitFor! -> calls.filter((c) -> c.method is 'PUT' and c.body?.upstreams?.some((u) -> u.doorbell)).length >= 2
     res = uds!(bell, '/ring')
@@ -2025,7 +2031,7 @@ test! "an app/ dir ships through the pool: boot page, bundle ETag, per-epoch rea
     stub.stop(true)
     rmSync dir, { recursive: true, force: true }
 
-# ==[ Manager: the workspace dev feed — RIP_WORKSPACE=1 through a live pool ]==
+# ==[ Manager: the workspace dev feed through a live pool ]==
 
 console.log "\nManager workspace dev feed"
 
@@ -2043,7 +2049,7 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
   writeClientDir dir
   calls = []
   stub = stubJanus ctlSock, calls
-  proc = spawnManager dir, ctlSock, ['--name', 'wsapp', '-w', '1', '--bridge', '/hub'], { RIP_WORKSPACE: '1' }
+  proc = spawnManager dir, ctlSock, ['--name', 'wsapp', '-w', '1', '--bridge', '/hub']
   puts = -> calls.filter (c) -> c.method is 'PUT'
   try
     sock = waitFor! ->
@@ -2098,14 +2104,14 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
     stub.stop(true)
     rmSync dir, { recursive: true, force: true }
 
-test! "flag on, a non-client edit still cuts admission and reloads through the doorbell", ->
+test! "a non-client edit cuts admission, reloads through the doorbell, and dings the swap", ->
   ctlSock = join(tmpdir(), "rip-janus-wsfull-#{Date.now()}-#{rand(1e6)}.sock")
   dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
   writeFileSync join(dir, 'app.rip'), wsAppSource('v1')
   writeClientDir dir
   calls = []
   stub = stubJanus ctlSock, calls
-  proc = spawnManager dir, ctlSock, ['--name', 'wsfull', '-w', '1'], { RIP_WORKSPACE: '1' }
+  proc = spawnManager dir, ctlSock, ['--name', 'wsfull', '-w', '1']
   bells = -> calls.filter (c) -> c.method is 'PUT' and c.body?.upstreams?.some (u) -> u.doorbell
   try
     sock1 = waitFor! ->

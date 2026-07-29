@@ -366,16 +366,16 @@ with a fresh ETag.
 generated page reads the query param and passes `debug` to `bootApp`,
 exactly as the browser certification fixture does.
 
-### The dev feed — RIP_WORKSPACE=1 (experimental)
+### The dev feed — the workspace door's server half
 
 The server half of the Rip Workspace door
-([docs/WORKSPACE.md](../../docs/WORKSPACE.md)) — experimental, gated
-behind `RIP_WORKSPACE=1` in the manager's environment. Flag off, nothing
-below exists and every path behaves exactly as documented above. This is
-the door's server half, not "HMR done": how a running app absorbs a cell
-is the apply engine's problem, and it lives elsewhere.
+([docs/WORKSPACE.md](../../docs/WORKSPACE.md)) — the default for every
+manager-served browser app (Q10). Standalone `client()` pages have no
+manager and therefore no feed: they boot plain. This is the door's
+server half, not "HMR done": how a running app absorbs a cell is the
+apply engine's problem, and it lives in `@rip-lang/app`.
 
-With the flag on, in watch mode:
+In watch mode:
 
 - **Change classification.** The watcher tracks a per-file hash map next
   to its whole-tree content-hash gate. A save whose every changed, added,
@@ -405,8 +405,8 @@ With the flag on, in watch mode:
   never blocks the cell path.
 - **Bundle freshness.** On the cell path the manager atomically rewrites
   the live pool's bundle file, and the worker's `/@rip/bundle.json`
-  re-reads and re-tags per request (a dev-only cost) — so a hard refresh
-  never serves stale first-paint code.
+  re-reads and re-tags per request (Janus's micro-cache absorbs the
+  cost) — so a hard refresh never serves stale first-paint code.
 - **Bridge enrollment.** With `--bridge <path>`, the worker answers the
   bridge's `Sec-WebSocket-Frame: open` POST with `{"+": ["/rip/dev"]}` —
   enrolling the opening connection into the dev channel — and `text` /
@@ -653,8 +653,8 @@ sockets PUT before the 204), save coalescing, the identical-bytes no-op,
 boot-failure caching, prebuilt-artifact boots (loader-free workers,
 `import.meta.dir` preservation, loud build rejection), browser delivery
 through the pool (manager-assembled bundle, per-epoch reassembly with a
-fresh ETag), the `RIP_WORKSPACE=1` dev feed (in-process feed routes and
-flag-off identity, plus the cell path through a live pool — ding, rev
+fresh ETag), the workspace dev feed (in-process feed routes and
+standalone identity, plus the cell path through a live pool — ding, rev
 bump, immutable old revs, in-place bundle rewrite, no reload — and the
 full-reload path for non-client edits), `--bridge`
 registration (carried `bridge_path`, loud startup rejection), the

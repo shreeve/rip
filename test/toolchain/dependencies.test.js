@@ -135,9 +135,12 @@ test('packages/ui isolates an exact Tailwind dependency budget', () => {
   }
 });
 
-test('packages/app remains dependency-free', () => {
+test('packages/app remains runtime-dependency-free; testing is its only dev dep', () => {
   const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../../packages/app/package.json'), 'utf8'));
-  for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+  for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
     expect(pkg[field]).toBeUndefined();
   }
+  // The workspace test harness (test/workspace.rip) runs on the rip
+  // testing package; nothing ships with it.
+  expect(pkg.devDependencies).toEqual({ '@rip-lang/testing': 'workspace:*' });
 });

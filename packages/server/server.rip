@@ -835,16 +835,17 @@ export App = (fn) ->
 #   standalone (no RIP_BUNDLE_PATH) — the process runs under the rip loader,
 #     so the compiler is loadable; assemble at call time, failing fast.
 #
-# Under RIP_WORKSPACE=1 (docs/WORKSPACE.md — experimental) worker mode adds
-# the dev feed: GET /@rip/manifest (no-store, read per request), rev-keyed
-# immutable cell bytes at /@rip/cells/<id>?rev=N, a per-request bundle
-# re-read (the manager rewrites the pool's bundle in place on a cell
-# change), and the hub bridge endpoint enrolling dev sockets into the
-# DEV_CHANNEL. Flag off, client() registers exactly the surface above.
+# Worker mode adds the workspace dev feed (docs/WORKSPACE.md): GET
+# /@rip/manifest (no-store, read per request), rev-keyed immutable cell
+# bytes at /@rip/cells/<id>?rev=N, a per-request bundle re-read (the
+# manager rewrites the pool's bundle in place on a cell change), and the
+# hub bridge endpoint enrolling dev sockets into the DEV_CHANNEL. Each
+# surface keys on its manager-provided environment: standalone mode has no
+# manager, so none of them register there.
 
-# The hub channel dev clients enroll in under RIP_WORKSPACE=1 — mirrored as
-# DEV_CHANNEL in manager.rip (workers never import manager code). Exported
-# so the mirror is a pinned fact, not a convention.
+# The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
+# manager.rip (workers never import manager code). Exported so the mirror
+# is a pinned fact, not a convention.
 export DEV_CHANNEL = '/rip/dev'
 
 clientModules = (dir) ->
@@ -860,10 +861,10 @@ clientModules = (dir) ->
   walk dir, 'app/'
   out
 
-# The generated boot page. In worker mode under RIP_WORKSPACE=1 the
-# bootApp call carries `workspace: true` — the browser half of the dev
-# door; everywhere else the emitted page is byte-identical to the
-# plain boot.
+# The generated boot page. Where the feed surface exists (worker mode —
+# the manager wrote the manifest and cells) the bootApp call carries
+# `workspace: true`, the browser half of the dev door; standalone pages
+# boot plain.
 BOOT_PAGE = (workspace) -> """
 <!doctype html>
 <meta charset="utf-8">
@@ -877,7 +878,6 @@ BOOT_PAGE = (workspace) -> """
 """
 
 export client = (dir = null) ->
-  workspace = process.env.RIP_WORKSPACE is '1'
   bundleText = null
   clientDir = null
   runtimePath = null
@@ -907,11 +907,7 @@ export client = (dir = null) ->
     # specifier defeats the bundler's static analysis.
     bundleModule = join(srcDir, 'bundle.js')
     { assembleBundle } = import!(bundleModule)
-    assembly: Record<string, any> = { modules: clientModules(clientDir), packagesDir }
-    # The flag's browser half boots through @rip-lang/workspace, so
-    # standalone assembly claims it exactly as the manager does.
-    assembly.claims = ['@rip-lang/workspace'] if workspace
-    bundleText = JSON.stringify assembleBundle(assembly)
+    bundleText = JSON.stringify assembleBundle { modules: clientModules(clientDir), packagesDir }
 
   etag = "\"#{Bun.hash(bundleText).toString(16)}\""
   indexHtml = if clientDir? then join(clientDir, 'index.html') else null
@@ -920,8 +916,8 @@ export client = (dir = null) ->
   # The page opens the door only where the feed surface exists — worker
   # mode, where the manager wrote the manifest and cells. Standalone has
   # no manager and no feed routes: a workspace-mode boot there would die
-  # on its manifest fetch, so the flag alone never opens the door.
-  door = workspace and process.env.RIP_MANIFEST_PATH?
+  # on its manifest fetch, so it boots plain.
+  door = process.env.RIP_MANIFEST_PATH?
 
   bootPage = (c) ->
     if indexHtml?
@@ -930,10 +926,11 @@ export client = (dir = null) ->
       c.html BOOT_PAGE(door)
 
   get '/', (c) -> bootPage(c)
-  if workspace and process.env.RIP_BUNDLE_PATH?
-    # Dev-feed freshness: the manager rewrites this pool's bundle file in
+  if process.env.RIP_BUNDLE_PATH?
+    # Feed freshness: the manager rewrites this pool's bundle file in
     # place on a cell change, so the handler re-reads and re-tags per
-    # request — a dev-only cost. Flag off keeps the boot-time cached bytes.
+    # request. Janus's micro-cache absorbs the cost at the edge;
+    # standalone mode keeps the boot-time cached bytes below.
     get '/@rip/bundle.json', (c) ->
       text = readFileSync(process.env.RIP_BUNDLE_PATH, 'utf8')
       live = "\"#{Bun.hash(text).toString(16)}\""
@@ -947,13 +944,13 @@ export client = (dir = null) ->
       c.body bundleText, 200, { 'Content-Type': 'application/json', 'ETag': etag }
   get '/@rip/rip.js', (c) -> c.send runtimePath
 
-  if workspace and process.env.RIP_MANIFEST_PATH?
+  if process.env.RIP_MANIFEST_PATH?
     get '/@rip/manifest', (c) ->
       # Read per request: the manager rewrites the manifest on every cell
       # change, and no-store keeps every cache out of the freshness path.
       c.body readFileSync(process.env.RIP_MANIFEST_PATH, 'utf8'), 200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
 
-  if workspace and process.env.RIP_CELLS_DIR?
+  if process.env.RIP_CELLS_DIR?
     # Cell bytes are addressed by (id, rev) in the URL (Q8): a rev-keyed
     # answer is immutable and cacheable; an unversioned request is rejected,
     # never guessed at. The filename encoding mirrors the manager's — the
@@ -967,7 +964,7 @@ export client = (dir = null) ->
       error "unknown cell (#{id}, rev #{rev})", 404 unless existsSync(file)
       c.body readFileSync(file, 'utf8'), 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=31536000, immutable' }
 
-  if workspace and process.env.RIP_BRIDGE_PATH?
+  if process.env.RIP_BRIDGE_PATH?
     # Janus POSTs every hub socket event here; answering an open with
     # {"+": [DEV_CHANNEL]} enrolls that connection into the dev channel.
     post process.env.RIP_BRIDGE_PATH, (c) ->

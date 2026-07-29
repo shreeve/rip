@@ -350,10 +350,11 @@ describe('bootApp workspace mode', () => {
     ],
   };
 
+  // The workspace rides the app package (Q9): plain assembly carries
+  // createWorkspace and connectFeed with no extra claim.
   const assembleWorkspace = () => assembleBundle({
     modules: WS_MODULES,
     packagesDir: resolve(root, 'packages'),
-    claims: ['@rip-lang/workspace'],
   });
 
   const fakeFetch = table => {
@@ -447,17 +448,6 @@ describe('bootApp workspace mode', () => {
       workspace: true,
       feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch: fakeFetch(manifestTable()) },
     })).rejects.toThrow(/manifestUrl/);
-  });
-
-  test('a bundle without the workspace package rejects naming the flag and the claim', async () => {
-    await expect(bootApp({
-      bundle: assembleBundle({ modules: WS_MODULES, packagesDir: resolve(root, 'packages') }),
-      target: doc.createElement('div'),
-      adapter: fakeAdapter('/'),
-      workspace: true,
-      manifestUrl: '/@rip/manifest',
-      feed: { fetch: fakeFetch(manifestTable()) },
-    })).rejects.toThrow(/@rip-lang\/workspace.*RIP_WORKSPACE/s);
   });
 
   test('populate seeds one passport per manifest cell the bundle carries, at the manifest rev', async () => {
@@ -568,7 +558,6 @@ describe('bootApp workspace mode', () => {
     const bundle = assembleBundle({
       modules,
       packagesDir: resolve(root, 'packages'),
-      claims: ['@rip-lang/workspace'],
     });
     const table = new Map([['/@rip/manifest', JSON.stringify(manifest)]]);
     table.set('/@rip/cells/app/badge.rip?rev=2', "export LABEL = 'badge v2'");

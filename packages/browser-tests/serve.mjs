@@ -57,7 +57,6 @@ const rebuildWsBundle = () => {
   wsBundleText = JSON.stringify(assembleBundle({
     modules: wsModules,
     packagesDir: join(root, 'packages'),
-    claims: ['@rip-lang/workspace'],
   }));
   wsBundleTag = `"${Bun.hash(wsBundleText).toString(16)}"`;
 };

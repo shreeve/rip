@@ -21,6 +21,9 @@
     "packages/app": {
       "name": "@rip-lang/app",
       "version": "0.0.0",
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
+      },
     },
     "packages/browser-tests": {
       "name": "@rip-lang/browser-tests",
@@ -179,13 +182,6 @@
         "vscode-languageserver-textdocument": "1.0.12",
       },
     },
-    "packages/workspace": {
-      "name": "@rip-lang/workspace",
-      "version": "0.0.0",
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
-      },
-    },
     "packages/x12": {
       "name": "@rip-lang/x12",
       "version": "4.0.0",
@@ -240,8 +236,6 @@
     "@rip-lang/utils": ["@rip-lang/utils@workspace:packages/utils"],
 
     "@rip-lang/validate": ["@rip-lang/validate@workspace:packages/validate"],
-
-    "@rip-lang/workspace": ["@rip-lang/workspace@workspace:packages/workspace"],
 
     "@rip-lang/x12": ["@rip-lang/x12@workspace:packages/x12"],
 

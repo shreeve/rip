@@ -14,6 +14,10 @@ The package currently provides:
 - `launch` for the one application boot path, with `persistStash`
 - `ariaCurrent` and `ownsAnchor` route-aware accessibility helpers
 - `createRenderer` for precompiled route/layout construction with render gates
+- `createWorkspace` for the Rip Workspace — the reactive passport bag of
+  component records ([docs/WORKSPACE.md](../../docs/WORKSPACE.md))
+- `connectFeed` for the workspace dev feed — the hub subscriber that turns
+  `{id, rev}` dings into HTTP cell fetches and `workspace.set` calls
 
 Only named exports are supported:
 

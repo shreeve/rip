@@ -7,11 +7,13 @@ test('public entry exposes named substrate exports only', () => {
     'ariaCurrent',
     'browserAdapter',
     'buildRoutes',
+    'connectFeed',
     'createComponents',
     'createMutation',
     'createRenderer',
     'createRouter',
     'createStash',
+    'createWorkspace',
     'debounce',
     'delay',
     'hold',
@@ -28,14 +30,10 @@ test('public entry exposes named substrate exports only', () => {
   expect('default' in app).toBeFalse();
 });
 
-test('package has no dependency fields', () => {
+test('package has no runtime dependency fields; testing is the only dev dep', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  for (const field of [
-    'dependencies',
-    'devDependencies',
-    'peerDependencies',
-    'optionalDependencies',
-  ]) {
+  for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
     expect(pkg[field]).toBeUndefined();
   }
+  expect(pkg.devDependencies).toEqual({ '@rip-lang/testing': 'workspace:*' });
 });
