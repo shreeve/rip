@@ -390,7 +390,7 @@ In watch mode:
   rename retires the old id and mints a new one at rev 1 (id persistence
   across renames is open research). Revs start at 1 and bump once per
   content change; the registry lives in the manager's memory for the run.
-  `GET /@rip/manifest` answers `{"cells": [{id, path, rev, hash}, …]}`
+  `GET /@rip/manifest` answers `{"cells": [{id, rev, hash}, …]}`
   sorted by path, `Cache-Control: no-store`, read per request. Cell
   bytes — the file's **source text**, dev-mode in-browser compile — are
   addressed by `(id, rev)` plus the content-hash discriminator in the
@@ -407,7 +407,7 @@ In watch mode:
   does not match the bytes, is a 404.
 - **The ding.** After the cells, the manifest, and the rewritten bundle
   are durable, the manager publishes one directive per changed cell to
-  the hub channel `/rip/dev` — the envelope is `{id, rev, hash}` only;
+  the hub channel `/@rip/dev` — the envelope is `{id, rev, hash}` only;
   source and compiled bodies never ride the hub (HTTP carries the bytes). A
   deleted client file retires: it leaves the manifest, its retirement
   occupies its own rev, and the ding carries `kind: "delete"` (no bytes
@@ -418,7 +418,7 @@ In watch mode:
   re-reads and re-tags per request (Janus's micro-cache absorbs the
   cost) — so a hard refresh never serves stale first-paint code.
 - **Bridge enrollment.** With `--bridge <path>`, the worker answers the
-  bridge's `Sec-WebSocket-Frame: open` POST with `{"+": ["/rip/dev"]}` —
+  bridge's `Sec-WebSocket-Frame: open` POST with `{"+": ["/@rip/dev"]}` —
   enrolling the opening connection into the dev channel — and `text` /
   `close` frames with an empty 204. Enrollment keys on the feed surface
   existing: with watch off the open answers a plain 204, so app-level

@@ -26,7 +26,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
-import { posix, join, resolve, dirname } from 'node:path'
+import { posix, join, resolve, dirname, basename } from 'node:path'
 
 # ==============================================================================
 # Module State
@@ -848,7 +848,7 @@ export App = (fn) ->
 # The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
 # manager.rip (workers never import manager code). Exported so the mirror
 # is a pinned fact, not a convention.
-export DEV_CHANNEL = '/rip/dev'
+export DEV_CHANNEL = '/@rip/dev'
 
 clientModules = (dir) ->
   out = {}
@@ -863,14 +863,16 @@ clientModules = (dir) ->
   walk dir, 'app/'
   out
 
-# The generated boot page. Where the feed surface exists (worker mode —
-# the manager wrote the manifest and cells) the bootApp call carries
-# `workspace: true`, the browser half of the dev door; standalone pages
-# boot plain.
-BOOT_PAGE = (workspace) -> """
+# The generated boot page, titled with the app's name (the manager
+# passes its --name; standalone derives it from the app's directory).
+# Where the feed surface exists (a watching worker — the manager wrote
+# the manifest and cells) the bootApp call carries `workspace: true`,
+# the browser half of the dev door; standalone pages boot plain.
+BOOT_PAGE = (workspace, title) -> """
 <!doctype html>
 <meta charset="utf-8">
-<title>rip app</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#{title}</title>
 <div id="app"></div>
 <script type="module">
   import { bootApp } from '/@rip/rip.js'
@@ -915,17 +917,23 @@ export client = (dir = null) ->
   indexHtml = if clientDir? then join(clientDir, 'index.html') else null
   indexHtml = null unless indexHtml? and existsSync(indexHtml)
 
-  # The page opens the door only where the feed surface exists — worker
-  # mode, where the manager wrote the manifest and cells. Standalone has
-  # no manager and no feed routes: a workspace-mode boot there would die
-  # on its manifest fetch, so it boots plain.
+  # The page opens the door only where the feed surface exists — a
+  # watching worker, where the manager wrote the manifest and cells.
+  # Standalone has no manager and no feed routes: a workspace-mode boot
+  # there would die on its manifest fetch, so it boots plain.
   door = process.env.RIP_MANIFEST_PATH?
+
+  # The page title: the manager's --name in worker mode, the app's
+  # directory name standalone. Escaped — a directory name is filesystem
+  # input, not HTML.
+  title = process.env.RIP_APP_NAME or (if clientDir? then basename(dirname(clientDir)) else 'rip app')
+  title = title.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 
   bootPage = (c) ->
     if indexHtml?
       c.send indexHtml, 'text/html; charset=UTF-8'
     else
-      c.html BOOT_PAGE(door)
+      c.html BOOT_PAGE(door, title)
 
   get '/', (c) -> bootPage(c)
   if process.env.RIP_BUNDLE_PATH?

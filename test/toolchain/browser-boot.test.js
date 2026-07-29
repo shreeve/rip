@@ -345,8 +345,8 @@ describe('bootApp workspace mode', () => {
 
   const MANIFEST = {
     cells: [
-      { id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1 },
-      { id: 'app/routes/about.rip', path: 'app/routes/about.rip', rev: 1 },
+      { id: 'app/routes/index.rip', rev: 1 },
+      { id: 'app/routes/about.rip', rev: 1 },
     ],
   };
 
@@ -452,7 +452,7 @@ describe('bootApp workspace mode', () => {
 
   test('populate seeds one passport per manifest cell the bundle carries, at the manifest rev', async () => {
     const manifest = {
-      cells: [...MANIFEST.cells, { id: 'app/routes/extra.rip', path: 'app/routes/extra.rip', rev: 3 }],
+      cells: [...MANIFEST.cells, { id: 'app/routes/extra.rip', rev: 3 }],
     };
     const hub = fakeHub();
     const { result } = await bootWorkspace({ table: manifestTable(manifest), hub });
@@ -527,8 +527,10 @@ describe('bootApp workspace mode', () => {
       await until(() => result.workspace.passport('app/routes/index.rip').rev === 2);
       await settleEscape();
       await until(() => target.textContent.includes('home v2'));
-      const escapeLines = logs.filter(line => line.includes('escape'));
-      expect(escapeLines).toEqual(['[Rip] workspace: change applied by remount (escape, not hot apply)']);
+      // The applied-log is user-facing: it names the file that changed
+      // and is honest that the remount resets component state.
+      const appliedLines = logs.filter(line => line.includes('applied'));
+      expect(appliedLines).toEqual(['[Rip] applied app/routes/index.rip — remounted (component state reset)']);
       expect(result.router.current.route.file).toBe('app/routes/index.rip');
     } finally {
       console.log = originalLog;
@@ -551,8 +553,8 @@ describe('bootApp workspace mode', () => {
     };
     const manifest = {
       cells: [
-        { id: 'app/badge.rip', path: 'app/badge.rip', rev: 1 },
-        { id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1 },
+        { id: 'app/badge.rip', rev: 1 },
+        { id: 'app/routes/index.rip', rev: 1 },
       ],
     };
     const bundle = assembleBundle({

@@ -192,12 +192,12 @@ export async function bootApp(opts = {}) {
     bag = app.createWorkspace();
     const records = [];
     for (const entry of manifest?.cells ?? []) {
-      const path = typeof entry.path === 'string' ? entry.path : entry.id;
-      const source = (bundle.modules ?? {})[path];
+      // The id IS the store path (B′ — the birth path is the id).
+      const source = (bundle.modules ?? {})[entry.id];
       // A manifest cell the bundle does not carry is skipped here: the
       // feed's open resync fetches it rev-keyed.
       if (source === undefined) continue;
-      records.push({ id: entry.id, path, rev: entry.rev, source });
+      records.push({ id: entry.id, path: entry.id, rev: entry.rev, source });
     }
     bag.populate(records);
   }
@@ -258,6 +258,7 @@ export async function bootApp(opts = {}) {
   let destroyed = false;
   let timer = null;
   let remounting = false;
+  const pending = new Set();
   const handle = {};
   const remount = async () => {
     timer = null;
@@ -267,6 +268,11 @@ export async function bootApp(opts = {}) {
       return;
     }
     remounting = true;
+    // The changed paths drain here so the applied-log names what this
+    // remount actually absorbed; a save landing mid-remount stays
+    // pending for the next one.
+    const applied = [...pending];
+    pending.clear();
     try {
       const snapshot = {};
       for (const path of bag.paths()) {
@@ -275,7 +281,7 @@ export async function bootApp(opts = {}) {
           module = { ...(await loader.import(path)) };
           bag.setCompiled(path, module);
         } catch (error) {
-          report(`[Rip] workspace: '${path}' failed to recompile for the remount — keeping its last good projection`, error);
+          report(`[Rip] ${path} failed to compile — keeping its last good version`, error);
           module = bag.getCompiled(path);
         }
         if (module) snapshot[path] = module;
@@ -291,9 +297,9 @@ export async function bootApp(opts = {}) {
         current.destroy();
         current = launchWith(snapshot);
         Object.assign(handle, current, stable);
-        console.log('[Rip] workspace: change applied by remount (escape, not hot apply)');
+        console.log(`[Rip] applied ${applied.join(', ') || 'a change'} — remounted (component state reset)`);
       } catch (error) {
-        report('[Rip] workspace: remount failed — the page stays down until the next good change applies', error);
+        report('[Rip] remount failed — the page stays down until the next good change applies', error);
       }
     } finally {
       remounting = false;
@@ -301,6 +307,7 @@ export async function bootApp(opts = {}) {
   };
   const unwatch = bag.watch((_event, path) => {
     if (!path.startsWith('app/')) return;
+    pending.add(path);
     timer ??= setTimeout(remount, 25);
   });
 
@@ -338,7 +345,7 @@ export async function bootApp(opts = {}) {
       try {
         module = await loader.import(path);
       } catch (error) {
-        report(`[Rip] workspace: '${path}' rev ${cell.rev} failed to compile — keeping the last good revision`, error);
+        report(`[Rip] ${path} rev ${cell.rev} failed to compile — keeping the last good version`, error);
         return false;
       }
       return bag.set({ ...cell, compiled: { ...module } });
