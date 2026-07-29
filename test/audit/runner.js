@@ -2662,6 +2662,7 @@ if (RUN_MAP) {
   auditBanner('MAPPING AUDIT', `use-site identifier coverage · compiler output only · ${fixtures.length} files`);
 
   const perFile = [];
+  const fileRows = [];
   const byRootRole = { synthetic: new Map(), rewrite: new Map() };
   let totReads = 0, totFlag = 0, unplaced = 0, mistext = 0, missing = 0, census = 0, byLuck = 0;
   const missingRows = [];   // flagged reads with no containing row — the pathological class
@@ -2681,7 +2682,7 @@ if (RUN_MAP) {
       // silent: a shrinking denominator is exactly what the coverage line below
       // exists to make visible.
       skips.push(f);
-      console.log(`    ${yellow('skip')} ${pad(f, NAME_W + 2)} ${dim('does not compile — no face to walk: ' + ((e && e.message) || e))}`);
+      fileRows.push({ f, skip: (e && e.message) || String(e) });
       continue;
     }
     // Only `starts` is kept for the -v listing; `src` is not retained (nothing
@@ -2701,11 +2702,24 @@ if (RUN_MAP) {
     missing += scan.missingRows.length;
     for (const r of scan.missingRows) missingRows.push({ f, ...r });
     const flagged = scan.rows.length;
-    console.log(`    ${flagged === 0 ? green('✓') : yellow('•')} ${pad(f, NAME_W + 2)} ${dim(pad(scan.total + ' reads', 12))}`
-      + (flagged === 0 ? green('all placed') : yellow(`${flagged} unmapped`)));
+    fileRows.push({ f, reads: scan.total, flagged });
+  }
+  // Counts RIGHT-align, as every other fixture table in the audit does — and
+  // the widths come from the run's own numbers, so a busier corpus cannot
+  // misalign them. Padding `N reads` as one string left-aligned the number
+  // instead, sliding the unit left under a shorter count: `2 reads` and
+  // `102 reads` shared a start and nothing else. Rows buffer for the same
+  // reason the Grammar Gate's do — a column width is not knowable until every
+  // row exists.
+  const READ_W = Math.max(1, ...fileRows.filter((r) => !r.skip).map((r) => String(r.reads).length));
+  const FLAG_W = Math.max(1, ...fileRows.filter((r) => !r.skip).map((r) => String(r.flagged).length));
+  for (const r of fileRows) {
+    if (r.skip) { out(`    ${yellow('skip')} ${pad(r.f, NAME_W + 2)} ${dim('does not compile — no face to walk: ' + r.skip)}`); continue; }
+    console.log(`    ${r.flagged === 0 ? green('✓') : yellow('•')} ${pad(r.f, NAME_W + 2)} ${dim(String(r.reads).padStart(READ_W) + ' reads')}   `
+      + (r.flagged === 0 ? green('all placed') : yellow(String(r.flagged).padStart(FLAG_W) + ' unmapped')));
   }
 
-  console.log(`\n    ${green('✓')} ${dim(`coverage: ${perFile.length} of ${fixtures.length} fixture(s) walked${skips.length ? `, ${skips.length} skipped (no face)` : ''}, ${totReads} reads`)}`);
+  console.log(`\n    ${green('✓')} ${dim(`${perFile.length} of ${fixtures.length} fixtures walked${skips.length ? `, ${skips.length} skipped (no face)` : ''} · ${totReads} reads`)}`);
 
   // ── the two invariants. Every failure is one or the other, never both: a
   // rewrite REFUSES (no resolved position to hold wrong text), mark-width
@@ -2732,7 +2746,7 @@ if (RUN_MAP) {
   // source spans drives it to zero — no downstream resolver tweak can — which is
   // why THIS number is the gate, not the symptom count. Same mapping rows, no
   // server, no oracle.
-  out(`\n  ${bold('Census')} ${dim('(reads with no exact row — broken today, or surviving only by luck)')}`);
+  out(`\n  ${bold('Census')} ${dim('(reads with no exact row)')}`);
   out(`    ${pad('census', 10)} ${(census === 0 ? green : yellow)(String(census).padStart(4))}   ${dim(`of ${totReads} reads — ${totFlag} broken today (flagged above) + ${byLuck} resolving by luck — one change to the emitted TS from breaking`)}`);
   // The decomposition is exact BY CONSTRUCTION — a flagged read always lacks an
   // exact row (see mappingScan) — so census === broken-today + by-luck. Checked,
@@ -3951,7 +3965,7 @@ if (gr) {
 if (mp) totalLine('Mapping', `${mp.totReads} reads: `
   + (mp.totFlag === 0
     ? green('all placed, all truthful')
-    : `${yellow(`${mp.totFlag} unmapped`)} ${dim(`(${mp.unplaced} unplaced, ${mp.mistext} mis-texted · ${mp.synthetic} synthetic, ${mp.rewrite} rewrite)`)} ${dim('tracking the mapping gap (expected)')}`)
+    : `${yellow(`${mp.totFlag} unmapped`)} ${dim(`(${mp.unplaced} unplaced, ${mp.mistext} mistext · ${mp.synthetic} synthetic, ${mp.rewrite} rewrite)`)} ${dim('tracking the mapping gap (expected)')}`)
   + dim(` · ${mp.census} at-risk — no exact row`)
   + (mp.missing ? ` · ${red(`${mp.missing} missing span${mp.missing === 1 ? '' : 's'}`)} ${dim('— a new class')}` : ''));
 if (RUN_MAIN) totalLine('Type', (fails === 0
