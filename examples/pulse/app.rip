@@ -9,7 +9,7 @@ MOODS = ['up', 'even', 'down']
 statuses = [
   text: 'Pulse is alive'
   mood: 'up'
-  timestamp: new Date().toISOString()
+  timestamp: Date.new().toISOString()
 ]
 
 client!()
@@ -21,7 +21,7 @@ post '/api/statuses' ->
   error! "text is too long (max 140 characters)" if text.length > 140
   mood = read 'mood', MOODS
   error! "mood must be one of: #{MOODS.join ', '}" unless mood?
-  status = { text, mood, timestamp: new Date().toISOString() }
+  status = { text, mood, timestamp: Date.new().toISOString() }
   statuses.push status
   status
 
