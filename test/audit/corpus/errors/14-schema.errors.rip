@@ -1,4 +1,4 @@
-# 14-schema.errors.rip — intentional negatives asserted by the Diagnostics Lane; the wrongGetter row is pinned (error-pins.json) while the callable-unknown finding is open.
+# 14-schema.errors.rip — intentional negatives asserted by the Diagnostics Audit; the wrongGetter row is pinned (error-pins.json) while the callable-unknown finding is open.
 # @ts-nocheck
 
 Person = schema

@@ -1,4 +1,4 @@
-# 25-components.errors.rip — intentional negatives asserted by the Diagnostics Lane; the ref and `<=>` rows are pinned (error-pins.json).
+# 25-components.errors.rip — intentional negatives asserted by the Diagnostics Audit; the ref and `<=>` rows are pinned (error-pins.json).
 # The method-argument row is DOUBLE-quoted on purpose: a single-quoted literal is rewritten in the face, so its diagnostic falls back to the call's open paren (FINDINGS.md).
 # @ts-nocheck
 

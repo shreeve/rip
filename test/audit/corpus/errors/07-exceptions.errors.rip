@@ -1,4 +1,4 @@
-# 07-exceptions.errors.rip — intentional negatives, each asserted by the Diagnostics Lane (bun run audit --diagnostics).
+# 07-exceptions.errors.rip — intentional negatives, each asserted by the Diagnostics Audit (bun run audit --diagnostics).
 # @ts-nocheck
 
 reasonCode = 500

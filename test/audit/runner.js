@@ -4,10 +4,10 @@
 // number tells you WHERE the type story stands.
 //
 //   bun run audit                  # EVERY lane, bottom-up: grammar → map → type → diagnostics → hover + token
-//   bun run audit --grammar        # the Grammar Gate ONLY (parser only)
+//   bun run audit --grammar        # the Grammar Audit ONLY (parser only)
 //   bun run audit --map            # the Mapping Audit ONLY (compiler output; no server)
 //   bun run audit --type           # the Type Audit ONLY — the fast loop while authoring
-//   bun run audit --diagnostics    # the Diagnostics Lane ONLY (drives the editor server)
+//   bun run audit --diagnostics    # the Diagnostics Audit ONLY (drives the editor server)
 //   bun run audit --hover          # the Hover Audit ONLY (slower; drives LSP servers)
 //   bun run audit --token          # the Token Audit ONLY (drives the editor server)
 //   bun run audit --verbose        # + list expected hover divergences / unasserted tokens
@@ -21,7 +21,7 @@
 // audits. `--serial` is a mode, not a lane, and stays outside the set.
 //
 // The independent audits (the AUDITS table below is the authoritative list —
-// it also carries the Grammar Gate, ROADMAP "M2", and the Diagnostics Lane,
+// it also carries the Grammar Audit, ROADMAP "M2", and the Diagnostics Audit,
 // ROADMAP "M3", which each document themselves at their sections):
 //
 // A · THE TYPE AUDIT — a per-fixture grid over five dimensions:
@@ -204,7 +204,7 @@
 // Layout: corpus/ holds the corpus in two CHARTER buckets — each `.rip`
 // beside a hand-written `.ts`/`.tsx` twin:
 //   corpus/grammar/  fixtures chartered by the closed denominators (the
-//                    grammar gate's productions, the census's type kinds);
+//                    grammar audit's productions, the census's type kinds);
 //                    each must uniquely reduce at least one production.
 //   corpus/claims/   fixtures chartered by CLAIMS.md — ruled behaviors no
 //                    denominator can derive; each must be a named carrier
@@ -214,7 +214,7 @@
 // symbols the twin cannot judge, and the RULINGS-governed in-body positions.
 // corpus/errors/ is where the corpus's NEGATIVE tests live —
 // one unsuppressed error pair per family — and it belongs to the
-// Diagnostics Lane ALONE: the fixture walk never descends into it,
+// Diagnostics Audit ALONE: the fixture walk never descends into it,
 // and tsconfig.json excludes it from the twin type-check, so its
 // deliberately-unsuppressed errors cannot leak
 // into any other audit's denominator. Each error pair carries a
@@ -265,7 +265,7 @@ const SERVER = path.join(ROOT, 'packages/vscode/src/server.js');
 const CORPUS = path.join(HERE, 'corpus');
 const FIX = path.join(CORPUS, 'grammar');
 const CLM = path.join(CORPUS, 'claims');
-// The Diagnostics Lane's fixtures — a SIBLING of the positive buckets, so
+// The Diagnostics Audit's fixtures — a SIBLING of the positive buckets, so
 // nothing in errors/ can join another audit's denominator, and
 // tsconfig.json excludes it from the twin type-check.
 const ERRD = path.join(CORPUS, 'errors');
@@ -288,7 +288,7 @@ const ERRD = path.join(CORPUS, 'errors');
 //     text = a reviewed truthful interim). The `ruled` gauge below
 //     reports divergences red by agreement, soft, like the silence gauge.
 const HOVERS = path.join(HERE, 'hover-pins.json');
-// The Diagnostics Lane's pinned expectations — ADDITIVE per error pair, for
+// The Diagnostics Audit's pinned expectations — ADDITIVE per error pair, for
 // exactly the diagnostics no honest twin line can spell (a lowering's second
 // publish). Rows the twin CAN judge stay derived; a pin that duplicates a
 // derived row is flagged, never silently merged. Same discipline as
@@ -411,7 +411,7 @@ const ARGV = process.argv.slice(2);
 // value, the one thing a reader most needs and is least likely to guess.
 const AUDITS = [
   {
-    key: 'grammar', flag: '--grammar', name: 'Grammar Gate',
+    key: 'grammar', flag: '--grammar', name: 'Grammar Audit',
     // Parser only — no server, no tsgo, no compile even: the corpus is parsed
     // with an instrumented Parser and each reduce records its rule.
     runs: 'parser only',
@@ -448,10 +448,10 @@ const AUDITS = [
          + 'diagnostics, `strict` against `rip check` over the whole corpus. No\n'
          + 'positive fixture may carry a suppression directive (the preflight refuses\n'
          + 'them): every fixture publishes ZERO diagnostics, its negatives living in\n'
-         + 'corpus/errors/ under the Diagnostics Lane',
+         + 'corpus/errors/ under the Diagnostics Audit',
   },
   {
-    key: 'errors', flag: '--diagnostics', name: 'Diagnostics Lane',
+    key: 'errors', flag: '--diagnostics', name: 'Diagnostics Audit',
     blurb: 'the corpus\'s negatives — unsuppressed error fixtures, every diagnostic asserted by code and position',
     judge: 'the twin\'s OWN tsgo diagnostics — TypeScript\'s answer on the LINE-ALIGNED twin\n'
          + 'fixes each expected code and line, and the flagged token\'s place in the rip\n'
@@ -995,7 +995,7 @@ class EditorServer {
   release(uri) { if (this.open === uri) this.open = null; }
   async start() {
     for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(d, f), path.join(this.dir, f));
-    // No errors/ copy: the Diagnostics Lane opens its fixtures with in-memory
+    // No errors/ copy: the Diagnostics Audit opens its fixtures with in-memory
     // text under `errors/…` URIs (distinct from every flat fixture by path
     // alone), and the server compiles the didOpen text — it never reads an
     // opened document from disk.
@@ -1609,7 +1609,7 @@ function mappingScan(src, code, mappings) {
 // ── run
 // The positive corpus spans BOTH charter buckets; every lane treats them
 // identically (the buckets differ only in which instrument justifies a
-// fixture's existence — judged in the grammar gate). Basenames must be
+// fixture's existence — judged in the grammar audit). Basenames must be
 // unique across buckets: twins, pins, and CLAIMS carriers all key on them.
 const grammarFixtures = fs.readdirSync(FIX).filter((f) => f.endsWith('.rip')).sort();
 const claimsFixtures = fs.existsSync(CLM) ? fs.readdirSync(CLM).filter((f) => f.endsWith('.rip')).sort() : [];
@@ -1628,7 +1628,7 @@ const fixtures = [...grammarFixtures, ...claimsFixtures].sort();
 // rots the corpus silently — verdict would stay green over a suppressed
 // error. Refused here, for every audit mode, at comment-start position (a
 // prose mention is not a directive). corpus/errors/ is exempt — its
-// line-aligned @ts-nocheck pragma pair is the Diagnostics Lane's own
+// line-aligned @ts-nocheck pragma pair is the Diagnostics Audit's own
 // enforced discipline — and the carriage FEATURE (a rip marker surviving
 // onto the face) is gated in test/lang/tsface.test.js, not here.
 {
@@ -1639,7 +1639,7 @@ const fixtures = [...grammarFixtures, ...claimsFixtures].sort();
     process.exit(1);
   }
 }
-// The Diagnostics Lane's fixtures, listed here beside the flat walk so the
+// The Diagnostics Audit's fixtures, listed here beside the flat walk so the
 // pool below can size itself to the lane's workload.
 const errorFixtures = fs.existsSync(ERRD) ? fs.readdirSync(ERRD).filter((f) => f.endsWith('.rip')).sort() : [];
 // ── shared presentation helpers
@@ -1754,13 +1754,13 @@ async function abort(headline, reasons) {
 }
 
 // ── AUDIT RUN ORDER — bottom-up by instrument layer, so in a full run each
-// section's failures explain the one after it: the Grammar Gate (can the
+// section's failures explain the one after it: the Grammar Audit (can the
 // parser even reduce it) and the Mapping Audit (do the compiler's own rows
 // place every read) run first and need no server; then the Type Audit (the
-// face and its verdict), the Diagnostics Lane (each diagnostic's code and
+// face and its verdict), the Diagnostics Audit (each diagnostic's code and
 // position), and last the probe pass driving the slow LSP surfaces (hover,
 // tokens). The Totals at the bottom print in this same order.
-// ── the Grammar Gate (ROADMAP "M2"): which productions the corpus exercises.
+// ── the Grammar Audit (ROADMAP "M2"): which productions the corpus exercises.
 // Parser only — no compile, no server. Each fixture is parsed with an
 // instrumented Parser whose ctx.onReduce records every rule the parse reduces;
 // the denominator is the generated parser's own ruleNames table (index 0 is
@@ -1843,7 +1843,7 @@ if (RUN_GRAMMAR) {
   // the DENOMINATOR, already net of the exclusions, and a parenthesised count
   // beside a total reads as a part OF that total — a reader would subtract
   // twice and arrive at a denominator the report never uses.
-  auditBanner('GRAMMAR GATE', `productions the corpus reduces · ${denom.length} rules${excludedIdx.length ? ` after ${excludedIdx.length} exclusions` : ''} · ${fixtures.length} fixtures`);
+  auditBanner('GRAMMAR AUDIT', `productions the corpus reduces · ${denom.length} rules${excludedIdx.length ? ` after ${excludedIdx.length} exclusions` : ''} · ${fixtures.length} fixtures`);
   const seen = new Set();
   // Reducers per production, for UNIQUE contribution — the retirement
   // instrument: a fixture whose every reduction some other fixture also
@@ -2007,7 +2007,7 @@ if (RUN_GRAMMAR) {
   // Totals, which paints the same 520 green.
   console.log(`    ${(uncovered.length ? dim : green)(String(denom.length - uncovered.length))} ${dim('/')} ${dim(String(denom.length))} ${dim(`productions (${pct}%)`)}`);
   if (excludedIdx.length) {
-    out(`    ${dim(`${excludedIdx.length} excluded by the gate (unreachable, banned, or coverable only by a fixture that asserts nothing) — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`)}`);
+    out(`    ${dim(`${excludedIdx.length} excluded by ruling (unreachable, banned, or coverable only by a fixture that asserts nothing) — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`)}`);
     // A production name is itself most of a line, so its reason goes BENEATH
     // rather than beside: a label column that wide leaves the prose a gutter
     // too narrow to read, and the pair is legible stacked.
@@ -2261,7 +2261,7 @@ if (RUN_GRAMMAR) {
       flush();
     };
     // ── TYPE-VOCABULARY CENSUS — positive coverage on the closed universe.
-    // The grammar gate cannot see below the parser's one-token type opacity,
+    // The grammar audit cannot see below the parser's one-token type opacity,
     // so this is that world's denominator: every kind TS's type grammar
     // defines, claimed or queued — a kind nobody thought of is still a
     // queue item. Exclusions are rulings, named and reasoned, netted from
@@ -2448,7 +2448,7 @@ if (RUN_GRAMMAR) {
     for (const s of staleSpellingExclusions) out(`    ${red('✗')} ${red('excluded spelling the lexer no longer rewrites:')} ${s} ${dim('— stale; fix the spelling exclusion table')}`);
 
     out(`\n    ${bold('Type vocabulary census')} ${dim(`(what lives inside a TYPE token — invisible to the production count, from the pinned tsgo)`)}`);
-    out(`    ${(kindQueue.length ? dim : green)(String(claimedSet.size))} ${dim('/')} ${dim(`${censusDenom.length} kinds claimed by the corpus`)}${EXCLUDED_KINDS.size ? dim(` · ${EXCLUDED_KINDS.size} excluded by the gate — netted from the denominator; -v lists them`) : ''}`);
+    out(`    ${(kindQueue.length ? dim : green)(String(claimedSet.size))} ${dim('/')} ${dim(`${censusDenom.length} kinds claimed by the corpus`)}${EXCLUDED_KINDS.size ? dim(` · ${EXCLUDED_KINDS.size} excluded by ruling — netted from the denominator; -v lists them`) : ''}`);
     const heldKinds = kindQueue.filter((k) => HELD_KINDS.has(k));
     const staleHeldKinds = [...HELD_KINDS.keys()].filter((k) => !universeSet.has(k));
     if (kindQueue.length) {
@@ -2730,7 +2730,7 @@ if (RUN_MAP) {
   // misalign them. Padding `N reads` as one string left-aligned the number
   // instead, sliding the unit left under a shorter count: `2 reads` and
   // `102 reads` shared a start and nothing else. Rows buffer for the same
-  // reason the Grammar Gate's do — a column width is not knowable until every
+  // reason the Grammar Audit's do — a column width is not knowable until every
   // row exists.
   const READ_W = Math.max(1, ...fileRows.filter((r) => !r.skip).map((r) => String(r.reads).length));
   const FLAG_W = Math.max(1, ...fileRows.filter((r) => !r.skip).map((r) => String(r.flagged).length));
@@ -2978,8 +2978,8 @@ if (RUN_MAIN) {
       console.log(`    ${bold(r.name)}`);
       for (const [label, detail] of notes) console.log(`      ${dim('·')} ${label} ${dim('— ' + detail)}`);
       // A failure always shows its evidence — no flag needed to learn WHY.
-      if (r.diags?.length) for (const d of r.diags) out(dim(`          ${d.range.start.line}:${d.range.start.character} [TS${d.code}] ${d.message}`));
-      if (r.twinErrs?.length) for (const e of r.twinErrs) console.log(dim(`          twin: ${e}`));
+      if (r.diags?.length) for (const d of r.diags) out(dim(`        ${d.range.start.line}:${d.range.start.character} [TS${d.code}] ${d.message}`));
+      if (r.twinErrs?.length) for (const e of r.twinErrs) console.log(dim(`        twin: ${e}`));
       // The implicit-any evidence is bulky and REPETITIVE by nature: ONE
       // untyped param fans out into a diagnostic per member access, all
       // reported at the SAME source position. Showing the first N raw rows
@@ -2995,10 +2995,10 @@ if (RUN_MAIN) {
         }
         for (const [at, es] of [...sites].slice(0, 4)) {
           const more = es.length > 1 ? dim(` (+${es.length - 1} more here)`) : '';
-          out(dim(`          strict: ${at} [TS${es[0].code}] ${es[0].message}`) + more);
+          out(dim(`        strict: ${at} [TS${es[0].code}] ${es[0].message}`) + more);
         }
         const rest = sites.size - Math.min(sites.size, 4);
-        if (rest > 0) console.log(dim(`          strict: … and ${rest} more site${rest === 1 ? '' : 's'} (see \`rip check\` under rip.strict)`));
+        if (rest > 0) console.log(dim(`        strict: … and ${rest} more site${rest === 1 ? '' : 's'} (see \`rip check\` under rip.strict)`));
       }
     }
   }
@@ -3015,7 +3015,7 @@ if (RUN_MAIN) {
   fails = totalApplicable - totalPass;
 }
 
-// ── the Diagnostics Lane (--diagnostics; ROADMAP "M3"): fixtures whose
+// ── the Diagnostics Audit (--diagnostics; ROADMAP "M3"): fixtures whose
 // errors are UNSUPPRESSED, each published diagnostic asserted by code AND
 // position. The verdict dimension can never see a mis-positioned diagnostic —
 // a fixture's `@ts-expect-error` is consumed inside tsgo, on the face, before
@@ -3056,8 +3056,8 @@ if (RUN_ERRORS) {
     const code = lines.findIndex((l) => l.trim() && !commentRe.test(l));
     return pragma >= 0 && (code < 0 || pragma < code);
   };
-  auditBanner('DIAGNOSTICS LANE', `unsuppressed fixtures, code + position asserted · ${errorFixtures.length} file(s)`);
-  if (errorFixtures.length === 0) await abort('The Diagnostics Lane found no fixtures', [`${path.relative(ROOT, ERRD)} holds no .rip files`]);
+  auditBanner('DIAGNOSTICS AUDIT', `unsuppressed fixtures, code + position asserted · ${errorFixtures.length} files`);
+  if (errorFixtures.length === 0) await abort('The Diagnostics Audit found no fixtures', [`${path.relative(ROOT, ERRD)} holds no .rip files`]);
 
   // The twin pass: tsgo over fixtures/errors' twins in an instrument-owned
   // workspace (the runStrictCheck pattern — the audit tsconfig excludes
@@ -3218,16 +3218,24 @@ if (RUN_ERRORS) {
     }
     for (const d of unmatched) problems.push({ kind: 'stray', note: `unexpected ${(d.severity ?? 1) === 2 ? 'warning ' : ''}TS${d.code} at ${d.range.start.line + 1}:${d.range.start.character} — ${String(d.message).split('\n')[0]}` });
     return { name: f, expected, problems };
-  }, {
-    width: LANES,
-    onDone: (r) => {
+  }, { width: LANES });
+  // Printed after the pass, not streamed from it: the lane is a five-second
+  // run, so streaming buys nothing, and a count column cannot right-align
+  // until every row exists — `8` sat under the first digit of `10`, which is
+  // a column in name only. A row's own violation count rides its line too: a
+  // ✗ whose text says `35 asserted` and nothing else reads like a success
+  // whose mark is a typo.
+  {
+    const W = Math.max(1, ...laneRows.map((r) => String(r.expected.length).length));
+    for (const r of laneRows) {
       const ok = r.problems.length === 0;
-      console.log(`    ${ok ? green('✓') : red('✗')} ${pad(path.join('errors', r.name), ERR_NAME_W)} ${dim(`${r.expected.length} diagnostic(s) asserted`)}`);
-      for (const p of r.problems) out(`        ${red('·')} ${yellow(p.kind)} ${dim(p.note)}`);
-    },
-  });
+      console.log(`    ${ok ? green('✓') : red('✗')} ${pad(path.join('errors', r.name), ERR_NAME_W)} ${dim(String(r.expected.length).padStart(W) + ` diagnostic${r.expected.length === 1 ? '' : 's'} asserted`)}`
+        + (ok ? '' : dim(' · ') + red(`${r.problems.length} violation${r.problems.length === 1 ? '' : 's'}`)));
+      for (const p of r.problems) out(`      ${red('·')} ${yellow(p.kind)} ${dim(p.note)}`);
+    }
+  }
   const missedErr = errorFixtures.filter((f, i) => !laneRows[i] || laneRows[i].name !== f);
-  if (missedErr.length) await abort('The Diagnostics Lane did not score every fixture', missedErr.map((f) => `${f}: no row produced`));
+  if (missedErr.length) await abort('The Diagnostics Audit did not score every fixture', missedErr.map((f) => `${f}: no row produced`));
   // No orphaned twins: a twin whose .rip was renamed away would otherwise
   // have its asserted negatives vanish from every denominator, silently.
   const orphanTwins = fs.readdirSync(ERRD).filter((t) => /\.tsx?$/.test(t) && !errorFixtures.includes(t.replace(/\.tsx?$/, '.rip')));
@@ -3389,7 +3397,7 @@ if (RUN_HOVER || RUN_TOKENS) {
   const probed = await lanes(fixtures, probeOne, { width: LANES, onDone: (r) => r && console.log(r.line) });
   for (const r of probed) if (r?.probe) PROBES.set(r.file, r.probe);
 
-  console.log(`\n    ${dim(`probed ${PROBES.size} file(s) in ${((Date.now() - t0) / 1000).toFixed(1)}s`)}`);
+  console.log(`\n    ${dim(`probed ${PROBES.size} file${PROBES.size === 1 ? '' : 's'} in ${((Date.now() - t0) / 1000).toFixed(1)}s`)}`);
   await Promise.all(twins.map((t) => t.stop()));
   await Promise.all(faces.map((o) => o.stop()));
   if (FACE_DIR) fs.rmSync(FACE_DIR, { recursive: true, force: true });
@@ -3597,7 +3605,7 @@ if (RUN_HOVER) {
   }
 
   const probed = allRows.length;
-  console.log(`\n  ${bold('Parity')} ${dim(`(${probed} probes${hskip ? `, ${hskip} file(s) skipped` : ''})`)}`);
+  console.log(`\n  ${bold('Parity')} ${dim(`(${probed} probes${hskip ? `, ${hskip} file${hskip === 1 ? '' : 's'} skipped` : ''})`)}`);
   const prow = (label, n, color, note) => out(`    ${pad(label, 12)} ${color(String(n).padStart(3))}${note ? '   ' + dim(note) : ''}`);
   prow('agree', tally.agree, green, tally.order ? `incl. ${tally.order} union-order` : '');
   prow('gaps', tally.gap, tally.gap ? yellow : green, tally.gap ? 'hover ≠ tsgo twin on a comparable type' : '');
@@ -3770,7 +3778,7 @@ if (RUN_TOKENS) {
       }
     };
 
-    out(`\n  ${bold('Invariants')} ${dim(`(${probed} declarations${tskip ? `, ${tskip} file(s) skipped` : ''} — every expectation derived from .rip syntax)`)}`);
+    out(`\n  ${bold('Invariants')} ${dim(`(${probed} declarations${tskip ? `, ${tskip} file${tskip === 1 ? '' : 's'} skipped` : ''} — every expectation derived from .rip syntax)`)}`);
     // Every row here is `label  N / M  [count]  note`, and the note is the
     // only part that can run long — so a wrap hangs at the note's own column
     // rather than at the line's indent, where it would read as a nameless
@@ -3933,7 +3941,7 @@ const totalLine = (audit, text) => {
   for (const l of lines.slice(1)) console.log(' '.repeat(4 + TOTAL_W + 2) + l);
 };
 console.log(`\n  ${bold('Totals')}`);
-// The Grammar Gate's coverage number is a gauge, not a regression count:
+// The Grammar Audit's coverage number is a gauge, not a regression count:
 // uncovered productions are work remaining — a fixture to write, or a park
 // held by an open finding — so the count paints yellow until the corpus
 // covers the grammar, never red.
@@ -4026,10 +4034,15 @@ if (mp) totalLine('Mapping', `${mp.totReads} reads: `
 if (RUN_MAIN) totalLine('Type', (fails === 0
   ? green(`${totalApplicable} dimension checks: all passing`)
   : `${totalApplicable} dimension checks: ${green(totalPass + ' passing')}, ${red(fails + ' failing')}`));
-if (el) totalLine('Diagnostics', `${el.asserted} asserted over ${el.files} file(s): ` + (el.problems.length === 0
+if (el) totalLine('Diagnostics', `${el.asserted} asserted over ${el.files} files: ` + (el.problems.length === 0
   ? green('every code and position as TypeScript says')
   : red(`${el.problems.length} violation${el.problems.length === 1 ? '' : 's'}`)
-    + dim(` (${['shape', 'missing', 'position', 'stray', 'orphan'].map((k) => [k, el.problems.filter((p) => p.kind === k).length]).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(', ')})`)));
+    + (() => {
+        const kinds = ['shape', 'missing', 'position', 'stray', 'orphan'].map((k) => [k, el.problems.filter((p) => p.kind === k).length]).filter(([, n]) => n);
+        // A single category is the whole count — `2 violations (2 position)`
+        // splits one number into itself. Name the kind instead.
+        return kinds.length === 1 ? dim(` — all ${kinds[0][0]}`) : dim(` (${kinds.map(([k, n]) => `${n} ${k}`).join(', ')})`);
+      })()));
 if (hp) totalLine('Hover', `${hp.probed} hover probes: `
   + (hp.gap === 0 && hp.snapChanged === 0 && hp.violations.length === 0
     ? green('every answer matches the twin, every pin unchanged')

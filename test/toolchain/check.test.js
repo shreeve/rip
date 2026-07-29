@@ -147,7 +147,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   test('a write to a computed is an emitter decline, bound to the write line', () => {
     // `doubled = 5` off `doubled ~= …` is REJECTED at compile — a real
     // message, never broken output (the for-range-ban model). This is the
-    // decline's home: the spelling cannot enter the Diagnostics Lane, whose
+    // decline's home: the spelling cannot enter the Diagnostics Audit, whose
     // error pairs need a face to publish from, and an emitter decline aborts
     // the compile before any face exists. The readonly-write beside it
     // (`limit = 7` off `limit =! 100`) is NOT this class — it compiles and
