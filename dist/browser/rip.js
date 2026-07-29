@@ -23138,10 +23138,14 @@ async function bootApp(opts = {}) {
       }
       if (destroyed)
         return;
-      current.destroy();
-      current = launchWith(snapshot);
-      Object.assign(handle, current, stable);
-      console.log("[Rip] workspace: change applied by remount (escape, not hot apply)");
+      try {
+        current.destroy();
+        current = launchWith(snapshot);
+        Object.assign(handle, current, stable);
+        console.log("[Rip] workspace: change applied by remount (escape, not hot apply)");
+      } catch (error) {
+        report("[Rip] workspace: remount failed — the page stays down until the next good change applies", error);
+      }
     } finally {
       remounting = false;
     }

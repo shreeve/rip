@@ -296,10 +296,20 @@ export async function bootApp(opts = {}) {
         if (module) snapshot[path] = module;
       }
       if (destroyed) return;
-      current.destroy();
-      current = launchWith(snapshot);
-      Object.assign(handle, current, stable);
-      console.log('[Rip] workspace: change applied by remount (escape, not hot apply)');
+      // A cell can compile cleanly and still break launch (a contract
+      // violation like a stash module without appStash). The teardown-
+      // plus-relaunch must never die as an unhandled rejection with the
+      // page silently unmounted: it reports, `current` keeps pointing
+      // at the torn-down launch (destroy is idempotent), and the next
+      // successful change relaunches through this same path.
+      try {
+        current.destroy();
+        current = launchWith(snapshot);
+        Object.assign(handle, current, stable);
+        console.log('[Rip] workspace: change applied by remount (escape, not hot apply)');
+      } catch (error) {
+        report('[Rip] workspace: remount failed — the page stays down until the next good change applies', error);
+      }
     } finally {
       remounting = false;
     }

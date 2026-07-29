@@ -677,6 +677,33 @@ describe('bootApp workspace mode', () => {
     }
   });
 
+  test('a remount whose relaunch throws reports loudly and the next good change recovers the page', async () => {
+    // A cell can compile cleanly and still break launch (the stash
+    // contract: 'app/stash.rip' must export appStash). The remount's
+    // teardown-plus-relaunch must not die as an unhandled rejection
+    // with the page silently unmounted — it reports, and a following
+    // good revision relaunches.
+    const table = manifestTable();
+    table.set('/@rip/cells/app/stash.rip?rev=1', 'export nothing = 1');
+    table.set('/@rip/cells/app/stash.rip?rev=2', 'export appStash = {}');
+    const hub = fakeHub();
+    const reports = [];
+    const { result, target } = await bootWorkspace({ table, hub, reports });
+    try {
+      await until(() => target.textContent.includes('home v1'));
+      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/stash.rip', rev: 1 } }) });
+      await until(() => result.workspace.passport('app/stash.rip')?.rev === 1);
+      await settleEscape();
+      await until(() => reports.some(line => line.includes('remount failed')));
+      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/stash.rip', rev: 2 } }) });
+      await until(() => result.workspace.passport('app/stash.rip')?.rev === 2);
+      await settleEscape();
+      await until(() => target.textContent.includes('home v1'));
+    } finally {
+      result.destroy();
+    }
+  });
+
   test('a delete ding removes the passport and the remount survives against the shrunken bag', async () => {
     const hub = fakeHub();
     const { result } = await bootWorkspace({ table: manifestTable(), hub });
