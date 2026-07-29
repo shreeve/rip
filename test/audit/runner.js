@@ -343,6 +343,34 @@ const wrapText = (text, width, indent) => {
 const wrapAt = (indent, text) => {
   for (const l of wrapText(text, TERM_W - indent, 2)) console.log(' '.repeat(indent) + l);
 };
+// A LABEL COLUMN followed by prose — an excluded spelling and its reason, a
+// held kind and what holds it. `out` hangs a wrap two spaces in from the
+// line's own indent, which is right for a paragraph and wrong here: the
+// continuation lands back under the LABEL, so a wrapped reason reads as a
+// second row with a blank label rather than as more of the first. The hang
+// belongs at the prose's own column, and only the caller knows where that is,
+// so it is passed rather than inferred. Both halves are then measured against
+// it: a reason that wraps stays inside its own column for as long as it runs.
+// Rows sharing a reason VERBATIM are one ruling, not several, so they share a
+// row. Printing the sentence once per key turns a two-decision table into a
+// wall a reader has to diff against itself to notice the repetition — and the
+// repetition is the point being missed: `on` and `yes` are excluded for the
+// same reason because they are the same case. Keys keep table order, and the
+// grouping collapses to one-per-row on its own when the reasons differ.
+const groupByReason = (entries) => {
+  const g = new Map();
+  for (const [k, why] of entries) {
+    if (!g.has(why)) g.set(why, []);
+    g.get(why).push(k);
+  }
+  return [...g].map(([why, keys]) => [keys.join(', '), why]);
+};
+const labeled = (indent, label, width, text, paintLabel = (s) => s) => {
+  const gutter = indent + width + 1;
+  const lines = wrapText(text, TERM_W - gutter, 0);
+  console.log(' '.repeat(indent) + paintLabel(pad(label, width)) + ' ' + dim(lines[0]));
+  for (const l of lines.slice(1)) console.log(' '.repeat(gutter) + dim(l));
+};
 // `wrapAt` for a line that is already fully composed — leading blank lines,
 // indent and all. It reads the indent off the string rather than being told
 // it, so converting a prose call site is `console.log` → `out` and nothing
@@ -1949,7 +1977,13 @@ if (RUN_GRAMMAR) {
   console.log(`    ${(uncovered.length ? yellow : green)(String(denom.length - uncovered.length))} ${dim('/')} ${dim(String(denom.length))} ${dim(`productions (${pct}%)`)}`);
   if (excludedIdx.length) {
     out(`    ${dim(`${excludedIdx.length} excluded by the gate (unreachable, banned, or coverable only by a fixture that asserts nothing) — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`)}`);
-    if (VERBOSE) for (const i of excludedIdx) out(`        ${dim(names[i])} ${dim('·')} ${dim(EXCLUDED.get(names[i]))}`);
+    // A production name is itself most of a line, so its reason goes BENEATH
+    // rather than beside: a label column that wide leaves the prose a gutter
+    // too narrow to read, and the pair is legible stacked.
+    if (VERBOSE) for (const i of excludedIdx) {
+      out(`        ${dim(names[i])}`);
+      out(`          ${dim(EXCLUDED.get(names[i]))}`);
+    }
   }
   // Both directions of the exclusion table's self-policing, printed where the
   // exclusions are: a claim that a production is unreachable is refuted by the
@@ -2327,8 +2361,14 @@ if (RUN_GRAMMAR) {
     // as the worst mark on the screen, which is a comparison the prose then
     // has to spend a sentence undoing. A count of what is tracked carries the
     // same information and invites no ranking against the obligations.
-    out(`    ${dim(`${spellings.length} spellings tracked`)}${dim(` · ${rewritten.length} read live from the lexer's alias table, ${MINTS.length} hand-listed with a probe each`)}${EXCLUDED_SPELLINGS.size ? dim(` · ${EXCLUDED_SPELLINGS.size} excluded by the gate — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`) : ''}`);
-    if (VERBOSE) for (const [s, why] of EXCLUDED_SPELLINGS) out(`        ${pad(s, 8)} ${dim(`excluded — ${why}`)}`);
+    // `after N exclusions` rather than a trailing `N excluded — netted from
+    // the denominator`: the count leads the denominator it already belongs
+    // to, the way the productions banner states its own, and the clause the
+    // sentence used to spend on saying so is the clause it no longer needs.
+    // The alias table needs no owner named — this is the LEXER-spelling
+    // census, and it has only one.
+    out(`    ${dim(`${spellings.length} spellings${EXCLUDED_SPELLINGS.size ? ` after ${EXCLUDED_SPELLINGS.size} exclusions${VERBOSE ? '' : ' (-v lists them)'}` : ''} · ${rewritten.length} read live from the alias table, ${MINTS.length} hand-listed, each probed`)}`);
+    if (VERBOSE) for (const [label, why] of groupByReason(EXCLUDED_SPELLINGS)) labeled(8, label, 8, `excluded — ${why}`);
     if (darkSpellings.length) {
       out(`    ${yellow(`${darkSpellings.length} never written by the corpus — candidates, not obligations:`)}`);
       for (const s of darkSpellings) console.log(`        ${yellow(pad(s.spelling, 8))} ${dim(`→ ${s.becomes}`)}`);
@@ -2351,14 +2391,14 @@ if (RUN_GRAMMAR) {
         : heldKinds.length ? `${writable} a fixture could claim today, ${heldKinds.length} held by an open finding` : 'the vocabulary queue'}:`)}`);
       for (const k of kindQueue) {
         const held = HELD_KINDS.get(k);
-        if (held) out(`        ${yellow(pad(k, 26))} ${dim(`· held by ${held}`)}`);
+        if (held) labeled(8, k, 26, `· held by ${held}`, yellow);
       }
       const free = kindQueue.filter((k) => !HELD_KINDS.has(k));
       if (free.length) wrapList(free, yellow);
     } else out(`    ${green('every kind claimed or excluded')}`);
     for (const k of heldKinds.filter((k) => claimedSet.has(k))) out(`    ${red('✗')} ${red('held but claimed:')} ${k} ${dim('— the finding closed; drop the hold')}`);
     for (const k of staleHeldKinds) out(`    ${red('✗')} ${red('held kind not in the universe:')} ${k} ${dim('— stale; fix the census hold table')}`);
-    if (VERBOSE) for (const [k, why] of EXCLUDED_KINDS) out(`        ${pad(k, 26)} ${dim(`excluded — ${why}`)}`);
+    if (VERBOSE) for (const [label, why] of groupByReason(EXCLUDED_KINDS)) labeled(8, label, 26, `excluded — ${why}`);
     for (const k of claimedOutside) out(`    ${red('✗')} ${red('claimed kind outside the census universe:')} ${k} ${dim('— extend the universe derivation in classifyTypeTexts')}`);
     for (const k of falseKindExclusions) out(`    ${red('✗')} ${red('excluded but claimed:')} ${k} ${dim("— the exclusion claim is false; fix the census exclusion table")}`);
     for (const k of staleKindExclusions) out(`    ${red('✗')} ${red('excluded kind not in the universe:')} ${k} ${dim("— stale; fix the census exclusion table")}`);
