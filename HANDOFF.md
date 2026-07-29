@@ -1,11 +1,12 @@
-# HANDOFF — session launch document (2026-07-28, evening)
+# HANDOFF — session launch document (2026-07-29, ~1am)
 
 The tracked session launch document (see AGENTS.md, working ledgers):
 read it first when starting a session; rewrite it at session
 boundaries with live-verified facts only. Every fact below was
-verified live on 2026-07-28 evening (UTC-6) against git, the files,
-fresh suite runs, and two live end-to-end runs through a real Janus
-binary, except where an older verification date is stated explicitly.
+verified live on 2026-07-28 evening → 2026-07-29 ~1am (UTC-6) against
+git, fresh suite runs, an independent cold review, and live end-to-end
+runs through a real Janus binary, except where an older verification
+date is stated explicitly.
 
 ## Orientation
 
@@ -13,11 +14,11 @@ binary, except where an older verification date is stated explicitly.
   `~/Data/Code/rip-v4` is DEAD; do not work there.
 - v3 oracle: `~/Data/Code/rip-lang` — read-only reference, never edit.
 - Janus: `~/Data/Code/janus` — the Caddy-module edge server, its own
-  repo. `./bin/caddy` there is a working Janus binary (built
-  2026-07-28); `./bin/caddy run --config Caddyfile` starts the dev
-  edge (control `http://127.0.0.1:7600`, hub at `/hub`,
-  `*.ripdev.io → 127.0.0.1` with a trusted wildcard cert;
-  `hubany.ripdev.io` accepts non-browser WebSocket clients).
+  repo. `./bin/caddy` there is a working Janus binary;
+  `./bin/caddy run --config Caddyfile` starts the dev edge (control
+  `http://127.0.0.1:7600`, hub at `/hub`, `*.ripdev.io → 127.0.0.1`
+  with a trusted wildcard cert; `hubany.ripdev.io` accepts non-browser
+  WebSocket clients).
 - `AGENTS.md` is doctrine. Read it before touching code. Key rules:
   reject loudly; fix at the owning layer; never hand-edit
   `src/parser.js` (regen via `bun run parser`); output changes land
@@ -29,129 +30,124 @@ binary, except where an older verification date is stated explicitly.
   `bun run parser` · `bun run corpus-expected` ·
   `bun run browser-bundle` (regenerates `dist/browser/rip.js`).
 
-## Branch topology (verified live)
+## PR #187 LANDED — the workspace branch is merged and deleted
 
-- **Local `main` is at `965baf2`** — "WORKSPACE rulings Q6–Q9" —
-  **ahead 1 of `origin/main`, unpushed** (nothing is pushed without
-  explicit owner approval; that agreement stands).
-- **Branch `workspace` is checked out at `7af886c`, 9 commits ahead
-  of local main, working tree clean.** This is the session's work,
-  in order:
-  1. `d6da2bd` — `launch()` accepts an injected components store (Q7).
-  2. `3e639e3` — `packages/workspace`: the passport bag
-     (populate/set/seal door, Q8 rev cursor, ComponentsStore view).
-  3. `9eee092` — manager `--bridge` flag + `publish()` control client.
-  4. `f2df9c3` — `client()` browser-delivery surface (boot page,
-     bundle ETag/304, runtime, SPA fallback; manager assembles per
-     epoch; workers never carry the compiler).
-  5. `f6fec3c` — workspace feed: the hub subscriber (`connectFeed`).
-  6. `b4944b7` — the thin feed under `RIP_WORKSPACE=1`: client-only
-     saves feed the live pool in place (rev-keyed immutable cells,
-     atomic manifest, `/rip/dev` dings, `kind: delete`, bridge
-     enrollment); flag off is byte-identical.
-  7. `96edb5a` — the door in the browser: `bootApp` workspace mode
-     (bag from manifest, compile-through door, coalesced remount
-     labeled escape); three-engine Playwright pins.
-  8. `dc89f9b` — boot page opens the door only in worker mode.
-  9. `7af886c` — **client tree vocabulary: `app/` replaces `client/`
-     with `_app/` and `_route/`** (owner ruling, this session): the
-     disk path IS the store path. Route components live under
-     `app/routes/` (the route root), the stash contract is
-     `app/stash.rip`, cell ids and dings carry the same paths
-     (`app/mood.rip`). `client()` defaults to the `app/` dir.
-     Pulse (`examples/pulse/`) landed in this layout.
-- No PR exists for `workspace` yet. It is a big merge: AGENTS.md
-  rule 10 applies (independent empirical verification + at least one
-  genuinely COLD review) before it lands in main.
+- **`main` is at `479a82e`** — "PR #187 — Rip Workspace: the door, the
+  thin feed, and live HMR through Janus" — a TRUE MERGE commit (rule
+  9), local and origin in sync. Ancestry verified live:
+  `git merge-base --is-ancestor 8cd0a82 main` holds (the branch tip is
+  an ancestor of main). The `workspace` branch is deleted local and
+  remote.
+- The landed arc (20 commits): rulings Q6–Q9 · `packages/workspace`
+  (the passport bag: populate/set/seal door, Q8 rev cursor, drop-in
+  ComponentsStore view) · `launch()` takes an injected store ·
+  manager `--bridge` + `publish()` control client · `client()`
+  browser-delivery surface (boot page, bundle ETag/304, runtime, SPA
+  fallback) · the thin feed under `RIP_WORKSPACE=1` (rev-keyed
+  immutable cells, atomic manifest, `{id, rev}` dings on `/rip/dev`,
+  `kind: delete`; flag off byte-identical) · `connectFeed` (the hub
+  subscriber) · `bootApp` workspace mode (bag from manifest,
+  compile-through door, coalesced **remount labeled escape**; the
+  remount rebuilds projections THROUGH the loader so a dinged
+  dependency's importers recompile) · the `app/` client-tree
+  vocabulary (disk path IS store path; `app/routes/`, `app/stash.rip`)
+  · the `/@rip/` reserved namespace (Vite-style, replaced `/__rip/`) ·
+  an emitter fix (a factory block's `_first` latch reassigns only when
+  the child IS the block's first top-level node — a NotFoundError was
+  silently halting list reconciliation; pinned) · `examples/pulse`
+  (four demo legs) · the cold-review findings ledgered in TODO.md.
 
-## Suites (re-run live at this handoff, on `7af886c`)
+## Suites (all verified this session, on the landed tree)
 
-- repo-root `bun run test:all` → **6116 pass / 0 fail** (56.7s).
-- `packages/server` suite (`rip test.rip`) → **161/161**.
-- `packages/app` suite (`rip test`) → **281 pass / 1 skip / 0 fail**.
-- `packages/workspace` suite → **56/56**.
-- Playwright certification (`packages/browser-tests`,
-  `bunx playwright test`) → **16 pass / 2 skip** across chromium,
-  firefox, webkit — including the workspace ding spec.
-- `bun run audit` was NOT re-run this session (no editor-surface
-  changes); last verified on main `b2594e8` midday: contract holding,
-  15 green / 3 red by agreement.
+- repo-root `bun run test:all` → **6118 pass / 0 fail** (51s) — run by
+  me AND independently by the cold reviewer.
+- `packages/vscode` `bun run test` → **128 pass / 0 fail**.
+- Playwright certification (`packages/browser-tests`) → **16 pass /
+  2 skip** across chromium, firefox, webkit (incl. the workspace ding
+  spec).
+- Package suites (cold reviewer's runs): workspace **56/56**, server
+  **161/161**, app **281 pass / 1 skip**. Note: root `test:all`
+  mechanically excludes `packages/**` (bunfig pathIgnorePatterns), so
+  these are additional coverage.
+- `bun run audit` NOT re-run (no editor-surface changes); last
+  verified midday 2026-07-28: 15 green / 3 red by agreement.
 
-## Live end-to-end through real Janus (the session's proof)
+## Rule 10 discharged (this landing)
 
-Two full runs through the actual edge binary, both verified at this
-handoff (processes started, driven, and torn down; nothing left
-running):
+An adversarial COLD review (a fresh agent, zero context on rationale)
+ran before the merge. Verdict: **safe to land, zero blockers** — the
+flag-off contract holds and is pinned, the emitter fix introduces no
+evaluation-count or scope-capture hazard, the cell route resists path
+traversal (decode → re-encode canonicalization), no pre-existing
+acceptance criterion was weakened. **Five should-fixes + three nits,
+all inside the experimental `RIP_WORKSPACE=1` surface, are ledgered in
+TODO.md** ("Cold-review should-fixes"). The two that head the list are
+silent-stale races (the doctrine's named worst class, contained by the
+flag): the browser door mutates the loader before the bag's rev
+verdict, and boot pairs the manifest rev with uncorrelated bundle
+bytes.
 
-1. A scratch app, then 2. **Pulse** (`examples/pulse`) — both under
-   `RIP_WORKSPACE=1 rip server … --host hubany.ripdev.io --bridge
-   /hub` against Janus's dev Caddyfile. Verified on the wire:
-   registration with `bridge_path` in the registry read-back; the
-   boot page over HTTPS carrying `workspace: true`; the no-store
-   manifest; API routes proxied; a live WebSocket on the edge hub;
-   a client-file save producing exactly one ding frame
-   (`{"ding":{"id":"app/mood.rip","rev":2}}` for Pulse's documented
-   demo edit); the manifest rev bump; the rev-keyed immutable cell
-   answering the new bytes; old revs still answering. No bodies ever
-   rode the socket.
-- Pulse standalone (`rip app.rip` from `examples/pulse`) also
-  verified live: bundle ships `app/mood.rip`, `app/routes/index.rip`,
-  `app/stash.rip`; API and boot page answer.
-- Operational note from the runs: `rip server` dispatches through the
-  generic `rip-<name>` fallback, so it needs `rip-server` discoverable
-  (repo checkout: run `packages/server/server.rip` directly with the
-  loader preload, as its tests do, or use `bun run link-global`).
+## Live end-to-end (the session's proof, all four Pulse legs)
 
-## The new client-tree vocabulary (owner ruling 2026-07-28)
+`examples/pulse` behind a real Janus binary
+(`RIP_WORKSPACE=1 rip server app.rip --name pulse --host
+pulse.ripdev.io --bridge /hub`):
 
-`client/`, `_app/`, and `_route/` are GONE from the vocabulary. The
-browser app lives in `app/` next to the server entry; every `.rip`
-under it is a bundle module keyed by its disk path — the disk path IS
-the store path, the cell id, and the ding id. Route components live
-under `app/routes/` (`buildRoutes` root default); the stash contract
-is `app/stash.rip`. Files/dirs starting with `_` inside the route
-tree stay non-routable (`_layout.rip` unchanged). The full-rename
-scope (ids, manifest, dings — not a disk-only alias) was the owner's
-explicit choice.
+- Leg 1 standalone and Leg 2 pooled: boot page, bundle, API, all
+  verified. (A worker-mode gate keeps `workspace: true` out of
+  standalone boots.)
+- Leg 3 the door: `app/mood.rip` saves produced exactly one
+  `{"ding":{id,rev}}` per save on the wire; pages fetched the
+  rev-keyed cell over `/@rip/cells/…` and applied by remount — many
+  consecutive live edits applied cleanly, including edits made WHILE
+  the collaboration test ran.
+- Leg 4 live collaboration: a status posted in one browser window
+  appeared in a second untouched window — the page self-enrolls its
+  `/hub` socket into `/pulse` (client-legal `{"+":[…]}` join) and the
+  poster announces `{"@":["/pulse"],changed:{}}`; members refetch the
+  API. The frame is a hint, the data rides HTTP; the worker holds no
+  sockets. Zero framework changes — app-level code only.
+- **Still running on this machine at handoff** (deliberately left up —
+  the owner was live-driving the demo): Janus
+  (`~/Data/Code/janus`, `./bin/caddy run`, log
+  `/tmp/janus-pulse-caddy.log`) and the Pulse manager
+  (`examples/pulse`). Kill or reuse freely next session.
 
 ## Rip Workspace state
 
-docs/WORKSPACE.md is the constitution; Q1–Q9 locked (Q6 M0/M1
-independent exits, Q7 the bag subsumes the component store, Q8
-rev-keyed cell freshness, Q9 package shape). M1 Probe 0 is DONE end
-to end on the `workspace` branch: door + thin feed + browser apply by
-**remount labeled escape** (never called hot apply). Open edges:
+docs/WORKSPACE.md is the constitution; Q1–Q9 locked. M1 Probe 0 is
+DONE and LANDED: door + thin feed + browser apply by **remount labeled
+escape** (never called hot apply). Open, in priority order:
 
-- **Apply quality is the M1 exit criterion still open** — the escape
-  remounts the whole launch per change batch; hot apply is future
-  work per the research-first ruling (Q5).
-- **Epoch-path dings** (TODO.md): a full pool reload (server-file
-  save) sends no ding, so an open page learns about a new epoch only
-  by user refresh. Deliberately open.
-- **Id persistence across renames** is open research (a rename today
-  is retire + mint at rev 1).
-- `rip.browser` granularity stays on the owner's deferred docket.
+- **Hot apply (M2 apply quality)** — swap a component's implementation
+  under live instances with state intact; remount stays the
+  always-correct fallback. The seams are ready (versioned bag,
+  per-cell dings, transitive loader invalidation); the work is the
+  apply policy in `src/browser-boot.js`. Start here — and take the two
+  silent-stale should-fixes (TODO.md) first or alongside: they live in
+  the same file.
+- Epoch-path dings, the one unexplained missed ding, the no-retry
+  resync gap — all ledgered in TODO.md with reproduction notes.
+- Id persistence across renames is open research (rename = retire +
+  mint at rev 1). `rip.browser` granularity stays on the owner's
+  deferred docket.
 
-## State of main (unchanged since midday handoff)
+## State of main (beyond the workspace arc)
 
-PR #186 merged (`b2594e8`), then `965baf2` (Q6–Q9 rulings) landed
-locally on top. The findings road: #21 heads it (identifier read
-mappings), then #22, #40, #42. The owner's deferred docket stands:
-findings #36/#45/#46, `rip.browser` granularity, misc/ triage, and
-the bare-optional-parameters contract — do not resolve unilaterally.
+The findings road: #21 heads it (identifier read mappings), then #22,
+#40, #42. The owner's deferred docket stands: findings #36/#45/#46,
+`rip.browser` granularity, misc/ triage, and the bare-optional-
+parameters contract — do not resolve unilaterally.
 
 ## Next session: recommended starting point
 
-- **Land the `workspace` branch**: adversarial review with a COLD
-  pass (rule 10), decide the PR shape, obtain owner approval to push.
-  The branch is green on every suite named above.
-- **Or push M1 forward on apply quality** (component-level hot apply
-  behind the same flag), with the escape as the always-correct
-  fallback.
-- The findings road (#21) remains the main-branch queue if the
-  session is compiler/editor-directed instead.
+- **Hot apply** (M2), leading with the two silent-stale should-fixes —
+  red pins first (concurrent dings out of order; a save landing
+  between the boot's bundle and manifest fetches).
+- Or the findings road (#21) if the session is compiler/editor-
+  directed.
 
-## Upstream Bun thread (NOT re-verified this session; as of midday)
+## Upstream Bun thread (NOT re-verified this session; as of 07-28)
 
 - PR [oven-sh/bun#29291](https://github.com/oven-sh/bun/pull/29291)
   (ESM bytecode without `--compile`): OPEN, sole gate codeowner
@@ -166,14 +162,15 @@ the bare-optional-parameters contract — do not resolve unilaterally.
 - PRs land as TRUE MERGE commits — never squash-merged, never
   rebase-merged (AGENTS.md rule 9). Landing subject:
   `PR #N — <PR title>` via
-  `gh pr merge N --merge --subject "PR #N — <title>"`.
+  `gh pr merge N --merge --subject "PR #N — <title>"`. (#187 landed
+  exactly this way, with explicit owner approval to push.)
 - HANDOFF.md is tracked and rewritten at session boundaries with
   live-verified facts (owner ruling).
 - Shared branches catch up by MERGE, never rebase; never force-push.
 - Nothing pushed or posted without explicit owner approval.
 - Red pin before fix: reproduce the defect as a failing test first.
 - Adversarial review with at least one genuinely COLD pass before big
-  merges (rule 10; proven by #176's cold-caught defects).
+  merges (rule 10; discharged for #187, proven by #176 before it).
 - Every bug is fixed at the layer that owns it (rule 4).
 - Anything posted publicly is fact-checked claim-by-claim first.
 
@@ -181,18 +178,24 @@ the bare-optional-parameters contract — do not resolve unilaterally.
 
 - `test/audit/` needs its own `bun install` (fixture corpus) before
   `bun run audit` — done on this machine 2026-07-28.
-- Janus dev runs unprivileged from its checkout; my session started
-  and stopped it cleanly twice. Scratch evidence from the live runs:
-  `/tmp/janus-smoke/` (logs + WS driver) — disposable.
-- The unnamed test:all flake watch stands (two sightings 2026-07-20/21
-  plus one audit-lane sighting 2026-07-28 midday; all unreproduced).
-  Every run this session was green. If a logged run ever fails,
-  capture the test NAME verbatim.
+- The working tree carries ONE deliberate uncommitted edit:
+  `examples/pulse/app/mood.rip` (the owner's live demo playground,
+  label experiments). Do not commit or revert it without asking.
+- `rip test` (the CLI wrapper) exits 0 on "No tests found" — a
+  silent-success edge that predates the workspace branch, noticed by
+  the cold reviewer. The contract-standard invocation for package
+  suites is `bun run test` inside the package (which runs
+  `rip test.rip`).
+- The unnamed test:all flake watch stands (two sightings
+  2026-07-20/21 plus one audit-lane sighting 2026-07-28 midday; all
+  unreproduced). Every run this session was green. If a logged run
+  ever fails, capture the test NAME verbatim.
 - Background subagents intermittently stall right after their opening
   message (three occurrences 2026-07-21; recurred 2026-07-28).
   Recovery that works every time: interrupt + resume with "restate
   your mandate and proceed". Detection: transcript mtime AND repo-tree
-  writes AND new commits all stale >10 min.
+  writes AND new commits all stale >10 min. (The cold reviewer this
+  session ran clean.)
 - `.handoff/bunpr-bench` — Bun #29291 validation evidence, in-repo but
   git-invisible via `.git/info/exclude`. KEEP while #29291/#34835 are
   open.
