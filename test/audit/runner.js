@@ -432,18 +432,23 @@ const AUDITS = [
     judge: 'the COMPILER OUTPUT alone — no server, no tsgo, no twin. A read is `placed`\n'
          + 'when the precise map resolves it and `text`-true when that position holds its\n'
          + 'own bytes; each failure is classified by the mapping row it fell to. The\n'
-         + 'walk itself has NO per-run reference: its logic was driven against the real\n'
-         + 'editor once (ROADMAP.md, M1) and the server-backed scaffolds retired, so it\n'
-         + 'catches CHANGE reliably and would not notice its own resolver drifting',
+         + 'walk needs no reference to run: `text` is a PROPERTY, not a comparison, so\n'
+         + 'drift toward wrong positions surfaces as a rising count. Its blind spot is\n'
+         + 'that byte-equality is not identity — a read resolving onto a DIFFERENT\n'
+         + 'occurrence of the same name passes both invariants. The logic was driven\n'
+         + 'against the real editor once (ROADMAP.md, M1); nothing re-drives it',
   },
   {
     key: 'main', flag: '--type', name: 'Type Audit',
     runs: 'compiles, runs, and type-checks each fixture',
     blurb: 'five dimensions per fixture: compiles, verdict, runtime, twin, strict',
-    judge: 'the fixtures themselves. No positive fixture may carry a suppression\n'
-         + 'directive (the preflight refuses them): every fixture must publish ZERO\n'
-         + 'diagnostics, its negatives living in corpus/errors/ under the Diagnostics\n'
-         + 'Lane.',
+    judge: 'a DIFFERENT reference per dimension, which is why there are five:\n'
+         + '`compiles` and `runtime` against the fixture running, `twin` against the\n'
+         + 'hand-written .ts/.tsx beside it, `verdict` against zero published\n'
+         + 'diagnostics, `strict` against `rip check` over the whole corpus. No\n'
+         + 'positive fixture may carry a suppression directive (the preflight refuses\n'
+         + 'them): every fixture publishes ZERO diagnostics, its negatives living in\n'
+         + 'corpus/errors/ under the Diagnostics Lane',
   },
   {
     key: 'errors', flag: '--diagnostics', name: 'Diagnostics Lane',
@@ -477,7 +482,7 @@ const AUDITS = [
 ];
 const FLAGS = [
   ['--serial', 'probe one fixture at a time — the control for the concurrent pass'],
-  ['--verbose', '-v', '+ expected hover divergences, unasserted tokens, and every flagged mapping read, in full'],
+  ['--verbose', '-v', 'every list a section summarizes — exclusions, queue members, claims rows, hover divergences, unasserted tokens, and every flagged mapping read'],
   ['--help', '-h', 'this message'],
 ];
 // Every accepted flag: the audits' own, plus the modifiers above (a row may
@@ -500,10 +505,10 @@ const usage = () => {
     return [`  ${label.padEnd(16)} ${first}`, ...more.map((l) => ' '.repeat(19) + l)];
   };
   return [
-    ...para('The audit gauge — a progress scoreboard (not a pass/fail gate) for rip\'s typed-editor story: '
-      + 'the TypeScript view the compiler shows a checker (the FACE) plus the tsgo-brokered editor, '
-      + 'measured over the typed fixtures in ./corpus. '
-      + 'Not part of `bun test`.', 0, 0),
+    ...para('The audit — a scoreboard for rip\'s typed-editor story over the typed fixtures in ./corpus: the '
+      + 'TypeScript view the compiler shows a checker (the FACE), plus the tsgo-brokered editor. '
+      + 'GAUGE AND GATE at once: most of what it prints is a queue whose size is work remaining, and the '
+      + 'CONTRACT at the foot of the run is what decides the exit code. Not part of `bun test`.', 0, 0),
     '',
     'Usage: bun run audit [flag]',
     '',
