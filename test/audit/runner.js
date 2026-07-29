@@ -3394,17 +3394,19 @@ if (RUN_HOVER || RUN_TOKENS) {
   // CPU. Equivalence with a serial run rests on the per-lane servers (each lane
   // probes into its own program, never a shared one), NOT on the oracles noticing
   // cross-talk afterwards. Results land in fixture order.
-  const probed = await lanes(fixtures, probeOne, { width: LANES });
-  {
-    const shown = probed.filter(Boolean);
-    const DW = Math.max(1, ...shown.map((r) => String(r.decls).length));
-    const TW = Math.max(1, ...shown.map((r) => String(r.tokens ?? 0).length));
-    for (const r of shown) {
-      console.log(`    ${green('✓')} ${pad(r.file, NAME_W + 2)} `
-        + dim(String(r.decls).padStart(DW) + ` decl${r.decls === 1 ? '' : 's'}`)
-        + (r.tokens === null ? '' : dim('   ' + String(r.tokens).padStart(TW) + ` token${r.tokens === 1 ? '' : 's'}`)));
-    }
-  }
+  // Rows STREAM as each fixture returns: this pass takes about fourteen
+  // seconds and prints nothing else, so buffering it to align a column traded
+  // the only progress the run shows for two spaces of tidiness. The width is
+  // still derived rather than picked — a fixture cannot declare more names
+  // than it has lines, so the longest fixture's line count is an upper bound
+  // available before the first probe returns. It over-pads by at most a
+  // column, and `padStart` never truncates, so a surprise is a wide row and
+  // not a lost digit.
+  const CW = String(Math.max(1, ...fixtures.map((f) => fs.readFileSync(fixPath(f), 'utf8').split('\n').length))).length;
+  const probeRow = (r) => console.log(`    ${green('✓')} ${pad(r.file, NAME_W + 2)} `
+    + dim(String(r.decls).padStart(CW) + ` decl${r.decls === 1 ? '' : 's'}`)
+    + (r.tokens === null ? '' : dim('   ' + String(r.tokens).padStart(CW) + ` token${r.tokens === 1 ? '' : 's'}`)));
+  const probed = await lanes(fixtures, probeOne, { width: LANES, onDone: (r) => r && probeRow(r) });
   for (const r of probed) if (r?.probe) PROBES.set(r.file, r.probe);
 
   console.log(`\n    ${dim(`probed ${PROBES.size} file${PROBES.size === 1 ? '' : 's'} in ${((Date.now() - t0) / 1000).toFixed(1)}s`)}`);
@@ -3687,11 +3689,24 @@ if (RUN_HOVER) {
     for (const s of silentLeaks) out(`      ${red('✗')} ${s.file}:${s.line + 1}  ${dim(`→ ${s.hover}`)}`);
   }
   if (ruledDiverging.length) {
+    // 63 lines — the largest block left in the report, and every row of it is
+    // red BY AGREEMENT: it cannot move until the render-DSL and member-wrapper
+    // findings close, so each run reprints yesterday's state at three lines a
+    // row. The `ruled` fraction above carries the count; what survives here is
+    // WHICH RULES are diverging, since that is the part that would change if
+    // one of them were fixed alone.
     out(`\n    ${bold('Ruled positions diverging from their pins')} ${dim('(RULINGS.md, Components / render; red by agreement while the render-DSL and member-wrapper findings are open)')}`);
-    for (const r of ruledDiverging) {
-      console.log(`      ${red('✗')} ${r.file}:${r.line}:${r.character} ${bold(r.token)} ${dim(`[${r.rule}]`)}`);
-      out(`        ${dim('pin')} ${green(JSON.stringify(r.expect ?? null))}`);
-      out(`        ${dim('now')} ${yellow(JSON.stringify(r.hover ?? null))}`);
+    if (VERBOSE) {
+      for (const r of ruledDiverging) {
+        console.log(`      ${red('✗')} ${r.file}:${r.line}:${r.character} ${bold(r.token)} ${dim(`[${r.rule}]`)}`);
+        out(`        ${dim('pin')} ${green(JSON.stringify(r.expect ?? null))}`);
+        out(`        ${dim('now')} ${yellow(JSON.stringify(r.hover ?? null))}`);
+      }
+    } else {
+      const byRule = new Map();
+      for (const r of ruledDiverging) byRule.set(r.rule, (byRule.get(r.rule) ?? 0) + 1);
+      const ranked = [...byRule].sort((a, b) => b[1] - a[1]).map(([rule, n]) => (n > 1 ? `${rule} ×${n}` : rule));
+      out(`      ${dim(`${ruledDiverging.length} across ${byRule.size} ruled position${byRule.size === 1 ? '' : 's'}: ${ranked.join(', ')}; -v shows each pin and answer`)}`);
     }
   }
   if (VERBOSE) for (const [label, rowset] of [['rip-native (expected divergences — twin uses React/zod)', natives], ['pinned-only (no twin symbol)', pinnedOnly]]) {
@@ -3812,29 +3827,44 @@ if (RUN_TOKENS) {
     // rather than at the line's indent, where it would read as a nameless
     // second row. The lead is composed first and measured, because the
     // optional violation count moves the column.
-    const irow = (label, bad, den, note) => {
-      const lead = `    ${pad(label, 12)} ${(bad ? red : green)(String(den - bad).padStart(3))} ${dim('/')} ${dim(String(den).padStart(3))}${bad ? '   ' + yellow(`${bad} violation${bad === 1 ? '' : 's'}`) : ''}   `;
-      noteWrap(lead, note ?? '');
-    };
+    // Rows buffer so the fraction and the shortfall each get ONE column: the
+    // numerators run 12 to 2535 and the denominators 22 to 2933, so printing
+    // each as it came put every slash at a different place. The shortfall
+    // keeps three different WORDS on purpose — `violations` is a fresh
+    // regression, `gaps` and `drops` are the known mapping hole — so its
+    // number aligns and its word runs on.
+    const irows = [];
+    let driftNote = 0;
+    const irow = (label, bad, den, note, word = 'violation') =>
+      irows.push({ label, ok: den - bad, den, bad, word, note: note ?? '' });
     const noteWrap = (lead, note) => {
       const col = visibleW(lead);
       const lines = note ? wrapText(note, TERM_W - col, 0) : [''];
       console.log(lead + dim(lines[0]));
       for (const l of lines.slice(1)) console.log(' '.repeat(col) + dim(l));
     };
+    const flushIrows = () => {
+      const OW = Math.max(...irows.map((r) => String(r.ok).length));
+      const DW = Math.max(...irows.map((r) => String(r.den).length));
+      const BW = Math.max(0, ...irows.filter((r) => r.bad).map((r) => String(r.bad).length));
+      const SW = Math.max(0, ...irows.filter((r) => r.bad).map((r) => `${r.bad} ${r.word}${r.bad === 1 ? '' : 's'}`.length + (BW - String(r.bad).length)));
+      for (const r of irows) {
+        const short = r.bad ? String(r.bad).padStart(BW) + ` ${r.word}${r.bad === 1 ? '' : 's'}` : '';
+        const lead = `    ${pad(r.label, 12)} ${(r.bad ? red : green)(String(r.ok).padStart(OW))} ${dim('/')} ${dim(pad(String(r.den), DW))}`
+          + (SW ? '   ' + yellow(pad(short, SW)) : '') + '   ';
+        noteWrap(lead, r.note);
+      }
+    };
     irow('present', missing.length, probed, 'a declared name gets a token');
     irow('type', badType.length, typeAsserted, `token type matches the declaring form${unasserted.length ? ` · ${unasserted.length} unasserted` : ''}`);
-    irow('readonly', badReadonly.length, roAsserted, `readonly IFF the binding is immutable in rip${probed - roAsserted ? ` · ${probed - roAsserted} n/a` : ''}`);
+    irow('readonly', badReadonly.length, roAsserted, `readonly IFF the binding is immutable in rip${probed - roAsserted ? ` · ${probed - roAsserted} unasserted` : ''}`);
     // Type-body member presence — EXPECTED RED (the mapping gap), the token
     // twin of the `strict` gauge. Its own line so the wording is "gap" (a
     // known-open hole), not "violation" (a fresh regression), and green means
     // the mapping fix has landed and this gauge should be retired.
-    {
-      const gaps = memberMissing.length;
-      const note = gaps ? yellow(`${gaps} gap${gaps === 1 ? '' : 's'}`) + '   ' + dim('type-body member tokens drop — expected red until the mapping fix')
-                        : dim('type-body member tokens — the mapping fix appears to have landed; retire this gauge');
-      noteWrap(`    ${pad('member', 12)} ${(gaps ? red : green)(String(memberProbed - gaps).padStart(3))} ${dim('/')} ${dim(String(memberProbed).padStart(3))}   `, note);
-    }
+    irow('member', memberMissing.length, memberProbed,
+      memberMissing.length ? 'type-body member tokens drop — expected red until the mapping fix'
+                           : 'type-body member tokens — the mapping fix appears to have landed; retire this gauge', 'gap');
     // Face-survival — USE-SITE token drops (the mapping gap), the direction the
     // source-enumerated invariants above cannot see: a classified source
     // identifier the server drops, covering use sites AND rip-native names with
@@ -3843,17 +3873,21 @@ if (RUN_TOKENS) {
     // so the ratio reads as delivery FIDELITY.
     if (facesAvailable) {
       const dropTotal = survDrops.reduce((n, d) => n + d.count, 0);
-      const den = survSurvived + dropTotal;
-      const note = dropTotal ? yellow(`${dropTotal} drop${dropTotal === 1 ? '' : 's'}`) + '   ' + dim('identifiers tsgo tokenizes that the server never ships at a use site — expected red until the mapping fix')
-                             : dim('use-site tokens — the mapping fix appears to have landed; retire this gauge');
-      noteWrap(`    ${pad('use-site', 12)} ${(dropTotal ? red : green)(String(survSurvived).padStart(3))} ${dim('/')} ${dim(String(den).padStart(3))}   `, note);
+      irow('use-site', dropTotal, survSurvived + dropTotal,
+        dropTotal ? 'identifiers tsgo tokenizes that the server never ships at a use site — expected red until the mapping fix'
+                  : 'use-site tokens — the mapping fix appears to have landed; retire this gauge', 'drop');
       // Silent guard (surfaces only on failure): count-based uses the server's
       // tokens directly, so `delivered ⊆ classified` holds by construction —
       // EXCEPT if this standalone FaceOracle's tsgo drifts from the server's.
       // Nothing else would catch that, so flag it, but don't print an always-ok
       // line for a near-tautology.
-      if (survUnclassified) console.log(`    ${pad('  ↳ drift', 12)} ${red(`${survUnclassified} unclassified`)}   ${dim('the server shipped a name tsgo never tokenizes — the reference drifted, distrust the use-site count')}`);
+      if (survUnclassified) driftNote = survUnclassified;
     }
+    // OUTSIDE the facesAvailable branch: `use-site` is the only row that
+    // depends on the face oracle, and flushing inside it would drop the other
+    // four entirely on a run where tsgo never settled.
+    flushIrows();
+    if (driftNote) console.log(`    ${pad('  ↳ drift', 12)} ${red(`${driftNote} unclassified`)}   ${dim('the server shipped a name tsgo never tokenizes — the reference drifted, distrust the use-site count')}`);
 
     show(missing, 'No token — the name gets no semantic color', () => {});
     show(badType, 'Wrong token type', (r) => {
@@ -3872,7 +3906,19 @@ if (RUN_TOKENS) {
     const byFileOf = (rows) => { const m = new Map(); for (const r of rows) { if (!m.has(r.file)) m.set(r.file, []); m.get(r.file).push(r); } return m; };
     const COL = 6 + (NAME_W + 2) + 1 + 3 + 3;                        // leading + filename + sp + count + gap = name column
     const WRAP = TERM_W - 2;
+    // The NAMES go behind -v. This is a known-open gap that cannot move until
+    // the mapping fix lands, and 398 identifiers spread over 45 wrapped lines
+    // is the largest block in the report saying something the invariant row
+    // above already totals. What survives by default is where the drops
+    // CONCENTRATE, which is the only part anyone reads for direction.
     const dropSection = (title, byFile, tally, nameOf) => {
+      if (!VERBOSE) {
+        const ranked = [...byFile].map(([file, entries]) => [file, tally(entries)]).sort((a, b) => b[1] - a[1]);
+        const total = ranked.reduce((n, [, c]) => n + c, 0);
+        const top = ranked.slice(0, 3).map(([f, c]) => `${f} (${c})`).join(', ');
+        out(`\n    ${bold(title)} ${dim(`— the mapping gap, expected red · ${total} across ${ranked.length} file${ranked.length === 1 ? '' : 's'}, heaviest in ${top}; -v names them`)}`);
+        return;
+      }
       console.log(`\n    ${bold(title)} ${dim('— the mapping gap, expected red')}`);
       for (const [file, entries] of byFile) {
         // filename stays plain (the terminal linkifies it) and full — never
