@@ -3813,7 +3813,13 @@ await Promise.all(pool.map((s) => s.stop()));
 // That is not hypothetical: the Type Audit's failures were read as the Token
 // Audit's, which was reporting all-green two lines lower. A totals line that
 // can be misattributed is worse than no totals line.
-const TOTAL_W = 12;
+// Derived, not chosen: the longest lane name plus a two-column gutter, so
+// the widest label (`Diagnostics`, at 11) still has air between it and its
+// text instead of butting straight into the number. A hand-picked 12 left it
+// one space, which reads as a run-on where every other lane has a clean
+// column. Adding a lane with a longer name widens the column by itself.
+const TOTAL_LABELS = ['Grammar', 'Mapping', 'Type', 'Diagnostics', 'Hover', 'Token'];
+const TOTAL_W = Math.max(...TOTAL_LABELS.map((l) => l.length)) + 2;
 // Wrap on VISIBLE width (ANSI-stripped) at ` · ` segment boundaries: a totals
 // line longer than the terminal would otherwise hard-break mid-word at column
 // zero, dangling unindented fragments under the audit-name column. Every
@@ -3821,6 +3827,7 @@ const TOTAL_W = 12;
 // clause whole; a continuation line leads with its separator. ANSI state
 // persists across the break, so a styled segment keeps its paint even when
 // its opening code lands on the previous line.
+let totalsPrinted = 0;
 const totalLine = (audit, text) => {
   const avail = TERM_W - (4 + TOTAL_W) - 1;
   // Split only at TOP-LEVEL separators — a ` · ` inside a parenthetical is
@@ -3846,8 +3853,16 @@ const totalLine = (audit, text) => {
   // so a continuation can never be mistaken for the next group.
   const lines = [];
   for (const seg of segs) for (const l of wrapText(seg, avail, 2)) lines.push(l);
+  // One blank line between every lane. Six lanes reporting on six different
+  // instruments are six separate statements, and run together they read as
+  // one paragraph whose lines happen to start with a word in the left
+  // column — the more so where a lane runs to three lines and the next
+  // begins immediately under its last continuation. Uniform, because a rule
+  // that spaces some seams and not others makes the spacing itself carry a
+  // meaning it does not have.
+  if (totalsPrinted++) console.log('');
   console.log('    ' + dim(pad(audit, TOTAL_W)) + lines[0]);
-  for (const l of lines.slice(1)) console.log(' '.repeat(4 + TOTAL_W) + l);
+  for (const l of lines.slice(1)) console.log(' '.repeat(4 + TOTAL_W + 2) + l);
 };
 console.log(`\n  ${bold('Totals')}`);
 // The Grammar Gate's coverage number is a gauge, not a regression count:
