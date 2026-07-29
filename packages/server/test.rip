@@ -852,6 +852,22 @@ test! "a client module importing a server-only package rejects loudly at client(
   ok err.message.includes('@rip-lang/server'), "names the package: #{err.message}"
   rmSync dir, { recursive: true, force: true }
 
+test! "client() warns when its SPA fallback replaces an earlier notFound registration", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-client-')
+  writeClientDir dir
+  resetGlobals()
+  notFound (c) -> new Response('custom 404', { status: 404 })
+  warns = []
+  original = console.warn
+  console.warn = (...args) -> warns.push args.join(' ')
+  try
+    client! join(dir, 'app')
+  finally
+    console.warn = original
+  ok warns.some((w) -> w.includes('notFound')), "the replacement is loud: #{JSON.stringify warns}"
+  resetGlobals()
+  rmSync dir, { recursive: true, force: true }
+
 rmSync clientAppDir, { recursive: true, force: true }
 resetGlobals()
 
@@ -1243,7 +1259,11 @@ test! "an orphaned worker (parent gone) exits on its own", ->
 
 console.log "\nPrebuild"
 
-import { buildArtifact, REGISTER_409_MS, scale, publish, state as managerState, cfg as managerCfg, onCellChange } from './manager.rip'
+import { buildArtifact, REGISTER_409_MS, scale, publish, state as managerState, cfg as managerCfg, onCellChange, DEV_CHANNEL as MANAGER_DEV_CHANNEL } from './manager.rip'
+
+test "DEV_CHANNEL mirrors across manager and worker — a pinned fact, not a convention", ->
+  eq MANAGER_DEV_CHANNEL, mod.DEV_CHANNEL
+  eq mod.DEV_CHANNEL, '/rip/dev'
 
 test! "buildArtifact bundles an app to one JS file a loader-free worker serves", ->
   dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')

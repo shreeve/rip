@@ -62,12 +62,6 @@ Janus items moved to `janus/TODO.md`.
       console, capture the feed report verbatim. (The structural
       no-retry gap that could have silenced it is closed: a miss now
       registers a want and resyncs with backoff until satisfied.)
-- [ ] Cold-review nits (PR #187 review, 2026-07-29): `client()`'s SPA
-      fallback silently replaces a notFound the app registered BEFORE
-      calling it (warn or document the ordering); `DEV_CHANNEL` is a
-      two-site hand-mirrored constant (pin their equality); the Pulse
-      post handler ignores `res.ok` and can `send` on a CONNECTING
-      socket.
 
 ---
 

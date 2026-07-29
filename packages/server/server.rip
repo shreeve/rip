@@ -843,8 +843,9 @@ export App = (fn) ->
 # DEV_CHANNEL. Flag off, client() registers exactly the surface above.
 
 # The hub channel dev clients enroll in under RIP_WORKSPACE=1 — mirrored as
-# DEV_CHANNEL in manager.rip (workers never import manager code).
-DEV_CHANNEL = '/rip/dev'
+# DEV_CHANNEL in manager.rip (workers never import manager code). Exported
+# so the mirror is a pinned fact, not a convention.
+export DEV_CHANNEL = '/rip/dev'
 
 clientModules = (dir) ->
   out = {}
@@ -976,6 +977,10 @@ export client = (dir = null) ->
       error "missing or unknown Sec-WebSocket-Frame header (got #{JSON.stringify(frame ?? null)})", 400
   # SPA fallback: an unmatched GET that accepts HTML answers the boot page,
   # so client-side routes deep-link; everything else stays a plain 404.
+  # An app keeps its own notFound by registering it AFTER client(); one
+  # registered before would be replaced — loudly, never silently.
+  if _notFoundHandler?
+    console.warn 'rip-server: client() replaces the notFound handler registered before it — register the app notFound after client() to keep it'
   notFound (c) ->
     if c.req.method is 'GET' and (c.req.header('accept') or '').includes('text/html')
       return bootPage(c)

@@ -375,8 +375,9 @@ buildApp = ->
 WORKSPACE =! process.env.RIP_WORKSPACE is '1'
 
 # The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
-# server.rip (workers never import manager code).
-DEV_CHANNEL =! '/rip/dev'
+# server.rip (workers never import manager code). Exported so the mirror
+# is a pinned fact, not a convention.
+export DEV_CHANNEL =! '/rip/dev'
 
 sha256hex = (text) -> new Bun.CryptoHasher('sha256').update(text).digest('hex')
 
