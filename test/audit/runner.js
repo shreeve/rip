@@ -3382,11 +3382,11 @@ if (RUN_HOVER || RUN_TOKENS) {
       survival = faceSurvival(src, code, dec, probe.tokens);
     }
 
-    const took = `${((Date.now() - started) / 1000).toFixed(1)}s`;
     return {
       file: f,
+      decls: decls.length,
+      tokens: RUN_TOKENS ? probe.tokens.length : null,
       probe: { ...probe, tmap, members, survival },
-      line: `    ${green('✓')} ${pad(f, NAME_W + 2)} ${dim(`${pad(decls.length + ' decls', 10)}${RUN_TOKENS ? pad(probe.tokens.length + ' tokens', 12) : ''}${took}`)}`,
     };
   };
 
@@ -3394,7 +3394,17 @@ if (RUN_HOVER || RUN_TOKENS) {
   // CPU. Equivalence with a serial run rests on the per-lane servers (each lane
   // probes into its own program, never a shared one), NOT on the oracles noticing
   // cross-talk afterwards. Results land in fixture order.
-  const probed = await lanes(fixtures, probeOne, { width: LANES, onDone: (r) => r && console.log(r.line) });
+  const probed = await lanes(fixtures, probeOne, { width: LANES });
+  {
+    const shown = probed.filter(Boolean);
+    const DW = Math.max(1, ...shown.map((r) => String(r.decls).length));
+    const TW = Math.max(1, ...shown.map((r) => String(r.tokens ?? 0).length));
+    for (const r of shown) {
+      console.log(`    ${green('✓')} ${pad(r.file, NAME_W + 2)} `
+        + dim(String(r.decls).padStart(DW) + ` decl${r.decls === 1 ? '' : 's'}`)
+        + (r.tokens === null ? '' : dim('   ' + String(r.tokens).padStart(TW) + ` token${r.tokens === 1 ? '' : 's'}`)));
+    }
+  }
   for (const r of probed) if (r?.probe) PROBES.set(r.file, r.probe);
 
   console.log(`\n    ${dim(`probed ${PROBES.size} file${PROBES.size === 1 ? '' : 's'} in ${((Date.now() - t0) / 1000).toFixed(1)}s`)}`);
@@ -3467,7 +3477,7 @@ if (RUN_HOVER || RUN_TOKENS) {
     if (RUN_TOKENS && (!p.tokens || !p.tokens.length)) gaps.push(`${f}: no semantic tokens returned`);
   }
   if (gaps.length) await abort('The probe pass did not cover the corpus', gaps);
-  out(`    ${green('✓')} ${dim(`coverage: ${want.length} compiling fixture(s), ${want.reduce((n, f) => n + PROBES.get(f).decls.length, 0)} declarations — all probed, all answered`)}`);
+  out(`    ${green('✓')} ${dim(`${want.length} compiling fixtures, ${want.reduce((n, f) => n + PROBES.get(f).decls.length, 0)} declarations — all probed, all answered`)}`);
 }
 
 // ── the Hover Audit: twin oracle (correctness) + expected hovers (baseline)
@@ -3605,13 +3615,23 @@ if (RUN_HOVER) {
   }
 
   const probed = allRows.length;
-  console.log(`\n  ${bold('Parity')} ${dim(`(${probed} probes${hskip ? `, ${hskip} file${hskip === 1 ? '' : 's'} skipped` : ''})`)}`);
-  const prow = (label, n, color, note) => out(`    ${pad(label, 12)} ${color(String(n).padStart(3))}${note ? '   ' + dim(note) : ''}`);
-  prow('agree', tally.agree, green, tally.order ? `incl. ${tally.order} union-order` : '');
-  prow('gaps', tally.gap, tally.gap ? yellow : green, tally.gap ? 'hover ≠ tsgo twin on a comparable type' : '');
+  out(`\n  ${bold('Parity')} ${dim(`(${probed} probes${hskip ? `, ${hskip} file${hskip === 1 ? '' : 's'} skipped` : ''} — the first four partition them; the rest are separate checks)`)}`);
+  // Rows buffer so every value shares ONE right-aligned field: a fraction is
+  // wider than a count, and printing each as it came left the notes in two
+  // columns. `silence` and `ruled` count what HOLDS out of a population where
+  // every row above counts probes — identical shapes for opposite senses is
+  // how `0` came to mean "none of the three is behaving" in a column whose
+  // every other zero means "nothing wrong", so those two carry a denominator.
+  const prows = [];
+  const prow = (label, n, color, note) => prows.push({ label, text: String(n), color, note });
+  const pgap = () => prows.push(null);
+  const pfrac = (label, ok, of, note) => prows.push({ label, text: `${ok} / ${of}`, color: ok === of ? green : red, note });
+  prow('agree', tally.agree, green, tally.order ? `${tally.order} of them after normalizing union-member order` : 'every twin-checked hover matches TypeScript');
+  prow('gaps', tally.gap, tally.gap ? yellow : green, tally.gap ? 'hover ≠ tsgo twin on a comparable type' : 'no hover disagrees with the tsgo twin on a comparable type');
   prow('rip-native', tally.native, dim, 'component / schema / reactive — the twin uses React/zod, so it has no answer to compare');
   prow('pinned-only', tally.pinnedOnly, dim, 'no twin symbol — covered by hover-pins');
-  prow('expected', snapChanged.length, snapChanged.length ? red : green,
+  pgap();
+  prow('pins', snapChanged.length, snapChanged.length ? red : green,
     snapChanged.length ? 'diverging vs hover-pins.json decls' : `${pinnedCount} pinned, unchanged`);
   prow('invariant', violations.length, violations.length ? red : green, violations.length ? 'an initialized binding hovers `any`' : 'no initialized binding hovers `any`');
   // The `silence` gauge — ruled-silent positions (bare `~>` operators) must
@@ -3621,8 +3641,8 @@ if (RUN_HOVER) {
   const silentRows = [...PROBES].flatMap(([file, p]) => (p.silent ?? []).map((s) => ({ file, ...s })));
   const silentLeaks = silentRows.filter((s) => s.hover !== null);
   if (silentRows.length) {
-    prow('silence', silentRows.length - silentLeaks.length, silentLeaks.length ? red : green,
-      `of ${silentRows.length} ruled-silent bare ~> positions serve null${silentLeaks.length ? ' — red by agreement: the open bare-effect finding (FINDINGS.md)' : ''}`);
+    pfrac('silence', silentRows.length - silentLeaks.length, silentRows.length,
+      `ruled-silent bare ~> positions serve null${silentLeaks.length ? ' — red by agreement: the open bare-effect finding (FINDINGS.md)' : ''}`);
   }
   // The `ruled` gauge — RULINGS-governed in-body positions (hover-pins.json `positions`:
   // render-DSL words, member declarations, gate spellings) must serve their
@@ -3633,16 +3653,24 @@ if (RUN_HOVER) {
   const ruledRows = [...PROBES].flatMap(([file, p]) => (p.ruled ?? []).map((r) => ({ file, ...r })));
   const ruledDiverging = ruledRows.filter((r) => (r.expect ?? null) !== (r.hover ?? null));
   if (ruledRows.length) {
-    prow('ruled', ruledRows.length - ruledDiverging.length, ruledDiverging.length ? red : green,
-      `of ${ruledRows.length} RULINGS-governed in-body positions serve their pin${ruledDiverging.length ? ' — red by agreement: the render-DSL and member-wrapper findings (FINDINGS.md)' : ''}`);
+    pfrac('ruled', ruledRows.length - ruledDiverging.length, ruledRows.length,
+      `RULINGS-governed in-body positions serve their pin${ruledDiverging.length ? ' — red by agreement: the render-DSL and member-wrapper findings (FINDINGS.md)' : ''}`);
+  }
+
+  {
+    const VW = Math.max(...prows.filter(Boolean).map((r) => r.text.length));
+    for (const r of prows) {
+      if (!r) { console.log(''); continue; }
+      out(`    ${pad(r.label, 12)} ${r.color(r.text.padStart(VW))}${r.note ? '   ' + dim(r.note) : ''}`);
+    }
   }
 
   if (gaps.length) {
     console.log(`\n    ${bold('Gaps — hover ≠ tsgo twin on a comparable type')} ${dim('(after quote / keyword / union-order normalization)')}`);
     for (const r of gaps) {
       out(`      ${yellow('✗')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text})`)}`);
-      out(`          ${dim('tsgo')} ${green(r.ts)}`);
-      out(`          ${dim('rip ')} ${yellow(r.hover)}`);
+      out(`        ${dim('tsgo')} ${green(r.ts)}`);
+      out(`        ${dim('rip ')} ${yellow(r.hover)}`);
     }
   }
   if (snapChanged.length) {
@@ -3662,8 +3690,8 @@ if (RUN_HOVER) {
     out(`\n    ${bold('Ruled positions diverging from their pins')} ${dim('(RULINGS.md, Components / render; red by agreement while the render-DSL and member-wrapper findings are open)')}`);
     for (const r of ruledDiverging) {
       console.log(`      ${red('✗')} ${r.file}:${r.line}:${r.character} ${bold(r.token)} ${dim(`[${r.rule}]`)}`);
-      out(`          ${dim('pin')} ${green(JSON.stringify(r.expect ?? null))}`);
-      out(`          ${dim('now')} ${yellow(JSON.stringify(r.hover ?? null))}`);
+      out(`        ${dim('pin')} ${green(JSON.stringify(r.expect ?? null))}`);
+      out(`        ${dim('now')} ${yellow(JSON.stringify(r.hover ?? null))}`);
     }
   }
   if (VERBOSE) for (const [label, rowset] of [['rip-native (expected divergences — twin uses React/zod)', natives], ['pinned-only (no twin symbol)', pinnedOnly]]) {
@@ -3671,8 +3699,8 @@ if (RUN_HOVER) {
     console.log(`\n    ${dim(label)}`);
     for (const r of rowset) {
       out(`      ${green('•')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text})`)}`);
-      if (r.ts != null) out(`          ${dim('tsgo')} ${dim(r.ts)}`);
-      out(`          ${dim('rip ')} ${dim(r.hover)}`);
+      if (r.ts != null) out(`        ${dim('tsgo')} ${dim(r.ts)}`);
+      out(`        ${dim('rip ')} ${dim(r.hover)}`);
     }
   }
 
@@ -3829,12 +3857,12 @@ if (RUN_TOKENS) {
 
     show(missing, 'No token — the name gets no semantic color', () => {});
     show(badType, 'Wrong token type', (r) => {
-      console.log(`          ${dim('expected')} ${green(r.want.type)}`);
-      console.log(`          ${dim('actual  ')} ${yellow(fmt(r.got))}`);
+      console.log(`        ${dim('expected')} ${green(r.want.type)}`);
+      console.log(`        ${dim('actual  ')} ${yellow(fmt(r.got))}`);
     });
     show(badReadonly, 'Wrong `readonly` modifier', (r) => {
-      console.log(`          ${dim('expected')} ${green(`${r.want.type}${r.want.readonly ? ' readonly' : ''}`)} ${dim(`— a \`${r.want.form}\` binding is ${r.want.readonly ? 'immutable' : 'WRITABLE'} in rip`)}`);
-      console.log(`          ${dim('actual  ')} ${yellow(fmt(r.got))}`);
+      console.log(`        ${dim('expected')} ${green(`${r.want.type}${r.want.readonly ? ' readonly' : ''}`)} ${dim(`— a \`${r.want.form}\` binding is ${r.want.readonly ? 'immutable' : 'WRITABLE'} in rip`)}`);
+      console.log(`        ${dim('actual  ')} ${yellow(fmt(r.got))}`);
     });
     // The mapping gap's expected-red evidence, kept apart from the regression
     // sections above: these are known-open holes, not surprises. The name lists
