@@ -229,7 +229,7 @@ Defaults:
 | `panel` synthesis | `gpt` | `synthesis_model` parameter |
 | `fresh_review` | first credentialed default not in `exclude_models` | `model` parameter |
 
-You can still pin an exact model with the canonical `provider:model` form (e.g. `openai:gpt-5.5`) anywhere a `model:` is accepted.
+You can still pin an exact model with the canonical `provider:model` form (e.g. `openai:gpt-5.6-sol`) anywhere a `model:` is accepted.
 
 ### How "latest" is resolved
 
@@ -238,12 +238,12 @@ On the first call (and at most once every 12h after), the server queries each pr
 The flagship families and offline fallbacks live at the top of `lib/providers.rip`:
 
 ```
-FAMILY  = { openai: /^gpt-\d+(?:\.\d+)*$/, anthropic: /^claude-opus-\d+(?:[-.]\d+)*$/ }
-SEED    = { openai: 'openai:gpt-5.5',      anthropic: 'anthropic:claude-opus-4-8' }
+FAMILY  = { openai: /^gpt-\d+(?:\.\d+)*(?:-sol)?$/, anthropic: /^claude-opus-\d+(?:[-.]\d+)*$/ }
+SEED    = { openai: 'openai:gpt-5.6-sol', anthropic: 'anthropic:claude-opus-4-8' }
 PRICING = { openai: {…}, anthropic: {…} }   # per-1M-token rates, provider-scoped
 ```
 
-Change `FAMILY` only if a provider renames its flagship tier (e.g. Anthropic moving off `opus`). `SEED` is only used cold / offline — a live refresh overrides it. `PRICING` is provider-scoped so an autodetected successor inherits rates without a code change.
+OpenAI's GPT-5.6 family ships as `-sol` (flagship), `-terra`, and `-luna`; only bare `gpt-N(.M)*` and `-sol` count as the flagship family. Change `FAMILY` only if a provider renames its flagship tier (e.g. Anthropic moving off `opus`). `SEED` is only used cold / offline — a live refresh overrides it, and a SEED version that outranks a still-fresh cache forces refresh. `PRICING` is provider-scoped so an autodetected successor inherits rates without a code change.
 
 ## Cost
 
