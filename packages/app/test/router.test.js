@@ -3,11 +3,11 @@ import { browserAdapter, buildRoutes, createRouter } from '@rip-lang/app';
 import { __effect } from '../../../src/runtime/reactive.js';
 
 const FILES = [
-  '_route/_layout.rip',
-  '_route/index.rip',
-  '_route/about.rip',
-  '_route/users/[id].rip',
-  '_route/docs/[...rest].rip',
+  'app/routes/_layout.rip',
+  'app/routes/index.rip',
+  'app/routes/about.rip',
+  'app/routes/users/[id].rip',
+  'app/routes/docs/[...rest].rip',
 ];
 
 const manifest = () => buildRoutes(FILES);
@@ -81,8 +81,8 @@ describe('init and route state', () => {
   test('init resolves the adapter URL into renderer route state', () => {
     const { router } = makeRouter({ initial: '/users/7?tab=posts#bio' });
     expect(router.init()).toBe(router);
-    expect(router.current.route.file).toBe('_route/users/[id].rip');
-    expect(router.current.layouts).toEqual(['_route/_layout.rip']);
+    expect(router.current.route.file).toBe('app/routes/users/[id].rip');
+    expect(router.current.layouts).toEqual(['app/routes/_layout.rip']);
     expect(router.current.params).toEqual({ id: '7' });
     expect(router.current.query).toEqual({ tab: 'posts' });
     expect(router.path).toBe('/users/7');
@@ -115,7 +115,7 @@ describe('push and replace', () => {
     const { adapter, router } = makeRouter();
     router.init();
     expect(router.push('/about')).toBeTrue();
-    expect(router.current.route.file).toBe('_route/about.rip');
+    expect(router.current.route.file).toBe('app/routes/about.rip');
     expect(adapter.calls.push).toEqual(['/about']);
     expect(adapter.calls.saves).toBe(1);
     expect(adapter.calls.tops).toBe(1);
@@ -172,7 +172,7 @@ describe('push and replace', () => {
     const router = createRouter({ routes: manifest(), adapter });
     router.init();
     expect(router.push('/about')).toBeTrue();
-    expect(router.current.route.file).toBe('_route/about.rip');
+    expect(router.current.route.file).toBe('app/routes/about.rip');
   });
 
   test('pushing the identical URL still resolves and scrolls', () => {
@@ -189,7 +189,7 @@ describe('push and replace', () => {
     const router = createRouter({ routes: manifest(), adapter, onError: f => seen.push(f) });
     router.init();
     expect(router.push('/missing')).toBeFalse();
-    expect(router.current.route.file).toBe('_route/index.rip');
+    expect(router.current.route.file).toBe('app/routes/index.rip');
     expect(adapter.calls.push).toEqual([]);
     expect(seen).toEqual([{ status: 404, path: '/missing' }]);
   });
@@ -201,10 +201,10 @@ describe('history traversal', () => {
     router.init();
     router.push('/about');
     router.back();
-    expect(router.current.route.file).toBe('_route/index.rip');
+    expect(router.current.route.file).toBe('app/routes/index.rip');
     expect(adapter.calls.restores).toEqual([{ y: 7 }]);
     router.forward();
-    expect(router.current.route.file).toBe('_route/about.rip');
+    expect(router.current.route.file).toBe('app/routes/about.rip');
   });
 });
 
@@ -255,7 +255,7 @@ describe('onNavigate', () => {
     router.push('/users/9?x=1');
     expect(seen.length).toBe(2);
     expect(seen[1].path).toBe('/users/9');
-    expect(seen[1].route.file).toBe('_route/users/[id].rip');
+    expect(seen[1].route.file).toBe('app/routes/users/[id].rip');
     expect(seen[1].params).toEqual({ id: '9' });
     expect(seen[1].query).toEqual({ x: '1' });
   });
@@ -323,11 +323,11 @@ describe('match', () => {
     const { router } = makeRouter();
     router.init();
     const hit = router.match('/users/3?tab=a&tab=b#top');
-    expect(hit.route.file).toBe('_route/users/[id].rip');
+    expect(hit.route.file).toBe('app/routes/users/[id].rip');
     expect(hit.params).toEqual({ id: '3' });
     expect(hit.query).toEqual({ tab: 'b' });
     expect(hit.hash).toBe('top');
-    expect(router.current.route.file).toBe('_route/index.rip');
+    expect(router.current.route.file).toBe('app/routes/index.rip');
     expect(router.match('/missing')).toBeNull();
   });
 
@@ -455,7 +455,7 @@ describe('hash mode', () => {
     const adapter = fakeAdapter('/site/index.html');
     const router = createRouter({ routes: manifest(), adapter, hash: true });
     router.init();
-    expect(router.current.route.file).toBe('_route/index.rip');
+    expect(router.current.route.file).toBe('app/routes/index.rip');
   });
 
   test('a second # inside the fragment is the route hash', () => {
@@ -491,7 +491,7 @@ describe('minimal adapters', () => {
     router.init();
     router.push('/about');
     router.back();
-    expect(router.current.route.file).toBe('_route/index.rip');
+    expect(router.current.route.file).toBe('app/routes/index.rip');
   });
 });
 
@@ -573,7 +573,7 @@ describe('browserAdapter scroll restore', () => {
 
 describe('rebuild and destroy', () => {
   test('rebuild swaps the manifest thunk and re-resolves', () => {
-    let files = ['_route/index.rip'];
+    let files = ['app/routes/index.rip'];
     const adapter = fakeAdapter('/late');
     const seen = [];
     const router = createRouter({
@@ -583,9 +583,9 @@ describe('rebuild and destroy', () => {
     });
     router.init();
     expect(router.current).toBeNull();
-    files = ['_route/index.rip', '_route/late.rip'];
+    files = ['app/routes/index.rip', 'app/routes/late.rip'];
     router.rebuild();
-    expect(router.current.route.file).toBe('_route/late.rip');
+    expect(router.current.route.file).toBe('app/routes/late.rip');
   });
 
   test('rebuild with a static manifest re-resolves in place', () => {
@@ -604,12 +604,12 @@ describe('rebuild and destroy', () => {
     const router = createRouter({ routes: () => buildRoutes(files), adapter, onError: f => errors.push(f) });
     router.init();
     router.push('/about');
-    files = FILES.filter(f => f !== '_route/about.rip');
+    files = FILES.filter(f => f !== 'app/routes/about.rip');
     router.back();
     router.rebuild();
-    expect(router.current.route.file).toBe('_route/index.rip');
+    expect(router.current.route.file).toBe('app/routes/index.rip');
     router.forward();
-    expect(router.current.route.file).toBe('_route/index.rip');
+    expect(router.current.route.file).toBe('app/routes/index.rip');
     expect(errors).toEqual([{ status: 404, path: '/about' }]);
     expect(adapter.read()).toBe('/about');
   });
@@ -622,10 +622,10 @@ describe('rebuild and destroy', () => {
     router.destroy();
     expect(adapter.listeners.size).toBe(0);
     adapter.go(-1);
-    expect(router.current.route.file).toBe('_route/about.rip');
+    expect(router.current.route.file).toBe('app/routes/about.rip');
     router.init();
     expect(adapter.listeners.size).toBe(1);
     adapter.go(1);
-    expect(router.current.route.file).toBe('_route/about.rip');
+    expect(router.current.route.file).toBe('app/routes/about.rip');
   });
 });

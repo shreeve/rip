@@ -314,6 +314,105 @@ request path is outside its pattern. `sessions` cookies are HMAC-signed by
 default or AES-256-GCM sealed with `encrypt: true`; `csrf` implements
 double-submit with HMAC binding.
 
+## Serving a browser app — client()
+
+An app serves its own SPA through one registration:
+
+```coffee
+import { get, client, start } from '@rip-lang/server'
+
+client!()                    # app/ next to the app entry, or client!('path/to/dir')
+get '/api/users' -> users()  # API routes coexist with the SPA
+start()
+```
+
+**The directory convention.** A directory named `app/` next to the app
+entry holds the browser app; route components live under `app/routes/`.
+Every `.rip` file under it becomes a bundle module keyed by its disk path
+— the disk path IS the store path `@rip-lang/app` boots from:
+`app/routes/index.rip` is the `/` route, `app/stash.rip` the stash
+contract. The bundle carries every browser-safe `@rip-lang` package the
+modules reach (`rip.browser: true` in the package manifest); a server-only
+or unknown import rejects assembly loudly, naming the importer and the
+package.
+
+**Three routes plus a fallback.** `client()` registers:
+
+- `GET /` — the boot page. If `app/index.html` exists it is served
+  as-is (with ETag revalidation); otherwise a minimal generated page
+  mounts `<div id="app">` and boots via a module script.
+- `GET /@rip/bundle.json` — the bundle, `Content-Type: application/json`
+  with a quoted ETag; a matching `If-None-Match` answers 304 with no body.
+- `GET /@rip/rip.js` — the browser runtime, served with the same
+  file/ETag machinery as `@send`.
+- A `notFound` fallback answering the boot page for GET requests whose
+  `Accept` includes `text/html` — so client-side routes deep-link — and a
+  plain 404 for everything else. An app's own later `notFound`
+  registration replaces it.
+
+**Standalone vs pooled.** Standalone (`rip app.rip`), the process runs
+under the rip loader, so `client()` loads the bundle assembler from the
+compiler's src directory and assembles at call time — fail fast, loud.
+Under the pool, the **manager** assembles the bundle once per boot epoch
+(alongside the app artifact, inside the same failure path: an assembly
+error caches as a boot failure and rings answer 503 with the diagnostic)
+and passes its path to workers via `RIP_BUNDLE_PATH` — workers read the
+prebuilt file and never carry the compiler. A save under `app/` is an
+epoch like any other: the watcher's content-hash gate covers every `.rip`
+under the app directory, so the next ring serves a reassembled bundle
+with a fresh ETag.
+
+**Debug builds.** `?debug=1` on the boot page turns on source maps: the
+generated page reads the query param and passes `debug` to `bootApp`,
+exactly as the browser certification fixture does.
+
+### The dev feed — RIP_WORKSPACE=1 (experimental)
+
+The server half of the Rip Workspace door
+([docs/WORKSPACE.md](../../docs/WORKSPACE.md)) — experimental, gated
+behind `RIP_WORKSPACE=1` in the manager's environment. Flag off, nothing
+below exists and every path behaves exactly as documented above. This is
+the door's server half, not "HMR done": how a running app absorbs a cell
+is the apply engine's problem, and it lives elsewhere.
+
+With the flag on, in watch mode:
+
+- **Change classification.** The watcher tracks a per-file hash map next
+  to its whole-tree content-hash gate. A save whose every changed, added,
+  or removed path lies under `app/` feeds the live pool in place — no
+  admission cut, no pool reload, no doorbell. Any other save (server
+  files, or a mixed set) takes the full-reload path above unchanged.
+- **Cells and the manifest.** Each `.rip` under `app/` is a cell whose
+  id is its birth path (`app/routes/index.rip`); a
+  rename retires the old id and mints a new one at rev 1 (id persistence
+  across renames is open research). Revs start at 1 and bump once per
+  content change; the registry lives in the manager's memory for the run.
+  `GET /@rip/manifest` answers `{"cells": [{id, path, rev}, …]}` sorted
+  by path, `Cache-Control: no-store`, read per request. Cell bytes — the
+  file's **source text**, dev-mode in-browser compile — are addressed by
+  `(id, rev)` in the URL: `GET /@rip/cells/<id>?rev=N` answers
+  `text/plain` with `Cache-Control: public, max-age=31536000, immutable`,
+  and old revs keep answering for the manager run. A request without a
+  valid positive-integer `rev` is a 400 — unversioned cell URLs are
+  rejected, never guessed at. An unknown `(id, rev)` is a 404.
+- **The ding.** After the cells, the manifest, and the rewritten bundle
+  are durable, the manager publishes one directive per changed cell to
+  the hub channel `/rip/dev` — the envelope is `{id, rev}` only; source
+  and compiled bodies never ride the hub (HTTP carries the bytes). A
+  deleted client file retires: it leaves the manifest, its retirement
+  occupies its own rev, and the ding carries `kind: "delete"` (no bytes
+  for that rev — old revs keep answering). A publish failure warns and
+  never blocks the cell path.
+- **Bundle freshness.** On the cell path the manager atomically rewrites
+  the live pool's bundle file, and the worker's `/@rip/bundle.json`
+  re-reads and re-tags per request (a dev-only cost) — so a hard refresh
+  never serves stale first-paint code.
+- **Bridge enrollment.** With `--bridge <path>`, the worker answers the
+  bridge's `Sec-WebSocket-Frame: open` POST with `{"+": ["/rip/dev"]}` —
+  enrolling the opening connection into the dev channel — and `text` /
+  `close` frames with an empty 204. A missing or unknown frame header is
+  a 400 naming the header.
+
 ## Running under Janus — the pool runtime
 
 The package is three concepts — the DSL is the only part an app ever
@@ -338,9 +437,10 @@ Janus ──UDS─────────►│  WORKER    (worker.rip)      �
 ```
 
 The manager implements the Rip Server half of the pool coordination
-protocol: it POSTs `{name, hosts}` to `/1.0/apps` (retrying a 409 for 30s
-by default — sized so a dead predecessor's claim, held for Janus's 15s
-heartbeat TTL plus its reap-sweep lag, expires inside the window),
+protocol: it POSTs `{name, hosts, bridge_path?}` to `/1.0/apps` (retrying
+a 409 for 30s by default — sized so a dead predecessor's claim, held for
+Janus's 15s heartbeat TTL plus its reap-sweep lag, expires inside the
+window),
 heartbeats every 5s from the moment of registration, owns a persistent
 doorbell socket, and spawns workers on unique unix socket paths,
 publishing them with atomic full-list PUTs. A boot failure is cached and
@@ -348,10 +448,17 @@ answered 503 with the error; the next content-changing save clears it. On
 SIGINT/SIGTERM it logs one lifecycle line —
 `rip-server: <SIGNAL> — deregistering <name> (<appId>), draining workers`
 — publishes an empty upstream list, drains, and DELETEs the registration.
-Registration carries `name` and `hosts` only: a hub app's `bridge_path` is
-wired today with a manual `PATCH /1.0/apps/{id}` — the
-[counter demo](https://github.com/shreeve/janus/blob/main/docs/counter/index.md)
-documents the exact command (a `--bridge` flag is planned; see below).
+Registration carries `name`, `hosts`, and — with `--bridge <path>` — the
+hub app's `bridge_path`, so a bridge endpoint is wired at launch with no
+follow-up `PATCH /1.0/apps/{id}`. The path must start with `/`; anything
+else is refused at startup. Server-initiated hub broadcasts have a
+manager-internal publish client: `publish(directives)` POSTs a directive
+object or list to `POST /1.0/apps/{id}/hub/publish` through the same
+control-plane client that registered, and returns the delivery envelope
+(`objects`, `deliveries`, `unknown_targets`); a non-2xx answer is a loud
+error carrying status and body. Nothing in the manager calls it yet — the
+framework-level hub ergonomics that will are planned (see **Planned**
+below).
 
 Workers never carry the Rip compiler. The manager compiles the app **once
 per boot epoch** — `Bun.build` with a `.rip` plugin over the compiler it is
@@ -382,6 +489,7 @@ rip server [app-entry] [options]   # app-entry defaults to ./app.rip, then ./ind
 | --- | --- |
 | `--name <n>` | App name for registration (default: the app directory's name) |
 | `--host <h>` | Public host to claim; repeatable (default: the app name) |
+| `--bridge <path>` | Hub bridge endpoint, registered as `bridge_path` (must start with `/`) — Janus POSTs every hub socket event to it |
 | `-w, --workers <n>` | Worker processes (default: 2) |
 | `-c, --concurrency <n>` | Concurrent requests per worker (default: 1). Refused with watch on — `--eager` included — raise `c` only with watch off (`--no-watch`, or `RIP_ENV=production`); see the sizing maxim below |
 | `--watch` / `--no-watch` | File watching + hot reload (default ON unless `RIP_ENV=production`) |
@@ -445,11 +553,12 @@ one structured report:
   → acme registered with janus, 4 workers ready
 ```
 
-The `janus 1.0` tag and the `registered` line are **read back** from the
-control plane after publishing — `GET /1.0` and `GET /1.0/apps/{id}`
-through the same client that registered — so the report states the
-registration as Janus holds it (the upstream count comes from the
-response body), never merely what this manager sent. A failed read-back
+The `janus 1.0` tag, the `bridge` line (printed only under `--bridge`),
+and the `registered` line are **read back** from the control plane after
+publishing — `GET /1.0` and `GET /1.0/apps/{id}` through the same client
+that registered — so the report states the registration as Janus holds it
+(the upstream count and the bridge path come from the response body),
+never merely what this manager sent. A failed read-back
 is reported as a failure (`read-back failed (GET /1.0/apps/{id} → 404)`
 on the `registered` line, and the closing arrow drops the
 registered-with-janus claim), never as success. Per-worker boot times
@@ -533,30 +642,38 @@ bun run test
 The suite drives the exported fetch handler end-to-end — routing, smart
 responses, error envelopes, the full `read()` vocabulary, session/context
 helpers, `input:` schema validation with the generated OpenAPI document,
-and every built-in middleware — with no live socket. The worker and
+every built-in middleware, and the `client()` browser-delivery surface
+(boot page, bundle with ETag/304, runtime route, SPA fallback, the
+`index.html` override, and the loud server-only-import rejection) — with
+no live socket. The worker and
 manager runtimes then run as real subprocesses over unix sockets against
 a stub Janus `/1.0` control socket that records every call in order:
 readiness, drains, the dirty epoch (doorbell PUT before the ring's 204,
 sockets PUT before the 204), save coalescing, the identical-bytes no-op,
 boot-failure caching, prebuilt-artifact boots (loader-free workers,
-`import.meta.dir` preservation, loud build rejection), the startup
-report (`scale`, the read-back rule, honest read-back failure, mono
-piped output), and shutdown.
+`import.meta.dir` preservation, loud build rejection), browser delivery
+through the pool (manager-assembled bundle, per-epoch reassembly with a
+fresh ETag), the `RIP_WORKSPACE=1` dev feed (in-process feed routes and
+flag-off identity, plus the cell path through a live pool — ding, rev
+bump, immutable old revs, in-place bundle rewrite, no reload — and the
+full-reload path for non-client edits), `--bridge`
+registration (carried `bridge_path`, loud startup rejection), the
+publish client (envelope round-trip, loud non-2xx), the startup report
+(`scale`, the read-back rule — the `bridge` line included, honest
+read-back failure, mono piped output), and shutdown.
 
 ## Planned
 
 Approved near-term work — everything in this section is **not yet
 shipped**; the rest of this README states only what is:
 
-1. **`--bridge` manager flag** — registration carries `bridge_path`, so a
-   hub app needs no manual `PATCH /1.0/apps/{id}` after launch.
-2. **Hub ergonomics in the framework** — bridge-frame dispatch
+1. **Hub ergonomics in the framework** — bridge-frame dispatch
    (open/text/close routed like methods), directive-response helpers for
    the sigil grammar (`!` / `@` / `+` / `-` / `?` / `<` / `*`, including
-   the required-`!` rule on the bridge plane), a publish client with
-   app-id plumbing (the manager holds `state.appId`; workers currently
-   re-derive it by name), and membership-snapshot access.
-3. **Opt-in file logging** — a `logs:` config knob or the `RIP_LOG_DIR`
+   the required-`!` rule on the bridge plane), worker-side publishing
+   (the manager-internal client exists; workers cannot reach it yet),
+   and membership-snapshot access.
+2. **Opt-in file logging** — a `logs:` config knob or the `RIP_LOG_DIR`
    env var redirects the merged server stream to `logs/server.log`;
    stdout stays the default. The edge's access log can be pointed at
    the same directory via the Caddyfile (`logs/access.log`) — its

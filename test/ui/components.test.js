@@ -1379,6 +1379,44 @@ describe('child components: the instantiation protocol', () => {
     expect(() => new Function(code)).not.toThrow();
   });
 
+  test('a child NESTED inside a row element never hijacks the block\'s _first — the list grows across a whole-array replacement', () => {
+    // The refetch shape: every row object is a NEW reference, so
+    // identity keying recreates every block and the reconciler mounts
+    // them against each other's _first. A nested child's _mountSetup
+    // latch must NOT overwrite _first with an interior node — that
+    // node is no child of the list parent, and the next insertBefore
+    // rejects.
+    const source = `${KID}App = component
+  items := [{id: 1, text: "one"}]
+  render
+    ul
+      for item in items
+        li
+          Kid label: item.text
+          span item.text
+`;
+    const { code } = compile(source, { runtimeDelivery: 'none' });
+    // The latch must not reassign _first here: the Kid sits INSIDE
+    // the li, and the block's first node stays the li itself.
+    expect(code).not.toMatch(/_mountSetup[\s\S]{0,120}this\._first =/);
+    const names = Object.keys(RT);
+    const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
+    const target = document.createElement('main');
+    const app = new App({});
+    try {
+      app.mount(target);
+      expect(serialize(target)).toBe(
+        '<main><ul data-part="App"><li><div data-part="Kid">one</div><span>one</span></li><!--for--></ul></main>',
+      );
+      app.items.value = [{ id: 1, text: 'one' }, { id: 2, text: 'two' }];
+      expect(serialize(target)).toBe(
+        '<main><ul data-part="App"><li><div data-part="Kid">one</div><span>one</span></li><li><div data-part="Kid">two</div><span>two</span></li><!--for--></ul></main>',
+      );
+    } finally {
+      app.unmount();
+    }
+  });
+
   test('failed factory children transfer ownership to their placeholders across keyed moves, removal, and branch replacement', () => {
     const source = `failedRoots = []
 Bad = component

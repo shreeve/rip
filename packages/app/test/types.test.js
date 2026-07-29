@@ -71,7 +71,7 @@ test.skip('app package TypeScript faces and declarations are valid (deferred: pa
       "source({ kind: 'keyed', fetch: async () => ({ id: 'missing' }) });",
       '// @ts-expect-error source fetch supports only [] or [K]',
       'source({ fetch: async (first: string, second: number) => ({ first, second }) });',
-      "const routesManifest = buildRoutes(['_route/index.rip']);",
+      "const routesManifest = buildRoutes(['app/routes/index.rip']);",
       "const fake = { read: () => '/', push(u: string, s: unknown) {}, replace(u: string, s: unknown) {}, go(d: number) {}, listen: (fn: () => void) => () => {}, scroll: { save: () => ({ y: 0 }), watch: (fn: () => void) => () => {} } };",
       'const router = createRouter({ routes: routesManifest, adapter: fake });',
       "const pushed: boolean = router.init().push('/', { noScroll: true });",

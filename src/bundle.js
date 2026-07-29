@@ -34,7 +34,7 @@ const ripFilesUnder = dir => {
   return out;
 };
 
-export function assembleBundle({ modules, packagesDir, data = null }) {
+export function assembleBundle({ modules, packagesDir, data = null, claims = null }) {
   if (!modules || typeof modules !== 'object') {
     throw new TypeError('rip: assembleBundle requires a modules object');
   }
@@ -75,8 +75,10 @@ export function assembleBundle({ modules, packagesDir, data = null }) {
   };
 
   // The application package is the boot substrate: every bundle
-  // carries it, imported or not.
+  // carries it, imported or not. `claims` names additional packages
+  // claimed the same way — the boot importer, imported or not.
   if (packagesDir) claimPackage('@rip-lang/app', '<boot>');
+  for (const name of claims ?? []) claimPackage(name, '<boot>');
 
   const queue = Object.keys(bundle.modules);
   const seen = new Set();

@@ -15219,7 +15219,9 @@ ${this.replayPad}}` : " }");
           this.b.emit(`if (${instVar} && ${instVar}._state === 'mounting') {
 ` + `${pad}  ${elVar} = ${instVar}._mountSetup(document.createComment('rip:child-error: ${name}'));
 `);
-          if (rec.kind !== "class") {
+          const fragChildren = this.rstate.fragChildren.get(rec.root);
+          const firstNode = fragChildren !== undefined ? fragChildren[0] : rec.root;
+          if (rec.kind !== "class" && firstNode === elVar) {
             this.b.emit(`${pad}  `);
             if (this.ts)
               this.b.tsOnly(() => this.b.emit("("));
@@ -22925,6 +22927,7 @@ function createModuleLoader({ components: registry, packages = {}, debug = false
 }
 // src/browser-boot.js
 var APP_PACKAGE = "@rip-lang/app";
+var WORKSPACE_PACKAGE = "@rip-lang/workspace";
 var bootGraphs = new Map;
 var browserFetchText = async (url, etag) => {
   const headers = etag ? { "If-None-Match": etag } : {};
@@ -23034,14 +23037,65 @@ async function bootApp(opts = {}) {
     }
   }
   const app = await loader.import(`${appEntry.root}/${appEntry.entry}`);
+  const workspaceMode = opts.workspace === true;
+  let createWorkspace = null;
+  let connectFeed = null;
+  let manifestUrl = null;
+  let fetchBytes = null;
+  let bag = null;
+  if (workspaceMode) {
+    const wsEntry = bundle.packages?.[WORKSPACE_PACKAGE];
+    if (!wsEntry) {
+      throw new Error(`rip: workspace mode requires the '${WORKSPACE_PACKAGE}' package, which this bundle does not carry — ` + "serve under RIP_WORKSPACE=1 so assembly claims it");
+    }
+    ({ createWorkspace } = await loader.import(`${wsEntry.root}/${wsEntry.entry}`));
+    const feedSub = wsEntry.exports?.["./feed"];
+    if (!feedSub) {
+      throw new Error(`rip: the '${WORKSPACE_PACKAGE}' package carries no './feed' export`);
+    }
+    ({ connectFeed } = await loader.import(`${wsEntry.root}/${feedSub}`));
+    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf("/") + 1)}manifest` : null);
+    if (!manifestUrl) {
+      throw new Error("rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl");
+    }
+    fetchBytes = opts.feed?.fetch ?? ((url) => fetch(url));
+    const res = await fetchBytes(manifestUrl);
+    if (!res.ok) {
+      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
+    }
+    const manifest = await res.json();
+    bag = createWorkspace();
+    const records = [];
+    for (const entry of manifest?.cells ?? []) {
+      const path = typeof entry.path === "string" ? entry.path : entry.id;
+      const source = (bundle.modules ?? {})[path];
+      if (source === undefined)
+        continue;
+      records.push({ id: entry.id, path, rev: entry.rev, source });
+    }
+    bag.populate(records);
+  }
   const compiled = {};
   for (const path of Object.keys(bundle.modules ?? {})) {
-    if (path.startsWith("_route/") || path.startsWith("_app/")) {
+    if (path.startsWith("app/")) {
       compiled[path] = { ...await loader.import(path) };
     }
   }
-  return app.launch({
-    bundle: { modules: bundle.modules, compiled, data: bundle.data },
+  if (!workspaceMode) {
+    return app.launch({
+      bundle: { modules: bundle.modules, compiled, data: bundle.data },
+      target: opts.target,
+      adapter: opts.adapter,
+      base: opts.base,
+      hash: opts.hash,
+      persist: opts.persist,
+      storage: opts.storage,
+      onError: opts.onError
+    });
+  }
+  const launchWith = (compiledModules) => app.launch({
+    bundle: { compiled: compiledModules, data: bundle.data },
+    components: bag,
     target: opts.target,
     adapter: opts.adapter,
     base: opts.base,
@@ -23050,6 +23104,90 @@ async function bootApp(opts = {}) {
     storage: opts.storage,
     onError: opts.onError
   });
+  let current = launchWith(compiled);
+  const report = opts.feed?.report ?? ((...args) => console.error(...args));
+  let destroyed = false;
+  let timer = null;
+  let remounting = false;
+  const handle = {};
+  const remount = async () => {
+    timer = null;
+    if (destroyed)
+      return;
+    if (remounting) {
+      timer = setTimeout(remount, 25);
+      return;
+    }
+    remounting = true;
+    try {
+      const snapshot = {};
+      for (const path of bag.paths()) {
+        let module = null;
+        try {
+          module = { ...await loader.import(path) };
+          bag.setCompiled(path, module);
+        } catch (error) {
+          report(`[Rip] workspace: '${path}' failed to recompile for the remount — keeping its last good projection`, error);
+          module = bag.getCompiled(path);
+        }
+        if (module)
+          snapshot[path] = module;
+      }
+      if (destroyed)
+        return;
+      current.destroy();
+      current = launchWith(snapshot);
+      Object.assign(handle, current, stable);
+      console.log("[Rip] workspace: change applied by remount (escape, not hot apply)");
+    } finally {
+      remounting = false;
+    }
+  };
+  const unwatch = bag.watch((_event, path) => {
+    if (!path.startsWith("app/"))
+      return;
+    timer ??= setTimeout(remount, 25);
+  });
+  const door = {
+    passport: bag.passport,
+    sealed: bag.sealed,
+    set: async (cell) => {
+      if (cell.deleted === true) {
+        const path2 = bag.passport(cell.id)?.path;
+        if (path2 !== undefined) {
+          files.delete(path2);
+          loader.invalidate(path2);
+        }
+        return bag.set(cell);
+      }
+      const path = cell.path ?? cell.id;
+      files.set(path, cell.source);
+      loader.invalidate(path);
+      let module;
+      try {
+        module = await loader.import(path);
+      } catch (error) {
+        report(`[Rip] workspace: '${path}' rev ${cell.rev} failed to compile — keeping the last good revision`, error);
+        return false;
+      }
+      return bag.set({ ...cell, compiled: { ...module } });
+    }
+  };
+  const feed = connectFeed(door, { ...opts.feed ?? {}, manifestUrl, report });
+  const destroy = () => {
+    if (destroyed)
+      return;
+    destroyed = true;
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    unwatch();
+    feed.close();
+    current.destroy();
+  };
+  const stable = { workspace: bag, feed, destroy };
+  return Object.assign(handle, current, stable);
 }
 // src/browser.js
 function compileToJS(source, options = {}) {

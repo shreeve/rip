@@ -10,7 +10,8 @@ one reactive bag of Rip components in the browser, not a catalog of
 `docs/YYYYMMDD-HHMMSS-workspace.md`; this file stays the living pointer.
 
 Owner rulings below are dated **2026-07-23** (Q1–Q5 locked) with
-warm-collaboration polish **2026-07-24**. Amend this document when a
+warm-collaboration polish **2026-07-24** and sequencing / store /
+freshness rulings **2026-07-28** (Q6–Q9). Amend this document when a
 lock changes; do not invent protocol detail that is still open research.
 
 ---
@@ -59,6 +60,22 @@ Production may omit source bytes and still keep `sourceHash`. Key
 custody, rotation, and mismatch UX stay **open research**; a
 stub / deploy-dev signer is enough for M0 happy-path proof. Hash-only
 forever and “CSP later” are **rejected** as M0 rewrites.
+
+### Rulings 2026-07-28 (Q6–Q9)
+
+| # | Ruling |
+|---|---|
+| **Q6** | **M0 and M1 are independent exits.** M1 (the dev door) may land first under `RIP_WORKSPACE=1` with dev-mode in-browser compile; M0 (signed cells, CSP without `unsafe-eval`) gates **production populate** only and is unweakened. D6 reads: the dev door never leaks into production — flag off is unchanged and production has no Hub. |
+| **Q7** | **The bag subsumes the app's component store.** The Workspace implements the `ComponentsStore` interface (`packages/app/components.rip`) as its app-facing view — path-keyed through the path→id map, passports underneath. `launch()` accepts an injected components store; flag off, it creates its own store exactly as today (D1). When the Workspace earns the default, `createComponents` retires and the bag is the only store. Two live stores of browser code never coexist. |
+| **Q8** | **Cell freshness is structural.** Cell bytes are addressed by `(id, rev)` in the URL; a rev-keyed response is immutable and cacheable (micro-cache, browser cache, CDN alike). The manifest route is `no-store`. A client applies a cell only when its rev matches the ding's rev; on mismatch it refetches the manifest (S14's foothold). Unversioned cell URLs are rejected — freshness never rests on a header convention or a purge side effect. |
+| **Q9** | **Package shape confirmed.** `packages/workspace` and `packages/refresh` stay separate browser-side packages while experimental (kill switch #2); `packages/server` keeps only the muscles. If the Workspace earns the default, its merge destination is `packages/app`, never `packages/server`. |
+
+The ledger and the bundle are one artifact: first paint fetches the
+ledger (manifest + cells in one document — today's `bundle.json`
+evolved, each entry carrying its passport) into `Workspace.populate`;
+live mutation fetches a single rev-keyed cell into `Workspace.set`.
+One record type, two package sizes — per the flexible-packaging lock
+above.
 
 ---
 
@@ -175,6 +192,8 @@ without claiming live update — under those CSP/signed constraints.
 
 - Dev/watch: manager sees disk change → Hub ding → HTTP fetch →
   `Workspace.set` → passport mutates → UI visibly updates.
+- M0 is **not** a prerequisite (Q6): the door may land with dev-mode
+  in-browser compile; production populate stays gated on M0.
 - No RipFS/OPFS required.
 - Apply may be coarse (even remount/reload *as escape*) so long as the
   **door** is real and tested — but the product surface must not call
@@ -353,7 +372,7 @@ Probe 0 observables (honesty bar, not a protocol):
 |---|---|
 | D1 | Flag off → current Rip path unchanged |
 | D2 | Disk change → Hub ding with `id` + `rev` (no body) |
-| D3 | Client HTTP-fetches cell / manifest bytes |
+| D3 | Client HTTP-fetches cell / manifest bytes (cells rev-keyed, Q8) |
 | D4 | `Workspace.set` mutates the passport (rev / hashes advance) |
 | D5 | UI shows a visible change attributable to that mutation |
 | D6 | Seal / no-Hub path still holds for production populate (M0) |

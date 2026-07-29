@@ -13,19 +13,32 @@
 # Never on the data path: client traffic flows Janus → worker socket.
 # ==============================================================================
 
-import { watch, readdirSync, readFileSync, existsSync, statSync, unlinkSync, mkdtempSync, rmSync } from 'node:fs'
+import { watch, readdirSync, readFileSync, existsSync, statSync, unlinkSync, mkdtempSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { join, resolve, dirname, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 
 # The compiler compiling THIS process is the one that builds artifacts —
 # resolved from the loader's --preload path, loaded once, on first build.
+_srcDir = null
+loaderSrcDir = ->
+  return _srcDir if _srcDir?
+  preload = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
+  abort "rip-server: the rip loader is missing from execArgv — run via `rip server`" unless preload?
+  _srcDir = dirname(resolve(preload))
+
 _compile = null
 loadCompiler = ->
   return _compile if _compile?
-  preload = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
-  abort "rip-server: the rip loader is missing from execArgv — run via `rip server`" unless preload?
-  mod = import!(join(dirname(resolve(preload)), 'compile.js'))
+  mod = import!(join(loaderSrcDir(), 'compile.js'))
   _compile = mod.compile
+
+# Bundle assembly requires the compiler, so it runs here in the manager —
+# never in a prebuilt worker. Cached like _compile.
+_assemble = null
+loadAssembler = ->
+  return _assemble if _assemble?
+  mod = import!(join(loaderSrcDir(), 'bundle.js'))
+  _assemble = mod.assembleBundle
 
 # --- Tunables — env-overridable, defaults per the pool protocol ----------------
 
@@ -65,6 +78,7 @@ Usage:
 Options:
   --name <n>          App name for registration (default: the app directory's name)
   --host <h>          Public host to claim; repeatable (default: the app name)
+  --bridge <path>     Hub bridge endpoint, registered as bridge_path (must start with /)
   -w, --workers <n>   Worker processes (default: 2)
   -c, --concurrency <n>  Concurrent requests per worker (default: 1; c > 1 requires watch off)
   --watch             Watch app files and hot-reload (default ON unless RIP_ENV=production)
@@ -86,25 +100,33 @@ cfg =
   appDir: null         # directory the watcher covers
   name: null
   hosts: []
+  bridge: null         # hub bridge endpoint, registered as bridge_path
   workers: 2
   concurrency: 1
   watch: false
   eager: false
   control: null
 
-state =
+# Exported: the manager is a process singleton, and its module state IS the
+# process state — in-process tests (the publish client) configure it directly.
+export state =
   appId: null
   controlUnix: null    # unix socket path to the control plane, or
   controlBase: null    # http(s) base URL
   workerJs: null       # the worker runtime, prebuilt to plain JS at startup
+  browserRuntime: null # dist/browser/rip.js, copied into runDir when app/ exists
   buildCounter: 0      # one app artifact per boot epoch, uniquely named
   runDir: null         # tmpdir holding the doorbell, worker sockets, artifacts
+  cellsDir: null       # RIP_WORKSPACE=1: rev-keyed cell files under runDir/cells
+  manifestPath: null   # RIP_WORKSPACE=1: the atomically rewritten cell manifest
+  cells: {}            # RIP_WORKSPACE=1: id (birth store path, 'app/…') → { id, rev, hash, retired }
   bellPath: null
   bell: null
   watcher: null
   settleTimer: null
   hbTimer: null
   lastHash: null       # content hash of the watched *.rip files
+  lastFiles: null      # per-file content hashes from the same walk (change classification)
   lastUpstreams: []    # the registry's current statement (re-PUT after re-register)
   dirty: false         # files changed since the last upstreams PUT
   doorbellPublished: false
@@ -142,10 +164,12 @@ cfetch = (method, path, body = null) ->
 registerApp = ->
   backoff = 200
   deadline409 = null
+  reg = { name: cfg.name, hosts: cfg.hosts }
+  reg.bridge_path = cfg.bridge if cfg.bridge?
   loop
     res = null
     try
-      res = cfetch! 'POST', '/1.0/apps', { name: cfg.name, hosts: cfg.hosts }
+      res = cfetch! 'POST', '/1.0/apps', reg
     if res?
       if res.status is 201            # per the pool protocol: created, only
         body = res.json!
@@ -210,6 +234,20 @@ heartbeatOnce = ->
 
 deleteApp = ->
   try cfetch! 'DELETE', "/1.0/apps/#{state.appId}"
+
+# POST a directive object/list to the app's hub publish plane. Hot-plane by
+# contract (janus: publish touches hub state only — never upstreams, never
+# the doorbell), so it never rides the writer chain: a broadcast must not
+# queue behind an upstreams retry. Returns the parsed delivery envelope
+# ({objects, deliveries, unknown_targets}); a non-2xx answer throws carrying
+# status and body, never a silent swallow.
+export publish = (directives) ->
+  throw new Error("rip-server: publish before registration — no app id") unless state.appId?
+  res = cfetch! 'POST', "/1.0/apps/#{state.appId}/hub/publish", directives
+  unless res.ok
+    detail = res.text!
+    throw new Error("rip-server: publish failed (#{res.status}): #{detail}")
+  res.json!
 
 # ==============================================================================
 # Prebuild — one JS artifact per boot epoch, built by the manager
@@ -276,9 +314,153 @@ export buildArtifact = (entry, outfile) ->
   Bun.write! outfile, result.outputs[0].text!
   outfile
 
+# The app's browser bundle, reassembled every epoch alongside the artifact:
+# each .rip under <appDir>/app, keyed by its disk path relative to the app
+# entry ('app/routes/index.rip', 'app/stash.rip' — the disk path IS the
+# store path), through the compiler-src assembleBundle. No app/ dir means
+# no bundle (null). An assembly failure throws — it rides the same
+# boot-failure caching as a compile failure, so rings answer 503 with the
+# diagnostic.
+clientModules = (dir) ->
+  out = {}
+  walk = (at, prefix) ->
+    for e in readdirSync(at, { withFileTypes: true })
+      continue if e.name.startsWith('.')
+      full = join(at, e.name)
+      if e.isDirectory()
+        walk full, "#{prefix}#{e.name}/"
+      else if e.name.endsWith('.rip')
+        out["#{prefix}#{e.name}"] = readFileSync(full, 'utf8')
+  walk dir, 'app/'
+  out
+
+assembleBundleText = ->
+  assemble = loadAssembler!()
+  opts: Record<string, any> = { modules: clientModules(join(cfg.appDir, 'app')), packagesDir: join(loaderSrcDir(), '..', 'packages') }
+  # The dev door boots in the browser through @rip-lang/workspace, so
+  # the flag claims it into every bundle this manager assembles.
+  opts.claims = ['@rip-lang/workspace'] if WORKSPACE
+  JSON.stringify assemble(opts)
+
+buildBundle = ->
+  return null unless existsSync(join(cfg.appDir, 'app'))
+  out = join(state.runDir, "b#{state.buildCounter}-bundle.json")
+  Bun.write! out, assembleBundleText!()
+  out
+
 buildApp = ->
   state.buildCounter += 1
-  buildArtifact! cfg.entry, join(state.runDir, "b#{state.buildCounter}-app.js")
+  artifact = buildArtifact! cfg.entry, join(state.runDir, "b#{state.buildCounter}-app.js")
+  bundle = buildBundle!()
+  syncCells!() if WORKSPACE and bundle?
+  { artifact, bundle }
+
+# ==============================================================================
+# The workspace dev feed — RIP_WORKSPACE=1 (docs/WORKSPACE.md)
+# ==============================================================================
+#
+# Flag on, a save touching ONLY app/ feeds the live pool in place: mint or
+# bump (id, rev) cells, rewrite the manifest and the current pool's bundle,
+# then ding /rip/dev with {id, rev} envelopes — no new epoch, no pool reload,
+# no doorbell. Flag off, none of this code runs and every save takes the
+# dirty-epoch path above, byte-identically.
+
+WORKSPACE =! process.env.RIP_WORKSPACE is '1'
+
+# The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
+# server.rip (workers never import manager code).
+DEV_CHANNEL =! '/rip/dev'
+
+sha256hex = (text) -> new Bun.CryptoHasher('sha256').update(text).digest('hex')
+
+# A cell filename encodes (id, rev) unambiguously: the id is percent-encoded
+# (it contains slashes), so the literal '@' separator can never appear inside
+# it. Mirrored by the cell route in server.rip.
+cellFile = (id, rev) -> join(state.cellsDir, "#{encodeURIComponent(id)}@#{rev}")
+
+# Sync the registry against the app/ tree and write what changed. A new
+# path mints its id — the birth path, Q3/B′ — at rev 1; a changed path bumps
+# its rev; a deleted path retires: dropped from the manifest, its rev-keyed
+# files staying on disk and answering (Q8), and the retirement OCCUPIES its
+# own rev so the delete ding is rev-guarded like any mutation. A path
+# returning after retirement resumes its rev sequence — restarting at rev 1
+# would rewrite an existing (id, rev) file, and rev-keyed files are
+# immutable. A rename is retire + mint (id persistence across renames is
+# open research). Returns the changed { id, rev, deleted? } entries.
+syncCells = ->
+  state.cellsDir ?= join(state.runDir, 'cells')
+  state.manifestPath ?= join(state.runDir, 'manifest.json')
+  mkdirSync state.cellsDir, { recursive: true }
+  modules = clientModules(join(cfg.appDir, 'app'))
+  changed = []
+  for path, source of modules
+    h = sha256hex(source)
+    entry = state.cells[path]
+    if not entry?
+      entry = { id: path, rev: 1, hash: h, retired: false }
+      state.cells[path] = entry
+      changed.push entry
+    else if entry.retired
+      entry.retired = false
+      entry.rev += 1
+      entry.hash = h
+      changed.push entry
+    else if entry.hash isnt h
+      entry.rev += 1
+      entry.hash = h
+      changed.push entry
+  for path, entry of state.cells
+    if not modules[path]? and not entry.retired
+      entry.retired = true
+      entry.rev += 1
+      changed.push { id: entry.id, rev: entry.rev, deleted: true }
+  # Revs only move forward within a run, so every write below creates a
+  # fresh (id, rev) file — an existing one is never rewritten. A retirement
+  # has no bytes: its rev exists only in the ding.
+  for entry in changed when not entry.deleted
+    Bun.write! cellFile(entry.id, entry.rev), modules[entry.id]
+  live = []
+  for path, entry of state.cells
+    live.push { id: entry.id, path: path, rev: entry.rev } unless entry.retired
+  live.sort (a, b) -> if a.path < b.path then -1 else 1
+  # tmp + rename: workers read the manifest per request and must never see
+  # a torn document.
+  tmp = "#{state.manifestPath}.tmp"
+  Bun.write! tmp, JSON.stringify({ cells: live })
+  renameSync tmp, state.manifestPath
+  changed
+
+# Rewrite the live pool's bundle file in place (tmp + rename — workers
+# re-read it per request under the flag), so a hard refresh never serves
+# stale first-paint code.
+refreshPoolBundle = ->
+  pool = state.currentPool
+  return unless pool?.bundle?
+  tmp = "#{pool.bundle}.tmp"
+  Bun.write! tmp, assembleBundleText!()
+  renameSync tmp, pool.bundle
+
+# The cell path: cells, manifest, and the bundle are durable BEFORE the ding
+# names the new revs. A reassembly or publish failure warns and never blocks
+# the cell path or crashes the manager — the cell bytes are already servable.
+onCellChange = ->
+  changed = syncCells!()
+  try
+    refreshPoolBundle!()
+  catch e
+    warn "rip-server: bundle reassembly failed on the cell path: #{e?.message or e}"
+  dings = changed.map (c) ->
+    ding = { id: c.id, rev: c.rev }
+    ding.kind = 'delete' if c.deleted is true
+    { '@': [DEV_CHANNEL], ding }
+  i = 0
+  while i < dings.length                 # the publish plane caps 16 objects per frame
+    try
+      publish! dings.slice(i, i + 16)
+    catch e
+      warn "rip-server: dev ding publish failed: #{e?.message or e}"
+    i += 16
+  return
 
 # ==============================================================================
 # Workers and pools
@@ -289,11 +471,20 @@ workerPath =! join(import.meta.dir, 'worker.rip')
 spawnWorker = (pool) ->
   pool.serial += 1
   sock = join(state.runDir, "p#{pool.n}w#{pool.serial}.sock")
+  env = { ...process.env, APP_ARTIFACT: pool.artifact, SOCKET_PATH: sock, WORKER_ID: "#{pool.n}.#{pool.serial}", WORKER_CONCURRENCY: "#{cfg.concurrency}", RIP_DRAIN_DEADLINE_MS: "#{WORKER_DRAIN_MS}" }
+  if pool.bundle?
+    env.RIP_BUNDLE_PATH = pool.bundle
+    env.RIP_BROWSER_RUNTIME = state.browserRuntime
+    env.RIP_CLIENT_DIR = join(cfg.appDir, 'app')
+    if WORKSPACE
+      env.RIP_CELLS_DIR = state.cellsDir
+      env.RIP_MANIFEST_PATH = state.manifestPath
+      env.RIP_BRIDGE_PATH = cfg.bridge if cfg.bridge?
   proc = Bun.spawn ['bun', state.workerJs],
     stdout: 'inherit'
     stderr: 'inherit'
     stdin: 'ignore'
-    env: { ...process.env, APP_ARTIFACT: pool.artifact, SOCKET_PATH: sock, WORKER_ID: "#{pool.n}.#{pool.serial}", WORKER_CONCURRENCY: "#{cfg.concurrency}", RIP_DRAIN_DEADLINE_MS: "#{WORKER_DRAIN_MS}" }
+    env: env
   w = { sock, proc, ready: false, spawnedAt: Date.now(), readyAt: null }
   monitorWorker pool, w
   w
@@ -338,9 +529,9 @@ pollWorker = (w) ->
       return { ok: false, w, error: lastBody or 'worker boot deadline expired' }
     sleep! 25
 
-spawnPool = (artifact) ->
+spawnPool = (artifact, bundle) ->
   state.poolCounter += 1
-  pool = { n: state.poolCounter, serial: 0, workers: [], polls: [], retired: false, artifact }
+  pool = { n: state.poolCounter, serial: 0, workers: [], polls: [], retired: false, artifact, bundle }
   for i in [0...cfg.workers]
     pool.workers.push spawnWorker(pool)
   pool.polls = pool.workers.map (w) -> pollWorker(w)
@@ -417,6 +608,7 @@ retirePool = (pool, graceMs = DRAIN_MS) ->
     for w in pool.workers
       try unlinkSync w.sock
     try unlinkSync pool.artifact if pool.artifact?   # per-epoch, dies with the pool
+    try unlinkSync pool.bundle if pool.bundle?
     return
 
 scrapPool = (pool) -> retirePool pool, 0
@@ -461,18 +653,19 @@ kickBoot = ->
 bootLoop = ->
   loop
     state.dirty = false
-    artifact = null
+    build = null
     try
-      artifact = buildApp!()
+      build = buildApp!()
     catch err
       continue if state.dirty        # files changed mid-build; the failure may be stale
       state.bootFailure = err?.message or String(err)
       warn "rip-server: app build failed: #{state.bootFailure}"
       throw err
     if state.dirty                   # saved during the build — this artifact is stale
-      try unlinkSync artifact
+      try unlinkSync build.artifact
+      try unlinkSync build.bundle if build.bundle?
       continue
-    pool = spawnPool(artifact)
+    pool = spawnPool(build.artifact, build.bundle)
     try
       awaitReady! pool, state.readyWhen
     catch err
@@ -559,7 +752,6 @@ ignoredPath = (rel) ->
   false
 
 hashApp = ->
-  hasher = new Bun.CryptoHasher('sha256')
   files = []
   walk = (dir) ->
     entries = []
@@ -573,20 +765,48 @@ hashApp = ->
         files.push(full)
   walk cfg.appDir
   files.sort()
+  # Per-file hashes feed both the whole-tree gate and (flag on) the
+  # client-only (app/-only) change classification in settle.
+  map = {}
+  hasher = new Bun.CryptoHasher('sha256')
   for f in files
+    one = new Bun.CryptoHasher('sha256')
+    try one.update readFileSync(f)
+    map[f] = one.digest 'hex'
     hasher.update f
-    try hasher.update readFileSync(f)
-  hasher.digest 'hex'
+    hasher.update map[f]
+  { hash: hasher.digest('hex'), files: map }
+
+# Every changed, added, or removed path between two walks lies under
+# app/ — then the save is a cell feed, not a reload.
+clientOnlyChange = (prev, cur) ->
+  boundary = join(cfg.appDir, 'app') + '/'
+  for path, h of cur
+    return false if prev[path] isnt h and not path.startsWith(boundary)
+  for path of prev
+    return false if not cur[path]? and not path.startsWith(boundary)
+  true
 
 settle = ->
   state.settleTimer = null
-  h = hashApp()
-  return if h is state.lastHash
-  state.lastHash = h
+  snap = hashApp()
+  return if snap.hash is state.lastHash
+  prev = state.lastFiles
+  state.lastHash = snap.hash
+  state.lastFiles = snap.files
+  # RIP_WORKSPACE=1: a save touching only app/ mutates a LIVE pool in
+  # place. With no live pool to feed (admission already cut, a cached boot
+  # failure, mid-reload) the save joins the pending epoch exactly as a
+  # server save would. Flag off, every save takes the path below.
+  if WORKSPACE and prev? and state.currentPool? and not state.dirty and not state.bootFailure? and clientOnlyChange(prev, snap.files)
+    onCellChange().catch (e) -> warn "rip-server: cell update failed: #{e?.message or e}"
+    return
   onContentChange()
 
 startWatcher = ->
-  state.lastHash = hashApp()
+  snap = hashApp()
+  state.lastHash = snap.hash
+  state.lastFiles = snap.files
   state.watcher = watch cfg.appDir, { recursive: true }, (event, filename) ->
     return if state.shuttingDown or ignoredPath(filename)
     clearTimeout state.settleTimer if state.settleTimer?
@@ -679,6 +899,16 @@ startupReport = ->
     lines.push "  #{label('control')}#{c}#{target}#{r} #{d}— #{plane.type} #{plane.api_version}#{r}"
   else
     lines.push "  #{label('control')}#{c}#{target}#{r} #{d}—#{r} #{y}read-back failed (#{planeErr})#{r}"
+  # The bridge line states what janus holds (GET /1.0/apps/{id} returns
+  # bridge_path), never merely what this manager sent.
+  if cfg.bridge?
+    if reg?
+      if reg.bridge_path is cfg.bridge
+        lines.push "  #{label('bridge')}#{reg.bridge_path}"
+      else
+        lines.push "  #{label('bridge')}#{y}read-back mismatch (janus holds #{JSON.stringify(reg.bridge_path ?? null)})#{r}"
+    else
+      lines.push "  #{label('bridge')}#{y}read-back failed (#{regErr})#{r}"
   lines.push "  #{label('workers')}#{cfg.workers}"
   lines.push "  #{label('watch')}#{if cfg.watch then "*.rip#{if cfg.eager then ', eager' else ''}" else "#{y}off#{r}"}"
 
@@ -733,7 +963,7 @@ shutdown = (reason) ->
   exit 0
 
 parseArgs = (argv) ->
-  args = { entry: null, name: null, hosts: [], workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, control: process.env.JANUS_CONTROL or null }
+  args = { entry: null, name: null, hosts: [], bridge: null, workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, control: process.env.JANUS_CONTROL or null }
   i = 0
   while i < argv.length
     a = argv[i]
@@ -744,6 +974,10 @@ parseArgs = (argv) ->
     switch a
       when '--name' then args.name = nextValue()
       when '--host' then args.hosts.push nextValue()
+      when '--bridge'
+        raw = nextValue()
+        abort "rip-server: --bridge takes a /-prefixed path, got #{raw}" unless raw.startsWith('/')
+        args.bridge = raw
       when '--workers', '-w'
         args.workers = parseInt(nextValue())
         abort "rip-server: --workers takes a positive integer" unless Number.isFinite(args.workers) and args.workers >= 1
@@ -787,6 +1021,7 @@ export main = (argv) ->
   cfg.entry = resolveEntry(args.entry)
   cfg.appDir = dirname(cfg.entry)
   cfg.name = args.name or basename(cfg.appDir)
+  cfg.bridge = args.bridge
   cfg.workers = args.workers
   cfg.concurrency = args.concurrency
   cfg.eager = args.eager
@@ -828,6 +1063,15 @@ export main = (argv) ->
     state.workerJs = buildArtifact! workerPath, join(state.runDir, 'worker.js')
   catch e
     abort "rip-server: cannot build the worker runtime: #{e?.message or e}"
+
+  # An app with an app/ dir serves the browser runtime from the run
+  # tmpdir — copied once per manager start. A missing runtime file is a
+  # toolchain defect, not an app error: abort.
+  if existsSync(join(cfg.appDir, 'app'))
+    runtimeSrc = join(loaderSrcDir(), '..', 'dist', 'browser', 'rip.js')
+    abort "rip-server: browser runtime missing at #{runtimeSrc} — an app/ dir requires dist/browser/rip.js" unless existsSync(runtimeSrc)
+    state.browserRuntime = join(state.runDir, 'rip.js')
+    Bun.write! state.browserRuntime, Bun.file(runtimeSrc)
 
   startDoorbell()
 

@@ -15,8 +15,12 @@
 #              overwrites a source cell
 #
 # The application declares its stash in the bundle module
-# `_app/stash.rip` through its `appStash` export; the `stash` option
+# `app/stash.rip` through its `appStash` export; the `stash` option
 # overrides it for tests and embedding hosts.
+#
+# The `components` option injects the component store (the Workspace
+# bag implements the same interface — WORKSPACE.md Q7); omitted,
+# launch creates its own store and behavior is unchanged.
 #
 # A second launch while one is live rejects loudly, as does a malformed
 # bundle. destroy() tears down in reverse and restores every global it
@@ -37,6 +41,7 @@ export type LaunchOpts =
   base?: string
   hash?: boolean
   stash?: Record<string, any>
+  components?: Record<string, any>
   links?: { listen: (type: string, fn: (event: any) => void, opts?: Record<string, any>) => () => void }
   persist?: boolean | 'local' | 'session'
   storage?: Record<string, any>
@@ -49,7 +54,7 @@ export type LaunchResult =
   renderer: Record<string, any>
   destroy: () => void
 
-ROUTE_ROOT = '_route'
+ROUTE_ROOT = 'app/routes'
 
 fail = (message) -> throw new Error "Rip App: #{message}"
 
@@ -63,6 +68,15 @@ validBundle = (bundle) ->
   if bundle.data? and (typeof bundle.data isnt 'object' or Array.isArray(bundle.data))
     fail 'launch bundle data must be an object'
   bundle
+
+STORE_METHODS = ['read', 'write', 'del', 'exists', 'size', 'list', 'listAll', 'load', 'watch', 'getCompiled', 'setCompiled']
+
+validComponents = (store) ->
+  fail 'launch components must be an object' unless typeof store is 'object' and not Array.isArray(store)
+  for method in STORE_METHODS
+    unless typeof store[method] is 'function'
+      fail "launch components store is missing '#{method}'"
+  store
 
 defaultTarget = ->
   unless typeof document isnt 'undefined' and typeof document.querySelector is 'function'
@@ -82,13 +96,13 @@ export def launch(opts: LaunchOpts): LaunchResult
   adapter: any = opts.adapter ?? browserAdapter()
 
   # The stash: an explicit option wins; otherwise the bundle's
-  # `_app/stash.rip` module provides it through its `appStash` export.
+  # `app/stash.rip` module provides it through its `appStash` export.
   # A stash module without the export is a named mistake, never a
   # silently empty application.
-  stashModule = bundle.compiled?['_app/stash.rip']
+  stashModule = bundle.compiled?['app/stash.rip']
   seed: any = opts.stash ?? stashModule?.appStash
   if not seed? and stashModule?
-    fail "the bundle's '_app/stash.rip' module must export 'appStash'"
+    fail "the bundle's 'app/stash.rip' module must export 'appStash'"
   if seed? and (typeof seed isnt 'object' or Array.isArray(seed))
     fail "the application stash must be a plain object"
   # The seed clones on the way in (cells by reference): the declaration
@@ -102,7 +116,7 @@ export def launch(opts: LaunchOpts): LaunchResult
   _mergePlain app.data, bundle.data ?? {}
   _stampDefaults app.data
 
-  components = createComponents()
+  components = if opts.components? then validComponents(opts.components) else createComponents()
   components.load bundle.modules if bundle.modules?
   if bundle.compiled?
     for own path, module of bundle.compiled
