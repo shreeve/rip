@@ -115,6 +115,16 @@ export const CONTRACT = [
     red: (s) => ((s.gr.negatives?.claimsBroken ?? 0) + (s.gr.negatives?.cellsMissing ?? 0)) > 0,
   },
   {
+    // The one thing byte-equality cannot check. `placed` and `text` both pass
+    // for a read that resolves onto a DIFFERENT occurrence of its own name;
+    // mapping back through the editor's own reverse direction is what
+    // distinguishes them. Expected zero — unlike its two neighbours, which
+    // count the open mapping gap — so any count is a defect never seen.
+    name: 'mapping.identity', lane: 'map',
+    property: 'every resolved read maps back to a source span containing the read it came from',
+    red: (s) => (s.mp.drifted ?? 0) > 0,
+  },
+  {
     name: 'mapping.spans', lane: 'map',
     property: 'every flagged read sits inside a mapping row the compiler emitted',
     red: (s) => s.mp.missing > 0,

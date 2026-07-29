@@ -256,7 +256,7 @@ import { Parser } from '../../src/parser.js';
 import { makeParserLexer, tokenize, ALIASES } from '../../src/lexer.js';
 import { renderTypeDecl } from '../../src/typetext.js';
 import { judge } from './contract.js';
-import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, offsetToPosition } from '../../packages/vscode/src/translate.js';
+import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, generatedSpanToSource, offsetToPosition } from '../../packages/vscode/src/translate.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
@@ -1555,12 +1555,25 @@ function mappingScan(src, code, mappings) {
   const rows = [];         // flagged reads WITH a containing row (unplaced/mistext)
   const missingRows = [];  // flagged reads with NO row at all — counted apart
   let total = 0, census = 0, byLuck = 0;
+  const drifted = [];    // resolved and byte-equal, but maps back somewhere else
   for (const { name, offset } of identReads(src)) {
     total++;
     const g = sourceOffsetToGeneratedExact(mappings, offset, src, code);
     const placed = g !== null;
     const text = g === null ? true : code.slice(g, g + name.length) === name;
+    // IDENTITY — the third invariant, and the only one byte-equality cannot
+    // supply. `text` asks whether the resolved position holds the read's
+    // bytes; it cannot ask whether those are the SAME bytes, so a read landing
+    // on a different occurrence of its own name passes it. Mapping back closes
+    // that: the reverse direction is the editor's own, and the source span it
+    // answers must contain the offset we started from. CONTAINMENT, not
+    // equality — a read resolving through a cover row maps back to the whole
+    // cover, which is coarse but not wrong, and is what the census already
+    // counts. Only checked where the forward map resolved.
+    const back = g === null ? null : generatedSpanToSource(mappings, g, g + name.length);
+    const identity = g === null ? true : (back !== null && back[0] <= offset && offset <= back[1]);
     const flagged = !(placed && text);
+    if (!flagged && !identity) drifted.push({ name, offset, gen: g, back });
     // One source-tree stab, reused for every question below — the missing check,
     // the census, and the cover row — rather than a `bestAtSource` plus a
     // separate `atSource`. `at` is empty iff nothing contains the offset, which
@@ -1590,7 +1603,7 @@ function mappingScan(src, code, mappings) {
     // a mistext, the wrong text a hover at this read would answer about.
     rows.push({ name, offset, placed, text, role: row.role, root, gen: g, hit: g === null ? null : code.slice(g, g + name.length) });
   }
-  return { total, rows, missingRows, census, byLuck };
+  return { total, rows, missingRows, census, byLuck, drifted };
 }
 
 // ── run
@@ -2745,6 +2758,15 @@ if (RUN_MAP) {
   };
   invLine('unplaced', unplaced, '`placed` fails — nothing resolves, so definition and rename find nothing there');
   invLine('mistext', mistext, '`text` fails — the span is wider than the name, so a hover names the wrong symbol');
+  // EXPECTED ZERO, unlike the two above. Those count the known mapping gap;
+  // this one closes the hole byte-equality leaves — a read landing on another
+  // occurrence of its own name — so any count here is a defect nobody has
+  // seen, not a queue. Green at zero and named either way, because a check
+  // that prints only on failure cannot be told from one that never ran.
+  const driftRows = perFile.flatMap((pf) => pf.drifted.map((d) => ({ f: pf.f, ...d })));
+  out(`    ${pad('identity', 10)} ${(driftRows.length ? red : green)(String(driftRows.length).padStart(4))}   `
+    + dim('resolved and byte-equal, but maps back outside the read — a wrong symbol both checks above accept'));
+  for (const d of driftRows) out(`      ${red('✗')} ${d.f} ${dim(`${d.name} at ${d.offset} → generated ${d.gen} → back to ${JSON.stringify(d.back)}`)}`);
 
   // ── the CENSUS — the gate the ledger's identifier-read finding asks for:
   // reads with no exact row, the at-risk population, and the MITIGATION-PROOF
@@ -2839,7 +2861,7 @@ if (RUN_MAP) {
 
   // Exactly what the combined-totals line reads — no dead fields carried on the
   // signal object (perFile, byLuck, skips, walked were all retained for nothing).
-  mp = { totReads, totFlag, unplaced, mistext, missing, census,
+  mp = { totReads, totFlag, unplaced, mistext, missing, census, drifted: driftRows.length,
          synthetic: rootTotal(byRootRole.synthetic), rewrite: rootTotal(byRootRole.rewrite) };
 
   // No calibration runs here, and that is deliberate: trusting the instrument is
@@ -3989,6 +4011,7 @@ if (mp) totalLine('Mapping', `${mp.totReads} reads: `
     ? green('all placed, all truthful')
     : `${yellow(`${mp.totFlag} unmapped`)} ${dim(`(${mp.unplaced} unplaced, ${mp.mistext} mistext · ${mp.synthetic} synthetic, ${mp.rewrite} rewrite)`)} ${dim('tracking the mapping gap (expected)')}`)
   + dim(` · ${mp.census} at-risk — no exact row`)
+  + (mp.drifted ? ` · ${red(`${mp.drifted} mapping back outside the read`)}` : '')
   + (mp.missing ? ` · ${red(`${mp.missing} missing span${mp.missing === 1 ? '' : 's'}`)} ${dim('— a new class')}` : ''));
 if (RUN_MAIN) totalLine('Type', (fails === 0
   ? green(`${totalApplicable} dimension checks: all passing`)

@@ -94,6 +94,7 @@ describe('the audit contract judges in both directions', () => {
       'claims.carriers': (s) => { s.gr.negatives.claimsBroken = 1; },
       'claims.parks': (s) => { s.gr.negatives.claimsBadParks = 1; },
       'corpus.dividers': (s) => { s.gr.negatives.splitDividers = 1; },
+      'mapping.identity': (s) => { s.mp.drifted = 1; },
       'mapping.spans': (s) => { s.mp.missing = 1; },
       'type.dimensions': (s) => { s.fails = 1; },
       'diagnostics.codes': (s) => { s.el.problems = [{ kind: 'missing' }]; },
