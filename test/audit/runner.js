@@ -1910,10 +1910,24 @@ if (RUN_GRAMMAR) {
     if (!r.ok) { out(`    ${red('✗')} ${pad(r.f, NAME_W + 2)} ${dim(`parse failed ${r.failed}`)}`); continue; }
     // A claims fixture parses but contributes no coverage, so it must not wear
     // the ✓ a contributing fixture wears: one mark, two meanings, and the
-    // weaker meaning is the one a reader would assume.
-    if (!r.grammarBucket) { console.log(`    ${dim('·')} ${pad(r.f, NAME_W + 2)} ${dim('claims-chartered — judged under Corpus claims')}`); continue; }
+    // weaker meaning is the one a reader would assume. It still belongs to the
+    // gate — it feeds the containment matrix below, and it must PARSE like
+    // anything else in the corpus — but neither column has a value to show, so
+    // one line stands for the whole bucket and -v breaks it out. Six rows
+    // repeating one sentence is a third of this table saying nothing.
+    if (!r.grammarBucket) {
+      if (VERBOSE) console.log(`    ${dim('·')} ${pad(r.f, NAME_W + 2)} ${dim('no coverage — judged under Corpus claims')}`);
+      continue;
+    }
     const u = uniqueOf(r.f);
     console.log(`    ${green('✓')} ${pad(r.f, NAME_W + 2)} ${dim(`${String(r.reduced).padStart(3)} rules · `)}${(u ? dim : yellow)(`${String(u).padStart(3)} unique`)}`);
+  }
+  // A failed claims fixture already printed its own ✗ row above, so this line
+  // counts only the ones that parsed — it can never stand in front of a
+  // failure and report it as fine.
+  {
+    const n = fixtureRows.filter((r) => r.ok && !r.grammarBucket).length;
+    if (n && !VERBOSE) out(`    ${dim('·')} ${dim(`${n} claims fixtures parsed — no coverage, judged under Corpus claims; -v lists them`)}`);
   }
   const uncovered = denom.filter((i) => !seen.has(i));
   const groupOf = (prod) => owner
