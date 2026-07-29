@@ -60,6 +60,12 @@ const HAND_ROWS = [
   // enum declarations: numeric, string, negative, exported —
   // and the enum NAME usable in type position
   'enum Color\n  red = 0\n  green = 1\nexport enum Tier\n  free = "f"\nenum Dir\n  up = 1\n  down = -1\npick: Color = Color.red',
+  // a type predicate in a parameter, and in a type body reached
+  // through one: the declaration path renders the token VALUE, so
+  // rip's `is`→`==` alias reaching type text ships a `.d.ts` that
+  // does not parse — TS1005, from tsc itself
+  'export def apply(g: ((v: unknown) => v is string), x: unknown): boolean\n  g(x)\nexport def keep(rows: unknown[], p: ((v: unknown) => v is string)): string[]\n  rows.filter(p)',
+  'type Guard = { check: (value: unknown) => value is string }\nexport def run(g: Guard, v: unknown): boolean\n  g.check(v)',
   // typed reactive declarations: the annotation types the
   // container's `.value` slot (state mutable, computed readonly) —
   // exported and module-internal

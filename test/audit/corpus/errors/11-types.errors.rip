@@ -31,6 +31,8 @@ type IsText<T> = T extends string ? 'yes' : 'no'
 type Elem<T> = T extends Array<infer U> ? U : never
 type Branch = { label: string, kids: Branch[] }
 type Formatter = { (value: number): string }
+type Copy<T> = { [K in keyof T]: T[K] }
+type Guard = { check: (value: unknown) => value is string }
 locked: Locked = { id: 1 }
 
 wrongAlias: Code = 'zero'
@@ -63,6 +65,8 @@ wrongIsText: IsText<number> = 'yes'
 wrongElem: Elem<string[]> = 5
 wrongBranch: Branch = { label: 'r', kids: [{ label: 2, kids: [] }] }
 wrongFormatter: Formatter = 5
+wrongCopy: Copy<Chart> = { mode: 9 }
+wrongGuard: Guard = { check: 5 }
 wrongAbstract: (abstract new () => Chart) = 5
 def wrongPredicate(value: number): value is string
   true

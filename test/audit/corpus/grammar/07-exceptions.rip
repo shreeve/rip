@@ -55,12 +55,14 @@ settle = (risky: () => string) ->
 
 console.log(settle(-> 'delivered'), settle(-> throw new Error('nope')))
 
-# ── try as an expression: inline, and inline with a catch ──
+# ── try as an expression: inline, inline with a catch, and the two together ──
+# The third carries a postfix cast AND a handler: the cast's type run stops at the clause keyword, so the handler survives as its own token rather than swallowing into the type string.
 
 live = try JSON.parse('{"live":true}') as { live: boolean }
 backed: { live: boolean } = try JSON.parse('broken') catch e then { live: false }
+cast = try JSON.parse('broken') as { live: boolean } catch e then { live: false }
 
-console.log('live:', live, 'backed:', backed)
+console.log('live:', live, 'backed:', backed, 'cast:', cast)
 
 # ── throw: the indented-object payload, and the expression position ──
 

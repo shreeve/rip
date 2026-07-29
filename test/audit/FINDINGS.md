@@ -51,7 +51,6 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [52](#52-a-destructured-binding-read-by-a-hoisted-def-is-implicitly-any-under-strict) | A destructured binding read by a hoisted def is implicitly `any` under strict | `strict`, `hoist` | **none** — the shape cannot enter a positive fixture while it fails the `strict` dimension; the fix's gate is the destructured spelling entering the inference claims fixture, where `strict` holds it |
 | [55](#55-a-computed-members-type-is-inferred-from-its-expressions-form-so-most-bodies-type-any) | A computed member's type is inferred from its expression's form, so most bodies type `any` | `compiler` | **none** — the fix's gate is a consumer-face claims row whose computed body reads a property rather than multiplying |
 | [54](#54-a-generic-components-shipped-declarations-reference-a-type-parameter-they-never-declare) | A generic component's shipped declarations reference a type parameter they never declare | `compiler` | **none** — the audit reads the face the checker serves, never the emitted declarations; the fix's gate is a type parameter on dts-tsc's component fixture |
-| [59](#59-a-type-predicate-in-a-parameter-ships-as--in-the-emitted-declarations) | A type predicate in a parameter ships as `==` in the emitted declarations — the `.d.ts` does not parse | `compiler` | **none** — the audit reads the face the checker serves, never the emitted declarations; the fix's gate is the predicate spelling entering dts-tsc's fixture |
 | [43](#43-a-schema-callables-output-types-unknown) | A schema callable's output types `unknown` — false errors on every typed read | `compiler` | the Diagnostics Audit's 14-schema pin (`error-pins.json`) asserts the typed-read rejection **as the interim** — it goes red the day callable outputs type, the cue to retire it |
 | [36](#36-a-reactive-import-serves-the-raw-cell) | A reactive import serves the raw cell — no deref, writes don't build | `compiler`, `capability` | **none while the semantics are unsettled** — auto-deref vs cell-as-API is the language owner's ruling; this row's exit is that ruling, which hands it an ordinary gate either way |
 | [41](#41-a-forward-referenced-class-or-component-pins-the-probes-own-symbol) | A forward-referenced class or component pins the probe's own symbol — TS2304 on legal code | `editor`, `hoist` | `check`'s forward-reference case — asserts the probe-symbol TS2304 **as the gap**; the fix's gate is the forward-reference spelling entering the corpus, where `verdict` holds it |
@@ -66,13 +65,8 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [13](#13-single-rooted-tsconfig--no-per-project-resolution) | Single-rooted tsconfig — no monorepo support | `config` | **none** — no gate can see the gap in a single-package workspace; the fix's gate is a two-tsconfig workspace driven through `check` and the editor session, per-project posture asserted in both |
 | [50](#50-a-rewritten-literal-widens-its-neighbours-diagnostics-to-the-whole-element-list) | A rewritten literal widens its neighbours' diagnostics to the whole element list | `compiler` | the Diagnostics Audit (`runner.js`) — 11-types' wrongEntry row reports a position violation, held by the contract's diagnostics.positions.element; red by agreement (soft: the audit exits 0) until the span lands on the offending element. Its wrongTrailing neighbour now positions correctly, which isolates this row to a rewritten LITERAL: a read in the same slot carries its own span (#21) |
 | [32](#32-reassigning-an-exported-plain-binding-double-declares) | Reassigning an exported plain binding double-declares | `compiler` | **none** — the spelling's output does not build, so no fixture can carry it; the fix's gate is the spelling entering 10-modules |
-| [58](#58-a-classed-svg-element-emits-an-unclosed-setattribute-call) | A classed SVG element emits an unclosed call — the module does not parse | `compiler` | **none** — the emission does not parse, so no fixture can carry it; the fix's gate is the spelling entering 13-components |
-| [28](#28-a-postfix-cast-on-an-inline-try-body-detaches-the-catch-arm) | A postfix cast on an inline try body detaches the catch arm | `compiler` | **none** — the spelling cannot compile, so no fixture can carry it; the fix's gate is the spelling entering 07-exceptions, where `compiles` and `verdict` hold it |
 | [29](#29-new-on-an-optional-chain-emits-an-unconstructable-spelling) | `new` on an optional chain emits an unconstructable spelling | `compiler` | **none** — the emission cannot parse as JS, so no fixture can carry it; the production is parked ([MANIFEST.md](MANIFEST.md)); the fix's gate is the spelling entering 09-classes |
 | [30](#30-new-on-a-tagged-template-leaks-the-sexpr-head) | `new` on a tagged template leaks the sexpr head | `compiler` | **none** — the emission references undeclared names, so no fixture can carry it; the production is parked ([MANIFEST.md](MANIFEST.md)); the fix's gate is the spelling entering 09-classes |
-| [46](#46-a-mapped-type-is-rejected-by-the-type-body-validator) | A mapped type is rejected by the type-body validator | `compiler` | **none while unruled** — the MappedType row stands in the census queue (no spelling compiles); the exit is the language owner's ruling: admit (the fix's gate is the kind entering 11-types, contract negative alongside) or rule out (the row closes into the census exclusion table) |
-| [45](#45-a-type-predicate-inside-a-type-body-collides-with-rips-is) | A type predicate inside a type body collides with rip's `is` | `compiler` | **none** — the body spelling is lexer-rejected, so no fixture can carry it, and the surviving def-return spelling drains the census row past it; the boundaries note ([ROADMAP.md](ROADMAP.md)) records the constraint |
-| [48](#48-a-method-member-in-an-inline-type-body-is-rejected) | A method member in an inline type body is rejected | `compiler` | **none** — the indented spelling claims the kind, so the census stays silent about the inline gap; the fix's gate is the inline spelling entering 11-types under `compiles` |
 | [49](#49-an-import-type-cannot-name-a-rip-module) | An import type cannot name a `.rip` module | `compiler` | **none** — the specifier does not resolve, so no fixture can carry it; the fix's gate is the ImportType kind entering 11-types with a contract negative |
 | [23](#23-an-in-face-value-declaration-could-retire-the-tier-3-pin-probe) | An in-face value declaration could retire the Tier 3 pin probe | `hoist` | **none today** — nothing fails; adoption hands it an ordinary gate (bindings still needing a pin, expect zero) |
 | [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | `editor` | **none, and none is honest** — upstream; a naive gate is platform-dependent |
@@ -314,31 +308,6 @@ The type-parameter list is dropped from both the instance interface and the cons
 **vs v3 — regression** (driven both sides, 2026-07-28, `-d` over the same four-line component). v3 emits `export declare class Listing<TItem extends string>` — the parameter list survives onto the declaration, so the shipped `.d.ts` compiles and a consumer can supply the argument.
 
 **Status.** ⬜ **Open** (2026-07-27) — **no gate**, and the gate does not belong in this corpus: the audit judges the face the checker serves, which is correct here. The fix's gate is a type parameter on `dts-tsc.test.js`'s component fixture, where a consumer already compiles against the emitted declarations and would fail on the unbound name.
-
-### 59. A type predicate in a parameter ships as `==` in the emitted declarations
-
-```
-export def apply(g: ((v: unknown) => v is string), x: unknown): boolean
-  g(x)
-```
-
-emits
-
-```ts
-export declare function apply(g: ((v: unknown) => v == string), x: unknown): boolean;
-```
-
-The declaration file does not parse — driven 2026-07-28, the repo's pinned TypeScript over the emitted `.d.ts`: TS1005 twice on that one line. `rip check` reports the source **clean**, because the checker reads a face built from a different render path. So a package whose public API takes a type guard ships a declaration file no consumer can compile, and nothing on the road says so.
-
-**Why (code) — two render paths, one of which re-tokenizes.** [typetext.js](../../src/typetext.js) states the split in its own header: an annotation position renders `normalizeTypeText` over the user's source bytes, while lexer-value positions — dts params, overload rows — render the token VALUE through `tidyType`. `is` is rewritten at scan time by `ALIASES` ([lexer.js](../../src/lexer.js), `is: ['COMPARE', '==']`), so the token value carries `==` and only the second path ships it. Same root as the type-body rejection one row over; different path, and this one is silent.
-
-**The fix — scope the rewrite, not the renderer.** Held in common with #45: stop `is` being rewritten inside type text, and both symptoms close. **Not** by special-casing `tidyType` to undo `==` → `is`, which cannot distinguish a predicate from a user's genuine equality comparison in a type position, and would leave every other alias the same path carries.
-
-**Why the suite missed it.** [dts-tsc.test.js](../toolchain/dts-tsc.test.js) compiles shipped declarations against a consumer program — exactly the right instrument — but no fixture's public surface takes a type predicate. The audit's lanes never look at declaration text at all, which is the same blind spot the generic-component row records.
-
-**vs v3 — not a regression** (driven both sides, 2026-07-28). v3 corrupts the same spelling through the same alias table; its type-body face escapes for the same reason v4's does, and its declaration path does not.
-
-**Status.** ⬜ **Open** (2026-07-28) — **no gate**: the audit judges the face the checker serves, which is correct here, and no lane reads emitted declarations. The fix's gate is the predicate spelling entering `dts-tsc.test.js`'s fixture, where a consumer already compiles against the shipped `.d.ts` and would fail to parse it.
 
 ### 55. A computed member's type is inferred from its expression's FORM, so most bodies type `any`
 
@@ -609,48 +578,6 @@ The leading literal is not the variable: double-quoting it changes nothing while
 
 **Status.** ⬜ **Open** (2026-07-23) — no gate: the spelling's output does not build, so no fixture can carry it. When the rejection lands, the never-reassigned spelling remains 10-modules' covered form and the reassignment becomes an asserted compile error.
 
-### 58. A classed SVG element emits an unclosed `setAttribute` call
-
-```
-export Icon = component
-  render
-    svg class: 'animate-spin'
-```
-
-emits `this._el0.setAttribute('class', "animate-spin";` — the closing paren is absent, so the module does not parse. Driven 2026-07-28 against three independent parsers, which agree: tsgo publishes TS1005 (*`)` expected*), `bun build` refuses with *Expected ")" but found ";"*, and node rejects the same bytes as ESM. Every other attribute on the same element closes correctly (`viewBox` and `fill` beside it emit whole), and a `div` carrying the identical `class:` is unaffected.
-
-**Why (code) — the close is arity-matched to the wrong call.** The static `class` branch ([emitter.js](../../src/emitter.js), the class-attribute walk) opens on the element kind — `setAttribute('class', ` for SVG, `${el}.className = ` for HTML — which is a CALL on one side and an ASSIGNMENT on the other. Its only close is the `if (compound)` emit of `')'`, and that paren balances the `__clsx(` the branch may have opened, never the `setAttribute(`. So the assignment side needs no close and gets none, correctly; the call side needs one and never gets one, at either arity:
-
-| SVG `class:` value | opens | closes | result |
-| --- | --- | --- | --- |
-| a plain string (`'animate-spin'`) | `setAttribute(` | none | one short |
-| compound (`['spin', on and 'go']`) | `setAttribute(` + `__clsx(` | `__clsx`'s only | one short |
-
-**The fix's shape is ten lines above it.** The REACTIVE class branch has the same two openings and branches its close the way it branches its open — `this.b.emit(isSvg ? '));' : ');')` — and emits whole (driven: `setAttribute('class', __clsx(this.cls.value));`). The static branch needs the same `isSvg` conditional on its close; nothing else about the lowering changes.
-
-**It reaches shipped code.** medlabs carries two occurrences. Any component whose render tree contains a classed SVG produces a module that can be neither built nor type-checked, so every other diagnostic in that file is unreachable behind the parse failure — which is what puts a loud row this far up among the loud ones.
-
-**Why the suite missed it.** No fixture spells `class:` on an SVG element: 13-components' SVG content carries geometry attributes, and every classed element in the corpus is HTML, which takes the `className` branch. `bun test` asserts emitted bytes for the shapes it carries, and this shape is carried nowhere, so nothing ever compared them.
-
-**vs v3 — regression** (driven both sides, 2026-07-28). v3 emits `this._el0.setAttribute('class', 'animate-spin');` — closed, and the same module builds.
-
-**Status.** ⬜ **Open** (2026-07-28) — no gate: the emission does not parse, so no fixture can carry it. The fix's gate is the spelling entering 13-components, where `compiles` and `runtime` hold it.
-
-
-### 28. A postfix cast on an inline try body detaches the catch arm
-
-`x = try f() as T catch e then y` does not parse — the reported error is an unexpected INDENT at the catch arm's own body. Driven 2026-07-22 across cast shapes: `as number`, `as { a: number }`, `as number[]` all fail identically, so the trigger is the cast itself, not a brace type. The same spelling without the cast parses (`try f() catch e then y` is committed corpus), and the cast without the catch parses (`x = try f() as T`); it is exactly the combination that breaks. The workaround is one pair of parens on the cast operand: `try (f() as T) catch e then y` compiles.
-
-**Why (code) — `CAST_STOPS` omits `CATCH`, so the type run swallows the handler.** The parser never sees a CATCH at all: the lexer's cast type-run scans until a stop keyword, and `CAST_STOPS` ([lexer.js](../../src/lexer.js)) lists `IF, UNLESS, ELSE, THEN, WHILE, UNTIL, LOOP, FOR, WHEN, BY, SWITCH, RETURN, THROW` — no `CATCH` — though the set's own comment states the invariant it is breaking, that a trailing clause never swallows into the type string. Driven 2026-07-28: `rip -t` on the failing spelling yields `CAST "number catch e"` as one token value, and the run stops at `THEN`, which is why the error lands on the handler body's INDENT. The parenthesized workaround rescues it by DEPTH, not precedence — `)` drops the run below zero and breaks the scan, and its token stream carries `CAST "number"` followed by a real `CATCH`.
-
-**The fix — add `CATCH` to `CAST_STOPS`.** The set already encodes the rule; `CATCH` is the omission. **Not** a grammar change: the token stream is wrong before the parser runs, so precedence and lookahead cannot reach it. And **not** a blanket widening of the stop set — `|` and `&` are deliberately absent because they carry union and intersection types, so the addition belongs to the clause-keyword group alone.
-
-**Why the suite missed it.** Nothing ever spelled a cast on an inline try body. The Grammar Audit counts productions, not interaction shapes — cast × inline-try is precisely the interaction class the containment matrix exists to measure, and it is one the matrix cannot yet name: `CONSTRUCT_HEADS` carries no cast head, so the cell is unrulable until the heads are curated ([ROADMAP.md](ROADMAP.md), M3) — and this one surfaced by hand while authoring 07-exceptions, whose try-expression section sidesteps the combination today: the cast rides the handler-less form, and the handled form types itself through a declaration annotation instead.
-
-**vs v3 — both wrong, v3 more quietly** (driven both sides, 2026-07-28). v3 PARSES the spelling and drops the handler: `x = try f() as number catch e then 0` emits `(() => { try { return f(); } catch {} })()` — no binding, no `0`, the catch arm silently gone. So the combination is unsupported on both sides, and v4 refusing it at the parser is the better of the two failures. Nothing to restore here; the fix is new work either way.
-
-**Status.** ⬜ **Open** (2026-07-22) — loud (a compile error, not a wrong answer) and narrow, which is why it sits at the bottom of the unblocked rows. No gate: the spelling cannot enter a fixture while it fails to compile. The fix's gate is the unparenthesized spelling entering 07-exceptions, where `compiles` and `verdict` hold it.
-
 ### 29. `new` on an optional chain emits an unconstructable spelling
 
 `new Registry?.Box` compiles and emits the optional chain into `new` verbatim — `new Registry?.Box;` — which JavaScript rejects at parse time: *Cannot call constructor in an optional chain* (driven 2026-07-23, reproduced under bun; tsgo flags the face TS2351). Every spelling of the production is affected, so no fixture can carry it: the corpus parks `NewSpine → NewSpine ?. Property` ([MANIFEST.md](MANIFEST.md)'s Parked table), which is why 09-classes' gate queue holds one row it cannot clear.
@@ -678,52 +605,6 @@ emits `this._el0.setAttribute('class', "animate-spin";` — the closing paren is
 **vs v3 — not a regression** (driven both sides, 2026-07-28). v3 leaks the same sexpr head, byte for byte: `new tagged-template(tag, "hi");`. Pre-existing, and dark for the same reason as the optional-chain spine beside it.
 
 **Status.** ⬜ **Open** (2026-07-23) — no gate while the emission is broken; the parked manifest row is the queue's memory of it.
-
-### 46. A mapped type is rejected by the type-body validator
-
-`type Copy<T> = { [K in keyof T]: T[K] }` does not compile: the type-body validator reads TS's `in` as executable code — *"code expression ('in') in a type body — types erase and cannot execute"* (driven 2026-07-24, the expressibility census; the indented block spelling fails identically). The validator's purpose is sound — catch users writing runtime code inside erased type bodies — but mapped types are TypeScript's own grammar, not code: the rejection is a false positive of a generic check, not a considered ruling that rip's type sub-language omits them. The loss is user-authored `Partial`-shaped transforms; the built-in utility types survive (`Partial<T>` is an ordinary type reference, claimed by the corpus).
-
-**Why (code) — a generic code-in-type-body check with no mapped-type case.** The validator scans a type body for tokens it reads as executable and rejects `in` among them. Mapped-type syntax is the one TypeScript grammar that puts `in` between `[` and `]`, and the check carries no exception for that position.
-
-**The fix is a ruling, and admitting is the narrow side of it.** Admit `in` between `[` and `]` inside a type body — the only place TS grammar puts it — or rule mapped types out and close this into the census exclusion table beside template-literal types. v3 compiles the spelling (below), which is what makes this a decision about removing a capability — and the version of the question the language owner should actually be handed.
-
-**Why the suite missed it.** No fixture spells a mapped type anywhere — `MappedType` sat unclaimed and invisible until the census enumerated TS's type grammar as a closed universe and the expressibility probe drove each queued kind through the compiler.
-
-**vs v3 — regression** (driven both sides, 2026-07-28). v3 has no type-body validator and compiles the spelling, emitting `type Copy<T> = {[K in keyof T]: T[K]};` verbatim onto the face. That narrows the ruling below: mapped types were expressible until this validator, so ruling them out is removing a capability rather than declining to add one — which is a different decision, and the one the language owner should be asked.
-
-**Whether to admit them is the language owner's call.** If yes, the fix is scoped: the validator admits `in` between `[` and `]` inside a type body (mapped-type syntax is the only TS grammar that puts it there). If no — a deliberate simplicity ruling — this row closes into the census exclusion table with that ruling as its reason, beside template-literal types.
-
-**Status.** ⬜ **Open** (2026-07-24) — gated softly: `MappedType` stands in the census queue (`bun run audit --grammar`) and cannot drain while the lexer rejects every spelling; the row closes when the kind is admitted and claimed, or rules into the exclusion table.
-
-### 45. A type predicate inside a type body collides with rip's `is`
-
-`type Guard = { check: (value: unknown) => value is string }` does not compile: rip's `is`→`==` rewrite reaches inside the type body, and the lexer's own validation then rejects its product — *"code expression ('==') in a type body — types erase and cannot execute"* (driven 2026-07-24, the expressibility census; the indented block spelling fails identically). TypeScript's predicate syntax owns `is` in that position; rip's operator rewrite runs anyway. Annotation positions survive and are fully honest — a typed binding (`isStr: ((v: unknown) => v is string)`) and a nested object type both emit `v is string` onto the face and enforce it, so the predicate KIND is expressible everywhere except a `type`/`interface` declaration body. The def-return spelling survives on the face too, and corrupts in the emitted declarations — that is #59, one symptom over, same root.
-
-**Why (code) — the `is`→`==` rewrite runs inside type bodies.** rip rewrites `is` to `==` wherever it appears, the type sub-language included, and the validator then rejects the `==` its own rewrite produced — which is why the error blames an operator the user never wrote. The def-return position escapes because the rewrite does not reach a return annotation.
-
-**The fix — scope the rewrite so it does not reach type text.** **Not** by carving out the validator: a `type`/`interface` face is raw source (`TYPE_DECL` carries the statement text verbatim — `type Flag = { a: yes, b: no }` ships `yes`/`no` unrewritten), so a carve-out really would make this spelling correct, and that is the trap. It would close the loud symptom and leave #59's silent one, which flows through a different render path, standing.
-
-**Why the suite missed it.** No fixture spells a type predicate anywhere — `TypePredicate` sat unclaimed and invisible until the census enumerated TS's type grammar as a closed universe and the expressibility probe drove each queued kind through the compiler.
-
-**It is a defect, not a ruling.** The sibling rejections are not considered exclusions with their own messages: `this`-types and mapped types draw the identical generic string from the single `fail` site in `assertTypeVocabulary`. And the same predicate text is admitted, rendered and enforced one position over, so the type sub-language is inconsistent with itself rather than deliberately narrow.
-
-**vs v3 — shared root, opposite failure mode** (driven both sides, 2026-07-28). The `is`→`==` rewrite reaches into the type body in v3 too — but v3 has no validator to catch its product, so the spelling COMPILES and emits `check :(value: unknown) => value == string` onto the face, where tsgo then reports TS2749 and TS2693 against the user's legal predicate syntax. The rewrite is the defect on both sides. v4's rejection is the louder half — but not the safer one: v4 ships the same corruption through its declaration path (#59), so it has both halves where v3 has one.
-
-**Status.** ⬜ **Open** (2026-07-24) — no mechanical gate while the spelling is lexer-rejected: a fixture cannot carry it, and the census cannot distinguish which SPELLING claimed a kind (any `TypePredicate` claim, def-return included, drains the queue row). The boundaries note (ROADMAP.md, the error-pair conventions) records the constraint for census-queue authoring; re-drive the census probe on any change to the lexer's type-run collection.
-
-### 48. A method member in an inline type body is rejected
-
-`type Greeter = { greet(n: number): string }` does not compile: the type-body validator reads the member's parameter list as executable code — *"code expression ('(') in a type body — types erase and cannot execute"* (driven 2026-07-24, the census drain). It is the same generic check that rejects mapped types, firing on a name followed by a paren, and it is not a considered ruling that the type sub-language omits object methods: the sibling call signature `{ (value: number): string }` compiles inline, and the indented spelling of the very same member compiles too — `interface Sink` carries `accept(entry: string): string`. Closed finding C2 admitted this shorthand into type bodies; its fix reached the indented form and left the inline literal behind.
-
-**Why (code) — the same code-in-type-body check, firing on a name followed by a paren.** The validator reads the parameter list as executable and refuses it. The two spellings that DO compile, above, are what isolate this to the check's reach rather than to the type sub-language's scope.
-
-**The fix — admit a name followed by a parameter list inside a type body.** C2 admitted this shorthand and its fix reached the indented form only; the inline literal needs the same admission at the validator. The inline call signature already passing is the precedent for the exact shape, and v3 compiles the spelling (below).
-
-**Why the suite missed it.** No fixture spelled a method member inline, and the indented spelling works, so nothing failed. The census cannot report the gap either — it records that a kind is claimed, never which SPELLING claimed it, and the indented member claims MethodSignature.
-
-**vs v3 — regression** (driven both sides, 2026-07-28). v3 compiles the inline spelling and emits `type Greeter = { greet(n: number): string; };`. So this is not C2's fix stopping short of a form that never worked — the form worked, and the validator is what reaches it. Same root as the mapped-type row, same reframing: a capability removed, not one unbuilt.
-
-**Status.** ⬜ **Open** (2026-07-24) — no mechanical gate: the kind is claimed, so the queue is silent, and no fixture can carry a spelling that does not compile. The boundaries note ([ROADMAP.md](ROADMAP.md)) records the constraint for census-queue authoring; the fix's gate is the inline spelling entering 11-types, where `compiles` holds it.
 
 ### 49. An import type cannot name a `.rip` module
 
@@ -810,3 +691,9 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 51 | A value word names a binding — every read became the literal, silently | `battery` (value-words.rip): rejection rows for every annotated binding site, property-position rows for the legal negative space |
 | 60 | A value word in a destructuring pattern bound — the module did not parse | `battery` (value-words.rip): rejection rows for every pattern form, negative-space rows for ordinary names |
 | 53 | A paren-injected call's arity error lands on the wrong argument | the Diagnostics Audit, position rows on 02-operations |
+| 59 | A type predicate shipped as `==` in the emitted declarations | `dts-tsc` |
+| 45 | A type predicate in a type body collided with rip's `is` | audit `compiles`, `dts-tsc`, and `types`' predicate-admission rows |
+| 46 | A mapped type rejected by the type-body validator | audit `compiles` and `types`' mapped-type-admission rows; MappedType drained from the `census` queue. Accepted limits: the optionality-modifier spellings reject at the scanner rather than the vocabulary floor, and in a brace-less indented body an opening bracket already reads as a tuple or an index signature, so the braced spellings are the admitted ones |
+| 48 | A method member in an inline type body rejected | audit `compiles` and `types`' shorthand-admission rows |
+| 28 | A postfix cast on an inline try body detached the catch arm | audit `compiles`, `verdict` |
+| 58 | A classed SVG element emitted an unclosed call | audit `runtime`, `verdict`, `strict`, on both static arities — `compiles` stays green on the broken emission and holds nothing here |

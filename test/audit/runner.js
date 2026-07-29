@@ -2262,11 +2262,10 @@ if (RUN_GRAMMAR) {
       ['IntrinsicKeyword', 'reserved for lib.d.ts internals (`intrinsic`) — not writable in user code'],
       // Kinds rip's type sub-language rejects BY DESIGN — reasons cite the
       // lexer's own errors. If the lexer ever admits one, its text claims
-      // the kind and the excluded-but-claimed red fires. MappedType is
-      // lexer-rejected but NOT excluded — the open mapped-type finding
-      // holds its queue row (a generic validator collision, not a
-      // considered rejection); ThisType is claimable (a class method's
-      // return annotation carries it).
+      // the kind and the excluded-but-claimed red fires. ThisType is
+      // claimable (a class method's return annotation carries it), and so
+      // is MappedType — the braced spellings compile, so it is neither
+      // excluded nor held.
       ['TemplateLiteralType', 'rip\'s dedicated rejection — "template-literal types are not supported — a Rip type cannot contain \'`\'" (the backtick is rip\'s own token)'],
       ['ConstructSignature', "rip's lexer rejects `new (` inside a type body; the annotation-position ConstructorType (`new () => T`) is the claimable spelling"],
     ]);
@@ -2279,7 +2278,6 @@ if (RUN_GRAMMAR) {
     // and the hold outlived it, and a hold naming a kind outside the
     // universe is stale — each paints red rather than sitting there.
     const HELD_KINDS = new Map([
-      ['MappedType', 'the open mapped-type finding — every spelling is lexer-rejected'],
       ['ImportType', 'the open import-type finding — the `.rip` specifier does not resolve'],
     ]);
     const claimedSet = new Set(claimed.map(([c]) => c));
@@ -2441,6 +2439,10 @@ if (RUN_GRAMMAR) {
     out(`    ${(kindQueue.length ? dim : green)(String(claimedSet.size))} ${dim('/')} ${dim(`${censusDenom.length} kinds claimed by the corpus`)}${EXCLUDED_KINDS.size ? dim(` · ${EXCLUDED_KINDS.size} excluded by ruling — netted from the denominator; -v lists them`) : ''}`);
     const heldKinds = kindQueue.filter((k) => HELD_KINDS.has(k));
     const staleHeldKinds = [...HELD_KINDS.keys()].filter((k) => !universeSet.has(k));
+    // Read from the HOLD TABLE, not from the unclaimed queue: a hold whose
+    // kind is now claimed is exactly the case this catches, and a queue
+    // filtered to unclaimed kinds can never contain one.
+    const heldButClaimed = [...HELD_KINDS.keys()].filter((k) => claimedSet.has(k));
     if (kindQueue.length) {
       const writable = kindQueue.length - heldKinds.length;
       out(`    ${yellow(`${kindQueue.length} unclaimed — ${heldKinds.length === kindQueue.length
@@ -2453,7 +2455,7 @@ if (RUN_GRAMMAR) {
       const free = kindQueue.filter((k) => !HELD_KINDS.has(k));
       if (free.length) wrapList(free, yellow);
     } else out(`    ${green('every kind claimed or excluded')}`);
-    for (const k of heldKinds.filter((k) => claimedSet.has(k))) out(`    ${red('✗')} ${red('held but claimed:')} ${k} ${dim('— the finding closed; drop the hold')}`);
+    for (const k of heldButClaimed) out(`    ${red('✗')} ${red('held but claimed:')} ${k} ${dim('— the finding closed; drop the hold')}`);
     for (const k of staleHeldKinds) out(`    ${red('✗')} ${red('held kind not in the universe:')} ${k} ${dim('— stale; fix the census hold table')}`);
     if (VERBOSE) for (const [label, why] of groupByReason(EXCLUDED_KINDS)) labeled(6, label, 26, `excluded — ${why}`);
     for (const k of claimedOutside) out(`    ${red('✗')} ${red('claimed kind outside the census universe:')} ${k} ${dim('— extend the universe derivation in classifyTypeTexts')}`);
@@ -2537,7 +2539,8 @@ if (RUN_GRAMMAR) {
       badSpellingExclusions: falseSpellingExclusions.length + staleSpellingExclusions.length,
       famZero: famZero.length, vocabClaimed: claimed.length, vocabUnfalsified: unfalsified.length,
       kindDenom: censusDenom.length, kindQueued: kindQueue.length, kindHeld: heldKinds.length,
-      kindBad: claimedOutside.length + falseKindExclusions.length + staleKindExclusions.length,
+      kindBad: claimedOutside.length + falseKindExclusions.length + staleKindExclusions.length
+        + heldButClaimed.length + staleHeldKinds.length,
       headsUnseen: headsUnseen.length, headsTotal: CONSTRUCT_HEADS.size, pairs: pairsSeen.size,
       splitDividers: splitDividers.length, splitDividerRows: splitDividers, dividerFiles: commentFiles.length,
     };

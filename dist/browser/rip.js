@@ -3100,7 +3100,8 @@ var CAST_STOPS = new Set([
   "BY",
   "SWITCH",
   "RETURN",
-  "THROW"
+  "THROW",
+  "CATCH"
 ]);
 var ALIAS_STOPS = new Set([
   "IF",
@@ -3165,13 +3166,35 @@ var TYPE_ATOM_ENDERS = new Set([
   "INDEX_END",
   "}"
 ]);
+var MEMBER_ROW_OPENERS = new Set(["TERMINATOR", "INDENT", "OUTDENT", "{", ","]);
+var memberRowStart = (tokens, at, from) => {
+  if (at - 1 < from)
+    return true;
+  const before = tokens[at - 1];
+  if (before.value === "readonly" || (before.kind === "-" || before.kind === "+") && tokens[at].value === "readonly") {
+    return memberRowStart(tokens, at - 1, from);
+  }
+  return MEMBER_ROW_OPENERS.has(before.kind);
+};
+var GROUP_OPENERS = new Map([
+  ["{", "{"],
+  ["[", "["],
+  ["INDEX_START", "["],
+  ["(", "("],
+  ["PARAM_START", "("]
+]);
+var GROUP_CLOSERS = new Set(["}", "]", "INDEX_END", ")", "PARAM_END"]);
 var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
   let angle = 0;
+  const groups = [];
+  const enclosing = (up = 0) => groups[groups.length - 1 - up];
   let openAngle = null;
   let atomEnd = false;
-  let methodClose = -1;
+  const methodCloses = [];
   const closeAngles = (t, n) => {
     angle -= n;
+    for (let k = 0;k < n; k++)
+      groups.pop();
     if (angle < 0) {
       fail(`unbalanced '${t.value}' in a type body — the line is not a type`, t.start);
     }
@@ -3187,6 +3210,7 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       if (angle === 0)
         openAngle = t;
       angle++;
+      groups.push("<");
       atomEnd = false;
       continue;
     }
@@ -3209,6 +3233,14 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = false;
       continue;
     }
+    if (t.word === "is" && atomEnd && j - 2 >= from && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY") && (tokens[j - 2].kind === "=>" || tokens[j - 2].value === "asserts")) {
+      atomEnd = false;
+      continue;
+    }
+    if (kd === "RELATION" && t.value === "in" && enclosing() === "[" && enclosing(1) === "{" && j - 2 >= from && (tokens[j - 2].kind === "[" || tokens[j - 2].kind === "INDEX_START") && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY") && memberRowStart(tokens, j - 2, from)) {
+      atomEnd = false;
+      continue;
+    }
     if (t.value === "?" && atomEnd && tokens[j + 1]?.kind === ":") {
       atomEnd = false;
       continue;
@@ -3218,13 +3250,17 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = true;
       continue;
     }
+    if ((kd === "-" || kd === "+") && tokens[j + 1]?.value === "readonly" && enclosing() === "{" && memberRowStart(tokens, j, from)) {
+      atomEnd = false;
+      continue;
+    }
     if (kd === "=" && angle > 0) {
       atomEnd = false;
       continue;
     }
-    if (opts.methods && kd === "CALL_START" && methodClose === -1) {
+    if ((enclosing() === "{" || opts.methods && enclosing() === undefined) && kd === "CALL_START") {
       const name = tokens[j - 1];
-      const memberStart = j - 2 < from || tokens[j - 2].kind === "TERMINATOR" || tokens[j - 2].kind === "INDENT" || tokens[j - 2].kind === "OUTDENT";
+      const memberStart = memberRowStart(tokens, j - 1, from);
       if (name && (name.kind === "IDENTIFIER" || name.kind === "PROPERTY") && memberStart) {
         let d = 1;
         let k = j + 1;
@@ -3236,7 +3272,8 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
           k++;
         }
         if (d === 0 && tokens[k]?.kind === ":") {
-          methodClose = k - 1;
+          methodCloses.push(k - 1);
+          groups.push("(");
           atomEnd = false;
           continue;
         }
@@ -3245,12 +3282,17 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
         }
       }
     }
-    if (kd === "CALL_END" && j === methodClose) {
-      methodClose = -1;
+    if (kd === "CALL_END" && j === methodCloses[methodCloses.length - 1]) {
+      methodCloses.pop();
+      groups.pop();
       atomEnd = true;
       continue;
     }
     if (TYPE_VOCAB.has(kd)) {
+      if (GROUP_OPENERS.has(kd))
+        groups.push(GROUP_OPENERS.get(kd));
+      else if (GROUP_CLOSERS.has(kd))
+        groups.pop();
       atomEnd = TYPE_ATOM_ENDERS.has(kd);
       continue;
     }
@@ -3525,7 +3567,7 @@ var collectTypeRun = (tokens, j, opts, fail) => {
         j++;
         continue;
       }
-      parts.push(t.value);
+      parts.push(t.word ?? t.value);
       end = t.end;
       j++;
     }
@@ -5202,7 +5244,7 @@ ${baseline}`).join(`
         } else if (word === "new" && text[pos] === "." && /^\.target\b/.test(text.slice(pos))) {
           push("NEW_TARGET", "new", start, pos);
         } else {
-          push(kind, value, start, pos);
+          push(kind, value, start, pos, { word });
         }
       } else if ((word === "offer" || word === "accept") && insideComponentBody()) {
         push(word === "offer" ? "OFFER" : "ACCEPT", word, start, pos);
@@ -15744,6 +15786,8 @@ ${this.replayPad}}` : " }");
               this.b.emit(`${this.runtimeName("__clsx")}(`);
             this.renderExpr(value);
             if (compound)
+              this.b.emit(")");
+            if (isSvg)
               this.b.emit(")");
           });
         }

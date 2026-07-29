@@ -9116,6 +9116,8 @@ class Emitter {
             if (compound) this.b.emit(`${this.runtimeName('__clsx')}(`);
             this.renderExpr(value);
             if (compound) this.b.emit(')');
+            // The open is branched, so the close is too: SVG opened a CALL, HTML an assignment.
+            if (isSvg) this.b.emit(')');
           });
         }
         continue;

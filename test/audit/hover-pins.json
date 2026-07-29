@@ -50,6 +50,10 @@
         "expect": "let Take: typeof Take"
       },
       {
+        "name": "Spinner",
+        "expect": "let Spinner: typeof Spinner"
+      },
+      {
         "name": "Quiet",
         "expect": "let Quiet: typeof Quiet"
       },

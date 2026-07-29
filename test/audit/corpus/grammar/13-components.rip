@@ -130,6 +130,17 @@ Take = component
   render
     span 'take'
 
+# ── SVG elements: the namespaced branch, where `class:` lowers to setAttribute ──
+
+Spinner = component
+  spinning := true
+
+  render
+    svg viewBox: '0 0 24 24', class: 'animate-spin', fill: 'none'
+      g class: ['icon', 'spin']
+        circle cx: '12', cy: '12', r: '10'
+      path class: "trail-#{spinning}", d: 'M4 12a8 8 0 0 1 8-8'
+
 # ── render Expression (the block-less spelling): a logic-only component ──
 
 Quiet = component
@@ -142,6 +153,6 @@ Quiet = component
 Terse = component
   render null;
 
-console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel)
+console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel, typeof Spinner)
 console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse)
 console.log('rip-native constructs:', (typeof Routed is 'function'), (typeof Give is 'function'), (typeof Take is 'function'))

@@ -67,8 +67,9 @@ console.log(settle(() => 'delivered'), settle(() => { throw new Error('nope') })
 
 let live = (() => { try { return JSON.parse('{"live":true}') as { live: boolean } } catch {} })()
 let backed: { live: boolean } = (() => { try { return JSON.parse('broken') } catch (e) { return { live: false } } })()
+let cast = (() => { try { return JSON.parse('broken') as { live: boolean } } catch (e) { return { live: false } } })()
 
-console.log('live:', live, 'backed:', backed)
+console.log('live:', live, 'backed:', backed, 'cast:', cast)
 
 // ── throw: the indented-object payload, and the expression position ──
 
