@@ -60,6 +60,16 @@ Janus items moved to `janus/TODO.md`.
       (apply policy for server changes is likely a full page reload
       anyway); if the door keeps in-place apply for these, the manager
       must ding after the pool swap.
+- [ ] One unexplained missed ding (2026-07-28, live Janus run): a
+      `app/mood.rip` rev-2 ding published ~15s after a manager
+      re-registration (409 host-claim retry window) never applied in a
+      freshly booted tab — no report was captured (console hook was
+      installed later); hub counters showed publishes 1 / deliveries 2 /
+      conns 2, so delivery-vs-enrollment is ambiguous. Six consecutive
+      dings applied cleanly afterward. If it recurs with a hooked
+      console, capture the feed report verbatim. Structural note: an
+      applyDing whose cell fetch AND resync both miss has no retry
+      timer — the feed stays silent until the next ding or reconnect.
 
 ---
 

@@ -398,11 +398,11 @@ describe('bootApp workspace mode', () => {
     ['/__rip/manifest', JSON.stringify(manifest)],
   ]);
 
-  const bootWorkspace = async ({ table, hub, reports = [] }) => {
+  const bootWorkspace = async ({ table, hub, reports = [], bundle = null }) => {
     const target = doc.createElement('div');
     const fetch = fakeFetch(table);
     const result = await bootApp({
-      bundle: assembleWorkspace(),
+      bundle: bundle ?? assembleWorkspace(),
       target,
       adapter: fakeAdapter('/'),
       workspace: true,
@@ -543,6 +543,45 @@ describe('bootApp workspace mode', () => {
     } finally {
       console.log = originalLog;
       boot?.result.destroy();
+    }
+  });
+
+  test('a ding to a DEPENDENCY recompiles its importers: the remount shows the new value through the importing route', async () => {
+    // The loader invalidates importers transitively; the remount must
+    // read its projections THROUGH the loader, or the route keeps the
+    // stale module that closed over the old dependency.
+    const modules = {
+      'app/badge.rip': "export LABEL = 'badge v1'",
+      'app/routes/index.rip': [
+        "import { LABEL } from '../badge.rip'",
+        'export Home = component',
+        '  render',
+        '    h1 "#{LABEL}"',
+      ].join('\n'),
+    };
+    const manifest = {
+      cells: [
+        { id: 'app/badge.rip', path: 'app/badge.rip', rev: 1 },
+        { id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1 },
+      ],
+    };
+    const bundle = assembleBundle({
+      modules,
+      packagesDir: resolve(root, 'packages'),
+      claims: ['@rip-lang/workspace'],
+    });
+    const table = new Map([['/__rip/manifest', JSON.stringify(manifest)]]);
+    table.set('/__rip/cells/app/badge.rip?rev=2', "export LABEL = 'badge v2'");
+    const hub = fakeHub();
+    const { result, target } = await bootWorkspace({ table, hub, bundle });
+    try {
+      await until(() => target.textContent.includes('badge v1'));
+      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/badge.rip', rev: 2 } }) });
+      await until(() => result.workspace.passport('app/badge.rip').rev === 2);
+      await settleEscape();
+      await until(() => target.textContent.includes('badge v2'));
+    } finally {
+      result.destroy();
     }
   });
 

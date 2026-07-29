@@ -255,21 +255,44 @@ export async function bootApp(opts = {}) {
   // remount of the whole launch against the same bag — the cached
   // graph makes the relaunch legal (no second renderer claim). This is
   // the labeled escape (D7), not hot apply.
+  //
+  // Projections rebuild THROUGH the loader, never from the bag's cache:
+  // a dinged cell's importers are invalidated transitively (they splice
+  // its object URL), so their bag projections are stale the moment the
+  // cell lands. Unchanged modules answer from the loader's own cache.
   let destroyed = false;
   let timer = null;
+  let remounting = false;
   const handle = {};
-  const remount = () => {
+  const remount = async () => {
     timer = null;
     if (destroyed) return;
-    const snapshot = {};
-    for (const path of bag.paths()) {
-      const module = bag.getCompiled(path);
-      if (module) snapshot[path] = module;
+    if (remounting) {
+      timer = setTimeout(remount, 25);
+      return;
     }
-    current.destroy();
-    current = launchWith(snapshot);
-    Object.assign(handle, current, stable);
-    console.log('[Rip] workspace: change applied by remount (escape, not hot apply)');
+    remounting = true;
+    try {
+      const snapshot = {};
+      for (const path of bag.paths()) {
+        let module = null;
+        try {
+          module = { ...(await loader.import(path)) };
+          bag.setCompiled(path, module);
+        } catch (error) {
+          report(`[Rip] workspace: '${path}' failed to recompile for the remount — keeping its last good projection`, error);
+          module = bag.getCompiled(path);
+        }
+        if (module) snapshot[path] = module;
+      }
+      if (destroyed) return;
+      current.destroy();
+      current = launchWith(snapshot);
+      Object.assign(handle, current, stable);
+      console.log('[Rip] workspace: change applied by remount (escape, not hot apply)');
+    } finally {
+      remounting = false;
+    }
   };
   const unwatch = bag.watch((_event, path) => {
     if (!path.startsWith('app/')) return;
