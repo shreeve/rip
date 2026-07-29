@@ -585,24 +585,61 @@ test! "a manifest entry the cursor covers with different bytes restarts too — 
   eq ws.passport('a.rip').rev, 3
   feed.close()
 
-test! "a want the manifest no longer names is retired — a lost delete ding never re-polls forever", ->
+test! "a want retires only when the manifest MOVES without naming it — retirement needs evidence", ->
   # Wants come only from dings, and dings only name server-owned ids: an
-  # id the manifest does not name was retired upstream (its delete ding
-  # lost in a reconnect window). Nothing will ever satisfy the want, so
-  # the resync must retire it instead of re-polling the manifest forever.
+  # id that a manifest which has MOVED since the want was recorded still
+  # does not name was retired upstream (its delete ding lost in a
+  # reconnect window) — nothing will ever satisfy the want, so the moved
+  # manifest retires it and the re-poll stops. An UNCHANGED manifest
+  # proves nothing: it may be held back by a bundle-rewrite failure, so
+  # the want survives it and keeps retrying.
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
-  { feed, calls, sockets, reports } = openFeed ws, { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', rev: 1 }] } }
+  routes = { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', rev: 1 }] } }
+  { feed, calls, sockets, reports } = openFeed ws, routes
   sockets[0].onopen()
   await settle()
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'gone.rip', rev: 2 } } }
   await settle()
   ok reports.some((args) -> String(args[0]).includes('cell fetch missed')), 'the miss is loud'
+  base = calls.filter((u) -> u is '/@rip/manifest').length
+  await new Promise (resolve) -> setTimeout resolve, 30
+  ok calls.filter((u) -> u is '/@rip/manifest').length > base, 'an unchanged manifest keeps the retry alive'
+  # The next save moves the manifest — and still does not name the id:
+  # retirement evidence. The want retires and the re-poll stops.
+  routes['/@rip/manifest'] = JSON.stringify { cells: [{ id: 'a.rip', rev: 2 }] }
+  routes['/@rip/cells/a.rip?rev=2'] = 'v2'
   await new Promise (resolve) -> setTimeout resolve, 30
   polls = calls.filter((u) -> u is '/@rip/manifest').length
   await new Promise (resolve) -> setTimeout resolve, 30
-  eq calls.filter((u) -> u is '/@rip/manifest').length, polls, 'the retired want stops the re-poll'
+  eq calls.filter((u) -> u is '/@rip/manifest').length, polls, 'the moved manifest retires the want and stops the re-poll'
   eq ws.passport('gone.rip'), undefined
+  eq ws.passport('a.rip').rev, 2
+  feed.close()
+
+test! "a want for a brand-new id survives a held-back manifest — the direct cell retry heals it", ->
+  # Two simultaneous failures: the ding's cell fetch misses AND the
+  # manifest is held back by a failed bundle rewrite, so it does not
+  # name the brand-new id. The manager writes cells durable BEFORE dings
+  # publish, so the ding's own rev-and-hash URL is fetchable the moment
+  # the transient miss heals — the kept want retries it directly and the
+  # cell lands without the manifest ever speaking.
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
+  routes = { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', rev: 1 }] } }
+  { feed, sockets, reports } = openFeed ws, routes
+  sockets[0].onopen()
+  await settle()                       # clean open resync
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'new.rip', rev: 1, hash: 'feedfacefeedface' } } }
+  await settle()                       # the cell misses AND the manifest does not name the id
+  eq ws.passport('new.rip'), undefined
+  ok reports.some((args) -> String(args[0]).includes('cell fetch missed')), 'the miss is loud'
+  # The transient miss heals; the manifest stays held back.
+  routes['/@rip/cells/new.rip?rev=1&h=feedfacefeedface'] = 'born'
+  await new Promise (resolve) -> setTimeout resolve, 50
+  eq ws.passport('new.rip').rev, 1
+  eq ws.passport('new.rip').path, 'new.rip'
+  eq ws.read('new.rip'), 'born'
   feed.close()
 
 test! "a stale or duplicate ding never touches the network", ->

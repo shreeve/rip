@@ -109,16 +109,19 @@ export def connectFeed(workspace, opts = {}): Feed
   timer = null
   resyncTimer = null
   resyncAttempts = 0
-  wants = {}       # id → highest dinged rev not yet applied (a miss under retry)
+  wants = {}       # id → { rev, hash, sig }: the highest dinged rev not yet applied (a miss under retry)
 
   # A dinged rev the workspace has not reached yet is a WANT: a resync
   # only counts as clean once every want is satisfied (or its id was
   # deleted), so a miss retries instead of leaving the feed silently
-  # behind until the next ding or reconnect.
+  # behind until the next ding or reconnect. A want keeps the ding's
+  # hash (its cell URL is refetchable directly) and the signature of
+  # the first manifest that failed to name it (retirement evidence —
+  # the retirement rule below).
   wantsSatisfied = ->
-    for id, rev of wants
+    for id, want of wants
       current = workspace.passport id
-      delete wants[id] if current? and current.rev >= rev
+      delete wants[id] if current? and current.rev >= want.rev
     Object.keys(wants).length is 0
 
   scheduleResync = ->
@@ -172,13 +175,33 @@ export def connectFeed(workspace, opts = {}): Feed
       # A birth needs a path, and the id IS the path (B′).
       cell.path = entry.id unless current?
       workspace.set! cell
-    # Wants come only from dings, and dings only name server-owned ids —
-    # so a wanted id the manifest no longer names was RETIRED upstream
-    # and its delete ding was lost in a reconnect window. Drop the want:
-    # nothing will ever satisfy it, and re-polling the manifest forever
-    # is the alternative.
+    # A want the manifest walk left unsatisfied retries the ding's OWN
+    # rev-and-hash URL: the manager writes cells durable BEFORE dings
+    # publish, so a manifest held back by a bundle-rewrite failure never
+    # blocks a live feed — the cell is fetchable the moment its transient
+    # miss heals. Retirement needs EVIDENCE: wants come only from dings,
+    # and dings only name server-owned ids, so a want that a manifest
+    # which has MOVED since first failing to name it STILL does not name
+    # was retired upstream (its delete ding lost in a reconnect window) —
+    # nothing will ever satisfy it, and the moved manifest retires it. An
+    # UNCHANGED manifest proves nothing either way (held back or
+    # retired?), so the want survives it and the retry stays scheduled.
+    sig = JSON.stringify cells
     for id of { ...wants }
-      delete wants[id] unless named.has id
+      want = wants[id]
+      current = workspace.passport id
+      continue if current? and current.rev >= want.rev
+      cres = fetchBytes! cellUrl(id, want.rev, want.hash)
+      if cres.ok
+        source = cres.text!()
+        cell = { id, rev: want.rev, source }
+        cell.path = id unless current?
+        workspace.set! cell
+      else if not named.has(id)
+        if want.sig? and want.sig isnt sig
+          delete wants[id] if wants[id] is want
+        else
+          want.sig = sig
     if clean and wantsSatisfied()
       resyncAttempts = 0
     else
@@ -212,7 +235,10 @@ export def connectFeed(workspace, opts = {}): Feed
     res = fetchBytes! cellUrl(id, rev, hash)
     unless res.ok
       report "[Rip] workspace feed: cell fetch missed (#{res.status}) for '#{id}' rev #{rev} — resyncing from the manifest"
-      wants[id] = Math.max rev, wants[id] ?? 0
+      # A fresh ding is fresh proof of life: a higher rev remints the
+      # want with a null signature, restarting the retirement clock.
+      prior = wants[id]
+      wants[id] = { rev, hash, sig: null } unless prior? and prior.rev >= rev
       resync!()
       return
     source = res.text!()

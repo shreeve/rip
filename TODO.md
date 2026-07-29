@@ -46,11 +46,6 @@ B-list real-but-deferrable items.
 
 ### workspace feed (PR #188 re-review, 2026-07-29)
 
-- [ ] Want retirement can drop a retry it should keep: a ding for a
-      brand-new id whose cell fetch misses WHILE the manifest is held
-      back (a bundle-rewrite failure) gets its want retired — the
-      held-back manifest does not name the id yet. Needs two
-      simultaneous failures, dev-only, heals on the next save.
 - [ ] When an editor producer lands (M2), `crossRun` cannot distinguish
       "another run" from "another producer": a local write over a
       server-owned id bumps the rev with local bytes, and the next
