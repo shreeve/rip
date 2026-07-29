@@ -2887,7 +2887,11 @@ if (RUN_MAIN) {
   // Print the header immediately, then stream each fixture's row as it
   // is computed, so the report fills in live.
   auditBanner('TYPE AUDIT', `${fixtures.length} fixtures × ${dims.length} dimensions`);
-  console.log('  ' + dim(pad('fixture', NAME_W + 2) + ' ' + dims.map(([d, w]) => pad(d, w)).join(' ')));
+  // `trimEnd` on both the header and every row: the last dimension pads to its
+  // column width like the others, which is trailing whitespace on 24 lines —
+  // invisible in a terminal, loud in a diff, and stripped by half the editors
+  // that would ever open a captured run.
+  console.log(('  ' + dim(pad('fixture', NAME_W + 2) + ' ' + dims.map(([d, w]) => pad(d, w)).join(' '))).trimEnd());
   console.log('  ' + dim('─'.repeat(RULE_W)));
 
   // Both batch passes are independent of each other AND of the per-fixture
@@ -2943,7 +2947,7 @@ if (RUN_MAIN) {
     row.twinDetail = tw.detail;
     row.twinErrs = tw.errs;
     return row;
-  }, { width: LANES, onDone: (row) => console.log(`  ${pad(row.name, NAME_W + 2)} ${dims.map(([d, w]) => cell(row[d], w)).join(' ')}`) });
+  }, { width: LANES, onDone: (row) => console.log(`  ${pad(row.name, NAME_W + 2)} ${dims.map(([d, w]) => cell(row[d], w)).join(' ')}`.trimEnd()) });
 
   // COVERAGE, for the same reason the probe pass has one: the Score below is a
   // ratio of the rows this loop produced. A fixture that fell out of the lanes
@@ -2951,8 +2955,13 @@ if (RUN_MAIN) {
   const missed = fixtures.filter((f, i) => !rows[i] || rows[i].name !== f);
   if (missed.length) await abort('The Type Audit did not score every fixture', missed.map((f) => `${f}: no row produced`));
 
-  console.log(`\n  ${bold('Failures')} ${dim('(categorized)')}`);
+  // The heading waits for its first row. `Failures / none` announced a section
+  // with nothing in it, in a lane that already says all-passing three more
+  // times — the per-dimension Score, the grid above, and Totals. Silence here
+  // is never ambiguous because Score reports each dimension's ratio whether or
+  // not anything failed.
   let any = false;
+  const failHeading = () => { if (!any) console.log(`\n  ${bold('Failures')} ${dim('(categorized)')}`); };
   for (const r of rows) {
     const notes = [];
     if (r.compiles === 'fail') notes.push([yellow('compiler-coverage gap'), r.compileDetail]);
@@ -2964,6 +2973,7 @@ if (RUN_MAIN) {
     // errors are; that contradiction is the misattribution in miniature.
     if (r.strict === 'fail') notes.push([yellow('fails under rip.strict'), r.strictDetail]);
     if (notes.length) {
+      failHeading();
       any = true;
       console.log(`    ${bold(r.name)}`);
       for (const [label, detail] of notes) console.log(`      ${dim('·')} ${label} ${dim('— ' + detail)}`);
@@ -2992,7 +3002,7 @@ if (RUN_MAIN) {
       }
     }
   }
-  if (!any) console.log('    ' + green('none'));
+
 
   console.log(`\n  ${bold('Score')} ${dim('(pass / applicable)')}`);
   for (const [d] of dims) {
