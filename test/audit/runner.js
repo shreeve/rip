@@ -431,7 +431,10 @@ const AUDITS = [
     blurb: 'every source identifier maps to a generated position holding the same text',
     judge: 'the COMPILER OUTPUT alone — no server, no tsgo, no twin. A read is `placed`\n'
          + 'when the precise map resolves it and `text`-true when that position holds its\n'
-         + 'own bytes; each failure is classified by the mapping row it fell to',
+         + 'own bytes; each failure is classified by the mapping row it fell to. The\n'
+         + 'walk itself has NO per-run reference: its logic was driven against the real\n'
+         + 'editor once (ROADMAP.md, M1) and the server-backed scaffolds retired, so it\n'
+         + 'catches CHANGE reliably and would not notice its own resolver drifting',
   },
   {
     key: 'main', flag: '--type', name: 'Type Audit',
@@ -2659,7 +2662,7 @@ if (RUN_GRAMMAR) {
 // the probe pass spins up any of them.
 let mp = null;
 if (RUN_MAP) {
-  auditBanner('MAPPING AUDIT', `use-site identifier coverage · compiler output only · ${fixtures.length} files`);
+  auditBanner('MAPPING AUDIT', `use-site identifier coverage · compiler output only, no per-run reference · ${fixtures.length} files`);
 
   const perFile = [];
   const fileRows = [];
@@ -2715,7 +2718,7 @@ if (RUN_MAP) {
   const FLAG_W = Math.max(1, ...fileRows.filter((r) => !r.skip).map((r) => String(r.flagged).length));
   for (const r of fileRows) {
     if (r.skip) { out(`    ${yellow('skip')} ${pad(r.f, NAME_W + 2)} ${dim('does not compile — no face to walk: ' + r.skip)}`); continue; }
-    console.log(`    ${r.flagged === 0 ? green('✓') : yellow('•')} ${pad(r.f, NAME_W + 2)} ${dim(String(r.reads).padStart(READ_W) + ' reads')}   `
+    console.log(`    ${r.flagged === 0 ? green('✓') : yellow('·')} ${pad(r.f, NAME_W + 2)} ${dim(String(r.reads).padStart(READ_W) + ' reads')}   `
       + (r.flagged === 0 ? green('all placed') : yellow(String(r.flagged).padStart(FLAG_W) + ' unmapped')));
   }
 
@@ -2735,8 +2738,8 @@ if (RUN_MAP) {
     console.log(`    ${pad(label, 10)} ${(n === 0 ? green : yellow)(String(n).padStart(4))}   ${dim(lines[0])}`);
     for (const l of lines.slice(1)) console.log(' '.repeat(NOTE_COL) + dim(l));
   };
-  invLine('unplaced', unplaced, '`placed` fails — the precise map refuses: the generated row no longer opens with the source bytes');
-  invLine('mistext', mistext, '`text` fails — resolves, but to the WRONG bytes: the generated span is wider than the name, so a hover names the wrong symbol');
+  invLine('unplaced', unplaced, '`placed` fails — nothing resolves, so definition and rename find nothing there');
+  invLine('mistext', mistext, '`text` fails — the span is wider than the name, so a hover names the wrong symbol');
 
   // ── the CENSUS — the gate the ledger's identifier-read finding asks for:
   // reads with no exact row, the at-risk population, and the MITIGATION-PROOF
@@ -2747,7 +2750,7 @@ if (RUN_MAP) {
   // why THIS number is the gate, not the symptom count. Same mapping rows, no
   // server, no oracle.
   out(`\n  ${bold('Census')} ${dim('(reads with no exact row)')}`);
-  out(`    ${pad('census', 10)} ${(census === 0 ? green : yellow)(String(census).padStart(4))}   ${dim(`of ${totReads} reads — ${totFlag} broken today (flagged above) + ${byLuck} resolving by luck — one change to the emitted TS from breaking`)}`);
+  out(`    ${pad('census', 10)} ${(census === 0 ? green : yellow)(String(census).padStart(4))}   ${dim(`of ${totReads} — ${totFlag} broken today, ${byLuck} resolving by luck: one change to the emitted TS from breaking`)}`);
   // The decomposition is exact BY CONSTRUCTION — a flagged read always lacks an
   // exact row (see mappingScan) — so census === broken-today + by-luck. Checked,
   // not assumed: it rests on the compiler keeping synthetic rows zero-width on
@@ -2764,7 +2767,9 @@ if (RUN_MAP) {
   // a lone "—" under each zero, which reads as noise once the census is clean.
   const roleBreak = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]).map(([role, n]) => `${role} ${n}`).join(', ');
   const rootTotal = (m) => [...m.values()].reduce((a, b) => a + b, 0);
-  console.log(`\n  ${bold('Why they miss')} ${dim('(read off the compiler row each one landed in)')}`);
+  // `out`, not console.log: this heading carries a gloss now and a heading
+  // that overruns hard-breaks mid-word at the terminal's edge.
+  out(`\n  ${bold('Why they miss')} ${dim('(the row each read landed in — ROLE is the part of the construct emitted, `$self` the construct itself)')}`);
   const rootLine = (label, n, note, roles) => {
     invLine(label, n, note);
     if (roles) for (const l of wrapText(roles, TERM_W - NOTE_COL, 2)) console.log(' '.repeat(NOTE_COL) + dim(l));
@@ -2799,7 +2804,12 @@ if (RUN_MAP) {
   // every column after it. A narrow terminal loses the last column here; the
   // alternative loses the listing.
   if (VERBOSE && totFlag) {
-    out(`\n  ${bold('Flagged reads')} ${dim('(-v — every one, so each can be checked against the editor at its line:col)')}`);
+    out(`\n  ${bold('Flagged reads')} ${dim('(every one, so each can be checked against the editor at its line:col)')}`);
+    // Widths from the rows themselves — a name one character over a
+    // hand-picked 16 shunts every column right of it on that line alone.
+    const allRows = perFile.flatMap((pf) => pf.rows);
+    const NAME_C = Math.max(4, ...allRows.map((r) => r.name.length));
+    const ROLE_C = Math.max(4, ...allRows.map((r) => (r.role ?? '—').length));
     for (const pf of perFile) {
       if (!pf.rows.length) continue;
       console.log(`\n    ${bold(pf.f)} ${dim(`(${pf.rows.length})`)}`);
@@ -2807,10 +2817,17 @@ if (RUN_MAP) {
         const { line, character } = offsetToPosition(pf.starts, r.offset);
         const where = dim(`${String(line + 1).padStart(3)}:${String(character).padEnd(3)}`);
         const inv = r.placed ? yellow('mistext ') : yellow('unplaced');
-        const detail = r.placed
-          ? dim(`maps onto ${JSON.stringify(r.hit)}`)               // the wrong bytes a hover would read
-          : dim('the precise map refuses');
-        console.log(`      ${where} ${bold(pad(r.name, 16))} ${inv} ${dim(pad(r.root, 10))} ${dim(pad(r.role ?? '—', 12))} ${detail}`);
+        // A trailing note ONLY where it carries something the columns do not.
+        // `unplaced` rows all ended in `the precise map refuses`, which is what
+        // `unplaced` means — 496 rows restating their own second column, in a
+        // listing whose whole value is the per-row detail. A `mistext` row's
+        // note is the wrong bytes a hover would actually read, which is the
+        // one thing no column can hold.
+        const detail = r.placed ? ' ' + dim(`maps onto \`${r.hit}\``) : '';
+        // The role column pads only when something follows it: a padded LAST
+        // column is trailing whitespace on every line of a 660-line listing.
+        const role = r.role ?? '—';
+        console.log(`      ${where} ${bold(pad(r.name, NAME_C))} ${inv} ${dim(pad(r.root, 10))} ${dim(detail ? pad(role, ROLE_C) : role)}${detail}`);
       }
     }
   }
