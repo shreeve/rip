@@ -53,6 +53,35 @@ const JS_OP = { '==': '===', '!=': '!==' };
 // lowered side survives into the tree, so this is the set a destructuring
 // target can never legally be.
 const PATTERN_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'this']);
+// Identifier tokens inside opaque type text. Strings and comments are skipped:
+// their word-shaped contents are values, not type-name occurrences. The caller
+// supplies the source-base offset when these become MappingStore spans.
+const typeIdentifierTokens = (text, base = 0) => {
+  const out = [];
+  let quote = null;
+  for (let i = 0; i < text.length;) {
+    const ch = text[i];
+    if (quote !== null) {
+      if (ch === '\\') i += 2;
+      else { if (ch === quote) quote = null; i++; }
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; i++; continue; }
+    if (ch === '#' || (ch === '/' && text[i + 1] === '/')) {
+      while (i < text.length && text[i] !== '\n') i++;
+      continue;
+    }
+    if (/[A-Za-z_$]/.test(ch)) {
+      let j = i + 1;
+      while (j < text.length && /[\w$]/.test(text[j])) j++;
+      out.push({ value: text.slice(i, j), start: base + i, end: base + j });
+      i = j;
+      continue;
+    }
+    i++;
+  }
+  return out;
+};
 
 const isNode = (x) => Array.isArray(x);
 const isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 3;
@@ -245,6 +274,19 @@ class Emitter {
     // cluster lines after the enclosing statement — TS hoists type
     // declarations, so the displaced line still governs its uses.
     this.pendingTypeDecls = [];
+    // Sibling-role source regions the primitive claim must SKIP while emitting a
+    // part whose frame is wider than the part itself — a comprehension's clause,
+    // which has no role of its own and would otherwise claim out of the body.
+    // Null everywhere else; set tightly around one emission and always restored.
+    this.primitiveAvoid = null;
+    // Source spans the compiler CONSUMES as its own vocabulary: words that are
+    // syntax in their position and reach no face entity, so no honest mapping
+    // row can exist for them. Recorded (TS face only) so the mapping census can
+    // subtract them from a population of reads that SHOULD resolve — never so a
+    // read that could have a row is excused from having one. Each carries the
+    // kind that says why, and the audit judges its exclusion table against the
+    // kinds that actually appear.
+    this.vocabulary = [];
     // Component type stories (TS face only): component node →
     // the walked member/props info. Populated by componentExpr (the
     // one place the member model is authoritative), consumed by the
@@ -1067,7 +1109,9 @@ class Emitter {
   reactiveRead(name) {
     const m = this.b.currentMark;
     const src = this.b.source;
-    if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
+    if (this.ts) {
+      this.emitPrimitive(name);
+    } else if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
       this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
     } else {
       this.b.emit(name);
@@ -1085,12 +1129,149 @@ class Emitter {
     const m = this.b.currentMark;
     const src = this.b.source;
     this.b.emit((this.renderSelf ?? 'this') + '.');
-    if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
+    if (this.ts) {
+      this.emitPrimitive(name);
+    } else if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
       this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
     } else {
       this.b.emit(name);
     }
     if (reactive) this.b.emit('.value');
+  }
+
+  // Emit a primitive identifier through its parser-recorded occurrence span.
+  // Primitive tree values have no identity, so the current node/role frame and
+  // its occurrence cursor supply the join. TS-face only: these rows serve the
+  // editor position surface and do not revise shipping source-map artifacts.
+  emitPrimitive(value) {
+    const owner = this.b.currentMark;
+    const span = this.ts && typeof value === 'string' && isIdentifierName(value)
+      ? this.b.claimPrimitiveSpan(value, this.primitiveAvoid) : null;
+    if (owner !== null && span !== null) {
+      this.b.markSpan(owner.nodeId, 'identifier', span[0], span[1], () => this.b.emit(value));
+    } else {
+      this.b.emit(value);
+    }
+  }
+
+  // Record `word` inside `container` as consumed vocabulary. Anchors on an
+  // exact node when the caller has one; otherwise it accepts the container only
+  // when the word occurs there ONCE, so an ambiguous anchor records nothing
+  // rather than excusing the wrong occurrence — a user binding that happens to
+  // share the spelling keeps its place in the census.
+  noteVocabulary(kind, word, container) {
+    if (!this.ts) return;
+    const id = isNode(container) ? this.stores.idOf(container) : null;
+    const span = id !== null ? this.stores.selfSpan(id) : null;
+    if (span === null) return;
+    const hits = this.stores.primitiveSpans(word, span[0], span[1]);
+    if (hits.length !== 1) return;
+    this.vocabulary.push({ kind, start: hits[0].sourceStart, end: hits[0].sourceEnd });
+  }
+
+  emitRewrittenPrimitive(storedValue, emittedValue) {
+    const owner = this.b.currentMark;
+    const span = this.ts ? this.b.claimPrimitiveSpan(storedValue) : null;
+    if (owner !== null && span !== null) {
+      this.b.markSpan(owner.nodeId, 'identifier', span[0], span[1], () => this.b.emit(emittedValue));
+    } else {
+      this.b.emit(emittedValue);
+    }
+  }
+
+  emitQuotedPrimitive(value, quote = "'") {
+    this.b.emit(quote);
+    this.emitPrimitive(value);
+    this.b.emit(quote);
+  }
+
+  // Schema bodies are one opaque SCHEMA_BODY token, but the schema pass keeps
+  // each source word occurrence on its descriptor. Serialize a descriptor
+  // segment in place, marking word-valued JSON strings and expression
+  // identifiers from those recorded occurrences. Object-literal keys are
+  // generated descriptor vocabulary and stay unmarked. This consumes the text
+  // before it reaches the builder; no generated output is searched afterward.
+  emitSchemaText(text) {
+    let i = 0;
+    while (i < text.length) {
+      const ch = text[i];
+      if (ch === '"' || ch === "'") {
+        let j = i + 1;
+        while (j < text.length && text[j] !== ch) j += text[j] === '\\' ? 2 : 1;
+        const body = text.slice(i + 1, j);
+        this.b.emit(ch);
+        if (isIdentifierName(body)) this.emitPrimitive(body);
+        else this.b.emit(body);
+        if (j < text.length) this.b.emit(ch);
+        i = Math.min(j + 1, text.length);
+        continue;
+      }
+      if (/[A-Za-z_$]/.test(ch)) {
+        let j = i + 1;
+        while (j < text.length && /[\w$]/.test(text[j])) j++;
+        const word = text.slice(i, j);
+        let k = j;
+        while (k < text.length && /\s/.test(text[k])) k++;
+        // Descriptor object keys (`name:`, `typeName:`) are generated
+        // vocabulary. Expression/member identifiers and shorthand values are
+        // source-carried occurrences.
+        if (text[k] === ':') this.b.emit(word);
+        else this.emitPrimitive(word);
+        i = j;
+        continue;
+      }
+      this.b.emit(ch);
+      i++;
+    }
+  }
+
+  // Emit already-rendered type text while marking every source-backed
+  // identifier from the owning recorded span. Inserted identifiers (notably
+  // Promise around async returns) stay unmarked; source identifiers match in
+  // order, so repeated names retain occurrence identity without a query-time
+  // ordinal guess.
+  emitTypeText(node, role, text) {
+    const id = this.stores.idOf(node);
+    const row = id === null ? null : role === '$self'
+      ? this.stores.node(id) : this.stores.role(id, role);
+    const source = this.b.source;
+    if (!this.ts || id === null || row?.sourceStart == null || source === null) {
+      // No row to match within — the node is SYNTHESIZED (the constructor's
+      // promoted-parameter strip rebuilds each typed-var, losing its store
+      // identity). The type names are still source reads, so they claim their
+      // occurrences in the enclosing frame instead of emitting blind.
+      if (this.ts && source !== null) {
+        let at = 0;
+        for (const token of typeIdentifierTokens(text)) {
+          this.b.emit(text.slice(at, token.start));
+          this.emitPrimitive(token.value);
+          at = token.end;
+        }
+        this.b.emit(text.slice(at));
+        return;
+      }
+      this.b.emit(text);
+      return;
+    }
+    const sourceTokens = typeIdentifierTokens(
+      source.slice(row.sourceStart, row.sourceEnd), row.sourceStart,
+    );
+    const generatedTokens = typeIdentifierTokens(text);
+    let sourceAt = 0;
+    let generatedAt = 0;
+    for (const token of generatedTokens) {
+      this.b.emit(text.slice(generatedAt, token.start));
+      const match = sourceTokens.findIndex((s, i) => i >= sourceAt && s.value === token.value);
+      if (match >= 0) {
+        const s = sourceTokens[match];
+        this.b.markSpan(id, 'identifier', s.start, s.end, () => this.b.emit(token.value));
+        sourceAt = match + 1;
+      } else {
+        this.b.emit(token.value);
+      }
+      generatedAt = token.end;
+    }
+    this.b.emit(text.slice(generatedAt));
   }
 
   // The void marker's contract: the annotated
@@ -1207,7 +1388,7 @@ class Emitter {
   // the emitted bytes equal the recorded span verbatim, cover
   // otherwise — the builder decides, never a declaration).
   tsAnnotate(node, role, text) {
-    this.b.tsOnly(() => this.mark(node, role, () => this.b.emit(`: ${text}`)));
+    this.b.tsOnly(() => this.mark(node, role, () => this.emitTypeText(node, role, `: ${text}`)));
   }
 
   // A function's TS-face return annotation, emitted after its param
@@ -1225,7 +1406,7 @@ class Emitter {
     const text = this.annotationText(node, 'returnType');
     if (text !== null) {
       const spelled = isAsync && !/^Promise\s*</.test(text) ? `Promise<${text}>` : text;
-      this.b.tsOnly(() => this.mark(node, 'returnType', () => this.b.emit(`: ${spelled}`)));
+      this.b.tsOnly(() => this.mark(node, 'returnType', () => this.emitTypeText(node, 'returnType', `: ${spelled}`)));
       return;
     }
     if (isVoid) {
@@ -1288,7 +1469,7 @@ class Emitter {
     this.b.tsOnly(() => {
       this.b.emit(pad);
       this.mark(s, '$self', () => this.mark(s, 'declaration', () => {
-        this.b.emit(lines.join('\n' + pad));
+        this.emitTypeText(s, 'declaration', lines.join('\n' + pad));
       }));
       this.b.emit('\n');
     });
@@ -1762,7 +1943,7 @@ class Emitter {
           this.b.emit('function ');
           this.mark(sig, 'name', () => this.b.emit(sig[1]));
           this.mark(sig, 'params', () => this.b.emit(params));
-          this.mark(sig, 'returnType', () => this.b.emit(`: ${tidyType(sig[3])}`));
+          this.mark(sig, 'returnType', () => this.emitTypeText(sig, 'returnType', `: ${tidyType(sig[3])}`));
           this.b.emit(';');
         });
         this.b.emit('\n' + '  '.repeat(ind));
@@ -2871,11 +3052,18 @@ class Emitter {
   }
 
   // A specifier list entry: a plain name, `default`, or [name, alias].
+  // A multi-line specifier list RE-FLOWS onto one line, so the clause's cover
+  // stops being verbatim at the first newline and every name past it loses its
+  // position. Each name is a source read and takes its own row; the alias is a
+  // binding site and takes one too.
   emitSpecifiers(list) {
     list.forEach((s, i) => {
       if (i > 0) this.b.emit(', ');
-      if (isNode(s)) this.b.emit(`${s[0]} as ${s[1]}`);
-      else this.b.emit(s);
+      if (isNode(s)) {
+        this.emitPrimitive(s[0]);
+        this.b.emit(' as ');
+        this.emitPrimitive(s[1]);
+      } else this.emitPrimitive(s);
     });
   }
 
@@ -3062,7 +3250,8 @@ class Emitter {
               // Exported generic component: the ExportAssign's
               // TYPE_PARAMS role rides to the lowered class, same
               // channel as the Assign path.
-              this._componentTypeParams = this.annotationText(spec, 'typeParams');
+              const text = this.annotationText(spec, 'typeParams');
+              this._componentTypeParams = text === null ? null : { text, owner: spec };
             }
             this.mark(spec, 'value', () => this.withExpression(() => this.expr(spec[2])));
             this._schemaName = prevSchemaName;
@@ -3255,7 +3444,15 @@ class Emitter {
         pairs.forEach(([item, key, valueText], i) => {
           if (i > 0) this.b.emit(', ');
           this.mark(item, '$self', () => {
-            this.mark(item, 'target', () => this.b.emit(ownKey(key, key)));
+            this.mark(item, 'target', () => {
+              // A BARE member's `item` is the enum node, so this frame is the
+              // whole declaration and the key has no row of its own. It emits
+              // verbatim unless the one dangerous name forces quoting, so it
+              // claims its occurrence exactly like any other primitive read.
+              const keyText = ownKey(key, key);
+              if (keyText === key) this.emitPrimitive(key);
+              else this.b.emit(keyText);
+            });
             this.b.emit(': ');
             this.mark(item, 'value', () => this.b.emit(valueText));
           });
@@ -3330,7 +3527,7 @@ class Emitter {
         const segments = descriptorSegments(
           descriptor, schemaName, fns, fns.get('adapter') ?? null, story?.thisTypes ?? null, this.ts);
         for (const seg of segments) {
-          if (typeof seg === 'string') this.b.emit(seg);
+          if (typeof seg === 'string') this.emitSchemaText(seg);
           else this.b.tsOnly(() => this.b.emit(seg.ts));
         }
       });
@@ -4002,7 +4199,7 @@ class Emitter {
 
   forInCore(node, vars, iter, step, guard, body, ind) {
     this.mark(node, '$self', () => {
-      const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string' ? this.b.emit(v) : this.withPattern(() => this.expr(v), true)));
+      const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string' ? this.emitPrimitive(v) : this.withPattern(() => this.expr(v), true)));
       // Pattern loop variables emit in the plain of-loop and the
       // index-variable forms (both destructure); the range/step
       // lowerings iterate through the variable itself.
@@ -4043,6 +4240,10 @@ class Emitter {
         // quirk). The index variable is the second loop variable when
         // given (`for t, i in xs by -1`), `_i` otherwise.
         const idx = vars.length === 2 ? vars[1] : this.loopTempName('_i');
+        // The index name's DECLARING occurrence is a source variable only when the
+        // loop spells one (`for t, i in xs by 2`); every later `${idx}` in the header
+        // is emitter arithmetic on that binding, not another read of the source.
+        const declIdx = () => { if (vars.length === 2) markVar(idx); else this.b.emit(idx); };
         const numText = (s) => (typeof s === 'string' && /^[0-9.]/.test(s) ? s : null);
         const posLit = numText(step) ??
           (isNode(step) && step[0] === '+' && step.length === 2 ? numText(step[1]) : null);
@@ -4058,7 +4259,7 @@ class Emitter {
         if (negLit !== null) {
           this.b.emit('for (let ');
           bind();
-          this.b.emit(`${idx} = `);
+          declIdx(); this.b.emit(' = ');
           ref();
           this.b.emit(`.length - 1; ${idx} >= 0; `);
           if (negLit === '1') {
@@ -4074,7 +4275,7 @@ class Emitter {
         } else if (posLit !== null) {
           this.b.emit('for (let ');
           bind();
-          this.b.emit(`${idx} = 0; ${idx} < `);
+          declIdx(); this.b.emit(` = 0; ${idx} < `);
           ref();
           this.b.emit(`.length; `);
           if (step === '1') {
@@ -4091,7 +4292,7 @@ class Emitter {
           this.mark(node, 'step', () => this.expr(step));
           this.b.emit(', ');
           bind();
-          this.b.emit(`${idx} = ${stp} > 0 ? 0 : `);
+          declIdx(); this.b.emit(` = ${stp} > 0 ? 0 : `);
           ref();
           this.b.emit(`.length - 1; ${stp} > 0 ? ${idx} < `);
           ref();
@@ -4160,7 +4361,7 @@ class Emitter {
 
   forOfCore(node, vars, obj, own, guard, body, ind) {
     this.mark(node, '$self', () => {
-      const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string' ? this.b.emit(v) : this.withPattern(() => this.expr(v), true)));
+      const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string' ? this.emitPrimitive(v) : this.withPattern(() => this.expr(v), true)));
       // An impure object the own-filter or value line would re-read
       // binds once ahead of the header.
       const rereads = own || vars.length === 2;
@@ -4189,13 +4390,9 @@ class Emitter {
           this.b.emit(`, ${vars[0]})) continue;\n`);
         }
         if (vars.length === 2) {
-          if (isNode(vars[1])) {
-            this.b.emit('let ');
-            markVar(vars[1]);
-            this.b.emit(' = ');
-          } else {
-            this.b.emit(`let ${vars[1]} = `);
-          }
+          this.b.emit('let ');
+          markVar(vars[1]);
+          this.b.emit(' = ');
           ref();
           this.b.emit(`[${vars[0]}];\n`);
         }
@@ -4303,7 +4500,7 @@ class Emitter {
   // belongs to an annotated loop node; comprehension clauses carry no
   // roles, so their marks fall back to plain emission.
   clauseHeader(node, kind, vars, iter, aux, pad = null) {
-    const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string' ? this.b.emit(v) : this.withPattern(() => this.expr(v), true)));
+    const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string' ? this.emitPrimitive(v) : this.withPattern(() => this.expr(v), true)));
     const setups = [];
     if (kind === 'for-of') {
       this.checkForOfPatternKey(vars, aux === true);
@@ -4336,13 +4533,9 @@ class Emitter {
       }
       if (vars.length === 2) {
         setups.push(() => {
-          if (isNode(vars[1])) {
-            this.b.emit('let ');
-            markVar(vars[1]);
-            this.b.emit(' = ');
-          } else {
-            this.b.emit(`let ${vars[1]} = `);
-          }
+          this.b.emit('let ');
+          markVar(vars[1]);
+          this.b.emit(' = ');
           ref();
           this.b.emit(`[${vars[0]}];`);
         });
@@ -4381,6 +4574,10 @@ class Emitter {
       // other step evaluates ONCE into `_step` and the header tests its
       // sign, and a zero literal rejects.
       const idx = vars.length === 2 ? vars[1] : this.loopTempName('_i');
+      // The index name's DECLARING occurrence is a source variable only when the
+      // loop spells one (`for t, i in xs by 2`); every later `${idx}` in the header
+      // is emitter arithmetic on that binding, not another read of the source.
+      const declIdx = () => { if (vars.length === 2) markVar(idx); else this.b.emit(idx); };
       const numText = (s) => (typeof s === 'string' && /^[0-9.]/.test(s) ? s : null);
       const posLit = numText(step) ??
         (isNode(step) && step[0] === '+' && step.length === 2 ? numText(step[1]) : null);
@@ -4394,7 +4591,7 @@ class Emitter {
       if (negLit !== null) {
         this.b.emit('for (let ');
         bind();
-        this.b.emit(`${idx} = `);
+        declIdx(); this.b.emit(' = ');
         ref();
         this.b.emit(`.length - 1; ${idx} >= 0; `);
         if (negLit === '1') {
@@ -4410,7 +4607,7 @@ class Emitter {
       } else if (posLit !== null) {
         this.b.emit('for (let ');
         bind();
-        this.b.emit(`${idx} = 0; ${idx} < `);
+        declIdx(); this.b.emit(` = 0; ${idx} < `);
         ref();
         this.b.emit(`.length; `);
         if (step === '1') {
@@ -4425,7 +4622,7 @@ class Emitter {
         this.mark(node, 'step', () => this.expr(step));
         this.b.emit(', ');
         bind();
-        this.b.emit(`${idx} = ${stp} > 0 ? 0 : `);
+        declIdx(); this.b.emit(` = ${stp} > 0 ? 0 : `);
         ref();
         this.b.emit(`.length - 1; ${stp} > 0 ? ${idx} < `);
         ref();
@@ -4505,12 +4702,36 @@ class Emitter {
       this.b.emit(`${pad}  const ${acc} = ${keyExpr === null ? '[]' : '{}'};\n`);
       this.b.emit(`${pad}  `);
       const [kind, vars, iter, aux] = clause;
+      // The clause has no role of its own, so its names claim from the
+      // comprehension's whole $self frame — where the BODY's reads live too, and
+      // where the lowering emits the clause FIRST, so an ordinal claim would
+      // hand the clause variable the body's occurrence. The parts that DO own
+      // spans say where the clause is not: the `value` role covers the body, and
+      // each guard is a node with its own extent.
+      const away = [];
+      const cid = this.stores.idOf(node);
+      const valueRole = cid !== null ? this.stores.role(cid, 'value') : null;
+      if (valueRole !== null && valueRole.sourceStart != null) away.push([valueRole.sourceStart, valueRole.sourceEnd]);
+      for (const g of guards) {
+        const gid = isNode(g) ? this.stores.idOf(g) : null;
+        const sp = gid !== null ? this.stores.selfSpan(gid) : null;
+        if (sp !== null) away.push(sp);
+      }
+      // The header AND the body-top setups both spell clause variables (the
+      // two-variable for-of binds its value there), so both emit inside the
+      // window; everything after it claims normally.
+      const offClause = away.length > 0 ? () => { this.primitiveAvoid = null; } : () => {};
+      const onClause = away.length > 0 ? () => { this.primitiveAvoid = away; } : () => {};
+      onClause();
       const setups = this.clauseHeader(node, kind, vars, iter, aux ?? null, `${pad}  `);
+      offClause();
       this.b.emit(' {\n');
       let inner = `${pad}    `;
       for (const setup of setups) {
         this.b.emit(inner);
+        onClause();
         setup();
+        offClause();
         this.b.emit('\n');
       }
       if (guards.length > 0) {
@@ -5169,7 +5390,7 @@ class Emitter {
       // string>(…)` — erased from JS).
       if (this.ts) {
         const tp = this.annotationText(node, 'typeParams');
-        if (tp !== null) this.b.tsOnly(() => this.mark(node, 'typeParams', () => this.b.emit(tp)));
+        if (tp !== null) this.b.tsOnly(() => this.mark(node, 'typeParams', () => this.emitTypeText(node, 'typeParams', tp)));
       }
       // The params role spans the parenthesized list (OptParams); the
       // ParamList array is itself a registered node, so the name list
@@ -5449,7 +5670,8 @@ class Emitter {
         }
         throw err;
       }
-      this.b.emit(node);
+      if (typeof node === 'string') this.emitPrimitive(node);
+      else this.b.emit(node);
       return;
     }
     const head = node[0];
@@ -5500,7 +5722,16 @@ class Emitter {
     }
     if (head === 'symbol' && node.length === 2 && this.lockedHead(node, 'symbol')) {
       // Interned symbol: identity holds across realms and modules.
-      return this.mark(node, '$self', () => this.b.emit(`Symbol.for(${JSON.stringify(node[1])})`));
+      return this.mark(node, '$self', () => {
+        // `:alpha` → `Symbol.for("alpha")`: the name survives verbatim as the
+        // string's content, so it claims its own occurrence there.
+        const quoted = JSON.stringify(node[1]);
+        if (quoted === `"${node[1]}"`) {
+          this.b.emit('Symbol.for("');
+          this.emitPrimitive(node[1]);
+          this.b.emit('")');
+        } else this.b.emit(`Symbol.for(${quoted})`);
+      });
     }
     if ((head === '.=' || head === '*>') && node.length === 3) {
       throw this.positionedError(node, `emitter: ${head} is a statement — its target is spelled twice (write + read), which has no single-expression form`);
@@ -6020,11 +6251,11 @@ class Emitter {
         }
         if (this.moduleClassNames?.has(proto.head)) {
           if (this.ts) this.b.tsOnly(() => this.mark(node, 'annotation', () =>
-            this.b.emit(`interface ${proto.head} { ${proto.member}: ${text} }\n`)));
+            this.emitTypeText(node, 'annotation', `interface ${proto.head} { ${proto.member}: ${text} }\n`)));
         } else if (!this.scopes[0].has(proto.head)) {
           const params = PROTO_GENERIC_PARAMS[proto.head] ?? '';
           if (this.ts) this.b.tsOnly(() => this.mark(node, 'annotation', () =>
-            this.b.emit(`declare global { interface ${proto.head}${params} { ${proto.member}: ${text} } }\n`)));
+            this.emitTypeText(node, 'annotation', `declare global { interface ${proto.head}${params} { ${proto.member}: ${text} } }\n`)));
         } else {
           throw protoError(
             `emitter: the annotation on \`${proto.head}::${proto.member}\` cannot augment — ` +
@@ -6084,7 +6315,8 @@ class Emitter {
         // Generic component: the assign's TYPE_PARAMS role rides to
         // the lowered class (componentExpr) through the same channel
         // as the name.
-        this._componentTypeParams = this.annotationText(node, 'typeParams');
+        const text = this.annotationText(node, 'typeParams');
+        this._componentTypeParams = text === null ? null : { text, owner: node };
       }
       this.mark(node, 'value', () => this.withExpression(() => this.expr(node[2])));
       this._schemaName = prevSchemaName;
@@ -6191,14 +6423,18 @@ class Emitter {
           this.expr(value);
           if (wrap) this.b.emit(')');
         }));
-        if (enforce !== null) this.b.tsOnly(() => this.mark(node, 'annotation', () => this.b.emit(` satisfies ${enforce}`)));
+        if (enforce !== null) this.b.tsOnly(() => this.mark(node, 'annotation', () =>
+          this.emitTypeText(node, 'annotation', ` satisfies ${enforce}`)));
         this.b.emit(')');
       } else {
         this.b.emit(`${this.runtimeName('__computed')}(`);
         if (enforce !== null) this.b.tsOnly(() => this.b.emit('('));
         this.b.emit('() => ');
         this.mark(node, 'value', () => this.withExpression(() => this.computedBody(node, value, ind)));
-        if (enforce !== null) this.b.tsOnly(() => this.mark(node, 'annotation', () => this.b.emit(`) satisfies () => ${enforce}`)));
+        if (enforce !== null) this.b.tsOnly(() => this.mark(node, 'annotation', () => {
+          this.b.emit(`) satisfies () => `);
+          this.emitTypeText(node, 'annotation', enforce);
+        }));
         this.b.emit(')');
       }
     }));
@@ -6505,12 +6741,12 @@ class Emitter {
       return { error: 'path', node: pathNode };
     }
     const path = segments.slice(3).join('.');
-    if (key === null) return { path, pathNode, key: null, keyCode: null };
+    if (key === null) return { path, pathNode, key: null, keyCode: null, keyParts: null };
 
     if (typeof key === 'string' &&
         (/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(key.replace(/_/g, '')) ||
          /^["'][^]*["']$/.test(key) || key === 'true' || key === 'false')) {
-      return { path, pathNode, key, keyCode: key };
+      return { path, pathNode, key, keyCode: key, keyParts: null };
     }
     const keySegments = Emitter.gateChain(key);
     if (keySegments === null) return { error: 'key', node: key };
@@ -6518,7 +6754,7 @@ class Emitter {
     if ((keySegments[0] !== 'params' && keySegments[0] !== 'query') || keySegments.length < 2) {
       return { error: 'key', node: key };
     }
-    return { path, pathNode, key, keyCode: keySegments.join('.') };
+    return { path, pathNode, key, keyCode: keySegments.join('.'), keyParts: keySegments };
   }
 
   // ["component", parent, ["block", …]] — the declaration. Expression
@@ -6916,8 +7152,9 @@ class Emitter {
       // TS-only region on the class expression (`class<TOption
       // extends TOptionShape> extends __Component`), erased from JS.
       if (this.ts && this._componentTypeParams) {
-        const tp = this._componentTypeParams;
-        this.b.tsOnly(() => this.b.emit(tp));
+        const { text, owner } = this._componentTypeParams;
+        this.b.tsOnly(() => this.mark(owner, 'typeParams', () =>
+          this.emitTypeText(owner, 'typeParams', text)));
       }
       this.b.emit(` extends ${this.runtimeName('__Component')} {\n`);
       if (tsInfo !== null) this.tsComponentMemberDeclares(tsInfo, pad);
@@ -6928,22 +7165,38 @@ class Emitter {
         this.b.emit(`${pad}static __gates = [`);
         gateVars.forEach((gate, index) => {
           if (index > 0) this.b.emit(', ');
+          // `@app.data` is the marker that makes this a gate; the lowering
+          // erases it entirely, keeping only the route name. RULINGS.md pins
+          // those segments to silence — there is nothing for them to answer.
+          this.noteVocabulary('gate-prefix', 'app', gate.pathNode);
+          this.noteVocabulary('gate-prefix', 'data', gate.pathNode);
           this.mark(gate.node, '$self', () => {
             this.mark(gate.node, 'operator', () => {});
             this.mark(gate.node, 'rhs', () => {
               if (gate.key === null) {
-                this.b.emit(`'${gate.path}'`);
+                this.emitQuotedPrimitive(gate.path);
               } else {
                 // The key fn is minted scaffold — its params carry explicit
                 // face-only `any` (the tsScaffoldAny doctrine) so a strict
                 // workspace never inherits implicit-any noise from them.
-                this.b.emit(`{ path: '${gate.path}', key: (params`);
+                this.b.emit('{ path: ');
+                this.emitQuotedPrimitive(gate.path);
+                this.b.emit(', key: (params');
                 if (this.ts) this.b.tsOnly(() => this.b.emit(': any'));
                 this.b.emit(', query');
                 if (this.ts) this.b.tsOnly(() => this.b.emit(': any'));
                 this.b.emit(') => ');
                 this.mark(gate.node, 'key', () => {
-                  this.mark(gate.key, '$self', () => this.b.emit(gate.keyCode));
+                  this.mark(gate.key, '$self', () => {
+                    // `@query.tab` drops its `@`, so the chain is not verbatim
+                    // and its cover cannot place the segments — each identifier
+                    // claims its own occurrence inside the key's own span.
+                    if (gate.keyParts === null) { this.b.emit(gate.keyCode); return; }
+                    gate.keyParts.forEach((seg, i) => {
+                      if (i > 0) this.b.emit('.');
+                      this.emitPrimitive(seg);
+                    });
+                  });
                 });
                 this.b.emit(' }');
               }
@@ -6960,7 +7213,9 @@ class Emitter {
         // props collect into the reactive `rest` view and forward
         // onto the inherited element (the rest machinery lives on
         // __Component).
-        this.b.emit(`${pad}static __extends = '${extendsTag}';\n`);
+        this.b.emit(`${pad}static __extends = `);
+        this.emitQuotedPrimitive(extendsTag);
+        this.b.emit(';\n');
       }
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
       this.b.emit(`${pad}_init(props`);
@@ -7831,9 +8086,10 @@ class Emitter {
     }
     const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
     this.renderLine(node, () => {
-      this.b.emit(isSvg
-        ? `${el} = document.createElementNS('${Emitter.SVG_NS}', '${tag}')`
-        : `${el} = document.createElement('${tag}')`);
+      if (isSvg) this.b.emit(`${el} = document.createElementNS('${Emitter.SVG_NS}', `);
+      else this.b.emit(`${el} = document.createElement(`);
+      this.emitQuotedPrimitive(tag);
+      this.b.emit(')');
     });
     if (id) this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
     this.bindInheritedTarget(node, tag, el);
@@ -7884,9 +8140,10 @@ class Emitter {
     }
     const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
     this.renderLine(node, () => {
-      this.b.emit(isSvg
-        ? `${el} = document.createElementNS('${Emitter.SVG_NS}', '${tag}')`
-        : `${el} = document.createElement('${tag}')`);
+      if (isSvg) this.b.emit(`${el} = document.createElementNS('${Emitter.SVG_NS}', `);
+      else this.b.emit(`${el} = document.createElement(`);
+      this.emitQuotedPrimitive(tag);
+      this.b.emit(')');
     });
     if (id) this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
     this.bindInheritedTarget(node, tag, el);
@@ -7989,9 +8246,19 @@ class Emitter {
           const t = this.newRenderText();
           if (scopeKind === 'loop-reactive') {
             this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
-            this.renderEffect(null, () => this.b.emit(`${t}.data = ${arg};`));
+            // The interpolated name is a source READ — a render loop variable at
+            // its use, which RULINGS.md wants answering a plain inferred type.
+            this.renderEffect(null, () => {
+              this.b.emit(`${t}.data = `);
+              this.emitPrimitive(arg);
+              this.b.emit(';');
+            });
           } else {
-            this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode(${arg})`));
+            this.renderLine(null, () => {
+              this.b.emit(`${t} = document.createTextNode(`);
+              this.emitPrimitive(arg);
+              this.b.emit(')');
+            });
           }
           this.renderLine(null, () => this.b.emit(`${el}.appendChild(${t})`));
           continue;
@@ -8019,7 +8286,9 @@ class Emitter {
               '(a misspelling would silently set a boolean attribute); quote it, or spell `name: value`', this.rstate.node);
           }
           this.renderLine(null, () => {
-            this.b.emit(`${el}.setAttribute('${arg}', true`);
+            this.b.emit(`${el}.setAttribute(`);
+            this.emitQuotedPrimitive(arg);
+            this.b.emit(', true');
             if (this.ts) this.b.tsOnly(() => this.b.emit(' as any'));
             this.b.emit(')');
           });
@@ -8080,7 +8349,11 @@ class Emitter {
     if (typeof child !== 'string' || !Emitter.BOOLEAN_ATTRS.has(child)) return false;
     if (this.renderVarKind(child, child) !== null) return false;
     if (this.resolveBareRead(child) !== null || this.inScope(child)) return false;
-    this.renderLine(null, () => this.b.emit(`${el}.setAttribute('${child}', '')`));
+    this.renderLine(null, () => {
+      this.b.emit(`${el}.setAttribute(`);
+      this.emitQuotedPrimitive(child);
+      this.b.emit(", '')");
+    });
     return true;
   }
 
@@ -8112,10 +8385,12 @@ class Emitter {
         '', this.rstate.node);
     }
     R.slotSeen = true;
+    this.noteVocabulary('render-channel', 'slot', markNode ?? this.rstate.node);
     const v = this.newRenderVar('slot');
     this.renderLine(markNode, () => {
       const s = this.renderSelf ?? 'this';
-      this.b.emit(`${v} = ${s}.children instanceof Node ? ${s}.children : (${s}.children != null ? ` +
+      this.b.emit(v);
+      this.b.emit(` = ${s}.children instanceof Node ? ${s}.children : (${s}.children != null ? ` +
         `document.createTextNode(String(${s}.children)) : document.createComment(''))`);
     });
     return v;
@@ -8154,15 +8429,19 @@ class Emitter {
     // placeholder at mount); module bindings and imports emit bare.
     let ctorRef;
     if (this.renderVarKind(name) !== null) {
-      ctorRef = () => this.b.emit(name);
+      ctorRef = () => this.emitPrimitive(name);
     } else {
       const r = this.resolveBareRead(name);
       if (r === 'member' || r === 'member-reactive') {
-        ctorRef = () => this.b.emit(`${this.renderSelf ?? 'this'}.${name}${r === 'member-reactive' ? '.value' : ''}`);
+        ctorRef = () => {
+          this.b.emit(`${this.renderSelf ?? 'this'}.`);
+          this.emitPrimitive(name);
+          if (r === 'member-reactive') this.b.emit('.value');
+        };
       } else if (r === 'reactive') {
-        ctorRef = () => this.b.emit(`${name}.value`);
+        ctorRef = () => { this.emitPrimitive(name); this.b.emit('.value'); };
       } else if (this.inScope(name) || (this.moduleBound !== undefined && this.moduleBound.has(name))) {
-        ctorRef = () => this.b.emit(name);
+        ctorRef = () => this.emitPrimitive(name);
       } else {
         throw this.positionedError(markNode ?? node,
           `emitter: component '${name}' is not defined in this module — a child component must be a module binding, ` +
@@ -8533,7 +8812,14 @@ class Emitter {
               p.fn();
               return;
             }
-            this.b.emit(`${p.key}: `);
+            if (p.key.startsWith('__bind_') && p.key.endsWith('__')) {
+              this.b.emit('__bind_');
+              this.emitRewrittenPrimitive(p.key, p.key.slice(7, -2));
+              this.b.emit('__');
+            } else {
+              this.emitPrimitive(p.key);
+            }
+            this.b.emit(': ');
             p.fn();
           };
           if (p.pair !== null && this.stores.idOf(p.pair) !== null) this.mark(p.pair, '$self', emitPair);
@@ -8579,7 +8865,13 @@ class Emitter {
             this.renderLine(pair, () => {
         // The wrapper's own param is lowering plumbing — explicit
         // `any` (the handler EXPRESSION is where typing lands).
-        this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}`);
+        if (!this.ts) {
+          this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}`);
+        } else {
+          this.b.emit(`if (${instVar}) ${elVar}.addEventListener(`);
+          this.emitQuotedPrimitive(event);
+          this.b.emit(`, (${ev}`);
+        }
         this.tsScaffoldAny();
         this.b.emit(`) => ${this.runtimeName('__batch')}(() => (`);
         this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
@@ -8657,13 +8949,19 @@ class Emitter {
     if (typeof value === 'string') {
       if (this.renderVarKind(value) !== null) return null;
       const r = this.resolveBareRead(value);
-      if (r === 'member-reactive') return () => this.b.emit(`${this.renderSelf ?? 'this'}.${value}`);
-      if (r === 'reactive') return () => this.b.emit(value);
+      if (r === 'member-reactive') return () => {
+        this.b.emit(`${this.renderSelf ?? 'this'}.`);
+        this.emitPrimitive(value);
+      };
+      if (r === 'reactive') return () => this.emitPrimitive(value);
       return null;
     }
     if (isNode(value) && value[0] === '.' && value[1] === 'this' && value.length === 3 &&
         typeof value[2] === 'string' && this.memberIsReactive(value[2])) {
-      return () => this.b.emit(`${this.renderSelf ?? 'this'}.${value[2]}`);
+      return () => {
+        this.b.emit(`${this.renderSelf ?? 'this'}.`);
+        this.emitPrimitive(value[2]);
+      };
     }
     return null;
   }
@@ -8740,13 +9038,20 @@ class Emitter {
           // The wrapper's own param is lowering plumbing — explicit
           // `any`; the typed cast on the handler expression is where
           // the event type lands.
-          this.b.emit(`${el}.addEventListener('${eventName}', (${ev}`);
+          if (!this.ts) {
+            this.b.emit(`${el}.addEventListener('${eventName}', (${ev}`);
+          } else {
+            this.b.emit(`${el}.addEventListener(`);
+            this.emitQuotedPrimitive(eventName);
+            this.b.emit(`, (${ev}`);
+          }
           this.tsScaffoldAny();
           this.b.emit(`) => ${this.runtimeName('__batch')}(() => `);
           if (typeof value === 'string' && this.renderVarKind(value) === null &&
               this.cframes[this.cframes.length - 1].members.has(value)) {
             if (this.ts) this.b.tsOnly(() => this.b.emit('('));
-            this.b.emit(`${self}.${value}`);
+            this.b.emit(`${self}.`);
+            this.emitPrimitive(value);
             if (this.ts) this.b.tsOnly(() => this.b.emit(' as any)'));
             this.b.emit(`(${ev})`);
           } else {
@@ -8776,6 +9081,7 @@ class Emitter {
         continue;
       }
       if (key === 'ref') {
+        this.noteVocabulary('render-channel', 'ref', pair);
         this.renderRef(el, pair, value, objExpr);
         continue;
       }
@@ -8817,7 +9123,9 @@ class Emitter {
 
       if ((key === 'value' || key === 'checked') && this.renderReactive(value)) {
         this.renderEffect(pair, () => {
-          this.b.emit(`${el}.${key} = `);
+          this.b.emit(`${el}.`);
+          this.emitPrimitive(key);
+          this.b.emit(' = ');
           this.renderExpr(value);
           this.b.emit(';');
         }, value);
@@ -8867,7 +9175,9 @@ class Emitter {
           }, value);
         } else {
           this.renderEffect(pair, () => {
-            this.b.emit(`${el}.setAttribute('${key}', `);
+            this.b.emit(`${el}.setAttribute(`);
+            this.emitQuotedPrimitive(key);
+            this.b.emit(', ');
             this.renderExpr(value);
             if (this.ts) this.b.tsOnly(() => this.b.emit(' as any'));
             this.b.emit(');');
@@ -8881,7 +9191,9 @@ class Emitter {
         }, false);
       } else {
         this.renderLine(pair, () => {
-          this.b.emit(`${el}.setAttribute('${key}', `);
+          this.b.emit(`${el}.setAttribute(`);
+          this.emitQuotedPrimitive(key);
+          this.b.emit(', ');
           this.renderExpr(value);
           // Rip DOM attributes are coercive by design (numbers,
           // booleans stringify); TS's string-only setAttribute view
@@ -9342,6 +9654,7 @@ class Emitter {
       for (let i = 1; i < obj.length; i++) {
         const pair = obj[i];
         if (isNode(pair) && pair.length === 3 && pair[0] === ':' && pair[1] === 'key') {
+          this.noteVocabulary('render-channel', 'key', pair);
           this.rstate.suppressedPairs.add(pair);
           return pair[2];
         }
@@ -9563,7 +9876,7 @@ class Emitter {
       names.forEach((n, i) => {
         if (i > 0) this.b.emit(', ');
         const emitOne = () => {
-          this.b.emit(n);
+          this.emitPrimitive(n);
           if (!this.ts) return;
           const t = i === 0 ? selfType : typeOf(n, i);
           if (t != null) this.b.tsOnly(() => this.b.emit(`: ${t}`));
@@ -9746,7 +10059,9 @@ class Emitter {
     }
     if (this.rstate.sink.kind === 'class') {
       this.renderLine(pair, () => {
-        this.b.emit(`this.${refName}.value = ${el}`);
+        this.b.emit('this.');
+        this.emitPrimitive(refName);
+        this.b.emit(`.value = ${el}`);
         // Ref typing: the scaffold's _el fields are
         // any (the slot index signature), so the assignment casts
         // TS-only to the element's REAL tag type — and `| null`,
@@ -9758,7 +10073,14 @@ class Emitter {
           this.b.tsOnly(() => this.b.emit(` as ${map}['${tag}'] | null`));
         }
       });
-      this.renderLine(pair, () => this.b.emit(`(this._refCleanups ??= []).push(() => ${this.runtimeName('__detachRef')}(this.${refName}, ${el}))`));
+      this.renderLine(pair, () => {
+        // The ref NAME emits through the primitive channel so the TS face
+        // gives it its own exact row; in JS mode that falls back to a plain
+        // emit, so both faces spell the same bytes from this one path.
+        this.b.emit(`(this._refCleanups ??= []).push(() => ${this.runtimeName('__detachRef')}(this.`);
+        this.emitPrimitive(refName);
+        this.b.emit(`, ${el}))`);
+      });
     } else {
       this.rstate.sink.refs.push({ name: refName, elVar: el, node: pair });
     }
@@ -9792,7 +10114,9 @@ class Emitter {
       accessor = inputType === 'number' || inputType === 'range' ? 'target.valueAsNumber' : 'target.value';
     }
     this.renderEffect(pair, () => {
-      this.b.emit(`${el}.${prop} = `);
+      this.b.emit(`${el}.`);
+      this.emitRewrittenPrimitive(`__bind_${prop}__`, prop);
+      this.b.emit(' = ');
       this.withExpression(() => this.expr(value));
       this.b.emit(';');
     }, value);
@@ -10134,7 +10458,15 @@ class Emitter {
           this.mark(n, 'property', () => this.b.emit(`[${n[2]}]`));
         } else {
           this.mark(n, 'operator', () => this.b.emit(op));
-          this.mark(n, 'property', () => this.b.emit(n[2]));
+          this.mark(n, 'property', () => {
+            // A SYNTHESIZED member — the `.=` lowering builds `['.', read, prop]`
+            // at emit time — has no store row, so no frame opens here and the
+            // property would inherit the statement's cover. Its name is still a
+            // source read; it claims its occurrence in that enclosing span. A
+            // real member already owns an exact row from its own frame.
+            if (this.stores.idOf(n) === null) this.emitPrimitive(n[2]);
+            else this.b.emit(n[2]);
+          });
         }
         // Component scope: `@member` (this.member) reads and writes
         // its signal's `.value` when the member is reactive — chains
@@ -10510,7 +10842,7 @@ class Emitter {
       if (wrapValue) this.b.tsOnly(() => this.b.emit(')'));
       this.b.tsOnly(() => {
         this.b.emit(' ');
-        this.mark(node, 'annotation', () => this.b.emit(spelled));
+        this.mark(node, 'annotation', () => this.emitTypeText(node, 'annotation', spelled));
       });
       this.b.tsOnly(() => this.b.emit(')'));
     });
@@ -11004,7 +11336,7 @@ class Emitter {
       if (isNode(stmt) && stmt[0] === 'class' && isNode(stmt[1]) &&
           stmt[1][0] === '.' && stmt[1][1] === 'this' && typeof stmt[1][2] === 'string') {
         this.b.emit(pad + 'static ');
-        this.mark(stmt, 'name', () => this.b.emit(stmt[1][2]));
+        this.mark(stmt, 'name', () => this.emitPrimitive(stmt[1][2]));
         this.b.emit(' = ');
         this.classCode(['class', null, stmt[2] ?? null, stmt[3]], ind + 1);
         this.b.emit(';\n');
@@ -11034,7 +11366,7 @@ class Emitter {
             if (isStaticKey(key)) this.b.emit('static ');
             if (Emitter.containsAwait(value[2])) this.b.emit('async ');
             if (Emitter.containsYield(value[2])) this.b.emit('*');
-            this.mark(pair, 'key', () => this.b.emit(mName));
+            this.mark(pair, 'key', () => this.emitPrimitive(mName));
             let [, params, block] = value;
             let atParams = [];
             if (mName === 'constructor') {
@@ -11102,7 +11434,7 @@ class Emitter {
         this.b.emit(pad);
         this.mark(stmt, '$self', () => {
           this.b.emit('static ');
-          this.mark(stmt, 'property', () => this.b.emit(stmt[2]));
+          this.mark(stmt, 'property', () => this.emitPrimitive(stmt[2]));
         });
         this.b.emit(';\n');
         return;
@@ -11115,7 +11447,7 @@ class Emitter {
         this.b.emit(pad);
         this.mark(stmt, '$self', () => this.mark(stmt, 'annotation', () => {
           if (isStaticKey(stmt[1])) this.b.emit('static ');
-          this.mark(stmt, 'target', () => this.b.emit(memberName(stmt[1])));
+          this.mark(stmt, 'target', () => this.emitPrimitive(memberName(stmt[1])));
           if (this.ts) this.tsAnnotate(stmt, 'annotation', this.annotationText(stmt) ?? tidyType(stmt[2]));
         }));
         this.b.emit(';\n');
@@ -11130,7 +11462,7 @@ class Emitter {
         this.b.emit(pad);
         this.mark(stmt, 'annotation', () => this.mark(stmt, '$self', () => {
           if (isStaticKey(stmt[1])) this.b.emit('static ');
-          this.mark(stmt, 'target', () => this.b.emit(memberName(stmt[1])));
+          this.mark(stmt, 'target', () => this.emitPrimitive(memberName(stmt[1])));
           if (this.ts && this.annotationText(stmt) !== null) {
             this.tsAnnotate(stmt, 'annotation', this.annotationText(stmt));
           }
@@ -11327,7 +11659,7 @@ class Emitter {
           // `new ` prefix already written this is `new Ctor(args)`.
           this.call(operand);
         } else {
-          this.b.emit(operand);
+          this.emitPrimitive(operand);
           this.b.emit('()');
         }
       });
@@ -11338,7 +11670,7 @@ class Emitter {
   // (`name = expr`), or an array/object pattern (emitted like the
   // matching literal — the pattern element cases live on object/array).
   emitParam(p) {
-    if (typeof p === 'string') return this.b.emit(p);
+    if (typeof p === 'string') return this.emitPrimitive(p);
     // A typed parameter (["typed-var", target, "T"]) erases to its target;
     // the annotation role's cover row spans the emitted target — the
     // type's only generated manifestation. The TS face emits
@@ -11393,10 +11725,19 @@ class Emitter {
   static expansionSplit(params) {
     const at = params.findIndex((p) => isNode(p) && p[0] === 'expansion');
     if (at === -1) return { list: params, extractions: [] };
-    const trailing = params.slice(at + 1).map(Emitter.paramCore);
+    const trailing = params.slice(at + 1);
     return {
       list: [...params.slice(0, at), ['rest', '_rest']],
-      extractions: trailing.map((name, i) => `const ${name} = _rest[_rest.length - ${trailing.length - i}];`),
+      // The NAME is the parameter the source spells, and this extraction is its
+      // ONLY generated manifestation, so it stays separate from the line's text
+      // and takes its own row. The param NODE rides along because the extraction
+      // emits inside the BODY's frame, which does not span the parameter list —
+      // the claim has to open on the parameter's own extent to see it.
+      extractions: trailing.map((p, i) => ({
+        node: p,
+        name: Emitter.paramCore(p),
+        tail: `_rest[_rest.length - ${trailing.length - i}];`,
+      })),
     };
   }
 
@@ -11538,8 +11879,10 @@ class Emitter {
           this.hoistLine(hoist, '  '.repeat(ind + 1));
           this.b.emit('\n');
         }
-        for (const line of extractions) {
-          this.b.emit('  '.repeat(ind + 1) + line + '\n');
+        for (const ex of extractions) {
+          this.b.emit('  '.repeat(ind + 1) + 'const ');
+          this.mark(ex.node, '$self', () => this.emitPrimitive(ex.name));
+          this.b.emit(` = ${ex.tail}\n`);
         }
         this.emitTsTypeDecls(isBlock(block) ? block.slice(1) : [block], '  '.repeat(ind + 1));
         this.mark(block, 'statements', () => {
@@ -12206,7 +12549,11 @@ class Emitter {
           this.mark(pair, 'key', () => {
             if (typeof key === 'string' && /^[A-Za-z_$][\w$]*$/.test(key) &&
                 key !== 'true' && key !== 'false' && key !== 'null' && key !== 'undefined') {
-              this.b.emit(JSON.stringify(key));
+              // Re-rendered quoted, so the pair's cover breaks at the quote —
+              // the name itself is still verbatim inside it.
+              this.b.emit('"');
+              this.emitPrimitive(key);
+              this.b.emit('"');
             } else if (isNode(key) && key[0] === 'dynamicKey') {
               this.expr(key[1]);
             } else {
@@ -13022,7 +13369,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   }
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
-  const builder = new CodeBuilder(stores, { source });
+  const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
   const emitter = new Emitter(stores, builder, { face, pins, strict, script, repl });
   emitter.dataPayload = dataPayload;
 
@@ -13297,7 +13644,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

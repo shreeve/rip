@@ -701,7 +701,10 @@ describe('TS-face mapping rows (the same mark protocol)', () => {
     const at = r.code.indexOf(': number') + 3; // inside `number` in the hoist line
     const row = r.mappings.bestAtGenerated(at);
     expect(row).not.toBeNull();
-    expect(src.slice(row.sourceStart, row.sourceEnd)).toBe(': number');
+    // The type NAME carries its own exact row inside the annotation's cover,
+    // so the innermost row at a position inside `number` is `number` itself —
+    // the answer a hover there should give, not the whole `: number` span.
+    expect(src.slice(row.sourceStart, row.sourceEnd)).toBe('number');
   });
 });
 

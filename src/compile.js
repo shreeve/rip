@@ -148,7 +148,10 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
 
   let result;
   try {
-    result = parser.parse(parseSource);
+    // Primitive occurrence spans are read only by the TS face (they give a
+    // primitive identifier read its own exact mapping row); the shipping JS
+    // emission never queries them, so it does not pay to record them.
+    result = parser.parse(parseSource, { primitives: face === 'ts' });
   } catch (err) {
     // Lexer rejections carry offset spans; anything else is a bug, not
     // a diagnostic — let it propagate.
@@ -195,6 +198,10 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     map,
     stores: emitted.stores,
     mappings: new Mappings(emitted.mappings),
+    // Source spans the compiler consumed as its OWN vocabulary — words that are
+    // syntax in their position and reach no face entity, each tagged with the
+    // kind that says why. TS face only; empty otherwise.
+    vocabulary: emitted.vocabulary ?? [],
     runtimes: emitted.runtimes,
     // The program's top-level binding inventory: [{name, kind}] with
     // kind plain / state / computed / effect / readonly / import /

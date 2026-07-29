@@ -28,7 +28,7 @@ const withRed = (name, why) => withoutReds().map((c) => (c.name === name ? { ...
 // one case would leak into the next.
 const cleanStates = () => ({
   gr: { unallocated: 0, badExclusions: 0, negatives: { kindBad: 0, vocabUnfalsified: 0, claimsBroken: 0, cellsMissing: 0, staleMints: 0, headsUnseen: 0, badSpellingExclusions: 0, claimsBadParks: 0, splitDividers: 0 } },
-  mp: { missing: 0 },
+  mp: { missing: 0, drifted: 0, census: 0, badExclusions: 0 },
   fails: 0,
   el: { problems: [] },
   hp: { gap: 0, snapChanged: 0, violations: [] },
@@ -96,6 +96,8 @@ describe('the audit contract judges in both directions', () => {
       'corpus.dividers': (s) => { s.gr.negatives.splitDividers = 1; },
       'mapping.identity': (s) => { s.mp.drifted = 1; },
       'mapping.spans': (s) => { s.mp.missing = 1; },
+      'mapping.census': (s) => { s.mp.census = 1; },
+      'mapping.exclusions': (s) => { s.mp.badExclusions = 1; },
       'type.dimensions': (s) => { s.fails = 1; },
       'diagnostics.codes': (s) => { s.el.problems = [{ kind: 'missing' }]; },
       'diagnostics.positions': (s) => { s.el.problems = [{ kind: 'position' }]; },

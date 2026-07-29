@@ -252,6 +252,7 @@ import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.js';
 import { compile } from '../../src/compile.js';
+import { codeMask } from './mask.js';
 import { Parser } from '../../src/parser.js';
 import { makeParserLexer, tokenize, ALIASES } from '../../src/lexer.js';
 import { renderTypeDecl } from '../../src/typetext.js';
@@ -1254,40 +1255,7 @@ class FaceOracle {
 // standalone FaceOracle's tsgo drifting from the server's. `unclassified`
 // counts violators; it surfaces only if nonzero, never as an always-ok line.
 const FACE_IDENT = /^[A-Za-z_$][\w$]*$/;
-// Whole-source code mask for the occurrence scan: blank STRING-LITERAL bytes
-// but KEEP `#{…}` interpolation expressions (a read inside an interpolation is
-// real code), track string state ACROSS lines (a multi-line template's body
-// stays blanked), and cut comments — all offset-preserving. Unlike the per-line
-// `codeOf`, which cannot see a multi-line string and blanks interpolations
-// wholesale. Single-quoted strings do not interpolate, so `#{` inside one is
-// literal. Interpolation depth is tracked per string on a stack, so nested
-// strings/braces inside `#{…}` resolve correctly.
-function codeMask(src) {
-  const out = [];
-  const stack = [];   // string contexts: { delim, interp, brace } — brace>0 ⇒ inside its #{…}
-  for (let i = 0; i < src.length; i++) {
-    const c = src[i];
-    const top = stack[stack.length - 1];
-    if (top && top.brace === 0) {                              // inside a string LITERAL
-      if (c === '\\') { out.push(' '); if (i + 1 < src.length) { out.push(' '); i++; } continue; }
-      if (c === top.delim) { stack.pop(); out.push(c); continue; }
-      if (top.interp && c === '#' && src[i + 1] === '{') { top.brace = 1; out.push(' ', ' '); i++; continue; }
-      out.push(c === '\n' ? '\n' : ' ');                       // literal content — blank, keep newlines
-      continue;
-    }
-    if (top && top.brace > 0) {                                // interpolation code — track its braces
-      if (c === '{') { top.brace++; out.push(c); continue; }
-      if (c === '}') { top.brace--; out.push(top.brace === 0 ? ' ' : c); continue; }
-    }
-    if (!stack.length && c === '#' && src[i + 1] !== '{') {    // comment (top-level only)
-      while (i < src.length && src[i] !== '\n') { out.push(' '); i++; }
-      i--; continue;                                           // leave the newline for the loop
-    }
-    if (c === "'" || c === '"' || c === '`') { stack.push({ delim: c, interp: c !== "'", brace: 0 }); out.push(c); continue; }
-    out.push(c);
-  }
-  return out.join('');
-}
+
 // rip DECLARATION keywords whose spelling is ALSO a common property name, so a
 // source-word count cannot tell the keyword from the identifier (`type X =` vs
 // `type: 'a'`). Excluded wholesale — a few genuine property-`type` drops are
@@ -1507,7 +1475,7 @@ const MAP_RESERVED = new Set([
   'var', 'function', 'class', 'extends', 'implements', 'interface', 'enum',
   'type', 'namespace', 'module', 'def', 'component', 'schema', 'render', 'and',
   'or', 'not', 'is', 'isnt', 'true', 'false', 'null', 'undefined', 'this',
-  'super', 'with', 'case', 'by',
+  'super', 'with', 'case', 'by', 'own',
 ]);
 
 // Every identifier in real CODE, as { name, offset }. `codeMask` blanks string
@@ -1551,12 +1519,34 @@ function* identReads(src) {
 // apart and never folded into the census or the unplaced/mistext tallies, which
 // speak about reads that HAVE a span. The audit proves the class empty afresh
 // each run.
-function mappingScan(src, code, mappings) {
+// The census population is reads that SHOULD resolve. A word that is syntax in
+// its position resolves to nothing by design, so counting it would demand a row
+// no honest emission can produce — and the hover audit already pins these
+// positions null and GREEN, so counting them here would have two instruments
+// disagreeing about the same bytes.
+//
+// This is also the one lever that could shrink the census without fixing
+// anything, which is why it is a TABLE and not a filter: the compiler names the
+// kind at the site it consumes the word (never the audit guessing from
+// spelling — `key` is a loop variable in 06-loops and `ref` a schema field in
+// 14-schema, both of which must keep counting), every kind here must actually
+// occur, and `mapping.exclusions` goes red when one stops occurring, so an
+// exclusion cannot outlive its reason.
+const MAP_EXCLUSIONS = new Map([
+  ['render-channel', "the render DSL's own channel words — `ref:` binds a cell, `key:` identifies loop rows, `slot` projects children. The compiler CONSUMES each; none reaches a face entity"],
+  ['gate-prefix', "a gate's `@app.data` marker, erased whole by the lowering, which keeps only the route name. RULINGS.md pins these segments to silence"],
+]);
+
+function mappingScan(src, code, mappings, vocabulary = []) {
   const rows = [];         // flagged reads WITH a containing row (unplaced/mistext)
   const missingRows = [];  // flagged reads with NO row at all — counted apart
+  const excluded = [];     // reads the compiler consumed as vocabulary
   let total = 0, census = 0, byLuck = 0;
   const drifted = [];    // resolved and byte-equal, but maps back somewhere else
+  const consumed = (offset, len) => vocabulary.find((v) => v.start === offset && v.end === offset + len) ?? null;
   for (const { name, offset } of identReads(src)) {
+    const eaten = consumed(offset, name.length);
+    if (eaten !== null) { excluded.push({ name, offset, kind: eaten.kind }); continue; }
     total++;
     const g = sourceOffsetToGeneratedExact(mappings, offset, src, code);
     const placed = g !== null;
@@ -1603,7 +1593,7 @@ function mappingScan(src, code, mappings) {
     // a mistext, the wrong text a hover at this read would answer about.
     rows.push({ name, offset, placed, text, role: row.role, root, gen: g, hit: g === null ? null : code.slice(g, g + name.length) });
   }
-  return { total, rows, missingRows, census, byLuck, drifted };
+  return { total, rows, missingRows, census, byLuck, drifted, excluded };
 }
 
 // ── run
@@ -2696,8 +2686,8 @@ if (RUN_MAP) {
     try {
       // The SAME compile the server's `faceOf` and the survival oracle use, so
       // the rows walked here are the exact rows the editor remaps through.
-      const { code, mappings } = compile(src, { path: full, runtimeDelivery: 'inline', face: 'ts' });
-      scan = mappingScan(src, code, mappings);
+      const { code, mappings, vocabulary } = compile(src, { path: full, runtimeDelivery: 'inline', face: 'ts' });
+      scan = mappingScan(src, code, mappings, vocabulary);
     } catch (e) {
       // A fixture that will not compile has no face to walk. Surfaced, never
       // silent: a shrinking denominator is exactly what the coverage line below
@@ -2787,6 +2777,24 @@ if (RUN_MAP) {
     console.log(`    ${red('✗')} ${dim(`census decomposition off: ${census} ≠ ${totFlag} broken + ${byLuck} by-luck — a flagged read sits in an exact row (a compiler-invariant regression, not a corpus change)`)}`);
   }
 
+  // The exclusions, PRINTED — a population this gate narrows silently is a
+  // population nobody can audit. Each kind is declared with its reason above and
+  // must actually occur; `mapping.exclusions` fails on one that no longer does.
+  const excRows = perFile.flatMap((pf) => (pf.excluded ?? []).map((e) => ({ f: pf.f, ...e })));
+  const byKind = new Map();
+  for (const e of excRows) byKind.set(e.kind, (byKind.get(e.kind) ?? 0) + 1);
+  const undeclared = [...byKind.keys()].filter((k) => !MAP_EXCLUSIONS.has(k));
+  const unused = [...MAP_EXCLUSIONS.keys()].filter((k) => !byKind.has(k));
+  out(`    ${pad('excluded', 10)} ${dim(String(excRows.length).padStart(4))}   ${dim('reads the compiler consumed as its own vocabulary — netted from the population above')}`);
+  for (const [kind, why] of MAP_EXCLUSIONS) {
+    const n = byKind.get(kind) ?? 0;
+    out(`      ${(n ? dim : red)(`${kind} ${n}`)}`);
+    out(`        ${(n ? dim : red)(why)}`);
+  }
+  for (const k of undeclared) console.log(`    ${red('✗')} ${dim(`the compiler recorded exclusion kind '${k}', which this gate does not declare`)}`);
+  for (const k of unused) console.log(`    ${red('✗')} ${dim(`exclusion '${k}' is declared but no longer occurs — delete it, or it will excuse the next read that lands there`)}`);
+  if (VERBOSE) for (const e of excRows) out(`      ${dim(`${e.f} ${e.name} at ${e.offset} (${e.kind})`)}`);
+
   // ── the two roots, each with the roles it bit (the row every failure fell
   // to). The counts are live and the ordering is by weight, so the dominant
   // class names itself.
@@ -2861,7 +2869,7 @@ if (RUN_MAP) {
 
   // Exactly what the combined-totals line reads — no dead fields carried on the
   // signal object (perFile, byLuck, skips, walked were all retained for nothing).
-  mp = { totReads, totFlag, unplaced, mistext, missing, census, drifted: driftRows.length,
+  mp = { totReads, totFlag, unplaced, mistext, missing, census, drifted: driftRows.length, badExclusions: undeclared.length + unused.length,
          synthetic: rootTotal(byRootRole.synthetic), rewrite: rootTotal(byRootRole.rewrite) };
 
   // No calibration runs here, and that is deliberate: trusting the instrument is

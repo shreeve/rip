@@ -384,6 +384,17 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
   if (adapterTokens) descriptor.adapterTokens = adapterTokens;
   descriptor.start = (kindTok ?? bodyTokens[0]).start;
   descriptor.end = bodyEnd;
+  // SCHEMA_BODY collapses the entire DSL into one opaque parser token. Keep
+  // every word-token occurrence as side-band span data so the generated
+  // parser can carry primitive identity through that collapse just as it does
+  // for ordinary list elements. The descriptor remains the same tree value.
+  descriptor.primitiveSpans = [kindTok, ...bodyTokens]
+    .filter((t) => t && typeof t.value === 'string' && /^[A-Za-z_$][\w$]*$/.test(t.value))
+    .map((t) => ({
+      value: t.value,
+      sourceStart: t === kindTok && t.end - t.start === t.value.length + 1 ? t.start + 1 : t.start,
+      sourceEnd: t.end,
+    }));
 
   out.push({
     id: mintId(), kind: 'SCHEMA', value: 'schema',

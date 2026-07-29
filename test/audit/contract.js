@@ -130,6 +130,29 @@ export const CONTRACT = [
     red: (s) => s.mp.missing > 0,
   },
   {
+    // The census narrows its own population, which is the one move that could
+    // shrink it without fixing anything. Both directions, like the grammar
+    // gate's exclusion table: a kind the compiler records but this gate does not
+    // declare is an exclusion nobody reviewed, and a kind declared but no longer
+    // occurring is a reason that has outlived its defect and would silently
+    // excuse the next read that lands there.
+    name: 'mapping.exclusions', lane: 'map',
+    property: 'every census exclusion is declared with a reason, and every declared reason still occurs',
+    red: (s) => (s.mp.badExclusions ?? 0) > 0,
+  },
+  {
+    // The identifier-read row's EXIT, and the reason it is an invariant rather
+    // than a number the summary prints: the row closes when this is zero, and
+    // nothing else closes it. Judged in both directions like every other
+    // agreement, so the day the census empties, THIS fails — the reason below
+    // has become a lie, and the failure is the cue to retire it and the row
+    // together. Left as prose, a green census would just stop being mentioned.
+    name: 'mapping.census', lane: 'map',
+    property: 'every identifier read owns an exact row — its own span, never its cover’s',
+    redBecause: "five reads remain, and FOUR cannot take an honest row as things stand: two annotations their lowering erases outright (a gap parameter's, and a defaulted promoted parameter's, whose default infers the type), and the parked `offer`/`accept` pair whose model RULINGS.md does not settle. The fifth is a bare-name implicit return, and it is the ORDINAL claim's own limit rather than an emission left unrouted — the frame holds every occurrence of the name, the earlier ones claimed in frames of their own so this frame's cursor is fresh, and picking the first is a guess. It wants occurrence identity carried from the tree. Delete this when every read classifies exact",
+    red: (s) => s.mp.census > 0,
+  },
+  {
     name: 'type.dimensions', lane: 'main',
     property: 'every dimension check passes — compiles, verdict, runtime, twin, strict',
     red: (s) => s.fails > 0,
@@ -142,7 +165,7 @@ export const CONTRACT = [
   {
     name: 'diagnostics.positions', lane: 'errors',
     property: 'every diagnostic lands on the span its twin puts it on',
-    redBecause: "a rewritten literal earlier in an element list widens its neighbours' diagnostics to the whole list rather than the offending element, so 11-types' wrong-element rows land wide — their single-quoted leading literal is load-bearing, and double-quoting them would narrow the span without fixing anything; delete this when the span narrows to the element",
+    redBecause: "a string literal carries no source span of its own, so a diagnostic ON one falls back to the enclosing element list and lands wide — 11-types' wrongEntry row is the case; its wrongTrailing neighbour, whose offending element is a READ, now narrows correctly. The single-quoted OFFENDING literal is load-bearing, and double-quoting it would narrow the span without fixing anything; delete this when the span narrows to the element",
     red: (s) => s.el.problems.some((p) => p.kind === 'position'),
   },
   {

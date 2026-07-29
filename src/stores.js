@@ -16,19 +16,27 @@
 //                  spans come from the children's own NodeStore rows)
 //   literal role { nodeId, role, grammarRef: null, childSlot, literal,
 //                  fileId } — statically-known value, no span
+//
+// PrimitiveStore row: { nodeId, value, sourceStart, sourceEnd, fileId } —
+//   one source token occurrence, owned by the first constructed node that
+//   carries it. Primitive tree values cannot carry identity themselves, so
+//   their occurrence spans live here and are claimed by source containment
+//   while an enclosing node emits.
 
 import { ops } from './ops.js';
 
 export class Stores {
-  constructor({ nodes, roles, nodeIds = null }) {
+  constructor({ nodes, roles, primitives = [], nodeIds = null }) {
     this.nodes = nodes;
     this.roles = roles;
+    this.primitives = primitives;
     this.nodeIds = nodeIds;
     this.byId = new Map(nodes.map(n => [n.nodeId, n]));
     // Lookup indexes over the plain row arrays (the arrays stay the
     // source of truth): role() and rolesOf() are called once per mark
     // during emission, so they must be O(1), not row scans.
     this.rolesByNode = new Map();
+    this.primitivesByValue = new Map();
     for (const r of roles) {
       let forNode = this.rolesByNode.get(r.nodeId);
       if (!forNode) {
@@ -37,6 +45,14 @@ export class Stores {
       }
       forNode.list.push(r);
       forNode.byName.set(r.role, r);
+    }
+    for (const p of primitives) {
+      let forValue = this.primitivesByValue.get(p.value);
+      if (!forValue) this.primitivesByValue.set(p.value, forValue = []);
+      forValue.push(p);
+    }
+    for (const occurrences of this.primitivesByValue.values()) {
+      occurrences.sort((a, b) => a.sourceStart - b.sourceStart);
     }
   }
 
@@ -69,6 +85,16 @@ export class Stores {
 
   role(nodeId, name) {
     return this.rolesByNode.get(nodeId)?.byName.get(name) ?? null;
+  }
+
+  // Primitive occurrences inside [sourceStart, sourceEnd), in source order.
+  // A role frame supplies its own bounds; $self supplies the node bounds.
+  // Filtering by value identifies the primitive spelling while the
+  // frame-local claim cursor distinguishes repeated occurrences.
+  primitiveSpans(value, sourceStart, sourceEnd) {
+    return (this.primitivesByValue.get(value) ?? []).filter((p) =>
+      sourceStart <= p.sourceStart && p.sourceEnd <= sourceEnd
+    );
   }
 
   // [start, end) — the node's own span, read from its NodeStore row.
