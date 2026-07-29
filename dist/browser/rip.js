@@ -22996,7 +22996,7 @@ async function bootApp(opts = {}) {
   let fetchBytes = null;
   let manifest = null;
   if (workspaceMode) {
-    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf("/") + 1)}manifest` : null);
+    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf("/") + 1)}manifest.json` : null);
     if (!manifestUrl) {
       throw new Error("rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl");
     }
@@ -23114,26 +23114,25 @@ async function bootApp(opts = {}) {
     try {
       const snapshot = {};
       for (const path of bag.paths()) {
-        let module = null;
         try {
-          module = { ...await loader.import(path) };
-          bag.setCompiled(path, module);
+          snapshot[path] = { ...await loader.import(path) };
         } catch (error) {
-          report(`[Rip] ${path} failed to compile — keeping its last good version`, error);
-          module = bag.getCompiled(path);
+          report(`[Rip] ${path} failed to compile — keeping the last good version`, error);
+          return;
         }
-        if (module)
-          snapshot[path] = module;
       }
       if (destroyed)
         return;
+      for (const [path, module] of Object.entries(snapshot)) {
+        bag.setCompiled(path, module);
+      }
       try {
         current.destroy();
         current = launchWith(snapshot);
         Object.assign(handle, current, stable);
         console.log(`[Rip] applied ${applied.join(", ") || "a change"} — remounted (component state reset)`);
       } catch (error) {
-        report("[Rip] remount failed — the page stays down until the next good change applies", error);
+        report("[Rip] remount failed — waiting for the next good change", error);
       }
     } finally {
       remounting = false;

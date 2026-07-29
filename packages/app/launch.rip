@@ -165,17 +165,32 @@ export def launch(opts: LaunchOpts): LaunchResult
   destroy = ->
     return if destroyed
     destroyed = true
-    disposeLinks?()
-    renderer.stop()
-    router.destroy()
-    unwatch()
-    disposePersist?()
+    # Every disposer runs; errors aggregate. Globals ALWAYS clear — a
+    # stuck __ripApp bricks every future launch (destroy latches
+    # `destroyed` before work, so a mid-teardown throw used to leave
+    # the sentinel set with no recovery path).
+    errors = []
+    run = (fn) ->
+      try
+        fn()
+      catch e
+        errors.push e
+      return
+    run -> disposeLinks?()
+    run -> renderer.stop()
+    run -> router.destroy()
+    run -> unwatch()
+    run -> disposePersist?()
     delete globalThis.__ripApp if globalThis.__ripApp is app
     delete globalThis.__ripRouter if globalThis.__ripRouter is router
+    if errors.length is 1
+      throw errors[0]
+    if errors.length > 1
+      throw new AggregateError errors, 'Rip App: launch.destroy failed'
     return
 
-  # A failing start must not wedge the process: teardown runs before the
-  # failure propagates, so the globals never outlive a dead launch.
+  # A failing start must not wedge the process: destroy clears the
+  # globals even when a disposer throws, then the failure propagates.
   globalThis.__ripApp = app
   globalThis.__ripRouter = router
   try

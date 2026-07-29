@@ -95,7 +95,7 @@ Bun.serve({
       }
       return new Response(wsBundleText, { headers: { 'Content-Type': 'application/json', ETag: wsBundleTag } });
     }
-    if (pathname === '/@rip/manifest') {
+    if (pathname === '/@rip/manifest.json') {
       const cells = [...wsRevs].map(([id, rev]) => ({ id, rev }));
       return new Response(JSON.stringify({ cells }), {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },

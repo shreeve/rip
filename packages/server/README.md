@@ -390,7 +390,7 @@ In watch mode:
   rename retires the old id and mints a new one at rev 1 (id persistence
   across renames is open research). Revs start at 1 and bump once per
   content change; the registry lives in the manager's memory for the run.
-  `GET /@rip/manifest` answers `{"cells": [{id, rev, hash}, …]}`
+  `GET /@rip/manifest.json` answers `{"cells": [{id, rev, hash}, …]}`
   sorted by path, `Cache-Control: no-store`, read per request. Cell
   bytes — the file's **source text**, dev-mode in-browser compile — are
   addressed by `(id, rev)` plus the content-hash discriminator in the
@@ -405,18 +405,27 @@ In watch mode:
   URLs are rejected alike, never answered with a cacheable 200 under
   the proven-broken bare shape. An unknown `(id, rev)`, or an `h` that
   does not match the bytes, is a 404.
-- **The ding.** After the cells, the manifest, and the rewritten bundle
-  are durable, the manager publishes one directive per changed cell to
-  the hub channel `/@rip/dev` — the envelope is `{id, rev, hash}` only;
-  source and compiled bodies never ride the hub (HTTP carries the bytes). A
-  deleted client file retires: it leaves the manifest, its retirement
-  occupies its own rev, and the ding carries `kind: "delete"` (no bytes
-  for that rev — old revs keep answering). A publish failure warns and
-  never blocks the cell path.
+- **The ding.** After the cells, the rewritten bundle, and the manifest
+  are durable (manifest last), the manager publishes one directive per
+  changed cell to the hub channel `/@rip/dev` — the envelope is
+  `{id, rev, hash}` only; source and compiled bodies never ride the hub
+  (HTTP carries the bytes). A deleted client file retires: it leaves the
+  manifest, its retirement occupies its own rev, and the ding carries
+  `kind: "delete"` (no bytes for that rev — old revs keep answering). A
+  publish failure warns and never blocks the cell path. Both the cell
+  path and the epoch `buildApp` path walk `app/` once and feed that
+  snapshot to the bundle, the cells, and the manifest — a second walk
+  mid-run can invent a manifest naming revs the bundle does not carry
+  (the silent-stale class). A scrapped epoch build restores the prior
+  registry and rewrites the manifest so it cannot name an unlinked
+  bundle's revs.
 - **Bundle freshness.** On the cell path the manager atomically rewrites
   the live pool's bundle file, and the worker's `/@rip/bundle.json`
-  re-reads and re-tags per request (Janus's micro-cache absorbs the
-  cost) — so a hard refresh never serves stale first-paint code.
+  re-reads and re-tags per request. With the door open the bundle is
+  `Cache-Control: no-store` like the manifest (a micro-cache hit would
+  otherwise pair a live manifest with stale first-paint bytes); with
+  watch off, ETag-only so the edge cache still earns its keep. No live
+  pool bundle is a held-back-manifest verdict, never a silent skip.
 - **Bridge enrollment.** With `--bridge <path>`, the worker answers the
   bridge's `Sec-WebSocket-Frame: open` POST with `{"+": ["/@rip/dev"]}` —
   enrolling the opening connection into the dev channel — and `text` /

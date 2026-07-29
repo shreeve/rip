@@ -396,7 +396,7 @@ describe('bootApp workspace mode', () => {
   const settleEscape = () => Bun.sleep(40);
 
   const manifestTable = (manifest = MANIFEST) => new Map([
-    ['/@rip/manifest', JSON.stringify(manifest)],
+    ['/@rip/manifest.json', JSON.stringify(manifest)],
   ]);
 
   const bootWorkspace = async ({ table, hub, reports = [], bundle = null, fetchImpl = null }) => {
@@ -407,7 +407,7 @@ describe('bootApp workspace mode', () => {
       target,
       adapter: fakeAdapter('/'),
       workspace: true,
-      manifestUrl: '/@rip/manifest',
+      manifestUrl: '/@rip/manifest.json',
       feed: {
         hub: 'ws://test/dev',
         makeSocket: hub.makeSocket,
@@ -426,7 +426,7 @@ describe('bootApp workspace mode', () => {
       bundle: assembleWorkspace(),
       target: doc.createElement('div'),
       adapter: fakeAdapter('/'),
-      manifestUrl: '/@rip/manifest',
+      manifestUrl: '/@rip/manifest.json',
       feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch },
     });
     try {
@@ -477,7 +477,7 @@ describe('bootApp workspace mode', () => {
     try {
       const socket = hub.sockets[0];
       socket.onopen();
-      await until(() => fetch.calls.includes('/@rip/manifest'));
+      await until(() => fetch.calls.includes('/@rip/manifest.json'));
       socket.onmessage({ data: JSON.stringify({ ding: { id: 'app/routes/index.rip', rev: 2 } }) });
       await until(() => result.workspace.passport('app/routes/index.rip').rev === 2);
       expect(fetch.calls).toContain('/@rip/cells/app/routes/index.rip?rev=2');
@@ -561,7 +561,7 @@ describe('bootApp workspace mode', () => {
       modules,
       packagesDir: resolve(root, 'packages'),
     });
-    const table = new Map([['/@rip/manifest', JSON.stringify(manifest)]]);
+    const table = new Map([['/@rip/manifest.json', JSON.stringify(manifest)]]);
     table.set('/@rip/cells/app/badge.rip?rev=2', "export LABEL = 'badge v2'");
     const hub = fakeHub();
     const { result, target } = await bootWorkspace({ table, hub, bundle });
@@ -576,12 +576,61 @@ describe('bootApp workspace mode', () => {
     }
   });
 
+  test('a remount whose importer fails keeps the page interactive (compile barrier)', async () => {
+    // A shared cell can compile while its importer cannot (export
+    // removed). The remount must stage every projection first and
+    // abort with ZERO bag.setCompiled / destroy / relaunch — otherwise
+    // the page tears down into a version-mixed launch (S10).
+    const modules = {
+      'app/badge.rip': "export LABEL = 'badge v1'",
+      'app/routes/index.rip': [
+        "import { LABEL } from '../badge.rip'",
+        'export Home = component',
+        '  render',
+        '    h1 "#{LABEL}"',
+      ].join('\n'),
+    };
+    const manifest = {
+      cells: [
+        { id: 'app/badge.rip', rev: 1 },
+        { id: 'app/routes/index.rip', rev: 1 },
+      ],
+    };
+    const bundle = assembleBundle({
+      modules,
+      packagesDir: resolve(root, 'packages'),
+    });
+    const table = new Map([['/@rip/manifest.json', JSON.stringify(manifest)]]);
+    table.set('/@rip/cells/app/badge.rip?rev=2', "export OTHER = 'no LABEL'");
+    table.set('/@rip/cells/app/badge.rip?rev=3', "export LABEL = 'badge v3'");
+    const hub = fakeHub();
+    const reports = [];
+    const { result, target } = await bootWorkspace({ table, hub, bundle, reports });
+    try {
+      await until(() => target.textContent.includes('badge v1'));
+      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/badge.rip', rev: 2 } }) });
+      await until(() => result.workspace.passport('app/badge.rip').rev === 2);
+      await settleEscape();
+      await until(() => reports.some(line => line.includes('failed to compile') && line.includes('app/routes/index.rip')));
+      expect(target.textContent).toContain('badge v1');
+      expect(target.textContent).not.toContain('badge v3');
+      // The next good revision recovers through the same path.
+      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/badge.rip', rev: 3 } }) });
+      await until(() => result.workspace.passport('app/badge.rip').rev === 3);
+      await settleEscape();
+      await until(() => target.textContent.includes('badge v3'));
+    } finally {
+      result.destroy();
+    }
+  });
+
   test('a workspace boot fetches the manifest BEFORE the bundle (rev-over-bytes correlation)', async () => {
     // The manager writes the manifest AFTER the bundle; the boot
     // fetches it BEFORE. The only pairing a boot racing a save can
     // observe is "manifest rev <= bundle bytes", which the feed's
     // resync heals forward — the reverse would block its own healing
-    // on the rev cursor.
+    // on the rev cursor. The URL derives from the bundle the same way
+    // (…/bundle.json → …/manifest.json) — no explicit manifestUrl.
     const order = [];
     const bundleText = JSON.stringify(assembleWorkspace());
     const fetchText = async url => {
@@ -603,7 +652,6 @@ describe('bootApp workspace mode', () => {
       target: doc.createElement('div'),
       adapter: fakeAdapter('/'),
       workspace: true,
-      manifestUrl: '/@rip/manifest',
       feed: {
         hub: 'ws://test/dev',
         makeSocket: hub.makeSocket,
@@ -613,8 +661,9 @@ describe('bootApp workspace mode', () => {
       },
     });
     try {
-      expect(order[0]).toBe('feed:/@rip/manifest');
+      expect(order[0]).toBe('feed:/@rip/manifest.json');
       expect(order).toContain('bundle:/@rip/bundle.json');
+      expect(order).not.toContain('feed:/@rip/manifest');
     } finally {
       result.destroy();
     }
