@@ -98,10 +98,14 @@ describe('the audit contract judges in both directions', () => {
       'mapping.spans': (s) => { s.mp.missing = 1; },
       'type.dimensions': (s) => { s.fails = 1; },
       'diagnostics.codes': (s) => { s.el.problems = [{ kind: 'missing' }]; },
-      'diagnostics.positions': (s) => { s.el.problems = [{ kind: 'position' }]; },
+      'diagnostics.positions': (s) => { s.el.problems = [{ kind: 'position', file: '09-classes.errors.rip' }]; },
+      'diagnostics.positions.element': (s) => { s.el.problems = [{ kind: 'position', file: '11-types.errors.rip' }]; },
+      'diagnostics.positions.arity': (s) => { s.el.problems = [{ kind: 'position', file: '02-operations.errors.rip' }]; },
       'hover.parity': (s) => { s.hp.gap = 1; },
       'token.delivery': (s) => { s.tk.missing = [{}]; },
-      'token.type': (s) => { s.tk.badType = [{}]; },
+      'token.type': (s) => { s.tk.badType = [{ want: { type: 'variable' } }]; },
+      'token.type.enum': (s) => { s.tk.badType = [{ want: { type: 'enum' } }]; },
+      'token.type.void': (s) => { s.tk.badType = [{ want: { type: 'function' } }]; },
       'token.readonly': (s) => { s.tk.badReadonly = [{}]; },
     };
     expect(Object.keys(fire).sort()).toEqual(CONTRACT.map((c) => c.name).sort());
