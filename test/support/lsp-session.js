@@ -184,6 +184,24 @@ export async function openSession(files) {
       return labels;
     },
 
+    // Signature help at a position. Polls for a LIVE (non-null) answer the
+    // same way completions() polls for a non-empty list, and for the same
+    // reason: a request issued while tsgo is still building answers null,
+    // which would silently satisfy any "help is absent" assertion. A null
+    // after the full wait is returned as-is — that is a real answer, and a
+    // test asserting it must first have proven the surface live at a
+    // position that answers (the liveness-pair discipline).
+    async signatureHelp(name, line, character, { tries = 20, every = 300 } = {}) {
+      for (let i = 0; i < tries; i++) {
+        const r = await client.request('textDocument/signatureHelp', {
+          textDocument: { uri: uri(name) }, position: { line, character },
+        }).catch(() => null);
+        if (r?.signatures?.length) return r;
+        await sleep(every);
+      }
+      return null;
+    },
+
     // Semantic tokens for an open doc, decoded against the server's own legend
     // into absolute rows on .rip source. Throws when the server advertised no
     // legend: an empty token list would satisfy any "modifier is absent"

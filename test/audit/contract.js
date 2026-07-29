@@ -142,7 +142,11 @@ export const CONTRACT = [
   {
     name: 'diagnostics.positions', lane: 'errors',
     property: 'every diagnostic lands on the span its twin puts it on',
-    redBecause: "a rewritten literal earlier in an element list widens its neighbours' diagnostics to the whole list rather than the offending element, so 11-types' wrong-element rows land wide — their single-quoted leading literal is load-bearing, and double-quoting them would narrow the span without fixing anything; delete this when the span narrows to the element",
+    // TWO open causes share this red, and it does not clear until both do —
+    // naming only one would strand the other the day that one closes, leaving
+    // a red nothing explains. Both are the same root (a read inside a cover
+    // row resolves to the cover's edge, not its own span) on two list shapes.
+    redBecause: "a rewritten literal earlier in an element list widens its neighbours' diagnostics to the whole list rather than the offending element, so 11-types' wrong-element rows land wide — their single-quoted leading literal is load-bearing, and double-quoting them would narrow the span without fixing anything; AND a paren-injected call's arity error lands on the first argument rather than the excess one, so 02-operations' paren-less arity row lands early — its paren-less spelling is load-bearing, and parenthesizing it would position correctly while testing nothing. Delete each clause only when its span lands on the offending element/argument",
     red: (s) => s.el.problems.some((p) => p.kind === 'position'),
   },
   {

@@ -18,3 +18,6 @@ let wrongArgument = pair(1, text)
 let wrongExist = missingName != null
 let wrongDelete = delete point.x
 let wrongScale: ((n: number) => number) | null = 7
+// the paren-less spelling of wrongArgument's excess-arity cousin: the twin anchors TS2554 on the excess argument, and the injected paren cover publishes it on the FIRST — the position violation is expected, carried by the contract (diagnostics.positions), and this row exists to keep it measured
+let wrongArityBare = pair(1, count, count)
+let wrongArityParen = pair(1, count, count)
