@@ -7,7 +7,7 @@
     ".": "./index.rip"
   },
   "scripts": {
-    "test": "rip test"
+    "test": "rip test && rip test/workspace.rip"
   },
   "files": [
     "*.rip",
@@ -15,5 +15,8 @@
   ],
   "rip": {
     "browser": true
+  },
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
   }
 }

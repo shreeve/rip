@@ -20,7 +20,6 @@
 import { createModuleLoader } from './browser-modules.js';
 
 const APP_PACKAGE = '@rip-lang/app';
-const WORKSPACE_PACKAGE = '@rip-lang/workspace';
 
 const bootGraphs = new Map();
 
@@ -94,6 +93,33 @@ export async function bootApp(opts = {}) {
   const fetchOpts = {};
   if (opts.fetchText) fetchOpts.fetchText = opts.fetchText;
   if ('bundleStorage' in opts) fetchOpts.storage = opts.bundleStorage;
+
+  // Workspace mode fetches the manifest BEFORE the bundle, and the
+  // manager writes it AFTER the bundle: the only pairing a boot racing
+  // a save can observe is "manifest rev <= bundle bytes", which the
+  // feed's open resync heals forward. The reverse pairing (a manifest
+  // rev over older bundle bytes) would block its own healing on the
+  // bag's rev cursor — the silent-stale class.
+  const workspaceMode = opts.workspace === true;
+  let manifestUrl = null;
+  let fetchBytes = null;
+  let manifest = null;
+  if (workspaceMode) {
+    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl
+      ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf('/') + 1)}manifest` : null);
+    if (!manifestUrl) {
+      throw new Error(
+        'rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl',
+      );
+    }
+    fetchBytes = opts.feed?.fetch ?? (url => fetch(url));
+    const res = await fetchBytes(manifestUrl);
+    if (!res.ok) {
+      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
+    }
+    manifest = await res.json();
+  }
+
   const bundle = opts.bundle ?? await fetchBundle(opts.url, fetchOpts);
   if (!bundle || typeof bundle !== 'object') {
     throw new Error('rip: bootApp requires a bundle or a url');
@@ -158,43 +184,12 @@ export async function bootApp(opts = {}) {
 
   const app = await loader.import(`${appEntry.root}/${appEntry.entry}`);
 
-  const workspaceMode = opts.workspace === true;
-  let createWorkspace = null;
-  let connectFeed = null;
-  let manifestUrl = null;
-  let fetchBytes = null;
   let bag = null;
   if (workspaceMode) {
-    // The workspace package rides the bundle like the app package
-    // does, and loads through the same graph — never a second copy.
-    const wsEntry = bundle.packages?.[WORKSPACE_PACKAGE];
-    if (!wsEntry) {
-      throw new Error(
-        `rip: workspace mode requires the '${WORKSPACE_PACKAGE}' package, which this bundle does not carry — ` +
-        'serve under RIP_WORKSPACE=1 so assembly claims it',
-      );
-    }
-    ({ createWorkspace } = await loader.import(`${wsEntry.root}/${wsEntry.entry}`));
-    const feedSub = wsEntry.exports?.['./feed'];
-    if (!feedSub) {
-      throw new Error(`rip: the '${WORKSPACE_PACKAGE}' package carries no './feed' export`);
-    }
-    ({ connectFeed } = await loader.import(`${wsEntry.root}/${feedSub}`));
-
-    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl
-      ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf('/') + 1)}manifest` : null);
-    if (!manifestUrl) {
-      throw new Error(
-        'rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl',
-      );
-    }
-    fetchBytes = opts.feed?.fetch ?? (url => fetch(url));
-    const res = await fetchBytes(manifestUrl);
-    if (!res.ok) {
-      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
-    }
-    const manifest = await res.json();
-    bag = createWorkspace();
+    // The workspace is part of the app package (docs/WORKSPACE.md, Q9):
+    // createWorkspace and connectFeed ride the same module the launch
+    // does — one graph, never a second copy.
+    bag = app.createWorkspace();
     const records = [];
     for (const entry of manifest?.cells ?? []) {
       const path = typeof entry.path === 'string' ? entry.path : entry.id;
@@ -286,10 +281,20 @@ export async function bootApp(opts = {}) {
         if (module) snapshot[path] = module;
       }
       if (destroyed) return;
-      current.destroy();
-      current = launchWith(snapshot);
-      Object.assign(handle, current, stable);
-      console.log('[Rip] workspace: change applied by remount (escape, not hot apply)');
+      // A cell can compile cleanly and still break launch (a contract
+      // violation like a stash module without appStash). The teardown-
+      // plus-relaunch must never die as an unhandled rejection with the
+      // page silently unmounted: it reports, `current` keeps pointing
+      // at the torn-down launch (destroy is idempotent), and the next
+      // successful change relaunches through this same path.
+      try {
+        current.destroy();
+        current = launchWith(snapshot);
+        Object.assign(handle, current, stable);
+        console.log('[Rip] workspace: change applied by remount (escape, not hot apply)');
+      } catch (error) {
+        report('[Rip] workspace: remount failed — the page stays down until the next good change applies', error);
+      }
     } finally {
       remounting = false;
     }
@@ -308,6 +313,16 @@ export async function bootApp(opts = {}) {
     passport: bag.passport,
     sealed: bag.sealed,
     set: async cell => {
+      // The bag's rev cursor is THE staleness verdict — consult it
+      // BEFORE any mutation. Two dings in flight can resolve out of
+      // order: the older fetch lands after the newer one applied, and
+      // while bag.set would reject it, the files/loader mutations
+      // below would already carry the stale bytes into the next
+      // remount (the silent-stale class). Same guard for deletes: a
+      // replayed stale delete must not evict the loader's file while
+      // the bag keeps the passport.
+      const known = bag.passport(cell.id);
+      if (known && Number.isInteger(cell.rev) && cell.rev <= known.rev) return false;
       if (cell.deleted === true) {
         const path = bag.passport(cell.id)?.path;
         if (path !== undefined) {
@@ -329,7 +344,7 @@ export async function bootApp(opts = {}) {
       return bag.set({ ...cell, compiled: { ...module } });
     },
   };
-  const feed = connectFeed(door, { ...(opts.feed ?? {}), manifestUrl, report });
+  const feed = app.connectFeed(door, { ...(opts.feed ?? {}), manifestUrl, report });
 
   const destroy = () => {
     if (destroyed) return;

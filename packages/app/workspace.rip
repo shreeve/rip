@@ -1,5 +1,5 @@
 # ==============================================================================
-# @rip-lang/workspace — Rip Workspace: the reactive passport bag
+# Rip Workspace — the reactive passport bag (@rip-lang/app)
 #
 # One bag of component records ("passports") in the browser. Producers
 # mutate the bag through the door (populate / set / seal); the app reads

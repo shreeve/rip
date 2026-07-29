@@ -1,12 +1,14 @@
 # ==============================================================================
-# @rip-lang/workspace tests — passport bag: door, rev cursor, store view, seal
+# @rip-lang/app workspace tests — passport bag: door, rev cursor, store view,
+# seal, and the hub feed. Run via `rip test/workspace.rip` (the rip test
+# harness, not bun:test — chained in the package's test script).
 # ==============================================================================
 
 import { test, eq, ok, throws } from '@rip-lang/testing'
-import { createWorkspace } from '@rip-lang/workspace'
-import * as mod from '@rip-lang/workspace'
-import { connectFeed } from '@rip-lang/workspace/feed'
-import * as feedMod from '@rip-lang/workspace/feed'
+import { createWorkspace } from '../workspace.rip'
+import * as mod from '../workspace.rip'
+import { connectFeed } from '../feed.rip'
+import * as feedMod from '../feed.rip'
 import { readFileSync } from 'fs'
 
 # A workspace born through the door, plus an event log attached after birth.
@@ -30,18 +32,9 @@ test "named exports", ->
   eq Object.keys(feedMod).sort(), ['connectFeed']
   eq typeof connectFeed, 'function'
 
-test "zero runtime deps", ->
-  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
-  for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
-    eq pkg[field], undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
-  eq pkg.files, ['workspace.rip', 'feed.rip', 'README.md']
-
-test "declares browser safety and earns it", ->
-  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
-  eq pkg.rip, { browser: true }
+test "the workspace modules stay dependency-free and browser-safe", ->
   for file in ['workspace.rip', 'feed.rip']
-    source = readFileSync("#{import.meta.dir}/#{file}", 'utf8')
+    source = readFileSync("#{import.meta.dir}/../#{file}", 'utf8')
     eq /^\s*import\b/m.test(source), false
     eq /\bBun\.|node:|process\.|globalThis/.test(source), false
 
@@ -518,6 +511,100 @@ test! "a ding fetches the rev-keyed cell and mutates the passport", ->
   feed.close()
   eq feed.connected(), false
 
+test! "a hashed ding and a hashed manifest entry fetch hash-keyed URLs — the cross-run cache pin", ->
+  # Revs restart across manager runs while cell responses cache immutable
+  # for a year: a bare (id, rev) URL collides across runs and the browser
+  # would silently apply the OLD run's bytes. The content hash in the URL
+  # is the fix — the URL varies iff the bytes do.
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
+  { feed, calls, sockets } = openFeed ws,
+    '/@rip/manifest': JSON.stringify { cells: [{ id: 'b.rip', path: 'b.rip', rev: 1, hash: 'beadfeedbeadfeed' }] }
+    '/@rip/cells/a.rip?rev=2&h=cafef00dcafef00d': 'v2'
+    '/@rip/cells/b.rip?rev=1&h=beadfeedbeadfeed': 'bb'
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2, hash: 'cafef00dcafef00d' } } }
+  await settle()
+  eq ws.read('a.rip'), 'v2'
+  eq ws.read('b.rip'), 'bb'
+  ok calls.includes('/@rip/cells/a.rip?rev=2&h=cafef00dcafef00d'), "the ding fetch rides the hash: #{JSON.stringify calls}"
+  ok calls.includes('/@rip/cells/b.rip?rev=1&h=beadfeedbeadfeed'), "the resync fetch rides the hash: #{JSON.stringify calls}"
+  feed.close()
+
+# Mirrors the manager's shortHash — 16 hex chars of sha256 over the bytes.
+srcHash = (s) -> new Bun.CryptoHasher('sha256').update(s).digest('hex').slice(0, 16)
+
+test! "a covered ding with DIFFERENT bytes arbitrates through the manifest — a real restart reloads, an overtaken frame is a clean no-op", ->
+  # Revs restart when a manager restarts: the surviving page's rev cursor
+  # sits ABOVE the new run's revs, so every plain rev verdict says "stale"
+  # and the page would silently pin to the old run's bytes forever. But a
+  # covered-mismatch ding ALONE cannot tell a restart from its own
+  # staleness (the HTTP resync is unordered relative to hub frames), so
+  # the no-store manifest arbitrates.
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 3, source: 'old-run' }]
+  restarts = []
+  routes = { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 3, hash: srcHash('old-run') }] } }
+  { feed, calls, sockets } = openFeed ws, routes, { onRestart: (d) -> restarts.push d }
+  sockets[0].onopen()
+  await settle()
+  before = calls.length
+  # Covered rev, SAME bytes: the plain stale skip — no restart, no network.
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 3, hash: srcHash('old-run') } } }
+  await settle()
+  eq restarts, []
+  eq calls.length, before
+  # An overtaken frame: covered-mismatch, but the manifest still names
+  # this page's bytes — the arbitration resolves as a no-op, never a
+  # spurious reload.
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2, hash: srcHash('mid-edit') } } }
+  await settle()
+  eq restarts, []
+  ok calls.length > before, 'the mismatch consulted the manifest'
+  eq ws.passport('a.rip').rev, 3
+  # A real restart: the manifest ITSELF names a covered rev with
+  # different bytes — the new run announcing itself.
+  routes['/@rip/manifest'] = JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 2, hash: srcHash('new-run') }] }
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2, hash: srcHash('new-run') } } }
+  await settle()
+  eq restarts, [{ id: 'a.rip', rev: 2, hash: srcHash('new-run') }]
+  eq ws.read('a.rip'), 'old-run'
+  feed.close()
+
+test! "a manifest entry the cursor covers with different bytes restarts too — the resync half of the cross-run verdict", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 3, source: 'old-run' }]
+  restarts = []
+  { feed, sockets } = openFeed ws,
+    { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 2, hash: srcHash('new-run') }] } },
+    { onRestart: (d) -> restarts.push d }
+  sockets[0].onopen()
+  await settle()
+  eq restarts, [{ id: 'a.rip', rev: 2, hash: srcHash('new-run') }]
+  eq ws.passport('a.rip').rev, 3
+  feed.close()
+
+test! "a want the manifest no longer names is retired — a lost delete ding never re-polls forever", ->
+  # Wants come only from dings, and dings only name server-owned ids: an
+  # id the manifest does not name was retired upstream (its delete ding
+  # lost in a reconnect window). Nothing will ever satisfy the want, so
+  # the resync must retire it instead of re-polling the manifest forever.
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
+  { feed, calls, sockets, reports } = openFeed ws, { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 1 }] } }
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'gone.rip', rev: 2 } } }
+  await settle()
+  ok reports.some((args) -> String(args[0]).includes('cell fetch missed')), 'the miss is loud'
+  await new Promise (resolve) -> setTimeout resolve, 30
+  polls = calls.filter((u) -> u is '/@rip/manifest').length
+  await new Promise (resolve) -> setTimeout resolve, 30
+  eq calls.filter((u) -> u is '/@rip/manifest').length, polls, 'the retired want stops the re-poll'
+  eq ws.passport('gone.rip'), undefined
+  feed.close()
+
 test! "a stale or duplicate ding never touches the network", ->
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 3, source: 'v3' }]
@@ -603,6 +690,70 @@ test! "a cell miss resyncs from the manifest, which never deletes local mints", 
   eq ws.passport('a.rip').rev, 4
   eq ws.read('local.rip'), 'mine'
   ok reports.some (args) -> String(args[0]).includes('cell fetch missed')
+  feed.close()
+
+test! "the default cell URL percent-encodes the id's segments", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'app/50%.rip', path: 'app/50%.rip', rev: 1, source: 'v1' }]
+  { feed, calls, sockets, reports } = openFeed ws,
+    '/@rip/manifest': emptyManifest
+    '/@rip/cells/app/50%25.rip?rev=2': 'v2'
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'app/50%.rip', rev: 2 } } }
+  await settle()
+  ok calls.includes('/@rip/cells/app/50%25.rip?rev=2'), "the fetch rides the encoded URL: #{JSON.stringify calls}"
+  eq ws.passport('app/50%.rip').rev, 2
+  eq ws.read('app/50%.rip'), 'v2'
+  eq reports, []
+  feed.close()
+
+test! "a failed open-resync retries with backoff until the feed heals", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
+  routes = {}                          # no manifest yet: the open resync fails
+  { feed, sockets, reports } = openFeed ws, routes
+  sockets[0].onopen()
+  await settle()
+  ok reports.some((args) -> String(args[0]).includes('manifest fetch failed')), 'the miss is loud'
+  eq ws.passport('a.rip').rev, 1
+  # The routes heal; the scheduled retry (backoff min 1ms) finds them.
+  routes['/@rip/manifest'] = JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 2 }] }
+  routes['/@rip/cells/a.rip?rev=2'] = 'v2'
+  await new Promise (resolve) -> setTimeout resolve, 50
+  eq ws.passport('a.rip').rev, 2
+  eq ws.read('a.rip'), 'v2'
+  feed.close()
+
+test! "a dinged rev the manifest does not yet name is retried until it appears — never silently dropped", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
+  routes = { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 1 }] } }
+  { feed, sockets, reports } = openFeed ws, routes
+  sockets[0].onopen()
+  await settle()                       # clean open resync at rev 1
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2 } } }
+  await settle()                       # the cell is absent and the manifest is behind: a want
+  eq ws.passport('a.rip').rev, 1
+  ok reports.some((args) -> String(args[0]).includes('cell fetch missed')), 'the miss is loud'
+  routes['/@rip/manifest'] = JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 2 }] }
+  routes['/@rip/cells/a.rip?rev=2'] = 'v2'
+  await new Promise (resolve) -> setTimeout resolve, 50
+  eq ws.passport('a.rip').rev, 2
+  feed.close()
+
+test! "an epoch ding invokes the reload policy — never the cell path, never a malformed report", ->
+  ws = createWorkspace()
+  epochs = []
+  { feed, calls, sockets, reports } = openFeed ws, { '/@rip/manifest': emptyManifest }, { onEpoch: (d) -> epochs.push d }
+  sockets[0].onopen()
+  await settle()
+  before = calls.length
+  sockets[0].onmessage { data: JSON.stringify { ding: { kind: 'epoch', epoch: 7 } } }
+  await settle()
+  eq epochs, [{ kind: 'epoch', epoch: 7 }]
+  eq calls.length, before
+  eq reports, []
   feed.close()
 
 test! "a dropped socket reconnects with backoff and resyncs; close() stops it", ->

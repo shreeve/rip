@@ -350,10 +350,11 @@ describe('bootApp workspace mode', () => {
     ],
   };
 
+  // The workspace rides the app package (Q9): plain assembly carries
+  // createWorkspace and connectFeed with no extra claim.
   const assembleWorkspace = () => assembleBundle({
     modules: WS_MODULES,
     packagesDir: resolve(root, 'packages'),
-    claims: ['@rip-lang/workspace'],
   });
 
   const fakeFetch = table => {
@@ -398,9 +399,9 @@ describe('bootApp workspace mode', () => {
     ['/@rip/manifest', JSON.stringify(manifest)],
   ]);
 
-  const bootWorkspace = async ({ table, hub, reports = [], bundle = null }) => {
+  const bootWorkspace = async ({ table, hub, reports = [], bundle = null, fetchImpl = null }) => {
     const target = doc.createElement('div');
-    const fetch = fakeFetch(table);
+    const fetch = fetchImpl ?? fakeFetch(table);
     const result = await bootApp({
       bundle: bundle ?? assembleWorkspace(),
       target,
@@ -447,17 +448,6 @@ describe('bootApp workspace mode', () => {
       workspace: true,
       feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch: fakeFetch(manifestTable()) },
     })).rejects.toThrow(/manifestUrl/);
-  });
-
-  test('a bundle without the workspace package rejects naming the flag and the claim', async () => {
-    await expect(bootApp({
-      bundle: assembleBundle({ modules: WS_MODULES, packagesDir: resolve(root, 'packages') }),
-      target: doc.createElement('div'),
-      adapter: fakeAdapter('/'),
-      workspace: true,
-      manifestUrl: '/@rip/manifest',
-      feed: { fetch: fakeFetch(manifestTable()) },
-    })).rejects.toThrow(/@rip-lang\/workspace.*RIP_WORKSPACE/s);
   });
 
   test('populate seeds one passport per manifest cell the bundle carries, at the manifest rev', async () => {
@@ -568,7 +558,6 @@ describe('bootApp workspace mode', () => {
     const bundle = assembleBundle({
       modules,
       packagesDir: resolve(root, 'packages'),
-      claims: ['@rip-lang/workspace'],
     });
     const table = new Map([['/@rip/manifest', JSON.stringify(manifest)]]);
     table.set('/@rip/cells/app/badge.rip?rev=2', "export LABEL = 'badge v2'");
@@ -580,6 +569,125 @@ describe('bootApp workspace mode', () => {
       await until(() => result.workspace.passport('app/badge.rip').rev === 2);
       await settleEscape();
       await until(() => target.textContent.includes('badge v2'));
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a workspace boot fetches the manifest BEFORE the bundle (rev-over-bytes correlation)', async () => {
+    // The manager writes the manifest AFTER the bundle; the boot
+    // fetches it BEFORE. The only pairing a boot racing a save can
+    // observe is "manifest rev <= bundle bytes", which the feed's
+    // resync heals forward — the reverse would block its own healing
+    // on the rev cursor.
+    const order = [];
+    const bundleText = JSON.stringify(assembleWorkspace());
+    const fetchText = async url => {
+      order.push(`bundle:${url}`);
+      return { fresh: true, text: bundleText, etag: null };
+    };
+    const table = manifestTable();
+    const fetchImpl = async url => {
+      order.push(`feed:${url}`);
+      const body = table.get(url);
+      if (body === undefined) return { ok: false, status: 404, json: async () => null, text: async () => '' };
+      return { ok: true, status: 200, json: async () => JSON.parse(body), text: async () => body };
+    };
+    const hub = fakeHub();
+    const result = await bootApp({
+      url: '/@rip/bundle.json',
+      fetchText,
+      bundleStorage: null,
+      target: doc.createElement('div'),
+      adapter: fakeAdapter('/'),
+      workspace: true,
+      manifestUrl: '/@rip/manifest',
+      feed: {
+        hub: 'ws://test/dev',
+        makeSocket: hub.makeSocket,
+        fetch: fetchImpl,
+        report: () => {},
+        backoff: { min: 1, max: 2 },
+      },
+    });
+    try {
+      expect(order[0]).toBe('feed:/@rip/manifest');
+      expect(order).toContain('bundle:/@rip/bundle.json');
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('an out-of-order stale cell never touches the module graph: the newest rev survives later remounts', async () => {
+    // Two dings in flight resolve out of order: rev 3's fetch completes
+    // first and applies; rev 2's completes after. The bag's rev cursor
+    // rejects rev 2 — and the module graph must stay untouched too, or
+    // the NEXT remount silently recompiles the stale bytes while the
+    // passport still says rev 3 (the silent-stale class).
+    const table = manifestTable();
+    const v2 = routeSource('Home', 'home v2');
+    const v3 = routeSource('Home', 'home v3');
+    table.set('/@rip/cells/app/routes/index.rip?rev=3', v3);
+    table.set('/@rip/cells/app/routes/about.rip?rev=2', routeSource('About', 'about v2'));
+    let releaseV2 = null;
+    const gate = new Promise(resolve => { releaseV2 = resolve; });
+    const base = fakeFetch(table);
+    const fetchImpl = async url => {
+      if (url === '/@rip/cells/app/routes/index.rip?rev=2') {
+        await gate;
+        return { ok: true, status: 200, json: async () => null, text: async () => v2 };
+      }
+      return base(url);
+    };
+    fetchImpl.calls = base.calls;
+    const hub = fakeHub();
+    const { result, target } = await bootWorkspace({ table, hub, fetchImpl });
+    try {
+      await until(() => target.textContent.includes('home v1'));
+      const socket = hub.sockets[0];
+      socket.onmessage({ data: JSON.stringify({ ding: { id: 'app/routes/index.rip', rev: 2 } }) });
+      socket.onmessage({ data: JSON.stringify({ ding: { id: 'app/routes/index.rip', rev: 3 } }) });
+      await until(() => result.workspace.passport('app/routes/index.rip').rev === 3);
+      await settleEscape();
+      await until(() => target.textContent.includes('home v3'));
+      releaseV2();
+      await settleEscape();
+      // A ding to ANOTHER cell forces the next remount; index.rip must
+      // recompile to rev 3, never the late-arriving rev 2.
+      socket.onmessage({ data: JSON.stringify({ ding: { id: 'app/routes/about.rip', rev: 2 } }) });
+      await until(() => result.workspace.passport('app/routes/about.rip').rev === 2);
+      await settleEscape();
+      expect(result.workspace.passport('app/routes/index.rip').rev).toBe(3);
+      expect(result.workspace.passport('app/routes/index.rip').source).toBe(v3);
+      expect(target.textContent).toContain('home v3');
+      expect(target.textContent).not.toContain('home v2');
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a remount whose relaunch throws reports loudly and the next good change recovers the page', async () => {
+    // A cell can compile cleanly and still break launch (the stash
+    // contract: 'app/stash.rip' must export appStash). The remount's
+    // teardown-plus-relaunch must not die as an unhandled rejection
+    // with the page silently unmounted — it reports, and a following
+    // good revision relaunches.
+    const table = manifestTable();
+    table.set('/@rip/cells/app/stash.rip?rev=1', 'export nothing = 1');
+    table.set('/@rip/cells/app/stash.rip?rev=2', 'export appStash = {}');
+    const hub = fakeHub();
+    const reports = [];
+    const { result, target } = await bootWorkspace({ table, hub, reports });
+    try {
+      await until(() => target.textContent.includes('home v1'));
+      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/stash.rip', rev: 1 } }) });
+      await until(() => result.workspace.passport('app/stash.rip')?.rev === 1);
+      await settleEscape();
+      await until(() => reports.some(line => line.includes('remount failed')));
+      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/stash.rip', rev: 2 } }) });
+      await until(() => result.workspace.passport('app/stash.rip')?.rev === 2);
+      await settleEscape();
+      await until(() => target.textContent.includes('home v1'));
     } finally {
       result.destroy();
     }

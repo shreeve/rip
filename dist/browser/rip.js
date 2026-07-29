@@ -22927,7 +22927,6 @@ function createModuleLoader({ components: registry, packages = {}, debug = false
 }
 // src/browser-boot.js
 var APP_PACKAGE = "@rip-lang/app";
-var WORKSPACE_PACKAGE = "@rip-lang/workspace";
 var bootGraphs = new Map;
 var browserFetchText = async (url, etag) => {
   const headers = etag ? { "If-None-Match": etag } : {};
@@ -22992,6 +22991,22 @@ async function bootApp(opts = {}) {
     fetchOpts.fetchText = opts.fetchText;
   if ("bundleStorage" in opts)
     fetchOpts.storage = opts.bundleStorage;
+  const workspaceMode = opts.workspace === true;
+  let manifestUrl = null;
+  let fetchBytes = null;
+  let manifest = null;
+  if (workspaceMode) {
+    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf("/") + 1)}manifest` : null);
+    if (!manifestUrl) {
+      throw new Error("rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl");
+    }
+    fetchBytes = opts.feed?.fetch ?? ((url) => fetch(url));
+    const res = await fetchBytes(manifestUrl);
+    if (!res.ok) {
+      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
+    }
+    manifest = await res.json();
+  }
   const bundle = opts.bundle ?? await fetchBundle(opts.url, fetchOpts);
   if (!bundle || typeof bundle !== "object") {
     throw new Error("rip: bootApp requires a bundle or a url");
@@ -23037,34 +23052,9 @@ async function bootApp(opts = {}) {
     }
   }
   const app = await loader.import(`${appEntry.root}/${appEntry.entry}`);
-  const workspaceMode = opts.workspace === true;
-  let createWorkspace = null;
-  let connectFeed = null;
-  let manifestUrl = null;
-  let fetchBytes = null;
   let bag = null;
   if (workspaceMode) {
-    const wsEntry = bundle.packages?.[WORKSPACE_PACKAGE];
-    if (!wsEntry) {
-      throw new Error(`rip: workspace mode requires the '${WORKSPACE_PACKAGE}' package, which this bundle does not carry — ` + "serve under RIP_WORKSPACE=1 so assembly claims it");
-    }
-    ({ createWorkspace } = await loader.import(`${wsEntry.root}/${wsEntry.entry}`));
-    const feedSub = wsEntry.exports?.["./feed"];
-    if (!feedSub) {
-      throw new Error(`rip: the '${WORKSPACE_PACKAGE}' package carries no './feed' export`);
-    }
-    ({ connectFeed } = await loader.import(`${wsEntry.root}/${feedSub}`));
-    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf("/") + 1)}manifest` : null);
-    if (!manifestUrl) {
-      throw new Error("rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl");
-    }
-    fetchBytes = opts.feed?.fetch ?? ((url) => fetch(url));
-    const res = await fetchBytes(manifestUrl);
-    if (!res.ok) {
-      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
-    }
-    const manifest = await res.json();
-    bag = createWorkspace();
+    bag = app.createWorkspace();
     const records = [];
     for (const entry of manifest?.cells ?? []) {
       const path = typeof entry.path === "string" ? entry.path : entry.id;
@@ -23135,10 +23125,14 @@ async function bootApp(opts = {}) {
       }
       if (destroyed)
         return;
-      current.destroy();
-      current = launchWith(snapshot);
-      Object.assign(handle, current, stable);
-      console.log("[Rip] workspace: change applied by remount (escape, not hot apply)");
+      try {
+        current.destroy();
+        current = launchWith(snapshot);
+        Object.assign(handle, current, stable);
+        console.log("[Rip] workspace: change applied by remount (escape, not hot apply)");
+      } catch (error) {
+        report("[Rip] workspace: remount failed — the page stays down until the next good change applies", error);
+      }
     } finally {
       remounting = false;
     }
@@ -23152,6 +23146,9 @@ async function bootApp(opts = {}) {
     passport: bag.passport,
     sealed: bag.sealed,
     set: async (cell) => {
+      const known = bag.passport(cell.id);
+      if (known && Number.isInteger(cell.rev) && cell.rev <= known.rev)
+        return false;
       if (cell.deleted === true) {
         const path2 = bag.passport(cell.id)?.path;
         if (path2 !== undefined) {
@@ -23173,7 +23170,7 @@ async function bootApp(opts = {}) {
       return bag.set({ ...cell, compiled: { ...module } });
     }
   };
-  const feed = connectFeed(door, { ...opts.feed ?? {}, manifestUrl, report });
+  const feed = app.connectFeed(door, { ...opts.feed ?? {}, manifestUrl, report });
   const destroy = () => {
     if (destroyed)
       return;

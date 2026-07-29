@@ -44,71 +44,22 @@ B-list real-but-deferrable items.
       every client response, and the micro-cache stores post-scrub
       bytes.)
 
+### workspace feed (PR #188 re-review, 2026-07-29)
+
+- [ ] Want retirement can drop a retry it should keep: a ding for a
+      brand-new id whose cell fetch misses WHILE the manifest is held
+      back (a bundle-rewrite failure) gets its want retired — the
+      held-back manifest does not name the id yet. Needs two
+      simultaneous failures, dev-only, heals on the next save.
+- [ ] When an editor producer lands (M2), `crossRun` cannot distinguish
+      "another run" from "another producer": a local write over a
+      server-owned id bumps the rev with local bytes, and the next
+      resync would reload and discard the local edit. Unreachable
+      today — nothing writes server-owned ids locally.
+
 ### janus
 
 Janus items moved to `janus/TODO.md`.
-
----
-
-## Workspace dev feed — open edges
-
-- [ ] Epoch-path dings: a full reload (server or mixed save under
-      `RIP_WORKSPACE=1`) rebuilds cells in `buildApp` but publishes no
-      dings, and hub sockets survive app reloads at Janus — so connected
-      browsers hear nothing about client cells that changed in that
-      epoch until their next reconnect resync. Decide in Phase C
-      (apply policy for server changes is likely a full page reload
-      anyway); if the door keeps in-place apply for these, the manager
-      must ding after the pool swap.
-- [ ] One unexplained missed ding (2026-07-28, live Janus run): a
-      `app/mood.rip` rev-2 ding published ~15s after a manager
-      re-registration (409 host-claim retry window) never applied in a
-      freshly booted tab — no report was captured (console hook was
-      installed later); hub counters showed publishes 1 / deliveries 2 /
-      conns 2, so delivery-vs-enrollment is ambiguous. Six consecutive
-      dings applied cleanly afterward. If it recurs with a hooked
-      console, capture the feed report verbatim. Structural note: an
-      applyDing whose cell fetch AND resync both miss has no retry
-      timer — the feed stays silent until the next ding or reconnect.
-- [ ] Cold-review should-fixes (PR #187 review, 2026-07-29; all inside
-      the experimental `RIP_WORKSPACE=1` surface, none reachable flag
-      off). The two silent-stale items head the list — they are the
-      defect class the doctrine exists to kill:
-  - [ ] The browser door mutates the loader BEFORE the bag's rev
-        verdict (`src/browser-boot.js` door.set/delete): two dings in
-        flight can land out of order — the pre-fetch staleness check
-        passes for both, the older fetch completes second, and its
-        `files.set` + `invalidate` poison the module graph while
-        `bag.set` rejects it without error. Check
-        `bag.passport(id)?.rev` before touching `files`/`loader`.
-  - [ ] Boot pairs the manifest's rev with the bundle's source without
-        correlation (`src/browser-boot.js`): the bundle is fetched
-        before the manifest, and the manager writes the manifest before
-        rewriting the pool bundle — a save between the two fetches makes
-        `populate` claim rev N+1 over rev-N bytes, and the rev cursor
-        then blocks the healing ding until the NEXT save. Needs a
-        correlation fact (per-cell hash, or fetch order + epoch check).
-  - [ ] The feed's default `cellUrl` never percent-encodes the id
-        (`packages/workspace/feed.rip`): a legal filename containing
-        `%`, `#`, or `?` builds a URL the server 400s or truncates —
-        and the miss path has no retry (see above). One-line
-        `encodeURIComponent` on the id.
-  - [ ] Overlapping `onCellChange` runs share fixed tmp paths
-        (`packages/server/manager.rip`): a second save's run races the
-        first on `manifest.json.tmp` and the pool bundle's `.tmp` —
-        interleaved writes can land a torn manifest via rename, or the
-        rename throws and that run's dings abort. Chain cell-path runs
-        on a promise queue.
-  - [ ] The remount's teardown-plus-relaunch has no guard
-        (`src/browser-boot.js`): a throw from `launch` inside the
-        timer-driven remount leaves the page unmounted with only an
-        unhandled rejection as evidence. Wrap and route through
-        `report`.
-  - [ ] Nits from the same review: `client()`'s SPA fallback silently
-        replaces a notFound the app registered BEFORE calling it
-        (warn or document the ordering); `DEV_CHANNEL` is a two-site
-        hand-mirrored constant (pin their equality); the Pulse post
-        handler ignores `res.ok` and can `send` on a CONNECTING socket.
 
 ---
 

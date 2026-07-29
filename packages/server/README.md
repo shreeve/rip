@@ -366,16 +366,19 @@ with a fresh ETag.
 generated page reads the query param and passes `debug` to `bootApp`,
 exactly as the browser certification fixture does.
 
-### The dev feed — RIP_WORKSPACE=1 (experimental)
+### The dev feed — the workspace door's server half
 
 The server half of the Rip Workspace door
-([docs/WORKSPACE.md](../../docs/WORKSPACE.md)) — experimental, gated
-behind `RIP_WORKSPACE=1` in the manager's environment. Flag off, nothing
-below exists and every path behaves exactly as documented above. This is
-the door's server half, not "HMR done": how a running app absorbs a cell
-is the apply engine's problem, and it lives elsewhere.
+([docs/WORKSPACE.md](../../docs/WORKSPACE.md)) — the default for every
+WATCHING manager-served browser app (Q10). The feed surface is
+watch-only: a production manager (watch off) writes no cells and no
+manifest, sets none of the feed environment, and its pages boot plain —
+production has no hub (Q2). Standalone `client()` pages have no manager
+and therefore no feed: they boot plain too. This is the door's server
+half, not "HMR done": how a running app absorbs a cell is the apply
+engine's problem, and it lives in `@rip-lang/app`.
 
-With the flag on, in watch mode:
+In watch mode:
 
 - **Change classification.** The watcher tracks a per-file hash map next
   to its whole-tree content-hash gate. A save whose every changed, added,
@@ -387,31 +390,40 @@ With the flag on, in watch mode:
   rename retires the old id and mints a new one at rev 1 (id persistence
   across renames is open research). Revs start at 1 and bump once per
   content change; the registry lives in the manager's memory for the run.
-  `GET /@rip/manifest` answers `{"cells": [{id, path, rev}, …]}` sorted
-  by path, `Cache-Control: no-store`, read per request. Cell bytes — the
-  file's **source text**, dev-mode in-browser compile — are addressed by
-  `(id, rev)` in the URL: `GET /@rip/cells/<id>?rev=N` answers
-  `text/plain` with `Cache-Control: public, max-age=31536000, immutable`,
-  and old revs keep answering for the manager run. A request without a
-  valid positive-integer `rev` is a 400 — unversioned cell URLs are
-  rejected, never guessed at. An unknown `(id, rev)` is a 404.
+  `GET /@rip/manifest` answers `{"cells": [{id, path, rev, hash}, …]}`
+  sorted by path, `Cache-Control: no-store`, read per request. Cell
+  bytes — the file's **source text**, dev-mode in-browser compile — are
+  addressed by `(id, rev)` plus the content-hash discriminator in the
+  URL: `GET /@rip/cells/<id>?rev=N&h=<hash>` answers `text/plain` with
+  `Cache-Control: public, max-age=31536000, immutable`, and old revs
+  keep answering for the manager run. The hash (16 hex chars of sha256)
+  is what makes the immutable answer sound: revs restart across manager
+  runs, so a bare `(id, rev)` URL would let a returning browser's cache
+  serve the OLD run's bytes silently — with `h`, the URL varies iff the
+  bytes do. A request without a valid positive-integer `rev`, or
+  without a well-formed `h`, is a 400 — unversioned and unhashed cell
+  URLs are rejected alike, never answered with a cacheable 200 under
+  the proven-broken bare shape. An unknown `(id, rev)`, or an `h` that
+  does not match the bytes, is a 404.
 - **The ding.** After the cells, the manifest, and the rewritten bundle
   are durable, the manager publishes one directive per changed cell to
-  the hub channel `/rip/dev` — the envelope is `{id, rev}` only; source
-  and compiled bodies never ride the hub (HTTP carries the bytes). A
+  the hub channel `/rip/dev` — the envelope is `{id, rev, hash}` only;
+  source and compiled bodies never ride the hub (HTTP carries the bytes). A
   deleted client file retires: it leaves the manifest, its retirement
   occupies its own rev, and the ding carries `kind: "delete"` (no bytes
   for that rev — old revs keep answering). A publish failure warns and
   never blocks the cell path.
 - **Bundle freshness.** On the cell path the manager atomically rewrites
   the live pool's bundle file, and the worker's `/@rip/bundle.json`
-  re-reads and re-tags per request (a dev-only cost) — so a hard refresh
-  never serves stale first-paint code.
+  re-reads and re-tags per request (Janus's micro-cache absorbs the
+  cost) — so a hard refresh never serves stale first-paint code.
 - **Bridge enrollment.** With `--bridge <path>`, the worker answers the
   bridge's `Sec-WebSocket-Frame: open` POST with `{"+": ["/rip/dev"]}` —
   enrolling the opening connection into the dev channel — and `text` /
-  `close` frames with an empty 204. A missing or unknown frame header is
-  a 400 naming the header.
+  `close` frames with an empty 204. Enrollment keys on the feed surface
+  existing: with watch off the open answers a plain 204, so app-level
+  hub sockets (a production-legal use) never ride the dev channel. A
+  missing or unknown frame header is a 400 naming the header.
 
 ## Running under Janus — the pool runtime
 
@@ -653,8 +665,8 @@ sockets PUT before the 204), save coalescing, the identical-bytes no-op,
 boot-failure caching, prebuilt-artifact boots (loader-free workers,
 `import.meta.dir` preservation, loud build rejection), browser delivery
 through the pool (manager-assembled bundle, per-epoch reassembly with a
-fresh ETag), the `RIP_WORKSPACE=1` dev feed (in-process feed routes and
-flag-off identity, plus the cell path through a live pool — ding, rev
+fresh ETag), the workspace dev feed (in-process feed routes and
+standalone identity, plus the cell path through a live pool — ding, rev
 bump, immutable old revs, in-place bundle rewrite, no reload — and the
 full-reload path for non-client edits), `--bridge`
 registration (carried `bridge_path`, loud startup rejection), the

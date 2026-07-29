@@ -95,7 +95,9 @@ RIP_HANDLER_DEADLINE_MS
 
 # --- Module state ---------------------------------------------------------------
 
-cfg =
+# Exported for the same reason state is (below): the manager is a process
+# singleton, and in-process tests configure it directly.
+export cfg =
   entry: null          # absolute path to the app entry
   appDir: null         # directory the watcher covers
   name: null
@@ -117,9 +119,9 @@ export state =
   browserRuntime: null # dist/browser/rip.js, copied into runDir when app/ exists
   buildCounter: 0      # one app artifact per boot epoch, uniquely named
   runDir: null         # tmpdir holding the doorbell, worker sockets, artifacts
-  cellsDir: null       # RIP_WORKSPACE=1: rev-keyed cell files under runDir/cells
-  manifestPath: null   # RIP_WORKSPACE=1: the atomically rewritten cell manifest
-  cells: {}            # RIP_WORKSPACE=1: id (birth store path, 'app/…') → { id, rev, hash, retired }
+  cellsDir: null       # rev-keyed cell files under runDir/cells
+  manifestPath: null   # the atomically rewritten cell manifest
+  cells: {}            # id (birth store path, 'app/…') → { id, rev, hash, retired }
   bellPath: null
   bell: null
   watcher: null
@@ -133,6 +135,7 @@ export state =
   bootFailure: null    # cached boot error; cleared only by a content-changing save
   bootPromise: null    # the single in-flight boot, joined by concurrent rings
   currentPool: null
+  everServed: false    # a pool has been live this run (epoch dings fire only on SWAPS)
   poolCounter: 0
   ringWaiters: 0
   readyWhen: 1
@@ -336,11 +339,7 @@ clientModules = (dir) ->
 
 assembleBundleText = ->
   assemble = loadAssembler!()
-  opts: Record<string, any> = { modules: clientModules(join(cfg.appDir, 'app')), packagesDir: join(loaderSrcDir(), '..', 'packages') }
-  # The dev door boots in the browser through @rip-lang/workspace, so
-  # the flag claims it into every bundle this manager assembles.
-  opts.claims = ['@rip-lang/workspace'] if WORKSPACE
-  JSON.stringify assemble(opts)
+  JSON.stringify assemble { modules: clientModules(join(cfg.appDir, 'app')), packagesDir: join(loaderSrcDir(), '..', 'packages') }
 
 buildBundle = ->
   return null unless existsSync(join(cfg.appDir, 'app'))
@@ -352,26 +351,42 @@ buildApp = ->
   state.buildCounter += 1
   artifact = buildArtifact! cfg.entry, join(state.runDir, "b#{state.buildCounter}-app.js")
   bundle = buildBundle!()
-  syncCells!() if WORKSPACE and bundle?
+  if bundle? and cfg.watch
+    # The bundle is durable (buildBundle wrote it) BEFORE the manifest
+    # names the new revs — the correlation invariant below. Watch only:
+    # the feed surface exists exactly where saves can ding it. With
+    # watch off (production) no cells, no manifest, and the boot page
+    # stays plain — production has no hub (Q2).
+    syncCells!()
+    writeManifest!()
   { artifact, bundle }
 
 # ==============================================================================
-# The workspace dev feed — RIP_WORKSPACE=1 (docs/WORKSPACE.md)
+# The workspace dev feed (docs/WORKSPACE.md)
 # ==============================================================================
 #
-# Flag on, a save touching ONLY app/ feeds the live pool in place: mint or
-# bump (id, rev) cells, rewrite the manifest and the current pool's bundle,
-# then ding /rip/dev with {id, rev} envelopes — no new epoch, no pool reload,
-# no doorbell. Flag off, none of this code runs and every save takes the
-# dirty-epoch path above, byte-identically.
-
-WORKSPACE =! process.env.RIP_WORKSPACE is '1'
+# A save touching ONLY app/ feeds the live pool in place: mint or bump
+# (id, rev) cells, rewrite the current pool's bundle and the manifest, then
+# ding /rip/dev with {id, rev, hash} envelopes — no new epoch, no pool
+# reload, no doorbell. Any other save takes the dirty-epoch path above and
+# dings the swap (kind 'epoch') once the new pool is live.
 
 # The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
-# server.rip (workers never import manager code).
-DEV_CHANNEL =! '/rip/dev'
+# server.rip (workers never import manager code). Exported so the mirror
+# is a pinned fact, not a convention.
+export DEV_CHANNEL =! '/rip/dev'
 
 sha256hex = (text) -> new Bun.CryptoHasher('sha256').update(text).digest('hex')
+
+# The content-hash discriminator that rides cell URLs (manifest entries
+# and dings). Revs restart when a manager restarts, so a bare (id, rev)
+# URL can name DIFFERENT bytes across runs — and cell responses are
+# cached immutable for a year, so a returning browser would silently
+# apply the OLD run's bytes on a URL collision. With the hash in the
+# URL, the URL varies iff the bytes do: a cache hit is byte-correct by
+# construction. 16 hex chars (64 bits) of sha256 — collision needs the
+# same id, the same rev, AND a 64-bit hash collision.
+shortHash = (hash) -> hash.slice(0, 16)
 
 # A cell filename encodes (id, rev) unambiguously: the id is percent-encoded
 # (it contains slashes), so the literal '@' separator can never appear inside
@@ -419,16 +434,24 @@ syncCells = ->
   # has no bytes: its rev exists only in the ding.
   for entry in changed when not entry.deleted
     Bun.write! cellFile(entry.id, entry.rev), modules[entry.id]
+  changed
+
+# The manifest is the LAST durable document on every cell path — written
+# only after the bundle carrying the same revs is. The browser fetches the
+# manifest FIRST, so the pairing a boot can observe is "manifest rev <=
+# bundle bytes", which the feed's resync heals forward; the reverse pairing
+# (a manifest claiming revs the bundle does not carry) would block its own
+# healing on the rev cursor — the silent-stale class. tmp + rename: workers
+# read the manifest per request and must never see a torn document.
+writeManifest = ->
   live = []
   for path, entry of state.cells
-    live.push { id: entry.id, path: path, rev: entry.rev } unless entry.retired
+    live.push { id: entry.id, path: path, rev: entry.rev, hash: shortHash(entry.hash) } unless entry.retired
   live.sort (a, b) -> if a.path < b.path then -1 else 1
-  # tmp + rename: workers read the manifest per request and must never see
-  # a torn document.
   tmp = "#{state.manifestPath}.tmp"
   Bun.write! tmp, JSON.stringify({ cells: live })
   renameSync tmp, state.manifestPath
-  changed
+  return
 
 # Rewrite the live pool's bundle file in place (tmp + rename — workers
 # re-read it per request under the flag), so a hard refresh never serves
@@ -440,18 +463,40 @@ refreshPoolBundle = ->
   Bun.write! tmp, assembleBundleText!()
   renameSync tmp, pool.bundle
 
-# The cell path: cells, manifest, and the bundle are durable BEFORE the ding
-# names the new revs. A reassembly or publish failure warns and never blocks
-# the cell path or crashes the manager — the cell bytes are already servable.
-onCellChange = ->
+# The cell path: cells, then the bundle, then the manifest — every document
+# durable BEFORE the ding names the new revs, and the manifest last (the
+# correlation invariant on writeManifest). A reassembly failure warns and
+# HOLDS THE MANIFEST BACK — a manifest naming revs the bundle does not carry
+# would silently strand fresh boots — while the dings still publish: live
+# feeds fetch cells directly and never need the manifest for a named rev.
+# A publish failure warns and never blocks the cell path or crashes the
+# manager — the cell bytes are already servable. Exported as an in-process
+# test seam (the manifest-holdback and serialization pins drive it directly).
+#
+# Runs SERIALIZE on one promise chain: overlapping runs would race on the
+# shared tmp paths (manifest.json.tmp, the pool bundle's .tmp), and
+# interleaved writes can land a torn document through the rename. A run's
+# failure surfaces to its own caller and never blocks the next run.
+cellChain = Promise.resolve()
+
+export onCellChange = ->
+  next = cellChain.then -> runCellChange()
+  cellChain = next.catch -> null
+  next
+
+runCellChange = ->
   changed = syncCells!()
   try
     refreshPoolBundle!()
+    writeManifest!()
   catch e
-    warn "rip-server: bundle reassembly failed on the cell path: #{e?.message or e}"
+    warn "rip-server: bundle/manifest rewrite failed on the cell path — manifest held back: #{e?.message or e}"
   dings = changed.map (c) ->
     ding = { id: c.id, rev: c.rev }
-    ding.kind = 'delete' if c.deleted is true
+    if c.deleted is true
+      ding.kind = 'delete'
+    else
+      ding.hash = shortHash(c.hash)
     { '@': [DEV_CHANNEL], ding }
   i = 0
   while i < dings.length                 # the publish plane caps 16 objects per frame
@@ -476,10 +521,14 @@ spawnWorker = (pool) ->
     env.RIP_BUNDLE_PATH = pool.bundle
     env.RIP_BROWSER_RUNTIME = state.browserRuntime
     env.RIP_CLIENT_DIR = join(cfg.appDir, 'app')
-    if WORKSPACE
+    # The feed surface is watch-only: these envs are what open the
+    # workspace door in the worker (feed routes, workspace: true on the
+    # boot page). Production (watch off) never sets them — production
+    # has no hub and its pages boot plain (Q2, backout charter).
+    if cfg.watch
       env.RIP_CELLS_DIR = state.cellsDir
       env.RIP_MANIFEST_PATH = state.manifestPath
-      env.RIP_BRIDGE_PATH = cfg.bridge if cfg.bridge?
+    env.RIP_BRIDGE_PATH = cfg.bridge if cfg.bridge?
   proc = Bun.spawn ['bun', state.workerJs],
     stdout: 'inherit'
     stderr: 'inherit'
@@ -685,12 +734,28 @@ bootLoop = ->
       return if state.dirty or state.shuttingDown
       putUpstreams! readySocks(pool)
     state.currentPool = pool
+    # A dev-feed frame: only watch-mode pages hold feed sockets, so the
+    # epoch ding is watch-only like the rest of the feed surface.
+    dingEpoch pool.n if state.everServed and cfg.watch
+    state.everServed = true
     state.doorbellPublished = false
     attachLateJoins pool
     if state.dirty                   # saved during the PUT flight — cut again, boot again
       cutAdmission()
       continue
     return
+
+# A pool SWAP is an epoch: every connected page holds pre-swap code, and no
+# cell ding describes a server change. The manager dings the dev channel with
+# the new epoch so open browsers reload into it — the apply policy for a
+# server change IS the full page reload. Fire-and-forget: a publish failure
+# warns and never blocks the boot (the reload is a courtesy; a manual refresh
+# always works). Hub sockets survive the swap at Janus, so the frame reaches
+# every page the OLD pool served.
+dingEpoch = (n) ->
+  pr = do -> publish! [{ '@': [DEV_CHANNEL], ding: { kind: 'epoch', epoch: n } }]
+  pr.catch (e) -> warn "rip-server: epoch ding publish failed: #{e?.message or e}"
+  return
 
 # ==============================================================================
 # The doorbell
@@ -794,11 +859,10 @@ settle = ->
   prev = state.lastFiles
   state.lastHash = snap.hash
   state.lastFiles = snap.files
-  # RIP_WORKSPACE=1: a save touching only app/ mutates a LIVE pool in
-  # place. With no live pool to feed (admission already cut, a cached boot
-  # failure, mid-reload) the save joins the pending epoch exactly as a
-  # server save would. Flag off, every save takes the path below.
-  if WORKSPACE and prev? and state.currentPool? and not state.dirty and not state.bootFailure? and clientOnlyChange(prev, snap.files)
+  # A save touching only app/ mutates a LIVE pool in place. With no live
+  # pool to feed (admission already cut, a cached boot failure, mid-reload)
+  # the save joins the pending epoch exactly as a server save would.
+  if prev? and state.currentPool? and not state.dirty and not state.bootFailure? and clientOnlyChange(prev, snap.files)
     onCellChange().catch (e) -> warn "rip-server: cell update failed: #{e?.message or e}"
     return
   onContentChange()

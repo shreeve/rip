@@ -2,8 +2,8 @@
 
 A tiny status board that proves the whole stack end to end: Rip Server
 serves the boot page, the bundle, and a small API; Rip App renders the
-page in the browser; and under `RIP_WORKSPACE=1` behind Janus, saving a
-component file updates the running page through the Workspace door.
+page in the browser; and behind Janus, saving a component file updates
+the running page through the Workspace door.
 
 It is a runnable example and a demo script — not a test suite. Nothing
 here is wired into CI.
@@ -72,7 +72,7 @@ Same as leg 2, with the flag in the manager's environment:
 
 ```bash
 cd examples/pulse
-RIP_WORKSPACE=1 rip server app.rip --name pulse --bridge /hub
+rip server app.rip --name pulse --bridge /hub
 ```
 
 Open the page, then edit `app/mood.rip`: change the `up` label
