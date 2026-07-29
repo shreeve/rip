@@ -111,7 +111,7 @@ export const CONTRACT = [
   },
   {
     name: 'claims.carriers', lane: 'grammar',
-    property: 'every ruled CLAIMS.md row names a carrier that still exists in the corpus',
+    property: 'every ruled CLAIMS.md row still points at a fixture and symbol that exist in the corpus',
     red: (s) => ((s.gr.negatives?.claimsBroken ?? 0) + (s.gr.negatives?.cellsMissing ?? 0)) > 0,
   },
   {

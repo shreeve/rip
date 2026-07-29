@@ -452,13 +452,13 @@ const AUDITS = [
          + 'never shadowing a derived row. ALL of the corpus\'s negative tests live\n'
          + 'here, in corpus/errors/ (one error pair per family), OUTSIDE the shared\n'
          + 'fixture walk: positive fixtures publish zero diagnostics absolutely, and only\n'
-         + 'this lane can see a mis-positioned diagnostic — suppression would consume the\n'
-         + 'evidence on the face',
+         + 'this lane can see a mis-positioned diagnostic — a suppression is consumed on\n'
+         + 'the face, before any of it reaches the audit',
   },
   {
     key: 'hover', flag: '--hover', name: 'Hover Audit',
     blurb: 'hover every top-level declaration through the editor server',
-    judge: 'the hand-written .ts/.tsx twin (a real oracle), falling back to hover-pins.json\n'
+    judge: 'the hand-written .ts/.tsx twin — a real reference answer — falling back to hover-pins.json\n'
          + 'where rip-native constructs have no twin. The pin file is hand-maintained per\n'
          + 'row (no mechanical re-pin — the run prints paste-ready rows instead): `decls`\n'
          + 'sections hold the declaration baselines, `positions` sections the\n'
@@ -498,7 +498,8 @@ const usage = () => {
   };
   return [
     ...para('The audit gauge — a progress scoreboard (not a pass/fail gate) for rip\'s typed-editor story: '
-      + 'the compiler\'s TS face plus the tsgo-brokered editor, measured over the typed fixtures in ./corpus. '
+      + 'the TypeScript view the compiler shows a checker (the FACE) plus the tsgo-brokered editor, '
+      + 'measured over the typed fixtures in ./corpus. '
       + 'Not part of `bun test`.', 0, 0),
     '',
     'Usage: bun run audit [flag]',
@@ -2578,7 +2579,7 @@ if (RUN_GRAMMAR) {
       for (const b of behaviors) {
         const s1 = carrierOk(b.carrier), s2 = carrierOk(b.neg);
         const until = parkedBy.get(b.behavior);
-        if (s1 === 'missing' || s2 === 'missing') { broken++; loud.push(`${red('✗')} ${b.behavior} ${dim('— carrier missing:')} ${red(s1 === 'missing' ? b.carrier : b.neg)}`); }
+        if (s1 === 'missing' || s2 === 'missing') { broken++; loud.push(`${red('✗')} ${b.behavior} ${dim('— the fixture this row points at is gone:')} ${red(s1 === 'missing' ? b.carrier : b.neg)}`); }
         else if (s1 === 'absent' || s2 === 'absent') {
           if (until) { parked++; loud.push(`${yellow('·')} ${b.behavior} ${dim(`— PARKED until ${until}`)}`); }
           else { absent++; quiet.push(`${yellow('·')} ${b.behavior} ${dim('— ruled, uncarried')}`); }
@@ -2688,10 +2689,17 @@ if (RUN_MAP) {
   // RESOLVES to the wrong bytes — so `unplaced` and `mistext` partition the
   // flagged set, and each is the root the other cannot catch.
   out(`\n  ${bold('Invariants')} ${dim(`(${totFlag} of ${totReads} reads unmapped — every position from the compiler's own rows)`)}`);
-  const invLine = (label, n, note) =>
-    out(`    ${pad(label, 10)} ${(n === 0 ? green : yellow)(String(n).padStart(4))}   ${dim(note)}`);
-  invLine('unplaced', unplaced, '`placed` fails — the precise map REFUSES, a rewrite breaks the cover\'s verbatim prefix');
-  invLine('mistext', mistext, '`text` fails — resolves, but to the WRONG bytes: mark-width, so a hover at the use site names the wrong symbol');
+  // The note column is where a wrap has to hang — 4 indent, a 10-wide label,
+  // a 4-wide count, and the gaps between them. `out` would hang it at 6,
+  // under the label, which reads as a second row whose name went missing.
+  const NOTE_COL = 4 + 10 + 1 + 4 + 3;
+  const invLine = (label, n, note) => {
+    const lines = wrapText(note, TERM_W - NOTE_COL, 0);
+    console.log(`    ${pad(label, 10)} ${(n === 0 ? green : yellow)(String(n).padStart(4))}   ${dim(lines[0])}`);
+    for (const l of lines.slice(1)) console.log(' '.repeat(NOTE_COL) + dim(l));
+  };
+  invLine('unplaced', unplaced, '`placed` fails — the precise map refuses: the generated row no longer opens with the source bytes');
+  invLine('mistext', mistext, '`text` fails — resolves, but to the WRONG bytes: the generated span is wider than the name, so a hover names the wrong symbol');
 
   // ── the CENSUS — the gate the ledger's identifier-read finding asks for:
   // reads with no exact row, the at-risk population, and the MITIGATION-PROOF
@@ -2701,8 +2709,8 @@ if (RUN_MAP) {
   // source spans drives it to zero — no downstream resolver tweak can — which is
   // why THIS number is the gate, not the symptom count. Same mapping rows, no
   // server, no oracle.
-  out(`\n  ${bold('Census')} ${dim('(reads with no exact row — the mitigation-proof at-risk population)')}`);
-  out(`    ${pad('census', 10)} ${(census === 0 ? green : yellow)(String(census).padStart(4))}   ${dim(`of ${totReads} reads — ${totFlag} broken today (flagged above) + ${byLuck} resolving by luck (one face rewrite from breaking)`)}`);
+  out(`\n  ${bold('Census')} ${dim('(reads with no exact row — broken today, or surviving only by luck)')}`);
+  out(`    ${pad('census', 10)} ${(census === 0 ? green : yellow)(String(census).padStart(4))}   ${dim(`of ${totReads} reads — ${totFlag} broken today (flagged above) + ${byLuck} resolving by luck — one change to the emitted TS from breaking`)}`);
   // The decomposition is exact BY CONSTRUCTION — a flagged read always lacks an
   // exact row (see mappingScan) — so census === broken-today + by-luck. Checked,
   // not assumed: it rests on the compiler keeping synthetic rows zero-width on
@@ -2719,12 +2727,12 @@ if (RUN_MAP) {
   // a lone "—" under each zero, which reads as noise once the census is clean.
   const roleBreak = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]).map(([role, n]) => `${role} ${n}`).join(', ');
   const rootTotal = (m) => [...m.values()].reduce((a, b) => a + b, 0);
-  console.log(`\n  ${bold('Roots')} ${dim('(classified from the mapping row each read fell to)')}`);
+  console.log(`\n  ${bold('Why they miss')} ${dim('(read off the compiler row each one landed in)')}`);
   const rootLine = (label, n, note, roles) => {
-    out(`    ${pad(label, 10)} ${(n === 0 ? green : yellow)(String(n).padStart(4))}   ${dim(note)}`);
-    if (roles) out(`    ${' '.repeat(15)}${dim(roles)}`);
+    invLine(label, n, note);
+    if (roles) for (const l of wrapText(roles, TERM_W - NOTE_COL, 2)) console.log(' '.repeat(NOTE_COL) + dim(l));
   };
-  rootLine('synthetic', rootTotal(byRootRole.synthetic), 'a mark carries glyphs its source span does not', roleBreak(byRootRole.synthetic));
+  rootLine('synthetic', rootTotal(byRootRole.synthetic), 'the generated text carries characters the source span does not', roleBreak(byRootRole.synthetic));
   rootLine('rewrite', rootTotal(byRootRole.rewrite), 'a string literal re-rendered double-quoted', roleBreak(byRootRole.rewrite));
 
   // ── the one structural invariant that IS load-bearing: no flagged read may
@@ -3166,7 +3174,7 @@ if (RUN_HOVER || RUN_TOKENS) {
     try {
       twins = await Promise.all(Array.from({ length: LANES }, async () => { const t = new TwinOracle(); await t.start(); return t; }));
     } catch { twins = []; }
-    if (!twins.length) console.log(`    ${dim('tsgo unavailable — twin oracle skipped; hover-pins comparison still runs')}`);
+    if (!twins.length) console.log(`    ${dim('tsgo unavailable — the twin comparison is skipped; hover-pins still run')}`);
   }
 
   // The face-survival oracle (the mapping gap's use sites). Compile every compiling
@@ -3204,7 +3212,7 @@ if (RUN_HOVER || RUN_TOKENS) {
       faces = await Promise.all(Array.from({ length: LANES }, async () => { const o = new FaceOracle(); await o.start(); return o; }));
     } catch { faces = []; }
     facesAvailable = faces.length > 0;
-    if (!facesAvailable) console.log(`    ${dim('tsgo unavailable — face-survival oracle skipped (the use-site token gauge)')}`);
+    if (!facesAvailable) console.log(`    ${dim('tsgo unavailable — the use-site token gauge is skipped')}`);
   }
 
   const t0 = Date.now();
@@ -3366,7 +3374,7 @@ if (RUN_HOVER || RUN_TOKENS) {
 // ── the Hover Audit: twin oracle (correctness) + expected hovers (baseline)
 let hp = null;
 if (RUN_HOVER) {
-  auditBanner('HOVER AUDIT', `twin oracle + expected hovers · ${fixtures.length} files`);
+  auditBanner('HOVER AUDIT', `the twin's answers + pinned answers · ${fixtures.length} files`);
 
   const allRows = [];
   let anyCount = 0, probeCount = 0;
@@ -3502,11 +3510,11 @@ if (RUN_HOVER) {
   const prow = (label, n, color, note) => out(`    ${pad(label, 12)} ${color(String(n).padStart(3))}${note ? '   ' + dim(note) : ''}`);
   prow('agree', tally.agree, green, tally.order ? `incl. ${tally.order} union-order` : '');
   prow('gaps', tally.gap, tally.gap ? yellow : green, tally.gap ? 'hover ≠ tsgo twin on a comparable type' : '');
-  prow('rip-native', tally.native, dim, 'component / schema / reactive — twin uses React/zod, no oracle');
+  prow('rip-native', tally.native, dim, 'component / schema / reactive — the twin uses React/zod, so it has no answer to compare');
   prow('pinned-only', tally.pinnedOnly, dim, 'no twin symbol — covered by hover-pins');
   prow('expected', snapChanged.length, snapChanged.length ? red : green,
     snapChanged.length ? 'diverging vs hover-pins.json decls' : `${pinnedCount} pinned, unchanged`);
-  prow('invariant', violations.length, violations.length ? red : green, violations.length ? 'initialized binding hovers `any`' : '');
+  prow('invariant', violations.length, violations.length ? red : green, violations.length ? 'an initialized binding hovers `any`' : 'no initialized binding hovers `any`');
   // The `silence` gauge — ruled-silent positions (bare `~>` operators) must
   // serve null. EXPECTED RED while the bare-effect finding is open: the
   // server leaks the runtime's `__effect` symbol there today, and this
@@ -3672,8 +3680,21 @@ if (RUN_TOKENS) {
     };
 
     out(`\n  ${bold('Invariants')} ${dim(`(${probed} declarations${tskip ? `, ${tskip} file(s) skipped` : ''} — every expectation derived from .rip syntax)`)}`);
-    const irow = (label, bad, den, note) => out(
-      `    ${pad(label, 12)} ${(bad ? red : green)(String(den - bad).padStart(3))} ${dim('/')} ${dim(String(den).padStart(3))}${bad ? '   ' + yellow(`${bad} violation${bad === 1 ? '' : 's'}`) : ''}${note ? '   ' + dim(note) : ''}`);
+    // Every row here is `label  N / M  [count]  note`, and the note is the
+    // only part that can run long — so a wrap hangs at the note's own column
+    // rather than at the line's indent, where it would read as a nameless
+    // second row. The lead is composed first and measured, because the
+    // optional violation count moves the column.
+    const irow = (label, bad, den, note) => {
+      const lead = `    ${pad(label, 12)} ${(bad ? red : green)(String(den - bad).padStart(3))} ${dim('/')} ${dim(String(den).padStart(3))}${bad ? '   ' + yellow(`${bad} violation${bad === 1 ? '' : 's'}`) : ''}   `;
+      noteWrap(lead, note ?? '');
+    };
+    const noteWrap = (lead, note) => {
+      const col = visibleW(lead);
+      const lines = note ? wrapText(note, TERM_W - col, 0) : [''];
+      console.log(lead + dim(lines[0]));
+      for (const l of lines.slice(1)) console.log(' '.repeat(col) + dim(l));
+    };
     irow('present', missing.length, probed, 'a declared name gets a token');
     irow('type', badType.length, typeAsserted, `token type matches the declaring form${unasserted.length ? ` · ${unasserted.length} unasserted` : ''}`);
     irow('readonly', badReadonly.length, roAsserted, `readonly IFF the binding is immutable in rip${probed - roAsserted ? ` · ${probed - roAsserted} n/a` : ''}`);
@@ -3685,7 +3706,7 @@ if (RUN_TOKENS) {
       const gaps = memberMissing.length;
       const note = gaps ? yellow(`${gaps} gap${gaps === 1 ? '' : 's'}`) + '   ' + dim('type-body member tokens drop — expected red until the mapping fix')
                         : dim('type-body member tokens — the mapping fix appears to have landed; retire this gauge');
-      out(`    ${pad('member', 12)} ${(gaps ? red : green)(String(memberProbed - gaps).padStart(3))} ${dim('/')} ${dim(String(memberProbed).padStart(3))}   ${note}`);
+      noteWrap(`    ${pad('member', 12)} ${(gaps ? red : green)(String(memberProbed - gaps).padStart(3))} ${dim('/')} ${dim(String(memberProbed).padStart(3))}   `, note);
     }
     // Face-survival — USE-SITE token drops (the mapping gap), the direction the
     // source-enumerated invariants above cannot see: a classified source
@@ -3696,15 +3717,15 @@ if (RUN_TOKENS) {
     if (facesAvailable) {
       const dropTotal = survDrops.reduce((n, d) => n + d.count, 0);
       const den = survSurvived + dropTotal;
-      const note = dropTotal ? yellow(`${dropTotal} drop${dropTotal === 1 ? '' : 's'}`) + '   ' + dim('classified source identifiers the server drops at use sites — expected red until the mapping fix')
+      const note = dropTotal ? yellow(`${dropTotal} drop${dropTotal === 1 ? '' : 's'}`) + '   ' + dim('identifiers tsgo tokenizes that the server never ships at a use site — expected red until the mapping fix')
                              : dim('use-site tokens — the mapping fix appears to have landed; retire this gauge');
-      out(`    ${pad('survival', 12)} ${(dropTotal ? red : green)(String(survSurvived).padStart(3))} ${dim('/')} ${dim(String(den).padStart(3))}   ${note}`);
+      noteWrap(`    ${pad('use-site', 12)} ${(dropTotal ? red : green)(String(survSurvived).padStart(3))} ${dim('/')} ${dim(String(den).padStart(3))}   `, note);
       // Silent guard (surfaces only on failure): count-based uses the server's
       // tokens directly, so `delivered ⊆ classified` holds by construction —
       // EXCEPT if this standalone FaceOracle's tsgo drifts from the server's.
       // Nothing else would catch that, so flag it, but don't print an always-ok
       // line for a near-tautology.
-      if (survUnclassified) console.log(`    ${pad('  ↳ drift', 12)} ${red(`${survUnclassified} unclassified`)}   ${dim('server shipped a name tsgo never classifies — face oracle drifted, distrust the survival count')}`);
+      if (survUnclassified) console.log(`    ${pad('  ↳ drift', 12)} ${red(`${survUnclassified} unclassified`)}   ${dim('the server shipped a name tsgo never tokenizes — the reference drifted, distrust the use-site count')}`);
     }
 
     show(missing, 'No token — the name gets no semantic color', () => {});
@@ -3877,7 +3898,7 @@ if (gr) {
   const held = ['exclusions true'];
   if (n.headsTotal) held.push(`${n.headsTotal} containment constructs spelled`);
   if (n.vocabClaimed) held.push(`${n.vocabClaimed} vocabulary classes falsified`);
-  if (claimsRead) held.push('every claims carrier and cell live');
+  if (claimsRead) held.push('every claims row still points at a fixture that exists');
   // The divider rule prints no section of its own while it holds, so this
   // clause is the only place a reader learns it was measured at all.
   if (n.dividerFiles) held.push('every corpus divider closes on its own line');
@@ -3928,7 +3949,7 @@ if (tk) {
   const survivalClause = !facesAvailable
     ? ''
     : tk.survUnclassified
-      ? dim(' · ') + red(`${tk.survUnclassified} unclassified`) + ' ' + dim('— server/face oracles disagree, distrust the survival gauge')
+      ? dim(' · ') + red(`${tk.survUnclassified} unclassified`) + ' ' + dim('— the server and tsgo disagree on what is an identifier, distrust the use-site gauge')
       : survDropTotal
         ? dim(' · ') + yellow(`${survDropTotal} use-site drop${survDropTotal === 1 ? '' : 's'}`) + ' ' + dim('tracking the mapping gap (expected)')
         : dim(' · ') + green('use-site tokens clean') + ' ' + dim('— the mapping gap may be closed');
