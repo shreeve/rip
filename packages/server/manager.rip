@@ -351,9 +351,12 @@ buildApp = ->
   state.buildCounter += 1
   artifact = buildArtifact! cfg.entry, join(state.runDir, "b#{state.buildCounter}-app.js")
   bundle = buildBundle!()
-  if bundle?
+  if bundle? and cfg.watch
     # The bundle is durable (buildBundle wrote it) BEFORE the manifest
-    # names the new revs — the correlation invariant below.
+    # names the new revs — the correlation invariant below. Watch only:
+    # the feed surface exists exactly where saves can ding it. With
+    # watch off (production) no cells, no manifest, and the boot page
+    # stays plain — production has no hub (Q2).
     syncCells!()
     writeManifest!()
   { artifact, bundle }
@@ -518,8 +521,13 @@ spawnWorker = (pool) ->
     env.RIP_BUNDLE_PATH = pool.bundle
     env.RIP_BROWSER_RUNTIME = state.browserRuntime
     env.RIP_CLIENT_DIR = join(cfg.appDir, 'app')
-    env.RIP_CELLS_DIR = state.cellsDir
-    env.RIP_MANIFEST_PATH = state.manifestPath
+    # The feed surface is watch-only: these envs are what open the
+    # workspace door in the worker (feed routes, workspace: true on the
+    # boot page). Production (watch off) never sets them — production
+    # has no hub and its pages boot plain (Q2, backout charter).
+    if cfg.watch
+      env.RIP_CELLS_DIR = state.cellsDir
+      env.RIP_MANIFEST_PATH = state.manifestPath
     env.RIP_BRIDGE_PATH = cfg.bridge if cfg.bridge?
   proc = Bun.spawn ['bun', state.workerJs],
     stdout: 'inherit'
@@ -726,7 +734,9 @@ bootLoop = ->
       return if state.dirty or state.shuttingDown
       putUpstreams! readySocks(pool)
     state.currentPool = pool
-    dingEpoch pool.n if state.everServed
+    # A dev-feed frame: only watch-mode pages hold feed sockets, so the
+    # epoch ding is watch-only like the rest of the feed surface.
+    dingEpoch pool.n if state.everServed and cfg.watch
     state.everServed = true
     state.doorbellPublished = false
     attachLateJoins pool

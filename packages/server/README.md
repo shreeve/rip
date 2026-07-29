@@ -370,10 +370,13 @@ exactly as the browser certification fixture does.
 
 The server half of the Rip Workspace door
 ([docs/WORKSPACE.md](../../docs/WORKSPACE.md)) — the default for every
-manager-served browser app (Q10). Standalone `client()` pages have no
-manager and therefore no feed: they boot plain. This is the door's
-server half, not "HMR done": how a running app absorbs a cell is the
-apply engine's problem, and it lives in `@rip-lang/app`.
+WATCHING manager-served browser app (Q10). The feed surface is
+watch-only: a production manager (watch off) writes no cells and no
+manifest, sets none of the feed environment, and its pages boot plain —
+production has no hub (Q2). Standalone `client()` pages have no manager
+and therefore no feed: they boot plain too. This is the door's server
+half, not "HMR done": how a running app absorbs a cell is the apply
+engine's problem, and it lives in `@rip-lang/app`.
 
 In watch mode:
 
@@ -397,9 +400,11 @@ In watch mode:
   is what makes the immutable answer sound: revs restart across manager
   runs, so a bare `(id, rev)` URL would let a returning browser's cache
   serve the OLD run's bytes silently — with `h`, the URL varies iff the
-  bytes do. A request without a valid positive-integer `rev` is a 400 —
-  unversioned cell URLs are rejected, never guessed at. An unknown
-  `(id, rev)`, or an `h` that does not match the bytes, is a 404.
+  bytes do. A request without a valid positive-integer `rev`, or
+  without a well-formed `h`, is a 400 — unversioned and unhashed cell
+  URLs are rejected alike, never answered with a cacheable 200 under
+  the proven-broken bare shape. An unknown `(id, rev)`, or an `h` that
+  does not match the bytes, is a 404.
 - **The ding.** After the cells, the manifest, and the rewritten bundle
   are durable, the manager publishes one directive per changed cell to
   the hub channel `/rip/dev` — the envelope is `{id, rev, hash}` only;
@@ -415,8 +420,10 @@ In watch mode:
 - **Bridge enrollment.** With `--bridge <path>`, the worker answers the
   bridge's `Sec-WebSocket-Frame: open` POST with `{"+": ["/rip/dev"]}` —
   enrolling the opening connection into the dev channel — and `text` /
-  `close` frames with an empty 204. A missing or unknown frame header is
-  a 400 naming the header.
+  `close` frames with an empty 204. Enrollment keys on the feed surface
+  existing: with watch off the open answers a plain 204, so app-level
+  hub sockets (a production-legal use) never ride the dev channel. A
+  missing or unknown frame header is a 400 naming the header.
 
 ## Running under Janus — the pool runtime
 

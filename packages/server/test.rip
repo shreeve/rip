@@ -914,34 +914,41 @@ test! "GET /@rip/manifest is no-store and read per request", ->
   eq ((handle! req('GET', '/@rip/manifest')).json!).cells[0].rev, 2
   writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, path: FEED_CELL_ID, rev: 1 }] })
 
-test! "a rev-keyed cell answers immutable text/plain source bytes", ->
-  res = handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1")
+test! "a rev-and-hash-keyed cell answers immutable text/plain source bytes", ->
+  res = handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1&h=#{cellHash(CLIENT_ROUTE)}")
   eq res.status, 200
   eq res.headers.get('content-type'), 'text/plain; charset=utf-8'
   eq res.headers.get('cache-control'), 'public, max-age=31536000, immutable'
   eq (res.text!), CLIENT_ROUTE
 
-test! "the h discriminator gates the immutable answer: a match serves, a mismatch is an unknown cell", ->
+test! "the h discriminator gates the immutable answer: a mismatch is an unknown cell", ->
   # Revs restart across manager runs while these responses cache immutable
   # for a year: without h in the URL, a returning browser silently applies
   # the OLD run's bytes on an (id, rev) collision. Serving bytes under a
   # URL whose h names DIFFERENT bytes would poison that cache slot.
-  hit = handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1&h=#{cellHash(CLIENT_ROUTE)}")
-  eq hit.status, 200
-  eq (hit.text!), CLIENT_ROUTE
   miss = handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1&h=0123456789abcdef")
   eq miss.status, 404
   ok ((miss.json!).error.message).includes('does not match these bytes'), 'names the mismatch'
 
 test! "a cell URL without a valid positive-integer rev is a 400 naming the rule", ->
-  for path in ["/@rip/cells/#{FEED_CELL_ID}", "/@rip/cells/#{FEED_CELL_ID}?rev=0", "/@rip/cells/#{FEED_CELL_ID}?rev=abc", "/@rip/cells/#{FEED_CELL_ID}?rev=1.5"]
+  h = cellHash(CLIENT_ROUTE)
+  for path in ["/@rip/cells/#{FEED_CELL_ID}?h=#{h}", "/@rip/cells/#{FEED_CELL_ID}?rev=0&h=#{h}", "/@rip/cells/#{FEED_CELL_ID}?rev=abc&h=#{h}", "/@rip/cells/#{FEED_CELL_ID}?rev=1.5&h=#{h}"]
     res = handle! req('GET', path)
     eq res.status, 400
     ok ((res.json!).error.message).includes('unversioned cell URLs are rejected'), "names the rule for #{path}"
 
+test! "a cell URL without a well-formed h is a 400 — freshness never rests on a client convention", ->
+  # A bare (id, rev) URL is the proven-broken shape (the cross-run cache
+  # collision): answering it with a year-long cacheable 200 would put the
+  # unsound URL right back in circulation.
+  for path in ["/@rip/cells/#{FEED_CELL_ID}?rev=1", "/@rip/cells/#{FEED_CELL_ID}?rev=1&h=abc", "/@rip/cells/#{FEED_CELL_ID}?rev=1&h=0123456789ABCDEF"]
+    res = handle! req('GET', path)
+    eq res.status, 400
+    ok ((res.json!).error.message).includes('unhashed cell URLs are rejected'), "names the rule for #{path}"
+
 test! "an unknown (id, rev) is a 404", ->
-  eq (handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=9")).status, 404
-  eq (handle! req('GET', '/@rip/cells/nope.rip?rev=1')).status, 404
+  eq (handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=9&h=#{cellHash(CLIENT_ROUTE)}")).status, 404
+  eq (handle! req('GET', "/@rip/cells/nope.rip?rev=1&h=#{cellHash(CLIENT_ROUTE)}")).status, 404
 
 test! "a bridge open enrolls the connection into /rip/dev", ->
   res = handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })
@@ -997,6 +1004,21 @@ test! "without the manager's feed env there are no feed routes and no door; the 
     ok res.headers.get('etag') isnt etag1, 'the rewrite shows on the next request'
   finally
     delete process.env.RIP_BUNDLE_PATH
+    resetGlobals()
+
+test! "a bridge without the feed surface never enrolls the dev channel — app-level hub sockets stay off /rip/dev", ->
+  writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: {}, packages: {} })
+  process.env.RIP_BUNDLE_PATH = join(feedDir, 'bundle.json')
+  process.env.RIP_BRIDGE_PATH = '/hub'
+  try
+    resetGlobals()
+    client!()
+    res = handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })
+    eq res.status, 204
+    eq (res.text!), ''
+  finally
+    delete process.env.RIP_BUNDLE_PATH
+    delete process.env.RIP_BRIDGE_PATH
     resetGlobals()
 
 test! "the workspace rides the app package — one claim, no second package, door still closed standalone", ->
@@ -2077,7 +2099,7 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
       { id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1, hash: cellHash(CLIENT_ROUTE) }
       { id: 'app/stash.rip',        path: 'app/stash.rip',        rev: 1, hash: cellHash(CLIENT_STASH) }
     ] }
-    c1 = uds!(sock, '/@rip/cells/app/routes/index.rip?rev=1')
+    c1 = uds!(sock, "/@rip/cells/app/routes/index.rip?rev=1&h=#{cellHash(CLIENT_ROUTE)}")
     eq c1.status, 200
     eq c1.headers.get('cache-control'), 'public, max-age=31536000, immutable'
     eq (c1.text!), CLIENT_ROUTE
@@ -2090,16 +2112,18 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
     eq pub.body, [{ '@': ['/rip/dev'], ding: { id: 'app/routes/index.rip', rev: 2, hash: cellHash(v2) } }]
     m2 = (uds!(sock, '/@rip/manifest')).json!
     eq m2.cells.find((e) -> e.path is 'app/routes/index.rip').rev, 2
-    eq ((uds!(sock, '/@rip/cells/app/routes/index.rip?rev=2')).text!), v2
-    eq ((uds!(sock, '/@rip/cells/app/routes/index.rip?rev=1')).text!), CLIENT_ROUTE   # old revs keep answering
     # The hash discriminator: the URL varies iff the bytes do (revs restart
     # across manager runs while the browser caches these responses immutable
     # for a year — a bare (id, rev) collision would silently serve the old
-    # run's bytes). A matching h answers; a mismatched h is an unknown cell.
+    # run's bytes). A matching h answers, old revs keep answering under
+    # their own hashes, a mismatched h is an unknown cell, and a bare URL
+    # is rejected — never a cacheable 200 under the proven-broken shape.
     eq ((uds!(sock, "/@rip/cells/app/routes/index.rip?rev=2&h=#{cellHash(v2)}")).text!), v2
+    eq ((uds!(sock, "/@rip/cells/app/routes/index.rip?rev=1&h=#{cellHash(CLIENT_ROUTE)}")).text!), CLIENT_ROUTE
     eq (uds!(sock, "/@rip/cells/app/routes/index.rip?rev=2&h=#{cellHash(CLIENT_ROUTE)}")).status, 404
     eq (uds!(sock, '/@rip/cells/app/routes/index.rip')).status, 400                   # unversioned → rejected
-    eq (uds!(sock, '/@rip/cells/app/routes/index.rip?rev=9')).status, 404
+    eq (uds!(sock, '/@rip/cells/app/routes/index.rip?rev=2')).status, 400             # unhashed → rejected
+    eq (uds!(sock, "/@rip/cells/app/routes/index.rip?rev=9&h=#{cellHash(v2)}")).status, 404
     open = uds!(sock, '/hub', { method: 'POST', headers: { 'Sec-WebSocket-Frame': 'open' } })
     eq open.status, 200
     eq (open.json!), { '+': ['/rip/dev'] }
@@ -2117,9 +2141,39 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
     eq retirement.body, [{ '@': ['/rip/dev'], ding: { id: 'app/stash.rip', rev: 2, kind: 'delete' } }]
     m3 = (uds!(sock, '/@rip/manifest')).json!
     eq m3.cells.map((e) -> e.path), ['app/routes/index.rip']
-    eq ((uds!(sock, '/@rip/cells/app/stash.rip?rev=1')).text!), CLIENT_STASH
-    eq (uds!(sock, '/@rip/cells/app/stash.rip?rev=2')).status, 404   # a retirement has no bytes
+    eq ((uds!(sock, "/@rip/cells/app/stash.rip?rev=1&h=#{cellHash(CLIENT_STASH)}")).text!), CLIENT_STASH
+    eq (uds!(sock, "/@rip/cells/app/stash.rip?rev=2&h=#{cellHash(CLIENT_STASH)}")).status, 404   # a retirement has no bytes
     eq puts().length, putsAt
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "watch off never opens the door: no feed routes, a plain boot page, no dev enrollment (production has no hub)", ->
+  # The feed surface is watch-only (Q2): a production manager (--no-watch)
+  # must serve pages that boot PLAIN — no unsealed bag, no hub socket per
+  # visitor — and its bridge must not enroll app-level hub sockets into
+  # the dev channel.
+  ctlSock = join(tmpdir(), "rip-janus-wsprod-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), wsAppSource('hi')
+  writeClientDir dir
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'wsprod', '-w', '1', '--no-watch', '--bridge', '/hub']
+  try
+    sock = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    page = uds!(sock, '/', { headers: { Accept: 'text/html' } })
+    eq page.status, 200
+    ok not (page.text!).includes('workspace'), 'the boot page boots plain'
+    eq (uds!(sock, '/@rip/bundle.json')).status, 200
+    eq (uds!(sock, '/@rip/manifest')).status, 404
+    eq (uds!(sock, "/@rip/cells/app/routes/index.rip?rev=1&h=#{cellHash(CLIENT_ROUTE)}")).status, 404
+    open = uds!(sock, '/hub', { method: 'POST', headers: { 'Sec-WebSocket-Frame': 'open' } })
+    eq open.status, 204
+    eq (open.text!), ''
   finally
     try proc.kill('SIGKILL')
     await proc.exited

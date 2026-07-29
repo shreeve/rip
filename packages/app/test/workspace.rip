@@ -532,6 +532,68 @@ test! "a hashed ding and a hashed manifest entry fetch hash-keyed URLs — the c
   ok calls.includes('/@rip/cells/b.rip?rev=1&h=beadfeedbeadfeed'), "the resync fetch rides the hash: #{JSON.stringify calls}"
   feed.close()
 
+# Mirrors the manager's shortHash — 16 hex chars of sha256 over the bytes.
+srcHash = (s) -> new Bun.CryptoHasher('sha256').update(s).digest('hex').slice(0, 16)
+
+test! "a covered rev whose hash names DIFFERENT bytes is a manager restart — the reload policy, never a silent pin to the old run", ->
+  # Revs restart when a manager restarts: the surviving page's rev cursor
+  # sits ABOVE the new run's revs, so every plain rev verdict says "stale"
+  # and the page would silently pin to the old run's bytes forever. The
+  # hash in the ding is the tiebreak: covered rev + different bytes can
+  # only be another run, and the policy is the same as an epoch.
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 3, source: 'old-run' }]
+  restarts = []
+  { feed, calls, sockets, reports } = openFeed ws, { '/@rip/manifest': emptyManifest }, { onRestart: (d) -> restarts.push d }
+  sockets[0].onopen()
+  await settle()
+  before = calls.length
+  # Covered rev, SAME bytes: the plain stale skip — no restart, no network.
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 3, hash: srcHash('old-run') } } }
+  await settle()
+  eq restarts, []
+  # Covered rev, DIFFERENT bytes: the new run announcing itself.
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2, hash: srcHash('new-run') } } }
+  await settle()
+  eq restarts, [{ id: 'a.rip', rev: 2, hash: srcHash('new-run') }]
+  eq calls.length, before, 'never the cell path'
+  eq ws.passport('a.rip').rev, 3
+  eq ws.read('a.rip'), 'old-run'
+  feed.close()
+
+test! "a manifest entry the cursor covers with different bytes restarts too — the resync half of the cross-run verdict", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 3, source: 'old-run' }]
+  restarts = []
+  { feed, sockets } = openFeed ws,
+    { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 2, hash: srcHash('new-run') }] } },
+    { onRestart: (d) -> restarts.push d }
+  sockets[0].onopen()
+  await settle()
+  eq restarts, [{ id: 'a.rip', rev: 2, hash: srcHash('new-run') }]
+  eq ws.passport('a.rip').rev, 3
+  feed.close()
+
+test! "a want the manifest no longer names is retired — a lost delete ding never re-polls forever", ->
+  # Wants come only from dings, and dings only name server-owned ids: an
+  # id the manifest does not name was retired upstream (its delete ding
+  # lost in a reconnect window). Nothing will ever satisfy the want, so
+  # the resync must retire it instead of re-polling the manifest forever.
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
+  { feed, calls, sockets, reports } = openFeed ws, { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 1 }] } }
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'gone.rip', rev: 2 } } }
+  await settle()
+  ok reports.some((args) -> String(args[0]).includes('cell fetch missed')), 'the miss is loud'
+  await new Promise (resolve) -> setTimeout resolve, 30
+  polls = calls.filter((u) -> u is '/@rip/manifest').length
+  await new Promise (resolve) -> setTimeout resolve, 30
+  eq calls.filter((u) -> u is '/@rip/manifest').length, polls, 'the retired want stops the re-poll'
+  eq ws.passport('gone.rip'), undefined
+  feed.close()
+
 test! "a stale or duplicate ding never touches the network", ->
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 3, source: 'v3' }]

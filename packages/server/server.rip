@@ -830,18 +830,20 @@ export App = (fn) ->
 #
 # Two modes, decided by environment:
 #   worker (RIP_BUNDLE_PATH set) — the manager assembled the bundle before
-#     any worker spawned; read it once and cache bytes + ETag in memory.
-#     The process dies on reload, so staleness is impossible.
+#     any worker spawned; the handler re-reads and re-tags it per request
+#     (the manager rewrites the pool's bundle file in place on a cell
+#     change; Janus's micro-cache absorbs the read at the edge).
 #   standalone (no RIP_BUNDLE_PATH) — the process runs under the rip loader,
-#     so the compiler is loadable; assemble at call time, failing fast.
+#     so the compiler is loadable; assemble at call time, failing fast,
+#     and serve the boot-time cached bytes.
 #
-# Worker mode adds the workspace dev feed (docs/WORKSPACE.md): GET
-# /@rip/manifest (no-store, read per request), rev-keyed immutable cell
-# bytes at /@rip/cells/<id>?rev=N, a per-request bundle re-read (the
-# manager rewrites the pool's bundle in place on a cell change), and the
-# hub bridge endpoint enrolling dev sockets into the DEV_CHANNEL. Each
-# surface keys on its manager-provided environment: standalone mode has no
-# manager, so none of them register there.
+# A WATCHING worker additionally carries the workspace dev feed
+# (docs/WORKSPACE.md): GET /@rip/manifest (no-store, read per request),
+# rev-and-hash-keyed immutable cell bytes at /@rip/cells/<id>?rev=N&h=…,
+# and the hub bridge endpoint enrolling dev sockets into the DEV_CHANNEL.
+# Each surface keys on its manager-provided environment — the manager
+# sets the feed envs only with watch on (production has no hub, Q2), and
+# standalone mode has no manager, so none of them register there.
 
 # The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
 # manager.rip (workers never import manager code). Exported so the mirror
@@ -955,31 +957,40 @@ export client = (dir = null) ->
     # discriminator `h` in the URL (Q8): the immutable-cacheable answer is
     # sound only because the URL varies iff the bytes do — revs restart
     # across manager runs, and a bare (id, rev) URL would let a returning
-    # browser's cache serve the OLD run's bytes silently. An unversioned
-    # request is rejected, never guessed at; a request whose `h` does not
-    # match the bytes is an unknown cell — answering it would poison the
-    # requester's cache under that URL. The filename encoding mirrors the
-    # manager's — the percent-encoded id can never contain the literal '@'
-    # separator.
+    # browser's cache serve the OLD run's bytes silently. Both parts are
+    # REQUIRED — freshness never rests on a client convention, so an
+    # unversioned or unhashed request is rejected, never answered with a
+    # year-long cacheable 200 under the proven-broken URL shape. A request
+    # whose `h` does not match the bytes is an unknown cell — answering it
+    # would poison the requester's cache under that URL. The filename
+    # encoding mirrors the manager's — the percent-encoded id can never
+    # contain the literal '@' separator.
     get '/@rip/cells/*', (c) ->
       rev = c.req.query('rev')
       unless rev? and /^[1-9]\d*$/.test(rev)
         error 'unversioned cell URLs are rejected — address a cell as /@rip/cells/<id>?rev=N&h=<hash> (docs/WORKSPACE.md, Q8)', 400
+      h = c.req.query('h')
+      unless h? and /^[0-9a-f]{16}$/.test(h)
+        error 'unhashed cell URLs are rejected — address a cell as /@rip/cells/<id>?rev=N&h=<hash> (docs/WORKSPACE.md, Q8)', 400
       id = try decodeURIComponent(c.req.path.slice('/@rip/cells/'.length)) catch then error('malformed percent-encoding in cell id', 400)
       file = join(process.env.RIP_CELLS_DIR, "#{encodeURIComponent(id)}@#{rev}")
       error "unknown cell (#{id}, rev #{rev})", 404 unless existsSync(file)
       bytes = readFileSync(file, 'utf8')
-      h = c.req.query('h')
-      if h? and h isnt new Bun.CryptoHasher('sha256').update(bytes).digest('hex').slice(0, 16)
+      if h isnt new Bun.CryptoHasher('sha256').update(bytes).digest('hex').slice(0, 16)
         error "unknown cell (#{id}, rev #{rev}, h #{h}) — the named hash does not match these bytes", 404
       c.body bytes, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=31536000, immutable' }
 
   if process.env.RIP_BRIDGE_PATH?
     # Janus POSTs every hub socket event here; answering an open with
     # {"+": [DEV_CHANNEL]} enrolls that connection into the dev channel.
+    # Enrollment keys on the feed surface existing: with watch off the
+    # dev channel carries nothing, and an app-level hub socket (a
+    # production-legal use) must not ride it.
     post process.env.RIP_BRIDGE_PATH, (c) ->
       frame = c.req.header('sec-websocket-frame')
-      return c.json { '+': [DEV_CHANNEL] } if frame is 'open'
+      if frame is 'open'
+        return c.json { '+': [DEV_CHANNEL] } if process.env.RIP_MANIFEST_PATH?
+        return new Response(null, { status: 204 })
       return new Response(null, { status: 204 }) if frame is 'text' or frame is 'close'
       error "missing or unknown Sec-WebSocket-Frame header (got #{JSON.stringify(frame ?? null)})", 400
   # SPA fallback: an unmatched GET that accepts HTML answers the boot page,

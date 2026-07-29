@@ -1,9 +1,11 @@
 # Rip Workspace
 
 **Status:** living constitution — plan + backout charter. The **door is
-the default** (Q10, 2026-07-29): every manager-served browser app runs
-through the Workspace. Apply excellence (hot swap, state intact) remains
-open research. Not a completed HMR protocol. Not a Janus capability.
+the default** (Q10, 2026-07-29): every WATCHING manager-served browser
+app runs through the Workspace; a production manager (watch off) serves
+plain-booting pages — production has no hub (Q2). Apply excellence (hot
+swap, state intact) remains open research. Not a completed HMR protocol.
+Not a Janus capability.
 
 **Name:** singular — `WORKSPACE.md`, one **Workspace**. The product is
 one reactive bag of Rip components in the browser, not a catalog of
@@ -69,14 +71,14 @@ forever and “CSP later” are **rejected** as M0 rewrites.
 |---|---|
 | **Q6** | **M0 and M1 are independent exits.** M1 (the dev door) may land first under `RIP_WORKSPACE=1` with dev-mode in-browser compile; M0 (signed cells, CSP without `unsafe-eval`) gates **production populate** only and is unweakened. D6 reads: the dev door never leaks into production — flag off is unchanged and production has no Hub. |
 | **Q7** | **The bag subsumes the app's component store.** The Workspace implements the `ComponentsStore` interface (`packages/app/components.rip`) as its app-facing view — path-keyed through the path→id map, passports underneath. `launch()` accepts an injected components store; flag off, it creates its own store exactly as today (D1). When the Workspace earns the default, `createComponents` retires and the bag is the only store. Two live stores of browser code never coexist. |
-| **Q8** | **Cell freshness is structural.** Cell bytes are addressed by `(id, rev)` plus a content-hash discriminator `h` in the URL; the response is immutable and cacheable (micro-cache, browser cache, CDN alike) because the URL varies iff the bytes do. *(Amended 2026-07-29: revs restart across manager runs, so a bare `(id, rev)` URL collides across runs and a year-long immutable cache hit silently serves the old run's bytes — proven live; the hash makes a cache hit byte-correct by construction, and a request whose `h` mismatches the bytes is an unknown cell.)* The manifest route is `no-store`. A client applies a cell only when its rev matches the ding's rev; on mismatch it refetches the manifest (S14's foothold). Unversioned cell URLs are rejected — freshness never rests on a header convention or a purge side effect. |
+| **Q8** | **Cell freshness is structural.** Cell bytes are addressed by `(id, rev)` plus a content-hash discriminator `h` in the URL; the response is immutable and cacheable (micro-cache, browser cache, CDN alike) because the URL varies iff the bytes do. *(Amended 2026-07-29: revs restart across manager runs, so a bare `(id, rev)` URL collides across runs and a year-long immutable cache hit silently serves the old run's bytes — proven live; the hash makes a cache hit byte-correct by construction, and a request whose `h` mismatches the bytes is an unknown cell.)* The manifest route is `no-store`. A client applies a cell only when its rev matches the ding's rev; on mismatch it refetches the manifest (S14's foothold). The hash also settles the PAGE-side cross-run verdict: a rev the page's cursor already covers whose bytes DIFFER from the page's copy can only be another manager run (revs restarted under it), and the feed's policy is the full reload — without it the surviving page silently pins to the old run. Unversioned and unhashed cell URLs are rejected alike — freshness never rests on a header or client convention or a purge side effect. |
 | **Q9** | **Package shape confirmed.** `packages/workspace` and `packages/refresh` stay separate browser-side packages while experimental (kill switch #2); `packages/server` keeps only the muscles. If the Workspace earns the default, its merge destination is `packages/app`, never `packages/server`. |
 
 ### Ruling 2026-07-29 (Q10)
 
 | # | Ruling |
 |---|---|
-| **Q10** | **The Workspace earned the default; the flag is retired.** `RIP_WORKSPACE` no longer exists: every manager-served browser app takes the cell path (a client-only save feeds the live pool; any other save reloads the pool and dings the swap as an epoch), and the page opens the door wherever the feed surface exists (worker mode). Q9's merge executed: `packages/workspace` folded into `packages/app` (`workspace.rip`, `feed.rip` — `createWorkspace` and `connectFeed` on the public entry), so `@rip-lang/app` **is** the client side. `packages/refresh` will never exist as a separate package: when apply research (M2) starts, the engine lands as a discardable `packages/app` module against the S-suite. The backout is architectural, not a flag: the boot's `workspace` option (standalone pages boot plain, byte-identically — D1) and the door/apply split remain. |
+| **Q10** | **The Workspace earned the default; the flag is retired.** `RIP_WORKSPACE` no longer exists: every WATCHING manager-served browser app takes the cell path (a client-only save feeds the live pool; any other save reloads the pool and dings the swap as an epoch), and the page opens the door wherever the feed surface exists — a WATCHING worker. The manager sets the feed environment only with watch on: a production manager (watch off) writes no cells, no manifest, publishes no dings, and its pages boot plain — production has no hub (Q2), enforced structurally, not by convention. Q9's merge executed: `packages/workspace` folded into `packages/app` (`workspace.rip`, `feed.rip` — `createWorkspace` and `connectFeed` on the public entry), so `@rip-lang/app` **is** the client side. `packages/refresh` will never exist as a separate package: when apply research (M2) starts, the engine lands as a discardable `packages/app` module against the S-suite. The backout is architectural, not a flag: the boot's `workspace` option (standalone pages boot plain, byte-identically — D1) and the door/apply split remain. |
 
 The ledger and the bundle are one artifact: first paint fetches the
 ledger (manifest + cells in one document — today's `bundle.json`
