@@ -85,3 +85,24 @@ updates without a manual refresh.
 The update applies by **remount labeled escape** (docs/WORKSPACE.md,
 M1): the route remounts against the new component, and the console says
 so — this is the door working, not hot state-preserving apply.
+
+## Leg 4 — live collaboration
+
+No new commands: any pooled run (leg 2 or 3) already carries it. Open
+the page in TWO browser windows and post from one — the other's list
+updates without a refresh.
+
+The mechanism is the app-level twin of the dev feed, over the same
+Janus hub, under the same doctrine — **the frame is a hint, the data
+rides HTTP**:
+
+- On mount the page opens a `/hub` socket and self-enrolls with
+  `{"+": ["/pulse"]}` — a client-legal hub directive; the worker is
+  not involved.
+- After a successful POST the poster sends
+  `{"@": ["/pulse"], "changed": {}}`; Janus fans it out to every
+  member at the edge.
+- Each member (the poster included — the echo is idempotent) refetches
+  `GET /api/statuses`. The frame never carries a status, so a spoofed
+  frame can only cause a harmless refetch: the server stays
+  authoritative.

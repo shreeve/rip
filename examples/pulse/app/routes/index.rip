@@ -4,6 +4,28 @@ export Home = component
   statuses <~ @app.data.statuses
   text := ""
   mood := "up"
+  hub := null
+
+  # Live collaboration rides the same edge hub as the dev feed, and by
+  # the same doctrine: the frame is a HINT, never the data. Members of
+  # /pulse hear "changed" and refetch over HTTP — a spoofed frame can
+  # only cause a harmless refetch, so the server stays authoritative.
+  mounted: ->
+    scheme = if location.protocol is 'https:' then 'wss' else 'ws'
+    ws = new WebSocket "#{scheme}://#{location.host}/hub"
+    ws.onopen = -> ws.send JSON.stringify '+': ['/pulse']
+    ws.onmessage = (event) ->
+      frame = JSON.parse event.data
+      refresh() if frame.changed?
+    hub = ws
+
+  beforeUnmount: ->
+    hub?.close()
+    hub = null
+
+  refresh: ->
+    # The source cell refetches; the render gate re-reads and the list updates.
+    globalThis.__ripApp.data.source('statuses').refetch()
 
   post: ->
     return if text is ""
@@ -13,8 +35,10 @@ export Home = component
         'Content-Type': 'application/json'
       body: JSON.stringify { text, mood }
     text = ""
-    # The source cell refetches; the render gate re-reads and the list updates.
-    globalThis.__ripApp.data.source('statuses').refetch()
+    refresh()
+    # Announce to every /pulse member (including this page — the echo
+    # just re-runs the refetch above, which is idempotent).
+    hub?.send JSON.stringify '@': ['/pulse'], changed: {}
 
   render
     h1 "Pulse"
