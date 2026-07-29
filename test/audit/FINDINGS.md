@@ -104,7 +104,7 @@ The declaration stands — the face reads `let yes: boolean = false` — and eve
 
 **vs v3 — not a regression** (driven both sides, 2026-07-28). v3 prints `true` for the same two lines. Both the pair exemption in the identifier branch and the alias table predate this repo, so the shape has always miscompiled; the lexer-spelling census is what made it visible, not a change that made it wrong.
 
-**Status.** ⬜ **Open** (2026-07-27) — **no gate**, honestly: a positive fixture cannot carry the shape while it miscompiles, and `rip check` cannot see it because the face is clean. The fix's gate is a `battery` rejection row for the declaration, at which point the census's `yes`/`no` rows go dark and want an exclusion naming `true`/`false` as the spelling that carries their lowering.
+**Status.** ⬜ **Open** (2026-07-27) — **no gate**, honestly: a positive fixture cannot carry the shape while it miscompiles, and `rip check` cannot see it because the face is clean. The fix's gate is a `battery` rejection row for the declaration, at which point the census's four value-alias rows — `yes`, `no`, `on`, `off`, which sit in its queue together for exactly as long as this row is open — want one exclusion naming `true`/`false` as the spelling that carries their lowering.
 
 ### 21. An identifier read carries no source span
 

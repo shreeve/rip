@@ -57,7 +57,7 @@ export const CONTRACT = [
     // the lexer's own table, so it cannot fall out of step. The curated mints
     // can, and a row that no longer describes the lexer measures nothing.
     name: 'lexer.mints', lane: 'grammar',
-    property: "every curated mint spelling is still minted by the lexer, driven by its own probe",
+    property: "every hand-listed spelling is still produced by the lexer, driven by its own probe",
     red: (s) => (s.gr.negatives?.staleMints ?? 0) > 0,
   },
   {
