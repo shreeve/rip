@@ -2417,6 +2417,11 @@ if (RUN_GRAMMAR) {
     // with the Containment summary under Corpus claims.
     out(`    ${(headsUnseen.length ? red : green)(String(headsSeen.size))} ${dim('/')} ${dim(String(CONSTRUCT_HEADS.size))} ${dim('heads spelled by a fixture')}`);
     for (const h of headsUnseen) out(`    ${red('✗')} ${red(`curated head no fixture produces: ${h}`)} ${dim('— drop it if the parser never mints it, or spell it if it does')}`);
+    // The vocabulary itself under -v, as every other census in this section
+    // lists its own members. A reader asking which pairs a CLAIMS.md cell may
+    // name has to know the heads to answer, and this was the one denominator
+    // the report counted without ever showing.
+    if (VERBOSE) wrapList([...CONSTRUCT_HEADS].sort(), dim);
 
     // ── COMMENT CONVENTION — one rule enforced, one reported. A corpus
     // comment is never a reflowed paragraph: a section divider opens `── `
@@ -2435,7 +2440,6 @@ if (RUN_GRAMMAR) {
       ...fs.readdirSync(ERRD).map((f) => [ERRD, f]),
     ].filter(([, f]) => /\.(rip|ts|tsx)$/.test(f));
     const splitDividers = [];
-    const headerLines = [];
     // A rip line opening `#` is not necessarily a comment: `#{…}` is string
     // interpolation, and inside a heredoc or heregex a `#` line is content
     // whose bytes the runtime dimension compares. Two conditions keep this
@@ -2448,9 +2452,6 @@ if (RUN_GRAMMAR) {
         ? (t) => (t === '#' ? '' : t.startsWith('# ') ? t.slice(2) : null)
         : (t) => (t === '//' ? '' : t.startsWith('// ') ? t.slice(3) : null);
       const lines = fs.readFileSync(path.join(dir, f), 'utf8').split('\n');
-      let head = 0;
-      while (head < lines.length && commentOf(lines[head]) !== null) head++;
-      headerLines.push([f, head]);
       lines.forEach((l, i) => {
         if (l !== l.trimStart()) return;            // indented: inside a construct, not a divider
         const body = commentOf(l);
@@ -2459,16 +2460,22 @@ if (RUN_GRAMMAR) {
         if (t.startsWith('── ') && !t.endsWith('──')) splitDividers.push([f, i + 1, t]);
       });
     }
-    out(`\n    ${bold('Comment convention')} ${dim('(a divider opens and closes on one line — exact; header length is a gauge)')}`);
-    // Count FILES, not divider hits: one file can wrap several dividers, and
-    // subtracting a hit count from a file count would understate how much of
-    // the corpus is clean (and can go negative).
-    const filesWithSplit = new Set(splitDividers.map(([f]) => f)).size;
-    out(`    ${(filesWithSplit ? red : green)(String(commentFiles.length - filesWithSplit))} ${dim('/')} ${dim(String(commentFiles.length))} ${dim('files whose dividers all close on their own line')}`);
-    for (const [f, ln, body] of splitDividers) out(`    ${red('✗')} ${red(`${f}:${ln} divider wraps`)} ${dim(`— join the lines: ${body.slice(0, 60)}…`)}`);
-    const deepHeaders = headerLines.filter(([, n]) => n > 3).sort((a, b) => b[1] - a[1]);
-    out(`    ${dim(`headers: ${headerLines.filter(([, n]) => n <= 3).length} of ${headerLines.length} at 3 lines or fewer`)}${deepHeaders.length ? `${dim(' · deepest: ')}${yellow(deepHeaders.slice(0, 3).map(([f, n]) => `${f} (${n})`).join(', '))}` : ''}`);
-
+    // NO SECTION when this holds. Every other block in this gate reports a
+    // coverage denominator — what the corpus proves and what it does not —
+    // and a divider rule is neither: it is a readability invariant over
+    // prose, true every run so far, and two lines saying the comments are
+    // tidy sat between two censuses answering a different question entirely.
+    // It keeps its teeth: the contract still judges it, Totals names it among
+    // the obligations that HELD (so a reader can tell "clean" from "never
+    // measured"), and a violation prints here, loudly, where the corpus it
+    // describes is being reported on.
+    // The header gauge is ONE NUMBER, riding the divider line. Its whole job
+    // is that a header drifting toward eighteen lines gets noticed, and the
+    // number alone does that job — naming the files at the deepest depth
+    // spends a line telling a reader which files have an ordinary header,
+    // which is news about nothing. When the number does look wrong, the file
+    // is one grep away, and no threshold has to be invented to decide when to
+    // print it.
     out(`\n    ${bold('Negative coverage')} ${dim(`(the error lane against the positive corpus's own claims — vocabulary contractual, family fractions a gauge)`)}`);
     out(`    ${dim(`${negParsed} error fixtures reduce ${negSeen.size} productions`)}${famZero.length ? `${dim(' · families with no negative at all: ')}${yellow(famZero.join(', '))}` : ''}`);
     if (VERBOSE) for (const [g, n] of [...famPos.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
@@ -2484,7 +2491,7 @@ if (RUN_GRAMMAR) {
       kindDenom: censusDenom.length, kindQueued: kindQueue.length,
       kindBad: claimedOutside.length + falseKindExclusions.length + staleKindExclusions.length,
       headsUnseen: headsUnseen.length, headsTotal: CONSTRUCT_HEADS.size, pairs: pairsSeen.size,
-      splitDividers: splitDividers.length,
+      splitDividers: splitDividers.length, splitDividerRows: splitDividers, dividerFiles: commentFiles.length,
     };
     // ── CORPUS CLAIMS (CLAIMS.md) — the decision record for coverage with
     // no syntactic denominator: checker behaviors (carrier presence-checked
@@ -2589,6 +2596,16 @@ if (RUN_GRAMMAR) {
       ng.claimsAbsent = absent; ng.claimsBroken = broken + claimsOrphans; ng.cellsMissing = cellsMissing;
       ng.claimsParked = parked; ng.claimsBadParks = staleParks.length + orphanParks.length;
     }
+  }
+  // LAST, and only when it fires. Every section above measures what the
+  // corpus proves; this one measures whether its prose is tidy, which is the
+  // least of what a reader came here for — so it never interrupts the
+  // coverage narrative, and when it does appear it is at the bottom where an
+  // interruption costs nothing. Totals names the rule among the obligations
+  // either way, so silence here is never mistaken for unmeasured.
+  if (ng?.splitDividerRows?.length) {
+    out(`\n    ${bold('Comment convention')} ${dim('(a section divider opens and closes on one line — never a reflowed paragraph)')}`);
+    for (const [f, ln, body] of ng.splitDividerRows) out(`    ${red('✗')} ${red(`${f}:${ln} divider wraps`)} ${dim(`— join the lines: ${body.slice(0, 60)}…`)}`);
   }
   gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, uncoveredParked: uncovered.filter((i) => owner?.parked.has(names[i])).length, groups: groups.size, groupKind: owner ? 'files' : 'constructs', unallocated: groups.get('UNALLOCATED')?.length ?? 0, excluded: excludedIdx.length, badExclusions: falseExclusions.length + staleExcluded.length, unparsed: fixtureRows.filter((r) => !r.ok).length, negatives: ng };
 }
@@ -3809,6 +3826,11 @@ if (gr) {
   if (n.kindBad) broken.push(s(n.kindBad, 'census violation'));
   if (n.vocabUnfalsified) broken.push(`${n.vocabUnfalsified}/${n.vocabClaimed} vocabulary classes unfalsified`);
   if (n.headsUnseen) broken.push(`${s(n.headsUnseen, 'containment head')} no fixture spells`);
+  // The contract judged this all along, but Totals never did — so a wrapped
+  // divider failed the run while this line still read `all hold`. It matters
+  // more now that the held list names the rule: an obligation a reader is
+  // told held must be one this line can also report broken.
+  if (n.splitDividers) broken.push(`${s(n.splitDividers, 'wrapped divider')} — join the lines`);
   // The claims registry is the one input here that can be ABSENT: everything
   // else is derived from the grammar or the corpus and always measured, but
   // CLAIMS.md is a file, and when it is missing the whole section is skipped
@@ -3836,6 +3858,9 @@ if (gr) {
   if (n.headsTotal) held.push(`${n.headsTotal} containment heads spelled`);
   if (n.vocabClaimed) held.push(`${n.vocabClaimed} vocabulary classes falsified`);
   if (claimsRead) held.push('every claims carrier and cell live');
+  // The divider rule prints no section of its own while it holds, so this
+  // clause is the only place a reader learns it was measured at all.
+  if (n.dividerFiles) held.push('every corpus divider closes on its own line');
   totalLine('Grammar', `${gr.total} productions${gr.excluded ? dim(` after ${gr.excluded} exclusions`) : ''}: `
     + (gr.uncovered === 0 ? green('every production exercised by the corpus') : green(`${gr.covered} exercised`))
     + `${dim(' · obligations: ')}${broken.length ? red(broken.join(', ')) : green(`all hold — ${held.join(', ')}`)}`
