@@ -144,6 +144,212 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  // Three of the four component member forms silently accept a wrong-typed
+  // initializer: in a component-carrying file the face's runtime destructure
+  // is UNTYPED (the reactive table's generic signatures are lost), so
+  // `__state`/`__computed` return effectively-any and the _init assignments
+  // never check; the `=!` member's constructor-seam write is cast
+  // `(this as any)`, which swallows the value check with it. Wrong-typed
+  // WRITES inside a method are a second root in the same hole: tsgo reports
+  // them on the mirror, and the `@name` lowering's `this.`-prefix carries no
+  // source row, so mapTsDiagnostic drops them in transit — state, prop, and
+  // plain non-reactive member alike.
+  //
+  // Both halves are OPEN gaps, so this test asserts the SILENCE on purpose —
+  // the exact-list assertions are the gap. The day either half is fixed
+  // (typing the destructure, or an honest mapping for the `@` write's span),
+  // new diagnostics appear and the lists below go red: that is the cue to
+  // invert this test and move the member negatives into the audit's
+  // components error pair, not a regression. The liveness signals are
+  // IN-FILE: the plain member's own TS2322 proves member initializers reach
+  // the checker, and the method-body TS2304 proves method bodies do — so a
+  // checker that stopped reporting cannot impersonate the fix.
+  test('a component member initializer and in-method writes are never type-checked — an open gap, asserted as-is', () => {
+    const initDir = workspace({
+      'member.rip': [
+        'export Box = component',
+        '  wrongPlain: string = 42',
+        "  wrongMember: number := 'oops'",
+        "  wrongComputed: string ~= 7 * 3",
+        "  wrongReadonly: number =! 'nope'",
+        '',
+        '  render',
+        '    div wrongPlain',
+      ].join('\n') + '\n',
+    });
+    // The write half was driven under rip.strict; the drop is mode-independent
+    // (mapTsDiagnostic discards any diagnostic whose generated span has no
+    // honest source mapping), but the gate re-drives the driven posture.
+    const writeDir = workspace({
+      'writes.rip': [
+        'export Writer = component',
+        "  @value: string := ''",
+        '  count := 0',
+        '  plainField: number = 1',
+        '',
+        '  bump: ->',
+        "    @count = 'oops'",
+        "    @value = 'nope'",
+        "    @plainField = 'flat'",
+        '    nonexistentHelper(1)',
+        '',
+        '  render',
+        '    div count',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const init = JSON.parse(check(initDir, ['--json']).stdout);
+      // The plain member's TS2322 alone — the `:=`, `~=`, and `=!` member
+      // lines (3–5) publish NOTHING. Exact list: a fix on any form goes red.
+      expect(init.map((d) => [d.code, d.line])).toEqual([[2322, 2]]);
+
+      const writes = JSON.parse(check(writeDir, ['--json']).stdout);
+      // The method body's TS2304 alone — the three wrong-typed member writes
+      // (lines 7–9) publish NOTHING, though tsgo reports all three on the
+      // mirror.
+      expect(writes.map((d) => [d.code, d.line])).toEqual([[2304, 10]]);
+    } finally {
+      fs.rmSync(initDir, { recursive: true, force: true });
+      fs.rmSync(writeDir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // A wrong-typed schema DEFAULT and a wrong-typed TRANSFORM both publish
+  // nothing: the face carries the schema body as an untyped runtime
+  // descriptor (`__schema({ … })`), where a default is a bare JS value and a
+  // transform a bare JS function, related to the field's declared type by
+  // nothing tsgo can see. The runtime rejects both on every `.parse()` — the
+  // declaration is a program that cannot parse successfully, silent until
+  // run.
+  //
+  // An OPEN gap, asserted as the SILENCE on purpose: the day the descriptor
+  // types its defaults (or transforms), schema.rip publishes and the empty
+  // list goes red — the cue to invert this test and move the misdeclaration
+  // negatives into the audit's schema error pair, not a regression. The
+  // liveness pair (a real TS2322 in the same workspace) keeps an empty run
+  // loud.
+  test('a wrong-typed schema default or transform is never type-checked — an open gap, asserted as-is', () => {
+    const dir = workspace({
+      'schema.rip': [
+        'Person = schema',
+        '  id!   number, -> it.name',      // transform returns string on a number field
+        "  role  number, ['guest']",       // string default on a number field
+        '',
+        "person = Person.parse({ name: 'Ada' })",
+        'console.log person.id, person.role',
+      ].join('\n') + '\n',
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
+      expect(diags.filter((d) => d.file === 'schema.rip')).toEqual([]);                      // the gap
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A pattern catch destructures `unknown`: the lowering mints its binding
+  // (`catch (_err) { ({message} = _err); … }`) and the face types it
+  // `unknown`, so the destructure itself publishes on legal rip — TS2339 on
+  // an object pattern, TS2488 on an array pattern — with no narrowing seam
+  // the author can reach. (The identifier spelling is NOT this class: its
+  // `unknown` is honest and user-governable.)
+  //
+  // An OPEN gap, asserted as-is: the day the pattern branch mints its own
+  // annotation, both codes vanish and the assertions go red — the cue to
+  // invert this test and move both pattern spellings out of the manifest's
+  // Parked table into the exceptions fixture, not a regression. Codes are
+  // BOUND to their lines, columns left free: a partial fix on either
+  // spelling goes red, a mapped-column shift is not a fix. Liveness-paired.
+  test('a pattern catch publishes TS2339/TS2488 from its own lowering — an open gap, asserted as-is', () => {
+    const dir = workspace({
+      'catchpat.rip': [
+        'try',
+        "  JSON.parse('broken')",
+        'catch {message}',
+        '  console.log message',
+        '',
+        'try',
+        "  JSON.parse('broken')",
+        'catch [first]',
+        '  console.log first',
+      ].join('\n') + '\n',
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
+      expect(diags.filter((d) => d.file === 'catchpat.rip').map((d) => [d.code, d.line]))
+        .toEqual([[2339, 3], [2488, 8]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // An `@`-param promotion emits its assignment and not the field declaration
+  // it implies, so the class has no such property on the checked face:
+  // TS2339 at the promotion itself and at every member use, on legal rip
+  // that runs correctly. (The shipped .d.ts declares the field on both
+  // sides; only the check mirror omits it.)
+  //
+  // An OPEN gap, asserted as-is: the day the mirror declares the promoted
+  // field, both TS2339s vanish and the exact list goes red — the cue to
+  // invert this test and move the field-less spelling into the audit's
+  // functions fixture, not a regression. Codes bound to lines, columns
+  // free. Liveness-paired.
+  test('a promoted @-param declares no field — TS2339 on every member use, an open gap, asserted as-is', () => {
+    const dir = workspace({
+      'promo.rip': [
+        'class Crate',
+        "  constructor: (@owner: string) ->",
+        '',
+        "crate = new Crate('cargo')",
+        'console.log crate.owner',
+      ].join('\n') + '\n',
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
+      expect(diags.filter((d) => d.file === 'promo.rip').map((d) => [d.code, d.line]))
+        .toEqual([[2339, 2], [2339, 5]]);   // the promotion line, and the member use
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A forward-referenced class-expression binding breaks the pin probe:
+  // tsgo types an anonymous class by its own binding, so the probe
+  // declaration's hover answers `typeof __rip_probe_N_<name>` —
+  // self-referential — and parseProbeHover's unusable-answer filter has no
+  // self-reference clause, so the answer feeds back through compile() as a
+  // pin naming a symbol from a probe file already deleted. The published
+  // error is doubly wrong: false, and spelled in minted vocabulary the user
+  // can find nowhere.
+  //
+  // An OPEN gap, asserted as-is: the day the filter (or a substitution
+  // shape) lands, the TS2304 vanishes and this goes red — the cue to invert
+  // this test and move the forward-reference spelling into the corpus, not
+  // a regression. Liveness-paired.
+  test('a forward-referenced class pins the probe\'s own symbol — TS2304 on legal code, an open gap, asserted as-is', () => {
+    const dir = workspace({
+      'fwd.rip': [
+        'make = -> new Box()',    // reads Box above its declaration — forces the hoist split
+        'Box = class',
+        "  greet: -> 'hi'",
+        'console.log make().greet()',
+      ].join('\n') + '\n',
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
+      const fwd = diags.filter((d) => d.file === 'fwd.rip');
+      // Code bound to its line, column left free — the diagnostic is anchored
+      // at the hoist line, whose mapped column is a property of the hoist
+      // emission rather than of this root, so pinning it would redden on an
+      // unrelated remap. The minted symbol in the message is the substantive
+      // assertion: that vocabulary IS the defect.
+      expect(fwd.map((d) => [d.code, d.line])).toEqual([[2304, 1]]);
+      expect(fwd[0].message).toContain('__rip_probe_');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   test('a write to a computed is an emitter decline, bound to the write line', () => {
     // `doubled = 5` off `doubled ~= …` is REJECTED at compile — a real
     // message, never broken output (the for-range-ban model). This is the

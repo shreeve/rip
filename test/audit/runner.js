@@ -3251,7 +3251,7 @@ if (RUN_ERRORS) {
   el = {
     files: laneRows.length,
     asserted: laneRows.reduce((n, r) => n + r.expected.length, 0),
-    problems: [...laneRows.flatMap((r) => r.problems), ...orphanTwins.map((o) => ({ kind: 'orphan', note: `${o}: twin with no fixture` }))],
+    problems: [...laneRows.flatMap((r) => r.problems.map((p) => ({ ...p, file: r.name }))), ...orphanTwins.map((o) => ({ kind: 'orphan', note: `${o}: twin with no fixture`, file: o }))],
   };
 }
 
@@ -4192,21 +4192,34 @@ if (tk) {
 // it dangles fragments at column zero (the defect `totalLine` exists to prevent,
 // one section up).
 {
-  const reason = (text) => { for (const l of wrapText(text, TERM_W - 8, 0)) console.log(`        ${dim(l)}`); };
+  // A row's reason is its DETAIL, at 6 — it sat at 8, which is the level for
+  // detail-of-detail and left a gap under a section that has no middle tier.
+  const reason = (text) => { for (const l of wrapText(text, TERM_W - 6, 0)) console.log(`      ${dim(l)}`); };
   const { verdicts, failures } = judge({
     states: { gr, mp, el, hp, tk, fails },
     ran: (lane) => AUDITS.find((a) => a.key === lane).ran,
   });
   const judged = verdicts.filter((v) => v.state !== 'skipped');
   out(`\n  ${bold('Contract')} ${dim(`(${judged.length} invariant${judged.length === 1 ? '' : 's'} judged${verdicts.length - judged.length ? `, ${verdicts.length - judged.length} unjudged — their lane did not run` : ''})`)}`);
-  for (const v of judged.filter((x) => x.state !== 'green')) {
-    if (v.state === 'red-expected') { console.log(`    ${yellow('·')} ${pad(v.name, 26)} ${dim('red by agreement')}`); reason(v.redBecause); }
-    if (v.state === 'red-new') { console.log(`    ${red('✗')} ${pad(v.name, 26)} ${red('BROKEN')}`); reason(`this must hold: ${v.property}`); }
-    if (v.state === 'recovered') { console.log(`    ${red('✗')} ${pad(v.name, 26)} ${red('RECOVERED')}`); reason('red by agreement, now holding — delete its `redBecause`, which would otherwise mask the next break here'); }
+  const shown = judged.filter((x) => x.state !== 'green');
+  const NW = Math.max(1, ...shown.map((v) => v.name.length));
+  for (const v of shown) {
+    // An AGREED red's reason is standing state: it cannot change until its fix
+    // lands, so printing all five in full every run spent twenty lines
+    // restating yesterday. The names stay — a reader must still see WHAT is
+    // tolerated without asking — and -v gives the reasons. A red-new or a
+    // recovered row is news and always carries its own, since those are the
+    // two states that need acting on.
+    if (v.state === 'red-expected') {
+      console.log(`    ${yellow('·')} ${pad(v.name, NW)}   ${dim('red by agreement')}`);
+      if (VERBOSE) reason(v.redBecause);
+    }
+    if (v.state === 'red-new') { console.log(`    ${red('✗')} ${pad(v.name, NW)}   ${red('BROKEN')}`); reason(`this must hold: ${v.property}`); }
+    if (v.state === 'recovered') { console.log(`    ${red('✗')} ${pad(v.name, NW)}   ${red('RECOVERED')}`); reason('red by agreement, now holding — delete its `redBecause`, which would otherwise mask the next break here'); }
   }
   const held = judged.filter((v) => v.state === 'red-expected').length;
   const clean = judged.filter((v) => v.state === 'green').length;
-  out(`    ${failures.length ? red(`${failures.length} failing`) : green('contract holds')}${dim(` · ${clean} green · ${held} red by agreement`)}`);
+  out(`    ${failures.length ? red(`${failures.length} failing`) : green('contract holds')}${dim(` · ${clean} green · ${held} red by agreement`)}${held && !VERBOSE ? dim(' — -v gives each reason') : ''}`);
   console.log('');
   if (failures.length) process.exit(1);
 }

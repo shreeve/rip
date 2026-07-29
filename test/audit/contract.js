@@ -162,11 +162,29 @@ export const CONTRACT = [
     property: 'every diagnostic the twin publishes is published by the fixture, and none besides',
     red: (s) => s.el.problems.some((p) => p.kind !== 'position'),
   },
+  // The position agreement was ONE row tolerating TWO unrelated defects, joined
+  // by `AND`. Recovery only fires when a whole invariant goes green, so fixing
+  // either would have left the row red on the other and half its reason a lie —
+  // the exact failure the two-directional check exists to prevent. Split by the
+  // fixture each agreement already names, which also TIGHTENS the contract: a
+  // position violation anywhere else is a fresh red now, not one absorbed by a
+  // blanket tolerance. Both remain the same root — a read inside a cover row
+  // resolving to the cover's edge — on two list shapes.
   {
     name: 'diagnostics.positions', lane: 'errors',
-    property: 'every diagnostic lands on the span its twin puts it on',
-    redBecause: "a string literal carries no source span of its own, so a diagnostic ON one falls back to the enclosing element list and lands wide — 11-types' wrongEntry row is the case; its wrongTrailing neighbour, whose offending element is a READ, now narrows correctly. The single-quoted OFFENDING literal is load-bearing, and double-quoting it would narrow the span without fixing anything; delete this when the span narrows to the element",
-    red: (s) => s.el.problems.some((p) => p.kind === 'position'),
+    property: 'every diagnostic lands on the span its twin puts it on, outside the two agreed below',
+    red: (s) => s.el.problems.some((p) => p.kind === 'position' && !/^(11-types|02-operations)\./.test(p.file ?? '')),
+  },
+  {
+    name: 'diagnostics.positions.element', lane: 'errors',
+    property: 'a wrong-element diagnostic lands on the offending element, not the whole list',
+    redBecause: "a string literal carries no source span of its own, so a diagnostic ON one falls back to the enclosing element list and lands wide — 11-types' wrongEntry row is the case, and its wrongTrailing neighbour, whose offending element is a READ, now narrows correctly. The single-quoted OFFENDING literal is load-bearing, not the leading one: double-quoting it would narrow the span without fixing anything; delete this when the span lands on the offending element",
+    red: (s) => s.el.problems.some((p) => p.kind === 'position' && /^11-types\./.test(p.file ?? '')),
+  },
+  {
+    name: 'diagnostics.positions.arity', lane: 'errors',
+    property: "a paren-injected call's arity error lands on the excess argument",
+    red: (s) => s.el.problems.some((p) => p.kind === 'position' && /^02-operations\./.test(p.file ?? '')),
   },
   {
     name: 'hover.parity', lane: 'hover',
@@ -178,16 +196,27 @@ export const CONTRACT = [
     property: 'the server delivers a semantic token for every probed declaration',
     red: (s) => s.tk.missing.length > 0,
   },
+  // Split for the same reason as the position rows: one red tolerating the enum
+  // classification AND the void-lowering split could only recover together, so
+  // fixing either left half a reason standing as fact. `want.type` separates
+  // them exactly — the enum rows expect `enum`, the void row expects
+  // `function` — and anything else is a fresh red rather than an absorbed one.
   {
     name: 'token.type', lane: 'token',
-    property: "each declaration's token type is the one its binding form fixes",
-    // TWO open rows share this red, and it does not clear until both do:
-    // the enum names, and the void-marked binding whose hoist-split declaration
-    // hides its function value. Naming only one would strand the other the day
-    // that one closes — the shape the ledger warns about, since a reader
-    // deleting a satisfied reason would leave a red nothing explains.
-    redBecause: 'an enum name\'s token says `type` where its declaring form fixes `enum`, and a void-marked binding says `variable` where its arrow fixes `function` — delete this when the server classifies enum declarations by their own form AND the void lowering stops splitting its declaration',
-    red: (s) => s.tk.badType.length > 0,
+    property: "each declaration's token type is the one its binding form fixes, outside the two forms agreed below",
+    red: (s) => s.tk.badType.some((r) => r.want?.type !== 'enum' && r.want?.type !== 'function'),
+  },
+  {
+    name: 'token.type.enum', lane: 'token',
+    property: 'an enum name is classified by its own declaring form',
+    redBecause: "an enum name's token says `type` where its declaring form fixes `enum` — delete this when the server classifies enum declarations by their own form",
+    red: (s) => s.tk.badType.some((r) => r.want?.type === 'enum'),
+  },
+  {
+    name: 'token.type.void', lane: 'token',
+    property: 'a void-marked binding is classified by the arrow it holds',
+    redBecause: "a void-marked binding says `variable` where its arrow fixes `function`, because the void lowering splits the declaration and hides its function value — delete this when the lowering stops splitting it",
+    red: (s) => s.tk.badType.some((r) => r.want?.type === 'function'),
   },
   {
     name: 'token.readonly', lane: 'token',
