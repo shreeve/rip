@@ -140,6 +140,10 @@ export state =
   ringWaiters: 0
   readyWhen: 1
   shuttingDown: false
+  # Test seam: invoked after the one app/ snapshot is taken and before any
+  # durable document is written from it. Pins mutate the disk here to prove
+  # a second walk cannot affect the producing run.
+  afterAppSnapshot: null
 
 # ==============================================================================
 # Control-plane client — single writer, every call awaited in order
@@ -337,27 +341,61 @@ clientModules = (dir) ->
   walk dir, 'app/'
   out
 
-assembleBundleText = ->
-  assemble = loadAssembler!()
-  JSON.stringify assemble { modules: clientModules(join(cfg.appDir, 'app')), packagesDir: join(loaderSrcDir(), '..', 'packages') }
+# One app/ walk feeds every document in a producing run. A second walk can
+# observe a save mid-run and write a manifest naming revs the bundle does
+# not carry — the silent-stale class the boot's rev cursor cannot heal.
+readAppModules = ->
+  appRoot = join(cfg.appDir, 'app')
+  return null unless existsSync(appRoot)
+  clientModules(appRoot)
 
-buildBundle = ->
-  return null unless existsSync(join(cfg.appDir, 'app'))
+assembleBundleText = (modules) ->
+  assemble = loadAssembler!()
+  JSON.stringify assemble { modules, packagesDir: join(loaderSrcDir(), '..', 'packages') }
+
+buildBundle = (modules) ->
+  return null unless modules?
   out = join(state.runDir, "b#{state.buildCounter}-bundle.json")
-  Bun.write! out, assembleBundleText!()
+  Bun.write! out, assembleBundleText!(modules)
   out
 
-buildApp = ->
+# Deep-clone the cell registry so a scrapped epoch build can restore it —
+# buildApp advances cells + manifest before bootLoop knows whether the
+# artifact will publish, and a scrap that only unlinks the bundle would
+# leave the manifest naming revs whose bundle file is gone.
+snapshotCells = ->
+  out = {}
+  for path, entry of state.cells
+    out[path] = { id: entry.id, rev: entry.rev, hash: entry.hash, retired: entry.retired }
+  out
+
+# Restore the cell registry and rewrite the manifest. Exported as the
+# scrap pin's seam — bootLoop calls this whenever a build's bundle will
+# not stay published. A rewrite failure is loud — a silent leave-behind
+# would re-open the pairing the restore exists to close.
+export revertCellsAndManifest = (cellsBefore) ->
+  return unless cfg.watch
+  state.cells = cellsBefore
+  return unless state.manifestPath?
+  writeManifest!()
+
+# Exported as an in-process test seam (the epoch-path correlation pin
+# drives it directly through cfg/state).
+export buildApp = ->
   state.buildCounter += 1
   artifact = buildArtifact! cfg.entry, join(state.runDir, "b#{state.buildCounter}-app.js")
-  bundle = buildBundle!()
+  modules = readAppModules!()
+  state.afterAppSnapshot?()
+  bundle = buildBundle!(modules)
   if bundle? and cfg.watch
     # The bundle is durable (buildBundle wrote it) BEFORE the manifest
     # names the new revs — the correlation invariant below. Watch only:
     # the feed surface exists exactly where saves can ding it. With
     # watch off (production) no cells, no manifest, and the boot page
-    # stays plain — production has no hub (Q2).
-    syncCells!()
+    # stays plain — production has no hub (Q2). One snapshot: syncCells
+    # and the bundle consume the SAME modules map, so a save landing
+    # after the walk cannot invent the reverse pairing.
+    syncCells!(modules)
     writeManifest!()
   { artifact, bundle }
 
@@ -393,7 +431,7 @@ shortHash = (hash) -> hash.slice(0, 16)
 # it. Mirrored by the cell route in server.rip.
 cellFile = (id, rev) -> join(state.cellsDir, "#{encodeURIComponent(id)}@#{rev}")
 
-# Sync the registry against the app/ tree and write what changed. A new
+# Sync the registry against a modules snapshot and write what changed. A new
 # path mints its id — the birth path, Q3/B′ — at rev 1; a changed path bumps
 # its rev; a deleted path retires: dropped from the manifest, its rev-keyed
 # files staying on disk and answering (Q8), and the retirement OCCUPIES its
@@ -401,12 +439,13 @@ cellFile = (id, rev) -> join(state.cellsDir, "#{encodeURIComponent(id)}@#{rev}")
 # returning after retirement resumes its rev sequence — restarting at rev 1
 # would rewrite an existing (id, rev) file, and rev-keyed files are
 # immutable. A rename is retire + mint (id persistence across renames is
-# open research). Returns the changed { id, rev, deleted? } entries.
-syncCells = ->
+# open research). The caller supplies the snapshot — a second disk walk
+# here would re-open the silent-stale class. Returns the changed
+# { id, rev, deleted? } entries.
+syncCells = (modules) ->
   state.cellsDir ?= join(state.runDir, 'cells')
   state.manifestPath ?= join(state.runDir, 'manifest.json')
   mkdirSync state.cellsDir, { recursive: true }
-  modules = clientModules(join(cfg.appDir, 'app'))
   changed = []
   for path, source of modules
     h = sha256hex(source)
@@ -457,12 +496,15 @@ writeManifest = ->
 
 # Rewrite the live pool's bundle file in place (tmp + rename — workers
 # re-read it per request under the flag), so a hard refresh never serves
-# stale first-paint code.
-refreshPoolBundle = ->
+# stale first-paint code. No live pool bundle is a held-back-manifest
+# verdict — never a silent skip that lets writeManifest name revs the
+# page cannot pair with bundle bytes.
+refreshPoolBundle = (modules) ->
   pool = state.currentPool
-  return unless pool?.bundle?
+  unless pool?.bundle?
+    throw new Error('rip-server: no live pool bundle to rewrite — manifest held back')
   tmp = "#{pool.bundle}.tmp"
-  Bun.write! tmp, assembleBundleText!()
+  Bun.write! tmp, assembleBundleText!(modules)
   renameSync tmp, pool.bundle
 
 # The cell path: cells, then the bundle, then the manifest — every document
@@ -487,9 +529,12 @@ export onCellChange = ->
   next
 
 runCellChange = ->
-  changed = syncCells!()
+  modules = readAppModules!()
+  return unless modules?
+  state.afterAppSnapshot?()
+  changed = syncCells!(modules)
   try
-    refreshPoolBundle!()
+    refreshPoolBundle!(modules)
     writeManifest!()
   catch e
     warn "rip-server: bundle/manifest rewrite failed on the cell path — manifest held back: #{e?.message or e}"
@@ -706,9 +751,15 @@ bootLoop = ->
   loop
     state.dirty = false
     build = null
+    # buildApp advances cells + manifest before we know whether this
+    # artifact will publish. Snapshot the registry so a scrap can restore
+    # it — otherwise the manifest would name revs whose bundle file was
+    # unlinked (the silent-stale class on the epoch path).
+    cellsBefore = snapshotCells()
     try
       build = buildApp!()
     catch err
+      revertCellsAndManifest cellsBefore
       continue if state.dirty        # files changed mid-build; the failure may be stale
       state.bootFailure = err?.message or String(err)
       warn "rip-server: app build failed: #{state.bootFailure}"
@@ -716,18 +767,21 @@ bootLoop = ->
     if state.dirty                   # saved during the build — this artifact is stale
       try unlinkSync build.artifact
       try unlinkSync build.bundle if build.bundle?
+      revertCellsAndManifest cellsBefore
       continue
     pool = spawnPool(build.artifact, build.bundle)
     try
       awaitReady! pool, state.readyWhen
     catch err
       scrapPool pool
+      revertCellsAndManifest cellsBefore
       continue if state.dirty        # files changed mid-boot; the failure may be stale
       state.bootFailure = err?.message or String(err)
       warn "rip-server: pool boot failed: #{state.bootFailure}"
       throw err
     if state.dirty                   # check at publish: never publish a stale pool
       scrapPool pool
+      revertCellsAndManifest cellsBefore
       continue
     # The enqueued fn runs behind whatever the writer chain already holds —
     # a save or a shutdown can land in that gap, so re-check inside the

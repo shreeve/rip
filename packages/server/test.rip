@@ -1299,7 +1299,7 @@ test! "an orphaned worker (parent gone) exits on its own", ->
 
 console.log "\nPrebuild"
 
-import { buildArtifact, REGISTER_409_MS, scale, publish, state as managerState, cfg as managerCfg, onCellChange, DEV_CHANNEL as MANAGER_DEV_CHANNEL } from './manager.rip'
+import { buildArtifact, buildApp, revertCellsAndManifest, REGISTER_409_MS, scale, publish, state as managerState, cfg as managerCfg, onCellChange, DEV_CHANNEL as MANAGER_DEV_CHANNEL } from './manager.rip'
 
 test "DEV_CHANNEL mirrors across manager and worker — a pinned fact, not a convention", ->
   eq MANAGER_DEV_CHANNEL, mod.DEV_CHANNEL
@@ -2438,9 +2438,197 @@ test! "publish() surfaces a non-2xx answer as an error carrying status and body"
 # after the pool bundle carrying the same revs is. A bundle rewrite failure
 # HOLDS THE MANIFEST BACK — a manifest naming revs the bundle does not carry
 # would silently strand fresh boots on the bag's rev cursor. Driven
-# in-process through the exported singleton (cfg/state/onCellChange).
+# in-process through the exported singleton (cfg/state/onCellChange/buildApp).
+#
+# The same pairing holds on the epoch path: buildApp walks app/ ONCE and
+# feeds that snapshot to the bundle, the cells, and the manifest. A second
+# walk can observe a save mid-run and invent the reverse pairing.
 
 console.log "\nManager cell path"
+
+# Every manifest entry's (id, rev, hash) must name bytes present in the bundle.
+assertManifestMatchesBundle = (manifestPath, bundlePath) ->
+  m = JSON.parse readFileSync(manifestPath, 'utf8')
+  b = JSON.parse readFileSync(bundlePath, 'utf8')
+  modules = b.modules or {}
+  for entry in m.cells
+    source = modules[entry.id]
+    ok source?, "bundle must carry #{entry.id}"
+    eq entry.hash, cellHash(source), "#{entry.id} rev #{entry.rev}: manifest hash must match bundle bytes"
+
+test! "a scrapped epoch build restores the manifest so it cannot name unlinked bundle revs", ->
+  # buildApp writes cells + manifest + bundle; bootLoop then sees dirty,
+  # unlinks the bundle, and calls revertCellsAndManifest. Without that
+  # restore the manifest would name revs whose bundle file is gone.
+  appDir = mkdtempSync join(import.meta.dir, 'tmp-scrap-')
+  runDir = mkdtempSync join(import.meta.dir, 'tmp-scrap-run-')
+  mkdirSync join(appDir, 'app'), { recursive: true }
+  writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
+  writeFileSync join(appDir, 'app.rip'), 'export default -> null'
+  saved =
+    appDir: managerCfg.appDir
+    entry: managerCfg.entry
+    watch: managerCfg.watch
+    runDir: managerState.runDir
+    cellsDir: managerState.cellsDir
+    manifestPath: managerState.manifestPath
+    cells: managerState.cells
+    buildCounter: managerState.buildCounter
+    afterAppSnapshot: managerState.afterAppSnapshot
+  try
+    managerCfg.appDir = appDir
+    managerCfg.entry = join(appDir, 'app.rip')
+    managerCfg.watch = true
+    managerState.runDir = runDir
+    managerState.cellsDir = null
+    managerState.manifestPath = null
+    managerState.cells = {}
+    managerState.buildCounter = 0
+    managerState.afterAppSnapshot = null
+    buildApp!()
+    cellsBefore = {}
+    for path, entry of managerState.cells
+      cellsBefore[path] = { id: entry.id, rev: entry.rev, hash: entry.hash, retired: entry.retired }
+    writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
+    build2 = buildApp!()
+    eq (JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')).cells,
+      [{ id: 'app/x.rip', rev: 2, hash: cellHash('export A = 2') }]
+    unlinkSync build2.bundle
+    revertCellsAndManifest! cellsBefore
+    m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
+    eq m.cells, [{ id: 'app/x.rip', rev: 1, hash: cellHash('export A = 1') }]
+    ok not existsSync(build2.bundle), 'the scrapped bundle stays gone'
+  finally
+    managerCfg.appDir = saved.appDir
+    managerCfg.entry = saved.entry
+    managerCfg.watch = saved.watch
+    managerState.runDir = saved.runDir
+    managerState.cellsDir = saved.cellsDir
+    managerState.manifestPath = saved.manifestPath
+    managerState.cells = saved.cells
+    managerState.buildCounter = saved.buildCounter
+    managerState.afterAppSnapshot = saved.afterAppSnapshot
+    rmSync appDir, { recursive: true, force: true }
+    rmSync runDir, { recursive: true, force: true }
+
+test! "epoch buildApp: a save after the snapshot cannot invent a manifest/bundle reverse pairing", ->
+  # Red against a second disk walk: afterAppSnapshot mutates the file AFTER
+  # the producing run's snapshot. One snapshot keeps the manifest paired
+  # with the bundle; a second walk would bump the rev against bytes the
+  # bundle does not carry (the silent-stale class).
+  appDir = mkdtempSync join(import.meta.dir, 'tmp-epoch-corr-')
+  runDir = mkdtempSync join(import.meta.dir, 'tmp-epoch-corr-run-')
+  mkdirSync join(appDir, 'app'), { recursive: true }
+  writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
+  writeFileSync join(appDir, 'app.rip'), 'export default -> null'
+  saved =
+    appDir: managerCfg.appDir
+    entry: managerCfg.entry
+    watch: managerCfg.watch
+    runDir: managerState.runDir
+    cellsDir: managerState.cellsDir
+    manifestPath: managerState.manifestPath
+    cells: managerState.cells
+    buildCounter: managerState.buildCounter
+    afterAppSnapshot: managerState.afterAppSnapshot
+  try
+    managerCfg.appDir = appDir
+    managerCfg.entry = join(appDir, 'app.rip')
+    managerCfg.watch = true
+    managerState.runDir = runDir
+    managerState.cellsDir = null
+    managerState.manifestPath = null
+    managerState.cells = {}
+    managerState.buildCounter = 0
+    managerState.afterAppSnapshot = ->
+      writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
+    build = buildApp!()
+    ok build.bundle?, 'watch-mode buildApp writes a bundle'
+    assertManifestMatchesBundle join(runDir, 'manifest.json'), build.bundle
+    m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
+    eq m.cells, [{ id: 'app/x.rip', rev: 1, hash: cellHash('export A = 1') }]
+  finally
+    managerCfg.appDir = saved.appDir
+    managerCfg.entry = saved.entry
+    managerCfg.watch = saved.watch
+    managerState.runDir = saved.runDir
+    managerState.cellsDir = saved.cellsDir
+    managerState.manifestPath = saved.manifestPath
+    managerState.cells = saved.cells
+    managerState.buildCounter = saved.buildCounter
+    managerState.afterAppSnapshot = saved.afterAppSnapshot
+    rmSync appDir, { recursive: true, force: true }
+    rmSync runDir, { recursive: true, force: true }
+
+test! "cell path: a save after the snapshot cannot invent a manifest/bundle reverse pairing", ->
+  appDir = mkdtempSync join(import.meta.dir, 'tmp-cell-corr-')
+  runDir = mkdtempSync join(import.meta.dir, 'tmp-cell-corr-run-')
+  mkdirSync join(appDir, 'app'), { recursive: true }
+  writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
+  saved =
+    appDir: managerCfg.appDir
+    runDir: managerState.runDir
+    cellsDir: managerState.cellsDir
+    manifestPath: managerState.manifestPath
+    cells: managerState.cells
+    currentPool: managerState.currentPool
+    afterAppSnapshot: managerState.afterAppSnapshot
+  try
+    managerCfg.appDir = appDir
+    managerState.runDir = runDir
+    managerState.cellsDir = null
+    managerState.manifestPath = null
+    managerState.cells = {}
+    managerState.currentPool = { bundle: join(runDir, 'bundle.json') }
+    managerState.afterAppSnapshot = ->
+      writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
+    onCellChange!()
+    assertManifestMatchesBundle join(runDir, 'manifest.json'), join(runDir, 'bundle.json')
+    m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
+    eq m.cells, [{ id: 'app/x.rip', rev: 1, hash: cellHash('export A = 1') }]
+  finally
+    managerCfg.appDir = saved.appDir
+    managerState.runDir = saved.runDir
+    managerState.cellsDir = saved.cellsDir
+    managerState.manifestPath = saved.manifestPath
+    managerState.cells = saved.cells
+    managerState.currentPool = saved.currentPool
+    managerState.afterAppSnapshot = saved.afterAppSnapshot
+    rmSync appDir, { recursive: true, force: true }
+    rmSync runDir, { recursive: true, force: true }
+
+test! "a cell-path run with no live pool bundle holds the manifest back", ->
+  appDir = mkdtempSync join(import.meta.dir, 'tmp-nopool-')
+  runDir = mkdtempSync join(import.meta.dir, 'tmp-nopool-run-')
+  mkdirSync join(appDir, 'app'), { recursive: true }
+  writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
+  saved =
+    appDir: managerCfg.appDir
+    runDir: managerState.runDir
+    cellsDir: managerState.cellsDir
+    manifestPath: managerState.manifestPath
+    cells: managerState.cells
+    currentPool: managerState.currentPool
+  try
+    managerCfg.appDir = appDir
+    managerState.runDir = runDir
+    managerState.cellsDir = null
+    managerState.manifestPath = null
+    managerState.cells = {}
+    managerState.currentPool = null          # no live pool — must not write a manifest
+    onCellChange!()
+    ok not existsSync(join(runDir, 'manifest.json')), 'no pool bundle ⇒ manifest held back'
+    ok existsSync(join(runDir, 'cells', "#{encodeURIComponent('app/x.rip')}@1")), 'cell bytes are durable regardless'
+  finally
+    managerCfg.appDir = saved.appDir
+    managerState.runDir = saved.runDir
+    managerState.cellsDir = saved.cellsDir
+    managerState.manifestPath = saved.manifestPath
+    managerState.cells = saved.cells
+    managerState.currentPool = saved.currentPool
+    rmSync appDir, { recursive: true, force: true }
+    rmSync runDir, { recursive: true, force: true }
+
 
 test! "concurrent cell-path runs serialize: a second save never interleaves a parked publish", ->
   # The pin parks run 1 inside its ding publish (a stub Janus that answers
