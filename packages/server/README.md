@@ -421,8 +421,10 @@ In watch mode:
   bundle's revs.
 - **Bundle freshness.** On the cell path the manager atomically rewrites
   the live pool's bundle file, and the worker's `/@rip/bundle.json`
-  re-reads and re-tags per request (Janus's micro-cache absorbs the
-  cost) — so a hard refresh never serves stale first-paint code. No live
+  re-reads and re-tags per request. With the door open the bundle is
+  `Cache-Control: no-store` like the manifest (a micro-cache hit would
+  otherwise pair a live manifest with stale first-paint bytes); with
+  watch off, ETag-only so the edge cache still earns its keep. No live
   pool bundle is a held-back-manifest verdict, never a silent skip.
 - **Bridge enrollment.** With `--bridge <path>`, the worker answers the
   bridge's `Sec-WebSocket-Frame: open` POST with `{"+": ["/@rip/dev"]}` —

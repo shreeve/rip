@@ -576,6 +576,54 @@ describe('bootApp workspace mode', () => {
     }
   });
 
+  test('a remount whose importer fails keeps the page interactive (compile barrier)', async () => {
+    // A shared cell can compile while its importer cannot (export
+    // removed). The remount must stage every projection first and
+    // abort with ZERO bag.setCompiled / destroy / relaunch — otherwise
+    // the page tears down into a version-mixed launch (S10).
+    const modules = {
+      'app/badge.rip': "export LABEL = 'badge v1'",
+      'app/routes/index.rip': [
+        "import { LABEL } from '../badge.rip'",
+        'export Home = component',
+        '  render',
+        '    h1 "#{LABEL}"',
+      ].join('\n'),
+    };
+    const manifest = {
+      cells: [
+        { id: 'app/badge.rip', rev: 1 },
+        { id: 'app/routes/index.rip', rev: 1 },
+      ],
+    };
+    const bundle = assembleBundle({
+      modules,
+      packagesDir: resolve(root, 'packages'),
+    });
+    const table = new Map([['/@rip/manifest.json', JSON.stringify(manifest)]]);
+    table.set('/@rip/cells/app/badge.rip?rev=2', "export OTHER = 'no LABEL'");
+    table.set('/@rip/cells/app/badge.rip?rev=3', "export LABEL = 'badge v3'");
+    const hub = fakeHub();
+    const reports = [];
+    const { result, target } = await bootWorkspace({ table, hub, bundle, reports });
+    try {
+      await until(() => target.textContent.includes('badge v1'));
+      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/badge.rip', rev: 2 } }) });
+      await until(() => result.workspace.passport('app/badge.rip').rev === 2);
+      await settleEscape();
+      await until(() => reports.some(line => line.includes('failed to compile') && line.includes('app/routes/index.rip')));
+      expect(target.textContent).toContain('badge v1');
+      expect(target.textContent).not.toContain('badge v3');
+      // The next good revision recovers through the same path.
+      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/badge.rip', rev: 3 } }) });
+      await until(() => result.workspace.passport('app/badge.rip').rev === 3);
+      await settleEscape();
+      await until(() => target.textContent.includes('badge v3'));
+    } finally {
+      result.destroy();
+    }
+  });
+
   test('a workspace boot fetches the manifest BEFORE the bundle (rev-over-bytes correlation)', async () => {
     // The manager writes the manifest AFTER the bundle; the boot
     // fetches it BEFORE. The only pairing a boot racing a save can

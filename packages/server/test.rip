@@ -914,6 +914,15 @@ test! "GET /@rip/manifest.json is no-store and read per request", ->
   eq ((handle! req('GET', '/@rip/manifest.json')).json!).cells[0].rev, 2
   writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, rev: 1 }] })
 
+test! "GET /@rip/bundle.json is no-store when the feed door is open", ->
+  # Manifest no-store + a micro-cached bundle invents the reverse pairing
+  # (live manifest over stale bundle bytes). With the door open both are
+  # no-store; production (no manifest) keeps ETag-only.
+  res = handle! req('GET', '/@rip/bundle.json')
+  eq res.status, 200
+  eq res.headers.get('cache-control'), 'no-store'
+  eq res.headers.get('content-type'), 'application/json'
+
 test! "a rev-and-hash-keyed cell answers immutable text/plain source bytes", ->
   res = handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1&h=#{cellHash(CLIENT_ROUTE)}")
   eq res.status, 200

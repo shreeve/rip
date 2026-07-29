@@ -275,32 +275,37 @@ export async function bootApp(opts = {}) {
     const applied = [...pending];
     pending.clear();
     try {
+      // Compile barrier (S10/S11): stage every projection locally first.
+      // A single import failure means ZERO bag.setCompiled calls, no
+      // destroy, no relaunch — last-known-good stays interactive. The
+      // previous loop committed each success then tore down into a
+      // version-mixed launch on the first failure (the daily bug when
+      // a shared cell's importer breaks).
       const snapshot = {};
       for (const path of bag.paths()) {
-        let module = null;
         try {
-          module = { ...(await loader.import(path)) };
-          bag.setCompiled(path, module);
+          snapshot[path] = { ...(await loader.import(path)) };
         } catch (error) {
-          report(`[Rip] ${path} failed to compile — keeping its last good version`, error);
-          module = bag.getCompiled(path);
+          report(`[Rip] ${path} failed to compile — keeping the last good version`, error);
+          return;
         }
-        if (module) snapshot[path] = module;
       }
       if (destroyed) return;
+      for (const [path, module] of Object.entries(snapshot)) {
+        bag.setCompiled(path, module);
+      }
       // A cell can compile cleanly and still break launch (a contract
-      // violation like a stash module without appStash). The teardown-
-      // plus-relaunch must never die as an unhandled rejection with the
-      // page silently unmounted: it reports, `current` keeps pointing
-      // at the torn-down launch (destroy is idempotent), and the next
-      // successful change relaunches through this same path.
+      // violation like a stash module without appStash). destroy() now
+      // always clears the launch globals even when a disposer throws, so
+      // a failed relaunch can recover on the next good change. Report
+      // loudly either way — never an unhandled rejection.
       try {
         current.destroy();
         current = launchWith(snapshot);
         Object.assign(handle, current, stable);
         console.log(`[Rip] applied ${applied.join(', ') || 'a change'} — remounted (component state reset)`);
       } catch (error) {
-        report('[Rip] remount failed — the page stays down until the next good change applies', error);
+        report('[Rip] remount failed — waiting for the next good change', error);
       }
     } finally {
       remounting = false;

@@ -119,6 +119,17 @@ describe('launch', () => {
     boot();
   });
 
+  test('destroy clears globals even when a disposer throws, and the next launch succeeds', () => {
+    // destroy latches `destroyed` before work; a mid-teardown throw must
+    // still clear __ripApp/__ripRouter or every future launch bricks.
+    const result = boot();
+    result.renderer.stop = () => { throw new Error('teardown boom'); };
+    expect(() => result.destroy()).toThrow(/teardown boom/);
+    expect(globalThis.__ripApp).toBeUndefined();
+    expect(globalThis.__ripRouter).toBeUndefined();
+    boot();
+  });
+
   test('seed data overlays the stash without touching source cells', () => {
     let fetches = 0;
     const result = boot({

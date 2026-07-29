@@ -939,14 +939,19 @@ export client = (dir = null) ->
   if process.env.RIP_BUNDLE_PATH?
     # Feed freshness: the manager rewrites this pool's bundle file in
     # place on a cell change, so the handler re-reads and re-tags per
-    # request. Janus's micro-cache absorbs the cost at the edge;
-    # standalone mode keeps the boot-time cached bytes below.
+    # request. With the door open (manifest present) the bundle is
+    # no-store like the manifest — a 1s micro-cache hit can otherwise
+    # pair a live manifest with stale bundle bytes (the silent-stale
+    # class). Standalone / production (no manifest) keeps ETag-only
+    # so the edge cache still earns its keep.
     get '/@rip/bundle.json', (c) ->
       text = readFileSync(process.env.RIP_BUNDLE_PATH, 'utf8')
       live = "\"#{Bun.hash(text).toString(16)}\""
+      headers = { 'Content-Type': 'application/json', 'ETag': live }
+      headers['Cache-Control'] = 'no-store' if process.env.RIP_MANIFEST_PATH?
       if c.req.header('if-none-match') is live
-        return new Response(null, { status: 304, headers: { 'ETag': live } })
-      c.body text, 200, { 'Content-Type': 'application/json', 'ETag': live }
+        return new Response(null, { status: 304, headers })
+      c.body text, 200, headers
   else
     get '/@rip/bundle.json', (c) ->
       if c.req.header('if-none-match') is etag
