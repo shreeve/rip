@@ -7,7 +7,9 @@ MOODS = ['up', 'even', 'down']
 
 # In-memory only — a worker reload clears the list (README, pooled note).
 statuses = [
-  { text: 'Pulse is alive', mood: 'up', timestamp: new Date().toISOString() }
+  text: 'Pulse is alive'
+  mood: 'up'
+  timestamp: new Date().toISOString()
 ]
 
 client!()

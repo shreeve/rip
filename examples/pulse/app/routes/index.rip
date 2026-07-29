@@ -7,9 +7,10 @@ export Home = component
 
   post: ->
     return if text is ""
-    await fetch '/api/statuses',
+    fetch! '/api/statuses',
       method: 'POST'
-      headers: { 'Content-Type': 'application/json' }
+      headers:
+        'Content-Type': 'application/json'
       body: JSON.stringify { text, mood }
     text = ""
     # The source cell refetches; the render gate re-reads and the list updates.
