@@ -71,7 +71,7 @@ export def connectFeed(workspace, opts = {}): Feed
   cellUrl = opts.cellUrl ?? (id, rev, hash) ->
     base = "/@rip/cells/#{id.split('/').map(encodeURIComponent).join('/')}?rev=#{rev}"
     if typeof hash is 'string' and hash isnt '' then "#{base}&h=#{hash}" else base
-  manifestUrl = opts.manifestUrl ?? '/@rip/manifest'
+  manifestUrl = opts.manifestUrl ?? '/@rip/manifest.json'
   report = opts.report ?? (...args) -> console.error(...args)
   backoffMin = opts.backoff?.min ?? FEED_BACKOFF_MIN
   backoffMax = opts.backoff?.max ?? FEED_BACKOFF_MAX

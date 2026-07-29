@@ -903,15 +903,15 @@ for k, v of feedEnv
 resetGlobals()
 client!()
 
-test! "GET /@rip/manifest is no-store and read per request", ->
-  res = handle! req('GET', '/@rip/manifest')
+test! "GET /@rip/manifest.json is no-store and read per request", ->
+  res = handle! req('GET', '/@rip/manifest.json')
   eq res.status, 200
   eq res.headers.get('content-type'), 'application/json'
   eq res.headers.get('cache-control'), 'no-store'
   eq (res.json!), { cells: [{ id: FEED_CELL_ID, rev: 1 }] }
   # a manager rewrite shows on the very next request — nothing is cached
   writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, rev: 2 }] })
-  eq ((handle! req('GET', '/@rip/manifest')).json!).cells[0].rev, 2
+  eq ((handle! req('GET', '/@rip/manifest.json')).json!).cells[0].rev, 2
   writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, rev: 1 }] })
 
 test! "a rev-and-hash-keyed cell answers immutable text/plain source bytes", ->
@@ -992,7 +992,7 @@ test! "without the manager's feed env there are no feed routes and no door; the 
   try
     resetGlobals()
     client!()
-    eq (handle! req('GET', '/@rip/manifest')).status, 404
+    eq (handle! req('GET', '/@rip/manifest.json')).status, 404
     eq (handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1")).status, 404
     eq (handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })).status, 404
     ok not ((handle! req('GET', '/')).text!).includes('workspace'), 'no manifest env, no door'
@@ -2098,7 +2098,7 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
   try
     sock = waitFor! ->
       managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
-    m1 = uds!(sock, '/@rip/manifest')
+    m1 = uds!(sock, '/@rip/manifest.json')
     eq m1.status, 200
     eq m1.headers.get('cache-control'), 'no-store'
     eq (m1.json!), { cells: [
@@ -2116,7 +2116,7 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
     pub = waitFor! -> calls.find (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
     eq pub.path, '/1.0/apps/app-x/hub/publish'
     eq pub.body, [{ '@': ['/@rip/dev'], ding: { id: 'app/routes/index.rip', rev: 2, hash: cellHash(v2) } }]
-    m2 = (uds!(sock, '/@rip/manifest')).json!
+    m2 = (uds!(sock, '/@rip/manifest.json')).json!
     eq m2.cells.find((e) -> e.id is 'app/routes/index.rip').rev, 2
     # The hash discriminator: the URL varies iff the bytes do (revs restart
     # across manager runs while the browser caches these responses immutable
@@ -2145,7 +2145,7 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
     pubs = -> calls.filter (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
     retirement = waitFor! -> pubs()[1]
     eq retirement.body, [{ '@': ['/@rip/dev'], ding: { id: 'app/stash.rip', rev: 2, kind: 'delete' } }]
-    m3 = (uds!(sock, '/@rip/manifest')).json!
+    m3 = (uds!(sock, '/@rip/manifest.json')).json!
     eq m3.cells.map((e) -> e.id), ['app/routes/index.rip']
     eq ((uds!(sock, "/@rip/cells/app/stash.rip?rev=1&h=#{cellHash(CLIENT_STASH)}")).text!), CLIENT_STASH
     eq (uds!(sock, "/@rip/cells/app/stash.rip?rev=2&h=#{cellHash(CLIENT_STASH)}")).status, 404   # a retirement has no bytes
@@ -2175,7 +2175,7 @@ test! "watch off never opens the door: no feed routes, a plain boot page, no dev
     eq page.status, 200
     ok not (page.text!).includes('workspace'), 'the boot page boots plain'
     eq (uds!(sock, '/@rip/bundle.json')).status, 200
-    eq (uds!(sock, '/@rip/manifest')).status, 404
+    eq (uds!(sock, '/@rip/manifest.json')).status, 404
     eq (uds!(sock, "/@rip/cells/app/routes/index.rip?rev=1&h=#{cellHash(CLIENT_ROUTE)}")).status, 404
     open = uds!(sock, '/hub', { method: 'POST', headers: { 'Sec-WebSocket-Frame': 'open' } })
     eq open.status, 204

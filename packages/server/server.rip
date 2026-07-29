@@ -838,7 +838,7 @@ export App = (fn) ->
 #     and serve the boot-time cached bytes.
 #
 # A WATCHING worker additionally carries the workspace dev feed
-# (docs/WORKSPACE.md): GET /@rip/manifest (no-store, read per request),
+# (docs/WORKSPACE.md): GET /@rip/manifest.json (no-store, read per request),
 # rev-and-hash-keyed immutable cell bytes at /@rip/cells/<id>?rev=N&h=…,
 # and the hub bridge endpoint enrolling dev sockets into the DEV_CHANNEL.
 # Each surface keys on its manager-provided environment — the manager
@@ -955,7 +955,7 @@ export client = (dir = null) ->
   get '/@rip/rip.js', (c) -> c.send runtimePath
 
   if process.env.RIP_MANIFEST_PATH?
-    get '/@rip/manifest', (c) ->
+    get '/@rip/manifest.json', (c) ->
       # Read per request: the manager rewrites the manifest on every cell
       # change, and no-store keeps every cache out of the freshness path.
       c.body readFileSync(process.env.RIP_MANIFEST_PATH, 'utf8'), 200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }

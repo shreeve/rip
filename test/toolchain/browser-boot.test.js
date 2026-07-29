@@ -396,7 +396,7 @@ describe('bootApp workspace mode', () => {
   const settleEscape = () => Bun.sleep(40);
 
   const manifestTable = (manifest = MANIFEST) => new Map([
-    ['/@rip/manifest', JSON.stringify(manifest)],
+    ['/@rip/manifest.json', JSON.stringify(manifest)],
   ]);
 
   const bootWorkspace = async ({ table, hub, reports = [], bundle = null, fetchImpl = null }) => {
@@ -407,7 +407,7 @@ describe('bootApp workspace mode', () => {
       target,
       adapter: fakeAdapter('/'),
       workspace: true,
-      manifestUrl: '/@rip/manifest',
+      manifestUrl: '/@rip/manifest.json',
       feed: {
         hub: 'ws://test/dev',
         makeSocket: hub.makeSocket,
@@ -426,7 +426,7 @@ describe('bootApp workspace mode', () => {
       bundle: assembleWorkspace(),
       target: doc.createElement('div'),
       adapter: fakeAdapter('/'),
-      manifestUrl: '/@rip/manifest',
+      manifestUrl: '/@rip/manifest.json',
       feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch },
     });
     try {
@@ -477,7 +477,7 @@ describe('bootApp workspace mode', () => {
     try {
       const socket = hub.sockets[0];
       socket.onopen();
-      await until(() => fetch.calls.includes('/@rip/manifest'));
+      await until(() => fetch.calls.includes('/@rip/manifest.json'));
       socket.onmessage({ data: JSON.stringify({ ding: { id: 'app/routes/index.rip', rev: 2 } }) });
       await until(() => result.workspace.passport('app/routes/index.rip').rev === 2);
       expect(fetch.calls).toContain('/@rip/cells/app/routes/index.rip?rev=2');
@@ -561,7 +561,7 @@ describe('bootApp workspace mode', () => {
       modules,
       packagesDir: resolve(root, 'packages'),
     });
-    const table = new Map([['/@rip/manifest', JSON.stringify(manifest)]]);
+    const table = new Map([['/@rip/manifest.json', JSON.stringify(manifest)]]);
     table.set('/@rip/cells/app/badge.rip?rev=2', "export LABEL = 'badge v2'");
     const hub = fakeHub();
     const { result, target } = await bootWorkspace({ table, hub, bundle });
@@ -603,7 +603,7 @@ describe('bootApp workspace mode', () => {
       target: doc.createElement('div'),
       adapter: fakeAdapter('/'),
       workspace: true,
-      manifestUrl: '/@rip/manifest',
+      manifestUrl: '/@rip/manifest.json',
       feed: {
         hub: 'ws://test/dev',
         makeSocket: hub.makeSocket,
@@ -613,7 +613,7 @@ describe('bootApp workspace mode', () => {
       },
     });
     try {
-      expect(order[0]).toBe('feed:/@rip/manifest');
+      expect(order[0]).toBe('feed:/@rip/manifest.json');
       expect(order).toContain('bundle:/@rip/bundle.json');
     } finally {
       result.destroy();

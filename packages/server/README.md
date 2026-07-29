@@ -390,7 +390,7 @@ In watch mode:
   rename retires the old id and mints a new one at rev 1 (id persistence
   across renames is open research). Revs start at 1 and bump once per
   content change; the registry lives in the manager's memory for the run.
-  `GET /@rip/manifest` answers `{"cells": [{id, rev, hash}, …]}`
+  `GET /@rip/manifest.json` answers `{"cells": [{id, rev, hash}, …]}`
   sorted by path, `Cache-Control: no-store`, read per request. Cell
   bytes — the file's **source text**, dev-mode in-browser compile — are
   addressed by `(id, rev)` plus the content-hash discriminator in the
