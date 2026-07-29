@@ -8,6 +8,10 @@ Permanent documentation:
 
 - [README.md](README.md) — repository orientation and entry points.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
+- [docs/WORKSPACE.md](docs/WORKSPACE.md) — the Rip Workspace
+ constitution: the browser passport bag, the dev feed ("door"), and
+ the apply roadmap. The door is the DEFAULT for watching
+ manager-served browser apps; production has no hub.
 - [docs/HMR.md](docs/HMR.md) — HMR design and acceptance contract.
 - [docs/FRAME.md](docs/FRAME.md) — Rip-native hypermedia design and acceptance contract.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work.
@@ -306,11 +310,12 @@ alters surface syntax updates ALL THREE in the same change.
  top-level list. Removing either breaks its half of the world.
 - `packages/vscode` tests never ride the compiler's fast loop; the two
  suites run separately (CI runs both).
-- An unreproduced single-failure `test:all` run is a KNOWN open
- mystery (two sightings, 2026-07-20/21; evidence points at timing
- sensitivity under machine load). If a logged run ever fails, capture
- the test NAME verbatim — identifying it matters more than the green
- rerun.
+- An unreproduced single-failure suite run is a KNOWN open mystery
+ (sightings: `test:all` 2026-07-20/21, an audit lane 2026-07-28, one
+ Playwright firefox spec 2026-07-29 — all unreproduced; evidence
+ points at timing sensitivity under machine load). If a logged run
+ ever fails, capture the test NAME verbatim — identifying it matters
+ more than the green rerun.
 
 ## Commands
 
@@ -324,10 +329,18 @@ alters surface syntax updates ALL THREE in the same change.
 - `bun run test:all` — the CANONICAL full suite: everything above PLUS
  the extended tier. CI runs this, always. COMPLETION CLAIMS run
  against `bun run test:all`, not the fast loop.
-- `bun run test` FROM `packages/vscode` — the extension's own suite
+- `bun run test` FROM a package (`packages/vscode`, `packages/server`,
+ `packages/app`, …) — that package's own suite; root `test:all`
+ excludes `packages/**` by bunfig, so these are additional coverage
  (deps come from the repo-root `bun install`; no package-local lock).
+- `bunx playwright test` FROM `packages/browser-tests` — the real-DOM
+ certification (chromium, firefox, webkit), including the workspace
+ ding spec.
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus-expected` — regenerate the corpus expected outputs.
+- `bun run browser-bundle` — regenerate `dist/browser/rip.js` after any
+ `src/browser-*.js` change; a freshness gate in `test:all` catches a
+ stale bundle.
 - `bun run audit` — the typed-editor scoreboard, and NOT `bun audit`,
   which is Bun's dependency scanner. Six lanes (grammar, mapping, type,
   diagnostics, hover, token); no flag runs EVERY lane, and a lane's
