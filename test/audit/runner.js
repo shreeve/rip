@@ -1626,18 +1626,28 @@ const RULE_W = NAME_W + 3 + DIMS.reduce((a, [, w]) => a + w, 0) + (DIMS.length -
 // render a heavier glyph; others implement bold as a brighter foreground, which
 // reverse swaps into a brighter background), so if this reads thin, the fix is
 // an explicit pair like `1;30;47` — bold black on white, never using reverse.
-// The rule is the GRID's width, but it must never exceed the TERMINAL's: a
-// rule that wraps prints a second stub line of dots under the first, which
-// reads as a rendering fault rather than a seam. The subtitle drops to its own
-// wrapped line when the chip leaves it too little room to sit alongside.
+// The rule closes the header block, so it runs under the whole of it: the
+// GRID's width is its floor — a short title still opens the report as wide as
+// the widest thing printed below it — the longest header line is its reach,
+// and the TERMINAL is its ceiling. A rule that stops mid-title reads as a
+// broken underline; one that wraps prints a second stub line of dots under the
+// first, which reads as a rendering fault rather than a seam. The subtitle
+// drops to its own wrapped line when the chip leaves it too little room to sit
+// alongside, and the rule then closes under the widest of those lines.
 const auditBanner = (title, subtitle) => {
   const chip = `  ${paint('1;7', ` ${title} `)}`;
   const room = TERM_W - visibleW(chip) - 2;
-  if (subtitle && visibleW(subtitle) > room) {
-    console.log(`\n\n${chip}`);
-    wrapAt(2, dim(subtitle));
-  } else console.log(`\n\n${chip}${subtitle ? '  ' + dim(subtitle) : ''}`);
-  console.log(`  ${dim('┈'.repeat(Math.min(RULE_W, TERM_W - 2)))}\n`);
+  // Composed before anything prints: the rule is measured against the lines it
+  // has to close, so those lines have to exist first.
+  const head = subtitle && visibleW(subtitle) > room
+    ? [chip, ...wrapText(dim(subtitle), TERM_W - 2, 2).map((l) => `  ${l}`)]
+    : [`${chip}${subtitle ? '  ' + dim(subtitle) : ''}`];
+  console.log('\n');
+  for (const l of head) console.log(l);
+  // Every header line is indented two, and so is the rule — the widths compare
+  // only after that shared indent comes off both.
+  const ruleW = Math.min(TERM_W - 2, Math.max(RULE_W, ...head.map((l) => visibleW(l) - 2)));
+  console.log(`  ${dim('┈'.repeat(ruleW))}\n`);
 };
 
 // ── the server pool: ONE EDITOR SERVER PER LANE.
@@ -1841,34 +1851,63 @@ if (RUN_GRAMMAR) {
   // are both order-independent, and together they answer the two questions a
   // fixture list is read for: how much does this file exercise, and what would
   // deleting it cost.
+  // `ok` carries the outcome, never the message: a discriminant that is the
+  // message text is falsy exactly when the message is empty, and a parse
+  // failure would then fall through to the pass branches and print as a fixture
+  // that parsed. For the same reason the first NON-EMPTY line is taken — an
+  // error whose text opens with a newline still names itself.
+  const firstLine = (s) => String(s).split('\n').find((l) => l.trim()) ?? 'no message';
   const fixtureRows = [];
   for (const f of fixtures) {
     const grammarBucket = fixDirOf(f) === FIX;
     const mine = new Set();
-    const p = Parser({ onReduce: grammarBucket ? (id) => { seen.add(id); mine.add(id); } : () => {} });
+    const p = Parser({ onReduce: grammarBucket ? (id) => mine.add(id) : () => {} });
     p.lexer = makeParserLexer(fixPath(f));
-    if (grammarBucket) perFixture.set(f, mine);
     try {
-      const tree = p.parse(fs.readFileSync(fixPath(f), 'utf8'));
-      walkPairs(tree?.sexpr, []);
-      for (const id of mine) reducers.set(id, (reducers.get(id) ?? 0) + 1);
+      const text = fs.readFileSync(fixPath(f), 'utf8');
+      const tree = p.parse(text);
+      // A PARSE error is RETURNED, not thrown — only the LEXER throws. The
+      // generated parser stops at the offending token and hands back
+      // `{ sexpr: null, stores: null, diagnostics: [...] }`, so a bare
+      // try/catch reads a program the compiler rejects as one that parsed: it
+      // prints the ✓ a clean parse wears, and the rules reduced on the way to
+      // the bad token stand as coverage. The returned diagnostic IS the
+      // outcome, so it is what the row is judged on.
+      const bad = tree?.diagnostics?.[0];
+      if (bad || !tree?.stores) {
+        // The offending token's own line:column, the way the compiler prints
+        // it: the name column says which file to open, and this says where to
+        // look once it is open.
+        const at = bad ? offsetToPosition(lineStartsOf(text), bad.start ?? 0) : null;
+        fixtureRows.push({ f, ok: false, failed: bad ? `at ${at.line + 1}:${at.character + 1} — ${firstLine(bad.message)}` : '— the parser returned no tree' });
+        continue;
+      }
+      walkPairs(tree.sexpr, []);
+      // Coverage folds in only once the parse SUCCEEDS. Reductions performed on
+      // the way to a rejected token are not evidence that the corpus exercises
+      // a production — a file the compiler refuses cannot be the reason a rule
+      // reads as covered, or fixing the file would DROP coverage nobody knew
+      // rested on it, and the M3 queue would be short by exactly the rules only
+      // the broken fixture reached.
+      if (grammarBucket) {
+        perFixture.set(f, mine);
+        for (const id of mine) { seen.add(id); reducers.set(id, (reducers.get(id) ?? 0) + 1); }
+      }
       fixtureRows.push({ f, ok: true, grammarBucket, reduced: mine.size });
     } catch (e) {
-      // `ok` carries the outcome, never the message: a discriminant that is
-      // the message text is falsy exactly when the message is empty, and a
-      // parse failure would then fall through to the pass branches and print
-      // as a fixture that parsed. For the same reason the first NON-EMPTY
-      // line is taken — an error whose text opens with a newline still names
-      // itself.
-      const lines = String(e?.message ?? e).split('\n');
-      fixtureRows.push({ f, ok: false, failed: lines.find((l) => l.trim()) ?? 'no message' });
+      // The LEXER's throw — it names itself with an absolute path, which in
+      // this list is a wall of shared prefix before the part that differs.
+      fixtureRows.push({ f, ok: false, failed: `— ${firstLine(e?.message ?? e).replaceAll(CORPUS + '/', '')}` });
     }
   }
   // Which fixtures the coverage would survive losing — the retirement
   // instrument, now the fixture list's own column.
   const uniqueOf = (f) => [...(perFixture.get(f) ?? [])].filter((id) => reducers.get(id) === 1).length;
   for (const r of fixtureRows) {
-    if (!r.ok) { console.log(`    ${red('✗')} ${pad(r.f, NAME_W + 2)} ${dim(`parse failed — ${r.failed}`)}`); continue; }
+    // The only row here that carries PROSE — a parser's expected-token list
+    // runs past any terminal — so it is the only one that wraps, hanging under
+    // its own column rather than dangling fragments at column zero.
+    if (!r.ok) { out(`    ${red('✗')} ${pad(r.f, NAME_W + 2)} ${dim(`parse failed ${r.failed}`)}`); continue; }
     // A claims fixture parses but contributes no coverage, so it must not wear
     // the ✓ a contributing fixture wears: one mark, two meanings, and the
     // weaker meaning is the one a reader would assume.
@@ -1897,7 +1936,11 @@ if (RUN_GRAMMAR) {
   // reductions is deletable at zero coverage cost, and that is a standing
   // fact rather than a verbose detail, so it states itself either way.
   {
-    const removable = grammarFixtures.filter((f) => uniqueOf(f) === 0);
+    // Only fixtures that PARSED can be judged removable: one that failed
+    // reduces nothing the corpus can rely on, so it trivially has no unique
+    // contribution, and listing it as removable-at-no-cost would answer a
+    // question nobody asked over the one the ✗ row just raised.
+    const removable = fixtureRows.filter((r) => r.ok && r.grammarBucket && uniqueOf(r.f) === 0).map((r) => r.f);
     out(`    ${removable.length
       ? yellow(`removable with zero coverage loss (no unique reductions): ${removable.join(', ')}`)
       : dim('every grammar fixture reduces at least one production no other fixture does')}`);
@@ -2424,7 +2467,7 @@ if (RUN_GRAMMAR) {
       if (VERBOSE || g === 'UNALLOCATED') for (const r of rules) out(`        ${dim(r)}${owner?.parked.has(r) ? ' ' + yellow('· parked') : ''}`);
     }
   }
-  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, groups: groups.size, groupKind: owner ? 'files' : 'constructs', unallocated: groups.get('UNALLOCATED')?.length ?? 0, excluded: excludedIdx.length, badExclusions: falseExclusions.length + staleExcluded.length, negatives: ng };
+  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, groups: groups.size, groupKind: owner ? 'files' : 'constructs', unallocated: groups.get('UNALLOCATED')?.length ?? 0, excluded: excludedIdx.length, badExclusions: falseExclusions.length + staleExcluded.length, unparsed: fixtureRows.filter((r) => !r.ok).length, negatives: ng };
 }
 
 // ── the Mapping Audit (--map): use-site identifier coverage, from the
@@ -3635,6 +3678,7 @@ if (gr) {
   // Obligations: every one of these is a claim the gate makes about itself or
   // about the corpus, and a nonzero count is a defect, not a backlog.
   const broken = [];
+  if (gr.unparsed) broken.push(`${s(gr.unparsed, 'fixture')} the parser rejects — the rows say which`);
   if (gr.badExclusions) broken.push(`${s(gr.badExclusions, 'bad exclusion')} — fix the gate's exclusion table`);
   if (gr.unallocated) broken.push(`${gr.unallocated} UNALLOCATED — the manifest owes an ownership decision`);
   if (n.badSpellingExclusions || n.staleMints) broken.push(s((n.badSpellingExclusions ?? 0) + (n.staleMints ?? 0), 'spelling-census violation'));

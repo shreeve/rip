@@ -34,6 +34,15 @@
 
 export const CONTRACT = [
   {
+    // The gate's floor, and the one thing every number above it assumes. A
+    // parse error is RETURNED by the generated parser rather than thrown, so
+    // an unparsable fixture is not a loud crash — it is a quiet row, and its
+    // partial reductions would otherwise stand as coverage.
+    name: 'grammar.parses', lane: 'grammar',
+    property: 'every fixture in the corpus parses — coverage is measured only over programs the parser accepts',
+    red: (s) => (s.gr.unparsed ?? 0) > 0,
+  },
+  {
     name: 'grammar.allocation', lane: 'grammar',
     property: 'every construct and production the grammar defines is allocated by the manifest',
     red: (s) => s.gr.unallocated > 0,
