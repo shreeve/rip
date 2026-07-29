@@ -2167,6 +2167,9 @@ if (RUN_GRAMMAR) {
       if (negSeen.has(i)) famNeg.set(g, (famNeg.get(g) ?? 0) + 1);
     }
     const famZero = [...famPos.keys()].filter((g) => !(famNeg.get(g) > 0)).sort();
+    // The error lane's reductions that land INSIDE what the positives
+    // exercise — the numerator the family rows sum to.
+    const negWithin = denom.filter((i) => seen.has(i) && negSeen.has(i)).length;
     // TYPE VOCABULARY, classified by TypeScript's own grammar, live: every
     // type-level text in the corpus (TYPE/TYPE_DECL/TYPE_PARAMS/CAST tokens
     // — everything beneath the parser's one-token opacity) is parsed
@@ -2410,13 +2413,19 @@ if (RUN_GRAMMAR) {
     // because the fix is a decision either way — drop the head if the
     // parser never mints it, or spell it in a fixture if it does.
     const headsUnseen = [...CONSTRUCT_HEADS].filter((h) => !headsSeen.has(h)).sort();
-    out(`\n    ${bold('Containment heads')} ${dim('(the matrix\'s vocabulary: pairs of these are what CLAIMS.md cells can name)')}`);
+    // The heading has to carry the WHY, because nothing else in the output
+    // does: a reader meeting `the matrix's vocabulary` has never been told
+    // there is a matrix, let alone that it exists because production counting
+    // is context-free. One example is worth the explanation — seeing `if
+    // inside render` tells a reader what a head is, what a pair is, and what
+    // a claim may name, in four words.
+    out(`\n    ${bold('Containment constructs')} ${dim('(production counts see no nesting — a pair of these names it, like `if inside render`)')}`);
     // The pair count does NOT belong here: it has no denominator and can only
     // rise, so on its own it is a number a reader cannot act on. Where it
     // means something is next to the cells it is the pool for, so it prints
     // with the Containment summary under Corpus claims.
-    out(`    ${(headsUnseen.length ? red : green)(String(headsSeen.size))} ${dim('/')} ${dim(String(CONSTRUCT_HEADS.size))} ${dim('heads spelled by a fixture')}`);
-    for (const h of headsUnseen) out(`    ${red('✗')} ${red(`curated head no fixture produces: ${h}`)} ${dim('— drop it if the parser never mints it, or spell it if it does')}`);
+    out(`    ${(headsUnseen.length ? red : green)(String(headsSeen.size))} ${dim('/')} ${dim(String(CONSTRUCT_HEADS.size))} ${dim('constructs spelled by a fixture')}`);
+    for (const h of headsUnseen) out(`    ${red('✗')} ${red(`curated construct no fixture produces: ${h}`)} ${dim('— drop it if the parser never mints it, or spell it if it does')}`);
     // The vocabulary itself under -v, as every other census in this section
     // lists its own members. A reader asking which pairs a CLAIMS.md cell may
     // name has to know the heads to answer, and this was the one denominator
@@ -2476,10 +2485,21 @@ if (RUN_GRAMMAR) {
     // which is news about nothing. When the number does look wrong, the file
     // is one grep away, and no threshold has to be invented to decide when to
     // print it.
-    out(`\n    ${bold('Negative coverage')} ${dim(`(the error lane against the positive corpus's own claims — vocabulary contractual, family fractions a gauge)`)}`);
-    out(`    ${dim(`${negParsed} error fixtures reduce ${negSeen.size} productions`)}${famZero.length ? `${dim(' · families with no negative at all: ')}${yellow(famZero.join(', '))}` : ''}`);
+    out(`\n    ${bold('Negative coverage')} ${dim(`(the error lane against the positive corpus — vocabulary contractual, family fractions a gauge)`)}`);
+    // The reduction COUNT is gone from this line, not reworded. Nothing acts
+    // on it: it has no target (a negative proves one rejection and has no
+    // reason to re-exercise the grammar), no obligation behind it, and no
+    // follow-up when it moves — a fraction invented a gap that was not there,
+    // and a bare count invited the reader to wonder what it should be. What
+    // this section can actually say is whether every family has a negative at
+    // all, which is a question with an answer someone can act on. The
+    // per-family counts stay under -v, where a reader who wants the texture
+    // asks for it.
+    out(`    ${dim(`${negParsed} error fixtures`)}${dim(' · ')}${famZero.length
+      ? yellow(`no negative at all for: ${famZero.join(', ')}`)
+      : green('every construct family has at least one negative')}`);
     if (VERBOSE) for (const [g, n] of [...famPos.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-      out(`        ${pad(g, 24)} ${dim(`${String(famNeg.get(g) ?? 0).padStart(3)} of ${String(n).padStart(3)} exercised constructs appear in a negative`)}`);
+      out(`        ${pad(g, 24)} ${dim(`${String(famNeg.get(g) ?? 0).padStart(3)} of ${String(n).padStart(3)} exercised productions appear in a negative`)}`);
     }
     out(`    ${dim(`type vocabulary: positives claim ${claimed.length} classes`)}${unfalsified.length ? `${dim(' · ')}${red(`${unfalsified.length} unfalsified (no negative instance) — every claimed class needs one`)}` : `${dim(' · ')}${green('every claimed class has a negative instance')}`}`);
     if (unfalsified.length) wrapList(unfalsified, red);
@@ -3825,7 +3845,7 @@ if (gr) {
   if (n.badSpellingExclusions || n.staleMints) broken.push(s((n.badSpellingExclusions ?? 0) + (n.staleMints ?? 0), 'spelling-census violation'));
   if (n.kindBad) broken.push(s(n.kindBad, 'census violation'));
   if (n.vocabUnfalsified) broken.push(`${n.vocabUnfalsified}/${n.vocabClaimed} vocabulary classes unfalsified`);
-  if (n.headsUnseen) broken.push(`${s(n.headsUnseen, 'containment head')} no fixture spells`);
+  if (n.headsUnseen) broken.push(`${s(n.headsUnseen, 'containment construct')} no fixture spells`);
   // The contract judged this all along, but Totals never did — so a wrapped
   // divider failed the run while this line still read `all hold`. It matters
   // more now that the held list names the rule: an obligation a reader is
@@ -3855,7 +3875,7 @@ if (gr) {
   // its measurement possible, and a measurement that did not run contributes
   // no clause rather than a zero.
   const held = ['exclusions true'];
-  if (n.headsTotal) held.push(`${n.headsTotal} containment heads spelled`);
+  if (n.headsTotal) held.push(`${n.headsTotal} containment constructs spelled`);
   if (n.vocabClaimed) held.push(`${n.vocabClaimed} vocabulary classes falsified`);
   if (claimsRead) held.push('every claims carrier and cell live');
   // The divider rule prints no section of its own while it holds, so this

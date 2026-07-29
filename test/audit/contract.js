@@ -76,7 +76,7 @@ export const CONTRACT = [
     // ones both resolve by a decision, and neither is drained by authoring
     // against the cell.
     name: 'containment.heads', lane: 'grammar',
-    property: 'every curated containment head is spelled by at least one fixture, so every cell the matrix can name is satisfiable',
+    property: 'every curated containment construct is spelled by at least one fixture, so every pair a claim can name is satisfiable',
     red: (s) => (s.gr.negatives?.headsUnseen ?? 0) > 0,
   },
   {
