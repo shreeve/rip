@@ -95,7 +95,9 @@ RIP_HANDLER_DEADLINE_MS
 
 # --- Module state ---------------------------------------------------------------
 
-cfg =
+# Exported for the same reason state is (below): the manager is a process
+# singleton, and in-process tests configure it directly.
+export cfg =
   entry: null          # absolute path to the app entry
   appDir: null         # directory the watcher covers
   name: null
@@ -352,7 +354,11 @@ buildApp = ->
   state.buildCounter += 1
   artifact = buildArtifact! cfg.entry, join(state.runDir, "b#{state.buildCounter}-app.js")
   bundle = buildBundle!()
-  syncCells!() if WORKSPACE and bundle?
+  if WORKSPACE and bundle?
+    # The bundle is durable (buildBundle wrote it) BEFORE the manifest
+    # names the new revs — the correlation invariant below.
+    syncCells!()
+    writeManifest!()
   { artifact, bundle }
 
 # ==============================================================================
@@ -419,16 +425,24 @@ syncCells = ->
   # has no bytes: its rev exists only in the ding.
   for entry in changed when not entry.deleted
     Bun.write! cellFile(entry.id, entry.rev), modules[entry.id]
+  changed
+
+# The manifest is the LAST durable document on every cell path — written
+# only after the bundle carrying the same revs is. The browser fetches the
+# manifest FIRST, so the pairing a boot can observe is "manifest rev <=
+# bundle bytes", which the feed's resync heals forward; the reverse pairing
+# (a manifest claiming revs the bundle does not carry) would block its own
+# healing on the rev cursor — the silent-stale class. tmp + rename: workers
+# read the manifest per request and must never see a torn document.
+writeManifest = ->
   live = []
   for path, entry of state.cells
     live.push { id: entry.id, path: path, rev: entry.rev } unless entry.retired
   live.sort (a, b) -> if a.path < b.path then -1 else 1
-  # tmp + rename: workers read the manifest per request and must never see
-  # a torn document.
   tmp = "#{state.manifestPath}.tmp"
   Bun.write! tmp, JSON.stringify({ cells: live })
   renameSync tmp, state.manifestPath
-  changed
+  return
 
 # Rewrite the live pool's bundle file in place (tmp + rename — workers
 # re-read it per request under the flag), so a hard refresh never serves
@@ -440,15 +454,22 @@ refreshPoolBundle = ->
   Bun.write! tmp, assembleBundleText!()
   renameSync tmp, pool.bundle
 
-# The cell path: cells, manifest, and the bundle are durable BEFORE the ding
-# names the new revs. A reassembly or publish failure warns and never blocks
-# the cell path or crashes the manager — the cell bytes are already servable.
-onCellChange = ->
+# The cell path: cells, then the bundle, then the manifest — every document
+# durable BEFORE the ding names the new revs, and the manifest last (the
+# correlation invariant on writeManifest). A reassembly failure warns and
+# HOLDS THE MANIFEST BACK — a manifest naming revs the bundle does not carry
+# would silently strand fresh boots — while the dings still publish: live
+# feeds fetch cells directly and never need the manifest for a named rev.
+# A publish failure warns and never blocks the cell path or crashes the
+# manager — the cell bytes are already servable. Exported as an in-process
+# test seam (the manifest-holdback pin drives it directly).
+export onCellChange = ->
   changed = syncCells!()
   try
     refreshPoolBundle!()
+    writeManifest!()
   catch e
-    warn "rip-server: bundle reassembly failed on the cell path: #{e?.message or e}"
+    warn "rip-server: bundle/manifest rewrite failed on the cell path — manifest held back: #{e?.message or e}"
   dings = changed.map (c) ->
     ding = { id: c.id, rev: c.rev }
     ding.kind = 'delete' if c.deleted is true

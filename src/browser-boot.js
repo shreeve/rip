@@ -94,6 +94,33 @@ export async function bootApp(opts = {}) {
   const fetchOpts = {};
   if (opts.fetchText) fetchOpts.fetchText = opts.fetchText;
   if ('bundleStorage' in opts) fetchOpts.storage = opts.bundleStorage;
+
+  // Workspace mode fetches the manifest BEFORE the bundle, and the
+  // manager writes it AFTER the bundle: the only pairing a boot racing
+  // a save can observe is "manifest rev <= bundle bytes", which the
+  // feed's open resync heals forward. The reverse pairing (a manifest
+  // rev over older bundle bytes) would block its own healing on the
+  // bag's rev cursor — the silent-stale class.
+  const workspaceMode = opts.workspace === true;
+  let manifestUrl = null;
+  let fetchBytes = null;
+  let manifest = null;
+  if (workspaceMode) {
+    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl
+      ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf('/') + 1)}manifest` : null);
+    if (!manifestUrl) {
+      throw new Error(
+        'rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl',
+      );
+    }
+    fetchBytes = opts.feed?.fetch ?? (url => fetch(url));
+    const res = await fetchBytes(manifestUrl);
+    if (!res.ok) {
+      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
+    }
+    manifest = await res.json();
+  }
+
   const bundle = opts.bundle ?? await fetchBundle(opts.url, fetchOpts);
   if (!bundle || typeof bundle !== 'object') {
     throw new Error('rip: bootApp requires a bundle or a url');
@@ -158,11 +185,8 @@ export async function bootApp(opts = {}) {
 
   const app = await loader.import(`${appEntry.root}/${appEntry.entry}`);
 
-  const workspaceMode = opts.workspace === true;
   let createWorkspace = null;
   let connectFeed = null;
-  let manifestUrl = null;
-  let fetchBytes = null;
   let bag = null;
   if (workspaceMode) {
     // The workspace package rides the bundle like the app package
@@ -180,20 +204,6 @@ export async function bootApp(opts = {}) {
       throw new Error(`rip: the '${WORKSPACE_PACKAGE}' package carries no './feed' export`);
     }
     ({ connectFeed } = await loader.import(`${wsEntry.root}/${feedSub}`));
-
-    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl
-      ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf('/') + 1)}manifest` : null);
-    if (!manifestUrl) {
-      throw new Error(
-        'rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl',
-      );
-    }
-    fetchBytes = opts.feed?.fetch ?? (url => fetch(url));
-    const res = await fetchBytes(manifestUrl);
-    if (!res.ok) {
-      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
-    }
-    const manifest = await res.json();
     bag = createWorkspace();
     const records = [];
     for (const entry of manifest?.cells ?? []) {

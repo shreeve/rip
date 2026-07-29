@@ -585,6 +585,50 @@ describe('bootApp workspace mode', () => {
     }
   });
 
+  test('a workspace boot fetches the manifest BEFORE the bundle (rev-over-bytes correlation)', async () => {
+    // The manager writes the manifest AFTER the bundle; the boot
+    // fetches it BEFORE. The only pairing a boot racing a save can
+    // observe is "manifest rev <= bundle bytes", which the feed's
+    // resync heals forward — the reverse would block its own healing
+    // on the rev cursor.
+    const order = [];
+    const bundleText = JSON.stringify(assembleWorkspace());
+    const fetchText = async url => {
+      order.push(`bundle:${url}`);
+      return { fresh: true, text: bundleText, etag: null };
+    };
+    const table = manifestTable();
+    const fetchImpl = async url => {
+      order.push(`feed:${url}`);
+      const body = table.get(url);
+      if (body === undefined) return { ok: false, status: 404, json: async () => null, text: async () => '' };
+      return { ok: true, status: 200, json: async () => JSON.parse(body), text: async () => body };
+    };
+    const hub = fakeHub();
+    const result = await bootApp({
+      url: '/@rip/bundle.json',
+      fetchText,
+      bundleStorage: null,
+      target: doc.createElement('div'),
+      adapter: fakeAdapter('/'),
+      workspace: true,
+      manifestUrl: '/@rip/manifest',
+      feed: {
+        hub: 'ws://test/dev',
+        makeSocket: hub.makeSocket,
+        fetch: fetchImpl,
+        report: () => {},
+        backoff: { min: 1, max: 2 },
+      },
+    });
+    try {
+      expect(order[0]).toBe('feed:/@rip/manifest');
+      expect(order).toContain('bundle:/@rip/bundle.json');
+    } finally {
+      result.destroy();
+    }
+  });
+
   test('an out-of-order stale cell never touches the module graph: the newest rev survives later remounts', async () => {
     // Two dings in flight resolve out of order: rev 3's fetch completes
     // first and applies; rev 2's completes after. The bag's rev cursor

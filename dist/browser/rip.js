@@ -22992,6 +22992,22 @@ async function bootApp(opts = {}) {
     fetchOpts.fetchText = opts.fetchText;
   if ("bundleStorage" in opts)
     fetchOpts.storage = opts.bundleStorage;
+  const workspaceMode = opts.workspace === true;
+  let manifestUrl = null;
+  let fetchBytes = null;
+  let manifest = null;
+  if (workspaceMode) {
+    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf("/") + 1)}manifest` : null);
+    if (!manifestUrl) {
+      throw new Error("rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl");
+    }
+    fetchBytes = opts.feed?.fetch ?? ((url) => fetch(url));
+    const res = await fetchBytes(manifestUrl);
+    if (!res.ok) {
+      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
+    }
+    manifest = await res.json();
+  }
   const bundle = opts.bundle ?? await fetchBundle(opts.url, fetchOpts);
   if (!bundle || typeof bundle !== "object") {
     throw new Error("rip: bootApp requires a bundle or a url");
@@ -23037,11 +23053,8 @@ async function bootApp(opts = {}) {
     }
   }
   const app = await loader.import(`${appEntry.root}/${appEntry.entry}`);
-  const workspaceMode = opts.workspace === true;
   let createWorkspace = null;
   let connectFeed = null;
-  let manifestUrl = null;
-  let fetchBytes = null;
   let bag = null;
   if (workspaceMode) {
     const wsEntry = bundle.packages?.[WORKSPACE_PACKAGE];
@@ -23054,16 +23067,6 @@ async function bootApp(opts = {}) {
       throw new Error(`rip: the '${WORKSPACE_PACKAGE}' package carries no './feed' export`);
     }
     ({ connectFeed } = await loader.import(`${wsEntry.root}/${feedSub}`));
-    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf("/") + 1)}manifest` : null);
-    if (!manifestUrl) {
-      throw new Error("rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl");
-    }
-    fetchBytes = opts.feed?.fetch ?? ((url) => fetch(url));
-    const res = await fetchBytes(manifestUrl);
-    if (!res.ok) {
-      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
-    }
-    const manifest = await res.json();
     bag = createWorkspace();
     const records = [];
     for (const entry of manifest?.cells ?? []) {

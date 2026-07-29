@@ -14,7 +14,7 @@ import { get, post, put, patch, del, all, use, prefix, before, after, onError, n
          read, error, notice, bail, ctx, session, subrequest, mark,
          mimeType, errorEnvelope, openapi } from '@rip-lang/server'
 import { cors, logger, compress, sessions, csrf, secureHeaders, timeout, htmlJson } from '@rip-lang/server/middleware'
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, unlinkSync } from 'fs'
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, unlinkSync, existsSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -1243,7 +1243,7 @@ test! "an orphaned worker (parent gone) exits on its own", ->
 
 console.log "\nPrebuild"
 
-import { buildArtifact, REGISTER_409_MS, scale, publish, state as managerState } from './manager.rip'
+import { buildArtifact, REGISTER_409_MS, scale, publish, state as managerState, cfg as managerCfg, onCellChange } from './manager.rip'
 
 test! "buildArtifact bundles an app to one JS file a loader-free worker serves", ->
   dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')
@@ -2312,3 +2312,57 @@ test! "publish() surfaces a non-2xx answer as an error carrying status and body"
     managerState.controlUnix = null
     managerState.appId = null
     stub.stop(true)
+
+# ==[ Manager: the cell path's correlation invariant ]==
+#
+# The manifest is the LAST durable document on the cell path: written only
+# after the pool bundle carrying the same revs is. A bundle rewrite failure
+# HOLDS THE MANIFEST BACK — a manifest naming revs the bundle does not carry
+# would silently strand fresh boots on the bag's rev cursor. Driven
+# in-process through the exported singleton (cfg/state/onCellChange).
+
+console.log "\nManager cell path"
+
+test! "a bundle rewrite failure holds the manifest back; the next clean save writes both", ->
+  appDir = mkdtempSync join(import.meta.dir, 'tmp-cellpath-')
+  runDir = mkdtempSync join(import.meta.dir, 'tmp-cellpath-run-')
+  mkdirSync join(appDir, 'app'), { recursive: true }
+  writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
+  saved =
+    appDir: managerCfg.appDir
+    runDir: managerState.runDir
+    cellsDir: managerState.cellsDir
+    manifestPath: managerState.manifestPath
+    cells: managerState.cells
+    currentPool: managerState.currentPool
+  try
+    managerCfg.appDir = appDir
+    managerState.runDir = runDir
+    managerState.cellsDir = null
+    managerState.manifestPath = null
+    managerState.cells = {}
+    # A DIRECTORY at the bundle path makes the tmp+rename rewrite fail.
+    brokenBundle = join(runDir, 'bundle-as-dir')
+    mkdirSync brokenBundle, { recursive: true }
+    managerState.currentPool = { bundle: brokenBundle }
+    onCellChange!()          # publish warns (no app id) and never blocks
+    manifestPath = join(runDir, 'manifest.json')
+    ok not existsSync(manifestPath), 'the manifest must be held back when the bundle rewrite fails'
+    ok existsSync(join(runDir, 'cells', "#{encodeURIComponent('app/x.rip')}@1")), 'the cell bytes are durable regardless'
+    # The next save against a writable bundle path writes bundle THEN manifest.
+    goodBundle = join(runDir, 'bundle.json')
+    managerState.currentPool = { bundle: goodBundle }
+    writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
+    onCellChange!()
+    ok existsSync(goodBundle), 'the pool bundle is rewritten'
+    m = JSON.parse readFileSync(manifestPath, 'utf8')
+    eq m.cells, [{ id: 'app/x.rip', path: 'app/x.rip', rev: 2 }]
+  finally
+    managerCfg.appDir = saved.appDir
+    managerState.runDir = saved.runDir
+    managerState.cellsDir = saved.cellsDir
+    managerState.manifestPath = saved.manifestPath
+    managerState.cells = saved.cells
+    managerState.currentPool = saved.currentPool
+    rmSync appDir, { recursive: true, force: true }
+    rmSync runDir, { recursive: true, force: true }
