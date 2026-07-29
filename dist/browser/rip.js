@@ -22996,7 +22996,7 @@ async function bootApp(opts = {}) {
   let fetchBytes = null;
   let manifest = null;
   if (workspaceMode) {
-    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf("/") + 1)}manifest` : null);
+    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf("/") + 1)}manifest.json` : null);
     if (!manifestUrl) {
       throw new Error("rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl");
     }

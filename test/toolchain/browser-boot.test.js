@@ -581,7 +581,8 @@ describe('bootApp workspace mode', () => {
     // fetches it BEFORE. The only pairing a boot racing a save can
     // observe is "manifest rev <= bundle bytes", which the feed's
     // resync heals forward — the reverse would block its own healing
-    // on the rev cursor.
+    // on the rev cursor. The URL derives from the bundle the same way
+    // (…/bundle.json → …/manifest.json) — no explicit manifestUrl.
     const order = [];
     const bundleText = JSON.stringify(assembleWorkspace());
     const fetchText = async url => {
@@ -603,7 +604,6 @@ describe('bootApp workspace mode', () => {
       target: doc.createElement('div'),
       adapter: fakeAdapter('/'),
       workspace: true,
-      manifestUrl: '/@rip/manifest.json',
       feed: {
         hub: 'ws://test/dev',
         makeSocket: hub.makeSocket,
@@ -615,6 +615,7 @@ describe('bootApp workspace mode', () => {
     try {
       expect(order[0]).toBe('feed:/@rip/manifest.json');
       expect(order).toContain('bundle:/@rip/bundle.json');
+      expect(order).not.toContain('feed:/@rip/manifest');
     } finally {
       result.destroy();
     }
