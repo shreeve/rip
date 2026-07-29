@@ -44,7 +44,11 @@ export def connectFeed(workspace, opts = {}): Feed
   hubUrl = opts.hub ?? defaultHubUrl()
   makeSocket = opts.makeSocket ?? defaultSocketFactory()
   fetchBytes = opts.fetch ?? defaultFetch()
-  cellUrl = opts.cellUrl ?? (id, rev) -> "/@rip/cells/#{id}?rev=#{rev}"
+  # The default cell URL percent-encodes each path segment: a legal
+  # filename containing '%', '#', or '?' must build a URL the server can
+  # decode, and the slashes stay visible (the cell route matches a splat
+  # and canonicalizes by decode → re-encode).
+  cellUrl = opts.cellUrl ?? (id, rev) -> "/@rip/cells/#{id.split('/').map(encodeURIComponent).join('/')}?rev=#{rev}"
   manifestUrl = opts.manifestUrl ?? '/@rip/manifest'
   report = opts.report ?? (...args) -> console.error(...args)
   backoffMin = opts.backoff?.min ?? FEED_BACKOFF_MIN
@@ -55,15 +59,43 @@ export def connectFeed(workspace, opts = {}): Feed
   socket = null
   attempts = 0
   timer = null
+  resyncTimer = null
+  resyncAttempts = 0
+  wants = {}       # id → highest dinged rev not yet applied (a miss under retry)
+
+  # A dinged rev the workspace has not reached yet is a WANT: a resync
+  # only counts as clean once every want is satisfied (or its id was
+  # deleted), so a miss retries instead of leaving the feed silently
+  # behind until the next ding or reconnect.
+  wantsSatisfied = ->
+    for id, rev of wants
+      current = workspace.passport id
+      delete wants[id] if current? and current.rev >= rev
+    Object.keys(wants).length is 0
+
+  scheduleResync = ->
+    return if closed or resyncTimer?
+    delay = Math.min backoffMin * 2 ** resyncAttempts, backoffMax
+    resyncAttempts += 1
+    resyncTimer = setTimeout (->
+      resyncTimer = null
+      resync().catch (error) -> report '[Rip] workspace feed: resync failed:', error
+    ), delay
+    return
 
   # Reconciliation is additive-and-forward only: the manifest advances
   # what it names and never deletes — the bag legally holds passports the
   # server feed does not own (an editor's local mints). Deletions ride
-  # dings alone.
+  # dings alone. A resync that could not fully reconcile (a manifest or
+  # cell fetch failing, an unsatisfied want) schedules its own retry with
+  # backoff; a clean one clears the cursor. A structurally malformed
+  # manifest is a server bug, reported and never retried into.
   resync = ->
+    clean = true
     res = fetchBytes! manifestUrl
     unless res.ok
       report "[Rip] workspace feed: manifest fetch failed (#{res.status})"
+      scheduleResync()
       return
     manifest = res.json!()
     cells = manifest?.cells
@@ -79,12 +111,17 @@ export def connectFeed(workspace, opts = {}): Feed
       cres = fetchBytes! cellUrl(entry.id, entry.rev)
       unless cres.ok
         report "[Rip] workspace feed: cell fetch missed (#{cres.status}) for '#{entry.id}' rev #{entry.rev} during resync"
+        clean = false
         continue
       source = cres.text!()
       cell = { id: entry.id, rev: entry.rev, source }
       unless current?
         cell.path = if typeof entry.path is 'string' then entry.path else entry.id
-      workspace.set cell
+      workspace.set! cell
+    if clean and wantsSatisfied()
+      resyncAttempts = 0
+    else
+      scheduleResync()
     return
 
   applyDing = (ding) ->
@@ -93,6 +130,7 @@ export def connectFeed(workspace, opts = {}): Feed
       return
     { id, rev, kind } = ding
     if kind is 'delete'
+      delete wants[id]         # a retirement supersedes any pending want
       workspace.set { id, rev, deleted: true }
       return
     current = workspace.passport id
@@ -100,6 +138,7 @@ export def connectFeed(workspace, opts = {}): Feed
     res = fetchBytes! cellUrl(id, rev)
     unless res.ok
       report "[Rip] workspace feed: cell fetch missed (#{res.status}) for '#{id}' rev #{rev} — resyncing from the manifest"
+      wants[id] = Math.max rev, wants[id] ?? 0
       resync!()
       return
     source = res.text!()
@@ -169,6 +208,9 @@ export def connectFeed(workspace, opts = {}): Feed
       if timer?
         clearTimeout timer
         timer = null
+      if resyncTimer?
+        clearTimeout resyncTimer
+        resyncTimer = null
       try socket?.close()
       return
     connected: -> isOpen and not closed

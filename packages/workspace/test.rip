@@ -605,6 +605,56 @@ test! "a cell miss resyncs from the manifest, which never deletes local mints", 
   ok reports.some (args) -> String(args[0]).includes('cell fetch missed')
   feed.close()
 
+test! "the default cell URL percent-encodes the id's segments", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'app/50%.rip', path: 'app/50%.rip', rev: 1, source: 'v1' }]
+  { feed, calls, sockets, reports } = openFeed ws,
+    '/@rip/manifest': emptyManifest
+    '/@rip/cells/app/50%25.rip?rev=2': 'v2'
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'app/50%.rip', rev: 2 } } }
+  await settle()
+  ok calls.includes('/@rip/cells/app/50%25.rip?rev=2'), "the fetch rides the encoded URL: #{JSON.stringify calls}"
+  eq ws.passport('app/50%.rip').rev, 2
+  eq ws.read('app/50%.rip'), 'v2'
+  eq reports, []
+  feed.close()
+
+test! "a failed open-resync retries with backoff until the feed heals", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
+  routes = {}                          # no manifest yet: the open resync fails
+  { feed, sockets, reports } = openFeed ws, routes
+  sockets[0].onopen()
+  await settle()
+  ok reports.some((args) -> String(args[0]).includes('manifest fetch failed')), 'the miss is loud'
+  eq ws.passport('a.rip').rev, 1
+  # The routes heal; the scheduled retry (backoff min 1ms) finds them.
+  routes['/@rip/manifest'] = JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 2 }] }
+  routes['/@rip/cells/a.rip?rev=2'] = 'v2'
+  await new Promise (resolve) -> setTimeout resolve, 50
+  eq ws.passport('a.rip').rev, 2
+  eq ws.read('a.rip'), 'v2'
+  feed.close()
+
+test! "a dinged rev the manifest does not yet name is retried until it appears — never silently dropped", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
+  routes = { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 1 }] } }
+  { feed, sockets, reports } = openFeed ws, routes
+  sockets[0].onopen()
+  await settle()                       # clean open resync at rev 1
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2 } } }
+  await settle()                       # the cell is absent and the manifest is behind: a want
+  eq ws.passport('a.rip').rev, 1
+  ok reports.some((args) -> String(args[0]).includes('cell fetch missed')), 'the miss is loud'
+  routes['/@rip/manifest'] = JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 2 }] }
+  routes['/@rip/cells/a.rip?rev=2'] = 'v2'
+  await new Promise (resolve) -> setTimeout resolve, 50
+  eq ws.passport('a.rip').rev, 2
+  feed.close()
+
 test! "a dropped socket reconnects with backoff and resyncs; close() stops it", ->
   ws = createWorkspace()
   { feed, calls, sockets } = openFeed ws, { '/@rip/manifest': emptyManifest }
