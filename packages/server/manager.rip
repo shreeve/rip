@@ -135,6 +135,7 @@ export state =
   bootFailure: null    # cached boot error; cleared only by a content-changing save
   bootPromise: null    # the single in-flight boot, joined by concurrent rings
   currentPool: null
+  everServed: false    # a pool has been live this run (epoch dings fire only on SWAPS)
   poolCounter: 0
   ringWaiters: 0
   readyWhen: 1
@@ -718,12 +719,26 @@ bootLoop = ->
       return if state.dirty or state.shuttingDown
       putUpstreams! readySocks(pool)
     state.currentPool = pool
+    dingEpoch pool.n if WORKSPACE and state.everServed
+    state.everServed = true
     state.doorbellPublished = false
     attachLateJoins pool
     if state.dirty                   # saved during the PUT flight — cut again, boot again
       cutAdmission()
       continue
     return
+
+# A pool SWAP is an epoch: every connected page holds pre-swap code, and no
+# cell ding describes a server change. The manager dings the dev channel with
+# the new epoch so open browsers reload into it — the apply policy for a
+# server change IS the full page reload. Fire-and-forget: a publish failure
+# warns and never blocks the boot (the reload is a courtesy; a manual refresh
+# always works). Hub sockets survive the swap at Janus, so the frame reaches
+# every page the OLD pool served.
+dingEpoch = (n) ->
+  pr = do -> publish! [{ '@': [DEV_CHANNEL], ding: { kind: 'epoch', epoch: n } }]
+  pr.catch (e) -> warn "rip-server: epoch ding publish failed: #{e?.message or e}"
+  return
 
 # ==============================================================================
 # The doorbell

@@ -655,6 +655,20 @@ test! "a dinged rev the manifest does not yet name is retried until it appears â
   eq ws.passport('a.rip').rev, 2
   feed.close()
 
+test! "an epoch ding invokes the reload policy â€” never the cell path, never a malformed report", ->
+  ws = createWorkspace()
+  epochs = []
+  { feed, calls, sockets, reports } = openFeed ws, { '/@rip/manifest': emptyManifest }, { onEpoch: (d) -> epochs.push d }
+  sockets[0].onopen()
+  await settle()
+  before = calls.length
+  sockets[0].onmessage { data: JSON.stringify { ding: { kind: 'epoch', epoch: 7 } } }
+  await settle()
+  eq epochs, [{ kind: 'epoch', epoch: 7 }]
+  eq calls.length, before
+  eq reports, []
+  feed.close()
+
 test! "a dropped socket reconnects with backoff and resyncs; close() stops it", ->
   ws = createWorkspace()
   { feed, calls, sockets } = openFeed ws, { '/@rip/manifest': emptyManifest }

@@ -53,6 +53,13 @@ export def connectFeed(workspace, opts = {}): Feed
   report = opts.report ?? (...args) -> console.error(...args)
   backoffMin = opts.backoff?.min ?? FEED_BACKOFF_MIN
   backoffMax = opts.backoff?.max ?? FEED_BACKOFF_MAX
+  # An epoch ding names a pool swap: the page's code AND its server are
+  # both pre-swap, so the apply policy is the full reload — never the
+  # cell path.
+  onEpoch = opts.onEpoch ?? (ding) ->
+    report "[Rip] workspace feed: a new epoch is live (#{ding.epoch}) — reloading"
+    location.reload() if typeof location isnt 'undefined'
+    return
 
   closed = false
   isOpen = false
@@ -125,6 +132,9 @@ export def connectFeed(workspace, opts = {}): Feed
     return
 
   applyDing = (ding) ->
+    if ding? and typeof ding is 'object' and ding.kind is 'epoch'
+      onEpoch ding
+      return
     unless ding? and typeof ding is 'object' and typeof ding.id is 'string' and Number.isInteger(ding.rev)
       report '[Rip] workspace feed: malformed ding:', ding
       return

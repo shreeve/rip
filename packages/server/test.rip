@@ -2094,7 +2094,7 @@ test! "flag on, a non-client edit still cuts admission and reloads through the d
     bellsAt = bells().length
     writeFileSync join(dir, 'app.rip'), wsAppSource('v2')
     waitFor! -> bells().length > bellsAt          # the save cut admission — a full epoch, not a cell feed
-    ok not calls.some((c) -> c.path.endsWith('/hub/publish')), 'no ding for a server edit'
+    ok not calls.some((c) -> c.path.endsWith('/hub/publish')), 'no ding at admission cut — the epoch is not live yet'
     bell = bells()[0].body.upstreams[0].path
     res = uds!(bell, '/ring')
     eq res.status, 204
@@ -2103,6 +2103,17 @@ test! "flag on, a non-client edit still cuts admission and reloads through the d
       last = fresh[fresh.length - 1]?.body.upstreams[0].path
       if last? and last isnt sock1 then last else null
     eq ((uds!(sock2, '/hi')).text!), 'v2'
+    # The swap dings the dev channel with the NEW epoch — connected pages
+    # reload into it. Exactly one, kind 'epoch', on /rip/dev; and none was
+    # published at startup (the first pool serves no pre-swap pages).
+    epochDings = waitFor! ->
+      hits = calls.filter (c) -> c.path.endsWith('/hub/publish') and c.body?.some?((d) -> d.ding?.kind is 'epoch')
+      if hits.length then hits else null
+    eq epochDings.length, 1
+    frame = epochDings[0].body[0]
+    eq frame['@'], ['/rip/dev']
+    eq frame.ding.kind, 'epoch'
+    ok Number.isInteger(frame.ding.epoch), 'the ding names the epoch'
   finally
     try proc.kill('SIGKILL')
     await proc.exited
