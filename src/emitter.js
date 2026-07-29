@@ -8572,7 +8572,15 @@ class Emitter {
             `if (${instVar} && ${instVar}._state === 'mounting') {\n` +
             `${pad}  ${elVar} = ${instVar}._mountSetup(document.createComment('rip:child-error: ${name}'));\n`,
           );
-          if (rec.kind !== 'class') {
+          // _first tracks the setup-returned node ONLY when the child
+          // IS the block's first top-level node (c() latched the same
+          // var). A child nested inside another element must never
+          // hijack _first: the reconciler uses _first as an
+          // insertBefore reference against the block's PARENT, and an
+          // interior node is no child of it.
+          const fragChildren = this.rstate.fragChildren.get(rec.root);
+          const firstNode = fragChildren !== undefined ? fragChildren[0] : rec.root;
+          if (rec.kind !== 'class' && firstNode === elVar) {
             this.b.emit(`${pad}  `);
             if (this.ts) this.b.tsOnly(() => this.b.emit('('));
             this.b.emit('this');

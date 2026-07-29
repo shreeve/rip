@@ -15219,7 +15219,9 @@ ${this.replayPad}}` : " }");
           this.b.emit(`if (${instVar} && ${instVar}._state === 'mounting') {
 ` + `${pad}  ${elVar} = ${instVar}._mountSetup(document.createComment('rip:child-error: ${name}'));
 `);
-          if (rec.kind !== "class") {
+          const fragChildren = this.rstate.fragChildren.get(rec.root);
+          const firstNode = fragChildren !== undefined ? fragChildren[0] : rec.root;
+          if (rec.kind !== "class" && firstNode === elVar) {
             this.b.emit(`${pad}  `);
             if (this.ts)
               this.b.tsOnly(() => this.b.emit("("));
