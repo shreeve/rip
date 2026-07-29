@@ -2212,6 +2212,18 @@ if (RUN_GRAMMAR) {
       ['TemplateLiteralType', 'rip\'s dedicated rejection — "template-literal types are not supported — a Rip type cannot contain \'`\'" (the backtick is rip\'s own token)'],
       ['ConstructSignature', "rip's lexer rejects `new (` inside a type body; the annotation-position ConstructorType (`new () => T`) is the claimable spelling"],
     ]);
+    // Queue rows a finding holds. An unclaimed kind is normally a fixture
+    // someone could write; these are not — no spelling of either compiles
+    // today, so listing them beside genuinely writable rows sends a reader
+    // to discover that for themselves. Same distinction the production
+    // queue draws between parked and available. Self-policing in both
+    // directions: a held kind that becomes CLAIMED means the finding closed
+    // and the hold outlived it, and a hold naming a kind outside the
+    // universe is stale — each paints red rather than sitting there.
+    const HELD_KINDS = new Map([
+      ['MappedType', 'the open mapped-type finding — every spelling is lexer-rejected'],
+      ['ImportType', 'the open import-type finding — the `.rip` specifier does not resolve'],
+    ]);
     const claimedSet = new Set(claimed.map(([c]) => c));
     const universeSet = new Set(kindUniverse);
     const censusDenom = kindUniverse.filter((k) => !EXCLUDED_KINDS.has(k));
@@ -2328,12 +2340,24 @@ if (RUN_GRAMMAR) {
     for (const s of falseSpellingExclusions) out(`    ${red('✗')} ${red('excluded but written:')} ${s} ${dim('— the redundancy claim is false; count the spelling or stop writing it')}`);
     for (const s of staleSpellingExclusions) out(`    ${red('✗')} ${red('excluded spelling the lexer no longer rewrites:')} ${s} ${dim('— stale; fix the spelling exclusion table')}`);
 
-    out(`\n    ${bold('Type vocabulary census')} ${dim(`(the sub-token denominator: every kind in TS's own type grammar, enumerated from the pinned tsgo)`)}`);
-    out(`    ${dim(`${claimedSet.size} / ${censusDenom.length} kinds claimed by the positives`)}${EXCLUDED_KINDS.size ? dim(` · ${EXCLUDED_KINDS.size} excluded by the gate — netted from the denominator; -v lists them`) : ''}`);
+    out(`\n    ${bold('Type vocabulary census')} ${dim(`(what lives inside a TYPE token — invisible to the production count, from the pinned tsgo)`)}`);
+    out(`    ${dim(`${claimedSet.size} / ${censusDenom.length} kinds claimed by the corpus`)}${EXCLUDED_KINDS.size ? dim(` · ${EXCLUDED_KINDS.size} excluded by the gate — netted from the denominator; -v lists them`) : ''}`);
+    const heldKinds = kindQueue.filter((k) => HELD_KINDS.has(k));
+    const staleHeldKinds = [...HELD_KINDS.keys()].filter((k) => !universeSet.has(k));
     if (kindQueue.length) {
-      out(`    ${yellow(`${kindQueue.length} unclaimed — the vocabulary queue:`)}`);
-      wrapList(kindQueue, yellow);
+      const writable = kindQueue.length - heldKinds.length;
+      out(`    ${yellow(`${kindQueue.length} unclaimed — ${heldKinds.length === kindQueue.length
+        ? 'every one held by an open finding'
+        : heldKinds.length ? `${writable} a fixture could claim today, ${heldKinds.length} held by an open finding` : 'the vocabulary queue'}:`)}`);
+      for (const k of kindQueue) {
+        const held = HELD_KINDS.get(k);
+        if (held) out(`        ${yellow(pad(k, 26))} ${dim(`· held by ${held}`)}`);
+      }
+      const free = kindQueue.filter((k) => !HELD_KINDS.has(k));
+      if (free.length) wrapList(free, yellow);
     } else out(`    ${green('every kind claimed or excluded')}`);
+    for (const k of heldKinds.filter((k) => claimedSet.has(k))) out(`    ${red('✗')} ${red('held but claimed:')} ${k} ${dim('— the finding closed; drop the hold')}`);
+    for (const k of staleHeldKinds) out(`    ${red('✗')} ${red('held kind not in the universe:')} ${k} ${dim('— stale; fix the census hold table')}`);
     if (VERBOSE) for (const [k, why] of EXCLUDED_KINDS) out(`        ${pad(k, 26)} ${dim(`excluded — ${why}`)}`);
     for (const k of claimedOutside) out(`    ${red('✗')} ${red('claimed kind outside the census universe:')} ${k} ${dim('— extend the universe derivation in classifyTypeTexts')}`);
     for (const k of falseKindExclusions) out(`    ${red('✗')} ${red('excluded but claimed:')} ${k} ${dim("— the exclusion claim is false; fix the census exclusion table")}`);
