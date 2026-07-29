@@ -18,6 +18,5 @@ wrongArgument = pair(1, text)
 wrongExist = missingName?
 wrongDelete = delete point.x
 wrongScale: ((n: number) => number) | null = 7
-# the paren-less spelling of wrongArgument's excess-arity cousin: the twin anchors TS2554 on the excess argument, and the injected paren cover publishes it on the FIRST — the position violation is expected, carried by the contract (diagnostics.positions), and this row exists to keep it measured
 wrongArityBare = pair 1, count, count
 wrongArityParen = pair(1, count, count)
