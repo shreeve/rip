@@ -535,16 +535,18 @@ test! "a hashed ding and a hashed manifest entry fetch hash-keyed URLs — the c
 # Mirrors the manager's shortHash — 16 hex chars of sha256 over the bytes.
 srcHash = (s) -> new Bun.CryptoHasher('sha256').update(s).digest('hex').slice(0, 16)
 
-test! "a covered rev whose hash names DIFFERENT bytes is a manager restart — the reload policy, never a silent pin to the old run", ->
+test! "a covered ding with DIFFERENT bytes arbitrates through the manifest — a real restart reloads, an overtaken frame is a clean no-op", ->
   # Revs restart when a manager restarts: the surviving page's rev cursor
   # sits ABOVE the new run's revs, so every plain rev verdict says "stale"
-  # and the page would silently pin to the old run's bytes forever. The
-  # hash in the ding is the tiebreak: covered rev + different bytes can
-  # only be another run, and the policy is the same as an epoch.
+  # and the page would silently pin to the old run's bytes forever. But a
+  # covered-mismatch ding ALONE cannot tell a restart from its own
+  # staleness (the HTTP resync is unordered relative to hub frames), so
+  # the no-store manifest arbitrates.
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 3, source: 'old-run' }]
   restarts = []
-  { feed, calls, sockets, reports } = openFeed ws, { '/@rip/manifest': emptyManifest }, { onRestart: (d) -> restarts.push d }
+  routes = { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 3, hash: srcHash('old-run') }] } }
+  { feed, calls, sockets } = openFeed ws, routes, { onRestart: (d) -> restarts.push d }
   sockets[0].onopen()
   await settle()
   before = calls.length
@@ -552,12 +554,21 @@ test! "a covered rev whose hash names DIFFERENT bytes is a manager restart — t
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 3, hash: srcHash('old-run') } } }
   await settle()
   eq restarts, []
-  # Covered rev, DIFFERENT bytes: the new run announcing itself.
+  eq calls.length, before
+  # An overtaken frame: covered-mismatch, but the manifest still names
+  # this page's bytes — the arbitration resolves as a no-op, never a
+  # spurious reload.
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2, hash: srcHash('mid-edit') } } }
+  await settle()
+  eq restarts, []
+  ok calls.length > before, 'the mismatch consulted the manifest'
+  eq ws.passport('a.rip').rev, 3
+  # A real restart: the manifest ITSELF names a covered rev with
+  # different bytes — the new run announcing itself.
+  routes['/@rip/manifest'] = JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 2, hash: srcHash('new-run') }] }
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2, hash: srcHash('new-run') } } }
   await settle()
   eq restarts, [{ id: 'a.rip', rev: 2, hash: srcHash('new-run') }]
-  eq calls.length, before, 'never the cell path'
-  eq ws.passport('a.rip').rev, 3
   eq ws.read('a.rip'), 'old-run'
   feed.close()
 

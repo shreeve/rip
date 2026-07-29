@@ -12,9 +12,10 @@
 # old run's cell silently; with the content hash in the URL, a cache hit
 # is byte-correct by construction. A cell fetch that misses resyncs from
 # the manifest; a covered rev whose bytes DIFFER from the page's copy
-# names a manager restart, and the policy is the full reload (onRestart).
-# Dev/watch only by constitution: production has no hub, and a sealed
-# workspace rejects the feed at the door.
+# names a manager restart — arbitrated through the no-store manifest,
+# where the verdict is the full reload (onRestart). Dev/watch only by
+# constitution: production has no hub, and a sealed workspace rejects
+# the feed at the door.
 # ==============================================================================
 
 export type Feed =
@@ -198,10 +199,15 @@ export def connectFeed(workspace, opts = {}): Feed
       return
     current = workspace.passport id
     if current? and rev <= current.rev
-      # Stale within a run — skip the network. Unless the bytes differ:
-      # that is the cross-run collision, and the policy is the reload.
-      if crossRun! current, hash
-        onRestart { id, rev, hash }
+      # Covered — skip the network. Unless the bytes differ: that is
+      # EITHER a manager restart or this frame's own staleness (the
+      # HTTP resync is unordered relative to hub frames, so a resync
+      # can advance the cursor past a frame still in flight). The ding
+      # alone cannot tell the two apart, so the no-store manifest
+      # arbitrates: a genuine restart shows the same mismatch there and
+      # the resync-path verdict reloads; an overtaken frame resolves as
+      # a clean no-op.
+      resync!() if crossRun! current, hash
       return
     res = fetchBytes! cellUrl(id, rev, hash)
     unless res.ok

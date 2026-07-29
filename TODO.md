@@ -44,6 +44,19 @@ B-list real-but-deferrable items.
       every client response, and the micro-cache stores post-scrub
       bytes.)
 
+### workspace feed (PR #188 re-review, 2026-07-29)
+
+- [ ] Want retirement can drop a retry it should keep: a ding for a
+      brand-new id whose cell fetch misses WHILE the manifest is held
+      back (a bundle-rewrite failure) gets its want retired — the
+      held-back manifest does not name the id yet. Needs two
+      simultaneous failures, dev-only, heals on the next save.
+- [ ] When an editor producer lands (M2), `crossRun` cannot distinguish
+      "another run" from "another producer": a local write over a
+      server-owned id bumps the rev with local bytes, and the next
+      resync would reload and discard the local edit. Unreachable
+      today — nothing writes server-owned ids locally.
+
 ### janus
 
 Janus items moved to `janus/TODO.md`.
