@@ -367,14 +367,14 @@ buildApp = ->
 #
 # A save touching ONLY app/ feeds the live pool in place: mint or bump
 # (id, rev) cells, rewrite the current pool's bundle and the manifest, then
-# ding /rip/dev with {id, rev, hash} envelopes — no new epoch, no pool
+# ding /@rip/dev with {id, rev, hash} envelopes — no new epoch, no pool
 # reload, no doorbell. Any other save takes the dirty-epoch path above and
 # dings the swap (kind 'epoch') once the new pool is live.
 
 # The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
 # server.rip (workers never import manager code). Exported so the mirror
 # is a pinned fact, not a convention.
-export DEV_CHANNEL =! '/rip/dev'
+export DEV_CHANNEL =! '/@rip/dev'
 
 sha256hex = (text) -> new Bun.CryptoHasher('sha256').update(text).digest('hex')
 
@@ -446,8 +446,10 @@ syncCells = ->
 writeManifest = ->
   live = []
   for path, entry of state.cells
-    live.push { id: entry.id, path: path, rev: entry.rev, hash: shortHash(entry.hash) } unless entry.retired
-  live.sort (a, b) -> if a.path < b.path then -1 else 1
+    # The id IS the store path (B′ — the birth path is the id, a rename
+    # retires and mints), so the entry carries one spelling of that fact.
+    live.push { id: entry.id, rev: entry.rev, hash: shortHash(entry.hash) } unless entry.retired
+  live.sort (a, b) -> if a.id < b.id then -1 else 1
   tmp = "#{state.manifestPath}.tmp"
   Bun.write! tmp, JSON.stringify({ cells: live })
   renameSync tmp, state.manifestPath
@@ -521,6 +523,7 @@ spawnWorker = (pool) ->
     env.RIP_BUNDLE_PATH = pool.bundle
     env.RIP_BROWSER_RUNTIME = state.browserRuntime
     env.RIP_CLIENT_DIR = join(cfg.appDir, 'app')
+    env.RIP_APP_NAME = cfg.name
     # The feed surface is watch-only: these envs are what open the
     # workspace door in the worker (feed routes, workspace: true on the
     # boot page). Production (watch off) never sets them — production

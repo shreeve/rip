@@ -495,7 +495,7 @@ test! "a ding fetches the rev-keyed cell and mutates the passport", ->
   ws = createWorkspace()
   ws.populate [{ id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1, source: 'v1' }]
   { feed, calls, sockets, reports } = openFeed ws,
-    '/@rip/manifest': JSON.stringify { cells: [{ id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1 }] }
+    '/@rip/manifest': JSON.stringify { cells: [{ id: 'app/routes/index.rip', rev: 1 }] }
     '/@rip/cells/app/routes/index.rip?rev=2': 'v2'
   s = sockets[0]
   eq s.url, 'ws://test/hub'
@@ -519,7 +519,7 @@ test! "a hashed ding and a hashed manifest entry fetch hash-keyed URLs — the c
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
   { feed, calls, sockets } = openFeed ws,
-    '/@rip/manifest': JSON.stringify { cells: [{ id: 'b.rip', path: 'b.rip', rev: 1, hash: 'beadfeedbeadfeed' }] }
+    '/@rip/manifest': JSON.stringify { cells: [{ id: 'b.rip', rev: 1, hash: 'beadfeedbeadfeed' }] }
     '/@rip/cells/a.rip?rev=2&h=cafef00dcafef00d': 'v2'
     '/@rip/cells/b.rip?rev=1&h=beadfeedbeadfeed': 'bb'
   sockets[0].onopen()
@@ -545,7 +545,7 @@ test! "a covered ding with DIFFERENT bytes arbitrates through the manifest — a
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 3, source: 'old-run' }]
   restarts = []
-  routes = { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 3, hash: srcHash('old-run') }] } }
+  routes = { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', rev: 3, hash: srcHash('old-run') }] } }
   { feed, calls, sockets } = openFeed ws, routes, { onRestart: (d) -> restarts.push d }
   sockets[0].onopen()
   await settle()
@@ -565,7 +565,7 @@ test! "a covered ding with DIFFERENT bytes arbitrates through the manifest — a
   eq ws.passport('a.rip').rev, 3
   # A real restart: the manifest ITSELF names a covered rev with
   # different bytes — the new run announcing itself.
-  routes['/@rip/manifest'] = JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 2, hash: srcHash('new-run') }] }
+  routes['/@rip/manifest'] = JSON.stringify { cells: [{ id: 'a.rip', rev: 2, hash: srcHash('new-run') }] }
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', rev: 2, hash: srcHash('new-run') } } }
   await settle()
   eq restarts, [{ id: 'a.rip', rev: 2, hash: srcHash('new-run') }]
@@ -577,7 +577,7 @@ test! "a manifest entry the cursor covers with different bytes restarts too — 
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 3, source: 'old-run' }]
   restarts = []
   { feed, sockets } = openFeed ws,
-    { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 2, hash: srcHash('new-run') }] } },
+    { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', rev: 2, hash: srcHash('new-run') }] } },
     { onRestart: (d) -> restarts.push d }
   sockets[0].onopen()
   await settle()
@@ -592,7 +592,7 @@ test! "a want the manifest no longer names is retired — a lost delete ding nev
   # the resync must retire it instead of re-polling the manifest forever.
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
-  { feed, calls, sockets, reports } = openFeed ws, { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 1 }] } }
+  { feed, calls, sockets, reports } = openFeed ws, { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', rev: 1 }] } }
   sockets[0].onopen()
   await settle()
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'gone.rip', rev: 2 } } }
@@ -680,7 +680,7 @@ test! "a cell miss resyncs from the manifest, which never deletes local mints", 
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
   ws.write 'local.rip', 'mine'               # an editor's local mint — not the server's
   { feed, sockets, reports } = openFeed ws,
-    '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 4 }] }
+    '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', rev: 4 }] }
     '/@rip/cells/a.rip?rev=4': 'v4'
   sockets[0].onopen()                        # open-resync already advances a.rip to rev 4
   await settle()
@@ -718,7 +718,7 @@ test! "a failed open-resync retries with backoff until the feed heals", ->
   ok reports.some((args) -> String(args[0]).includes('manifest fetch failed')), 'the miss is loud'
   eq ws.passport('a.rip').rev, 1
   # The routes heal; the scheduled retry (backoff min 1ms) finds them.
-  routes['/@rip/manifest'] = JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 2 }] }
+  routes['/@rip/manifest'] = JSON.stringify { cells: [{ id: 'a.rip', rev: 2 }] }
   routes['/@rip/cells/a.rip?rev=2'] = 'v2'
   await new Promise (resolve) -> setTimeout resolve, 50
   eq ws.passport('a.rip').rev, 2
@@ -728,7 +728,7 @@ test! "a failed open-resync retries with backoff until the feed heals", ->
 test! "a dinged rev the manifest does not yet name is retried until it appears — never silently dropped", ->
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
-  routes = { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 1 }] } }
+  routes = { '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', rev: 1 }] } }
   { feed, sockets, reports } = openFeed ws, routes
   sockets[0].onopen()
   await settle()                       # clean open resync at rev 1
@@ -736,7 +736,7 @@ test! "a dinged rev the manifest does not yet name is retried until it appears �
   await settle()                       # the cell is absent and the manifest is behind: a want
   eq ws.passport('a.rip').rev, 1
   ok reports.some((args) -> String(args[0]).includes('cell fetch missed')), 'the miss is loud'
-  routes['/@rip/manifest'] = JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 2 }] }
+  routes['/@rip/manifest'] = JSON.stringify { cells: [{ id: 'a.rip', rev: 2 }] }
   routes['/@rip/cells/a.rip?rev=2'] = 'v2'
   await new Promise (resolve) -> setTimeout resolve, 50
   eq ws.passport('a.rip').rev, 2

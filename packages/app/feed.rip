@@ -169,8 +169,8 @@ export def connectFeed(workspace, opts = {}): Feed
         continue
       source = cres.text!()
       cell = { id: entry.id, rev: entry.rev, source }
-      unless current?
-        cell.path = if typeof entry.path is 'string' then entry.path else entry.id
+      # A birth needs a path, and the id IS the path (B′).
+      cell.path = entry.id unless current?
       workspace.set! cell
     # Wants come only from dings, and dings only name server-owned ids —
     # so a wanted id the manifest no longer names was RETIRED upstream

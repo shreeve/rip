@@ -65,7 +65,7 @@ is stated explicitly.
   now WATCH-ONLY — a production manager (watch off) sets no feed env,
   writes no cells/manifest, publishes no dings, its pages boot PLAIN,
   and the bridge answers opens with a bare 204 (app-level hub sockets
-  never ride `/rip/dev`). Production has no hub (Q2), enforced
+  never ride the dev channel). Production has no hub (Q2), enforced
   structurally. Also from that review: `h` is REQUIRED on the cell
   route (a bare URL is a 400, never a cacheable 200); the page-side
   cross-run verdict (a covered rev whose bytes differ from the page's
