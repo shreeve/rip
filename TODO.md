@@ -70,6 +70,45 @@ Janus items moved to `janus/TODO.md`.
       console, capture the feed report verbatim. Structural note: an
       applyDing whose cell fetch AND resync both miss has no retry
       timer — the feed stays silent until the next ding or reconnect.
+- [ ] Cold-review should-fixes (PR #187 review, 2026-07-29; all inside
+      the experimental `RIP_WORKSPACE=1` surface, none reachable flag
+      off). The two silent-stale items head the list — they are the
+      defect class the doctrine exists to kill:
+  - [ ] The browser door mutates the loader BEFORE the bag's rev
+        verdict (`src/browser-boot.js` door.set/delete): two dings in
+        flight can land out of order — the pre-fetch staleness check
+        passes for both, the older fetch completes second, and its
+        `files.set` + `invalidate` poison the module graph while
+        `bag.set` rejects it without error. Check
+        `bag.passport(id)?.rev` before touching `files`/`loader`.
+  - [ ] Boot pairs the manifest's rev with the bundle's source without
+        correlation (`src/browser-boot.js`): the bundle is fetched
+        before the manifest, and the manager writes the manifest before
+        rewriting the pool bundle — a save between the two fetches makes
+        `populate` claim rev N+1 over rev-N bytes, and the rev cursor
+        then blocks the healing ding until the NEXT save. Needs a
+        correlation fact (per-cell hash, or fetch order + epoch check).
+  - [ ] The feed's default `cellUrl` never percent-encodes the id
+        (`packages/workspace/feed.rip`): a legal filename containing
+        `%`, `#`, or `?` builds a URL the server 400s or truncates —
+        and the miss path has no retry (see above). One-line
+        `encodeURIComponent` on the id.
+  - [ ] Overlapping `onCellChange` runs share fixed tmp paths
+        (`packages/server/manager.rip`): a second save's run races the
+        first on `manifest.json.tmp` and the pool bundle's `.tmp` —
+        interleaved writes can land a torn manifest via rename, or the
+        rename throws and that run's dings abort. Chain cell-path runs
+        on a promise queue.
+  - [ ] The remount's teardown-plus-relaunch has no guard
+        (`src/browser-boot.js`): a throw from `launch` inside the
+        timer-driven remount leaves the page unmounted with only an
+        unhandled rejection as evidence. Wrap and route through
+        `report`.
+  - [ ] Nits from the same review: `client()`'s SPA fallback silently
+        replaces a notFound the app registered BEFORE calling it
+        (warn or document the ordering); `DEV_CHANNEL` is a two-site
+        hand-mirrored constant (pin their equality); the Pulse post
+        handler ignores `res.ok` and can `send` on a CONNECTING socket.
 
 ---
 
