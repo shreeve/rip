@@ -321,23 +321,24 @@ An app serves its own SPA through one registration:
 ```coffee
 import { get, client, start } from '@rip-lang/server'
 
-client!()                    # client/ next to the app entry, or client!('path/to/dir')
+client!()                    # app/ next to the app entry, or client!('path/to/dir')
 get '/api/users' -> users()  # API routes coexist with the SPA
 start()
 ```
 
-**The directory convention.** A directory named `client/` next to the app
-entry holds the browser app. Every `.rip` file under it, keyed by its path
-relative to `client/`, becomes a bundle module — `client/_route/index.rip`
-travels as `_route/index.rip`, the store-path vocabulary `@rip-lang/app`
-boots from. The bundle carries every browser-safe `@rip-lang` package the
+**The directory convention.** A directory named `app/` next to the app
+entry holds the browser app; route components live under `app/routes/`.
+Every `.rip` file under it becomes a bundle module keyed by its disk path
+— the disk path IS the store path `@rip-lang/app` boots from:
+`app/routes/index.rip` is the `/` route, `app/stash.rip` the stash
+contract. The bundle carries every browser-safe `@rip-lang` package the
 modules reach (`rip.browser: true` in the package manifest); a server-only
 or unknown import rejects assembly loudly, naming the importer and the
 package.
 
 **Three routes plus a fallback.** `client()` registers:
 
-- `GET /` — the boot page. If `client/index.html` exists it is served
+- `GET /` — the boot page. If `app/index.html` exists it is served
   as-is (with ETag revalidation); otherwise a minimal generated page
   mounts `<div id="app">` and boots via a module script.
 - `GET /__rip/bundle.json` — the bundle, `Content-Type: application/json`
@@ -356,7 +357,7 @@ Under the pool, the **manager** assembles the bundle once per boot epoch
 (alongside the app artifact, inside the same failure path: an assembly
 error caches as a boot failure and rings answer 503 with the diagnostic)
 and passes its path to workers via `RIP_BUNDLE_PATH` — workers read the
-prebuilt file and never carry the compiler. A save under `client/` is an
+prebuilt file and never carry the compiler. A save under `app/` is an
 epoch like any other: the watcher's content-hash gate covers every `.rip`
 under the app directory, so the next ring serves a reassembled bundle
 with a fresh ETag.
@@ -378,11 +379,11 @@ With the flag on, in watch mode:
 
 - **Change classification.** The watcher tracks a per-file hash map next
   to its whole-tree content-hash gate. A save whose every changed, added,
-  or removed path lies under `client/` feeds the live pool in place — no
+  or removed path lies under `app/` feeds the live pool in place — no
   admission cut, no pool reload, no doorbell. Any other save (server
   files, or a mixed set) takes the full-reload path above unchanged.
-- **Cells and the manifest.** Each `.rip` under `client/` is a cell whose
-  id is its birth path relative to `client/` (`_route/index.rip`); a
+- **Cells and the manifest.** Each `.rip` under `app/` is a cell whose
+  id is its birth path (`app/routes/index.rip`); a
   rename retires the old id and mints a new one at rev 1 (id persistence
   across renames is open research). Revs start at 1 and bump once per
   content change; the registry lives in the manager's memory for the run.

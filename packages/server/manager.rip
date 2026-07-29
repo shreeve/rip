@@ -114,12 +114,12 @@ export state =
   controlUnix: null    # unix socket path to the control plane, or
   controlBase: null    # http(s) base URL
   workerJs: null       # the worker runtime, prebuilt to plain JS at startup
-  browserRuntime: null # dist/browser/rip.js, copied into runDir when client/ exists
+  browserRuntime: null # dist/browser/rip.js, copied into runDir when app/ exists
   buildCounter: 0      # one app artifact per boot epoch, uniquely named
   runDir: null         # tmpdir holding the doorbell, worker sockets, artifacts
   cellsDir: null       # RIP_WORKSPACE=1: rev-keyed cell files under runDir/cells
   manifestPath: null   # RIP_WORKSPACE=1: the atomically rewritten cell manifest
-  cells: {}            # RIP_WORKSPACE=1: id (birth path under client/) → { id, rev, hash, retired }
+  cells: {}            # RIP_WORKSPACE=1: id (birth store path, 'app/…') → { id, rev, hash, retired }
   bellPath: null
   bell: null
   watcher: null
@@ -315,10 +315,12 @@ export buildArtifact = (entry, outfile) ->
   outfile
 
 # The app's browser bundle, reassembled every epoch alongside the artifact:
-# each .rip under <appDir>/client, keyed by its path relative to client/,
-# through the compiler-src assembleBundle. No client dir means no bundle
-# (null). An assembly failure throws — it rides the same boot-failure
-# caching as a compile failure, so rings answer 503 with the diagnostic.
+# each .rip under <appDir>/app, keyed by its disk path relative to the app
+# entry ('app/routes/index.rip', 'app/stash.rip' — the disk path IS the
+# store path), through the compiler-src assembleBundle. No app/ dir means
+# no bundle (null). An assembly failure throws — it rides the same
+# boot-failure caching as a compile failure, so rings answer 503 with the
+# diagnostic.
 clientModules = (dir) ->
   out = {}
   walk = (at, prefix) ->
@@ -329,19 +331,19 @@ clientModules = (dir) ->
         walk full, "#{prefix}#{e.name}/"
       else if e.name.endsWith('.rip')
         out["#{prefix}#{e.name}"] = readFileSync(full, 'utf8')
-  walk dir, ''
+  walk dir, 'app/'
   out
 
 assembleBundleText = ->
   assemble = loadAssembler!()
-  opts: Record<string, any> = { modules: clientModules(join(cfg.appDir, 'client')), packagesDir: join(loaderSrcDir(), '..', 'packages') }
+  opts: Record<string, any> = { modules: clientModules(join(cfg.appDir, 'app')), packagesDir: join(loaderSrcDir(), '..', 'packages') }
   # The dev door boots in the browser through @rip-lang/workspace, so
   # the flag claims it into every bundle this manager assembles.
   opts.claims = ['@rip-lang/workspace'] if WORKSPACE
   JSON.stringify assemble(opts)
 
 buildBundle = ->
-  return null unless existsSync(join(cfg.appDir, 'client'))
+  return null unless existsSync(join(cfg.appDir, 'app'))
   out = join(state.runDir, "b#{state.buildCounter}-bundle.json")
   Bun.write! out, assembleBundleText!()
   out
@@ -357,7 +359,7 @@ buildApp = ->
 # The workspace dev feed — RIP_WORKSPACE=1 (docs/WORKSPACE.md)
 # ==============================================================================
 #
-# Flag on, a save touching ONLY client/ feeds the live pool in place: mint or
+# Flag on, a save touching ONLY app/ feeds the live pool in place: mint or
 # bump (id, rev) cells, rewrite the manifest and the current pool's bundle,
 # then ding /rip/dev with {id, rev} envelopes — no new epoch, no pool reload,
 # no doorbell. Flag off, none of this code runs and every save takes the
@@ -376,7 +378,7 @@ sha256hex = (text) -> new Bun.CryptoHasher('sha256').update(text).digest('hex')
 # it. Mirrored by the cell route in server.rip.
 cellFile = (id, rev) -> join(state.cellsDir, "#{encodeURIComponent(id)}@#{rev}")
 
-# Sync the registry against the client tree and write what changed. A new
+# Sync the registry against the app/ tree and write what changed. A new
 # path mints its id — the birth path, Q3/B′ — at rev 1; a changed path bumps
 # its rev; a deleted path retires: dropped from the manifest, its rev-keyed
 # files staying on disk and answering (Q8), and the retirement OCCUPIES its
@@ -389,7 +391,7 @@ syncCells = ->
   state.cellsDir ?= join(state.runDir, 'cells')
   state.manifestPath ?= join(state.runDir, 'manifest.json')
   mkdirSync state.cellsDir, { recursive: true }
-  modules = clientModules(join(cfg.appDir, 'client'))
+  modules = clientModules(join(cfg.appDir, 'app'))
   changed = []
   for path, source of modules
     h = sha256hex(source)
@@ -473,7 +475,7 @@ spawnWorker = (pool) ->
   if pool.bundle?
     env.RIP_BUNDLE_PATH = pool.bundle
     env.RIP_BROWSER_RUNTIME = state.browserRuntime
-    env.RIP_CLIENT_DIR = join(cfg.appDir, 'client')
+    env.RIP_CLIENT_DIR = join(cfg.appDir, 'app')
     if WORKSPACE
       env.RIP_CELLS_DIR = state.cellsDir
       env.RIP_MANIFEST_PATH = state.manifestPath
@@ -764,7 +766,7 @@ hashApp = ->
   walk cfg.appDir
   files.sort()
   # Per-file hashes feed both the whole-tree gate and (flag on) the
-  # client-only change classification in settle.
+  # client-only (app/-only) change classification in settle.
   map = {}
   hasher = new Bun.CryptoHasher('sha256')
   for f in files
@@ -776,9 +778,9 @@ hashApp = ->
   { hash: hasher.digest('hex'), files: map }
 
 # Every changed, added, or removed path between two walks lies under
-# client/ — then the save is a cell feed, not a reload.
+# app/ — then the save is a cell feed, not a reload.
 clientOnlyChange = (prev, cur) ->
-  boundary = join(cfg.appDir, 'client') + '/'
+  boundary = join(cfg.appDir, 'app') + '/'
   for path, h of cur
     return false if prev[path] isnt h and not path.startsWith(boundary)
   for path of prev
@@ -792,7 +794,7 @@ settle = ->
   prev = state.lastFiles
   state.lastHash = snap.hash
   state.lastFiles = snap.files
-  # RIP_WORKSPACE=1: a save touching only client/ mutates a LIVE pool in
+  # RIP_WORKSPACE=1: a save touching only app/ mutates a LIVE pool in
   # place. With no live pool to feed (admission already cut, a cached boot
   # failure, mid-reload) the save joins the pending epoch exactly as a
   # server save would. Flag off, every save takes the path below.
@@ -1062,12 +1064,12 @@ export main = (argv) ->
   catch e
     abort "rip-server: cannot build the worker runtime: #{e?.message or e}"
 
-  # An app with a client/ dir serves the browser runtime from the run
+  # An app with an app/ dir serves the browser runtime from the run
   # tmpdir — copied once per manager start. A missing runtime file is a
   # toolchain defect, not an app error: abort.
-  if existsSync(join(cfg.appDir, 'client'))
+  if existsSync(join(cfg.appDir, 'app'))
     runtimeSrc = join(loaderSrcDir(), '..', 'dist', 'browser', 'rip.js')
-    abort "rip-server: browser runtime missing at #{runtimeSrc} — a client/ dir requires dist/browser/rip.js" unless existsSync(runtimeSrc)
+    abort "rip-server: browser runtime missing at #{runtimeSrc} — an app/ dir requires dist/browser/rip.js" unless existsSync(runtimeSrc)
     state.browserRuntime = join(state.runDir, 'rip.js')
     Bun.write! state.browserRuntime, Bun.file(runtimeSrc)
 

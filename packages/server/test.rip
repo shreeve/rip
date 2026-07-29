@@ -772,15 +772,14 @@ export Home = component
 """
 
 writeClientDir = (dir, route = CLIENT_ROUTE) ->
-  mkdirSync join(dir, 'client', '_route'), { recursive: true }
-  mkdirSync join(dir, 'client', '_app'), { recursive: true }
-  writeFileSync join(dir, 'client', '_route', 'index.rip'), route
-  writeFileSync join(dir, 'client', '_app', 'stash.rip'), CLIENT_STASH
+  mkdirSync join(dir, 'app', 'routes'), { recursive: true }
+  writeFileSync join(dir, 'app', 'routes', 'index.rip'), route
+  writeFileSync join(dir, 'app', 'stash.rip'), CLIENT_STASH
 
 clientAppDir = mkdtempSync join(import.meta.dir, 'tmp-client-')
 writeClientDir clientAppDir
 resetGlobals()
-client! join(clientAppDir, 'client')
+client! join(clientAppDir, 'app')
 
 test! "client(dir) serves the boot page at GET /: runtime import, bundle url, mount point", ->
   res = handle! req('GET', '/')
@@ -797,8 +796,8 @@ test! "GET /__rip/bundle.json ships the client modules and the boot package", ->
   eq res.status, 200
   eq res.headers.get('content-type'), 'application/json'
   bundle = res.json!
-  ok bundle.modules['_route/index.rip']?, 'the route module travels under its store path'
-  ok bundle.modules['_app/stash.rip']?, 'the stash module travels under its store path'
+  ok bundle.modules['app/routes/index.rip']?, 'the route module travels under its store path'
+  ok bundle.modules['app/stash.rip']?, 'the stash module travels under its store path'
   ok Object.keys(bundle.modules).some((k) -> k.startsWith('_pkg/app/')), 'the app package modules travel'
   ok bundle.packages['@rip-lang/app']?, 'the boot package is claimed'
 
@@ -823,11 +822,11 @@ test! "the SPA fallback answers HTML navigations; everything else stays a 404", 
   api = handle! req('GET', '/nope', { headers: { Accept: 'application/json' } })
   eq api.status, 404
 
-test! "a client/index.html replaces the generated boot page", ->
-  writeFileSync join(clientAppDir, 'client', 'index.html'),
+test! "an app/index.html replaces the generated boot page", ->
+  writeFileSync join(clientAppDir, 'app', 'index.html'),
     '<!doctype html><title>custom</title><div id="app"></div>'
   resetGlobals()
-  client! join(clientAppDir, 'client')
+  client! join(clientAppDir, 'app')
   res = handle! req('GET', '/')
   eq res.status, 200
   ok (res.text!).includes('custom'), 'the app-provided page ships'
@@ -835,8 +834,8 @@ test! "a client/index.html replaces the generated boot page", ->
 
 test! "a client module importing a server-only package rejects loudly at client()", ->
   dir = mkdtempSync join(import.meta.dir, 'tmp-client-')
-  mkdirSync join(dir, 'client', '_route'), { recursive: true }
-  writeFileSync join(dir, 'client', '_route', 'index.rip'), """
+  mkdirSync join(dir, 'app', 'routes'), { recursive: true }
+  writeFileSync join(dir, 'app', 'routes', 'index.rip'), """
   import { get } from '@rip-lang/server'
   export Home = component
     render
@@ -845,11 +844,11 @@ test! "a client module importing a server-only package rejects loudly at client(
   resetGlobals()
   err = null
   try
-    client! join(dir, 'client')
+    client! join(dir, 'app')
   catch e
     err = e
   ok err?, 'a server-only import must not assemble'
-  ok err.message.includes('_route/index.rip'), "names the importer: #{err.message}"
+  ok err.message.includes('app/routes/index.rip'), "names the importer: #{err.message}"
   ok err.message.includes('@rip-lang/server'), "names the package: #{err.message}"
   rmSync dir, { recursive: true, force: true }
 
@@ -864,7 +863,7 @@ resetGlobals()
 
 console.log "\nclient() dev feed"
 
-FEED_CELL_ID = '_route/index.rip'
+FEED_CELL_ID = 'app/routes/index.rip'
 feedDir = mkdtempSync join(import.meta.dir, 'tmp-feed-')
 mkdirSync join(feedDir, 'cells'), { recursive: true }
 writeFileSync join(feedDir, 'cells', "#{encodeURIComponent(FEED_CELL_ID)}@1"), CLIENT_ROUTE
@@ -974,7 +973,7 @@ test! "standalone assembly under the flag claims @rip-lang/workspace into the bu
   process.env.RIP_WORKSPACE = '1'
   try
     resetGlobals()
-    client! join(dir, 'client')
+    client! join(dir, 'app')
     bundle = (handle! req('GET', '/__rip/bundle.json')).json!
     ok bundle.packages['@rip-lang/workspace']?, 'the workspace package is claimed'
     ok bundle.modules['_pkg/workspace/feed.rip']?, 'the feed module travels'
@@ -1960,7 +1959,7 @@ test! "manager -c 2 --no-watch plumbs the cap to workers: two in flight over one
 
 console.log "\nManager browser delivery"
 
-test! "a client/ dir ships through the pool: boot page, bundle ETag, per-epoch reassembly", ->
+test! "an app/ dir ships through the pool: boot page, bundle ETag, per-epoch reassembly", ->
   ctlSock = join(tmpdir(), "rip-janus-client-#{Date.now()}-#{rand(1e6)}.sock")
   dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
   writeFileSync join(dir, 'app.rip'), """
@@ -1984,11 +1983,11 @@ test! "a client/ dir ships through the pool: boot page, bundle ETag, per-epoch r
     etag1 = b1.headers.get('etag')
     ok etag1?, 'the bundle carries an ETag'
     bundle = b1.json!
-    ok bundle.modules['_route/index.rip']?, 'the manager-assembled bundle ships the client module'
+    ok bundle.modules['app/routes/index.rip']?, 'the manager-assembled bundle ships the client module'
     # A client edit is an epoch like any other: settle cuts admission, the
     # ring boots against a REASSEMBLED bundle — its ETag must differ.
     bell = calls.find((c) -> c.method is 'PUT' and c.body?.upstreams?.some((u) -> u.doorbell)).body.upstreams[0].path
-    writeFileSync join(dir, 'client', '_route', 'index.rip'), CLIENT_ROUTE.replace('"home"', '"home v2"')
+    writeFileSync join(dir, 'app', 'routes', 'index.rip'), CLIENT_ROUTE.replace('"home"', '"home v2"')
     waitFor! -> calls.filter((c) -> c.method is 'PUT' and c.body?.upstreams?.some((u) -> u.doorbell)).length >= 2
     res = uds!(bell, '/ring')
     eq res.status, 204
@@ -2033,26 +2032,26 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
     eq m1.status, 200
     eq m1.headers.get('cache-control'), 'no-store'
     eq (m1.json!), { cells: [
-      { id: '_app/stash.rip',   path: '_app/stash.rip',   rev: 1 }
-      { id: '_route/index.rip', path: '_route/index.rip', rev: 1 }
+      { id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1 }
+      { id: 'app/stash.rip',        path: 'app/stash.rip',        rev: 1 }
     ] }
-    c1 = uds!(sock, '/__rip/cells/_route/index.rip?rev=1')
+    c1 = uds!(sock, '/__rip/cells/app/routes/index.rip?rev=1')
     eq c1.status, 200
     eq c1.headers.get('cache-control'), 'public, max-age=31536000, immutable'
     eq (c1.text!), CLIENT_ROUTE
     etag1 = (uds!(sock, '/__rip/bundle.json')).headers.get('etag')
     putsAt = puts().length
     v2 = CLIENT_ROUTE.replace('"home"', '"home v2"')
-    writeFileSync join(dir, 'client', '_route', 'index.rip'), v2
+    writeFileSync join(dir, 'app', 'routes', 'index.rip'), v2
     pub = waitFor! -> calls.find (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
     eq pub.path, '/1.0/apps/app-x/hub/publish'
-    eq pub.body, [{ '@': ['/rip/dev'], ding: { id: '_route/index.rip', rev: 2 } }]
+    eq pub.body, [{ '@': ['/rip/dev'], ding: { id: 'app/routes/index.rip', rev: 2 } }]
     m2 = (uds!(sock, '/__rip/manifest')).json!
-    eq m2.cells.find((e) -> e.path is '_route/index.rip').rev, 2
-    eq ((uds!(sock, '/__rip/cells/_route/index.rip?rev=2')).text!), v2
-    eq ((uds!(sock, '/__rip/cells/_route/index.rip?rev=1')).text!), CLIENT_ROUTE   # old revs keep answering
-    eq (uds!(sock, '/__rip/cells/_route/index.rip')).status, 400                   # unversioned → rejected
-    eq (uds!(sock, '/__rip/cells/_route/index.rip?rev=9')).status, 404
+    eq m2.cells.find((e) -> e.path is 'app/routes/index.rip').rev, 2
+    eq ((uds!(sock, '/__rip/cells/app/routes/index.rip?rev=2')).text!), v2
+    eq ((uds!(sock, '/__rip/cells/app/routes/index.rip?rev=1')).text!), CLIENT_ROUTE   # old revs keep answering
+    eq (uds!(sock, '/__rip/cells/app/routes/index.rip')).status, 400                   # unversioned → rejected
+    eq (uds!(sock, '/__rip/cells/app/routes/index.rip?rev=9')).status, 404
     open = uds!(sock, '/hub', { method: 'POST', headers: { 'Sec-WebSocket-Frame': 'open' } })
     eq open.status, 200
     eq (open.json!), { '+': ['/rip/dev'] }
@@ -2064,14 +2063,14 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
     # A deletion rides the same stream: the retirement occupies its own rev,
     # dings with kind 'delete', leaves the manifest, and its old rev-keyed
     # cells keep answering (Q8) — still no reload.
-    unlinkSync join(dir, 'client', '_app', 'stash.rip')
+    unlinkSync join(dir, 'app', 'stash.rip')
     pubs = -> calls.filter (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
     retirement = waitFor! -> pubs()[1]
-    eq retirement.body, [{ '@': ['/rip/dev'], ding: { id: '_app/stash.rip', rev: 2, kind: 'delete' } }]
+    eq retirement.body, [{ '@': ['/rip/dev'], ding: { id: 'app/stash.rip', rev: 2, kind: 'delete' } }]
     m3 = (uds!(sock, '/__rip/manifest')).json!
-    eq m3.cells.map((e) -> e.path), ['_route/index.rip']
-    eq ((uds!(sock, '/__rip/cells/_app/stash.rip?rev=1')).text!), CLIENT_STASH
-    eq (uds!(sock, '/__rip/cells/_app/stash.rip?rev=2')).status, 404   # a retirement has no bytes
+    eq m3.cells.map((e) -> e.path), ['app/routes/index.rip']
+    eq ((uds!(sock, '/__rip/cells/app/stash.rip?rev=1')).text!), CLIENT_STASH
+    eq (uds!(sock, '/__rip/cells/app/stash.rip?rev=2')).status, 404   # a retirement has no bytes
     eq puts().length, putsAt
   finally
     try proc.kill('SIGKILL')

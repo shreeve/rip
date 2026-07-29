@@ -207,12 +207,13 @@ export async function bootApp(opts = {}) {
     bag.populate(records);
   }
 
-  // Route and app modules compile up front: launch's renderer requires
-  // every navigable module already compiled, and a page fails its boot
-  // loudly at its own position instead of failing its first navigation.
+  // Application modules (the app/ store tree) compile up front:
+  // launch's renderer requires every navigable module already compiled,
+  // and a page fails its boot loudly at its own position instead of
+  // failing its first navigation.
   const compiled = {};
   for (const path of Object.keys(bundle.modules ?? {})) {
-    if (path.startsWith('_route/') || path.startsWith('_app/')) {
+    if (path.startsWith('app/')) {
       compiled[path] = { ...(await loader.import(path)) };
     }
   }
@@ -271,7 +272,7 @@ export async function bootApp(opts = {}) {
     console.log('[Rip] workspace: change applied by remount (escape, not hot apply)');
   };
   const unwatch = bag.watch((_event, path) => {
-    if (!path.startsWith('_route/') && !path.startsWith('_app/')) return;
+    if (!path.startsWith('app/')) return;
     timer ??= setTimeout(remount, 25);
   });
 

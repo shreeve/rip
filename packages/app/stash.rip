@@ -218,7 +218,7 @@ sourceHandle = (raw, path, key) ->
       cell = value
       break
   unless cell
-    throw new Error "Rip App: source('#{path}') does not resolve to a source key — declare it with source() in _app/stash.rip"
+    throw new Error "Rip App: source('#{path}') does not resolve to a source key — declare it with source() in app/stash.rip"
   if _isSourceFamily cell
     throw new Error "Rip App: keyed source('#{path}') requires a key — source('#{path}', key)" unless key?
     cell = cell.cellFor key

@@ -23075,7 +23075,7 @@ async function bootApp(opts = {}) {
   }
   const compiled = {};
   for (const path of Object.keys(bundle.modules ?? {})) {
-    if (path.startsWith("_route/") || path.startsWith("_app/")) {
+    if (path.startsWith("app/")) {
       compiled[path] = { ...await loader.import(path) };
     }
   }
@@ -23123,7 +23123,7 @@ async function bootApp(opts = {}) {
     console.log("[Rip] workspace: change applied by remount (escape, not hot apply)");
   };
   const unwatch = bag.watch((_event, path) => {
-    if (!path.startsWith("_route/") && !path.startsWith("_app/"))
+    if (!path.startsWith("app/"))
       return;
     timer ??= setTimeout(remount, 25);
   });

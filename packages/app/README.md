@@ -70,11 +70,11 @@ arity inference for idiomatic Rip. Kind and callback arity must agree.
 
 ## Routes
 
-`buildRoutes(files, root = '_route')` compiles route files into a frozen,
+`buildRoutes(files, root = 'app/routes')` compiles route files into a frozen,
 deterministic manifest with no browser dependency:
 
 ```coffee
-manifest = buildRoutes components.listAll('_route')
+manifest = buildRoutes components.listAll('app/routes')
 manifest.match '/users/7'   # { route: { pattern, file, layouts }, params: { id: '7' } }
 ```
 
@@ -102,7 +102,7 @@ URL reads, and scroll primitives — so the machine tests under Node and
 
 ```coffee
 router = createRouter
-  routes: buildRoutes components.listAll('_route')
+  routes: buildRoutes components.listAll('app/routes')
   adapter: browserAdapter()
   onError: (failure) -> console.error failure.status, failure.path
 
@@ -194,7 +194,7 @@ not provide source compilation, launch, or browser delivery.
 then the result is stamped as the reset baseline), loads the component
 registry, derives the route manifest, and wires router and renderer
 together before starting. The application declares its stash in the
-bundle module `_app/stash.rip` through its `appStash` export — a stash
+bundle module `app/stash.rip` through its `appStash` export — a stash
 module without the export rejects loudly — and the `stash` option
 overrides it for tests and embedding hosts. It installs `__ripApp` and `__ripRouter`; a
 second launch rejects loudly, as does a malformed bundle, and

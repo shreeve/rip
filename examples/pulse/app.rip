@@ -1,0 +1,26 @@
+# Pulse — a tiny status board proving the stack end to end: Rip Server
+# serves the boot page, the bundle, and this API; Rip App renders the
+# app/ directory in the browser. See README.md for the demo script.
+import { get, post, read, error, client, start } from '@rip-lang/server'
+
+MOODS = ['up', 'even', 'down']
+
+# In-memory only — a worker reload clears the list (README, pooled note).
+statuses = [
+  { text: 'Pulse is alive', mood: 'up', timestamp: new Date().toISOString() }
+]
+
+client!()
+
+get '/api/statuses' -> statuses
+
+post '/api/statuses' ->
+  text = read 'text', 'text!'
+  error! "text is too long (max 140 characters)" if text.length > 140
+  mood = read 'mood', MOODS
+  error! "mood must be one of: #{MOODS.join ', '}" unless mood?
+  status = { text, mood, timestamp: new Date().toISOString() }
+  statuses.push status
+  status
+
+start()

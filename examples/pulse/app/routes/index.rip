@@ -1,0 +1,33 @@
+import { MoodBadge } from '../mood.rip'
+
+export Home = component
+  statuses <~ @app.data.statuses
+  text := ""
+  mood := "up"
+
+  post: ->
+    return if text is ""
+    await fetch '/api/statuses',
+      method: 'POST'
+      headers: { 'Content-Type': 'application/json' }
+      body: JSON.stringify { text, mood }
+    text = ""
+    # The source cell refetches; the render gate re-reads and the list updates.
+    globalThis.__ripApp.data.source('statuses').refetch()
+
+  render
+    h1 "Pulse"
+    input placeholder: "What's happening?", value <=> text
+    span " mood: #{mood} "
+    button "up"
+      @click: -> mood = "up"
+    button "even"
+      @click: -> mood = "even"
+    button "down"
+      @click: -> mood = "down"
+    button @click: post, "Post"
+    ul
+      for s in statuses
+        li
+          MoodBadge mood: s.mood
+          span " #{s.text} (#{s.timestamp})"

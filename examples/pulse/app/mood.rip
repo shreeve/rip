@@ -1,0 +1,12 @@
+# The mood → label vocabulary. This is the file the live demo edits:
+# change a label below, save, and watch every badge on the page update.
+MOODS =
+  up:   'riding high'
+  even: 'steady on'
+  down: 'in the trenches'
+
+export MoodBadge = component
+  @mood?: string := ""
+  render
+    text = MOODS[@mood] or @mood
+    strong "[#{text}]"

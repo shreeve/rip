@@ -500,20 +500,20 @@ test "connectFeed validates its workspace and rejects a sealed one", ->
 
 test! "a ding fetches the rev-keyed cell and mutates the passport", ->
   ws = createWorkspace()
-  ws.populate [{ id: '_route/index.rip', path: '_route/index.rip', rev: 1, source: 'v1' }]
+  ws.populate [{ id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1, source: 'v1' }]
   { feed, calls, sockets, reports } = openFeed ws,
-    '/__rip/manifest': JSON.stringify { cells: [{ id: '_route/index.rip', path: '_route/index.rip', rev: 1 }] }
-    '/__rip/cells/_route/index.rip?rev=2': 'v2'
+    '/__rip/manifest': JSON.stringify { cells: [{ id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1 }] }
+    '/__rip/cells/app/routes/index.rip?rev=2': 'v2'
   s = sockets[0]
   eq s.url, 'ws://test/hub'
   s.onopen()
   await settle()
   ok feed.connected()
-  s.onmessage { data: JSON.stringify { ding: { id: '_route/index.rip', rev: 2 } } }
+  s.onmessage { data: JSON.stringify { ding: { id: 'app/routes/index.rip', rev: 2 } } }
   await settle()
-  eq ws.passport('_route/index.rip').rev, 2
-  eq ws.read('_route/index.rip'), 'v2'
-  ok calls.includes('/__rip/cells/_route/index.rip?rev=2')
+  eq ws.passport('app/routes/index.rip').rev, 2
+  eq ws.read('app/routes/index.rip'), 'v2'
+  ok calls.includes('/__rip/cells/app/routes/index.rip?rev=2')
   eq reports, []
   feed.close()
   eq feed.connected(), false
@@ -536,12 +536,12 @@ test! "a ding for an unknown id births the passport at its id path", ->
   ws = createWorkspace()
   { feed, sockets } = openFeed ws,
     '/__rip/manifest': emptyManifest
-    '/__rip/cells/_app/new.rip?rev=1': 'fresh'
+    '/__rip/cells/app/new.rip?rev=1': 'fresh'
   sockets[0].onopen()
   await settle()
-  sockets[0].onmessage { data: JSON.stringify { ding: { id: '_app/new.rip', rev: 1 } } }
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'app/new.rip', rev: 1 } } }
   await settle()
-  eq ws.passport('_app/new.rip'), { id: '_app/new.rip', path: '_app/new.rip', rev: 1, source: 'fresh', compiled: undefined }
+  eq ws.passport('app/new.rip'), { id: 'app/new.rip', path: 'app/new.rip', rev: 1, source: 'fresh', compiled: undefined }
   feed.close()
 
 test! "a delete ding removes the passport without a fetch", ->

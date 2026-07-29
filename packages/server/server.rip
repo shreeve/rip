@@ -817,11 +817,12 @@ export App = (fn) ->
 # Browser delivery — client()
 # ==============================================================================
 #
-# A directory named client/ next to the app entry holds the browser app:
-# every .rip file under it, keyed by its path relative to client/, becomes a
-# bundle module ('_route/index.rip', '_app/stash.rip' — the store-path
-# vocabulary @rip-lang/app boots from). client(dir) registers the delivery
-# surface: GET / answers the boot page (client/index.html when present, else
+# A directory named app/ next to the app entry holds the browser app:
+# every .rip file under it becomes a bundle module keyed by its disk path
+# ('app/routes/index.rip', 'app/stash.rip' — the disk path IS the store
+# path @rip-lang/app boots from; routes live under app/routes/).
+# client(dir) registers the delivery surface: GET / answers the boot page
+# (app/index.html when present, else
 # a generated one), GET /__rip/bundle.json ships the bundle with ETag
 # revalidation, GET /__rip/rip.js ships the browser runtime, and a notFound
 # fallback answers the boot page for GET requests accepting text/html — an
@@ -855,7 +856,7 @@ clientModules = (dir) ->
         walk full, "#{prefix}#{e.name}/"
       else if e.name.endsWith('.rip')
         out["#{prefix}#{e.name}"] = readFileSync(full, 'utf8')
-  walk dir, ''
+  walk dir, 'app/'
   out
 
 # The generated boot page. In worker mode under RIP_WORKSPACE=1 the
@@ -885,9 +886,9 @@ export client = (dir = null) ->
     runtimePath = process.env.RIP_BROWSER_RUNTIME
     clientDir = process.env.RIP_CLIENT_DIR or null
   else
-    clientDir = resolve(dir ?? 'client')
+    clientDir = resolve(dir ?? 'app')
     unless existsSync(clientDir)
-      throw new Error "client() found no client directory at #{clientDir}"
+      throw new Error "client() found no app directory at #{clientDir}"
     preload = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
     unless preload?
       throw new Error "client() cannot assemble the bundle: the rip loader is missing from execArgv — serving a browser app standalone requires running via `rip`"

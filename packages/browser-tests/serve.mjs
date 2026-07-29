@@ -10,19 +10,19 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
 
 const MODULES = {
-  '_app/stash.rip': [
+  'app/stash.rip': [
     "import { source } from '@rip-lang/app'",
     'export appStash = {',
     "  user: source fetch: -> (await fetch('/user.json')).json()",
     '}',
   ].join('\n'),
-  '_route/index.rip': [
+  'app/routes/index.rip': [
     'export Home = component',
     '  render',
     '    h1#title "home"',
     '    a href: "/profile", "profile"',
   ].join('\n'),
-  '_route/profile.rip': [
+  'app/routes/profile.rip': [
     'export Profile = component',
     '  user <~ @app.data.user',
     '  render',
@@ -48,9 +48,9 @@ const wsRoute = title => [
   `    h1#title "${title}"`,
 ].join('\n');
 
-const wsModules = { '_route/index.rip': wsRoute('workspace home') };
-const wsRevs = new Map([['_route/index.rip', 1]]);
-const wsBytes = new Map([['_route/index.rip@1', wsModules['_route/index.rip']]]);
+const wsModules = { 'app/routes/index.rip': wsRoute('workspace home') };
+const wsRevs = new Map([['app/routes/index.rip', 1]]);
+const wsBytes = new Map([['app/routes/index.rip@1', wsModules['app/routes/index.rip']]]);
 let wsBundleText = null;
 let wsBundleTag = null;
 const rebuildWsBundle = () => {
