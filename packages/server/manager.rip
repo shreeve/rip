@@ -462,8 +462,20 @@ refreshPoolBundle = ->
 # feeds fetch cells directly and never need the manifest for a named rev.
 # A publish failure warns and never blocks the cell path or crashes the
 # manager — the cell bytes are already servable. Exported as an in-process
-# test seam (the manifest-holdback pin drives it directly).
+# test seam (the manifest-holdback and serialization pins drive it directly).
+#
+# Runs SERIALIZE on one promise chain: overlapping runs would race on the
+# shared tmp paths (manifest.json.tmp, the pool bundle's .tmp), and
+# interleaved writes can land a torn document through the rename. A run's
+# failure surfaces to its own caller and never blocks the next run.
+cellChain = Promise.resolve()
+
 export onCellChange = ->
+  next = cellChain.then -> runCellChange()
+  cellChain = next.catch -> null
+  next
+
+runCellChange = ->
   changed = syncCells!()
   try
     refreshPoolBundle!()
