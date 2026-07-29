@@ -108,7 +108,7 @@ The audit stays a STANDALONE script, outside `test` and `test:all`, and CI will 
 
 **Grammar credit** goes to `corpus/grammar/` fixtures alone, so neither an error nor a claims fixture can cover a production by accident, and retirement reasons about the grammar charters only. The claims bucket's mirror standard: every `corpus/claims/` fixture must be a named carrier of at least one CLAIMS.md row, judged live.
 
-**Retirement.** The legacy fixtures are retired, twins and pins with them, every ledger citation re-grounded. The unique-contribution line is the standing instrument: a healthy corpus reads "every fixture reduces at least one production no other fixture does."
+**Retirement.** The legacy fixtures are retired, twins and pins with them, every ledger citation re-grounded. The unique-contribution line is the standing instrument: a healthy corpus counts every fixture as reducing a production no other does, and any that do not are named as removable at zero coverage loss.
 
 Depends on M2 (built), RULINGS.md (the components/schema files and their pinned negatives are gated on it), MANIFEST.md (the grammar bucket's ownership record, joined live), and CLAIMS.md (the claims bucket's, where a row must be ruled before its fixture is authored). Produces: the corpus — and M1, M4, and M5 see only what the corpus contains, so their completeness is bounded here.
 

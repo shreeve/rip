@@ -390,8 +390,9 @@ const AUDITS = [
     blurb: 'which grammar productions the fixture corpus exercises, and which it never reduces',
     judge: 'the GRAMMAR\'S OWN RULE LIST — a closed denominator: every production the\n'
          + 'parser can reduce is enumerable, so "exercised by at least one fixture" is\n'
-         + 'checkable in a way no corpus-relative rate ever is. The uncovered list is\n'
-         + 'the M3 fixture-growth queue (see ROADMAP.md)',
+         + 'checkable in a way no corpus-relative rate ever is. The uncovered list names\n'
+         + 'the productions no fixture reduces — a fixture to write where one is\n'
+         + 'available, an open finding where MANIFEST.md parks it',
   },
   {
     key: 'map', flag: '--map', name: 'Mapping Audit',
@@ -1715,7 +1716,7 @@ async function abort(headline, reasons) {
 // the denominator is the generated parser's own ruleNames table (index 0 is
 // the $accept pad), so the question "is every production exercised by at least
 // one fixture?" has a CLOSED answer no corpus-relative rate can give. The
-// uncovered list is the M3 fixture-growth queue — group it by LHS so a reader
+// uncovered list is the corpus's remaining work — group it by LHS so a reader
 // sees which CONSTRUCTS are dark, not 200 interchangeable rows. Coverage here
 // is necessary, not sufficient: a rule can be exercised while its interaction
 // shapes (reorder × repetition, strings/comments in the frame) stay untested —
@@ -1788,7 +1789,11 @@ if (RUN_GRAMMAR) {
   }
   const grammarNames = new Set(names.filter(Boolean));
   const staleExcluded = [...EXCLUDED.keys()].filter((k) => !grammarNames.has(k));
-  auditBanner('GRAMMAR GATE', `productions the corpus reduces · ${denom.length} rules${excludedIdx.length ? ` (${excludedIdx.length} excluded)` : ''} · ${fixtures.length} fixtures`);
+  // `after N exclusions` rather than `(N excluded)`: the count printed here is
+  // the DENOMINATOR, already net of the exclusions, and a parenthesised count
+  // beside a total reads as a part OF that total — a reader would subtract
+  // twice and arrive at a denominator the report never uses.
+  auditBanner('GRAMMAR GATE', `productions the corpus reduces · ${denom.length} rules${excludedIdx.length ? ` after ${excludedIdx.length} exclusions` : ''} · ${fixtures.length} fixtures`);
   const seen = new Set();
   // Reducers per production, for UNIQUE contribution — the retirement
   // instrument: a fixture whose every reduction some other fixture also
@@ -1887,7 +1892,7 @@ if (RUN_GRAMMAR) {
       // the way to a rejected token are not evidence that the corpus exercises
       // a production — a file the compiler refuses cannot be the reason a rule
       // reads as covered, or fixing the file would DROP coverage nobody knew
-      // rested on it, and the M3 queue would be short by exactly the rules only
+      // rested on it, and the uncovered queue would be short by exactly the rules only
       // the broken fixture reached.
       if (grammarBucket) {
         perFixture.set(f, mine);
@@ -1946,18 +1951,60 @@ if (RUN_GRAMMAR) {
     out(`    ${dim(`${excludedIdx.length} excluded by the gate (unreachable, banned, or coverable only by a fixture that asserts nothing) — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`)}`);
     if (VERBOSE) for (const i of excludedIdx) out(`        ${dim(names[i])} ${dim('·')} ${dim(EXCLUDED.get(names[i]))}`);
   }
-  // The verdict on the unique column above: a fixture with no unique
-  // reductions is deletable at zero coverage cost, and that is a standing
-  // fact rather than a verbose detail, so it states itself either way.
+  // Both directions of the exclusion table's self-policing, printed where the
+  // exclusions are: a claim that a production is unreachable is refuted by the
+  // corpus reaching it, and a row naming no production has outlived its rule.
+  const falseExclusions = excludedIdx.filter((i) => seen.has(i));
+  for (const i of falseExclusions) out(`    ${red('✗')} ${red('excluded but reduced:')} ${names[i]} ${dim("— the exclusion claim is false; fix the gate's exclusion table")}`);
+  for (const k of staleExcluded) out(`    ${red('✗')} ${red('excluded row names no grammar production:')} ${k} ${dim("— stale; fix the gate's exclusion table")}`);
+  // The verdict on the unique column above — the RETIREMENT measurement, and
+  // it reports either way for the reason every other check in this section
+  // does: a line that appears only on bad news makes its absence ambiguous
+  // between "nothing to report" and "never measured", and this section's whole
+  // discipline is that a measurement which ran contributes a clause. So it
+  // carries a count in the same `N / N` shape as its neighbours rather than a
+  // sentence of reassurance, and names the removable files when there are any.
   {
     // Only fixtures that PARSED can be judged removable: one that failed
     // reduces nothing the corpus can rely on, so it trivially has no unique
     // contribution, and listing it as removable-at-no-cost would answer a
     // question nobody asked over the one the ✗ row just raised.
-    const removable = fixtureRows.filter((r) => r.ok && r.grammarBucket && uniqueOf(r.f) === 0).map((r) => r.f);
-    out(`    ${removable.length
-      ? yellow(`removable with zero coverage loss (no unique reductions): ${removable.join(', ')}`)
-      : dim('every grammar fixture reduces at least one production no other fixture does')}`);
+    const judged = fixtureRows.filter((r) => r.ok && r.grammarBucket);
+    const removable = judged.filter((r) => uniqueOf(r.f) === 0).map((r) => r.f);
+    out(`    ${(removable.length ? yellow : green)(String(judged.length - removable.length))} ${dim('/')} ${dim(String(judged.length))} ${dim('fixtures reduce a production no other does')}`
+      + (removable.length ? `${dim(' · ')}${yellow(`removable at zero coverage loss: ${removable.join(', ')}`)}` : ''));
+  }
+  // The queue is the ANSWER to the number above it — which productions the
+  // corpus does not reach — so it sits under that number rather than behind
+  // the censuses of four other denominators. Its rows split by STANDING,
+  // because the two halves are different kinds of work: a PARKED production is
+  // blocked on an open finding (MANIFEST.md names which), and an AVAILABLE one
+  // is a fixture someone could write this afternoon. So the available half is
+  // always named — it is the actionable half, and a queue that hides what can
+  // be worked behind a flag is a queue nobody works — while the parked half
+  // stays counted, its spellings under -v. Without a manifest there is no park
+  // data to sort by, so the whole queue reports as counts, as before.
+  if (groups.size) {
+    const isParked = (r) => owner?.parked.has(r) ?? false;
+    const parkedN = uncovered.filter((i) => isParked(names[i])).length;
+    const availN = uncovered.length - parkedN;
+    const title = owner ? 'Uncovered, by owning file (MANIFEST.md)' : 'Uncovered, by construct';
+    const standing = owner
+      ? (availN
+        ? `${availN} available to cover now, ${parkedN} parked on open findings (FINDINGS.md)${VERBOSE || !parkedN ? '' : '; -v spells the parked ones'}`
+        : `all ${parkedN} parked on open findings (FINDINGS.md) — no fixture is available to write today${VERBOSE ? '' : '; -v spells them'}`)
+      : (VERBOSE ? 'every production shown' : 'counts only, -v for every production');
+    out(`\n    ${bold(title)} ${dim(`— ${standing}`)}`);
+    // Files read in wave order; constructs by descending count.
+    const rows = [...groups.entries()].sort(owner ? (a, b) => a[0].localeCompare(b[0]) : (a, b) => b[1].length - a[1].length);
+    for (const [g, rules] of rows) {
+      const paint = g === 'UNALLOCATED' ? red : yellow;
+      console.log(`      ${pad(g, 24)} ${paint(String(rules.length).padStart(3))}`);
+      for (const r of rules) {
+        if (!(VERBOSE || g === 'UNALLOCATED' || (owner && !isParked(r)))) continue;
+        out(`        ${dim(r)}${isParked(r) ? ' ' + yellow('· parked') : ''}`);
+      }
+    }
   }
   // ── NEGATIVE COVERAGE — the error lane measured against the positive
   // corpus's own claims. The denominator problem: positives get theirs from
@@ -2417,8 +2464,8 @@ if (RUN_GRAMMAR) {
       // print unconditionally. A carried ✓ and a ruled-uncarried · are not:
       // they restate CLAIMS.md, which is in the repo, and they cannot change
       // without someone editing that file — so by default they are counted,
-      // and `-v` prints them, exactly as the M3 production queue three
-      // sections down has always behaved. The reason is not brevity for its
+      // and `-v` prints them, exactly as the uncovered production queue under
+      // Coverage behaves. The reason is not brevity for its
       // own sake: 47 unchanging lines around 4 that matter is how a reader
       // learns to skip the section.
       const loud = [], quiet = [];
@@ -2467,21 +2514,7 @@ if (RUN_GRAMMAR) {
       ng.claimsParked = parked; ng.claimsBadParks = staleParks.length + orphanParks.length;
     }
   }
-  const falseExclusions = excludedIdx.filter((i) => seen.has(i));
-  for (const i of falseExclusions) out(`    ${red('✗')} ${red('excluded but reduced:')} ${names[i]} ${dim("— the exclusion claim is false; fix the gate's exclusion table")}`);
-  for (const k of staleExcluded) out(`    ${red('✗')} ${red('excluded row names no grammar production:')} ${k} ${dim("— stale; fix the gate's exclusion table")}`);
-  if (groups.size) {
-    const title = owner ? 'Uncovered, by owning file (MANIFEST.md)' : 'Uncovered, by construct';
-    out(`\n    ${bold(title)} ${dim(`— the M3 queue; ${VERBOSE ? 'every production shown' : 'counts only, -v for every production'}`)}`);
-    // Files read in wave order; constructs by descending count.
-    const rows = [...groups.entries()].sort(owner ? (a, b) => a[0].localeCompare(b[0]) : (a, b) => b[1].length - a[1].length);
-    for (const [g, rules] of rows) {
-      const paint = g === 'UNALLOCATED' ? red : yellow;
-      console.log(`      ${pad(g, 24)} ${paint(String(rules.length).padStart(3))}`);
-      if (VERBOSE || g === 'UNALLOCATED') for (const r of rules) out(`        ${dim(r)}${owner?.parked.has(r) ? ' ' + yellow('· parked') : ''}`);
-    }
-  }
-  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, groups: groups.size, groupKind: owner ? 'files' : 'constructs', unallocated: groups.get('UNALLOCATED')?.length ?? 0, excluded: excludedIdx.length, badExclusions: falseExclusions.length + staleExcluded.length, unparsed: fixtureRows.filter((r) => !r.ok).length, negatives: ng };
+  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, uncoveredParked: uncovered.filter((i) => owner?.parked.has(names[i])).length, groups: groups.size, groupKind: owner ? 'files' : 'constructs', unallocated: groups.get('UNALLOCATED')?.length ?? 0, excluded: excludedIdx.length, badExclusions: falseExclusions.length + staleExcluded.length, unparsed: fixtureRows.filter((r) => !r.ok).length, negatives: ng };
 }
 
 // ── the Mapping Audit (--map): use-site identifier coverage, from the
@@ -3673,9 +3706,10 @@ const totalLine = (audit, text) => {
   for (const l of lines.slice(1)) console.log(' '.repeat(4 + TOTAL_W) + l);
 };
 console.log(`\n  ${bold('Totals')}`);
-// The Grammar Gate is a gauge toward M3, not a regression count: uncovered
-// productions are the fixture-growth queue, red only in the sense of "work
-// remains", so the count paints yellow until the corpus covers the grammar.
+// The Grammar Gate's coverage number is a gauge, not a regression count:
+// uncovered productions are work remaining — a fixture to write, or a park
+// held by an open finding — so the count paints yellow until the corpus
+// covers the grammar, never red.
 //
 // The gate reports at three DIFFERENT STANDINGS, and a totals line that
 // strings them together with one separator lets none of them be read: a
@@ -3710,7 +3744,9 @@ if (gr) {
   if (claimsRead && claimsRed) broken.push(`${s(claimsRed, 'claims row')} red`);
   // Queues: yellow because work remains, never because anything is wrong.
   const queues = [];
-  if (gr.uncovered) queues.push(`${s(gr.uncovered, 'production')} uncovered across ${gr.groups} ${gr.groupKind} (M3)`);
+  // A queue that is entirely parked is a different report from one that is
+  // waiting to be worked: the number is the same, the standing is not.
+  if (gr.uncovered) queues.push(`${s(gr.uncovered, 'production')} uncovered across ${gr.groups} ${gr.groupKind}${gr.uncoveredParked === gr.uncovered ? ' (all parked)' : gr.uncoveredParked ? ` (${gr.uncoveredParked} parked)` : ''}`);
   if (n.kindQueued) queues.push(`${s(n.kindQueued, 'type kind')} unclaimed (census)`);
   if (n.claimsAbsent) queues.push(`${n.claimsAbsent} claims ruled-uncarried`);
   if (n.darkSpellings) queues.push(`${n.darkSpellings} of ${n.spellings} spellings never written`);
@@ -3724,7 +3760,7 @@ if (gr) {
   if (n.headsTotal) held.push(`${n.headsTotal} containment heads spelled`);
   if (n.vocabClaimed) held.push(`${n.vocabClaimed} vocabulary classes falsified`);
   if (claimsRead) held.push('every claims carrier and cell live');
-  totalLine('Grammar', `${gr.total} productions${gr.excluded ? dim(` · ${gr.excluded} excluded`) : ''}: `
+  totalLine('Grammar', `${gr.total} productions${gr.excluded ? dim(` after ${gr.excluded} exclusions`) : ''}: `
     + (gr.uncovered === 0 ? green('every production exercised by the corpus') : green(`${gr.covered} exercised`))
     + `${dim(' · obligations: ')}${broken.length ? red(broken.join(', ')) : green(`all hold — ${held.join(', ')}`)}`
     // An absent registry is NEWS, not silence: the gate prints no Corpus
