@@ -23152,6 +23152,9 @@ async function bootApp(opts = {}) {
     passport: bag.passport,
     sealed: bag.sealed,
     set: async (cell) => {
+      const known = bag.passport(cell.id);
+      if (known && Number.isInteger(cell.rev) && cell.rev <= known.rev)
+        return false;
       if (cell.deleted === true) {
         const path2 = bag.passport(cell.id)?.path;
         if (path2 !== undefined) {

@@ -308,6 +308,16 @@ export async function bootApp(opts = {}) {
     passport: bag.passport,
     sealed: bag.sealed,
     set: async cell => {
+      // The bag's rev cursor is THE staleness verdict — consult it
+      // BEFORE any mutation. Two dings in flight can resolve out of
+      // order: the older fetch lands after the newer one applied, and
+      // while bag.set would reject it, the files/loader mutations
+      // below would already carry the stale bytes into the next
+      // remount (the silent-stale class). Same guard for deletes: a
+      // replayed stale delete must not evict the loader's file while
+      // the bag keeps the passport.
+      const known = bag.passport(cell.id);
+      if (known && Number.isInteger(cell.rev) && cell.rev <= known.rev) return false;
       if (cell.deleted === true) {
         const path = bag.passport(cell.id)?.path;
         if (path !== undefined) {
