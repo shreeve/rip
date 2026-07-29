@@ -7,7 +7,7 @@
   // Hash routing keeps the fixture page's own pathname out of the
   // route table; the hub URL may arrive as a query param.
   const hub = new URLSearchParams(location.search).get('hub') ?? `ws://${location.host}/hub`;
-  globalThis.__bootResult = bootApp({ url: '/__rip/bundle.json', workspace: true, hash: true, feed: { hub } })
+  globalThis.__bootResult = bootApp({ url: '/@rip/bundle.json', workspace: true, hash: true, feed: { hub } })
     .then(result => { globalThis.__rip = result; return 'ok'; })
     .catch(error => { console.error('[Rip]', String(error)); return 'failed: ' + error.message; });
 </script>

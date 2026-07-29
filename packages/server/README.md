@@ -341,9 +341,9 @@ package.
 - `GET /` — the boot page. If `app/index.html` exists it is served
   as-is (with ETag revalidation); otherwise a minimal generated page
   mounts `<div id="app">` and boots via a module script.
-- `GET /__rip/bundle.json` — the bundle, `Content-Type: application/json`
+- `GET /@rip/bundle.json` — the bundle, `Content-Type: application/json`
   with a quoted ETag; a matching `If-None-Match` answers 304 with no body.
-- `GET /__rip/rip.js` — the browser runtime, served with the same
+- `GET /@rip/rip.js` — the browser runtime, served with the same
   file/ETag machinery as `@send`.
 - A `notFound` fallback answering the boot page for GET requests whose
   `Accept` includes `text/html` — so client-side routes deep-link — and a
@@ -387,10 +387,10 @@ With the flag on, in watch mode:
   rename retires the old id and mints a new one at rev 1 (id persistence
   across renames is open research). Revs start at 1 and bump once per
   content change; the registry lives in the manager's memory for the run.
-  `GET /__rip/manifest` answers `{"cells": [{id, path, rev}, …]}` sorted
+  `GET /@rip/manifest` answers `{"cells": [{id, path, rev}, …]}` sorted
   by path, `Cache-Control: no-store`, read per request. Cell bytes — the
   file's **source text**, dev-mode in-browser compile — are addressed by
-  `(id, rev)` in the URL: `GET /__rip/cells/<id>?rev=N` answers
+  `(id, rev)` in the URL: `GET /@rip/cells/<id>?rev=N` answers
   `text/plain` with `Cache-Control: public, max-age=31536000, immutable`,
   and old revs keep answering for the manager run. A request without a
   valid positive-integer `rev` is a 400 — unversioned cell URLs are
@@ -404,7 +404,7 @@ With the flag on, in watch mode:
   for that rev — old revs keep answering). A publish failure warns and
   never blocks the cell path.
 - **Bundle freshness.** On the cell path the manager atomically rewrites
-  the live pool's bundle file, and the worker's `/__rip/bundle.json`
+  the live pool's bundle file, and the worker's `/@rip/bundle.json`
   re-reads and re-tags per request (a dev-only cost) — so a hard refresh
   never serves stale first-paint code.
 - **Bridge enrollment.** With `--bridge <path>`, the worker answers the

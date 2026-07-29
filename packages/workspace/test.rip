@@ -502,8 +502,8 @@ test! "a ding fetches the rev-keyed cell and mutates the passport", ->
   ws = createWorkspace()
   ws.populate [{ id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1, source: 'v1' }]
   { feed, calls, sockets, reports } = openFeed ws,
-    '/__rip/manifest': JSON.stringify { cells: [{ id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1 }] }
-    '/__rip/cells/app/routes/index.rip?rev=2': 'v2'
+    '/@rip/manifest': JSON.stringify { cells: [{ id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1 }] }
+    '/@rip/cells/app/routes/index.rip?rev=2': 'v2'
   s = sockets[0]
   eq s.url, 'ws://test/hub'
   s.onopen()
@@ -513,7 +513,7 @@ test! "a ding fetches the rev-keyed cell and mutates the passport", ->
   await settle()
   eq ws.passport('app/routes/index.rip').rev, 2
   eq ws.read('app/routes/index.rip'), 'v2'
-  ok calls.includes('/__rip/cells/app/routes/index.rip?rev=2')
+  ok calls.includes('/@rip/cells/app/routes/index.rip?rev=2')
   eq reports, []
   feed.close()
   eq feed.connected(), false
@@ -521,7 +521,7 @@ test! "a ding fetches the rev-keyed cell and mutates the passport", ->
 test! "a stale or duplicate ding never touches the network", ->
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 3, source: 'v3' }]
-  { feed, calls, sockets } = openFeed ws, { '/__rip/manifest': emptyManifest }
+  { feed, calls, sockets } = openFeed ws, { '/@rip/manifest': emptyManifest }
   sockets[0].onopen()
   await settle()
   before = calls.length
@@ -535,8 +535,8 @@ test! "a stale or duplicate ding never touches the network", ->
 test! "a ding for an unknown id births the passport at its id path", ->
   ws = createWorkspace()
   { feed, sockets } = openFeed ws,
-    '/__rip/manifest': emptyManifest
-    '/__rip/cells/app/new.rip?rev=1': 'fresh'
+    '/@rip/manifest': emptyManifest
+    '/@rip/cells/app/new.rip?rev=1': 'fresh'
   sockets[0].onopen()
   await settle()
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'app/new.rip', rev: 1 } } }
@@ -547,7 +547,7 @@ test! "a ding for an unknown id births the passport at its id path", ->
 test! "a delete ding removes the passport without a fetch", ->
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
-  { feed, calls, sockets } = openFeed ws, { '/__rip/manifest': emptyManifest }
+  { feed, calls, sockets } = openFeed ws, { '/@rip/manifest': emptyManifest }
   sockets[0].onopen()
   await settle()
   before = calls.length
@@ -560,8 +560,8 @@ test! "a delete ding removes the passport without a fetch", ->
 test! "malformed frames and dings are reported and the feed survives", ->
   ws = createWorkspace()
   { feed, sockets, reports } = openFeed ws,
-    '/__rip/manifest': emptyManifest
-    '/__rip/cells/ok.rip?rev=1': 'good'
+    '/@rip/manifest': emptyManifest
+    '/@rip/cells/ok.rip?rev=1': 'good'
   sockets[0].onopen()
   await settle()
   sockets[0].onmessage { data: 'not json' }
@@ -576,9 +576,9 @@ test! "malformed frames and dings are reported and the feed survives", ->
 test! "an array frame applies every ding object and ignores foreign events", ->
   ws = createWorkspace()
   { feed, sockets } = openFeed ws,
-    '/__rip/manifest': emptyManifest
-    '/__rip/cells/a.rip?rev=1': 'aa'
-    '/__rip/cells/b.rip?rev=1': 'bb'
+    '/@rip/manifest': emptyManifest
+    '/@rip/cells/a.rip?rev=1': 'aa'
+    '/@rip/cells/b.rip?rev=1': 'bb'
   sockets[0].onopen()
   await settle()
   frame = [{ ding: { id: 'a.rip', rev: 1 } }, { chat: 'hello' }, { ding: { id: 'b.rip', rev: 1 } }]
@@ -593,8 +593,8 @@ test! "a cell miss resyncs from the manifest, which never deletes local mints", 
   ws.populate [{ id: 'a.rip', path: 'a.rip', rev: 1, source: 'v1' }]
   ws.write 'local.rip', 'mine'               # an editor's local mint — not the server's
   { feed, sockets, reports } = openFeed ws,
-    '/__rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 4 }] }
-    '/__rip/cells/a.rip?rev=4': 'v4'
+    '/@rip/manifest': JSON.stringify { cells: [{ id: 'a.rip', path: 'a.rip', rev: 4 }] }
+    '/@rip/cells/a.rip?rev=4': 'v4'
   sockets[0].onopen()                        # open-resync already advances a.rip to rev 4
   await settle()
   eq ws.passport('a.rip').rev, 4
@@ -607,10 +607,10 @@ test! "a cell miss resyncs from the manifest, which never deletes local mints", 
 
 test! "a dropped socket reconnects with backoff and resyncs; close() stops it", ->
   ws = createWorkspace()
-  { feed, calls, sockets } = openFeed ws, { '/__rip/manifest': emptyManifest }
+  { feed, calls, sockets } = openFeed ws, { '/@rip/manifest': emptyManifest }
   sockets[0].onopen()
   await settle()
-  manifestFetches = -> calls.filter((u) -> u is '/__rip/manifest').length
+  manifestFetches = -> calls.filter((u) -> u is '/@rip/manifest').length
   eq manifestFetches(), 1
   sockets[0].onclose()
   eq feed.connected(), false

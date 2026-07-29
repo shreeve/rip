@@ -120,12 +120,12 @@ feed.close()
 ```
 
 - A ding carries `{ id, rev }` only — code bytes never ride the hub.
-  The feed HTTP-fetches the rev-keyed cell (`/__rip/cells/<id>?rev=N`)
+  The feed HTTP-fetches the rev-keyed cell (`/@rip/cells/<id>?rev=N`)
   and applies it through `set`; the bag's rev cursor owns staleness, so
   stale and duplicate dings are skipped before the network.
 - A ding with `kind: 'delete'` removes the passport without a fetch.
 - A cell fetch that misses resyncs from the manifest
-  (`/__rip/manifest`). Resync is additive-and-forward only: it never
+  (`/@rip/manifest`). Resync is additive-and-forward only: it never
   deletes, because the bag legally holds passports the server feed does
   not own (an editor's local mints).
 - The socket reconnects with exponential backoff and resyncs on every

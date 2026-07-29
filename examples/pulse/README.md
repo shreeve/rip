@@ -44,7 +44,7 @@ rip app.rip
 ```
 
 Open the printed URL (http://localhost:3000). The page boots from
-`/__rip/bundle.json`, the seeded status renders through its mood badge,
+`/@rip/bundle.json`, the seeded status renders through its mood badge,
 and posting from the form updates the list in place — the handler POSTs,
 then refetches the `statuses` source.
 

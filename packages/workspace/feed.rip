@@ -44,8 +44,8 @@ export def connectFeed(workspace, opts = {}): Feed
   hubUrl = opts.hub ?? defaultHubUrl()
   makeSocket = opts.makeSocket ?? defaultSocketFactory()
   fetchBytes = opts.fetch ?? defaultFetch()
-  cellUrl = opts.cellUrl ?? (id, rev) -> "/__rip/cells/#{id}?rev=#{rev}"
-  manifestUrl = opts.manifestUrl ?? '/__rip/manifest'
+  cellUrl = opts.cellUrl ?? (id, rev) -> "/@rip/cells/#{id}?rev=#{rev}"
+  manifestUrl = opts.manifestUrl ?? '/@rip/manifest'
   report = opts.report ?? (...args) -> console.error(...args)
   backoffMin = opts.backoff?.min ?? FEED_BACKOFF_MIN
   backoffMax = opts.backoff?.max ?? FEED_BACKOFF_MAX

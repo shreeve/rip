@@ -90,20 +90,20 @@ Bun.serve({
     if (pathname === '/hub') {
       return server.upgrade(request) ? undefined : new Response('websocket only', { status: 400 });
     }
-    if (pathname === '/__rip/bundle.json') {
+    if (pathname === '/@rip/bundle.json') {
       if (request.headers.get('If-None-Match') === wsBundleTag) {
         return new Response(null, { status: 304, headers: { ETag: wsBundleTag } });
       }
       return new Response(wsBundleText, { headers: { 'Content-Type': 'application/json', ETag: wsBundleTag } });
     }
-    if (pathname === '/__rip/manifest') {
+    if (pathname === '/@rip/manifest') {
       const cells = [...wsRevs].map(([id, rev]) => ({ id, path: id, rev }));
       return new Response(JSON.stringify({ cells }), {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       });
     }
-    if (pathname.startsWith('/__rip/cells/')) {
-      const id = pathname.slice('/__rip/cells/'.length);
+    if (pathname.startsWith('/@rip/cells/')) {
+      const id = pathname.slice('/@rip/cells/'.length);
       const body = wsBytes.get(`${id}@${url.searchParams.get('rev')}`);
       if (body === undefined) return new Response('unknown cell', { status: 404 });
       return new Response(body, {
