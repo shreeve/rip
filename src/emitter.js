@@ -11539,6 +11539,7 @@ class Emitter {
     // constructor or after it.
     const declared = new Set();
     let ctorParams = null;
+    let ctorBody = null;
     for (const stmt of stmts) {
       if (!isObject(stmt)) {
         const field = isStaticKey(stmt) ? null
@@ -11559,7 +11560,7 @@ class Emitter {
         const mName = memberName(pair[1]);
         if (mName === 'constructor') {
           hasConstructor = true;
-          if (isFunc(pair[2])) ctorParams = pair[2][1];
+          if (isFunc(pair[2])) { ctorParams = pair[2][1]; ctorBody = pair[2][2]; }
         } else if (!isStaticKey(pair[1]) && typeof mName === 'string') {
           declared.add(mName);
         }
@@ -11590,6 +11591,31 @@ class Emitter {
         const text = field.typed === null ? null
           : this.annotationText(field.typed) ?? (field.typed[2] === '' ? null : tidyType(field.typed[2]));
         this.b.tsOnly(() => this.b.emit(`${pad}${field.name}${text ? `: ${text}` : ''};\n`));
+      }
+    }
+
+    // A constructor BODY's `@field = value` is the same story as a
+    // promoted parameter, by a different route: it assigns the instance
+    // property and declares nothing, and TypeScript reads a class's
+    // properties from its declarations alone — so every assignment AND
+    // every read publishes TS2339 on code that runs correctly. The face
+    // declares what the assignment implies, with the author's own
+    // annotation when there is one. TS-only, for the promoted
+    // parameter's reason: in JS the property comes from the assignment,
+    // where a declaration would REDEFINE it rather than describe it.
+    //
+    // Control flow is walked THROUGH (a field assigned inside an `if`
+    // still declares) but a nested function is not: its `this` is not
+    // this instance's, so an assignment there says nothing about this
+    // class. The `declared` set keeps a body-level declaration winning,
+    // here as for promotions — one declaration, or TypeScript reads the
+    // pair as duplicate identifiers.
+    if (this.ts && ctorBody !== null) {
+      for (const at of Emitter.ctorAtFields(ctorBody)) {
+        if (declared.has(at.name)) continue;
+        declared.add(at.name);
+        const text = this.annotationText(at.node);
+        this.b.tsOnly(() => this.b.emit(`${pad}${at.name}${text ? `: ${text}` : ''};\n`));
       }
     }
 
@@ -11877,6 +11903,29 @@ class Emitter {
     if (isNode(x) && x[0] === 'typed-var' && x.length === 3) x = x[1];
     if (isNode(x) && x[0] === '.' && x[1] === 'this' && typeof x[2] === 'string') return x[2];
     return null;
+  }
+
+  // Every `@name = …` a constructor body assigns, in source order,
+  // deduped by name (a field written twice declares once). Nested
+  // functions are not entered — their `this` is another object.
+  static ctorAtFields(body) {
+    const out = [];
+    const seen = new Set();
+    const walk = (n) => {
+      if (!isNode(n)) return;
+      const h = n[0];
+      if (h === '->' || h === '=>' || h === 'def' || h === 'void-def' ||
+          h === 'class' || h === 'component' || h === 'schema') return;
+      if ((h === '=' || h === 'void-assign') && n.length === 3 &&
+          isNode(n[1]) && n[1][0] === '.' && n[1][1] === 'this' && typeof n[1][2] === 'string' &&
+          !seen.has(n[1][2])) {
+        seen.add(n[1][2]);
+        out.push({ name: n[1][2], node: n });
+      }
+      for (const el of n.slice(1)) walk(el);
+    };
+    walk(body);
+    return out;
   }
 
   // The field a promoted parameter declares — its name and the

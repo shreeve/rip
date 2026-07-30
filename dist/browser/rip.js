@@ -17738,6 +17738,7 @@ ${this.replayPad}}` : " }");
     let hasConstructor = false;
     const declared = new Set;
     let ctorParams = null;
+    let ctorBody = null;
     for (const stmt of stmts) {
       if (!isObject(stmt)) {
         const field = isStaticKey(stmt) ? null : typeof stmt === "string" ? stmt : Emitter.isTypedWrapper(stmt) && typeof stmt[1] === "string" ? stmt[1] : isNode4(stmt) && stmt[0] === "=" && stmt.length === 3 && typeof stmt[1] === "string" ? stmt[1] : null;
@@ -17755,8 +17756,10 @@ ${this.replayPad}}` : " }");
         const mName = memberName(pair[1]);
         if (mName === "constructor") {
           hasConstructor = true;
-          if (isFunc2(pair[2]))
+          if (isFunc2(pair[2])) {
             ctorParams = pair[2][1];
+            ctorBody = pair[2][2];
+          }
         } else if (!isStaticKey(pair[1]) && typeof mName === "string") {
           declared.add(mName);
         }
@@ -17777,6 +17780,16 @@ ${this.replayPad}}` : " }");
         declared.add(field.name);
         const text = field.typed === null ? null : this.annotationText(field.typed) ?? (field.typed[2] === "" ? null : tidyType(field.typed[2]));
         this.b.tsOnly(() => this.b.emit(`${pad}${field.name}${text ? `: ${text}` : ""};
+`));
+      }
+    }
+    if (this.ts && ctorBody !== null) {
+      for (const at of Emitter.ctorAtFields(ctorBody)) {
+        if (declared.has(at.name))
+          continue;
+        declared.add(at.name);
+        const text = this.annotationText(at.node);
+        this.b.tsOnly(() => this.b.emit(`${pad}${at.name}${text ? `: ${text}` : ""};
 `));
       }
     }
@@ -18021,6 +18034,25 @@ ${"  ".repeat(ind)}`);
     if (isNode4(x) && x[0] === "." && x[1] === "this" && typeof x[2] === "string")
       return x[2];
     return null;
+  }
+  static ctorAtFields(body) {
+    const out = [];
+    const seen = new Set;
+    const walk = (n) => {
+      if (!isNode4(n))
+        return;
+      const h = n[0];
+      if (h === "->" || h === "=>" || h === "def" || h === "void-def" || h === "class" || h === "component" || h === "schema")
+        return;
+      if ((h === "=" || h === "void-assign") && n.length === 3 && isNode4(n[1]) && n[1][0] === "." && n[1][1] === "this" && typeof n[1][2] === "string" && !seen.has(n[1][2])) {
+        seen.add(n[1][2]);
+        out.push({ name: n[1][2], node: n });
+      }
+      for (const el of n.slice(1))
+        walk(el);
+    };
+    walk(body);
+    return out;
   }
   static atParamField(p) {
     let x = p;

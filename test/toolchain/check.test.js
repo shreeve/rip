@@ -264,6 +264,75 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // TypeScript reads a class's properties from its DECLARATIONS alone,
+  // never from what the constructor assigns — so a constructor body's
+  // `@field = value` has to declare what it implies, exactly as a
+  // promoted parameter does. Without it, legal rip that runs correctly
+  // publishes TS2339 at every assignment AND every read, which is the
+  // whole surface of the class. The annotated spelling carries its type
+  // onto the declaration; the bare one declares the name alone, the
+  // promoted-parameter precedent. A body-level declaration of the same
+  // name still wins — one declaration, or TypeScript reads the pair as
+  // duplicate identifiers.
+  test('a constructor body\'s @field assignment declares its field', () => {
+    const dir = workspace({
+      // Legal, correctly-running rip: every spelling must be silent.
+      'box.rip': [
+        'export class Box',
+        '  tag: string = \'t\'',       // declared in the body — must not double
+        '',
+        '  constructor: ->',
+        '    @size = 3',
+        '    @label: string = \'b\'',
+        '    @tag = \'u\'',
+        '    if true',
+        '      @flag = 1',            // reached THROUGH control flow
+        '',
+        'b = new Box()',
+        'console.log b.size, b.label, b.tag, b.flag',
+      ].join('\n') + '\n',
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    // The claims a clean run cannot hold on its own. Declaring the NAME
+    // is most of the fix — TypeScript infers a bare property's type from
+    // the constructor's own assignment — so the annotation is load-bearing
+    // in exactly one place: where the author declares WIDER than the
+    // assignment infers. `wide` takes null and `plain` refuses it, which
+    // is the only pair that can tell the two apart. And only a read that
+    // still rejects proves a nested function's `this` — another object
+    // entirely — declared nothing.
+    const negDir = workspace({
+      'crate.rip': [
+        'export class Crate',
+        '  constructor: ->',
+        '    @wide: string | null = \'b\'',
+        '    @plain = \'b\'',
+        '    later = -> @nested = 1',
+        '    later',
+        '',
+        'c = new Crate()',
+        'c.wide = null',                // legal: the annotation rode onto the declaration
+        'c.plain = null',               // rejects: inferred from the assignment alone
+        'wrongNested = c.nested',
+      ].join('\n') + '\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
+      expect(diags.filter((d) => d.file !== 'live.rip')).toEqual([]);
+
+      const neg = JSON.parse(check(negDir, ['--json']).stdout);
+      expect(neg.map((d) => [d.code, d.line])).toEqual([
+        [2683, 5],   // the nested function's own untyped `this` — not this class's
+        [2322, 10],  // `plain` inferred `string`; line 9's write to `wide` stays silent
+        [2339, 11],  // `nested` was never declared, because that `this` is another object
+      ]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(negDir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // A wrong-typed schema DEFAULT publishes: the face carries the descriptor's
   // default under a `satisfies` against the field's declared type, so the
   // relation the runtime enforces on every `.parse()` is stated where the
