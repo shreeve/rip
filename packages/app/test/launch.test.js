@@ -103,6 +103,18 @@ describe('launch', () => {
     expect(host.children.map(child => child.name)).toEqual(['about']);
   });
 
+  test('clears a static placeholder (e.g. #app-loader) before the first mount', async () => {
+    const host = node('host');
+    const loader = node('loader');
+    host.appendChild(loader);
+    const result = launch({ bundle: bundle(), target: host, adapter: fakeAdapter('/') });
+    running.push(result);
+    await Bun.sleep(0);
+    await Bun.sleep(0);
+    expect(host.children.map(child => child.name)).toEqual(['home']);
+    expect(host.children).not.toContain(loader);
+  });
+
   test('installs the app globals and a second launch rejects', () => {
     const result = boot();
     expect(globalThis.__ripApp).toBe(result.app);

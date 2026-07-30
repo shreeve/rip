@@ -194,6 +194,13 @@ export def launch(opts: LaunchOpts): LaunchResult
   globalThis.__ripApp = app
   globalThis.__ripRouter = router
   try
+    # #app may hold a static loader; from here the mount point is the
+    # renderer's. Drop placeholders so the first commit is not stacked
+    # under a full-viewport spinner (append-only commit).
+    if typeof target.replaceChildren is 'function'
+      target.replaceChildren()
+    else if Array.isArray(target.children)
+      target.children.length = 0
     renderer.start()
   catch error
     destroy()

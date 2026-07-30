@@ -110,6 +110,11 @@ function __claimGateConstructor() {
       component: Component,
       gates: metadata.gates,
       parent: metadata.parent ?? null,
+      // Route fields the emitter lowers to `this.app` / `this.router` /
+      // `this.params` / `this.query` — assigned in the constructor
+      // before `_init`, so member initializers can read them.
+      app: metadata.app ?? null,
+      router: metadata.router ?? null,
       used: false,
     };
     try {
@@ -536,6 +541,20 @@ class __Component {
     if (rendererAuthorized) {
       __gateMetadata.set(this, mount);
       if (mount.parent) this._parent = mount.parent;
+      // Inject before `_init`: gated/route members read `@app`,
+      // `@router`, `@params`, and `@query` during construction.
+      if (mount.app != null) this.app = mount.app;
+      if (mount.router != null) {
+        this.router = mount.router;
+        Object.defineProperty(this, 'params', {
+          get: () => mount.router.params,
+          configurable: true,
+        });
+        Object.defineProperty(this, 'query', {
+          get: () => mount.router.query,
+          configurable: true,
+        });
+      }
     }
     __checkDeclaredProps(this.constructor, this);
     const declared = this.constructor.__props ?? [];

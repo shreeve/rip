@@ -263,6 +263,8 @@ alters surface syntax updates ALL THREE in the same change.
     own binding, not `source({ fetch() { … }, staleTime: … })`
   - keyword / indented call shape over forced `({ … })` object
     literals when the callee accepts Rip's call forms
+  - dammit is the call: `client!` / `f! x`, not `client!()` / `f!(x)`
+    when there are no required parens
   - `->` / `=>`, dammit (`!`), existence (`?`), and match forms as the
     surrounding code already uses them — do not rewrite working Rip
     into `async`/`await`/`try`/`catch`/object-literal JS for familiarity

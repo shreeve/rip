@@ -319,12 +319,17 @@ double-submit with HMAC binding.
 An app serves its own SPA through one registration:
 
 ```coffee
-import { get, client, start } from '@rip-lang/server'
+import { get, start } from '@rip-lang/server'
 
-client!()                    # app/ next to the app entry, or client!('path/to/dir')
 get '/api/users' -> users()  # API routes coexist with the SPA
-start()
+start! 'app'                 # mount app/ then listen (or start! 'path/to/dir')
 ```
+
+`client!` then bare `start()` is still legal when you need the mount
+before other registrations; for the common case one call is enough.
+`start! 'app'` is the Promise path — dammit awaits bundle assembly.
+Bare `start()` (API-only) stays synchronous so worker handover cannot
+race.
 
 **The directory convention.** A directory named `app/` next to the app
 entry holds the browser app; route components live under `app/routes/`.
@@ -341,7 +346,7 @@ package.
 - `GET /` — the boot page. If `app/index.html` exists it is served
   as-is (with ETag revalidation); otherwise a minimal generated page
   mounts `<div id="app">` and boots via a module script.
-- `GET /@rip/bundle.json` — the bundle, `Content-Type: application/json`
+- `GET /bundle.json` — the bundle, `Content-Type: application/json`
   with a quoted ETag; a matching `If-None-Match` answers 304 with no body.
 - `GET /@rip/rip.js` — the browser runtime, served with the same
   file/ETag machinery as `@send`.
@@ -390,11 +395,11 @@ In watch mode:
   rename retires the old id and mints a new one at rev 1 (id persistence
   across renames is open research). Revs start at 1 and bump once per
   content change; the registry lives in the manager's memory for the run.
-  `GET /@rip/manifest.json` answers `{"cells": [{id, rev, hash}, …]}`
+  `GET /manifest.json` answers `{"cells": [{id, rev, hash}, …]}`
   sorted by path, `Cache-Control: no-store`, read per request. Cell
   bytes — the file's **source text**, dev-mode in-browser compile — are
   addressed by `(id, rev)` plus the content-hash discriminator in the
-  URL: `GET /@rip/cells/<id>?rev=N&h=<hash>` answers `text/plain` with
+  URL: `GET /app/<id>?rev=N&h=<hash>` answers `text/plain` with
   `Cache-Control: public, max-age=31536000, immutable`, and old revs
   keep answering for the manager run. The hash (16 hex chars of sha256)
   is what makes the immutable answer sound: revs restart across manager
@@ -407,7 +412,7 @@ In watch mode:
   does not match the bytes, is a 404.
 - **The ding.** After the cells, the rewritten bundle, and the manifest
   are durable (manifest last), the manager publishes one directive per
-  changed cell to the hub channel `/@rip/dev` — the envelope is
+  changed cell to the hub channel `/hub` — the envelope is
   `{id, rev, hash}` only; source and compiled bodies never ride the hub
   (HTTP carries the bytes). A deleted client file retires: it leaves the
   manifest, its retirement occupies its own rev, and the ding carries
@@ -420,14 +425,14 @@ In watch mode:
   registry and rewrites the manifest so it cannot name an unlinked
   bundle's revs.
 - **Bundle freshness.** On the cell path the manager atomically rewrites
-  the live pool's bundle file, and the worker's `/@rip/bundle.json`
+  the live pool's bundle file, and the worker's `/bundle.json`
   re-reads and re-tags per request. With the door open the bundle is
   `Cache-Control: no-store` like the manifest (a micro-cache hit would
   otherwise pair a live manifest with stale first-paint bytes); with
   watch off, ETag-only so the edge cache still earns its keep. No live
   pool bundle is a held-back-manifest verdict, never a silent skip.
 - **Bridge enrollment.** With `--bridge <path>`, the worker answers the
-  bridge's `Sec-WebSocket-Frame: open` POST with `{"+": ["/@rip/dev"]}` —
+  bridge's `Sec-WebSocket-Frame: open` POST with `{"+": ["/hub"]}` —
   enrolling the opening connection into the dev channel — and `text` /
   `close` frames with an empty 204. Enrollment keys on the feed surface
   existing: with watch off the open answers a plain 204, so app-level

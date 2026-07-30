@@ -791,7 +791,16 @@ runHandler = (c, route) ->
 
 export startHandler = -> fetch
 
-export start = (opts?: { host?: string, port?: number, silent?: boolean }) ->
+# Bare start() stays synchronous: workers read __ripHandler after one
+# microtask, so a Promise-returning start() without top-level await would
+# race. start! 'app' takes the Promise path (client then listen) — dammit
+# makes the await explicit at the call site.
+export start = (dirOrOpts?: string | { host?: string, port?: number, silent?: boolean }, opts?: { host?: string, port?: number, silent?: boolean }) ->
+  if typeof dirOrOpts is 'string'
+    return client(dirOrOpts).then(-> startListen(opts ?? {}))
+  startListen(dirOrOpts ?? {})
+
+startListen = (opts) ->
   opts ?= {}
   handler = startHandler()
 
@@ -823,7 +832,7 @@ export App = (fn) ->
 # path @rip-lang/app boots from; routes live under app/routes/).
 # client(dir) registers the delivery surface: GET / answers the boot page
 # (app/index.html when present, else
-# a generated one), GET /@rip/bundle.json ships the bundle with ETag
+# a generated one), GET /bundle.json ships the bundle with ETag
 # revalidation, GET /@rip/rip.js ships the browser runtime, and a notFound
 # fallback answers the boot page for GET requests accepting text/html — an
 # app's own later notFound registration replaces it.
@@ -838,17 +847,18 @@ export App = (fn) ->
 #     and serve the boot-time cached bytes.
 #
 # A WATCHING worker additionally carries the workspace dev feed
-# (docs/WORKSPACE.md): GET /@rip/manifest.json (no-store, read per request),
-# rev-and-hash-keyed immutable cell bytes at /@rip/cells/<id>?rev=N&h=…,
-# and the hub bridge endpoint enrolling dev sockets into the DEV_CHANNEL.
-# Each surface keys on its manager-provided environment — the manager
-# sets the feed envs only with watch on (production has no hub, Q2), and
-# standalone mode has no manager, so none of them register there.
+# (docs/WORKSPACE.md Q8′): GET /manifest.json (no-store, read per request),
+# latest module bytes at /app/{store-path-without-app-prefix}?etag=…,
+# and the hub bridge endpoint enrolling dev sockets into the DEV_CHANNEL
+# (/hub — same string as the bridge path). Each surface keys on its
+# manager-provided environment — the manager sets the feed envs only
+# with watch on (production has no hub, Q2), and standalone mode has
+# no manager, so none of them register there.
 
 # The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
 # manager.rip (workers never import manager code). Exported so the mirror
-# is a pinned fact, not a convention.
-export DEV_CHANNEL = '/@rip/dev'
+# is a pinned fact, not a convention. Same spelling as the bridge path.
+export DEV_CHANNEL = '/hub'
 
 clientModules = (dir) ->
   out = {}
@@ -877,7 +887,7 @@ BOOT_PAGE = (workspace, title) -> """
 <script type="module">
   import { bootApp } from '/@rip/rip.js'
   const debug = new URLSearchParams(location.search).has('debug')
-  bootApp({ url: '/@rip/bundle.json', debug#{if workspace then ', workspace: true' else ''} })
+  bootApp({ url: '/bundle.json', debug#{if workspace then ', workspace: true' else ''} })
 </script>
 """
 
@@ -944,7 +954,7 @@ export client = (dir = null) ->
     # pair a live manifest with stale bundle bytes (the silent-stale
     # class). Standalone / production (no manifest) keeps ETag-only
     # so the edge cache still earns its keep.
-    get '/@rip/bundle.json', (c) ->
+    get '/bundle.json', (c) ->
       text = readFileSync(process.env.RIP_BUNDLE_PATH, 'utf8')
       live = "\"#{Bun.hash(text).toString(16)}\""
       headers = { 'Content-Type': 'application/json', 'ETag': live }
@@ -953,45 +963,43 @@ export client = (dir = null) ->
         return new Response(null, { status: 304, headers })
       c.body text, 200, headers
   else
-    get '/@rip/bundle.json', (c) ->
+    get '/bundle.json', (c) ->
       if c.req.header('if-none-match') is etag
         return new Response(null, { status: 304, headers: { 'ETag': etag } })
       c.body bundleText, 200, { 'Content-Type': 'application/json', 'ETag': etag }
+  # Local checkout runtime until a CDN-pinned rip.js lands (Q8′).
   get '/@rip/rip.js', (c) -> c.send runtimePath
 
   if process.env.RIP_MANIFEST_PATH?
-    get '/@rip/manifest.json', (c) ->
+    get '/manifest.json', (c) ->
       # Read per request: the manager rewrites the manifest on every cell
       # change, and no-store keeps every cache out of the freshness path.
       c.body readFileSync(process.env.RIP_MANIFEST_PATH, 'utf8'), 200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
 
   if process.env.RIP_CELLS_DIR?
-    # Cell bytes are addressed by (id, rev) plus the content-hash
-    # discriminator `h` in the URL (Q8): the immutable-cacheable answer is
-    # sound only because the URL varies iff the bytes do — revs restart
-    # across manager runs, and a bare (id, rev) URL would let a returning
-    # browser's cache serve the OLD run's bytes silently. Both parts are
-    # REQUIRED — freshness never rests on a client convention, so an
-    # unversioned or unhashed request is rejected, never answered with a
-    # year-long cacheable 200 under the proven-broken URL shape. A request
-    # whose `h` does not match the bytes is an unknown cell — answering it
-    # would poison the requester's cache under that URL. The filename
-    # encoding mirrors the manager's — the percent-encoded id can never
-    # contain the literal '@' separator.
-    get '/@rip/cells/*', (c) ->
-      rev = c.req.query('rev')
-      unless rev? and /^[1-9]\d*$/.test(rev)
-        error 'unversioned cell URLs are rejected — address a cell as /@rip/cells/<id>?rev=N&h=<hash> (docs/WORKSPACE.md, Q8)', 400
-      h = c.req.query('h')
-      unless h? and /^[0-9a-f]{16}$/.test(h)
-        error 'unhashed cell URLs are rejected — address a cell as /@rip/cells/<id>?rev=N&h=<hash> (docs/WORKSPACE.md, Q8)', 400
-      id = try decodeURIComponent(c.req.path.slice('/@rip/cells/'.length)) catch then error('malformed percent-encoding in cell id', 400)
-      file = join(process.env.RIP_CELLS_DIR, "#{encodeURIComponent(id)}@#{rev}")
-      error "unknown cell (#{id}, rev #{rev})", 404 unless existsSync(file)
+    # Q8′ latest-representation door: GET /app/<rel>?etag=E where the
+    # store id is app/<rel> (e.g. /app/mood.rip ↔ app/mood.rip). Exact
+    # etag → 200 + body + ETag; a superseded etag → 409 + current ETag
+    # (never a silent stale body). no-store: freshness is the query
+    # param, not the browser cache. The on-disk name is the percent-
+    # encoded store id — one file per module, overwritten on each save
+    # (no per-rev museum).
+    get '/app/*', (c) ->
+      wanted = c.req.query('etag')
+      unless wanted? and /^[0-9a-f]{16}$/.test(wanted)
+        error 'module URLs require ?etag=<16-hex> (docs/WORKSPACE.md, Q8′)', 400
+      rel = c.req.path.slice('/app/'.length)
+      id = try
+        'app/' + rel.split('/').map((s) -> decodeURIComponent(s)).join('/')
+      catch then error('malformed percent-encoding in module path', 400)
+      file = join(process.env.RIP_CELLS_DIR, encodeURIComponent(id))
+      error "unknown module #{id}", 404 unless existsSync(file)
       bytes = readFileSync(file, 'utf8')
-      if h isnt new Bun.CryptoHasher('sha256').update(bytes).digest('hex').slice(0, 16)
-        error "unknown cell (#{id}, rev #{rev}, h #{h}) — the named hash does not match these bytes", 404
-      c.body bytes, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=31536000, immutable' }
+      current = new Bun.CryptoHasher('sha256').update(bytes).digest('hex').slice(0, 16)
+      headers = { 'Content-Type': 'text/plain; charset=utf-8', 'ETag': "\"#{current}\"", 'Cache-Control': 'no-store' }
+      if wanted isnt current
+        return new Response(null, { status: 409, headers })
+      c.body bytes, 200, headers
 
   if process.env.RIP_BRIDGE_PATH?
     # Janus POSTs every hub socket event here; answering an open with

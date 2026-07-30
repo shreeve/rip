@@ -2,18 +2,16 @@
 # The workspace feed — the hub subscriber half of the door (@rip-lang/app)
 #
 # connectFeed(workspace, opts) opens the app's Janus hub socket and turns
-# ding events into passport mutations: a ding carries only { id, rev,
-# hash } (Q2 — never bodies over the hub), the cell bytes ride HTTP at a
-# rev-and-hash-keyed URL (Q8), and workspace.set applies them — the bag's
-# rev cursor owns staleness, so out-of-order fetches are harmless. The
-# hash in the URL is what makes the browser's immutable cache sound:
-# revs restart when a manager restarts, so a bare (id, rev) URL can name
-# DIFFERENT bytes across runs and a year-long cache hit would serve the
-# old run's cell silently; with the content hash in the URL, a cache hit
-# is byte-correct by construction. A cell fetch that misses resyncs from
-# the manifest; a covered rev whose bytes DIFFER from the page's copy
-# names a manager restart — arbitrated through the no-store manifest,
-# where the verdict is the full reload (onRestart). Dev/watch only by
+# ding events into passport mutations: a ding carries { id, rev, etag }
+# (Q2 — never bodies over the hub), module bytes ride HTTP at
+# /app/…?etag=E (Q8′ — latest representation, 200 or 409), and
+# workspace.set applies them — the bag's rev cursor owns staleness, so
+# out-of-order fetches are harmless. A superseded etag answers 409 with
+# the current ETag (never a silent stale body); the feed refetches once
+# at the current generation. A module fetch that misses resyncs from the
+# manifest; a covered rev whose bytes DIFFER from the page's copy names
+# a manager restart — arbitrated through the no-store manifest, where
+# the verdict is the full reload (onRestart). Dev/watch only by
 # constitution: production has no hub, and a sealed workspace rejects
 # the feed at the door.
 # ==============================================================================
@@ -43,15 +41,26 @@ defaultFetch = ->
   (url) -> fetch(url)
 
 # The page-side half of the cross-run verdict: hash a passport's source
-# the same way the manager hashes cell bytes (16 hex chars of sha256), so
-# a ding or manifest entry whose rev the cursor already covers can still
-# be checked byte-for-byte. Null where the platform offers no subtle
-# crypto — the caller treats that as "cannot judge" and keeps the plain
-# rev verdict.
+# the same way the manager hashes module bytes (16 hex chars of sha256),
+# so a ding or manifest entry whose rev the cursor already covers can
+# still be checked byte-for-byte. Null where the platform offers no
+# subtle crypto — the caller treats that as "cannot judge" and keeps
+# the plain rev verdict.
 sourceHash = (text) ->
   return null unless typeof text is 'string' and typeof crypto isnt 'undefined' and crypto.subtle?
   digest = crypto.subtle.digest! 'SHA-256', new TextEncoder().encode(text)
   Array.from(new Uint8Array(digest), (b) -> b.toString(16).padStart(2, '0')).join('').slice(0, 16)
+
+# Store id `app/mood.rip` → `/app/mood.rip?etag=…` (path segments encoded).
+defaultModuleUrl = (id, etag) ->
+  path = '/' + id.split('/').map(encodeURIComponent).join('/')
+  if typeof etag is 'string' and etag isnt '' then "#{path}?etag=#{etag}" else path
+
+# Strip optional quotes from an ETag header value.
+etagToken = (raw) ->
+  return null unless typeof raw is 'string' and raw isnt ''
+  m = raw.match(/^"([0-9a-f]{16})"$/)
+  if m? then m[1] else if /^[0-9a-f]{16}$/.test(raw) then raw else null
 
 export def connectFeed(workspace, opts = {}): Feed
   unless workspace? and typeof workspace.set is 'function' and typeof workspace.passport is 'function' and typeof workspace.sealed is 'function'
@@ -62,22 +71,14 @@ export def connectFeed(workspace, opts = {}): Feed
   hubUrl = opts.hub ?? defaultHubUrl()
   makeSocket = opts.makeSocket ?? defaultSocketFactory()
   fetchBytes = opts.fetch ?? defaultFetch()
-  # The default cell URL percent-encodes each path segment: a legal
-  # filename containing '%', '#', or '?' must build a URL the server can
-  # decode, and the slashes stay visible (the cell route matches a splat
-  # and canonicalizes by decode → re-encode). The content hash rides as
-  # `h` so the URL varies iff the bytes do — the cross-run cache soundness
-  # above.
-  cellUrl = opts.cellUrl ?? (id, rev, hash) ->
-    base = "/@rip/cells/#{id.split('/').map(encodeURIComponent).join('/')}?rev=#{rev}"
-    if typeof hash is 'string' and hash isnt '' then "#{base}&h=#{hash}" else base
-  manifestUrl = opts.manifestUrl ?? '/@rip/manifest.json'
+  moduleUrl = opts.moduleUrl ?? opts.cellUrl ?? defaultModuleUrl
+  manifestUrl = opts.manifestUrl ?? '/manifest.json'
   report = opts.report ?? (...args) -> console.error(...args)
   backoffMin = opts.backoff?.min ?? FEED_BACKOFF_MIN
   backoffMax = opts.backoff?.max ?? FEED_BACKOFF_MAX
   # An epoch ding names a pool swap: the page's code AND its server are
   # both pre-swap, so the apply policy is the full reload — never the
-  # cell path.
+  # module path.
   onEpoch = opts.onEpoch ?? (ding) ->
     report "[Rip] workspace feed: a new epoch is live (#{ding.epoch}) — reloading"
     location.reload() if typeof location isnt 'undefined'
@@ -85,22 +86,32 @@ export def connectFeed(workspace, opts = {}): Feed
   # A manager restart is an epoch the manager cannot announce: revs
   # restart with it, so the surviving page's rev cursor sits ABOVE the
   # new run's revs and every plain rev verdict says "stale" — the page
-  # would silently pin to the old run's bytes forever. The hash is the
+  # would silently pin to the old run's bytes forever. The etag is the
   # tiebreak: a rev the cursor covers whose bytes DIFFER from the page's
-  # copy can only be another run (within a run, one rev has one hash and
+  # copy can only be another run (within a run, one rev has one etag and
   # hub frames arrive in order on one socket), and the policy is the
   # same as an epoch — the full reload.
   onRestart = opts.onRestart ?? (about) ->
-    report "[Rip] workspace feed: cell '#{about.id}' rev #{about.rev} names different bytes than this page holds — the manager restarted; reloading"
+    report "[Rip] workspace feed: module '#{about.id}' rev #{about.rev} names different bytes than this page holds — the manager restarted; reloading"
     location.reload() if typeof location isnt 'undefined'
     return
   # "This rev is covered but the bytes differ" — the cross-run verdict
-  # above. False only where it cannot judge (no hash offered, no subtle
+  # above. False only where it cannot judge (no etag offered, no subtle
   # crypto): the plain rev verdict then stands.
-  crossRun = (current, hash) ->
-    return false unless typeof hash is 'string' and hash isnt ''
+  crossRun = (current, etag) ->
+    return false unless typeof etag is 'string' and etag isnt ''
     mine = sourceHash! current.source
-    mine? and mine isnt hash
+    mine? and mine isnt etag
+
+  # Fetch module bytes for a wanted etag. A 409 means the generation was
+  # superseded — refetch once at the current ETag from the response.
+  fetchModule = (id, etag) ->
+    res = fetchBytes! moduleUrl(id, etag)
+    if res.status is 409
+      next = etagToken(res.headers?.get?('etag') or res.headers?.get?('ETag'))
+      return res unless next? and next isnt etag
+      return fetchBytes! moduleUrl(id, next)
+    res
 
   closed = false
   isOpen = false
@@ -109,13 +120,13 @@ export def connectFeed(workspace, opts = {}): Feed
   timer = null
   resyncTimer = null
   resyncAttempts = 0
-  wants = {}       # id → { rev, hash, sig }: the highest dinged rev not yet applied (a miss under retry)
+  wants = {}       # id → { rev, etag, sig }: the highest dinged rev not yet applied (a miss under retry)
 
   # A dinged rev the workspace has not reached yet is a WANT: a resync
   # only counts as clean once every want is satisfied (or its id was
   # deleted), so a miss retries instead of leaving the feed silently
   # behind until the next ding or reconnect. A want keeps the ding's
-  # hash (its cell URL is refetchable directly) and the signature of
+  # etag (its module URL is refetchable directly) and the signature of
   # the first manifest that failed to name it (retirement evidence —
   # the retirement rule below).
   wantsSatisfied = ->
@@ -138,7 +149,7 @@ export def connectFeed(workspace, opts = {}): Feed
   # what it names and never deletes — the bag legally holds passports the
   # server feed does not own (an editor's local mints). Deletions ride
   # dings alone. A resync that could not fully reconcile (a manifest or
-  # cell fetch failing, an unsatisfied want) schedules its own retry with
+  # module fetch failing, an unsatisfied want) schedules its own retry with
   # backoff; a clean one clears the cursor. A structurally malformed
   # manifest is a server bug, reported and never retried into.
   resync = ->
@@ -155,19 +166,20 @@ export def connectFeed(workspace, opts = {}): Feed
       return
     named = new Set()
     for entry in cells
+      etag = entry.etag ?? entry.hash
       unless entry? and typeof entry.id is 'string' and Number.isInteger(entry.rev)
         report '[Rip] workspace feed: malformed manifest entry:', entry
         continue
       named.add entry.id
       current = workspace.passport entry.id
       if current? and current.rev >= entry.rev
-        if crossRun! current, entry.hash
-          onRestart { id: entry.id, rev: entry.rev, hash: entry.hash }
+        if crossRun! current, etag
+          onRestart { id: entry.id, rev: entry.rev, etag }
           return
         continue
-      cres = fetchBytes! cellUrl(entry.id, entry.rev, entry.hash)
+      cres = fetchModule! entry.id, etag
       unless cres.ok
-        report "[Rip] workspace feed: cell fetch missed (#{cres.status}) for '#{entry.id}' rev #{entry.rev} during resync"
+        report "[Rip] workspace feed: module fetch missed (#{cres.status}) for '#{entry.id}' rev #{entry.rev} during resync"
         clean = false
         continue
       source = cres.text!()
@@ -176,9 +188,9 @@ export def connectFeed(workspace, opts = {}): Feed
       cell.path = entry.id unless current?
       workspace.set! cell
     # A want the manifest walk left unsatisfied retries the ding's OWN
-    # rev-and-hash URL: the manager writes cells durable BEFORE dings
+    # etag URL: the manager writes modules durable BEFORE dings
     # publish, so a manifest held back by a bundle-rewrite failure never
-    # blocks a live feed — the cell is fetchable the moment its transient
+    # blocks a live feed — the module is fetchable the moment its transient
     # miss heals. Retirement needs EVIDENCE: wants come only from dings,
     # and dings only name server-owned ids, so a want that a manifest
     # which has MOVED since first failing to name it STILL does not name
@@ -191,7 +203,7 @@ export def connectFeed(workspace, opts = {}): Feed
       want = wants[id]
       current = workspace.passport id
       continue if current? and current.rev >= want.rev
-      cres = fetchBytes! cellUrl(id, want.rev, want.hash)
+      cres = fetchModule! id, want.etag
       if cres.ok
         source = cres.text!()
         cell = { id, rev: want.rev, source }
@@ -215,7 +227,8 @@ export def connectFeed(workspace, opts = {}): Feed
     unless ding? and typeof ding is 'object' and typeof ding.id is 'string' and Number.isInteger(ding.rev)
       report '[Rip] workspace feed: malformed ding:', ding
       return
-    { id, rev, kind, hash } = ding
+    { id, rev, kind } = ding
+    etag = ding.etag ?? ding.hash
     if kind is 'delete'
       delete wants[id]         # a retirement supersedes any pending want
       workspace.set { id, rev, deleted: true }
@@ -230,15 +243,15 @@ export def connectFeed(workspace, opts = {}): Feed
       # arbitrates: a genuine restart shows the same mismatch there and
       # the resync-path verdict reloads; an overtaken frame resolves as
       # a clean no-op.
-      resync!() if crossRun! current, hash
+      resync!() if crossRun! current, etag
       return
-    res = fetchBytes! cellUrl(id, rev, hash)
+    res = fetchModule! id, etag
     unless res.ok
-      report "[Rip] workspace feed: cell fetch missed (#{res.status}) for '#{id}' rev #{rev} — resyncing from the manifest"
+      report "[Rip] workspace feed: module fetch missed (#{res.status}) for '#{id}' rev #{rev} — resyncing from the manifest"
       # A fresh ding is fresh proof of life: a higher rev remints the
       # want with a null signature, restarting the retirement clock.
       prior = wants[id]
-      wants[id] = { rev, hash, sig: null } unless prior? and prior.rev >= rev
+      wants[id] = { rev, etag, sig: null } unless prior? and prior.rev >= rev
       resync!()
       return
     source = res.text!()

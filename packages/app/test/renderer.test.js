@@ -72,6 +72,49 @@ const registry = entries => {
   return components;
 };
 
+describe('renderer injects app/router/params/query', () => {
+  test('constructed route instances see @app, @router, @params, and @query', async () => {
+    const host = target();
+    const pageRoot = node('page');
+    let seen;
+    const params = { id: '7' };
+    const query = { tab: 'posts' };
+    const router = {
+      current: null,
+      get params() { return params; },
+      get query() { return query; },
+      path: '/orders/7',
+    };
+    const app = { data: createStash({ cart: { items: [] } }) };
+
+    class Page extends __Component {
+      _init() {
+        seen = {
+          app: this.app,
+          router: this.router,
+          params: this.params,
+          query: this.query,
+          cart: this.app.data.cart,
+        };
+      }
+      _create() { return pageRoot; }
+    }
+
+    const renderer = createRenderer({
+      router,
+      app,
+      components: registry({ 'page.rip': { Page } }),
+      target: host,
+    });
+    await renderer.mount(route('page.rip', { params, query }));
+    expect(seen.app).toBe(app);
+    expect(seen.router).toBe(router);
+    expect(seen.params).toEqual({ id: '7' });
+    expect(seen.query).toEqual({ tab: 'posts' });
+    expect(seen.cart).toEqual({ items: [] });
+  });
+});
+
 describe('renderer render gates', () => {
   test('the renderer owns the one gate-construction capability', () => {
     expect(() => __claimGateConstructor()).toThrow('already claimed');

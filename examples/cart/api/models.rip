@@ -1,0 +1,33 @@
+export User = schema :model
+  firstName! string, 1..
+  lastName!  string, 1..
+  email!     email @unique
+  phone?     string
+  @timestamps
+  @has_many Order
+
+export Product = schema :model
+  name!  string, 1..
+  price! integer, 0..
+  image! string
+
+export OrderLine = schema :shape
+  productId! integer
+  quantity!  integer, 1..
+
+export OrderItem = schema :shape
+  productId! integer
+  name!      string, 1..
+  price!     integer, 0..
+  image!     string
+  quantity!  integer, 1..
+
+export Order = schema :model
+  total! integer, 0..
+  items! OrderItem[]
+  @timestamps
+  @belongs_to User
+
+export UserPublic    = User.pick('id', 'firstName', 'lastName', 'email', 'phone')
+export ProductPublic = Product.pick('id', 'name', 'price', 'image')
+export OrderPublic   = Order.pick('id', 'total', 'items', 'createdAt')
