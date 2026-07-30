@@ -198,7 +198,7 @@ not provide source compilation, launch, or browser delivery.
 then the result is stamped as the reset baseline), loads the component
 registry, derives the route manifest, and wires router and renderer
 together before starting. The application declares its stash in the
-bundle module `app/stash.rip` through its `appStash` export — a stash
+bundle module `app/stash.rip` through its `stash` export — a stash
 module without the export rejects loudly — and the `stash` option
 overrides it for tests and embedding hosts. It installs `__ripApp` and `__ripRouter`; a
 second launch rejects loudly, as does a malformed bundle, and

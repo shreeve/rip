@@ -51,7 +51,7 @@ const fakeAdapter = (initial = '/') => {
 const APP_MODULES = {
   'app/stash.rip': [
     "import { source } from '@rip-lang/app'",
-    'export appStash = {',
+    'export stash = {',
     '  user: source fetch: -> Promise.resolve { name: "Ada" }',
     '}',
   ].join('\n'),
@@ -719,13 +719,13 @@ describe('bootApp workspace mode', () => {
 
   test('a remount whose relaunch throws reports loudly and the next good change recovers the page', async () => {
     // A cell can compile cleanly and still break launch (the stash
-    // contract: 'app/stash.rip' must export appStash). The remount's
+    // contract: 'app/stash.rip' must export stash). The remount's
     // teardown-plus-relaunch must not die as an unhandled rejection
     // with the page silently unmounted — it reports, and a following
     // good revision relaunches.
     const table = manifestTable();
     table.set('/app/stash.rip?etag=1111111111111111', 'export nothing = 1');
-    table.set('/app/stash.rip?etag=2222222222222222', 'export appStash = {}');
+    table.set('/app/stash.rip?etag=2222222222222222', 'export stash = {}');
     const hub = fakeHub();
     const reports = [];
     const { result, target } = await bootWorkspace({ table, hub, reports });

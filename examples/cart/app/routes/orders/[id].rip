@@ -30,4 +30,4 @@ export OrderDetails = component
               strong 'Total'
             td
               strong "#{formatPrice(order.total)}"
-    ButtonLink href: '/orders', outline: true, 'Back to Orders'
+    ButtonLink href: '/orders', outline, 'Back to Orders'

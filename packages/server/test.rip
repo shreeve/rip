@@ -794,7 +794,7 @@ console.log "\nclient()"
 
 CLIENT_STASH = """
 import { source } from '@rip-lang/app'
-export appStash = {
+export stash = {
   user: source fetch: -> (await fetch('/user.json')).json()
 }
 """

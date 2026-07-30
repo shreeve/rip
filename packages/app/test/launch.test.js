@@ -162,7 +162,7 @@ describe('launch', () => {
     let fetches = 0;
     const result = boot({
       bundle: withStash({
-        appStash: {
+        stash: {
           user: source({ fetch: async () => { fetches += 1; return { name: 'live' }; } }),
           theme: 'dark',
         },
@@ -177,15 +177,15 @@ describe('launch', () => {
   test('an explicit stash option overrides the bundle stash module', () => {
     const result = boot({
       stash: { theme: 'light' },
-      bundle: withStash({ appStash: { theme: 'dark' } }),
+      bundle: withStash({ stash: { theme: 'dark' } }),
     });
     expect(result.app.data.theme).toBe('light');
   });
 
-  test('a stash module without appStash and a malformed stash reject loudly', () => {
+  test('a stash module without stash and a malformed stash reject loudly', () => {
     expect(() => boot({ bundle: withStash({ helpers: 1 }) }))
-      .toThrow(/'app\/stash\.rip' module must export 'appStash'/);
-    expect(() => boot({ bundle: withStash({ appStash: ['not', 'a', 'stash'] }) }))
+      .toThrow(/'app\/stash\.rip' module must export 'stash'/);
+    expect(() => boot({ bundle: withStash({ stash: ['not', 'a', 'stash'] }) }))
       .toThrow(/stash must be a plain object/);
     expect(globalThis.__ripApp).toBeUndefined();
   });
@@ -261,7 +261,7 @@ describe('launch reconciliation', () => {
 
   test('relaunch from a shared stash declaration starts from the declared baseline', () => {
     const cell = source({ fetch: async () => ({ id: 1 }) });
-    const declaration = { appStash: { user: cell, theme: 'dark', profile: { name: 'anon' } } };
+    const declaration = { stash: { user: cell, theme: 'dark', profile: { name: 'anon' } } };
     const first = boot({ bundle: withStash(declaration) });
     first.app.data.theme = 'light';
     first.app.data.profile.name = 'steve';

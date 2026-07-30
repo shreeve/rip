@@ -8,6 +8,13 @@ export type SourceHandle =
   reset: () => void
 
 export type StashMethods =
+  inc: (path: string, step?: number) => number
+  dec: (path: string, step?: number) => number
+  flip: (path: string) => boolean
+  join: (path: string, obj: Record<string, unknown>) => void
+  keys: (path?: string) => string[]
+  has: (path: string) => boolean
+  del: (path: string) => void
   peek: (path?: string) => unknown
   reset: () => void
   source: (path: string, key?: unknown) => SourceHandle
@@ -267,7 +274,7 @@ export def _stampDefaults(stash: any): void
 
 # Clone a stash seed: source cells carry by reference — their identity
 # is the data contract — and plain subtrees clone deeply, so launching
-# from a shared declaration (a module's `appStash` export) never lets
+# from a shared declaration (a module's `stash` export) never lets
 # one session's writes leak into the next launch's baseline. Keys land
 # as own data properties so a '__proto__' key stays inert.
 export def _cloneSeed(value: any): any
@@ -323,6 +330,85 @@ restoreDefaults = (proxy, raw) ->
   _mergePlain proxy, defaults
   return
 
+# Path helpers — reserved names for atomic / structural updates through
+# a dotted path. Reactivity still drives the UI; these just avoid the
+# read-mutate-write boilerplate at deep keys.
+STASH_METHODS =! {
+  inc: true, dec: true, flip: true, join: true, keys: true, has: true,
+  del: true, peek: true, reset: true, source: true
+}
+
+stashMethod = (proxy, raw, prop) ->
+  if prop is 'inc'
+    return (path, step = 1) ->
+      next = (readPath(proxy, path) ?? 0) + step
+      writePath proxy, path, next
+      next
+  if prop is 'dec'
+    return (path, step = 1) ->
+      next = (readPath(proxy, path) ?? 0) - step
+      writePath proxy, path, next
+      next
+  if prop is 'flip'
+    return (path) ->
+      next = not (readPath(proxy, path) ?? false)
+      writePath proxy, path, next
+      next
+  if prop is 'join'
+    return (path, obj) ->
+      unless obj? and typeof obj is 'object' and not Array.isArray(obj)
+        throw new TypeError 'Rip App: join expects a plain object'
+      __batch ->
+        target = readPath proxy, path
+        unless target? and typeof target is 'object' and not Array.isArray(target)
+          writePath proxy, path, {}
+          target = readPath proxy, path
+        target[k] = v for own k, v of obj
+      return
+  if prop is 'keys'
+    return (path) ->
+      obj = if path? then readPath(proxy, path) else proxy
+      return [] unless obj? and typeof obj is 'object'
+      t = if obj[RAW] then obj[RAW] else obj
+      keysSignal(t).value
+      Object.keys t
+  if prop is 'has'
+    return (path) ->
+      parts = pathParts path
+      return false unless parts.length > 0
+      obj = proxy
+      for part, i in parts
+        key = resolvePart part, obj
+        if i is parts.length - 1
+          t = if obj[RAW] then obj[RAW] else obj
+          keysSignal(t).value
+          return Object.prototype.hasOwnProperty.call(t, key)
+        return false unless obj?
+        obj = readLiteral obj, key
+      false
+  if prop is 'del'
+    return (path) ->
+      parts = pathParts path
+      return unless parts.length > 0
+      obj = proxy
+      for part, i in parts
+        key = resolvePart part, obj
+        if i is parts.length - 1
+          delete obj[key]
+          return
+        return unless obj?
+        obj = readLiteral obj, key
+      return
+  if prop is 'peek' then return (path) -> peekPath raw, path
+  if prop is 'reset'
+    return ->
+      restoreDefaults proxy, raw
+      resetSources raw, new WeakSet()
+      raw[PURGE]?()
+      return
+  if prop is 'source' then return (path, key) -> sourceHandle raw, path, key
+  return
+
 makeProxy = (target) ->
   proxy = null
   handler =
@@ -332,16 +418,8 @@ makeProxy = (target) ->
       if prop is 'length' and Array.isArray(raw)
         keysSignal(raw).value
         return raw.length
-      if prop is 'peek'
-        return (path) -> peekPath raw, path
-      if prop is 'reset'
-        return ->
-          restoreDefaults proxy, raw
-          resetSources raw, new WeakSet()
-          raw[PURGE]?()
-          return
-      if prop is 'source'
-        return (path, key) -> sourceHandle raw, path, key
+      if STASH_METHODS[prop]
+        return stashMethod proxy, raw, prop
       return readPath(proxy, prop) if isPathKey prop
 
       readLiteral proxy, prop

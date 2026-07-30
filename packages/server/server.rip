@@ -861,7 +861,8 @@ export App = (fn) ->
 export DEV_CHANNEL = '/hub'
 
 clientModules = (dir) ->
-  out = {}
+  modules = {}
+  moduleFiles = {}
   walk = (at, prefix) ->
     for e in readdirSync(at, { withFileTypes: true })
       continue if e.name.startsWith('.')
@@ -869,9 +870,13 @@ clientModules = (dir) ->
       if e.isDirectory()
         walk full, "#{prefix}#{e.name}/"
       else if e.name.endsWith('.rip')
-        out["#{prefix}#{e.name}"] = readFileSync(full, 'utf8')
+        key = "#{prefix}#{e.name}"
+        modules[key] = readFileSync(full, 'utf8')
+        moduleFiles[key] = full
   walk dir, 'app/'
-  out
+  # appDir is the project root (parent of app/) — projection overlays
+  # key as paths under it (api/models.rip), so relative imports resolve.
+  { modules, moduleFiles, appDir: dirname(dir) }
 
 # The generated boot page, titled with the app's name (the manager
 # passes its --name; standalone derives it from the app's directory).
@@ -921,7 +926,8 @@ export client = (dir = null) ->
     # specifier defeats the bundler's static analysis.
     bundleModule = join(srcDir, 'bundle.js')
     { assembleBundle } = import!(bundleModule)
-    bundleText = JSON.stringify assembleBundle { modules: clientModules(clientDir), packagesDir }
+    { modules, moduleFiles, appDir } = clientModules(clientDir)
+    bundleText = JSON.stringify assembleBundle { modules, moduleFiles, appDir, packagesDir }
 
   etag = "\"#{Bun.hash(bundleText).toString(16)}\""
   indexHtml = if clientDir? then join(clientDir, 'index.html') else null

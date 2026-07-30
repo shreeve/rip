@@ -53,9 +53,9 @@ export Products = component
             h5 product.name
             p "#{formatPrice(product.price)}"
             if cart.items.some((i) -> i.id is product.id)
-              Button outline: true, @click: (-> cart.removeItem(product)), 'Added to Cart'
+              Button outline, @click: (-> cart.removeItem(product)), 'Added to Cart'
             else
-              Button outline: true, @click: (-> cart.addItem(product)), 'Add to Cart'
+              Button outline, @click: (-> cart.addItem(product)), 'Add to Cart'
     else
       p 'No products found. '
-        Button outline: true, link: true, @click: @clearFilters, 'Clear Filters'
+        Button outline, link: true, @click: @clearFilters, 'Clear Filters'

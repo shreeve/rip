@@ -1,5 +1,5 @@
-import { User } from '../types.rip'
-import { api, parseApiError } from '../api-client.rip'
+import { UserPublic as User } from '../../api/models.rip'
+import { api, ApiErrors, parseApiError } from '../api-client.rip'
 import { Button } from '../components/button.rip'
 import { title } from '../config.rip'
 import { createMutation } from '@rip-lang/app'
@@ -7,7 +7,7 @@ import { createMutation } from '@rip-lang/app'
 export Profile = component
   user <~ @app.data.user
   form: User := { ...user }
-  errors: { form?: string, field?: Partial<Record<keyof User, string>> } := {}
+  errors: ApiErrors<keyof User> := {}
 
   mounted: -> document.title = title('Profile')
 
@@ -19,7 +19,7 @@ export Profile = component
 
   render
     h1 'Profile'
-    form @submit: ((e) -> e.preventDefault(); updateUser(form))
+    form @submit: ((e) -> e.preventDefault(); updateUser!(form))
       div.grid
         label
           'First name'

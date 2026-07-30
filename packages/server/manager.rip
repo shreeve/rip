@@ -329,7 +329,8 @@ export buildArtifact = (entry, outfile) ->
 # boot-failure caching as a compile failure, so rings answer 503 with the
 # diagnostic.
 clientModules = (dir) ->
-  out = {}
+  modules = {}
+  moduleFiles = {}
   walk = (at, prefix) ->
     for e in readdirSync(at, { withFileTypes: true })
       continue if e.name.startsWith('.')
@@ -337,9 +338,11 @@ clientModules = (dir) ->
       if e.isDirectory()
         walk full, "#{prefix}#{e.name}/"
       else if e.name.endsWith('.rip')
-        out["#{prefix}#{e.name}"] = readFileSync(full, 'utf8')
+        key = "#{prefix}#{e.name}"
+        modules[key] = readFileSync(full, 'utf8')
+        moduleFiles[key] = full
   walk dir, 'app/'
-  out
+  { modules, moduleFiles, appDir: dirname(dir) }
 
 # One app/ walk feeds every document in a producing run. A second walk can
 # observe a save mid-run and write a manifest naming revs the bundle does
@@ -349,14 +352,19 @@ readAppModules = ->
   return null unless existsSync(appRoot)
   clientModules(appRoot)
 
-assembleBundleText = (modules) ->
+assembleBundleText = (walk) ->
   assemble = loadAssembler!()
-  JSON.stringify assemble { modules, packagesDir: join(loaderSrcDir(), '..', 'packages') }
+  JSON.stringify assemble {
+    modules: walk.modules
+    moduleFiles: walk.moduleFiles
+    appDir: walk.appDir
+    packagesDir: join(loaderSrcDir(), '..', 'packages')
+  }
 
-buildBundle = (modules) ->
-  return null unless modules?
+buildBundle = (walk) ->
+  return null unless walk?
   out = join(state.runDir, "b#{state.buildCounter}-bundle.json")
-  Bun.write! out, assembleBundleText!(modules)
+  Bun.write! out, assembleBundleText!(walk)
   out
 
 # Deep-clone the cell registry so a scrapped epoch build can restore it —
@@ -435,7 +443,8 @@ moduleFile = (id) -> join(state.cellsDir, encodeURIComponent(id))
 # across renames is open research). The caller supplies the snapshot — a
 # second disk walk here would re-open the silent-stale class. Returns the
 # changed { id, rev, deleted? } entries.
-syncCells = (modules) ->
+syncCells = (walk) ->
+  modules = walk.modules
   state.cellsDir ?= join(state.runDir, 'cells')
   state.manifestPath ?= join(state.runDir, 'manifest.json')
   mkdirSync state.cellsDir, { recursive: true }
@@ -494,12 +503,12 @@ writeManifest = ->
 # stale first-paint code. No live pool bundle is a held-back-manifest
 # verdict — never a silent skip that lets writeManifest name revs the
 # page cannot pair with bundle bytes.
-refreshPoolBundle = (modules) ->
+refreshPoolBundle = (walk) ->
   pool = state.currentPool
   unless pool?.bundle?
     throw new Error('rip-server: no live pool bundle to rewrite — manifest held back')
   tmp = "#{pool.bundle}.tmp"
-  Bun.write! tmp, assembleBundleText!(modules)
+  Bun.write! tmp, assembleBundleText!(walk)
   renameSync tmp, pool.bundle
 
 # The cell path: cells, then the bundle, then the manifest — every document

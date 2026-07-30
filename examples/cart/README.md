@@ -15,9 +15,11 @@ It is a runnable example — not a CI suite.
 | `setup.rip` | One-shot `migrate` + `seed` |
 | `api/` | SQLite adapter, models, seed, `/api/*` handlers (not a public URL tree) |
 | `app/index.html` | SPA shell (Pico + styles + `bootApp`) |
-| `app/stash.rip` | `appStash` — cart + `source` cells for user/products/orders |
+| `app/stash.rip` | `stash` — cart + `source` cells for user/products/orders |
 | `app/routes/` | File routes + `_layout.rip` |
-| `app/types.rip` | Browser-safe public shapes (`:shape` only — `:model` stays in `api/`) |
+
+Client modules import `UserPublic` / etc. from `../api/models.rip`; the
+bundler overlays shippable projections at that path (`:model` stays server-side).
 
 Persistence starts on **bun:sqlite**. A follow-up swaps `api/db.rip` to
 `@rip-lang/db` (DuckDB over duckdb-harbor).

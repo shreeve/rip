@@ -12,7 +12,7 @@ const root = resolve(here, '../..');
 const MODULES = {
   'app/stash.rip': [
     "import { source } from '@rip-lang/app'",
-    'export appStash = {',
+    'export stash = {',
     "  user: source fetch: -> (await fetch('/user.json')).json()",
     '}',
   ].join('\n'),

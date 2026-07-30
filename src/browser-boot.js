@@ -295,7 +295,7 @@ export async function bootApp(opts = {}) {
         bag.setCompiled(path, module);
       }
       // A cell can compile cleanly and still break launch (a contract
-      // violation like a stash module without appStash). destroy() now
+      // violation like a stash module without stash). destroy() now
       // always clears the launch globals even when a disposer throws, so
       // a failed relaunch can recover on the next good change. Report
       // loudly either way — never an unhandled rejection.

@@ -14,7 +14,7 @@ here is wired into CI.
 | --- | --- |
 | `index.rip` | The server: statuses API, `start! 'app'` |
 | `app/index.html` | SPA shell (`bootApp` over `/bundle.json`) |
-| `app/stash.rip` | `appStash` — the `statuses` source over `/api/statuses` |
+| `app/stash.rip` | `stash` — the `statuses` source over `/api/statuses` |
 | `app/mood.rip` | `MoodBadge`, the mood → label leaf. **This is the file the live demo edits.** |
 | `app/routes/index.rip` | The page: post form + the status list through `MoodBadge` |
 
