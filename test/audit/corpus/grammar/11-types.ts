@@ -269,3 +269,9 @@ let maker: (abstract new () => Shaped) = class {
 }
 
 console.log('abstract:', typeof maker)
+
+// ── an import type ──
+
+let parcel: import('./10-modules-lib').Parcel = { size: 2 }
+
+console.log('import type:', parcel.size)

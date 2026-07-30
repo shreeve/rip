@@ -2,6 +2,8 @@
 
 let station = 'relay'
 
+export type Parcel = { size: number }
+
 export const host = 'localhost'
 export const port: number = 4010
 export const describe = function(): void { console.log('lib describes', host) }

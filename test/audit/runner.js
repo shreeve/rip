@@ -2277,9 +2277,7 @@ if (RUN_GRAMMAR) {
     // directions: a held kind that becomes CLAIMED means the finding closed
     // and the hold outlived it, and a hold naming a kind outside the
     // universe is stale — each paints red rather than sitting there.
-    const HELD_KINDS = new Map([
-      ['ImportType', 'the open import-type finding — the `.rip` specifier does not resolve'],
-    ]);
+    const HELD_KINDS = new Map([]);
     const claimedSet = new Set(claimed.map(([c]) => c));
     const universeSet = new Set(kindUniverse);
     const censusDenom = kindUniverse.filter((k) => !EXCLUDED_KINDS.has(k));

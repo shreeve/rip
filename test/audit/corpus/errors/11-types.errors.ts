@@ -81,3 +81,4 @@ let wrongThis: number = new WrongTally().bump()
 let presets = { theme: 'dark', depth: 2 }
 type Presets = typeof presets
 let wrongPreset: Presets = { theme: 7, depth: 3 }
+let wrongParcel: typeof import('./10-modules.errors').wrongTyped = 5

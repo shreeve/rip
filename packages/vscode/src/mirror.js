@@ -229,18 +229,33 @@ export function mirrorRelForFsPath(fsPath, workspaceRoot) {
   return path.join('__external__', fsPath.replace(/^[/\\]/, '').replace(/:/g, ''));
 }
 
+// The roles whose recorded span is TYPE TEXT — where an import type's
+// specifier lives, since it belongs to no import node.
+const TYPE_TEXT_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declaration']);
+const IMPORT_TYPE = /\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
+
 // The relative .rip import targets of a compiled file, as absolute paths
 // — the closure edges. Read from the compiler's OWN stores (never
 // scanned from generated text — the never-list): import/export nodes
 // carry a `source` role whose exact source span is the specifier string;
 // dynimport nodes carry an `args` span, followed only when it is a single
-// static string literal (a computed specifier is a recorded closure miss).
+// static string literal (a computed specifier is a recorded closure miss);
+// and an IMPORT TYPE (`c: import('./lib.rip').Crate`) names its module
+// inside recorded type text, which is read the same way — a role's own
+// span over SOURCE, never a scan of anything generated. Program
+// membership is the whole fix there: with the sibling in the program the
+// untouched `.rip` specifier resolves by the mirror's filename, so
+// nothing rewrites a specifier and there is no second resolution rule.
 export function ripImportsOf(stores, sourceText, fromDir) {
+  const seen = new Set();
   const targets = [];
   const addSpec = (spec) => {
     if (!spec.endsWith('.rip')) return;
     if (!spec.startsWith('./') && !spec.startsWith('../')) return;
-    targets.push(path.resolve(fromDir, spec));
+    const abs = path.resolve(fromDir, spec);
+    if (seen.has(abs)) return;   // one edge per module, however many spellings name it
+    seen.add(abs);
+    targets.push(abs);
   };
   for (const kind of ['import', 'export']) {
     for (const node of stores.nodesByKind(kind)) {
@@ -255,6 +270,10 @@ export function ripImportsOf(stores, sourceText, fromDir) {
     const raw = sourceText.slice(args.sourceStart, args.sourceEnd);
     const literal = /^\(\s*(['"`])([^'"`]+)\1\s*\)$/.exec(raw);
     if (literal) addSpec(literal[2]);
+  }
+  for (const r of stores.roles) {
+    if (!TYPE_TEXT_ROLES.has(r.role) || typeof r.sourceStart !== 'number') continue;
+    for (const m of sourceText.slice(r.sourceStart, r.sourceEnd).matchAll(IMPORT_TYPE)) addSpec(m[2]);
   }
   return targets;
 }

@@ -500,13 +500,21 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
         textDocument: { uri, languageId: 'rip', version: 1, text: fixture },
       });
       const { diagnostics } = await wait();
-      // Exactly the planted violation — nothing else (the member
-      // declares remove the TS2339 noise class; the minted `_init`
-      // param's unused hint drops with the exact-span rendering rule).
-      expect(diagnostics).toHaveLength(1);
-      expect(diagnostics[0].code).toBe(2339);
-      expect(diagnostics[0].range.start.line).toBe(11);
-      expect(diagnostics[0].range.start.character).toBe(14); // `toUpperCase` in source
+      // The planted violation, and one honest hint on the user's OWN
+      // unused handler parameter — nothing minted. The member declares
+      // remove the TS2339 noise class; the minted `_init` param's unused
+      // hint still drops, because a tagged diagnostic ships only over an
+      // EXACT span and a minted name has none. `e` reaches the editor for
+      // the same reason it should: it is the user's own name, declared and
+      // never read, and the occurrence-span fix gave that read a span of
+      // its own. Asserted as an exact list, so a minted name arriving here
+      // is a failure rather than a silent third row.
+      expect(diagnostics.map((d) => [d.code, d.severity, d.range.start.line, d.range.start.character]))
+        .toEqual([
+          [2339, 1, 11, 14],   // `toUpperCase` on a number — the plant
+          [6133, 4, 6, 13],    // `e`, the user's own unused parameter, faded
+        ]);
+      expect(fixture.split('\n')[6][13]).toBe('e');   // the hint really lands on the user's name
       // Member hovers answer the container conventions.
       const state = await hoverAt(client, 3, 3);
       expect(state.contents.value).toContain('count');

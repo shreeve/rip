@@ -7,7 +7,7 @@ import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { hashTree, hashText } from '../src/hash.js';
+import { hashTree, hashText, cacheIdentityOf } from '../src/hash.js';
 
 function makeTree(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-hashtree-'));
@@ -63,6 +63,47 @@ describe('hashTree (the compiler-build cache key)', () => {
       expect(hashTree(dir)).toBe(renamed); // test/ is not the build
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// The manifest keys TWO products of TWO trees: the cached FACES the
+// compiler built, and the closure EDGE LISTS the server's own
+// ripImportsOf derived. Keying it on the compiler alone leaves the
+// second half unversioned — change how an edge is collected and every
+// warm workspace keeps serving lists computed by the old rule, silently,
+// until each file happens to be edited.
+describe('cacheIdentityOf (the manifest key over both trees)', () => {
+  const SERVER = { 'server.js': 'export const s = 1;\n', 'mirror.js': 'export const m = 1;\n' };
+
+  test('a COMPILER change and a SERVER change each change the identity', () => {
+    const compiler = makeTree(BASE);
+    const server = makeTree(SERVER);
+    try {
+      const before = cacheIdentityOf(compiler, server);
+      expect(cacheIdentityOf(compiler, server)).toBe(before);   // stable
+
+      fs.writeFileSync(path.join(compiler, 'runtime/reactive.js'), 'export const r = 2;\n');
+      const afterCompiler = cacheIdentityOf(compiler, server);
+      expect(afterCompiler).not.toBe(before);
+
+      // The half the compiler hash could never see: the edge collector.
+      fs.writeFileSync(path.join(server, 'mirror.js'), 'export const m = 2;\n');
+      expect(cacheIdentityOf(compiler, server)).not.toBe(afterCompiler);
+    } finally {
+      fs.rmSync(compiler, { recursive: true, force: true });
+      fs.rmSync(server, { recursive: true, force: true });
+    }
+  });
+
+  test('the two trees are not interchangeable — swapping them changes the identity', () => {
+    const a = makeTree(BASE);
+    const b = makeTree(SERVER);
+    try {
+      expect(cacheIdentityOf(a, b)).not.toBe(cacheIdentityOf(b, a));
+    } finally {
+      fs.rmSync(a, { recursive: true, force: true });
+      fs.rmSync(b, { recursive: true, force: true });
     }
   });
 });

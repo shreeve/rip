@@ -61,7 +61,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startTsgo } from './tsgo.js';
 import { buildProbe, parseProbeHover } from './pins.js';
-import { hashText, hashTree } from './hash.js';
+import { hashText, cacheIdentityOf } from './hash.js';
 import {
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, generatedSpanToSource,
@@ -75,8 +75,10 @@ import { generatedMirror as buildGeneratedMirror, HOST_FLOOR_NAME, mirrorRelForF
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
-// hashTree over the compiler tree (recursive — nested runtime/ fragments
-// included) is the cache key's compiler identity.
+// The cache key spans the compiler tree AND this server's own tree
+// (recursive — nested runtime/ fragments included): the manifest caches
+// faces the compiler built and closure edge lists THIS code derived, so
+// either tree changing has to purge it.
 async function loadCompiler() {
   const candidates = [
     new URL('../../../src/compile.js', import.meta.url),   // in-repo
@@ -84,7 +86,10 @@ async function loadCompiler() {
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(fileURLToPath(candidate))) {
-      compilerHash = hashTree(path.dirname(fileURLToPath(candidate)));
+      cacheIdentity = cacheIdentityOf(
+        path.dirname(fileURLToPath(candidate)),
+        path.dirname(fileURLToPath(import.meta.url)),
+      );
       return (await import(candidate.href)).compile;
     }
   }
@@ -124,7 +129,7 @@ let mirrorRootIsFallback = false; // temp-dir mirror root (workspace unwritable/
 let mirrorRootReady = false;     // lazily created on first materialization
 let clientSupportsWatchers = false;
 let clientSupportsConfiguration = false;
-let compilerHash = null;         // the compiler build's identity (cache keying)
+let cacheIdentity = null;        // compiler build + server build (cache keying)
 
 // rip document uri → per-buffer state.
 const states = new Map();
@@ -138,8 +143,12 @@ const pendingImports = new Set();
 
 // The persistent face cache manifest (.cache.json at the mirror root):
 // absolute source path → { sourceHash, imports }. Valid only under the
-// manifest's recorded compilerHash — a compiler upgrade purges the tree.
-let cacheManifest = { compilerHash: null, entries: {} };
+// manifest's recorded cacheIdentity — a compiler OR server upgrade purges
+// the tree. The field is deliberately not the old `compilerHash` name:
+// a manifest written before the key widened carries no cacheIdentity,
+// mismatches on read, and purges — which is exactly right, since its
+// edge lists were derived by the narrower rule.
+let cacheManifest = { cacheIdentity: null, entries: {} };
 let manifestDirty = false;
 let manifestTimer = null;
 
@@ -225,29 +234,30 @@ function* walkFiles(dir, suffix) {
 }
 
 // Load the persistent cache: a manifest recorded under a DIFFERENT
-// compiler build invalidates the whole tree (every cached face was
-// produced by a compiler that no longer exists here). Read-only unless
-// a purge is due — a fresh session creates nothing.
+// build invalidates the whole tree — every cached face was produced by
+// a compiler that no longer exists here, and every recorded import list
+// by a closure walk that may no longer agree. Read-only unless a purge
+// is due — a fresh session creates nothing.
 function loadCache() {
   if (!mirrorRoot) {
-    cacheManifest = { compilerHash, entries: {} };
+    cacheManifest = { cacheIdentity, entries: {} };
     return;
   }
   try {
     const loaded = JSON.parse(fs.readFileSync(manifestPath(), 'utf8'));
-    if (loaded?.compilerHash === compilerHash && loaded.entries) {
+    if (loaded?.cacheIdentity === cacheIdentity && loaded.entries) {
       cacheManifest = loaded;
       return;
     }
-    // A manifest from another compiler build: purge the tree it keyed.
+    // A manifest from another build: purge the tree it keyed.
     for (const mirror of walkFiles(mirrorRoot, '.rip.ts')) {
       try { fs.rmSync(mirror); } catch { /* best effort */ }
     }
-    cacheManifest = { compilerHash, entries: {} };
+    cacheManifest = { cacheIdentity, entries: {} };
     scheduleManifestSave();
     return;
   } catch { /* absent or unreadable: start fresh, create nothing */ }
-  cacheManifest = { compilerHash, entries: {} };
+  cacheManifest = { cacheIdentity, entries: {} };
 }
 
 // JSONC → parseable JSON (comments stripped).

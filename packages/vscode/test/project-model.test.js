@@ -23,7 +23,10 @@
 //      files contributes NOTHING to startup or the mirror tree.
 //   8. PERSISTENT CACHE: a restart revalidates by source hash and
 //      recompiles only what changed while the server was down; a
-//      compiler-hash mismatch purges the whole tree.
+//      build-identity mismatch purges the whole tree. The identity spans
+//      the compiler tree AND the server's own, because the manifest
+//      records both the faces the compiler built and the closure edge
+//      lists the server derived.
 //
 // Same availability guard as the other live suites: dependencies absent →
 // skip; the package's `bun run test` preflight turns a missing tsgo into a
@@ -301,7 +304,7 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
     });
   }, 30000);
 
-  test('persistent cache: a restart recompiles only what changed; a compiler-hash mismatch purges', async () => {
+  test('persistent cache: a restart recompiles only what changed; a build-identity mismatch purges', async () => {
     const ws = makeWorkspace({
       'a.rip': 'import { b } from "./b.rip"\nexport a = b + 1\n',
       'b.rip': 'export b = 41\n',
@@ -333,11 +336,15 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
         expect(api.logs.some((l) => /closure of app\.rip: [1-9]\d* compiled/.test(l))).toBe(false);
       });
 
-      // A DIFFERENT COMPILER recorded the cache → the whole tree purges
-      // (every face was produced by a build that no longer exists here).
+      // A DIFFERENT BUILD recorded the cache → the whole tree purges. The
+      // key spans the compiler tree AND the server's own: every face was
+      // produced by a compiler that no longer exists here, and every
+      // recorded import list by a closure walk that may no longer agree
+      // about which spellings are edges.
       const manifestPath = path.join(ws, '.rip', 'editor', '.cache.json');
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-      manifest.compilerHash = 'stale-compiler-build';
+      expect(manifest.cacheIdentity).toBeTruthy();     // the key is recorded under its own name
+      manifest.cacheIdentity = 'stale-build';
       fs.writeFileSync(manifestPath, JSON.stringify(manifest));
       await inSession(ws, async (api) => {
         expect(mirrorCount(ws)).toBe(0); // purged at load, before any open

@@ -261,3 +261,9 @@ maker: (abstract new () => Shaped) = class
   id: number = 3
 
 console.log('abstract:', typeof maker)
+
+# ── an import type ──
+
+parcel: import('./10-modules-lib.rip').Parcel = { size: 2 }
+
+console.log('import type:', parcel.size)
