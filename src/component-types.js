@@ -76,7 +76,10 @@ const awaitsIn = (x) => {
 // member list the renderers consume. Statements that carry no type
 // story (render, effects) skip; anything unrecognized skips rather
 // than guessing (the JS emission is the rejection authority).
-export function componentTypeInfo(stores, source, node) {
+// `behavior` names the face's per-component behavior object, or is
+// null on the road that has none (dts). Every member carries it, so
+// the segment assembly can read a computed's type through the body.
+export function componentTypeInfo(stores, source, node, behavior = null) {
   const [, parent, body] = node;
   const extendsTag = typeof parent === 'string' ? parent : null;
   const stmts = isBlock(body) ? body.slice(1) : [];
@@ -212,9 +215,10 @@ export function componentTypeInfo(stores, source, node) {
   // initializer rooted at another member cannot spell module-scope
   // typeof).
   const siblings = new Set(members.map((m) => m.name));
-  for (const m of members) m.siblings = siblings;
+  for (const m of members) { m.siblings = siblings; m.behavior = behavior; }
   return {
     extendsTag,
+    behavior,
     members,
     roleText,
     // The shared optionality reader, carried on `info` because BOTH
@@ -381,11 +385,24 @@ const typeofSpelling = (v) => {
 };
 
 const memberTypeSegments = (m, lead) => {
+  // An unannotated computed reads its type from the BODY, through the
+  // face's behavior object (the emitter emits one per named component,
+  // carrying the same compiled bodies `_init` does). The form table
+  // below cannot do this: it reads the initializer's SHAPE, so `count
+  // * 2` types number and `words.length` types any. An author's own
+  // annotation still wins — it is a declaration, not a guess.
+  //
+  // `m.behavior` is absent on the dts road, which has no module-local
+  // value to name and keeps the form table (the schema-callable
+  // precedent: derivation reaches this checker, not consumers).
+  if (m.kind === 'computed' && m.annotation == null && m.behavior) {
+    const rt = `ReturnType<typeof ${m.behavior}.${m.name}>`;
+    return [{ text: `${lead}{ readonly value: ${rt}; read(): ${rt} }` }];
+  }
   // The typeof spelling resolves at MODULE scope (the declare row sits
   // on the class) — an initializer rooted at a SIBLING member
   // (`bad1 ~= store.itms`) must not spell it (this.store is not in
-  // scope there); those members keep any and their checking happens on
-  // the _init assignment line instead (the generic runtime types it).
+  // scope there); those members keep any.
   const rootOf = (v) => (typeof v === 'string' ? v
     : Array.isArray(v) && v[0] === '.' && v.length === 3 ? rootOf(v[1]) : null);
   const siblingRooted = m.siblings !== undefined &&
@@ -424,6 +441,13 @@ export const memberDeclareSegments = (m) => [
   ...memberTypeSegments(m, ': '),
   { text: ';' },
 ];
+
+// The `=!` seam's this-cast type: one MUTABLE member carrying the
+// declared type the class states readonly. `_init` is the lowering's
+// constructor seam, so its one legitimate readonly write has to quiet
+// TS2540 — through a cast that keeps the member's type, so the value
+// still checks against it.
+export const readonlyCastType = (m) => `{ ${m.name}${segmentsText(memberTypeSegments(m, ': '))} }`;
 
 export const isDeclarableMember = (m) => m.kind !== 'method' && m.kind !== 'hook';
 

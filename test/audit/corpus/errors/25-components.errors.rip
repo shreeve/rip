@@ -47,3 +47,28 @@ Shell = component
       input ref: strictEl
       section ref: wrongTag
       Liner inner <=> wrongSleeve
+
+
+
+
+Books = component
+  entries: string[] := ['open', 2]
+  status := 'idle'
+
+  post: ->
+    status = 4
+
+  render null
+
+
+Gauge = component
+  labels: string[] := ['idle']
+  cap =! 3
+
+  width ~= labels.length
+
+  render null
+
+gauge = new Gauge({})
+wrongWidth: string = gauge.width.value
+gauge.cap = 4

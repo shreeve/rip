@@ -45,21 +45,21 @@ vendor = Vendor.parse({ Id: 'V-9', DisplayName: 'Acme Corp' })
 
 console.log("vendor: #{vendor.id} #{vendor.displayName}")
 
-# ── The callable surface on :shape: computed (~>), eager derived (!>), methods ──
-# Each getter reads FIELDS only: the callable-unknown finding (FINDINGS.md) holds every typed read of a callable's output, so `total` recomputes from the fields rather than reading `@subtotal` — in-body casts and annotations are stripped with the descriptor's JS.
-# `@ensure` is PARKED for the same root: its predicate's param is an implicit any under strict and no spelling can type it.
+# ── The callable surface on :shape: computed (~>), eager derived (!>), methods, and @ensure ──
 
 Cart = schema :shape
   items!    number[]
   taxRate!  number
   subtotal: !> @items.reduce(((a, b) -> a + b), 0)
-  total:    ~> @items.reduce(((a, b) -> a + b), 0) * (1 + @taxRate)
+  total:    ~> @subtotal * (1 + @taxRate)
   describe: -> "#{@items.length} items"
+  @ensure 'a cart needs items', :items, (c) -> c.items.length > 0
 
-# The method call rides a cast — a bare `cart.describe()` publishes while the callable-unknown finding is open (FINDINGS.md); the cast is this fixture's workaround shape, the promoted-param precedent.
 cart = Cart.parse({ items: [700, 550], taxRate: 0.1 })
+cartTotal: number = cart.total
+cartLabel: string = cart.describe()
 
-console.log("cart: #{cart.subtotal} #{cart.total} #{(cart.describe as () => string)()}")
+console.log("cart: #{cart.subtotal} #{cartTotal} #{cartLabel}")
 
 # ── :enum ──
 

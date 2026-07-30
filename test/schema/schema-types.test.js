@@ -198,8 +198,9 @@ describe('schema type story on the TS face', () => {
     // query `this` for scope/defaultScope (the alias exists — a named scope does)
     expect(f.code).toContain('{tag: "scope", name: "live", fn: (function(this: MQuery) {');
     expect(f.code).toContain('{tag: "defaultScope", name: "defaultScope", fn: (function(this: MQuery) {');
-    // ensure predicates are called UNBOUND — no this-param, honestly
-    expect(f.code).toMatch(/\{tag: "ensure",[^}]*fn: \(function\(m\)/);
+    // ensure predicates are called UNBOUND — no this-param, honestly; their
+    // one parameter IS the data, which is what the annotation states
+    expect(f.code).toMatch(/\{tag: "ensure",[^}]*fn: \(function\(m: MData\)/);
   });
 
   test('a defaultScope with no named scopes types `this` as the inline SchemaQuery', () => {

@@ -284,19 +284,30 @@ export function isModuleShaped(programSexpr, isModuleImport) {
   return false;
 }
 
+// The face-only behavior object's name for a schema: one module-local
+// const carrying the same compiled callable bodies the descriptor
+// does, so `ReturnType<typeof …>` can read what each returns.
+export const behaviorName = (name) => `__${name}__behavior`;
+
 // ── field/property rendering ─────────────────────────────────────────
 
 // A field entry's TS type: literal unions verbatim, the intrinsic
 // vocabulary through the table, a SAME-MODULE schema name as itself
 // (its alias exists), anything else `unknown` — never an unresolved
 // identifier in a shipped artifact.
+//
+// A `[null]` default widens the type: the runtime substitutes it when
+// the input is absent OR null (_applyDefaults), so `invite? string,
+// [null]` parses to `invite: null` and a bare `string` would be a lie
+// about the value every default-taking parse produces.
 export const fieldType = (entry, known) => {
+  const nullable = entry.constraints?.default === null ? ' | null' : '';
   if (entry.typeName === 'literal-union' && entry.literals?.length) {
-    return entry.literals.map((l) => JSON.stringify(l)).join(' | ');
+    return entry.literals.map((l) => JSON.stringify(l)).join(' | ') + nullable;
   }
   let base = INTRINSIC_FIELD_TYPES[entry.typeName] ??
     (known && known.has(entry.typeName) ? entry.typeName : 'unknown');
-  return entry.array ? `${base}[]` : base;
+  return (entry.array ? `${base}[]` : base) + nullable;
 };
 
 const fieldProps = (descriptor, known) => {
@@ -461,19 +472,41 @@ export function schemaTypeStory(decl, byName, known) {
   // derived (`!>`) own props, computed (`~>`) readonly getters, and
   // methods live on the instance, never the projectable data shape.
   const dataType = intersect(braced(fieldProps(descriptor, known)), mixinRefs(descriptor, byName));
+  // A callable's OUTPUT is derived, not declared: the face emits the
+  // behavior object beside the binding (behaviorObjectText) carrying
+  // the same compiled bodies the descriptor does, and each member
+  // reads `ReturnType<typeof …>` so tsgo infers what the body
+  // returns. The SHIPPED declarations cannot: the behavior object is
+  // a module-local value with no place in a `.d.ts`, so the dts road
+  // keeps `unknown` — the consumer surface stays where it was.
+  const bname = behaviorName(name);
   const derived = [];
   const computed = [];
   const methods = [];
   const instanceIdx = []; // entries whose `this` is the instance
   const scopeIdx = [];    // entries whose `this` is the query builder
+  const ensureIdx = [];   // `@ensure` predicates — their param IS the data
+  const out = (e, face) => (face ? `ReturnType<typeof ${bname}.${e.name}>` : 'unknown');
+  const member = (e, face) =>
+    e.tag === 'derived' ? `${e.name}: ${out(e, face)}`
+      : e.tag === 'computed' ? `readonly ${e.name}: ${out(e, face)}`
+        : `${e.name}: (...args: any[]) => ${out(e, face)}`;
   descriptor.entries.forEach((e, i) => {
-    if (e.tag === 'derived') { derived.push(`${e.name}: unknown`); instanceIdx.push(i); }
-    else if (e.tag === 'computed') { computed.push(`readonly ${e.name}: unknown`); instanceIdx.push(i); }
-    else if (e.tag === 'method') { methods.push(`${e.name}: (...args: any[]) => unknown`); instanceIdx.push(i); }
+    if (e.tag === 'derived') { derived.push(e); instanceIdx.push(i); }
+    else if (e.tag === 'computed') { computed.push(e); instanceIdx.push(i); }
+    else if (e.tag === 'method') { methods.push(e); instanceIdx.push(i); }
     else if (e.tag === 'hook') instanceIdx.push(i);
     else if (e.tag === 'scope' || e.tag === 'defaultScope') scopeIdx.push(i);
+    else if (e.tag === 'ensure') ensureIdx.push(i);
   });
-  const behavior = [...derived, ...computed, ...methods];
+  // An `@ensure` predicate runs on the typed, defaulted DATA
+  // (_applyEnsures passes it straight through), so its one parameter
+  // types as the data shape — the only annotation the DSL leaves no
+  // room for the author to write.
+  const ensuresOf = (dataName) => new Map(ensureIdx.map((i) => [i, dataName]));
+  const behaviorEntries = [...derived, ...computed, ...methods];
+  const behaviorFor = (face) => behaviorEntries.map((e) => member(e, face));
+  const behavior = behaviorFor(false);
 
   if (kind === 'model') {
     const dataName = `${name}Data`;
@@ -482,8 +515,8 @@ export function schemaTypeStory(decl, byName, known) {
     const scopeNames = descriptor.entries.filter((e) => e.tag === 'scope').map((e) => e.name);
     const queryName = `${name}Query`;
     const queryType = scopeNames.length ? queryName : `SchemaQuery<${name}, ${dataName}>`;
-    const instanceExtras = [
-      ...behavior,
+    const instanceExtras = (face) => [
+      ...behaviorFor(face),
       ...relationAccessors(descriptor, known),
       `save(): Promise<${name}>`,
       `destroy(opts?: { hard?: boolean }): Promise<${name}>`,
@@ -494,23 +527,27 @@ export function schemaTypeStory(decl, byName, known) {
       `savedChanges: Map<string, [unknown, unknown]>`,
       `toJSON(): ${dataName}`,
     ];
-    const aliasLines = [
+    const linesFor = (face) => [
       `type ${dataName} = ${dataType} & ${braced(modelImplicitProps(descriptor))};`,
       `type ${createName} = ${intersect(braced(modelCreateProps(descriptor, known)), mixinRefs(descriptor, byName))};`,
-      `type ${name} = ${dataName} & ${braced(instanceExtras)};`,
+      `type ${name} = ${dataName} & ${braced(instanceExtras(face))};`,
     ];
+    const aliasLines = linesFor(false);
+    const faceAliasLines = linesFor(true);
     const typeNames = [dataName, createName, name];
     let constType = `ModelSchema<${name}, ${dataName}, number, ${createName}>`;
     if (scopeNames.length) {
       const scopeSigs = scopeNames.map((s) => `${s}(...args: any[]): ${queryName}`);
       aliasLines.push(`type ${queryName} = SchemaQuery<${name}, ${dataName}> & ${braced(scopeSigs)};`);
+      faceAliasLines.push(`type ${queryName} = SchemaQuery<${name}, ${dataName}> & ${braced(scopeSigs)};`);
       typeNames.push(queryName);
       constType += ` & ${braced(scopeSigs)}`;
     }
     const thisTypes = new Map();
     for (const i of instanceIdx) thisTypes.set(i, name);
     for (const i of scopeIdx) thisTypes.set(i, queryType);
-    return { aliasLines, constType, thisTypes, typeNames };
+    return { aliasLines, faceAliasLines, constType, thisTypes, typeNames, behaviorName: bname,
+             ensureTypes: ensuresOf(dataName) };
   }
 
   // :input / :shape — collapse to one bare name when instance === data.
@@ -518,14 +555,18 @@ export function schemaTypeStory(decl, byName, known) {
   for (const i of instanceIdx) thisTypes.set(i, name);
   if (behavior.length) {
     const dataName = `${name}Data`;
+    const linesFor = (face) => [
+      `type ${dataName} = ${dataType};`,
+      `type ${name} = ${dataName} & ${braced(behaviorFor(face))};`,
+    ];
     return {
-      aliasLines: [
-        `type ${dataName} = ${dataType};`,
-        `type ${name} = ${dataName} & ${braced(behavior)};`,
-      ],
+      aliasLines: linesFor(false),
+      faceAliasLines: linesFor(true),
       constType: `Schema<${name}, ${dataName}>`,
       thisTypes,
       typeNames: [dataName, name],
+      behaviorName: bname,
+      ensureTypes: ensuresOf(dataName),
     };
   }
   return {
@@ -533,6 +574,7 @@ export function schemaTypeStory(decl, byName, known) {
     constType: `Schema<${name}, ${name}>`,
     thisTypes,
     typeNames: [name],
+    ensureTypes: ensuresOf(name),
   };
 }
 
@@ -600,7 +642,19 @@ export function buildSchemaTypeStory(programSexpr) {
           d.descriptor.start ?? null);
       }
     }
-    stories.push({ decl: d, ...story });
+    // A field's `[default]` is a bare JS value in the runtime
+    // descriptor, related to the field's declared type by nothing the
+    // checker can see — so the face states the relation: entry index →
+    // the type the default has to satisfy. Kind-independent, because
+    // every kind that has fields validates their defaults the same
+    // way. The transform half stays runtime-only: relating a
+    // transform's RETURN to the field needs its INPUT related to the
+    // row shape, and `it` is the declared `any` boundary.
+    const defaultTypes = new Map();
+    d.descriptor.entries.forEach((e, i) => {
+      if (e.tag === 'field' && e.constraints?.default !== undefined) defaultTypes.set(i, fieldType(e, known));
+    });
+    stories.push({ decl: d, ...story, defaultTypes });
   }
   return {
     stories,

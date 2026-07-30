@@ -21,7 +21,7 @@
 import { readFileSync } from 'fs';
 import { Stores } from './stores.js';
 import { CodeBuilder } from './builder.js';
-import { descriptorSegments, paramNamesOf, splitTopLevelByComma } from './schema.js';
+import { descriptorSegments, behaviorObjectText, paramNamesOf, splitTopLevelByComma } from './schema.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './schema-types.js';
 import { Parser } from './parser.js';
 import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, isIdentifierName } from './lexer.js';
@@ -31,7 +31,7 @@ import {
   COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS, componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
   syntacticLiteralType,
-  selfArgsOf,
+  selfArgsOf, anyArgsOf, readonlyCastType,
 } from './component-types.js';
 
 const BINOPS = new Set(['+', '-', '*', '/', '%', '**', '<', '>', '<=', '>=', '==', '!=', '&&', '||', '??', '<<', '>>', '>>>', '&', '^', '|']);
@@ -308,6 +308,7 @@ class Emitter {
     // one place the member model is authoritative), consumed by the
     // companion-interface emission after the binding statement.
     this.componentInfo = new Map();
+    this.schemaFns = new Map();
     // Module-scope component binding names → their component node
     // (BOTH modes): a name bound to a second component rejects — the
     // rebinding clobbers the first class silently, and the typed
@@ -1817,6 +1818,30 @@ class Emitter {
           '}',
         ];
         this.b.emit(lines.join('\n' + pad));
+      });
+    });
+    // The behavior object the computed members' types read through,
+    // emitted HERE because this is the one place a companion
+    // interface is known to exist for its `this` parameter to name. A
+    // generic component's params are not in scope at module level, so
+    // the parameter takes the erased arguments — the gated-prototype
+    // spelling.
+    const bodies = info.computedBodies ?? [];
+    if (info.behavior === null || bodies.length === 0) return;
+    const selfType = `${name}${anyArgsOf(typeParams)}`;
+    this.b.tsOnly(() => {
+      this.b.emit('\n' + pad);
+      this.mark(compNode, '$self', () => {
+        this.b.emit(`const ${info.behavior} = {`);
+        // A multi-statement body is already a BRACED FUNCTION BODY
+        // (computedBody's funcBlock path) and takes the parameter list
+        // directly; wrapping it in `return …` would emit
+        // `return { let x = …; }`, which does not parse. A
+        // single-expression body is a value and needs the return.
+        bodies.forEach(({ name: n, code, block }, i) => {
+          this.b.emit(`${i > 0 ? ',' : ''} ${n}: function (this: ${selfType}) ${block ? code : `{ return ${code}; }`}`);
+        });
+        this.b.emit(' };');
       });
     });
   }
@@ -3390,6 +3415,9 @@ class Emitter {
           if (this.ts && typeof spec[1] === 'string' && this.componentInfo.has(spec[2])) {
             this.tsComponentCompanion(spec[2], spec[1], true, this.annotationText(spec, 'typeParams'));
           }
+          // The schema behavior object rides the EXPORT binding as it
+          // rides the plain one — the alias lines name it either way.
+          if (this.ts) this.tsSchemaBehavior(spec[2]);
         } else {
           this.b.emit('export { ');
           this.emitSpecifiers(spec);
@@ -3649,14 +3677,25 @@ class Emitter {
     // declared type — inference-independent, so the face types the
     // binding identically under every runtimeDelivery.
     const story = this.schemaStories?.get(node) ?? null;
+    const nodeId = this.stores.idOf(node);
+    // The compiled bodies, kept for the behavior object the binding
+    // statement emits after this expression (same bodies, one place
+    // they are compiled).
+    if (this.ts && story !== null) this.schemaFns.set(node, fns);
     this.mark(node, '$self', () => {
       this.b.emit('__schema(');
       this.mark(node, 'body', () => {
         const segments = descriptorSegments(
-          descriptor, schemaName, fns, fns.get('adapter') ?? null, story?.thisTypes ?? null, this.ts);
+          descriptor, schemaName, fns, fns.get('adapter') ?? null, story?.thisTypes ?? null, this.ts,
+          story?.defaultTypes ?? null, story?.ensureTypes ?? null);
         for (const seg of segments) {
           if (typeof seg === 'string') this.emitSchemaText(seg);
-          else this.b.tsOnly(() => this.b.emit(seg.ts));
+          // A face segment carrying a source span marks there — a
+          // wrong-typed default's diagnostic anchors on the literal the
+          // author wrote, not on the entry list that encloses it.
+          else if (seg.span !== null && seg.span !== undefined && nodeId !== null) {
+            this.b.tsOnly(() => this.b.markSpan(nodeId, 'literal', seg.span[0], seg.span[1], () => this.b.emit(seg.ts)));
+          } else this.b.tsOnly(() => this.b.emit(seg.ts));
         }
       });
       this.b.emit(')');
@@ -3984,6 +4023,27 @@ class Emitter {
         typeof node[1] === 'string' && this.componentInfo.has(node[2])) {
       this.tsComponentCompanion(node[2], node[1], false, this.annotationText(node, 'typeParams'));
     }
+    if (this.ts && isNode(node) && node[0] === '=' && node.length === 3) {
+      this.tsSchemaBehavior(node[2]);
+    }
+  }
+
+  // The schema behavior object, after its binding statement (the
+  // companion placement): a TS-only line whose properties re-carry the
+  // descriptor's compiled callable bodies, so the companion's
+  // `ReturnType<typeof …>` members resolve to what each body returns.
+  tsSchemaBehavior(schemaNode) {
+    const story = this.schemaStories?.get(schemaNode) ?? null;
+    const fns = this.schemaFns.get(schemaNode);
+    if (story === null || fns === undefined) return;
+    const text = behaviorObjectText(schemaNode[1], story.decl.name, fns, story.thisTypes);
+    if (text === null) return;
+    const id = this.stores.idOf(schemaNode);
+    this.b.tsOnly(() => {
+      this.b.emit('\n' + '  '.repeat(this.ind));
+      if (id !== null) this.b.mark(id, '$self', () => this.b.emit(text));
+      else this.b.emit(text);
+    });
   }
 
   // repl mode's result slot, minted against the used-name registry on
@@ -7275,7 +7335,15 @@ class Emitter {
     // The type story (TS face only): walked ONCE here — after
     // every rejection class above has had its chance — and kept for
     // the companion-interface emission after the binding statement.
-    const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node) : null;
+    // The behavior object's name — set only where a companion
+    // INTERFACE is emitted to name in its `this` parameter, which is
+    // exactly a module-scope named binding (the condition just above,
+    // a strict subset of the two companion call sites). Everything
+    // else — a member-held declaration, a binding inside a function —
+    // keeps the form table.
+    const behavior = this.ts && this.scopes.length === 1 && typeof this._componentName === 'string'
+      ? `__${this._componentName}__computed` : null;
+    const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node, behavior) : null;
     if (tsInfo !== null) this.componentInfo.set(node, tsInfo);
     const frame = { members, memberReactive, name: this._componentName, extendsTag, plainWrites: new Map(), renderPlainReads: new Set() };
     const ind = this.ind;
@@ -7412,16 +7480,23 @@ class Emitter {
         this.mark(stmt, role, () => this.b.emit(name));
       };
       const readonlySet = new Set(readonlyVars);
+      // Captured computed bodies, in declaration order — the face's
+      // behavior object, emitted with the companion interface it names.
+      const computedBodies = [];
+      if (tsInfo !== null) tsInfo.computedBodies = computedBodies;
       const emitPlainish = (m) => {
         initLine(m.node, () => {
           // A readonly (`=!`) member declares `readonly` on the class,
           // and TS allows readonly writes only in the CONSTRUCTOR —
           // _init is the lowering's seam, so its one legitimate write
           // quiets through a TS-only cast (strip restores `this.x`).
+          // The cast states the MEMBER's own type, mutable: `as any`
+          // would swallow the initializer's value check with TS2540.
           if (readonlySet.has(m) && this.ts) {
+            const tm = tsInfo?.members.find((x) => x.node === m.node && x.kind === 'readonly');
             this.b.tsOnly(() => this.b.emit('('));
             this.b.emit('this');
-            this.b.tsOnly(() => this.b.emit(' as any)'));
+            this.b.tsOnly(() => this.b.emit(` as ${tm ? readonlyCastType(tm) : 'any'})`));
             this.b.emit('.');
             this.mark(m.node, 'target', () => this.b.emit(m.name));
           } else {
@@ -7452,6 +7527,14 @@ class Emitter {
           this.b.emit(` = ${this.runtimeName('__state')}(`);
           if (m.isPublic && (m.required || m.value === undefined)) {
             this.b.emit(`props.__bind_${m.name}__ ?? props.${m.name}`);
+            // A REQUIRED prop's props type is an intersection with a
+            // two-arm union (`{name: …} | {__bind_name__: …}`), so one
+            // of the pair is always present — a correlation no
+            // narrowing recovers, since neither arm mentions the
+            // other's key. The TS-only assertion states it; the
+            // optional spellings carry `| undefined` honestly and get
+            // none.
+            if (m.required && this.ts) this.b.tsOnly(() => this.b.emit('!'));
           } else if (m.isPublic) {
             this.b.emit(`props.__bind_${m.name}__ ?? props.${m.name} ?? `);
             memberValue(m.node, m.value);
@@ -7468,6 +7551,23 @@ class Emitter {
           this.mark(m.node, 'value', () => this.withExpression(() => this.computedBody(m.node, m.value, ind + 2)));
           this.b.emit(')');
         });
+        // The same body a second time, into a scratch builder, for the
+        // face's behavior object: emitted from HERE because the
+        // component's frames are live only here, so the copy lowers
+        // member reads exactly as the real one does. The scratch
+        // builder holds its own rows and its own primitive claims, and
+        // temps memoize per node — nothing the real emission produces
+        // moves. An ANNOTATED computed is skipped: its declaration is
+        // the author's, not the body's.
+        if (behavior === null || tsInfo === null) return;
+        const tm = tsInfo.members.find((x) => x.node === m.node && x.kind === 'computed');
+        if (tm === undefined || tm.annotation != null) return;
+        const saved = this.b;
+        this.b = new CodeBuilder(this.stores, { source: null });
+        try {
+          this.withExpression(() => this.computedBody(m.node, m.value, 0));
+          computedBodies.push({ name: m.name, code: this.b.code, block: isBlock(m.value) && m.value.length > 2 });
+        } finally { this.b = saved; }
       };
       const emitGate = (gate, index) => {
         initLine(gate.node, () => {
@@ -13249,6 +13349,12 @@ const RUNTIME_TABLE = [
     // readonly cell of cart's full object type).
     // Plain type params widen literal arguments (T from 'Rip' is
     // string, not "Rip") — the declare-in-place widening story.
+    // `__state` PASSES AN EXISTING CELL THROUGH (reactive.js's first
+    // line), which the signature states by admitting the cell in the
+    // ARGUMENT: a prop's delivery seam is `__state(props.__bind_x__ ??
+    // props.x ?? …)`, whose argument legitimately unions the cell with
+    // the value, and a signature that always wrapped would type that
+    // member a cell of a cell.
     key: 'reactive',
     names: ['__state', '__computed', '__effect', '__batch', '__readonly',
             '__setErrorHandler', '__handleError', '__catchErrors', 'getEffectSignal'],
@@ -13256,7 +13362,7 @@ const RUNTIME_TABLE = [
     url: new URL('./runtime/reactive.js', import.meta.url),
     triggers: (sexpr, preds) => containsReactive(sexpr, preds.isTrigger),
     types: {
-      __state: '<T>(value: T) => { value: T; read(): T }',
+      __state: '<T>(value: T | { value: T; read(): T }) => { value: T; read(): T }',
       __computed: '<T>(fn: () => T) => { readonly value: T; read(): T }',
       __effect: '(fn: () => void | (() => void)) => () => void',
       __batch: '<T>(fn: () => T) => T',
@@ -13757,7 +13863,11 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     // Injection units: one per delivered runtime, except inline mode
     // fuses a dependent runtime's body INTO its dependency's IIFE —
     // the bodies share one scope (the fragment model), and the fused
-    // unit binds the union of names.
+    // unit binds the union of names and states the union of their
+    // face types (a fused unit's destructure carries its dependency's
+    // signatures: a component-carrying file's `__state`/`__computed`
+    // stay generic, so every member initializer checks against the
+    // member's declared type).
     const active = RUNTIME_TABLE.filter((rt) => runtimes.has(rt.key));
     const units = [];
     if (runtimeDelivery === 'import') {
@@ -13768,7 +13878,12 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         if (fused.has(rt.key)) continue;
         if (rt.requires) {
           const dep = RUNTIME_TABLE.find((d) => d.key === rt.requires);
-          units.push({ runtimes: [dep, rt], names: [...dep.names, ...rt.names], body: runtimeText(dep) + '\n' + runtimeText(rt) });
+          // A fused unit states the union of its runtimes' face types
+          // — and only when one of them HAS a table: the assertion
+          // types every bound name, so an empty union would flatten
+          // names that infer honestly through the IIFE to `any`.
+          const types = (dep.types || rt.types) ? { ...dep.types, ...rt.types } : undefined;
+          units.push({ runtimes: [dep, rt], names: [...dep.names, ...rt.names], body: runtimeText(dep) + '\n' + runtimeText(rt), types });
         } else {
           units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt), types: rt.types });
         }
@@ -13790,14 +13905,27 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         builder.emit(';\n');
       } else {
         builder.emit(`const { ${bindings.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(', ')} }`);
-        // Precise stdlib types on the TS face (the STDLIB_TYPE_DECLS
-        // as a destructure annotation): the checker sees the declared
-        // signatures instead of inferring anys through the IIFE.
-        if (face === 'ts' && unit.types) {
-          const members = bindings.filter(({ name }) => unit.types[name]).map(({ local, name }) => `${local}: ${unit.types[name]}`);
-          if (members.length > 0) builder.tsOnly(() => builder.emit(`: { ${members.join('; ')} }`));
-        }
-        builder.emit(` = (() => {\n${unit.body}\nreturn { ${unit.names.join(', ')} };\n})();\n`);
+        // Precise runtime types on the TS face (the table's signatures):
+        // the checker reads the declared shapes instead of inferring
+        // through the IIFE. Stated as an ASSERTION on the injected
+        // value, not as a destructure annotation — an annotation is
+        // checked against the body, and the body is vendored JS whose
+        // inferred shapes are not the contract, so one unprovable
+        // signature would reject the whole declaration and hand every
+        // bound name an error type. It must also state EVERY name the
+        // pattern binds; a name the table does not type rides as `any`,
+        // which is what inferring through the IIFE gave it. Members key
+        // by the runtime's OWN name, never the alias a colliding user
+        // binding mints — the assertion describes the object the
+        // pattern reads from, not the names it binds.
+        const types = face === 'ts' && unit.types
+          ? `{ ${bindings.map(({ name }) => `${name}: ${unit.types[name] ?? 'any'}`).join('; ')} }`
+          : null;
+        builder.emit(' = ');
+        if (types) builder.tsOnly(() => builder.emit('('));
+        builder.emit(`(() => {\n${unit.body}\nreturn { ${unit.names.join(', ')} };\n})()`);
+        if (types) builder.tsOnly(() => builder.emit(` as ${types})`));
+        builder.emit(';\n');
       }
       // The injected text has no source: ONE synthetic row (zero-width
       // source anchor at the program's start) records it honestly —
@@ -13868,7 +13996,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         // program's own first line (still inside its region).
         const tail = i === story.stories.length - 1 ? '\n\n' : '\n';
         builder.tsOnly(() => {
-          const lines = () => builder.emit(s.aliasLines.map((l) => `${exp}${l}`).join('\n'));
+          const lines = () => builder.emit((s.faceAliasLines ?? s.aliasLines).map((l) => `${exp}${l}`).join('\n'));
           if (nodeId !== null) builder.mark(nodeId, '$self', lines);
           else lines();
           builder.emit(tail);

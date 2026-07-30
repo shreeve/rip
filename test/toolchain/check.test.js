@@ -147,27 +147,27 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  // Three of the four component member forms silently accept a wrong-typed
-  // initializer: in a component-carrying file the face's runtime destructure
-  // is UNTYPED (the reactive table's generic signatures are lost), so
-  // `__state`/`__computed` return effectively-any and the _init assignments
-  // never check; the `=!` member's constructor-seam write is cast
-  // `(this as any)`, which swallows the value check with it. Wrong-typed
-  // WRITES inside a method are a second root in the same hole: tsgo reports
-  // them on the mirror, and the `@name` lowering's `this.`-prefix carries no
-  // source row, so mapTsDiagnostic drops them in transit — state, prop, and
-  // plain non-reactive member alike.
+  // Every component member form checks its initializer, and every wrong-typed
+  // member WRITE inside a method reaches the source. Two mechanisms hold this
+  // up and each has its own spelling below.
   //
-  // Both halves are OPEN gaps, so this test asserts the SILENCE on purpose —
-  // the exact-list assertions are the gap. The day either half is fixed
-  // (typing the destructure, or an honest mapping for the `@` write's span),
-  // new diagnostics appear and the lists below go red: that is the cue to
-  // invert this test and move the member negatives into the audit's
-  // components error pair, not a regression. The liveness signals are
-  // IN-FILE: the plain member's own TS2322 proves member initializers reach
-  // the checker, and the method-body TS2304 proves method bodies do — so a
-  // checker that stopped reporting cannot impersonate the fix.
-  test('a component member initializer and in-method writes are never type-checked — an open gap, asserted as-is', () => {
+  // The initializer half is the face's runtime destructure: a component-carrying
+  // file fuses the components runtime into the reactive one, and the fused unit
+  // states the union of their signatures, so `__state`/`__computed` stay generic
+  // and every `_init` assignment checks against the member's declared type. The
+  // `=!` member rides a second seam — its one legitimate constructor-seam write
+  // casts `this` to the member's own type rather than to `any`, which would
+  // swallow the value check along with TS2540.
+  //
+  // The write half is the mapping: an `@name` write lowers to `this.name…`, and
+  // the emitted `this` maps back through the member's own cover, so a
+  // diagnostic anchored there reaches `@name` instead of dropping in transit.
+  // Exact lists both ways — a form that stops checking, or a span that stops
+  // mapping, goes red here. The audit's components error pair holds the same
+  // negatives by code and position; this is the CLI's own check, over a
+  // workspace with no rip config, plus the strict posture the write half was
+  // driven under.
+  test('every component member form checks its initializer, and in-method writes reach the source', () => {
     const initDir = workspace({
       'member.rip': [
         'export Box = component',
@@ -180,13 +180,13 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         '    div wrongPlain',
       ].join('\n') + '\n',
     });
-    // The write half was driven under rip.strict; the drop is mode-independent
-    // (mapTsDiagnostic discards any diagnostic whose generated span has no
-    // honest source mapping), but the gate re-drives the driven posture.
+    // The prop's declared type is NUMBER and the write is a string: an earlier
+    // spelling of this fixture wrote `'nope'` into a `string` prop, which is a
+    // correct write, so the row asserted nothing either way.
     const writeDir = workspace({
       'writes.rip': [
         'export Writer = component',
-        "  @value: string := ''",
+        '  @value: number := 0',
         '  count := 0',
         '  plainField: number = 1',
         '',
@@ -202,36 +202,80 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     }, { strict: true });
     try {
       const init = JSON.parse(check(initDir, ['--json']).stdout);
-      // The plain member's TS2322 alone — the `:=`, `~=`, and `=!` member
-      // lines (3–5) publish NOTHING. Exact list: a fix on any form goes red.
-      expect(init.map((d) => [d.code, d.line])).toEqual([[2322, 2]]);
+      // All four member forms, each on its own declaration line, anchored on
+      // the member name.
+      expect(init.map((d) => [d.code, d.line, d.column])).toEqual([
+        [2322, 2, 3], [2322, 3, 3], [2322, 4, 3], [2322, 5, 3],
+      ]);
 
       const writes = JSON.parse(check(writeDir, ['--json']).stdout);
-      // The method body's TS2304 alone — the three wrong-typed member writes
-      // (lines 7–9) publish NOTHING, though tsgo reports all three on the
-      // mirror.
-      expect(writes.map((d) => [d.code, d.line])).toEqual([[2304, 10]]);
+      // State, prop, and plain non-reactive member alike — each anchored on
+      // the `@`, the first byte of the source the lowering's `this` stands
+      // for. The method body's TS2304 is the liveness pair.
+      expect(writes.map((d) => [d.code, d.line, d.column])).toEqual([
+        [2322, 7, 5], [2322, 8, 5], [2322, 9, 5], [2304, 10, 5],
+      ]);
     } finally {
       fs.rmSync(initDir, { recursive: true, force: true });
       fs.rmSync(writeDir, { recursive: true, force: true });
     }
   }, 90_000);
 
-  // A wrong-typed schema DEFAULT and a wrong-typed TRANSFORM both publish
-  // nothing: the face carries the schema body as an untyped runtime
-  // descriptor (`__schema({ … })`), where a default is a bare JS value and a
-  // transform a bare JS function, related to the field's declared type by
-  // nothing tsgo can see. The runtime rejects both on every `.parse()` — the
-  // declaration is a program that cannot parse successfully, silent until
-  // run.
+  // The two face-only BEHAVIOR OBJECTS (a component's computed members, a
+  // schema's callables) are re-emissions of bodies the descriptor and _init
+  // already carry, and each has a shape that the fixtures which drove them
+  // did not: a computed body of more than one statement, and a schema bound
+  // by `export`. Both produce a face that does not compile — the first
+  // because a multi-statement body is already a BRACED BLOCK and cannot be
+  // wrapped in `return …`, the second because the object is emitted at the
+  // plain `=` statement and the export path binds elsewhere. Legal rip, so
+  // the whole workspace must be silent; the liveness pair is a real error in
+  // a third file, which also proves a broken face cannot masquerade as one.
+  test('a multi-statement computed and an exported schema keep the face compiling', () => {
+    const dir = workspace({
+      'panel.rip': [
+        'Panel = component',
+        '  count := 3',
+        '',
+        '  summary ~=',
+        '    doubled = count * 2',
+        '    doubled + 1',
+        '',
+        '  render null',
+        '',
+        'panel = new Panel({})',
+        'total: number = panel.summary.value',
+        'console.log total',
+      ].join('\n') + '\n',
+      'cart.rip': [
+        'export Cart = schema :shape',
+        '  items! number[]',
+        '  total: ~> @items.length',
+        '',
+        'sum: number = Cart.parse({ items: [3] }).total',
+        'console.log sum',
+      ].join('\n') + '\n',
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
+      expect(diags.filter((d) => d.file !== 'live.rip')).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A wrong-typed schema DEFAULT publishes: the face carries the descriptor's
+  // default under a `satisfies` against the field's declared type, so the
+  // relation the runtime enforces on every `.parse()` is stated where the
+  // checker can read it.
   //
-  // An OPEN gap, asserted as the SILENCE on purpose: the day the descriptor
-  // types its defaults (or transforms), schema.rip publishes and the empty
-  // list goes red — the cue to invert this test and move the misdeclaration
-  // negatives into the audit's schema error pair, not a regression. The
-  // liveness pair (a real TS2322 in the same workspace) keeps an empty run
-  // loud.
-  test('a wrong-typed schema default or transform is never type-checked — an open gap, asserted as-is', () => {
+  // The wrong-typed TRANSFORM stays silent, and that is the ruling, not a
+  // second gap: relating a transform's RETURN to its field needs its INPUT
+  // related to the row shape, and `it` is the declared `any` boundary — the
+  // wire shape is what a transform exists to absorb. The runtime rejects it
+  // on `.parse()`. The two are asserted apart so that a later change to
+  // either is visible on its own line.
+  test('a wrong-typed schema default publishes; the transform half stays runtime-only', () => {
     const dir = workspace({
       'schema.rip': [
         'Person = schema',
@@ -246,7 +290,12 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     try {
       const diags = JSON.parse(check(dir, ['--json']).stdout);
       expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
-      expect(diags.filter((d) => d.file === 'schema.rip')).toEqual([]);                      // the gap
+      // TS1360 is what `satisfies` publishes, anchored on the default LITERAL
+      // — not on the entry list that encloses it, which is where it lands
+      // without a span of its own. The transform's line (2) is absent: the
+      // ruled runtime-only half.
+      expect(diags.filter((d) => d.file === 'schema.rip')
+        .map((d) => [d.code, d.line, d.column, d.endColumn])).toEqual([[1360, 3, 18, 25]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 

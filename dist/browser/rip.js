@@ -70,6 +70,455 @@ var syncOpsFlag = () => {
   return ops.on;
 };
 
+// src/schema-types.js
+class SchemaTypeError extends Error {
+  constructor(message, start = null, node = null) {
+    super(message);
+    this.name = "SchemaTypeError";
+    this.start = start;
+    this.node = node;
+  }
+}
+var snakeCase = (s) => s.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+var camelCase = (col) => String(col).replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+var UNCOUNTABLE = new Set(["equipment", "information", "rice", "money", "species", "series", "fish", "sheep", "data"]);
+var IRREGULAR = new Map([["person", "people"], ["man", "men"], ["woman", "women"], ["child", "children"], ["tooth", "teeth"], ["foot", "feet"], ["mouse", "mice"]]);
+var pluralize = (w) => {
+  const lw = w.toLowerCase();
+  if (UNCOUNTABLE.has(lw))
+    return w;
+  if (IRREGULAR.has(lw))
+    return IRREGULAR.get(lw);
+  if (/[^aeiouy]y$/i.test(w))
+    return w.slice(0, -1) + "ies";
+  if (/(s|x|z|ch|sh)$/i.test(w))
+    return w + "es";
+  return w + "s";
+};
+var fkCamel = (target) => camelCase(snakeCase(target) + "_id");
+var accessorOf = (target) => target[0].toLowerCase() + target.slice(1);
+var INTRINSIC_FIELD_TYPES = {
+  __proto__: null,
+  string: "string",
+  text: "string",
+  email: "string",
+  url: "string",
+  uuid: "string",
+  phone: "string",
+  zip: "string",
+  number: "number",
+  integer: "number",
+  boolean: "boolean",
+  date: "Date",
+  datetime: "Date",
+  json: "unknown",
+  any: "any"
+};
+var VALIDATION_INTRINSIC_NAMES = new Set([
+  "SchemaIssue",
+  "SchemaSafeResult",
+  "ArraySchema",
+  "Schema"
+]);
+var MODEL_INTRINSIC_NAMES = new Set(["SchemaQuery", "ModelSchema"]);
+var SCHEMA_INTRINSIC_NAMES = new Set([
+  ...VALIDATION_INTRINSIC_NAMES,
+  ...MODEL_INTRINSIC_NAMES
+]);
+var VALIDATION_INTRINSICS = [
+  "interface SchemaIssue { field: string; error: string; message: string; }",
+  "type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };",
+  "interface ArraySchema<Out> {",
+  "  parse(data: unknown): Out[];",
+  "  safe(data: unknown): SchemaSafeResult<Out[]>;",
+  "  ok(data: unknown): boolean;",
+  "  parseAsync(data: unknown): Promise<Out[]>;",
+  "  safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;",
+  "  okAsync(data: unknown): Promise<boolean>;",
+  "  toJSONSchema(): Record<string, unknown>;",
+  "}",
+  "interface Schema<Out, In = unknown> {",
+  "  parse(data: unknown): Out;",
+  "  array: ArraySchema<Out>;",
+  "  safe(data: unknown): SchemaSafeResult<Out>;",
+  "  ok(data: unknown): boolean;",
+  "  parseAsync(data: unknown): Promise<Out>;",
+  "  safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;",
+  "  okAsync(data: unknown): Promise<boolean>;",
+  "  toJSONSchema(): Record<string, unknown>;",
+  "  pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;",
+  "  omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;",
+  "  partial(): Schema<Partial<In>, Partial<In>>;",
+  "  required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;",
+  "  extend<U>(other: Schema<U>): Schema<In & U, In & U>;",
+  "}"
+];
+var MODEL_INTRINSICS = [
+  "interface SchemaQuery<T, Data = Record<string, unknown>> {",
+  "  all(): Promise<T[]>;",
+  "  first(): Promise<T | null>;",
+  "  count(): Promise<number>;",
+  "  where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;",
+  "  limit(n: number): SchemaQuery<T, Data>;",
+  "  offset(n: number): SchemaQuery<T, Data>;",
+  "  order(spec: string): SchemaQuery<T, Data>;",
+  "  orderBy(spec: string): SchemaQuery<T, Data>;",
+  "  includes(...specs: unknown[]): SchemaQuery<T, Data>;",
+  "  withDeleted(): SchemaQuery<T, Data>;",
+  "  onlyDeleted(): SchemaQuery<T, Data>;",
+  "  updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;",
+  "  deleteAll(): Promise<number | null>;",
+  "  unscoped(): SchemaQuery<T, Data>;",
+  "}",
+  "interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {",
+  "  find(id: Id): Promise<Instance | null>;",
+  "  findMany(ids: Id[]): Promise<Instance[]>;",
+  "  where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;",
+  "  includes(...specs: unknown[]): SchemaQuery<Instance, Data>;",
+  "  withDeleted(): SchemaQuery<Instance, Data>;",
+  "  onlyDeleted(): SchemaQuery<Instance, Data>;",
+  "  unscoped(): SchemaQuery<Instance, Data>;",
+  "  all(): Promise<Instance[]>;",
+  "  first(): Promise<Instance | null>;",
+  "  count(): Promise<number>;",
+  "  create(data: Create): Promise<Instance>;",
+  "  upsert(data: Create, opts: { on: unknown }): Promise<Instance>;",
+  "  insertMany(rows: Create[]): Promise<Instance[]>;",
+  "  toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;",
+  "}"
+];
+var schemaIntrinsicLines = (withModel) => withModel ? [...VALIDATION_INTRINSICS, ...MODEL_INTRINSICS] : [...VALIDATION_INTRINSICS];
+var isNode = (x) => Array.isArray(x);
+var isSchemaNode = (x) => isNode(x) && x[0] === "schema" && x.length === 2 && x[1] && typeof x[1] === "object" && Array.isArray(x[1].entries);
+function collectSchemaDecls(programSexpr) {
+  const out = [];
+  if (!isNode(programSexpr) || programSexpr[0] !== "program")
+    return out;
+  const consider = (stmt, exported) => {
+    if (!isNode(stmt) || stmt[0] !== "=" || stmt.length !== 3)
+      return;
+    if (typeof stmt[1] !== "string" || !isSchemaNode(stmt[2]))
+      return;
+    out.push({ name: stmt[1], descriptor: stmt[2][1], node: stmt[2], exported });
+  };
+  for (const stmt of programSexpr.slice(1)) {
+    if (isNode(stmt) && stmt[0] === "export" && stmt.length === 2)
+      consider(stmt[1], true);
+    else
+      consider(stmt, false);
+  }
+  return out;
+}
+function collectUserTypeNames(programSexpr) {
+  const names = new Map;
+  if (!isNode(programSexpr) || programSexpr[0] !== "program")
+    return names;
+  const consider = (stmt) => {
+    if (!isNode(stmt))
+      return;
+    if (stmt[0] === "type-decl" && typeof stmt[1] === "string") {
+      const m = stmt[1].replace(/^export\s+/, "").match(/^(type|interface)\s+([A-Za-z_$][\w$]*)/);
+      if (m)
+        names.set(m[2], { what: `the ${m[1]} declaration '${m[2]}'`, node: stmt });
+    } else if (stmt[0] === "class" && typeof stmt[1] === "string") {
+      names.set(stmt[1], { what: `class ${stmt[1]}`, node: stmt });
+    } else if (stmt[0] === "enum" && typeof stmt[1] === "string") {
+      names.set(stmt[1], { what: `enum ${stmt[1]}`, node: stmt });
+    }
+  };
+  for (const stmt of programSexpr.slice(1)) {
+    consider(isNode(stmt) && stmt[0] === "export" && stmt.length === 2 ? stmt[1] : stmt);
+  }
+  return names;
+}
+function isModuleShaped(programSexpr, isModuleImport) {
+  if (!isNode(programSexpr) || programSexpr[0] !== "program")
+    return false;
+  for (const stmt of programSexpr.slice(1)) {
+    if (!isNode(stmt))
+      continue;
+    if (stmt[0] === "export")
+      return true;
+    if (isModuleImport(stmt))
+      return true;
+  }
+  return false;
+}
+var behaviorName = (name) => `__${name}__behavior`;
+var fieldType = (entry, known) => {
+  const nullable = entry.constraints?.default === null ? " | null" : "";
+  if (entry.typeName === "literal-union" && entry.literals?.length) {
+    return entry.literals.map((l) => JSON.stringify(l)).join(" | ") + nullable;
+  }
+  let base = INTRINSIC_FIELD_TYPES[entry.typeName] ?? (known && known.has(entry.typeName) ? entry.typeName : "unknown");
+  return (entry.array ? `${base}[]` : base) + nullable;
+};
+var fieldProps = (descriptor, known) => {
+  const props = [];
+  for (const e of descriptor.entries) {
+    if (e.tag !== "field")
+      continue;
+    const required = e.modifiers.includes("!");
+    props.push(`${e.name}${required ? "" : "?"}: ${fieldType(e, known)}`);
+  }
+  return props;
+};
+var mixinRefs = (descriptor, byName) => {
+  const refs = [];
+  for (const e of descriptor.entries) {
+    if (e.tag !== "directive" || e.name !== "mixin")
+      continue;
+    const target = e.args?.[0]?.target;
+    if (target && byName.get(target)?.descriptor.kind === "mixin")
+      refs.push(target);
+  }
+  return refs;
+};
+var intersect = (base, refs) => refs.length ? `${base} & ${refs.join(" & ")}` : base;
+var RELATION_KINDS = { __proto__: null, belongs_to: "belongsTo", has_one: "hasOne", one: "hasOne", has_many: "hasMany", many: "hasMany" };
+var relationsOf = (descriptor) => {
+  const rels = [];
+  for (const e of descriptor.entries) {
+    const kind = e.tag === "directive" ? RELATION_KINDS[e.name] : undefined;
+    if (!kind)
+      continue;
+    const target = e.args?.[0]?.target;
+    if (!target)
+      continue;
+    rels.push({ kind, target, optional: e.args[0].optional === true });
+  }
+  return rels;
+};
+var modelImplicitProps = (descriptor) => {
+  const props = ["id: number"];
+  for (const rel of relationsOf(descriptor)) {
+    if (rel.kind !== "belongsTo")
+      continue;
+    props.push(`${fkCamel(rel.target)}: number${rel.optional ? " | null" : ""}`);
+  }
+  const has = (n) => descriptor.entries.some((e) => e.tag === "directive" && e.name === n);
+  if (has("timestamps"))
+    props.push("createdAt: Date", "updatedAt: Date");
+  if (has("softDelete"))
+    props.push("deletedAt: Date | null");
+  return props;
+};
+var modelCreateProps = (descriptor, known) => {
+  const props = [];
+  for (const e of descriptor.entries) {
+    if (e.tag !== "field")
+      continue;
+    const required = e.modifiers.includes("!") && e.constraints?.default === undefined;
+    props.push(`${e.name}${required ? "" : "?"}: ${fieldType(e, known)}`);
+  }
+  for (const rel of relationsOf(descriptor)) {
+    if (rel.kind !== "belongsTo")
+      continue;
+    props.push(`${fkCamel(rel.target)}${rel.optional ? "?" : ""}: number${rel.optional ? " | null" : ""}`);
+  }
+  return props;
+};
+var relationAccessors = (descriptor, known) => {
+  const out = [];
+  const OPTS = "opts?: { reload?: boolean }";
+  for (const rel of relationsOf(descriptor)) {
+    const isKnown = known.has(rel.target);
+    if (rel.kind === "hasMany") {
+      out.push(`${pluralize(accessorOf(rel.target))}(${OPTS}): Promise<${isKnown ? `${rel.target}[]` : "unknown[]"}>`);
+    } else {
+      out.push(`${accessorOf(rel.target)}(${OPTS}): Promise<${isKnown ? `${rel.target} | null` : "unknown"}>`);
+    }
+  }
+  return out;
+};
+var braced = (props) => props.length ? `{ ${props.join("; ")} }` : "{}";
+function schemaTypeStory(decl, byName, known) {
+  const { name, descriptor } = decl;
+  const kind = descriptor.kind;
+  if (kind === "enum") {
+    const members = descriptor.entries.filter((e) => e.tag === "enum-member").map((e) => e.value !== undefined ? e.value : e.name);
+    const union = members.length ? members.map((v) => typeof v === "string" ? JSON.stringify(v) : String(v)).join(" | ") : "never";
+    const bare = descriptor.entries.every((e) => e.tag !== "enum-member" || e.value === undefined || e.value === e.name);
+    return {
+      aliasLines: [`type ${name} = ${union};`],
+      constType: `{ parse(data: unknown): ${name}; safe(data: unknown): SchemaSafeResult<${name}>; ` + `ok(data: unknown): ${bare ? `data is ${name}` : "boolean"}; ` + `parseAsync(data: unknown): Promise<${name}>; safeAsync(data: unknown): Promise<SchemaSafeResult<${name}>>; ` + `okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<${name}>; }`,
+      thisTypes: new Map,
+      typeNames: [name]
+    };
+  }
+  if (kind === "union") {
+    const members = descriptor.entries.filter((e) => e.tag === "union-member").map((e) => e.name);
+    const armed = members.map((m) => known.has(m) ? m : "unknown");
+    const union = armed.length ? armed.join(" | ") : "never";
+    return {
+      aliasLines: [`type ${name} = ${union};`],
+      constType: `{ parse(data: unknown): ${name}; safe(data: unknown): SchemaSafeResult<${name}>; ` + `ok(data: unknown): boolean; ` + `parseAsync(data: unknown): Promise<${name}>; safeAsync(data: unknown): Promise<SchemaSafeResult<${name}>>; ` + `okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<${name}>; }`,
+      thisTypes: new Map,
+      typeNames: [name]
+    };
+  }
+  if (kind === "mixin") {
+    return {
+      aliasLines: [`type ${name} = ${intersect(braced(fieldProps(descriptor, known)), mixinRefs(descriptor, byName))};`],
+      constType: null,
+      thisTypes: new Map,
+      typeNames: [name]
+    };
+  }
+  const dataType = intersect(braced(fieldProps(descriptor, known)), mixinRefs(descriptor, byName));
+  const bname = behaviorName(name);
+  const derived = [];
+  const computed = [];
+  const methods = [];
+  const instanceIdx = [];
+  const scopeIdx = [];
+  const ensureIdx = [];
+  const out = (e, face) => face ? `ReturnType<typeof ${bname}.${e.name}>` : "unknown";
+  const member = (e, face) => e.tag === "derived" ? `${e.name}: ${out(e, face)}` : e.tag === "computed" ? `readonly ${e.name}: ${out(e, face)}` : `${e.name}: (...args: any[]) => ${out(e, face)}`;
+  descriptor.entries.forEach((e, i) => {
+    if (e.tag === "derived") {
+      derived.push(e);
+      instanceIdx.push(i);
+    } else if (e.tag === "computed") {
+      computed.push(e);
+      instanceIdx.push(i);
+    } else if (e.tag === "method") {
+      methods.push(e);
+      instanceIdx.push(i);
+    } else if (e.tag === "hook")
+      instanceIdx.push(i);
+    else if (e.tag === "scope" || e.tag === "defaultScope")
+      scopeIdx.push(i);
+    else if (e.tag === "ensure")
+      ensureIdx.push(i);
+  });
+  const ensuresOf = (dataName) => new Map(ensureIdx.map((i) => [i, dataName]));
+  const behaviorEntries = [...derived, ...computed, ...methods];
+  const behaviorFor = (face) => behaviorEntries.map((e) => member(e, face));
+  const behavior = behaviorFor(false);
+  if (kind === "model") {
+    const dataName = `${name}Data`;
+    const createName = `${name}Create`;
+    const softDelete = descriptor.entries.some((e) => e.tag === "directive" && e.name === "softDelete");
+    const scopeNames = descriptor.entries.filter((e) => e.tag === "scope").map((e) => e.name);
+    const queryName = `${name}Query`;
+    const queryType = scopeNames.length ? queryName : `SchemaQuery<${name}, ${dataName}>`;
+    const instanceExtras = (face) => [
+      ...behaviorFor(face),
+      ...relationAccessors(descriptor, known),
+      `save(): Promise<${name}>`,
+      `destroy(opts?: { hard?: boolean }): Promise<${name}>`,
+      ...softDelete ? [`restore(): Promise<${name}>`] : [],
+      `ok(): boolean`,
+      `errors(): SchemaIssue[]`,
+      `markDirty(name: string): ${name}`,
+      `savedChanges: Map<string, [unknown, unknown]>`,
+      `toJSON(): ${dataName}`
+    ];
+    const linesFor = (face) => [
+      `type ${dataName} = ${dataType} & ${braced(modelImplicitProps(descriptor))};`,
+      `type ${createName} = ${intersect(braced(modelCreateProps(descriptor, known)), mixinRefs(descriptor, byName))};`,
+      `type ${name} = ${dataName} & ${braced(instanceExtras(face))};`
+    ];
+    const aliasLines = linesFor(false);
+    const faceAliasLines = linesFor(true);
+    const typeNames = [dataName, createName, name];
+    let constType = `ModelSchema<${name}, ${dataName}, number, ${createName}>`;
+    if (scopeNames.length) {
+      const scopeSigs = scopeNames.map((s) => `${s}(...args: any[]): ${queryName}`);
+      aliasLines.push(`type ${queryName} = SchemaQuery<${name}, ${dataName}> & ${braced(scopeSigs)};`);
+      faceAliasLines.push(`type ${queryName} = SchemaQuery<${name}, ${dataName}> & ${braced(scopeSigs)};`);
+      typeNames.push(queryName);
+      constType += ` & ${braced(scopeSigs)}`;
+    }
+    const thisTypes2 = new Map;
+    for (const i of instanceIdx)
+      thisTypes2.set(i, name);
+    for (const i of scopeIdx)
+      thisTypes2.set(i, queryType);
+    return {
+      aliasLines,
+      faceAliasLines,
+      constType,
+      thisTypes: thisTypes2,
+      typeNames,
+      behaviorName: bname,
+      ensureTypes: ensuresOf(dataName)
+    };
+  }
+  const thisTypes = new Map;
+  for (const i of instanceIdx)
+    thisTypes.set(i, name);
+  if (behavior.length) {
+    const dataName = `${name}Data`;
+    const linesFor = (face) => [
+      `type ${dataName} = ${dataType};`,
+      `type ${name} = ${dataName} & ${braced(behaviorFor(face))};`
+    ];
+    return {
+      aliasLines: linesFor(false),
+      faceAliasLines: linesFor(true),
+      constType: `Schema<${name}, ${dataName}>`,
+      thisTypes,
+      typeNames: [dataName, name],
+      behaviorName: bname,
+      ensureTypes: ensuresOf(dataName)
+    };
+  }
+  return {
+    aliasLines: [`type ${name} = ${dataType};`],
+    constType: `Schema<${name}, ${name}>`,
+    thisTypes,
+    typeNames: [name],
+    ensureTypes: ensuresOf(name)
+  };
+}
+function buildSchemaTypeStory(programSexpr) {
+  const decls = collectSchemaDecls(programSexpr);
+  if (decls.length === 0)
+    return null;
+  const known = new Set(decls.map((d) => d.name));
+  const byName = new Map(decls.map((d) => [d.name, d]));
+  const userTypes = collectUserTypeNames(programSexpr);
+  const withModel = decls.some((d) => d.descriptor.kind === "model");
+  for (const [name, user] of userTypes) {
+    const emitted = VALIDATION_INTRINSIC_NAMES.has(name) || withModel && MODEL_INTRINSIC_NAMES.has(name);
+    if (emitted) {
+      throw new SchemaTypeError(`${user.what} collides with the schema intrinsic declarations this module emits ` + `(a schema declaration is present${MODEL_INTRINSIC_NAMES.has(name) ? ", and a :model brings the persistence tier" : ""}) — ` + `rename it; the emitted intrinsic vocabulary here is ` + `${[...VALIDATION_INTRINSIC_NAMES, ...withModel ? MODEL_INTRINSIC_NAMES : []].join(", ")}`, null, user.node);
+    }
+  }
+  const owners = new Map;
+  const stories = [];
+  for (const d of decls) {
+    const story = schemaTypeStory(d, byName, known);
+    for (const t of story.typeNames) {
+      if (SCHEMA_INTRINSIC_NAMES.has(t)) {
+        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which is reserved by the schema ` + `intrinsic declarations (${[...SCHEMA_INTRINSIC_NAMES].join(", ")}) — rename the schema`, d.descriptor.start ?? null);
+      }
+      const prior = owners.get(t);
+      if (prior !== undefined) {
+        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which ${prior} already emits — ` + `every schema-emitted type name binds once per module; rename one`, d.descriptor.start ?? null);
+      }
+      owners.set(t, `schema '${d.name}'`);
+      const user = userTypes.get(t);
+      if (user !== undefined) {
+        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which collides with ${user.what} — ` + `the schema's types and the user declaration would merge or duplicate; rename one`, d.descriptor.start ?? null);
+      }
+    }
+    const defaultTypes = new Map;
+    d.descriptor.entries.forEach((e, i) => {
+      if (e.tag === "field" && e.constraints?.default !== undefined)
+        defaultTypes.set(i, fieldType(e, known));
+    });
+    stories.push({ decl: d, ...story, defaultTypes });
+  }
+  return {
+    stories,
+    intrinsicLines: schemaIntrinsicLines(withModel),
+    withModel
+  };
+}
+
 // src/schema.js
 var VALID_KINDS = new Set(["input", "shape", "mixin", "enum", "union", "model"]);
 var KIND_DEFAULT = "input";
@@ -103,7 +552,7 @@ var MODEL_DIRECTIVES = {
   tableWas: "name"
 };
 var RELATION_DIRECTIVES = new Set(["belongs_to", "has_one", "has_many", "one", "many"]);
-var snakeCase = (s) => s.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+var snakeCase2 = (s) => s.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 var SCHEMA_COERCIBLE_TYPES = new Set(["integer", "number", "boolean", "date", "datetime"]);
 var SCHEMA_NAMED_COERCER_TYPES = {
   __proto__: null,
@@ -683,6 +1132,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   let range = null;
   let bracketDefault = undefined;
   let hasDefault = false;
+  const defaultSpan = {};
   let regex = null;
   let transformTokens = null;
   let attrs = null;
@@ -725,7 +1175,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
       if (head.kind === "[" || head.kind === "INDEX_START") {
         if (hasDefault)
           fail(`field '${name}' has more than one '[…]' default bracket`, head.start);
-        bracketDefault = parseDefaultBracket(part, name, fail);
+        bracketDefault = parseDefaultBracket(part, name, fail, defaultSpan);
         hasDefault = true;
       } else if (head.kind === "{") {
         if (kind !== "model" && kind !== "mixin") {
@@ -800,7 +1250,8 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     transformTokens,
     unique: uniqueAttr,
     attrs,
-    start: first.start
+    start: first.start,
+    defaultSpan: defaultSpan.start === undefined ? null : [defaultSpan.start, defaultSpan.end]
   });
 }
 var SCHEMA_FIELD_ATTRS = new Set(["was"]);
@@ -924,7 +1375,7 @@ function finishModelBody(entries, fail) {
   for (const e of entries) {
     if (e.tag !== "field")
       continue;
-    const col = snakeCase(e.name);
+    const col = snakeCase2(e.name);
     fieldBySnake.set(col, e.name);
     known.add(col);
   }
@@ -944,13 +1395,13 @@ function finishModelBody(entries, fail) {
     } else if (e.name === "softDelete")
       claim("deleted_at", "@softDelete");
     else if (e.name === "belongs_to")
-      claim(snakeCase(e.args[0].target) + "_id", `the @belongs_to ${e.args[0].target} relation`);
+      claim(snakeCase2(e.args[0].target) + "_id", `the @belongs_to ${e.args[0].target} relation`);
   }
   for (const e of entries) {
     if (e.tag !== "directive" || e.name !== "index" && e.name !== "unique")
       continue;
     e.args[0].fields.forEach((c, ci) => {
-      if (!known.has(snakeCase(c))) {
+      if (!known.has(snakeCase2(c))) {
         fail(`@${e.name}: unknown column '${c}' — the table has: ${[...known].sort().join(", ")}`, e.colTokens?.[ci]?.start ?? e.start);
       }
     });
@@ -1366,8 +1817,12 @@ function parseRangeTokens(tokens, fieldName, fail) {
     out.max = max;
   return out;
 }
-function parseDefaultBracket(tokens, fieldName, fail) {
+function parseDefaultBracket(tokens, fieldName, fail, span = {}) {
   const inner = tokens.slice(1, -1);
+  if (inner.length) {
+    span.start = inner[0].start;
+    span.end = inner[inner.length - 1].end;
+  }
   const items = splitTopLevelByComma(inner);
   if (items.length !== 1) {
     fail(items.length === 2 ? `size/value ranges use 'min..max' syntax, not brackets — replace the bracket pair with a range` : `the constraint bracket takes a single default value (got ${items.length} elements)`, tokens[0].start);
@@ -1451,7 +1906,7 @@ function findTopLevelArrowIdx(tokens) {
   }
   return -1;
 }
-function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null, tsFace = false) {
+function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null, tsFace = false, defaultTypes = null, ensureTypes = null) {
   const segs = [];
   const emit = (s) => {
     if (segs.length && typeof segs[segs.length - 1] === "string")
@@ -1459,7 +1914,7 @@ function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thi
     else
       segs.push(s);
   };
-  const emitTs = (s) => segs.push({ ts: s });
+  const emitTs = (s, span = null) => segs.push({ ts: s, span });
   emit(`{kind: ${JSON.stringify(descriptor.kind)}`);
   if (schemaName)
     emit(`, name: ${JSON.stringify(schemaName)}`);
@@ -1467,7 +1922,7 @@ function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thi
   descriptor.entries.forEach((e, i) => {
     if (i > 0)
       emit(", ");
-    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs, tsFace);
+    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs, tsFace, defaultTypes?.get(i) ?? null, ensureTypes?.get(i) ?? null);
   });
   emit("]");
   if (adapterCode)
@@ -1476,6 +1931,24 @@ function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thi
   return segs;
 }
 var fnText = (fnCode) => typeof fnCode === "string" ? fnCode : fnCode.code;
+function behaviorObjectText(descriptor, name, fns, thisTypes) {
+  const props = [];
+  descriptor.entries.forEach((e, i) => {
+    if (e.tag !== "derived" && e.tag !== "computed" && e.tag !== "method")
+      return;
+    const fnCode = fns.get(i);
+    if (fnCode === undefined)
+      return;
+    const thisType = thisTypes?.get(i) ?? null;
+    let code = fnText(fnCode);
+    if (thisType !== null && typeof fnCode !== "string") {
+      const { thisAt } = fnCode;
+      code = code.slice(0, thisAt) + `this: ${thisType}${code[thisAt] === ")" ? "" : ", "}` + code.slice(thisAt);
+    }
+    props.push(`${e.name}: ${code}`);
+  });
+  return props.length ? `const ${behaviorName(name)} = {${props.join(", ")}};` : null;
+}
 function fnSegments(fnCode, thisType, emit, emitTs) {
   if (thisType === null || typeof fnCode === "string") {
     emit(fnText(fnCode));
@@ -1486,7 +1959,7 @@ function fnSegments(fnCode, thisType, emit, emitTs) {
   emitTs(`this: ${thisType}${code[thisAt] === ")" ? "" : ", "}`);
   emit(code.slice(thisAt));
 }
-function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false) {
+function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaultType = null, ensureType = null) {
   switch (e.tag) {
     case "computed":
     case "method":
@@ -1499,19 +1972,31 @@ function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false) {
       emit("}");
       return;
     default:
-      if (tsFace && e.tag === "field" && fnCode !== undefined && typeof fnCode !== "string" && fnText(fnCode).startsWith("it", fnCode.thisAt)) {
-        const whole = entryLiteral(e, fnCode);
-        const fn = fnText(fnCode);
-        const cut = whole.length - 1 - fn.length + fnCode.thisAt + "it".length;
-        emit(whole.slice(0, cut));
-        emitTs(": any");
-        emit(whole.slice(cut));
-        return;
+      const marks = {};
+      const whole = entryLiteral(e, fnCode, marks);
+      const cuts = [];
+      if (tsFace && defaultType !== null && marks.defaultEnd !== undefined) {
+        cuts.push({ at: marks.defaultEnd, ts: ` satisfies ${defaultType}`, span: e.defaultSpan ?? null });
       }
-      emit(entryLiteral(e, fnCode));
+      if (tsFace && e.tag === "field" && fnCode !== undefined && typeof fnCode !== "string" && fnText(fnCode).startsWith("it", fnCode.thisAt)) {
+        const fn = fnText(fnCode);
+        cuts.push({ at: whole.length - 1 - fn.length + fnCode.thisAt + "it".length, ts: ": any" });
+      }
+      if (tsFace && e.tag === "ensure" && ensureType !== null && marks.fnAt !== undefined && typeof fnCode !== "string" && fnCode !== undefined) {
+        const p0 = /^[A-Za-z_$][\w$]*/.exec(fnText(fnCode).slice(fnCode.thisAt))?.[0];
+        if (p0)
+          cuts.push({ at: marks.fnAt + fnCode.thisAt + p0.length, ts: `: ${ensureType}` });
+      }
+      let pos = 0;
+      for (const c of cuts) {
+        emit(whole.slice(pos, c.at));
+        emitTs(c.ts, c.span ?? null);
+        pos = c.at;
+      }
+      emit(whole.slice(pos));
   }
 }
-function entryLiteral(e, fnCode) {
+function entryLiteral(e, fnCode, marks = {}) {
   if (fnCode !== undefined)
     fnCode = fnText(fnCode);
   switch (e.tag) {
@@ -1538,12 +2023,20 @@ function entryLiteral(e, fnCode) {
           c.push(`min: ${serializeLiteral(e.constraints.min)}`);
         if (e.constraints.max !== undefined)
           c.push(`max: ${serializeLiteral(e.constraints.max)}`);
-        if (e.constraints.default !== undefined)
+        let defaultInC = -1;
+        if (e.constraints.default !== undefined) {
+          defaultInC = c.length;
           c.push(`default: ${serializeLiteral(e.constraints.default)}`);
+        }
         if (e.constraints.regex !== undefined)
           c.push(`regex: ${e.constraints.regex.toString()}`);
-        if (c.length)
+        if (c.length) {
+          if (defaultInC >= 0) {
+            const head = `{${obj.join(", ")}, constraints: {`;
+            marks.defaultEnd = head.length + c.slice(0, defaultInC + 1).join(", ").length;
+          }
           obj.push(`constraints: {${c.join(", ")}}`);
+        }
       }
       if (e.attrs) {
         obj.push(`attrs: {${Object.keys(e.attrs).sort().map((k) => `${k}: ${serializeLiteral(e.attrs[k])}`).join(", ")}}`);
@@ -1571,11 +2064,12 @@ function entryLiteral(e, fnCode) {
       return `{${obj.join(", ")}}`;
     }
     case "ensure": {
-      const obj = [
+      const head = [
         `tag: "ensure"`,
-        `message: ${JSON.stringify(e.message)}`,
-        `fn: ${fnCode}`
+        `message: ${JSON.stringify(e.message)}`
       ];
+      marks.fnAt = `{${head.join(", ")}, fn: `.length;
+      const obj = [...head, `fn: ${fnCode}`];
       if (e.field)
         obj.push(`field: ${JSON.stringify(e.field)}`);
       if (e.async)
@@ -6318,7 +6812,7 @@ function makeParserLexer(path = "<anonymous>") {
 var parserInstance = {
   symbolIds: { $accept: 0, $end: 1, error: 2, Root: 3, Body: 4, Line: 5, TERMINATOR: 6, Expression: 7, Statement: 8, Return: 9, STATEMENT: 10, Import: 11, Export: 12, TypeDecl: 13, Enum: 14, TYPE_DECL: 15, Assignable: 16, TYPE: 17, OPT_MARKER: 18, DEF: 19, Identifier: 20, OptParams: 21, IMPORT: 22, String: 23, ImportDefaultSpecifier: 24, FROM: 25, ImportNamespaceSpecifier: 26, "{": 27, "}": 28, ImportSpecifierList: 29, OptComma: 30, ",": 31, ImportSpecifier: 32, INDENT: 33, OUTDENT: 34, AS: 35, DEFAULT: 36, IMPORT_ALL: 37, EXPORT: 38, ExportSpecifierList: 39, Class: 40, Def: 41, ExportAssign: 42, ReactiveAssign: 43, ComputedAssign: 44, Readonly: 45, Effect: 46, Object: 47, EXPORT_ALL: 48, "=": 49, TYPE_PARAMS: 50, VOID_MARKER: 51, REACTIVE_ASSIGN: 52, COMPUTED_ASSIGN: 53, Block: 54, READONLY_ASSIGN: 55, EFFECT: 56, ExportSpecifier: 57, Value: 58, Code: 59, Operation: 60, Assign: 61, Gate: 62, If: 63, Try: 64, For: 65, Switch: 66, While: 67, Throw: 68, Schema: 69, Component: 70, Render: 71, Literal: 72, Parenthetical: 73, Range: 74, Invocation: 75, DoIife: 76, This: 77, Super: 78, DAMMIT: 79, NewValue: 80, TEMPLATE_TAG: 81, Atom: 82, Regex: 83, UNDEFINED: 84, NULL: 85, BOOL: 86, NUMBER: 87, SYMBOL: 88, STRING: 89, STRING_START: 90, Interpolations: 91, STRING_END: 92, InterpolationChunk: 93, INTERPOLATION_START: 94, INTERPOLATION_END: 95, REGEX: 96, HEREGEX_START: 97, HEREGEX_END: 98, IDENTIFIER: 99, Property: 100, PROPERTY: 101, SimpleAssignable: 102, COMPOUND_ASSIGN: 103, METHOD_ASSIGN: 104, MERGE_ASSIGN: 105, Array: 106, GATE: 107, CALL_START: 108, CALL_END: 109, ArgList: 110, ThisProperty: 111, Subjectable: 112, ".": 113, "?.": 114, INDEX_START: 115, INDEX_END: 116, Slice: 117, ES6_OPTIONAL_INDEX: 118, PICK_START: 119, PickList: 120, PICK_END: 121, OPTPICK_START: 122, IMPORT_META: 123, NEW_TARGET: 124, NEW: 125, NewSpine: 126, NewCall: 127, Arguments: 128, PARAM_START: 129, ParamList: 130, PARAM_END: 131, ArrowKind: 132, "->": 133, "=>": 134, DO_IIFE: 135, THIS: 136, "@": 137, "[": 138, "]": 139, Elisions: 140, ArgElisionList: 141, OptElisions: 142, ArgElision: 143, Arg: 144, Elision: 145, AssignList: 146, MAP_START: 147, AssignObj: 148, ObjAssignable: 149, ObjRestValue: 150, ":": 151, SimpleObjAssignable: 152, "...": 153, ObjSpreadExpr: 154, SUPER: 155, DYNAMIC_IMPORT: 156, PickItem: 157, PickKey: 158, RangeDots: 159, "..": 160, Param: 161, TypedParamVar: 162, ParamVar: 163, Splat: 164, ClassName: 165, CLASS: 166, EXTENDS: 167, ENUM: 168, SCHEMA: 169, SCHEMA_BODY: 170, COMPONENT: 171, ComponentBlock: 172, ComponentBody: 173, ComponentLine: 174, OFFER: 175, ACCEPT: 176, RENDER: 177, ES6_OPTIONAL_CALL: 178, "(": 179, ")": 180, RETURN: 181, WHILE: 182, UNTIL: 183, WHEN: 184, Loop: 185, IfBlock: 186, IF: 187, IfElseTail: 188, ELSE: 189, UnlessBlock: 190, UNLESS: 191, POST_IF: 192, POST_UNLESS: 193, TRY: 194, Catch: 195, FINALLY: 196, CATCH: 197, THROW: 198, SWITCH: 199, Cases: 200, When: 201, LEADING_WHEN: 202, SimpleArgs: 203, FOR: 204, ForVariables: 205, FORIN: 206, BY: 207, FOROF: 208, OWN: 209, FORAS: 210, AWAIT: 211, FORASAWAIT: 212, ForValue: 213, LOOP: 214, "--": 215, "++": 216, "?": 217, PRESENCE: 218, CAST: 219, TERNARY: 220, UNARY: 221, DO: 222, UNARY_MATH: 223, YIELD: 224, "-": 225, "+": 226, "**": 227, MATH: 228, SHIFT: 229, "&": 230, "^": 231, "|": 232, COMPARE: 233, MATCH: 234, RELATION: 235, "&&": 236, "||": 237, "??": 238 },
   tokenNames: { 2: "error", 6: "TERMINATOR", 10: "STATEMENT", 15: "TYPE_DECL", 17: "TYPE", 18: "?", 19: "DEF", 22: "IMPORT", 25: "FROM", 27: "{", 28: "}", 31: ",", 33: "INDENT", 34: "OUTDENT", 35: "AS", 36: "DEFAULT", 37: "IMPORT_ALL", 38: "EXPORT", 48: "EXPORT_ALL", 49: "=", 50: "TYPE_PARAMS", 51: "!", 52: "REACTIVE_ASSIGN", 53: "COMPUTED_ASSIGN", 55: "READONLY_ASSIGN", 56: "EFFECT", 79: "DAMMIT", 81: "TEMPLATE_TAG", 84: "UNDEFINED", 85: "NULL", 86: "BOOL", 87: "NUMBER", 88: "SYMBOL", 89: "STRING", 90: "STRING_START", 92: "STRING_END", 94: "INTERPOLATION_START", 95: "INTERPOLATION_END", 96: "REGEX", 97: "HEREGEX_START", 98: "HEREGEX_END", 99: "IDENTIFIER", 101: "PROPERTY", 103: "COMPOUND_ASSIGN", 104: "METHOD_ASSIGN", 105: "MERGE_ASSIGN", 107: "GATE", 108: "CALL_START", 109: "CALL_END", 113: ".", 114: "?.", 115: "INDEX_START", 116: "INDEX_END", 118: "ES6_OPTIONAL_INDEX", 119: "PICK_START", 121: "PICK_END", 122: "OPTPICK_START", 123: "IMPORT_META", 124: "NEW_TARGET", 125: "NEW", 129: "PARAM_START", 131: "PARAM_END", 133: "->", 134: "=>", 135: "DO_IIFE", 136: "THIS", 137: "@", 138: "[", 139: "]", 147: "MAP_START", 151: ":", 153: "...", 155: "SUPER", 156: "DYNAMIC_IMPORT", 160: "..", 166: "CLASS", 167: "EXTENDS", 168: "ENUM", 169: "SCHEMA", 170: "SCHEMA_BODY", 171: "COMPONENT", 175: "OFFER", 176: "ACCEPT", 177: "RENDER", 178: "ES6_OPTIONAL_CALL", 179: "(", 180: ")", 181: "RETURN", 182: "WHILE", 183: "UNTIL", 184: "WHEN", 187: "IF", 189: "ELSE", 191: "UNLESS", 192: "POST_IF", 193: "POST_UNLESS", 194: "TRY", 196: "FINALLY", 197: "CATCH", 198: "THROW", 199: "SWITCH", 202: "LEADING_WHEN", 204: "FOR", 206: "FORIN", 207: "BY", 208: "FOROF", 209: "OWN", 210: "FORAS", 211: "AWAIT", 212: "FORASAWAIT", 214: "LOOP", 215: "--", 216: "++", 217: "?", 218: "PRESENCE", 219: "CAST", 220: "TERNARY", 221: "UNARY", 222: "DO", 223: "UNARY_MATH", 224: "YIELD", 225: "-", 226: "+", 227: "**", 228: "MATH", 229: "SHIFT", 230: "&", 231: "^", 232: "|", 233: "COMPARE", 234: "MATCH", 235: "RELATION", 236: "&&", 237: "||", 238: "??" },
-  semantics: { "1": { kind: "program", roles: [] }, "2": { kind: "program", roles: [{ name: "body", grammarRef: 1, childSlot: 1, spread: true }] }, "14": { kind: "typedecl", roles: [{ name: "declaration", grammarRef: 1, childSlot: 1, spread: false }] }, "15": { kind: "typedvar", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "annotation", grammarRef: 2, childSlot: 2, spread: false }] }, "16": { kind: "typedvar", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "annotation", grammarRef: 3, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }] }, "17": { kind: "defsig", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 3, childSlot: 2, spread: false }, { name: "returnType", grammarRef: 4, childSlot: 3, spread: false }] }, "18": { kind: "import", roles: [{ name: "spec", grammarRef: null, childSlot: 1, literal: "{}" }, { name: "source", grammarRef: 2, childSlot: 2, spread: false }] }, "19": { kind: "import", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }, { name: "source", grammarRef: 4, childSlot: 2, spread: false }] }, "20": { kind: "import", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }, { name: "source", grammarRef: 4, childSlot: 2, spread: false }] }, "21": { kind: "import", roles: [{ name: "spec", grammarRef: null, childSlot: 1, literal: "{}" }, { name: "source", grammarRef: 5, childSlot: 2, spread: false }] }, "22": { kind: "import", roles: [{ name: "spec", grammarRef: 3, childSlot: 1, spread: false }, { name: "source", grammarRef: 7, childSlot: 2, spread: false }] }, "23": { kind: "import", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }, { name: "extra", grammarRef: 4, childSlot: 2, spread: false }, { name: "source", grammarRef: 6, childSlot: 3, spread: false }] }, "24": { kind: "import", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }, { name: "extra", grammarRef: 5, childSlot: 2, spread: false }, { name: "source", grammarRef: 9, childSlot: 3, spread: false }] }, "31": { kind: "as", roles: [{ name: "name", grammarRef: 1, childSlot: 0, spread: false }, { name: "alias", grammarRef: 3, childSlot: 1, spread: false }] }, "33": { kind: "as", roles: [{ name: "name", grammarRef: 1, childSlot: 0, spread: false }, { name: "alias", grammarRef: 3, childSlot: 1, spread: false }] }, "35": { kind: "as", roles: [{ name: "name", grammarRef: null, childSlot: 0, literal: "*" }, { name: "alias", grammarRef: 3, childSlot: 1, spread: false }] }, "36": { kind: "export", roles: [{ name: "spec", grammarRef: null, childSlot: 1, literal: "{}" }] }, "37": { kind: "export", roles: [{ name: "spec", grammarRef: 3, childSlot: 1, spread: false }] }, "38": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "39": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "40": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "41": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "42": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "43": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "44": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "45": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "46": { kind: "export", roles: [{ name: "spec", grammarRef: 3, childSlot: 1, spread: false }] }, "47": { kind: "export", roles: [{ name: "spec", grammarRef: 4, childSlot: 1, spread: false }] }, "48": { kind: "export", roles: [{ name: "source", grammarRef: 4, childSlot: 1, spread: false }] }, "49": { kind: "export", roles: [{ name: "spec", grammarRef: null, childSlot: 1, literal: "{}" }, { name: "source", grammarRef: 5, childSlot: 2, spread: false }] }, "50": { kind: "export", roles: [{ name: "spec", grammarRef: 3, childSlot: 1, spread: false }, { name: "source", grammarRef: 7, childSlot: 2, spread: false }] }, "51": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "52": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "53": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "54": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "55": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "56": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "57": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "typeParams", grammarRef: 2, childSlot: null, spread: false }] }, "58": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "typeParams", grammarRef: 2, childSlot: null, spread: false }] }, "59": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "typeParams", grammarRef: 2, childSlot: null, spread: false }] }, "60": { kind: "assign", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "61": { kind: "assign", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "62": { kind: "assign", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "63": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "64": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "65": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "66": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "67": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "68": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "69": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "70": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "71": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "72": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "73": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "74": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "81": { kind: "as", roles: [{ name: "name", grammarRef: 1, childSlot: 0, spread: false }, { name: "alias", grammarRef: 3, childSlot: 1, spread: false }] }, "82": { kind: "as", roles: [{ name: "name", grammarRef: 1, childSlot: 0, spread: false }, { name: "alias", grammarRef: 3, childSlot: 1, spread: false }] }, "84": { kind: "as", roles: [{ name: "name", grammarRef: 1, childSlot: 0, spread: false }, { name: "alias", grammarRef: 3, childSlot: 1, spread: false }] }, "113": { kind: "dammit", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }] }, "115": { kind: "tagged", roles: [{ name: "tag", grammarRef: 1, childSlot: 1, spread: false }, { name: "str", grammarRef: 3, childSlot: 2, spread: false }] }, "123": { kind: "symbol", roles: [{ name: "name", grammarRef: 1, childSlot: 1, spread: false }] }, "125": { kind: "str", roles: [{ name: "parts", grammarRef: 2, childSlot: 1, spread: true }] }, "133": { kind: "heregex", roles: [{ name: "flags", grammarRef: 3, childSlot: 1, spread: false }, { name: "parts", grammarRef: 2, childSlot: 2, spread: true }] }, "136": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "137": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "138": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "139": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "140": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "141": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "142": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "143": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "144": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }] }, "145": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }] }, "146": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }] }, "147": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }] }, "148": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }] }, "149": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }] }, "150": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "typeParams", grammarRef: 2, childSlot: null, spread: false }] }, "151": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "typeParams", grammarRef: 2, childSlot: null, spread: false }] }, "152": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "typeParams", grammarRef: 2, childSlot: null, spread: false }] }, "153": { kind: "assign", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "154": { kind: "assign", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "155": { kind: "assign", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "156": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: ".=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "157": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "*>" }, { name: "target", grammarRef: 2, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "158": { kind: "assign", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "159": { kind: "assign", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "160": { kind: "assign", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "164": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "165": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "166": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "167": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "168": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "169": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "170": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "171": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "172": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "173": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "174": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "175": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "176": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "177": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "178": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "179": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "180": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "181": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "182": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "183": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "184": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "185": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "186": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "187": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "188": { kind: "gate", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "rhs", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "189": { kind: "gate", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "rhs", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "190": { kind: "gate", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "rhs", grammarRef: 3, childSlot: 2, spread: false }, { name: "key", grammarRef: 5, childSlot: 3, spread: true }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "191": { kind: "gate", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "rhs", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "192": { kind: "gate", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "rhs", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "193": { kind: "gate", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "rhs", grammarRef: 4, childSlot: 2, spread: false }, { name: "key", grammarRef: 6, childSlot: 3, spread: true }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "194": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "195": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "196": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "197": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "198": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "199": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "200": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "201": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "202": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "203": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "204": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "205": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "206": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "207": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "208": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "209": { kind: "effect", roles: [{ name: "target", grammarRef: null, childSlot: 1, literal: null }, { name: "value", grammarRef: 2, childSlot: 2, spread: false }, { name: "operator", grammarRef: 1, childSlot: null, spread: false }] }, "210": { kind: "effect", roles: [{ name: "target", grammarRef: null, childSlot: 1, literal: null }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 1, childSlot: null, spread: false }] }, "211": { kind: "effect", roles: [{ name: "target", grammarRef: null, childSlot: 1, literal: null }, { name: "value", grammarRef: 2, childSlot: 2, spread: false }, { name: "operator", grammarRef: 1, childSlot: null, spread: false }] }, "212": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "213": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "214": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "217": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "218": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "219": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }] }, "220": { kind: "regexindex", roles: [{ name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }, { name: "capture", grammarRef: 5, childSlot: 3, spread: false }] }, "221": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 4, childSlot: 2, spread: false }] }, "222": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }] }, "223": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 4, childSlot: 2, spread: false }] }, "224": { kind: "optindex", roles: [{ name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 4, childSlot: 2, spread: false }] }, "225": { kind: "optindex", roles: [{ name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 5, childSlot: 2, spread: false }] }, "226": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 3, childSlot: 2, spread: true }] }, "227": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 3, childSlot: 2, spread: true }] }, "228": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 4, childSlot: 2, spread: true }] }, "229": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 4, childSlot: 2, spread: true }] }, "230": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "231": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "232": { kind: "unary", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "233": { kind: "unary", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "234": { kind: "unary", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "237": { kind: "call", roles: [{ name: "callee", grammarRef: 1, childSlot: 0, spread: false }, { name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "243": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "244": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "245": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }] }, "246": { kind: "tagged", roles: [{ name: "tag", grammarRef: 1, childSlot: 1, spread: false }, { name: "str", grammarRef: 3, childSlot: 2, spread: false }] }, "249": { kind: "func", roles: [{ name: "kind", grammarRef: 4, childSlot: 0, spread: false }, { name: "params", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 5, childSlot: 2, spread: false }] }, "250": { kind: "func", roles: [{ name: "kind", grammarRef: 5, childSlot: 0, spread: false }, { name: "params", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 6, childSlot: 2, spread: false }, { name: "returnType", grammarRef: 4, childSlot: null, spread: false }] }, "254": { kind: "doiife", roles: [{ name: "func", grammarRef: 2, childSlot: 1, spread: false }] }, "257": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: null, childSlot: 1, literal: "this" }, { name: "property", grammarRef: 2, childSlot: 2, spread: false }] }, "258": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: null, childSlot: 1, literal: "this" }, { name: "property", grammarRef: 2, childSlot: 2, spread: false }] }, "259": { kind: "array", roles: [] }, "260": { kind: "array", roles: [{ name: "elisions", grammarRef: 2, childSlot: 1, spread: true }] }, "261": { kind: "array", roles: [{ name: "items", grammarRef: 2, childSlot: 1, spread: true }, { name: "elisions", grammarRef: 3, childSlot: null, spread: true }] }, "275": { kind: "object", roles: [{ name: "pairs", grammarRef: 2, childSlot: 1, spread: true }] }, "276": { kind: "map", roles: [{ name: "pairs", grammarRef: 3, childSlot: 1, spread: true }] }, "282": { kind: "pair", roles: [{ name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 1, childSlot: 2, spread: false }] }, "284": { kind: "pair", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: ":" }, { name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "285": { kind: "pair", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: ":" }, { name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "286": { kind: "pair", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: ":" }, { name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "287": { kind: "pair", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "288": { kind: "pair", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "289": { kind: "pair", roles: [{ name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "290": { kind: "pair", roles: [{ name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "291": { kind: "splat", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "292": { kind: "splat", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "298": { kind: "super", roles: [{ name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "299": { kind: "dynimport", roles: [{ name: "keyword", grammarRef: 1, childSlot: 0, spread: false }, { name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "300": { kind: "call", roles: [{ name: "callee", grammarRef: 1, childSlot: 0, spread: false }, { name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "301": { kind: "call", roles: [{ name: "callee", grammarRef: 1, childSlot: 0, spread: false }, { name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "302": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "303": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "304": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }] }, "305": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 4, childSlot: 2, spread: false }] }, "306": { kind: "dammit", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }] }, "307": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 3, childSlot: 2, spread: true }] }, "308": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 3, childSlot: 2, spread: true }] }, "309": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 4, childSlot: 2, spread: true }] }, "310": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 4, childSlot: 2, spread: true }] }, "315": { kind: "pickitem", roles: [{ name: "key", grammarRef: 1, childSlot: 0, spread: false }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }] }, "316": { kind: "pickitem", roles: [{ name: "key", grammarRef: 1, childSlot: 0, spread: false }, { name: "target", grammarRef: 3, childSlot: 1, spread: false }] }, "317": { kind: "pickitem", roles: [{ name: "key", grammarRef: 1, childSlot: 0, spread: false }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "default", grammarRef: 3, childSlot: 2, spread: false }] }, "318": { kind: "pickitem", roles: [{ name: "key", grammarRef: 1, childSlot: 0, spread: false }, { name: "target", grammarRef: 3, childSlot: 1, spread: false }, { name: "default", grammarRef: 5, childSlot: 2, spread: false }] }, "326": { kind: "dynamicKey", roles: [{ name: "key", grammarRef: 2, childSlot: 1, spread: false }] }, "327": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: null, childSlot: 1, literal: "this" }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }] }, "330": { kind: "range", roles: [{ name: "operator", grammarRef: 3, childSlot: 0, spread: false }, { name: "from", grammarRef: 2, childSlot: 1, spread: false }, { name: "to", grammarRef: 4, childSlot: 2, spread: false }] }, "331": { kind: "range", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "from", grammarRef: 1, childSlot: 1, spread: false }, { name: "to", grammarRef: 3, childSlot: 2, spread: false }] }, "332": { kind: "range", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "from", grammarRef: 1, childSlot: 1, spread: false }, { name: "to", grammarRef: null, childSlot: 2, literal: null }] }, "333": { kind: "range", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "from", grammarRef: null, childSlot: 1, literal: null }, { name: "to", grammarRef: 2, childSlot: 2, spread: false }] }, "334": { kind: "range", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "from", grammarRef: null, childSlot: 1, literal: null }, { name: "to", grammarRef: null, childSlot: 2, literal: null }] }, "335": { kind: "def", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 3, childSlot: 2, spread: false }, { name: "body", grammarRef: 4, childSlot: 3, spread: false }] }, "336": { kind: "def", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 3, childSlot: 2, spread: false }, { name: "body", grammarRef: 5, childSlot: 3, spread: false }, { name: "returnType", grammarRef: 4, childSlot: null, spread: false }] }, "337": { kind: "def", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 5, childSlot: 3, spread: false }, { name: "typeParams", grammarRef: 3, childSlot: null, spread: false }] }, "338": { kind: "def", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 6, childSlot: 3, spread: false }, { name: "typeParams", grammarRef: 3, childSlot: null, spread: false }, { name: "returnType", grammarRef: 5, childSlot: null, spread: false }] }, "339": { kind: "def", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 5, childSlot: 3, spread: false }, { name: "voidMarker", grammarRef: 3, childSlot: null, spread: false }] }, "340": { kind: "def", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 6, childSlot: 3, spread: false }, { name: "voidMarker", grammarRef: 3, childSlot: null, spread: false }, { name: "returnType", grammarRef: 5, childSlot: null, spread: false }] }, "349": { kind: "default", roles: [{ name: "name", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "350": { kind: "rest", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }] }, "351": { kind: "expansion", roles: [] }, "353": { kind: "typedvar", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "annotation", grammarRef: 2, childSlot: 2, spread: false }] }, "354": { kind: "typedvar", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "annotation", grammarRef: 3, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }] }, "355": { kind: "typedvar", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "annotation", grammarRef: null, childSlot: 2, literal: "" }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }] }, "360": { kind: "splat", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "362": { kind: "class", roles: [{ name: "name", grammarRef: null, childSlot: 1, literal: null }, { name: "parent", grammarRef: null, childSlot: 2, literal: null }] }, "363": { kind: "class", roles: [{ name: "name", grammarRef: null, childSlot: 1, literal: null }, { name: "parent", grammarRef: null, childSlot: 2, literal: null }, { name: "body", grammarRef: 2, childSlot: 3, spread: false }] }, "364": { kind: "class", roles: [{ name: "name", grammarRef: null, childSlot: 1, literal: null }, { name: "parent", grammarRef: 3, childSlot: 2, spread: false }] }, "365": { kind: "class", roles: [{ name: "name", grammarRef: null, childSlot: 1, literal: null }, { name: "parent", grammarRef: 3, childSlot: 2, spread: false }, { name: "body", grammarRef: 4, childSlot: 3, spread: false }] }, "366": { kind: "class", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "parent", grammarRef: null, childSlot: 2, literal: null }] }, "367": { kind: "class", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "parent", grammarRef: null, childSlot: 2, literal: null }, { name: "body", grammarRef: 3, childSlot: 3, spread: false }] }, "368": { kind: "class", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "parent", grammarRef: 4, childSlot: 2, spread: false }] }, "369": { kind: "class", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "parent", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 5, childSlot: 3, spread: false }] }, "370": { kind: "class", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "parent", grammarRef: null, childSlot: 2, literal: null }, { name: "body", grammarRef: 3, childSlot: 3, spread: false }] }, "371": { kind: "class", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "parent", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 5, childSlot: 3, spread: false }] }, "372": { kind: "enum", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 3, childSlot: 2, spread: false }] }, "373": { kind: "schema", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "374": { kind: "component", roles: [{ name: "parent", grammarRef: null, childSlot: 1, literal: null }, { name: "body", grammarRef: 2, childSlot: 2, spread: false }] }, "375": { kind: "component", roles: [{ name: "parent", grammarRef: 3, childSlot: 1, spread: false }, { name: "body", grammarRef: 4, childSlot: 2, spread: false }] }, "376": { kind: "block", roles: [{ name: "statements", grammarRef: 2, childSlot: 1, spread: true }] }, "382": { kind: "offer", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "383": { kind: "accept", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }] }, "384": { kind: "render", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "385": { kind: "render", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "386": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: null, childSlot: 1, literal: "super" }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "387": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: null, childSlot: 1, literal: "super" }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }] }, "388": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: null, childSlot: 1, literal: "super" }, { name: "key", grammarRef: 4, childSlot: 2, spread: false }] }, "389": { kind: "call", roles: [{ name: "callee", grammarRef: 1, childSlot: 0, spread: false }, { name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "390": { kind: "super", roles: [{ name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "391": { kind: "optcall", roles: [{ name: "callee", grammarRef: 1, childSlot: 1, spread: false }, { name: "args", grammarRef: 3, childSlot: 2, spread: true }] }, "392": { kind: "dynimport", roles: [{ name: "keyword", grammarRef: 1, childSlot: 0, spread: false }, { name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "405": { kind: "block", roles: [] }, "406": { kind: "block", roles: [{ name: "statements", grammarRef: 2, childSlot: 1, spread: true }] }, "409": { kind: "return", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "410": { kind: "return", roles: [{ name: "value", grammarRef: 3, childSlot: 1, spread: false }] }, "411": { kind: "return", roles: [] }, "412": { kind: "while", roles: [{ name: "condition", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 3, childSlot: 2, spread: false }] }, "414": { kind: "while", roles: [{ name: "condition", grammarRef: 2, childSlot: 1, spread: false }, { name: "guard", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 5, childSlot: 3, spread: false }] }, "425": { kind: "if", roles: [{ name: "condition", grammarRef: 2, childSlot: 1, spread: false }, { name: "then", grammarRef: 3, childSlot: 2, spread: false }] }, "426": { kind: "if", roles: [{ name: "condition", grammarRef: 2, childSlot: 1, spread: false }, { name: "then", grammarRef: 3, childSlot: 2, spread: false }, { name: "else", grammarRef: 4, childSlot: 3, spread: false }] }, "427": { kind: "if", roles: [{ name: "condition", grammarRef: 3, childSlot: 1, spread: false }, { name: "then", grammarRef: 4, childSlot: 2, spread: false }] }, "428": { kind: "if", roles: [{ name: "condition", grammarRef: 3, childSlot: 1, spread: false }, { name: "then", grammarRef: 4, childSlot: 2, spread: false }, { name: "else", grammarRef: 5, childSlot: 3, spread: false }] }, "438": { kind: "ternary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?:" }, { name: "condition", grammarRef: 3, childSlot: 1, spread: false }, { name: "then", grammarRef: 1, childSlot: 2, spread: false }, { name: "else", grammarRef: 6, childSlot: 3, spread: false }] }, "439": { kind: "ternary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?:" }, { name: "condition", grammarRef: 3, childSlot: 1, spread: false }, { name: "then", grammarRef: 1, childSlot: 2, spread: false }, { name: "else", grammarRef: 5, childSlot: 3, spread: false }] }, "440": { kind: "try", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "441": { kind: "try", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "442": { kind: "try", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }, { name: "handler", grammarRef: 3, childSlot: 2, spread: false }] }, "443": { kind: "try", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }, { name: "handler", grammarRef: 3, childSlot: 2, spread: false }] }, "444": { kind: "try", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }, { name: "finalizer", grammarRef: 4, childSlot: 2, spread: false }] }, "445": { kind: "try", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }, { name: "handler", grammarRef: 3, childSlot: 2, spread: false }, { name: "finalizer", grammarRef: 5, childSlot: 3, spread: false }] }, "446": { kind: "catch", roles: [{ name: "binding", grammarRef: 2, childSlot: 0, spread: false }, { name: "body", grammarRef: 3, childSlot: 1, spread: false }] }, "447": { kind: "catch", roles: [{ name: "binding", grammarRef: 2, childSlot: 0, spread: false }, { name: "body", grammarRef: 3, childSlot: 1, spread: false }] }, "448": { kind: "catch", roles: [{ name: "binding", grammarRef: 2, childSlot: 0, spread: false }, { name: "body", grammarRef: 3, childSlot: 1, spread: false }] }, "449": { kind: "catch", roles: [{ name: "binding", grammarRef: null, childSlot: 0, literal: null }, { name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "450": { kind: "throw", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "451": { kind: "throw", roles: [{ name: "value", grammarRef: 3, childSlot: 1, spread: false }] }, "452": { kind: "switch", roles: [{ name: "subject", grammarRef: 2, childSlot: 1, spread: false }, { name: "cases", grammarRef: 4, childSlot: 2, spread: false }, { name: "default", grammarRef: null, childSlot: 3, literal: null }] }, "453": { kind: "switch", roles: [{ name: "subject", grammarRef: 2, childSlot: 1, spread: false }, { name: "cases", grammarRef: 4, childSlot: 2, spread: false }, { name: "default", grammarRef: 6, childSlot: 3, spread: false }] }, "454": { kind: "switch", roles: [{ name: "subject", grammarRef: null, childSlot: 1, literal: null }, { name: "cases", grammarRef: 3, childSlot: 2, spread: false }, { name: "default", grammarRef: null, childSlot: 3, literal: null }] }, "455": { kind: "switch", roles: [{ name: "subject", grammarRef: null, childSlot: 1, literal: null }, { name: "cases", grammarRef: 3, childSlot: 2, spread: false }, { name: "default", grammarRef: 5, childSlot: 3, spread: false }] }, "458": { kind: "when", roles: [{ name: "conditions", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 3, childSlot: 2, spread: false }] }, "459": { kind: "when", roles: [{ name: "conditions", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 3, childSlot: 2, spread: false }] }, "462": { kind: "forin", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "step", grammarRef: null, childSlot: 3, literal: null }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 5, childSlot: 5, spread: false }] }, "463": { kind: "forin", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "step", grammarRef: null, childSlot: 3, literal: null }, { name: "guard", grammarRef: 6, childSlot: 4, spread: false }, { name: "body", grammarRef: 7, childSlot: 5, spread: false }] }, "464": { kind: "forin", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "step", grammarRef: 6, childSlot: 3, spread: false }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 7, childSlot: 5, spread: false }] }, "465": { kind: "forin", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "step", grammarRef: 8, childSlot: 3, spread: false }, { name: "guard", grammarRef: 6, childSlot: 4, spread: false }, { name: "body", grammarRef: 9, childSlot: 5, spread: false }] }, "466": { kind: "forin", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "step", grammarRef: 6, childSlot: 3, spread: false }, { name: "guard", grammarRef: 8, childSlot: 4, spread: false }, { name: "body", grammarRef: 9, childSlot: 5, spread: false }] }, "467": { kind: "forof", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "object", grammarRef: 4, childSlot: 2, spread: false }, { name: "own", grammarRef: null, childSlot: 3, literal: false }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 5, childSlot: 5, spread: false }] }, "468": { kind: "forof", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "object", grammarRef: 4, childSlot: 2, spread: false }, { name: "own", grammarRef: null, childSlot: 3, literal: false }, { name: "guard", grammarRef: 6, childSlot: 4, spread: false }, { name: "body", grammarRef: 7, childSlot: 5, spread: false }] }, "469": { kind: "forof", roles: [{ name: "vars", grammarRef: 3, childSlot: 1, spread: false }, { name: "object", grammarRef: 5, childSlot: 2, spread: false }, { name: "own", grammarRef: null, childSlot: 3, literal: true }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 6, childSlot: 5, spread: false }] }, "470": { kind: "forof", roles: [{ name: "vars", grammarRef: 3, childSlot: 1, spread: false }, { name: "object", grammarRef: 5, childSlot: 2, spread: false }, { name: "own", grammarRef: null, childSlot: 3, literal: true }, { name: "guard", grammarRef: 7, childSlot: 4, spread: false }, { name: "body", grammarRef: 8, childSlot: 5, spread: false }] }, "471": { kind: "foras", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "await", grammarRef: null, childSlot: 3, literal: false }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 5, childSlot: 5, spread: false }] }, "472": { kind: "foras", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "await", grammarRef: null, childSlot: 3, literal: false }, { name: "guard", grammarRef: 6, childSlot: 4, spread: false }, { name: "body", grammarRef: 7, childSlot: 5, spread: false }] }, "473": { kind: "foras", roles: [{ name: "vars", grammarRef: 3, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 5, childSlot: 2, spread: false }, { name: "await", grammarRef: null, childSlot: 3, literal: true }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 6, childSlot: 5, spread: false }] }, "474": { kind: "foras", roles: [{ name: "vars", grammarRef: 3, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 5, childSlot: 2, spread: false }, { name: "await", grammarRef: null, childSlot: 3, literal: true }, { name: "guard", grammarRef: 7, childSlot: 4, spread: false }, { name: "body", grammarRef: 8, childSlot: 5, spread: false }] }, "475": { kind: "foras", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "await", grammarRef: null, childSlot: 3, literal: true }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 5, childSlot: 5, spread: false }] }, "476": { kind: "foras", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "await", grammarRef: null, childSlot: 3, literal: true }, { name: "guard", grammarRef: 6, childSlot: 4, spread: false }, { name: "body", grammarRef: 7, childSlot: 5, spread: false }] }, "479": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "480": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "481": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "482": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "483": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "484": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "485": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "486": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "487": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "488": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "489": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "490": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "491": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "492": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "493": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "497": { kind: "loop", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "498": { kind: "loop", roles: [{ name: "count", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 3, childSlot: 2, spread: false }] }, "499": { kind: "update", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "--" }, { name: "target", grammarRef: 2, childSlot: 1, spread: false }, { name: "prefix", grammarRef: null, childSlot: 2, literal: false }] }, "500": { kind: "update", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "++" }, { name: "target", grammarRef: 2, childSlot: 1, spread: false }, { name: "prefix", grammarRef: null, childSlot: 2, literal: false }] }, "501": { kind: "update", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "--" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "prefix", grammarRef: null, childSlot: 2, literal: true }] }, "502": { kind: "update", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "++" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "prefix", grammarRef: null, childSlot: 2, literal: true }] }, "503": { kind: "existence", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?" }, { name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "504": { kind: "presence", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "505": { kind: "cast", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }, { name: "annotation", grammarRef: 2, childSlot: 2, spread: false }] }, "506": { kind: "ternary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?:" }, { name: "condition", grammarRef: 1, childSlot: 1, spread: false }, { name: "then", grammarRef: 3, childSlot: 2, spread: false }, { name: "else", grammarRef: 5, childSlot: 3, spread: false }] }, "507": { kind: "unary", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "508": { kind: "doiife", roles: [{ name: "func", grammarRef: 2, childSlot: 1, spread: false }] }, "509": { kind: "unary", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "510": { kind: "await", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "511": { kind: "await", roles: [{ name: "value", grammarRef: 3, childSlot: 1, spread: false }] }, "512": { kind: "yield", roles: [] }, "513": { kind: "yield", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "514": { kind: "yield", roles: [{ name: "value", grammarRef: 3, childSlot: 1, spread: false }] }, "515": { kind: "yieldfrom", roles: [{ name: "value", grammarRef: 3, childSlot: 1, spread: false }] }, "516": { kind: "unary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "-" }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "517": { kind: "unary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "+" }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "518": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "**" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "519": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "+" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "520": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "-" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "521": { kind: "binary", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "522": { kind: "binary", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "523": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "&" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "524": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "^" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "525": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "|" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "526": { kind: "binary", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "527": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=~" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "528": { kind: "relation", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "529": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "&&" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "530": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "||" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "531": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "??" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "532": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "&&" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "533": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "||" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "534": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "??" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] } },
+  semantics: { "1": { kind: "program", roles: [] }, "2": { kind: "program", roles: [{ name: "body", grammarRef: 1, childSlot: 1, spread: true }] }, "14": { kind: "typedecl", roles: [{ name: "declaration", grammarRef: 1, childSlot: 1, spread: false }] }, "15": { kind: "typedvar", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "annotation", grammarRef: 2, childSlot: 2, spread: false }] }, "16": { kind: "typedvar", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "annotation", grammarRef: 3, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }] }, "17": { kind: "defsig", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 3, childSlot: 2, spread: false }, { name: "returnType", grammarRef: 4, childSlot: 3, spread: false }] }, "18": { kind: "import", roles: [{ name: "spec", grammarRef: null, childSlot: 1, literal: "{}" }, { name: "source", grammarRef: 2, childSlot: 2, spread: false }] }, "19": { kind: "import", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }, { name: "source", grammarRef: 4, childSlot: 2, spread: false }] }, "20": { kind: "import", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }, { name: "source", grammarRef: 4, childSlot: 2, spread: false }] }, "21": { kind: "import", roles: [{ name: "spec", grammarRef: null, childSlot: 1, literal: "{}" }, { name: "source", grammarRef: 5, childSlot: 2, spread: false }] }, "22": { kind: "import", roles: [{ name: "spec", grammarRef: 3, childSlot: 1, spread: false }, { name: "source", grammarRef: 7, childSlot: 2, spread: false }] }, "23": { kind: "import", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }, { name: "extra", grammarRef: 4, childSlot: 2, spread: false }, { name: "source", grammarRef: 6, childSlot: 3, spread: false }] }, "24": { kind: "import", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }, { name: "extra", grammarRef: 5, childSlot: 2, spread: false }, { name: "source", grammarRef: 9, childSlot: 3, spread: false }] }, "31": { kind: "as", roles: [{ name: "name", grammarRef: 1, childSlot: 0, spread: false }, { name: "alias", grammarRef: 3, childSlot: 1, spread: false }] }, "33": { kind: "as", roles: [{ name: "name", grammarRef: 1, childSlot: 0, spread: false }, { name: "alias", grammarRef: 3, childSlot: 1, spread: false }] }, "35": { kind: "as", roles: [{ name: "name", grammarRef: null, childSlot: 0, literal: "*" }, { name: "alias", grammarRef: 3, childSlot: 1, spread: false }] }, "36": { kind: "export", roles: [{ name: "spec", grammarRef: null, childSlot: 1, literal: "{}" }] }, "37": { kind: "export", roles: [{ name: "spec", grammarRef: 3, childSlot: 1, spread: false }] }, "38": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "39": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "40": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "41": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "42": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "43": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "44": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "45": { kind: "export", roles: [{ name: "spec", grammarRef: 2, childSlot: 1, spread: false }] }, "46": { kind: "export", roles: [{ name: "spec", grammarRef: 3, childSlot: 1, spread: false }] }, "47": { kind: "export", roles: [{ name: "spec", grammarRef: 4, childSlot: 1, spread: false }] }, "48": { kind: "export", roles: [{ name: "source", grammarRef: 4, childSlot: 1, spread: false }] }, "49": { kind: "export", roles: [{ name: "spec", grammarRef: null, childSlot: 1, literal: "{}" }, { name: "source", grammarRef: 5, childSlot: 2, spread: false }] }, "50": { kind: "export", roles: [{ name: "spec", grammarRef: 3, childSlot: 1, spread: false }, { name: "source", grammarRef: 7, childSlot: 2, spread: false }] }, "51": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "52": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "53": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "54": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "55": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "56": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "57": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "typeParams", grammarRef: 2, childSlot: null, spread: false }] }, "58": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "typeParams", grammarRef: 2, childSlot: null, spread: false }] }, "59": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "typeParams", grammarRef: 2, childSlot: null, spread: false }] }, "60": { kind: "assign", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "61": { kind: "assign", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "62": { kind: "assign", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "63": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "64": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "65": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "66": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "67": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "68": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "69": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "70": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "71": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "72": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "73": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "74": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "81": { kind: "as", roles: [{ name: "name", grammarRef: 1, childSlot: 0, spread: false }, { name: "alias", grammarRef: 3, childSlot: 1, spread: false }] }, "82": { kind: "as", roles: [{ name: "name", grammarRef: 1, childSlot: 0, spread: false }, { name: "alias", grammarRef: 3, childSlot: 1, spread: false }] }, "84": { kind: "as", roles: [{ name: "name", grammarRef: 1, childSlot: 0, spread: false }, { name: "alias", grammarRef: 3, childSlot: 1, spread: false }] }, "113": { kind: "dammit", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }] }, "115": { kind: "tagged", roles: [{ name: "tag", grammarRef: 1, childSlot: 1, spread: false }, { name: "str", grammarRef: 3, childSlot: 2, spread: false }] }, "123": { kind: "symbol", roles: [{ name: "name", grammarRef: 1, childSlot: 1, spread: false }] }, "125": { kind: "str", roles: [{ name: "parts", grammarRef: 2, childSlot: 1, spread: true }] }, "133": { kind: "heregex", roles: [{ name: "flags", grammarRef: 3, childSlot: 1, spread: false }, { name: "parts", grammarRef: 2, childSlot: 2, spread: true }] }, "136": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "137": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "138": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "139": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "140": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "141": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "142": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "143": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }] }, "144": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }] }, "145": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }] }, "146": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }] }, "147": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }] }, "148": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }] }, "149": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }] }, "150": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "typeParams", grammarRef: 2, childSlot: null, spread: false }] }, "151": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "typeParams", grammarRef: 2, childSlot: null, spread: false }] }, "152": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "typeParams", grammarRef: 2, childSlot: null, spread: false }] }, "153": { kind: "assign", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "154": { kind: "assign", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "155": { kind: "assign", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "156": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: ".=" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "157": { kind: "assign", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "*>" }, { name: "target", grammarRef: 2, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "158": { kind: "assign", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "159": { kind: "assign", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "160": { kind: "assign", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "164": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "165": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "166": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "167": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "168": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "169": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "170": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "171": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "172": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "173": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "174": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "175": { kind: "state", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "176": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "177": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "178": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "179": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "180": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "181": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "182": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "183": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "184": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "185": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "186": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "187": { kind: "computed", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "188": { kind: "gate", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "rhs", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "189": { kind: "gate", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "rhs", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "190": { kind: "gate", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "rhs", grammarRef: 3, childSlot: 2, spread: false }, { name: "key", grammarRef: 5, childSlot: 3, spread: true }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "191": { kind: "gate", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "rhs", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "192": { kind: "gate", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "rhs", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "193": { kind: "gate", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "rhs", grammarRef: 4, childSlot: 2, spread: false }, { name: "key", grammarRef: 6, childSlot: 3, spread: true }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "194": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "195": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "196": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "197": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "198": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "199": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "200": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "201": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "202": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 6, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "annotation", grammarRef: 3, childSlot: null, spread: false }, { name: "operator", grammarRef: 4, childSlot: null, spread: false }] }, "203": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "204": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "205": { kind: "readonly", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "206": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "207": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "208": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 2, childSlot: null, spread: false }] }, "209": { kind: "effect", roles: [{ name: "target", grammarRef: null, childSlot: 1, literal: null }, { name: "value", grammarRef: 2, childSlot: 2, spread: false }, { name: "operator", grammarRef: 1, childSlot: null, spread: false }] }, "210": { kind: "effect", roles: [{ name: "target", grammarRef: null, childSlot: 1, literal: null }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }, { name: "operator", grammarRef: 1, childSlot: null, spread: false }] }, "211": { kind: "effect", roles: [{ name: "target", grammarRef: null, childSlot: 1, literal: null }, { name: "value", grammarRef: 2, childSlot: 2, spread: false }, { name: "operator", grammarRef: 1, childSlot: null, spread: false }] }, "212": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "213": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "214": { kind: "effect", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "annotation", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "217": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "218": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "219": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }] }, "220": { kind: "regexindex", roles: [{ name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }, { name: "capture", grammarRef: 5, childSlot: 3, spread: false }] }, "221": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 4, childSlot: 2, spread: false }] }, "222": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }] }, "223": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 4, childSlot: 2, spread: false }] }, "224": { kind: "optindex", roles: [{ name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 4, childSlot: 2, spread: false }] }, "225": { kind: "optindex", roles: [{ name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 5, childSlot: 2, spread: false }] }, "226": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 3, childSlot: 2, spread: true }] }, "227": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 3, childSlot: 2, spread: true }] }, "228": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 4, childSlot: 2, spread: true }] }, "229": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 4, childSlot: 2, spread: true }] }, "230": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "231": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "232": { kind: "unary", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "233": { kind: "unary", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "234": { kind: "unary", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "237": { kind: "call", roles: [{ name: "callee", grammarRef: 1, childSlot: 0, spread: false }, { name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "243": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "244": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "245": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }] }, "246": { kind: "tagged", roles: [{ name: "tag", grammarRef: 1, childSlot: 1, spread: false }, { name: "str", grammarRef: 3, childSlot: 2, spread: false }] }, "249": { kind: "func", roles: [{ name: "kind", grammarRef: 4, childSlot: 0, spread: false }, { name: "params", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 5, childSlot: 2, spread: false }] }, "250": { kind: "func", roles: [{ name: "kind", grammarRef: 5, childSlot: 0, spread: false }, { name: "params", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 6, childSlot: 2, spread: false }, { name: "returnType", grammarRef: 4, childSlot: null, spread: false }] }, "254": { kind: "doiife", roles: [{ name: "func", grammarRef: 2, childSlot: 1, spread: false }] }, "257": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "property", grammarRef: 2, childSlot: 2, spread: false }] }, "258": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "property", grammarRef: 2, childSlot: 2, spread: false }] }, "259": { kind: "array", roles: [] }, "260": { kind: "array", roles: [{ name: "elisions", grammarRef: 2, childSlot: 1, spread: true }] }, "261": { kind: "array", roles: [{ name: "items", grammarRef: 2, childSlot: 1, spread: true }, { name: "elisions", grammarRef: 3, childSlot: null, spread: true }] }, "275": { kind: "object", roles: [{ name: "pairs", grammarRef: 2, childSlot: 1, spread: true }] }, "276": { kind: "map", roles: [{ name: "pairs", grammarRef: 3, childSlot: 1, spread: true }] }, "282": { kind: "pair", roles: [{ name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 1, childSlot: 2, spread: false }] }, "284": { kind: "pair", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: ":" }, { name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "285": { kind: "pair", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: ":" }, { name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "286": { kind: "pair", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: ":" }, { name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "287": { kind: "pair", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "288": { kind: "pair", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=" }, { name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }] }, "289": { kind: "pair", roles: [{ name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 4, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "290": { kind: "pair", roles: [{ name: "key", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 5, childSlot: 2, spread: false }, { name: "voidMarker", grammarRef: 2, childSlot: null, spread: false }, { name: "operator", grammarRef: 3, childSlot: null, spread: false }] }, "291": { kind: "splat", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "292": { kind: "splat", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "298": { kind: "super", roles: [{ name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "299": { kind: "dynimport", roles: [{ name: "keyword", grammarRef: 1, childSlot: 0, spread: false }, { name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "300": { kind: "call", roles: [{ name: "callee", grammarRef: 1, childSlot: 0, spread: false }, { name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "301": { kind: "call", roles: [{ name: "callee", grammarRef: 1, childSlot: 0, spread: false }, { name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "302": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "303": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?." }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "304": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }] }, "305": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: 1, childSlot: 1, spread: false }, { name: "key", grammarRef: 4, childSlot: 2, spread: false }] }, "306": { kind: "dammit", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }] }, "307": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 3, childSlot: 2, spread: true }] }, "308": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 3, childSlot: 2, spread: true }] }, "309": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 4, childSlot: 2, spread: true }] }, "310": { kind: "pick", roles: [{ name: "source", grammarRef: 1, childSlot: 1, spread: false }, { name: "items", grammarRef: 4, childSlot: 2, spread: true }] }, "315": { kind: "pickitem", roles: [{ name: "key", grammarRef: 1, childSlot: 0, spread: false }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }] }, "316": { kind: "pickitem", roles: [{ name: "key", grammarRef: 1, childSlot: 0, spread: false }, { name: "target", grammarRef: 3, childSlot: 1, spread: false }] }, "317": { kind: "pickitem", roles: [{ name: "key", grammarRef: 1, childSlot: 0, spread: false }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "default", grammarRef: 3, childSlot: 2, spread: false }] }, "318": { kind: "pickitem", roles: [{ name: "key", grammarRef: 1, childSlot: 0, spread: false }, { name: "target", grammarRef: 3, childSlot: 1, spread: false }, { name: "default", grammarRef: 5, childSlot: 2, spread: false }] }, "326": { kind: "dynamicKey", roles: [{ name: "key", grammarRef: 2, childSlot: 1, spread: false }] }, "327": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: null, childSlot: 1, literal: "this" }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }] }, "330": { kind: "range", roles: [{ name: "operator", grammarRef: 3, childSlot: 0, spread: false }, { name: "from", grammarRef: 2, childSlot: 1, spread: false }, { name: "to", grammarRef: 4, childSlot: 2, spread: false }] }, "331": { kind: "range", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "from", grammarRef: 1, childSlot: 1, spread: false }, { name: "to", grammarRef: 3, childSlot: 2, spread: false }] }, "332": { kind: "range", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "from", grammarRef: 1, childSlot: 1, spread: false }, { name: "to", grammarRef: null, childSlot: 2, literal: null }] }, "333": { kind: "range", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "from", grammarRef: null, childSlot: 1, literal: null }, { name: "to", grammarRef: 2, childSlot: 2, spread: false }] }, "334": { kind: "range", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "from", grammarRef: null, childSlot: 1, literal: null }, { name: "to", grammarRef: null, childSlot: 2, literal: null }] }, "335": { kind: "def", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 3, childSlot: 2, spread: false }, { name: "body", grammarRef: 4, childSlot: 3, spread: false }] }, "336": { kind: "def", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 3, childSlot: 2, spread: false }, { name: "body", grammarRef: 5, childSlot: 3, spread: false }, { name: "returnType", grammarRef: 4, childSlot: null, spread: false }] }, "337": { kind: "def", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 5, childSlot: 3, spread: false }, { name: "typeParams", grammarRef: 3, childSlot: null, spread: false }] }, "338": { kind: "def", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 6, childSlot: 3, spread: false }, { name: "typeParams", grammarRef: 3, childSlot: null, spread: false }, { name: "returnType", grammarRef: 5, childSlot: null, spread: false }] }, "339": { kind: "def", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 5, childSlot: 3, spread: false }, { name: "voidMarker", grammarRef: 3, childSlot: null, spread: false }] }, "340": { kind: "def", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "params", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 6, childSlot: 3, spread: false }, { name: "voidMarker", grammarRef: 3, childSlot: null, spread: false }, { name: "returnType", grammarRef: 5, childSlot: null, spread: false }] }, "349": { kind: "default", roles: [{ name: "name", grammarRef: 1, childSlot: 1, spread: false }, { name: "value", grammarRef: 3, childSlot: 2, spread: false }] }, "350": { kind: "rest", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }] }, "351": { kind: "expansion", roles: [] }, "353": { kind: "typedvar", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "annotation", grammarRef: 2, childSlot: 2, spread: false }] }, "354": { kind: "typedvar", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "annotation", grammarRef: 3, childSlot: 2, spread: false }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }] }, "355": { kind: "typedvar", roles: [{ name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "annotation", grammarRef: null, childSlot: 2, literal: "" }, { name: "optionalMarker", grammarRef: 2, childSlot: null, spread: false }] }, "360": { kind: "splat", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "362": { kind: "class", roles: [{ name: "name", grammarRef: null, childSlot: 1, literal: null }, { name: "parent", grammarRef: null, childSlot: 2, literal: null }] }, "363": { kind: "class", roles: [{ name: "name", grammarRef: null, childSlot: 1, literal: null }, { name: "parent", grammarRef: null, childSlot: 2, literal: null }, { name: "body", grammarRef: 2, childSlot: 3, spread: false }] }, "364": { kind: "class", roles: [{ name: "name", grammarRef: null, childSlot: 1, literal: null }, { name: "parent", grammarRef: 3, childSlot: 2, spread: false }] }, "365": { kind: "class", roles: [{ name: "name", grammarRef: null, childSlot: 1, literal: null }, { name: "parent", grammarRef: 3, childSlot: 2, spread: false }, { name: "body", grammarRef: 4, childSlot: 3, spread: false }] }, "366": { kind: "class", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "parent", grammarRef: null, childSlot: 2, literal: null }] }, "367": { kind: "class", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "parent", grammarRef: null, childSlot: 2, literal: null }, { name: "body", grammarRef: 3, childSlot: 3, spread: false }] }, "368": { kind: "class", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "parent", grammarRef: 4, childSlot: 2, spread: false }] }, "369": { kind: "class", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "parent", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 5, childSlot: 3, spread: false }] }, "370": { kind: "class", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "parent", grammarRef: null, childSlot: 2, literal: null }, { name: "body", grammarRef: 3, childSlot: 3, spread: false }] }, "371": { kind: "class", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "parent", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 5, childSlot: 3, spread: false }] }, "372": { kind: "enum", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 3, childSlot: 2, spread: false }] }, "373": { kind: "schema", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "374": { kind: "component", roles: [{ name: "parent", grammarRef: null, childSlot: 1, literal: null }, { name: "body", grammarRef: 2, childSlot: 2, spread: false }] }, "375": { kind: "component", roles: [{ name: "parent", grammarRef: 3, childSlot: 1, spread: false }, { name: "body", grammarRef: 4, childSlot: 2, spread: false }] }, "376": { kind: "block", roles: [{ name: "statements", grammarRef: 2, childSlot: 1, spread: true }] }, "382": { kind: "offer", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "383": { kind: "accept", roles: [{ name: "name", grammarRef: 2, childSlot: 1, spread: false }] }, "384": { kind: "render", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "385": { kind: "render", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "386": { kind: "member", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "." }, { name: "object", grammarRef: null, childSlot: 1, literal: "super" }, { name: "property", grammarRef: 3, childSlot: 2, spread: false }] }, "387": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: null, childSlot: 1, literal: "super" }, { name: "key", grammarRef: 3, childSlot: 2, spread: false }] }, "388": { kind: "index", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "[]" }, { name: "object", grammarRef: null, childSlot: 1, literal: "super" }, { name: "key", grammarRef: 4, childSlot: 2, spread: false }] }, "389": { kind: "call", roles: [{ name: "callee", grammarRef: 1, childSlot: 0, spread: false }, { name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "390": { kind: "super", roles: [{ name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "391": { kind: "optcall", roles: [{ name: "callee", grammarRef: 1, childSlot: 1, spread: false }, { name: "args", grammarRef: 3, childSlot: 2, spread: true }] }, "392": { kind: "dynimport", roles: [{ name: "keyword", grammarRef: 1, childSlot: 0, spread: false }, { name: "args", grammarRef: 2, childSlot: 1, spread: true }] }, "405": { kind: "block", roles: [] }, "406": { kind: "block", roles: [{ name: "statements", grammarRef: 2, childSlot: 1, spread: true }] }, "409": { kind: "return", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "410": { kind: "return", roles: [{ name: "value", grammarRef: 3, childSlot: 1, spread: false }] }, "411": { kind: "return", roles: [] }, "412": { kind: "while", roles: [{ name: "condition", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 3, childSlot: 2, spread: false }] }, "414": { kind: "while", roles: [{ name: "condition", grammarRef: 2, childSlot: 1, spread: false }, { name: "guard", grammarRef: 4, childSlot: 2, spread: false }, { name: "body", grammarRef: 5, childSlot: 3, spread: false }] }, "425": { kind: "if", roles: [{ name: "condition", grammarRef: 2, childSlot: 1, spread: false }, { name: "then", grammarRef: 3, childSlot: 2, spread: false }] }, "426": { kind: "if", roles: [{ name: "condition", grammarRef: 2, childSlot: 1, spread: false }, { name: "then", grammarRef: 3, childSlot: 2, spread: false }, { name: "else", grammarRef: 4, childSlot: 3, spread: false }] }, "427": { kind: "if", roles: [{ name: "condition", grammarRef: 3, childSlot: 1, spread: false }, { name: "then", grammarRef: 4, childSlot: 2, spread: false }] }, "428": { kind: "if", roles: [{ name: "condition", grammarRef: 3, childSlot: 1, spread: false }, { name: "then", grammarRef: 4, childSlot: 2, spread: false }, { name: "else", grammarRef: 5, childSlot: 3, spread: false }] }, "438": { kind: "ternary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?:" }, { name: "condition", grammarRef: 3, childSlot: 1, spread: false }, { name: "then", grammarRef: 1, childSlot: 2, spread: false }, { name: "else", grammarRef: 6, childSlot: 3, spread: false }] }, "439": { kind: "ternary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?:" }, { name: "condition", grammarRef: 3, childSlot: 1, spread: false }, { name: "then", grammarRef: 1, childSlot: 2, spread: false }, { name: "else", grammarRef: 5, childSlot: 3, spread: false }] }, "440": { kind: "try", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "441": { kind: "try", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "442": { kind: "try", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }, { name: "handler", grammarRef: 3, childSlot: 2, spread: false }] }, "443": { kind: "try", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }, { name: "handler", grammarRef: 3, childSlot: 2, spread: false }] }, "444": { kind: "try", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }, { name: "finalizer", grammarRef: 4, childSlot: 2, spread: false }] }, "445": { kind: "try", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }, { name: "handler", grammarRef: 3, childSlot: 2, spread: false }, { name: "finalizer", grammarRef: 5, childSlot: 3, spread: false }] }, "446": { kind: "catch", roles: [{ name: "binding", grammarRef: 2, childSlot: 0, spread: false }, { name: "body", grammarRef: 3, childSlot: 1, spread: false }] }, "447": { kind: "catch", roles: [{ name: "binding", grammarRef: 2, childSlot: 0, spread: false }, { name: "body", grammarRef: 3, childSlot: 1, spread: false }] }, "448": { kind: "catch", roles: [{ name: "binding", grammarRef: 2, childSlot: 0, spread: false }, { name: "body", grammarRef: 3, childSlot: 1, spread: false }] }, "449": { kind: "catch", roles: [{ name: "binding", grammarRef: null, childSlot: 0, literal: null }, { name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "450": { kind: "throw", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "451": { kind: "throw", roles: [{ name: "value", grammarRef: 3, childSlot: 1, spread: false }] }, "452": { kind: "switch", roles: [{ name: "subject", grammarRef: 2, childSlot: 1, spread: false }, { name: "cases", grammarRef: 4, childSlot: 2, spread: false }, { name: "default", grammarRef: null, childSlot: 3, literal: null }] }, "453": { kind: "switch", roles: [{ name: "subject", grammarRef: 2, childSlot: 1, spread: false }, { name: "cases", grammarRef: 4, childSlot: 2, spread: false }, { name: "default", grammarRef: 6, childSlot: 3, spread: false }] }, "454": { kind: "switch", roles: [{ name: "subject", grammarRef: null, childSlot: 1, literal: null }, { name: "cases", grammarRef: 3, childSlot: 2, spread: false }, { name: "default", grammarRef: null, childSlot: 3, literal: null }] }, "455": { kind: "switch", roles: [{ name: "subject", grammarRef: null, childSlot: 1, literal: null }, { name: "cases", grammarRef: 3, childSlot: 2, spread: false }, { name: "default", grammarRef: 5, childSlot: 3, spread: false }] }, "458": { kind: "when", roles: [{ name: "conditions", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 3, childSlot: 2, spread: false }] }, "459": { kind: "when", roles: [{ name: "conditions", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 3, childSlot: 2, spread: false }] }, "462": { kind: "forin", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "step", grammarRef: null, childSlot: 3, literal: null }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 5, childSlot: 5, spread: false }] }, "463": { kind: "forin", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "step", grammarRef: null, childSlot: 3, literal: null }, { name: "guard", grammarRef: 6, childSlot: 4, spread: false }, { name: "body", grammarRef: 7, childSlot: 5, spread: false }] }, "464": { kind: "forin", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "step", grammarRef: 6, childSlot: 3, spread: false }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 7, childSlot: 5, spread: false }] }, "465": { kind: "forin", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "step", grammarRef: 8, childSlot: 3, spread: false }, { name: "guard", grammarRef: 6, childSlot: 4, spread: false }, { name: "body", grammarRef: 9, childSlot: 5, spread: false }] }, "466": { kind: "forin", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "step", grammarRef: 6, childSlot: 3, spread: false }, { name: "guard", grammarRef: 8, childSlot: 4, spread: false }, { name: "body", grammarRef: 9, childSlot: 5, spread: false }] }, "467": { kind: "forof", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "object", grammarRef: 4, childSlot: 2, spread: false }, { name: "own", grammarRef: null, childSlot: 3, literal: false }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 5, childSlot: 5, spread: false }] }, "468": { kind: "forof", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "object", grammarRef: 4, childSlot: 2, spread: false }, { name: "own", grammarRef: null, childSlot: 3, literal: false }, { name: "guard", grammarRef: 6, childSlot: 4, spread: false }, { name: "body", grammarRef: 7, childSlot: 5, spread: false }] }, "469": { kind: "forof", roles: [{ name: "vars", grammarRef: 3, childSlot: 1, spread: false }, { name: "object", grammarRef: 5, childSlot: 2, spread: false }, { name: "own", grammarRef: null, childSlot: 3, literal: true }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 6, childSlot: 5, spread: false }] }, "470": { kind: "forof", roles: [{ name: "vars", grammarRef: 3, childSlot: 1, spread: false }, { name: "object", grammarRef: 5, childSlot: 2, spread: false }, { name: "own", grammarRef: null, childSlot: 3, literal: true }, { name: "guard", grammarRef: 7, childSlot: 4, spread: false }, { name: "body", grammarRef: 8, childSlot: 5, spread: false }] }, "471": { kind: "foras", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "await", grammarRef: null, childSlot: 3, literal: false }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 5, childSlot: 5, spread: false }] }, "472": { kind: "foras", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "await", grammarRef: null, childSlot: 3, literal: false }, { name: "guard", grammarRef: 6, childSlot: 4, spread: false }, { name: "body", grammarRef: 7, childSlot: 5, spread: false }] }, "473": { kind: "foras", roles: [{ name: "vars", grammarRef: 3, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 5, childSlot: 2, spread: false }, { name: "await", grammarRef: null, childSlot: 3, literal: true }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 6, childSlot: 5, spread: false }] }, "474": { kind: "foras", roles: [{ name: "vars", grammarRef: 3, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 5, childSlot: 2, spread: false }, { name: "await", grammarRef: null, childSlot: 3, literal: true }, { name: "guard", grammarRef: 7, childSlot: 4, spread: false }, { name: "body", grammarRef: 8, childSlot: 5, spread: false }] }, "475": { kind: "foras", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "await", grammarRef: null, childSlot: 3, literal: true }, { name: "guard", grammarRef: null, childSlot: 4, literal: null }, { name: "body", grammarRef: 5, childSlot: 5, spread: false }] }, "476": { kind: "foras", roles: [{ name: "vars", grammarRef: 2, childSlot: 1, spread: false }, { name: "iterable", grammarRef: 4, childSlot: 2, spread: false }, { name: "await", grammarRef: null, childSlot: 3, literal: true }, { name: "guard", grammarRef: 6, childSlot: 4, spread: false }, { name: "body", grammarRef: 7, childSlot: 5, spread: false }] }, "479": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "480": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "481": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "482": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "483": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "484": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "485": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "486": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "487": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "488": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "489": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "490": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "491": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "492": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "493": { kind: "comprehension", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "497": { kind: "loop", roles: [{ name: "body", grammarRef: 2, childSlot: 1, spread: false }] }, "498": { kind: "loop", roles: [{ name: "count", grammarRef: 2, childSlot: 1, spread: false }, { name: "body", grammarRef: 3, childSlot: 2, spread: false }] }, "499": { kind: "update", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "--" }, { name: "target", grammarRef: 2, childSlot: 1, spread: false }, { name: "prefix", grammarRef: null, childSlot: 2, literal: false }] }, "500": { kind: "update", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "++" }, { name: "target", grammarRef: 2, childSlot: 1, spread: false }, { name: "prefix", grammarRef: null, childSlot: 2, literal: false }] }, "501": { kind: "update", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "--" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "prefix", grammarRef: null, childSlot: 2, literal: true }] }, "502": { kind: "update", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "++" }, { name: "target", grammarRef: 1, childSlot: 1, spread: false }, { name: "prefix", grammarRef: null, childSlot: 2, literal: true }] }, "503": { kind: "existence", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?" }, { name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "504": { kind: "presence", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }] }, "505": { kind: "cast", roles: [{ name: "value", grammarRef: 1, childSlot: 1, spread: false }, { name: "annotation", grammarRef: 2, childSlot: 2, spread: false }] }, "506": { kind: "ternary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "?:" }, { name: "condition", grammarRef: 1, childSlot: 1, spread: false }, { name: "then", grammarRef: 3, childSlot: 2, spread: false }, { name: "else", grammarRef: 5, childSlot: 3, spread: false }] }, "507": { kind: "unary", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "508": { kind: "doiife", roles: [{ name: "func", grammarRef: 2, childSlot: 1, spread: false }] }, "509": { kind: "unary", roles: [{ name: "operator", grammarRef: 1, childSlot: 0, spread: false }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "510": { kind: "await", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "511": { kind: "await", roles: [{ name: "value", grammarRef: 3, childSlot: 1, spread: false }] }, "512": { kind: "yield", roles: [] }, "513": { kind: "yield", roles: [{ name: "value", grammarRef: 2, childSlot: 1, spread: false }] }, "514": { kind: "yield", roles: [{ name: "value", grammarRef: 3, childSlot: 1, spread: false }] }, "515": { kind: "yieldfrom", roles: [{ name: "value", grammarRef: 3, childSlot: 1, spread: false }] }, "516": { kind: "unary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "-" }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "517": { kind: "unary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "+" }, { name: "operand", grammarRef: 2, childSlot: 1, spread: false }] }, "518": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "**" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "519": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "+" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "520": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "-" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "521": { kind: "binary", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "522": { kind: "binary", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "523": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "&" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "524": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "^" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "525": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "|" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "526": { kind: "binary", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "527": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "=~" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "528": { kind: "relation", roles: [{ name: "operator", grammarRef: 2, childSlot: 0, spread: false }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "529": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "&&" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "530": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "||" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "531": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "??" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "532": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "&&" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "533": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "||" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] }, "534": { kind: "binary", roles: [{ name: "operator", grammarRef: null, childSlot: 0, literal: "??" }, { name: "left", grammarRef: 1, childSlot: 1, spread: false }, { name: "right", grammarRef: 3, childSlot: 2, spread: false }] } },
   primitiveRefs: { "1": [], "2": [1], "3": [1], "4": [1, 3], "5": [1], "6": [1], "7": [1], "8": [1], "9": [1], "10": [1], "11": [1], "12": [1], "13": [1], "14": [1], "15": [1, 2], "16": [1, 3], "17": [2, 3, 4], "18": [2], "19": [2, 4], "20": [2, 4], "21": [5], "22": [3, 7], "23": [2, 4, 6], "24": [2, 5, 9], "25": [1], "26": [1, 3], "27": [1, 4], "28": [2], "29": [1, 4], "30": [1], "31": [1, 3], "32": [1], "33": [1, 3], "34": [1], "35": [3], "36": [], "37": [3], "38": [2], "39": [2], "40": [2], "41": [2], "42": [2], "43": [2], "44": [2], "45": [2], "46": [3], "47": [4], "48": [4], "49": [5], "50": [3, 7], "51": [1, 3], "52": [1, 4], "53": [1, 4], "54": [1, 4], "55": [1, 5], "56": [1, 5], "57": [1, 4], "58": [1, 5], "59": [1, 5], "60": [1, 4], "61": [1, 5], "62": [1, 5], "63": [1, 4], "64": [1, 5], "65": [1, 5], "66": [1, 4], "67": [1, 5], "68": [1, 4], "69": [1, 4], "70": [1, 5], "71": [1, 5], "72": [1, 4], "73": [1, 5], "74": [1, 4], "75": [1], "76": [1, 3], "77": [1, 4], "78": [2], "79": [1, 4], "80": [1], "81": [1, 3], "82": [1, 3], "83": [1], "84": [1, 3], "85": [1], "86": [1], "87": [1], "88": [1], "89": [1], "90": [1], "91": [1], "92": [1], "93": [1], "94": [1], "95": [1], "96": [1], "97": [1], "98": [1], "99": [1], "100": [1], "101": [1], "102": [1], "103": [1], "104": [1], "105": [1], "106": [1], "107": [1], "108": [1], "109": [1], "110": [1], "111": [1], "112": [1], "113": [1], "114": [1], "115": [1, 3], "116": [1], "117": [1], "118": [], "119": [], "120": [1], "121": [1], "122": [1], "123": [1], "124": [1], "125": [2], "126": [1], "127": [1, 2], "128": [2], "129": [3], "130": [], "131": [1], "132": [1], "133": [3, 2], "134": [1], "135": [1], "136": [1, 3], "137": [1, 3], "138": [1, 4], "139": [1, 4], "140": [1, 4], "141": [1, 4], "142": [1, 5], "143": [1, 5], "144": [1, 4], "145": [1, 5], "146": [1, 5], "147": [1, 5], "148": [1, 6], "149": [1, 6], "150": [1, 4], "151": [1, 5], "152": [1, 5], "153": [2, 1, 3], "154": [2, 1, 4], "155": [2, 1, 4], "156": [1, 3], "157": [2, 4], "158": [1, 4], "159": [1, 5], "160": [1, 5], "161": [1], "162": [1], "163": [1], "164": [1, 3], "165": [1, 4], "166": [1, 4], "167": [1, 4], "168": [1, 5], "169": [1, 5], "170": [1, 5], "171": [1, 6], "172": [1, 6], "173": [1, 4], "174": [1, 5], "175": [1, 5], "176": [1, 3], "177": [1, 4], "178": [1, 3], "179": [1, 4], "180": [1, 5], "181": [1, 4], "182": [1, 5], "183": [1, 6], "184": [1, 5], "185": [1, 4], "186": [1, 5], "187": [1, 4], "188": [1, 3], "189": [1, 3], "190": [1, 3, 5], "191": [1, 4], "192": [1, 4], "193": [1, 4, 6], "194": [1, 3], "195": [1, 4], "196": [1, 4], "197": [1, 4], "198": [1, 5], "199": [1, 5], "200": [1, 5], "201": [1, 6], "202": [1, 6], "203": [1, 4], "204": [1, 5], "205": [1, 5], "206": [1, 3], "207": [1, 4], "208": [1, 3], "209": [2], "210": [3], "211": [2], "212": [1, 4], "213": [1, 5], "214": [1, 4], "215": [1], "216": [1], "217": [1, 3], "218": [1, 3], "219": [1, 3], "220": [1, 3, 5], "221": [1, 4], "222": [1, 3], "223": [1, 4], "224": [1, 4], "225": [1, 5], "226": [1, 3], "227": [1, 3], "228": [1, 4], "229": [1, 4], "230": [1, 3], "231": [1, 3], "232": [1, 2], "233": [1, 2], "234": [1, 2], "235": [2], "236": [2, 4], "237": [1, 2], "238": [1], "239": [1], "240": [1], "241": [1], "242": [1], "243": [1, 3], "244": [1, 3], "245": [1, 3], "246": [1, 3], "247": [1], "248": [1], "249": [4, 2, 5], "250": [5, 2, 6], "251": [1, 2], "252": [1], "253": [1], "254": [2], "255": [], "256": [], "257": [2], "258": [2], "259": [], "260": [2], "261": [2, 3], "262": [1], "263": [1, 3], "264": [1, 4], "265": [2, 3], "266": [1, 2, 4, 5], "267": [1], "268": [1, 2], "269": [], "270": [2], "271": [1], "272": [1, 2], "273": [], "274": [1], "275": [2], "276": [3], "277": [], "278": [1], "279": [1, 3], "280": [1, 4], "281": [1, 4], "282": [1, 1], "283": [1], "284": [1, 3], "285": [1, 3], "286": [1, 4], "287": [1, 3], "288": [1, 4], "289": [1, 4], "290": [1, 5], "291": [2], "292": [2], "293": [1], "294": [1], "295": [1], "296": [1], "297": [1], "298": [2], "299": [1, 2], "300": [1, 2], "301": [1, 2], "302": [1, 3], "303": [1, 3], "304": [1, 3], "305": [1, 4], "306": [1], "307": [1, 3], "308": [1, 3], "309": [1, 4], "310": [1, 4], "311": [1], "312": [1, 3], "313": [1, 4], "314": [1, 4], "315": [1, 1], "316": [1, 3], "317": [1, 1, 3], "318": [1, 3, 5], "319": [1], "320": [1], "321": [1], "322": [1], "323": [1], "324": [1], "325": [1], "326": [2], "327": [3], "328": [], "329": [], "330": [3, 2, 4], "331": [2, 1, 3], "332": [2, 1], "333": [1, 2], "334": [1], "335": [2, 3, 4], "336": [2, 3, 5], "337": [2, 4, 5], "338": [2, 4, 6], "339": [2, 4, 5], "340": [2, 4, 6], "341": [], "342": [2], "343": [], "344": [1], "345": [1, 3], "346": [1, 4], "347": [1, 4], "348": [1], "349": [1, 3], "350": [2], "351": [], "352": [1], "353": [1, 2], "354": [1, 3], "355": [1], "356": [1], "357": [1], "358": [1], "359": [1], "360": [2], "361": [1], "362": [], "363": [2], "364": [3], "365": [3, 4], "366": [2], "367": [2, 3], "368": [2, 4], "369": [2, 4, 5], "370": [2, 3], "371": [2, 4, 5], "372": [2, 3], "373": [2], "374": [2], "375": [3, 4], "376": [2], "377": [1], "378": [1, 3], "379": [1], "380": [1], "381": [1], "382": [2], "383": [2], "384": [2], "385": [2], "386": [3], "387": [3], "388": [4], "389": [1, 2], "390": [2], "391": [1, 3], "392": [1, 2], "393": [3], "394": [], "395": [2], "396": [1], "397": [1, 3], "398": [1, 4], "399": [2], "400": [1, 4], "401": [1], "402": [1], "403": [1], "404": [1], "405": [], "406": [2], "407": [2], "408": [3], "409": [2], "410": [3], "411": [], "412": [2, 3], "413": [2, 3], "414": [2, 4, 5], "415": [2, 4, 5], "416": [3, 1], "417": [3, 1], "418": [3, 1], "419": [3, 1], "420": [3, 5, 1], "421": [3, 5, 1], "422": [3, 5, 1], "423": [3, 5, 1], "424": [1], "425": [2, 3], "426": [2, 3, 4], "427": [3, 4], "428": [3, 4, 5], "429": [2], "430": [2, 3], "431": [2, 3, 5], "432": [1], "433": [1], "434": [3, 1], "435": [3, 1], "436": [3, 1], "437": [3, 1], "438": [3, 1, 6], "439": [3, 1, 5], "440": [2], "441": [2], "442": [2, 3], "443": [2, 3], "444": [2, 4], "445": [2, 3, 5], "446": [2, 3], "447": [2, 3], "448": [2, 3], "449": [2], "450": [2], "451": [3], "452": [2, 4], "453": [2, 4, 6], "454": [3], "455": [3, 5], "456": [1], "457": [1, 2], "458": [2, 3], "459": [2, 3], "460": [1], "461": [1, 3], "462": [2, 4, 5], "463": [2, 4, 6, 7], "464": [2, 4, 6, 7], "465": [2, 4, 8, 6, 9], "466": [2, 4, 6, 8, 9], "467": [2, 4, 5], "468": [2, 4, 6, 7], "469": [3, 5, 6], "470": [3, 5, 7, 8], "471": [2, 4, 5], "472": [2, 4, 6, 7], "473": [3, 5, 6], "474": [3, 5, 7, 8], "475": [2, 4, 5], "476": [2, 4, 6, 7], "477": [2, 3], "478": [2, 4, 5], "479": [1, 3, 5], "480": [1, 3, 5, 7], "481": [1, 3, 5, 7], "482": [1, 3, 5, 9, 7], "483": [1, 3, 5, 7, 9], "484": [1, 3, 5], "485": [1, 3, 5, 7], "486": [1, 4, 6], "487": [1, 4, 6, 8], "488": [1, 3, 5], "489": [1, 3, 5, 7], "490": [1, 4, 6], "491": [1, 4, 6, 8], "492": [1, 3, 5], "493": [1, 3, 5, 7], "494": [1], "495": [1], "496": [1, 3], "497": [2], "498": [2, 3], "499": [2], "500": [2], "501": [1], "502": [1], "503": [1], "504": [1], "505": [1, 2], "506": [1, 3, 5], "507": [1, 2], "508": [2], "509": [1, 2], "510": [2], "511": [3], "512": [], "513": [2], "514": [3], "515": [3], "516": [2], "517": [2], "518": [1, 3], "519": [1, 3], "520": [1, 3], "521": [2, 1, 3], "522": [2, 1, 3], "523": [1, 3], "524": [1, 3], "525": [1, 3], "526": [2, 1, 3], "527": [1, 3], "528": [2, 1, 3], "529": [1, 3], "530": [1, 3], "531": [1, 3], "532": [1, 3], "533": [1, 3], "534": [1, 3] },
   accumulators: { "4": true, "26": true, "27": true, "29": true, "76": true, "77": true, "79": true, "127": true, "263": true, "264": true, "266": true, "272": true, "279": true, "280": true, "281": true, "312": true, "313": true, "314": true, "345": true, "346": true, "347": true, "378": true, "397": true, "398": true, "400": true, "457": true },
   parseTable: (() => {
@@ -7728,423 +8222,6 @@ class CodeBuilder {
   }
 }
 
-// src/schema-types.js
-class SchemaTypeError extends Error {
-  constructor(message, start = null, node = null) {
-    super(message);
-    this.name = "SchemaTypeError";
-    this.start = start;
-    this.node = node;
-  }
-}
-var snakeCase2 = (s) => s.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-var camelCase = (col) => String(col).replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-var UNCOUNTABLE = new Set(["equipment", "information", "rice", "money", "species", "series", "fish", "sheep", "data"]);
-var IRREGULAR = new Map([["person", "people"], ["man", "men"], ["woman", "women"], ["child", "children"], ["tooth", "teeth"], ["foot", "feet"], ["mouse", "mice"]]);
-var pluralize = (w) => {
-  const lw = w.toLowerCase();
-  if (UNCOUNTABLE.has(lw))
-    return w;
-  if (IRREGULAR.has(lw))
-    return IRREGULAR.get(lw);
-  if (/[^aeiouy]y$/i.test(w))
-    return w.slice(0, -1) + "ies";
-  if (/(s|x|z|ch|sh)$/i.test(w))
-    return w + "es";
-  return w + "s";
-};
-var fkCamel = (target) => camelCase(snakeCase2(target) + "_id");
-var accessorOf = (target) => target[0].toLowerCase() + target.slice(1);
-var INTRINSIC_FIELD_TYPES = {
-  __proto__: null,
-  string: "string",
-  text: "string",
-  email: "string",
-  url: "string",
-  uuid: "string",
-  phone: "string",
-  zip: "string",
-  number: "number",
-  integer: "number",
-  boolean: "boolean",
-  date: "Date",
-  datetime: "Date",
-  json: "unknown",
-  any: "any"
-};
-var VALIDATION_INTRINSIC_NAMES = new Set([
-  "SchemaIssue",
-  "SchemaSafeResult",
-  "ArraySchema",
-  "Schema"
-]);
-var MODEL_INTRINSIC_NAMES = new Set(["SchemaQuery", "ModelSchema"]);
-var SCHEMA_INTRINSIC_NAMES = new Set([
-  ...VALIDATION_INTRINSIC_NAMES,
-  ...MODEL_INTRINSIC_NAMES
-]);
-var VALIDATION_INTRINSICS = [
-  "interface SchemaIssue { field: string; error: string; message: string; }",
-  "type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };",
-  "interface ArraySchema<Out> {",
-  "  parse(data: unknown): Out[];",
-  "  safe(data: unknown): SchemaSafeResult<Out[]>;",
-  "  ok(data: unknown): boolean;",
-  "  parseAsync(data: unknown): Promise<Out[]>;",
-  "  safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;",
-  "  okAsync(data: unknown): Promise<boolean>;",
-  "  toJSONSchema(): Record<string, unknown>;",
-  "}",
-  "interface Schema<Out, In = unknown> {",
-  "  parse(data: unknown): Out;",
-  "  array: ArraySchema<Out>;",
-  "  safe(data: unknown): SchemaSafeResult<Out>;",
-  "  ok(data: unknown): boolean;",
-  "  parseAsync(data: unknown): Promise<Out>;",
-  "  safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;",
-  "  okAsync(data: unknown): Promise<boolean>;",
-  "  toJSONSchema(): Record<string, unknown>;",
-  "  pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;",
-  "  omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;",
-  "  partial(): Schema<Partial<In>, Partial<In>>;",
-  "  required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;",
-  "  extend<U>(other: Schema<U>): Schema<In & U, In & U>;",
-  "}"
-];
-var MODEL_INTRINSICS = [
-  "interface SchemaQuery<T, Data = Record<string, unknown>> {",
-  "  all(): Promise<T[]>;",
-  "  first(): Promise<T | null>;",
-  "  count(): Promise<number>;",
-  "  where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;",
-  "  limit(n: number): SchemaQuery<T, Data>;",
-  "  offset(n: number): SchemaQuery<T, Data>;",
-  "  order(spec: string): SchemaQuery<T, Data>;",
-  "  orderBy(spec: string): SchemaQuery<T, Data>;",
-  "  includes(...specs: unknown[]): SchemaQuery<T, Data>;",
-  "  withDeleted(): SchemaQuery<T, Data>;",
-  "  onlyDeleted(): SchemaQuery<T, Data>;",
-  "  updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;",
-  "  deleteAll(): Promise<number | null>;",
-  "  unscoped(): SchemaQuery<T, Data>;",
-  "}",
-  "interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {",
-  "  find(id: Id): Promise<Instance | null>;",
-  "  findMany(ids: Id[]): Promise<Instance[]>;",
-  "  where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;",
-  "  includes(...specs: unknown[]): SchemaQuery<Instance, Data>;",
-  "  withDeleted(): SchemaQuery<Instance, Data>;",
-  "  onlyDeleted(): SchemaQuery<Instance, Data>;",
-  "  unscoped(): SchemaQuery<Instance, Data>;",
-  "  all(): Promise<Instance[]>;",
-  "  first(): Promise<Instance | null>;",
-  "  count(): Promise<number>;",
-  "  create(data: Create): Promise<Instance>;",
-  "  upsert(data: Create, opts: { on: unknown }): Promise<Instance>;",
-  "  insertMany(rows: Create[]): Promise<Instance[]>;",
-  "  toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;",
-  "}"
-];
-var schemaIntrinsicLines = (withModel) => withModel ? [...VALIDATION_INTRINSICS, ...MODEL_INTRINSICS] : [...VALIDATION_INTRINSICS];
-var isNode = (x) => Array.isArray(x);
-var isSchemaNode = (x) => isNode(x) && x[0] === "schema" && x.length === 2 && x[1] && typeof x[1] === "object" && Array.isArray(x[1].entries);
-function collectSchemaDecls(programSexpr) {
-  const out = [];
-  if (!isNode(programSexpr) || programSexpr[0] !== "program")
-    return out;
-  const consider = (stmt, exported) => {
-    if (!isNode(stmt) || stmt[0] !== "=" || stmt.length !== 3)
-      return;
-    if (typeof stmt[1] !== "string" || !isSchemaNode(stmt[2]))
-      return;
-    out.push({ name: stmt[1], descriptor: stmt[2][1], node: stmt[2], exported });
-  };
-  for (const stmt of programSexpr.slice(1)) {
-    if (isNode(stmt) && stmt[0] === "export" && stmt.length === 2)
-      consider(stmt[1], true);
-    else
-      consider(stmt, false);
-  }
-  return out;
-}
-function collectUserTypeNames(programSexpr) {
-  const names = new Map;
-  if (!isNode(programSexpr) || programSexpr[0] !== "program")
-    return names;
-  const consider = (stmt) => {
-    if (!isNode(stmt))
-      return;
-    if (stmt[0] === "type-decl" && typeof stmt[1] === "string") {
-      const m = stmt[1].replace(/^export\s+/, "").match(/^(type|interface)\s+([A-Za-z_$][\w$]*)/);
-      if (m)
-        names.set(m[2], { what: `the ${m[1]} declaration '${m[2]}'`, node: stmt });
-    } else if (stmt[0] === "class" && typeof stmt[1] === "string") {
-      names.set(stmt[1], { what: `class ${stmt[1]}`, node: stmt });
-    } else if (stmt[0] === "enum" && typeof stmt[1] === "string") {
-      names.set(stmt[1], { what: `enum ${stmt[1]}`, node: stmt });
-    }
-  };
-  for (const stmt of programSexpr.slice(1)) {
-    consider(isNode(stmt) && stmt[0] === "export" && stmt.length === 2 ? stmt[1] : stmt);
-  }
-  return names;
-}
-function isModuleShaped(programSexpr, isModuleImport) {
-  if (!isNode(programSexpr) || programSexpr[0] !== "program")
-    return false;
-  for (const stmt of programSexpr.slice(1)) {
-    if (!isNode(stmt))
-      continue;
-    if (stmt[0] === "export")
-      return true;
-    if (isModuleImport(stmt))
-      return true;
-  }
-  return false;
-}
-var fieldType = (entry, known) => {
-  if (entry.typeName === "literal-union" && entry.literals?.length) {
-    return entry.literals.map((l) => JSON.stringify(l)).join(" | ");
-  }
-  let base = INTRINSIC_FIELD_TYPES[entry.typeName] ?? (known && known.has(entry.typeName) ? entry.typeName : "unknown");
-  return entry.array ? `${base}[]` : base;
-};
-var fieldProps = (descriptor, known) => {
-  const props = [];
-  for (const e of descriptor.entries) {
-    if (e.tag !== "field")
-      continue;
-    const required = e.modifiers.includes("!");
-    props.push(`${e.name}${required ? "" : "?"}: ${fieldType(e, known)}`);
-  }
-  return props;
-};
-var mixinRefs = (descriptor, byName) => {
-  const refs = [];
-  for (const e of descriptor.entries) {
-    if (e.tag !== "directive" || e.name !== "mixin")
-      continue;
-    const target = e.args?.[0]?.target;
-    if (target && byName.get(target)?.descriptor.kind === "mixin")
-      refs.push(target);
-  }
-  return refs;
-};
-var intersect = (base, refs) => refs.length ? `${base} & ${refs.join(" & ")}` : base;
-var RELATION_KINDS = { __proto__: null, belongs_to: "belongsTo", has_one: "hasOne", one: "hasOne", has_many: "hasMany", many: "hasMany" };
-var relationsOf = (descriptor) => {
-  const rels = [];
-  for (const e of descriptor.entries) {
-    const kind = e.tag === "directive" ? RELATION_KINDS[e.name] : undefined;
-    if (!kind)
-      continue;
-    const target = e.args?.[0]?.target;
-    if (!target)
-      continue;
-    rels.push({ kind, target, optional: e.args[0].optional === true });
-  }
-  return rels;
-};
-var modelImplicitProps = (descriptor) => {
-  const props = ["id: number"];
-  for (const rel of relationsOf(descriptor)) {
-    if (rel.kind !== "belongsTo")
-      continue;
-    props.push(`${fkCamel(rel.target)}: number${rel.optional ? " | null" : ""}`);
-  }
-  const has = (n) => descriptor.entries.some((e) => e.tag === "directive" && e.name === n);
-  if (has("timestamps"))
-    props.push("createdAt: Date", "updatedAt: Date");
-  if (has("softDelete"))
-    props.push("deletedAt: Date | null");
-  return props;
-};
-var modelCreateProps = (descriptor, known) => {
-  const props = [];
-  for (const e of descriptor.entries) {
-    if (e.tag !== "field")
-      continue;
-    const required = e.modifiers.includes("!") && e.constraints?.default === undefined;
-    props.push(`${e.name}${required ? "" : "?"}: ${fieldType(e, known)}`);
-  }
-  for (const rel of relationsOf(descriptor)) {
-    if (rel.kind !== "belongsTo")
-      continue;
-    props.push(`${fkCamel(rel.target)}${rel.optional ? "?" : ""}: number${rel.optional ? " | null" : ""}`);
-  }
-  return props;
-};
-var relationAccessors = (descriptor, known) => {
-  const out = [];
-  const OPTS = "opts?: { reload?: boolean }";
-  for (const rel of relationsOf(descriptor)) {
-    const isKnown = known.has(rel.target);
-    if (rel.kind === "hasMany") {
-      out.push(`${pluralize(accessorOf(rel.target))}(${OPTS}): Promise<${isKnown ? `${rel.target}[]` : "unknown[]"}>`);
-    } else {
-      out.push(`${accessorOf(rel.target)}(${OPTS}): Promise<${isKnown ? `${rel.target} | null` : "unknown"}>`);
-    }
-  }
-  return out;
-};
-var braced = (props) => props.length ? `{ ${props.join("; ")} }` : "{}";
-function schemaTypeStory(decl, byName, known) {
-  const { name, descriptor } = decl;
-  const kind = descriptor.kind;
-  if (kind === "enum") {
-    const members = descriptor.entries.filter((e) => e.tag === "enum-member").map((e) => e.value !== undefined ? e.value : e.name);
-    const union = members.length ? members.map((v) => typeof v === "string" ? JSON.stringify(v) : String(v)).join(" | ") : "never";
-    const bare = descriptor.entries.every((e) => e.tag !== "enum-member" || e.value === undefined || e.value === e.name);
-    return {
-      aliasLines: [`type ${name} = ${union};`],
-      constType: `{ parse(data: unknown): ${name}; safe(data: unknown): SchemaSafeResult<${name}>; ` + `ok(data: unknown): ${bare ? `data is ${name}` : "boolean"}; ` + `parseAsync(data: unknown): Promise<${name}>; safeAsync(data: unknown): Promise<SchemaSafeResult<${name}>>; ` + `okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<${name}>; }`,
-      thisTypes: new Map,
-      typeNames: [name]
-    };
-  }
-  if (kind === "union") {
-    const members = descriptor.entries.filter((e) => e.tag === "union-member").map((e) => e.name);
-    const armed = members.map((m) => known.has(m) ? m : "unknown");
-    const union = armed.length ? armed.join(" | ") : "never";
-    return {
-      aliasLines: [`type ${name} = ${union};`],
-      constType: `{ parse(data: unknown): ${name}; safe(data: unknown): SchemaSafeResult<${name}>; ` + `ok(data: unknown): boolean; ` + `parseAsync(data: unknown): Promise<${name}>; safeAsync(data: unknown): Promise<SchemaSafeResult<${name}>>; ` + `okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<${name}>; }`,
-      thisTypes: new Map,
-      typeNames: [name]
-    };
-  }
-  if (kind === "mixin") {
-    return {
-      aliasLines: [`type ${name} = ${intersect(braced(fieldProps(descriptor, known)), mixinRefs(descriptor, byName))};`],
-      constType: null,
-      thisTypes: new Map,
-      typeNames: [name]
-    };
-  }
-  const dataType = intersect(braced(fieldProps(descriptor, known)), mixinRefs(descriptor, byName));
-  const derived = [];
-  const computed = [];
-  const methods = [];
-  const instanceIdx = [];
-  const scopeIdx = [];
-  descriptor.entries.forEach((e, i) => {
-    if (e.tag === "derived") {
-      derived.push(`${e.name}: unknown`);
-      instanceIdx.push(i);
-    } else if (e.tag === "computed") {
-      computed.push(`readonly ${e.name}: unknown`);
-      instanceIdx.push(i);
-    } else if (e.tag === "method") {
-      methods.push(`${e.name}: (...args: any[]) => unknown`);
-      instanceIdx.push(i);
-    } else if (e.tag === "hook")
-      instanceIdx.push(i);
-    else if (e.tag === "scope" || e.tag === "defaultScope")
-      scopeIdx.push(i);
-  });
-  const behavior = [...derived, ...computed, ...methods];
-  if (kind === "model") {
-    const dataName = `${name}Data`;
-    const createName = `${name}Create`;
-    const softDelete = descriptor.entries.some((e) => e.tag === "directive" && e.name === "softDelete");
-    const scopeNames = descriptor.entries.filter((e) => e.tag === "scope").map((e) => e.name);
-    const queryName = `${name}Query`;
-    const queryType = scopeNames.length ? queryName : `SchemaQuery<${name}, ${dataName}>`;
-    const instanceExtras = [
-      ...behavior,
-      ...relationAccessors(descriptor, known),
-      `save(): Promise<${name}>`,
-      `destroy(opts?: { hard?: boolean }): Promise<${name}>`,
-      ...softDelete ? [`restore(): Promise<${name}>`] : [],
-      `ok(): boolean`,
-      `errors(): SchemaIssue[]`,
-      `markDirty(name: string): ${name}`,
-      `savedChanges: Map<string, [unknown, unknown]>`,
-      `toJSON(): ${dataName}`
-    ];
-    const aliasLines = [
-      `type ${dataName} = ${dataType} & ${braced(modelImplicitProps(descriptor))};`,
-      `type ${createName} = ${intersect(braced(modelCreateProps(descriptor, known)), mixinRefs(descriptor, byName))};`,
-      `type ${name} = ${dataName} & ${braced(instanceExtras)};`
-    ];
-    const typeNames = [dataName, createName, name];
-    let constType = `ModelSchema<${name}, ${dataName}, number, ${createName}>`;
-    if (scopeNames.length) {
-      const scopeSigs = scopeNames.map((s) => `${s}(...args: any[]): ${queryName}`);
-      aliasLines.push(`type ${queryName} = SchemaQuery<${name}, ${dataName}> & ${braced(scopeSigs)};`);
-      typeNames.push(queryName);
-      constType += ` & ${braced(scopeSigs)}`;
-    }
-    const thisTypes2 = new Map;
-    for (const i of instanceIdx)
-      thisTypes2.set(i, name);
-    for (const i of scopeIdx)
-      thisTypes2.set(i, queryType);
-    return { aliasLines, constType, thisTypes: thisTypes2, typeNames };
-  }
-  const thisTypes = new Map;
-  for (const i of instanceIdx)
-    thisTypes.set(i, name);
-  if (behavior.length) {
-    const dataName = `${name}Data`;
-    return {
-      aliasLines: [
-        `type ${dataName} = ${dataType};`,
-        `type ${name} = ${dataName} & ${braced(behavior)};`
-      ],
-      constType: `Schema<${name}, ${dataName}>`,
-      thisTypes,
-      typeNames: [dataName, name]
-    };
-  }
-  return {
-    aliasLines: [`type ${name} = ${dataType};`],
-    constType: `Schema<${name}, ${name}>`,
-    thisTypes,
-    typeNames: [name]
-  };
-}
-function buildSchemaTypeStory(programSexpr) {
-  const decls = collectSchemaDecls(programSexpr);
-  if (decls.length === 0)
-    return null;
-  const known = new Set(decls.map((d) => d.name));
-  const byName = new Map(decls.map((d) => [d.name, d]));
-  const userTypes = collectUserTypeNames(programSexpr);
-  const withModel = decls.some((d) => d.descriptor.kind === "model");
-  for (const [name, user] of userTypes) {
-    const emitted = VALIDATION_INTRINSIC_NAMES.has(name) || withModel && MODEL_INTRINSIC_NAMES.has(name);
-    if (emitted) {
-      throw new SchemaTypeError(`${user.what} collides with the schema intrinsic declarations this module emits ` + `(a schema declaration is present${MODEL_INTRINSIC_NAMES.has(name) ? ", and a :model brings the persistence tier" : ""}) — ` + `rename it; the emitted intrinsic vocabulary here is ` + `${[...VALIDATION_INTRINSIC_NAMES, ...withModel ? MODEL_INTRINSIC_NAMES : []].join(", ")}`, null, user.node);
-    }
-  }
-  const owners = new Map;
-  const stories = [];
-  for (const d of decls) {
-    const story = schemaTypeStory(d, byName, known);
-    for (const t of story.typeNames) {
-      if (SCHEMA_INTRINSIC_NAMES.has(t)) {
-        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which is reserved by the schema ` + `intrinsic declarations (${[...SCHEMA_INTRINSIC_NAMES].join(", ")}) — rename the schema`, d.descriptor.start ?? null);
-      }
-      const prior = owners.get(t);
-      if (prior !== undefined) {
-        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which ${prior} already emits — ` + `every schema-emitted type name binds once per module; rename one`, d.descriptor.start ?? null);
-      }
-      owners.set(t, `schema '${d.name}'`);
-      const user = userTypes.get(t);
-      if (user !== undefined) {
-        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which collides with ${user.what} — ` + `the schema's types and the user declaration would merge or duplicate; rename one`, d.descriptor.start ?? null);
-      }
-    }
-    stories.push({ decl: d, ...story });
-  }
-  return {
-    stories,
-    intrinsicLines: schemaIntrinsicLines(withModel),
-    withModel
-  };
-}
-
 // src/typetext.js
 class TypeTextError extends Error {
   constructor(message) {
@@ -8562,7 +8639,7 @@ var awaitsIn = (x) => {
     return false;
   return x.some(awaitsIn);
 };
-function componentTypeInfo(stores, source, node) {
+function componentTypeInfo(stores, source, node, behavior = null) {
   const [, parent, body] = node;
   const extendsTag = typeof parent === "string" ? parent : null;
   const stmts = isBlock(body) ? body.slice(1) : [];
@@ -8735,10 +8812,13 @@ function componentTypeInfo(stores, source, node) {
   for (const stmt of stmts)
     classify(stmt);
   const siblings = new Set(members.map((m) => m.name));
-  for (const m of members)
+  for (const m of members) {
     m.siblings = siblings;
+    m.behavior = behavior;
+  }
   return {
     extendsTag,
+    behavior,
     members,
     roleText,
     isOptionalParam: optionalReader(stores)
@@ -8854,6 +8934,10 @@ var typeofSpelling = (v) => {
   return null;
 };
 var memberTypeSegments = (m, lead) => {
+  if (m.kind === "computed" && m.annotation == null && m.behavior) {
+    const rt = `ReturnType<typeof ${m.behavior}.${m.name}>`;
+    return [{ text: `${lead}{ readonly value: ${rt}; read(): ${rt} }` }];
+  }
   const rootOf = (v) => typeof v === "string" ? v : Array.isArray(v) && v[0] === "." && v.length === 3 ? rootOf(v[1]) : null;
   const siblingRooted = m.siblings !== undefined && Array.isArray(m.node) && m.node.length === 3 && m.siblings.has(rootOf(m.node[2]));
   const t = m.annotation ?? (m.hasDefault && !siblingRooted && Array.isArray(m.node) && m.node.length === 3 ? syntacticLiteralType(m.node[2]) ?? typeofSpelling(m.node[2]) : null);
@@ -8882,6 +8966,7 @@ var memberDeclareSegments = (m) => [
   ...memberTypeSegments(m, ": "),
   { text: ";" }
 ];
+var readonlyCastType = (m) => `{ ${m.name}${segmentsText(memberTypeSegments(m, ": "))} }`;
 var isDeclarableMember = (m) => m.kind !== "method" && m.kind !== "hook";
 var publicProps = (info) => info.members.filter((m) => m.isPublic && (containerish(m) || m.kind === "readonly" || m.kind === "plain"));
 var isRequiredProp = (m) => m.kind === "prop" && m.annotation !== null && !m.optional;
@@ -9125,6 +9210,7 @@ class Emitter {
     this.primitiveAvoid = null;
     this.vocabulary = [];
     this.componentInfo = new Map;
+    this.schemaFns = new Map;
     this.moduleComponentNames = new Map;
     this.ind = 0;
     this.methodName = null;
@@ -10101,6 +10187,21 @@ class Emitter {
         ];
         this.b.emit(lines.join(`
 ` + pad));
+      });
+    });
+    const bodies = info.computedBodies ?? [];
+    if (info.behavior === null || bodies.length === 0)
+      return;
+    const selfType = `${name}${anyArgsOf(typeParams)}`;
+    this.b.tsOnly(() => {
+      this.b.emit(`
+` + pad);
+      this.mark(compNode, "$self", () => {
+        this.b.emit(`const ${info.behavior} = {`);
+        bodies.forEach(({ name: n, code, block }, i) => {
+          this.b.emit(`${i > 0 ? "," : ""} ${n}: function (this: ${selfType}) ${block ? code : `{ return ${code}; }`}`);
+        });
+        this.b.emit(" };");
       });
     });
   }
@@ -11162,6 +11263,8 @@ class Emitter {
           if (this.ts && typeof spec[1] === "string" && this.componentInfo.has(spec[2])) {
             this.tsComponentCompanion(spec[2], spec[1], true, this.annotationText(spec, "typeParams"));
           }
+          if (this.ts)
+            this.tsSchemaBehavior(spec[2]);
         } else {
           this.b.emit("export { ");
           this.emitSpecifiers(spec);
@@ -11332,14 +11435,19 @@ class Emitter {
       fns.set(i, this.schemaFnCode(params, tokens));
     }
     const story = this.schemaStories?.get(node) ?? null;
+    const nodeId = this.stores.idOf(node);
+    if (this.ts && story !== null)
+      this.schemaFns.set(node, fns);
     this.mark(node, "$self", () => {
       this.b.emit("__schema(");
       this.mark(node, "body", () => {
-        const segments = descriptorSegments(descriptor, schemaName, fns, fns.get("adapter") ?? null, story?.thisTypes ?? null, this.ts);
+        const segments = descriptorSegments(descriptor, schemaName, fns, fns.get("adapter") ?? null, story?.thisTypes ?? null, this.ts, story?.defaultTypes ?? null, story?.ensureTypes ?? null);
         for (const seg of segments) {
           if (typeof seg === "string")
             this.emitSchemaText(seg);
-          else
+          else if (seg.span !== null && seg.span !== undefined && nodeId !== null) {
+            this.b.tsOnly(() => this.b.markSpan(nodeId, "literal", seg.span[0], seg.span[1], () => this.b.emit(seg.ts)));
+          } else
             this.b.tsOnly(() => this.b.emit(seg.ts));
         }
       });
@@ -11583,6 +11691,27 @@ class Emitter {
     if (this.ts && isNode4(node) && node[0] === "=" && node.length === 3 && typeof node[1] === "string" && this.componentInfo.has(node[2])) {
       this.tsComponentCompanion(node[2], node[1], false, this.annotationText(node, "typeParams"));
     }
+    if (this.ts && isNode4(node) && node[0] === "=" && node.length === 3) {
+      this.tsSchemaBehavior(node[2]);
+    }
+  }
+  tsSchemaBehavior(schemaNode) {
+    const story = this.schemaStories?.get(schemaNode) ?? null;
+    const fns = this.schemaFns.get(schemaNode);
+    if (story === null || fns === undefined)
+      return;
+    const text = behaviorObjectText(schemaNode[1], story.decl.name, fns, story.thisTypes);
+    if (text === null)
+      return;
+    const id = this.stores.idOf(schemaNode);
+    this.b.tsOnly(() => {
+      this.b.emit(`
+` + "  ".repeat(this.ind));
+      if (id !== null)
+        this.b.mark(id, "$self", () => this.b.emit(text));
+      else
+        this.b.emit(text);
+    });
   }
   replSlot() {
     if (this.replResultName === null) {
@@ -14290,7 +14419,8 @@ ${pad ?? ""}`);
       }
       this.moduleComponentNames.set(this._componentName, node);
     }
-    const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node) : null;
+    const behavior = this.ts && this.scopes.length === 1 && typeof this._componentName === "string" ? `__${this._componentName}__computed` : null;
+    const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node, behavior) : null;
     if (tsInfo !== null)
       this.componentInfo.set(node, tsInfo);
     const frame = { members, memberReactive, name: this._componentName, extendsTag, plainWrites: new Map, renderPlainReads: new Set };
@@ -14406,12 +14536,16 @@ ${pad ?? ""}`);
         this.mark(stmt, role, () => this.b.emit(name));
       };
       const readonlySet = new Set(readonlyVars);
+      const computedBodies = [];
+      if (tsInfo !== null)
+        tsInfo.computedBodies = computedBodies;
       const emitPlainish = (m) => {
         initLine(m.node, () => {
           if (readonlySet.has(m) && this.ts) {
+            const tm = tsInfo?.members.find((x) => x.node === m.node && x.kind === "readonly");
             this.b.tsOnly(() => this.b.emit("("));
             this.b.emit("this");
-            this.b.tsOnly(() => this.b.emit(" as any)"));
+            this.b.tsOnly(() => this.b.emit(` as ${tm ? readonlyCastType(tm) : "any"})`));
             this.b.emit(".");
             this.mark(m.node, "target", () => this.b.emit(m.name));
           } else {
@@ -14440,6 +14574,8 @@ ${pad ?? ""}`);
           this.b.emit(` = ${this.runtimeName("__state")}(`);
           if (m.isPublic && (m.required || m.value === undefined)) {
             this.b.emit(`props.__bind_${m.name}__ ?? props.${m.name}`);
+            if (m.required && this.ts)
+              this.b.tsOnly(() => this.b.emit("!"));
           } else if (m.isPublic) {
             this.b.emit(`props.__bind_${m.name}__ ?? props.${m.name} ?? `);
             memberValue(m.node, m.value);
@@ -14456,6 +14592,19 @@ ${pad ?? ""}`);
           this.mark(m.node, "value", () => this.withExpression(() => this.computedBody(m.node, m.value, ind + 2)));
           this.b.emit(")");
         });
+        if (behavior === null || tsInfo === null)
+          return;
+        const tm = tsInfo.members.find((x) => x.node === m.node && x.kind === "computed");
+        if (tm === undefined || tm.annotation != null)
+          return;
+        const saved = this.b;
+        this.b = new CodeBuilder(this.stores, { source: null });
+        try {
+          this.withExpression(() => this.computedBody(m.node, m.value, 0));
+          computedBodies.push({ name: m.name, code: this.b.code, block: isBlock2(m.value) && m.value.length > 2 });
+        } finally {
+          this.b = saved;
+        }
       };
       const emitGate = (gate, index) => {
         initLine(gate.node, () => {
@@ -18956,7 +19105,7 @@ var RUNTIME_TABLE = [
     url: new URL("./runtime/reactive.js", import.meta.url),
     triggers: (sexpr, preds) => containsReactive(sexpr, preds.isTrigger),
     types: {
-      __state: "<T>(value: T) => { value: T; read(): T }",
+      __state: "<T>(value: T | { value: T; read(): T }) => { value: T; read(): T }",
       __computed: "<T>(fn: () => T) => { readonly value: T; read(): T }",
       __effect: "(fn: () => void | (() => void)) => () => void",
       __batch: "<T>(fn: () => T) => T",
@@ -19413,8 +19562,9 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
           continue;
         if (rt.requires) {
           const dep = RUNTIME_TABLE.find((d) => d.key === rt.requires);
+          const types = dep.types || rt.types ? { ...dep.types, ...rt.types } : undefined;
           units.push({ runtimes: [dep, rt], names: [...dep.names, ...rt.names], body: runtimeText(dep) + `
-` + runtimeText(rt) });
+` + runtimeText(rt), types });
         } else {
           units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt), types: rt.types });
         }
@@ -19436,15 +19586,17 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
 `);
       } else {
         builder.emit(`const { ${bindings2.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(", ")} }`);
-        if (face === "ts" && unit.types) {
-          const members = bindings2.filter(({ name }) => unit.types[name]).map(({ local, name }) => `${local}: ${unit.types[name]}`);
-          if (members.length > 0)
-            builder.tsOnly(() => builder.emit(`: { ${members.join("; ")} }`));
-        }
-        builder.emit(` = (() => {
+        const types = face === "ts" && unit.types ? `{ ${bindings2.map(({ name }) => `${name}: ${unit.types[name] ?? "any"}`).join("; ")} }` : null;
+        builder.emit(" = ");
+        if (types)
+          builder.tsOnly(() => builder.emit("("));
+        builder.emit(`(() => {
 ${unit.body}
 return { ${unit.names.join(", ")} };
-})();
+})()`);
+        if (types)
+          builder.tsOnly(() => builder.emit(` as ${types})`));
+        builder.emit(`;
 `);
       }
       if (programId !== null) {
@@ -19511,7 +19663,7 @@ return { ${unit.names.join(", ")} };
 ` : `
 `;
         builder.tsOnly(() => {
-          const lines = () => builder.emit(s.aliasLines.map((l) => `${exp}${l}`).join(`
+          const lines = () => builder.emit((s.faceAliasLines ?? s.aliasLines).map((l) => `${exp}${l}`).join(`
 `));
           if (nodeId !== null)
             builder.mark(nodeId, "$self", lines);

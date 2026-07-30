@@ -34,3 +34,17 @@ Wrong = component
 
 wrongMount = Gated.mount()
 wrongConstruct = new Gated({})
+
+Member = component
+  wrongPlain: string = 42
+  wrongState: number := 'oops'
+  wrongComputed: string ~= 7 * 3
+  wrongConst: number =! 'nope'
+  ok := 0
+
+  bump: ->
+    ok = 'later'
+    @wrongPlain = 12
+
+  render
+    div ok

@@ -65,6 +65,7 @@ const REGION_SHAPES = [
   /^constructor\(props\??: \{ .*\{ super\(props\); \}$/su, // the component props ctor (M12-E)
   /^as any\)?$/u,                                          // scaffold/handler quieting casts (M12-E)
   /^\) as any$/u,                                          // handler cast's TS-only close (arrow-safe grouping)
+  new RegExp(String.raw`^const __${ID}__(behavior|computed) = \{`, 'su'), // the behavior objects (schema callable / component computed return types)
   new RegExp(String.raw`^(export )?type ${ID}`, 'u'),      // alias / enum companion / schema alias
   new RegExp(String.raw`^(export )?interface ${ID}`, 'u'), // interface / schema intrinsic block
   new RegExp(String.raw`^function ${ID}\(.*\): [^;]+;$`, 'su'), // overload signature
@@ -234,6 +235,25 @@ describe('TS-face emission pins', () => {
     expect(() => toMatchable('one\ntwo')).toThrow(/\/m/);
     expect(toMatchable('one\ntwo', true)).toBe('one\ntwo');
     expect(toMatchable('plain')).toBe('plain');
+  });
+
+  // The injected runtime's face type is an ASSERTION on the IIFE's
+  // value, so its members are the runtime's OWN property names — never
+  // the aliases the destructure mints when a user binding collides.
+  // Key them by the local and the pattern reads a property the asserted
+  // type does not declare: every name in the unit types as an error,
+  // invisibly, because the injection's synthetic mapping swallows the
+  // TS2339 that would say so. The liveness pair is the same program
+  // without the shadow.
+  test('the injected runtime asserts its own property names, not the minted aliases', () => {
+    const shadowed = compile("__state = 'mine'\ncount := 1\nconsole.log(__state, count)\n",
+      { runtimeDelivery: 'inline', face: 'ts' }).code;
+    expect(shadowed).toContain('{ __state: __state_,');                 // the alias is minted
+    expect(shadowed).toContain('as { __state: <T>(value: T');           // and the assertion still keys by the NAME
+    expect(shadowed).not.toContain('as { __state_:');
+    const plain = compile("count := 1\nconsole.log(count)\n",
+      { runtimeDelivery: 'inline', face: 'ts' }).code;
+    expect(plain).toContain('as { __state: <T>(value: T');
   });
 
   test('catch patterns: the minted parameter carries a face-only `any`, in the statement try and the value try alike', () => {

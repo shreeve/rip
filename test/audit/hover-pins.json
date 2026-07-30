@@ -398,7 +398,7 @@
         "why": "ruled normal expression hovers; today the bracket serves silence — the pin moves when expression hovers reach it"
       },
       {
-        "line": 55,
+        "line": 53,
         "character": 2,
         "token": "subtotal",
         "expect": null,
@@ -406,7 +406,7 @@
         "why": "the !> spelling of the computed row; ruled (computed), interim silence — green, measured 2026-07-23"
       },
       {
-        "line": 56,
+        "line": 54,
         "character": 2,
         "token": "total",
         "expect": null,
@@ -472,6 +472,14 @@
       {
         "name": "Cuff",
         "expect": "let Cuff: typeof Cuff"
+      },
+      {
+        "name": "Ledger",
+        "expect": "let Ledger: typeof Ledger"
+      },
+      {
+        "name": "Meter",
+        "expect": "let Meter: typeof Meter"
       }
     ]
   },

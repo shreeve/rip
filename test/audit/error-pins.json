@@ -29,18 +29,32 @@
       "code": 2322,
       "token": "label",
       "why": "the two-way bind mismatch (number state into a string prop) — no TSX line can spell the <=> channel; the container-typed message is the channel's real contract; pinned per the components ruling (RULINGS.md)"
+    },
+    {
+      "line": 47,
+      "character": 4,
+      "code": 2322,
+      "token": "@wrongPlain",
+      "why": "a wrong-typed member write in the `@` spelling — the diagnostic anchors on the sigil (the lowering's `this` maps back through the member's own cover), and no TSX line spells `@`, so the twin cannot transfer the position; the bare spelling one line above is the derived pair"
     }
   ],
   "14-schema.errors.rip": [
     {
-      "line": 23,
-      "character": 0,
-      "code": 2322,
-      "token": "wrongGetter",
-      "why": "a :shape callable's output types unknown, so the typed read rejects — rip-native: the twin's transform-derived total is honestly a number, so no zod line can spell it; asserts the interim while the callable-unknown finding is open (FINDINGS.md)"
+      "line": 7,
+      "character": 18,
+      "code": 1360,
+      "token": "'high'",
+      "why": "a wrong-typed field default — rip states the relation as a `satisfies` on the descriptor's own value (TS1360), while zod states it as an argument type (TS2345), so the twin's line carries a CORRECT default and stays quiet rather than deriving a code rip never publishes"
     }
   ],
   "25-components.errors.rip": [
+    {
+      "line": 38,
+      "character": 2,
+      "code": 2322,
+      "token": "strictEl",
+      "why": "the non-nullable ref cell's own initializer — the declaration is deliberately un-nullable so the ref row below can reject, and `:=` takes an initializer, so the same deliberate wrongness reports twice: once here and once at the ref; the TSX twin spells the cell nullable (useRef<T | null>) and carries neither"
+    },
     {
       "line": 47,
       "character": 12,
@@ -61,6 +75,13 @@
       "code": 2322,
       "token": "inner",
       "why": "a forwarded element ref whose cell types a different tag than the child's own ref — no TSX line can spell the <=> channel, and the container-typed message is the channel's real contract; pinned per the components ruling (RULINGS.md)"
+    },
+    {
+      "line": 55,
+      "character": 2,
+      "code": 2322,
+      "token": "entries",
+      "why": "an array-typed reactive member whose initializer carries a wrong element — the mismatch rip publishes is between CELLS (the declared `{value: string[]}` against the inferred `{value: (string | number)[]}`), so it anchors on the member rather than on the element the twin flags; the twin's own array is correct and stays quiet"
     }
   ]
 }
