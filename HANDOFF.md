@@ -1,9 +1,8 @@
-# HANDOFF — session launch document (2026-07-30, ~07:00 UTC-6)
+# HANDOFF — session launch document (2026-07-30)
 
 The tracked session launch document (see AGENTS.md, working ledgers):
 read it first when starting a session; rewrite it at session
-boundaries with live-verified facts only. Facts below were verified
-live on this branch against package suites and browser-boot pins.
+boundaries with live-verified facts only.
 
 ## Orientation
 
@@ -18,93 +17,63 @@ live on this branch against package suites and browser-boot pins.
   `bun run test:rip` · `bun run audit` · `bun run parser` ·
   `bun run corpus-expected` · `bun run browser-bundle`.
 
-## Active branch (not on main yet)
+## Active branch
 
-**Branch: `marquee-live-apply`** — Probe 1 PR cut (landing).
+**Branch: `door-file-rename`** (from `main` / `8cc10cc` after PR #194).
 
-Includes: Q8′ etag door; narrow remount apply floor; juxta `f? x`;
-cart Playwright harness (real `rip server` + stub Janus); package store
-paths `@rip-lang/<name>/…` (no `_pkg`); cart type-only import fix.
+Door leftover rename: `cell*` → `file*` on the Workspace door store
+and APIs only. Reactive `SourceCell` / `cellFor` / FRAME prose
+untouched.
 
-Verified: `packages/browser-tests` Playwright 19 pass / 2 skip;
-browser-modules + browser-boot + server package suites green on the
-harness/store-path tip.
+Verified green: `packages/server` (175), `packages/app` (workspace +
+apply + bun suite), `test/toolchain/browser-boot.test.js`. Browser
+bundle regenerated.
+
+| Old | New |
+|---|---|
+| `RIP_CELLS_DIR` | `RIP_FILES_DIR` |
+| `runDir/cells` | `runDir/files` |
+| `state.cells` / `cellsDir` | `state.files` / `filesDir` |
+| `syncCells` / `onCellChange` | `syncFiles` / `onFileChange` |
+| `revertCellsAndManifest` | `revertFilesAndManifest` |
+| `opts.cellUrl` / `manifest.cells` | removed (wire is `files` only) |
+
+## On main (already landed)
+
+PR #194 — Probe 1: etag door, narrow remount apply, cart harness
+(`8cc10cc`).
 
 ## Door wire (Q8′ — sealed)
 
 | Surface | Shape |
 |---|---|
-| Hub ding | `{ id, etag }` (+ optional `kind: 'delete' \| 'epoch'`) — no bodies, **no `rev`** |
+| Hub ding | `{ id, etag }` (+ optional `kind: 'delete' \| 'epoch'`) |
 | Manifest | `{ files: [{ id, etag }, …] }` |
-| HTTP | `GET /app/mood.rip?etag=E` → 200 + body + `ETag`, or 409 + current |
-| Passport | `{ id, path, etag, source, compiled? }` — etag equality |
-| Bag unit | **module** (path-keyed). Not “cell.” “File” = OS path only. |
-| Env leftover | `runDir/cells` / `RIP_CELLS_DIR` — rename later; not the product noun |
+| HTTP | `GET /app/mood.rip?etag=E` → 200 + body + `ETag`, or 409 |
+| Passport | `{ id, path, etag, source, compiled? }` |
+| Bag unit | **module** (path-keyed) |
+| On-disk store | `runDir/files` via `RIP_FILES_DIR` |
 
-Constitution: [`docs/WORKSPACE.md`](docs/WORKSPACE.md) Q2 / Q8′ / D2.
-HMR Layer A **is** this door ([`docs/HMR.md`](docs/HMR.md)).
+## Next after this branch lands
 
-## Apply today (Probe 1 floor — not marquee yet)
-
-- [`packages/app/apply.rip`](packages/app/apply.rip) — `createApply`;
-  discardable under Q10.
-- [`packages/app/renderer.rip`](packages/app/renderer.rip) —
-  `remountDirty(paths)` → `'narrow' \| 'noop' \| 'escape'`.
-- Wired from [`src/browser-boot.js`](src/browser-boot.js) after the
-  compile barrier / `setCompiled`.
-- Applied-log:
-  - narrow: `applied … — narrow remount (route state reset; stash kept)`
-  - escape: `applied … — remounted (component state reset)`
-- **Stash escape must be decided before the live-route guard** — after
-  a failed whole-launch escape, `lastRoute` may be null; stash edits
-  must still return `'escape'` so the next good generation recovers
-  (pinned in browser-boot).
-
-This is the **Vue remount floor** for route/layout modules — not S1
-markup patch, not named-state migrate, not signatures.
-
-## Exemplars
-
-- **Cart** ([`examples/cart/`](examples/cart/)) — marquee certification
-  host for the S-suite. Needs real `rip server` (watch), not the
-  synthetic `packages/browser-tests/serve.mjs` door fake.
-- **Pulse** ([`examples/pulse/`](examples/pulse/)) — thin door canary.
-
-## Probe 1 harness (in this PR)
-
-- [`packages/browser-tests/cart-harness.mjs`](packages/browser-tests/cart-harness.mjs)
-  — real `rip server` on a /tmp cart copy + stub Janus; HTTP proxy +
-  hub ding fanout (no bodies). Not `serve.mjs`.
-- [`tests/cart-apply.spec.mjs`](packages/browser-tests/tests/cart-apply.spec.mjs)
-  — leaf markup no-reload + layout sentinel; stash `Cart (1)` survives;
-  compile-fail keeps LKG (S10). Project `cart-chromium`.
-
-## After this PR lands
-
-1. Rename door leftovers `cell*` → `file*` (`RIP_CELLS_DIR`, etc.).
-2. CSS soft path: watch `app/**/*.css`, ding `{id,etag}`, swap
+1. CSS soft path: watch `app/**/*.css`, ding `{id,etag}`, swap
    `<style data-rip-css>` — no JS remount (S12).
-3. Signatures + true patch / migrate; feel budget; S1–S15 on cart.
-4. **Do not market remount as HMR done** until the suite earns it.
-
-Plan notes (Cursor): `exceptional_rip_hmr_*.plan.md` — Phase 0 done on
-this branch; marquee apply continues here.
+2. Signatures + true patch / migrate; feel budget; S1–S15 on cart.
+3. **Do not market remount as HMR done** until the suite earns it.
 
 ## Working agreements
 
 - PRs: TRUE MERGE only (AGENTS rule 9). Subject:
   `PR #N — <title>` via `gh pr merge N --merge --subject "…"`.
+- **Land** = merge green + delete the feature branch (local + origin).
 - HANDOFF rewritten at session boundaries with live-verified facts.
 - Shared branches: MERGE, never rebase; never force-push.
-- Red pin before fix; cold review before big merges (rule 10).
 - No AI attribution in commits.
-- Nothing pushed without owner approval.
 
 ## Do not trust (stale mental models)
 
-- Ding `{ id, rev, … }` or per-rev cell museum URLs
-- Bag noun “cell” / HMR “definition cell”
+- `RIP_CELLS_DIR` / `runDir/cells` / `onCellChange` / bag noun “cell”
+- Ding `{ id, rev, … }` or per-rev museum URLs
 - Whole-launch remount as “HMR done”
 - A separate `packages/refresh` package
 - Extending `serve.mjs` to fake the cart app
-- `HANDOFF.md` from before `marquee-live-apply` (museum-era)

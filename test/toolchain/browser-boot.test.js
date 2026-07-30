@@ -494,7 +494,7 @@ describe('bootApp workspace mode', () => {
     }
   });
 
-  test('a cell that fails to compile reports and leaves the last good generation live (S10)', async () => {
+  test('a module that fails to compile reports and leaves the last good generation live (S10)', async () => {
     const table = manifestTable();
     const bad = 'x = ((';
     const eBad = etagOf(bad);

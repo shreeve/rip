@@ -840,8 +840,8 @@ export App = (fn) ->
 # Two modes, decided by environment:
 #   worker (RIP_BUNDLE_PATH set) — the manager assembled the bundle before
 #     any worker spawned; the handler re-reads and re-tags it per request
-#     (the manager rewrites the pool's bundle file in place on a cell
-#     change; Janus's micro-cache absorbs the read at the edge).
+#     (the manager rewrites the pool's bundle file in place on a
+#     file-feed change; Janus's micro-cache absorbs the read at the edge).
 #   standalone (no RIP_BUNDLE_PATH) — the process runs under the rip loader,
 #     so the compiler is loadable; assemble at call time, failing fast,
 #     and serve the boot-time cached bytes.
@@ -881,7 +881,7 @@ clientModules = (dir) ->
 # The generated boot page, titled with the app's name (the manager
 # passes its --name; standalone derives it from the app's directory).
 # Where the feed surface exists (a watching worker — the manager wrote
-# the manifest and cells) the bootApp call carries `workspace: true`,
+# the manifest and files) the bootApp call carries `workspace: true`,
 # the browser half of the dev door; standalone pages boot plain.
 BOOT_PAGE = (workspace, title) -> """
 <!doctype html>
@@ -934,7 +934,7 @@ export client = (dir = null) ->
   indexHtml = null unless indexHtml? and existsSync(indexHtml)
 
   # The page opens the door only where the feed surface exists — a
-  # watching worker, where the manager wrote the manifest and cells.
+  # watching worker, where the manager wrote the manifest and files.
   # Standalone has no manager and no feed routes: a workspace-mode boot
   # there would die on its manifest fetch, so it boots plain.
   door = process.env.RIP_MANIFEST_PATH?
@@ -954,7 +954,7 @@ export client = (dir = null) ->
   get '/', (c) -> bootPage(c)
   if process.env.RIP_BUNDLE_PATH?
     # Feed freshness: the manager rewrites this pool's bundle file in
-    # place on a cell change, so the handler re-reads and re-tags per
+    # place on a file-feed change, so the handler re-reads and re-tags per
     # request. With the door open (manifest present) the bundle is
     # no-store like the manifest — a 1s micro-cache hit can otherwise
     # pair a live manifest with stale bundle bytes (the silent-stale
@@ -978,11 +978,11 @@ export client = (dir = null) ->
 
   if process.env.RIP_MANIFEST_PATH?
     get '/manifest.json', (c) ->
-      # Read per request: the manager rewrites the manifest on every cell
+      # Read per request: the manager rewrites the manifest on every file-feed
       # change, and no-store keeps every cache out of the freshness path.
       c.body readFileSync(process.env.RIP_MANIFEST_PATH, 'utf8'), 200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
 
-  if process.env.RIP_CELLS_DIR?
+  if process.env.RIP_FILES_DIR?
     # Q8′ latest-representation door: GET /app/<rel>?etag=E where the
     # store id is app/<rel> (e.g. /app/mood.rip ↔ app/mood.rip). Exact
     # etag → 200 + body + ETag; a superseded etag → 409 + current ETag
@@ -998,7 +998,7 @@ export client = (dir = null) ->
       id = try
         'app/' + rel.split('/').map((s) -> decodeURIComponent(s)).join('/')
       catch then error('malformed percent-encoding in module path', 400)
-      file = join(process.env.RIP_CELLS_DIR, encodeURIComponent(id))
+      file = join(process.env.RIP_FILES_DIR, encodeURIComponent(id))
       error "unknown module #{id}", 404 unless existsSync(file)
       bytes = readFileSync(file, 'utf8')
       current = new Bun.CryptoHasher('sha256').update(bytes).digest('hex').slice(0, 16)

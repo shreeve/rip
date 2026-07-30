@@ -376,11 +376,11 @@ exactly as the browser certification fixture does.
 The server half of the Rip Workspace door
 ([docs/WORKSPACE.md](../../docs/WORKSPACE.md)) — the default for every
 WATCHING manager-served browser app (Q10). The feed surface is
-watch-only: a production manager (watch off) writes no cells and no
+watch-only: a production manager (watch off) writes no files and no
 manifest, sets none of the feed environment, and its pages boot plain —
 production has no hub (Q2). Standalone `client()` pages have no manager
 and therefore no feed: they boot plain too. This is the door's server
-half, not "HMR done": how a running app absorbs a cell is the apply
+half, not "HMR done": how a running app absorbs a module is the apply
 engine's problem, and it lives in `@rip-lang/app`.
 
 In watch mode:
@@ -415,7 +415,7 @@ In watch mode:
   reverse pairing (the silent-stale class). A scrapped epoch build
   restores the prior registry and rewrites the manifest so it cannot
   name an unlinked bundle's etags.
-- **Bundle freshness.** On the cell path the manager atomically rewrites
+- **Bundle freshness.** On the file-feed path the manager atomically rewrites
   the live pool's bundle file, and the worker's `/bundle.json`
   re-reads and re-tags per request. With the door open the bundle is
   `Cache-Control: no-store` like the manifest (a micro-cache hit would

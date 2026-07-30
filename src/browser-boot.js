@@ -14,7 +14,7 @@
 // turns it on when it arrives with the server).
 //
 // `workspace: true` opens the dev door (docs/WORKSPACE.md, M1): the
-// bag populates from the served manifest, the hub feed dings cells in,
+// bag populates from the served manifest, the hub feed dings modules in,
 // and a change applies by remount — labeled escape, never hot apply.
 // Off, every path below is byte-identical to the plain boot.
 import { createModuleLoader } from './browser-modules.js';
@@ -192,7 +192,7 @@ export async function bootApp(opts = {}) {
     // does — one graph, never a second copy.
     bag = app.createWorkspace();
     const records = [];
-    for (const entry of manifest?.files ?? manifest?.cells ?? []) {
+    for (const entry of manifest?.files ?? []) {
       // The id IS the store path (B′ — the birth path is the id).
       const source = (bundle.modules ?? {})[entry.id];
       // A manifest file the bundle does not carry is skipped here: the
@@ -329,7 +329,7 @@ export async function bootApp(opts = {}) {
     timer ??= setTimeout(absorb, 25);
   });
 
-  // The compile-through door: a cell lands in the bag already
+  // The compile-through door: a passport lands in the bag already
   // projected, so ONE notify carries source and compiled together and
   // launch's rebuild never observes a source-without-projection gap.
   // A compile failure reports and never sets — last-known-good stays
@@ -337,7 +337,7 @@ export async function bootApp(opts = {}) {
   const door = {
     passport: bag.passport,
     sealed: bag.sealed,
-    set: async cell => {
+    set: async passport => {
       // The bag's etag is THE staleness verdict — consult it BEFORE any
       // mutation. Two dings in flight can resolve out of order: the
       // older fetch lands after the newer one applied, and while bag.set
@@ -346,30 +346,30 @@ export async function bootApp(opts = {}) {
       // silent-stale class). Same guard for deletes: a replayed stale
       // delete must not evict the loader's file while the bag keeps the
       // passport.
-      const known = bag.passport(cell.id);
-      if (known && typeof cell.etag === 'string' && cell.etag === known.etag) {
-        if (cell.deleted !== true) return false;
+      const known = bag.passport(passport.id);
+      if (known && typeof passport.etag === 'string' && passport.etag === known.etag) {
+        if (passport.deleted !== true) return false;
       }
-      if (cell.deleted === true) {
-        if (known && typeof cell.etag === 'string' && cell.etag !== known.etag) return false;
-        const path = bag.passport(cell.id)?.path;
+      if (passport.deleted === true) {
+        if (known && typeof passport.etag === 'string' && passport.etag !== known.etag) return false;
+        const path = bag.passport(passport.id)?.path;
         if (path !== undefined) {
           files.delete(path);
           loader.invalidate(path);
         }
-        return bag.set(cell);
+        return bag.set(passport);
       }
-      const path = cell.path ?? cell.id;
-      files.set(path, cell.source);
+      const path = passport.path ?? passport.id;
+      files.set(path, passport.source);
       loader.invalidate(path);
       let module;
       try {
         module = await loader.import(path);
       } catch (error) {
-        report(`[Rip] ${path} etag ${cell.etag} failed to compile — keeping the last good version`, error);
+        report(`[Rip] ${path} etag ${passport.etag} failed to compile — keeping the last good version`, error);
         return false;
       }
-      return bag.set({ ...cell, compiled: { ...module } });
+      return bag.set({ ...passport, compiled: { ...module } });
     },
   };
   const feed = app.connectFeed(door, { ...(opts.feed ?? {}), manifestUrl, report });
