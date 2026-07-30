@@ -37,11 +37,10 @@ const bundleText = JSON.stringify(assembleBundle({
 }));
 const bundleTag = `"${Bun.hash(bundleText).toString(16)}"`;
 
-// The workspace door surface (docs/WORKSPACE.md dev-feed shape): a
-// mutable cell registry with rev-keyed immutable bytes, a no-store
-// manifest, and a hub socket that only ever sends {ding: {id, rev}} —
-// never bodies. POST /__test/bump advances a cell from the spec, and
-// GET /__test/frames answers the full frame log so specs pin D2.
+// The workspace door surface (docs/WORKSPACE.md / Q8′): latest file bytes
+// addressed by etag, a no-store manifest, and a hub socket that only
+// ever sends {ding: {id, etag}} — never bodies. POST /__test/bump
+// advances a file from the spec; GET /__test/frames pins D2.
 const wsRoute = title => [
   'export Home = component',
   '  render',
@@ -49,7 +48,6 @@ const wsRoute = title => [
 ].join('\n');
 
 const wsModules = { 'app/routes/index.rip': wsRoute('workspace home') };
-const wsRevs = new Map([['app/routes/index.rip', 1]]);
 const wsEtags = new Map();
 const shortEtag = (text) => new Bun.CryptoHasher('sha256').update(text).digest('hex').slice(0, 16);
 wsEtags.set('app/routes/index.rip', shortEtag(wsModules['app/routes/index.rip']));
@@ -66,8 +64,8 @@ rebuildWsBundle();
 
 const wsSockets = new Set();
 const wsFrames = [];
-const ding = (id, rev, etag) => {
-  const frame = JSON.stringify({ ding: { id, rev, etag } });
+const ding = (id, etag) => {
+  const frame = JSON.stringify({ ding: { id, etag } });
   wsFrames.push(frame);
   for (const socket of wsSockets) socket.send(frame);
 };
@@ -97,8 +95,8 @@ Bun.serve({
       return server.upgrade(request) ? undefined : new Response('websocket only', { status: 400 });
     }
     if (pathname === '/manifest.json') {
-      const cells = [...wsRevs].map(([id, rev]) => ({ id, rev, etag: wsEtags.get(id) }));
-      return new Response(JSON.stringify({ cells }), {
+      const files = [...wsEtags].map(([id, etag]) => ({ id, etag }));
+      return new Response(JSON.stringify({ files }), {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       });
     }
@@ -117,15 +115,13 @@ Bun.serve({
     }
     if (pathname === '/__test/bump' && request.method === 'POST') {
       const { id, title } = await request.json();
-      const rev = (wsRevs.get(id) ?? 0) + 1;
       const source = wsRoute(title);
       const etag = shortEtag(source);
-      wsRevs.set(id, rev);
       wsEtags.set(id, etag);
       wsModules[id] = source;
       rebuildWsBundle();
-      ding(id, rev, etag);
-      return new Response(JSON.stringify({ id, rev, etag }), { headers: { 'Content-Type': 'application/json' } });
+      ding(id, etag);
+      return new Response(JSON.stringify({ id, etag }), { headers: { 'Content-Type': 'application/json' } });
     }
     if (pathname === '/__test/frames') {
       return new Response(JSON.stringify(wsFrames), { headers: { 'Content-Type': 'application/json' } });

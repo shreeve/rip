@@ -119,9 +119,9 @@ export state =
   browserRuntime: null # dist/browser/rip.js, copied into runDir when app/ exists
   buildCounter: 0      # one app artifact per boot epoch, uniquely named
   runDir: null         # tmpdir holding the doorbell, worker sockets, artifacts
-  cellsDir: null       # rev-keyed cell files under runDir/cells
+  cellsDir: null       # latest file bytes under runDir/cells (env RIP_CELLS_DIR)
   manifestPath: null   # the atomically rewritten cell manifest
-  cells: {}            # id (birth store path, 'app/…') → { id, rev, hash, retired }
+  cells: {}            # id (birth store path, 'app/…') → { id, hash, retired }
   bellPath: null
   bell: null
   watcher: null
@@ -374,7 +374,7 @@ buildBundle = (walk) ->
 snapshotCells = ->
   out = {}
   for path, entry of state.cells
-    out[path] = { id: entry.id, rev: entry.rev, hash: entry.hash, retired: entry.retired }
+    out[path] = { id: entry.id, hash: entry.hash, retired: entry.retired }
   out
 
 # Restore the cell registry and rewrite the manifest. Exported as the
@@ -412,10 +412,10 @@ export buildApp = ->
 # ==============================================================================
 #
 # A save touching ONLY app/ feeds the live pool in place: mint or bump
-# (id, rev) cells, rewrite the current pool's bundle and the manifest, then
-# ding /hub with {id, rev, etag} envelopes — no new epoch, no pool
-# reload, no doorbell. Any other save takes the dirty-epoch path above and
-# dings the swap (kind 'epoch') once the new pool is live.
+# latest file bytes, rewrite the current pool's bundle and the manifest, then
+# ding /hub with {id, etag} envelopes — no new epoch, no pool reload, no
+# doorbell. Any other save takes the dirty-epoch path above and dings the
+# swap (kind 'epoch') once the new pool is live.
 
 # The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
 # server.rip (workers never import manager code). Exported so the mirror
@@ -435,14 +435,13 @@ shortHash = (hash) -> hash.slice(0, 16)
 moduleFile = (id) -> join(state.cellsDir, encodeURIComponent(id))
 
 # Sync the registry against a modules snapshot and write what changed. A new
-# path mints its id — the birth path, Q3/B′ — at rev 1; a changed path bumps
-# its rev; a deleted path retires: dropped from the manifest, its latest
-# file removed, and the retirement OCCUPIES its own rev so the delete ding
-# is rev-guarded like any mutation. A path returning after retirement
-# resumes its rev sequence. A rename is retire + mint (id persistence
-# across renames is open research). The caller supplies the snapshot — a
-# second disk walk here would re-open the silent-stale class. Returns the
-# changed { id, rev, deleted? } entries.
+# path mints its id — the birth path, Q3/B′. A changed path updates its
+# content hash. A deleted path retires: dropped from the manifest, its
+# latest file removed; the delete ding carries the retired generation's
+# etag so the bag ignores a stale delete after a recreate. A rename is
+# retire + mint (id persistence across renames is open research). The
+# caller supplies the snapshot — a second disk walk here would re-open
+# the silent-stale class. Returns the changed { id, hash, deleted? } entries.
 syncCells = (walk) ->
   modules = walk.modules
   state.cellsDir ?= join(state.runDir, 'cells')
@@ -453,25 +452,22 @@ syncCells = (walk) ->
     h = sha256hex(source)
     entry = state.cells[path]
     if not entry?
-      entry = { id: path, rev: 1, hash: h, retired: false }
+      entry = { id: path, hash: h, retired: false }
       state.cells[path] = entry
       changed.push entry
     else if entry.retired
       entry.retired = false
-      entry.rev += 1
       entry.hash = h
       changed.push entry
     else if entry.hash isnt h
-      entry.rev += 1
       entry.hash = h
       changed.push entry
   for path, entry of state.cells
     if not modules[path]? and not entry.retired
       entry.retired = true
-      entry.rev += 1
-      changed.push { id: entry.id, rev: entry.rev, deleted: true }
+      changed.push { id: entry.id, hash: entry.hash, deleted: true }
   # Latest representation only (Q8′ — no per-rev museum). A retirement
-  # removes the file; its rev exists only in the ding.
+  # removes the file; its etag rides the delete ding.
   for entry in changed
     if entry.deleted
       try unlinkSync moduleFile(entry.id)
@@ -479,22 +475,20 @@ syncCells = (walk) ->
       Bun.write! moduleFile(entry.id), modules[entry.id]
   changed
 
-# The manifest is the LAST durable document on every cell path — written
-# only after the bundle carrying the same revs is. The browser fetches the
-# manifest FIRST, so the pairing a boot can observe is "manifest rev <=
-# bundle bytes", which the feed's resync heals forward; the reverse pairing
-# (a manifest claiming revs the bundle does not carry) would block its own
-# healing on the rev cursor — the silent-stale class. tmp + rename: workers
-# read the manifest per request and must never see a torn document.
+# The manifest is the LAST durable document on every file path — written
+# only after the bundle carrying the same etags is. The browser fetches
+# the manifest FIRST, so a boot can heal forward via feed resync. tmp +
+# rename: workers read the manifest per request and must never see a
+# torn document.
 writeManifest = ->
   live = []
   for path, entry of state.cells
     # The id IS the store path (B′ — the birth path is the id, a rename
     # retires and mints), so the entry carries one spelling of that fact.
-    live.push { id: entry.id, rev: entry.rev, etag: shortHash(entry.hash) } unless entry.retired
+    live.push { id: entry.id, etag: shortHash(entry.hash) } unless entry.retired
   live.sort (a, b) -> if a.id < b.id then -1 else 1
   tmp = "#{state.manifestPath}.tmp"
-  Bun.write! tmp, JSON.stringify({ cells: live })
+  Bun.write! tmp, JSON.stringify({ files: live })
   renameSync tmp, state.manifestPath
   return
 
@@ -543,11 +537,8 @@ runCellChange = ->
   catch e
     warn "rip-server: bundle/manifest rewrite failed on the cell path — manifest held back: #{e?.message or e}"
   dings = changed.map (c) ->
-    ding = { id: c.id, rev: c.rev }
-    if c.deleted is true
-      ding.kind = 'delete'
-    else
-      ding.etag = shortHash(c.hash)
+    ding = { id: c.id, etag: shortHash(c.hash) }
+    ding.kind = 'delete' if c.deleted is true
     { '@': [DEV_CHANNEL], ding }
   i = 0
   while i < dings.length                 # the publish plane caps 16 objects per frame

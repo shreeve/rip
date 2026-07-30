@@ -28,40 +28,36 @@ reload is a fallback, not the default once framework refresh exists.
 | dev substrate | watcher, graph, transport, module delivery, CSS, overlay, fallback |
 | framework refresh | identity, signatures, state migration, effects, DOM reconciliation |
 | boundary | module/component that accepts an update |
-| definition cell | stable component identity whose implementation can swap |
+| component definition | stable component identity whose implementation can swap |
 | signature | structural fingerprint used to select patch, migrate, or remount |
-| last-known-good | the active successful revision retained across a failed update |
+| last-known-good | the active successful generation retained across a failed update |
 | transactional activation | stage, validate, swap atomically, and roll back on failure |
 
 ## Current baseline
 
-Rip compiles and runs modules through Bun and can emit feature runtimes
-inline or by import. The browser entry, module graph (`assembleBundle`
-→ `bootApp` → `launch`), and app framework are shipped and certified in
-real browsers (`packages/browser-tests`). No product surface serves the
-page and bundle (only the certification fixture does), no watch→browser
-transport exists, and there is no state-preserving refresh.
-
-HMR therefore depends on the dev-server integration work in
-`ROADMAP.md` (Browser delivery). The first HMR phase establishes an
-honest last-known-good reload path; later phases add module and
-framework refresh.
+The Workspace **door** (Layer A) is shipped: watch → `/hub` ding
+`{id,etag}` → HTTP `GET /app/…?etag=` → `Workspace.set` → visible
+update (see [WORKSPACE.md](WORKSPACE.md) Q8′). Apply today is the
+labeled whole-launch **remount escape** — not state-preserving refresh.
+Marquee apply (Layer B) is open research against the S-suite; do not
+call remount “HMR done.”
 
 ## Two-layer architecture
 
 HMR has two independent owners:
 
 ```text
-Layer A — dev substrate
-watch → module graph → notify → fetch/evaluate → CSS → overlay
+Layer A — Workspace door (dev substrate)
+watch → hub ding {id,etag} → HTTP GET /app/?etag= → Workspace.set
                          │
                          ▼
-Layer B — framework refresh
+Layer B — framework refresh (apply engine)
 identity → signature → patch/migrate/remount → effects → DOM
 ```
 
-Layer A delivers a new module namespace. Layer B decides whether living
-instances can adopt it.
+Layer A mutates the passport bag. Layer B decides whether living
+instances can adopt the mutation. Layer A **is** the Workspace door —
+not a second WebSocket body bus.
 
 Rip owns the language, compiler, runtime, renderer, router, and server,
 so both layers can share stable ids and compiler-produced metadata
@@ -71,10 +67,10 @@ without heuristic source transforms.
 
 ### Module graph
 
-Each module records:
+Each file records:
 
-- stable module id;
-- content hash and revision;
+- stable file id (B′);
+- content etag;
 - imported dependencies;
 - importers;
 - accepted dependencies/self-accept status;
@@ -136,12 +132,12 @@ and declaration identity. A process-wide registry owns:
 
 ```text
 component id
-  → current definition cell
+  → current component definition
   → structural signature
   → living instances
 ```
 
-Generated code resolves the definition cell rather than permanently
+Generated code resolves the component definition rather than permanently
 capturing one class object.
 
 ### Signature
@@ -296,19 +292,15 @@ signature decisions remain deterministic unit tests.
 
 ## Resolved decisions
 
-Decided at stage entry, before implementation depends on them:
+Aligned with [WORKSPACE.md](WORKSPACE.md) (door wins where this file
+once disagreed):
 
-- **Transport: WebSocket, unified.** One dev transport, built new,
-  carries both file-watch reloads and HMR updates. SSE is rejected:
-  its HTTP/1.1 six-connection-per-origin ceiling starves the app's own
-  requests once a few dev tabs are open, and a bidirectional channel
-  is wanted for targeted updates and client→server error/state
-  reporting. Reconnection carries a revision cursor so a reconnecting
-  client resumes from its last-applied revision.
-- **API: Rip-native, no `import.meta.hot` shim.** Rip owns its dev
-  server and runtime and replaces Vite rather than running under it, so
-  there is no external API to be compatible with. The HMR API keeps
-  Rip's ownership and effect-cleanup semantics honest.
+- **Layer A transport: Workspace door.** Hub ding `{ id, etag }`
+  (no bodies, no `rev`); HTTP carries file bytes at `/app/…?etag=`.
+  Production has no hub (Q2). SSE body buses and WS-inline update
+  payloads are rejected.
+- **API: Rip-native, no `import.meta.hot` shim.** Compiler-owned
+  accept/boundaries; Rip events for tools later.
 - **Container identity during patch: owner-frame + declared key**, never
   positional (honors "state never migrates by positional guesswork").
 - **Type-fingerprint change: remount.** A changed fingerprint remounts;
@@ -318,10 +310,11 @@ Decided at stage entry, before implementation depends on them:
 - **Stash / schema-registry replacement: replace-and-revalidate.** The
   registry is replaced and revalidated; live stash values are preserved
   by key and orphaned keys are dropped loudly.
-- **Update payload: inline** over the bidirectional WS (no separate
-  hash-addressed fetch channel).
-- **Dev module layout: unbundled ESM** in development (fast narrow
-  updates); the deterministic bundle remains the production output.
+- **Bag unit noun: file** (path-keyed passport). Swappable component
+  identity: **component definition** (not “definition cell”).
+- **Dev delivery: manager file pool + bundle.json first paint**; live
+  mutation fetches one file generation. Production remains the
+  deterministic sealed path.
 
 ## Architectural constraints
 

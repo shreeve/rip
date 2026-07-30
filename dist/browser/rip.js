@@ -5944,6 +5944,10 @@ function implicitObjects(tokens, mintId) {
     insertions.push({ at, token: makeBrace("}", lastReal ? lastReal.end : 0, lastReal ? lastReal.id : null) });
   };
   const looksObjectish = (j) => looksObjectishAt(tokens, j);
+  const pendingIndentedObjectCallAt = (indentAt) => {
+    const before = tokens[indentAt - 1];
+    return Boolean(before && IMPLICIT_FUNC.has(before.kind) && looksObjectish(indentAt + 1) && !controlHeadBackwards(tokens, indentAt - 1));
+  };
   const openCallBetween = (from, i) => {
     let levels = 0;
     for (let j = i - 1;j > from; j--) {
@@ -5955,8 +5959,9 @@ function implicitObjects(tokens, mintId) {
         continue;
       }
       if (PASS_OPENERS.has(k)) {
-        if (k === "INDENT" && levels === 0)
-          return false;
+        if (k === "INDENT" && levels === 0) {
+          return pendingIndentedObjectCallAt(j);
+        }
         levels--;
         if (levels < 0)
           return false;
@@ -6001,7 +6006,7 @@ function implicitObjects(tokens, mintId) {
       continue;
     }
     if (k === "INDENT") {
-      if (prev && !BLOCK_ARG_CARRIERS.has(prev.kind)) {
+      if (prev && !BLOCK_ARG_CARRIERS.has(prev.kind) && !pendingIndentedObjectCallAt(i)) {
         while (top()?.kind === "object" && prev.kind !== ":")
           closeObject(i);
       }
@@ -6058,7 +6063,8 @@ function implicitObjects(tokens, mintId) {
       const under = stack[stack.length - 2];
       const isBraceFrame = (fr) => fr && (fr.kind === "{" || fr.kind === "PICK_START" || fr.kind === "OPTPICK_START" || fr.kind === "object");
       const isBraceKind = (kd) => kd === "{" || kd === "PICK_START" || kd === "OPTPICK_START";
-      if (f && (isBraceFrame(f) || f.kind === "INDENT" && isBraceKind(under?.kind)) && !openCallBetween(f.at, s) && (startsLine || before?.kind === "," || isBraceKind(before?.kind) || tokens[s]?.kind === "{")) {
+      const callFrom = f?.kind === "INDENT" && under ? under.at : f?.at;
+      if (f && (isBraceFrame(f) || f.kind === "INDENT" && isBraceKind(under?.kind)) && !(callFrom != null && openCallBetween(callFrom, s)) && (startsLine || before?.kind === "," || isBraceKind(before?.kind) || tokens[s]?.kind === "{")) {
         continue;
       }
       stack.push({ kind: "object", at: s, sameLine: true, startsLine });
@@ -23075,11 +23081,11 @@ async function bootApp(opts = {}) {
   if (workspaceMode) {
     bag = app.createWorkspace();
     const records = [];
-    for (const entry of manifest?.cells ?? []) {
+    for (const entry of manifest?.files ?? manifest?.cells ?? []) {
       const source = (bundle.modules ?? {})[entry.id];
       if (source === undefined)
         continue;
-      records.push({ id: entry.id, path: entry.id, rev: entry.rev, source });
+      records.push({ id: entry.id, path: entry.id, etag: entry.etag, source });
     }
     bag.populate(records);
   }
@@ -23168,9 +23174,13 @@ async function bootApp(opts = {}) {
     sealed: bag.sealed,
     set: async (cell) => {
       const known = bag.passport(cell.id);
-      if (known && Number.isInteger(cell.rev) && cell.rev <= known.rev)
-        return false;
+      if (known && typeof cell.etag === "string" && cell.etag === known.etag) {
+        if (cell.deleted !== true)
+          return false;
+      }
       if (cell.deleted === true) {
+        if (known && typeof cell.etag === "string" && cell.etag !== known.etag)
+          return false;
         const path2 = bag.passport(cell.id)?.path;
         if (path2 !== undefined) {
           files.delete(path2);
@@ -23185,7 +23195,7 @@ async function bootApp(opts = {}) {
       try {
         module = await loader.import(path);
       } catch (error) {
-        report(`[Rip] ${path} rev ${cell.rev} failed to compile — keeping the last good version`, error);
+        report(`[Rip] ${path} etag ${cell.etag} failed to compile — keeping the last good version`, error);
         return false;
       }
       return bag.set({ ...cell, compiled: { ...module } });

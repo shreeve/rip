@@ -17,7 +17,7 @@ The package currently provides:
 - `createWorkspace` for the Rip Workspace — the reactive passport bag of
   component records ([docs/WORKSPACE.md](../../docs/WORKSPACE.md))
 - `connectFeed` for the workspace dev feed — the hub subscriber that turns
-  `{id, rev, etag}` dings into HTTP `/app/…?etag=` fetches and `workspace.set` calls
+  `{id, etag}` dings into HTTP `/app/…?etag=` fetches and `workspace.set` calls
 
 Only named exports are supported:
 

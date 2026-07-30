@@ -192,13 +192,13 @@ export async function bootApp(opts = {}) {
     // does — one graph, never a second copy.
     bag = app.createWorkspace();
     const records = [];
-    for (const entry of manifest?.cells ?? []) {
+    for (const entry of manifest?.files ?? manifest?.cells ?? []) {
       // The id IS the store path (B′ — the birth path is the id).
       const source = (bundle.modules ?? {})[entry.id];
-      // A manifest cell the bundle does not carry is skipped here: the
-      // feed's open resync fetches it rev-keyed.
+      // A manifest file the bundle does not carry is skipped here: the
+      // feed's open resync fetches it by etag.
       if (source === undefined) continue;
-      records.push({ id: entry.id, path: entry.id, rev: entry.rev, source });
+      records.push({ id: entry.id, path: entry.id, etag: entry.etag, source });
     }
     bag.populate(records);
   }
@@ -229,9 +229,9 @@ export async function bootApp(opts = {}) {
 
   // The bag IS the component store (Q7), and the launch bundle carries
   // NO modules key on purpose: launch's load() would rewrite every
-  // passport and bump every rev, desyncing the bag's rev cursor from
-  // the server's. The bag already holds the sources; launch only
-  // overlays projections (setCompiled never bumps a rev or notifies).
+  // passport and desync bag etags from the server's. The bag already
+  // holds the sources; launch only overlays projections (setCompiled
+  // never changes etag or notifies).
   const launchWith = compiledModules => app.launch({
     bundle: { compiled: compiledModules, data: bundle.data },
     components: bag,
@@ -326,17 +326,20 @@ export async function bootApp(opts = {}) {
     passport: bag.passport,
     sealed: bag.sealed,
     set: async cell => {
-      // The bag's rev cursor is THE staleness verdict — consult it
-      // BEFORE any mutation. Two dings in flight can resolve out of
-      // order: the older fetch lands after the newer one applied, and
-      // while bag.set would reject it, the files/loader mutations
-      // below would already carry the stale bytes into the next
-      // remount (the silent-stale class). Same guard for deletes: a
-      // replayed stale delete must not evict the loader's file while
-      // the bag keeps the passport.
+      // The bag's etag is THE staleness verdict — consult it BEFORE any
+      // mutation. Two dings in flight can resolve out of order: the
+      // older fetch lands after the newer one applied, and while bag.set
+      // would reject a duplicate etag, the files/loader mutations below
+      // would already carry stale bytes into the next remount (the
+      // silent-stale class). Same guard for deletes: a replayed stale
+      // delete must not evict the loader's file while the bag keeps the
+      // passport.
       const known = bag.passport(cell.id);
-      if (known && Number.isInteger(cell.rev) && cell.rev <= known.rev) return false;
+      if (known && typeof cell.etag === 'string' && cell.etag === known.etag) {
+        if (cell.deleted !== true) return false;
+      }
       if (cell.deleted === true) {
+        if (known && typeof cell.etag === 'string' && cell.etag !== known.etag) return false;
         const path = bag.passport(cell.id)?.path;
         if (path !== undefined) {
           files.delete(path);
@@ -351,7 +354,7 @@ export async function bootApp(opts = {}) {
       try {
         module = await loader.import(path);
       } catch (error) {
-        report(`[Rip] ${path} rev ${cell.rev} failed to compile — keeping the last good version`, error);
+        report(`[Rip] ${path} etag ${cell.etag} failed to compile — keeping the last good version`, error);
         return false;
       }
       return bag.set({ ...cell, compiled: { ...module } });
