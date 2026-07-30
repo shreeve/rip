@@ -39,6 +39,11 @@ const BINOPS = new Set(['+', '-', '*', '/', '%', '**', '<', '>', '<=', '>=', '==
 // own emission validates the function value and suppresses the
 // implicit return. It emits as plain '='.
 const ASSIGNS = new Set(['=', 'void-assign', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=', '<<=', '>>=', '>>>=', '&=', '^=', '|=']);
+// The assignment heads that INTRODUCE their plain-name target rather
+// than reading it first: plain `=` and the void definition, whose bang
+// rides the head and changes nothing about the binding it creates.
+// Every compound form reads before it writes and is excluded.
+const DECLARING_ASSIGNS = new Set(['=', 'void-assign']);
 
 // Assignment heads that declare/mutate a RENDER LOCAL at a render
 // child position : `=` declares, compound forms
@@ -631,6 +636,63 @@ class Emitter {
     return names;
   }
 
+  // Names an exported PLAIN assign declares (`export flag = 1`,
+  // `export save! = ->`). Their lowering is `export const` — a real
+  // declaration the hoist line never carries — so the scope owns them
+  // as consts and every later write rejects. Only direct statements
+  // are walked: `export` is a module-top form, and a spec that is a
+  // reactive/readonly/def/class declaration owns its own kind.
+  static exportedConstNames(stmts) {
+    const names = new Set();
+    for (const n of stmts) {
+      if (!isNode(n) || n[0] !== 'export') continue;
+      for (const spec of n.slice(1)) {
+        if (isNode(spec) && (spec[0] === '=' || spec[0] === 'void-assign') &&
+            spec.length === 3 && typeof spec[1] === 'string') {
+          names.add(spec[1]);
+        }
+      }
+    }
+    return names;
+  }
+
+  // Does `name` resolve to an exported const at this point? The walk
+  // is the ambient-readonly walk's shape: innermost frame first, and
+  // any nearer binding (a parameter, an inner declaration, a loop or
+  // catch binding, a component member) answers first — shadowing is
+  // never a write to the export.
+  isExportedConst(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive.has(name)) return false;
+      if (f.exportedConst !== undefined && f.exportedConst.has(name)) return true;
+      if (f.bound.has(name)) return false;
+      if (f.members !== undefined && f.members.has(name)) return false;
+    }
+    return false;
+  }
+
+  // The exported-const write guard — called with an assignment/update
+  // TARGET before emission, at every head that writes a bare name.
+  // Rejecting is the whole point: the two lowerings collide otherwise
+  // (the hoist pass mints `let flag;` for the write while the export
+  // pass mints `export const flag = 1;`, and the module does not
+  // build), and no emission of a write to a const is correct anyway.
+  // Member and index targets are untouched — those mutate the exported
+  // VALUE, which a const binding permits.
+  checkExportedConstWrite(node, target) {
+    const names = typeof target === 'string'
+      ? [target]
+      : (Emitter.isPattern(target) ? this.patternNames(target) : []);
+    for (const name of names) {
+      if (!this.isExportedConst(name)) continue;
+      throw this.positionedError(node,
+        `emitter: cannot assign to exported '${name}' — an exported binding lowers to ` +
+        `'export const', which never changes after its declaration; declare it as state ` +
+        `('export ${name} := …') to write it, or drop the export`);
+    }
+  }
+
   // An Error carrying the node's source span (offsets) — compile()
   // formats it as path:line:col with a caret, the same shape lexer
   // and parse diagnostics take. Every emitter rejection throws
@@ -922,8 +984,13 @@ class Emitter {
   // shadow-hoist it). Handles and readonly names enter the frame's
   // BOUND set, never the reactive set: both are plain consts (reads
   // never unwrap), and each shadows any outer reactive name it
-  // re-binds. `params` (the function scopes) join the redeclaration
-  // check as parameter-kind declarations.
+  // re-binds. Exported plain names get their OWN set rather than
+  // either, because the write guard has to tell them apart from every
+  // other const to name the spellings that DO change; they
+  // deliberately stay out of the returned scope names, so an inner
+  // function's assignment to the name still binds its own local.
+  // `params` (the function scopes) join the redeclaration check as
+  // parameter-kind declarations.
   pushReactiveFrame(stmts, bound, params = [], owner = null) {
     const reactive = this.collectReactiveNames(stmts);
     const handles = this.collectEffectHandles(stmts);
@@ -933,6 +1000,7 @@ class Emitter {
       reactive,
       computed: this.collectComputedNames(stmts),
       bound: new Set([...bound, ...Emitter.declaredNames(stmts), ...handles, ...readonly]),
+      exportedConst: Emitter.exportedConstNames(stmts),
     });
     return new Set([...reactive, ...handles, ...readonly]);
   }
@@ -1149,16 +1217,26 @@ class Emitter {
     if (reactive) this.b.emit('.value');
   }
 
-  // Emit a primitive identifier through its parser-recorded occurrence span.
+  // Emit a primitive atom through its parser-recorded occurrence span.
   // Primitive tree values have no identity, so the current node/role frame and
   // its occurrence cursor supply the join. TS-face only: these rows serve the
   // editor position surface and do not revise shipping source-map artifacts.
+  //
+  // LITERAL spellings take a row too, not identifiers alone. A re-rendered
+  // literal (`'b'` → `"b"`) is not verbatim-equal to its source bytes, so the
+  // builder calls the row `cover` — but the SPAN is the lexer's own and is
+  // exactly right, and a resolver that finds no exact row falls to the
+  // innermost cover it can see. Without a row of the literal's own that is the
+  // enclosing element list, so a diagnostic on one element paints them all.
+  // The role names which the value is; `mappingKind` stays the builder's
+  // verbatim call, never declared here.
   emitPrimitive(value) {
     const owner = this.b.currentMark;
-    const span = this.ts && typeof value === 'string' && isIdentifierName(value)
+    const span = this.ts && typeof value === 'string'
       ? this.b.claimPrimitiveSpan(value, this.primitiveAvoid) : null;
     if (owner !== null && span !== null) {
-      this.b.markSpan(owner.nodeId, 'identifier', span[0], span[1], () => this.b.emit(value));
+      const role = isIdentifierName(value) ? 'identifier' : 'literal';
+      this.b.markSpan(owner.nodeId, role, span[0], span[1], () => this.b.emit(value));
     } else {
       this.b.emit(value);
     }
@@ -2011,6 +2089,19 @@ class Emitter {
       this.patternNames(p[1], out, binding, p);
     } else if (p[0] === '...') this.patternNames(p[1], out, binding, p);
     else if (p[0] === 'default') this.patternNames(p[1], out, binding, p);
+    // A defaulted ELEMENT is spelled as a bare `=` node, not as
+    // `default` — `[flag = 5]` parses to `["array", ["=", "flag", "5"]]`
+    // — so the walk has to descend it too, in an array element and as a
+    // keyed pair's value alike. Without this the name never reaches the
+    // caller and every check keyed on the pattern's names silently
+    // skips it.
+    else if (p[0] === '=') this.patternNames(p[1], out, binding, p);
+    // A cast wraps the target without changing what binds: `[flag as T]`
+    // is still a write to `flag`. Same omission class as the default
+    // above — the name is invisible to every check keyed on the walk,
+    // and here it hides the name from the hoist pass too, so the module
+    // BUILDS and throws on the const write at runtime instead.
+    else if (p[0] === 'cast') this.patternNames(p[1], out, binding, p);
     else if (p[0] === 'typed-var') this.patternNames(p[1], out, binding, p);
     return out;
   }
@@ -2170,7 +2261,33 @@ class Emitter {
       }
     }
     const collected = this.hoistTargets(stmts, params);
-    let entries = collected.filter(([n]) => !this.inScope(n) || (n === '_' && collected.matchWrite));
+    let entries = collected.filter(([n, node]) => {
+      // A COMPOUND-HEADED write to a name that resolves to an enclosing
+      // exported const does not mint a local. Exported names are kept
+      // out of scope names so a pure write can shadow them, but a
+      // compound head reads its target before writing it, so the shadow
+      // it would declare is read while still undefined — `flag += 2`
+      // yields NaN where the same spelling on a plain module binding
+      // writes through. Unhoisted, the write resolves to the export,
+      // where the const guard rejects it in the author's vocabulary.
+      // The update forms already behave this way: they were never hoist
+      // candidates.
+      //
+      // The head list matches `hoistTargets`' own walk, `*>` included:
+      // merge-into reads its target to merge into it, so a shadow there
+      // silently drops the export's value rather than reading undefined.
+      //
+      // The test is the HEAD, not the value: `flag = flag + 1` reads the
+      // name just as surely and still shadows, still yielding NaN. That
+      // residue is older than this clause and uniform with every other
+      // nested shadow; narrowing it needs the scope's read/write
+      // ORDERING, which the hoist collector does not carry. What this
+      // clause buys is the spelling users actually write.
+      if (isNode(node) && (ASSIGNS.has(node[0]) || node[0] === '*>') &&
+          !DECLARING_ASSIGNS.has(node[0]) &&
+          typeof node[1] === 'string' && this.isExportedConst(node[1])) return false;
+      return !this.inScope(n) || (n === '_' && collected.matchWrite);
+    });
     entries.annotations = collected.annotations;
     entries.directives = collected.directives;
     const names = new Set(entries.map(([n]) => n));
@@ -2463,8 +2580,8 @@ class Emitter {
   // One generic execution-order walk over a scope's RAW statement list
   // (pre-liveStmts, so bare typed forwards still appear and structurally
   // disqualify their names in both faces), descending into nested
-  // functions (unlike hoistTargets). Per name: `decl` — the plain `=`
-  // statement eligible to declare it (null unless the name's first
+  // functions (unlike hoistTargets). Per name: `decl` — the declaring
+  // assign statement eligible to declare it (null unless the name's first
   // occurrence is an unannotated top-level write); `nested` — any
   // occurrence inside a nested function; `nestedWrite` — a nested
   // occurrence that writes (the Tier 3 signal, consumed by the pin
@@ -2532,11 +2649,12 @@ class Emitter {
       if ((ASSIGNS.has(head) || head === '*>') && n.length === 3) {
         walk(n[2], inFn); // value before target: execution order
         if (typeof n[1] === 'string') {
-          if (head !== '=') occur(n[1], inFn); // compound assigns read their target first
+          const declaring = DECLARING_ASSIGNS.has(head);
+          if (!declaring) occur(n[1], inFn); // compound assigns read their target first
           // Annotated assigns qualify too: the annotation emits inline
           // (`let x: T = v`), so typed/stripped twins ship identical JS
           // (the dts.test.js erasure invariant).
-          occur(n[1], inFn, true, head === '=' && !inFn && top.has(n) ? n : null, head === '=' ? n : null);
+          occur(n[1], inFn, true, declaring && !inFn && top.has(n) ? n : null, declaring ? n : null);
         } else {
           // Pattern and member targets: names inside over-count as
           // reads (patterns stay hoisted; a member target's object is
@@ -2604,7 +2722,7 @@ class Emitter {
       // A guard assign's write emits INSIDE an `if` condition
       // (`if (!(y = x)) return e;`) — `let` is invalid there, so the
       // target keeps its hoist-line declaration.
-      if (isNode(f.decl) && f.decl[0] === '=' &&
+      if (isNode(f.decl) && DECLARING_ASSIGNS.has(f.decl[0]) &&
           (Emitter.returnGuard(f.decl[2]) || Emitter.throwGuard(f.decl[2]))) return true;
       // A bare typed FORWARD (`x: number` … `x = 5`) keeps the hoist —
       // its annotation manifests on the hoist line and the forward is
@@ -4037,12 +4155,20 @@ class Emitter {
             // The catch-pattern lowering: bind `error`, destructure as
             // the handler's first statement (paren-wrapped for both
             // pattern kinds). The names hoist at the enclosing scope —
-            // for BOTH kinds.
+            // for BOTH kinds, which is why the write check runs here.
+            this.checkExportedConstWrite(part, binding);
             // The scaffold parameter is minted, never `error`: the
             // handler body may READ an outer `error`, which a fixed
-            // parameter would shadow.
+            // parameter would shadow. Face-only `any` on it (tsScaffoldAny's
+            // doctrine): the destructure is the LOWERING's statement, and
+            // TypeScript's `unknown` catch type would publish on it with no
+            // narrowing seam the author can reach. Scoped to the minted
+            // binding alone — the identifier spelling keeps `unknown`,
+            // which the author governs the ordinary ways.
             const param = this.loopTempName('_err');
-            this.b.emit(` catch (${param}) {\n`);
+            this.b.emit(` catch (${param}`);
+            this.tsScaffoldAny();
+            this.b.emit(') {\n');
             const pad = '  '.repeat(ind + 1);
             this.b.emit(pad + '(');
             this.mark(part, 'binding', () => this.withPattern(() => this.expr(binding)));
@@ -5067,8 +5193,13 @@ class Emitter {
             this.b.emit(' catch ');
             this.returnBlock(body, ind);
           } else if (Emitter.isPattern(binding)) {
+            this.checkExportedConstWrite(part, binding);
+            // The statement path's catch-pattern lowering, value-side:
+            // minted parameter, face-only `any` on it for the same reason.
             const param = this.loopTempName('_err');
-            this.b.emit(` catch (${param}) {\n`);
+            this.b.emit(` catch (${param}`);
+            this.tsScaffoldAny();
+            this.b.emit(') {\n');
             this.b.emit('  '.repeat(ind + 1) + '(');
             this.mark(part, 'binding', () => this.withPattern(() => this.expr(binding)));
             this.b.emit(` = ${param});\n`);
@@ -6216,6 +6347,11 @@ class Emitter {
       throw this.positionedError(node,
         `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
     }
+    // Pattern elements reject too — a destructured write declares
+    // nothing, so `[flag] = […]` writes the export just as `flag = …`
+    // does. Inside an enclosing pattern this `=` is a DEFAULT, and the
+    // pattern's own check already covered the name.
+    if (!this.inPattern) this.checkExportedConstWrite(node, node[1]);
     this.checkMemberWrite(node, node[1]);
     // A void definition (`save! = ->`, head 'void-assign') validates its
     // function value and emits as a plain '='; the value's body owns
@@ -11284,8 +11420,23 @@ class Emitter {
     const bound = [];
     let firstBound = null;
     let hasConstructor = false;
+    // The instance members the body itself names — every field form and
+    // every method key, statics excluded (a static shares no name space
+    // with an instance property). Collected over the WHOLE body: a
+    // declaration reads to TypeScript wherever it sits, before the
+    // constructor or after it.
+    const declared = new Set();
+    let ctorParams = null;
     for (const stmt of stmts) {
-      if (!isObject(stmt)) continue;
+      if (!isObject(stmt)) {
+        const field = isStaticKey(stmt) ? null
+          : typeof stmt === 'string' ? stmt
+          : Emitter.isTypedWrapper(stmt) && typeof stmt[1] === 'string' ? stmt[1]
+          : isNode(stmt) && stmt[0] === '=' && stmt.length === 3 && typeof stmt[1] === 'string' ? stmt[1]
+          : null;
+        if (field !== null) declared.add(field);
+        continue;
+      }
       for (const pair of stmt.slice(1)) {
         if (pair[0] !== ':' && pair[0] !== 'void-pair') {
           throw this.positionedError(pair, 'emitter: class bodies support methods and fields only', stmt);
@@ -11294,7 +11445,12 @@ class Emitter {
           throw this.positionedError(pair, 'emitter: computed class members are not supported yet', stmt);
         }
         const mName = memberName(pair[1]);
-        if (mName === 'constructor') hasConstructor = true;
+        if (mName === 'constructor') {
+          hasConstructor = true;
+          if (isFunc(pair[2])) ctorParams = pair[2][1];
+        } else if (!isStaticKey(pair[1]) && typeof mName === 'string') {
+          declared.add(mName);
+        }
         if (isFunc(pair[2]) && pair[2][0] === '=>' && !isStaticKey(pair[1]) && mName !== 'constructor') {
           bound.push(mName);
           firstBound ??= pair;
@@ -11303,6 +11459,26 @@ class Emitter {
     }
     if (bound.length > 0 && !hasConstructor) {
       throw this.positionedError(firstBound, "emitter: bound ('=>') class methods require an explicit constructor", body);
+    }
+
+    // A promoted parameter (`constructor: (@owner: string) ->`) assigns
+    // the instance property but declares nothing, and TypeScript reads a
+    // class's properties from its DECLARATIONS alone — never from what
+    // the constructor assigns — so the TS face declares what the
+    // promotion implies. TS-only: the JS twin's property comes from the
+    // constructor's assignment, where a declaration would not describe
+    // the field but REDEFINE it, on class-field semantics. The body's
+    // own declaration wins when both spellings are present — one
+    // declaration, or TypeScript reads the pair as duplicate identifiers.
+    if (this.ts && ctorParams !== null) {
+      for (const p of ctorParams) {
+        const field = Emitter.atParamField(p);
+        if (field === null || declared.has(field.name)) continue;
+        declared.add(field.name);
+        const text = field.typed === null ? null
+          : this.annotationText(field.typed) ?? (field.typed[2] === '' ? null : tidyType(field.typed[2]));
+        this.b.tsOnly(() => this.b.emit(`${pad}${field.name}${text ? `: ${text}` : ''};\n`));
+      }
     }
 
     // Each member row runs through the place-or-decline probe:
@@ -11398,7 +11574,13 @@ class Emitter {
                   const dn = Emitter.atParamName(p[1]);
                   if (dn !== null) {
                     atParams.push(dn);
-                    return ['default', dn, p[2]];
+                    // The annotation rides through the default wrapper:
+                    // a defaulted parameter's type would otherwise be
+                    // the DEFAULT's inferred type, which is wider than
+                    // what the author wrote (`'on' | 'off' = 'on'`
+                    // reads as `string`) and contradicts the field.
+                    const typed = isNode(p[1]) && p[1][0] === 'typed-var' && p[1].length === 3;
+                    return ['default', typed ? ['typed-var', dn, p[1][2]] : dn, p[2]];
                   }
                 }
                 return p;
@@ -11529,6 +11711,10 @@ class Emitter {
   //   [a, ...mid, b, c] = src
   //   → a = _ref[0]; mid = _ref.slice(1, -2); b = _ref[_ref.length - 2]; …
   middleRestAssign(node, ind) {
+    // This lowering is dispatched AHEAD of the guarded assign path and
+    // writes each name raw, so the exported-const check has to run here
+    // too — `[...rest, flag] = src` reaches no other guard.
+    this.checkExportedConstWrite(node, node[1]);
     const els = node[1].slice(1);
     const at = els.findIndex((e) => isNode(e) && e[0] === '...' && e.length === 2);
     const heads = els.slice(0, at);
@@ -11579,6 +11765,18 @@ class Emitter {
     if (isNode(x) && x[0] === 'typed-var' && x.length === 3) x = x[1];
     if (isNode(x) && x[0] === '.' && x[1] === 'this' && typeof x[2] === 'string') return x[2];
     return null;
+  }
+
+  // The field a promoted parameter declares — its name and the
+  // ["typed-var", …] node carrying the annotation, null when the
+  // parameter is untyped. Reaches through a default (`@level = 1`),
+  // which wraps the promotion the annotation sits on.
+  static atParamField(p) {
+    let x = p;
+    if (isNode(x) && x[0] === 'default' && x.length === 3) x = x[1];
+    const name = Emitter.atParamName(x);
+    if (name === null) return null;
+    return { name, typed: isNode(x) && x[0] === 'typed-var' && x.length === 3 ? x : null };
   }
 
   methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, atParams = [] }) {
@@ -12071,6 +12269,7 @@ class Emitter {
       throw this.positionedError(node,
         `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
     }
+    this.checkExportedConstWrite(node, node[1]);
     this.checkMemberWrite(node, node[1]);
     // An optional chain is not a JavaScript assignment reference —
     // `obj?.x++` has no valid emission; guard the update explicitly.
@@ -12466,6 +12665,7 @@ class Emitter {
   // single-evaluation contract. Returns the node the READ spelling
   // embeds. Minted names come from the used-name registry.
   compoundTarget(node, target, ind) {
+    this.checkExportedConstWrite(node, target);
     if (this.repeatSafeValue(target)) {
       this.mark(node, 'target', () => this.withTarget(() => this.expr(target)));
       return target;
@@ -12634,6 +12834,26 @@ class Emitter {
     });
   }
 
+  // The seam both match lowerings share: close `toMatchable(`'s
+  // arguments, then open `.match(`. `toMatchable` returns
+  // `string | null` and that null is the LOUD-THROW path (a
+  // multi-line receiver without /m must blow up rather than anchor
+  // wrong), so the receiver really is nullable and the bare `.match`
+  // would publish TS2531 on every legal match, at any operand type,
+  // in any mode. The assertion carrying that is TS-ONLY — a builder
+  // tsOnly region, so the JS bytes stay `toMatchable(x).match(re)`
+  // and throw exactly as before, while the face says what the
+  // lowering knows: the null branch leaves through the throw, never
+  // into the match result (which stays honestly `… | null`). Scoped
+  // here rather than in the helper's signature on purpose — the
+  // RUNTIME_TABLE annotation keeps telling the truth about a helper
+  // that really does return null.
+  matchReceiverClose(multiline) {
+    this.b.emit(multiline ? ', true)' : ')');
+    if (this.ts) this.b.tsOnly(() => this.b.emit('!'));
+    this.b.emit('.match(');
+  }
+
   // A regex-literal INDEX is a match read: `text[/re/]` is the whole
   // match (or null), `text[/re/, n]` the nth capture — both spell
   // `((_ = toMatchable(text).match(/re/)) && _[n])`, sharing the
@@ -12645,7 +12865,7 @@ class Emitter {
     this.mark(node, '$self', () => {
       this.b.emit(`((_ = ${this.runtimeName('toMatchable')}(`);
       this.mark(node, 'object', () => this.expr(obj));
-      this.b.emit(multiline ? ', true).match(' : ').match(');
+      this.matchReceiverClose(multiline);
       this.mark(node, 'key', () => this.b.emit(regex));
       this.b.emit(')) && _[');
       if (capture === null) this.b.emit('0');
@@ -12694,7 +12914,7 @@ class Emitter {
     this.mark(node, '$self', () => {
       this.b.emit(`(_ = ${this.runtimeName('toMatchable')}(`);
       this.mark(node, 'left', () => this.expr(node[1]));
-      this.b.emit(multiline ? ', true).match(' : ').match(');
+      this.matchReceiverClose(multiline);
       this.mark(node, 'right', () => this.expr(r));
       this.b.emit('))');
     });
@@ -12727,6 +12947,7 @@ class Emitter {
   // control transfer in the source function's own context.
   synthCompound(node, open, mid, close) {
     const t = node[1];
+    this.checkExportedConstWrite(node, t);
     if (isNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 3) {
       const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
       if (plan.obj === null && !this.repeatSafeValue(t[1])) {

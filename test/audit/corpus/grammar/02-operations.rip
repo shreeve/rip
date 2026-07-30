@@ -23,7 +23,6 @@ shifted = ten << 2 >> 1 >>> 0
 console.log('bits:', masked, merged, toggled, inverted, shifted)
 
 # ── Comparison and logic: symbolic and word spellings ──
-# The match operator =~ is PARKED: its emission publishes TS2531 on every use (FINDINGS.md).
 
 bigger = ten > three
 looser = ten >= 10 and three <= 3
@@ -35,6 +34,16 @@ either = false || 'fallback'
 sized = ten > three ? 'ten' : 'three'
 
 console.log('compare:', bigger, looser, same, differ, negated, both, either, sized)
+
+# ── The match operator =~: the match array or null, with `_` bound to the last match, and the /m spelling a multi-line receiver requires ──
+
+subject = 'rip 42 lang'
+digits = (subject =~ /(\d+)/) and _[1]
+report = 'one\ntwo'
+spanned = (report =~ /^two$/m) and _[0]
+missed = subject =~ /zzz/
+
+console.log('match:', digits, spanned, missed)
 
 # ── Relations and unary words: in, of, instanceof, typeof, delete ──
 

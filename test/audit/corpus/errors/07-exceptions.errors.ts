@@ -11,10 +11,3 @@ let wrongAccess = function() {
     return 'ok'
   } catch (error) {
     return error.message } }
-// wrongPluck holds the open pattern-catch gap's TS2339, not a blessed negative (FINDINGS.md): red here on a lowering change is the cue to invert it into 07-exceptions.
-// The array spelling cannot derive in this lane — TS2488 anchors on the pattern's `[` — and no lane holds it yet.
-let wrongPluck = function() {
-  try {
-    return 'ok'
-  } catch ({ message }) {
-    return message } }

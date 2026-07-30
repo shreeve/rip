@@ -107,7 +107,6 @@ describe('the audit contract judges in both directions', () => {
       'token.delivery': (s) => { s.tk.missing = [{}]; },
       'token.type': (s) => { s.tk.badType = [{ want: { type: 'variable' } }]; },
       'token.type.enum': (s) => { s.tk.badType = [{ want: { type: 'enum' } }]; },
-      'token.type.void': (s) => { s.tk.badType = [{ want: { type: 'function' } }]; },
       'token.readonly': (s) => { s.tk.badReadonly = [{}]; },
     };
     expect(Object.keys(fire).sort()).toEqual(CONTRACT.map((c) => c.name).sort());

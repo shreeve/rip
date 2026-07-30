@@ -1,4 +1,4 @@
-let chained, flush, logIt, nested, notify, wipe;
+let wipe;
 
 function save(x) {
   register(x);
@@ -13,23 +13,23 @@ function typed(x) {
   bump(x);
   return;
 }
-logIt = function(m) {
+let logIt = function(m) {
   emitLog(m);
   return;
 };
-notify = m => {
+let notify = m => {
   sendOut(m);
   return;
 };
-flush = function() {
+let flush = function() {
   drain();
   return;
 };
-chained = function(x) {
+let chained = function(x) {
   track(x);
   return;
 };
-nested = function(a) {
+let nested = function(a) {
   let inner = function(b) {
     return (b + 1);
   };

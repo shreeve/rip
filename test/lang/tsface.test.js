@@ -51,6 +51,10 @@ const MARKER = '\nexport {};\n';
 const ID = String.raw`[$_\p{ID_Start}][$\u200c\u200d\p{ID_Continue}]*`;
 const REGION_SHAPES = [
   /^!?: \S/u,                                             // annotation `: T` / forward `!: T`
+  /^satisfies \S/u,                                       // reactive value enforcement: `v satisfies T`
+  /^\($/u,                                                // computed-lambda wrap opener for `) satisfies () => T`
+  /^\) satisfies \(\) => \S/su,                           // computed return enforcement
+  /^!$/u,                                                 // the match lowering's assertion on its own toMatchable receiver
   /^[()]$/u,                                              // arrow-param / cast parens
   /^as\s+\S/u,                                            // the cast's `as T` spelling
   /^this: \S/u,                                           // schema callable `this` param 
@@ -60,9 +64,6 @@ const REGION_SHAPES = [
   /^constructor\(props\??: \{ .*\{ super\(props\); \}$/su, // the component props ctor (M12-E)
   /^as any\)?$/u,                                          // scaffold/handler quieting casts (M12-E)
   /^\) as any$/u,                                          // handler cast's TS-only close (arrow-safe grouping)
-  /^satisfies \S/u,                                        // reactive value enforcement: `v satisfies T`
-  /^\($/u,                                                 // computed-lambda wrap opener for `) satisfies () => T`
-  /^\) satisfies \(\) => \S/su,                            // computed return enforcement
   new RegExp(String.raw`^(export )?type ${ID}`, 'u'),      // alias / enum companion / schema alias
   new RegExp(String.raw`^(export )?interface ${ID}`, 'u'), // interface / schema intrinsic block
   new RegExp(String.raw`^function ${ID}\(.*\): [^;]+;$`, 'su'), // overload signature
@@ -202,6 +203,46 @@ describe('TS-face emission pins', () => {
       .toBe('let p = function({a, b}: {a: number, b: string}) {\n  return a;\n};' + MARKER);
   });
 
+  // The destructure is the LOWERING's own statement — no seam exists
+  // where an author could narrow, so TypeScript's `unknown` catch type
+  // would publish on legal rip. The annotation is minted with the
+  // parameter and scoped to it: an IDENTIFIER catch keeps `unknown`,
+  // which the author governs the ordinary ways. Both tries carry the
+  // branch separately, so both are pinned; stripping restores the JS.
+  // The match lowering narrows its OWN receiver rather than softening the
+  // helper it calls. Both halves are pinned together because either alone
+  // is satisfiable the wrong way: annotate `toMatchable` as `=> string`
+  // and the assertion becomes unnecessary, which is the fix the finding
+  // ruled out — it would make the prelude lie about a helper that really
+  // answers null on the multi-line path, where the null IS the loud throw.
+  test('the match seam asserts its receiver, and the helper keeps telling the truth', () => {
+    const src = "text = 'abc'\nfound = text =~ /b+/\nnth = text[/(b)/, 1]\n";
+    const code = ts(src).code;
+    expect(code).toContain('toMatchable(text)!.match(/b+/)');
+    expect(code).toContain('toMatchable(text)!.match(/(b)/)');
+    // The helper's own annotation rides the inlined prelude, so the
+    // signature is pinned where it is actually emitted.
+    const withPrelude = compile(src, { runtimeDelivery: 'inline', face: 'ts' }).code;
+    expect(withPrelude).toContain('toMatchable: (v: any, allowNewlines?: boolean) => string | null');
+    // The assertion is face-only: the JS twin calls the same helper with
+    // no narrowing at all, so the null still reaches `.match` and throws.
+    expect(js(src).code).toContain('toMatchable(text).match(/b+/)');
+    expect(js(src).code).not.toContain('!');
+  });
+
+  test('catch patterns: the minted parameter carries a face-only `any`, in the statement try and the value try alike', () => {
+    const stmt = 'try\n  f()\ncatch {message}\n  message\n';
+    const value = 'v = try\n  f()\ncatch [first]\n  first\n';
+    expect(ts(stmt).code).toContain('} catch (_err: any) {');
+    expect(ts(value).code).toContain('} catch (_err: any) {');
+    for (const src of [stmt, value]) {
+      const r = ts(src);
+      expect(stripFace(r.code, r.tsRegions)).toBe(js(src).code);
+    }
+    // The identifier spelling mints nothing and gains nothing.
+    expect(ts('try\n  f()\ncatch e\n  e\n').code).toContain('} catch (e) {');
+  });
+
   test('single typed arrow param gains TS-only parens (TS requires them; stripping restores the bare name)', () => {
     const r = ts('g = (v: number) => v\n');
     expect(r.code).toBe('let g = (v: number) => v;' + MARKER);
@@ -222,7 +263,10 @@ describe('TS-face emission pins', () => {
 
   test('void definitions annotate `: void` (async: Promise<void>) under the voidMarker', () => {
     expect(ts('def save!(x)\n  x\n').code).toBe('function save(x): void {\n  x;\n  return;\n}' + MARKER);
-    expect(ts('tick! = (x) =>\n  x\n').code).toBe('let tick;\n\ntick = (x): void => {\n  x;\n  return;\n};' + MARKER);
+    // The binding declares in place, so the annotation sits on an
+    // INITIALIZED declaration — the span a semantic token and a hover
+    // are both read at carries the function value.
+    expect(ts('tick! = (x) =>\n  x\n').code).toBe('let tick = (x): void => {\n  x;\n  return;\n};' + MARKER);
     expect(ts('def flush!(x)\n  await x\n').code)
       .toBe('async function flush(x): Promise<void> {\n  await x;\n  return;\n}' + MARKER);
   });

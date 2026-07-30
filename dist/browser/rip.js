@@ -7617,7 +7617,7 @@ class CodeBuilder {
     fn();
     this.endMark();
   }
-  static SPAN_ROLES = new Set(["tsDirective", "shorthandProp", "identifier"]);
+  static SPAN_ROLES = new Set(["tsDirective", "shorthandProp", "identifier", "literal"]);
   markSpan(nodeId, role, sourceStart, sourceEnd, fn) {
     if (!CodeBuilder.SPAN_ROLES.has(role)) {
       throw new Error(`builder: markSpan role '${role}' is not in the TS-face trivia allowlist ` + `(${[...CodeBuilder.SPAN_ROLES].join(", ")}) — every other role resolves through RoleStore`);
@@ -8940,6 +8940,7 @@ function instanceTypeLines(info, selfType) {
 // src/emitter.js
 var BINOPS = new Set(["+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "&&", "||", "??", "<<", ">>", ">>>", "&", "^", "|"]);
 var ASSIGNS = new Set(["=", "void-assign", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "<<=", ">>=", ">>>=", "&=", "^=", "|="]);
+var DECLARING_ASSIGNS = new Set(["=", "void-assign"]);
 var RENDER_BINDING_HEADS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??="]);
 var RENDER_LOCAL_RE = /^[A-Za-z_$][\w$]*$/;
 var JS_OP = { "==": "===", "!=": "!==" };
@@ -9238,6 +9239,41 @@ class Emitter {
       walk(n, false);
     return names;
   }
+  static exportedConstNames(stmts) {
+    const names = new Set;
+    for (const n of stmts) {
+      if (!isNode4(n) || n[0] !== "export")
+        continue;
+      for (const spec of n.slice(1)) {
+        if (isNode4(spec) && (spec[0] === "=" || spec[0] === "void-assign") && spec.length === 3 && typeof spec[1] === "string") {
+          names.add(spec[1]);
+        }
+      }
+    }
+    return names;
+  }
+  isExportedConst(name) {
+    for (let i = this.rframes.length - 1;i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive.has(name))
+        return false;
+      if (f.exportedConst !== undefined && f.exportedConst.has(name))
+        return true;
+      if (f.bound.has(name))
+        return false;
+      if (f.members !== undefined && f.members.has(name))
+        return false;
+    }
+    return false;
+  }
+  checkExportedConstWrite(node, target) {
+    const names = typeof target === "string" ? [target] : Emitter.isPattern(target) ? this.patternNames(target) : [];
+    for (const name of names) {
+      if (!this.isExportedConst(name))
+        continue;
+      throw this.positionedError(node, `emitter: cannot assign to exported '${name}' — an exported binding lowers to ` + `'export const', which never changes after its declaration; declare it as state ` + `('export ${name} := …') to write it, or drop the export`);
+    }
+  }
   positionedError(node, message, ...fallbacks) {
     const err = new Error(message);
     for (const n of [node, ...fallbacks]) {
@@ -9481,7 +9517,8 @@ class Emitter {
     this.rframes.push({
       reactive,
       computed: this.collectComputedNames(stmts),
-      bound: new Set([...bound, ...Emitter.declaredNames(stmts), ...handles, ...readonly])
+      bound: new Set([...bound, ...Emitter.declaredNames(stmts), ...handles, ...readonly]),
+      exportedConst: Emitter.exportedConstNames(stmts)
     });
     return new Set([...reactive, ...handles, ...readonly]);
   }
@@ -9647,9 +9684,10 @@ class Emitter {
   }
   emitPrimitive(value) {
     const owner = this.b.currentMark;
-    const span = this.ts && typeof value === "string" && isIdentifierName(value) ? this.b.claimPrimitiveSpan(value, this.primitiveAvoid) : null;
+    const span = this.ts && typeof value === "string" ? this.b.claimPrimitiveSpan(value, this.primitiveAvoid) : null;
     if (owner !== null && span !== null) {
-      this.b.markSpan(owner.nodeId, "identifier", span[0], span[1], () => this.b.emit(value));
+      const role = isIdentifierName(value) ? "identifier" : "literal";
+      this.b.markSpan(owner.nodeId, role, span[0], span[1], () => this.b.emit(value));
     } else {
       this.b.emit(value);
     }
@@ -10187,6 +10225,10 @@ class Emitter {
       this.patternNames(p[1], out, binding, p);
     else if (p[0] === "default")
       this.patternNames(p[1], out, binding, p);
+    else if (p[0] === "=")
+      this.patternNames(p[1], out, binding, p);
+    else if (p[0] === "cast")
+      this.patternNames(p[1], out, binding, p);
     else if (p[0] === "typed-var")
       this.patternNames(p[1], out, binding, p);
     return out;
@@ -10273,7 +10315,11 @@ class Emitter {
       }
     }
     const collected = this.hoistTargets(stmts, params);
-    let entries = collected.filter(([n]) => !this.inScope(n) || n === "_" && collected.matchWrite);
+    let entries = collected.filter(([n, node]) => {
+      if (isNode4(node) && (ASSIGNS.has(node[0]) || node[0] === "*>") && !DECLARING_ASSIGNS.has(node[0]) && typeof node[1] === "string" && this.isExportedConst(node[1]))
+        return false;
+      return !this.inScope(n) || n === "_" && collected.matchWrite;
+    });
     entries.annotations = collected.annotations;
     entries.directives = collected.directives;
     const names = new Set(entries.map(([n]) => n));
@@ -10505,9 +10551,10 @@ class Emitter {
       if ((ASSIGNS.has(head) || head === "*>") && n.length === 3) {
         walk(n[2], inFn);
         if (typeof n[1] === "string") {
-          if (head !== "=")
+          const declaring = DECLARING_ASSIGNS.has(head);
+          if (!declaring)
             occur(n[1], inFn);
-          occur(n[1], inFn, true, head === "=" && !inFn && top.has(n) ? n : null, head === "=" ? n : null);
+          occur(n[1], inFn, true, declaring && !inFn && top.has(n) ? n : null, declaring ? n : null);
         } else {
           walk(n[1], inFn);
         }
@@ -10565,7 +10612,7 @@ class Emitter {
       const f = facts.get(name);
       if (!f || f.decl === null || f.inDef || f.decl === tail)
         return true;
-      if (isNode4(f.decl) && f.decl[0] === "=" && (Emitter.returnGuard(f.decl[2]) || Emitter.throwGuard(f.decl[2])))
+      if (isNode4(f.decl) && DECLARING_ASSIGNS.has(f.decl[0]) && (Emitter.returnGuard(f.decl[2]) || Emitter.throwGuard(f.decl[2])))
         return true;
       const owner = entries.annotations?.get(name);
       if (owner !== undefined && owner !== f.decl) {
@@ -11612,8 +11659,11 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
             this.b.emit(" catch ");
             this.braceBlock(body2, ind);
           } else if (Emitter.isPattern(binding)) {
+            this.checkExportedConstWrite(part, binding);
             const param = this.loopTempName("_err");
-            this.b.emit(` catch (${param}) {
+            this.b.emit(` catch (${param}`);
+            this.tsScaffoldAny();
+            this.b.emit(`) {
 `);
             const pad = "  ".repeat(ind + 1);
             this.b.emit(pad + "(");
@@ -12578,8 +12628,11 @@ ${pad ?? ""}`);
             this.b.emit(" catch ");
             this.returnBlock(body, ind);
           } else if (Emitter.isPattern(binding)) {
+            this.checkExportedConstWrite(part, binding);
             const param = this.loopTempName("_err");
-            this.b.emit(` catch (${param}) {
+            this.b.emit(` catch (${param}`);
+            this.tsScaffoldAny();
+            this.b.emit(`) {
 `);
             this.b.emit("  ".repeat(ind + 1) + "(");
             this.mark(part, "binding", () => this.withPattern(() => this.expr(binding)));
@@ -13544,6 +13597,8 @@ ${pad ?? ""}`);
     if (typeof node[1] === "string" && this.isAmbientReadonly(node[1])) {
       throw this.positionedError(node, `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
     }
+    if (!this.inPattern)
+      this.checkExportedConstWrite(node, node[1]);
     this.checkMemberWrite(node, node[1]);
     if (node[0] === "void-assign")
       this.registerVoidValue(node[2], node);
@@ -17482,9 +17537,15 @@ ${this.replayPad}}` : " }");
     const bound = [];
     let firstBound = null;
     let hasConstructor = false;
+    const declared = new Set;
+    let ctorParams = null;
     for (const stmt of stmts) {
-      if (!isObject(stmt))
+      if (!isObject(stmt)) {
+        const field = isStaticKey(stmt) ? null : typeof stmt === "string" ? stmt : Emitter.isTypedWrapper(stmt) && typeof stmt[1] === "string" ? stmt[1] : isNode4(stmt) && stmt[0] === "=" && stmt.length === 3 && typeof stmt[1] === "string" ? stmt[1] : null;
+        if (field !== null)
+          declared.add(field);
         continue;
+      }
       for (const pair of stmt.slice(1)) {
         if (pair[0] !== ":" && pair[0] !== "void-pair") {
           throw this.positionedError(pair, "emitter: class bodies support methods and fields only", stmt);
@@ -17493,8 +17554,13 @@ ${this.replayPad}}` : " }");
           throw this.positionedError(pair, "emitter: computed class members are not supported yet", stmt);
         }
         const mName = memberName(pair[1]);
-        if (mName === "constructor")
+        if (mName === "constructor") {
           hasConstructor = true;
+          if (isFunc2(pair[2]))
+            ctorParams = pair[2][1];
+        } else if (!isStaticKey(pair[1]) && typeof mName === "string") {
+          declared.add(mName);
+        }
         if (isFunc2(pair[2]) && pair[2][0] === "=>" && !isStaticKey(pair[1]) && mName !== "constructor") {
           bound.push(mName);
           firstBound ??= pair;
@@ -17503,6 +17569,17 @@ ${this.replayPad}}` : " }");
     }
     if (bound.length > 0 && !hasConstructor) {
       throw this.positionedError(firstBound, "emitter: bound ('=>') class methods require an explicit constructor", body);
+    }
+    if (this.ts && ctorParams !== null) {
+      for (const p of ctorParams) {
+        const field = Emitter.atParamField(p);
+        if (field === null || declared.has(field.name))
+          continue;
+        declared.add(field.name);
+        const text = field.typed === null ? null : this.annotationText(field.typed) ?? (field.typed[2] === "" ? null : tidyType(field.typed[2]));
+        this.b.tsOnly(() => this.b.emit(`${pad}${field.name}${text ? `: ${text}` : ""};
+`));
+      }
     }
     for (const stmt of stmts) {
       this.withTsDirectives(stmt, pad, () => this.classMember(stmt, body, ind, pad, {
@@ -17579,7 +17656,8 @@ ${this.replayPad}}` : " }");
                     const dn = Emitter.atParamName(p[1]);
                     if (dn !== null) {
                       atParams.push(dn);
-                      return ["default", dn, p[2]];
+                      const typed = isNode4(p[1]) && p[1][0] === "typed-var" && p[1].length === 3;
+                      return ["default", typed ? ["typed-var", dn, p[1][2]] : dn, p[2]];
                     }
                   }
                   return p;
@@ -17689,6 +17767,7 @@ ${this.replayPad}}` : " }");
     return at !== -1 && at < els.length - 1;
   }
   middleRestAssign(node, ind) {
+    this.checkExportedConstWrite(node, node[1]);
     const els = node[1].slice(1);
     const at = els.findIndex((e) => isNode4(e) && e[0] === "..." && e.length === 2);
     const heads = els.slice(0, at);
@@ -17743,6 +17822,15 @@ ${"  ".repeat(ind)}`);
     if (isNode4(x) && x[0] === "." && x[1] === "this" && typeof x[2] === "string")
       return x[2];
     return null;
+  }
+  static atParamField(p) {
+    let x = p;
+    if (isNode4(x) && x[0] === "default" && x.length === 3)
+      x = x[1];
+    const name = Emitter.atParamName(x);
+    if (name === null)
+      return null;
+    return { name, typed: isNode4(x) && x[0] === "typed-var" && x.length === 3 ? x : null };
   }
   methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, atParams = [] }) {
     const stmts = this.liveStmts(isNode4(block) && block[0] === "block" ? block.slice(1) : [block], { forwards: true });
@@ -18113,6 +18201,7 @@ ${"  ".repeat(ind)}`);
     if (typeof node[1] === "string" && this.isAmbientReadonly(node[1])) {
       throw this.positionedError(node, `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
     }
+    this.checkExportedConstWrite(node, node[1]);
     this.checkMemberWrite(node, node[1]);
     if (isNode4(node[1]) && Emitter.optionalGuard(node[1]) !== null) {
       throw this.positionedError(node, "emitter: an optional chain cannot be an update target — no reference exists for `obj?.x++`; " + "guard it explicitly (`obj.x++ if obj?`)");
@@ -18408,6 +18497,7 @@ ${"  ".repeat(ind)}`);
     });
   }
   compoundTarget(node, target, ind) {
+    this.checkExportedConstWrite(node, target);
     if (this.repeatSafeValue(target)) {
       this.mark(node, "target", () => this.withTarget(() => this.expr(target)));
       return target;
@@ -18554,12 +18644,18 @@ ${"  ".repeat(ind)}`);
       this.b.emit("])");
     });
   }
+  matchReceiverClose(multiline) {
+    this.b.emit(multiline ? ", true)" : ")");
+    if (this.ts)
+      this.b.tsOnly(() => this.b.emit("!"));
+    this.b.emit(".match(");
+  }
   regexIndex(node, obj, regex, capture) {
     const multiline = /^\/(?:[^\\/]|\\.)*\/[a-z]*m[a-z]*$/.test(regex);
     this.mark(node, "$self", () => {
       this.b.emit(`((_ = ${this.runtimeName("toMatchable")}(`);
       this.mark(node, "object", () => this.expr(obj));
-      this.b.emit(multiline ? ", true).match(" : ").match(");
+      this.matchReceiverClose(multiline);
       this.mark(node, "key", () => this.b.emit(regex));
       this.b.emit(")) && _[");
       if (capture === null)
@@ -18599,7 +18695,7 @@ ${"  ".repeat(ind)}`);
     this.mark(node, "$self", () => {
       this.b.emit(`(_ = ${this.runtimeName("toMatchable")}(`);
       this.mark(node, "left", () => this.expr(node[1]));
-      this.b.emit(multiline ? ", true).match(" : ").match(");
+      this.matchReceiverClose(multiline);
       this.mark(node, "right", () => this.expr(r));
       this.b.emit("))");
     });
@@ -18615,6 +18711,7 @@ ${"  ".repeat(ind)}`);
   }
   synthCompound(node, open, mid, close) {
     const t = node[1];
+    this.checkExportedConstWrite(node, t);
     if (isNode4(t) && (t[0] === "." || t[0] === "[]") && t.length === 3) {
       const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
       if (plan.obj === null && !this.repeatSafeValue(t[1])) {

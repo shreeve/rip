@@ -188,3 +188,299 @@ code 'export default function', '''
     return name;
   };
 '''
+
+# ==============================================================================
+# An exported plain binding is const — every write in the export's own scope rejects
+# ==============================================================================
+
+# `export flag = …` lowers to `export const`, so nothing may write the
+# name afterwards. The rejection is positioned at the WRITE and names
+# the two spellings that do change: state (':=') keeps the export and
+# writes through, a bare binding drops it.
+fail "exported plain reassignment rejects", '''
+  export flag = 1
+  flag = 2
+''', "modules.rip>:2:1: emitter: cannot assign to exported 'flag'"
+
+fail "exported plain compound write rejects", "export n = 1\nn += 2", "cannot assign to exported 'n'"
+fail "exported plain merge write rejects", "export n = 1\nn ||= 2", "cannot assign to exported 'n'"
+fail "exported plain floor-div write rejects", "export n = 4\nn //= 2", "cannot assign to exported 'n'"
+fail "exported plain modulo write rejects", "export n = 4\nn %%= 3", "cannot assign to exported 'n'"
+fail "exported plain method-assign rejects", "export s = ' a '\ns .= trim()", "cannot assign to exported 's'"
+fail "exported plain merge-into rejects", "export o = { a: 1 }\n*>o = { b: 2 }", "cannot assign to exported 'o'"
+fail "exported plain postfix update rejects", "export n = 1\nn++", "cannot assign to exported 'n'"
+fail "exported plain prefix update rejects", "export n = 1\n--n", "cannot assign to exported 'n'"
+fail "exported void binding reassignment rejects", "export announce! = -> 1\nannounce! = -> 2", "cannot assign to exported 'announce'"
+fail "exported plain array-pattern write rejects", "export flag = 1\n[flag] = [2]", "cannot assign to exported 'flag'"
+fail "exported plain object-pattern write rejects", "export flag = 1\n{ flag } = { flag: 2 }", "cannot assign to exported 'flag'"
+# A DEFAULTED element is spelled as a bare `=` node rather than a
+# `default` one, so the name only reaches the check if the pattern walk
+# descends that shape — in an array element, nested one array deeper,
+# and as a keyed pair's value.
+fail "exported plain defaulted array-element write rejects", "export flag = 1\n[flag = 5] = []", "cannot assign to exported 'flag'"
+fail "exported plain nested defaulted element write rejects", "export flag = 1\n[[flag = 5]] = [[]]", "cannot assign to exported 'flag'"
+fail "exported plain defaulted pair-value write rejects", "export flag = 1\n{ a: flag = 5 } = {}", "cannot assign to exported 'flag'"
+fail "exported plain defaulted shorthand write rejects", "export flag = 1\n{ flag = 5 } = {}", "cannot assign to exported 'flag'"
+fail "exported plain defaulted tail element write rejects", "export flag = 1\n[other, flag = 5] = [1]", "cannot assign to exported 'flag'"
+# A try in VALUE position is a separate emission with its own
+# catch-pattern branch, so it needs its own rows: the statement rows
+# below leave that branch's guard deletable with a green board.
+fail "exported plain value-try object-catch write rejects", '''
+  export flag = 1
+  x = try
+    throw { flag: 2 }
+  catch { flag }
+    0
+''', "cannot assign to exported 'flag'"
+fail "exported plain value-try array-catch write rejects", '''
+  export flag = 1
+  x = try
+    throw [2]
+  catch [flag]
+    0
+''', "cannot assign to exported 'flag'"
+
+fail "exported plain catch-pattern write rejects", '''
+  export flag = 1
+  try
+    throw { flag: 2 }
+  catch { flag }
+    0
+''', "cannot assign to exported 'flag'"
+
+# Block depth does not license the write — a block, a loop body, a
+# handler and a switch case are all the export's own scope.
+fail "a write inside a block rejects", "export flag = 1\nif true\n  flag = 2", "cannot assign to exported 'flag'"
+fail "a write inside a loop body rejects", "export flag = 1\nfor i in [1, 2]\n  flag = i", "cannot assign to exported 'flag'"
+fail "a write inside a try body rejects", "export flag = 1\ntry\n  flag = 2", "cannot assign to exported 'flag'"
+fail "a write inside a switch case rejects", "export flag = 1\nswitch 1\n  when 1\n    flag = 2", "cannot assign to exported 'flag'"
+
+# A middle-rest pattern has no JS destructuring form, so it lowers
+# through its own statement path — dispatched AHEAD of the guarded assign
+# and writing each name raw. Without a check of its own it emitted the
+# defect this row names, on the everyday `[...rest, last]` spelling.
+fail "a middle-rest tail write rejects", "export flag = 1\n[...rest, flag] = []", "cannot assign to exported 'flag'"
+fail "a middle-rest head write rejects", "export flag = 1\n[flag, ...rest, b] = []", "cannot assign to exported 'flag'"
+fail "a middle-rest name itself rejects", "export flag = 1\n[a, ...flag, c] = []", "cannot assign to exported 'flag'"
+
+# A cast wraps the target without changing what binds. It hides the name
+# from the hoist pass too, so this shape BUILDS and throws on the const
+# write at runtime — a worse failure than the double declaration.
+fail "a cast in an array pattern rejects", "export flag = 1\n[flag as number] = [2]", "cannot assign to exported 'flag'"
+fail "a cast in a pair value rejects", "export flag = 1\n{ a: flag as number } = {}", "cannot assign to exported 'flag'"
+
+# The write check is suppressed inside a pattern that BINDS rather than
+# assigns, and this pair is what makes that suppression visible: a
+# parameter destructure introduces its own `flag`, so rejecting it would
+# be an over-rejection on legal rip.
+# `isExportedConst` walks four shadow kinds, and each needs a row or it
+# can be deleted with a green board: a reactive name, a bound name, a
+# component member, and the export itself. These two cover the kinds the
+# parameter and pattern rows above do not.
+code "a nested reactive binding shadows an exported name", '''
+  export flag = 1
+  def bump()
+    flag := 5
+    flag += 2
+    flag
+''', '''
+  export const flag = 1;
+  function bump() {
+    const flag = __state(5);
+    flag.value += 2;
+    return flag.value;
+  }
+'''
+
+code "a component member shadows an exported name", '''
+  export flag = 1
+  Widget = component
+    flag := 0
+    tick: -> flag += 1
+''', '''
+  export const flag = 1;
+  let Widget = class extends __Component {
+    _init(props) {
+      this.flag = __state(0);
+    }
+    tick() {
+      return (this.flag.value += 1);
+    }
+  };
+'''
+
+code "a parameter destructure with a default shadows an exported name", '''
+  export flag = 1
+  def bump([flag = 5])
+    flag
+''', '''
+  export const flag = 1;
+  function bump([flag = 5]) {
+    return flag;
+  }
+'''
+
+# The nested-FUNCTION exclusion, pinned in every direction it splits.
+# A PURE write mints a local shadow — the export's own scope declares
+# nothing twice, so the row's invariant is not violated — while a write
+# whose head READS the target first (a compound assign, an update)
+# resolves to the export and rejects, because the shadow it would
+# declare is read while still undefined. Whether a nested pure write
+# should shadow at all is a scoping-semantics decision rather than a
+# defect fix; whichever way that goes, the first row below moves and
+# says so.
+#
+# The split is by HEAD, and these rows say so rather than implying more:
+# `flag = flag + 1` reads the name in its VALUE and still shadows, still
+# yielding NaN. Narrowing that needs read/write ordering the hoist
+# collector does not carry.
+code "a bare write in a nested function shadows rather than rejecting", '''
+  export flag = 1
+  def bump()
+    flag = 2
+''', '''
+  export const flag = 1;
+  function bump() {
+    let flag;
+    return (flag = 2);
+  }
+'''
+fail "an update expression in a nested function still rejects", "export flag = 1\ndef bump()\n  flag++", "cannot assign to exported 'flag'"
+fail "a compound write in a nested function rejects", "export flag = 1\ndef bump()\n  flag += 2", "cannot assign to exported 'flag'"
+fail "a merge write in a nested function rejects", "export flag = 1\ndef bump()\n  flag ||= 2", "cannot assign to exported 'flag'"
+fail "a merge-into write in a nested function rejects", "export o = { a: 1 }\ndef bump()\n  *>o = { b: 2 }", "cannot assign to exported 'o'"
+# The residue this split leaves, pinned as the limit it is: the head is
+# plain, so the shadow is minted and the read inside the VALUE sees it
+# undefined. Recorded rather than blessed — if a later change makes this
+# reject, this row moves and the limit is gone.
+code "a pure write whose value reads the export still shadows", '''
+  export flag = 1
+  def bump()
+    flag = flag + 1
+''', '''
+  export const flag = 1;
+  function bump() {
+    let flag;
+    return (flag = flag + 1);
+  }
+'''
+
+# ==============================================================================
+# The negative space: what an exported binding still permits
+# ==============================================================================
+# `export` is a module keyword, so these rows compile rather than
+# evaluate — and a row whose compile throws fails, which is exactly
+# the over-rejection each one guards.
+
+code "an exported binding reads at every depth", '''
+  export flag = 1
+  def read()
+    if true
+      flag + 1
+  read() + flag
+''', '''
+  export const flag = 1;
+  function read() {
+    return (true ? (flag + 1) : undefined);
+  }
+  read() + flag;
+'''
+
+# A member write mutates the exported VALUE — the binding is untouched.
+code "a member write on an exported object stays legal", '''
+  export o = { a: 1 }
+  o.a = 2
+''', '''
+  export const o = {a: 1};
+  o.a = 2;
+'''
+
+# The two spellings the rejection names, driven: state keeps the
+# export and writes through, a bare binding drops the export.
+code "an exported state binding writes through", '''
+  export c := 1
+  c = 2
+''', '''
+  export const c = __state(1);
+  c.value = 2;
+'''
+
+code "a bare binding beside an export reassigns", '''
+  export shown = 1
+  hidden = 1
+  hidden = 2
+''', '''
+  export const shown = 1;
+  hidden = 1;
+  hidden = 2;
+'''
+
+# Shadowing is not a write to the export: a parameter, an inner
+# declaration, and a loop variable each bind their own name.
+code "a parameter shadows an exported binding", '''
+  export flag = 1
+  bump = (flag) ->
+    flag = 2
+    flag
+''', '''
+  export const flag = 1;
+  bump = function(flag) {
+    flag = 2;
+    return flag;
+  };
+'''
+
+code "an inner declaration shadows an exported binding", '''
+  export flag = 1
+  def mine()
+    flag =! 5
+    flag
+''', '''
+  export const flag = 1;
+  function mine() {
+    const flag = 5;
+    return flag;
+  }
+'''
+
+code "a loop variable shadows an exported binding", '''
+  export flag = 1
+  seen = []
+  for flag in [7, 8]
+    seen.push(flag)
+''', '''
+  export const flag = 1;
+  seen = [];
+  for (let flag of [7, 8]) {
+    seen.push(flag);
+  }
+'''
+
+# An exported def or class binds a JS function/class declaration —
+# writable bindings, so a later assignment is legal and the module
+# still builds.
+code "an exported def rebinds", '''
+  export def pick()
+    1
+  pick = -> 2
+''', '''
+  export function pick() {
+    return 1;
+  };
+  pick = function() {
+    return 2;
+  };
+'''
+
+code "an exported class rebinds", '''
+  export class Marker
+    tag: -> 1
+  Marker = 5
+''', '''
+  export class Marker {
+    tag() {
+      return 1;
+    }
+  };
+  Marker = 5;
+'''
