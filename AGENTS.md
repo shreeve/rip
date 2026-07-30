@@ -253,30 +253,55 @@ alters surface syntax updates ALL THREE in the same change.
 
 ## Style
 
+- **Idiomatic Rip over verbose JS-shaped code.** Prefer the language's
+  own forms — never invent a JavaScript-looking equivalent that
+  happens to parse. Examples of the preference:
+  - `try return x catch then return y` and `try expr catch then
+    fallback` — not a braced `try { … } catch { … }` rewrite when the
+    inline form is enough
+  - `source fetch: -> …` / an indented multi-key `source` body on its
+    own binding, not `source({ fetch() { … }, staleTime: … })`
+  - keyword / indented call shape over forced `({ … })` object
+    literals when the callee accepts Rip's call forms
+  - `->` / `=>`, dammit (`!`), existence (`?`), and match forms as the
+    surrounding code already uses them — do not rewrite working Rip
+    into `async`/`await`/`try`/`catch`/object-literal JS for familiarity
+  When a preferred form fails to parse, that is a grammar or lexer bug
+  at the owning layer (rule 4) — fix it there (as with `try return`),
+  or choose the nearest idiomatic alternative; never paper over with
+  curly-brace JS style. Read nearby `.rip` for the local dialect
+  before writing new code.
 - **Comments explain non-obvious intent** — invariants, constraints,
- why a trade-off was taken. Never narrate what code obviously does,
- never reference project history or future plans. A comment that
- states a stale fact is a bug (rule 8 applies to comments).
+  why a trade-off was taken. Never narrate what code obviously does,
+  never reference project history or future plans. A comment that
+  states a stale fact is a bug (rule 8 applies to comments).
 - **Names come from the established vocabulary**: SourceFile, TokenTape,
- NodeStore, RoleStore, MappingStore, CodeBuilder, semanticKind, role,
- `_` (structural constant), grammarRef (null for literal-sourced
- roles), childSlot, `$self`, mappingKind (exact/cover/synthetic),
- ambientBindings, classifyCompleteness, replResultName,
- RecallTracker, Osc11Matcher. Do not invent synonyms for established
- concepts.
+  NodeStore, RoleStore, MappingStore, CodeBuilder, semanticKind, role,
+  `_` (structural constant), grammarRef (null for literal-sourced
+  roles), childSlot, `$self`, mappingKind (exact/cover/synthetic),
+  ambientBindings, classifyCompleteness, replResultName,
+  RecallTracker, Osc11Matcher. Do not invent synonyms for established
+  concepts.
 - **Spans are `[start, end)` UTF-16 code-unit offsets** plus a fileId.
 - Grammar/generator sources are Rip (`.rip`); supporting modules are
- plain JavaScript ES modules; runtime and tests use Bun.
+  plain JavaScript ES modules; runtime and tests use Bun.
 
 ## Seam decisions (rule 4 exemplars)
 
+- **`try return` × Catch → grammar.** `try return x catch then return y`
+  failed because `Return` is `Statement`, not `Expression`, and `Try`
+  only had `TRY Expression Catch`. Owned by the grammar: `TRY Statement`
+  / `TRY Statement Catch` (+ finally twins) in `grammar.rip`;
+  conflict-neutral. Pins: `test/battery/control.rip` (`try return catch
+  then return`). Expanding to braced JS `try`/`catch` in user code to
+  dodge the parse error is rejected.
 - **`new` × dammit → grammar.** `new Response(x).text!` nested the
- dammit under `new`; the emitter leaked a `dammit!` head. Owned by
- the grammar (JS NewExpression/MemberExpression split): retag
- `new`→`NEW`; `NewValue`/`NewCall`/`NewSpine` in `grammar.rip`;
- conflict-neutral. The competing lexer-rewriter scored the same on
- in-scope cells but re-detected construction boundaries the parse
- owns — rejected.
+  dammit under `new`; the emitter leaked a `dammit!` head. Owned by
+  the grammar (JS NewExpression/MemberExpression split): retag
+  `new`→`NEW`; `NewValue`/`NewCall`/`NewSpine` in `grammar.rip`;
+  conflict-neutral. The competing lexer-rewriter scored the same on
+  in-scope cells but re-detected construction boundaries the parse
+  owns — rejected.
 - **REPL dynamic imports → minted runtime resolver.** Literal-only
  span recording would leave computed specifiers (`import(someVar)`)
  silently broken — the forbidden defect class. Instead `repl: true`
