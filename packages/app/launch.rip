@@ -15,7 +15,7 @@
 #              overwrites a source cell
 #
 # The application declares its stash in the bundle module
-# `app/stash.rip` through its `appStash` export; the `stash` option
+# `app/stash.rip` through its `stash` export; the `stash` option
 # overrides it for tests and embedding hosts.
 #
 # The `components` option injects the component store (the Workspace
@@ -96,13 +96,13 @@ export def launch(opts: LaunchOpts): LaunchResult
   adapter: any = opts.adapter ?? browserAdapter()
 
   # The stash: an explicit option wins; otherwise the bundle's
-  # `app/stash.rip` module provides it through its `appStash` export.
+  # `app/stash.rip` module provides it through its `stash` export.
   # A stash module without the export is a named mistake, never a
   # silently empty application.
   stashModule = bundle.compiled?['app/stash.rip']
-  seed: any = opts.stash ?? stashModule?.appStash
+  seed: any = opts.stash ?? stashModule?.stash
   if not seed? and stashModule?
-    fail "the bundle's 'app/stash.rip' module must export 'appStash'"
+    fail "the bundle's 'app/stash.rip' module must export 'stash'"
   if seed? and (typeof seed isnt 'object' or Array.isArray(seed))
     fail "the application stash must be a plain object"
   # The seed clones on the way in (cells by reference): the declaration

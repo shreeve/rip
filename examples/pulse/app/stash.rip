@@ -1,4 +1,4 @@
 import { source } from '@rip-lang/app'
 
-export appStash =
+export stash =
   statuses: source fetch: -> fetch!('/api/statuses').json()

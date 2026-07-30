@@ -5,6 +5,8 @@
 // URL. Resolution order for a specifier:
 //
 //   './x.rip', '../y.rip'   another bundle module, relative to here
+//                           (including projection overlays such as
+//                           `../api/models.rip` → `api/models.rip`)
 //   '_pkg/<name>/…'         a bundled package module, absolute
 //   '@rip-lang/<name>[/…]'  a bundled package entry from the packages
 //                           table — only packages the bundle carries

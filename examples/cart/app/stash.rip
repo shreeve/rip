@@ -1,6 +1,6 @@
 import { source } from '@rip-lang/app'
 import { api } from './api-client.rip'
-import { Product, User, Order } from './types.rip'
+import { UserPublic as User, ProductPublic as Product, OrderPublic as Order } from '../api/models.rip'
 
 type CartItem = Product & { quantity: number }
 
@@ -24,19 +24,16 @@ cart: Cart =
   totalPrice: -> @items.reduce(((sum, i) -> sum + i.price * i.quantity), 0)
   clear: -> @items = []
 
-# Multi-key `source` bodies need their own binding — an indented source
-# block cannot sit inside an object literal.
-user = source
-  fetch: -> User.parse(api.get!('user').json!())
-  staleTime: '5 min'
-
-products = source
-  fetch: -> Product.array.parse(api.get!('products').json!())
-  staleTime: '5 min'
-
-export appStash =
+# Framework contract: launch reads `export stash` from app/stash.rip.
+export stash =
   cart: cart
-  user: user
-  products: products
-  orders: source fetch: -> Order.array.parse(api.get!('orders').json!())
-  order: source fetch: (id: string) -> Order.parse(api.get!("orders/#{id}").json!())
+  user: source
+    fetch: -> User.parse(api.get!('user').json!())
+    staleTime: '5 min'
+  products: source
+    fetch: -> Product.array.parse(api.get!('products').json!())
+    staleTime: '5 min'
+  orders: source
+    fetch: -> Order.array.parse(api.get!('orders').json!())
+  order: source
+    fetch: (id: string) -> Order.parse(api.get!("orders/#{id}").json!())

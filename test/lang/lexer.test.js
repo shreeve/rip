@@ -147,6 +147,21 @@ describe('synthetic tokens', () => {
     expect(origin.value).toBe('a');
   });
 
+  test('indented-object call as an object property value (stash source shape)', () => {
+    // v3 cart: `user: source` + indent + `fetch:` stays one outer object
+    // with the call wrapping the nested pairs — objects-first must not
+    // close the outer object before the call pass inserts CALL_START.
+    const src = 'o =\n  a: f\n    x: 1\n  b: 2';
+    expect(kinds(src)).toEqual([
+      'IDENTIFIER', '=', 'INDENT',
+      '{', 'PROPERTY', ':', 'IDENTIFIER', 'CALL_START', 'INDENT',
+      '{', 'PROPERTY', ':', 'NUMBER', '}',
+      'OUTDENT', 'CALL_END', 'TERMINATOR',
+      'PROPERTY', ':', 'NUMBER', '}',
+      'OUTDENT',
+    ]);
+  });
+
   test('TERMINATOR carries the span of the newline that ended the line', () => {
     const { tokens, source } = tokenize('a = 1\nb = 2');
     const term = tokens.find(t => t.kind === 'TERMINATOR');

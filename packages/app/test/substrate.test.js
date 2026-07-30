@@ -505,6 +505,27 @@ describe('component registry', () => {
   });
 });
 
+describe('stash path helpers', () => {
+  test('inc / dec / flip / join / keys / has / del', () => {
+    const stash = createStash({
+      cart: { total: 1, meta: { open: false } },
+      tags: { a: 1 },
+    });
+    expect(stash.inc('cart.total')).toBe(2);
+    expect(stash.dec('cart.total', 2)).toBe(0);
+    expect(stash.flip('cart.meta.open')).toBe(true);
+    expect(stash.cart.meta.open).toBe(true);
+    stash.join('tags', { b: 2 });
+    expect(stash.tags).toEqual({ a: 1, b: 2 });
+    expect(stash.keys('cart').sort()).toEqual(['meta', 'total']);
+    expect(stash.has('cart.total')).toBe(true);
+    expect(stash.has('cart.missing')).toBe(false);
+    stash.del('tags.a');
+    expect(stash.tags).toEqual({ b: 2 });
+    expect(stash.peek('cart.total')).toBe(0);
+  });
+});
+
 describe('invalid calls', () => {
   test('reject malformed substrate calls', () => {
     expect(() => source()).toThrow('options object');

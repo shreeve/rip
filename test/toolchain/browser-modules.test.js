@@ -3,7 +3,7 @@
 // loud server-only rejection, cycles, and assembly's browser-safety
 // gate.
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -258,6 +258,57 @@ describe('package graph reconciliation', () => {
       modules: { 'app/routes/m.rip': 'U = schema :model\n  name! string' },
       packagesDir: resolve(root, 'packages'),
     })).toThrow(/persistence is server-only/);
+  });
+
+  test('cross-boundary Public projections overlay at the natural path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rip-proj-'));
+    try {
+      mkdirSync(join(dir, 'app'));
+      mkdirSync(join(dir, 'api'));
+      writeFileSync(join(dir, 'api', 'models.rip'), `export User = schema :model
+  firstName! string
+  @timestamps
+export UserPublic = User.pick("id", "firstName")
+`);
+      writeFileSync(
+        join(dir, 'app', 'types.rip'),
+        "export { UserPublic as User } from '../api/models.rip'\n",
+      );
+      const typesPath = join(dir, 'app', 'types.rip');
+      const typesSrc = readFileSync(typesPath, 'utf8');
+      const bundle = assembleBundle({
+        modules: { 'app/types.rip': typesSrc },
+        moduleFiles: { 'app/types.rip': typesPath },
+        appDir: dir,
+        packagesDir: resolve(root, 'packages'),
+      });
+      expect(bundle.modules['api/models.rip']).toMatch(/export UserPublic = __schema/);
+      expect(bundle.modules['api/models.rip']).not.toMatch(/kind:\s*"model"/);
+      // Author spelling stays — relative join lands on the overlay.
+      expect(bundle.modules['app/types.rip']).toBe(typesSrc);
+      expect(bundle.modules['app/types.rip']).toContain("from '../api/models.rip'");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('importing a bare :model name across the boundary refuses', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rip-proj-'));
+    try {
+      mkdirSync(join(dir, 'app'));
+      mkdirSync(join(dir, 'api'));
+      writeFileSync(join(dir, 'api', 'models.rip'), 'export User = schema :model\n  name! string\n');
+      const typesPath = join(dir, 'app', 'types.rip');
+      writeFileSync(typesPath, "export { User } from '../api/models.rip'\n");
+      expect(() => assembleBundle({
+        modules: { 'app/types.rip': readFileSync(typesPath, 'utf8') },
+        moduleFiles: { 'app/types.rip': typesPath },
+        appDir: dir,
+        packagesDir: resolve(root, 'packages'),
+      })).toThrow(/:model/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('assembled subpath exports travel into the packages table', () => {
