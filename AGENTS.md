@@ -265,6 +265,10 @@ alters surface syntax updates ALL THREE in the same change.
     literals when the callee accepts Rip's call forms
   - dammit is the call: `client!` / `f! x`, not `client!()` / `f!(x)`
     when there are no required parens
+  - postfix `?` is existence when bare (`x?` → `x != null`); a juxta
+    argument makes it optional call — `f? x` is the same as `f?(x)` /
+    `f?.(x)` (never a plain `f(x)`). Prefer the juxta form when it
+    matches surrounding dammit/juxta call style (`f! x`, `f x`)
   - `->` / `=>`, dammit (`!`), existence (`?`), and match forms as the
     surrounding code already uses them — do not rewrite working Rip
     into `async`/`await`/`try`/`catch`/object-literal JS for familiarity

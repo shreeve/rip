@@ -213,7 +213,7 @@ export def createRenderer(opts: RendererOpts): Renderer
       catch error
         errors.push error
         try
-          instance._teardown?({ state: 'unmounted', hooks: false, removeDOM: true })
+          instance._teardown? { state: 'unmounted', hooks: false, removeDOM: true }
         catch fallbackError
           errors.push fallbackError
     errors
@@ -286,8 +286,8 @@ export def createRenderer(opts: RendererOpts): Renderer
     roots = instance._nodes ?? [instance._root]
     for root in roots
       continue unless root
-      return root if root.matches?('#content')
-      slot = root.querySelector?('#content')
+      return root if root.matches? '#content'
+      slot = root.querySelector? '#content'
       return slot if slot
     roots.find((root) -> root?) ?? fallback
 
@@ -306,7 +306,7 @@ export def createRenderer(opts: RendererOpts): Renderer
         instance = construct entry, parent
         built.push instance
         entry.instance = instance
-        instance.mount?(mountPoint)
+        instance.mount? mountPoint
         if instance._state is 'failed'
           cleanup built
           return false
@@ -442,7 +442,7 @@ export def createRenderer(opts: RendererOpts): Renderer
         instance = construct entry, parent
         built.push instance
         entry.instance = instance
-        instance.mount?(mountPoint)
+        instance.mount? mountPoint
         if instance._state is 'failed'
           throw new Error "Rip App: component '#{entry.file}' failed during mount"
         if firstNew + index < entries.length - 1
@@ -542,7 +542,7 @@ export def createRenderer(opts: RendererOpts): Renderer
       else
         file = info?.route?.file ?? '<route>'
         failureFor (error?.path ?? file), file, error
-      onError?(failure)
+      onError? failure
       showFatalCard failure unless current?
       throw failure
     finally
@@ -574,7 +574,7 @@ export def createRenderer(opts: RendererOpts): Renderer
       catch caught
         error = caught as any
         failure = failureFor '<teardown>', '<renderer>', error
-        onError?(failure)
+        onError? failure
         throw failure
       return
 
