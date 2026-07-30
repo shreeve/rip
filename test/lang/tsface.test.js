@@ -27,6 +27,7 @@ import { describe, test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { compile, CompileError } from '../../src/compile.js';
+import { toMatchable } from '../../src/runtime/stdlib.js';
 import { stripFace } from '../../src/emitter.js';
 
 const corpusDir = join(import.meta.dir, '../corpus');
@@ -215,19 +216,24 @@ describe('TS-face emission pins', () => {
   // and the assertion becomes unnecessary, which is the fix the finding
   // ruled out — it would make the prelude lie about a helper that really
   // answers null on the multi-line path, where the null IS the loud throw.
-  test('the match seam asserts its receiver, and the helper keeps telling the truth', () => {
+  test('the match seam needs no assertion, because the helper cannot answer null', () => {
     const src = "text = 'abc'\nfound = text =~ /b+/\nnth = text[/(b)/, 1]\n";
     const code = ts(src).code;
-    expect(code).toContain('toMatchable(text)!.match(/b+/)');
-    expect(code).toContain('toMatchable(text)!.match(/(b)/)');
-    // The helper's own annotation rides the inlined prelude, so the
-    // signature is pinned where it is actually emitted.
-    const withPrelude = compile(src, { runtimeDelivery: 'inline', face: 'ts' }).code;
-    expect(withPrelude).toContain('toMatchable: (v: any, allowNewlines?: boolean) => string | null');
-    // The assertion is face-only: the JS twin calls the same helper with
-    // no narrowing at all, so the null still reaches `.match` and throws.
+    // No narrowing anywhere: the receiver is a string by the helper's
+    // own contract, so the face and the JS twin are the same call.
+    expect(code).toContain('toMatchable(text).match(/b+/)');
+    expect(code).toContain('toMatchable(text).match(/(b)/)');
     expect(js(src).code).toContain('toMatchable(text).match(/b+/)');
-    expect(js(src).code).not.toContain('!');
+    const withPrelude = compile(src, { runtimeDelivery: 'inline', face: 'ts' }).code;
+    expect(withPrelude).toContain('toMatchable: (v: any, allowNewlines?: boolean) => string');
+    // LIVENESS — the pair that keeps the signature from being a lie.
+    // `=> string` is honest only because the multi-line receiver THROWS
+    // instead of answering null; soften the runtime back and the
+    // annotation above becomes the false claim this row ruled out, with
+    // every byte pin still green. v3 ships that exact lie.
+    expect(() => toMatchable('one\ntwo')).toThrow(/\/m/);
+    expect(toMatchable('one\ntwo', true)).toBe('one\ntwo');
+    expect(toMatchable('plain')).toBe('plain');
   });
 
   test('catch patterns: the minted parameter carries a face-only `any`, in the statement try and the value try alike', () => {

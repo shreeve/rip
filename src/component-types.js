@@ -252,6 +252,60 @@ const containerish = (m) => m.kind === 'state' || m.kind === 'prop';
 // need the ambient-mode symbol and the inline-mode runtime's own
 // symbol to be the SAME type, which no spelling gives — `read` is
 // already on every real container's inferred type in every delivery).
+// The bare parameter NAMES of a type-parameter list, for the self-arguments
+// a generic component's own surface applies (`mount(): Select<TOption>` —
+// constraints stay on the header that declares them). Split at bracket
+// DEPTH ZERO: a constraint or default carries its own commas
+// (`<T extends Record<string, number>>`), and a naive split renders a list
+// that does not parse, which is a worse failure than the unbound name it
+// was meant to fix.
+export const typeParamNames = (typeParams) => {
+  if (!typeParams) return [];
+  const body = typeParams.slice(1, -1);
+  const names = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    // A quoted constraint carries whatever bytes it likes, commas and
+    // brackets included — skip to its close before counting anything.
+    if (c === '"' || c === "'" || c === '`') {
+      for (i++; i < body.length; i++) {
+        if (body[i] === '\\') { i++; continue; }
+        if (body[i] === c) break;
+      }
+      continue;
+    }
+    if (c === '<' || c === '(' || c === '[' || c === '{') depth++;
+    // The `>` of an ARROW closes nothing: a function-type constraint
+    // (`F extends () => void`) would otherwise drive depth negative and
+    // swallow the comma that ends the parameter.
+    else if (c === '>' && body[i - 1] === '=') continue;
+    else if (c === '>' || c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ',' && depth === 0) { names.push(body.slice(start, i)); start = i + 1; }
+  }
+  names.push(body.slice(start));
+  // A variance or const modifier precedes the name it governs.
+  const MODIFIERS = new Set(['const', 'in', 'out']);
+  return names.map((n) => {
+    const words = n.trim().split(/\s+/).filter(Boolean);
+    while (words.length > 1 && MODIFIERS.has(words[0])) words.shift();
+    return words[0] ?? '';
+  }).filter(Boolean);
+};
+
+// The same arity filled with `any` — for a surface that references the
+// component's own type where no parameter is in scope to name.
+export const anyArgsOf = (typeParams) => {
+  const n = typeParamNames(typeParams).length;
+  return n === 0 ? '' : `<${Array(n).fill('any').join(', ')}>`;
+};
+
+// The self-reference arguments for a generic surface — `<A, B>` — or ''.
+export const selfArgsOf = (typeParams) => {
+  const names = typeParamNames(typeParams);
+  return names.length === 0 ? '' : `<${names.join(', ')}>`;
+};
+
 export const containerType = (t, ro = '') => `{ ${ro}value: ${t}; read(): ${t} }`;
 
 // The member's INSTANCE type as segments (`declare name: …` bodies,

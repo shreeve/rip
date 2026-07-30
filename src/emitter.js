@@ -31,6 +31,7 @@ import {
   COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS, componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
   syntacticLiteralType,
+  selfArgsOf,
 } from './component-types.js';
 
 const BINOPS = new Set(['+', '-', '*', '/', '%', '**', '<', '>', '<=', '>=', '==', '!=', '&&', '||', '??', '<<', '>>', '>>>', '&', '^', '|']);
@@ -1806,8 +1807,7 @@ class Emitter {
     // carries the declaration's type params, and self-references in
     // the instance surface apply the bare param NAMES (`mount():
     // Select<TOption>` — extends clauses stay on the header).
-    const selfArgs = typeParams === null ? '' :
-      '<' + typeParams.slice(1, -1).split(',').map((p2) => p2.trim().split(/\s/)[0]).join(', ') + '>';
+    const selfArgs = selfArgsOf(typeParams);
     this.b.tsOnly(() => {
       this.b.emit('\n' + pad);
       this.mark(compNode, '$self', () => {
@@ -6351,6 +6351,18 @@ class Emitter {
     // nothing, so `[flag] = […]` writes the export just as `flag = …`
     // does. Inside an enclosing pattern this `=` is a DEFAULT, and the
     // pattern's own check already covered the name.
+    // A middle-rest pattern has no JS destructuring form and no
+    // expression lowering — only the statement path binds the source
+    // once and reads by index. Reaching here means the pattern is in
+    // VALUE position, where emitting it verbatim ships bytes no engine
+    // parses; reject in the author's vocabulary instead (the for-range
+    // ban's model), and name the statement spelling that does work.
+    if (Emitter.middleRestPattern(node[1])) {
+      throw this.positionedError(node,
+        'emitter: a middle-rest pattern (`[a, ...mid, b]`) assigns only as a STATEMENT — '
+        + 'it binds its source once and reads by index, which has no expression form; '
+        + 'move the assignment to its own line');
+    }
     if (!this.inPattern) this.checkExportedConstWrite(node, node[1]);
     this.checkMemberWrite(node, node[1]);
     // A void definition (`save! = ->`, head 'void-assign') validates its
@@ -12835,22 +12847,18 @@ class Emitter {
   }
 
   // The seam both match lowerings share: close `toMatchable(`'s
-  // arguments, then open `.match(`. `toMatchable` returns
-  // `string | null` and that null is the LOUD-THROW path (a
-  // multi-line receiver without /m must blow up rather than anchor
-  // wrong), so the receiver really is nullable and the bare `.match`
-  // would publish TS2531 on every legal match, at any operand type,
-  // in any mode. The assertion carrying that is TS-ONLY — a builder
-  // tsOnly region, so the JS bytes stay `toMatchable(x).match(re)`
-  // and throw exactly as before, while the face says what the
-  // lowering knows: the null branch leaves through the throw, never
-  // into the match result (which stays honestly `… | null`). Scoped
-  // here rather than in the helper's signature on purpose — the
-  // RUNTIME_TABLE annotation keeps telling the truth about a helper
-  // that really does return null.
+  // arguments, then open `.match(`. No narrowing rides here, because
+  // `toMatchable` cannot answer null: the multi-line receiver it used
+  // to coerce to null now THROWS, which is what that null was always
+  // for — it existed only so the following `.match` would blow up
+  // rather than anchor wrong. Throwing at the coercion says the same
+  // thing sooner and in the user's vocabulary, and it makes the
+  // helper's `=> string` annotation true rather than asserted around.
+  // v3 ships the same annotation over a runtime that really does
+  // return null, which is the lie this row ruled out — the difference
+  // is which side was changed to meet the other.
   matchReceiverClose(multiline) {
     this.b.emit(multiline ? ', true)' : ')');
-    if (this.ts) this.b.tsOnly(() => this.b.emit('!'));
     this.b.emit('.match(');
   }
 
@@ -13289,7 +13297,7 @@ const RUNTIME_TABLE = [
       raise: '(a: any, b?: any) => never',
       rand: '(a?: number, b?: number) => number',
       sleep: '(ms: number) => Promise<void>',
-      toMatchable: '(v: any, allowNewlines?: boolean) => string | null',
+      toMatchable: '(v: any, allowNewlines?: boolean) => string',
       todo: '(msg?: string) => never',
       warn: '(...args: any[]) => void',
       zip: '(...arrays: any[][]) => any[][]',

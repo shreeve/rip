@@ -8746,6 +8746,53 @@ function componentTypeInfo(stores, source, node) {
 }
 var segmentsText = (segs) => segs.map((s) => s.text).join("");
 var containerish = (m) => m.kind === "state" || m.kind === "prop";
+var typeParamNames = (typeParams) => {
+  if (!typeParams)
+    return [];
+  const body = typeParams.slice(1, -1);
+  const names = [];
+  let depth = 0, start = 0;
+  for (let i = 0;i < body.length; i++) {
+    const c = body[i];
+    if (c === '"' || c === "'" || c === "`") {
+      for (i++;i < body.length; i++) {
+        if (body[i] === "\\") {
+          i++;
+          continue;
+        }
+        if (body[i] === c)
+          break;
+      }
+      continue;
+    }
+    if (c === "<" || c === "(" || c === "[" || c === "{")
+      depth++;
+    else if (c === ">" && body[i - 1] === "=")
+      continue;
+    else if (c === ">" || c === ")" || c === "]" || c === "}")
+      depth--;
+    else if (c === "," && depth === 0) {
+      names.push(body.slice(start, i));
+      start = i + 1;
+    }
+  }
+  names.push(body.slice(start));
+  const MODIFIERS = new Set(["const", "in", "out"]);
+  return names.map((n) => {
+    const words = n.trim().split(/\s+/).filter(Boolean);
+    while (words.length > 1 && MODIFIERS.has(words[0]))
+      words.shift();
+    return words[0] ?? "";
+  }).filter(Boolean);
+};
+var anyArgsOf = (typeParams) => {
+  const n = typeParamNames(typeParams).length;
+  return n === 0 ? "" : `<${Array(n).fill("any").join(", ")}>`;
+};
+var selfArgsOf = (typeParams) => {
+  const names = typeParamNames(typeParams);
+  return names.length === 0 ? "" : `<${names.join(", ")}>`;
+};
 var containerType = (t, ro = "") => `{ ${ro}value: ${t}; read(): ${t} }`;
 var syntacticLiteralType = (v) => {
   if (typeof v === "string") {
@@ -10042,7 +10089,7 @@ class Emitter {
     if (info === undefined)
       return;
     const pad = "  ".repeat(this.ind);
-    const selfArgs = typeParams === null ? "" : "<" + typeParams.slice(1, -1).split(",").map((p2) => p2.trim().split(/\s/)[0]).join(", ") + ">";
+    const selfArgs = selfArgsOf(typeParams);
     this.b.tsOnly(() => {
       this.b.emit(`
 ` + pad);
@@ -13596,6 +13643,9 @@ ${pad ?? ""}`);
     }
     if (typeof node[1] === "string" && this.isAmbientReadonly(node[1])) {
       throw this.positionedError(node, `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
+    }
+    if (Emitter.middleRestPattern(node[1])) {
+      throw this.positionedError(node, "emitter: a middle-rest pattern (`[a, ...mid, b]`) assigns only as a STATEMENT — " + "it binds its source once and reads by index, which has no expression form; " + "move the assignment to its own line");
     }
     if (!this.inPattern)
       this.checkExportedConstWrite(node, node[1]);
@@ -18646,8 +18696,6 @@ ${"  ".repeat(ind)}`);
   }
   matchReceiverClose(multiline) {
     this.b.emit(multiline ? ", true)" : ")");
-    if (this.ts)
-      this.b.tsOnly(() => this.b.emit("!"));
     this.b.emit(".match(");
   }
   regexIndex(node, obj, regex, capture) {
@@ -18955,7 +19003,7 @@ var RUNTIME_TABLE = [
       raise: "(a: any, b?: any) => never",
       rand: "(a?: number, b?: number) => number",
       sleep: "(ms: number) => Promise<void>",
-      toMatchable: "(v: any, allowNewlines?: boolean) => string | null",
+      toMatchable: "(v: any, allowNewlines?: boolean) => string",
       todo: "(msg?: string) => never",
       warn: "(...args: any[]) => void",
       zip: "(...arrays: any[][]) => any[][]"
@@ -19683,6 +19731,22 @@ function emitDeclarations({ sexpr, stores, source }) {
       return;
     const members = [];
     const stmts = isNode5(body) && body[0] === "block" ? body.slice(1) : body != null ? [body] : [];
+    const bodyFields = new Set;
+    for (const stmt of stmts) {
+      if (isTypedWrapper2(stmt) && typeof stmt[1] === "string")
+        bodyFields.add(stmt[1]);
+      else if (isNode5(stmt) && stmt[0] === "=" && stmt.length === 3 && typeof stmt[1] === "string") {
+        bodyFields.add(stmt[1]);
+      } else if (isNode5(stmt) && stmt[0] === "object") {
+        for (const pair of stmt.slice(1)) {
+          if (!isNode5(pair) || pair.length < 2 || isStaticKey(pair[1]))
+            continue;
+          const k = memberName(pair[1]);
+          if (typeof k === "string")
+            bodyFields.add(k);
+        }
+      }
+    }
     for (const stmt of stmts) {
       if (isNode5(stmt) && stmt[0] === "object") {
         for (const pair of stmt.slice(1)) {
@@ -19713,7 +19777,7 @@ function emitDeclarations({ sexpr, stores, source }) {
               if (!(isNode5(x) && x[0] === "." && x[1] === "this" && typeof x[2] === "string"))
                 return pp;
               const n = x[2];
-              if (typed !== null && !members.some((m) => m.startsWith(`${n}:`))) {
+              if (typed !== null && !bodyFields.has(n)) {
                 members.push(`${n}: ${tidyType(typed[2])};`);
               }
               const plain = typed !== null ? ["typed-var", n, typed[2]] : n;
@@ -19793,24 +19857,26 @@ function emitDeclarations({ sexpr, stores, source }) {
     const id = stores.idOf(x);
     return (id !== null ? stores.node(id)?.semanticKind : null) === "component";
   };
-  const componentDecl = (node, name, exported) => {
+  const componentDecl = (node, name, exported, stmt) => {
     const info = componentTypeInfo(stores, source, node);
     const optional = propsParamOptional(info);
     const gated = info.members.some((m) => m.kind === "gate");
     const exp = exported ? "export " : "";
-    lines.push(`${exp}interface ${name} {`);
-    for (const l of rendered(() => instanceTypeLines(info, name)))
+    const typeParams = typeParamsOf(stmt);
+    const self = `${name}${selfArgsOf(typeParams)}`;
+    lines.push(`${exp}interface ${name}${typeParams} {`);
+    for (const l of rendered(() => instanceTypeLines(info, self)))
       lines.push(`  ${l}`);
     lines.push("}");
     lines.push(`${exp}declare let ${name}: {`);
     if (gated) {
-      lines.push(`  readonly prototype: ${name};`);
+      lines.push(`  readonly prototype: ${name}${anyArgsOf(typeParams)};`);
       lines.push("};");
       return;
     }
-    lines.push(`  new (props${optional ? "?" : ""}: ${propsTypeText(info)}): ${name};`);
+    lines.push(`  new ${typeParams}(props${optional ? "?" : ""}: ${propsTypeText(info)}): ${self};`);
     if (optional)
-      lines.push(`  mount(target?: any): ${name};`);
+      lines.push(`  mount${typeParams}(target?: any): ${self};`);
     lines.push("};");
   };
   const isEffectDecl = (stmt) => {
@@ -19937,7 +20003,7 @@ function emitDeclarations({ sexpr, stores, source }) {
     else if (head === "=" && stmt.length === 3 && schemaByNode.has(stmt[2])) {
       schemaDecl(schemaByNode.get(stmt[2]), exported);
     } else if (head === "=" && stmt.length === 3 && typeof stmt[1] === "string" && isComponentDecl(stmt[2])) {
-      componentDecl(stmt[2], stmt[1], exported);
+      componentDecl(stmt[2], stmt[1], exported, stmt);
     } else if (head === "=" && stmt.length === 3 && protoMemberTarget(stmt) !== null) {
       const proto = protoMemberTarget(stmt);
       const t = roleType(stmt, "annotation");
@@ -20252,8 +20318,12 @@ var todo = (msg) => {
 var warn = console.warn;
 var zip = (...a) => a[0].map((_, i) => a.map((b) => b[i]));
 var toMatchable = (v, allowNewlines) => {
-  if (typeof v === "string")
-    return !allowNewlines && /[\n\r]/.test(v) ? null : v;
+  if (typeof v === "string") {
+    if (!allowNewlines && /[\n\r]/.test(v)) {
+      throw new TypeError("match receiver spans lines — add the /m flag to match across them");
+    }
+    return v;
+  }
   if (v == null)
     return "";
   if (typeof v === "number" || typeof v === "bigint" || typeof v === "boolean")

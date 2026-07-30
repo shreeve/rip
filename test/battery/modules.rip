@@ -255,6 +255,14 @@ fail "a write inside a loop body rejects", "export flag = 1\nfor i in [1, 2]\n  
 fail "a write inside a try body rejects", "export flag = 1\ntry\n  flag = 2", "cannot assign to exported 'flag'"
 fail "a write inside a switch case rejects", "export flag = 1\nswitch 1\n  when 1\n    flag = 2", "cannot assign to exported 'flag'"
 
+# A middle-rest pattern has a STATEMENT lowering only — it binds its
+# source once and reads by index — so in expression position there is
+# nothing to emit. It used to emit the pattern verbatim, which no
+# JavaScript engine parses; a positioned rejection is the for-range-ban
+# model, and it is export-independent.
+fail "a middle-rest assign in expression position rejects", "r = []\nz = ([...r, q] = [1, 2])", "middle-rest"
+fail "a middle-rest assign as an implicit return rejects", "r = []\nf = ->\n  [...r, q] = [1, 2]", "middle-rest"
+
 # A middle-rest pattern has no JS destructuring form, so it lowers
 # through its own statement path — dispatched AHEAD of the guarded assign
 # and writing each name raw. Without a check of its own it emitted the

@@ -47,7 +47,6 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [8](#8-auto-import-is-closure-scoped) | Auto-import closure-scoped | `capability` | `auto-import` — the gap is an **expected failure** |
 | [52](#52-a-destructured-binding-read-by-a-hoisted-def-is-implicitly-any-under-strict) | A destructured binding read by a hoisted def is implicitly `any` under strict | `strict`, `hoist` | **none** — the shape cannot enter a positive fixture while it fails the `strict` dimension; the fix's gate is the destructured spelling entering the inference claims fixture, where `strict` holds it |
 | [55](#55-a-computed-members-type-is-inferred-from-its-expressions-form-so-most-bodies-type-any) | A computed member's type is inferred from its expression's form, so most bodies type `any` | `compiler` | **none** — the fix's gate is a consumer-face claims row whose computed body reads a property rather than multiplying |
-| [54](#54-a-generic-components-shipped-declarations-reference-a-type-parameter-they-never-declare) | A generic component's shipped declarations reference a type parameter they never declare | `compiler` | **none** — the audit reads the face the checker serves, never the emitted declarations; the fix's gate is a type parameter on dts-tsc's component fixture |
 | [43](#43-a-schema-callables-output-types-unknown) | A schema callable's output types `unknown` — false errors on every typed read | `compiler` | the Diagnostics Audit's 14-schema pin (`error-pins.json`) asserts the typed-read rejection **as the interim** — it goes red the day callable outputs type, the cue to retire it |
 | [36](#36-a-reactive-import-serves-the-raw-cell) | A reactive import serves the raw cell — no deref, writes don't build | `compiler`, `capability` | **none while the semantics are unsettled** — auto-deref vs cell-as-API is the language owner's ruling; this row's exit is that ruling, which hands it an ordinary gate either way |
 | [41](#41-a-forward-referenced-class-or-component-pins-the-probes-own-symbol) | A forward-referenced class or component pins the probe's own symbol — TS2304 on legal code | `editor`, `hoist` | `check`'s forward-reference case — asserts the probe-symbol TS2304 **as the gap**; the fix's gate is the forward-reference spelling entering the corpus, where `verdict` holds it |
@@ -223,38 +222,6 @@ So it is neither destructuring nor hoisting alone — it is destructuring reache
 **Status.** ⬜ **Open** (2026-07-27) — **no gate**: the shape cannot enter a positive fixture while it fails the `strict` dimension, and the corpus keeps only the block-confined spelling with the destructured one named as absent on purpose. The fix's gate is that spelling entering `claims/20-inference.rip`, where `strict` holds it and the pin-pass claim's carrier goes green.
 
 
-### 54. A generic component's shipped declarations reference a type parameter they never declare
-
-```
-export Listing<TItem extends string> = component
-  @items?: TItem[] := []
-```
-
-emits
-
-```ts
-export interface Listing {                      // no <TItem>
-  items: { value: TItem[]; read(): TItem[] };   // TS2304: Cannot find name 'TItem'
-};
-declare let Listing: {
-  new (props?: { items?: TItem[] | … }): Listing;   // and again, four more times
-};
-```
-
-The type-parameter list is dropped from both the instance interface and the constructor, while every reference to it survives in the members. The declaration file does not compile: seven TS2304 for that four-line component, fourteen for [13-components.rip](corpus/grammar/13-components.rip)'s two generic components. A TypeScript consumer importing a generic component from the shipped `.d.ts` gets `Cannot find name` for a parameter it cannot see or supply.
-
-**The checker's face is fine, and that is why this is invisible.** `rip check` reads an in-memory face where the parameter IS bound — a use-site constraint violation rejects correctly there (driven 2026-07-27: `new Listing({ items: [1, 2] })` publishes TS2322 twice). Only the emitted declarations lose it. Two surfaces, one right and one wrong, so no amount of checking source finds this.
-
-**Why (code) — the declaration emitter drops the parameter list and keeps every reference to it.** The type-parameter list reaches neither the instance interface nor the constructor, while the members that reference it emit verbatim, so the two halves of one file disagree. Only the emitted `.d.ts` path is affected — the in-memory face binds the parameter correctly, which is why no amount of checking source finds it.
-
-**The fix — carry the list onto both shipped declarations.** It is in hand where the members are emitted, since those members already reference it; the interface and the constructor each need it re-stated. v3's declaration (below) is the target text, so nothing here is designed. **Not** by erasing the references to match — that silently widens a generic component's props to `unknown` for every consumer.
-
-**Why the suite missed it.** [dts-tsc.test.js](../toolchain/dts-tsc.test.js) does exactly the right thing — compiles a component's shipped declarations against a consumer program — but its fixture is `export Counter = component` with no type parameter, so the generic path has never been emitted into a compiler. Nothing else looks at declaration text for components at all: the audit's lanes read the checker's face, never the `.d.ts`.
-
-**vs v3 — regression** (driven both sides, 2026-07-28, `-d` over the same four-line component). v3 emits `export declare class Listing<TItem extends string>` — the parameter list survives onto the declaration, so the shipped `.d.ts` compiles and a consumer can supply the argument.
-
-**Status.** ⬜ **Open** (2026-07-27) — **no gate**, and the gate does not belong in this corpus: the audit judges the face the checker serves, which is correct here. The fix's gate is a type parameter on `dts-tsc.test.js`'s component fixture, where a consumer already compiles against the emitted declarations and would fail on the unbound name.
-
 ### 55. A computed member's type is inferred from its expression's FORM, so most bodies type `any`
 
 ```
@@ -289,7 +256,7 @@ Every `:shape` callable projects `unknown` as its OUTPUT into the companion — 
 
 **The corpus's current shape.** 14-schema reads callable outputs through interpolation alone (where `unknown` coerces silently), casts the one method call at the use site (a use-site cast survives; only in-body ones are stripped), recomputes `total` from fields instead of reading `@subtotal`, and carries no `@ensure` — every one a workaround, the promoted-param precedent.
 
-**Why (code).** Callable bodies are sub-compiled at emission and land as plain JS function values in the untyped `__schema({…})` descriptor; the companion projection ([schema-types.js](../../src/schema-types.js)) types fields from their declared types but has no type information for a callable — no annotation slot exists in the field-line grammar ([schema.js](../../src/schema.js) `parseCallableLine`), and no inference crosses the descriptor — so it mints `unknown`, optional. 
+**Why (code).** Callable bodies are sub-compiled at emission and land as plain JS function values in the untyped `__schema({…})` descriptor; the companion projection ([schema-types.js](../../src/schema-types.js)) types fields from their declared types but has no type information for a callable — no annotation slot exists in the field-line grammar ([schema.js](../../src/schema.js) `parseCallableLine`), and no inference crosses the descriptor — so it mints `unknown`, optional.
 
 **The fix — one of two roads, and the language owner picks.** A type slot in the callable grammar the projection can read, or a face shape that lets tsgo infer the body's return type. v3 built the second (below, `ReturnType<typeof …>` over an emitted behavior object), so it is demonstrated rather than hypothetical. Either way the projection stops minting `unknown`. **Not** by casting at use sites — that is the corpus's current workaround and it hides the gap instead of closing it.
 
@@ -558,4 +525,5 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 31 | A promoted param declared no field on the checked face | `check`'s promoted-param case inverted over all four spellings and both dedupe orderings, with an exact whole-workspace diagnostic list; the field-less form entered 08-functions. The gate carries an annotation NARROWER than its default infers, which is the only spelling that can see the annotation riding the default wrapper |
 | 27 | A pattern catch destructured `unknown` | `check`'s pattern-catch case inverted; both pattern spellings entered 07-exceptions under `verdict`; the minted parameter alone carries the face-only annotation, pinned in `tsface` for the statement try and the value try separately — the identifier spelling keeps its honest catch type |
 | 26 | The match operator's emission was never null-clean | `check`'s match-operator case inverted over six spellings including both multiline branches, `=~` in 02-operations and the regex index in 04-assignments, both parked productions cleared. The lowering narrows its own receiver; `tsface` pins the assertion together with `toMatchable`'s honest `string | null`, so softening the helper — the fix this row ruled out — reds the gate |
-| 32 | Reassigning an exported plain binding double-declared | `battery` (modules.rip) — every module-scope write to an exported plain binding is an asserted compile error: statement and value positions, every compound and merge head, updates, and pattern targets through defaults, casts, rests and middle-rest. Completeness is from the emitter's own dispatch rather than from spelling counts: seven emission routes write a bare name and each carries the guard, and forcing the guard's predicate true for every name leaves no file in the repo compiling a bare-name write. A 2,382-spelling combinatorial sweep agrees, one behaviour change behind. **Accepted limit:** inside a NESTED function a plain-headed write still mints a local shadow, so a plain write whose VALUE reads the export evaluates to NaN where the non-exported twin writes through — pinned as its own row rather than left to prose, because the suite otherwise certifies that emission. A read-first head resolves to the export and rejects; whether the plain-headed shadow should survive at all is a scoping-semantics ruling, not a defect fix |
+| 32 | Reassigning an exported plain binding double-declared | `battery` (modules.rip) — every module-scope write to an exported plain binding is an asserted compile error: statement and value positions, every compound and merge head, updates, and pattern targets through defaults, casts, rests and middle-rest. Completeness is from the emitter's own dispatch rather than from spelling counts: seven emission routes write a bare name and each carries the guard, and forcing the guard's predicate true for every name leaves no file in the repo compiling a bare-name write. A 2,382-spelling combinatorial sweep agrees, one behaviour change behind. **Accepted limit:** inside a NESTED function a plain-headed write still mints a local shadow, so a plain write whose VALUE reads the export evaluates to NaN where the non-exported twin writes through — pinned as its own row rather than left to prose, because the suite otherwise certifies that emission. A read-first head resolves to the export and rejects; whether the plain-headed shadow should survive at all is a scoping-semantics ruling, not a defect fix. |
+| 54 | A generic component's shipped declarations referenced a type parameter they never declared | `dts-tsc` — the shipped declarations compile and a consumer supplies the argument, with the member types specialising to it rather than widening. The list reaches the interface header WITH its constraints, the constructor, the static mount, and the gated prototype's arity, each pinned separately because each is satisfiable alone. The scan that derives the self-arguments reads the list's own source text, so the gate carries the shapes that defeat a naive one — a quoted comma, and a function type whose arrow reads as a closing bracket. The same scan feeds the face's own companion, which carried the identical defect and is fixed with it. Not reachable, so not covered: a template-literal constraint, which the lexer refuses before any of this |
