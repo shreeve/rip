@@ -202,6 +202,13 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // syntax in their position and reach no face entity, each tagged with the
     // kind that says why. TS face only; empty otherwise.
     vocabulary: emitted.vocabulary ?? [],
+    // Source spans the EDITOR stays silent about. Distinct from
+    // `vocabulary` on purpose: these are real reads that DO reach a face
+    // entity and stay in the mapping population — a ref cell's name, a
+    // bind's right-hand name — silent only because at that position they
+    // are a channel's target, which the container the lowering wrote
+    // through does not honestly describe. TS face only; empty otherwise.
+    silences: emitted.silences ?? [],
     runtimes: emitted.runtimes,
     // The program's top-level binding inventory: [{name, kind}] with
     // kind plain / state / computed / effect / readonly / import /

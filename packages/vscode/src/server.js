@@ -1005,7 +1005,7 @@ async function refresh(document) {
     mutables: result.mutables,
     // SOURCE spans the lowering owns whole — hover declines there rather
     // than describing the machinery the face put in their place.
-    silent: noUserSymbolSpans(result.stores),
+    silent: noUserSymbolSpans(result),
     srcLineStarts,
     genLineStarts: lineStartsOf(result.code),
     strict: state.strict === true, // rides the compile it governed

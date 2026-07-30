@@ -303,6 +303,15 @@ class Emitter {
     // kind that says why, and the audit judges its exclusion table against the
     // kinds that actually appear.
     this.vocabulary = [];
+    // Source spans where the EDITOR declines rather than describing what
+    // the lowering put there — a different question from `vocabulary`,
+    // which records words the compiler CONSUMES and the mapping census
+    // nets out of its population. A ref cell's name and a bind's
+    // right-hand name are real reads that DO reach the face, so they
+    // stay in that population; they are silent only because at THIS
+    // position they are a channel's target, which no answer about the
+    // container the lowering wrote through describes honestly.
+    this.silences = [];
     // Component type stories (TS face only): component node →
     // the walked member/props info. Populated by componentExpr (the
     // one place the member model is authoritative), consumed by the
@@ -1250,13 +1259,25 @@ class Emitter {
   // rather than excusing the wrong occurrence — a user binding that happens to
   // share the spelling keeps its place in the census.
   noteVocabulary(kind, word, container) {
-    if (!this.ts) return;
+    const hit = this.wordSpanIn(word, container);
+    if (hit !== null) this.vocabulary.push({ kind, start: hit[0], end: hit[1] });
+  }
+
+  // A read the editor stays silent about without claiming the compiler
+  // consumed it — see `silences` above for why the two differ.
+  noteSilence(word, container) {
+    const hit = this.wordSpanIn(word, container);
+    if (hit !== null) this.silences.push([hit[0], hit[1]]);
+  }
+
+  wordSpanIn(word, container) {
+    if (!this.ts) return null;
     const id = isNode(container) ? this.stores.idOf(container) : null;
     const span = id !== null ? this.stores.selfSpan(id) : null;
-    if (span === null) return;
+    if (span === null) return null;
     const hits = this.stores.primitiveSpans(word, span[0], span[1]);
-    if (hits.length !== 1) return;
-    this.vocabulary.push({ kind, start: hits[0].sourceStart, end: hits[0].sourceEnd });
+    if (hits.length !== 1) return null;
+    return [hits[0].sourceStart, hits[0].sourceEnd];
   }
 
   emitRewrittenPrimitive(storedValue, emittedValue) {
@@ -3669,6 +3690,25 @@ class Emitter {
       // Transforms see the whole raw input as the explicit `it`
       // parameter.
       const params = Emitter.schemaBodyParams(e);
+      // `it` is the DSL's own word, not a name the author bound: the
+      // grammar fixes the parameter list, so there is nothing to
+      // annotate and nothing to rename. It reaches the face verbatim —
+      // so it stays in the mapping population — but what it reaches is
+      // the minted parameter carrying the declared `any` boundary.
+      // RULINGS.md rules the answer to the record under validation and
+      // pins silence until one is served. Read from the entry's own
+      // captured tokens, which carry each occurrence's span — and by
+      // token KIND, not by spelling: `it.it` reads the parameter and
+      // then a record FIELD the author named, which is an ordinary
+      // member with an answer of its own. The identifier is the DSL's
+      // word; the property is the user's.
+      if (this.ts && e.tag === 'field') {
+        for (const t of tokens) {
+          if (t.value === 'it' && t.kind === 'IDENTIFIER' && typeof t.start === 'number') {
+            this.silences.push([t.start, t.end]);
+          }
+        }
+      }
       fns.set(i, this.schemaFnCode(params, tokens));
     }
     // The schema type story (face only): callable bodies gain
@@ -7396,6 +7436,13 @@ class Emitter {
           // those segments to silence — there is nothing for them to answer.
           this.noteVocabulary('gate-prefix', 'app', gate.pathNode);
           this.noteVocabulary('gate-prefix', 'data', gate.pathNode);
+          // A gate KEY's segments do reach the face — they emit verbatim
+          // into the minted key fn — so they stay in the mapping
+          // population. What they reach is that fn's own `params`/`query`,
+          // minted scaffold the user never wrote, so the editor declines
+          // until the ruled answer (the segment's plain inferred type) is
+          // served.
+          for (const seg of gate.keyParts ?? []) this.noteSilence(seg, gate.key);
           this.mark(gate.node, '$self', () => {
             this.mark(gate.node, 'operator', () => {});
             this.mark(gate.node, 'rhs', () => {
@@ -8678,6 +8725,14 @@ class Emitter {
     const R = this.rstate;
     const rec = R.sink;
     const markNode = isNode(node) ? node : null;
+    // The component's own name at a USE site: a real read that reaches
+    // the face (the constructor reference emits it verbatim), so it
+    // stays in the mapping population — but what tsgo describes there is
+    // the lowered class expression's whole instance surface, props
+    // union and intrinsic passthrough included. RULINGS.md rules the
+    // answer to the component's SIGNATURE and pins silence until one is
+    // minted.
+    if (markNode !== null) this.noteSilence(name, markNode);
 
     // ── The constructor reference ──
     // Loop variables and render locals shadow the module reading (row
@@ -8793,6 +8848,13 @@ class Emitter {
       const isBind = cleanKey.startsWith('__bind_') && cleanKey.endsWith('__');
       if (isBind) {
         this.checkUserSpelledBind(pair);
+        // Same channel as an intrinsic bind, by the child-component
+        // route: the target under its rewritten spelling (whose
+        // primitive carries the source word's own span) and the name
+        // bound to it, which the pair's cover describes as the minted
+        // props slot rather than as itself.
+        this.noteVocabulary('render-channel', cleanKey, pair);
+        if (typeof value === 'string') this.noteSilence(value, pair);
         const boundName = cleanKey.slice(7, -2);
         const container = this.childContainerRef(value);
         if (container !== null) {
@@ -9334,18 +9396,46 @@ class Emitter {
       }
       if (key.startsWith('"') && key.endsWith('"')) key = key.slice(1, -1);
 
+      // The KEY of an intrinsic element's pair is render vocabulary
+      // whatever it turns out to be — an attribute, a property, an
+      // event word, or one of the channels dispatched below. The
+      // lowering spends it: nothing at that position survives into the
+      // face as the word the user wrote, so tsgo describes the cover it
+      // landed in. A component USE takes the other path (childProps),
+      // where a prop name is the props surface's own declared member
+      // and answers for itself — RULINGS.md pins that one as measured.
+      this.noteVocabulary('render-channel', key, pair);
+
       if (key === '__transition__') {
         this.renderTransition(el, pair, value, objExpr);
         continue;
       }
       if (key === 'ref') {
-        this.noteVocabulary('render-channel', 'ref', pair);
+        // Both halves of the channel: the word `ref` and the cell it
+        // names. The NAME is the user's own binding, but at THIS
+        // position it is a channel target, not a read — the lowering
+        // writes the element into it, and tsgo describes the container
+        // it wrote through (RULINGS.md pins the pair's interim to
+        // silence until the channel answer is minted).
+        if (typeof value === 'string') this.noteSilence(value, pair);
         this.renderRef(el, pair, value, objExpr);
         continue;
       }
       if (key.startsWith('__bind_') && key.endsWith('__')) {
         this.checkUserSpelledBind(pair);
-        this.renderBind(el, pair, key.slice(7, -2), value, objExpr);
+        // The two-way channel's own halves: the bind TARGET (the prop
+        // being bound, which the lowering rewrites into the
+        // `__bind_x__` props slot) and the NAME bound to it, which the
+        // same cover describes as that slot rather than as itself.
+        // The target is recorded under its REWRITTEN spelling: the lexer
+        // turned `value <=>` into the `__bind_value__` key, and the
+        // store's primitive for that key carries the source `value`'s
+        // own span (the same channel emitRewrittenPrimitive reads).
+        // Looking for the source word instead finds the RHS when a bind
+        // names the same word on both sides (`value <=> value`).
+        const prop = key.slice(7, -2);
+        if (typeof value === 'string') this.noteSilence(value, pair);
+        this.renderBind(el, pair, prop, value, objExpr);
         continue;
       }
       if (key === 'key') {
@@ -14124,7 +14214,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

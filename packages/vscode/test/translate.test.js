@@ -376,8 +376,7 @@ describe('spans with no user symbol (the hover declines)', () => {
   ].join('\n') + '\n';
 
   test('the bare effect operators, and only those', () => {
-    const { stores } = compile(src, { face: 'ts', runtimeDelivery: 'inline' });
-    const spans = noUserSymbolSpans(stores);
+    const spans = noUserSymbolSpans(compile(src, { face: 'ts', runtimeDelivery: 'inline' }));
     // Identity, not count: each span must BE a `~>`, and the named
     // effect's own operator must not be among them.
     expect(spans.map(([a, b]) => src.slice(a, b))).toEqual(['~>', '~>']);
@@ -386,9 +385,81 @@ describe('spans with no user symbol (the hover declines)', () => {
     expect(spans.map(([a]) => a)).toEqual([src.indexOf('~>', named + 1), src.lastIndexOf('~>')]);
   });
 
+  // The render channel and the reads it BINDS are two different
+  // populations, and conflating them is the live hazard: the compiler's
+  // `vocabulary` list feeds the mapping census, which nets every span in
+  // it out of the read population. A ref cell's name and a bind's
+  // right-hand name are real reads that reach a face entity — they must
+  // stay counted there while still being silent HERE, which is why the
+  // compiler reports them on a second channel.
+  test('the render channel silences its own words and the names they bind', () => {
+    const src = [
+      'Panel = component',
+      "  text := 'x'",
+      '  inputEl: HTMLInputElement | null := null',
+      '',
+      '  render',
+      '    input ref: inputEl',
+      '      value <=> text',
+      '',
+    ].join('\n');
+    const r = compile(src, { face: 'ts', runtimeDelivery: 'inline' });
+    const at = (word, from = 0) => src.indexOf(word, from);
+    const spans = noUserSymbolSpans(r);
+    const silenced = (o) => inNoUserSymbolSpan(spans, o);
+
+    const renderAt = src.indexOf('  render');
+    expect(silenced(at('ref:', renderAt))).toBe(true);            // the channel word
+    expect(silenced(at('inputEl', at('ref:', renderAt)))).toBe(true);   // the cell it names
+    expect(silenced(at('value', renderAt))).toBe(true);           // the bind target
+    expect(silenced(at('text', renderAt))).toBe(true);            // the name bound to it
+
+    // …and the census keeps the two reads it must still count.
+    const consumed = new Set(r.vocabulary.map((v) => v.start));
+    expect(consumed.has(at('inputEl', at('ref:', renderAt)))).toBe(false);
+    expect(consumed.has(at('text', renderAt))).toBe(false);
+    expect(consumed.has(at('ref:', renderAt))).toBe(true);        // the word itself IS consumed
+  });
+
+  // A schema transform's `it` is the DSL's own word — the grammar fixes
+  // the parameter list, so there is nothing to rename or annotate. A
+  // record FIELD the author happens to name `it` is the opposite: an
+  // ordinary member with an answer of its own. Spelling cannot tell them
+  // apart; the token kind can, and this is the only fixture anywhere that
+  // spells both on one line.
+  test("a transform silences the `it` PARAMETER, not a field named `it`", () => {
+    const src = "S = schema\n  label! -> it.it\n  other! -> String(it.name)\n";
+    const spans = noUserSymbolSpans(compile(src, { face: 'ts', runtimeDelivery: 'inline' }));
+    const first = src.indexOf('it.it');
+    expect(inNoUserSymbolSpan(spans, first)).toBe(true);          // the parameter read
+    expect(inNoUserSymbolSpan(spans, first + 3)).toBe(false);     // the field it reaches
+    expect(inNoUserSymbolSpan(spans, src.indexOf('it.name'))).toBe(true);
+    // …and an ordinary identifier in the same body is untouched: the
+    // predicate is the DSL's word AND the kind, not the kind alone.
+    expect(inNoUserSymbolSpan(spans, src.indexOf('String'))).toBe(false);
+    expect(spans.length).toBe(2);                                 // two parameters, nothing else
+  });
+
+  test('a DECLARATION outside render keeps its answer', () => {
+    const src = [
+      'Panel = component',
+      "  text := 'x'",
+      '',
+      '  render',
+      '    input',
+      '      value <=> text',
+      '',
+    ].join('\n');
+    const r = compile(src, { face: 'ts', runtimeDelivery: 'inline' });
+    // `text` at its own declaration is not a channel position — only the
+    // occurrence inside the render body is. A list that silenced the name
+    // everywhere would swallow the declaration too, and the ruled gauge
+    // probes the declaration under a different row.
+    expect(inNoUserSymbolSpan(noUserSymbolSpans(r), src.indexOf('  text :='))).toBe(false);
+  });
+
   test('the span is half-open: its first byte silences, the byte after it does not', () => {
-    const { stores } = compile(src, { face: 'ts', runtimeDelivery: 'inline' });
-    const spans = noUserSymbolSpans(stores);
+    const spans = noUserSymbolSpans(compile(src, { face: 'ts', runtimeDelivery: 'inline' }));
     const [start, end] = spans[0];
     expect(inNoUserSymbolSpan(spans, start)).toBe(true);     // the hover probe lands here
     expect(inNoUserSymbolSpan(spans, end - 1)).toBe(true);

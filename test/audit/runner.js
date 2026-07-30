@@ -1533,7 +1533,7 @@ function* identReads(src) {
 // occur, and `mapping.exclusions` goes red when one stops occurring, so an
 // exclusion cannot outlive its reason.
 const MAP_EXCLUSIONS = new Map([
-  ['render-channel', "the render DSL's own channel words — `ref:` binds a cell, `key:` identifies loop rows, `slot` projects children. The compiler CONSUMES each; none reaches a face entity"],
+  ['render-channel', "the render DSL's own words — every key on an intrinsic element (an attribute, a property, an event, `ref:`, `key:`), `slot`, and a `<=>` bind's TARGET, which the lexer folds into the minted `__bind_x__` props key. The compiler CONSUMES each; none reaches a face entity. The names such a pair BINDS — a ref cell, a bind's right-hand side — are ordinary reads that do reach one, and stay in the population"],
   ['gate-prefix', "a gate's `@app.data` marker, erased whole by the lowering, which keeps only the route name. RULINGS.md pins these segments to silence"],
 ]);
 

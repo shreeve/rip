@@ -9209,6 +9209,7 @@ class Emitter {
     this.pendingTypeDecls = [];
     this.primitiveAvoid = null;
     this.vocabulary = [];
+    this.silences = [];
     this.componentInfo = new Map;
     this.schemaFns = new Map;
     this.moduleComponentNames = new Map;
@@ -9826,16 +9827,26 @@ class Emitter {
     }
   }
   noteVocabulary(kind, word, container) {
+    const hit = this.wordSpanIn(word, container);
+    if (hit !== null)
+      this.vocabulary.push({ kind, start: hit[0], end: hit[1] });
+  }
+  noteSilence(word, container) {
+    const hit = this.wordSpanIn(word, container);
+    if (hit !== null)
+      this.silences.push([hit[0], hit[1]]);
+  }
+  wordSpanIn(word, container) {
     if (!this.ts)
-      return;
+      return null;
     const id = isNode4(container) ? this.stores.idOf(container) : null;
     const span = id !== null ? this.stores.selfSpan(id) : null;
     if (span === null)
-      return;
+      return null;
     const hits = this.stores.primitiveSpans(word, span[0], span[1]);
     if (hits.length !== 1)
-      return;
-    this.vocabulary.push({ kind, start: hits[0].sourceStart, end: hits[0].sourceEnd });
+      return null;
+    return [hits[0].sourceStart, hits[0].sourceEnd];
   }
   emitRewrittenPrimitive(storedValue, emittedValue) {
     const owner = this.b.currentMark;
@@ -11432,6 +11443,13 @@ class Emitter {
         continue;
       }
       const params = Emitter.schemaBodyParams(e);
+      if (this.ts && e.tag === "field") {
+        for (const t of tokens) {
+          if (t.value === "it" && t.kind === "IDENTIFIER" && typeof t.start === "number") {
+            this.silences.push([t.start, t.end]);
+          }
+        }
+      }
       fns.set(i, this.schemaFnCode(params, tokens));
     }
     const story = this.schemaStories?.get(node) ?? null;
@@ -14453,6 +14471,8 @@ ${pad ?? ""}`);
             this.b.emit(", ");
           this.noteVocabulary("gate-prefix", "app", gate.pathNode);
           this.noteVocabulary("gate-prefix", "data", gate.pathNode);
+          for (const seg of gate.keyParts ?? [])
+            this.noteSilence(seg, gate.key);
           this.mark(gate.node, "$self", () => {
             this.mark(gate.node, "operator", () => {});
             this.mark(gate.node, "rhs", () => {
@@ -15507,6 +15527,8 @@ ${pad ?? ""}`);
     const R = this.rstate;
     const rec = R.sink;
     const markNode = isNode4(node) ? node : null;
+    if (markNode !== null)
+      this.noteSilence(name, markNode);
     let ctorRef;
     if (this.renderVarKind(name) !== null) {
       ctorRef = () => this.emitPrimitive(name);
@@ -15578,6 +15600,9 @@ ${pad ?? ""}`);
       const isBind = cleanKey.startsWith("__bind_") && cleanKey.endsWith("__");
       if (isBind) {
         this.checkUserSpelledBind(pair);
+        this.noteVocabulary("render-channel", cleanKey, pair);
+        if (typeof value === "string")
+          this.noteSilence(value, pair);
         const boundName = cleanKey.slice(7, -2);
         const container = this.childContainerRef(value);
         if (container !== null) {
@@ -16004,18 +16029,23 @@ ${this.replayPad}}` : " }");
       }
       if (key.startsWith('"') && key.endsWith('"'))
         key = key.slice(1, -1);
+      this.noteVocabulary("render-channel", key, pair);
       if (key === "__transition__") {
         this.renderTransition(el, pair, value, objExpr);
         continue;
       }
       if (key === "ref") {
-        this.noteVocabulary("render-channel", "ref", pair);
+        if (typeof value === "string")
+          this.noteSilence(value, pair);
         this.renderRef(el, pair, value, objExpr);
         continue;
       }
       if (key.startsWith("__bind_") && key.endsWith("__")) {
         this.checkUserSpelledBind(pair);
-        this.renderBind(el, pair, key.slice(7, -2), value, objExpr);
+        const prop = key.slice(7, -2);
+        if (typeof value === "string")
+          this.noteSilence(value, pair);
+        this.renderBind(el, pair, prop, value, objExpr);
         continue;
       }
       if (key === "key") {
@@ -19753,7 +19783,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -20332,6 +20362,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     stores: emitted.stores,
     mappings: new Mappings(emitted.mappings),
     vocabulary: emitted.vocabulary ?? [],
+    silences: emitted.silences ?? [],
     runtimes: emitted.runtimes,
     bindings: emitted.bindings,
     replResultName: emitted.replResultName,

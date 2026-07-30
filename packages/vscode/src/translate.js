@@ -535,13 +535,20 @@ export function ripImportText(newText) {
 // machinery name is never a stand-in). Read from the compiler's own
 // stores rather than guessed from text.
 //
-// Today's population is the BARE effect operator — `~> …` with no
-// binding, whose `~>` lowers into a `__effect(…)` callee, so tsgo
-// truthfully describes the runtime's own symbol there. The bare form is
-// recognized by its own recorded roles: a named effect's `target` role
-// carries the binding's span, a bare one's carries no span at all.
-// The render-DSL positions are the same shape and extend this list.
-export function noUserSymbolSpans(stores) {
+// Two populations, both the compiler's own record:
+//
+//   the BARE effect operator — `~> …` with no binding, whose `~>` lowers
+//   into a `__effect(…)` callee, so tsgo truthfully describes the
+//   runtime's own symbol there. The bare form is recognized by its own
+//   recorded roles: a named effect's `target` role carries the binding's
+//   span, a bare one's carries no span at all.
+//
+//   the CONSUMED VOCABULARY the render walk records as it reads it
+//   (`noteVocabulary`, src/emitter.js) — DSL words the lowering spends
+//   whole: the render channel's own names and a gate's `@app.data`
+//   marker, which the lowering erases entirely, keeping only the route.
+//   RULINGS.md pins both to silence as their interim.
+export function noUserSymbolSpans({ stores, vocabulary = [], silences = [] }) {
   const spans = [];
   for (const node of stores.nodesByKind('effect')) {
     const target = stores.role(node.nodeId, 'target');
@@ -549,6 +556,10 @@ export function noUserSymbolSpans(stores) {
     const op = stores.role(node.nodeId, 'operator');
     if (op && typeof op.sourceStart === 'number') spans.push([op.sourceStart, op.sourceEnd]);
   }
+  for (const v of vocabulary) {
+    if (v.kind === 'render-channel' || v.kind === 'gate-prefix') spans.push([v.start, v.end]);
+  }
+  for (const s of silences) spans.push(s);
   return spans.sort((a, b) => a[0] - b[0]);
 }
 
