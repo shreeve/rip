@@ -23123,6 +23123,8 @@ async function bootApp(opts = {}) {
   const pending = new Set;
   const handle = {};
   const isCssPath = (path) => typeof path === "string" && path.endsWith(".css");
+  const isHtmlPath = (path) => typeof path === "string" && path.endsWith(".html");
+  const isNonRipBag = (path) => isCssPath(path) || isHtmlPath(path);
   const applyCssSheet = (id, source) => {
     if (typeof document === "undefined" || typeof source !== "string")
       return;
@@ -23158,7 +23160,7 @@ async function bootApp(opts = {}) {
   const escapeRemount = async (applied) => {
     const snapshot = {};
     for (const path of bag.paths()) {
-      if (isCssPath(path))
+      if (isNonRipBag(path))
         continue;
       snapshot[path] = { ...await loader.import(path) };
     }
@@ -23199,7 +23201,7 @@ async function bootApp(opts = {}) {
     try {
       const snapshot = {};
       for (const path of bag.paths()) {
-        if (isCssPath(path))
+        if (isNonRipBag(path))
           continue;
         try {
           snapshot[path] = { ...await loader.import(path) };
@@ -23228,7 +23230,7 @@ async function bootApp(opts = {}) {
   const unwatch = bag.watch((_event, path) => {
     if (!path.startsWith("app/"))
       return;
-    if (isCssPath(path))
+    if (isNonRipBag(path))
       return;
     pending.add(path);
     timer ??= setTimeout(absorb, 25);
@@ -23249,6 +23251,9 @@ async function bootApp(opts = {}) {
         if (path2 !== undefined) {
           if (isCssPath(path2)) {
             removeCssSheet(path2);
+          } else if (isHtmlPath(path2)) {
+            if (typeof location !== "undefined")
+              location.reload();
           } else {
             files.delete(path2);
             loader.invalidate(path2);
@@ -23262,6 +23267,16 @@ async function bootApp(opts = {}) {
         if (applied) {
           applyCssSheet(path, passport.source);
           console.log(`[Rip] applied ${path} — css soft-apply (no remount)`);
+        }
+        return applied;
+      }
+      if (isHtmlPath(path)) {
+        const had = known != null;
+        const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
+        if (applied && had) {
+          console.log(`[Rip] applied ${path} — html reload`);
+          if (typeof location !== "undefined")
+            location.reload();
         }
         return applied;
       }

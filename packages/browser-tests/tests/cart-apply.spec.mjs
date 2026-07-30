@@ -95,6 +95,34 @@ test.describe('cart Probe 1 apply', () => {
     }
   });
 
+  test('HTML shell edit reloads the document', async ({ page }) => {
+    await bootCart(page);
+    await page.evaluate(() => { globalThis.__wsSentinel = 'alive'; });
+
+    // App routes overwrite document.title — stamp the <html> attribute instead.
+    const stamp = `shell-${Date.now()}`;
+    const edit = await editFile('app/index.html', (src) =>
+      src.replace('<html lang="en">', `<html lang="en" data-rip-shell="${stamp}">`));
+
+    try {
+      await expect.poll(async () =>
+        page.evaluate(() => document.documentElement.getAttribute('data-rip-shell')),
+      { timeout: 15000 }).toBe(stamp);
+      // A real reload clears page-world state.
+      expect(await page.evaluate(() => globalThis.__wsSentinel)).toBeUndefined();
+      await expect(page.locator('h1')).toHaveText('Products', { timeout: 20000 });
+
+      const frames = await (await fetch(`${HARNESS}/__test/frames`)).json();
+      expect(frames.length).toBeGreaterThan(0);
+      const last = JSON.parse(frames[frames.length - 1]);
+      expect(last.ding.id).toBe('app/index.html');
+      expect(typeof last.ding.etag).toBe('string');
+      expect(last.ding.kind).toBeUndefined();
+    } finally {
+      edit.restore();
+    }
+  });
+
   test('CSS-only edit soft-applies without remount (S12)', async ({ page }) => {
     await bootCart(page);
     await page.evaluate(() => {

@@ -321,14 +321,18 @@ export buildArtifact = (entry, outfile) ->
   Bun.write! outfile, result.outputs[0].text!
   outfile
 
-# Bag walk under <appDir>/app: every .rip and .css, keyed by disk path
-# ('app/routes/index.rip', 'app/styles.css' — the disk path IS the store
-# id). The compile bundle takes .rip only (see ripWalk); CSS rides the
-# door as source text and soft-applies in the browser (S12). No app/ dir
-# means no bundle (null). An assembly failure throws — it rides the same
+# Default client bag under <appDir>/app: app/**/*.{rip,css,html}, keyed by
+# disk path ('app/routes/index.rip', 'app/styles.css', 'app/index.html' —
+# the disk path IS the store id). Doctrine: the bag is membership; the hub
+# only dings {id,etag}; the client chooses the reaction. The compile bundle
+# takes .rip only (see ripWalk); CSS soft-applies (S12); HTML reloads.
+# Project-root app.rip / index.rip is the main server entry — outside this
+# walk — and takes the epoch path when it changes. No app/ dir means no
+# bundle (null). An assembly failure throws — it rides the same
 # boot-failure caching as a compile failure, so rings answer 503 with the
 # diagnostic.
-isBagFile = (name) -> name.endsWith('.rip') or name.endsWith('.css')
+isBagFile = (name) ->
+  name.endsWith('.rip') or name.endsWith('.css') or name.endsWith('.html')
 
 clientModules = (dir) ->
   modules = {}
@@ -354,7 +358,7 @@ readAppModules = ->
   return null unless existsSync(appRoot)
   clientModules(appRoot)
 
-# assembleBundle compiles every module — CSS must never enter it.
+# assembleBundle compiles every module — CSS/HTML must never enter it.
 ripWalk = (walk) ->
   return null unless walk?
   modules = {}
@@ -872,12 +876,14 @@ startDoorbell = ->
       new Response('Not Found', { status: 404 })
 
 # ==============================================================================
-# The watcher — allowlist *.rip and *.css, rename-safe via the content-hash gate
+# The watcher — bag allowlist *.rip / *.css / *.html, rename-safe via hash gate
 # ==============================================================================
 
 # Editors save temp-then-rename, so event basenames are untrusted. Any
 # non-ignored event just arms the settle timer; the decision comes from
-# hashing the real *.rip / *.css files on disk — identical bytes cost nothing.
+# hashing the real bag files on disk — identical bytes cost nothing.
+# Project-root main entry (app.rip / index.rip) is included when present;
+# a change there (or anywhere outside app/) takes the epoch path.
 ignoredPath = (rel) ->
   return false unless rel?
   for seg in rel.split('/')
@@ -910,8 +916,9 @@ hashApp = ->
     hasher.update map[f]
   { hash: hasher.digest('hex'), files: map }
 
-# Every changed, added, or removed path between two walks lies under
-# app/ — then the save is a file feed, not a reload.
+# Every changed, added, or removed path lies under app/ (the default
+# client bag) — then the save is a file feed, not a reload. The main
+# server entry lives next to app/ and therefore takes the epoch path.
 clientOnlyChange = (prev, cur) ->
   boundary = join(cfg.appDir, 'app') + '/'
   for path, h of cur

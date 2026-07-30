@@ -31,9 +31,9 @@ export def createApply(opts: ApplyOpts): Apply
   absorb = (paths) ->
     unless Array.isArray(paths) and paths.length > 0
       return 'noop'
-    # CSS sheets soft-apply in the door (style[data-rip-css]); they never
-    # enter remount. A pure-CSS dirty set is an honest noop (S12).
-    dirty = (p for p in paths when typeof p is 'string' and p.startsWith('app/') and not p.endsWith('.css'))
+    # CSS/HTML soft paths never enter remount (door handles them). A
+    # dirty set of only those is an honest noop.
+    dirty = (p for p in paths when typeof p is 'string' and p.startsWith('app/') and not p.endsWith('.css') and not p.endsWith('.html'))
     return 'noop' unless dirty.length > 0
 
     verdict = 'escape'

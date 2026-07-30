@@ -279,14 +279,15 @@ alters surface syntax updates ALL THREE in the same change.
   or choose the nearest idiomatic alternative; never paper over with
   curly-brace JS style. Read nearby `.rip` for the local dialect
   before writing new code.
-- **Workspace vocabulary (door / apply):** bag unit = **module**
-  (path-keyed, e.g. `app/mood.rip`); in-memory record = **passport**;
-  swappable component identity = **component definition**. Not
-  “cell.” Wire freshness is `{ id, etag }` — no monotonic `rev` on
-  ding/manifest/passport. Manifest + on-disk door store use **files**
-  (`{ files: [{id,etag}] }`, `runDir/files`, env `RIP_FILES_DIR`).
-  “File” in prose also means OS path / editor buffer; it is not a
-  synonym for the bag’s module/passport nouns.
+- **Workspace vocabulary (door / apply):** bag = **membership** (default
+  `app/**/*.{rip,css,html}`); bag unit = **module** (path-keyed);
+  in-memory record = **passport**; swappable component identity =
+  **component definition**. Not “cell.” Hub dings `{ id, etag }` only —
+  no apply `kind` for CSS/HTML/Rip (client infers from extension).
+  Main server entry (`app.rip` / `index.rip` at project root) is outside
+  the client bag → epoch on change. Manifest + on-disk door store use
+  **files** (`{ files: [{id,etag}] }`, `runDir/files`, env
+  `RIP_FILES_DIR`).
 - **Comments explain non-obvious intent** — invariants, constraints,
   why a trade-off was taken. Never narrate what code obviously does,
   never reference project history or future plans. A comment that
