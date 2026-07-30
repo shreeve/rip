@@ -1,0 +1,30 @@
+import { ButtonLink } from '../../components/button.rip'
+import { title, formatPrice } from '../../config.rip'
+
+export Orders = component
+  orders <~ @app.data.orders
+
+  mounted: -> document.title = title('Orders')
+
+  render
+    h1 'Orders'
+    if not orders.length
+      p "You haven't placed any orders yet."
+      ButtonLink href: '/', 'Browse Products'
+    else
+      div.overflow-auto
+        table
+          thead
+            tr
+              th 'Order'
+              th 'Date'
+              th 'Items'
+              th 'Total'
+          tbody
+            for order in orders
+              tr
+                td
+                  a href: "/orders/#{order.id}", "##{order.id}"
+                td (new Date(order.createdAt)).toLocaleString()
+                td "#{order.items.reduce(((sum, i) -> sum + i.quantity), 0)}"
+                td "#{formatPrice(order.total)}"

@@ -12,7 +12,8 @@ here is wired into CI.
 
 | File | Role |
 | --- | --- |
-| `app.rip` | The server: `client!()`, the statuses API, `start()` |
+| `index.rip` | The server: statuses API, `start! 'app'` |
+| `app/index.html` | SPA shell (`bootApp` over `/bundle.json`) |
 | `app/stash.rip` | `appStash` — the `statuses` source over `/api/statuses` |
 | `app/mood.rip` | `MoodBadge`, the mood → label leaf. **This is the file the live demo edits.** |
 | `app/routes/index.rip` | The page: post form + the status list through `MoodBadge` |
@@ -40,11 +41,11 @@ server-file save, a restart) boots fresh workers and clears the list.
 
 ```bash
 cd examples/pulse
-rip app.rip
+rip index.rip
 ```
 
 Open the printed URL (http://localhost:3000). The page boots from
-`/@rip/bundle.json`, the seeded status renders through its mood badge,
+`/bundle.json`, the seeded status renders through its mood badge,
 and posting from the form updates the list in place — the handler POSTs,
 then refetches the `statuses` source.
 
@@ -55,10 +56,10 @@ With a Janus control endpoint running (`--control <target>` or the
 
 ```bash
 cd examples/pulse
-rip server app.rip --name pulse --bridge /hub
+rip server index.rip --name pulse --bridge /hub
 ```
 
-The same `app.rip` now runs as a worker pool: the manager registers
+The same `index.rip` now runs as a worker pool: the manager registers
 `pulse` with Janus, compiles the app and assembles the bundle once per
 boot epoch, and spawns workers on unix sockets. Caddy terminates TLS;
 Janus admits the host, routes it to the live worker sockets
@@ -72,7 +73,7 @@ Same as leg 2, with the flag in the manager's environment:
 
 ```bash
 cd examples/pulse
-rip server app.rip --name pulse --bridge /hub
+rip server index.rip --name pulse --bridge /hub
 ```
 
 Open the page, then edit `app/mood.rip`: change the `up` label

@@ -50,7 +50,9 @@ const wsRoute = title => [
 
 const wsModules = { 'app/routes/index.rip': wsRoute('workspace home') };
 const wsRevs = new Map([['app/routes/index.rip', 1]]);
-const wsBytes = new Map([['app/routes/index.rip@1', wsModules['app/routes/index.rip']]]);
+const wsEtags = new Map();
+const shortEtag = (text) => new Bun.CryptoHasher('sha256').update(text).digest('hex').slice(0, 16);
+wsEtags.set('app/routes/index.rip', shortEtag(wsModules['app/routes/index.rip']));
 let wsBundleText = null;
 let wsBundleTag = null;
 const rebuildWsBundle = () => {
@@ -64,8 +66,8 @@ rebuildWsBundle();
 
 const wsSockets = new Set();
 const wsFrames = [];
-const ding = (id, rev) => {
-  const frame = JSON.stringify({ ding: { id, rev } });
+const ding = (id, rev, etag) => {
+  const frame = JSON.stringify({ ding: { id, rev, etag } });
   wsFrames.push(frame);
   for (const socket of wsSockets) socket.send(frame);
 };
@@ -78,10 +80,15 @@ Bun.serve({
     const url = new URL(request.url);
     const { pathname } = url;
     if (pathname === '/bundle.json') {
-      if (request.headers.get('If-None-Match') === bundleTag) {
-        return new Response(null, { status: 304, headers: { ETag: bundleTag } });
+      // ?door=1 is the workspace certification bundle (harness-only); the
+      // plain URL is the non-workspace app.spec bundle.
+      const door = url.searchParams.has('door');
+      const text = door ? wsBundleText : bundleText;
+      const tag = door ? wsBundleTag : bundleTag;
+      if (request.headers.get('If-None-Match') === tag) {
+        return new Response(null, { status: 304, headers: { ETag: tag } });
       }
-      return new Response(bundleText, { headers: { 'Content-Type': 'application/json', ETag: bundleTag } });
+      return new Response(text, { headers: { 'Content-Type': 'application/json', ETag: tag } });
     }
     if (pathname === '/user.json') {
       return new Response(JSON.stringify({ name: 'Ada Lovelace' }), { headers: { 'Content-Type': 'application/json' } });
@@ -89,36 +96,36 @@ Bun.serve({
     if (pathname === '/hub') {
       return server.upgrade(request) ? undefined : new Response('websocket only', { status: 400 });
     }
-    if (pathname === '/@rip/bundle.json') {
-      if (request.headers.get('If-None-Match') === wsBundleTag) {
-        return new Response(null, { status: 304, headers: { ETag: wsBundleTag } });
-      }
-      return new Response(wsBundleText, { headers: { 'Content-Type': 'application/json', ETag: wsBundleTag } });
-    }
-    if (pathname === '/@rip/manifest.json') {
-      const cells = [...wsRevs].map(([id, rev]) => ({ id, rev }));
+    if (pathname === '/manifest.json') {
+      const cells = [...wsRevs].map(([id, rev]) => ({ id, rev, etag: wsEtags.get(id) }));
       return new Response(JSON.stringify({ cells }), {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       });
     }
-    if (pathname.startsWith('/@rip/cells/')) {
-      const id = pathname.slice('/@rip/cells/'.length);
-      const body = wsBytes.get(`${id}@${url.searchParams.get('rev')}`);
-      if (body === undefined) return new Response('unknown cell', { status: 404 });
-      return new Response(body, {
-        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=31536000, immutable' },
-      });
+    if (pathname.startsWith('/app/') && pathname.endsWith('.rip')) {
+      const id = pathname.slice(1); // app/...
+      const wanted = url.searchParams.get('etag');
+      const body = wsModules[id];
+      if (body === undefined) return new Response('unknown module', { status: 404 });
+      const current = wsEtags.get(id) ?? shortEtag(body);
+      const headers = { 'Content-Type': 'text/plain; charset=utf-8', ETag: `"${current}"`, 'Cache-Control': 'no-store' };
+      if (!wanted || !/^[0-9a-f]{16}$/.test(wanted)) {
+        return new Response('module URLs require ?etag=<16-hex>', { status: 400 });
+      }
+      if (wanted !== current) return new Response(null, { status: 409, headers });
+      return new Response(body, { headers });
     }
     if (pathname === '/__test/bump' && request.method === 'POST') {
       const { id, title } = await request.json();
       const rev = (wsRevs.get(id) ?? 0) + 1;
       const source = wsRoute(title);
+      const etag = shortEtag(source);
       wsRevs.set(id, rev);
-      wsBytes.set(`${id}@${rev}`, source);
+      wsEtags.set(id, etag);
       wsModules[id] = source;
       rebuildWsBundle();
-      ding(id, rev);
-      return new Response(JSON.stringify({ id, rev }), { headers: { 'Content-Type': 'application/json' } });
+      ding(id, rev, etag);
+      return new Response(JSON.stringify({ id, rev, etag }), { headers: { 'Content-Type': 'application/json' } });
     }
     if (pathname === '/__test/frames') {
       return new Response(JSON.stringify(wsFrames), { headers: { 'Content-Type': 'application/json' } });

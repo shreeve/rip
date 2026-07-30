@@ -405,43 +405,36 @@ export buildApp = ->
 #
 # A save touching ONLY app/ feeds the live pool in place: mint or bump
 # (id, rev) cells, rewrite the current pool's bundle and the manifest, then
-# ding /@rip/dev with {id, rev, hash} envelopes — no new epoch, no pool
+# ding /hub with {id, rev, etag} envelopes — no new epoch, no pool
 # reload, no doorbell. Any other save takes the dirty-epoch path above and
 # dings the swap (kind 'epoch') once the new pool is live.
 
 # The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
 # server.rip (workers never import manager code). Exported so the mirror
-# is a pinned fact, not a convention.
-export DEV_CHANNEL =! '/@rip/dev'
+# is a pinned fact, not a convention. Same spelling as the bridge path.
+export DEV_CHANNEL =! '/hub'
 
 sha256hex = (text) -> new Bun.CryptoHasher('sha256').update(text).digest('hex')
 
-# The content-hash discriminator that rides cell URLs (manifest entries
-# and dings). Revs restart when a manager restarts, so a bare (id, rev)
-# URL can name DIFFERENT bytes across runs — and cell responses are
-# cached immutable for a year, so a returning browser would silently
-# apply the OLD run's bytes on a URL collision. With the hash in the
-# URL, the URL varies iff the bytes do: a cache hit is byte-correct by
-# construction. 16 hex chars (64 bits) of sha256 — collision needs the
-# same id, the same rev, AND a 64-bit hash collision.
+# The content etag that rides module URLs (manifest entries and dings) —
+# 16 hex chars of sha256. The door serves the latest representation at
+# /app/…?etag=E (Q8′); a superseded etag answers 409 with the current
+# ETag, so freshness never rests on an immutable museum cache.
 shortHash = (hash) -> hash.slice(0, 16)
 
-# A cell filename encodes (id, rev) unambiguously: the id is percent-encoded
-# (it contains slashes), so the literal '@' separator can never appear inside
-# it. Mirrored by the cell route in server.rip.
-cellFile = (id, rev) -> join(state.cellsDir, "#{encodeURIComponent(id)}@#{rev}")
+# Latest-only on-disk name: the percent-encoded store id (contains
+# slashes). Mirrored by the /app/* route in server.rip.
+moduleFile = (id) -> join(state.cellsDir, encodeURIComponent(id))
 
 # Sync the registry against a modules snapshot and write what changed. A new
 # path mints its id — the birth path, Q3/B′ — at rev 1; a changed path bumps
-# its rev; a deleted path retires: dropped from the manifest, its rev-keyed
-# files staying on disk and answering (Q8), and the retirement OCCUPIES its
-# own rev so the delete ding is rev-guarded like any mutation. A path
-# returning after retirement resumes its rev sequence — restarting at rev 1
-# would rewrite an existing (id, rev) file, and rev-keyed files are
-# immutable. A rename is retire + mint (id persistence across renames is
-# open research). The caller supplies the snapshot — a second disk walk
-# here would re-open the silent-stale class. Returns the changed
-# { id, rev, deleted? } entries.
+# its rev; a deleted path retires: dropped from the manifest, its latest
+# file removed, and the retirement OCCUPIES its own rev so the delete ding
+# is rev-guarded like any mutation. A path returning after retirement
+# resumes its rev sequence. A rename is retire + mint (id persistence
+# across renames is open research). The caller supplies the snapshot — a
+# second disk walk here would re-open the silent-stale class. Returns the
+# changed { id, rev, deleted? } entries.
 syncCells = (modules) ->
   state.cellsDir ?= join(state.runDir, 'cells')
   state.manifestPath ?= join(state.runDir, 'manifest.json')
@@ -468,11 +461,13 @@ syncCells = (modules) ->
       entry.retired = true
       entry.rev += 1
       changed.push { id: entry.id, rev: entry.rev, deleted: true }
-  # Revs only move forward within a run, so every write below creates a
-  # fresh (id, rev) file — an existing one is never rewritten. A retirement
-  # has no bytes: its rev exists only in the ding.
-  for entry in changed when not entry.deleted
-    Bun.write! cellFile(entry.id, entry.rev), modules[entry.id]
+  # Latest representation only (Q8′ — no per-rev museum). A retirement
+  # removes the file; its rev exists only in the ding.
+  for entry in changed
+    if entry.deleted
+      try unlinkSync moduleFile(entry.id)
+    else
+      Bun.write! moduleFile(entry.id), modules[entry.id]
   changed
 
 # The manifest is the LAST durable document on every cell path — written
@@ -487,7 +482,7 @@ writeManifest = ->
   for path, entry of state.cells
     # The id IS the store path (B′ — the birth path is the id, a rename
     # retires and mints), so the entry carries one spelling of that fact.
-    live.push { id: entry.id, rev: entry.rev, hash: shortHash(entry.hash) } unless entry.retired
+    live.push { id: entry.id, rev: entry.rev, etag: shortHash(entry.hash) } unless entry.retired
   live.sort (a, b) -> if a.id < b.id then -1 else 1
   tmp = "#{state.manifestPath}.tmp"
   Bun.write! tmp, JSON.stringify({ cells: live })
@@ -543,7 +538,7 @@ runCellChange = ->
     if c.deleted is true
       ding.kind = 'delete'
     else
-      ding.hash = shortHash(c.hash)
+      ding.etag = shortHash(c.hash)
     { '@': [DEV_CHANNEL], ding }
   i = 0
   while i < dings.length                 # the publish plane caps 16 objects per frame

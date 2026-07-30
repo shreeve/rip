@@ -490,6 +490,16 @@ test "bare start() defaults host and port (standalone)", ->
   finally
     Bun.serve = realServe
 
+test "bare start() stays synchronous (worker handover)", ->
+  process.env.WORKER_ID = '1'
+  try
+    h = start()
+    ok typeof h is 'function'
+    ok typeof h.then isnt 'function', 'bare start() must not return a Promise'
+  finally
+    delete process.env.WORKER_ID
+    delete globalThis.__ripHandler
+
 # ==[ Body parsing + input: schemas + OpenAPI ]==
 
 console.log "\nBodies and schemas"
@@ -805,18 +815,38 @@ writeClientDir clientAppDir
 resetGlobals()
 client! join(clientAppDir, 'app')
 
+test! "start! dir mounts the client then hands over (worker)", ->
+  dir = tmpFixture('tmp-start-app-')
+  writeClientDir dir
+  resetGlobals()
+  process.env.WORKER_ID = '1'
+  try
+    pending = start(join(dir, 'app'))
+    ok typeof pending.then is 'function', "start('app') returns a Promise — use start!"
+    h = await pending
+    ok typeof h is 'function'
+    ok globalThis.__ripHandler is h
+    res = handle! req('GET', '/')
+    eq res.status, 200
+    ok (res.text!).includes('id="app"'), 'start! dir registered the boot page'
+  finally
+    delete process.env.WORKER_ID
+    delete globalThis.__ripHandler
+    resetGlobals()
+    client! join(clientAppDir, 'app')
+
 test! "client(dir) serves the boot page at GET /: runtime import, bundle url, mount point", ->
   res = handle! req('GET', '/')
   eq res.status, 200
   ok res.headers.get('content-type').includes('text/html')
   html = res.text!
   ok html.includes('/@rip/rip.js'), 'imports the served browser runtime'
-  ok html.includes('/@rip/bundle.json'), 'boots from the served bundle'
+  ok html.includes('/bundle.json'), 'boots from the served bundle'
   ok html.includes('id="app"'), 'carries the mount point'
   ok html.includes('debug'), 'the ?debug query param reaches bootApp'
 
-test! "GET /@rip/bundle.json ships the client modules and the boot package", ->
-  res = handle! req('GET', '/@rip/bundle.json')
+test! "GET /bundle.json ships the client modules and the boot package", ->
+  res = handle! req('GET', '/bundle.json')
   eq res.status, 200
   eq res.headers.get('content-type'), 'application/json'
   bundle = res.json!
@@ -826,10 +856,10 @@ test! "GET /@rip/bundle.json ships the client modules and the boot package", ->
   ok bundle.packages['@rip-lang/app']?, 'the boot package is claimed'
 
 test! "the bundle ETag round-trips as a 304", ->
-  first = handle! req('GET', '/@rip/bundle.json')
+  first = handle! req('GET', '/bundle.json')
   etag = first.headers.get('etag')
   ok etag?.startsWith('"'), "the ETag is quoted: #{etag}"
-  res = handle! req('GET', '/@rip/bundle.json', { headers: { 'If-None-Match': etag } })
+  res = handle! req('GET', '/bundle.json', { headers: { 'If-None-Match': etag } })
   eq res.status, 304
   eq res.headers.get('etag'), etag
 
@@ -903,15 +933,15 @@ resetGlobals()
 
 console.log "\nclient() dev feed"
 
-# The content-hash discriminator that rides manifests, dings, and cell
-# URLs — mirrors the manager's shortHash (sha256, 16 hex chars).
+# The content etag that rides manifests, dings, and module URLs —
+# mirrors the manager's shortHash (sha256, 16 hex chars).
 cellHash = (s) -> new Bun.CryptoHasher('sha256').update(s).digest('hex').slice(0, 16)
 
 FEED_CELL_ID = 'app/routes/index.rip'
 feedDir = tmpFixture('tmp-feed-')
 mkdirSync join(feedDir, 'cells'), { recursive: true }
-writeFileSync join(feedDir, 'cells', "#{encodeURIComponent(FEED_CELL_ID)}@1"), CLIENT_ROUTE
-writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, rev: 1 }] })
+writeFileSync join(feedDir, 'cells', encodeURIComponent(FEED_CELL_ID)), CLIENT_ROUTE
+writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, rev: 1, etag: cellHash(CLIENT_ROUTE) }] })
 writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: {}, packages: {} })
 
 feedEnv =
@@ -927,67 +957,60 @@ for k, v of feedEnv
 resetGlobals()
 client!()
 
-test! "GET /@rip/manifest.json is no-store and read per request", ->
-  res = handle! req('GET', '/@rip/manifest.json')
+test! "GET /manifest.json is no-store and read per request", ->
+  res = handle! req('GET', '/manifest.json')
   eq res.status, 200
   eq res.headers.get('content-type'), 'application/json'
   eq res.headers.get('cache-control'), 'no-store'
-  eq (res.json!), { cells: [{ id: FEED_CELL_ID, rev: 1 }] }
+  eq (res.json!), { cells: [{ id: FEED_CELL_ID, rev: 1, etag: cellHash(CLIENT_ROUTE) }] }
   # a manager rewrite shows on the very next request — nothing is cached
-  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, rev: 2 }] })
-  eq ((handle! req('GET', '/@rip/manifest.json')).json!).cells[0].rev, 2
-  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, rev: 1 }] })
+  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, rev: 2, etag: cellHash(CLIENT_ROUTE) }] })
+  eq ((handle! req('GET', '/manifest.json')).json!).cells[0].rev, 2
+  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, rev: 1, etag: cellHash(CLIENT_ROUTE) }] })
 
-test! "GET /@rip/bundle.json is no-store when the feed door is open", ->
+test! "GET /bundle.json is no-store when the feed door is open", ->
   # Manifest no-store + a micro-cached bundle invents the reverse pairing
   # (live manifest over stale bundle bytes). With the door open both are
   # no-store; production (no manifest) keeps ETag-only.
-  res = handle! req('GET', '/@rip/bundle.json')
+  res = handle! req('GET', '/bundle.json')
   eq res.status, 200
   eq res.headers.get('cache-control'), 'no-store'
   eq res.headers.get('content-type'), 'application/json'
 
-test! "a rev-and-hash-keyed cell answers immutable text/plain source bytes", ->
-  res = handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1&h=#{cellHash(CLIENT_ROUTE)}")
+test! "GET /app/…?etag= answers the latest module as text/plain", ->
+  # Store id app/routes/index.rip ↔ URL /app/routes/index.rip
+  rel = FEED_CELL_ID.slice('app/'.length)
+  etag = cellHash(CLIENT_ROUTE)
+  res = handle! req('GET', "/app/#{rel}?etag=#{etag}")
   eq res.status, 200
   eq res.headers.get('content-type'), 'text/plain; charset=utf-8'
-  eq res.headers.get('cache-control'), 'public, max-age=31536000, immutable'
+  eq res.headers.get('cache-control'), 'no-store'
+  eq res.headers.get('etag'), "\"#{etag}\""
   eq (res.text!), CLIENT_ROUTE
 
-test! "the h discriminator gates the immutable answer: a mismatch is an unknown cell", ->
-  # Revs restart across manager runs while these responses cache immutable
-  # for a year: without h in the URL, a returning browser silently applies
-  # the OLD run's bytes on an (id, rev) collision. Serving bytes under a
-  # URL whose h names DIFFERENT bytes would poison that cache slot.
-  miss = handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1&h=0123456789abcdef")
-  eq miss.status, 404
-  ok ((miss.json!).error.message).includes('does not match these bytes'), 'names the mismatch'
+test! "a superseded etag answers 409 with the current ETag — never a silent stale body", ->
+  rel = FEED_CELL_ID.slice('app/'.length)
+  current = cellHash(CLIENT_ROUTE)
+  miss = handle! req('GET', "/app/#{rel}?etag=0123456789abcdef")
+  eq miss.status, 409
+  eq miss.headers.get('etag'), "\"#{current}\""
+  eq (miss.text!), ''
 
-test! "a cell URL without a valid positive-integer rev is a 400 naming the rule", ->
-  h = cellHash(CLIENT_ROUTE)
-  for path in ["/@rip/cells/#{FEED_CELL_ID}?h=#{h}", "/@rip/cells/#{FEED_CELL_ID}?rev=0&h=#{h}", "/@rip/cells/#{FEED_CELL_ID}?rev=abc&h=#{h}", "/@rip/cells/#{FEED_CELL_ID}?rev=1.5&h=#{h}"]
+test! "a module URL without a well-formed etag is a 400", ->
+  rel = FEED_CELL_ID.slice('app/'.length)
+  for path in ["/app/#{rel}", "/app/#{rel}?etag=abc", "/app/#{rel}?etag=0123456789ABCDEF"]
     res = handle! req('GET', path)
     eq res.status, 400
-    ok ((res.json!).error.message).includes('unversioned cell URLs are rejected'), "names the rule for #{path}"
+    ok ((res.json!).error.message).includes('module URLs require'), "names the rule for #{path}"
 
-test! "a cell URL without a well-formed h is a 400 — freshness never rests on a client convention", ->
-  # A bare (id, rev) URL is the proven-broken shape (the cross-run cache
-  # collision): answering it with a year-long cacheable 200 would put the
-  # unsound URL right back in circulation.
-  for path in ["/@rip/cells/#{FEED_CELL_ID}?rev=1", "/@rip/cells/#{FEED_CELL_ID}?rev=1&h=abc", "/@rip/cells/#{FEED_CELL_ID}?rev=1&h=0123456789ABCDEF"]
-    res = handle! req('GET', path)
-    eq res.status, 400
-    ok ((res.json!).error.message).includes('unhashed cell URLs are rejected'), "names the rule for #{path}"
+test! "an unknown module is a 404", ->
+  eq (handle! req('GET', "/app/nope.rip?etag=#{cellHash(CLIENT_ROUTE)}")).status, 404
 
-test! "an unknown (id, rev) is a 404", ->
-  eq (handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=9&h=#{cellHash(CLIENT_ROUTE)}")).status, 404
-  eq (handle! req('GET', "/@rip/cells/nope.rip?rev=1&h=#{cellHash(CLIENT_ROUTE)}")).status, 404
-
-test! "a bridge open enrolls the connection into /@rip/dev", ->
+test! "a bridge open enrolls the connection into /hub", ->
   res = handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })
   eq res.status, 200
   ok res.headers.get('content-type').includes('application/json')
-  eq (res.json!), { '+': ['/@rip/dev'] }
+  eq (res.json!), { '+': ['/hub'] }
 
 test! "bridge text and close frames answer 204 with no directives", ->
   for frame in ['text', 'close']
@@ -1002,12 +1025,12 @@ test! "a missing or unknown frame header is a 400 naming the header", ->
     ok ((res.json!).error.message).includes('Sec-WebSocket-Frame'), 'names the header'
 
 test! "the bundle route re-reads per request — a rewrite shows without re-registration", ->
-  first = handle! req('GET', '/@rip/bundle.json')
+  first = handle! req('GET', '/bundle.json')
   eq first.status, 200
   etag1 = first.headers.get('etag')
-  eq (handle! req('GET', '/@rip/bundle.json', { headers: { 'If-None-Match': etag1 } })).status, 304
+  eq (handle! req('GET', '/bundle.json', { headers: { 'If-None-Match': etag1 } })).status, 304
   writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: { 'x.rip': 'x' }, packages: {} })
-  fresh = handle! req('GET', '/@rip/bundle.json')
+  fresh = handle! req('GET', '/bundle.json')
   eq fresh.status, 200
   ok fresh.headers.get('etag') isnt etag1, 'the ETag tracks the rewritten file'
 
@@ -1025,21 +1048,21 @@ test! "without the manager's feed env there are no feed routes and no door; the 
   try
     resetGlobals()
     client!()
-    eq (handle! req('GET', '/@rip/manifest.json')).status, 404
-    eq (handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1")).status, 404
+    eq (handle! req('GET', '/manifest.json')).status, 404
+    eq (handle! req('GET', "/app/routes/index.rip?etag=#{cellHash(CLIENT_ROUTE)}")).status, 404
     eq (handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })).status, 404
     ok not ((handle! req('GET', '/')).text!).includes('workspace'), 'no manifest env, no door'
     # Worker mode re-reads the bundle per request — the manager rewrites
     # it in place on a cell change, and Janus absorbs the cost.
-    etag1 = (handle! req('GET', '/@rip/bundle.json')).headers.get('etag')
+    etag1 = (handle! req('GET', '/bundle.json')).headers.get('etag')
     writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: { 'y.rip': 'y' }, packages: {} })
-    res = handle! req('GET', '/@rip/bundle.json')
+    res = handle! req('GET', '/bundle.json')
     ok res.headers.get('etag') isnt etag1, 'the rewrite shows on the next request'
   finally
     delete process.env.RIP_BUNDLE_PATH
     resetGlobals()
 
-test! "a bridge without the feed surface never enrolls the dev channel — app-level hub sockets stay off /@rip/dev", ->
+test! "a bridge without the feed surface never enrolls the dev channel — app-level hub sockets stay off /hub", ->
   writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: {}, packages: {} })
   process.env.RIP_BUNDLE_PATH = join(feedDir, 'bundle.json')
   process.env.RIP_BRIDGE_PATH = '/hub'
@@ -1060,7 +1083,7 @@ test! "the workspace rides the app package — one claim, no second package, doo
   try
     resetGlobals()
     client! join(dir, 'app')
-    bundle = (handle! req('GET', '/@rip/bundle.json')).json!
+    bundle = (handle! req('GET', '/bundle.json')).json!
     ok bundle.packages['@rip-lang/app']?, 'the app package is claimed'
     eq bundle.packages['@rip-lang/workspace'], undefined
     ok bundle.modules['_pkg/app/workspace.rip']?, 'the workspace module travels inside the app package'
@@ -1336,7 +1359,7 @@ import { buildArtifact, buildApp, revertCellsAndManifest, REGISTER_409_MS, scale
 
 test "DEV_CHANNEL mirrors across manager and worker — a pinned fact, not a convention", ->
   eq MANAGER_DEV_CHANNEL, mod.DEV_CHANNEL
-  eq mod.DEV_CHANNEL, '/@rip/dev'
+  eq mod.DEV_CHANNEL, '/hub'
 
 test! "buildArtifact bundles an app to one JS file a loader-free worker serves", ->
   dir = tmpFixture('tmp-prebuild-')
@@ -2076,7 +2099,7 @@ test! "an app/ dir ships through the pool: boot page, bundle ETag, per-epoch rea
     ok pageText.includes('id="app"'), 'the worker serves the boot page'
     ok pageText.includes('<title>clientapp</title>'), "the page is titled with the manager's --name"
     ok pageText.includes('name="viewport"'), 'the page carries the viewport meta'
-    b1 = uds!(sock1, '/@rip/bundle.json')
+    b1 = uds!(sock1, '/bundle.json')
     eq b1.status, 200
     etag1 = b1.headers.get('etag')
     ok etag1?, 'the bundle carries an ETag'
@@ -2100,7 +2123,7 @@ test! "an app/ dir ships through the pool: boot page, bundle ETag, per-epoch rea
       puts = managerSockPuts(calls).filter (c) -> c.body.upstreams.length is 1
       fresh = puts[puts.length - 1]?.body.upstreams[0].path
       if fresh? and fresh isnt sock1 then fresh else null
-    b2 = uds!(sock2, '/@rip/bundle.json')
+    b2 = uds!(sock2, '/bundle.json')
     eq b2.status, 200
     etag2 = b2.headers.get('etag')
     ok etag2? and etag2 isnt etag1, "the new epoch reassembled the bundle: #{etag1} vs #{etag2}"
@@ -2121,7 +2144,7 @@ get '/hi' -> '#{msg}'
 start()
 """
 
-test! "a client-only edit feeds cells in place: ding, rev bump, immutable old rev, fresh bundle, no reload", ->
+test! "a client-only edit feeds modules in place: ding, rev bump, etag door, fresh bundle, no reload", ->
   ctlSock = join(tmpdir(), "rip-janus-ws-#{Date.now()}-#{rand(1e6)}.sock")
   dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), wsAppSource('hi')
@@ -2133,57 +2156,52 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
   try
     sock = waitFor! ->
       managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
-    m1 = uds!(sock, '/@rip/manifest.json')
+    m1 = uds!(sock, '/manifest.json')
     eq m1.status, 200
     eq m1.headers.get('cache-control'), 'no-store'
     eq (m1.json!), { cells: [
-      { id: 'app/routes/index.rip', rev: 1, hash: cellHash(CLIENT_ROUTE) }
-      { id: 'app/stash.rip',        rev: 1, hash: cellHash(CLIENT_STASH) }
+      { id: 'app/routes/index.rip', rev: 1, etag: cellHash(CLIENT_ROUTE) }
+      { id: 'app/stash.rip',        rev: 1, etag: cellHash(CLIENT_STASH) }
     ] }
-    c1 = uds!(sock, "/@rip/cells/app/routes/index.rip?rev=1&h=#{cellHash(CLIENT_ROUTE)}")
+    c1 = uds!(sock, "/app/routes/index.rip?etag=#{cellHash(CLIENT_ROUTE)}")
     eq c1.status, 200
-    eq c1.headers.get('cache-control'), 'public, max-age=31536000, immutable'
+    eq c1.headers.get('cache-control'), 'no-store'
+    eq c1.headers.get('etag'), "\"#{cellHash(CLIENT_ROUTE)}\""
     eq (c1.text!), CLIENT_ROUTE
-    etag1 = (uds!(sock, '/@rip/bundle.json')).headers.get('etag')
+    bundleTag1 = (uds!(sock, '/bundle.json')).headers.get('etag')
     putsAt = puts().length
     v2 = CLIENT_ROUTE.replace('"home"', '"home v2"')
     writeFileSync join(dir, 'app', 'routes', 'index.rip'), v2
     pub = waitFor! -> calls.find (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
     eq pub.path, '/1.0/apps/app-x/hub/publish'
-    eq pub.body, [{ '@': ['/@rip/dev'], ding: { id: 'app/routes/index.rip', rev: 2, hash: cellHash(v2) } }]
-    m2 = (uds!(sock, '/@rip/manifest.json')).json!
+    eq pub.body, [{ '@': ['/hub'], ding: { id: 'app/routes/index.rip', rev: 2, etag: cellHash(v2) } }]
+    m2 = (uds!(sock, '/manifest.json')).json!
     eq m2.cells.find((e) -> e.id is 'app/routes/index.rip').rev, 2
-    # The hash discriminator: the URL varies iff the bytes do (revs restart
-    # across manager runs while the browser caches these responses immutable
-    # for a year — a bare (id, rev) collision would silently serve the old
-    # run's bytes). A matching h answers, old revs keep answering under
-    # their own hashes, a mismatched h is an unknown cell, and a bare URL
-    # is rejected — never a cacheable 200 under the proven-broken shape.
-    eq ((uds!(sock, "/@rip/cells/app/routes/index.rip?rev=2&h=#{cellHash(v2)}")).text!), v2
-    eq ((uds!(sock, "/@rip/cells/app/routes/index.rip?rev=1&h=#{cellHash(CLIENT_ROUTE)}")).text!), CLIENT_ROUTE
-    eq (uds!(sock, "/@rip/cells/app/routes/index.rip?rev=2&h=#{cellHash(CLIENT_ROUTE)}")).status, 404
-    eq (uds!(sock, '/@rip/cells/app/routes/index.rip')).status, 400                   # unversioned → rejected
-    eq (uds!(sock, '/@rip/cells/app/routes/index.rip?rev=2')).status, 400             # unhashed → rejected
-    eq (uds!(sock, "/@rip/cells/app/routes/index.rip?rev=9&h=#{cellHash(v2)}")).status, 404
+    # Q8′ latest door: matching etag → 200; superseded → 409 + current; bare → 400.
+    eq ((uds!(sock, "/app/routes/index.rip?etag=#{cellHash(v2)}")).text!), v2
+    stale = uds!(sock, "/app/routes/index.rip?etag=#{cellHash(CLIENT_ROUTE)}")
+    eq stale.status, 409
+    eq stale.headers.get('etag'), "\"#{cellHash(v2)}\""
+    eq (uds!(sock, '/app/routes/index.rip')).status, 400
+    eq (uds!(sock, '/app/routes/index.rip?etag=not-hex')).status, 400
     open = uds!(sock, '/hub', { method: 'POST', headers: { 'Sec-WebSocket-Frame': 'open' } })
     eq open.status, 200
-    eq (open.json!), { '+': ['/@rip/dev'] }
+    eq (open.json!), { '+': ['/hub'] }
     # no reload: no doorbell cut, no sockets churn — the SAME worker socket
     # answers, and its bundle ETag moved with the in-place rewrite
     eq puts().length, putsAt
-    etag2 = (uds!(sock, '/@rip/bundle.json')).headers.get('etag')
-    ok etag2? and etag2 isnt etag1, "the live pool's bundle was rewritten in place: #{etag1} vs #{etag2}"
+    bundleTag2 = (uds!(sock, '/bundle.json')).headers.get('etag')
+    ok bundleTag2? and bundleTag2 isnt bundleTag1, "the live pool's bundle was rewritten in place: #{bundleTag1} vs #{bundleTag2}"
     # A deletion rides the same stream: the retirement occupies its own rev,
-    # dings with kind 'delete', leaves the manifest, and its old rev-keyed
-    # cells keep answering (Q8) — still no reload.
+    # dings with kind 'delete', leaves the manifest, and removes the latest
+    # file — still no reload.
     unlinkSync join(dir, 'app', 'stash.rip')
     pubs = -> calls.filter (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
     retirement = waitFor! -> pubs()[1]
-    eq retirement.body, [{ '@': ['/@rip/dev'], ding: { id: 'app/stash.rip', rev: 2, kind: 'delete' } }]
-    m3 = (uds!(sock, '/@rip/manifest.json')).json!
+    eq retirement.body, [{ '@': ['/hub'], ding: { id: 'app/stash.rip', rev: 2, kind: 'delete' } }]
+    m3 = (uds!(sock, '/manifest.json')).json!
     eq m3.cells.map((e) -> e.id), ['app/routes/index.rip']
-    eq ((uds!(sock, "/@rip/cells/app/stash.rip?rev=1&h=#{cellHash(CLIENT_STASH)}")).text!), CLIENT_STASH
-    eq (uds!(sock, "/@rip/cells/app/stash.rip?rev=2&h=#{cellHash(CLIENT_STASH)}")).status, 404   # a retirement has no bytes
+    eq (uds!(sock, "/app/stash.rip?etag=#{cellHash(CLIENT_STASH)}")).status, 404
     eq puts().length, putsAt
   finally
     try proc.kill('SIGKILL')
@@ -2209,9 +2227,9 @@ test! "watch off never opens the door: no feed routes, a plain boot page, no dev
     page = uds!(sock, '/', { headers: { Accept: 'text/html' } })
     eq page.status, 200
     ok not (page.text!).includes('workspace'), 'the boot page boots plain'
-    eq (uds!(sock, '/@rip/bundle.json')).status, 200
-    eq (uds!(sock, '/@rip/manifest.json')).status, 404
-    eq (uds!(sock, "/@rip/cells/app/routes/index.rip?rev=1&h=#{cellHash(CLIENT_ROUTE)}")).status, 404
+    eq (uds!(sock, '/bundle.json')).status, 200
+    eq (uds!(sock, '/manifest.json')).status, 404
+    eq (uds!(sock, "/app/routes/index.rip?etag=#{cellHash(CLIENT_ROUTE)}")).status, 404
     open = uds!(sock, '/hub', { method: 'POST', headers: { 'Sec-WebSocket-Frame': 'open' } })
     eq open.status, 204
     eq (open.text!), ''
@@ -2247,14 +2265,14 @@ test! "a non-client edit cuts admission, reloads through the doorbell, and dings
       if last? and last isnt sock1 then last else null
     eq ((uds!(sock2, '/hi')).text!), 'v2'
     # The swap dings the dev channel with the NEW epoch — connected pages
-    # reload into it. Exactly one, kind 'epoch', on /@rip/dev; and none was
+    # reload into it. Exactly one, kind 'epoch', on /hub; and none was
     # published at startup (the first pool serves no pre-swap pages).
     epochDings = waitFor! ->
       hits = calls.filter (c) -> c.path.endsWith('/hub/publish') and c.body?.some?((d) -> d.ding?.kind is 'epoch')
       if hits.length then hits else null
     eq epochDings.length, 1
     frame = epochDings[0].body[0]
-    eq frame['@'], ['/@rip/dev']
+    eq frame['@'], ['/hub']
     eq frame.ding.kind, 'epoch'
     ok Number.isInteger(frame.ding.epoch), 'the ding names the epoch'
   finally
@@ -2481,7 +2499,7 @@ test! "publish() surfaces a non-2xx answer as an error carrying status and body"
 
 console.log "\nManager cell path"
 
-# Every manifest entry's (id, rev, hash) must name bytes present in the bundle.
+# Every manifest entry's (id, rev, etag) must name bytes present in the bundle.
 assertManifestMatchesBundle = (manifestPath, bundlePath) ->
   m = JSON.parse readFileSync(manifestPath, 'utf8')
   b = JSON.parse readFileSync(bundlePath, 'utf8')
@@ -2489,7 +2507,7 @@ assertManifestMatchesBundle = (manifestPath, bundlePath) ->
   for entry in m.cells
     source = modules[entry.id]
     ok source?, "bundle must carry #{entry.id}"
-    eq entry.hash, cellHash(source), "#{entry.id} rev #{entry.rev}: manifest hash must match bundle bytes"
+    eq entry.etag, cellHash(source), "#{entry.id} rev #{entry.rev}: manifest etag must match bundle bytes"
 
 test! "a scrapped epoch build restores the manifest so it cannot name unlinked bundle revs", ->
   # buildApp writes cells + manifest + bundle; bootLoop then sees dirty,
@@ -2527,11 +2545,11 @@ test! "a scrapped epoch build restores the manifest so it cannot name unlinked b
     writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
     build2 = buildApp!()
     eq (JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')).cells,
-      [{ id: 'app/x.rip', rev: 2, hash: cellHash('export A = 2') }]
+      [{ id: 'app/x.rip', rev: 2, etag: cellHash('export A = 2') }]
     unlinkSync build2.bundle
     revertCellsAndManifest! cellsBefore
     m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
-    eq m.cells, [{ id: 'app/x.rip', rev: 1, hash: cellHash('export A = 1') }]
+    eq m.cells, [{ id: 'app/x.rip', rev: 1, etag: cellHash('export A = 1') }]
     ok not existsSync(build2.bundle), 'the scrapped bundle stays gone'
   finally
     managerCfg.appDir = saved.appDir
@@ -2581,7 +2599,7 @@ test! "epoch buildApp: a save after the snapshot cannot invent a manifest/bundle
     ok build.bundle?, 'watch-mode buildApp writes a bundle'
     assertManifestMatchesBundle join(runDir, 'manifest.json'), build.bundle
     m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
-    eq m.cells, [{ id: 'app/x.rip', rev: 1, hash: cellHash('export A = 1') }]
+    eq m.cells, [{ id: 'app/x.rip', rev: 1, etag: cellHash('export A = 1') }]
   finally
     managerCfg.appDir = saved.appDir
     managerCfg.entry = saved.entry
@@ -2620,7 +2638,7 @@ test! "cell path: a save after the snapshot cannot invent a manifest/bundle reve
     onCellChange!()
     assertManifestMatchesBundle join(runDir, 'manifest.json'), join(runDir, 'bundle.json')
     m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
-    eq m.cells, [{ id: 'app/x.rip', rev: 1, hash: cellHash('export A = 1') }]
+    eq m.cells, [{ id: 'app/x.rip', rev: 1, etag: cellHash('export A = 1') }]
   finally
     managerCfg.appDir = saved.appDir
     managerState.runDir = saved.runDir
@@ -2653,7 +2671,7 @@ test! "a cell-path run with no live pool bundle holds the manifest back", ->
     managerState.currentPool = null          # no live pool — must not write a manifest
     onCellChange!()
     ok not existsSync(join(runDir, 'manifest.json')), 'no pool bundle ⇒ manifest held back'
-    ok existsSync(join(runDir, 'cells', "#{encodeURIComponent('app/x.rip')}@1")), 'cell bytes are durable regardless'
+    ok existsSync(join(runDir, 'cells', encodeURIComponent('app/x.rip'))), 'module bytes are durable regardless'
   finally
     managerCfg.appDir = saved.appDir
     managerState.runDir = saved.runDir
@@ -2713,10 +2731,10 @@ test! "concurrent cell-path runs serialize: a second save never interleaves a pa
     await p1
     await p2
     eq manifestDuringPublish.length, 2
-    eq manifestDuringPublish[0].cells, [{ id: 'app/x.rip', rev: 1, hash: cellHash('export A = 1') }]
-    eq manifestDuringPublish[1].cells, [{ id: 'app/x.rip', rev: 2, hash: cellHash('export A = 2') }]
+    eq manifestDuringPublish[0].cells, [{ id: 'app/x.rip', rev: 1, etag: cellHash('export A = 1') }]
+    eq manifestDuringPublish[1].cells, [{ id: 'app/x.rip', rev: 2, etag: cellHash('export A = 2') }]
     m = JSON.parse readFileSync(manifestPath, 'utf8')
-    eq m.cells, [{ id: 'app/x.rip', rev: 2, hash: cellHash('export A = 2') }]
+    eq m.cells, [{ id: 'app/x.rip', rev: 2, etag: cellHash('export A = 2') }]
   finally
     managerCfg.appDir = saved.appDir
     managerState.runDir = saved.runDir
@@ -2755,7 +2773,7 @@ test! "a bundle rewrite failure holds the manifest back; the next clean save wri
     onCellChange!()          # publish warns (no app id) and never blocks
     manifestPath = join(runDir, 'manifest.json')
     ok not existsSync(manifestPath), 'the manifest must be held back when the bundle rewrite fails'
-    ok existsSync(join(runDir, 'cells', "#{encodeURIComponent('app/x.rip')}@1")), 'the cell bytes are durable regardless'
+    ok existsSync(join(runDir, 'cells', encodeURIComponent('app/x.rip'))), 'module bytes are durable regardless'
     # The next save against a writable bundle path writes bundle THEN manifest.
     goodBundle = join(runDir, 'bundle.json')
     managerState.currentPool = { bundle: goodBundle }
@@ -2763,7 +2781,7 @@ test! "a bundle rewrite failure holds the manifest back; the next clean save wri
     onCellChange!()
     ok existsSync(goodBundle), 'the pool bundle is rewritten'
     m = JSON.parse readFileSync(manifestPath, 'utf8')
-    eq m.cells, [{ id: 'app/x.rip', rev: 2, hash: cellHash('export A = 2') }]
+    eq m.cells, [{ id: 'app/x.rip', rev: 2, etag: cellHash('export A = 2') }]
   finally
     managerCfg.appDir = saved.appDir
     managerState.runDir = saved.runDir

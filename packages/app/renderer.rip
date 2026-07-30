@@ -190,8 +190,14 @@ export def createRenderer(opts: RendererOpts): Renderer
     throw failing if failing?
     true
 
+  # Route/layout instances read `@app`, `@router`, `@params`, and
+  # `@query` as instance fields (the emitter lowers them to `this.app`
+  # etc.). They are not props — the gate constructor injects them
+  # before `_init` so member initializers can read them. Params and
+  # query delegate to the router's reactive getters so `~=` / computed
+  # members track navigations.
   construct = (entry, parent) ->
-    constructGateComponent entry.cls, { gates: entry.bindings, parent }
+    constructGateComponent entry.cls, { gates: entry.bindings, parent, app, router }
 
   cleanup = (list) ->
     errors = []
