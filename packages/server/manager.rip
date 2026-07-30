@@ -321,13 +321,15 @@ export buildArtifact = (entry, outfile) ->
   Bun.write! outfile, result.outputs[0].text!
   outfile
 
-# The app's browser bundle, reassembled every epoch alongside the artifact:
-# each .rip under <appDir>/app, keyed by its disk path relative to the app
-# entry ('app/routes/index.rip', 'app/stash.rip' — the disk path IS the
-# store path), through the compiler-src assembleBundle. No app/ dir means
-# no bundle (null). An assembly failure throws — it rides the same
+# Bag walk under <appDir>/app: every .rip and .css, keyed by disk path
+# ('app/routes/index.rip', 'app/styles.css' — the disk path IS the store
+# id). The compile bundle takes .rip only (see ripWalk); CSS rides the
+# door as source text and soft-applies in the browser (S12). No app/ dir
+# means no bundle (null). An assembly failure throws — it rides the same
 # boot-failure caching as a compile failure, so rings answer 503 with the
 # diagnostic.
+isBagFile = (name) -> name.endsWith('.rip') or name.endsWith('.css')
+
 clientModules = (dir) ->
   modules = {}
   moduleFiles = {}
@@ -337,7 +339,7 @@ clientModules = (dir) ->
       full = join(at, e.name)
       if e.isDirectory()
         walk full, "#{prefix}#{e.name}/"
-      else if e.name.endsWith('.rip')
+      else if isBagFile(e.name)
         key = "#{prefix}#{e.name}"
         modules[key] = readFileSync(full, 'utf8')
         moduleFiles[key] = full
@@ -352,12 +354,24 @@ readAppModules = ->
   return null unless existsSync(appRoot)
   clientModules(appRoot)
 
+# assembleBundle compiles every module — CSS must never enter it.
+ripWalk = (walk) ->
+  return null unless walk?
+  modules = {}
+  moduleFiles = {}
+  for path, source of walk.modules
+    continue unless path.endsWith('.rip')
+    modules[path] = source
+    moduleFiles[path] = walk.moduleFiles[path] if walk.moduleFiles?[path]?
+  { modules, moduleFiles, appDir: walk.appDir }
+
 assembleBundleText = (walk) ->
+  rip = ripWalk(walk)
   assemble = loadAssembler!()
   JSON.stringify assemble {
-    modules: walk.modules
-    moduleFiles: walk.moduleFiles
-    appDir: walk.appDir
+    modules: rip.modules
+    moduleFiles: rip.moduleFiles
+    appDir: rip.appDir
     packagesDir: join(loaderSrcDir(), '..', 'packages')
   }
 
@@ -397,12 +411,13 @@ export buildApp = ->
   bundle = buildBundle!(modules)
   if bundle? and cfg.watch
     # The bundle is durable (buildBundle wrote it) BEFORE the manifest
-    # names the new revs — the correlation invariant below. Watch only:
+    # names the new etags — the correlation invariant below. Watch only:
     # the feed surface exists exactly where saves can ding it. With
     # watch off (production) no files, no manifest, and the boot page
     # stays plain — production has no hub (Q2). One snapshot: syncFiles
-    # and the bundle consume the SAME modules map, so a save landing
-    # after the walk cannot invent the reverse pairing.
+    # (all bag files) and the Rip-only bundle share the same walk, so a
+    # save landing after the walk cannot invent the reverse pairing.
+    # CSS entries are in the manifest/filesDir only — never in the bundle.
     syncFiles!(modules)
     writeManifest!()
   { artifact, bundle }
@@ -857,12 +872,12 @@ startDoorbell = ->
       new Response('Not Found', { status: 404 })
 
 # ==============================================================================
-# The watcher — allowlist *.rip, rename-safe via the content-hash gate
+# The watcher — allowlist *.rip and *.css, rename-safe via the content-hash gate
 # ==============================================================================
 
 # Editors save temp-then-rename, so event basenames are untrusted. Any
 # non-ignored event just arms the settle timer; the decision comes from
-# hashing the real *.rip files on disk — identical bytes cost nothing.
+# hashing the real *.rip / *.css files on disk — identical bytes cost nothing.
 ignoredPath = (rel) ->
   return false unless rel?
   for seg in rel.split('/')
@@ -879,7 +894,7 @@ hashApp = ->
       full = join(dir, e.name)
       if e.isDirectory()
         walk(full)
-      else if e.name.endsWith('.rip')
+      else if isBagFile(e.name)
         files.push(full)
   walk cfg.appDir
   files.sort()

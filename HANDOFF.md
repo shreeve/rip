@@ -19,61 +19,46 @@ boundaries with live-verified facts only.
 
 ## Active branch
 
-**Branch: `door-file-rename`** (from `main` / `8cc10cc` after PR #194).
+**Branch: `css-soft-apply`** (from `main` / `83312e8` after PR #195).
 
-Door leftover rename: `cell*` → `file*` on the Workspace door store
-and APIs only. Reactive `SourceCell` / `cellFor` / FRAME prose
-untouched.
+S12 CSS soft path: watch `app/**/*.css` on the door; ding `{id,etag}`
+(no `kind:style`); soft-apply via `<style data-rip-css>`; never remount
+JS; CSS stays out of `assembleBundle`.
 
-Verified green: `packages/server` (175), `packages/app` (workspace +
-apply + bun suite), `test/toolchain/browser-boot.test.js`. Browser
-bundle regenerated.
-
-| Old | New |
-|---|---|
-| `RIP_CELLS_DIR` | `RIP_FILES_DIR` |
-| `runDir/cells` | `runDir/files` |
-| `state.cells` / `cellsDir` | `state.files` / `filesDir` |
-| `syncCells` / `onCellChange` | `syncFiles` / `onFileChange` |
-| `revertCellsAndManifest` | `revertFilesAndManifest` |
-| `opts.cellUrl` / `manifest.cells` | removed (wire is `files` only) |
+Verified: `packages/server` (176), `packages/app` (workspace + apply),
+browser-boot, cart Playwright including S12 soft-apply pin.
 
 ## On main (already landed)
 
-PR #194 — Probe 1: etag door, narrow remount apply, cart harness
-(`8cc10cc`).
+- PR #194 — Probe 1 etag door + narrow remount + cart harness
+- PR #195 — door leftovers cell → file (`RIP_FILES_DIR`, etc.)
 
-## Door wire (Q8′ — sealed)
+## Door wire (Q8′ + S12)
 
 | Surface | Shape |
 |---|---|
 | Hub ding | `{ id, etag }` (+ optional `kind: 'delete' \| 'epoch'`) |
-| Manifest | `{ files: [{ id, etag }, …] }` |
-| HTTP | `GET /app/mood.rip?etag=E` → 200 + body + `ETag`, or 409 |
-| Passport | `{ id, path, etag, source, compiled? }` |
-| Bag unit | **module** (path-keyed) |
-| On-disk store | `runDir/files` via `RIP_FILES_DIR` |
+| Manifest | `{ files: [{ id, etag }, …] }` — `.rip` and `.css` |
+| HTTP | `GET /app/…?etag=E` → 200 / 409 |
+| Bundle | **`.rip` only** — CSS never compiles |
+| Soft-apply | `<style data-rip-css="<id>">` textContent swap; disable matching `<link>` |
+| Bag unit | **module** / **passport**; CSS is a passport with source text |
 
 ## Next after this branch lands
 
-1. CSS soft path: watch `app/**/*.css`, ding `{id,etag}`, swap
-   `<style data-rip-css>` — no JS remount (S12).
-2. Signatures + true patch / migrate; feel budget; S1–S15 on cart.
-3. **Do not market remount as HMR done** until the suite earns it.
+1. Signatures + true patch / migrate; feel budget; S1–S15 on cart.
+2. **Do not market remount as HMR done** until the suite earns it.
 
 ## Working agreements
 
-- PRs: TRUE MERGE only (AGENTS rule 9). Subject:
-  `PR #N — <title>` via `gh pr merge N --merge --subject "…"`.
+- PRs: TRUE MERGE only (AGENTS rule 9).
 - **Land** = merge green + delete the feature branch (local + origin).
 - HANDOFF rewritten at session boundaries with live-verified facts.
-- Shared branches: MERGE, never rebase; never force-push.
 - No AI attribution in commits.
 
 ## Do not trust (stale mental models)
 
-- `RIP_CELLS_DIR` / `runDir/cells` / `onCellChange` / bag noun “cell”
-- Ding `{ id, rev, … }` or per-rev museum URLs
+- `RIP_CELLS_DIR` / bag noun “cell”
+- `kind: 'style'` on the ding (extension branches apply)
+- CSS in `assembleBundle` / JS remount for style-only saves
 - Whole-launch remount as “HMR done”
-- A separate `packages/refresh` package
-- Extending `serve.mjs` to fake the cart app

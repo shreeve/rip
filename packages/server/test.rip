@@ -2210,6 +2210,47 @@ test! "a client-only edit feeds modules in place: ding, etag advances, etag door
     stub.stop(true)
     rmSync dir, { recursive: true, force: true }
 
+test! "a CSS-only edit feeds in place: ding, etag door, no bundle key, no reload (S12)", ->
+  ctlSock = join(tmpdir(), "rip-janus-css-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-manager-css-')
+  writeFileSync join(dir, 'app.rip'), wsAppSource('hi')
+  writeClientDir dir
+  css1 = ":root { --rip-s12: 1; }\n"
+  writeFileSync join(dir, 'app', 'styles.css'), css1
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'cssapp', '-w', '1', '--bridge', '/hub']
+  puts = -> calls.filter (c) -> c.method is 'PUT'
+  try
+    sock = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    m1 = (uds!(sock, '/manifest.json')).json!
+    eq m1.files.find((e) -> e.id is 'app/styles.css')?.etag, fileHash(css1)
+    eq m1.files.find((e) -> e.id is 'app/routes/index.rip')?.etag, fileHash(CLIENT_ROUTE)
+    bundle1 = (uds!(sock, '/bundle.json')).json!
+    eq bundle1.modules['app/styles.css'], undefined, 'CSS never enters the compile bundle'
+    ok bundle1.modules['app/routes/index.rip']?, 'Rip modules still ship'
+    c1 = uds!(sock, "/app/styles.css?etag=#{fileHash(css1)}")
+    eq c1.status, 200
+    eq (c1.text!), css1
+    putsAt = puts().length
+    css2 = ":root { --rip-s12: 2; }\n"
+    writeFileSync join(dir, 'app', 'styles.css'), css2
+    pub = waitFor! -> calls.find (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
+    eq pub.body, [{ '@': ['/hub'], ding: { id: 'app/styles.css', etag: fileHash(css2) } }]
+    eq pub.body[0].ding.kind, undefined, 'no kind:style — extension branches the apply'
+    m2 = (uds!(sock, '/manifest.json')).json!
+    eq m2.files.find((e) -> e.id is 'app/styles.css').etag, fileHash(css2)
+    eq ((uds!(sock, "/app/styles.css?etag=#{fileHash(css2)}")).text!), css2
+    eq puts().length, putsAt, 'CSS-only save must not cut admission'
+    bundle2 = (uds!(sock, '/bundle.json')).json!
+    eq bundle2.modules['app/styles.css'], undefined
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
 test! "watch off never opens the door: no feed routes, a plain boot page, no dev enrollment (production has no hub)", ->
   # The feed surface is watch-only (Q2): a production manager (--no-watch)
   # must serve pages that boot PLAIN — no unsealed bag, no hub socket per
@@ -2500,15 +2541,23 @@ test! "publish() surfaces a non-2xx answer as an error carrying status and body"
 
 console.log "\nManager file-feed path"
 
-# Every manifest entry's (id, etag) must name bytes present in the bundle.
-assertManifestMatchesBundle = (manifestPath, bundlePath) ->
+# Rip entries must pair with bundle bytes; CSS entries pair with filesDir
+# (CSS never enters assembleBundle — S12 soft-apply).
+assertManifestMatchesBundle = (manifestPath, bundlePath, filesDir = null) ->
   m = JSON.parse readFileSync(manifestPath, 'utf8')
   b = JSON.parse readFileSync(bundlePath, 'utf8')
   modules = b.modules or {}
   for entry in m.files
-    source = modules[entry.id]
-    ok source?, "bundle must carry #{entry.id}"
-    eq entry.etag, fileHash(source), "#{entry.id}: manifest etag must match bundle bytes"
+    if entry.id.endsWith('.css')
+      ok filesDir?, "css manifest entry #{entry.id} needs filesDir"
+      file = join(filesDir, encodeURIComponent(entry.id))
+      ok existsSync(file), "filesDir must carry #{entry.id}"
+      eq entry.etag, fileHash(readFileSync(file, 'utf8')), "#{entry.id}: manifest etag must match file bytes"
+      eq modules[entry.id], undefined, "bundle must not carry CSS #{entry.id}"
+    else
+      source = modules[entry.id]
+      ok source?, "bundle must carry #{entry.id}"
+      eq entry.etag, fileHash(source), "#{entry.id}: manifest etag must match bundle bytes"
 
 test! "a scrapped epoch build restores the manifest so it cannot name unlinked bundle etags", ->
   # buildApp writes files + manifest + bundle; bootLoop then sees dirty,
@@ -2598,7 +2647,7 @@ test! "epoch buildApp: a save after the snapshot cannot invent a manifest/bundle
       writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
     build = buildApp!()
     ok build.bundle?, 'watch-mode buildApp writes a bundle'
-    assertManifestMatchesBundle join(runDir, 'manifest.json'), build.bundle
+    assertManifestMatchesBundle join(runDir, 'manifest.json'), build.bundle, join(runDir, 'files')
     m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
     eq m.files, [{ id: 'app/x.rip', etag: fileHash('export A = 1') }]
   finally
@@ -2637,7 +2686,7 @@ test! "file-feed path: a save after the snapshot cannot invent a manifest/bundle
     managerState.afterAppSnapshot = ->
       writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
     onFileChange!()
-    assertManifestMatchesBundle join(runDir, 'manifest.json'), join(runDir, 'bundle.json')
+    assertManifestMatchesBundle join(runDir, 'manifest.json'), join(runDir, 'bundle.json'), join(runDir, 'files')
     m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
     eq m.files, [{ id: 'app/x.rip', etag: fileHash('export A = 1') }]
   finally

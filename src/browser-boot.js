@@ -251,14 +251,48 @@ export async function bootApp(opts = {}) {
   // (route/layout; stash kept) or the labeled whole-launch escape (D7).
   // Projections rebuild THROUGH the loader; importers invalidate
   // transitively. Unchanged modules answer from the loader cache.
+  // CSS sheets soft-apply via <style data-rip-css> and never remount (S12).
   let destroyed = false;
   let timer = null;
   let remounting = false;
   const pending = new Set();
   const handle = {};
+  const isCssPath = path => typeof path === 'string' && path.endsWith('.css');
+  const applyCssSheet = (id, source) => {
+    if (typeof document === 'undefined' || typeof source !== 'string') return;
+    let el = null;
+    for (const node of document.querySelectorAll('style[data-rip-css]')) {
+      if (node.getAttribute('data-rip-css') === id) {
+        el = node;
+        break;
+      }
+    }
+    if (!el) {
+      el = document.createElement('style');
+      el.setAttribute('data-rip-css', id);
+      document.head.appendChild(el);
+    }
+    el.textContent = source;
+    // Cold load may still hold a matching <link> (e.g. /styles.css for
+    // app/styles.css). Disable it so soft-apply is the sole sheet.
+    const base = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
+    for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
+      const href = link.getAttribute('href') || '';
+      if (href === `/${base}` || href.endsWith(`/${base}`) || href === base) {
+        link.disabled = true;
+      }
+    }
+  };
+  const removeCssSheet = id => {
+    if (typeof document === 'undefined') return;
+    for (const node of [...document.querySelectorAll('style[data-rip-css]')]) {
+      if (node.getAttribute('data-rip-css') === id) node.remove();
+    }
+  };
   const escapeRemount = async (applied) => {
     const snapshot = {};
     for (const path of bag.paths()) {
+      if (isCssPath(path)) continue;
       snapshot[path] = { ...(await loader.import(path)) };
     }
     for (const [path, module] of Object.entries(snapshot)) {
@@ -300,6 +334,7 @@ export async function bootApp(opts = {}) {
       // apply — last-known-good stays interactive.
       const snapshot = {};
       for (const path of bag.paths()) {
+        if (isCssPath(path)) continue;
         try {
           snapshot[path] = { ...(await loader.import(path)) };
         } catch (error) {
@@ -325,13 +360,16 @@ export async function bootApp(opts = {}) {
   };
   const unwatch = bag.watch((_event, path) => {
     if (!path.startsWith('app/')) return;
+    // CSS soft-applied in door.set — never queue a JS remount (S12).
+    if (isCssPath(path)) return;
     pending.add(path);
     timer ??= setTimeout(absorb, 25);
   });
 
-  // The compile-through door: a passport lands in the bag already
+  // The compile-through door: a Rip passport lands in the bag already
   // projected, so ONE notify carries source and compiled together and
   // launch's rebuild never observes a source-without-projection gap.
+  // CSS passports soft-apply as style[data-rip-css] with no compile.
   // A compile failure reports and never sets — last-known-good stays
   // interactive (S10).
   const door = {
@@ -354,12 +392,24 @@ export async function bootApp(opts = {}) {
         if (known && typeof passport.etag === 'string' && passport.etag !== known.etag) return false;
         const path = bag.passport(passport.id)?.path;
         if (path !== undefined) {
-          files.delete(path);
-          loader.invalidate(path);
+          if (isCssPath(path)) {
+            removeCssSheet(path);
+          } else {
+            files.delete(path);
+            loader.invalidate(path);
+          }
         }
         return bag.set(passport);
       }
       const path = passport.path ?? passport.id;
+      if (isCssPath(path)) {
+        const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
+        if (applied) {
+          applyCssSheet(path, passport.source);
+          console.log(`[Rip] applied ${path} — css soft-apply (no remount)`);
+        }
+        return applied;
+      }
       files.set(path, passport.source);
       loader.invalidate(path);
       let module;

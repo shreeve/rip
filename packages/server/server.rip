@@ -860,6 +860,8 @@ export App = (fn) ->
 # is a pinned fact, not a convention. Same spelling as the bridge path.
 export DEV_CHANNEL = '/hub'
 
+# Standalone assemble is Rip-only. CSS under app/ is a watch-door concern
+# (manager syncFiles + browser soft-apply); it must never reach compile.
 clientModules = (dir) ->
   modules = {}
   moduleFiles = {}
