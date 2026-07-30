@@ -51,10 +51,10 @@ describe('createModuleLoader', () => {
   test('bare package imports resolve through the packages table', async () => {
     const loader = createModuleLoader({
       components: registryOf({
-        '_pkg/demo/index.rip': 'export greet = (name) -> "hi #{name}"',
+        '@rip-lang/demo/index.rip': 'export greet = (name) -> "hi #{name}"',
         'app/routes/page.rip': "import { greet } from '@rip-lang/demo'\nexport message = greet 'rip'",
       }),
-      packages: { '@rip-lang/demo': { root: '_pkg/demo', entry: 'index.rip' } },
+      packages: { '@rip-lang/demo': { root: '@rip-lang/demo', entry: 'index.rip' } },
     });
     const page = await loader.import('app/routes/page.rip');
     expect(page.message).toBe('hi rip');
@@ -63,10 +63,10 @@ describe('createModuleLoader', () => {
   test('runtime imports bridge to the one page copy', async () => {
     const loader = createModuleLoader({
       components: registryOf({
-        '_pkg/demo/cell.rip': "import { __state } from '../../src/runtime/reactive.js'\nexport cell = __state 41",
+        '@rip-lang/demo/cell.rip': "import { __state } from '../../src/runtime/reactive.js'\nexport cell = __state 41",
       }),
     });
-    const mod = await loader.import('_pkg/demo/cell.rip');
+    const mod = await loader.import('@rip-lang/demo/cell.rip');
     const { __state } = await import(resolve(root, 'src/runtime/reactive.js'));
     const probe = __state(0);
     expect(typeof mod.cell.read).toBe('function');
@@ -142,10 +142,10 @@ describe('assembleBundle', () => {
       },
       packagesDir: resolve(root, 'packages'),
     });
-    expect(bundle.packages['@rip-lang/validate'].root).toBe('_pkg/validate');
-    expect(bundle.modules['_pkg/validate/validate.rip']).toContain('registerValidator');
+    expect(bundle.packages['@rip-lang/validate'].root).toBe('@rip-lang/validate');
+    expect(bundle.modules['@rip-lang/validate/validate.rip']).toContain('registerValidator');
     // Runnable verb files (root test.rip etc.) are dev-only, never bundled.
-    expect(bundle.modules['_pkg/validate/test.rip']).toBeUndefined();
+    expect(bundle.modules['@rip-lang/validate/test.rip']).toBeUndefined();
     expect(() => assembleBundle({
       modules: { 'app/routes/index.rip': "import { x } from '@rip-lang/nope'" },
       packagesDir: resolve(root, 'packages'),
@@ -212,12 +212,12 @@ describe('package graph reconciliation', () => {
   test('subpaths resolve through the manifest exports map and never double the suffix', async () => {
     const loader = createModuleLoader({
       components: registryOf({
-        '_pkg/demo/util.rip': 'export u = 1',
-        '_pkg/demo/deep.rip': 'export d = 2',
+        '@rip-lang/demo/util.rip': 'export u = 1',
+        '@rip-lang/demo/deep.rip': 'export d = 2',
         'app/routes/p.rip': "import { u } from '@rip-lang/demo/util.rip'\nimport { d } from '@rip-lang/demo/tools'\nexport sum = u + d",
       }),
       packages: {
-        '@rip-lang/demo': { root: '_pkg/demo', entry: 'index.rip', exports: { './tools': 'deep.rip' } },
+        '@rip-lang/demo': { root: '@rip-lang/demo', entry: 'index.rip', exports: { './tools': 'deep.rip' } },
       },
     });
     const page = await loader.import('app/routes/p.rip');
@@ -244,7 +244,7 @@ describe('package graph reconciliation', () => {
   test('traversal and extensionless imports reject with the importer voiced', async () => {
     const loader = createModuleLoader({
       components: registryOf({
-        'app/routes/t.rip': "import { s } from '_pkg/demo/../../secret.rip'",
+        'app/routes/t.rip': "import { s } from '@rip-lang/demo/../../secret.rip'",
         'app/routes/e.rip': "import { x } from './x'",
         'app/routes/x.rip': 'export x = 1',
       }),

@@ -77,7 +77,7 @@ export def connectFeed(workspace, opts = {}): Feed
   fetchModule = (id, etag) ->
     res = fetchBytes! moduleUrl(id, etag)
     if res.status is 409
-      next = etagToken(res.headers?.get? 'etag' or res.headers?.get? 'ETag')
+      next = etagToken(res.headers?.get?('etag') or res.headers?.get?('ETag'))
       return res unless next? and next isnt etag
       return fetchBytes! moduleUrl(id, next)
     res
@@ -141,7 +141,7 @@ export def connectFeed(workspace, opts = {}): Feed
         clean = false
         continue
       source = cres.text!()
-      applied = etagToken(cres.headers?.get? 'etag' or cres.headers?.get? 'ETag') or etag
+      applied = etagToken(cres.headers?.get?('etag') or cres.headers?.get?('ETag')) or etag
       cell = { id: entry.id, etag: applied, source }
       cell.path = entry.id unless current?
       workspace.set! cell
@@ -157,7 +157,7 @@ export def connectFeed(workspace, opts = {}): Feed
       cres = fetchModule! id, want.etag
       if cres.ok
         source = cres.text!()
-        applied = etagToken(cres.headers?.get? 'etag' or cres.headers?.get? 'ETag') or want.etag
+        applied = etagToken(cres.headers?.get?('etag') or cres.headers?.get?('ETag')) or want.etag
         cell = { id, etag: applied, source }
         cell.path = id unless current?
         workspace.set! cell
@@ -201,7 +201,7 @@ export def connectFeed(workspace, opts = {}): Feed
       resync!()
       return
     source = res.text!()
-    applied = etagToken(res.headers?.get? 'etag' or res.headers?.get? 'ETag') or etag
+    applied = etagToken(res.headers?.get?('etag') or res.headers?.get?('ETag')) or etag
     cell = { id, etag: applied, source }
     cell.path = id unless workspace.passport(id)?
     workspace.set cell

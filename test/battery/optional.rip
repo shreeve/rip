@@ -86,6 +86,11 @@ test "optional call juxta multi", "fn = (a, b) -> a + b\nfn? 3, 4", 7
 code "optional call juxta gen", "fn? 42", "fn?.(42)"
 code "optional call juxta multi gen", "fn? 3, 4", "fn?.(3, 4)"
 
+# Juxta shares implicit-call argument extent: `or` is absorbed into the
+# arg. Call parens keep the binary outside the call.
+code "optional call juxta or binds into arg", "fn? a or b", "fn?.(a || b)"
+code "optional call paren or stays outside", "fn?(a) or b", "fn?.(a) || b;"
+
 # Bare existence is unchanged when no juxta argument follows.
 test "existence still bare", "x = 42\nx?", true
 code "existence still bare gen", "x?", "x != null;"

@@ -20,21 +20,15 @@ live on this branch against package suites and browser-boot pins.
 
 ## Active branch (not on main yet)
 
-**Branch: `marquee-live-apply`** (ahead of `main` / `b51d597`):
+**Branch: `marquee-live-apply`** — Probe 1 PR cut (landing).
 
-| Commit | What |
-|---|---|
-| `691f6a4` | Q8′ door finished: ding/manifest/passport are `{id,etag}`; feed has no rev cursor; docs/READMEs scrubbed |
-| `df4a781` | Probe 1 apply floor: `packages/app/apply.rip` + `renderer.remountDirty` — narrow remount keeps stash + ancestor layouts; stash edits → labeled whole-launch escape |
-| `2221950` | Juxta optional call: `f? x` ≡ `f?(x)` → `f?.(x)`; feed/renderer prefer juxta |
-| tip | Handoff: Probe 1 next steps, Workspace vocabulary |
+Includes: Q8′ etag door; narrow remount apply floor; juxta `f? x`;
+cart Playwright harness (real `rip server` + stub Janus); package store
+paths `@rip-lang/<name>/…` (no `_pkg`); cart type-only import fix.
 
-**Not pushed.** Open a PR from this branch when Probe 1 harness + pins
-are ready (or earlier if the owner wants the door cut alone).
-
-Verified green on this tip: `bun run test:all`, `packages/app` (bun +
-workspace + apply), `packages/server` (etag suite), browser-boot pins.
-Browser bundle regenerated with the juxta change.
+Verified: `packages/browser-tests` Playwright 19 pass / 2 skip;
+browser-modules + browser-boot + server package suites green on the
+harness/store-path tip.
 
 ## Door wire (Q8′ — sealed)
 
@@ -76,27 +70,22 @@ markup patch, not named-state migrate, not signatures.
   synthetic `packages/browser-tests/serve.mjs` door fake.
 - **Pulse** ([`examples/pulse/`](examples/pulse/)) — thin door canary.
 
-## Next session — finish Probe 1 → climb toward marquee
+## Probe 1 harness (in this PR)
 
-Priority order:
+- [`packages/browser-tests/cart-harness.mjs`](packages/browser-tests/cart-harness.mjs)
+  — real `rip server` on a /tmp cart copy + stub Janus; HTTP proxy +
+  hub ding fanout (no bodies). Not `serve.mjs`.
+- [`tests/cart-apply.spec.mjs`](packages/browser-tests/tests/cart-apply.spec.mjs)
+  — leaf markup no-reload + layout sentinel; stash `Cart (1)` survives;
+  compile-fail keeps LKG (S10). Project `cart-chromium`.
 
-1. **Playwright cart harness** — second webServer (or project) that
-   boots `examples/cart` under watching `rip server`; disk-edit probes
-   for S1/S2/S3/S8/S10; copy assertion style from
-   `packages/browser-tests/tests/workspace.spec.mjs` (sentinel, no
-   reload, ding shape). Do **not** fake cart inside `serve.mjs`.
-2. **Feel pins** — leaf S1/S2 visible update budget; layout never
-   flashes; `@app.data.cart` survives leaf apply.
-3. **Signatures + true patch** (Phase C) — emitter-owned component
-   signatures; patch markup/methods when signature-stable; migrate
-   named state (S4). Marquee claim blocked until S3 leaves the Vue
-   floor and S1–S15 are green on cart.
-4. **Idiomatic Rip only** in new `.rip` — dammit `f! x`, not
-   `await f(x)` when dammit fits; no needless braces/parens; optional
-   call: `fn? x` ≡ `fn?(x)` (see AGENTS Style). Mirror nearby
-   `packages/app/*.rip`.
-5. **Do not market remount as HMR done.** No README hero until the
-   suite earns it.
+## After this PR lands
+
+1. Rename door leftovers `cell*` → `file*` (`RIP_CELLS_DIR`, etc.).
+2. CSS soft path: watch `app/**/*.css`, ding `{id,etag}`, swap
+   `<style data-rip-css>` — no JS remount (S12).
+3. Signatures + true patch / migrate; feel budget; S1–S15 on cart.
+4. **Do not market remount as HMR done** until the suite earns it.
 
 Plan notes (Cursor): `exceptional_rip_hmr_*.plan.md` — Phase 0 done on
 this branch; marquee apply continues here.

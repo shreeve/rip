@@ -22869,14 +22869,10 @@ function createModuleLoader({ components: registry, packages = {}, debug = false
       }
       return { path: joined };
     }
-    if (spec.startsWith("_pkg/")) {
-      if (!inBundle(spec)) {
-        throw new Error(`rip: '${from}' imports '${spec}', which is not in the bundle${hint}`);
-      }
-      return { path: spec };
-    }
     const bare = spec.match(/^@rip-lang\/([\w-]+)(?:\/(.+))?$/);
     if (bare) {
+      if (inBundle(spec))
+        return { path: spec };
       const entry = packages[`@rip-lang/${bare[1]}`];
       if (!entry) {
         throw new Error(`rip: '${from}' imports '${spec}', but the bundle carries no such package — ` + "only packages declaring browser safety travel to the browser");

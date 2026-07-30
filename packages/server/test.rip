@@ -852,7 +852,7 @@ test! "GET /bundle.json ships the client modules and the boot package", ->
   bundle = res.json!
   ok bundle.modules['app/routes/index.rip']?, 'the route module travels under its store path'
   ok bundle.modules['app/stash.rip']?, 'the stash module travels under its store path'
-  ok Object.keys(bundle.modules).some((k) -> k.startsWith('_pkg/app/')), 'the app package modules travel'
+  ok Object.keys(bundle.modules).some((k) -> k.startsWith('@rip-lang/app/')), 'the app package modules travel'
   ok bundle.packages['@rip-lang/app']?, 'the boot package is claimed'
 
 test! "the bundle ETag round-trips as a 304", ->
@@ -1087,8 +1087,8 @@ test! "the workspace rides the app package — one claim, no second package, doo
     bundle = (handle! req('GET', '/bundle.json')).json!
     ok bundle.packages['@rip-lang/app']?, 'the app package is claimed'
     eq bundle.packages['@rip-lang/workspace'], undefined
-    ok bundle.modules['_pkg/app/workspace.rip']?, 'the workspace module travels inside the app package'
-    ok bundle.modules['_pkg/app/feed.rip']?, 'the feed module travels inside the app package'
+    ok bundle.modules['@rip-lang/app/workspace.rip']?, 'the workspace module travels inside the app package'
+    ok bundle.modules['@rip-lang/app/feed.rip']?, 'the feed module travels inside the app package'
     # Standalone has no manager and therefore no manifest/cell routes: a
     # workspace-mode boot would die on its manifest fetch, so the page
     # opens the door only in worker mode (RIP_MANIFEST_PATH present).

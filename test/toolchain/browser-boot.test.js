@@ -155,7 +155,7 @@ describe('bootApp', () => {
 
   test('boots the assembled app, mounts the route, and navigates', async () => {
     const bundle = assemble();
-    expect(bundle.packages['@rip-lang/app'].root).toBe('_pkg/app');
+    expect(bundle.packages['@rip-lang/app'].root).toBe('@rip-lang/app');
     const host = node('host');
     const adapter = fakeAdapter('/');
     const result = await bootApp({ bundle, target: host, adapter });
