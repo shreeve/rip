@@ -390,23 +390,25 @@ In watch mode:
   or removed path lies under `app/` feeds the live pool in place — no
   admission cut, no pool reload, no doorbell. Any other save (server
   files, or a mixed set) takes the full-reload path above unchanged.
-- **Files and the manifest (Q8′).** Each `.rip` and `.css` under `app/` is
-  a **file** whose id is its birth path (`app/routes/index.rip`,
-  `app/styles.css`); a rename retires the old id and mints a new one
-  (id persistence across renames is open research). Freshness is a
-  content **etag** (16 hex of sha256). The registry lives in the
-  manager's memory for the run; on disk the latest bytes are served
-  (no per-rev museum). `GET /manifest.json` answers
-  `{"files": [{id, etag}, …]}` sorted by id, `Cache-Control: no-store`,
-  read per request. File bytes are addressed by etag:
-  `GET /app/<id>?etag=<16-hex>` answers `text/plain` with
-  `Cache-Control: no-store` when the etag matches; a superseded etag is
-  **`409`** with the current `ETag` (never a silent stale body). A
-  missing or malformed `etag` query is a 400; an unknown id is a 404.
-  **`.rip`** modules enter the compile bundle; **`.css`** sheets ride
-  the door only and soft-apply in the browser as
-  `<style data-rip-css>` — never a JS remount, never `kind: "style"`
-  on the ding (S12).
+- **Bag membership (default).** The watching app’s client bag is
+  `app/**/*.{rip,css,html}` — ids are birth paths. The project-root
+  main entry (`app.rip` / `index.rip`) is **not** in that bag: changing
+  it takes the epoch path (rebuild/reload). Doctrine: the bag is
+  membership; the hub only dings `{id,etag}`; the client chooses the
+  reaction by extension (no `kind: "style"` / `"html"` on the wire).
+- **Files and the manifest (Q8′).** Each bag file’s id is its birth
+  path; a rename retires the old id and mints a new one (id persistence
+  across renames is open research). Freshness is a content **etag**
+  (16 hex of sha256). The registry lives in the manager's memory for
+  the run; on disk the latest bytes are served (no per-rev museum).
+  `GET /manifest.json` answers `{"files": [{id, etag}, …]}` sorted by
+  id, `Cache-Control: no-store`, read per request. File bytes are
+  addressed by etag: `GET /app/<id>?etag=<16-hex>` answers `text/plain`
+  with `Cache-Control: no-store` when the etag matches; a superseded
+  etag is **`409`** with the current `ETag` (never a silent stale body).
+  A missing or malformed `etag` query is a 400; an unknown id is a 404.
+  **`.rip`** enters the compile bundle; **`.css`** soft-applies
+  (`<style data-rip-css>`, S12); **`.html`** reloads the document.
 - **The ding.** After the file pool, the rewritten bundle, and the
   manifest are durable (manifest last), the manager publishes one
   directive per changed file to the hub channel `/hub` — the envelope is

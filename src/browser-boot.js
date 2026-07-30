@@ -258,6 +258,9 @@ export async function bootApp(opts = {}) {
   const pending = new Set();
   const handle = {};
   const isCssPath = path => typeof path === 'string' && path.endsWith('.css');
+  const isHtmlPath = path => typeof path === 'string' && path.endsWith('.html');
+  // Non-Rip bag members never enter the module loader / remount path.
+  const isNonRipBag = path => isCssPath(path) || isHtmlPath(path);
   const applyCssSheet = (id, source) => {
     if (typeof document === 'undefined' || typeof source !== 'string') return;
     let el = null;
@@ -292,7 +295,7 @@ export async function bootApp(opts = {}) {
   const escapeRemount = async (applied) => {
     const snapshot = {};
     for (const path of bag.paths()) {
-      if (isCssPath(path)) continue;
+      if (isNonRipBag(path)) continue;
       snapshot[path] = { ...(await loader.import(path)) };
     }
     for (const [path, module] of Object.entries(snapshot)) {
@@ -334,7 +337,7 @@ export async function bootApp(opts = {}) {
       // apply — last-known-good stays interactive.
       const snapshot = {};
       for (const path of bag.paths()) {
-        if (isCssPath(path)) continue;
+        if (isNonRipBag(path)) continue;
         try {
           snapshot[path] = { ...(await loader.import(path)) };
         } catch (error) {
@@ -360,8 +363,8 @@ export async function bootApp(opts = {}) {
   };
   const unwatch = bag.watch((_event, path) => {
     if (!path.startsWith('app/')) return;
-    // CSS soft-applied in door.set — never queue a JS remount (S12).
-    if (isCssPath(path)) return;
+    // CSS/HTML handled in door.set — never queue a JS remount.
+    if (isNonRipBag(path)) return;
     pending.add(path);
     timer ??= setTimeout(absorb, 25);
   });
@@ -369,9 +372,8 @@ export async function bootApp(opts = {}) {
   // The compile-through door: a Rip passport lands in the bag already
   // projected, so ONE notify carries source and compiled together and
   // launch's rebuild never observes a source-without-projection gap.
-  // CSS passports soft-apply as style[data-rip-css] with no compile.
-  // A compile failure reports and never sets — last-known-good stays
-  // interactive (S10).
+  // CSS soft-applies (S12); HTML reloads the document. A compile failure
+  // reports and never sets — last-known-good stays interactive (S10).
   const door = {
     passport: bag.passport,
     sealed: bag.sealed,
@@ -394,6 +396,9 @@ export async function bootApp(opts = {}) {
         if (path !== undefined) {
           if (isCssPath(path)) {
             removeCssSheet(path);
+          } else if (isHtmlPath(path)) {
+            // Shell gone — reload against the next generation.
+            if (typeof location !== 'undefined') location.reload();
           } else {
             files.delete(path);
             loader.invalidate(path);
@@ -407,6 +412,17 @@ export async function bootApp(opts = {}) {
         if (applied) {
           applyCssSheet(path, passport.source);
           console.log(`[Rip] applied ${path} — css soft-apply (no remount)`);
+        }
+        return applied;
+      }
+      if (isHtmlPath(path)) {
+        // Birth (first feed resync) only records the passport — the shell
+        // already came from the static page. A later etag advance reloads.
+        const had = known != null;
+        const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
+        if (applied && had) {
+          console.log(`[Rip] applied ${path} — html reload`);
+          if (typeof location !== 'undefined') location.reload();
         }
         return applied;
       }

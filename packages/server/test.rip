@@ -2251,6 +2251,38 @@ test! "a CSS-only edit feeds in place: ding, etag door, no bundle key, no reload
     stub.stop(true)
     rmSync dir, { recursive: true, force: true }
 
+test! "an HTML-only edit feeds in place: ding, etag door, no bundle key, no admission cut", ->
+  ctlSock = join(tmpdir(), "rip-janus-html-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-manager-html-')
+  writeFileSync join(dir, 'app.rip'), wsAppSource('hi')
+  writeClientDir dir
+  html1 = "<!doctype html><title>one</title>\n"
+  writeFileSync join(dir, 'app', 'index.html'), html1
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'htmlapp', '-w', '1', '--bridge', '/hub']
+  puts = -> calls.filter (c) -> c.method is 'PUT'
+  try
+    sock = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    m1 = (uds!(sock, '/manifest.json')).json!
+    eq m1.files.find((e) -> e.id is 'app/index.html')?.etag, fileHash(html1)
+    bundle1 = (uds!(sock, '/bundle.json')).json!
+    eq bundle1.modules['app/index.html'], undefined, 'HTML never enters the compile bundle'
+    eq ((uds!(sock, "/app/index.html?etag=#{fileHash(html1)}")).text!), html1
+    putsAt = puts().length
+    html2 = "<!doctype html><title>two</title>\n"
+    writeFileSync join(dir, 'app', 'index.html'), html2
+    pub = waitFor! -> calls.find (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
+    eq pub.body, [{ '@': ['/hub'], ding: { id: 'app/index.html', etag: fileHash(html2) } }]
+    eq pub.body[0].ding.kind, undefined
+    eq puts().length, putsAt, 'HTML-only save must not cut admission'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
 test! "watch off never opens the door: no feed routes, a plain boot page, no dev enrollment (production has no hub)", ->
   # The feed surface is watch-only (Q2): a production manager (--no-watch)
   # must serve pages that boot PLAIN — no unsealed bag, no hub socket per
@@ -2541,19 +2573,19 @@ test! "publish() surfaces a non-2xx answer as an error carrying status and body"
 
 console.log "\nManager file-feed path"
 
-# Rip entries must pair with bundle bytes; CSS entries pair with filesDir
-# (CSS never enters assembleBundle — S12 soft-apply).
+# Rip entries must pair with bundle bytes; CSS/HTML entries pair with
+# filesDir (they never enter assembleBundle — client soft paths).
 assertManifestMatchesBundle = (manifestPath, bundlePath, filesDir = null) ->
   m = JSON.parse readFileSync(manifestPath, 'utf8')
   b = JSON.parse readFileSync(bundlePath, 'utf8')
   modules = b.modules or {}
   for entry in m.files
-    if entry.id.endsWith('.css')
-      ok filesDir?, "css manifest entry #{entry.id} needs filesDir"
+    if entry.id.endsWith('.css') or entry.id.endsWith('.html')
+      ok filesDir?, "non-Rip manifest entry #{entry.id} needs filesDir"
       file = join(filesDir, encodeURIComponent(entry.id))
       ok existsSync(file), "filesDir must carry #{entry.id}"
       eq entry.etag, fileHash(readFileSync(file, 'utf8')), "#{entry.id}: manifest etag must match file bytes"
-      eq modules[entry.id], undefined, "bundle must not carry CSS #{entry.id}"
+      eq modules[entry.id], undefined, "bundle must not carry #{entry.id}"
     else
       source = modules[entry.id]
       ok source?, "bundle must carry #{entry.id}"

@@ -68,7 +68,7 @@ test "writes and reads source and compiled modules", ->
 
 test "rejects malformed and directory-shaped component paths", ->
   ws = createWorkspace()
-  for path in ['/app.rip', 'routes//app.rip', 'routes/app.rip/', './app.rip', 'routes/../app.rip', 'routes/admin', 'routes/app.rip/child.rip', 'a\\b.rip', '.rip', '.css', 'styles.css/child.rip']
+  for path in ['/app.rip', 'routes//app.rip', 'routes/app.rip/', './app.rip', 'routes/../app.rip', 'routes/admin', 'routes/app.rip/child.rip', 'a\\b.rip', '.rip', '.css', '.html', 'styles.css/child.rip', 'index.html/child.rip']
     throws (-> ws.write(path, 'source')), 'invalid component path'
 
 test "accepts CSS bag paths (S12 soft-apply sheets)", ->
@@ -76,6 +76,12 @@ test "accepts CSS bag paths (S12 soft-apply sheets)", ->
   ws.write 'app/styles.css', ':root { --x: 1 }'
   eq ws.read('app/styles.css'), ':root { --x: 1 }'
   eq ws.exists('app/styles.css'), true
+
+test "accepts HTML bag paths (shell reload)", ->
+  ws = createWorkspace()
+  ws.write 'app/index.html', '<!doctype html><title>x</title>'
+  eq ws.read('app/index.html'), '<!doctype html><title>x</title>'
+  eq ws.exists('app/index.html'), true
 
 test "rejects non-string paths and content", ->
   ws = createWorkspace()
