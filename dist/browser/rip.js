@@ -23078,7 +23078,7 @@ async function bootApp(opts = {}) {
   if (workspaceMode) {
     bag = app.createWorkspace();
     const records = [];
-    for (const entry of manifest?.files ?? manifest?.cells ?? []) {
+    for (const entry of manifest?.files ?? []) {
       const source = (bundle.modules ?? {})[entry.id];
       if (source === undefined)
         continue;
@@ -23197,33 +23197,33 @@ async function bootApp(opts = {}) {
   const door = {
     passport: bag.passport,
     sealed: bag.sealed,
-    set: async (cell) => {
-      const known = bag.passport(cell.id);
-      if (known && typeof cell.etag === "string" && cell.etag === known.etag) {
-        if (cell.deleted !== true)
+    set: async (passport) => {
+      const known = bag.passport(passport.id);
+      if (known && typeof passport.etag === "string" && passport.etag === known.etag) {
+        if (passport.deleted !== true)
           return false;
       }
-      if (cell.deleted === true) {
-        if (known && typeof cell.etag === "string" && cell.etag !== known.etag)
+      if (passport.deleted === true) {
+        if (known && typeof passport.etag === "string" && passport.etag !== known.etag)
           return false;
-        const path2 = bag.passport(cell.id)?.path;
+        const path2 = bag.passport(passport.id)?.path;
         if (path2 !== undefined) {
           files.delete(path2);
           loader.invalidate(path2);
         }
-        return bag.set(cell);
+        return bag.set(passport);
       }
-      const path = cell.path ?? cell.id;
-      files.set(path, cell.source);
+      const path = passport.path ?? passport.id;
+      files.set(path, passport.source);
       loader.invalidate(path);
       let module;
       try {
         module = await loader.import(path);
       } catch (error) {
-        report(`[Rip] ${path} etag ${cell.etag} failed to compile — keeping the last good version`, error);
+        report(`[Rip] ${path} etag ${passport.etag} failed to compile — keeping the last good version`, error);
         return false;
       }
-      return bag.set({ ...cell, compiled: { ...module } });
+      return bag.set({ ...passport, compiled: { ...module } });
     }
   };
   const feed = app.connectFeed(door, { ...opts.feed ?? {}, manifestUrl, report });

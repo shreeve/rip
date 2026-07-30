@@ -193,7 +193,7 @@ test "populate fires no watch events", ->
   ws.populate [{ id: 'c1', path: 'app.rip', etag: srcHash('src'), source: 'src' }]
   eq events, []
 
-test "populate carries compiled cells", ->
+test "populate carries compiled passports", ->
   ws = createWorkspace()
   module = { App: {} }
   ws.populate [{ id: 'c1', path: 'app.rip', etag: srcHash('src'), source: 'src', compiled: module }]
@@ -261,7 +261,7 @@ test "a different etag applies and fires change", ->
   eq ws.passport('c1').etag, srcHash('v4')
   eq events, [['change', 'app.rip']]
 
-test "new source clears compiled unless the cell carries one", ->
+test "new source clears compiled unless the passport carries one", ->
   { ws } = seeded()
   ws.setCompiled 'app.rip', { App: {} }
   ws.set { id: 'c1', etag: srcHash('v4'), source: 'v4' }
@@ -270,7 +270,7 @@ test "new source clears compiled unless the cell carries one", ->
   ws.set { id: 'c1', etag: srcHash('v5'), source: 'v5', compiled: module }
   ok ws.getCompiled('app.rip') is module
 
-test "a compiled-only cell swaps the projection", ->
+test "a compiled-only passport swaps the projection", ->
   { ws, events } = seeded()
   module = { App: {} }
   next = 'aaaaaaaaaaaaaaaa'
@@ -293,7 +293,7 @@ test "an unknown id without a full record rejects", ->
   throws (-> ws.set({ id: 'c9', etag: srcHash('no path'), source: 'no path' })), "unknown passport 'c9' requires a full record"
   throws (-> ws.set({ id: 'c9', etag: 'cccccccccccccccc', path: 'x.rip' })), "unknown passport 'c9' requires a full record"
 
-test "set validates its cell", ->
+test "set validates its passport", ->
   { ws } = seeded()
   throws (-> ws.set(null)), 'set expects a passport record'
   throws (-> ws.set([])), 'set expects a passport record'
@@ -313,7 +313,7 @@ test "a new path re-labels the id", ->
   eq ws.read('main.rip'), SRC_APP
   eq events, [['delete', 'app.rip'], ['create', 'main.rip']]
 
-test "rename and source travel in one cell", ->
+test "rename and source travel in one passport", ->
   { ws } = seeded()
   ws.set { id: 'c1', etag: srcHash('moved'), path: 'main.rip', source: 'moved' }
   eq ws.read('main.rip'), 'moved'

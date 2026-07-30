@@ -59,7 +59,7 @@ export def connectFeed(workspace, opts = {}): Feed
   hubUrl = opts.hub ?? defaultHubUrl()
   makeSocket = opts.makeSocket ?? defaultSocketFactory()
   fetchBytes = opts.fetch ?? defaultFetch()
-  moduleUrl = opts.moduleUrl ?? opts.cellUrl ?? defaultModuleUrl
+  moduleUrl = opts.moduleUrl ?? defaultModuleUrl
   manifestUrl = opts.manifestUrl ?? '/manifest.json'
   report = opts.report ?? (...args) -> console.error(...args)
   backoffMin = opts.backoff?.min ?? FEED_BACKOFF_MIN
@@ -121,7 +121,7 @@ export def connectFeed(workspace, opts = {}): Feed
       scheduleResync()
       return
     manifest = res.json!()
-    files = manifest?.files ?? manifest?.cells
+    files = manifest?.files
     unless Array.isArray files
       report '[Rip] workspace feed: malformed manifest:', manifest
       return
@@ -142,9 +142,9 @@ export def connectFeed(workspace, opts = {}): Feed
         continue
       source = cres.text!()
       applied = etagToken(cres.headers?.get?('etag') or cres.headers?.get?('ETag')) or etag
-      cell = { id: entry.id, etag: applied, source }
-      cell.path = entry.id unless current?
-      workspace.set! cell
+      passport = { id: entry.id, etag: applied, source }
+      passport.path = entry.id unless current?
+      workspace.set! passport
     # A want the manifest walk left unsatisfied retries the ding's OWN
     # etag URL. Retirement needs EVIDENCE: a want that a moved manifest
     # still does not name was retired upstream — nothing will ever
@@ -158,9 +158,9 @@ export def connectFeed(workspace, opts = {}): Feed
       if cres.ok
         source = cres.text!()
         applied = etagToken(cres.headers?.get?('etag') or cres.headers?.get?('ETag')) or want.etag
-        cell = { id, etag: applied, source }
-        cell.path = id unless current?
-        workspace.set! cell
+        passport = { id, etag: applied, source }
+        passport.path = id unless current?
+        workspace.set! passport
       else if not named.has(id)
         if want.sig? and want.sig isnt sig
           delete wants[id] if wants[id] is want
@@ -202,9 +202,9 @@ export def connectFeed(workspace, opts = {}): Feed
       return
     source = res.text!()
     applied = etagToken(res.headers?.get?('etag') or res.headers?.get?('ETag')) or etag
-    cell = { id, etag: applied, source }
-    cell.path = id unless workspace.passport(id)?
-    workspace.set cell
+    passport = { id, etag: applied, source }
+    passport.path = id unless workspace.passport(id)?
+    workspace.set passport
     return
 
   handleFrame = (text) ->

@@ -927,7 +927,7 @@ resetGlobals()
 
 # ==[ client() dev feed — the worker half of the workspace door ]==
 #
-# Worker-mode client() with the feed env set: the manifest, latest-cell
+# Worker-mode client() with the feed env set: the manifest, latest-file
 # door, bridge, and fresh-bundle routes — driven in-process through the
 # fetch handler against files a manager would have written.
 
@@ -935,18 +935,18 @@ console.log "\nclient() dev feed"
 
 # The content etag that rides manifests, dings, and module URLs —
 # mirrors the manager's shortHash (sha256, 16 hex chars).
-cellHash = (s) -> new Bun.CryptoHasher('sha256').update(s).digest('hex').slice(0, 16)
+fileHash = (s) -> new Bun.CryptoHasher('sha256').update(s).digest('hex').slice(0, 16)
 
-FEED_CELL_ID = 'app/routes/index.rip'
+FEED_FILE_ID = 'app/routes/index.rip'
 feedDir = tmpFixture('tmp-feed-')
-mkdirSync join(feedDir, 'cells'), { recursive: true }
-writeFileSync join(feedDir, 'cells', encodeURIComponent(FEED_CELL_ID)), CLIENT_ROUTE
-writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ files: [{ id: FEED_CELL_ID, etag: cellHash(CLIENT_ROUTE) }] })
+mkdirSync join(feedDir, 'files'), { recursive: true }
+writeFileSync join(feedDir, 'files', encodeURIComponent(FEED_FILE_ID)), CLIENT_ROUTE
+writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ files: [{ id: FEED_FILE_ID, etag: fileHash(CLIENT_ROUTE) }] })
 writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: {}, packages: {} })
 
 feedEnv =
   RIP_BUNDLE_PATH: join(feedDir, 'bundle.json')
-  RIP_CELLS_DIR: join(feedDir, 'cells')
+  RIP_FILES_DIR: join(feedDir, 'files')
   RIP_MANIFEST_PATH: join(feedDir, 'manifest.json')
   RIP_BRIDGE_PATH: '/hub'
 
@@ -962,12 +962,12 @@ test! "GET /manifest.json is no-store and read per request", ->
   eq res.status, 200
   eq res.headers.get('content-type'), 'application/json'
   eq res.headers.get('cache-control'), 'no-store'
-  eq (res.json!), { files: [{ id: FEED_CELL_ID, etag: cellHash(CLIENT_ROUTE) }] }
+  eq (res.json!), { files: [{ id: FEED_FILE_ID, etag: fileHash(CLIENT_ROUTE) }] }
   # a manager rewrite shows on the very next request — nothing is cached
-  v2etag = cellHash(CLIENT_ROUTE + 'v2')
-  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ files: [{ id: FEED_CELL_ID, etag: v2etag }] })
+  v2etag = fileHash(CLIENT_ROUTE + 'v2')
+  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ files: [{ id: FEED_FILE_ID, etag: v2etag }] })
   eq ((handle! req('GET', '/manifest.json')).json!).files[0].etag, v2etag
-  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ files: [{ id: FEED_CELL_ID, etag: cellHash(CLIENT_ROUTE) }] })
+  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ files: [{ id: FEED_FILE_ID, etag: fileHash(CLIENT_ROUTE) }] })
 
 test! "GET /bundle.json is no-store when the feed door is open", ->
   # Manifest no-store + a micro-cached bundle invents the reverse pairing
@@ -980,8 +980,8 @@ test! "GET /bundle.json is no-store when the feed door is open", ->
 
 test! "GET /app/…?etag= answers the latest module as text/plain", ->
   # Store id app/routes/index.rip ↔ URL /app/routes/index.rip
-  rel = FEED_CELL_ID.slice('app/'.length)
-  etag = cellHash(CLIENT_ROUTE)
+  rel = FEED_FILE_ID.slice('app/'.length)
+  etag = fileHash(CLIENT_ROUTE)
   res = handle! req('GET', "/app/#{rel}?etag=#{etag}")
   eq res.status, 200
   eq res.headers.get('content-type'), 'text/plain; charset=utf-8'
@@ -990,22 +990,22 @@ test! "GET /app/…?etag= answers the latest module as text/plain", ->
   eq (res.text!), CLIENT_ROUTE
 
 test! "a superseded etag answers 409 with the current ETag — never a silent stale body", ->
-  rel = FEED_CELL_ID.slice('app/'.length)
-  current = cellHash(CLIENT_ROUTE)
+  rel = FEED_FILE_ID.slice('app/'.length)
+  current = fileHash(CLIENT_ROUTE)
   miss = handle! req('GET', "/app/#{rel}?etag=0123456789abcdef")
   eq miss.status, 409
   eq miss.headers.get('etag'), "\"#{current}\""
   eq (miss.text!), ''
 
 test! "a module URL without a well-formed etag is a 400", ->
-  rel = FEED_CELL_ID.slice('app/'.length)
+  rel = FEED_FILE_ID.slice('app/'.length)
   for path in ["/app/#{rel}", "/app/#{rel}?etag=abc", "/app/#{rel}?etag=0123456789ABCDEF"]
     res = handle! req('GET', path)
     eq res.status, 400
     ok ((res.json!).error.message).includes('module URLs require'), "names the rule for #{path}"
 
 test! "an unknown module is a 404", ->
-  eq (handle! req('GET', "/app/nope.rip?etag=#{cellHash(CLIENT_ROUTE)}")).status, 404
+  eq (handle! req('GET', "/app/nope.rip?etag=#{fileHash(CLIENT_ROUTE)}")).status, 404
 
 test! "a bridge open enrolls the connection into /hub", ->
   res = handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })
@@ -1050,11 +1050,11 @@ test! "without the manager's feed env there are no feed routes and no door; the 
     resetGlobals()
     client!()
     eq (handle! req('GET', '/manifest.json')).status, 404
-    eq (handle! req('GET', "/app/routes/index.rip?etag=#{cellHash(CLIENT_ROUTE)}")).status, 404
+    eq (handle! req('GET', "/app/routes/index.rip?etag=#{fileHash(CLIENT_ROUTE)}")).status, 404
     eq (handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })).status, 404
     ok not ((handle! req('GET', '/')).text!).includes('workspace'), 'no manifest env, no door'
     # Worker mode re-reads the bundle per request — the manager rewrites
-    # it in place on a cell change, and Janus absorbs the cost.
+    # it in place on a file-feed change, and Janus absorbs the cost.
     etag1 = (handle! req('GET', '/bundle.json')).headers.get('etag')
     writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: { 'y.rip': 'y' }, packages: {} })
     res = handle! req('GET', '/bundle.json')
@@ -1089,7 +1089,7 @@ test! "the workspace rides the app package — one claim, no second package, doo
     eq bundle.packages['@rip-lang/workspace'], undefined
     ok bundle.modules['@rip-lang/app/workspace.rip']?, 'the workspace module travels inside the app package'
     ok bundle.modules['@rip-lang/app/feed.rip']?, 'the feed module travels inside the app package'
-    # Standalone has no manager and therefore no manifest/cell routes: a
+    # Standalone has no manager and therefore no manifest/file-feed routes: a
     # workspace-mode boot would die on its manifest fetch, so the page
     # opens the door only in worker mode (RIP_MANIFEST_PATH present).
     standalonePage = (handle! req('GET', '/')).text!
@@ -1356,7 +1356,7 @@ test! "an orphaned worker (parent gone) exits on its own", ->
 
 console.log "\nPrebuild"
 
-import { buildArtifact, buildApp, revertCellsAndManifest, REGISTER_409_MS, scale, publish, state as managerState, cfg as managerCfg, onCellChange, DEV_CHANNEL as MANAGER_DEV_CHANNEL } from './manager.rip'
+import { buildArtifact, buildApp, revertFilesAndManifest, REGISTER_409_MS, scale, publish, state as managerState, cfg as managerCfg, onFileChange, DEV_CHANNEL as MANAGER_DEV_CHANNEL } from './manager.rip'
 
 test "DEV_CHANNEL mirrors across manager and worker — a pinned fact, not a convention", ->
   eq MANAGER_DEV_CHANNEL, mod.DEV_CHANNEL
@@ -2108,7 +2108,7 @@ test! "an app/ dir ships through the pool: boot page, bundle ETag, per-epoch rea
     ok bundle.modules['app/routes/index.rip']?, 'the manager-assembled bundle ships the client module'
     # A MIXED save (server + client together) is an epoch: settle cuts
     # admission, the ring boots against a REASSEMBLED bundle — its ETag
-    # must differ. (A client-only save takes the cell path instead.)
+    # must differ. (A client-only save takes the file-feed path instead.)
     bell = calls.find((c) -> c.method is 'PUT' and c.body?.upstreams?.some((u) -> u.doorbell)).body.upstreams[0].path
     writeFileSync join(dir, 'app.rip'), """
     import { get, client, start } from '@rip-lang/server'
@@ -2161,13 +2161,13 @@ test! "a client-only edit feeds modules in place: ding, etag advances, etag door
     eq m1.status, 200
     eq m1.headers.get('cache-control'), 'no-store'
     eq (m1.json!), { files: [
-      { id: 'app/routes/index.rip', etag: cellHash(CLIENT_ROUTE) }
-      { id: 'app/stash.rip',        etag: cellHash(CLIENT_STASH) }
+      { id: 'app/routes/index.rip', etag: fileHash(CLIENT_ROUTE) }
+      { id: 'app/stash.rip',        etag: fileHash(CLIENT_STASH) }
     ] }
-    c1 = uds!(sock, "/app/routes/index.rip?etag=#{cellHash(CLIENT_ROUTE)}")
+    c1 = uds!(sock, "/app/routes/index.rip?etag=#{fileHash(CLIENT_ROUTE)}")
     eq c1.status, 200
     eq c1.headers.get('cache-control'), 'no-store'
-    eq c1.headers.get('etag'), "\"#{cellHash(CLIENT_ROUTE)}\""
+    eq c1.headers.get('etag'), "\"#{fileHash(CLIENT_ROUTE)}\""
     eq (c1.text!), CLIENT_ROUTE
     bundleTag1 = (uds!(sock, '/bundle.json')).headers.get('etag')
     putsAt = puts().length
@@ -2175,14 +2175,14 @@ test! "a client-only edit feeds modules in place: ding, etag advances, etag door
     writeFileSync join(dir, 'app', 'routes', 'index.rip'), v2
     pub = waitFor! -> calls.find (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
     eq pub.path, '/1.0/apps/app-x/hub/publish'
-    eq pub.body, [{ '@': ['/hub'], ding: { id: 'app/routes/index.rip', etag: cellHash(v2) } }]
+    eq pub.body, [{ '@': ['/hub'], ding: { id: 'app/routes/index.rip', etag: fileHash(v2) } }]
     m2 = (uds!(sock, '/manifest.json')).json!
-    eq m2.files.find((e) -> e.id is 'app/routes/index.rip').etag, cellHash(v2)
+    eq m2.files.find((e) -> e.id is 'app/routes/index.rip').etag, fileHash(v2)
     # Q8′ latest door: matching etag → 200; superseded → 409 + current; bare → 400.
-    eq ((uds!(sock, "/app/routes/index.rip?etag=#{cellHash(v2)}")).text!), v2
-    stale = uds!(sock, "/app/routes/index.rip?etag=#{cellHash(CLIENT_ROUTE)}")
+    eq ((uds!(sock, "/app/routes/index.rip?etag=#{fileHash(v2)}")).text!), v2
+    stale = uds!(sock, "/app/routes/index.rip?etag=#{fileHash(CLIENT_ROUTE)}")
     eq stale.status, 409
-    eq stale.headers.get('etag'), "\"#{cellHash(v2)}\""
+    eq stale.headers.get('etag'), "\"#{fileHash(v2)}\""
     eq (uds!(sock, '/app/routes/index.rip')).status, 400
     eq (uds!(sock, '/app/routes/index.rip?etag=not-hex')).status, 400
     open = uds!(sock, '/hub', { method: 'POST', headers: { 'Sec-WebSocket-Frame': 'open' } })
@@ -2199,10 +2199,10 @@ test! "a client-only edit feeds modules in place: ding, etag advances, etag door
     unlinkSync join(dir, 'app', 'stash.rip')
     pubs = -> calls.filter (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
     retirement = waitFor! -> pubs()[1]
-    eq retirement.body, [{ '@': ['/hub'], ding: { id: 'app/stash.rip', etag: cellHash(CLIENT_STASH), kind: 'delete' } }]
+    eq retirement.body, [{ '@': ['/hub'], ding: { id: 'app/stash.rip', etag: fileHash(CLIENT_STASH), kind: 'delete' } }]
     m3 = (uds!(sock, '/manifest.json')).json!
     eq m3.files.map((e) -> e.id), ['app/routes/index.rip']
-    eq (uds!(sock, "/app/stash.rip?etag=#{cellHash(CLIENT_STASH)}")).status, 404
+    eq (uds!(sock, "/app/stash.rip?etag=#{fileHash(CLIENT_STASH)}")).status, 404
     eq puts().length, putsAt
   finally
     try proc.kill('SIGKILL')
@@ -2230,7 +2230,7 @@ test! "watch off never opens the door: no feed routes, a plain boot page, no dev
     ok not (page.text!).includes('workspace'), 'the boot page boots plain'
     eq (uds!(sock, '/bundle.json')).status, 200
     eq (uds!(sock, '/manifest.json')).status, 404
-    eq (uds!(sock, "/app/routes/index.rip?etag=#{cellHash(CLIENT_ROUTE)}")).status, 404
+    eq (uds!(sock, "/app/routes/index.rip?etag=#{fileHash(CLIENT_ROUTE)}")).status, 404
     open = uds!(sock, '/hub', { method: 'POST', headers: { 'Sec-WebSocket-Frame': 'open' } })
     eq open.status, 204
     eq (open.text!), ''
@@ -2255,7 +2255,7 @@ test! "a non-client edit cuts admission, reloads through the doorbell, and dings
     eq ((uds!(sock1, '/hi')).text!), 'v1'
     bellsAt = bells().length
     writeFileSync join(dir, 'app.rip'), wsAppSource('v2')
-    waitFor! -> bells().length > bellsAt          # the save cut admission — a full epoch, not a cell feed
+    waitFor! -> bells().length > bellsAt          # the save cut admission — a full epoch, not a file feed
     ok not calls.some((c) -> c.path.endsWith('/hub/publish')), 'no ding at admission cut — the epoch is not live yet'
     bell = bells()[0].body.upstreams[0].path
     res = uds!(bell, '/ring')
@@ -2486,19 +2486,19 @@ test! "publish() surfaces a non-2xx answer as an error carrying status and body"
     managerState.appId = null
     stub.stop(true)
 
-# ==[ Manager: the cell path's correlation invariant ]==
+# ==[ Manager: the file-feed path's correlation invariant ]==
 #
-# The manifest is the LAST durable document on the cell path: written only
+# The manifest is the LAST durable document on the file-feed path: written only
 # after the pool bundle carrying the same etags is. A bundle rewrite failure
 # HOLDS THE MANIFEST BACK — a manifest naming etags the bundle does not carry
 # would silently strand fresh boots on the bag's etag door. Driven
-# in-process through the exported singleton (cfg/state/onCellChange/buildApp).
+# in-process through the exported singleton (cfg/state/onFileChange/buildApp).
 #
 # The same pairing holds on the epoch path: buildApp walks app/ ONCE and
-# feeds that snapshot to the bundle, the cells, and the manifest. A second
+# feeds that snapshot to the bundle, the files, and the manifest. A second
 # walk can observe a save mid-run and invent the reverse pairing.
 
-console.log "\nManager cell path"
+console.log "\nManager file-feed path"
 
 # Every manifest entry's (id, etag) must name bytes present in the bundle.
 assertManifestMatchesBundle = (manifestPath, bundlePath) ->
@@ -2508,11 +2508,11 @@ assertManifestMatchesBundle = (manifestPath, bundlePath) ->
   for entry in m.files
     source = modules[entry.id]
     ok source?, "bundle must carry #{entry.id}"
-    eq entry.etag, cellHash(source), "#{entry.id}: manifest etag must match bundle bytes"
+    eq entry.etag, fileHash(source), "#{entry.id}: manifest etag must match bundle bytes"
 
 test! "a scrapped epoch build restores the manifest so it cannot name unlinked bundle etags", ->
-  # buildApp writes cells + manifest + bundle; bootLoop then sees dirty,
-  # unlinks the bundle, and calls revertCellsAndManifest. Without that
+  # buildApp writes files + manifest + bundle; bootLoop then sees dirty,
+  # unlinks the bundle, and calls revertFilesAndManifest. Without that
   # restore the manifest would name etags whose bundle file is gone.
   appDir = tmpFixture('tmp-scrap-')
   runDir = tmpFixture('tmp-scrap-run-')
@@ -2524,9 +2524,9 @@ test! "a scrapped epoch build restores the manifest so it cannot name unlinked b
     entry: managerCfg.entry
     watch: managerCfg.watch
     runDir: managerState.runDir
-    cellsDir: managerState.cellsDir
+    filesDir: managerState.filesDir
     manifestPath: managerState.manifestPath
-    cells: managerState.cells
+    files: managerState.files
     buildCounter: managerState.buildCounter
     afterAppSnapshot: managerState.afterAppSnapshot
   try
@@ -2534,32 +2534,32 @@ test! "a scrapped epoch build restores the manifest so it cannot name unlinked b
     managerCfg.entry = join(appDir, 'app.rip')
     managerCfg.watch = true
     managerState.runDir = runDir
-    managerState.cellsDir = null
+    managerState.filesDir = null
     managerState.manifestPath = null
-    managerState.cells = {}
+    managerState.files = {}
     managerState.buildCounter = 0
     managerState.afterAppSnapshot = null
     buildApp!()
-    cellsBefore = {}
-    for path, entry of managerState.cells
-      cellsBefore[path] = { id: entry.id, hash: entry.hash, retired: entry.retired }
+    filesBefore = {}
+    for path, entry of managerState.files
+      filesBefore[path] = { id: entry.id, hash: entry.hash, retired: entry.retired }
     writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
     build2 = buildApp!()
     eq (JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')).files,
-      [{ id: 'app/x.rip', etag: cellHash('export A = 2') }]
+      [{ id: 'app/x.rip', etag: fileHash('export A = 2') }]
     unlinkSync build2.bundle
-    revertCellsAndManifest! cellsBefore
+    revertFilesAndManifest! filesBefore
     m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
-    eq m.files, [{ id: 'app/x.rip', etag: cellHash('export A = 1') }]
+    eq m.files, [{ id: 'app/x.rip', etag: fileHash('export A = 1') }]
     ok not existsSync(build2.bundle), 'the scrapped bundle stays gone'
   finally
     managerCfg.appDir = saved.appDir
     managerCfg.entry = saved.entry
     managerCfg.watch = saved.watch
     managerState.runDir = saved.runDir
-    managerState.cellsDir = saved.cellsDir
+    managerState.filesDir = saved.filesDir
     managerState.manifestPath = saved.manifestPath
-    managerState.cells = saved.cells
+    managerState.files = saved.files
     managerState.buildCounter = saved.buildCounter
     managerState.afterAppSnapshot = saved.afterAppSnapshot
     rmSync appDir, { recursive: true, force: true }
@@ -2580,9 +2580,9 @@ test! "epoch buildApp: a save after the snapshot cannot invent a manifest/bundle
     entry: managerCfg.entry
     watch: managerCfg.watch
     runDir: managerState.runDir
-    cellsDir: managerState.cellsDir
+    filesDir: managerState.filesDir
     manifestPath: managerState.manifestPath
-    cells: managerState.cells
+    files: managerState.files
     buildCounter: managerState.buildCounter
     afterAppSnapshot: managerState.afterAppSnapshot
   try
@@ -2590,9 +2590,9 @@ test! "epoch buildApp: a save after the snapshot cannot invent a manifest/bundle
     managerCfg.entry = join(appDir, 'app.rip')
     managerCfg.watch = true
     managerState.runDir = runDir
-    managerState.cellsDir = null
+    managerState.filesDir = null
     managerState.manifestPath = null
-    managerState.cells = {}
+    managerState.files = {}
     managerState.buildCounter = 0
     managerState.afterAppSnapshot = ->
       writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
@@ -2600,58 +2600,58 @@ test! "epoch buildApp: a save after the snapshot cannot invent a manifest/bundle
     ok build.bundle?, 'watch-mode buildApp writes a bundle'
     assertManifestMatchesBundle join(runDir, 'manifest.json'), build.bundle
     m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
-    eq m.files, [{ id: 'app/x.rip', etag: cellHash('export A = 1') }]
+    eq m.files, [{ id: 'app/x.rip', etag: fileHash('export A = 1') }]
   finally
     managerCfg.appDir = saved.appDir
     managerCfg.entry = saved.entry
     managerCfg.watch = saved.watch
     managerState.runDir = saved.runDir
-    managerState.cellsDir = saved.cellsDir
+    managerState.filesDir = saved.filesDir
     managerState.manifestPath = saved.manifestPath
-    managerState.cells = saved.cells
+    managerState.files = saved.files
     managerState.buildCounter = saved.buildCounter
     managerState.afterAppSnapshot = saved.afterAppSnapshot
     rmSync appDir, { recursive: true, force: true }
     rmSync runDir, { recursive: true, force: true }
 
-test! "cell path: a save after the snapshot cannot invent a manifest/bundle reverse pairing", ->
-  appDir = tmpFixture('tmp-cell-corr-')
-  runDir = tmpFixture('tmp-cell-corr-run-')
+test! "file-feed path: a save after the snapshot cannot invent a manifest/bundle reverse pairing", ->
+  appDir = tmpFixture('tmp-file-corr-')
+  runDir = tmpFixture('tmp-file-corr-run-')
   mkdirSync join(appDir, 'app'), { recursive: true }
   writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
   saved =
     appDir: managerCfg.appDir
     runDir: managerState.runDir
-    cellsDir: managerState.cellsDir
+    filesDir: managerState.filesDir
     manifestPath: managerState.manifestPath
-    cells: managerState.cells
+    files: managerState.files
     currentPool: managerState.currentPool
     afterAppSnapshot: managerState.afterAppSnapshot
   try
     managerCfg.appDir = appDir
     managerState.runDir = runDir
-    managerState.cellsDir = null
+    managerState.filesDir = null
     managerState.manifestPath = null
-    managerState.cells = {}
+    managerState.files = {}
     managerState.currentPool = { bundle: join(runDir, 'bundle.json') }
     managerState.afterAppSnapshot = ->
       writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
-    onCellChange!()
+    onFileChange!()
     assertManifestMatchesBundle join(runDir, 'manifest.json'), join(runDir, 'bundle.json')
     m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
-    eq m.files, [{ id: 'app/x.rip', etag: cellHash('export A = 1') }]
+    eq m.files, [{ id: 'app/x.rip', etag: fileHash('export A = 1') }]
   finally
     managerCfg.appDir = saved.appDir
     managerState.runDir = saved.runDir
-    managerState.cellsDir = saved.cellsDir
+    managerState.filesDir = saved.filesDir
     managerState.manifestPath = saved.manifestPath
-    managerState.cells = saved.cells
+    managerState.files = saved.files
     managerState.currentPool = saved.currentPool
     managerState.afterAppSnapshot = saved.afterAppSnapshot
     rmSync appDir, { recursive: true, force: true }
     rmSync runDir, { recursive: true, force: true }
 
-test! "a cell-path run with no live pool bundle holds the manifest back", ->
+test! "a file-feed run with no live pool bundle holds the manifest back", ->
   appDir = tmpFixture('tmp-nopool-')
   runDir = tmpFixture('tmp-nopool-run-')
   mkdirSync join(appDir, 'app'), { recursive: true }
@@ -2659,41 +2659,41 @@ test! "a cell-path run with no live pool bundle holds the manifest back", ->
   saved =
     appDir: managerCfg.appDir
     runDir: managerState.runDir
-    cellsDir: managerState.cellsDir
+    filesDir: managerState.filesDir
     manifestPath: managerState.manifestPath
-    cells: managerState.cells
+    files: managerState.files
     currentPool: managerState.currentPool
   try
     managerCfg.appDir = appDir
     managerState.runDir = runDir
-    managerState.cellsDir = null
+    managerState.filesDir = null
     managerState.manifestPath = null
-    managerState.cells = {}
+    managerState.files = {}
     managerState.currentPool = null          # no live pool — must not write a manifest
-    onCellChange!()
+    onFileChange!()
     ok not existsSync(join(runDir, 'manifest.json')), 'no pool bundle ⇒ manifest held back'
-    ok existsSync(join(runDir, 'cells', encodeURIComponent('app/x.rip'))), 'module bytes are durable regardless'
+    ok existsSync(join(runDir, 'files', encodeURIComponent('app/x.rip'))), 'module bytes are durable regardless'
   finally
     managerCfg.appDir = saved.appDir
     managerState.runDir = saved.runDir
-    managerState.cellsDir = saved.cellsDir
+    managerState.filesDir = saved.filesDir
     managerState.manifestPath = saved.manifestPath
-    managerState.cells = saved.cells
+    managerState.files = saved.files
     managerState.currentPool = saved.currentPool
     rmSync appDir, { recursive: true, force: true }
     rmSync runDir, { recursive: true, force: true }
 
 
-test! "concurrent cell-path runs serialize: a second save never interleaves a parked publish", ->
+test! "concurrent file-feed runs serialize: a second save never interleaves a parked publish", ->
   # The pin parks run 1 inside its ding publish (a stub Janus that answers
   # /hub/publish slowly) and fires run 2 meanwhile. Serialized, run 2's
-  # syncCells/manifest writes start only after run 1 completes — so the
+  # syncFiles/manifest writes start only after run 1 completes — so the
   # manifest observed DURING run 1's publish still names v1's etag.
-  appDir = tmpFixture('tmp-cellq-')
-  runDir = tmpFixture('tmp-cellq-run-')
+  appDir = tmpFixture('tmp-fileq-')
+  runDir = tmpFixture('tmp-fileq-run-')
   mkdirSync join(appDir, 'app'), { recursive: true }
   writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
-  qSock = join(tmpdir(), "rip-janus-cellq-#{Date.now()}-#{rand(1e6)}.sock")
+  qSock = join(tmpdir(), "rip-janus-fileq-#{Date.now()}-#{rand(1e6)}.sock")
   qCalls = []
   manifestDuringPublish = []
   manifestPath = join(runDir, 'manifest.json')
@@ -2708,40 +2708,40 @@ test! "concurrent cell-path runs serialize: a second save never interleaves a pa
   saved =
     appDir: managerCfg.appDir
     runDir: managerState.runDir
-    cellsDir: managerState.cellsDir
+    filesDir: managerState.filesDir
     manifestPath: managerState.manifestPath
-    cells: managerState.cells
+    files: managerState.files
     currentPool: managerState.currentPool
     controlUnix: managerState.controlUnix
     appId: managerState.appId
   try
     managerCfg.appDir = appDir
     managerState.runDir = runDir
-    managerState.cellsDir = null
+    managerState.filesDir = null
     managerState.manifestPath = null
-    managerState.cells = {}
+    managerState.files = {}
     managerState.currentPool = { bundle: join(runDir, 'bundle.json') }
     managerState.controlUnix = qSock
     managerState.appId = 'app-q'
-    p1 = onCellChange()
+    p1 = onFileChange()
     # Let run 1 reach its parked publish (the stub holds it 60ms) before
     # the second save lands.
     await new Promise (resolve) -> setTimeout resolve, 20
     writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
-    p2 = onCellChange()                       # must WAIT for run 1
+    p2 = onFileChange()                       # must WAIT for run 1
     await p1
     await p2
     eq manifestDuringPublish.length, 2
-    eq manifestDuringPublish[0].files, [{ id: 'app/x.rip', etag: cellHash('export A = 1') }]
-    eq manifestDuringPublish[1].files, [{ id: 'app/x.rip', etag: cellHash('export A = 2') }]
+    eq manifestDuringPublish[0].files, [{ id: 'app/x.rip', etag: fileHash('export A = 1') }]
+    eq manifestDuringPublish[1].files, [{ id: 'app/x.rip', etag: fileHash('export A = 2') }]
     m = JSON.parse readFileSync(manifestPath, 'utf8')
-    eq m.files, [{ id: 'app/x.rip', etag: cellHash('export A = 2') }]
+    eq m.files, [{ id: 'app/x.rip', etag: fileHash('export A = 2') }]
   finally
     managerCfg.appDir = saved.appDir
     managerState.runDir = saved.runDir
-    managerState.cellsDir = saved.cellsDir
+    managerState.filesDir = saved.filesDir
     managerState.manifestPath = saved.manifestPath
-    managerState.cells = saved.cells
+    managerState.files = saved.files
     managerState.currentPool = saved.currentPool
     managerState.controlUnix = saved.controlUnix
     managerState.appId = saved.appId
@@ -2750,45 +2750,45 @@ test! "concurrent cell-path runs serialize: a second save never interleaves a pa
     rmSync runDir, { recursive: true, force: true }
 
 test! "a bundle rewrite failure holds the manifest back; the next clean save writes both", ->
-  appDir = tmpFixture('tmp-cellpath-')
-  runDir = tmpFixture('tmp-cellpath-run-')
+  appDir = tmpFixture('tmp-filepath-')
+  runDir = tmpFixture('tmp-filepath-run-')
   mkdirSync join(appDir, 'app'), { recursive: true }
   writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
   saved =
     appDir: managerCfg.appDir
     runDir: managerState.runDir
-    cellsDir: managerState.cellsDir
+    filesDir: managerState.filesDir
     manifestPath: managerState.manifestPath
-    cells: managerState.cells
+    files: managerState.files
     currentPool: managerState.currentPool
   try
     managerCfg.appDir = appDir
     managerState.runDir = runDir
-    managerState.cellsDir = null
+    managerState.filesDir = null
     managerState.manifestPath = null
-    managerState.cells = {}
+    managerState.files = {}
     # A DIRECTORY at the bundle path makes the tmp+rename rewrite fail.
     brokenBundle = join(runDir, 'bundle-as-dir')
     mkdirSync brokenBundle, { recursive: true }
     managerState.currentPool = { bundle: brokenBundle }
-    onCellChange!()          # publish warns (no app id) and never blocks
+    onFileChange!()          # publish warns (no app id) and never blocks
     manifestPath = join(runDir, 'manifest.json')
     ok not existsSync(manifestPath), 'the manifest must be held back when the bundle rewrite fails'
-    ok existsSync(join(runDir, 'cells', encodeURIComponent('app/x.rip'))), 'module bytes are durable regardless'
+    ok existsSync(join(runDir, 'files', encodeURIComponent('app/x.rip'))), 'module bytes are durable regardless'
     # The next save against a writable bundle path writes bundle THEN manifest.
     goodBundle = join(runDir, 'bundle.json')
     managerState.currentPool = { bundle: goodBundle }
     writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
-    onCellChange!()
+    onFileChange!()
     ok existsSync(goodBundle), 'the pool bundle is rewritten'
     m = JSON.parse readFileSync(manifestPath, 'utf8')
-    eq m.files, [{ id: 'app/x.rip', etag: cellHash('export A = 2') }]
+    eq m.files, [{ id: 'app/x.rip', etag: fileHash('export A = 2') }]
   finally
     managerCfg.appDir = saved.appDir
     managerState.runDir = saved.runDir
-    managerState.cellsDir = saved.cellsDir
+    managerState.filesDir = saved.filesDir
     managerState.manifestPath = saved.manifestPath
-    managerState.cells = saved.cells
+    managerState.files = saved.files
     managerState.currentPool = saved.currentPool
     rmSync appDir, { recursive: true, force: true }
     rmSync runDir, { recursive: true, force: true }

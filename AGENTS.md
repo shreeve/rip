@@ -283,8 +283,10 @@ alters surface syntax updates ALL THREE in the same change.
   (path-keyed, e.g. `app/mood.rip`); in-memory record = **passport**;
   swappable component identity = **component definition**. Not
   “cell.” Wire freshness is `{ id, etag }` — no monotonic `rev` on
-  ding/manifest/passport. “File” means OS path / editor buffer, not
-  the bag noun.
+  ding/manifest/passport. Manifest + on-disk door store use **files**
+  (`{ files: [{id,etag}] }`, `runDir/files`, env `RIP_FILES_DIR`).
+  “File” in prose also means OS path / editor buffer; it is not a
+  synonym for the bag’s module/passport nouns.
 - **Comments explain non-obvious intent** — invariants, constraints,
   why a trade-off was taken. Never narrate what code obviously does,
   never reference project history or future plans. A comment that

@@ -119,9 +119,9 @@ export state =
   browserRuntime: null # dist/browser/rip.js, copied into runDir when app/ exists
   buildCounter: 0      # one app artifact per boot epoch, uniquely named
   runDir: null         # tmpdir holding the doorbell, worker sockets, artifacts
-  cellsDir: null       # latest file bytes under runDir/cells (env RIP_CELLS_DIR)
-  manifestPath: null   # the atomically rewritten cell manifest
-  cells: {}            # id (birth store path, 'app/…') → { id, hash, retired }
+  filesDir: null       # latest module bytes under runDir/files (env RIP_FILES_DIR)
+  manifestPath: null   # the atomically rewritten file manifest
+  files: {}            # id (birth store path, 'app/…') → { id, hash, retired }
   bellPath: null
   bell: null
   watcher: null
@@ -367,23 +367,23 @@ buildBundle = (walk) ->
   Bun.write! out, assembleBundleText!(walk)
   out
 
-# Deep-clone the cell registry so a scrapped epoch build can restore it —
-# buildApp advances cells + manifest before bootLoop knows whether the
+# Deep-clone the file registry so a scrapped epoch build can restore it —
+# buildApp advances files + manifest before bootLoop knows whether the
 # artifact will publish, and a scrap that only unlinks the bundle would
 # leave the manifest naming revs whose bundle file is gone.
-snapshotCells = ->
+snapshotFiles = ->
   out = {}
-  for path, entry of state.cells
+  for path, entry of state.files
     out[path] = { id: entry.id, hash: entry.hash, retired: entry.retired }
   out
 
-# Restore the cell registry and rewrite the manifest. Exported as the
+# Restore the file registry and rewrite the manifest. Exported as the
 # scrap pin's seam — bootLoop calls this whenever a build's bundle will
 # not stay published. A rewrite failure is loud — a silent leave-behind
 # would re-open the pairing the restore exists to close.
-export revertCellsAndManifest = (cellsBefore) ->
+export revertFilesAndManifest = (filesBefore) ->
   return unless cfg.watch
-  state.cells = cellsBefore
+  state.files = filesBefore
   return unless state.manifestPath?
   writeManifest!()
 
@@ -399,11 +399,11 @@ export buildApp = ->
     # The bundle is durable (buildBundle wrote it) BEFORE the manifest
     # names the new revs — the correlation invariant below. Watch only:
     # the feed surface exists exactly where saves can ding it. With
-    # watch off (production) no cells, no manifest, and the boot page
-    # stays plain — production has no hub (Q2). One snapshot: syncCells
+    # watch off (production) no files, no manifest, and the boot page
+    # stays plain — production has no hub (Q2). One snapshot: syncFiles
     # and the bundle consume the SAME modules map, so a save landing
     # after the walk cannot invent the reverse pairing.
-    syncCells!(modules)
+    syncFiles!(modules)
     writeManifest!()
   { artifact, bundle }
 
@@ -432,7 +432,7 @@ shortHash = (hash) -> hash.slice(0, 16)
 
 # Latest-only on-disk name: the percent-encoded store id (contains
 # slashes). Mirrored by the /app/* route in server.rip.
-moduleFile = (id) -> join(state.cellsDir, encodeURIComponent(id))
+moduleFile = (id) -> join(state.filesDir, encodeURIComponent(id))
 
 # Sync the registry against a modules snapshot and write what changed. A new
 # path mints its id — the birth path, Q3/B′. A changed path updates its
@@ -442,18 +442,18 @@ moduleFile = (id) -> join(state.cellsDir, encodeURIComponent(id))
 # retire + mint (id persistence across renames is open research). The
 # caller supplies the snapshot — a second disk walk here would re-open
 # the silent-stale class. Returns the changed { id, hash, deleted? } entries.
-syncCells = (walk) ->
+syncFiles = (walk) ->
   modules = walk.modules
-  state.cellsDir ?= join(state.runDir, 'cells')
+  state.filesDir ?= join(state.runDir, 'files')
   state.manifestPath ?= join(state.runDir, 'manifest.json')
-  mkdirSync state.cellsDir, { recursive: true }
+  mkdirSync state.filesDir, { recursive: true }
   changed = []
   for path, source of modules
     h = sha256hex(source)
-    entry = state.cells[path]
+    entry = state.files[path]
     if not entry?
       entry = { id: path, hash: h, retired: false }
-      state.cells[path] = entry
+      state.files[path] = entry
       changed.push entry
     else if entry.retired
       entry.retired = false
@@ -462,7 +462,7 @@ syncCells = (walk) ->
     else if entry.hash isnt h
       entry.hash = h
       changed.push entry
-  for path, entry of state.cells
+  for path, entry of state.files
     if not modules[path]? and not entry.retired
       entry.retired = true
       changed.push { id: entry.id, hash: entry.hash, deleted: true }
@@ -482,7 +482,7 @@ syncCells = (walk) ->
 # torn document.
 writeManifest = ->
   live = []
-  for path, entry of state.cells
+  for path, entry of state.files
     # The id IS the store path (B′ — the birth path is the id, a rename
     # retires and mints), so the entry carries one spelling of that fact.
     live.push { id: entry.id, etag: shortHash(entry.hash) } unless entry.retired
@@ -505,37 +505,38 @@ refreshPoolBundle = (walk) ->
   Bun.write! tmp, assembleBundleText!(walk)
   renameSync tmp, pool.bundle
 
-# The cell path: cells, then the bundle, then the manifest — every document
-# durable BEFORE the ding names the new revs, and the manifest last (the
-# correlation invariant on writeManifest). A reassembly failure warns and
-# HOLDS THE MANIFEST BACK — a manifest naming revs the bundle does not carry
-# would silently strand fresh boots — while the dings still publish: live
-# feeds fetch cells directly and never need the manifest for a named rev.
-# A publish failure warns and never blocks the cell path or crashes the
-# manager — the cell bytes are already servable. Exported as an in-process
+# The file-feed path: files, then the bundle, then the manifest — every
+# document durable BEFORE the ding names the new etags, and the manifest
+# last (the correlation invariant on writeManifest). A reassembly failure
+# warns and HOLDS THE MANIFEST BACK — a manifest naming etags the bundle
+# does not carry would silently strand fresh boots — while the dings still
+# publish: live feeds fetch modules directly and never need the manifest
+# for a named etag. A publish failure warns and never blocks the file-feed
+# path or crashes the manager — the module bytes are already servable.
+# Exported as an in-process
 # test seam (the manifest-holdback and serialization pins drive it directly).
 #
 # Runs SERIALIZE on one promise chain: overlapping runs would race on the
 # shared tmp paths (manifest.json.tmp, the pool bundle's .tmp), and
 # interleaved writes can land a torn document through the rename. A run's
 # failure surfaces to its own caller and never blocks the next run.
-cellChain = Promise.resolve()
+fileChain = Promise.resolve()
 
-export onCellChange = ->
-  next = cellChain.then -> runCellChange()
-  cellChain = next.catch -> null
+export onFileChange = ->
+  next = fileChain.then -> runFileChange()
+  fileChain = next.catch -> null
   next
 
-runCellChange = ->
+runFileChange = ->
   modules = readAppModules!()
   return unless modules?
   state.afterAppSnapshot?()
-  changed = syncCells!(modules)
+  changed = syncFiles!(modules)
   try
     refreshPoolBundle!(modules)
     writeManifest!()
   catch e
-    warn "rip-server: bundle/manifest rewrite failed on the cell path — manifest held back: #{e?.message or e}"
+    warn "rip-server: bundle/manifest rewrite failed on the file-feed path — manifest held back: #{e?.message or e}"
   dings = changed.map (c) ->
     ding = { id: c.id, etag: shortHash(c.hash) }
     ding.kind = 'delete' if c.deleted is true
@@ -569,7 +570,7 @@ spawnWorker = (pool) ->
     # boot page). Production (watch off) never sets them — production
     # has no hub and its pages boot plain (Q2, backout charter).
     if cfg.watch
-      env.RIP_CELLS_DIR = state.cellsDir
+      env.RIP_FILES_DIR = state.filesDir
       env.RIP_MANIFEST_PATH = state.manifestPath
     env.RIP_BRIDGE_PATH = cfg.bridge if cfg.bridge?
   proc = Bun.spawn ['bun', state.workerJs],
@@ -746,15 +747,15 @@ bootLoop = ->
   loop
     state.dirty = false
     build = null
-    # buildApp advances cells + manifest before we know whether this
+    # buildApp advances files + manifest before we know whether this
     # artifact will publish. Snapshot the registry so a scrap can restore
     # it — otherwise the manifest would name revs whose bundle file was
     # unlinked (the silent-stale class on the epoch path).
-    cellsBefore = snapshotCells()
+    filesBefore = snapshotFiles()
     try
       build = buildApp!()
     catch err
-      revertCellsAndManifest cellsBefore
+      revertFilesAndManifest filesBefore
       continue if state.dirty        # files changed mid-build; the failure may be stale
       state.bootFailure = err?.message or String(err)
       warn "rip-server: app build failed: #{state.bootFailure}"
@@ -762,21 +763,21 @@ bootLoop = ->
     if state.dirty                   # saved during the build — this artifact is stale
       try unlinkSync build.artifact
       try unlinkSync build.bundle if build.bundle?
-      revertCellsAndManifest cellsBefore
+      revertFilesAndManifest filesBefore
       continue
     pool = spawnPool(build.artifact, build.bundle)
     try
       awaitReady! pool, state.readyWhen
     catch err
       scrapPool pool
-      revertCellsAndManifest cellsBefore
+      revertFilesAndManifest filesBefore
       continue if state.dirty        # files changed mid-boot; the failure may be stale
       state.bootFailure = err?.message or String(err)
       warn "rip-server: pool boot failed: #{state.bootFailure}"
       throw err
     if state.dirty                   # check at publish: never publish a stale pool
       scrapPool pool
-      revertCellsAndManifest cellsBefore
+      revertFilesAndManifest filesBefore
       continue
     # The enqueued fn runs behind whatever the writer chain already holds —
     # a save or a shutdown can land in that gap, so re-check inside the
@@ -798,7 +799,7 @@ bootLoop = ->
     return
 
 # A pool SWAP is an epoch: every connected page holds pre-swap code, and no
-# cell ding describes a server change. The manager dings the dev channel with
+# ding describes a server change. The manager dings the dev channel with
 # the new epoch so open browsers reload into it — the apply policy for a
 # server change IS the full page reload. Fire-and-forget: a publish failure
 # warns and never blocks the boot (the reload is a courtesy; a manual refresh
@@ -895,7 +896,7 @@ hashApp = ->
   { hash: hasher.digest('hex'), files: map }
 
 # Every changed, added, or removed path between two walks lies under
-# app/ — then the save is a cell feed, not a reload.
+# app/ — then the save is a file feed, not a reload.
 clientOnlyChange = (prev, cur) ->
   boundary = join(cfg.appDir, 'app') + '/'
   for path, h of cur
@@ -915,7 +916,7 @@ settle = ->
   # pool to feed (admission already cut, a cached boot failure, mid-reload)
   # the save joins the pending epoch exactly as a server save would.
   if prev? and state.currentPool? and not state.dirty and not state.bootFailure? and clientOnlyChange(prev, snap.files)
-    onCellChange().catch (e) -> warn "rip-server: cell update failed: #{e?.message or e}"
+    onFileChange().catch (e) -> warn "rip-server: file-feed update failed: #{e?.message or e}"
     return
   onContentChange()
 
