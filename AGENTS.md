@@ -277,6 +277,12 @@ alters surface syntax updates ALL THREE in the same change.
   or choose the nearest idiomatic alternative; never paper over with
   curly-brace JS style. Read nearby `.rip` for the local dialect
   before writing new code.
+- **Workspace vocabulary (door / apply):** bag unit = **module**
+  (path-keyed, e.g. `app/mood.rip`); in-memory record = **passport**;
+  swappable component identity = **component definition**. Not
+  “cell.” Wire freshness is `{ id, etag }` — no monotonic `rev` on
+  ding/manifest/passport. “File” means OS path / editor buffer, not
+  the bag noun.
 - **Comments explain non-obvious intent** — invariants, constraints,
   why a trade-off was taken. Never narrate what code obviously does,
   never reference project history or future plans. A comment that
