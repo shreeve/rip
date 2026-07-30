@@ -9200,6 +9200,8 @@ class Emitter {
     this.pins = pins;
     this.pinnables = [];
     this.mutables = [];
+    this.enums = [];
+    this.importedRefs = [];
     this.strict = strict;
     this.ts = face === "ts";
     this.pendingHoistTypes = new Map;
@@ -9210,6 +9212,7 @@ class Emitter {
     this.pendingSigs = new WeakMap;
     this.pendingTypeDecls = [];
     this.primitiveAvoid = null;
+    this.declaringName = false;
     this.vocabulary = [];
     this.silences = [];
     this.memberDecls = [];
@@ -9447,6 +9450,19 @@ class Emitter {
     }
     return names;
   }
+  static declaredEnumNames(stmts) {
+    const names = new Set;
+    const declared = (s) => {
+      if (isNode4(s) && s[0] === "enum" && typeof s[1] === "string")
+        names.add(s[1]);
+    };
+    for (const s of stmts) {
+      declared(s);
+      if (isNode4(s) && s[0] === "export" && isNode4(s[1]))
+        declared(s[1]);
+    }
+    return names;
+  }
   nodeLine(node) {
     const id = this.stores.idOf(node);
     const span = id !== null ? this.stores.selfSpan(id) : null;
@@ -9655,6 +9671,8 @@ class Emitter {
       reactive,
       computed: this.collectComputedNames(stmts),
       bound: new Set([...bound, ...Emitter.declaredNames(stmts), ...handles, ...readonly]),
+      enums: Emitter.declaredEnumNames(stmts),
+      importSpecs: Emitter.importedSpecs(stmts),
       exportedConst: Emitter.exportedConstNames(stmts)
     });
     return new Set([...reactive, ...handles, ...readonly]);
@@ -9679,6 +9697,31 @@ class Emitter {
   }
   isReactiveName(name) {
     return this.resolveBareRead(name) === "reactive";
+  }
+  isEnumName(name) {
+    for (let i = this.rframes.length - 1;i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.enums !== undefined && f.enums.has(name))
+        return true;
+      if (f.reactive.has(name) || f.bound.has(name))
+        return false;
+      if (f.members !== undefined && f.members.has(name))
+        return false;
+    }
+    return false;
+  }
+  importSpecOf(name) {
+    for (let i = this.rframes.length - 1;i >= 0; i--) {
+      const f = this.rframes[i];
+      const spec = f.importSpecs?.get(name);
+      if (spec !== undefined)
+        return spec;
+      if (f.reactive.has(name) || f.bound.has(name))
+        return null;
+      if (f.members !== undefined && f.members.has(name))
+        return null;
+    }
+    return null;
   }
   isComputedName(name) {
     for (let i = this.rframes.length - 1;i >= 0; i--) {
@@ -9824,9 +9867,37 @@ class Emitter {
     const span = this.ts && typeof value === "string" ? this.b.claimPrimitiveSpan(value, this.primitiveAvoid) : null;
     if (owner !== null && span !== null) {
       const role = isIdentifierName(value) ? "identifier" : "literal";
-      this.b.markSpan(owner.nodeId, role, span[0], span[1], () => this.b.emit(value));
+      this.b.markSpan(owner.nodeId, role, span[0], span[1], () => this.noteNameSpan(value));
     } else {
+      this.noteNameSpan(value);
+    }
+  }
+  noteNameSpan(value) {
+    if (!this.ts || this.declaringName || typeof value !== "string" || !isIdentifierName(value)) {
       this.b.emit(value);
+      return;
+    }
+    const start = this.b.offset;
+    this.b.emit(value);
+    if (this.isEnumName(value)) {
+      this.enums.push([start, this.b.offset]);
+      return;
+    }
+    if (this.isReactiveName(value) && !this.isComputedName(value)) {
+      this.mutables.push([start, this.b.offset]);
+      return;
+    }
+    const spec = this.importSpecOf(value);
+    if (spec !== null)
+      this.importedRefs.push([start, this.b.offset, value, spec]);
+  }
+  withDeclaredName(fn) {
+    const prev = this.declaringName;
+    this.declaringName = true;
+    try {
+      return fn();
+    } finally {
+      this.declaringName = prev;
     }
   }
   noteVocabulary(kind, word, container) {
@@ -9943,10 +10014,10 @@ class Emitter {
       const match = sourceTokens.findIndex((s, i) => i >= sourceAt && s.value === token.value);
       if (match >= 0) {
         const s = sourceTokens[match];
-        this.b.markSpan(id, "identifier", s.start, s.end, () => this.b.emit(token.value));
+        this.b.markSpan(id, "identifier", s.start, s.end, () => this.noteNameSpan(token.value));
         sourceAt = match + 1;
       } else {
-        this.b.emit(token.value);
+        this.noteNameSpan(token.value);
       }
       generatedAt = token.end;
     }
@@ -10993,6 +11064,20 @@ class Emitter {
     }
     return names;
   }
+  static importedSpecs(stmts) {
+    const specs = new Map;
+    for (const node of stmts) {
+      if (!isNode4(node) || node[0] !== "import" || node.length < 3)
+        continue;
+      const source = node[node.length - 1];
+      if (typeof source !== "string")
+        continue;
+      const specifier = source.replace(/^['"`]|['"`]$/g, "");
+      for (const name of Emitter.importedNames([node]))
+        specs.set(name, specifier);
+    }
+    return specs;
+  }
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {
@@ -11413,7 +11498,7 @@ class Emitter {
     const ownKey = Emitter.ownKeyText;
     this.mark(node, "$self", () => {
       this.b.emit("const ");
-      this.mark(node, "name", () => this.b.emit(name));
+      this.mark(node, "name", () => this.noteNameSpan(name));
       this.b.emit(" = ");
       this.mark(node, "body", () => {
         this.b.emit("{");
@@ -17976,7 +18061,7 @@ ${this.replayPad}}` : " }");
         this.mark(stmt, "$self", () => this.mark(stmt, "annotation", () => {
           if (isStaticKey(stmt[1]))
             this.b.emit("static ");
-          this.mark(stmt, "target", () => this.emitPrimitive(memberName(stmt[1])));
+          this.mark(stmt, "target", () => this.withDeclaredName(() => this.emitPrimitive(memberName(stmt[1]))));
           if (this.ts)
             this.tsAnnotate(stmt, "annotation", this.annotationText(stmt) ?? tidyType(stmt[2]));
         }));
@@ -17990,7 +18075,7 @@ ${this.replayPad}}` : " }");
         this.mark(stmt, "annotation", () => this.mark(stmt, "$self", () => {
           if (isStaticKey(stmt[1]))
             this.b.emit("static ");
-          this.mark(stmt, "target", () => this.emitPrimitive(memberName(stmt[1])));
+          this.mark(stmt, "target", () => this.withDeclaredName(() => this.emitPrimitive(memberName(stmt[1]))));
           if (this.ts && this.annotationText(stmt) !== null) {
             this.tsAnnotate(stmt, "annotation", this.annotationText(stmt));
           }
@@ -18233,7 +18318,7 @@ ${"  ".repeat(ind)}`);
   }
   emitParam(p) {
     if (typeof p === "string")
-      return this.emitPrimitive(p);
+      return this.withDeclaredName(() => this.emitPrimitive(p));
     if (p[0] === "typed-var") {
       this.mark(p, "$self", () => this.mark(p, "annotation", () => {
         this.mark(p, "target", () => this.emitParam(p[1]));
@@ -19800,7 +19885,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -20388,6 +20473,8 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     tsRegions: emitted.tsRegions,
     pinnables: emitted.pinnables,
     mutables: emitted.mutables,
+    enums: emitted.enums,
+    importedRefs: emitted.importedRefs,
     imports: emitted.imports,
     trivia: result.trivia ?? [],
     get declarations() {

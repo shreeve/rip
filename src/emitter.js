@@ -244,8 +244,28 @@ class Emitter {
     // the container, not the binding the author writes to. Only the emitter can
     // tell them apart — `=!`, `~=` and `~>` also emit `const` and really are
     // immutable — so it reports the state names and the editor clears the
-    // modifier on those alone.
+    // modifier on those alone. Recorded at EVERY occurrence, not the
+    // declaration alone: `readonly` describes the BINDING, so a name
+    // cleared where it is declared and painted immutable where it is
+    // written and read is three colors for one binding, and the write
+    // site is the position that proves the classification false.
     this.mutables = [];
+    // Generated `[start, end]` spans of ENUM names, every occurrence. The
+    // lowering emits a const object plus a companion type alias sharing
+    // the name, so the two symbols MERGE and tsgo classifies the merged
+    // symbol — `type` wins at the declaration, the annotation and the
+    // value use alike. The lowering is deliberate (a native TS enum
+    // diverges at runtime), so the color is corrected rather than the
+    // emission changed.
+    this.enums = [];
+    // Generated spans of every reference to an IMPORTED name, each with
+    // the module it came from: `[start, end, name, specifier]`. One
+    // file's compile cannot know an imported name's KIND — that lives in
+    // the declaring module — so the compiler reports WHERE to ask and
+    // WHOM, and the editor resolves. The enum correction needs it because
+    // an enum's uses in a consuming module carry the same merged-symbol
+    // `type` classification its declaration does.
+    this.importedRefs = [];
     // rip.strict (presentation-only, E): typed forwards and pins emit
     // WITHOUT the `!` definite-assignment assertion, so use-before-
     // assign is checked (TS2454) instead of silenced. TS-only glyphs
@@ -296,6 +316,11 @@ class Emitter {
     // which has no role of its own and would otherwise claim out of the body.
     // Null everywhere else; set tightly around one emission and always restored.
     this.primitiveAvoid = null;
+    // Inside an emission that WRITES A NAME BEING DECLARED (a parameter,
+    // a class member). The token-correction channels record references,
+    // and a declaration of the same spelling is not one — see
+    // withDeclaredName.
+    this.declaringName = false;
     // Source spans the compiler CONSUMES as its own vocabulary: words that are
     // syntax in their position and reach no face entity, so no honest mapping
     // row can exist for them. Recorded (TS face only) so the mapping census can
@@ -763,6 +788,25 @@ class Emitter {
     return names;
   }
 
+  // The ENUM subset of the above. `enum` is the one declaration whose
+  // token color the face cannot carry — the lowering emits a const
+  // object plus a companion type alias, the two symbols merge, and tsgo
+  // classifies the merged symbol `type` at every position. The editor
+  // rewrites it back, and needs to know which names those are with the
+  // same scope discipline every other name question here gets: a local
+  // that re-binds the spelling is not the enum.
+  static declaredEnumNames(stmts) {
+    const names = new Set();
+    const declared = (s) => {
+      if (isNode(s) && s[0] === 'enum' && typeof s[1] === 'string') names.add(s[1]);
+    };
+    for (const s of stmts) {
+      declared(s);
+      if (isNode(s) && s[0] === 'export' && isNode(s[1])) declared(s[1]);
+    }
+    return names;
+  }
+
   // The 1-based source line of a node's span start — for diagnostics
   // that name a PRIOR site inside the message body (the redeclaration
   // rejection); null when the node has no recorded span or the
@@ -1022,6 +1066,8 @@ class Emitter {
       reactive,
       computed: this.collectComputedNames(stmts),
       bound: new Set([...bound, ...Emitter.declaredNames(stmts), ...handles, ...readonly]),
+      enums: Emitter.declaredEnumNames(stmts),
+      importSpecs: Emitter.importedSpecs(stmts),
       exportedConst: Emitter.exportedConstNames(stmts),
     });
     return new Set([...reactive, ...handles, ...readonly]);
@@ -1057,6 +1103,35 @@ class Emitter {
   // Does `name` read (or write) as a reactive container here?
   isReactiveName(name) {
     return this.resolveBareRead(name) === 'reactive';
+  }
+
+  // Does `name` name an ENUM here? The walk mirrors resolveBareRead, and
+  // the `enums` test precedes `bound` within a frame because
+  // declaredNames puts every enum in `bound` too — an inner frame's own
+  // binding still shadows, which is the whole reason this resolves
+  // rather than matching the spelling.
+  isEnumName(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.enums !== undefined && f.enums.has(name)) return true;
+      if (f.reactive.has(name) || f.bound.has(name)) return false;
+      if (f.members !== undefined && f.members.has(name)) return false;
+    }
+    return false;
+  }
+
+  // The module `name` was imported from, or null when `name` is not an
+  // import here. Same walk as isEnumName, same reason: an inner binding
+  // that re-uses the spelling is not the import.
+  importSpecOf(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      const spec = f.importSpecs?.get(name);
+      if (spec !== undefined) return spec;
+      if (f.reactive.has(name) || f.bound.has(name)) return null;
+      if (f.members !== undefined && f.members.has(name)) return null;
+    }
+    return null;
   }
 
   // The computed (`~=`) subset of the innermost frame that binds
@@ -1258,10 +1333,42 @@ class Emitter {
       ? this.b.claimPrimitiveSpan(value, this.primitiveAvoid) : null;
     if (owner !== null && span !== null) {
       const role = isIdentifierName(value) ? 'identifier' : 'literal';
-      this.b.markSpan(owner.nodeId, role, span[0], span[1], () => this.b.emit(value));
+      this.b.markSpan(owner.nodeId, role, span[0], span[1], () => this.noteNameSpan(value));
     } else {
-      this.b.emit(value);
+      this.noteNameSpan(value);
     }
+  }
+
+  // Emit a name, recording the token-correction channels it belongs to.
+  // Both are the same question asked of one emission — which SPANS does
+  // the editor have to repaint, because the face's own classification
+  // describes the lowering rather than the binding — so they share the
+  // funnel every identifier already passes through, and the scope walks
+  // decide, never the spelling.
+  noteNameSpan(value) {
+    if (!this.ts || this.declaringName || typeof value !== 'string' || !isIdentifierName(value)) {
+      this.b.emit(value);
+      return;
+    }
+    const start = this.b.offset;
+    this.b.emit(value);
+    if (this.isEnumName(value)) { this.enums.push([start, this.b.offset]); return; }
+    if (this.isReactiveName(value) && !this.isComputedName(value)) { this.mutables.push([start, this.b.offset]); return; }
+    const spec = this.importSpecOf(value);
+    if (spec !== null) this.importedRefs.push([start, this.b.offset, value, spec]);
+  }
+
+  // A name being DECLARED is not a reference to whatever else holds that
+  // spelling. Both scope walks answer about the ENCLOSING scope, and at a
+  // parameter or a class member the binding being written is not in that
+  // scope yet — a parameter's own frame is pushed after its list is
+  // emitted, and a member name is a property, not a binding at all. Both
+  // resolved to the outer name and repainted it, which is how `enum
+  // Color` made the parameter of `def paint(Color)` read `enum`.
+  withDeclaredName(fn) {
+    const prev = this.declaringName;
+    this.declaringName = true;
+    try { return fn(); } finally { this.declaringName = prev; }
   }
 
   // Record `word` inside `container` as consumed vocabulary. Anchors on an
@@ -1405,10 +1512,10 @@ class Emitter {
       const match = sourceTokens.findIndex((s, i) => i >= sourceAt && s.value === token.value);
       if (match >= 0) {
         const s = sourceTokens[match];
-        this.b.markSpan(id, 'identifier', s.start, s.end, () => this.b.emit(token.value));
+        this.b.markSpan(id, 'identifier', s.start, s.end, () => this.noteNameSpan(token.value));
         sourceAt = match + 1;
       } else {
-        this.b.emit(token.value);
+        this.noteNameSpan(token.value);
       }
       generatedAt = token.end;
     }
@@ -3110,6 +3217,22 @@ class Emitter {
   }
 
   // Names an import statement binds in module scope.
+  // Each imported local name paired with the module it came from. The
+  // token corrections are computed from ONE file's compile, so an
+  // imported name's KIND is unknowable here — what is knowable, and all
+  // the editor needs, is which module to ask.
+  static importedSpecs(stmts) {
+    const specs = new Map();
+    for (const node of stmts) {
+      if (!isNode(node) || node[0] !== 'import' || node.length < 3) continue;
+      const source = node[node.length - 1];
+      if (typeof source !== 'string') continue;
+      const specifier = source.replace(/^['"`]|['"`]$/g, '');
+      for (const name of Emitter.importedNames([node])) specs.set(name, specifier);
+    }
+    return specs;
+  }
+
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {
@@ -3645,7 +3768,10 @@ class Emitter {
     const ownKey = Emitter.ownKeyText;
     this.mark(node, '$self', () => {
       this.b.emit('const ');
-      this.mark(node, 'name', () => this.b.emit(name));
+      // The declaration's own name joins the enum span channel here
+      // rather than through the identifier funnel: it is written
+      // directly, and it is the one occurrence that is not a read.
+      this.mark(node, 'name', () => this.noteNameSpan(name));
       this.b.emit(' = ');
       this.mark(node, 'body', () => {
         this.b.emit('{');
@@ -11900,7 +12026,7 @@ class Emitter {
         this.b.emit(pad);
         this.mark(stmt, '$self', () => this.mark(stmt, 'annotation', () => {
           if (isStaticKey(stmt[1])) this.b.emit('static ');
-          this.mark(stmt, 'target', () => this.emitPrimitive(memberName(stmt[1])));
+          this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitPrimitive(memberName(stmt[1]))));
           if (this.ts) this.tsAnnotate(stmt, 'annotation', this.annotationText(stmt) ?? tidyType(stmt[2]));
         }));
         this.b.emit(';\n');
@@ -11915,7 +12041,7 @@ class Emitter {
         this.b.emit(pad);
         this.mark(stmt, 'annotation', () => this.mark(stmt, '$self', () => {
           if (isStaticKey(stmt[1])) this.b.emit('static ');
-          this.mark(stmt, 'target', () => this.emitPrimitive(memberName(stmt[1])));
+          this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitPrimitive(memberName(stmt[1]))));
           if (this.ts && this.annotationText(stmt) !== null) {
             this.tsAnnotate(stmt, 'annotation', this.annotationText(stmt));
           }
@@ -12222,7 +12348,7 @@ class Emitter {
   // (`name = expr`), or an array/object pattern (emitted like the
   // matching literal — the pattern element cases live on object/array).
   emitParam(p) {
-    if (typeof p === 'string') return this.emitPrimitive(p);
+    if (typeof p === 'string') return this.withDeclaredName(() => this.emitPrimitive(p));
     // A typed parameter (["typed-var", target, "T"]) erases to its target;
     // the annotation role's cover row spans the emitted target — the
     // type's only generated manifestation. The TS face emits
@@ -14245,7 +14371,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

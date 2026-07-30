@@ -206,13 +206,11 @@ export const CONTRACT = [
   {
     name: 'token.type.enum', lane: 'token',
     property: 'an enum name is classified by its own declaring form',
-    redBecause: "an enum name's token says `type` where its declaring form fixes `enum` — delete this when the server classifies enum declarations by their own form",
     red: (s) => s.tk.badType.some((r) => r.want?.type === 'enum'),
   },
   {
     name: 'token.readonly', lane: 'token',
     property: "the readonly modifier follows the binding form, at declarations and at writes",
-    redBecause: 'a state write site keeps the readonly modifier its declaration carries, so writes to reactive state paint unwritable — delete this when the correction reaches use-site spans',
     red: (s) => s.tk.badReadonly.length > 0,
   },
 ];

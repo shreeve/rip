@@ -236,6 +236,16 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // Generated spans of `:=` state names — writable in rip, `const` in the
     // face. The editor clears TypeScript's `readonly` token modifier on these.
     mutables: emitted.mutables,
+    // Generated spans of every ENUM name occurrence. The face's const
+    // object and its companion type alias share the name, so the symbols
+    // merge and tsgo colors every position `type`; the editor repaints
+    // the construct the author declared. TS face only; empty otherwise.
+    enums: emitted.enums,
+    // Generated spans of every reference to an IMPORTED name, each with
+    // the module it came from. One file's compile cannot know an imported
+    // name's kind — the editor resolves the specifier and asks the
+    // declaring module. TS face only; empty otherwise.
+    importedRefs: emitted.importedRefs,
     // Emitted module-specifier spans, recorded at emission — the
     // browser module loader splices resolved specifiers by offset.
     imports: emitted.imports,
