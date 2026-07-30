@@ -94,4 +94,50 @@ test.describe('cart Probe 1 apply', () => {
       edit.restore();
     }
   });
+
+  test('CSS-only edit soft-applies without remount (S12)', async ({ page }) => {
+    await bootCart(page);
+    await page.evaluate(() => {
+      globalThis.__wsSentinel = 'alive';
+      const nav = document.querySelector('nav');
+      if (nav) nav.__layoutSentinel = 'alive';
+    });
+    const add = page.getByRole('button', { name: 'Add to Cart' }).first();
+    await expect(add).toBeVisible({ timeout: 15000 });
+    await add.click();
+    await expect(page.locator('nav')).toContainText('Cart (1)', { timeout: 10000 });
+
+    const token = `s12-${Date.now()}`;
+    const edit = await editFile('app/styles.css', (src) =>
+      src.replace(':root {', `:root {\n  --rip-s12: ${token};`));
+
+    try {
+      await expect.poll(async () =>
+        page.evaluate(() =>
+          getComputedStyle(document.documentElement).getPropertyValue('--rip-s12').trim()),
+      { timeout: 15000 }).toBe(token);
+
+      expect(await page.evaluate(() =>
+        !!document.querySelector('style[data-rip-css="app/styles.css"]'))).toBe(true);
+      expect(await page.evaluate(() => {
+        const link = [...document.querySelectorAll('link[rel="stylesheet"]')]
+          .find((l) => (l.getAttribute('href') || '').includes('styles.css'));
+        return link?.disabled === true;
+      })).toBe(true);
+      expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
+      expect(await page.evaluate(() => document.querySelector('nav')?.__layoutSentinel)).toBe('alive');
+      await expect(page.locator('nav')).toContainText('Cart (1)');
+
+      const frames = await (await fetch(`${HARNESS}/__test/frames`)).json();
+      expect(frames.length).toBeGreaterThan(0);
+      const last = JSON.parse(frames[frames.length - 1]);
+      expect(Object.keys(last)).toEqual(['ding']);
+      expect(last.ding.id).toBe('app/styles.css');
+      expect(typeof last.ding.etag).toBe('string');
+      expect(last.ding.kind).toBeUndefined();
+      expect(frames[frames.length - 1].includes('--rip-s12')).toBe(false);
+    } finally {
+      edit.restore();
+    }
+  });
 });

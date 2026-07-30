@@ -40,14 +40,18 @@ export type Workspace =
   ids: () => string[]
   paths: () => string[]
 
+# Bag paths: Rip modules and CSS sheets (S12 soft-apply). Route/component
+# stores stay .rip-only in components.rip.
+isBagPath = (name) -> name.endsWith('.rip') or name.endsWith('.css')
+
 validPath = (path) ->
   unless typeof path is 'string' and path.length > 0
     throw new TypeError 'Rip Workspace: component path must be a non-empty string'
   segments = path.split '/'
   invalidSegment = segments.some (segment) -> not segment or segment is '.' or segment is '..'
   filename = segments[-1]
-  fileAsDirectory = segments.slice(0, -1).some (segment) -> segment.endsWith '.rip'
-  if path.includes('\\') or invalidSegment or fileAsDirectory or filename is '.rip' or not filename.endsWith('.rip')
+  fileAsDirectory = segments.slice(0, -1).some (segment) -> isBagPath segment
+  if path.includes('\\') or invalidSegment or fileAsDirectory or filename is '.rip' or filename is '.css' or not isBagPath(filename)
     throw new TypeError "Rip Workspace: invalid component path '#{path}'"
   path
 

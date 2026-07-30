@@ -20,6 +20,15 @@ test! "absorb no-ops on empty or non-app paths", ->
   eq apply.absorb!(['api/x.rip']), 'noop'
   eq calls, []
 
+test! "absorb no-ops on CSS-only dirty sets (S12 soft-apply)", ->
+  calls = []
+  apply = createApply
+    renderer: remountDirty: (paths) -> calls.push ['narrow', paths]; 'narrow'
+    escape: (paths) -> calls.push ['escape', paths]
+  eq apply.absorb!(['app/styles.css']), 'noop'
+  eq apply.absorb!(['app/styles.css', 'app/theme.css']), 'noop'
+  eq calls, []
+
 test! "absorb prefers narrow remount when the renderer accepts", ->
   logs = []
   escaped = []

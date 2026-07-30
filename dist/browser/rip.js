@@ -23122,9 +23122,44 @@ async function bootApp(opts = {}) {
   let remounting = false;
   const pending = new Set;
   const handle = {};
+  const isCssPath = (path) => typeof path === "string" && path.endsWith(".css");
+  const applyCssSheet = (id, source) => {
+    if (typeof document === "undefined" || typeof source !== "string")
+      return;
+    let el = null;
+    for (const node of document.querySelectorAll("style[data-rip-css]")) {
+      if (node.getAttribute("data-rip-css") === id) {
+        el = node;
+        break;
+      }
+    }
+    if (!el) {
+      el = document.createElement("style");
+      el.setAttribute("data-rip-css", id);
+      document.head.appendChild(el);
+    }
+    el.textContent = source;
+    const base = id.includes("/") ? id.slice(id.lastIndexOf("/") + 1) : id;
+    for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
+      const href = link.getAttribute("href") || "";
+      if (href === `/${base}` || href.endsWith(`/${base}`) || href === base) {
+        link.disabled = true;
+      }
+    }
+  };
+  const removeCssSheet = (id) => {
+    if (typeof document === "undefined")
+      return;
+    for (const node of [...document.querySelectorAll("style[data-rip-css]")]) {
+      if (node.getAttribute("data-rip-css") === id)
+        node.remove();
+    }
+  };
   const escapeRemount = async (applied) => {
     const snapshot = {};
     for (const path of bag.paths()) {
+      if (isCssPath(path))
+        continue;
       snapshot[path] = { ...await loader.import(path) };
     }
     for (const [path, module] of Object.entries(snapshot)) {
@@ -23164,6 +23199,8 @@ async function bootApp(opts = {}) {
     try {
       const snapshot = {};
       for (const path of bag.paths()) {
+        if (isCssPath(path))
+          continue;
         try {
           snapshot[path] = { ...await loader.import(path) };
         } catch (error) {
@@ -23191,6 +23228,8 @@ async function bootApp(opts = {}) {
   const unwatch = bag.watch((_event, path) => {
     if (!path.startsWith("app/"))
       return;
+    if (isCssPath(path))
+      return;
     pending.add(path);
     timer ??= setTimeout(absorb, 25);
   });
@@ -23208,12 +23247,24 @@ async function bootApp(opts = {}) {
           return false;
         const path2 = bag.passport(passport.id)?.path;
         if (path2 !== undefined) {
-          files.delete(path2);
-          loader.invalidate(path2);
+          if (isCssPath(path2)) {
+            removeCssSheet(path2);
+          } else {
+            files.delete(path2);
+            loader.invalidate(path2);
+          }
         }
         return bag.set(passport);
       }
       const path = passport.path ?? passport.id;
+      if (isCssPath(path)) {
+        const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
+        if (applied) {
+          applyCssSheet(path, passport.source);
+          console.log(`[Rip] applied ${path} — css soft-apply (no remount)`);
+        }
+        return applied;
+      }
       files.set(path, passport.source);
       loader.invalidate(path);
       let module;

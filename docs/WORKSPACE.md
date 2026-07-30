@@ -369,7 +369,7 @@ this suite (**S1–S15**), with industry rows as citations.
 | S9 | **Effect cleanup** ownership on replace | Outgoing effects dispose exactly once; no orphan timers/listeners | industry + Rip effect model (HMR.md) |
 | S10 | **Compile failure** mid-edit | Last-known-good stays interactive; overlay; no bag corruption | industry (Vite error overlay; RFR redbox) |
 | S11 | **Activation failure** after successful compile | Roll back apply; door passport may still show new etag only after successful activation — **open** (transaction vs door ordering). Mutation safety: a failed activation must not leave living instances half-applied. |
-| S12 | **CSS-only** shared sheet | Style update; zero component remount | industry |
+| S12 | **CSS-only** shared sheet | Style update via `<style data-rip-css>`; zero component remount; ding `{id,etag}` (extension branches — no `kind:style`) | industry (Probe 1 pin on cart) |
 | S13 | Rename file on disk (**B′ id stable**) | Same component identity; apply continues against id not path | open (Q3; no industry twin) |
 | S14 | Hub ding with **stale / duplicate etag** | Ignore or coalesce; no double-apply corruption | industry (door; etag equality) |
 | S15 | Intentional **force remount** | Author/tooling can request remount without full reload | industry (`@refresh reset`) |
