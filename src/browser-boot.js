@@ -247,40 +247,57 @@ export async function bootApp(opts = {}) {
 
   const report = opts.feed?.report ?? ((...args) => console.error(...args));
 
-  // The escape apply: any route or app mutation coalesces into one
-  // remount of the whole launch against the same bag — the cached
-  // graph makes the relaunch legal (no second renderer claim). This is
-  // the labeled escape (D7), not hot apply.
-  //
-  // Projections rebuild THROUGH the loader, never from the bag's cache:
-  // a dinged cell's importers are invalidated transitively (they splice
-  // its object URL), so their bag projections are stale the moment the
-  // cell lands. Unchanged modules answer from the loader's own cache.
+  // Apply: compile barrier, then createApply chooses narrow remount
+  // (route/layout; stash kept) or the labeled whole-launch escape (D7).
+  // Projections rebuild THROUGH the loader; importers invalidate
+  // transitively. Unchanged modules answer from the loader cache.
   let destroyed = false;
   let timer = null;
   let remounting = false;
   const pending = new Set();
   const handle = {};
-  const remount = async () => {
+  const escapeRemount = async (applied) => {
+    const snapshot = {};
+    for (const path of bag.paths()) {
+      snapshot[path] = { ...(await loader.import(path)) };
+    }
+    for (const [path, module] of Object.entries(snapshot)) {
+      bag.setCompiled(path, module);
+    }
+    current.destroy();
+    current = launchWith(snapshot);
+    Object.assign(handle, current, stable);
+    console.log(`[Rip] applied ${applied.join(', ') || 'a change'} — remounted (component state reset)`);
+  };
+  const apply = app.createApply({
+    renderer: {
+      remountDirty: (paths) => current.renderer.remountDirty(paths),
+    },
+    escape: async (paths) => {
+      await escapeRemount(paths);
+    },
+    report: (...args) => {
+      if (typeof args[0] === 'string' && args[0].startsWith('[Rip] applied')) {
+        console.log(...args);
+      } else {
+        report(...args);
+      }
+    },
+  });
+  const absorb = async () => {
     timer = null;
     if (destroyed) return;
     if (remounting) {
-      timer = setTimeout(remount, 25);
+      timer = setTimeout(absorb, 25);
       return;
     }
     remounting = true;
-    // The changed paths drain here so the applied-log names what this
-    // remount actually absorbed; a save landing mid-remount stays
-    // pending for the next one.
     const applied = [...pending];
     pending.clear();
     try {
       // Compile barrier (S10/S11): stage every projection locally first.
-      // A single import failure means ZERO bag.setCompiled calls, no
-      // destroy, no relaunch — last-known-good stays interactive. The
-      // previous loop committed each success then tore down into a
-      // version-mixed launch on the first failure (the daily bug when
-      // a shared cell's importer breaks).
+      // A single import failure means ZERO bag.setCompiled calls and no
+      // apply — last-known-good stays interactive.
       const snapshot = {};
       for (const path of bag.paths()) {
         try {
@@ -294,18 +311,13 @@ export async function bootApp(opts = {}) {
       for (const [path, module] of Object.entries(snapshot)) {
         bag.setCompiled(path, module);
       }
-      // A cell can compile cleanly and still break launch (a contract
-      // violation like a stash module without stash). destroy() now
-      // always clears the launch globals even when a disposer throws, so
-      // a failed relaunch can recover on the next good change. Report
-      // loudly either way — never an unhandled rejection.
       try {
-        current.destroy();
-        current = launchWith(snapshot);
-        Object.assign(handle, current, stable);
-        console.log(`[Rip] applied ${applied.join(', ') || 'a change'} — remounted (component state reset)`);
+        const verdict = await apply.absorb(applied);
+        if (verdict === 'narrow' || verdict === 'noop') {
+          Object.assign(handle, current, stable);
+        }
       } catch (error) {
-        report('[Rip] remount failed — waiting for the next good change', error);
+        report('[Rip] apply failed — waiting for the next good change', error);
       }
     } finally {
       remounting = false;
@@ -314,7 +326,7 @@ export async function bootApp(opts = {}) {
   const unwatch = bag.watch((_event, path) => {
     if (!path.startsWith('app/')) return;
     pending.add(path);
-    timer ??= setTimeout(remount, 25);
+    timer ??= setTimeout(absorb, 25);
   });
 
   // The compile-through door: a cell lands in the bag already

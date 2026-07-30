@@ -1,0 +1,52 @@
+# ==============================================================================
+# Apply — discardable hot-absorb policy for Workspace bag mutations
+#
+# Door mutates passports; apply decides how living instances adopt them.
+# Probe 1 floor: narrow remount of dirty route/layout modules while the
+# stash and ancestor layouts stay. Whole-launch remount remains the
+# labeled escape (stash edits, apply failure, no mounted route).
+#
+# Delete this module if door and apply fuse — Q10.
+# ==============================================================================
+
+export type ApplyVerdict = 'narrow' | 'escape' | 'noop'
+
+export type Apply =
+  absorb: (paths: string[]) => Promise<ApplyVerdict>
+
+export type ApplyOpts =
+  renderer: { remountDirty: (paths: string[]) => Promise<ApplyVerdict> }
+  escape: (paths: string[]) => Promise<void>
+  report?: (...args: any[]) => void
+
+export def createApply(opts: ApplyOpts): Apply
+  unless opts? and typeof opts is 'object'
+    throw new TypeError 'Rip App: createApply expects an options object'
+  unless typeof opts.renderer?.remountDirty is 'function'
+    throw new TypeError 'Rip App: createApply requires renderer.remountDirty'
+  unless typeof opts.escape is 'function'
+    throw new TypeError 'Rip App: createApply requires an escape remount'
+  report = opts.report ?? (...args) -> console.log ...args
+
+  absorb = (paths) ->
+    unless Array.isArray(paths) and paths.length > 0
+      return 'noop'
+    dirty = (p for p in paths when typeof p is 'string' and p.startsWith 'app/')
+    return 'noop' unless dirty.length > 0
+
+    verdict = 'escape'
+    try
+      verdict = opts.renderer.remountDirty! dirty
+    catch error
+      report '[Rip] narrow apply failed — falling back to full remount', error
+      verdict = 'escape'
+
+    if verdict is 'narrow'
+      report "[Rip] applied #{dirty.join ', '} — narrow remount (route state reset; stash kept)"
+      return 'narrow'
+    return 'noop' if verdict is 'noop'
+
+    opts.escape! dirty
+    'escape'
+
+  { absorb }

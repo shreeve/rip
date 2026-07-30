@@ -1,0 +1,50 @@
+# ==============================================================================
+# Apply engine — Probe 1 floor (narrow vs escape).
+# Run via `rip test/apply.rip` (chained in the package's test script).
+# ==============================================================================
+
+import { test, eq, throws } from '@rip-lang/testing'
+import { createApply } from '../apply.rip'
+
+test "createApply validates its options", ->
+  throws (-> createApply()), 'expects an options object'
+  throws (-> createApply {}), 'requires renderer.remountDirty'
+  throws (-> createApply { renderer: remountDirty: -> 'narrow' }), 'requires an escape remount'
+
+test! "absorb no-ops on empty or non-app paths", ->
+  calls = []
+  apply = createApply
+    renderer: remountDirty: (paths) -> calls.push ['narrow', paths]; 'narrow'
+    escape: (paths) -> calls.push ['escape', paths]
+  eq apply.absorb!([]), 'noop'
+  eq apply.absorb!(['api/x.rip']), 'noop'
+  eq calls, []
+
+test! "absorb prefers narrow remount when the renderer accepts", ->
+  logs = []
+  escaped = []
+  apply = createApply
+    renderer: remountDirty: -> 'narrow'
+    escape: (paths) -> escaped.push paths
+    report: (...args) -> logs.push args.join ' '
+  eq apply.absorb!(['app/routes/index.rip']), 'narrow'
+  eq escaped, []
+  eq (logs.some (l) -> l.includes('narrow remount') and l.includes 'stash kept'), true
+
+test! "absorb escapes for stash edits", ->
+  escaped = []
+  apply = createApply
+    renderer: remountDirty: -> 'escape'
+    escape: (paths) -> escaped.push paths
+    report: ->
+  eq apply.absorb!(['app/stash.rip']), 'escape'
+  eq escaped, [['app/stash.rip']]
+
+test! "absorb falls back to escape when narrow throws", ->
+  escaped = []
+  apply = createApply
+    renderer: remountDirty: -> throw new Error 'boom'
+    escape: (paths) -> escaped.push paths
+    report: ->
+  eq apply.absorb!(['app/routes/cart.rip']), 'escape'
+  eq escaped, [['app/routes/cart.rip']]

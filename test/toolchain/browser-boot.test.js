@@ -537,7 +537,7 @@ describe('bootApp workspace mode', () => {
       // The applied-log is user-facing: it names the file that changed
       // and is honest that the remount resets component state.
       const appliedLines = logs.filter(line => line.includes('applied'));
-      expect(appliedLines).toEqual(['[Rip] applied app/routes/index.rip — remounted (component state reset)']);
+      expect(appliedLines).toEqual(['[Rip] applied app/routes/index.rip — narrow remount (route state reset; stash kept)']);
       expect(result.router.current.route.file).toBe('app/routes/index.rip');
     } finally {
       console.log = originalLog;
@@ -776,7 +776,7 @@ describe('bootApp workspace mode', () => {
       hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/stash.rip', etag: e1 } }) });
       await until(() => result.workspace.passport('app/stash.rip')?.etag === e1);
       await settleEscape();
-      await until(() => reports.some(line => line.includes('remount failed')));
+      await until(() => reports.some(line => line.includes('remount failed') || line.includes('apply failed')));
       hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/stash.rip', etag: e2 } }) });
       await until(() => result.workspace.passport('app/stash.rip')?.etag === e2);
       await settleEscape();

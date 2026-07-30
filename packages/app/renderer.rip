@@ -15,6 +15,11 @@ export type GateFailure =
 export type Renderer =
   mount: (info: Record<string, any>) => Promise<any>
   preload: (info: Record<string, any>) => void
+  # Remount the current route chain from the first dirty module down,
+  # keeping ancestor layouts and the live stash (Probe 1 / S3 floor).
+  # Returns 'narrow' when it remounted, 'noop' when nothing was mounted,
+  # 'escape' when the caller should fall back to whole-launch remount.
+  remountDirty: (paths: string[]) => Promise<'narrow' | 'noop' | 'escape'>
   start: () => Renderer
   stop: () => void
   readonly current: any
@@ -74,6 +79,7 @@ export def createRenderer(opts: RendererOpts): Renderer
   mountedEntries: any[] = []
   pageMountPoint: any = null
   lastRoute: any = null
+  forceFrom = null
 
   shallowEqual = (a, b) ->
     keysA = Object.keys a
@@ -370,7 +376,9 @@ export def createRenderer(opts: RendererOpts): Renderer
     # receives load(params, query), unless a query-keyed gate now
     # addresses a different cell.
     mountedFiles = mountedEntries.map (entry) -> entry.file
-    if current? and lastRoute? and route.file is lastRoute.file
+    forcedFrom = forceFrom
+    forceFrom = null
+    if not forcedFrom? and current? and lastRoute? and route.file is lastRoute.file
       if sameChain([...layoutFiles, route.file], mountedFiles) and shallowEqual(params, lastRoute.params)
         unless shallowEqual(query, lastRoute.query) or queryKeyedRetargets(mountedEntries, params, query)
           await current.load params, query if typeof current.load is 'function'
@@ -380,15 +388,28 @@ export def createRenderer(opts: RendererOpts): Renderer
 
     # Reuse demands a completed page mount behind it (lastRoute survives
     # only those), an identical layout chain, and kept layouts whose
-    # keyed gates still address their constructed cells.
+    # keyed gates still address their constructed cells. A forced dirty
+    # remount keeps ancestors above forceFrom and rebuilds from there.
+    chainFiles = [...layoutFiles, route.file]
     reusableLayouts = lastRoute? and layoutFiles.length > 0 and
       mountedEntries.length is layoutFiles.length + 1 and
       sameChain(layoutFiles, mountedFiles.slice(0, -1)) and
       not queryKeyedRetargets(mountedEntries.slice(0, -1), params, query)
 
+    firstNew = if forcedFrom?
+      Math.max(0, Math.min(forcedFrom, chainFiles.length - 1))
+    else if reusableLayouts
+      layoutFiles.length
+    else
+      0
+    # Forced remount of only the page (or a suffix) still requires the
+    # kept prefix to match the live chain.
+    if forcedFrom? and firstNew > 0
+      unless mountedEntries.length is chainFiles.length and sameChain(chainFiles.slice(0, firstNew), mountedFiles.slice(0, firstNew))
+        firstNew = 0
+
     entries = []
-    firstNew = if reusableLayouts then layoutFiles.length else 0
-    for file, index in [...layoutFiles, route.file]
+    for file, index in chainFiles
       if index < firstNew
         entries.push mountedEntries[index]
       else
@@ -429,16 +450,20 @@ export def createRenderer(opts: RendererOpts): Renderer
       if mine isnt generation
         cleanup built
         return null
-      commitStaging staging, (if reusableLayouts then pageMountPoint ?? target else target)
+      # A forced dirty remount (apply) keeps the same prefix rule as
+      # layout reuse: commit into the living layout's page slot.
+      keepPrefix = firstNew > 0
+      commitStaging staging, (if keepPrefix then pageMountPoint ?? target else target)
     catch error
       cleanup built
       throw error
 
-    oldInstances = if reusableLayouts then instances.slice(firstNew) else instances
-    keptInstances = if reusableLayouts then instances.slice(0, firstNew) else []
+    keepPrefix = firstNew > 0
+    oldInstances = if keepPrefix then instances.slice(firstNew) else instances
+    keptInstances = if keepPrefix then instances.slice(0, firstNew) else []
     instances = [...keptInstances, ...built]
     current = built[built.length - 1] ?? null
-    unless reusableLayouts
+    unless keepPrefix
       pageMountPoint = if entries.length > 1 then mountPoint else null
     mountedEntries = entries
     lastRoute = { file: route.file, params, query }
@@ -473,11 +498,42 @@ export def createRenderer(opts: RendererOpts): Renderer
     job.cell.preload().catch(-> null) for job in jobs
     return
 
+  # Probe 1 apply seam: remount living route/layout instances whose
+  # modules changed, keeping the stash and ancestor layouts. Stash and
+  # non-UI modules are the caller's escape (whole-launch remount).
+  remountDirty = (paths) ->
+    return 'noop' unless Array.isArray(paths) and paths.length > 0
+    # Escape before the live-route guard: after a failed whole-launch
+    # escape the renderer may be stopped (no lastRoute), but a stash
+    # edit must still request escape so the next good generation recovers.
+    for path in paths
+      return 'escape' if path is 'app/stash.rip' or path.startsWith 'app/stash/'
+    info = router.current
+    return 'noop' unless info?.route?.file and lastRoute?
+    dirty = new Set paths
+    layoutFiles = info.layouts ?? info.route.layouts ?? []
+    chain = [...layoutFiles, info.route.file]
+    firstDirty = -1
+    for file, index in chain
+      if dirty.has file
+        firstDirty = index
+        break
+    # A dirty module not in the chain (shared child under app/) still
+    # remounts the page — Vue script remount floor for that leaf.
+    firstDirty = chain.length - 1 if firstDirty < 0
+    forceFrom = firstDirty
+    try
+      mount! info
+    catch error
+      forceFrom = null
+      throw error
+    'narrow'
+
   mount = (info) ->
     mine = ++generation
     router.navigating = true if 'navigating' in router
     try
-      await performMount info, mine
+      performMount! info, mine
     catch caught
       error = caught as any
       return null if mine isnt generation
@@ -497,6 +553,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     current: null
     mount: mount
     preload: preload
+    remountDirty: remountDirty
     start: ->
       return renderer if disposeRoute
       router.init?()
