@@ -68,6 +68,7 @@ import {
   generatedEditSpanToSource, generatedInsertionToSource, insertionAboveAttachedDirectives,
   isNocheckDirectiveRow, wholeImportLinesEdit, exactSpanMapper,
   staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
+  noUserSymbolSpans, inNoUserSymbolSpan,
   SUPPRESSED_TS_CODES,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
@@ -1002,6 +1003,9 @@ async function refresh(document) {
     // binds their cell `const`. Semantic tokens clear TypeScript's `readonly`
     // on exactly these.
     mutables: result.mutables,
+    // SOURCE spans the lowering owns whole — hover declines there rather
+    // than describing the machinery the face put in their place.
+    silent: noUserSymbolSpans(result.stores),
     srcLineStarts,
     genLineStarts: lineStartsOf(result.code),
     strict: state.strict === true, // rides the compile it governed
@@ -1595,6 +1599,10 @@ connection.onHover(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
   if (!ctx || ctx.genPosition === null) return null;
+  // A position the lowering owns whole answers nothing. tsgo would
+  // describe the minted symbol its own emission put there — truthfully,
+  // and about something the user never wrote.
+  if (inNoUserSymbolSpan(ctx.good.silent ?? [], ctx.offset)) return null;
 
   const hover = await tsgoRequest('textDocument/hover', {
     textDocument: { uri: ctx.state.tsUri },

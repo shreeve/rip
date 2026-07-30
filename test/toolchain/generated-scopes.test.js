@@ -306,6 +306,6 @@ describe('generated-scope inventory', () => {
       }
     }
     expect(unknown).toEqual([]);
-    expect(categories).toEqual({ diagnostic: 36, semantic: 21, type: 25 });
+    expect(categories).toEqual({ diagnostic: 36, semantic: 20, type: 25 });
   });
 });

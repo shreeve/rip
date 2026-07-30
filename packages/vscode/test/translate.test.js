@@ -11,7 +11,7 @@ import {
   insertionAboveAttachedDirectives, wholeImportLinesEdit,
   exactSpanMapper, staleOffsetMap,
   isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
-  diagnosticTagsFor,
+  diagnosticTagsFor, noUserSymbolSpans, inNoUserSymbolSpan,
 } from '../src/translate.js';
 
 describe('offset ↔ LSP position', () => {
@@ -354,5 +354,45 @@ describe('diagnostic tag restoration (the rendering seam)', () => {
     for (const code of [2322, 2339, 2578, 7043, 6134, 6205]) {
       expect(diagnosticTagsFor(code)).toEqual([]);
     }
+  });
+});
+
+// Spans the lowering owns whole — where hover declines rather than
+// describing the machinery the face put there. The BOUNDARY is the
+// whole content of this: a bare `~>` lowers into the `__effect` callee
+// and tsgo describes the runtime's own symbol, while a NAMED effect's
+// operator belongs to a construct that binds a user name. Today the
+// named operator happens to answer null anyway, so no end-to-end probe
+// can tell an over-wide list from a correct one — which is exactly why
+// the list itself is asserted here, by identity, rather than through
+// its current effect.
+describe('spans with no user symbol (the hover declines)', () => {
+  const src = [
+    "label = 'x'",
+    "named ~> console.log('named', label)",
+    "~> console.log('bare', label)",
+    '~>',
+    "  console.log('bare block')",
+  ].join('\n') + '\n';
+
+  test('the bare effect operators, and only those', () => {
+    const { stores } = compile(src, { face: 'ts', runtimeDelivery: 'inline' });
+    const spans = noUserSymbolSpans(stores);
+    // Identity, not count: each span must BE a `~>`, and the named
+    // effect's own operator must not be among them.
+    expect(spans.map(([a, b]) => src.slice(a, b))).toEqual(['~>', '~>']);
+    const named = src.indexOf('~>');                       // the named effect's operator
+    expect(spans.some(([a]) => a === named)).toBe(false);
+    expect(spans.map(([a]) => a)).toEqual([src.indexOf('~>', named + 1), src.lastIndexOf('~>')]);
+  });
+
+  test('the span is half-open: its first byte silences, the byte after it does not', () => {
+    const { stores } = compile(src, { face: 'ts', runtimeDelivery: 'inline' });
+    const spans = noUserSymbolSpans(stores);
+    const [start, end] = spans[0];
+    expect(inNoUserSymbolSpan(spans, start)).toBe(true);     // the hover probe lands here
+    expect(inNoUserSymbolSpan(spans, end - 1)).toBe(true);
+    expect(inNoUserSymbolSpan(spans, end)).toBe(false);      // the next construct answers for itself
+    expect(inNoUserSymbolSpan(spans, start - 1)).toBe(false);
   });
 });

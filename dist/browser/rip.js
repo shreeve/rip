@@ -18042,7 +18042,7 @@ ${"  ".repeat(ind)}`);
       if (!isNode4(n))
         return;
       const h = n[0];
-      if (h === "->" || h === "=>" || h === "def" || h === "void-def" || h === "class" || h === "component" || h === "schema")
+      if (h === "->" || h === "def" || h === "void-def" || h === "class" || h === "component" || h === "schema")
         return;
       if ((h === "=" || h === "void-assign") && n.length === 3 && isNode4(n[1]) && n[1][0] === "." && n[1][1] === "this" && typeof n[1][2] === "string" && !seen.has(n[1][2])) {
         seen.add(n[1][2]);

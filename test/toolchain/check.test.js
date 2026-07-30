@@ -287,9 +287,11 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         '    @tag = \'u\'',
         '    if true',
         '      @flag = 1',            // reached THROUGH control flow
+        '    bind = => @bound = 2',   // a BOUND arrow: its `this` IS the instance
+        '    bind()',
         '',
         'b = new Box()',
-        'console.log b.size, b.label, b.tag, b.flag',
+        'console.log b.size, b.label, b.tag, b.flag, b.bound',
       ].join('\n') + '\n',
       'live.rip': "n: number = 'oops'\nconsole.log n\n",
     });
@@ -298,9 +300,16 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     // the constructor's own assignment — so the annotation is load-bearing
     // in exactly one place: where the author declares WIDER than the
     // assignment infers. `wide` takes null and `plain` refuses it, which
-    // is the only pair that can tell the two apart. And only a read that
-    // still rejects proves a nested function's `this` — another object
-    // entirely — declared nothing.
+    // is the only pair that can tell the two apart.
+    //
+    // BOTH function forms are here, because the boundary is not "a nested
+    // function" but WHOSE `this` it is. `->` emits a plain function whose
+    // `this` is dynamic, so its assignment says nothing about the class;
+    // `=>` emits an arrow whose `this` is lexically the instance, so its
+    // assignment declares (the clean fixture's `bound`). The pairing that
+    // proves the line is drawn correctly rather than merely drawn: an
+    // arrow nested INSIDE a `->` still declares nothing, because by then
+    // the `this` it captures is the function's.
     const negDir = workspace({
       'crate.rip': [
         'export class Crate',
@@ -308,12 +317,17 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         '    @wide: string | null = \'b\'',
         '    @plain = \'b\'',
         '    later = -> @nested = 1',
+        '    outer = ->',
+        '      inner = => @deep = 1',   // an arrow under a `->`: captures the FUNCTION's this
+        '      inner()',
         '    later',
+        '    outer',
         '',
         'c = new Crate()',
         'c.wide = null',                // legal: the annotation rode onto the declaration
         'c.plain = null',               // rejects: inferred from the assignment alone
         'wrongNested = c.nested',
+        'wrongDeep = c.deep',
       ].join('\n') + '\n',
     });
     try {
@@ -323,9 +337,11 @@ describeExtended('rip check: type diagnostics over the real server', () => {
 
       const neg = JSON.parse(check(negDir, ['--json']).stdout);
       expect(neg.map((d) => [d.code, d.line])).toEqual([
-        [2683, 5],   // the nested function's own untyped `this` — not this class's
-        [2322, 10],  // `plain` inferred `string`; line 9's write to `wide` stays silent
-        [2339, 11],  // `nested` was never declared, because that `this` is another object
+        [2683, 5],   // the `->`'s own untyped `this` — not this class's
+        [2683, 7],   // and the arrow under it captures THAT one, not the instance
+        [2322, 14],  // `plain` inferred `string`; line 13's write to `wide` stays silent
+        [2339, 15],  // `nested` never declared: a plain function's `this` is another object
+        [2339, 16],  // nor `deep`: an arrow inherits whatever `this` encloses it
       ]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

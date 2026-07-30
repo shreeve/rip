@@ -11906,15 +11906,24 @@ class Emitter {
   }
 
   // Every `@name = …` a constructor body assigns, in source order,
-  // deduped by name (a field written twice declares once). Nested
-  // functions are not entered — their `this` is another object.
+  // deduped by name (a field written twice declares once). A plain
+  // function is not entered — its `this` is another object; a bound
+  // arrow is, because its `this` is this instance's.
   static ctorAtFields(body) {
     const out = [];
     const seen = new Set();
     const walk = (n) => {
       if (!isNode(n)) return;
       const h = n[0];
-      if (h === '->' || h === '=>' || h === 'def' || h === 'void-def' ||
+      // The boundary is WHOSE `this` a function has, not whether one is
+      // nested. `->`/`def` emit a plain function, whose `this` is
+      // dynamic — an assignment there says nothing about this class. A
+      // BOUND `=>` emits an arrow, whose `this` is lexically whatever
+      // encloses it, so inside the constructor it is the instance and
+      // its assignment declares. An arrow under a `->` is still excluded
+      // by the `->` above it, which is the correct reading: by then the
+      // `this` it captures is the function's.
+      if (h === '->' || h === 'def' || h === 'void-def' ||
           h === 'class' || h === 'component' || h === 'schema') return;
       if ((h === '=' || h === 'void-assign') && n.length === 3 &&
           isNode(n[1]) && n[1][0] === '.' && n[1][1] === 'this' && typeof n[1][2] === 'string' &&
