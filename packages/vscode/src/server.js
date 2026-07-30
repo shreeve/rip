@@ -68,7 +68,7 @@ import {
   generatedEditSpanToSource, generatedInsertionToSource, insertionAboveAttachedDirectives,
   isNocheckDirectiveRow, wholeImportLinesEdit, exactSpanMapper,
   staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
-  noUserSymbolSpans, inNoUserSymbolSpan,
+  noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
   SUPPRESSED_TS_CODES,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
@@ -1006,6 +1006,10 @@ async function refresh(document) {
     // SOURCE spans the lowering owns whole — hover declines there rather
     // than describing the machinery the face put in their place.
     silent: noUserSymbolSpans(result),
+    // SOURCE spans of component member declaration names — where a hover
+    // answers in the author's vocabulary rather than the container the
+    // face declares (see `memberDeclKind`).
+    memberDecls: result.memberDecls ?? [],
     srcLineStarts,
     genLineStarts: lineStartsOf(result.code),
     strict: state.strict === true, // rides the compile it governed
@@ -1540,7 +1544,14 @@ function reorderUnionHover(ctx, contents) {
 // type and the hover shows it back; whether it is a GOOD annotation is the
 // author's business. The editor's job is to be honest about what the source
 // says, not to second-guess it.
-function presentReactiveCellHover(contents) {
+// A component MEMBER declaration takes the same presentation for the same
+// reason — the author declared `people := []` and reads it as an array —
+// but only AT ITS DECLARATION. `atMemberDecl` says the request landed
+// there; at every other position the member's container is real (a
+// consumer holding an instance writes `inst.people.value`) and passes
+// through untouched. The two positions resolve to the same face symbol,
+// so the compiler's own record is what tells them apart.
+function presentReactiveCellHover(contents, atMemberDecl = false) {
   const value = contents?.value;
   if (typeof value !== 'string') return null;
   const fence = /(```(?:typescript|ts)\n)([^]*?)(\n?```)/.exec(value);
@@ -1548,14 +1559,23 @@ function presentReactiveCellHover(contents) {
   // tsgo renders object types with internal line breaks / run-on
   // spaces and a trailing `;` — normalize before matching.
   const flat = fence[2].replace(/\s+/g, ' ').trim();
-  const m = /^(const|let) ([A-Za-z_$][\w$]*): \{ (readonly )?value: (.+); read\(\): (.+?);? \}$/.exec(flat);
+  // The member arm's qualifier is whatever TypeScript prints before the
+  // final dot, NOT an identifier: a GENERIC component's containing type
+  // arrives with its parameter list (`Palette<TShade extends string>`),
+  // and anything narrower silently leaves the container standing on every
+  // generic component. The greedy run cannot swallow the type, which is
+  // anchored behind `: { … value: `.
+  const m = /^(?:(const|let) ([A-Za-z_$][\w$]*)|\(property\) ((?:.+\.)?[A-Za-z_$][\w$]*)): \{ (readonly )?value: (.+); read\(\): (.+?);? \}$/.exec(flat);
   if (!m) return null;
-  const [, , name, ro, t, readT] = m;
+  const [, , plain, qualified, ro, t, readT] = m;
+  const member = qualified !== undefined;
+  if (member && !atMemberDecl) return null;
   // depth guard: the `;` split above is greedy on `t` — verify T and
   // read()'s return agree after the same normalization (the brand
   // shape), else pass through.
   if (t.trim() !== readT.trim()) return null;
-  const reworded = value.replace(fence[0], `${fence[1]}${ro ? 'const' : 'let'} ${name}: ${t.trim()}${fence[3]}`);
+  const head = member ? `(property) ${qualified}` : `${ro ? 'const' : 'let'} ${plain}`;
+  const reworded = value.replace(fence[0], `${fence[1]}${head}: ${t.trim()}${fence[3]}`);
   return { ...contents, value: reworded };
 }
 
@@ -1603,6 +1623,12 @@ connection.onHover(async (params) => {
   // describe the minted symbol its own emission put there — truthfully,
   // and about something the user never wrote.
   if (inNoUserSymbolSpan(ctx.good.silent ?? [], ctx.offset)) return null;
+  // A member the face types through the lowering's behavior object: the
+  // symbol is the author's, but every type that can be spelled for it
+  // names the lowering. Silence is the ruled interim — a machinery name
+  // is never a stand-in (RULINGS.md, Principles).
+  const memberDecl = memberDeclKind(ctx.good.memberDecls ?? [], ctx.offset);
+  if (memberDecl === 'projected') return null;
 
   const hover = await tsgoRequest('textDocument/hover', {
     textDocument: { uri: ctx.state.tsUri },
@@ -1612,7 +1638,7 @@ connection.onHover(async (params) => {
 
   let contents = (await enrichEvolvingAnyHover(ctx, hover)) ?? hover.contents;
   contents = reorderUnionHover(ctx, contents) ?? contents;
-  contents = presentReactiveCellHover(contents) ?? contents;
+  contents = presentReactiveCellHover(contents, memberDecl === 'value') ?? contents;
 
   // The response range travels the reverse path: generated → last-good
   // source → current buffer. If it does not survive both hops intact,

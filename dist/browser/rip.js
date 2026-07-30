@@ -8933,8 +8933,10 @@ var typeofSpelling = (v) => {
   }
   return null;
 };
+var declaresContainer = (m) => containerish(m) || m.kind === "computed" || m.kind === "gate";
+var isBehaviorProjected = (m) => m.kind === "computed" && m.annotation == null && Boolean(m.behavior);
 var memberTypeSegments = (m, lead) => {
-  if (m.kind === "computed" && m.annotation == null && m.behavior) {
+  if (isBehaviorProjected(m)) {
     const rt = `ReturnType<typeof ${m.behavior}.${m.name}>`;
     return [{ text: `${lead}{ readonly value: ${rt}; read(): ${rt} }` }];
   }
@@ -9210,6 +9212,7 @@ class Emitter {
     this.primitiveAvoid = null;
     this.vocabulary = [];
     this.silences = [];
+    this.memberDecls = [];
     this.componentInfo = new Map;
     this.schemaFns = new Map;
     this.moduleComponentNames = new Map;
@@ -9836,6 +9839,19 @@ class Emitter {
     if (hit !== null)
       this.silences.push([hit[0], hit[1]]);
   }
+  noteMemberDecl(m) {
+    if (!this.ts || !declaresContainer(m))
+      return;
+    const id = isNode4(m.nameNode) ? this.stores.idOf(m.nameNode) : null;
+    const row = id !== null ? this.stores.role(id, m.nameRole) : null;
+    if (!row || typeof row.sourceStart !== "number")
+      return;
+    this.memberDecls.push({
+      start: row.sourceStart,
+      end: row.sourceEnd,
+      projected: isBehaviorProjected(m)
+    });
+  }
   wordSpanIn(word, container) {
     if (!this.ts)
       return null;
@@ -10091,6 +10107,7 @@ class Emitter {
         hasChildren = true;
       if (!isDeclarableMember(m))
         continue;
+      this.noteMemberDecl(m);
       line(() => this.emitSegments(memberDeclareSegments(m)));
     }
     if (!hasChildren)
@@ -19783,7 +19800,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -20363,6 +20380,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     mappings: new Mappings(emitted.mappings),
     vocabulary: emitted.vocabulary ?? [],
     silences: emitted.silences ?? [],
+    memberDecls: emitted.memberDecls ?? [],
     runtimes: emitted.runtimes,
     bindings: emitted.bindings,
     replResultName: emitted.replResultName,

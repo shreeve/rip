@@ -568,3 +568,25 @@ export function noUserSymbolSpans({ stores, vocabulary = [], silences = [] }) {
 // first byte) is not silenced.
 export const inNoUserSymbolSpan = (spans, offset) =>
   spans.some(([start, end]) => offset >= start && offset < end);
+
+// How a component member's DECLARATION position should present, read off
+// the compiler's own record (`memberDecls`, src/emitter.js):
+//
+//   'value'     — strip the container the face declares and answer the
+//                 member's value type. The author wrote `people := []`
+//                 and reads it as an array; the container belongs to
+//                 CONSUMER positions, where `inst.people.value` is real
+//                 and the wrapper is the honest answer.
+//   'projected' — the face types this member through the lowering's own
+//                 behavior object, so the value type spells a minted
+//                 name. RULINGS.md bans a machinery name as a stand-in,
+//                 and the interim is silence.
+//   null        — not a member declaration; nothing to say.
+//
+// End EXCLUSIVE, like every span predicate here.
+export const memberDeclKind = (decls, offset) => {
+  for (const d of decls) {
+    if (offset >= d.start && offset < d.end) return d.projected ? 'projected' : 'value';
+  }
+  return null;
+};

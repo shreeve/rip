@@ -3474,6 +3474,18 @@ if (RUN_HOVER || RUN_TOKENS) {
           gaps.push(`${f}: ruled pin \`${rp.token}\` not at ${rp.line}:${rp.character} — the fixture moved under the pin (re-measure and re-pin)`);
         }
       }
+      // Pins read in SOURCE order, so re-measuring is one walk down the
+      // fixture and a missing spelling is visible as a gap in the walk. The
+      // file drifted out of any order once already — pins were loosely
+      // grouped by rule, which the `rule` field states anyway — and nothing
+      // noticed, because order changes no verdict. This is the obligation
+      // that makes it stay.
+      for (let i = 1; i < pins.length; i++) {
+        const [a, b] = [pins[i - 1], pins[i]];
+        if (a.line > b.line || (a.line === b.line && a.character > b.character)) {
+          gaps.push(`${f}: ruled pins out of source order — \`${b.token}\` at ${b.line}:${b.character} follows \`${a.token}\` at ${a.line}:${a.character}`);
+        }
+      }
       // Decl pins are name-keyed, so their one rot mode is the declaration
       // leaving the fixture (or an occurrence miscount): a pin naming no
       // declaration would otherwise be asserted nowhere, silently.
@@ -3658,14 +3670,14 @@ if (RUN_HOVER) {
   // The `ruled` gauge — RULINGS-governed in-body positions (hover-pins.json `positions`:
   // render-DSL words, member declarations, gate spellings) must serve their
   // pinned answer: null where the ruling's interim is silence, text where a
-  // truthful interim is pinned. EXPECTED RED while the render-DSL and
-  // member-wrapper findings are open — the server serves scaffold symbols and
-  // container wrappers at positions ruled otherwise. Soft, like `silence`.
+  // truthful interim is pinned. EXPECTED RED while the render-DSL finding is
+  // open — the server serves scaffold symbols at positions ruled otherwise.
+  // Soft, like `silence`.
   const ruledRows = [...PROBES].flatMap(([file, p]) => (p.ruled ?? []).map((r) => ({ file, ...r })));
   const ruledDiverging = ruledRows.filter((r) => (r.expect ?? null) !== (r.hover ?? null));
   if (ruledRows.length) {
     pfrac('ruled', ruledRows.length - ruledDiverging.length, ruledRows.length,
-      `RULINGS-governed in-body positions serve their pin${ruledDiverging.length ? ' — red by agreement: the render-DSL and member-wrapper findings (FINDINGS.md)' : ''}`);
+      `RULINGS-governed in-body positions serve their pin${ruledDiverging.length ? ' — red by agreement: the render-DSL finding (FINDINGS.md)' : ''}`);
   }
 
   {
@@ -3699,12 +3711,12 @@ if (RUN_HOVER) {
   }
   if (ruledDiverging.length) {
     // 63 lines — the largest block left in the report, and every row of it is
-    // red BY AGREEMENT: it cannot move until the render-DSL and member-wrapper
-    // findings close, so each run reprints yesterday's state at three lines a
+    // red BY AGREEMENT: it cannot move until the render-DSL finding closes, so
+    // each run reprints yesterday's state at three lines a
     // row. The `ruled` fraction above carries the count; what survives here is
     // WHICH RULES are diverging, since that is the part that would change if
     // one of them were fixed alone.
-    out(`\n    ${bold('Ruled positions diverging from their pins')} ${dim('(RULINGS.md, Components / render; red by agreement while the render-DSL and member-wrapper findings are open)')}`);
+    out(`\n    ${bold('Ruled positions diverging from their pins')} ${dim('(RULINGS.md, Components / render; red by agreement while the render-DSL finding is open)')}`);
     if (VERBOSE) {
       for (const r of ruledDiverging) {
         console.log(`      ${red('✗')} ${r.file}:${r.line}:${r.character} ${bold(r.token)} ${dim(`[${r.rule}]`)}`);

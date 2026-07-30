@@ -384,6 +384,21 @@ const typeofSpelling = (v) => {
   return null;
 };
 
+// Does the face declare this member as the lowering's CONTAINER rather
+// than as its value? Only these have a container for a declaration
+// hover to see past — a `=!` or plain member's declared type IS its
+// value type (`declare readonly cap: number`), and a member whose
+// annotation happens to spell the container shape by hand meant it.
+export const declaresContainer = (m) =>
+  containerish(m) || m.kind === 'computed' || m.kind === 'gate';
+
+// Does this member's face type read through the lowering's behavior
+// object? The projection below is the one member type spelled from a
+// MINTED name, which the editor cannot present in the author's
+// vocabulary — so the two places that care read one predicate.
+export const isBehaviorProjected = (m) =>
+  m.kind === 'computed' && m.annotation == null && Boolean(m.behavior);
+
 const memberTypeSegments = (m, lead) => {
   // An unannotated computed reads its type from the BODY, through the
   // face's behavior object (the emitter emits one per named component,
@@ -395,7 +410,7 @@ const memberTypeSegments = (m, lead) => {
   // `m.behavior` is absent on the dts road, which has no module-local
   // value to name and keeps the form table (the schema-callable
   // precedent: derivation reaches this checker, not consumers).
-  if (m.kind === 'computed' && m.annotation == null && m.behavior) {
+  if (isBehaviorProjected(m)) {
     const rt = `ReturnType<typeof ${m.behavior}.${m.name}>`;
     return [{ text: `${lead}{ readonly value: ${rt}; read(): ${rt} }` }];
   }

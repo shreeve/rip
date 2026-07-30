@@ -29,6 +29,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom-vocab.js';
 import {
   COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS, componentTypeInfo, memberDeclareSegments, isDeclarableMember,
+  isBehaviorProjected, declaresContainer,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType,
@@ -312,6 +313,16 @@ class Emitter {
     // position they are a channel's target, which no answer about the
     // container the lowering wrote through describes honestly.
     this.silences = [];
+    // Component member DECLARATION name spans (TS face only): the source
+    // position where the author declared a member, paired with whether the
+    // face types it through the lowering's own behavior object. A
+    // declaration speaks the author's vocabulary — the member was written
+    // `people := []` and reads as an array — where a CONSUMER holding an
+    // instance really does write `ref.people.value`, so the container the
+    // face declares is right at consumer positions and wrong here. The
+    // editor needs the distinction and cannot derive it: both positions
+    // resolve to the same face symbol.
+    this.memberDecls = [];
     // Component type stories (TS face only): component node →
     // the walked member/props info. Populated by componentExpr (the
     // one place the member model is authoritative), consumed by the
@@ -1270,6 +1281,25 @@ class Emitter {
     if (hit !== null) this.silences.push([hit[0], hit[1]]);
   }
 
+  // A component member's declaration name, at the coordinates the declare
+  // line re-marks — the SAME role the face maps, so the span the editor
+  // tests is the span the mapping resolves. Only members the face
+  // declares as CONTAINERS are recorded: a member that declares its value
+  // type directly has nothing to see past, and one whose own annotation
+  // spells the container shape by hand meant that shape. `projected` says
+  // the face types this member through the lowering's behavior object,
+  // which is the one member type no answer can spell in the author's
+  // vocabulary.
+  noteMemberDecl(m) {
+    if (!this.ts || !declaresContainer(m)) return;
+    const id = isNode(m.nameNode) ? this.stores.idOf(m.nameNode) : null;
+    const row = id !== null ? this.stores.role(id, m.nameRole) : null;
+    if (!row || typeof row.sourceStart !== 'number') return;
+    this.memberDecls.push({
+      start: row.sourceStart, end: row.sourceEnd, projected: isBehaviorProjected(m),
+    });
+  }
+
   wordSpanIn(word, container) {
     if (!this.ts) return null;
     const id = isNode(container) ? this.stores.idOf(container) : null;
@@ -1631,6 +1661,7 @@ class Emitter {
     for (const m of info.members) {
       if (m.name === 'children') hasChildren = true;
       if (!isDeclarableMember(m)) continue;
+      this.noteMemberDecl(m);
       line(() => this.emitSegments(memberDeclareSegments(m)));
     }
     if (!hasChildren) line(() => this.b.emit('declare children: any;'));
@@ -14214,7 +14245,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

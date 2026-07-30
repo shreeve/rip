@@ -11,7 +11,7 @@ import {
   insertionAboveAttachedDirectives, wholeImportLinesEdit,
   exactSpanMapper, staleOffsetMap,
   isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
-  diagnosticTagsFor, noUserSymbolSpans, inNoUserSymbolSpan,
+  diagnosticTagsFor, noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
 } from '../src/translate.js';
 
 describe('offset ↔ LSP position', () => {
@@ -465,5 +465,77 @@ describe('spans with no user symbol (the hover declines)', () => {
     expect(inNoUserSymbolSpan(spans, end - 1)).toBe(true);
     expect(inNoUserSymbolSpan(spans, end)).toBe(false);      // the next construct answers for itself
     expect(inNoUserSymbolSpan(spans, start - 1)).toBe(false);
+  });
+});
+
+// The compiler's record of component member DECLARATIONS — the one fact
+// that separates the author's own vocabulary from a consumer's view of
+// the same face symbol.
+describe('memberDeclKind', () => {
+  const src = [
+    'Roster = component',                      // 0
+    '  @label?: string',                       // 1
+    '  people := []',                          // 2
+    "  shade ~= 'hot'",                        // 3  unannotated computed — behavior-projected
+    "  tint: string ~= 'cold'",                // 4  annotated computed — the author's own type
+    '  cap =! 3',                              // 5  declares its VALUE type
+    '  cell: { value: number, read(): number } = box',  // 6  the shape, BY HAND
+    '  bump: (e) -> p(e)',                     // 7  a method: no declare line, no row
+    '',
+    '  render',                                // 9
+    '    div people',                          // 10 a READ, not a declaration
+    '',
+  ].join('\n');
+  const decls = compile(src, { face: 'ts', runtimeDelivery: 'inline' }).memberDecls;
+  const at = (needle, word) => src.indexOf(word, src.indexOf(needle));
+
+  test('the members the face declares as CONTAINERS are recorded, at the name', () => {
+    // `cap` and `cell` are absent on purpose. A `=!` member's declared
+    // type IS its value type, so there is nothing to see past; and a
+    // member whose own annotation spells the container shape by hand
+    // MEANT that shape — stripping it would answer with a type the
+    // author never wrote.
+    expect(decls.map((d) => src.slice(d.start, d.end)))
+      .toEqual(['label', 'people', 'shade', 'tint']);
+  });
+
+  test('only the unannotated computed reads through the lowering', () => {
+    // An annotation is the author's statement of the type, so `tint`
+    // needs no projection and presents like any other member. If this
+    // ever flips, the editor starts declining at an answerable position.
+    expect(decls.filter((d) => d.projected).map((d) => src.slice(d.start, d.end))).toEqual(['shade']);
+  });
+
+  test('a declaration presents value-first; the same name at a READ does not', () => {
+    // The consumer half of the ruling: `inst.people.value` is real, so
+    // every position that is not a declaration keeps the container.
+    expect(memberDeclKind(decls, at('people :=', 'people'))).toBe('value');
+    expect(memberDeclKind(decls, at('div people', 'people'))).toBeNull();
+    expect(memberDeclKind(decls, at('shade ~=', 'shade'))).toBe('projected');
+    expect(memberDeclKind(decls, at('cap =!', 'cap'))).toBeNull();
+    expect(memberDeclKind(decls, at('cell:', 'cell'))).toBeNull();
+  });
+
+  test('the span comes from the role, not a text search — a self-named initializer is exact', () => {
+    // `people := people` puts the name twice on one line. The recorded
+    // span is the declaration's own role, so the READ beside it stays
+    // a consumer position.
+    const self = 'W = component\n  people := people\n';
+    const d = compile(self, { face: 'ts', runtimeDelivery: 'inline' }).memberDecls;
+    expect(d.map((x) => [x.start, x.end])).toEqual([[16, 22]]);
+    expect(memberDeclKind(d, self.indexOf('people'))).toBe('value');
+    expect(memberDeclKind(d, self.lastIndexOf('people'))).toBeNull();
+  });
+
+  test('the span is half-open, like every other', () => {
+    const d = decls[0];
+    expect(memberDeclKind(decls, d.start)).toBe('value');
+    expect(memberDeclKind(decls, d.end - 1)).toBe('value');
+    expect(memberDeclKind(decls, d.end)).toBeNull();
+    expect(memberDeclKind(decls, d.start - 1)).toBeNull();
+  });
+
+  test('the JS emission records nothing — the channel is the face\'s', () => {
+    expect(compile(src, { runtimeDelivery: 'inline' }).memberDecls).toEqual([]);
   });
 });

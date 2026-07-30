@@ -28,7 +28,9 @@ The declaration hovers here have an honest interim that is not silence: the plai
 
 ## Components / render
 
-Measured 2026-07-23 over 13-components (the `ruled` gauge, hover-pins.json's `positions`). Two findings hold the red pins: the render-DSL finding (positions with no user symbol serve minted scaffold — the cover's `this`, `_elN` locals, the `__bind_value__` slot, the gate key-fn's params) and the member-wrapper finding (member declarations and gate targets serve the container wrapper where the value-type answer is the only truthful interim).
+Measured 2026-07-23 over 13-components (the `ruled` gauge, hover-pins.json's `positions`), re-measured 2026-07-30 at the member declarations, where 25-components carries the generic spelling — a component's type parameters ride into the containing type the answer names, which 13-components has no component to show. One finding holds the red pins: the render-DSL finding (positions with no user symbol serve minted scaffold — the cover's `this`, `_elN` locals, the `__bind_value__` slot, the gate key-fn's params).
+
+**A declaration speaks the author's vocabulary; a consumer's read speaks the container's.** A member declared `people := []` is an array where the author wrote it, and the editor answers value-first there. That is not a claim the container is a fiction — a consumer holding an instance really does write `inst.people.value`, and at THAT position the container is the honest answer and passes through untouched. The two resolve to the same face symbol, so the compiler records which is which (`memberDecls`, src/emitter.js). The value-first half is served; the minted kind label is the open half of every member row below.
 
 | position | ruling (target) | interim |
 | --- | --- | --- |
@@ -44,8 +46,9 @@ Measured 2026-07-23 over 13-components (the `ruled` gauge, hover-pins.json's `po
 | the name in a bind (`count`) | its VALUE type — never the wrapper | null pin — today the bind cover's `__bind_value__`; the render-DSL finding |
 | render loop variable at a read | plain inferred type | blocked on the identifier-read finding |
 | member reads in branch/loop bodies (the factory's `ctx` is minted — no source position carries it) | plain inferred type | blocked on the identifier-read finding |
-| member declaration (state, computed, readonly, prop, ref cell) | minted kind, value-first — `(state) people: string[]` | null pin — the container wrapper is a leak (member-wrapper finding); the value-type answer is the only truthful interim |
-| gate target name (`stats <~ …`) | minted kind, value-first — the kind label undecided | null pin — wrapper leak; the member-wrapper finding |
+| member declaration (state, readonly, prop, ref cell) | minted kind, value-first — `(state) people: string[]` | pinned as measured — `(property) Roster.people: string[]`, the value half served; the minted kind is the open half |
+| member declaration (computed, unannotated) | the same — `(computed) shade: string` | pinned null — the face types an unannotated computed through the lowering's behavior object, so every spelling of its value type names machinery, which is never a stand-in; the computed-projection finding |
+| gate target name (`stats <~ …`) | minted kind, value-first — the kind label undecided | pinned as measured — the value half served; the kind label is the open half |
 | gate operator `<~` and `@app.data` path segments | silence | pinned null — green, measured 2026-07-23 |
 | gate key (`params.id` / `@query.tab`) | plain inferred type | null pin — today the minted key-fn's own param; the render-DSL finding |
 | component name at a use site | the component's signature (props) | pinned null — green, measured 2026-07-23; the pin asserts the interim |

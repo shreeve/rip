@@ -64,6 +64,70 @@
     ],
     "positions": [
       {
+        "line": 10,
+        "character": 2,
+        "token": "shade",
+        "expect": null,
+        "rule": "member declaration (computed)",
+        "why": "ruled silence — an unannotated computed's face type reads through the lowering's behavior object, and a machinery name is never a stand-in (computed-projection finding)"
+      },
+      {
+        "line": 13,
+        "character": 9,
+        "token": "class",
+        "expect": null,
+        "rule": "attr/prop name (intrinsic)",
+        "why": "the prop's type is the target; today serves the cover's `this`"
+      },
+      {
+        "line": 19,
+        "character": 3,
+        "token": "label",
+        "expect": "(property) Field.label: string | undefined",
+        "rule": "member declaration (prop)",
+        "why": "value-first; the optional marker widens the value, which is the prop's own type"
+      },
+      {
+        "line": 28,
+        "character": 8,
+        "token": "value",
+        "expect": null,
+        "rule": "bind target (intrinsic)",
+        "why": "today serves the cover's `this`"
+      },
+      {
+        "line": 36,
+        "character": 2,
+        "token": "people",
+        "expect": "(property) Roster.people: string[]",
+        "rule": "member declaration (state)",
+        "why": "value-first, the ruled interim served; the minted `(state)` kind is the open half"
+      },
+      {
+        "line": 39,
+        "character": 2,
+        "token": "inputEl",
+        "expect": "(property) Roster.inputEl: HTMLInputElement | null",
+        "rule": "member declaration (ref cell)",
+        "why": "value-first; the annotation is the author's own"
+      },
+      {
+        "line": 40,
+        "character": 2,
+        "token": "cap",
+        "expect": "(property) Roster.cap: number",
+        "rule": "member declaration (readonly)",
+        "why": "value-first — a `=!` member annotates its value type directly, so no container ever stood here"
+      },
+      {
+        "line": 48,
+        "character": 6,
+        "token": "input",
+        "expect": null,
+        "rule": "element tag",
+        "why": "intrinsic-element target; today serves the cover's `this`"
+      },
+      {
         "line": 48,
         "character": 12,
         "token": "ref",
@@ -78,6 +142,22 @@
         "expect": null,
         "rule": "name after ref:",
         "why": "target is the state binding's type; today serves the cover's `this`"
+      },
+      {
+        "line": 50,
+        "character": 14,
+        "token": "click",
+        "expect": null,
+        "rule": "event word",
+        "why": "handler-signature target; today serves the cover's `this`"
+      },
+      {
+        "line": 51,
+        "character": 23,
+        "token": "e",
+        "expect": "(parameter) e: PointerEvent & { target: any; currentTarget: any; }",
+        "rule": "value position (handler param)",
+        "why": "correct today — the principles' value-position answer, pinned as-is"
       },
       {
         "line": 60,
@@ -104,28 +184,20 @@
         "why": "intrinsic-element target; today serves the cover's `this`"
       },
       {
-        "line": 48,
+        "line": 71,
         "character": 6,
-        "token": "input",
+        "token": "Field",
         "expect": null,
-        "rule": "element tag",
-        "why": "intrinsic-element target; today serves the cover's `this`"
+        "rule": "component name at a use site",
+        "why": "props-signature target; measured null 2026-07-23 — the pin asserts the interim"
       },
       {
-        "line": 13,
-        "character": 9,
-        "token": "class",
-        "expect": null,
-        "rule": "attr/prop name (intrinsic)",
-        "why": "the prop's type is the target; today serves the cover's `this`"
-      },
-      {
-        "line": 50,
-        "character": 14,
-        "token": "click",
-        "expect": null,
-        "rule": "event word",
-        "why": "handler-signature target; today serves the cover's `this`"
+        "line": 72,
+        "character": 8,
+        "token": "label",
+        "expect": "(property) label?: string | { value: string; read(): string; } | undefined",
+        "rule": "attr/prop name (component)",
+        "why": "the props surface's real declared type — truthful interim; the container arm rides the bind slot by design"
       },
       {
         "line": 73,
@@ -144,84 +216,12 @@
         "why": "VALUE-type target; today serves the whole bind cover's `__bind_value__`"
       },
       {
-        "line": 28,
-        "character": 8,
-        "token": "value",
-        "expect": null,
-        "rule": "bind target (intrinsic)",
-        "why": "today serves the cover's `this`"
-      },
-      {
-        "line": 108,
-        "character": 24,
-        "token": "params",
-        "expect": null,
-        "rule": "gate key params",
-        "why": "plain-inferred target; today serves the minted key-fn's own param"
-      },
-      {
-        "line": 108,
-        "character": 31,
-        "token": "id",
-        "expect": null,
-        "rule": "gate key params",
-        "why": "plain-inferred target; today serves bare `any` off the minted param"
-      },
-      {
-        "line": 36,
-        "character": 2,
-        "token": "people",
-        "expect": null,
-        "rule": "member declaration (state)",
-        "why": "minted-kind value-first target; the container wrapper is a leak (member-wrapper finding)"
-      },
-      {
-        "line": 10,
-        "character": 2,
-        "token": "shade",
-        "expect": null,
-        "rule": "member declaration (computed)",
-        "why": "wrapper is a leak (member-wrapper finding)"
-      },
-      {
-        "line": 40,
-        "character": 2,
-        "token": "cap",
-        "expect": null,
-        "rule": "member declaration (readonly)",
-        "why": "wrapper is a leak (member-wrapper finding)"
-      },
-      {
-        "line": 19,
-        "character": 3,
-        "token": "label",
-        "expect": null,
-        "rule": "member declaration (prop)",
-        "why": "wrapper is a leak (member-wrapper finding)"
-      },
-      {
-        "line": 39,
-        "character": 2,
-        "token": "inputEl",
-        "expect": null,
-        "rule": "member declaration (ref cell)",
-        "why": "wrapper is a leak (member-wrapper finding)"
-      },
-      {
         "line": 106,
         "character": 2,
         "token": "stats",
-        "expect": null,
+        "expect": "(property) Routed.stats: any",
         "rule": "gate target name",
-        "why": "minted-kind value-first target (kind label undecided); wrapper is a leak (member-wrapper finding)"
-      },
-      {
-        "line": 109,
-        "character": 2,
-        "token": "user",
-        "expect": null,
-        "rule": "gate target name",
-        "why": "annotated spelling; wrapper is a leak (member-wrapper finding)"
+        "why": "value-first; an unannotated gate target's value IS any — truthful, and the kind label stays undecided"
       },
       {
         "line": 106,
@@ -256,28 +256,28 @@
         "why": "the path leaf; ruled silent — measured null 2026-07-23, green"
       },
       {
-        "line": 71,
-        "character": 6,
-        "token": "Field",
+        "line": 108,
+        "character": 24,
+        "token": "params",
         "expect": null,
-        "rule": "component name at a use site",
-        "why": "props-signature target; measured null 2026-07-23 — the pin asserts the interim"
+        "rule": "gate key params",
+        "why": "plain-inferred target; today serves the minted key-fn's own param"
       },
       {
-        "line": 72,
-        "character": 8,
-        "token": "label",
-        "expect": "(property) label?: string | { value: string; read(): string; } | undefined",
-        "rule": "attr/prop name (component)",
-        "why": "the props surface's real declared type — truthful interim; the container arm rides the bind slot by design"
+        "line": 108,
+        "character": 31,
+        "token": "id",
+        "expect": null,
+        "rule": "gate key params",
+        "why": "plain-inferred target; today serves bare `any` off the minted param"
       },
       {
-        "line": 51,
-        "character": 23,
-        "token": "e",
-        "expect": "(parameter) e: PointerEvent & { target: any; currentTarget: any; }",
-        "rule": "value position (handler param)",
-        "why": "correct today — the principles' value-position answer, pinned as-is"
+        "line": 109,
+        "character": 2,
+        "token": "user",
+        "expect": "(property) Routed.user: { name: string; }",
+        "rule": "gate target name",
+        "why": "value-first, the annotated spelling — the author's own type, so the answer is the annotation back"
       }
     ]
   },
@@ -398,6 +398,22 @@
         "why": "ruled normal expression hovers; today the bracket serves silence — the pin moves when expression hovers reach it"
       },
       {
+        "line": 20,
+        "character": 6,
+        "token": "Person",
+        "expect": "let Person: Schema<Person, Person>",
+        "rule": "companion type at a use site",
+        "why": "a value-position use serves the schema value's own type — the plain-answer rule; measured 2026-07-23"
+      },
+      {
+        "line": 41,
+        "character": 18,
+        "token": "it",
+        "expect": null,
+        "rule": "it in a transform",
+        "why": "ruled it: <input record> — the record under validation; interim silence — green, measured 2026-07-23"
+      },
+      {
         "line": 53,
         "character": 2,
         "token": "subtotal",
@@ -414,28 +430,12 @@
         "why": "ruled (computed) total: number, interim silence — green, measured 2026-07-23"
       },
       {
-        "line": 41,
-        "character": 18,
-        "token": "it",
-        "expect": null,
-        "rule": "it in a transform",
-        "why": "ruled it: <input record> — the record under validation; interim silence — green, measured 2026-07-23"
-      },
-      {
         "line": 124,
         "character": 22,
         "token": "Person",
         "expect": "type Person = { name: string; age?: number; role?: string; tier: \"basic\" | \"pro\"; scores: number[]; home?: Address; }",
         "rule": "companion type at a use site",
         "why": "the annotation position serves the full structural expansion — the ruled target, already served; measured 2026-07-23"
-      },
-      {
-        "line": 20,
-        "character": 6,
-        "token": "Person",
-        "expect": "let Person: Schema<Person, Person>",
-        "rule": "companion type at a use site",
-        "why": "a value-position use serves the schema value's own type — the plain-answer rule; measured 2026-07-23"
       }
     ]
   },
@@ -480,6 +480,16 @@
       {
         "name": "Meter",
         "expect": "let Meter: typeof Meter"
+      }
+    ],
+    "positions": [
+      {
+        "line": 42,
+        "character": 3,
+        "token": "shades",
+        "expect": "(property) Palette<TShade extends string>.shades: TShade[]",
+        "rule": "member declaration (prop)",
+        "why": "value-first on a GENERIC component — the containing type carries its parameter list into the answer, the one spelling 13-components cannot show"
       }
     ]
   },

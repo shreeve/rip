@@ -209,6 +209,13 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // are a channel's target, which the container the lowering wrote
     // through does not honestly describe. TS face only; empty otherwise.
     silences: emitted.silences ?? [],
+    // Component member DECLARATION name spans, each flagged `projected`
+    // where the face types the member through the lowering's behavior
+    // object. A declaration is the author's own vocabulary; a consumer
+    // holding an instance reads the container the face declares, and both
+    // resolve to the same face symbol — so the editor cannot tell them
+    // apart without this. TS face only; empty otherwise.
+    memberDecls: emitted.memberDecls ?? [],
     runtimes: emitted.runtimes,
     // The program's top-level binding inventory: [{name, kind}] with
     // kind plain / state / computed / effect / readonly / import /

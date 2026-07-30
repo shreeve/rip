@@ -515,21 +515,25 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
           [6133, 4, 6, 13],    // `e`, the user's own unused parameter, faded
         ]);
       expect(fixture.split('\n')[6][13]).toBe('e');   // the hint really lands on the user's name
-      // Member hovers answer the container conventions.
+      // A member's DECLARATION answers value-first — the author wrote
+      // `count := 0` and reads it as a number (RULINGS.md, Components /
+      // render). Unannotated members with literal initializers infer
+      // their syntactic type, so the value here is `number`, not `any`.
       const state = await hoverAt(client, 3, 3);
-      expect(state.contents.value).toContain('count');
-      // Unannotated members with literal initializers infer their
-      // syntactic type  — was `value: any`.
-      expect(state.contents.value).toContain('value: number');
+      expect(state.contents.value).toContain('(property) Card.count: number');
+      expect(state.contents.value).not.toContain('read()');
       const typedProp = await hoverAt(client, 1, 4);
-      expect(typedProp.contents.value).toContain('value: string');
-      const computed = await hoverAt(client, 4, 3);
-      expect(computed.contents.value).toContain('readonly value');
-      // A member READ inside a render block hovers the same container
-      // (the write-site question never arises — members are
-      // declared class properties, typed at every site).
+      expect(typedProp.contents.value).toContain('(property) Card.title: string');
+      // An unannotated computed's face type reads through the lowering's
+      // own behavior object, so no answer here can be spelled in the
+      // author's vocabulary — the ruled interim is silence.
+      expect(await hoverAt(client, 4, 3)).toBeNull();
+      // A member READ inside a render block is the CONSUMER position and
+      // keeps the container: `@title.value` is real there, and the
+      // declaration's vocabulary is not the reader's.
       const renderRead = await hoverAt(client, 10, 9);
       expect(renderRead.contents.value).toContain('value: string');
+      expect(renderRead.contents.value).toContain('read()');
       // The accept member is the honest cross-component boundary: the
       // offered container's type is not knowable statically — any.
       const accepted = await hoverAt(client, 5, 10);
@@ -642,8 +646,9 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       });
       // Was TS2300 ×4 + TS2717 ×2 through the duplicate children keys.
       expect((await wait()).diagnostics).toEqual([]);
+      // A declaration answers value-first, `children` like any other prop.
       const hover = await hoverAt(client, 1, 4);
-      expect(hover.contents.value).toContain('value: string');
+      expect(hover.contents.value).toContain('(property) Child.children: string');
     } finally {
       await client.stop();
     }
