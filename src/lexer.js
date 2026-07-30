@@ -3269,6 +3269,10 @@ export function tokenize(text, path = '<anonymous>') {
       // check (`a?!` → `a ? true : undefined` — the Houdini operator),
       // and a '?' directly after a value-ending token is the postfix
       // existence check (`a?` → `a != null`) — real tokens and nodes.
+      // A juxta argument after that existence token (`f? x`) is an
+      // optional call: `?` is IMPLICIT_FUNC, so implicitCalls wraps the
+      // args and the grammar lowers `Value ? Arguments` to optcall
+      // (same as `f?(x)`). Bare `a?` with no juxta arg stays existence.
       if (!pendingSpaced) {
         if (text[pos + 1] === '(' || text[pos + 1] === '[') {
           push('?.', '?', pos, pos + 1);
@@ -3835,7 +3839,12 @@ export function implicitBlocks(tokens, mintId) {
 // call so the comprehension wraps it. Inserted CALL_START/CALL_END are
 // generated zero-width tokens anchored at the argument extent's edges,
 // so call spans stay honest.
-const IMPLICIT_FUNC = new Set(['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS', 'DAMMIT']);
+// Postfix existence `?` is callable the same way DAMMIT is: a spaced
+// argument after `f?` opens an implicit optional call (`f? x` → the
+// same shape as `f?(x)`). Bare `f?` (no juxta arg) stays existence —
+// the grammar's `Value ?` vs `Value ? Arguments` split, with CALL_START
+// above `?` in precedence, owns that fork.
+const IMPLICIT_FUNC = new Set(['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS', 'DAMMIT', '?']);
 const IMPLICIT_CALL_STARTERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_START', 'REGEX', 'HEREGEX_START', 'SYMBOL', 'MAP_START',
   'PARAM_START', 'IF', 'TRY', 'SWITCH', 'CLASS', 'THIS', 'SUPER',

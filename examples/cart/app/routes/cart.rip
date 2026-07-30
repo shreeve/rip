@@ -1,4 +1,4 @@
-import { api, ApiErrors, parseApiError } from '../api-client.rip'
+import { api, parseApiError } from '../api-client.rip'
 import { Button, ButtonLink } from '../components/button.rip'
 import { title, formatPrice } from '../config.rip'
 import { createMutation } from '@rip-lang/app'

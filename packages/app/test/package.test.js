@@ -8,6 +8,7 @@ test('public entry exposes named substrate exports only', () => {
     'browserAdapter',
     'buildRoutes',
     'connectFeed',
+    'createApply',
     'createComponents',
     'createMutation',
     'createRenderer',

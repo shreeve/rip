@@ -390,40 +390,31 @@ In watch mode:
   or removed path lies under `app/` feeds the live pool in place — no
   admission cut, no pool reload, no doorbell. Any other save (server
   files, or a mixed set) takes the full-reload path above unchanged.
-- **Cells and the manifest.** Each `.rip` under `app/` is a cell whose
-  id is its birth path (`app/routes/index.rip`); a
-  rename retires the old id and mints a new one at rev 1 (id persistence
-  across renames is open research). Revs start at 1 and bump once per
-  content change; the registry lives in the manager's memory for the run.
-  `GET /manifest.json` answers `{"cells": [{id, rev, hash}, …]}`
-  sorted by path, `Cache-Control: no-store`, read per request. Cell
-  bytes — the file's **source text**, dev-mode in-browser compile — are
-  addressed by `(id, rev)` plus the content-hash discriminator in the
-  URL: `GET /app/<id>?rev=N&h=<hash>` answers `text/plain` with
-  `Cache-Control: public, max-age=31536000, immutable`, and old revs
-  keep answering for the manager run. The hash (16 hex chars of sha256)
-  is what makes the immutable answer sound: revs restart across manager
-  runs, so a bare `(id, rev)` URL would let a returning browser's cache
-  serve the OLD run's bytes silently — with `h`, the URL varies iff the
-  bytes do. A request without a valid positive-integer `rev`, or
-  without a well-formed `h`, is a 400 — unversioned and unhashed cell
-  URLs are rejected alike, never answered with a cacheable 200 under
-  the proven-broken bare shape. An unknown `(id, rev)`, or an `h` that
-  does not match the bytes, is a 404.
-- **The ding.** After the cells, the rewritten bundle, and the manifest
-  are durable (manifest last), the manager publishes one directive per
-  changed cell to the hub channel `/hub` — the envelope is
-  `{id, rev, hash}` only; source and compiled bodies never ride the hub
-  (HTTP carries the bytes). A deleted client file retires: it leaves the
-  manifest, its retirement occupies its own rev, and the ding carries
-  `kind: "delete"` (no bytes for that rev — old revs keep answering). A
-  publish failure warns and never blocks the cell path. Both the cell
-  path and the epoch `buildApp` path walk `app/` once and feed that
-  snapshot to the bundle, the cells, and the manifest — a second walk
-  mid-run can invent a manifest naming revs the bundle does not carry
-  (the silent-stale class). A scrapped epoch build restores the prior
-  registry and rewrites the manifest so it cannot name an unlinked
-  bundle's revs.
+- **Files and the manifest (Q8′).** Each `.rip` under `app/` is a **file**
+  whose id is its birth path (`app/routes/index.rip`); a rename retires
+  the old id and mints a new one (id persistence across renames is open
+  research). Freshness is a content **etag** (16 hex of sha256). The
+  registry lives in the manager's memory for the run; on disk the latest
+  bytes are served (no per-rev museum). `GET /manifest.json` answers
+  `{"files": [{id, etag}, …]}` sorted by id, `Cache-Control: no-store`,
+  read per request. File bytes — the **source text**, dev-mode
+  in-browser compile — are addressed by etag:
+  `GET /app/<id>?etag=<16-hex>` answers `text/plain` with
+  `Cache-Control: no-store` when the etag matches; a superseded etag is
+  **`409`** with the current `ETag` (never a silent stale body). A
+  missing or malformed `etag` query is a 400; an unknown id is a 404.
+- **The ding.** After the file pool, the rewritten bundle, and the
+  manifest are durable (manifest last), the manager publishes one
+  directive per changed file to the hub channel `/hub` — the envelope is
+  `{id, etag}` only (`kind: "delete"` includes the retired generation's
+  etag); source and compiled bodies never ride the hub (HTTP carries the
+  bytes). A publish failure warns and never blocks the file path. Both
+  the client-only path and the epoch `buildApp` path walk `app/` once
+  and feed that snapshot to the bundle, the file pool, and the
+  manifest — a second walk mid-run can invent a manifest/bundle
+  reverse pairing (the silent-stale class). A scrapped epoch build
+  restores the prior registry and rewrites the manifest so it cannot
+  name an unlinked bundle's etags.
 - **Bundle freshness.** On the cell path the manager atomically rewrites
   the live pool's bundle file, and the worker's `/bundle.json`
   re-reads and re-tags per request. With the door open the bundle is
@@ -680,9 +671,9 @@ boot-failure caching, prebuilt-artifact boots (loader-free workers,
 `import.meta.dir` preservation, loud build rejection), browser delivery
 through the pool (manager-assembled bundle, per-epoch reassembly with a
 fresh ETag), the workspace dev feed (in-process feed routes and
-standalone identity, plus the cell path through a live pool — ding, rev
-bump, immutable old revs, in-place bundle rewrite, no reload — and the
-full-reload path for non-client edits), `--bridge`
+standalone identity, plus the file path through a live pool — ding
+`{id,etag}`, latest-only `/app/*?etag=`, in-place bundle rewrite, no
+reload — and the full-reload path for non-client edits), `--bridge`
 registration (carried `bridge_path`, loud startup rejection), the
 publish client (envelope round-trip, loud non-2xx), the startup report
 (`scale`, the read-back rule — the `bridge` line included, honest

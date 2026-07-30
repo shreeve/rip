@@ -1,8 +1,10 @@
 // Bundle assembly — the server-side half of the browser package
 // graph. An application's modules plus every browser-safe package they
 // reach become one JSON bundle: `modules` maps store paths to sources
-// and `packages` maps bare names to their `_pkg/<name>/` roots. A
-// package travels only when its manifest declares `rip.browser`;
+// and `packages` maps bare names to their `@rip-lang/<name>/` roots
+// (the same spelling authors import — store paths are not a second
+// vocabulary). A package travels only when its manifest declares
+// `rip.browser`;
 // a server-only or unknown import rejects assembly loudly, naming the
 // importer. Discovery compiles each module and follows the emitter's
 // RECORDED import spans — generated text is never scanned.
@@ -172,13 +174,13 @@ export function assembleBundle({ modules, packagesDir, data = null, moduleFiles 
       if (target?.endsWith('.rip')) exportsMap[key] = target.replace(/^\.\//, '');
     }
     bundle.packages[name] = {
-      root: `_pkg/${short}`,
+      root: name,
       entry: entryTarget.replace(/^\.\//, ''),
       exports: exportsMap,
     };
     for (const file of ripFilesUnder(root)) {
       const relativePath = file.slice(root.length + 1);
-      bundle.modules[`_pkg/${short}/${relativePath}`] = readFileSync(file, 'utf8');
+      bundle.modules[`${name}/${relativePath}`] = readFileSync(file, 'utf8');
     }
   };
 
@@ -210,7 +212,9 @@ export function assembleBundle({ modules, packagesDir, data = null, moduleFiles 
     for (const span of compiled.imports) {
       const spec = unquote(span.specifier);
       if (RUNTIME_RE.test(spec)) continue;
-      if (spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('_pkg/')) continue;
+      // Relative imports and already-claimed package store paths
+      // (`@rip-lang/app/feed.rip`) need no further package claim.
+      if (spec.startsWith('./') || spec.startsWith('../') || bundle.modules[spec]) continue;
       const bare = spec.match(/^(@rip-lang\/[\w-]+)(?:\/.+)?$/);
       if (!bare) {
         throw new Error(

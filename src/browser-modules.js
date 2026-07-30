@@ -7,9 +7,10 @@
 //   './x.rip', '../y.rip'   another bundle module, relative to here
 //                           (including projection overlays such as
 //                           `../api/models.rip` → `api/models.rip`)
-//   '_pkg/<name>/…'         a bundled package module, absolute
-//   '@rip-lang/<name>[/…]'  a bundled package entry from the packages
-//                           table — only packages the bundle carries
+//   '@rip-lang/<name>/…'    a bundled package module (store path = import
+//                           spelling) or a package entry from the
+//                           packages table — only packages the bundle
+//                           carries
 //   …/runtime/<m>.js        the page's ONE runtime copy, through a
 //                           bridge module — never a second evaluation;
 //                           matched by the emitter's own delivery
@@ -125,14 +126,12 @@ export function createModuleLoader({ components: registry, packages = {}, debug 
       }
       return { path: joined };
     }
-    if (spec.startsWith('_pkg/')) {
-      if (!inBundle(spec)) {
-        throw new Error(`rip: '${from}' imports '${spec}', which is not in the bundle${hint}`);
-      }
-      return { path: spec };
-    }
+    // Store paths use the author-facing package spelling. A specifier
+    // that is already an exact bag key resolves as itself; otherwise
+    // bare `@rip-lang/<name>[/sub]` goes through the packages table.
     const bare = spec.match(/^@rip-lang\/([\w-]+)(?:\/(.+))?$/);
     if (bare) {
+      if (inBundle(spec)) return { path: spec };
       const entry = packages[`@rip-lang/${bare[1]}`];
       if (!entry) {
         throw new Error(

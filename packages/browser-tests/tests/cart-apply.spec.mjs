@@ -1,0 +1,97 @@
+// Probe 1 on the cart exemplar: real rip server (cart-harness.mjs), disk
+// edits under app/, Workspace door apply. Vue remount floor — layout +
+// stash survive leaf edits; reload is never the happy path.
+import { expect, test } from '@playwright/test';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const HARNESS = process.env.CART_HARNESS_URL || 'http://127.0.0.1:4174';
+
+async function cartRoot() {
+  const res = await fetch(`${HARNESS}/__test/cart-root`);
+  expect(res.ok).toBe(true);
+  return (await res.json()).cartDir;
+}
+
+async function bootCart(page) {
+  await page.goto('/');
+  await expect(page.locator('h1')).toHaveText('Products', { timeout: 20000 });
+  await expect(page.locator('nav')).toContainText('Shop');
+}
+
+async function editFile(relPath, transform) {
+  const root = await cartRoot();
+  const abs = join(root, relPath);
+  const before = readFileSync(abs, 'utf8');
+  writeFileSync(abs, transform(before));
+  return { abs, before, restore: () => writeFileSync(abs, before) };
+}
+
+test.describe('cart Probe 1 apply', () => {
+  test('leaf markup edit updates without reload; layout and hub stay ding-only', async ({ page }) => {
+    await bootCart(page);
+    await page.evaluate(() => {
+      globalThis.__wsSentinel = 'alive';
+      const nav = document.querySelector('nav');
+      if (nav) nav.__layoutSentinel = 'alive';
+    });
+
+    const stamp = `Products ${Date.now()}`;
+    const edit = await editFile('app/routes/index.rip', (src) =>
+      src.replace("h1 'Products'", `h1 '${stamp}'`));
+
+    try {
+      await expect(page.locator('h1')).toHaveText(stamp, { timeout: 15000 });
+      expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
+      expect(await page.evaluate(() => document.querySelector('nav')?.__layoutSentinel)).toBe('alive');
+      expect(await page.evaluate(() => location.pathname)).toBe('/');
+
+      const frames = await (await fetch(`${HARNESS}/__test/frames`)).json();
+      expect(frames.length).toBeGreaterThan(0);
+      const last = JSON.parse(frames[frames.length - 1]);
+      expect(Object.keys(last)).toEqual(['ding']);
+      expect(last.ding.id).toBe('app/routes/index.rip');
+      expect(typeof last.ding.etag).toBe('string');
+      expect(frames[frames.length - 1].includes(stamp)).toBe(false);
+    } finally {
+      edit.restore();
+    }
+  });
+
+  test('cart stash count survives a leaf route edit (Vue remount floor)', async ({ page }) => {
+    await bootCart(page);
+    const add = page.getByRole('button', { name: 'Add to Cart' }).first();
+    await expect(add).toBeVisible({ timeout: 15000 });
+    await add.click();
+    await expect(page.locator('nav')).toContainText('Cart (1)', { timeout: 10000 });
+
+    const stamp = `Products ${Date.now()}`;
+    const edit = await editFile('app/routes/index.rip', (src) =>
+      src.replace(/h1 '[^']*'/, `h1 '${stamp}'`));
+
+    try {
+      await expect(page.locator('h1')).toHaveText(stamp, { timeout: 15000 });
+      await expect(page.locator('nav')).toContainText('Cart (1)');
+    } finally {
+      edit.restore();
+    }
+  });
+
+  test('compile failure keeps the last good page interactive (S10)', async ({ page }) => {
+    await bootCart(page);
+    await page.evaluate(() => { globalThis.__wsSentinel = 'alive'; });
+
+    const edit = await editFile('app/routes/index.rip', (src) =>
+      `${src}\nthis is not valid rip {{{`);
+
+    try {
+      // Give the door a moment to attempt apply; the page must stay put.
+      await page.waitForTimeout(1500);
+      expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
+      await expect(page.locator('h1')).toHaveText('Products');
+      await expect(page.locator('nav')).toContainText('Shop');
+    } finally {
+      edit.restore();
+    }
+  });
+});

@@ -265,6 +265,12 @@ alters surface syntax updates ALL THREE in the same change.
     literals when the callee accepts Rip's call forms
   - dammit is the call: `client!` / `f! x`, not `client!()` / `f!(x)`
     when there are no required parens
+  - postfix `?` is existence when bare (`x?` → `x != null`); a juxta
+    argument makes it optional call — `f? x` is the same as `f?(x)` /
+    `f?.(x)` (never a plain `f(x)`). Prefer the juxta form when it
+    matches surrounding dammit/juxta call style (`f! x`, `f x`). Keep
+    call parens when the arg would otherwise swallow a following
+    `or`/`and`/`??` (`f? a or b` is `f?.(a || b)` — write `f?(a) or b`)
   - `->` / `=>`, dammit (`!`), existence (`?`), and match forms as the
     surrounding code already uses them — do not rewrite working Rip
     into `async`/`await`/`try`/`catch`/object-literal JS for familiarity
@@ -273,6 +279,12 @@ alters surface syntax updates ALL THREE in the same change.
   or choose the nearest idiomatic alternative; never paper over with
   curly-brace JS style. Read nearby `.rip` for the local dialect
   before writing new code.
+- **Workspace vocabulary (door / apply):** bag unit = **module**
+  (path-keyed, e.g. `app/mood.rip`); in-memory record = **passport**;
+  swappable component identity = **component definition**. Not
+  “cell.” Wire freshness is `{ id, etag }` — no monotonic `rev` on
+  ding/manifest/passport. “File” means OS path / editor buffer, not
+  the bag noun.
 - **Comments explain non-obvious intent** — invariants, constraints,
   why a trade-off was taken. Never narrate what code obviously does,
   never reference project history or future plans. A comment that

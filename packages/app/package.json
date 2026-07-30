@@ -7,7 +7,7 @@
     ".": "./index.rip"
   },
   "scripts": {
-    "test": "rip test && rip test/workspace.rip"
+    "test": "rip test && rip test/workspace.rip && rip test/apply.rip"
   },
   "files": [
     "*.rip",
