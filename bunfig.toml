@@ -6,8 +6,12 @@ preload = ["./src/loader.js"]
 preload = ["./src/loader.js"]
 
 # The test boundary: package suites run from their own directories
-# (rip test.rip; the vscode extension has its own CI step), and misc/
-# is an untracked scratch area — root runs exclude both mechanically.
+# (rip test.rip), and misc/ is an untracked scratch area — root runs
+# exclude both mechanically. `bun run test:all` crosses that boundary
+# through scripts/test-all.mjs, which spawns every packages/*/ suite as
+# its own lane alongside the root one. The single suite a local test:all
+# does not run is packages/browser-tests, which needs installed Playwright
+# browsers; CI runs it as its own step.
 pathIgnorePatterns = ["packages/**", "misc/**"]
 
 # The per-test timeout lives in package.json's test script as a CLI

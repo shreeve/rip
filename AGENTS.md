@@ -328,6 +328,14 @@ alters surface syntax updates ALL THREE in the same change.
 
 ## Test-Authoring Sharp Edges
 
+- A PTY test must await text that occurs ONCE in the whole stream. The
+ terminal echoes the command line back before the command's output, so
+ `echo AAA` awaiting `AAA` matches its own echo; only the bytes up to
+ there are consumed, and whether the output had already landed decides
+ what remains. Put the awaited text in the output alone
+ (`echo A$(echo AA)`) — otherwise the assertion is a bet on PTY read
+ boundaries, which coalesce under load: measured 5 failures in 12
+ concurrent runs before, 0 in 44 after.
 - Battery files are themselves Rip source, so quoting nests: a `"""`
  heredoc interpolates `#{}` at the battery-file level (the test's
  source never sees it); a `'''` heredoc is raw for interpolation but
@@ -350,8 +358,10 @@ alters surface syntax updates ALL THREE in the same change.
  `bun <file>`) and `[test]` (for `bun test`) — and BOTH are
  load-bearing: on Bun 1.3.14 the test runner does not inherit the
  top-level list. Removing either breaks its half of the world.
-- `packages/vscode` tests never ride the compiler's fast loop; the two
- suites run separately (CI runs both).
+- `packages/vscode` tests never ride the compiler's fast loop; the
+ extension suite is its own boundary, which `test:all` runs as one lane
+ through that package's own `bun run test` — the same command, and the
+ same ~60s, as running it in that directory.
 - An unreproduced single-failure suite run is a KNOWN open mystery
  (sightings: `test:all` 2026-07-20/21, an audit lane 2026-07-28, one
  Playwright firefox spec 2026-07-29 — all unreproduced; evidence
@@ -369,11 +379,16 @@ alters surface syntax updates ALL THREE in the same change.
  validity gates, scaling gates, fuzz drift) registers visible skips
  here.
 - `bun run test:all` — the CANONICAL full suite: everything above PLUS
- the extended tier. CI runs this, always. COMPLETION CLAIMS run
- against `bun run test:all`, not the fast loop.
+ the extended tier PLUS every `packages/*/` suite, which
+ `scripts/test-all.mjs` spawns as parallel lanes and aggregates into
+ one exit code. CI runs this, always. COMPLETION CLAIMS run against
+ `bun run test:all`, not the fast loop. The ONE suite it does not
+ carry is `packages/browser-tests` — it needs installed Playwright
+ browsers, and CI runs it as its own step.
 - `bun run test` FROM a package (`packages/vscode`, `packages/server`,
- `packages/app`, …) — that package's own suite; root `test:all`
- excludes `packages/**` by bunfig, so these are additional coverage
+ `packages/app`, …) — that package's own suite, and the inner loop
+ for work on that package; the root fast loop excludes `packages/**`
+ by bunfig, and `test:all` reaches these only by spawning them there
  (deps come from the repo-root `bun install`; no package-local lock).
 - `bunx playwright test` FROM `packages/browser-tests` — the real-DOM
  certification (chromium, firefox, webkit), including the workspace

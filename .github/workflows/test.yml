@@ -6,6 +6,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -32,7 +33,11 @@ jobs:
       - name: Install (one workspace install provisions every member; compiler purity is gated separately)
         run: bun install --frozen-lockfile
 
-      - name: Full suite, extended tier included
+      # Every suite in the repository except packages/browser-tests: the
+      # root suite with the extended tier, and one lane per workspace
+      # package, spawned and aggregated by scripts/test-all.mjs. CI is set
+      # here, so a lane that cannot run FAILS the step instead of skipping.
+      - name: Full suite, every lane (root + every packages/*/ suite)
         run: bun run test:all
 
       - name: Parser regeneration — must be byte-identical to the committed file
@@ -50,35 +55,16 @@ jobs:
           bun run browser-bundle
           git diff --exit-code dist/browser
 
-      - name: Extension suite (packages/vscode — its own suite, its own boundary)
-        working-directory: packages/vscode
-        # No install: the workspace root install above already provisioned
-        # this member (deps hoisted; tsgo resolves through the store).
-        run: bun run test
-
-      - name: UI package suite (packages/ui — its own suite, its own boundary)
-        working-directory: packages/ui
-        run: bun run test
-
-      - name: App package suite (packages/app — its own suite, its own boundary)
-        working-directory: packages/app
-        run: bun run test
-
-      - name: Validate package suite (packages/validate — its own suite, its own boundary)
-        working-directory: packages/validate
-        run: bun run test
-
-      - name: Server package suite (packages/server — its own suite, its own boundary)
-        working-directory: packages/server
-        run: bun run test
-
-      - name: Database package suite (packages/db — protocol tests; live tests gated on a harbor endpoint)
-        working-directory: packages/db
-        run: bun run test
-
-      - name: Time package suite (packages/time — its own suite, its own boundary; dayjs is the parity oracle)
-        working-directory: packages/time
-        run: bun run test
+      # The one suite test:all does not carry: it needs real browsers, which
+      # a local checkout is not required to have. The download dominates the
+      # step, so the browser binaries are cached against the pinned
+      # @playwright/test version — a version bump misses the key and
+      # reinstalls, which is the point.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('packages/browser-tests/package.json') }}
 
       - name: Real-browser suite (packages/browser-tests — Playwright in Chromium/Firefox/WebKit)
         working-directory: packages/browser-tests
