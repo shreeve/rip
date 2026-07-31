@@ -3,14 +3,12 @@
 // Thirteen extended-tier gates trust expectLinearDoubling to tell linear
 // from quadratic. The discrimination lives in scalingVerdict, a pure
 // function over (sizes, costs) — so it is proven here on exact numbers,
-// with the cost triples captured from real CI failures pinned as
-// fixtures. No clock is involved: a verdict test that measured real
-// workloads would itself be load-sensitive, which is the disease the
-// verdict exists to cure. (A first version of this file did exactly
-// that, and its quadratic — a 16x end-to-end signal against the 10.6x
-// the bound allows — was masked on a loaded runner by 1.5x of noise on
-// the smallest size. The margins are the statistic's, not the test's,
-// so the timing layer keeps only the one check with a fat margin.)
+// with cost triples measured on loaded CI runners pinned as fixtures.
+// The verdict tests involve no clock, because a verdict test that
+// measures real workloads is itself load-sensitive: over two doublings
+// a quadratic's 16x signal clears the exponent bound's 10.6x allowance
+// by only 1.5x of endpoint noise. The timing layer below keeps only the
+// checks whose margins are fat.
 import { expect, test } from 'bun:test';
 import { expectLinearDoubling, scalingVerdict } from '../support/scaling.js';
 import { describeExtended } from '../support/extended.js';
@@ -19,10 +17,10 @@ const verdict = (sizes, costs) => scalingVerdict({ sizes, costs });
 
 // ── The verdict, on exact numbers (fast tier — pure math) ─────────────
 
-test('captured CI failures of the old pairwise statistic are green: one lucky-fast middle sample is not growth', () => {
-  // Real cost triples from CI runs that failed the old per-pair bound.
-  // Each has a pair ratio the old statistic rejected; each grows more
-  // slowly end-to-end than the idle baseline (exponent ~1.2).
+test('a lucky-fast middle sample is not growth: measured CI triples with a spiked pair ratio stay green', () => {
+  // Cost triples measured on loaded CI runners. Each carries one pair
+  // ratio spiked by a fast middle sample; each grows more slowly
+  // end-to-end than the idle baseline (exponent ~1.2).
   const captured = [
     { sizes: [500, 1000, 2000], costs: [46.45, 73.04, 213.36] },   // pairs 1.57/2.92, exponent 1.10
     { sizes: [2000, 4000, 8000], costs: [48.20, 124.12, 352.00] }, // pairs 2.58/2.84, exponent 1.43

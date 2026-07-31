@@ -4,13 +4,9 @@
 # carries, plus the byte gates — healthy in ~4 minutes. `browser` is the
 # real-browser certification, isolated because its slow part is not ours:
 # `playwright install --with-deps` runs an apt install the browser cache
-# cannot cover, and a throttled Ubuntu mirror once stretched it past 20
-# minutes — inside a single job that stall held an already-green verdict
-# hostage until the job timeout killed it.
-#
-# If branch protection ever gains required status checks, require BOTH
-# `test` and `browser` — requiring only `test` quietly stops a red
-# browser suite from blocking merges.
+# cannot cover, and a throttled Ubuntu mirror can stretch it past 20
+# minutes — a stall that must not sit between a green verdict and its
+# report.
 name: test
 
 on:

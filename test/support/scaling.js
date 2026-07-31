@@ -20,11 +20,10 @@
 // The verdict is on the GROWTH EXPONENT — log(cost ratio)/log(size
 // ratio) across the endpoints — not on adjacent-pair ratios. A pair
 // ratio is maximally exposed to a single noisy sample: one lucky-fast
-// middle point sits in the denominator of the next pair, and every
-// CI failure captured while tuning this had exactly that shape —
-// pairs like 1.57/2.92 whose end-to-end exponent was 1.10, MORE linear
-// than the idle baseline (1.21). Captured exponents on healthy code:
-// 1.10-1.43 (loaded CI), ~1.2 idle. A quadratic measures 2.00. The
+// middle point sits in the denominator of the next pair — a measured
+// pair of 1.57/2.92 carries an end-to-end exponent of 1.10, MORE linear
+// than the idle baseline (1.21). Healthy code measures 1.10-1.43 on
+// loaded CI runners, ~1.2 idle. A quadratic measures 2.00. The
 // bound is 1.7, the midpoint. For sizes evenly spaced in log (every
 // caller doubles), the endpoint exponent IS the least-squares slope —
 // the middle point has zero leverage on it, which is the point.
@@ -33,8 +32,8 @@
 // walked, allocated and cached, so per-item cost rises as it outgrows
 // cache — exponent ~1.2, not 1.0). The pair bound of 3.4 survives only
 // as a backstop for a blowup confined to the LAST doubling (a capacity
-// cliff), which an endpoint exponent would dilute; 3.4 cleared three
-// consecutive CI runs while quadratic's per-pair 4x fails it twice over.
+// cliff), which an endpoint exponent would dilute: healthy pairs reach
+// 2.92 under load, while a quadratic's 4x fails both retry rounds.
 import { expect } from 'bun:test';
 import { ops } from '../../src/ops.js';
 
@@ -68,8 +67,8 @@ const cpuMs = (since) => {
 };
 
 // The verdict, separated from the measuring so it is testable on exact
-// numbers (test/toolchain/scaling-harness.test.js pins it against the
-// cost triples captured from real CI failures — no timing involved).
+// numbers (test/toolchain/scaling-harness.test.js pins it against
+// measured cost triples — no timing involved).
 export const scalingVerdict = ({ sizes, costs, bound = 3.4, exponentBound = 1.7 }) => {
   const exponent = Math.log(costs.at(-1) / costs[0]) / Math.log(sizes.at(-1) / sizes[0]);
   const pairs = costs.slice(1).map((t, i) => t / costs[i]);

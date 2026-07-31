@@ -92,9 +92,9 @@ const EXCLUDED = new Map([
   ['browser-tests', 'needs installed Playwright browsers — CI runs it as its own job'],
 ]);
 
-// Named once: the root lane runs the EXTENDED tier, which is what makes
-// it ~2x the work of a bare `bun run test` — the label says so, so a
-// reader comparing the two numbers is not left to guess.
+// The label names its tier: the extended tier is what makes this lane
+// ~2x the work of a bare `bun run test`, so the two wall times are not
+// comparable.
 const ROOT_LANE = 'root (extended tier)';
 
 const color = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -182,7 +182,7 @@ const planLanes = () => {
 // `bun test` over a file whose every describe is skipped prints
 // "Ran 0 tests" and exits 0, and the rip harness sets a non-zero code
 // only for a failure. Seven vscode lanes would go green that way with
-// tsgo absent (the guardrails now refuse first, but that closes one
+// tsgo absent (the guardrails refuse first, but that closes one
 // instance, not the class).
 //
 // Both runners end with a count, so require one and require it to be

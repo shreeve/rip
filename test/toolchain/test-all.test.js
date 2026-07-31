@@ -135,10 +135,10 @@ describe('the lane orchestrator', () => {
     expect(r.status).toBe(0);
   });
 
-  // Both of these used to be coerced to NaN and carried into the run.
-  // The spawn carries its own timeout so a regression fails this test
-  // rather than hanging the suite that is trying to catch it — the
-  // --jobs regression is an infinite wait, not a crash.
+  // A blindly coerced non-number is NaN, and NaN here is a hang, not a
+  // crash: a NaN jobs cap starts no lane and waits forever. The spawn
+  // carries its own timeout so a regression fails this test rather than
+  // hanging the suite that is trying to catch it.
   const withArgs = (...extra) =>
     spawnSync(process.execPath, [ORCHESTRATOR, '--root', fixture({}), ...extra], {
       encoding: 'utf8',

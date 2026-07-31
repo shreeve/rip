@@ -122,12 +122,11 @@ export async function openSession(files) {
     // the exact regression these gates exist to catch. A test that wants to
     // assert silence must first know the server spoke.
     // Waits for a publication NEWER than the one the previous call
-    // returned. Polling only until a publication EXISTS is permanently
-    // satisfied after the first one — every later read then slept a flat
-    // `settle` and snapshotted whatever happened to be there, so a server
-    // still working through a config change handed back its stale answer.
-    // On a busy machine that is the failure itself, not a symptom of one:
-    // a fixed sleep is a bet that the server is faster than the load.
+    // returned. A wait that ends when a publication merely EXISTS is
+    // satisfied forever after the first one, leaving nothing but the
+    // settle-sleep between a config change and reading the PREVIOUS
+    // answer as if it were the response — and a fixed sleep is a bet
+    // that the server is faster than whatever else the machine is doing.
     async diagnostics(name, { settle = 600, tries = 80, every = 100 } = {}) {
       const u = uri(name);
       const want = (seen.get(u) ?? 0) + 1;
@@ -141,7 +140,7 @@ export async function openSession(files) {
       }
       // Then let a burst finish: return once the count has held still for
       // `settle`, rather than after `settle` regardless of what is in
-      // flight. An intermediate publication no longer decides the answer.
+      // flight — an intermediate publication must not decide the answer.
       let quiet = 0;
       while (quiet < settle && Date.now() < deadline + settle) {
         const at = pubs.get(u);
