@@ -12,19 +12,29 @@
 // work), which is the whole reason these gates exist alongside that one.
 //
 // Per size the cost is min-of-5 (GC and JIT noise is one-sided — the
-// minimum approaches true cost). If any doubling ratio exceeds the
-// bound, the WHOLE measurement re-runs once, while genuinely superlinear
-// growth fails every round by structural margin — re-verified against
-// the documented quadratic runner variant whenever this harness changes.
+// minimum approaches true cost). If the verdict is red, the WHOLE
+// measurement re-runs once, while genuinely superlinear growth fails
+// every round by structural margin — the discrimination is a standing
+// gate, test/toolchain/scaling-harness.test.js.
 //
-// The bound is 3.4, not the 2.0 a purely linear pass suggests. These
-// workloads double a SET that is walked, allocated and cached, so honest
-// growth lands well above 2.0: measured on a quiet machine, the runtime
-// gates read 2.13-2.45 and 2.2-2.76, and CI runners produced 2.84 (effect
-// notify), 2.92 (reactive-heavy compile) and 2.76 (diamond) on code with
-// no regression in it. A 2.8 bound left no room on shared hardware and
-// failed roughly two runs in five. Quadratic still doubles at ~4 and
-// still fails twice over, which is the separation these gates exist for.
+// The verdict is on the GROWTH EXPONENT — log(cost ratio)/log(size
+// ratio) across the endpoints — not on adjacent-pair ratios. A pair
+// ratio is maximally exposed to a single noisy sample: one lucky-fast
+// middle point sits in the denominator of the next pair, and every
+// CI failure captured while tuning this had exactly that shape —
+// pairs like 1.57/2.92 whose end-to-end exponent was 1.10, MORE linear
+// than the idle baseline (1.21). Captured exponents on healthy code:
+// 1.10-1.43 (loaded CI), ~1.2 idle. A quadratic measures 2.00. The
+// bound is 1.7, the midpoint. For sizes evenly spaced in log (every
+// caller doubles), the endpoint exponent IS the least-squares slope —
+// the middle point has zero leverage on it, which is the point.
+//
+// Honest cost still grows past 2.0 per doubling (the doubled set is
+// walked, allocated and cached, so per-item cost rises as it outgrows
+// cache — exponent ~1.2, not 1.0). The pair bound of 3.4 survives only
+// as a backstop for a blowup confined to the LAST doubling (a capacity
+// cliff), which an endpoint exponent would dilute; 3.4 cleared three
+// consecutive CI runs while quadratic's per-pair 4x fails it twice over.
 import { expect } from 'bun:test';
 import { ops } from '../../src/ops.js';
 
@@ -57,8 +67,10 @@ const cpuMs = (since) => {
   return (user + system) / 1000;
 };
 
-export const expectLinearDoubling = ({ prepare, run, sizes, bound = 3.4, samples = 5 }) => {
+export const expectLinearDoubling = ({ prepare, run, sizes, bound = 3.4, exponentBound = 1.7, samples = 5 }) => {
   let costs = [];
+  const exponent = () =>
+    Math.log(costs.at(-1) / costs[0]) / Math.log(sizes.at(-1) / sizes[0]);
   const measure = () => {
     run(prepare(1000)); // warmup
     costs = sizes.map((n) => {
@@ -71,18 +83,20 @@ export const expectLinearDoubling = ({ prepare, run, sizes, bound = 3.4, samples
       }
       return Math.max(m, 0.5);
     });
-    return costs.every((t, i) => i === 0 || t / costs[i - 1] < bound);
+    return exponent() < exponentBound
+      && costs.every((t, i) => i === 0 || t / costs[i - 1] < bound);
   };
   const ok = measure() || measure();
   // Report the measurement, not just the verdict: a gate that fails on a
   // machine you cannot attach to is only actionable if it says by how
-  // much. A ratio of 2.9 against a 2.8 bound is noise to re-examine; 4.1
-  // is the quadratic these gates exist to catch, and the two need
-  // different responses.
+  // much. An exponent of 1.8 against 1.7 is noise to re-examine; 2.0 is
+  // the quadratic these gates exist to catch, and the two need different
+  // responses.
   const ratios = costs.slice(1).map((t, i) => (t / costs[i]).toFixed(2));
   expect(
     ok,
     `sizes ${sizes.join('/')} cost ${costs.map((t) => t.toFixed(2)).join('/')} cpu-ms ` +
-    `→ ratios ${ratios.join('/')} (bound ${bound})`,
+    `→ growth exponent ${exponent().toFixed(2)} (bound ${exponentBound}; linear ~1.2, quadratic 2.0), ` +
+    `pair ratios ${ratios.join('/')} (backstop ${bound})`,
   ).toBe(true);
 };
