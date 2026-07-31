@@ -468,20 +468,21 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  // A forward-referenced class-expression binding breaks the pin probe:
-  // tsgo types an anonymous class by its own binding, so the probe
-  // declaration's hover answers `typeof __rip_probe_N_<name>` —
-  // self-referential — and parseProbeHover's unusable-answer filter has no
-  // self-reference clause, so the answer feeds back through compile() as a
-  // pin naming a symbol from a probe file already deleted. The published
-  // error is doubly wrong: false, and spelled in minted vocabulary the user
-  // can find nowhere.
+  // A forward reference forces the hoist split, which is what puts a binding
+  // into the pin probe at all — a class declared before its uses takes
+  // declare-in-place and never rounds. tsgo types an anonymous class by its
+  // own binding, so the probe declaration answers `typeof __rip_probe_N_Box`,
+  // and accepting that annotated the REAL binding with a name deleted along
+  // with the probe file: TS2304 on legal code, spelled in vocabulary the
+  // author could find nowhere. `parseProbeHover` now refuses any answer
+  // naming a probe symbol, landing on the probe round's status quo.
   //
-  // An OPEN gap, asserted as-is: the day the filter (or a substitution
-  // shape) lands, the TS2304 vanishes and this goes red — the cue to invert
-  // this test and move the forward-reference spelling into the corpus, not
-  // a regression. Liveness-paired.
-  test('a forward-referenced class pins the probe\'s own symbol — TS2304 on legal code, an open gap, asserted as-is', () => {
+  // BOTH spellings, because the component is the shape that reaches real
+  // code — mutual and forward references between components are ordinary
+  // component-library structure, and a component lowers to a class
+  // expression. Liveness-paired: `live.rip` proves the run type-checked at
+  // all rather than reporting nothing because nothing ran.
+  test('a forward-referenced class and a forward-rendered component both check clean — no minted symbol escapes the probe', () => {
     const dir = workspace({
       'fwd.rip': [
         'make = -> new Box()',    // reads Box above its declaration — forces the hoist split
@@ -489,19 +490,95 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         "  greet: -> 'hi'",
         'console.log make().greet()',
       ].join('\n') + '\n',
+      'comp.rip': [
+        'Parent = component',
+        '  render',
+        "    Child text: 'hi'",   // renders Child above its declaration
+        '',
+        'Child = component',
+        '  @text: string',
+        '  render',
+        '    div',
+        '      = @text',
+      ].join('\n') + '\n',
       'live.rip': "n: number = 'oops'\nconsole.log n\n",
     });
     try {
       const diags = JSON.parse(check(dir, ['--json']).stdout);
       expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
-      const fwd = diags.filter((d) => d.file === 'fwd.rip');
-      // Code bound to its line, column left free — the diagnostic is anchored
-      // at the hoist line, whose mapped column is a property of the hoist
-      // emission rather than of this root, so pinning it would redden on an
-      // unrelated remap. The minted symbol in the message is the substantive
-      // assertion: that vocabulary IS the defect.
-      expect(fwd.map((d) => [d.code, d.line])).toEqual([[2304, 1]]);
-      expect(fwd[0].message).toContain('__rip_probe_');
+      expect(diags.filter((d) => d.file === 'fwd.rip')).toEqual([]);
+      expect(diags.filter((d) => d.file === 'comp.rip')).toEqual([]);
+      // No diagnostic anywhere may wear the minted vocabulary — the substantive
+      // half of this row. A future pin shape that leaks the probe name through
+      // some other message reds here rather than in a fixture nobody reads.
+      expect(diags.filter((d) => /__rip_probe_/.test(d.message))).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // The FLOOR's accepted cost, asserted so it cannot be mistaken for a fix.
+  // Refusing the self-referential answer leaves the binding unpinned — an
+  // evolving `any` — so a wrong call through it is NOT caught. That is the
+  // status quo the probe round promises on every failure path, and it is
+  // strictly better than a false error; it is not the ceiling. Substituting
+  // the real name (`typeof Box`) is circular at the declaration site and
+  // needs a shape that avoids self-annotation, which is a design step beyond
+  // the filter. This assertion is that row's exit: it reds the day a pin
+  // arrives, which is the cue to invert it.
+  // The unpinned binding is STRICT WORKING, not a gap, and this is what says
+  // so: a strict project is told the binding is implicitly `any`, and has two
+  // ordinary spellings to answer with. Without this the residual reads like an
+  // unreachable corner — the difference between "rip cannot express it" and
+  // "rip asks you to", which is the whole of what `rip.strict` means.
+  // Declare-first also documents the trigger: a class declared before its uses
+  // takes declare-in-place and never enters the probe set at all.
+  test('under rip.strict the unpinned forward reference is an ordinary missing annotation — reordering or annotating answers it', () => {
+    const dir = workspace({
+      'bare.rip': [
+        'make = -> (new Box())',
+        'Box = class',
+        "  greet: -> 'hi'",
+        'console.log make().greet()',
+      ].join('\n') + '\n',
+      'first.rip': [
+        'class Box',                       // declared before its uses — never rounds
+        "  greet: -> 'hi'",
+        'make = -> (new Box())',
+        'console.log make().greet()',
+      ].join('\n') + '\n',
+      'said.rip': [
+        'interface BoxT',                  // the author states the shape
+        '  greet(): string',
+        'make = -> (new Box())',
+        'Box: { new(): BoxT } = class',
+        "  greet: -> 'hi'",
+        'console.log make().greet()',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      // The implicit-any family, which `rip.strict` exists to un-suppress —
+      // and NOT a 2304: the minted symbol must not come back under any mode.
+      expect(diags.filter((d) => d.file === 'bare.rip').map((d) => d.code).sort((a, b) => a - b))
+        .toEqual([7005, 7034]);
+      expect(diags.filter((d) => d.file === 'first.rip')).toEqual([]);
+      expect(diags.filter((d) => d.file === 'said.rip')).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('the refused answer leaves the binding unpinned — a wrong call through it is the floor\'s accepted cost', () => {
+    const dir = workspace({
+      'unpinned.rip': [
+        'make = -> new Box()',
+        'Box = class',
+        "  greet: -> 'hi'",
+        'console.log make().greet(1, 2, 3)',   // arity nobody declared — unpinned, so unchecked
+      ].join('\n') + '\n',
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
+      expect(diags.filter((d) => d.file === 'unpinned.rip')).toEqual([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 

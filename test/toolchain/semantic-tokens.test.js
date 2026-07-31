@@ -292,3 +292,67 @@ describeExtended('semantic tokens — an enum name', () => {
     }
   }, 60000);
 });
+
+// A FORWARD-REFERENCED class binding loses its `class` color.
+//
+// The hoist split is the trigger, and it is the same one that used to leak a
+// probe symbol (#41): read a class above its declaration and the binding stays
+// hoisted, so the face spells it `let Box!: …` and tsgo — truthfully, about the
+// face — calls it a variable. Declared before its uses the same binding takes
+// declare-in-place, keeps a `class` face spelling, and colors correctly; that
+// is the POSITIVE CONTROL below, and it carries the weight, because a server
+// that simply never classified anything `class` would satisfy the negative for
+// free.
+//
+// `ripSemanticTokens` already owns two corrections of exactly this shape —
+// `mutables` clears a modifier, `enums` rewrites a type — both keyed by the
+// generated start the compiler reports. A third of the same form is the fix;
+// re-reading the .rip text to guess at `= class` is not, because a span the
+// compiler declares is what survives lowering.
+//
+// An OPEN gap, asserted as-is: the day the correction lands this goes red,
+// the cue to invert it. Liveness-paired.
+describeExtended('semantic tokens — a forward-referenced class binding', () => {
+  const FWD = [
+    'make = -> (new Box())',   // line 0 — reads Box above its declaration
+    'Box = class',             // line 1 — hoisted, so the face spells it `let`
+    "  greet: -> 'hi'",
+    'console.log make().greet()',
+    '',
+  ].join('\n');
+
+  const PLAIN = [
+    'Shape = class',           // line 0 — declared before any use
+    "  area: -> 1",
+    'console.log (new Shape()).area()',
+    '',
+  ].join('\n');
+
+  test('a forward-referenced class declaration colors `variable`, not `class` — an open gap, asserted as-is', async () => {
+    const session = await openSession({ 'app.rip': FWD });
+    try {
+      session.open('app.rip');
+      const tokens = await session.semanticTokens('app.rip');
+      expect(tokens.length).toBeGreaterThan(0);   // liveness
+      const tok = at(tokens, 1, 0);
+      expect(tok, 'the Box declaration has a token').toBeDefined();
+      expect(tok.type, 'the gap — the hoist split costs the binding form').toBe('variable');
+    } finally {
+      await session.close();
+    }
+  }, 60000);
+
+  test('the same binding declared before its uses colors `class` — the control that makes the gap a gap', async () => {
+    const session = await openSession({ 'app.rip': PLAIN });
+    try {
+      session.open('app.rip');
+      const tokens = await session.semanticTokens('app.rip');
+      expect(tokens.length).toBeGreaterThan(0);   // liveness
+      const tok = at(tokens, 0, 0);
+      expect(tok, 'the Shape declaration has a token').toBeDefined();
+      expect(tok.type, 'declare-in-place keeps the form').toBe('class');
+    } finally {
+      await session.close();
+    }
+  }, 60000);
+});

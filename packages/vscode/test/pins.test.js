@@ -58,6 +58,22 @@ describe('parseProbeHover', () => {
     expect(parseProbeHover({ contents: { value: 'no fence here' } })).toBeNull();
     expect(parseProbeHover(null)).toBeNull();
   });
+  // An answer naming a probe symbol cannot outlive the probe file. tsgo types
+  // an anonymous class by its own binding, so a class-expression RHS answers
+  // `typeof __rip_probe_N_<name>` — accepted, that annotates the REAL binding
+  // with a name deleted along with the probe, and tsgo then publishes TS2304
+  // on legal code, spelled in vocabulary the author can find nowhere. The
+  // probe round's doctrine is that every failure path lands on the status
+  // quo, so this caches null and the binding stays an unpinned evolving
+  // `any`. Not only SELF-reference: a sibling probe's symbol dangles the same
+  // way once the file is gone.
+  test('rejects an answer naming a probe symbol — it cannot outlive the probe file', () => {
+    expect(parseProbeHover(hover('let __rip_probe_0_Box: typeof __rip_probe_0_Box'))).toBeNull();
+    expect(parseProbeHover(hover('let __rip_probe_1_make: () => __rip_probe_0_Box'))).toBeNull();
+    // The ordinary answer is unaffected — the clause reads the TYPE, never the
+    // declaration's own minted name, which every probe answer carries.
+    expect(parseProbeHover(hover('let __rip_probe_0_items: string[]'))).toBe('string[]');
+  });
 });
 
 // The rip source: `items` is def-referenced (stays hoisted; evolving

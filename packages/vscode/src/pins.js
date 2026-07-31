@@ -35,6 +35,14 @@ const lineStartOf = (text, offset) => text.lastIndexOf('\n', offset - 1) + 1;
 // Splices run bottom-up so earlier offsets stay valid; probe names are
 // index-qualified so same-named bindings in different scopes never
 // collide.
+// The minted prefix, read from ONE spelling by everything that depends on
+// it: the splice below, the position lookup, the answer regex, and the
+// unusable-answer filter's self-reference clause. That clause has to reject
+// exactly what this mints — two literals that must agree is the drift this
+// module cannot afford, because disagreement fails SILENTLY (a filter that
+// stops matching just starts accepting dangling pins again).
+export const PROBE_PREFIX = '__rip_probe_';
+
 export function buildProbe(faceCode, pinnables) {
   const jobs = pinnables
     .map((p, i) => ({ ...p, i }))
@@ -44,12 +52,12 @@ export function buildProbe(faceCode, pinnables) {
     const at = lineStartOf(text, p.stmtGen[0]);
     const indent = /^[ \t]*/.exec(text.slice(at, text.indexOf('\n', at) + 1 || undefined))[0];
     const rhs = faceCode.slice(p.valueGen[0], p.valueGen[1]);
-    text = `${text.slice(0, at)}${indent}let __rip_probe_${p.i}_${p.name} = ${rhs};\n${text.slice(at)}`;
+    text = `${text.slice(0, at)}${indent}let ${PROBE_PREFIX}${p.i}_${p.name} = ${rhs};\n${text.slice(at)}`;
   }
   const lineStarts = [0];
   for (let i = 0; i < text.length; i++) if (text[i] === '\n') lineStarts.push(i + 1);
   const positions = pinnables.map((p, i) => {
-    const offset = text.indexOf(`__rip_probe_${i}_${p.name}`);
+    const offset = text.indexOf(`${PROBE_PREFIX}${i}_${p.name}`);
     if (offset < 0) return null;
     let line = 0;
     while (line + 1 < lineStarts.length && lineStarts[line + 1] <= offset) line++;
@@ -58,14 +66,36 @@ export function buildProbe(faceCode, pinnables) {
   return { text, positions };
 }
 
+// The answer shape, built ONCE from the prefix and escaped on the way in.
+// Escaped because the prefix is a value, not a pattern: a rename to anything
+// carrying `.` or `$` would otherwise change what this MATCHES rather than
+// fail, and `.` in particular would accept a declaration buildProbe never
+// minted — the silent drift the constant exists to prevent, reintroduced at
+// the one site that interpolates it into a regex. No `g` flag, so the shared
+// instance carries no lastIndex between calls.
+const ANSWER = new RegExp(
+  '```(?:typescript|ts)\\n(?:let|var|const)\\s+'
+  + PROBE_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  + '\\d+_[\\w$]+!?\\s*:\\s*([\\s\\S]*?)\\n?```',
+);
+
 // tsgo hover markdown → type text, or null when the answer is unusable
-// (no fence, evolving `any`, or a truncated printout). Multi-line type
-// printouts collapse to single-line pin text.
+// (no fence, evolving `any`, a truncated printout, or an answer naming a
+// probe symbol). Multi-line type printouts collapse to single-line pin text.
 export function parseProbeHover(hover) {
   const raw = hover?.contents?.value ?? '';
-  const m = /```(?:typescript|ts)\n(?:let|var|const)\s+__rip_probe_\d+_[\w$]+!?\s*:\s*([\s\S]*?)\n?```/.exec(raw);
+  const m = ANSWER.exec(raw);
   if (!m) return null;
   const type = m[1].replace(/\s+/g, ' ').trim();
   if (!type || type === 'any' || type.includes('...')) return null;
+  // A probe symbol in the TYPE cannot outlive the probe file. tsgo types an
+  // anonymous class by its own binding, so a class-expression RHS answers
+  // `typeof <probe symbol>`; accepted, that annotates the real binding with a
+  // name deleted along with the probe, and tsgo publishes TS2304 on legal
+  // code in vocabulary the author can find nowhere. Rejecting lands on the
+  // probe round's status quo — an unpinned evolving `any` — which is the
+  // doctrine every other clause here follows. The test reads the TYPE, never
+  // the declaration's own minted name, which every answer carries.
+  if (type.includes(PROBE_PREFIX)) return null;
   return type;
 }
