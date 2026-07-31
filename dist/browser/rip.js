@@ -8976,12 +8976,19 @@ var memberTypeSegments = (m, lead) => {
     return [{ text: `${lead}any` }];
   return typed;
 };
-var memberDeclareSegments = (m) => [
-  { text: m.kind === "readonly" ? "declare readonly " : "declare " },
-  { text: m.name, node: m.nameNode, role: m.nameRole },
-  ...memberTypeSegments(m, ": "),
-  { text: ";" }
-];
+var memberDeclareSegments = (m) => {
+  if (isBehaviorProjected(m))
+    return [
+      { text: m.name, node: m.nameNode, role: m.nameRole },
+      { text: ` = __computed(() => ${m.behavior}.${m.name}.call(this as any));` }
+    ];
+  return [
+    { text: m.kind === "readonly" ? "declare readonly " : "declare " },
+    { text: m.name, node: m.nameNode, role: m.nameRole },
+    ...memberTypeSegments(m, ": "),
+    { text: ";" }
+  ];
+};
 var readonlyCastType = (m) => `{ ${m.name}${segmentsText(memberTypeSegments(m, ": "))} }`;
 var isDeclarableMember = (m) => m.kind !== "method" && m.kind !== "hook";
 var publicProps = (info) => info.members.filter((m) => m.isPublic && (containerish(m) || m.kind === "readonly" || m.kind === "plain"));
@@ -9167,6 +9174,44 @@ var isObject = (x) => isNode4(x) && x[0] === "object";
 var isFunc2 = (x) => isNode4(x) && (x[0] === "->" || x[0] === "=>") && x.length === 3;
 var isDefHead = (h) => h === "def" || h === "void-def";
 var isUpdate = (x) => isNode4(x) && (x[0] === "++" || x[0] === "--") && x.length === 3;
+var IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+var patternBindings = (node, base = "", out = []) => {
+  if (!isNode4(node))
+    return out;
+  if (node[0] === "object") {
+    for (const el of node.slice(1)) {
+      if (!isNode4(el) || el.length !== 3)
+        continue;
+      const head = el[0];
+      if (head !== ":" && head !== null)
+        continue;
+      const key = el[1];
+      if (typeof key !== "string")
+        continue;
+      const seg = IDENT.test(key) ? `.${key}` : `[${key}]`;
+      const target = el[2];
+      if (typeof target === "string") {
+        if (IDENT.test(target))
+          out.push([target, base + seg]);
+      } else
+        patternBindings(target, base + seg, out);
+    }
+    return out;
+  }
+  if (node[0] === "array") {
+    node.slice(1).forEach((el, i) => {
+      if (isNode4(el) && el[0] === "...")
+        return;
+      if (typeof el === "string") {
+        if (IDENT.test(el))
+          out.push([el, `${base}[${i}]`]);
+      } else
+        patternBindings(el, `${base}[${i}]`, out);
+    });
+    return out;
+  }
+  return out;
+};
 var isTernary = (x) => isNode4(x) && x[0] === "?:" && x.length === 4;
 var isBlock2 = (x) => isNode4(x) && x[0] === "block";
 var isHtmlTag2 = (name) => TEMPLATE_TAGS.has(String(name).split("#")[0]);
@@ -9215,6 +9260,7 @@ class Emitter {
     this.pinnables = [];
     this.mutables = [];
     this.enums = [];
+    this.classDecls = [];
     this.importedRefs = [];
     this.strict = strict;
     this.ts = face === "ts";
@@ -9464,6 +9510,24 @@ class Emitter {
     }
     return names;
   }
+  static declaredClassNames(stmts) {
+    const names = new Set;
+    const declared = (s) => {
+      if (!isNode4(s) || !DECLARING_ASSIGNS.has(s[0]) || s.length !== 3)
+        return;
+      if (typeof s[1] !== "string")
+        return;
+      const v = s[2];
+      if (isNode4(v) && (v[0] === "class" || v[0] === "component"))
+        names.add(s[1]);
+    };
+    for (const s of stmts) {
+      declared(s);
+      if (isNode4(s) && s[0] === "export" && isNode4(s[1]))
+        declared(s[1]);
+    }
+    return names;
+  }
   static declaredEnumNames(stmts) {
     const names = new Set;
     const declared = (s) => {
@@ -9686,6 +9750,7 @@ class Emitter {
       computed: this.collectComputedNames(stmts),
       bound: new Set([...bound, ...Emitter.declaredNames(stmts), ...handles, ...readonly]),
       enums: Emitter.declaredEnumNames(stmts),
+      classes: Emitter.declaredClassNames(stmts),
       importSpecs: Emitter.importedSpecs(stmts),
       exportedConst: Emitter.exportedConstNames(stmts)
     });
@@ -9716,6 +9781,18 @@ class Emitter {
     for (let i = this.rframes.length - 1;i >= 0; i--) {
       const f = this.rframes[i];
       if (f.enums !== undefined && f.enums.has(name))
+        return true;
+      if (f.reactive.has(name) || f.bound.has(name))
+        return false;
+      if (f.members !== undefined && f.members.has(name))
+        return false;
+    }
+    return false;
+  }
+  isClassName(name) {
+    for (let i = this.rframes.length - 1;i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.classes !== undefined && f.classes.has(name))
         return true;
       if (f.reactive.has(name) || f.bound.has(name))
         return false;
@@ -9901,6 +9978,10 @@ class Emitter {
       this.mutables.push([start, this.b.offset]);
       return;
     }
+    if (this.isClassName(value)) {
+      this.classDecls.push([start, this.b.offset]);
+      return;
+    }
     const spec = this.importSpecOf(value);
     if (spec !== null)
       this.importedRefs.push([start, this.b.offset, value, spec]);
@@ -9945,8 +10026,7 @@ class Emitter {
       return;
     this.memberDecls.push({
       start: row.sourceStart,
-      end: row.sourceEnd,
-      projected: isBehaviorProjected(m)
+      end: row.sourceEnd
     });
   }
   wordSpanIn(word, container) {
@@ -10774,20 +10854,21 @@ class Emitter {
   captureScan(nodes) {
     const stmts = nodes.length === 1 && isBlock2(nodes[0]) ? nodes[0].slice(1) : nodes;
     const top = new Set(stmts.filter(isNode4));
-    const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
     const facts = new Map;
-    const occur = (name, inFn, write = false, declStmt = null, writeNode = null) => {
+    const occur = (name, inFn, write = false, declStmt = null, writeNode = null, writePath = "") => {
       if (typeof name !== "string" || !IDENT.test(name))
         return;
       let f = facts.get(name);
       if (f === undefined)
-        facts.set(name, f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, firstWrite: null });
+        facts.set(name, f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, firstWrite: null, firstWritePath: "" });
       if (!f.seen) {
         f.seen = true;
         f.decl = declStmt;
       }
-      if (write && f.firstWrite === null && writeNode !== null)
+      if (write && f.firstWrite === null && writeNode !== null) {
         f.firstWrite = writeNode;
+        f.firstWritePath = writePath;
+      }
       if (inFn > 0) {
         f.nested = true;
         if (write)
@@ -10830,6 +10911,11 @@ class Emitter {
           occur(n[1], inFn, true, declaring && !inFn && top.has(n) ? n : null, declaring ? n : null);
         } else {
           walk(n[1], inFn);
+          if (DECLARING_ASSIGNS.has(head)) {
+            for (const [bound, path] of patternBindings(n[1])) {
+              occur(bound, inFn, true, null, n, path);
+            }
+          }
         }
         return;
       }
@@ -10910,6 +10996,14 @@ class Emitter {
       }
     } else
       kept.directives = entries.directives;
+    kept.classBindings = new Set;
+    for (const [name, , role] of kept) {
+      if (role !== "target")
+        continue;
+      const v = facts.get(name)?.firstWrite?.[2];
+      if (isNode4(v) && (v[0] === "class" || v[0] === "component"))
+        kept.classBindings.add(name);
+    }
     kept.pinnable = new Map;
     for (const [name, , role] of kept) {
       if (role !== "target")
@@ -10919,17 +11013,18 @@ class Emitter {
         continue;
       if (kept.annotations?.has(name) || kept.schemaConsts?.has(name))
         continue;
-      kept.pinnable.set(name, f.firstWrite);
-      this.pinnables?.push({ name, node: f.firstWrite, key: this.pinKey(name, f.firstWrite) });
+      const key = this.pinKey(name, f.firstWrite, f.firstWritePath);
+      kept.pinnable.set(name, { node: f.firstWrite, key });
+      this.pinnables?.push({ name, node: f.firstWrite, path: f.firstWritePath, key });
     }
     return kept;
   }
-  pinKey(name, node) {
+  pinKey(name, node, path = "") {
     const id = this.stores.idOf(node);
     const row = id !== null ? this.stores.role(id, "value") : null;
     if (!row || row.sourceStart == null || this.b.source === null)
       return null;
-    const slice = this.b.source.slice(row.sourceStart, row.sourceEnd);
+    const slice = path + "\x00" + this.b.source.slice(row.sourceStart, row.sourceEnd);
     let h = 5381;
     for (let i = 0;i < slice.length; i++)
       h = (h * 33 ^ slice.charCodeAt(i)) >>> 0;
@@ -10984,10 +11079,14 @@ class Emitter {
       const owner = this.ts && role === "target" ? entries.annotations?.get(name) ?? null : null;
       const ownerId = owner !== null ? this.stores.idOf(owner) : null;
       const declaration = ownerId !== null && Emitter.isTypedWrapper(owner) && this.stores.role(ownerId, "target") !== null;
+      const nameStart = this.b.offset;
       if (declaration)
         this.mark(owner, "target", () => this.b.emit(name));
       else
         this.mark(node, role, () => this.b.emit(name));
+      if (this.ts && role === "target" && entries.classBindings?.has(name)) {
+        this.classDecls.push([nameStart, this.b.offset]);
+      }
       if (this.ts && role === "target") {
         if (owner !== null) {
           this.b.tsOnly(() => {
@@ -11000,8 +11099,7 @@ class Emitter {
           if (constType !== null)
             this.b.tsOnly(() => this.b.emit(`: ${constType}`));
           else {
-            const pinNode = entries.pinnable?.get(name);
-            const pinKey = pinNode !== undefined ? this.pinKey(name, pinNode) : null;
+            const pinKey = entries.pinnable?.get(name)?.key ?? null;
             const pinType = pinKey !== null ? this.pins?.get(pinKey) : undefined;
             if (pinType !== undefined)
               this.b.tsOnly(() => this.b.emit(`${this.strict ? "" : "!"}: ${pinType}`));
@@ -14039,8 +14137,15 @@ ${pad ?? ""}`);
       this.mark(node, "operator", () => this.b.emit("="));
       this.b.emit(" ");
       const enforce = this.ts ? this.annotationText(node) : null;
+      const typeArg = () => {
+        if (enforce === null)
+          return;
+        this.b.tsOnly(() => this.mark(node, "annotation", () => this.emitTypeText(node, "annotation", `<${enforce}>`)));
+      };
       if (head === "state") {
-        this.b.emit(`${this.runtimeName("__state")}(`);
+        this.b.emit(this.runtimeName("__state"));
+        typeArg();
+        this.b.emit("(");
         this.mark(node, "value", () => this.withExpression(() => {
           const wrap = Emitter.needsGrouping(value, "operand");
           if (wrap)
@@ -14049,20 +14154,12 @@ ${pad ?? ""}`);
           if (wrap)
             this.b.emit(")");
         }));
-        if (enforce !== null)
-          this.b.tsOnly(() => this.mark(node, "annotation", () => this.emitTypeText(node, "annotation", ` satisfies ${enforce}`)));
         this.b.emit(")");
       } else {
-        this.b.emit(`${this.runtimeName("__computed")}(`);
-        if (enforce !== null)
-          this.b.tsOnly(() => this.b.emit("("));
-        this.b.emit("() => ");
+        this.b.emit(this.runtimeName("__computed"));
+        typeArg();
+        this.b.emit("(() => ");
         this.mark(node, "value", () => this.withExpression(() => this.computedBody(node, value, ind)));
-        if (enforce !== null)
-          this.b.tsOnly(() => this.mark(node, "annotation", () => {
-            this.b.emit(`) satisfies () => `);
-            this.emitTypeText(node, "annotation", enforce);
-          }));
         this.b.emit(")");
       }
     }));
@@ -19921,7 +20018,7 @@ export {};
 `));
   }
   const pinnables = [];
-  for (const { name, node, key } of emitter.pinnables) {
+  for (const { name, node, path, key } of emitter.pinnables) {
     if (key === null)
       continue;
     const id = stores.idOf(node);
@@ -19934,17 +20031,18 @@ export {};
     pinnables.push({
       name,
       key,
+      path: path ?? "",
       stmtGen: [stmtRow.generatedStart, stmtRow.generatedEnd],
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
 var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 var B64_INDEX = new Map([...B64].map((c, i) => [c, i]));
-var IDENT = /^[$_\p{ID_Start}][$\u200C\u200D_\p{ID_Continue}]*$/u;
+var IDENT2 = /^[$_\p{ID_Start}][$\u200C\u200D_\p{ID_Continue}]*$/u;
 function encodeVLQ(value) {
   let vlq = value < 0 ? -value << 1 | 1 : value << 1;
   let out = "";
@@ -19977,7 +20075,7 @@ function toSourceMap({ code, mappings }, { source, file = "output.js", sourcePat
     prevSrcLine = src.line;
     prevSrcCol = src.col;
     const slice = code.slice(m.generatedStart, m.generatedEnd);
-    if (m.mappingKind === "exact" && IDENT.test(slice)) {
+    if (m.mappingKind === "exact" && IDENT2.test(slice)) {
       let idx = nameIndex.get(slice);
       if (idx === undefined) {
         idx = names.length;
@@ -20527,6 +20625,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     pinnables: emitted.pinnables,
     mutables: emitted.mutables,
     enums: emitted.enums,
+    classDecls: emitted.classDecls,
     importedRefs: emitted.importedRefs,
     imports: emitted.imports,
     trivia: result.trivia ?? [],

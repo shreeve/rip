@@ -30,7 +30,7 @@ const INVENTORY = [
   { sig: "? 'await (async () => { throw ' : '(() => { throw '", count: 1,
     site: 'value-position throw',
     policy: 'await rides the async form; yield/return/bare break/continue reject via rejectYieldInIIFE' },
-  { sig: "this.b.emit('() => ');", count: 1,
+  { sig: "this.b.emit('(() => ');", count: 1,
     site: "computed ('~=') lowering",
     policy: 'the computed body rejects both yield and await with its own positioned errors (computeds evaluate synchronously)' },
   { sig: "this.b.emit('(() => { ');", count: 1,
@@ -221,14 +221,13 @@ const generated = (literal, count, policy) => ({ literal, count, kind: 'generate
 const excluded = (literal, count, reason) => ({ literal, count, kind: 'excluded', reason });
 
 const LITERAL_CLASSIFICATION = [
-  generated("'(() => '", 2, 'effect bodies reject yield and carry await on the async spelling'),
+  generated("'(() => '", 3, "effect bodies reject yield and carry await on the async spelling; the computed ('~=') lowering rejects both"),
   generated("'(() => { '", 4, 'value lowerings reject captured control; class fields reject await and yield'),
   generated("'(() => { throw '", 1, 'value throw rejects captured control'),
   generated("'(() => {\\n'", 2, 'comprehensions reject captured control'),
   generated("'((n, d) => { n = +n; d = +d; return (n % d + d) % d; })'", 1, 'helper receives evaluated operands as parameters'),
   generated("'((s, e) => Array.from({length: Math.abs(e - s) + 1}, (_, i) => s + (i * (s <= e ? 1 : -1))))'", 1, 'range helper receives evaluated endpoints as parameters'),
   generated("'((s, e) => Array.from({length: Math.max(0, Math.abs(e - s))}, (_, i) => s + (i * (s <= e ? 1 : -1))))'", 1, 'range helper receives evaluated endpoints as parameters'),
-  generated("'() => '", 1, 'computed body rejects await and yield'),
   generated("'(async () => '", 2, 'effect bodies carry source await on the async spelling'),
   generated("'await (async () => { '", 3, 'value lowerings carry source await and reject captured control'),
   generated("'await (async () => { throw '", 1, 'value throw carries source await and rejects captured control'),
@@ -249,7 +248,6 @@ const LITERAL_CLASSIFICATION = [
   generated("`) => ${…}(() => `", 1, 'element listener arrow tail; handler control is validated before emission'),
   generated("`(this._refCleanups ??= []).push(() => ${…}(this.`", 1, 'emitter-owned ref cleanup; the ref NAME emits after it, through the primitive channel that gives the read its own source span'),
   excluded("`) as (e: ${…}) => unknown`", 1, 'TypeScript function type (the typed event-handler cast), erased from generated JavaScript'),
-  excluded("`) satisfies () => `", 1, 'TypeScript function type, erased from generated JavaScript; the annotation TEXT follows separately so each type name carries its own source span'),
   excluded("`${…} ${…}: function (this: ${…}) ${…}`", 1, 'the face behavior object re-states a computed body already emitted through computedBody, whose await/yield rejections govern both; a TypeScript-only region, erased from generated JavaScript'),
   generated("`${…}  if (${…}._t) { ${…}(${…}._first, ${…}._t, 'leave', () => ${…}.d(true)); }\\n`", 1, 'emitter-owned transition callback'),
   generated("`${…}(() => { `", 1, 'render control is rejected before updater emission'),

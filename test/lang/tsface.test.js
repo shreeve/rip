@@ -52,9 +52,8 @@ const MARKER = '\nexport {};\n';
 const ID = String.raw`[$_\p{ID_Start}][$\u200c\u200d\p{ID_Continue}]*`;
 const REGION_SHAPES = [
   /^!?: \S/u,                                             // annotation `: T` / forward `!: T`
-  /^satisfies \S/u,                                       // reactive value enforcement: `v satisfies T`
-  /^\($/u,                                                // computed-lambda wrap opener for `) satisfies () => T`
-  /^\) satisfies \(\) => \S/su,                           // computed return enforcement
+  /^satisfies \S/u,                                       // a schema field default's value enforcement: `v satisfies T`
+  /^<\S/su,                                               // a type ARGUMENT list: an annotated reactive's `__state<T>(v)`, and a generic `def`'s own `<T>` parameters
   /^!$/u,                                                 // the match lowering's assertion on its own toMatchable receiver
   /^[()]$/u,                                              // arrow-param / cast parens
   /^as\s+\S/u,                                            // the cast's `as T` spelling
@@ -368,10 +367,12 @@ describe('TS-face emission pins', () => {
 
   test('reactive containers type as the branded { value: T; read(): T } (computed readonly); readonly/effect handles as T', () => {
     const code = ts('count: number := 0\ntotal: number ~= count * 2\nro: string =! "s"\nh: Function ~> console.log(count)\n').code;
-    // Annotated reactives also ENFORCE the value via face-only
-    // `satisfies`.
-    expect(code).toContain('const count: { value: number; read(): number } = __state(0 satisfies number);');
-    expect(code).toContain('const total: { readonly value: number; read(): number } = __computed((() => (count.value * 2)) satisfies () => number);');
+    // Annotated reactives also ENFORCE the value, via a face-only
+    // explicit TYPE ARGUMENT — which checks the initializer and
+    // simultaneously makes the call's return type the annotated
+    // container, so a wrong value publishes once rather than twice.
+    expect(code).toContain('const count: { value: number; read(): number } = __state<number>(0);');
+    expect(code).toContain('const total: { readonly value: number; read(): number } = __computed<number>(() => (count.value * 2));');
     expect(code).toContain('const ro: string = "s";');
     expect(code).toContain('const h: Function = __effect(() => { console.log(count.value); });');
   });

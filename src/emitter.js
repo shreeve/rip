@@ -6977,19 +6977,53 @@ class Emitter {
       this.b.emit(' ');
       this.mark(node, 'operator', () => this.b.emit('='));
       this.b.emit(' ');
-      // Annotation ENFORCEMENT: the container
-      // annotation above types the cell, not the value — the
-      // initializer flows into __state()/__computed() unchecked (the
-      // runtime is inlined JS, so no generic constrains it). A
-      // TS-only `satisfies` closes the gap: it checks assignability
-      // WITHOUT changing the expression's type (the cell inference is
-      // undisturbed) and strips to the identical JS. For `~=`
-      // the lambda wraps so `satisfies () => T` checks the RETURN
-      // type. Marked under the annotation role, so the fired error
-      // maps to the author's `: T`.
+      // Annotation ENFORCEMENT: the container annotation above types
+      // the CELL, not the value, so the initializer would flow into
+      // __state()/__computed() unchecked unless something constrains
+      // it. A TS-only EXPLICIT TYPE ARGUMENT does: `__state<T>(v)`
+      // pins the primitive's own generic, which checks the value at
+      // the argument AND makes the call's return type exactly the
+      // annotated container — so the declaration itself has nothing
+      // left to complain about, and one wrong line publishes ONE
+      // diagnostic instead of two. `<T>` strips to the identical JS.
+      // Marked under the annotation role, so the fired error maps to
+      // the author's `: T`.
+      //
+      // WHY NOT `satisfies` ON THE VALUE, which this replaced: the
+      // guard checked the value but left T inferred FROM the value,
+      // so the container annotation ALSO failed and published a
+      // second diagnostic — in cell-wrapper prose, anchored on the
+      // name, the vocabulary the reactive-hover row was cured of.
+      // Dropping the guard alone was driven and reverted (it deletes
+      // the useful half and keeps the wrapper publish); pinning T is
+      // what lets the guard go, because it cures the OTHER half.
+      // Both together were measured too — the value then fails twice,
+      // once per mechanism. Overloading the primitive's signature to
+      // spell the parameter without its cell branch was measured and
+      // is worse still: TS reports TS2769 against the last overload,
+      // losing the tuple spelling's element anchor.
+      //
+      // ACCEPTED LIMIT: because __state admits an existing cell in
+      // its argument (the prop delivery seam — see RUNTIME_TABLE),
+      // a SCALAR state rejection names that union. It still leads
+      // with the value types and lands on the value; the array/tuple
+      // spellings and every `~=` collapse to the bare type.
+      //
+      // The SPAN is TypeScript's own, not a rip invention: 12-reactive's
+      // twin spells these as a call with a pinned parameter and an arrow
+      // with a pinned return, and tsgo puts its diagnostic exactly where
+      // the lowering puts ours — so the audit derives both lines rather
+      // than pinning them.
       const enforce = this.ts ? this.annotationText(node) : null;
+      const typeArg = () => {
+        if (enforce === null) return;
+        this.b.tsOnly(() => this.mark(node, 'annotation', () =>
+          this.emitTypeText(node, 'annotation', `<${enforce}>`)));
+      };
       if (head === 'state') {
-        this.b.emit(`${this.runtimeName('__state')}(`);
+        this.b.emit(this.runtimeName('__state'));
+        typeArg();
+        this.b.emit('(');
         // The initializer is an operand position (value context:
         // compounds group — `__state((1 + 2))`).
         this.mark(node, 'value', () => this.withExpression(() => {
@@ -6998,18 +7032,12 @@ class Emitter {
           this.expr(value);
           if (wrap) this.b.emit(')');
         }));
-        if (enforce !== null) this.b.tsOnly(() => this.mark(node, 'annotation', () =>
-          this.emitTypeText(node, 'annotation', ` satisfies ${enforce}`)));
         this.b.emit(')');
       } else {
-        this.b.emit(`${this.runtimeName('__computed')}(`);
-        if (enforce !== null) this.b.tsOnly(() => this.b.emit('('));
-        this.b.emit('() => ');
+        this.b.emit(this.runtimeName('__computed'));
+        typeArg();
+        this.b.emit('(() => ');
         this.mark(node, 'value', () => this.withExpression(() => this.computedBody(node, value, ind)));
-        if (enforce !== null) this.b.tsOnly(() => this.mark(node, 'annotation', () => {
-          this.b.emit(`) satisfies () => `);
-          this.emitTypeText(node, 'annotation', enforce);
-        }));
         this.b.emit(')');
       }
     }));
@@ -13872,6 +13900,12 @@ const RUNTIME_TABLE = [
     // props.x ?? …)`, whose argument legitimately unions the cell with
     // the value, and a signature that always wrapped would type that
     // member a cell of a cell.
+    // That union is READ BY USERS: an annotated `:=` enforces its
+    // initializer with an explicit type argument here, so a scalar
+    // rejection names this parameter type. It is the accepted cost of
+    // the pass-through, and the alternative was measured — splitting
+    // it into overloads makes TypeScript report TS2769 against the
+    // last one, which loses the array/tuple spellings' element anchor.
     key: 'reactive',
     names: ['__state', '__computed', '__effect', '__batch', '__readonly',
             '__setErrorHandler', '__handleError', '__catchErrors', 'getEffectSignal'],
@@ -14388,6 +14422,14 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     const active = RUNTIME_TABLE.filter((rt) => runtimes.has(rt.key));
     const units = [];
     if (runtimeDelivery === 'import') {
+      // No `types` here: the import binds the runtime module's own JS, whose
+      // functions carry no type parameters. A TS FACE built under this delivery
+      // therefore cannot type-check an annotated reactive — the face spells
+      // `__state<T>(v)` and the imported `__state` takes none (TS2558). No
+      // shipped path asks for one (check and the server both deliver inline,
+      // and `--ts` refuses to combine with `--runtime`), so this is a
+      // constraint to respect rather than a bug to route around: typing an
+      // import-delivered face means giving these units a signature source too.
       for (const rt of active) units.push({ runtimes: [rt], names: rt.names, imp: rt.url.pathname });
     } else {
       const fused = new Set(active.filter((rt) => rt.requires).map((rt) => rt.requires));
