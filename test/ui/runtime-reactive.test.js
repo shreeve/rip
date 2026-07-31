@@ -1337,6 +1337,7 @@ describe('runtime scaling', () => {
       },
       run: (cells) => { for (const s of cells) s.value = s.read() + 1; },
       sizes: [2000, 4000, 8000],
+      bound: BOUND,
     });
   });
 
@@ -1366,6 +1367,7 @@ describe('runtime scaling', () => {
       },
       run: (states) => __batch(() => { for (let k = 0; k < 3; k++) states[k].value += 1; }),
       sizes: [2000, 4000, 8000],
+      bound: BOUND,
     });
   });
 
@@ -1378,7 +1380,11 @@ describe('runtime scaling', () => {
         return a;
       },
       run: (a) => { a.value += 1; },
-      sizes: [2000, 4000, 8000],
+      // 2000/4000 both land near 1ms — indistinguishable, so their ratio
+      // is jitter, not growth (a CI run read 0.94/4.64 as 4.92x). Sized up
+      // until the base cost is worth dividing.
+      sizes: [8000, 16000, 32000],
+      bound: BOUND,
     });
   });
 
