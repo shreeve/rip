@@ -53,7 +53,7 @@ else
 
 console.log('tideline:', tideline.toUpperCase())
 
-# ── A block-confined binding read by a HOISTED def: the pin pass's own shape. The destructured spelling is absent on purpose (an open finding); destructuring itself types fine, held by the ordinary-flow read below ──
+# ── A binding read by a HOISTED def, plain and destructured alike: a def is callable from above its own statement, and the binding's type reaches it either way. The destructured read is of ONE name, so it carries that name's type and not the pattern's ──
 
 if (labels.length > 1)
   ribbon = labels[0]
@@ -63,7 +63,12 @@ def recount()
 
 { json: media } = { json: 'application/json' }
 
+def mediaType()
+  media.toUpperCase()
+
 console.log('media:', media.toUpperCase())
+
+console.log('mediaType:', mediaType())
 
 console.log('recount:', recount())
 

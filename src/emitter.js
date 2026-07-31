@@ -152,6 +152,47 @@ const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length 
 // only 'def' would silently misclassify void defs).
 const isDefHead = (h) => h === 'def' || h === 'void-def';
 const isUpdate = (x) => isNode(x) && (x[0] === '++' || x[0] === '--') && x.length === 3;
+// The bindings a destructuring pattern introduces, each paired with the
+// ACCESSOR PATH from the assigned value to that binding's own value:
+// `{ json: media }` yields `media` at `.json`, `[p, q]` yields `p` at `[0]`
+// and `q` at `[1]`, and nesting composes. The pin pipeline needs the path
+// because a pattern's bindings all share ONE assign node — probing that
+// node's whole value span would pin every sibling the type of the entire
+// object, and would hash them to one cache key besides.
+//
+// A DEFAULT (`{ label = 'x' }`) and a REST (`{ ...rest }`) deliberately
+// yield NOTHING. Their types are not the accessor's — a default removes
+// `undefined` from it and a rest is an `Omit` of the others — so a path
+// would pin them wrong, and wrong is worse here than the unpinned evolving
+// `any` they keep instead. Same for a computed key, whose accessor is not
+// knowable from the pattern alone.
+const patternBindings = (node, base = '', out = []) => {
+  if (!isNode(node)) return out;
+  if (node[0] === 'object') {
+    for (const el of node.slice(1)) {
+      if (!isNode(el) || el.length !== 3) continue;
+      const head = el[0];
+      if (head !== ':' && head !== null) continue;   // '=' default, '...' rest: skipped
+      const key = el[1];
+      if (typeof key !== 'string') continue;         // computed key
+      const seg = /^[A-Za-z_$][\w$]*$/.test(key) ? `.${key}` : `[${key}]`;
+      const target = el[2];
+      if (typeof target === 'string') out.push([target, base + seg]);
+      else patternBindings(target, base + seg, out);
+    }
+    return out;
+  }
+  if (node[0] === 'array') {
+    node.slice(1).forEach((el, i) => {
+      if (el === null || el === undefined) return;   // a hole binds nothing
+      if (isNode(el) && el[0] === '...') return;     // rest: skipped
+      if (typeof el === 'string') out.push([el, `${base}[${i}]`]);
+      else patternBindings(el, `${base}[${i}]`, out);
+    });
+    return out;
+  }
+  return out;
+};
 const isTernary = (x) => isNode(x) && x[0] === '?:' && x.length === 4;
 const isBlock = (x) => isNode(x) && x[0] === 'block';
 // Render-DSL name classes: template tags come from the
@@ -2807,14 +2848,17 @@ class Emitter {
     // above, `def f` below — the early-execution counterexample).
     // Only level 2 disqualifies declare-in-place; level 1 still marks
     // `nested` for the pin pipeline.
-    const occur = (name, inFn, write = false, declStmt = null, writeNode = null) => {
+    const occur = (name, inFn, write = false, declStmt = null, writeNode = null, writePath = '') => {
       if (typeof name !== 'string' || !IDENT.test(name)) return;
       let f = facts.get(name);
-      if (f === undefined) facts.set(name, (f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, firstWrite: null }));
+      if (f === undefined) facts.set(name, (f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, firstWrite: null, firstWritePath: '' }));
       if (!f.seen) { f.seen = true; f.decl = declStmt; }
       // The textually first WRITE with a known statement node — the
       // pin pipeline's probe site (its RHS is what TS infers from).
-      if (write && f.firstWrite === null && writeNode !== null) f.firstWrite = writeNode;
+      // `writePath` is empty for a plain target, whose value IS the RHS,
+      // and an accessor for a pattern binding, whose value is one step
+      // inside it (patternBindings).
+      if (write && f.firstWrite === null && writeNode !== null) { f.firstWrite = writeNode; f.firstWritePath = writePath; }
       if (inFn > 0) { f.nested = true; if (write) f.nestedWrite = true; if (inFn === 2) f.inDef = true; }
     };
     const walk = (n, inFn) => {
@@ -2862,6 +2906,19 @@ class Emitter {
           // reads (patterns stay hoisted; a member target's object is
           // a genuine read).
           walk(n[1], inFn);
+          // A pattern's bindings ALSO record a first write, so the pin
+          // pipeline can reach them — a hoisted `def` reading one gets no
+          // type any other way. `declStmt` stays null on purpose: patterns
+          // stay hoisted, and passing one here would make the pattern a
+          // declare-in-place candidate, which is a different decision with
+          // different rules (this branch is reached by member targets too).
+          // The path is what keeps a pattern's siblings apart, in the probe
+          // AND in the cache key.
+          if (DECLARING_ASSIGNS.has(head)) {
+            for (const [bound, path] of patternBindings(n[1])) {
+              occur(bound, inFn, true, null, n, path);
+            }
+          }
         }
         return;
       }
@@ -2976,8 +3033,13 @@ class Emitter {
       const f = facts.get(name);
       if (!f?.nested || f.firstWrite === null) continue;
       if (kept.annotations?.has(name) || kept.schemaConsts?.has(name)) continue;
-      kept.pinnable.set(name, f.firstWrite);
-      this.pinnables?.push({ name, node: f.firstWrite, key: this.pinKey(name, f.firstWrite) });
+      // The key is computed ONCE and carried, never recomputed at the
+      // emission site: it is derived from the name, the value slice and the
+      // accessor path, and a second site that reproduced two of those three
+      // would look right and silently pin nothing.
+      const key = this.pinKey(name, f.firstWrite, f.firstWritePath);
+      kept.pinnable.set(name, { node: f.firstWrite, key });
+      this.pinnables?.push({ name, node: f.firstWrite, path: f.firstWritePath, key });
     }
     return kept;
   }
@@ -2986,11 +3048,14 @@ class Emitter {
   // first write's VALUE source slice — stable while unrelated edits
   // shift offsets, invalidated exactly when the defining expression
   // changes (djb2; collisions merely share a correctly-typed pin).
-  pinKey(name, node) {
+  pinKey(name, node, path = '') {
     const id = this.stores.idOf(node);
     const row = id !== null ? this.stores.role(id, 'value') : null;
     if (!row || row.sourceStart == null || this.b.source === null) return null;
-    const slice = this.b.source.slice(row.sourceStart, row.sourceEnd);
+    // The path joins the hash: a pattern's siblings share one assign node,
+    // so hashing the value slice alone would give them ONE key and the
+    // cache would serve whichever landed first to all of them.
+    const slice = path + '\u0000' + this.b.source.slice(row.sourceStart, row.sourceEnd);
     let h = 5381;
     for (let i = 0; i < slice.length; i++) h = ((h * 33) ^ slice.charCodeAt(i)) >>> 0;
     return `${name}@${h.toString(36)}`;
@@ -3131,8 +3196,7 @@ class Emitter {
             // like a typed forward (`name!: T`) — the `!` keeps rip's
             // legal read-before-assign quiet, exactly as
             // annotated forwards do.
-            const pinNode = entries.pinnable?.get(name);
-            const pinKey = pinNode !== undefined ? this.pinKey(name, pinNode) : null;
+            const pinKey = entries.pinnable?.get(name)?.key ?? null;
             const pinType = pinKey !== null ? this.pins?.get(pinKey) : undefined;
             if (pinType !== undefined) this.b.tsOnly(() => this.b.emit(`${this.strict ? '' : '!'}: ${pinType}`));
           }
@@ -14438,7 +14502,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // offset shifts), plus the GENERATED spans the probe builder splices
   // with: the first-write statement's extent and its value expression.
   const pinnables = [];
-  for (const { name, node, key } of emitter.pinnables) {
+  for (const { name, node, path, key } of emitter.pinnables) {
     if (key === null) continue;
     const id = stores.idOf(node);
     if (id === null) continue;
@@ -14448,6 +14512,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     pinnables.push({
       name,
       key,
+      path: path ?? '',
       stmtGen: [stmtRow.generatedStart, stmtRow.generatedEnd],
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd],
     });

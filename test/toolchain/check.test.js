@@ -1052,6 +1052,50 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  // The pin pass reaches a DESTRUCTURED binding, and reaches it with the
+  // binding's own type rather than the pattern's.
+  //
+  // Three failure modes, and one fixture each, because any one of them alone
+  // is satisfiable by an accident:
+  //   · unpinned      — `media` stays evolving `any`, and under rip.strict the
+  //                     TS7034/TS7005 pair fires. This is the gap.
+  //   · pinned WRONG  — the probe splices the assign's whole value span, so a
+  //                     pattern binding takes `{ json: string }`. That silences
+  //                     the pair, so a gap gate alone would call it fixed while
+  //                     `media.toUpperCase()` reports TS2339.
+  //   · pinned RIGHT  — `string`, so the call is clean AND a bogus member on it
+  //                     still errors. `wrong.rip` is what proves the pin is a
+  //                     real type and not `any`: under `any` the member is
+  //                     accepted and the row would pass while pinning nothing.
+  test('a destructured binding read by a hoisted def pins to its OWN type, not the pattern\'s', () => {
+    const dir = workspace({
+      'renamed.rip': [
+        "{ json: media } = { json: 'application/json' }",
+        'def mediaType()',
+        '  media.toUpperCase()',    // defined on string, not on { json: string }
+        'console.log mediaType()',
+      ].join('\n') + '\n',
+      'shorthand.rip': [
+        "{ json } = { json: 'application/json' }",
+        'def kind()',
+        '  json.toUpperCase()',
+        'console.log kind()',
+      ].join('\n') + '\n',
+      'wrong.rip': [
+        "{ json: media } = { json: 'application/json' }",
+        'def bad()',
+        '  media.nope()',           // on `any` this is accepted — it must not be
+        'console.log bad()',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'renamed.rip')).toEqual([]);
+      expect(diags.filter((d) => d.file === 'shorthand.rip')).toEqual([]);
+      expect(diags.filter((d) => d.file === 'wrong.rip').map((d) => d.code)).toEqual([2339]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // The parity guard for the pin pass: `items` is a hoisted binding read
   // ACROSS a closure (inside filterBy), which evolving-`let` alone leaves
   // `any[]` — so `matches` is `any[]`, `expectNum(matches)` does NOT error,

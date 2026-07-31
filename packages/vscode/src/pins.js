@@ -52,7 +52,15 @@ export function buildProbe(faceCode, pinnables) {
     const at = lineStartOf(text, p.stmtGen[0]);
     const indent = /^[ \t]*/.exec(text.slice(at, text.indexOf('\n', at) + 1 || undefined))[0];
     const rhs = faceCode.slice(p.valueGen[0], p.valueGen[1]);
-    text = `${text.slice(0, at)}${indent}let ${PROBE_PREFIX}${p.i}_${p.name} = ${rhs};\n${text.slice(at)}`;
+    // A pattern binding's value is one step INSIDE the assign's value, so it
+    // probes through its accessor path (`.json`, `[0]`) rather than at the
+    // whole RHS — otherwise every sibling of one pattern would be pinned the
+    // type of the entire object. Parenthesised because the RHS is an
+    // arbitrary expression and an object literal at statement start would
+    // otherwise read as a block. Empty path — a plain target, whose value IS
+    // the RHS — splices exactly as before.
+    const init = p.path ? `(${rhs})${p.path}` : rhs;
+    text = `${text.slice(0, at)}${indent}let ${PROBE_PREFIX}${p.i}_${p.name} = ${init};\n${text.slice(at)}`;
   }
   const lineStarts = [0];
   for (let i = 0; i < text.length; i++) if (text[i] === '\n') lineStarts.push(i + 1);
