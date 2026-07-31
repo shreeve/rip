@@ -126,4 +126,169 @@ describeExtended('semantic tokens — the readonly modifier', () => {
       await session.close();
     }
   }, 60000);
+
+  // `readonly` is a fact about the BINDING, so it holds wherever the name
+  // appears. Clearing it at the declaration alone left the write — the
+  // position that proves the binding writable — painted immutable, and
+  // the read beside it too. The audit scores the same ruling over the
+  // corpus; this is the boundary, asserted directly: the `~=` name in the
+  // same file KEEPS its bit at its own use, so the correction is still
+  // surgical rather than a blanket strip over every reactive name.
+  test('a `:=` name carries no `readonly` at its WRITE or its READ — and `~=` still does', async () => {
+    const USES = [
+      'total := 1',              // line 0
+      'doubled ~= total * 2',    // line 1
+      'total = 5',               // line 2  the write
+      'console.log total',       // line 3  the read
+      'console.log doubled',     // line 4  a computed's read — keeps readonly
+      '',
+    ].join('\n');
+    const session = await openSession({ 'app.rip': USES });
+    try {
+      session.open('app.rip');
+      const tokens = await session.semanticTokens('app.rip');
+      expect(tokens.length).toBeGreaterThan(0);   // liveness
+
+      const write = at(tokens, 2, 0);
+      expect(write, 'the write site has a token').toBeDefined();
+      expect(write.modifiers).not.toContain('readonly');
+
+      const read = at(tokens, 3, 12);
+      expect(read, 'the read site has a token').toBeDefined();
+      expect(read.modifiers).not.toContain('readonly');
+
+      // The positive control at a USE site, which is what makes the two
+      // assertions above mean something: a blanket strip would clear this
+      // one too, and rip's own ruling says a `~=` binding is immutable.
+      const computedRead = at(tokens, 4, 12);
+      expect(computedRead, 'the computed read has a token').toBeDefined();
+      expect(computedRead.modifiers).toContain('readonly');
+    } finally {
+      await session.close();
+    }
+  }, 60000);
+});
+
+// An enum lowers to a const object PLUS a companion type alias sharing the
+// name, so the two symbols merge and TypeScript classifies the merged
+// symbol `type` at every position. The token names the construct the
+// author declared (RULINGS.md, Tokens). All three positions answer
+// separately — a correction reaching the declaration alone leaves two
+// thirds standing — so all three are pinned.
+describeExtended('semantic tokens — an enum name', () => {
+  const ENUMS = [
+    'enum Color',              // line 0
+    '  Red = 1',               // line 1
+    '  Blue = 2',              // line 2
+    'shade: Color = Color.Red', // line 3
+    'def paint(c: Color)',     // line 4
+    '  c',                     // line 5
+    '',
+  ].join('\n');
+
+  test('every occurrence classifies `enum` — declaration, annotation, value use', async () => {
+    const session = await openSession({ 'app.rip': ENUMS });
+    try {
+      session.open('app.rip');
+      const tokens = await session.semanticTokens('app.rip');
+      expect(tokens.length).toBeGreaterThan(0);   // liveness
+
+      for (const [label, line, character] of [
+        ['the declaration', 0, 5],
+        ['the annotation', 3, 7],
+        ['the value use', 3, 15],
+        ['a parameter annotation', 4, 13],
+      ]) {
+        const tok = at(tokens, line, character);
+        expect(tok, `${label} has a token`).toBeDefined();
+        expect(tok.type, label).toBe('enum');
+        // The `readonly` the merged symbol carries off its const-object
+        // half goes with the type — TypeScript's own enum tokens have none.
+        expect(tok.modifiers, label).not.toContain('readonly');
+      }
+    } finally {
+      await session.close();
+    }
+  }, 60000);
+
+  // The correction resolves by SCOPE, never by spelling. A local that
+  // re-binds the name is not the enum, and painting it `enum` is exactly
+  // the over-reach v3's source-regex mechanism has.
+  // An imported enum carries the same merged-symbol `type` classification
+  // its declaration does, and the importing file's compile cannot know
+  // that — the kind lives in the declaring module. In any project of more
+  // than one file this is where MOST enum uses are, so a correction that
+  // stopped at the declaring file would leave the majority mis-colored.
+  test('an enum imported from another module classifies `enum` at its uses', async () => {
+    const session = await openSession({
+      'lib.rip': 'export enum Color\n  Red = 1\n  Blue = 2\n\nexport plain = 7\n',
+      'app.rip': [
+        "import { Color, plain } from './lib.rip'",  // line 0
+        '',
+        'shade: Color = Color.Red',                  // line 2
+        'console.log plain',                         // line 3
+        '',
+      ].join('\n'),
+    });
+    try {
+      session.open('app.rip');
+      const tokens = await session.semanticTokens('app.rip');
+      expect(tokens.length).toBeGreaterThan(0);   // liveness
+
+      expect(at(tokens, 2, 7)?.type, 'the imported annotation').toBe('enum');
+      expect(at(tokens, 2, 15)?.type, 'the imported value use').toBe('enum');
+      // The negative control: an imported name that is NOT an enum keeps
+      // TypeScript's own answer. Without it, a correction that repainted
+      // every imported reference would pass the two assertions above.
+      const notAnEnum = at(tokens, 3, 12);
+      expect(notAnEnum, 'the plain import has a token').toBeDefined();
+      expect(notAnEnum.type, 'a non-enum import is untouched').not.toBe('enum');
+    } finally {
+      await session.close();
+    }
+  }, 60000);
+
+  // Every position that re-uses the spelling, DECLARATIONS INCLUDED. The
+  // first version of this test asserted only the body read and passed
+  // while the parameter one line above it was painted `enum` — the two
+  // scope walks answer about the ENCLOSING scope, and at a parameter or a
+  // class member the binding being written is not in that scope yet. A
+  // read is the easy half; the declaration is where this breaks.
+  test('nothing that merely re-uses the spelling is the enum — parameter, class member, local', async () => {
+    const SHADOW = [
+      'enum Color',                 // line 0
+      '  Red = 1',                  // line 1
+      'def paint(Color)',           // line 2  the PARAMETER — was painted `enum`
+      '  Color',                    // line 3  its read
+      'class P',                    // line 4
+      '  Color: 3',                 // line 5  a class member — was painted `enum`
+      'def repaint()',              // line 6
+      '  Color = "not the enum"',   // line 7
+      '  Color',                    // line 8
+      '',
+    ].join('\n');
+    const session = await openSession({ 'app.rip': SHADOW });
+    try {
+      session.open('app.rip');
+      const tokens = await session.semanticTokens('app.rip');
+      expect(tokens.length).toBeGreaterThan(0);   // liveness
+
+      // The positive control: the enum itself still classifies, so a
+      // guard that simply stopped recording would not pass this.
+      expect(at(tokens, 0, 5)?.type, 'the enum itself').toBe('enum');
+
+      for (const [label, line, character] of [
+        ['the parameter declaration', 2, 10],
+        ['the parameter read', 3, 2],
+        ['the class member', 5, 2],
+        ['the shadowing local', 8, 2],
+      ]) {
+        const tok = at(tokens, line, character);
+        expect(tok, `${label} has a token`).toBeDefined();
+        expect(tok.type, label).not.toBe('enum');
+      }
+    } finally {
+      await session.close();
+    }
+  }, 60000);
 });

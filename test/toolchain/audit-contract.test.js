@@ -120,11 +120,12 @@ describe('the audit contract judges in both directions', () => {
 });
 
 // Every tolerated red must say WHY, in prose. A row number dangles the day the
-// row closes; the prose does not.
+// row closes; the prose does not. The set is allowed to be EMPTY, and is today
+// — every invariant holds — so this asserts the SHAPE of whatever is in it
+// rather than that anything is: the next agreement still has to arrive with a
+// reason a reader can act on, and the check has to be here when it does.
 test('every red the contract tolerates carries a prose reason, not a row number', () => {
-  const tolerated = CONTRACT.filter((c) => c.redBecause);
-  expect(tolerated.length, 'a contract tolerating nothing needs no reasons — delete this expectation with the last one').toBeGreaterThan(0);
-  for (const { name, redBecause } of tolerated) {
+  for (const { name, redBecause } of CONTRACT.filter((c) => c.redBecause)) {
     expect(redBecause.length > 40, `"${name}" needs a reason a reader can act on`).toBe(true);
     expect(/(finding|findings)\s*#\d+/i.test(redBecause), `"${name}" cites a ledger row by number — state the reason instead`).toBe(false);
   }

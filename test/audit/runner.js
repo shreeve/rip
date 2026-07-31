@@ -3926,6 +3926,44 @@ if (RUN_TOKENS) {
     // corpus exercises BOTH polarities. A run where every row expected
     // "not readonly" would flag `:=` for free and prove nothing.
     const byForm = new Map();
+    // STATE USE SITES — a population derived on purpose, not one this
+    // audit happens to reach. `readonly` describes the BINDING, so a `:=`
+    // name carries none anywhere: not at its declaration, not where it is
+    // written, not where it is read. The declaration is already covered by
+    // the form table above; a write and a read are covered NOWHERE ELSE,
+    // and the write is the position that proves the classification false.
+    //
+    // Why its own probe: the write sites used to land in `decls` because
+    // declsOf counts a bare column-0 reassignment as a declaration. That
+    // is an accident of a line-shaped heuristic — tightening declsOf,
+    // correct on its own terms, would have evaporated the only gate this
+    // ruling had, silently. Derived here from the `:=` declarations
+    // themselves, so it survives that refactor.
+    //
+    // PRESENCE is deliberately NOT asserted here — that is the `use-site`
+    // gauge's question, and it is expected red for the mapping gap. This
+    // probe judges the MODIFIER on tokens that exist, which is why a
+    // spelling inside a string or a comment costs nothing: neither
+    // carries a token, so neither is scored.
+    let stateUses = 0;
+    const declaredState = (lines) => {
+      const names = new Set();
+      for (const l of lines) {
+        const m = /^([A-Za-z_$][\w$]*)\s*:=/.exec(l);
+        if (m) names.add(m[1]);
+      }
+      return names;
+    };
+    // Boundary-clean occurrences — a position not embedded in a longer
+    // identifier. (The diagnostics lane has its own copy for its own
+    // pass; the two populations never meet.)
+    const cleanOccurrences = (line, token) => {
+      const out = [];
+      for (let i = line.indexOf(token); i >= 0; i = line.indexOf(token, i + 1)) {
+        if (!/[\w$]/.test(line[i - 1] ?? '') && !/[\w$]/.test(line[i + token.length] ?? '')) out.push(i);
+      }
+      return out;
+    };
 
     for (const [f, { decls, tokens: toks, members, survival }] of PROBES) {
       // A declaration's token is the one STARTING at its name.
@@ -3964,6 +4002,30 @@ if (RUN_TOKENS) {
           byForm.set(want.form, s);
           if (bad) badReadonly.push(row);
         }
+      }
+      // The state use sites, scored into the SAME invariant: one ruling
+      // ("no readonly on a `:=` name"), one verdict, wherever the name
+      // appears.
+      const srcLines = fs.readFileSync(fixPath(f), 'utf8').split('\n');
+      const stateNames = declaredState(srcLines);
+      if (stateNames.size) {
+        srcLines.forEach((text, line) => {
+          for (const name of stateNames) {
+            if (new RegExp(`^${name}\\s*:=`).test(text)) continue;   // the declaration, covered above
+            for (const character of cleanOccurrences(text, name)) {
+              if (text[character - 1] === '.') continue;              // a member named the same, not the binding
+              const got = at.get(`${line}:${character}`);
+              if (!got) continue;
+              stateUses++;
+              if (got.modifiers.includes('readonly')) {
+                badReadonly.push({
+                  name, file: f, line, character, text: text.trim(),
+                  want: { type: null, readonly: false, form: 'state use' }, got,
+                });
+              }
+            }
+          }
+        });
       }
     }
 
@@ -4013,7 +4075,7 @@ if (RUN_TOKENS) {
     };
     irow('present', missing.length, probed, 'a declared name gets a token');
     irow('type', badType.length, typeAsserted, `token type matches the declaring form${unasserted.length ? ` · ${unasserted.length} unasserted` : ''}`);
-    irow('readonly', badReadonly.length, roAsserted, `readonly IFF the binding is immutable in rip${probed - roAsserted ? ` · ${probed - roAsserted} unasserted` : ''}`);
+    irow('readonly', badReadonly.length, roAsserted + stateUses, `readonly IFF the binding is immutable in rip, at declarations AND at every use${probed - roAsserted ? ` · ${probed - roAsserted} unasserted` : ''}`);
     // Type-body member presence — EXPECTED RED (the mapping gap), the token
     // twin of the `strict` gauge. Its own line so the wording is "gap" (a
     // known-open hole), not "violation" (a fresh regression), and green means
@@ -4051,7 +4113,13 @@ if (RUN_TOKENS) {
       console.log(`        ${dim('actual  ')} ${yellow(fmt(r.got))}`);
     });
     show(badReadonly, 'Wrong `readonly` modifier', (r) => {
-      console.log(`        ${dim('expected')} ${green(`${r.want.type}${r.want.readonly ? ' readonly' : ''}`)} ${dim(`— a \`${r.want.form}\` binding is ${r.want.readonly ? 'immutable' : 'WRITABLE'} in rip`)}`);
+      // A use site pins the MODIFIER only — its token type is whatever the
+      // read is, so the expectation prints as the modifier alone rather
+      // than as a `null` type nobody asserted.
+      const want = r.want.type === null
+        ? (r.want.readonly ? 'readonly' : 'no readonly')
+        : `${r.want.type}${r.want.readonly ? ' readonly' : ''}`;
+      console.log(`        ${dim('expected')} ${green(want)} ${dim(`— a \`${r.want.form}\` binding is ${r.want.readonly ? 'immutable' : 'WRITABLE'} in rip`)}`);
       console.log(`        ${dim('actual  ')} ${yellow(fmt(r.got))}`);
     });
     // The mapping gap's expected-red evidence, kept apart from the regression
@@ -4099,6 +4167,17 @@ if (RUN_TOKENS) {
         const tally = s.bad ? `${green(`${s.ok} ok`)}, ${red(`${s.bad} bad`)}` : green(`${s.ok} ok`);
         console.log(`      ${pad(form, 10)} ${dim(`expect ${s.want ? 'readonly' : 'writable'}`)}  ${tally}`);
       }
+      const stBad = badReadonly.filter((r) => r.want.form === 'state use').length;
+      console.log(`      ${pad('state use', 10)} ${dim('expect writable')}  `
+        + (stBad ? `${green(`${stateUses - stBad} ok`)}, ${red(`${stBad} bad`)}` : green(`${stateUses} ok`)));
+    }
+    // The use-site population is derived from the corpus, so it can go to
+    // zero without any invariant failing — and a zero population is an
+    // invariant that proves nothing while reporting green. Loud, like
+    // every other coverage obligation here.
+    if (!stateUses) {
+      await abort('The Token Audit found no state USE sites to judge',
+        ['the readonly ruling covers writes and reads, and the corpus must carry a `:=` name read or written away from its declaration']);
     }
     if (VERBOSE && unasserted.length) {
       out(`\n    ${dim('unasserted — rip source does not pin a token type (schema declares a value AND a type)')}`);

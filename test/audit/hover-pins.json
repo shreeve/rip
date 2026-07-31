@@ -345,7 +345,7 @@
       },
       {
         "name": "Stamped",
-        "expect": "let Stamped: __SchemaDef"
+        "expect": "let Stamped: MixinSchema<Stamped>"
       },
       {
         "name": "Doc",

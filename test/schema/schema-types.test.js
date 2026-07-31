@@ -56,11 +56,23 @@ describe('schema declarations: the per-kind shapes', () => {
     expect(d).toContain('declare const B: Schema<B, B>;');
   });
 
-  test(':mixin — a fields type only, no const (its runtime value is not a user surface)', () => {
+  test(':mixin — a fields type AND a binding typed by what the runtime actually serves', () => {
     const d = dts('T = schema :mixin\n  createdAt! datetime\nU = schema :shape\n  name! string\n  @mixin T');
     expect(d).toContain('type T = { createdAt: Date };');
-    expect(d).not.toContain('declare const T');
+    expect(d).toContain('declare const T: MixinSchema<T>;');
     expect(d).toContain('type U = { name: string } & T;');
+    // The surface is one method, because that is the one that answers: a
+    // mixin is not instantiable, and `parse`/`safe`/`ok` are absent here
+    // so the checker refuses them instead of the runtime throwing.
+    expect(d).toContain('interface MixinSchema<Out> {');
+    expect(d).toContain('  toJSONSchema(): Record<string, unknown>;');
+    expect(d).not.toMatch(/interface MixinSchema<Out> \{[^}]*parse/);
+  });
+
+  test('the mixin tier emits only where a :mixin exists', () => {
+    // The persistence tier's rule. Without it, every schema file in every
+    // project carries an interface it has no use for.
+    expect(dts('B = schema :shape\n  x! number')).not.toContain('MixinSchema');
   });
 
   test(':enum — bare members narrow (`data is`), valued members answer boolean (the runtime accepts names too)', () => {
@@ -225,10 +237,15 @@ describe('schema type story on the TS face', () => {
     expect(f.code).toContain('fn: (function(this: A, p) {');
   });
 
-  test(':mixin bindings carry NO cast (no user-facing runtime type exists)', () => {
+  test(':mixin bindings cast like every other kind — to what a mixin actually serves', () => {
     const f = face('T = schema :mixin\n  a! string');
     expect(f.code).toContain('type T = { a: string };');
-    expect(f.code).not.toContain('as unknown as');
+    // On the BINDING's own line — the row this closes is that the mixin
+    // binding was the one kind left uncast, falling to `__SchemaDef`, the
+    // schema runtime's own class, at a user declaration.
+    const binding = f.code.split('\n').find((l) => l.startsWith('let T = __schema('));
+    expect(binding).toBeDefined();
+    expect(binding).toContain('as unknown as MixinSchema<T>;');
   });
 
   test('anonymous and function-local schemas decline the story (recorded boundary)', () => {

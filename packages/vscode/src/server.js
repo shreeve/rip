@@ -564,6 +564,10 @@ function sourcePathOfMirror(mirrorFsPath) {
 // mirror can never pass revalidation). A compile failure leaves the
 // previous mirror in place (the last-compiled face serves — the
 // the staleness posture at project scale).
+// The enum names a compile declares, read off the binding inventory.
+const enumNamesOf = (result) =>
+  (result.bindings ?? []).filter((b) => b.kind === 'enum').map((b) => b.name);
+
 function mirrorFromDisk(fsPath, source) {
   faceCache.delete(fsPath);
   const result = compile(source, { path: fsPath, runtimeDelivery: 'inline', face: 'ts' });
@@ -571,7 +575,15 @@ function mirrorFromDisk(fsPath, source) {
   warnOnMirrorCollision(mirrorPath, fsPath);
   writeMirror(mirrorPath, result.code);
   const imports = ripImportsOf(result.stores, source, path.dirname(fsPath));
-  cacheManifest.entries[fsPath] = { sourceHash: hashText(source), codeHash: hashText(result.code), imports };
+  cacheManifest.entries[fsPath] = {
+    sourceHash: hashText(source), codeHash: hashText(result.code), imports,
+    // The names this module declares as enums — what an IMPORTER needs to
+    // color its own uses, and the one fact it cannot compute for itself.
+    // Cheap to carry (names, no spans) and invalidated with the entry; a
+    // manifest written before this field existed is purged wholesale by
+    // the cacheIdentity key, which a server change already moves.
+    enumNames: enumNamesOf(result),
+  };
   scheduleManifestSave();
   return { mirrorPath, imports };
 }
@@ -1003,6 +1015,20 @@ async function refresh(document) {
     // binds their cell `const`. Semantic tokens clear TypeScript's `readonly`
     // on exactly these.
     mutables: result.mutables,
+    // Generated spans of every enum-name occurrence. The face's const
+    // object and its companion type alias merge into one symbol tsgo
+    // classifies `type`; the token names the construct the author
+    // declared.
+    enums: result.enums,
+    // The enum names this module declares — read by IMPORTERS, which
+    // cannot compute it from their own compile. An open buffer answers
+    // from here; a disk file from its manifest entry.
+    enumNames: enumNamesOf(result),
+    // Generated spans of references to imported names, each with its
+    // module — the editor resolves the specifier and asks that module
+    // what kind the name is (see ripSemanticTokens).
+    importedRefs: result.importedRefs ?? [],
+    dir: (() => { try { return path.dirname(fileURLToPath(document.uri)); } catch { return null; } })(),
     // SOURCE spans the lowering owns whole — hover declines there rather
     // than describing the machinery the face put in their place.
     silent: noUserSymbolSpans(result),
@@ -1906,6 +1932,22 @@ connection.onSignatureHelp(async (params) => {
 // generated span of each state name (`mutables`), and the bit is cleared there
 // and nowhere else — `=!`, `~=` and `~>` also emit `const` and really ARE
 // immutable, so they keep it.
+// Does the module `specifier` names, resolved from `fromDir`, declare
+// `name` as an enum? An OPEN buffer answers from its own last-good
+// compile; a disk file from its manifest entry, which the closure fills
+// as it materializes and which is invalidated with the file's source
+// hash. Unknown (not in the closure, or unreadable) answers no — a
+// missing correction leaves TypeScript's own answer, which is the
+// conservative direction.
+function declaresEnum(fromDir, specifier, name) {
+  if (fromDir === null || !specifier.endsWith('.rip')) return false;
+  if (!specifier.startsWith('./') && !specifier.startsWith('../')) return false;
+  const abs = path.resolve(fromDir, specifier);
+  const open = states.get('file://' + abs);
+  if (open?.lastGood?.enumNames) return open.lastGood.enumNames.includes(name);
+  return (cacheManifest.entries[abs]?.enumNames ?? []).includes(name);
+}
+
 function ripSemanticTokens(ctx, data) {
   const mapSpan = exactSpanMapper(ctx.good.mappings);
   const roIndex = semanticTokensLegend?.tokenModifiers?.indexOf('readonly') ?? -1;
@@ -1915,6 +1957,20 @@ function ripSemanticTokens(ctx, data) {
   // than a scan of every span for every token on a surface that fires on each
   // edit.
   const mutableStarts = new Set((ctx.good.mutables ?? []).map(([s]) => s));
+  // Same keying, the other correction: an enum name's TYPE, not a
+  // modifier bit. -1 when the client's legend omits `enum`, and then the
+  // rewrite is skipped rather than pointed at some other type's index.
+  const enumType = semanticTokensLegend?.tokenTypes?.indexOf('enum') ?? -1;
+  const enumStarts = new Set((ctx.good.enums ?? []).map(([s]) => s));
+  // An IMPORTED enum carries the same merged-symbol `type` classification
+  // its declaration does, and the importing file's compile cannot know
+  // that — the kind lives in the declaring module. The compiler reports
+  // which references are imports and from where; the module answers.
+  // Only `./`-relative `.rip` specifiers resolve, matching the closure's
+  // own rule (mirror.js): a package import is TypeScript's to classify.
+  for (const [genStart, , name, specifier] of (ctx.good.importedRefs ?? [])) {
+    if (declaresEnum(ctx.good.dir, specifier, name)) enumStarts.add(genStart);
+  }
   const tokens = new Map(); // start → { start, length, type, modifiers }
   let line = 0, char = 0;
   for (let i = 0; i + 4 < data.length; i += 5) {
@@ -1933,12 +1989,22 @@ function ripSemanticTokens(ctx, data) {
     // of the same name would put the bit straight back.
     let modifiers = data[i + 4];
     if (roBit && mutableStarts.has(genStart)) modifiers &= ~roBit;
+    // An enum name carries the merged symbol's `readonly` too, off the
+    // `const` object half. The construct is a declaration, not a
+    // binding whose mutability is at issue, so the corrected token
+    // drops it with the type — TypeScript's own enum tokens carry
+    // neither.
+    let type = data[i + 3];
+    if (enumType >= 0 && enumStarts.has(genStart)) {
+      type = enumType;
+      modifiers &= ~roBit;
+    }
     const key = curStart * 0x100000 + length;
     const existing = tokens.get(key);
-    if (existing && existing.type === data[i + 3]) {
+    if (existing && existing.type === type) {
       existing.modifiers |= modifiers;
     } else if (!existing) {
-      tokens.set(key, { start: curStart, length, type: data[i + 3], modifiers });
+      tokens.set(key, { start: curStart, length, type, modifiers });
     }
   }
   const builder = new SemanticTokensBuilder();
