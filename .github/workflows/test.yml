@@ -15,7 +15,11 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # A healthy run is ~4 minutes. The margin is for `playwright install
+    # --with-deps`, whose apt half is not covered by the browser cache and
+    # rides the Ubuntu mirrors — observed taking 20+ minutes on a throttled
+    # mirror, which under a 25-minute cap killed an otherwise-green run.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
 
