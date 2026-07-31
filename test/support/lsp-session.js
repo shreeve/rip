@@ -222,6 +222,30 @@ export async function openSession(files) {
       return [];
     },
 
+    // Hover text at a .rip position, as the editor renders it — the fenced
+    // signature with the markdown stripped. Polls for the same reason tokens
+    // do: the answer rides an async program build, and a request issued while
+    // tsgo is still building answers null. Returns null when the position
+    // genuinely serves nothing, so a caller asserting SILENCE gets a real
+    // answer rather than a timing artifact — the two are indistinguishable
+    // without the poll, which is why one exists here.
+    async hover(name, line, character, { tries = 20, every = 300 } = {}) {
+      let last = null;
+      for (let i = 0; i < tries; i++) {
+        const r = await client.request('textDocument/hover', {
+          textDocument: { uri: uri(name) }, position: { line, character },
+        }).catch(() => null);
+        const value = r?.contents?.value;
+        if (typeof value === 'string' && value.trim()) {
+          last = value;
+          const fence = /```(?:typescript|ts)\n([^]*?)\n?```/.exec(value);
+          if (fence) return fence[1].replace(/\s+/g, ' ').trim();
+        }
+        await sleep(every);
+      }
+      return last;
+    },
+
     async close() {
       await client.stop().catch(() => {});
       fs.rmSync(dir, { recursive: true, force: true });
