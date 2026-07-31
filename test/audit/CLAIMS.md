@@ -101,7 +101,7 @@ The park expires in one direction: the row becomes CARRIED. The gate paints red 
 | behavior | until |
 | --- | --- |
 | a destructured binding types through the pin pass — the same hoisted read, bound by a pattern rather than assigned | the open destructured-hoisting finding closes (FINDINGS.md) — the pin pass reaches a plainly-assigned binding but not one bound by a pattern, so the shape is implicitly `any` under strict |
-| a render-head typo beyond `if` (unless, switch, for, `=`) rejects at the head line | the identifier-read span finding closes (FINDINGS.md) — every head publishes TS2304 on the right line, but the column is the construct's cover start rather than the name, and the Diagnostics Audit asserts both, so pinning it would certify the mis-position |
+| a render-head typo beyond `if` (unless, switch, for, `=`) rejects at the head line | **nothing — the park has expired and the row is authorable.** It waited on the identifier-read span, which has landed: driven over `unless` and `if` heads, TS2304 now underlines the NAME (`unless mistyped` reports at the `m`, not at the construct's cover start), which is the position the Diagnostics Audit asserts alongside the code. Carrying it is corpus work in the error lane, not a blocked claim |
 
 ## Containment
 

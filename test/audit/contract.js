@@ -141,15 +141,14 @@ export const CONTRACT = [
     red: (s) => (s.mp.badExclusions ?? 0) > 0,
   },
   {
-    // The identifier-read row's EXIT, and the reason it is an invariant rather
-    // than a number the summary prints: the row closes when this is zero, and
-    // nothing else closes it. Judged in both directions like every other
-    // agreement, so the day the census empties, THIS fails — the reason below
-    // has become a lie, and the failure is the cue to retire it and the row
-    // together. Left as prose, a green census would just stop being mentioned.
+    // Held red by agreement while the identifier-read row was open, and it is
+    // the reason that row could close: an invariant rather than a number the
+    // summary prints, judged in both directions, so the day the census emptied
+    // THIS failed and the stale agreement had to be retired rather than left to
+    // mask the next break. Now an ordinary green invariant — a read losing its
+    // own span again is a regression, not a queue.
     name: 'mapping.census', lane: 'map',
     property: 'every identifier read owns an exact row — its own span, never its cover’s',
-    redBecause: "five reads remain, and FOUR cannot take an honest row as things stand: two annotations their lowering erases outright (a gap parameter's, and a defaulted promoted parameter's, whose default infers the type), and the parked `offer`/`accept` pair whose model RULINGS.md does not settle. The fifth is a bare-name implicit return, and it is the ORDINAL claim's own limit rather than an emission left unrouted — the frame holds every occurrence of the name, the earlier ones claimed in frames of their own so this frame's cursor is fresh, and picking the first is a guess. It wants occurrence identity carried from the tree. Delete this when every read classifies exact",
     red: (s) => s.mp.census > 0,
   },
   {

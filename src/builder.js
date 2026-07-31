@@ -234,7 +234,24 @@ export class CodeBuilder {
     const unplaced = free.filter((c) =>
       !this.exactSourceSpans.has(`${c.sourceStart}:${c.sourceEnd}`)
     );
-    const p = (unplaced.length > 0 ? unplaced : free)[0];
+    // OWNERSHIP breaks the remaining ties, and it is recorded, not guessed: the
+    // parser hands each occurrence to the first node constructed over it, so an
+    // occurrence owned by THIS frame's node is one this node emits itself,
+    // while a descendant's will be claimed in the descendant's own frame. The
+    // preference only narrows — a frame that owns none of its candidates
+    // (a spread role emitting a list whose elements the list node owns) keeps
+    // the source-order behavior exactly.
+    //
+    // Source order alone is wrong wherever a lowering REORDERS, and it is not
+    // the comprehension's private problem: a postfix modifier moves its
+    // condition ahead of the body, the rule is un-annotated so the condition
+    // has no role of its own, and `log String(style) if style` therefore
+    // claimed the ARGUMENT's occurrence for the condition it emits first. The
+    // failure is a mis-PAIRING, not a missing row — both spans hold the same
+    // name, so every byte check downstream agrees with it.
+    const pool = unplaced.length > 0 ? unplaced : free;
+    const owned = pool.filter((c) => c.nodeId === f.nodeId);
+    const p = (owned.length > 0 ? owned : pool)[0];
     // Every occurrence in this frame is spoken for — decline, rather than hand
     // a second generated position a row on a source read that already has one.
     if (p === undefined) return null;

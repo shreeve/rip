@@ -8145,7 +8145,9 @@ class CodeBuilder {
       claims.set(value, taken = new Set);
     const free = candidates.filter((c) => !taken.has(c.sourceStart));
     const unplaced = free.filter((c) => !this.exactSourceSpans.has(`${c.sourceStart}:${c.sourceEnd}`));
-    const p = (unplaced.length > 0 ? unplaced : free)[0];
+    const pool = unplaced.length > 0 ? unplaced : free;
+    const owned = pool.filter((c) => c.nodeId === f.nodeId);
+    const p = (owned.length > 0 ? owned : pool)[0];
     if (p === undefined)
       return null;
     taken.add(p.sourceStart);
@@ -9834,6 +9836,18 @@ class Emitter {
     if (hit !== null)
       this.vocabulary.push({ kind, start: hit[0], end: hit[1] });
   }
+  noteHeadKeyword(kind, word, node) {
+    if (!this.ts)
+      return;
+    const id = isNode4(node) ? this.stores.idOf(node) : null;
+    const span = id !== null ? this.stores.selfSpan(id) : null;
+    if (span === null || this.b.source === null)
+      return;
+    const end = span[0] + word.length;
+    if (end > span[1] || this.b.source.slice(span[0], end) !== word)
+      return;
+    this.vocabulary.push({ kind, start: span[0], end });
+  }
   noteSilence(word, container) {
     const hit = this.wordSpanIn(word, container);
     if (hit !== null)
@@ -10884,9 +10898,14 @@ class Emitter {
     entries.forEach(([name, node, role], i) => {
       if (i > 0)
         this.b.emit(", ");
-      this.mark(node, role, () => this.b.emit(name));
+      const owner = this.ts && role === "target" ? entries.annotations?.get(name) ?? null : null;
+      const ownerId = owner !== null ? this.stores.idOf(owner) : null;
+      const declaration = ownerId !== null && Emitter.isTypedWrapper(owner) && this.stores.role(ownerId, "target") !== null;
+      if (declaration)
+        this.mark(owner, "target", () => this.b.emit(name));
+      else
+        this.mark(node, role, () => this.b.emit(name));
       if (this.ts && role === "target") {
-        const owner = entries.annotations?.get(name) ?? null;
         if (owner !== null) {
           this.b.tsOnly(() => {
             if (Emitter.isTypedWrapper(owner) && !this.strict)
@@ -14277,6 +14296,7 @@ ${pad ?? ""}`);
       if (this.isAcceptNode(stmt)) {
         if (offered)
           rejectOffer(stmt);
+        this.noteHeadKeyword("context-channel", "accept", stmt);
         declare(stmt[1], "accept", stmt, true);
         acceptedVars.push(stmt[1]);
         return;
@@ -14428,6 +14448,7 @@ ${pad ?? ""}`);
         const declKinds = this.isReactiveDecl(payload) || this.isReadonlyDecl(payload) || isNode4(payload) && (payload[0] === "=" || payload[0] === "void-assign") && payload.length === 3 && Emitter.memberTarget(payload[1]) !== null;
         if (!declKinds)
           rejectOffer(stmt);
+        this.noteHeadKeyword("context-channel", "offer", stmt);
         categorize(payload, true);
         const t = Emitter.memberTarget(payload[1]);
         offeredVars.push(t.name);
@@ -18273,7 +18294,7 @@ ${"  ".repeat(ind)}`);
       extractions: trailing.map((p, i) => ({
         node: p,
         name: Emitter.paramCore(p),
-        tail: `_rest[_rest.length - ${trailing.length - i}];`
+        slot: `_rest[_rest.length - ${trailing.length - i}]`
       }))
     };
   }
@@ -18373,9 +18394,29 @@ ${"  ".repeat(ind)}`);
 `);
         }
         for (const ex of extractions) {
+          const defaulted = isNode4(ex.name) && ex.name[0] === "default";
+          const bound = defaulted ? Emitter.paramCore(ex.name[1]) : ex.name;
+          const typed = defaulted ? ex.name[1] : ex.node;
+          if (isNode4(bound) && bound[0] === "rest") {
+            throw this.positionedError(ex.node, "emitter: a rest parameter cannot follow the '...' gap — the gap already binds every argument between the head and the tail, so a second rest has nothing left to collect; name the tail parameter instead");
+          }
           this.b.emit("  ".repeat(ind + 1) + "const ");
-          this.mark(ex.node, "$self", () => this.emitPrimitive(ex.name));
-          this.b.emit(` = ${ex.tail}
+          if (typeof bound === "string")
+            this.mark(ex.node, "$self", () => this.emitPrimitive(bound));
+          else
+            this.withPattern(() => this.expr(bound), true);
+          const annotation = this.ts ? this.annotationText(typed) : null;
+          if (annotation !== null)
+            this.tsAnnotate(typed, "annotation", annotation);
+          this.b.emit(" = ");
+          if (defaulted) {
+            this.b.emit(`${ex.slot} === undefined ? `);
+            this.withExpression(() => this.expr(ex.name[2]));
+            this.b.emit(` : ${ex.slot}`);
+          } else {
+            this.b.emit(ex.slot);
+          }
+          this.b.emit(`;
 `);
         }
         this.emitTsTypeDecls(isBlock2(block) ? block.slice(1) : [block], "  ".repeat(ind + 1));

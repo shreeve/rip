@@ -79,6 +79,13 @@ describe('TS face: a lowering that reorders same-named reads keeps them apart', 
     ['nums = [1]\nk = (n for n in nums when n > 2)', 'n', 3],    // body, clause variable, guard
     ['ages = {}\nx = (v for k, v of ages when v > 1)', 'v', 3],  // body, clause value, guard
     ['scores = [1]\nfor late, i in scores by 2\n  use i', 'i', 2],
+    // A postfix modifier reorders too, and its condition has NO role of its
+    // own — the rule is un-annotated, so the whole statement is one `$self`
+    // frame and the condition claims from it. The body's reads live in that
+    // same frame and are emitted after, so source order alone hands the
+    // condition the body's occurrence.
+    ['style = 1\nlog String(style) if style', 'style', 3],
+    ['style = 1\nlog String(style) unless style', 'style', 3],
   ])('%p gives each `%s` its own row', (src, name, count) => {
     const at = wholeWord(src, name);
     expect(at, `expected ${count} source occurrences of ${name}`).toHaveLength(count);
@@ -138,11 +145,24 @@ describe('TS face: consumed vocabulary is recorded where the compiler eats it', 
     ]);
   });
 
+  // `offer`/`accept` are the context channel's own words: the pair lowers to
+  // `setContext('theme', this.theme)` and `this.theme = getContext('theme')`,
+  // so neither word survives into the face at all. The NAME each one binds is
+  // an ordinary member and stays a read — that is the whole line between them.
+  test('the context channel words are recorded, the name they bind is not', () => {
+    expect(vocabOf("G = component\n  offer theme := 'dark'\n\n  render\n    div 'g'\n"))
+      .toEqual([{ kind: 'context-channel', text: 'offer' }]);
+    expect(vocabOf("T = component\n  accept theme\n\n  render\n    span 't'\n"))
+      .toEqual([{ kind: 'context-channel', text: 'accept' }]);
+  });
+
   test('the same spellings stay ORDINARY reads outside those positions', () => {
     // A loop variable named `key` and a binding named `data` are real reads:
     // recording them would blind the census exactly where it must not be.
     expect(vocabOf('ages = {}\nfor own key of ages\n  use key\n')).toEqual([]);
     expect(vocabOf('data = 1\napp = data + 1\n')).toEqual([]);
+    // And so are bindings that merely spell the channel's words.
+    expect(vocabOf('offer = 1\naccept = offer + 1\n')).toEqual([]);
   });
 
   test('the JS face records none — the census reads the editor face', () => {
@@ -219,6 +239,57 @@ describe('TS face: repeated identical reads keep their order', () => {
       expect(generated[i], `read ${i} at source ${offsets[i]} maps behind its predecessor`)
         .toBeGreaterThan(generated[i - 1]);
     }
+  });
+});
+
+// A bare typed forward (`chosen: Port`) erases in place and re-manifests on the
+// scope's hoist line, which is therefore the DECLARATION's only generated
+// position — not the first write's. Marking it from the first write leaves the
+// declaration's own name with no row, and the claim that follows then hands the
+// declaration's occurrence to whichever later frame asks first: a bare-name
+// implicit return claims from the block's `statements` frame, where every
+// occurrence of the name is in range and the earlier writes are already placed,
+// so the free one it takes is the declaration's. Both halves are the same
+// pairing, so both are driven here — the reads that ARE placed matter as much
+// as the read that is not.
+describe('TS face: a bare typed forward manifests as its own hoist line', () => {
+  const src = 'def choosePort(): number\n  chosen: number\n  if (1 < 2) then chosen = 443 else chosen = 80\n  chosen\n';
+  const r = parser.parse(src, { primitives: true });
+  expect(r.diagnostics).toEqual([]);
+  const { code, mappings } = emit(r, { source: src, face: 'ts' });
+  const at = [...src.matchAll(/(?<![\w$])chosen(?![\w$])/g)].map((m) => m.index);
+  const rowAt = (offset) => mappings.find((m) => m.mappingKind === 'exact'
+    && m.sourceStart === offset && m.sourceEnd === offset + 'chosen'.length
+    && code.slice(m.generatedStart, m.generatedEnd) === 'chosen');
+  // [which occurrence, the generated line it must land on]
+  const decl = 0, firstWrite = 1, secondWrite = 2, bareReturn = 3;
+  const lineOf = (offset) => code.slice(0, offset).split('\n').length;
+  const generatedLine = (which) => lineOf(rowAt(at[which]).generatedStart);
+
+  test('the four occurrences are the declaration, two writes, and the bare return', () => {
+    expect(at).toHaveLength(4);
+    expect(code).toContain('let chosen!: number;');
+    expect(code).toContain('return chosen;');
+  });
+
+  test.each([
+    ['the declaration', decl],
+    ['the first write', firstWrite],
+    ['the second write', secondWrite],
+    ['the bare return', bareReturn],
+  ])('%s owns an exact row at its own bytes', (_label, which) => {
+    expect(rowAt(at[which]), `no exact row at source offset ${at[which]}`).toBeDefined();
+  });
+
+  test('the hoist line is the DECLARATION, and the return is the return', () => {
+    // `let chosen!: number;` is the second line of the emitted function.
+    expect(generatedLine(decl)).toBe(2);
+    expect(generatedLine(bareReturn)).toBe(lineOf(code.indexOf('return chosen;')));
+    // Every occurrence maps to a distinct generated position — a name claimed
+    // twice would satisfy the row lookups above while pairing one source read
+    // onto another's emission.
+    const starts = at.map((o) => rowAt(o)?.generatedStart);
+    expect(new Set(starts).size).toBe(4);
   });
 });
 
@@ -324,9 +395,25 @@ describe('TS face: a node synthesized at emit time still places its names', () =
     // does not span the parameter list, so the claim opens on the parameter's
     // own extent to see it at all.
     const { code, owns } = rowsFor('bracket = (first: number, ..., last: number) -> [first, last]\n');
-    expect(code).toContain('const last = _rest[_rest.length - 1];');
+    expect(code).toContain('const last: number = _rest[_rest.length - 1];');
     expect(owns('last', 0)).toBe(true);   // the parameter
     expect(owns('last', 1)).toBe(true);   // its read in the body
+  });
+
+  // The tail parameter's ANNOTATION rides the same extraction. It is the only
+  // place the author's stated type can land: the gap swallows the position the
+  // parameter would have had, so an annotation left off here is discarded
+  // outright and the binding types from whatever the call site contextually
+  // supplies — or, in a `def` spelling that has no contextual type, from
+  // nothing at all.
+  test("a gap parameter's tail binding carries its annotation", () => {
+    const { code, owns } = rowsFor('bracket = (first: number, ..., last: number) -> [first, last]\n');
+    expect(owns('number', 1)).toBe(true);   // the TAIL parameter's type name, not the head's
+    // The annotation governs: a type the contextual signature contradicts is
+    // now the author's own error to see, where the face used to be silent.
+    const wrong = rowsFor('bracket = (first: number, ..., last: string) -> [first, last]\n');
+    expect(wrong.code).toContain('const last: string = _rest[_rest.length - 1];');
+    expect(code).toContain('..._rest');    // the gap itself stays untyped — the author states nothing for it
   });
 
   test("a promoted parameter's annotation places its type name", () => {

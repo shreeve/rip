@@ -44,8 +44,8 @@ Measured 2026-07-23 over 13-components (the `ruled` gauge, hover-pins.json's `po
 | event word (`click`) | the handler signature, event type included | null pin — today the cover's `this`; the render-DSL finding |
 | bind target (`value` in `value <=> count`) | `value <=> — two-way bind, <prop type>` | null pin — today the minted `__bind_value__` slot; the render-DSL finding |
 | the name in a bind (`count`) | its VALUE type — never the wrapper | null pin — today the bind cover's `__bind_value__`; the render-DSL finding |
-| render loop variable at a read | plain inferred type | blocked on the identifier-read finding |
-| member reads in branch/loop bodies (the factory's `ctx` is minted — no source position carries it) | plain inferred type | blocked on the identifier-read finding |
+| render loop variable at a read | plain inferred type | pinnable, unpinned — see the note below the tables |
+| member reads in branch/loop bodies (the factory's `ctx` is minted — no source position carries it) | plain inferred type | pinnable, unpinned — see the note below the tables |
 | member declaration (state, readonly, prop, ref cell) | minted kind, value-first — `(state) people: string[]` | pinned as measured — `(property) Roster.people: string[]`, the value half served; the minted kind is the open half |
 | member declaration (computed, unannotated) | the same — `(computed) shade: string` | pinned null — the face types an unannotated computed through the lowering's behavior object, so every spelling of its value type names machinery, which is never a stand-in; the computed-projection finding |
 | gate target name (`stats <~ …`) | minted kind, value-first — the kind label undecided | pinned as measured — the value half served; the kind label is the open half |
@@ -63,14 +63,14 @@ Measured 2026-07-23 over 14-schema's spellings (the `ruled` gauge, hover-pins.js
 | schema name at declaration | type-first: structure leads, value nature noted after | pinned as measured (`decls`) — the value-first `let Person: Schema<Person, Person>` is truthful short of the target, the reactive doctrine |
 | schema name at declaration (`:mixin`) | user vocabulary, never the machinery — the exact spelling undecided: a mixin has no parse surface, so `Schema<…>` would over-promise | pinned as measured (`decls`) — `let Stamped: __SchemaDef` is a leak; the mixin-declaration finding (FINDINGS.md) holds it |
 | field name (`name! string`) | `(field) name: string`, required/optional visible | pinned null — green, measured 2026-07-23 |
-| field type word | the type, same as an annotation | blocked on the identifier-read finding |
+| field type word | the type, same as an annotation | pinnable, unpinned — see the note below the tables |
 | `!` / `?` markers | silence — punctuation is silent, permanently | pinned null — green, measured 2026-07-23 |
 | default-value expression | normal expression hovers | pinned null — silence today, measured 2026-07-23; the pin moves the day expression hovers reach the default bracket |
 | computed field name | `(computed) total: number` | pinned null — green, measured 2026-07-23 |
 | `it` in a transform | `it: <input record>` — the record under validation (driven 2026-07-23: a transform receives the whole raw record, never the field's own value) | pinned null — green, measured 2026-07-23 |
 | companion type at a use site | the structural type, expanded like any alias | pinned as measured — the annotation position serves the full expansion (the target, already served); a value-position use serves the schema value's own type, the plain-answer rule |
 
-"Blocked on the identifier-read finding": pinnable when that fix lands (see FINDINGS.md).
+"Pinnable, unpinned": the identifier-read span these positions waited on has landed, so each now HAS a source position to answer at. What the server serves there is unmeasured — the pin is the measurement, and adopting one is an explicit reviewed edit, so these rows stay unpinned until someone drives them.
 
 ## Tokens
 

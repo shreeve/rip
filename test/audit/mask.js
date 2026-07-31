@@ -29,6 +29,11 @@
 // division and leaves the pattern unmasked — `return /^[A-Z]+$/` would then
 // contribute `A` and `Z` to a population of reads that can never own a row.
 // `lastWord` carries the identifier run so a keyword can say VALUE position.
+// The run ENDS where the source's does, which `lastCode` cannot say: it skips
+// whitespace by design (the divides-after test wants the last significant
+// byte), so continuing the run on it welds `ok` and `not` into one word and no
+// keyword is ever recognized past the first one on a line. The preceding SOURCE
+// byte is what bounds a run, and it is in hand at every position.
 const REGEX_DIVIDES_AFTER = /[\w$)\]]/;
 const REGEX_FOLLOWS_WORD = new Set([
   'return', 'yield', 'await', 'typeof', 'instanceof', 'delete', 'void', 'new',
@@ -59,7 +64,7 @@ export function codeMask(src) {
     const top = stack[stack.length - 1];
     if (top && top.brace === 0) {                              // inside a string LITERAL
       if (c === '\\') { out.push(' '); if (i + 1 < src.length) { out.push(' '); i++; } continue; }
-      if (c === top.delim) { stack.pop(); out.push(c); continue; }
+      if (src.startsWith(top.delim, i)) { stack.pop(); out.push(top.delim); i += top.delim.length - 1; continue; }
       if (top.interp && c === '#' && src[i + 1] === '{') { top.brace = 1; out.push(' ', ' '); i++; continue; }
       out.push(c === '\n' ? '\n' : ' ');                       // literal content — blank, keep newlines
       continue;
@@ -103,9 +108,18 @@ export function codeMask(src) {
         i = k - 1; lastCode = '/'; lastWord = ''; continue;
       }
     }
-    if (c === "'" || c === '"' || c === '`') { stack.push({ delim: c, interp: c !== "'", brace: 0 }); out.push(c); lastCode = c; continue; }
+    if (c === "'" || c === '"' || c === '`') {
+      // A heredoc's delimiter is the whole run of three. Read as `''` plus a
+      // `'`, its body would end at the first apostrophe the prose contains.
+      const delim = (c !== '`' && src.startsWith(c.repeat(3), i)) ? c.repeat(3) : c;
+      stack.push({ delim, interp: c !== "'", brace: 0 });
+      out.push(delim);
+      i += delim.length - 1;
+      lastCode = c;
+      continue;
+    }
     out.push(c);
-    if (/[\w$]/.test(c)) lastWord = /[\w$]/.test(lastCode) ? lastWord + c : c;
+    if (/[\w$]/.test(c)) lastWord = /[\w$]/.test(src[i - 1] ?? '') ? lastWord + c : c;
     else if (!/\s/.test(c)) lastWord = '';
     if (!/\s/.test(c)) lastCode = c;
   }

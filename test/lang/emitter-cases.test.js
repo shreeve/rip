@@ -51,6 +51,25 @@ describe('a for loop that binds no variable rejects loudly', () => {
   });
 });
 
+// The `...` gap already collects every argument between the head and the tail,
+// so a SECOND rest after it has nothing left to bind. The grammar admits the
+// spelling, and the extraction used to emit `const rest,more = _rest[…]` for it
+// — a stringified tree node, which does not parse. Rejection is the honest
+// answer: there is no lowering for a binding that can never receive anything.
+describe('a rest parameter after the `...` gap rejects loudly', () => {
+  const src = 'f = (first, ..., ...more) -> first';
+  test('it rejects, positioned, naming what the gap already did', () => {
+    const r = parser.parse(src);
+    expect(r.diagnostics).toEqual([]);
+    expect(() => emit(r, { source: src }))
+      .toThrow(/a rest parameter cannot follow the '\.\.\.' gap/);
+  });
+
+  test('an ordinary tail parameter is untouched', () => {
+    expect(eval(compile('f = (a, ..., b) -> a + b\nf(1, 2, 3, 4)'))).toBe(5);
+  });
+});
+
 describe("'??' continues across a line break", () => {
   test('a multi-line nullish chain is one logical line, identical to the single-line spelling', () => {
     const multi = parser.parse('v =\n  a ??\n  b ??\n  c');

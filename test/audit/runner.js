@@ -1532,10 +1532,49 @@ function* identReads(src) {
 // 14-schema, both of which must keep counting), every kind here must actually
 // occur, and `mapping.exclusions` goes red when one stops occurring, so an
 // exclusion cannot outlive its reason.
+// Each kind carries TWO texts, because they answer different questions. `is`
+// says WHAT was netted out, in the reader's own vocabulary — it prints beside
+// the count every run, since a bare slug and a number tell nobody what left
+// their population. `why` is the JUSTIFICATION, the paragraph someone has to
+// judge to decide the exclusion was ever honest; it prints under `-v`, and
+// unconditionally for a kind that has gone stale.
+//
+// They must not OVERLAP. A `why` that opens by restating its `is` makes the
+// -v listing say everything twice, which is how a detail view stops being
+// read at all — `is` names the words, `why` argues that netting them out is
+// honest, and neither does the other's job.
 const MAP_EXCLUSIONS = new Map([
-  ['render-channel', "the render DSL's own words — every key on an intrinsic element (an attribute, a property, an event, `ref:`, `key:`), `slot`, and a `<=>` bind's TARGET, which the lexer folds into the minted `__bind_x__` props key. The compiler CONSUMES each; none reaches a face entity. The names such a pair BINDS — a ref cell, a bind's right-hand side — are ordinary reads that do reach one, and stay in the population"],
-  ['gate-prefix', "a gate's `@app.data` marker, erased whole by the lowering, which keeps only the route name. RULINGS.md pins these segments to silence"],
+  ['render-channel', {
+    is: 'markup words: an element\'s attributes, properties and events, plus `ref:`, `key:`, `slot`, and a bind\'s target',
+    why: "the compiler consumes every one of them — a bind's target the lexer folds into a minted `__bind_x__` props key — so none reaches a face entity to resolve to. What such a pair BINDS is the opposite case: a ref cell, a bind's right-hand side, ordinary reads that do reach one and stay counted",
+  }],
+  ['gate-prefix', {
+    is: 'the `@app.data` in a gate — the lowering keeps only the route name after it',
+    why: "erased whole, so no part of it reaches the face; RULINGS.md independently pins these segments to silence, and counting them here would leave two instruments disagreeing about the same bytes",
+  }],
+  ['context-channel', {
+    is: 'the words `offer` and `accept`, which lower to `setContext`/`getContext` calls',
+    why: "neither word survives the lowering, so neither has anywhere to resolve TO, while what each one BINDS is an ordinary member and stays counted — that is the whole line between them. Independent of the channel's type model, which RULINGS.md still parks: `ref:` is ruled and census-excluded on the same two axes",
+  }],
 ]);
+
+// The table's SHAPE is checked here, loudly, because it changed: the value was
+// a plain reason string before it became `{ is, why }`, and the old form is
+// still the natural thing to write. Unchecked, an entry in that form reaches
+// `wrapText(undefined)` a thousand lines away and takes the whole --map lane
+// down with a TypeError naming neither the kind nor this table — so every
+// invariant in the lane goes unjudged over a one-line editing mistake. Checked
+// at load, before any lane runs, in the same shape as the corpus's own
+// collision and smuggled-directive gates.
+{
+  const malformed = [...MAP_EXCLUSIONS.entries()].filter(([, v]) =>
+    v === null || typeof v !== 'object' || typeof v.is !== 'string' || typeof v.why !== 'string' ||
+    v.is.trim() === '' || v.why.trim() === '');
+  if (malformed.length) {
+    console.error(`✗ census exclusion table: ${malformed.map(([k]) => `'${k}'`).join(', ')} — every kind's value is { is, why }, two non-empty strings: \`is\` names WHAT was netted out (it prints beside the count every run) and \`why\` argues that netting it out is honest (it prints under -v, and whenever the kind goes stale).`);
+    process.exit(1);
+  }
+}
 
 function mappingScan(src, code, mappings, vocabulary = []) {
   const rows = [];         // flagged reads WITH a containing row (unplaced/mistext)
@@ -2725,13 +2764,23 @@ if (RUN_MAP) {
   // row exists.
   const READ_W = Math.max(1, ...fileRows.filter((r) => !r.skip).map((r) => String(r.reads).length));
   const FLAG_W = Math.max(1, ...fileRows.filter((r) => !r.skip).map((r) => String(r.flagged).length));
+  // A clean row says only that the file was walked, which the summary line
+  // below already says for all of them at once — so the table prints the rows
+  // that carry something (a flagged read, a fixture with no face) and `-v`
+  // prints every one. The summary is unconditional either way: it is the
+  // completeness claim, and it must not depend on there being a problem.
+  let tabled = 0;
   for (const r of fileRows) {
-    if (r.skip) { out(`    ${yellow('skip')} ${pad(r.f, NAME_W + 2)} ${dim('does not compile — no face to walk: ' + r.skip)}`); continue; }
+    if (r.skip) { out(`    ${yellow('skip')} ${pad(r.f, NAME_W + 2)} ${dim('does not compile — no face to walk: ' + r.skip)}`); tabled++; continue; }
+    if (r.flagged === 0 && !VERBOSE) continue;
+    tabled++;
     console.log(`    ${r.flagged === 0 ? green('✓') : yellow('·')} ${pad(r.f, NAME_W + 2)} ${dim(String(r.reads).padStart(READ_W) + ' reads')}   `
       + (r.flagged === 0 ? green('all placed') : yellow(String(r.flagged).padStart(FLAG_W) + ' unmapped')));
   }
 
-  console.log(`\n    ${green('✓')} ${dim(`${perFile.length} of ${fixtures.length} fixtures walked${skips.length ? `, ${skips.length} skipped (no face)` : ''} · ${totReads} reads`)}`);
+  // The blank separates the summary FROM the table; with no table it would
+  // sit under the banner's own, opening the audit on two empty lines.
+  console.log(`${tabled ? '\n' : ''}    ${green('✓')} ${dim(`${perFile.length} of ${fixtures.length} fixtures walked${skips.length ? `, ${skips.length} skipped (no face)` : ''} · ${totReads} reads`)}`);
 
   // ── the two invariants. Every failure is one or the other, never both: a
   // rewrite REFUSES (no resolved position to hold wrong text), mark-width
@@ -2742,10 +2791,19 @@ if (RUN_MAP) {
   // a 4-wide count, and the gaps between them. `out` would hang it at 6,
   // under the label, which reads as a second row whose name went missing.
   const NOTE_COL = 4 + 10 + 1 + 4 + 3;
+  // A gauge is NAMED at zero and always — a check that prints only on failure
+  // cannot be told from one that never ran. Its NOTE is a different thing: it
+  // says what the failure would mean, which is worth a line when there is one
+  // to read and is pure noise when the count is zero. So the note rides the
+  // count, and `-v` restores every one of them for a reader who wants the
+  // definitions rather than the findings.
   const invLine = (label, n, note) => {
+    const head = `    ${pad(label, 10)} ${(n === 0 ? green : yellow)(String(n).padStart(4))}`;
+    if (n === 0 && !VERBOSE) { console.log(head); return false; }
     const lines = wrapText(note, TERM_W - NOTE_COL, 0);
-    console.log(`    ${pad(label, 10)} ${(n === 0 ? green : yellow)(String(n).padStart(4))}   ${dim(lines[0])}`);
+    console.log(`${head}   ${dim(lines[0])}`);
     for (const l of lines.slice(1)) console.log(' '.repeat(NOTE_COL) + dim(l));
+    return true;
   };
   invLine('unplaced', unplaced, '`placed` fails — nothing resolves, so definition and rename find nothing there');
   invLine('mistext', mistext, '`text` fails — the span is wider than the name, so a hover names the wrong symbol');
@@ -2755,8 +2813,11 @@ if (RUN_MAP) {
   // seen, not a queue. Green at zero and named either way, because a check
   // that prints only on failure cannot be told from one that never ran.
   const driftRows = perFile.flatMap((pf) => pf.drifted.map((d) => ({ f: pf.f, ...d })));
-  out(`    ${pad('identity', 10)} ${(driftRows.length ? red : green)(String(driftRows.length).padStart(4))}   `
-    + dim('resolved and byte-equal, but maps back outside the read — a wrong symbol both checks above accept'));
+  const driftHead = `    ${pad('identity', 10)} ${(driftRows.length ? red : green)(String(driftRows.length).padStart(4))}`;
+  if (driftRows.length || VERBOSE) {
+    out(`${driftHead}   `
+      + dim('resolved and byte-equal, but maps back outside the read — a wrong symbol both checks above accept'));
+  } else console.log(driftHead);
   for (const d of driftRows) out(`      ${red('✗')} ${d.f} ${dim(`${d.name} at ${d.offset} → generated ${d.gen} → back to ${JSON.stringify(d.back)}`)}`);
 
   // ── the CENSUS — the gate the ledger's identifier-read finding asks for:
@@ -2768,7 +2829,13 @@ if (RUN_MAP) {
   // why THIS number is the gate, not the symptom count. Same mapping rows, no
   // server, no oracle.
   out(`\n  ${bold('Census')} ${dim('(reads with no exact row)')}`);
-  out(`    ${pad('census', 10)} ${(census === 0 ? green : yellow)(String(census).padStart(4))}   ${dim(`of ${totReads} — ${totFlag} broken today, ${byLuck} resolving by luck: one change to the emitted TS from breaking`)}`);
+  // The decomposition is what a NON-EMPTY census is read for — how much of it
+  // misleads the editor today, and how much is one face rewrite away. At zero
+  // both halves are zero too, and printing them says nothing the count did not.
+  out(`    ${pad('census', 10)} ${(census === 0 ? green : yellow)(String(census).padStart(4))}   `
+    + dim(census === 0
+      ? `of ${totReads} — every read owns its own span`
+      : `of ${totReads} — ${totFlag} broken today, ${byLuck} resolving by luck: one change to the emitted TS from breaking`));
   // The decomposition is exact BY CONSTRUCTION — a flagged read always lacks an
   // exact row (see mappingScan) — so census === broken-today + by-luck. Checked,
   // not assumed: it rests on the compiler keeping synthetic rows zero-width on
@@ -2787,14 +2854,79 @@ if (RUN_MAP) {
   const undeclared = [...byKind.keys()].filter((k) => !MAP_EXCLUSIONS.has(k));
   const unused = [...MAP_EXCLUSIONS.keys()].filter((k) => !byKind.has(k));
   out(`    ${pad('excluded', 10)} ${dim(String(excRows.length).padStart(4))}   ${dim('reads the compiler consumed as its own vocabulary — netted from the population above')}`);
-  for (const [kind, why] of MAP_EXCLUSIONS) {
-    const n = byKind.get(kind) ?? 0;
-    out(`      ${(n ? dim : red)(`${kind} ${n}`)}`);
-    out(`        ${(n ? dim : red)(why)}`);
+  // Each kind's REASON is the thing that keeps this table honest, and it lives
+  // in MAP_EXCLUSIONS where it is reviewed — printing all of it every run
+  // spends a paragraph per kind restating a decision nobody is re-making. The
+  // counts print always (a population narrowed silently is one nobody can
+  // audit); the reasons print under `-v`, and unconditionally for a kind that
+  // has gone STALE, which is the one moment its reason is the thing to read.
+  const liveKinds = [];
+  for (const kind of MAP_EXCLUSIONS.keys()) if (byKind.get(kind)) liveKinds.push(kind);
+  // One nested row per kind — the report's own idiom, label then count then
+  // note, so the counts align and each names what it took. A single joined
+  // line of `kind N` pairs fits on one line and says nothing: the slugs are
+  // this gate's internal vocabulary, and a reader looking at a population that
+  // shrank by 32 needs to know what left it, not what the table calls it.
+  const KIND_W = Math.max(...liveKinds.map((k) => k.length), 0);
+  const KIND_NOTE = 6 + KIND_W + 1 + 4 + 3;
+  // The TABLE is name, count, what it is — three columns, one row each, and it
+  // reads the same in both modes. The justifications do NOT belong inside it:
+  // a paragraph per row turns a table into a stack of blocks, and every shape
+  // tried for it (hanging under the name, a lead-in dash, a `why` label in the
+  // count column) put prose in a margin the columns did not own. They are a
+  // section of their own, after the table, where a paragraph is just a
+  // paragraph.
+  for (const kind of liveKinds) {
+    const gloss = wrapText(MAP_EXCLUSIONS.get(kind).is, TERM_W - KIND_NOTE, 2);
+    console.log(`      ${dim(pad(kind, KIND_W))} ${dim(String(byKind.get(kind)).padStart(4))}   ${dim(gloss[0])}`);
+    for (const l of gloss.slice(1)) console.log(' '.repeat(KIND_NOTE) + dim(l));
   }
+  if (VERBOSE && liveKinds.length) {
+    out(`\n    ${bold('Why each is netted out')} ${dim('(the argument to judge, if you are auditing the table rather than reading it)')}`);
+    for (const kind of liveKinds) {
+      console.log(`      ${dim(kind)}`);
+      for (const l of wrapText(MAP_EXCLUSIONS.get(kind).why, TERM_W - 8, 0)) console.log(`        ${dim(l)}`);
+    }
+  }
+
   for (const k of undeclared) console.log(`    ${red('✗')} ${dim(`the compiler recorded exclusion kind '${k}', which this gate does not declare`)}`);
-  for (const k of unused) console.log(`    ${red('✗')} ${dim(`exclusion '${k}' is declared but no longer occurs — delete it, or it will excuse the next read that lands there`)}`);
-  if (VERBOSE) for (const e of excRows) out(`      ${dim(`${e.f} ${e.name} at ${e.offset} (${e.kind})`)}`);
+  // A stale kind is ONE callout: the fault, then the reason it was declared,
+  // which is the text the reader has to judge to decide whether the exclusion
+  // was ever right. Announced separately — a red row above and a ✗ below — the
+  // same kind reads as two problems.
+  for (const k of unused) {
+    console.log(`    ${red('✗')} ${dim(`exclusion '${k}' is declared but no longer occurs — delete it, or it will excuse the next read that lands there`)}`);
+    const e = MAP_EXCLUSIONS.get(k);
+    for (const l of wrapText(`${e.is} — ${e.why}`, TERM_W - 8, 2)) console.log(`        ${dim(l)}`);
+  }
+  // The per-read listing needs its own head under -v, or its first row reads
+  // as one more line of the last kind's reason paragraph above it.
+  //
+  // Grouped by file and addressed by LINE:COL, like the flagged-reads listing
+  // below and for the same reason: the point of printing all 32 is that a
+  // reader can go look at one, and a byte offset is not a place anyone can
+  // navigate to. Same columns, so the two listings read the same way.
+  if (VERBOSE && excRows.length) {
+    // A SIBLING of the justification section, not a child of it: this listing
+    // belongs to the `excluded` row, and indenting it one level deeper made it
+    // read as the tail of whatever section happened to precede it.
+    out(`\n    ${bold('Every excluded read')} ${dim(`(${excRows.length}, each checkable at its line:col)`)}`);
+    const NAME_C = Math.max(4, ...excRows.map((e) => e.name.length));
+    for (const pf of perFile) {
+      const rows = pf.excluded ?? [];
+      if (!rows.length) continue;
+      console.log(`      ${bold(pf.f)} ${dim(`(${rows.length})`)}`);
+      for (const e of rows) {
+        const { line, character } = offsetToPosition(pf.starts, e.offset);
+        const where = dim(`${String(line + 1).padStart(3)}:${String(character).padEnd(3)}`);
+        // The name is PLAIN, not bold. The flagged-reads listing bolds its
+        // names because each one is a defect to hunt down; every row here is
+        // expected vocabulary, so bolding all 32 makes a benign block shout
+        // louder than the failures below it.
+        console.log(`        ${where} ${pad(e.name, NAME_C)} ${dim(e.kind)}`);
+      }
+    }
+  }
 
   // ── the two roots, each with the roles it bit (the row every failure fell
   // to). The counts are live and the ordering is by weight, so the dominant
@@ -2805,7 +2937,10 @@ if (RUN_MAP) {
   const rootTotal = (m) => [...m.values()].reduce((a, b) => a + b, 0);
   // `out`, not console.log: this heading carries a gloss now and a heading
   // that overruns hard-breaks mid-word at the terminal's edge.
-  out(`\n  ${bold('Why they miss')} ${dim('(the row each read landed in — ROLE is the part of the construct emitted, `$self` the construct itself)')}`);
+  // The gloss explains the ROLE breakdown, which only prints under a root that
+  // bit something — with both at zero it defines a column that is not there.
+  const anyRoot = rootTotal(byRootRole.synthetic) + rootTotal(byRootRole.rewrite) > 0;
+  out(`\n  ${bold('Why they miss')}${anyRoot || VERBOSE ? ' ' + dim('(the row each read landed in — ROLE is the part of the construct emitted, `$self` the construct itself)') : ''}`);
   const rootLine = (label, n, note, roles) => {
     invLine(label, n, note);
     if (roles) for (const l of wrapText(roles, TERM_W - NOTE_COL, 2)) console.log(' '.repeat(NOTE_COL) + dim(l));
@@ -4116,13 +4251,14 @@ if (gr) {
     + (claimsRead ? '' : `${dim(' · ')}${yellow('claims: CLAIMS.md absent — not judged')}`)
     + (queues.length ? `${dim(' · queues: ')}${yellow(queues.join(', '))}` : `${dim(' · ')}${green('no queue — nothing ruled and unbuilt')}`));
 }
-// The Mapping Audit's flagged reads are EXPECTED red (the mapping gap), so
-// they read as a gauge, never a regression count: the total is the census, and
-// the missing-span clause is the only part that would signal something new.
+// The Mapping Audit's flagged reads were a GAUGE while the mapping gap was
+// open. It is closed and the census gates at zero, so a flagged read is now a
+// REGRESSION — some construct emits a name whose own span it never claimed —
+// and this line says so rather than reading as expected residue.
 if (mp) totalLine('Mapping', `${mp.totReads} reads: `
   + (mp.totFlag === 0
     ? green('all placed, all truthful')
-    : `${yellow(`${mp.totFlag} unmapped`)} ${dim(`(${mp.unplaced} unplaced, ${mp.mistext} mistext · ${mp.synthetic} synthetic, ${mp.rewrite} rewrite)`)} ${dim('tracking the mapping gap (expected)')}`)
+    : `${red(`${mp.totFlag} unmapped`)} ${dim(`(${mp.unplaced} unplaced, ${mp.mistext} mistext · ${mp.synthetic} synthetic, ${mp.rewrite} rewrite)`)} ${dim('— a regression: the census gates at zero')}`)
   + dim(` · ${mp.census} at-risk — no exact row`)
   + (mp.drifted ? ` · ${red(`${mp.drifted} mapping back outside the read`)}` : '')
   + (mp.missing ? ` · ${red(`${mp.missing} missing span${mp.missing === 1 ? '' : 's'}`)} ${dim('— a new class')}` : ''));
@@ -4156,10 +4292,11 @@ if (tk) {
   // own segment so use-site drops never read as fresh invariant regressions.
   // Absent entirely when the face oracle did not run (no survDrops key set).
   const survDropTotal = (tk.survDrops ?? []).reduce((n, d) => n + d.count, 0);
-  // Joined to the member clause with `, ` rather than ` · `: both gauges track
-  // the SAME open gap and carried the same trailing sentence, so as separate
-  // groups they spent two lines saying `tracking the mapping gap (expected)`
-  // twice. One group, one statement of what they are both waiting on.
+  // Joined to the member clause with `, ` rather than ` · `: both gauges asked
+  // the same question and carried the same trailing sentence, so as separate
+  // groups they spent two lines saying it twice. One group, one statement of
+  // what they are both waiting on — which is now delivery, the mapping half
+  // having closed underneath them.
   const survivalClause = !facesAvailable
     ? ''
     : tk.survUnclassified
@@ -4172,7 +4309,9 @@ if (tk) {
       : red(`${bad} invariant violation${bad === 1 ? '' : 's'}`)
         + dim(` (${[[tk.missing, 'missing'], [tk.badType, 'wrong type'], [tk.badReadonly, 'wrong readonly']].filter(([r]) => r.length).map(([r, l]) => `${r.length} ${l}`).join(', ')})`))
     + memberClause + survivalClause
-    + (tk.memberMissing.length || survDropTotal ? dim(' — tracking the mapping gap (expected)') : dim(' — the mapping gap may be closed')));
+    + (tk.memberMissing.length || survDropTotal
+      ? dim(' — server DELIVERY, not mapping: every read owns its own span (the census gates it), so what is dropped here is dropped on the way out')
+      : dim(' — nothing dropped')));
 }
 
 // ── what this run did NOT cover. The default runs one of the audits, so say

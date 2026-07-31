@@ -1274,6 +1274,24 @@ class Emitter {
     if (hit !== null) this.vocabulary.push({ kind, start: hit[0], end: hit[1] });
   }
 
+  // Record a node's own HEAD keyword as consumed vocabulary. A keyword the
+  // grammar folds into the rule head (`offer`, `accept`) is never a carried
+  // token value, so it has no PrimitiveStore occurrence and the anchored scan
+  // above cannot see it — but the node's span opens on it, so its bytes are
+  // arithmetic on a recorded span rather than a search. Verified before
+  // recording: if the span ever stops opening on the word, this records
+  // nothing rather than the wrong thing, the same place-or-decline rule
+  // `wordSpanIn` follows.
+  noteHeadKeyword(kind, word, node) {
+    if (!this.ts) return;
+    const id = isNode(node) ? this.stores.idOf(node) : null;
+    const span = id !== null ? this.stores.selfSpan(id) : null;
+    if (span === null || this.b.source === null) return;
+    const end = span[0] + word.length;
+    if (end > span[1] || this.b.source.slice(span[0], end) !== word) return;
+    this.vocabulary.push({ kind, start: span[0], end });
+  }
+
   // A read the editor stays silent about without claiming the compiler
   // consumed it — see `silences` above for why the two differ.
   noteSilence(word, container) {
@@ -2963,9 +2981,24 @@ class Emitter {
     this.b.emit('let ');
     entries.forEach(([name, node, role], i) => {
       if (i > 0) this.b.emit(', ');
-      this.mark(node, role, () => this.b.emit(name));
+      const owner = this.ts && role === 'target'
+        ? (entries.annotations?.get(name) ?? null) : null;
+      // A bare typed forward is the name's DECLARATION, and it erases in
+      // place — so this line is its only generated manifestation, and the
+      // name marks the forward's own `target` role rather than the first
+      // write's. The annotation beside it already comes from that node; the
+      // two halves of `let chosen!: number` are one source declaration and
+      // now map as one. An annotated ASSIGNMENT is its own declaration
+      // statement and keeps the first-write manifestation unchanged.
+      // Conditioned on the forward carrying a `target` ROW: a wrapper
+      // synthesized at emit time has none, and mark() would then drop the name
+      // silently rather than fall back to the write's row.
+      const ownerId = owner !== null ? this.stores.idOf(owner) : null;
+      const declaration = ownerId !== null && Emitter.isTypedWrapper(owner)
+        && this.stores.role(ownerId, 'target') !== null;
+      if (declaration) this.mark(owner, 'target', () => this.b.emit(name));
+      else this.mark(node, role, () => this.b.emit(name));
       if (this.ts && role === 'target') {
-        const owner = entries.annotations?.get(name) ?? null;
         if (owner !== null) {
           this.b.tsOnly(() => {
             if (Emitter.isTypedWrapper(owner) && !this.strict) this.b.emit('!');
@@ -7187,6 +7220,7 @@ class Emitter {
       }
       if (this.isAcceptNode(stmt)) {
         if (offered) rejectOffer(stmt);
+        this.noteHeadKeyword('context-channel', 'accept', stmt);
         declare(stmt[1], 'accept', stmt, true);
         acceptedVars.push(stmt[1]);
         return;
@@ -7355,6 +7389,7 @@ class Emitter {
         const declKinds = this.isReactiveDecl(payload) || this.isReadonlyDecl(payload) ||
           (isNode(payload) && (payload[0] === '=' || payload[0] === 'void-assign') && payload.length === 3 && Emitter.memberTarget(payload[1]) !== null);
         if (!declKinds) rejectOffer(stmt);
+        this.noteHeadKeyword('context-channel', 'offer', stmt);
         categorize(payload, true);
         const t = Emitter.memberTarget(payload[1]);
         offeredVars.push(t.name);
@@ -12285,10 +12320,14 @@ class Emitter {
       // and takes its own row. The param NODE rides along because the extraction
       // emits inside the BODY's frame, which does not span the parameter list —
       // the claim has to open on the parameter's own extent to see it.
+      // `slot` is the INDEX EXPRESSION, not a finished line: a tail parameter
+      // is a parameter, so it can be a pattern or carry a default, and those
+      // read the slot in different shapes. It is pure (arithmetic over a local
+      // array's length), which is what lets the default form read it twice.
       extractions: trailing.map((p, i) => ({
         node: p,
         name: Emitter.paramCore(p),
-        tail: `_rest[_rest.length - ${trailing.length - i}];`,
+        slot: `_rest[_rest.length - ${trailing.length - i}]`,
       })),
     };
   }
@@ -12431,10 +12470,56 @@ class Emitter {
           this.hoistLine(hoist, '  '.repeat(ind + 1));
           this.b.emit('\n');
         }
+        // A tail parameter is a PARAMETER: every shape a parameter list admits
+        // before the gap can appear after it, and each has to reach the
+        // extraction as a BINDING rather than as a name. Emitting the tree
+        // value through the primitive path handled only the bare and typed
+        // name; a pattern or a default arrived as a node and stringified into
+        // the line, so `(a, ..., [x, y])` emitted `const array,x,y = …` —
+        // output that does not parse, in the shipping JS as much as the face.
         for (const ex of extractions) {
+          // A DEFAULT wraps the binding it defaults, so unwrap to the thing
+          // being bound before asking what shape it is.
+          const defaulted = isNode(ex.name) && ex.name[0] === 'default';
+          const bound = defaulted ? Emitter.paramCore(ex.name[1]) : ex.name;
+          // The annotation lives on the typed wrapper, which the default (if
+          // any) encloses — `last: number = 5` is a default over a typed-var.
+          const typed = defaulted ? ex.name[1] : ex.node;
+          if (isNode(bound) && bound[0] === 'rest') {
+            throw this.positionedError(ex.node,
+              "emitter: a rest parameter cannot follow the '...' gap — the gap already binds every argument between the head and the tail, so a second rest has nothing left to collect; name the tail parameter instead");
+          }
           this.b.emit('  '.repeat(ind + 1) + 'const ');
-          this.mark(ex.node, '$self', () => this.emitPrimitive(ex.name));
-          this.b.emit(` = ${ex.tail}\n`);
+          // The mark supplies the claim's FRAME (the parameter's own extent);
+          // the name's row is narrowed to its recorded occurrence inside it.
+          if (typeof bound === 'string') this.mark(ex.node, '$self', () => this.emitPrimitive(bound));
+          else this.withPattern(() => this.expr(bound), true);
+          // The tail parameter's annotation rides its extraction, because the
+          // gap swallowed the parameter position that would otherwise carry it
+          // — this line is the only place the author's stated type can land,
+          // and left off it is discarded outright: the binding then types from
+          // whatever a call site contextually supplies, or from nothing at all
+          // where no contextual signature exists. TS-only, so the JS emission
+          // and the strip invariant are untouched. The gap's own `..._rest`
+          // stays bare: the author states no type for it. The optional marker
+          // does NOT ride along — `const x?: T` is not a declaration TS admits,
+          // and the slot's own absence is what the default below expresses.
+          const annotation = this.ts ? this.annotationText(typed) : null;
+          if (annotation !== null) this.tsAnnotate(typed, 'annotation', annotation);
+          this.b.emit(' = ');
+          if (defaulted) {
+            // JS parameter-default semantics, verbatim: the default fires when
+            // the slot holds `undefined` and not when it holds `null`, so the
+            // test is against `undefined` rather than a nullish coalesce. The
+            // slot is read twice and that is free — it is arithmetic over a
+            // local array the emitter itself minted, with nothing to observe.
+            this.b.emit(`${ex.slot} === undefined ? `);
+            this.withExpression(() => this.expr(ex.name[2]));
+            this.b.emit(` : ${ex.slot}`);
+          } else {
+            this.b.emit(ex.slot);
+          }
+          this.b.emit(';\n');
         }
         this.emitTsTypeDecls(isBlock(block) ? block.slice(1) : [block], '  '.repeat(ind + 1));
         this.mark(block, 'statements', () => {
