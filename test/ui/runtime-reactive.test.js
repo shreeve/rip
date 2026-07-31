@@ -1312,17 +1312,6 @@ describe('zero-cost gate: the reactive extension', () => {
 describe('runtime scaling', () => {
   const { __state, __computed, __effect, __batch } = v4mod;
 
-  // These gates double a SET the runtime walks — subscribers, dependencies,
-  // a chain — so per-item cost rises with the set as it outgrows cache, and
-  // an honest doubling here lands above the 2.0 a purely linear pass would
-  // give. Measured on a quiet machine, "N effects on ONE state" ratios sit
-  // at 2.13–2.45 across 16 samples, and a CI runner produced 2.57/2.84 —
-  // the default 2.8 bound has no room left for a timing measurement on
-  // shared hardware. 3.4 keeps the separation that matters: a quadratic
-  // walk doubles at ~4, and the harness re-runs the whole measurement
-  // before failing, so a real one fails twice. Gates that turn out to need
-  // this too will say so — a failure now prints its ratios.
-  const BOUND = 3.4;
 
   test('N states, one effect each: writing every state is linear in N', () => {
     expectLinearDoubling({
@@ -1337,7 +1326,6 @@ describe('runtime scaling', () => {
       },
       run: (cells) => { for (const s of cells) s.value = s.read() + 1; },
       sizes: [2000, 4000, 8000],
-      bound: BOUND,
     });
   });
 
@@ -1350,7 +1338,6 @@ describe('runtime scaling', () => {
       },
       run: (s) => { for (let k = 0; k < 5; k++) s.value = s.read() + 1; },
       sizes: [2000, 4000, 8000],
-      bound: BOUND,
     });
   });
 
@@ -1367,7 +1354,6 @@ describe('runtime scaling', () => {
       },
       run: (states) => __batch(() => { for (let k = 0; k < 3; k++) states[k].value += 1; }),
       sizes: [2000, 4000, 8000],
-      bound: BOUND,
     });
   });
 
@@ -1384,7 +1370,6 @@ describe('runtime scaling', () => {
       // is jitter, not growth (a CI run read 0.94/4.64 as 4.92x). Sized up
       // until the base cost is worth dividing.
       sizes: [8000, 16000, 32000],
-      bound: BOUND,
     });
   });
 
@@ -1402,7 +1387,6 @@ describe('runtime scaling', () => {
       },
       run: (a) => { for (let k = 0; k < 10; k++) a.value += 1; },
       sizes: [500, 1000, 2000],
-      bound: BOUND,
     });
   });
 });

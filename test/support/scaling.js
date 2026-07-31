@@ -14,9 +14,17 @@
 // Per size the cost is min-of-5 (GC and JIT noise is one-sided — the
 // minimum approaches true cost). If any doubling ratio exceeds the
 // bound, the WHOLE measurement re-runs once, while genuinely superlinear
-// growth fails every round by structural margin (a quadratic pass
-// doubles at ~4x against the 2.8 bound) — re-verified against the
-// documented quadratic runner variant whenever this harness changes.
+// growth fails every round by structural margin — re-verified against
+// the documented quadratic runner variant whenever this harness changes.
+//
+// The bound is 3.4, not the 2.0 a purely linear pass suggests. These
+// workloads double a SET that is walked, allocated and cached, so honest
+// growth lands well above 2.0: measured on a quiet machine, the runtime
+// gates read 2.13-2.45 and 2.2-2.76, and CI runners produced 2.84 (effect
+// notify), 2.92 (reactive-heavy compile) and 2.76 (diamond) on code with
+// no regression in it. A 2.8 bound left no room on shared hardware and
+// failed roughly two runs in five. Quadratic still doubles at ~4 and
+// still fails twice over, which is the separation these gates exist for.
 import { expect } from 'bun:test';
 import { ops } from '../../src/ops.js';
 
@@ -49,7 +57,7 @@ const cpuMs = (since) => {
   return (user + system) / 1000;
 };
 
-export const expectLinearDoubling = ({ prepare, run, sizes, bound = 2.8, samples = 5 }) => {
+export const expectLinearDoubling = ({ prepare, run, sizes, bound = 3.4, samples = 5 }) => {
   let costs = [];
   const measure = () => {
     run(prepare(1000)); // warmup
