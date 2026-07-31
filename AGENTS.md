@@ -384,7 +384,7 @@ alters surface syntax updates ALL THREE in the same change.
  one exit code. CI runs this, always. COMPLETION CLAIMS run against
  `bun run test:all`, not the fast loop. The ONE suite it does not
  carry is `packages/browser-tests` — it needs installed Playwright
- browsers, and CI runs it as its own step.
+ browsers, and CI runs it as its own job.
 - `bun run test` FROM a package (`packages/vscode`, `packages/server`,
  `packages/app`, …) — that package's own suite, and the inner loop
  for work on that package; the root fast loop excludes `packages/**`

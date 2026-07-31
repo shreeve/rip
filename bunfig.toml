@@ -11,7 +11,7 @@ preload = ["./src/loader.js"]
 # through scripts/test-all.mjs, which spawns every packages/*/ suite as
 # its own lane alongside the root one. The single suite a local test:all
 # does not run is packages/browser-tests, which needs installed Playwright
-# browsers; CI runs it as its own step.
+# browsers; CI runs it as its own job.
 pathIgnorePatterns = ["packages/**", "misc/**"]
 
 # The per-test timeout lives in package.json's test script as a CLI

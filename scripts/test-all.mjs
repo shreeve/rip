@@ -18,7 +18,7 @@
 //
 //   * packages/browser-tests is excluded. It needs installed Playwright
 //     browsers, which a local checkout is not required to have; CI runs it
-//     as its own step. It is the ONE suite a local `bun run test:all` does
+//     as its own job. It is the ONE suite a local `bun run test:all` does
 //     not cover.
 //
 // Every other package runs the way its own package.json says to. A suite
@@ -89,7 +89,7 @@ const CI = Boolean(process.env.CI);
 
 // The one excluded suite, named once.
 const EXCLUDED = new Map([
-  ['browser-tests', 'needs installed Playwright browsers — CI runs it as its own step'],
+  ['browser-tests', 'needs installed Playwright browsers — CI runs it as its own job'],
 ]);
 
 // Named once: the root lane runs the EXTENDED tier, which is what makes
@@ -358,7 +358,7 @@ for (const lane of skipped) {
   console.log(`  ${paint('⊘')} ${cols(lane.label)}  ${paint(lane.skip)}`);
 }
 for (const { name } of excluded) {
-  console.log(`  ${dim('·')} ${dim(cols(`packages/${name}`))}  ${dim('excluded (CI runs it as its own step)')}`);
+  console.log(`  ${dim('·')} ${dim(cols(`packages/${name}`))}  ${dim('excluded (CI runs it as its own job)')}`);
 }
 
 // A failing lane's output is printed where the lane finished, which in
