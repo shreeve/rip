@@ -35,7 +35,7 @@ in [docs/ROADMAP.md](docs/ROADMAP.md).
 ```sh
 bun run test:rip       # language battery
 bun run test           # fast compiler/runtime suite
-bun run test:all       # canonical extended suite
+bun run test:all       # canonical full suite: extended tier + every package
 bun run parser         # regenerate src/parser.js
 bun run corpus-expected
 bun run audit

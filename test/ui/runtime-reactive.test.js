@@ -1312,6 +1312,7 @@ describe('zero-cost gate: the reactive extension', () => {
 describe('runtime scaling', () => {
   const { __state, __computed, __effect, __batch } = v4mod;
 
+
   test('N states, one effect each: writing every state is linear in N', () => {
     expectLinearDoubling({
       prepare: (n) => {
@@ -1365,7 +1366,10 @@ describe('runtime scaling', () => {
         return a;
       },
       run: (a) => { a.value += 1; },
-      sizes: [2000, 4000, 8000],
+      // 2000/4000 both land near 1ms — indistinguishable, so their ratio
+      // is jitter, not growth (a CI run read 0.94/4.64 as 4.92x). Sized up
+      // until the base cost is worth dividing.
+      sizes: [8000, 16000, 32000],
     });
   });
 
