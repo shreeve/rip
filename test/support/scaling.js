@@ -1,14 +1,22 @@
 // Shared scaling-gate harness. Each gate supplies its workload
 // (`prepare(n)` builds the input, `run(arg)` does the measured work),
-// doubling sizes, and a ratio bound. Timing per size is min-of-5
-// (scheduler spikes are one-sided noise — the minimum approaches true
-// cost). If any doubling ratio exceeds the bound, the WHOLE measurement
-// re-runs once: a machine-load transient does not survive two full
-// rounds, while genuinely superlinear growth fails every round by
-// structural margin (a quadratic pass doubles at ~4x against the 2.8
-// bound). The retry therefore buys load tolerance without weakening
-// quadratic-catching power — re-verified against the documented
-// quadratic runner variant whenever this harness changes.
+// doubling sizes, and a ratio bound.
+//
+// Cost is this process's own CPU time, not elapsed wall time. Wall time
+// answers "how long did that take", which on a busy machine is mostly a
+// question about the other work: measured on the parse gate, the second
+// doubling ratio sat at ~1.8 idle and climbed to ~2.55 — against a 2.8
+// bound — with the cores oversubscribed, purely from being descheduled.
+// CPU time holds its idle band under the same load, and unlike the
+// COUNT-ratio gate below it still sees builtin cost (splice, GC, engine
+// work), which is the whole reason these gates exist alongside that one.
+//
+// Per size the cost is min-of-5 (GC and JIT noise is one-sided — the
+// minimum approaches true cost). If any doubling ratio exceeds the
+// bound, the WHOLE measurement re-runs once, while genuinely superlinear
+// growth fails every round by structural margin (a quadratic pass
+// doubles at ~4x against the 2.8 bound) — re-verified against the
+// documented quadratic runner variant whenever this harness changes.
 import { expect } from 'bun:test';
 import { ops } from '../../src/ops.js';
 
@@ -36,6 +44,11 @@ export const expectLinearOpsDoubling = ({ prepare, run, sizes, bound = 2.6 }) =>
   }
 };
 
+const cpuMs = (since) => {
+  const { user, system } = process.cpuUsage(since);
+  return (user + system) / 1000;
+};
+
 export const expectLinearDoubling = ({ prepare, run, sizes, bound = 2.8, samples = 5 }) => {
   const measure = () => {
     run(prepare(1000)); // warmup
@@ -43,9 +56,9 @@ export const expectLinearDoubling = ({ prepare, run, sizes, bound = 2.8, samples
       const arg = prepare(n);
       let m = Infinity;
       for (let k = 0; k < samples; k++) {
-        const t0 = performance.now();
+        const t0 = process.cpuUsage();
         run(arg);
-        m = Math.min(m, performance.now() - t0);
+        m = Math.min(m, cpuMs(t0));
       }
       return Math.max(m, 0.5);
     });
