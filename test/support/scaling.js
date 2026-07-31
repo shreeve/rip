@@ -50,9 +50,10 @@ const cpuMs = (since) => {
 };
 
 export const expectLinearDoubling = ({ prepare, run, sizes, bound = 2.8, samples = 5 }) => {
+  let costs = [];
   const measure = () => {
     run(prepare(1000)); // warmup
-    const best = sizes.map((n) => {
+    costs = sizes.map((n) => {
       const arg = prepare(n);
       let m = Infinity;
       for (let k = 0; k < samples; k++) {
@@ -62,7 +63,18 @@ export const expectLinearDoubling = ({ prepare, run, sizes, bound = 2.8, samples
       }
       return Math.max(m, 0.5);
     });
-    return best.every((t, i) => i === 0 || t / best[i - 1] < bound);
+    return costs.every((t, i) => i === 0 || t / costs[i - 1] < bound);
   };
-  expect(measure() || measure()).toBe(true);
+  const ok = measure() || measure();
+  // Report the measurement, not just the verdict: a gate that fails on a
+  // machine you cannot attach to is only actionable if it says by how
+  // much. A ratio of 2.9 against a 2.8 bound is noise to re-examine; 4.1
+  // is the quadratic these gates exist to catch, and the two need
+  // different responses.
+  const ratios = costs.slice(1).map((t, i) => (t / costs[i]).toFixed(2));
+  expect(
+    ok,
+    `sizes ${sizes.join('/')} cost ${costs.map((t) => t.toFixed(2)).join('/')} cpu-ms ` +
+    `→ ratios ${ratios.join('/')} (bound ${bound})`,
+  ).toBe(true);
 };
