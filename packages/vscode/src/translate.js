@@ -577,16 +577,19 @@ export const inNoUserSymbolSpan = (spans, offset) =>
 //                 and reads it as an array; the container belongs to
 //                 CONSUMER positions, where `inst.people.value` is real
 //                 and the wrapper is the honest answer.
-//   'projected' — the face types this member through the lowering's own
-//                 behavior object, so the value type spells a minted
-//                 name. RULINGS.md bans a machinery name as a stand-in,
-//                 and the interim is silence.
 //   null        — not a member declaration; nothing to say.
+//
+// There is no third kind. An unannotated computed once needed one: its
+// face type read through the lowering's behavior object, so every type
+// spellable for it named machinery and the ruled interim was silence.
+// The face now types that member from an INFERRED position instead — a
+// declaration with no type node, which TypeScript prints resolved — so it
+// is an ordinary value member and answers like every other kind.
 //
 // End EXCLUSIVE, like every span predicate here.
 export const memberDeclKind = (decls, offset) => {
   for (const d of decls) {
-    if (offset >= d.start && offset < d.end) return d.projected ? 'projected' : 'value';
+    if (offset >= d.start && offset < d.end) return 'value';
   }
   return null;
 };

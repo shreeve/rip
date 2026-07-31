@@ -499,11 +499,16 @@ describe('memberDeclKind', () => {
       .toEqual(['label', 'people', 'shade', 'tint']);
   });
 
-  test('only the unannotated computed reads through the lowering', () => {
-    // An annotation is the author's statement of the type, so `tint`
-    // needs no projection and presents like any other member. If this
-    // ever flips, the editor starts declining at an answerable position.
-    expect(decls.filter((d) => d.projected).map((d) => src.slice(d.start, d.end))).toEqual(['shade']);
+  test('no member reads through the lowering — the projected kind is retired', () => {
+    // An unannotated computed once carried a `projected` flag: its face
+    // type read through the lowering's behavior object, so every type
+    // spellable for it named machinery and the editor declined. The face
+    // now types that member from an INFERRED position — a declaration
+    // with no type node, which TypeScript prints resolved — so there is
+    // nothing to read through and no member needs the distinction. The
+    // flag going missing is the point; a member reacquiring one would
+    // mean the projection came back.
+    expect(decls.some((d) => d.projected)).toBe(false);
   });
 
   test('a declaration presents value-first; the same name at a READ does not', () => {
@@ -511,7 +516,8 @@ describe('memberDeclKind', () => {
     // every position that is not a declaration keeps the container.
     expect(memberDeclKind(decls, at('people :=', 'people'))).toBe('value');
     expect(memberDeclKind(decls, at('div people', 'people'))).toBeNull();
-    expect(memberDeclKind(decls, at('shade ~=', 'shade'))).toBe('projected');
+    // The unannotated computed answers like every other declaration now.
+    expect(memberDeclKind(decls, at('shade ~=', 'shade'))).toBe('value');
     expect(memberDeclKind(decls, at('cap =!', 'cap'))).toBeNull();
     expect(memberDeclKind(decls, at('cell:', 'cell'))).toBeNull();
   });

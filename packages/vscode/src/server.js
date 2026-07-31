@@ -1712,12 +1712,7 @@ connection.onHover(async (params) => {
   // describe the minted symbol its own emission put there — truthfully,
   // and about something the user never wrote.
   if (inNoUserSymbolSpan(ctx.good.silent ?? [], ctx.offset)) return null;
-  // A member the face types through the lowering's behavior object: the
-  // symbol is the author's, but every type that can be spelled for it
-  // names the lowering. Silence is the ruled interim — a machinery name
-  // is never a stand-in (RULINGS.md, Principles).
   const memberDecl = memberDeclKind(ctx.good.memberDecls ?? [], ctx.offset);
-  if (memberDecl === 'projected') return null;
 
   const hover = await tsgoRequest('textDocument/hover', {
     textDocument: { uri: ctx.state.tsUri },

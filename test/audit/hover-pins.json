@@ -67,9 +67,9 @@
         "line": 10,
         "character": 2,
         "token": "shade",
-        "expect": null,
+        "expect": "(property) Badge.shade: \"#06f\" | \"#a60\"",
         "rule": "member declaration (computed)",
-        "why": "ruled silence — an unannotated computed's face type reads through the lowering's behavior object, and a machinery name is never a stand-in (computed-projection finding)"
+        "why": "the value-first answer every other member kind serves — the face now types an unannotated computed from an INFERRED position (a declaration with no type node, which TypeScript prints resolved) rather than through the lowering behavior object, so no machinery name can be spelled here; the cell wrapper strips as it does for every member declaration. The minted kind label `(computed)` stays the open half, exactly as for the other kinds"
       },
       {
         "line": 13,

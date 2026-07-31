@@ -524,10 +524,17 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       expect(state.contents.value).not.toContain('read()');
       const typedProp = await hoverAt(client, 1, 4);
       expect(typedProp.contents.value).toContain('(property) Card.title: string');
-      // An unannotated computed's face type reads through the lowering's
-      // own behavior object, so no answer here can be spelled in the
-      // author's vocabulary — the ruled interim is silence.
-      expect(await hoverAt(client, 4, 3)).toBeNull();
+      // An unannotated computed answers value-first like every other
+      // member kind. Its face type once read through the lowering's
+      // behavior object, so nothing spellable for it was in the author's
+      // vocabulary and the ruled interim was silence; the face now types
+      // it from an INFERRED position — a declaration with no type node,
+      // which TypeScript prints resolved — so the projection is gone and
+      // so is the reason to decline. `count * 2` is number.
+      const computed = await hoverAt(client, 4, 3);
+      expect(computed.contents.value).toContain('(property) Card.total: number');
+      expect(computed.contents.value).not.toContain('__Card__computed');
+      expect(computed.contents.value).not.toContain('read()');
       // A member READ inside a render block is the CONSUMER position and
       // keeps the container: `@title.value` is real there, and the
       // declaration's vocabulary is not the reader's.

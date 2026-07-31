@@ -29,7 +29,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom-vocab.js';
 import {
   COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS, componentTypeInfo, memberDeclareSegments, isDeclarableMember,
-  isBehaviorProjected, declaresContainer,
+  declaresContainer,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType,
@@ -1504,17 +1504,16 @@ class Emitter {
   // tests is the span the mapping resolves. Only members the face
   // declares as CONTAINERS are recorded: a member that declares its value
   // type directly has nothing to see past, and one whose own annotation
-  // spells the container shape by hand meant that shape. `projected` says
-  // the face types this member through the lowering's behavior object,
-  // which is the one member type no answer can spell in the author's
-  // vocabulary.
+  // spells the container shape by hand meant that shape. Every recorded
+  // member answers the same way — value-first at its declaration, the
+  // container at a read — so the channel carries spans and nothing else.
   noteMemberDecl(m) {
     if (!this.ts || !declaresContainer(m)) return;
     const id = isNode(m.nameNode) ? this.stores.idOf(m.nameNode) : null;
     const row = id !== null ? this.stores.role(id, m.nameRole) : null;
     if (!row || typeof row.sourceStart !== 'number') return;
     this.memberDecls.push({
-      start: row.sourceStart, end: row.sourceEnd, projected: isBehaviorProjected(m),
+      start: row.sourceStart, end: row.sourceEnd,
     });
   }
 

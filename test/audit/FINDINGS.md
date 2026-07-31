@@ -6,7 +6,7 @@
 
 **Why this file exists at all.** `bun test` verifies rip against **rip** — every expectation in it was authored, so it checks only what its author already knew, and it was green through every finding recorded here (hence the *"why the suite missed it"* paragraphs below). The audit verifies rip against **TypeScript**, through oracles this repo does not control — the hand-written twin, the source's own grammar, TypeScript's own diagnostics over the error lane — which is why it can discover, and why its output is a categorized diff rather than a pass/fail boolean. The findings are that diff, written down.
 
-**The Gate column is load-bearing, and it is the exit.** ✅ **Verified means a named gate runs and passes** — nothing else earns it, not a code reading, not a scratch script, not a plausible argument. Read in both directions that is the whole membership contract: a finding with no gate cannot be Verified however obviously fixed it looks, and a finding whose gate *is* green does not stay. **This file is the queue of constraints not yet expressible as a passing test.** Every claim here *is* reachable that way, because each is a compiler output or a server payload and LSP carries all of them — a `textDocument/hover` response *is* the text VS Code renders; the reflex to call a claim "editor-only" is usually an unwritten test, not an unreachable one. No gate is red *by agreement* today — every contract invariant is green, so the next red is a regression rather than a queue, and a row filed from here on arrives with its gate already failing. Read each row's Gate cell anyway, because a gate does not always track only its own finding. One row (#23) has no gate because its own subject does not fail — the probe round's driven defects have closed — so #23's exit is a ruling rather than a green run, unless the open question in its body answers yes and hands it an ordinary gate.
+**The Gate column is load-bearing, and it is the exit.** ✅ **Verified means a named gate runs and passes** — nothing else earns it, not a code reading, not a scratch script, not a plausible argument. Read in both directions that is the whole membership contract: a finding with no gate cannot be Verified however obviously fixed it looks, and a finding whose gate *is* green does not stay. **This file is the queue of constraints not yet expressible as a passing test.** Every claim here *is* reachable that way, because each is a compiler output or a server payload and LSP carries all of them — a `textDocument/hover` response *is* the text VS Code renders; the reflex to call a claim "editor-only" is usually an unwritten test, not an unreachable one. No gate is red *by agreement* today — every contract invariant is green, so the next red is a regression rather than a queue, and a row filed from here on arrives with its gate already failing. Read each row's Gate cell anyway, because a gate does not always track only its own finding.
 
 **A fix closes the root, and the test is where the datum lands** — into the **face**, where every consumer reads it, or into the one response. A gate cannot tell them apart: a mitigation makes its payload correct without supplying the datum that was missing. The Tier 3 probe (#23) feeds tsgo's answers back through `compile()` as pins, so **a query is not the tell** — across an out-of-process checker it is the only route to a type at all; `enrichEvolvingAnyHover` ([server.js](../../packages/vscode/src/server.js)) returns a reference's hover in place of an `any` and touches nothing else. Same shape, opposite verdicts. The other tell is scope: one root left four surfaces wrong in #21, so greening one would have closed nothing, and **a mitigation's residue is not the finding** — a row restated around what the workaround could not reach reads as progress, and is how a workaround becomes the architecture. Nor is the root always in the compiler (#13's is `generatedMirror`, #16's is inside tsgo): *upstream* is where to look, not the rule. Diagnose the root, state it in the body, and make the gate measure **that** — one aimed at a symptom can be satisfied by a patch, and eventually is.
 
@@ -42,9 +42,7 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | --- | --- | --- | --- |
 | [22](#22-completion-and-signature-help-fail-on-an-incomplete-expression) | Completion & signature help fail on an incomplete expression | `editor`, `compiler` | `incomplete-expression` — asserts the stale scope list at the dot and the null signature help **as the gap**, liveness-paired; it goes red the day the parse gap closes, the cue to invert it |
 | [8](#8-auto-import-is-closure-scoped) | Auto-import closure-scoped | `capability` | `auto-import` — the gap is an **expected failure** |
-| [62](#62-an-unannotated-computed-members-face-type-names-the-lowering) | An unannotated computed member's face type names the lowering | `editor`, `compiler` | the Hover Audit's 13-components' shade position pin (`hover-pins.json`) asserts the ruled silence — green while the projection stands, and the day the face types the member from an inferred position the pin moves to the value-first answer every other member kind already serves |
 | [35](#35-a-wrong--initializer-publishes-twice-in-lowering-vocabulary) | A wrong `:=`/`~=` initializer publishes twice, in lowering vocabulary | `compiler` | the Diagnostics Audit's 12-reactive pins (`error-pins.json`) assert the double **as the interim** — they go red the day the emission publishes once, the cue to retire them |
-| [23](#23-an-in-face-value-declaration-could-retire-the-tier-3-pin-probe) | An in-face value declaration could retire the Tier 3 pin probe | `hoist` | **none today** — nothing fails; adoption hands it an ordinary gate (bindings still needing a pin, expect zero) |
 | [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | `editor` | **none, and none is honest** — upstream; a naive gate is platform-dependent |
 
 **The ordering principles.** Audience first: everything down to #8 reaches every rip user, mode-independent — permissive still infers. Within a band, *silently wrong* outranks *visibly missing*: a wrong answer stated without hedging misleads, where a loud failure merely interrupts — so the loud rows (build breaks, parse errors) sink below the silent ones however broken their output is. #16 sits last because it is blocked upstream, not because it matters least. Each row's own body argues its place; this paragraph does not restate them.
@@ -105,22 +103,6 @@ v4 offers auto-import candidates only from the ACTIVE PROGRAM (open files + tran
 **vs v3** — v3's in-process LanguageService rooted its project at the whole workspace (tsconfig `include` globbed all sources), so every workspace file was a candidate from cold. This was originally filed as a "scope note," which undersells it: for this feature it is a functional regression, not a caveat.
 
 **Status.** ⬜ **Open** (2026-07-14) — gated as the interim, and **green**: [auto-import.test.js](../toolchain/auto-import.test.js) drives real completion requests against the server and asserts the gap with `not.toContain`, so the wrong behaviour is pinned deliberately, the way the closed match-operator and schema-callable rows pinned theirs. It goes red the day the scope widens, which is the cue to invert it. The expected-failure device was considered and rejected in the gate's own header: under `test.failing` any throw counts as a pass, so a server returning nothing would satisfy it — which is why every completion assertion is liveness-paired against a candidate that IS offered.
-### 62. An unannotated computed member's face type names the lowering
-
-A component's unannotated computed member is typed in the face through the lowering's own behavior object — `declare shade: { readonly value: ReturnType<typeof __Badge__computed.shade>; read(): ReturnType<typeof __Badge__computed.shade> };` — so the only type that can be spelled at that declaration names a symbol the author never wrote. RULINGS.md's register bans a machinery name as a stand-in, and the interim it prescribes is silence: the editor declines there, where every other member kind answers value-first.
-
-**Why (code).** `memberTypeSegments` ([component-types.js](../../src/component-types.js)) reads an unannotated computed's type from its BODY, which the face carries a second time in a module-scope behavior object beside the component's companion interface, and projects it back with `ReturnType<typeof …>`. That projection is what gives these members a real inferred type at all — the form table it replaced typed most bodies `any` (the closed computed-form row) — so this is the cost of that fix, not a regression it introduced.
-
-**Why the editor cannot present past it.** TypeScript's quickinfo echoes a declaration's TYPE NODE verbatim: driven against tsgo 2026-07-30 on a two-member probe, both `ReturnType<typeof f>` and an inlined `extends … infer R` conditional print exactly as written, resolved neither time. So no server-side rewrite reaches the underlying type — the answer has to be resolved before the annotation is written, which the compiler cannot do.
-
-**The fix — type the member from an INFERRED position.** A declaration with no type node has nothing to echo, so TypeScript prints the resolved type. v3 reaches that by construction: its shadow emits the computed as a class FIELD WITH ITS INITIALIZER — `shade = __computed(() => ((this.tone.value === "warn") ? "#a60" : "#06f"))` (driven 2026-07-30, `rip --shadow`) — where `this` is already the class and no annotation exists. v4 assigns members in `_init` instead, so its face has no inferred position to hang the body on, and the behavior object exists to give that body a typed `this` while the JS emission stays byte-identical. The fix is a face-side inferred spelling for the member, not a change to the projection's name — renaming machinery keeps it machinery.
-
-**Why the suite missed it.** The projection is younger than the pin: while the member declaration served the container wrapper, every member's pin was null and the computed's null was indistinguishable from the rest. It became visible only when the other kinds started serving their value.
-
-**vs v3 — the gap is v4-only** (v3's face driven 2026-07-30; its LSP was not, so the served answer is not claimed). v3 has no projection to leak: the field-initializer shadow above gives the member an inferred type with no minted name anywhere in it.
-
-**Status.** ⬜ **Open** (2026-07-30) — gated as the ruled interim: the Hover Audit's 13-components' shade position pin (`hover-pins.json`) asserts null, green while the projection stands. The day the face types the member from an inferred position, the pin moves to the value-first answer every other member kind already serves.
-
 ### 35. A wrong `:=`/`~=` initializer publishes twice, in lowering vocabulary
 
 One wrong line, two squiggles — and the first one talks emission. `wrongState: number := 'oops'` publishes **TS2322 on the name**, whose message reads `Type '{ value: string; read(): string; }' is not assignable to type '{ value: number; read(): number; }'` — the cell wrapper, the vocabulary the hover surface was explicitly cured of when the reactive-hover row closed — **plus TS1360 on the literal**, from the `satisfies` guard the state lowering plants (`__state('oops' satisfies number)`). The computed spelling doubles the same way (TS2322 on the name in wrapper prose, a second value-level TS2322 on the expression). `=!` and an annotated effect publish once, cleanly — driven 2026-07-23, `rip check --json` across all four operators. The positions are right and the errors are real; what misleads is the count and the prose.
@@ -138,22 +120,6 @@ One wrong line, two squiggles — and the first one talks emission. `wrongState:
 **vs v3 — regression on both halves** (driven both sides, 2026-07-28, the same `wrongState: number := 'oops'`). v3 publishes **once**, and in value vocabulary: a single TS2322 reading *Type 'string' is not assignable to type 'number'*. So neither the count nor the prose is inherited — v3 plants no `satisfies` guard on the initializer and its message never mentions a cell. The fix's shape is therefore already demonstrated rather than merely argued for — but v3 reaches it by planting no guard AND typing the initializer, not by dropping a guard alone.
 
 **Status.** ⬜ **Open** (2026-07-23) — gated as the interim: the Diagnostics Audit's 12-reactive pins (`error-pins.json`) assert the measured double — code and position, the hover-pins discipline — so the lane is green while the behavior stands and flips loudly the day it changes. The twin-derivable rows beside them (`=!`, effect, the TS2588 write) stay derived and are not this row's subject. **The gate's scope is the count, not the prose:** the lane asserts codes and positions, and no instrument asserts message text — so an emission change that keeps both diagnostics but cleans the wrapper vocabulary flips nothing, and one that halves the count while keeping the wrapper flips the lane green having made the user's diagnostic worse. That is not hypothetical: it was driven and reverted on 2026-07-29, which is why the fix slot above now rules the guard's removal out. The prose claim must be re-driven by hand for this row to close, whatever the count does.
-
-### 23. An in-face value declaration could retire the Tier 3 pin probe
-
-A binding that stays hoist-split and is **also** read from inside a closure is an evolving `let` TypeScript declines to infer (`TS7034` — an evolving `let` serves only same-function references), so no site in the real face knows its type. The Tier 3 pin probe recovers those types by manufacturing a declaration site, hovering it ([pins.js](../../packages/vscode/src/pins.js)), and feeding the answer back through `compile()` as a pin — in the editor and in `rip check`'s batch alike, so the type lands in the **face** where every consumer reads it.
-
-**The alternative works, and that is new.** A TS-only value declaration ahead of the hoist line — `const __p0 = <first-write RHS>; let x: typeof __p0;` — types the binding with no round trip at all. Driven 2026-07-28 against the repo's pinned TypeScript (7.0.2): the object case infers and its negative fires (TS2322), and so does the **class-expression** case (TS2339 on a bad member), which is the shape that makes the forward-reference row publish a dangling probe symbol. So the probe is not the only route to a type — it is the only route the current face shape leaves.
-
-**Why (code) — what keeps a binding hoisted, and what the alternative needs.** `captureScan`'s safety rule ([emitter.js](../../src/emitter.js)) has three clauses; driven over this repo and medlabs, roughly a third of pinnable bindings are held solely by the third — any name touched inside a hoisted `def`, because a `def` is callable from above its own statement — and roughly two thirds by first-occurrence or placement, dominated by forward-referenced and recursive helpers. Neither group can declare in place: the write genuinely may not have run. The in-face declaration sidesteps that entirely by typing from the RHS rather than from the write's position, which is why it reaches cases widening never could.
-
-**The fix — settle the strip gate, then adopt or rule.** Two things remain unproven, both narrow: the strip gate must admit a stripped TS-only value declaration (a JS capture would break it), and the RHS must resolve in the declaring scope — true of the constants that dominate the population, false where it reads a block-local. A third is cosmetic and real: the type prints as the minted name (`typeof __p0`), so hover leaks machinery unless aliased. **Not** by widening declare-in-place — driven, that reaches only self-referential function-expression writes, and the `def` hazard it declines is genuine.
-
-**Why the suite missed it.** Nothing missed anything: no gate can fail while the probe works, which is why this row's exit was a ruling until the alternative was driven.
-
-**vs v3 — not a choice to weigh.** `patchUninitializedTypes` (rip-lang 3.17.5, `src/typecheck.js`) does not infer a type onto the hoist line: it takes the `ts` module and the live LanguageService, calls `checker.getSymbolAtLocation`, and injects types by mutating binder symbols on DocumentRegistry-shared SourceFiles — its own comment records the price, symbols released by hand or "every rebuilt program leaks (~50MB/compile → GBs over an editing session)". The tsgo broker is a separate process spoken to over LSP: no `ts` module, no `Program`, no symbol to mutate. So v3's mechanism is unavailable here, and the in-face declaration is the portable alternative it never needed.
-
-**Status.** ⬜ **Open** (2026-07-17) — **no gate today, and an ordinary one on adoption**: count the bindings still needing a pin, expect zero. The row closes by adopting the in-face declaration or by ruling it out on the strip gate; either way it leaves through the same door as every other row. Adopting it would also dissolve the forward-reference row, which exists only because a probe symbol can be pinned — a fixer taking this route is closing two rows and would learn that from neither.
 
 ### 16. Library globals lose the `defaultLibrary` modifier
 
@@ -198,48 +164,50 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 10 | Reactive bindings hover cell wrapper | hover audit + `hover-pins.json` |
 | 11 | Config changes required a reload | `config-reactivity` |
 | 12 | `rip.noCheck` parsed but never applied | `config-reactivity` |
+| 13 | Single-rooted tsconfig — a nested project's own config was ignored | `check`, `editor-gaps-synthetic-project` |
 | 14 | Unused `@ts-expect-error` silently swallowed | `check` |
 | 15 | Reactive `:=` bindings tagged `readonly` | `semantic-tokens`, token audit's `readonly` invariant |
 | 17 | A directive swallows the unused-local fade | `editor-features` |
 | 18 | A directive blinded its whole indented block | `check`'s head-line-only case |
 | 19 | Inline render-block directive lost from the face | `check`'s inline component-prop and two-way-bind directive cases; audit `verdict` |
 | 20 | Render branch/loop bodies unchecked (`ctx`, loop items) | `check`'s typed-factory-params case; audit `strict` (13-components' render branches and loops) |
+| 21 | Identifier reads carried no source span — hover, definition, diagnostics and tokens all resolved through a cover | `mapping`, audit `census`/`identity` |
+| 23 | An in-face value declaration could have retired the Tier 3 pin probe | none — closed by ruling, refused on measurement; the reasoning that would re-propose it is answered in pins.js, where it would be built |
 | 24 | A `schema` block's implicit `it` untyped | audit `strict` (14-schema's transforms); `schema-types`' transform case |
 | 25 | Event handler parameters get no event type | `check`'s handler case; `dom-vocab-lib` |
-| 47 | Census blind to indented type declarations | `runner.js` (the type-vocabulary census) — soft |
-| 51 | A value word names a binding — every read became the literal, silently | `battery` (value-words.rip): rejection rows for every annotated binding site, property-position rows for the legal negative space |
-| 60 | A value word in a destructuring pattern bound — the module did not parse | `battery` (value-words.rip): rejection rows for every pattern form, negative-space rows for ordinary names |
-| 53 | A paren-injected call's arity error lands on the wrong argument | the Diagnostics Audit, position rows on 02-operations |
-| 59 | A type predicate shipped as `==` in the emitted declarations | `dts-tsc` |
-| 45 | A type predicate in a type body collided with rip's `is` | audit `compiles`, `dts-tsc`, and `types`' predicate-admission rows |
-| 46 | A mapped type rejected by the type-body validator | audit `compiles`/`census`, `types` |
-| 48 | A method member in an inline type body rejected | audit `compiles` and `types`' shorthand-admission rows |
-| 28 | A postfix cast on an inline try body detached the catch arm | audit `compiles`, `verdict` |
-| 58 | A classed SVG element emitted an unclosed call | audit `runtime`/`verdict`/`strict` |
-| 30 | `new` on a tagged template leaked the sexpr head | audit `compiles`/`verdict`/`runtime`, and `battery` (classes.rip) pinning the bytes; the parked production cleared |
-| 29 | `new` on an optional chain emitted an unconstructable spelling | audit `verdict`/`runtime`/`strict`, `battery` (classes.rip) |
-| 57 | A void-marked binding's declaration split, so its token read `variable` | audit `type`, `contract.js` (the reason clause deleted) |
-| 50 | A rewritten literal widened its neighbours' diagnostics to the whole element list | `mapping`, `contract.js` (the element-position reason clause deleted) |
-| 31 | A promoted param declared no field on the checked face | `check` (08-functions) |
-| 27 | A pattern catch destructured `unknown` | `check`, audit `verdict` (07-exceptions), `tsface` |
 | 26 | The match operator's emission was never null-clean | `check`, `tsface` |
+| 27 | A pattern catch destructured `unknown` | `check`, audit `verdict` (07-exceptions), `tsface` |
+| 28 | A postfix cast on an inline try body detached the catch arm | audit `compiles`, `verdict` |
+| 29 | `new` on an optional chain emitted an unconstructable spelling | audit `verdict`/`runtime`/`strict`, `battery` (classes.rip) |
+| 30 | `new` on a tagged template leaked the sexpr head | audit `compiles`/`verdict`/`runtime`, and `battery` (classes.rip) pinning the bytes; the parked production cleared |
+| 31 | A promoted param declared no field on the checked face | `check` (08-functions) |
 | 32 | Reassigning an exported plain binding double-declared | `battery` (modules.rip) |
-| 54 | A generic component's shipped declarations referenced a type parameter they never declared | `dts-tsc` |
-| 40 | A component member's initializer and in-method writes were never type-checked | `check`, `error-pins.json` (13-components) |
-| 42 | A wrong-typed schema default was never type-checked | `check`, `error-pins.json` (14-schema) |
-| 43 | A schema callable's output typed unknown | audit `verdict`/`strict` (14-schema) |
-| 55 | A computed member's type came from its expression's FORM, so most bodies typed `any` | audit `verdict`/`strict` |
-| 49 | An import type could not name a `.rip` module | audit `verdict` (11-types) |
-| 61 | A constructor body's `@field =` declared no field, so every read of it rejected | `check` |
+| 33 | An enum name's semantic token said `type`, not `enum` | audit `type`, `contract.js` (the enum reason clause deleted) |
 | 34 | The bare `~>` operator hovered the runtime's machinery | audit `silence` |
+| 36 | A reactive import served the raw cell, with no stated contract | `reactive-imports` |
+| 37 | A state write site kept the lowering's `readonly` color | audit `readonly`, `contract.js` (the readonly reason clause deleted) |
 | 38 | Render-DSL positions hovered the lowering's scaffold | audit `ruled` (`hover-pins.json`) |
 | 39 | A component member's declaration hovered the container wrapper | audit `ruled` (`hover-pins.json`) |
-| 33 | An enum name's semantic token said `type`, not `enum` | audit `type`, `contract.js` (the enum reason clause deleted) |
-| 44 | A `:mixin` declaration hovered the runtime's machinery | audit `ruled` (`hover-pins.json`), `schema-types` |
-| 13 | Single-rooted tsconfig — a nested project's own config was ignored | `check`, `editor-gaps-synthetic-project` |
-| 37 | A state write site kept the lowering's `readonly` color | audit `readonly`, `contract.js` (the readonly reason clause deleted) |
-| 21 | Identifier reads carried no source span — hover, definition, diagnostics and tokens all resolved through a cover | `mapping`, audit `census`/`identity` |
+| 40 | A component member's initializer and in-method writes were never type-checked | `check`, `error-pins.json` (13-components) |
 | 41 | A forward-referenced class or component pinned the probe's own symbol — TS2304 on legal code | `check`, `pins` |
+| 42 | A wrong-typed schema default was never type-checked | `check`, `error-pins.json` (14-schema) |
+| 43 | A schema callable's output typed unknown | audit `verdict`/`strict` (14-schema) |
+| 44 | A `:mixin` declaration hovered the runtime's machinery | audit `ruled` (`hover-pins.json`), `schema-types` |
+| 45 | A type predicate in a type body collided with rip's `is` | audit `compiles`, `dts-tsc`, and `types`' predicate-admission rows |
+| 46 | A mapped type rejected by the type-body validator | audit `compiles`/`census`, `types` |
+| 47 | Census blind to indented type declarations | `runner.js` (the type-vocabulary census) — soft |
+| 48 | A method member in an inline type body rejected | audit `compiles` and `types`' shorthand-admission rows |
+| 49 | An import type could not name a `.rip` module | audit `verdict` (11-types) |
+| 50 | A rewritten literal widened its neighbours' diagnostics to the whole element list | `mapping`, `contract.js` (the element-position reason clause deleted) |
+| 51 | A value word names a binding — every read became the literal, silently | `battery` (value-words.rip): rejection rows for every annotated binding site, property-position rows for the legal negative space |
 | 52 | A destructured binding read by a hoisted def was implicitly `any` under strict | `check`, audit `strict` (20-inference) |
+| 53 | A paren-injected call's arity error lands on the wrong argument | the Diagnostics Audit, position rows on 02-operations |
+| 54 | A generic component's shipped declarations referenced a type parameter they never declared | `dts-tsc` |
+| 55 | A computed member's type came from its expression's FORM, so most bodies typed `any` | audit `verdict`/`strict` |
+| 57 | A void-marked binding's declaration split, so its token read `variable` | audit `type`, `contract.js` (the reason clause deleted) |
+| 58 | A classed SVG element emitted an unclosed call | audit `runtime`/`verdict`/`strict` |
+| 59 | A type predicate shipped as `==` in the emitted declarations | `dts-tsc` |
+| 60 | A value word in a destructuring pattern bound — the module did not parse | `battery` (value-words.rip): rejection rows for every pattern form, negative-space rows for ordinary names |
+| 61 | A constructor body's `@field =` declared no field, so every read of it rejected | `check` |
+| 62 | An unannotated computed member's face type named the lowering | `hover-pins.json`, audit `ruled` — limit: a component nested in a FUNCTION keeps the form table's any, because the behavior object the inferred position reads is emitted only for a module-scope named component; the projection never reached that shape either |
 | 63 | A forward-referenced class binding lost its class color | `semantic-tokens` |
-| 36 | A reactive import served the raw cell, with no stated contract | `reactive-imports` |

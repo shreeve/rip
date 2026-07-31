@@ -448,14 +448,46 @@ const memberTypeSegments = (m, lead) => {
 // One face `declare` line for a non-callable member (methods and
 // hooks are REAL class methods — their annotations ride the shared
 // param/return machinery).
-export const memberDeclareSegments = (m) => [
-  // A `=!` member is a CONST value: readonly on the declare, so
-  // instance writes draw TS2540.
-  { text: m.kind === 'readonly' ? 'declare readonly ' : 'declare ' },
-  { text: m.name, node: m.nameNode, role: m.nameRole },
-  ...memberTypeSegments(m, ': '),
-  { text: ';' },
-];
+export const memberDeclareSegments = (m) => {
+  // An unannotated computed takes an INFERRED position rather than a
+  // `declare` carrying a type node. TypeScript's quickinfo echoes a
+  // written type node VERBATIM — driven against tsgo, both
+  // `ReturnType<typeof f>` and an inlined conditional print exactly as
+  // spelled, resolved neither time — so no projection can be written that
+  // does not read as machinery, and no server-side rewrite reaches past
+  // it. A declaration with no type node has nothing to echo, so
+  // TypeScript prints the RESOLVED type instead.
+  //
+  // The initializer reuses the behavior object the face already carries,
+  // which holds the same compiled body `_init` assigns, so nothing is
+  // computed twice and the two cannot drift. At a field initializer
+  // `this` is the class, which is the position v3 reaches by
+  // construction (its shadow emits the computed as a field with its
+  // initializer). TS-only: the region strips, and `_init`'s assignment
+  // remains the only one the shipped JS carries.
+  if (isBehaviorProjected(m)) return [
+    { text: m.name, node: m.nameNode, role: m.nameRole },
+    // `this as any` is not sloppiness — it breaks a real circularity. The
+    // behavior function declares `this: <Component>`, and the member being
+    // initialized is PART of that component's type, so checking the
+    // argument's assignability means resolving the class while this field
+    // is still being inferred (driven: TS2345, `'this' is not assignable to
+    // parameter of type 'Badge'`). The cast costs nothing that matters: the
+    // return type comes from the function's own signature, not from the
+    // argument, so the member still infers its resolved value type. v3
+    // avoids the circularity differently, by inlining the body so `this` is
+    // only ever a receiver and never an argument.
+    { text: ` = __computed(() => ${m.behavior}.${m.name}.call(this as any));` },
+  ];
+  return [
+    // A `=!` member is a CONST value: readonly on the declare, so
+    // instance writes draw TS2540.
+    { text: m.kind === 'readonly' ? 'declare readonly ' : 'declare ' },
+    { text: m.name, node: m.nameNode, role: m.nameRole },
+    ...memberTypeSegments(m, ': '),
+    { text: ';' },
+  ];
+};
 
 // The `=!` seam's this-cast type: one MUTABLE member carrying the
 // declared type the class states readonly. `_init` is the lowering's

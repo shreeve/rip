@@ -23,6 +23,31 @@
 // DIFFERENT mechanism: inferring the first-write type statically onto the
 // hoist line, in-face, so no manufactured site is needed at all.
 //
+// WHY A PROBE AND NOT AN IN-FACE DECLARATION. The obvious simplification —
+// emit `const __p = <first-write RHS>; let x: typeof __p;` into the face and
+// delete this file — was built and measured (2026-07-31) and REFUSED. Three
+// findings, so it does not get re-proposed from the same reasoning:
+//
+//   · it does not reach zero. 29 of 230 declarations fail to resolve at the
+//     best legal placement, because the RHS reads a name the scope declares
+//     later or a block-local. The probe has no such limit: it types from a
+//     manufactured site, not from a position in the real scope.
+//   · the diagnostics it adds are mostly WRONG. Over four packages it
+//     reported 21 the probe does not, and 19 were false — `Cannot find name
+//     'ctx'` on the author's own lines, naming variables that are in scope
+//     where they were written. It lost 7 real ones.
+//   · the case it genuinely wins — a forward-referenced class, which the
+//     probe declines post-#41 and silently misses — has a population of ZERO
+//     here: no class- or component-valued first write exists in the corpus
+//     or in packages/.
+//
+// That last number is the whole trade, and it is the one most likely to
+// change: rip's component story is what would make forward-referenced
+// components ordinary. If they become common, revisit — but only as the
+// consumer splice, placed AFTER the hoist line, with the class expression
+// named from the author's binding, generated-region suppression, and a
+// nullish/empty-first-write exclusion. Nothing less was measured to work.
+//
 // Every failure path lands on the status quo: an unparseable hover, a
 // truncated type (`...`), or a bare `any` caches as null (no pin, no
 // retry until the defining expression changes — the pin key hashes the
