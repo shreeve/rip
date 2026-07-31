@@ -67,13 +67,30 @@ const cpuMs = (since) => {
   return (user + system) / 1000;
 };
 
+// The verdict, separated from the measuring so it is testable on exact
+// numbers (test/toolchain/scaling-harness.test.js pins it against the
+// cost triples captured from real CI failures — no timing involved).
+export const scalingVerdict = ({ sizes, costs, bound = 3.4, exponentBound = 1.7 }) => {
+  const exponent = Math.log(costs.at(-1) / costs[0]) / Math.log(sizes.at(-1) / sizes[0]);
+  const pairs = costs.slice(1).map((t, i) => t / costs[i]);
+  const ok = exponent < exponentBound && pairs.every((r) => r < bound);
+  // Report the measurement, not just the verdict: a gate that fails on a
+  // machine you cannot attach to is only actionable if it says by how
+  // much. An exponent of 1.8 against 1.7 is noise to re-examine; 2.0 is
+  // the quadratic these gates exist to catch, and the two need different
+  // responses.
+  const message =
+    `sizes ${sizes.join('/')} cost ${costs.map((t) => t.toFixed(2)).join('/')} cpu-ms ` +
+    `→ growth exponent ${exponent.toFixed(2)} (bound ${exponentBound}; linear ~1.2, quadratic 2.0), ` +
+    `pair ratios ${pairs.map((r) => r.toFixed(2)).join('/')} (backstop ${bound})`;
+  return { ok, message };
+};
+
 export const expectLinearDoubling = ({ prepare, run, sizes, bound = 3.4, exponentBound = 1.7, samples = 5 }) => {
-  let costs = [];
-  const exponent = () =>
-    Math.log(costs.at(-1) / costs[0]) / Math.log(sizes.at(-1) / sizes[0]);
+  let verdict;
   const measure = () => {
     run(prepare(1000)); // warmup
-    costs = sizes.map((n) => {
+    const costs = sizes.map((n) => {
       const arg = prepare(n);
       let m = Infinity;
       for (let k = 0; k < samples; k++) {
@@ -83,20 +100,9 @@ export const expectLinearDoubling = ({ prepare, run, sizes, bound = 3.4, exponen
       }
       return Math.max(m, 0.5);
     });
-    return exponent() < exponentBound
-      && costs.every((t, i) => i === 0 || t / costs[i - 1] < bound);
+    verdict = scalingVerdict({ sizes, costs, bound, exponentBound });
+    return verdict.ok;
   };
   const ok = measure() || measure();
-  // Report the measurement, not just the verdict: a gate that fails on a
-  // machine you cannot attach to is only actionable if it says by how
-  // much. An exponent of 1.8 against 1.7 is noise to re-examine; 2.0 is
-  // the quadratic these gates exist to catch, and the two need different
-  // responses.
-  const ratios = costs.slice(1).map((t, i) => (t / costs[i]).toFixed(2));
-  expect(
-    ok,
-    `sizes ${sizes.join('/')} cost ${costs.map((t) => t.toFixed(2)).join('/')} cpu-ms ` +
-    `→ growth exponent ${exponent().toFixed(2)} (bound ${exponentBound}; linear ~1.2, quadratic 2.0), ` +
-    `pair ratios ${ratios.join('/')} (backstop ${bound})`,
-  ).toBe(true);
+  expect(ok, verdict.message).toBe(true);
 };
