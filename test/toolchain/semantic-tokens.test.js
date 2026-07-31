@@ -293,25 +293,19 @@ describeExtended('semantic tokens — an enum name', () => {
   }, 60000);
 });
 
-// A FORWARD-REFERENCED class binding loses its `class` color.
+// A FORWARD-REFERENCED class binding keeps its `class` color.
 //
-// The hoist split is the trigger, and it is the same one that used to leak a
-// probe symbol (#41): read a class above its declaration and the binding stays
-// hoisted, so the face spells it `let Box!: …` and tsgo — truthfully, about the
-// face — calls it a variable. Declared before its uses the same binding takes
-// declare-in-place, keeps a `class` face spelling, and colors correctly; that
-// is the POSITIVE CONTROL below, and it carries the weight, because a server
-// that simply never classified anything `class` would satisfy the negative for
-// free.
+// TypeScript classifies a binding from its DECLARATION's initializer, so
+// `let Shape = class {…}` colors `class` unaided. A forward reference splits
+// the two — the binding hoists to a bare `let Box;` and the class expression
+// assigns below it — and the initializer tsgo would have read is not there.
+// The compile reports the declaration's generated span (`classDecls`) and
+// `ripSemanticTokens` repaints exactly those, the third correction of the
+// shape `mutables` and `enums` already use.
 //
-// `ripSemanticTokens` already owns two corrections of exactly this shape —
-// `mutables` clears a modifier, `enums` rewrites a type — both keyed by the
-// generated start the compiler reports. A third of the same form is the fix;
-// re-reading the .rip text to guess at `= class` is not, because a span the
-// compiler declares is what survives lowering.
-//
-// An OPEN gap, asserted as-is: the day the correction lands this goes red,
-// the cue to invert it. Liveness-paired.
+// The three fixtures are one assertion each, and the last two carry the
+// weight: a server that simply painted every hoisted name `class` would
+// satisfy the first on its own.
 describeExtended('semantic tokens — a forward-referenced class binding', () => {
   const FWD = [
     'make = -> (new Box())',   // line 0 — reads Box above its declaration
@@ -328,31 +322,82 @@ describeExtended('semantic tokens — a forward-referenced class binding', () =>
     '',
   ].join('\n');
 
-  test('a forward-referenced class declaration colors `variable`, not `class` — an open gap, asserted as-is', async () => {
-    const session = await openSession({ 'app.rip': FWD });
+  // A forward-referenced binding that is NOT a class. It hoists identically —
+  // same `let obj;` spelling, same split — so it is the control that proves
+  // the correction is keyed by the compiler's span and not by the hoist.
+  const NOTACLASS = [
+    'make = -> obj.a',         // line 0
+    'obj = { a: 1 }',          // line 1 — hoisted, and a variable
+    'console.log make()',
+    '',
+  ].join('\n');
+
+  // A component lowers to a class expression, and a forward-rendered child is
+  // ordinary component-library structure — the spelling that reaches real code.
+  const COMPONENT = [
+    'Parent = component',
+    '  render',
+    "    Child text: 'hi'",
+    '',
+    'Child = component',       // line 4 — rendered above its declaration
+    '  @text: string',
+    '  render',
+    '    div',
+    '      = @text',
+    '',
+  ].join('\n');
+
+  const typeAt = async (files, file, line, character, label) => {
+    const session = await openSession(files);
     try {
-      session.open('app.rip');
-      const tokens = await session.semanticTokens('app.rip');
-      expect(tokens.length).toBeGreaterThan(0);   // liveness
-      const tok = at(tokens, 1, 0);
-      expect(tok, 'the Box declaration has a token').toBeDefined();
-      expect(tok.type, 'the gap — the hoist split costs the binding form').toBe('variable');
+      session.open(file);
+      const tokens = await session.semanticTokens(file);
+      expect(tokens.length, 'liveness').toBeGreaterThan(0);
+      const tok = at(tokens, line, character);
+      expect(tok, `${label} has a token`).toBeDefined();
+      return tok.type;
     } finally {
       await session.close();
     }
+  };
+
+  // An EXPORTED forward reference needs no correction and gets none: the
+  // export lowers to `export const Box = class {…}`, which keeps the
+  // initializer TypeScript classifies from. Asserted because it is the
+  // spelling most likely to start needing one — a change to how exports
+  // lower would move it into the split silently, and this reds.
+  const EXPORTED = [
+    'make = -> (new Box())',
+    'export Box = class',      // line 1 — keeps its initializer
+    '  g: -> 1',
+    'console.log make().g()',
+    '',
+  ].join('\n');
+
+  test('a forward-referenced class declaration colors `class`, as the declared spelling does', async () => {
+    expect(await typeAt({ 'app.rip': FWD }, 'app.rip', 1, 0, 'the Box declaration')).toBe('class');
+    expect(await typeAt({ 'app.rip': PLAIN }, 'app.rip', 0, 0, 'the Shape declaration')).toBe('class');
+    expect(await typeAt({ 'app.rip': EXPORTED }, 'app.rip', 1, 7, 'the exported Box declaration')).toBe('class');
   }, 60000);
 
-  test('the same binding declared before its uses colors `class` — the control that makes the gap a gap', async () => {
-    const session = await openSession({ 'app.rip': PLAIN });
-    try {
-      session.open('app.rip');
-      const tokens = await session.semanticTokens('app.rip');
-      expect(tokens.length).toBeGreaterThan(0);   // liveness
-      const tok = at(tokens, 0, 0);
-      expect(tok, 'the Shape declaration has a token').toBeDefined();
-      expect(tok.type, 'declare-in-place keeps the form').toBe('class');
-    } finally {
-      await session.close();
-    }
+  // USE SITES, not just the declaration. A file has one declaration and many
+  // uses, so a correction that repainted only the declaration would leave the
+  // name disagreeing with itself everywhere it is read — more visible than the
+  // defect it replaced. References join the channel through `noteNameSpan`,
+  // the same funnel enum references use.
+  test('every occurrence colors `class` — the use site, not only the declaration', async () => {
+    // `new Box()` on line 0; the declaration below it on line 1.
+    expect(await typeAt({ 'app.rip': FWD }, 'app.rip', 0, 15, 'the Box use')).toBe('class');
+    // Declare-in-place is repainted too, idempotently: tsgo already answers
+    // `class` there, so this asserts the correction never makes it worse.
+    expect(await typeAt({ 'app.rip': PLAIN }, 'app.rip', 2, 17, 'the Shape use')).toBe('class');
+  }, 60000);
+
+  test('a forward-referenced component declaration colors `class` too', async () => {
+    expect(await typeAt({ 'app.rip': COMPONENT }, 'app.rip', 4, 0, 'the Child declaration')).toBe('class');
+  }, 60000);
+
+  test('a forward-referenced NON-class stays `variable` — the correction is the compiler\'s span, not the hoist', async () => {
+    expect(await typeAt({ 'app.rip': NOTACLASS }, 'app.rip', 1, 0, 'the obj declaration')).toBe('variable');
   }, 60000);
 });

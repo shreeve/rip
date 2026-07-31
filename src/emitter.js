@@ -305,6 +305,16 @@ class Emitter {
     // diverges at runtime), so the color is corrected rather than the
     // emission changed.
     this.enums = [];
+    // Generated `[start, end]` spans of a hoisted CLASS-EXPRESSION binding's
+    // declaration name. TypeScript classifies a binding from its
+    // DECLARATION's initializer, so `let Shape = class {…}` colors `class`
+    // and needs nothing — but a forward reference splits the declaration
+    // from the class expression (`let Box;` … `Box = class {…}`), and the
+    // initializer tsgo would have read is not there. The name is the
+    // author's class either way, so the color is corrected rather than the
+    // hoist changed. Components ride this too: one lowers to a class
+    // expression, and a forward-rendered child is ordinary library shape.
+    this.classDecls = [];
     // Generated spans of every reference to an IMPORTED name, each with
     // the module it came from: `[start, end, name, specifier]`. One
     // file's compile cannot know an imported name's KIND — that lives in
@@ -842,6 +852,27 @@ class Emitter {
   // rewrites it back, and needs to know which names those are with the
   // same scope discipline every other name question here gets: a local
   // that re-binds the spelling is not the enum.
+  // The names a scope binds to a CLASS EXPRESSION, the sibling of
+  // declaredEnumNames. Hoisting is not asked about: a declare-in-place
+  // binding keeps its initializer and tsgo already answers `class` there,
+  // so repainting it is a no-op — and a rule that tried to exclude it
+  // would have to predict a decision applyDeclareInPlace has not made yet
+  // at the point references are emitted.
+  static declaredClassNames(stmts) {
+    const names = new Set();
+    const declared = (s) => {
+      if (!isNode(s) || !DECLARING_ASSIGNS.has(s[0]) || s.length !== 3) return;
+      if (typeof s[1] !== 'string') return;
+      const v = s[2];
+      if (isNode(v) && (v[0] === 'class' || v[0] === 'component')) names.add(s[1]);
+    };
+    for (const s of stmts) {
+      declared(s);
+      if (isNode(s) && s[0] === 'export' && isNode(s[1])) declared(s[1]);
+    }
+    return names;
+  }
+
   static declaredEnumNames(stmts) {
     const names = new Set();
     const declared = (s) => {
@@ -1114,6 +1145,7 @@ class Emitter {
       computed: this.collectComputedNames(stmts),
       bound: new Set([...bound, ...Emitter.declaredNames(stmts), ...handles, ...readonly]),
       enums: Emitter.declaredEnumNames(stmts),
+      classes: Emitter.declaredClassNames(stmts),
       importSpecs: Emitter.importedSpecs(stmts),
       exportedConst: Emitter.exportedConstNames(stmts),
     });
@@ -1161,6 +1193,19 @@ class Emitter {
     for (let i = this.rframes.length - 1; i >= 0; i--) {
       const f = this.rframes[i];
       if (f.enums !== undefined && f.enums.has(name)) return true;
+      if (f.reactive.has(name) || f.bound.has(name)) return false;
+      if (f.members !== undefined && f.members.has(name)) return false;
+    }
+    return false;
+  }
+
+  // Is `name` a class-expression binding here? Same walk as isEnumName,
+  // and for the same reason: an inner binding that re-uses the spelling is
+  // not the class, so the frame's own set is asked before its `bound`.
+  isClassName(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.classes !== undefined && f.classes.has(name)) return true;
       if (f.reactive.has(name) || f.bound.has(name)) return false;
       if (f.members !== undefined && f.members.has(name)) return false;
     }
@@ -1401,6 +1446,7 @@ class Emitter {
     this.b.emit(value);
     if (this.isEnumName(value)) { this.enums.push([start, this.b.offset]); return; }
     if (this.isReactiveName(value) && !this.isComputedName(value)) { this.mutables.push([start, this.b.offset]); return; }
+    if (this.isClassName(value)) { this.classDecls.push([start, this.b.offset]); return; }
     const spec = this.importSpecOf(value);
     if (spec !== null) this.importedRefs.push([start, this.b.offset, value, spec]);
   }
@@ -3032,6 +3078,15 @@ class Emitter {
     // Branch-first names with no nested references stay UNPINNED on
     // purpose: intact evolving checks their reads with precise CFA
     // unions, which first-write pinning would falsify.
+    // Names whose first write is a class expression: the set hoistLine
+    // repaints. Read from the SAME facts the pin pass uses, so a binding
+    // cannot be one thing here and another there.
+    kept.classBindings = new Set();
+    for (const [name, , role] of kept) {
+      if (role !== 'target') continue;
+      const v = facts.get(name)?.firstWrite?.[2];
+      if (isNode(v) && (v[0] === 'class' || v[0] === 'component')) kept.classBindings.add(name);
+    }
     kept.pinnable = new Map();
     for (const [name, , role] of kept) {
       if (role !== 'target') continue;
@@ -3173,8 +3228,12 @@ class Emitter {
       const ownerId = owner !== null ? this.stores.idOf(owner) : null;
       const declaration = ownerId !== null && Emitter.isTypedWrapper(owner)
         && this.stores.role(ownerId, 'target') !== null;
+      const nameStart = this.b.offset;
       if (declaration) this.mark(owner, 'target', () => this.b.emit(name));
       else this.mark(node, role, () => this.b.emit(name));
+      if (this.ts && role === 'target' && entries.classBindings?.has(name)) {
+        this.classDecls.push([nameStart, this.b.offset]);
+      }
       if (this.ts && role === 'target') {
         if (owner !== null) {
           this.b.tsOnly(() => {
@@ -14526,7 +14585,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

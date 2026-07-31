@@ -44,7 +44,6 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [8](#8-auto-import-is-closure-scoped) | Auto-import closure-scoped | `capability` | `auto-import` — the gap is an **expected failure** |
 | [36](#36-a-reactive-import-serves-the-raw-cell) | A reactive import serves the raw cell — no deref, writes don't build | `compiler`, `capability` | **none while the semantics are unsettled** — auto-deref vs cell-as-API is the language owner's ruling; this row's exit is that ruling, which hands it an ordinary gate either way |
 | [62](#62-an-unannotated-computed-members-face-type-names-the-lowering) | An unannotated computed member's face type names the lowering | `editor`, `compiler` | the Hover Audit's 13-components' shade position pin (`hover-pins.json`) asserts the ruled silence — green while the projection stands, and the day the face types the member from an inferred position the pin moves to the value-first answer every other member kind already serves |
-| [63](#63-a-forward-referenced-class-binding-loses-its-class-color) | A forward-referenced class binding loses its class color | `editor`, `hoist` | `semantic-tokens` — asserts the variable color **as the gap**, paired with the declare-in-place control that colors class; it goes red the day the correction lands, the cue to invert it |
 | [35](#35-a-wrong--initializer-publishes-twice-in-lowering-vocabulary) | A wrong `:=`/`~=` initializer publishes twice, in lowering vocabulary | `compiler` | the Diagnostics Audit's 12-reactive pins (`error-pins.json`) assert the double **as the interim** — they go red the day the emission publishes once, the cue to retire them |
 | [23](#23-an-in-face-value-declaration-could-retire-the-tier-3-pin-probe) | An in-face value declaration could retire the Tier 3 pin probe | `hoist` | **none today** — nothing fails; adoption hands it an ordinary gate (bindings still needing a pin, expect zero) |
 | [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | `editor` | **none, and none is honest** — upstream; a naive gate is platform-dependent |
@@ -138,20 +137,6 @@ A component's unannotated computed member is typed in the face through the lower
 **vs v3 — the gap is v4-only** (v3's face driven 2026-07-30; its LSP was not, so the served answer is not claimed). v3 has no projection to leak: the field-initializer shadow above gives the member an inferred type with no minted name anywhere in it.
 
 **Status.** ⬜ **Open** (2026-07-30) — gated as the ruled interim: the Hover Audit's 13-components' shade position pin (`hover-pins.json`) asserts null, green while the projection stands. The day the face types the member from an inferred position, the pin moves to the value-first answer every other member kind already serves.
-
-### 63. A forward-referenced class binding loses its class color
-
-Read a class or component above its declaration — `make = -> (new Box())` over `Box = class` — and the declaration's semantic token classifies **`variable`**, not `class`. Declared before its uses the same binding colors correctly, so the editor's answer turns on authoring order rather than on what the author wrote. Driven 2026-07-31 over the real server, both orderings in one gate.
-
-**Why (code) — the face spells the hoisted binding `let`.** A forward reference forces the hoist split, so the face declares `let Box!: …` and tsgo classifies it truthfully, about the face. `ripSemanticTokens` ([server.js](../../packages/vscode/src/server.js)) already carries two corrections for exactly this loss, both keyed by the generated start the compile reports: `mutables` clears the `readonly` a `:=` cell's `const` earns, and `enums` rewrites the token TYPE for a name TypeScript classifies off its merged const-object half. Neither covers a class binding, and nothing else tells the server the rip form was `= class`.
-
-**The fix — a third correction of the same shape.** The compile reports the generated span of a class-expression binding's name; `ripSemanticTokens` rewrites the type to `class` on exactly those starts, idempotent so the declare-in-place spelling — already correct — is untouched. `enums` is the precedent, down to the keying. **Not** by re-reading the .rip text for `= class`: these corrections resolve by compiler-declared span precisely because a span survives lowering where a spelling does not, and a text probe is the over-reach v3's source-regex mechanism has. The component spelling rides the same channel, a component being a class expression.
-
-**Why the suite missed it.** The token audit derives its expectations from .rip syntax over the corpus, and the corpus is ladder-ordered by authoring convention — children before parents — so no class binding was ever forward-referenced. The shape could not enter the corpus either: while #41 published TS2304 a positive fixture refused it, and now that the false error is gone the binding is unpinned, so the fixture fails the `strict` dimension instead. Twice the corpus was the wrong instrument, which is why this row's gate drives the server directly.
-
-**vs v3 — the same loss, structurally.** `ripv3 --shadow` on the same file declares `let Box, make;` and assigns the class below (driven 2026-07-31), so v3's checker sees a variable exactly as v4's does; its shadow additionally carries `// @ts-nocheck`, an unannotated file going unchecked there at all. Not driven through v3's own token surface — the shadow is what its LanguageService classifies, and it loses the form identically. Not a regression.
-
-**Status.** ⬜ **Open** (2026-07-31) — gated as the interim by `semantic-tokens`' forward-referenced class case, asserting the `variable` color **as the gap** and paired with the declare-in-place control that colors `class`. The control carries the weight: a server that classified nothing `class` would satisfy the negative for free. Both liveness-paired. It goes red the day the correction lands, the cue to invert it.
 
 ### 35. A wrong `:=`/`~=` initializer publishes twice, in lowering vocabulary
 
@@ -273,3 +258,4 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 21 | Identifier reads carried no source span — hover, definition, diagnostics and tokens all resolved through a cover | `mapping`, audit `census`/`identity` |
 | 41 | A forward-referenced class or component pinned the probe's own symbol — TS2304 on legal code | `check`, `pins` |
 | 52 | A destructured binding read by a hoisted def was implicitly `any` under strict | `check`, audit `strict` (20-inference) |
+| 63 | A forward-referenced class binding lost its class color | `semantic-tokens` |

@@ -241,6 +241,11 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // merge and tsgo colors every position `type`; the editor repaints
     // the construct the author declared. TS face only; empty otherwise.
     enums: emitted.enums,
+    // Generated spans of a HOISTED class-expression binding's declaration
+    // name. TypeScript classifies a binding from its declaration's
+    // initializer, and a forward reference splits the two — the editor
+    // repaints the construct the author declared. TS face only.
+    classDecls: emitted.classDecls,
     // Generated spans of every reference to an IMPORTED name, each with
     // the module it came from. One file's compile cannot know an imported
     // name's kind — the editor resolves the specifier and asks the

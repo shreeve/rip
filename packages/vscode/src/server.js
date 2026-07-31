@@ -1068,6 +1068,9 @@ async function refresh(document) {
     // classifies `type`; the token names the construct the author
     // declared.
     enums: result.enums,
+    // Hoisted class-expression bindings whose declaration lost its
+    // initializer to the hoist split (see ripSemanticTokens).
+    classDecls: result.classDecls ?? [],
     // The enum names this module declares — read by IMPORTERS, which
     // cannot compute it from their own compile. An open buffer answers
     // from here; a disk file from its manifest entry.
@@ -2022,6 +2025,15 @@ function ripSemanticTokens(ctx, data) {
   // rewrite is skipped rather than pointed at some other type's index.
   const enumType = semanticTokensLegend?.tokenTypes?.indexOf('enum') ?? -1;
   const enumStarts = new Set((ctx.good.enums ?? []).map(([s]) => s));
+  // The third correction of the same shape: TypeScript classifies a binding
+  // from its DECLARATION's initializer, so `let Shape = class {…}` colors
+  // `class` on its own and reports nothing here — but a forward reference
+  // splits the declaration from the class expression, and `let Box;` is a
+  // variable as far as tsgo can see. -1 when the client's legend omits
+  // `class`, and then the rewrite is skipped rather than pointed at some
+  // other type's index, exactly as the enum correction does.
+  const classType = semanticTokensLegend?.tokenTypes?.indexOf('class') ?? -1;
+  const classStarts = new Set((ctx.good.classDecls ?? []).map(([s]) => s));
   // An IMPORTED enum carries the same merged-symbol `type` classification
   // its declaration does, and the importing file's compile cannot know
   // that — the kind lives in the declaring module. The compiler reports
@@ -2059,6 +2071,7 @@ function ripSemanticTokens(ctx, data) {
       type = enumType;
       modifiers &= ~roBit;
     }
+    if (classType >= 0 && classStarts.has(genStart)) type = classType;
     const key = curStart * 0x100000 + length;
     const existing = tokens.get(key);
     if (existing && existing.type === type) {
