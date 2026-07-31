@@ -2408,6 +2408,9 @@ type ":mixin emits field-type alias; host Data intersects mixins", '''
     required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
     extend<U>(other: Schema<U>): Schema<In & U, In & U>;
   }
+  interface MixinSchema<Out> {
+    toJSONSchema(): Record<string, unknown>;
+  }
   interface SchemaQuery<T, Data = Record<string, unknown>> {
     all(): Promise<T[]>;
     first(): Promise<T | null>;
@@ -2445,6 +2448,7 @@ type ":mixin emits field-type alias; host Data intersects mixins", '''
   type User = UserData & { save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
   declare const User: ModelSchema<User, UserData, number, UserCreate>;
   type Timestamps = { createdAt: Date; updatedAt: Date };
+  declare const Timestamps: MixinSchema<Timestamps>;
   export {};
   '''
 

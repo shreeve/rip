@@ -56,12 +56,12 @@ Measured 2026-07-23 over 13-components (the `ruled` gauge, hover-pins.json's `po
 
 ## Schema
 
-Measured 2026-07-23 over 14-schema's spellings (the `ruled` gauge, hover-pins.json's `positions`). The schema body is wholesale silent today — every in-body position serves null, which IS the ruled interim — so the null pins are green while the minted-kind targets stay unserved; no finding holds them, the component-name-at-use-site precedent. The declaration and companion-type rows serve truthful answers and pin as measured — except the `:mixin` declaration, which serves the runtime's own class; the mixin-declaration finding (FINDINGS.md) holds that pin.
+Measured 2026-07-23 over 14-schema's spellings (the `ruled` gauge, hover-pins.json's `positions`). The schema body is wholesale silent today — every in-body position serves null, which IS the ruled interim — so the null pins are green while the minted-kind targets stay unserved; no finding holds them, the component-name-at-use-site precedent. The declaration and companion-type rows serve truthful answers and pin as measured, the `:mixin` declaration included — its spelling is the one row here carried as a PROPOSAL rather than a settled ruling.
 
 | position | ruling (target) | interim |
 | --- | --- | --- |
 | schema name at declaration | type-first: structure leads, value nature noted after | pinned as measured (`decls`) — the value-first `let Person: Schema<Person, Person>` is truthful short of the target, the reactive doctrine |
-| schema name at declaration (`:mixin`) | user vocabulary, never the machinery — the exact spelling undecided: a mixin has no parse surface, so `Schema<…>` would over-promise | pinned as measured (`decls`) — `let Stamped: __SchemaDef` is a leak; the mixin-declaration finding (FINDINGS.md) holds it |
+| schema name at declaration (`:mixin`) | `MixinSchema<Stamped>` — user vocabulary, and no more surface than the runtime serves. **PROPOSED, awaiting the language owner.** A mixin is not instantiable: driven against the runtime 2026-07-30, `parse()` throws, `safe()` always fails, `ok()` is always false, and `toJSONSchema()` is the ONE method that works — so the interface carries that alone. `Schema<Stamped, Stamped>` would promise a parse surface the runtime refuses, which is the reason this row stayed open; the type parameter names the shape the mixin contributes | served as the proposal — the pin asserts `let Stamped: MixinSchema<Stamped>`, and it moves again if the owner rules a different spelling |
 | field name (`name! string`) | `(field) name: string`, required/optional visible | pinned null — green, measured 2026-07-23 |
 | field type word | the type, same as an annotation | blocked on the identifier-read finding |
 | `!` / `?` markers | silence — punctuation is silent, permanently | pinned null — green, measured 2026-07-23 |

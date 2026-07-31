@@ -123,9 +123,10 @@ export const INTRINSIC_FIELD_TYPES = {
 export const VALIDATION_INTRINSIC_NAMES = new Set([
   'SchemaIssue', 'SchemaSafeResult', 'ArraySchema', 'Schema',
 ]);
+export const MIXIN_INTRINSIC_NAMES = new Set(['MixinSchema']);
 export const MODEL_INTRINSIC_NAMES = new Set(['SchemaQuery', 'ModelSchema']);
 export const SCHEMA_INTRINSIC_NAMES = new Set([
-  ...VALIDATION_INTRINSIC_NAMES, ...MODEL_INTRINSIC_NAMES,
+  ...VALIDATION_INTRINSIC_NAMES, ...MIXIN_INTRINSIC_NAMES, ...MODEL_INTRINSIC_NAMES,
 ]);
 
 const VALIDATION_INTRINSICS = [
@@ -159,6 +160,21 @@ const VALIDATION_INTRINSICS = [
   '  partial(): Schema<Partial<In>, Partial<In>>;',
   '  required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;',
   '  extend<U>(other: Schema<U>): Schema<In & U, In & U>;',
+  '}',
+];
+
+// The mixin tier — emitted only where a `:mixin` exists, the persistence
+// tier's rule. A `:mixin` is NOT instantiable: driven against
+// src/runtime/schema.js (2026-07-30), `parse` throws, `safe` always
+// fails, `ok` is always false, and `toJSONSchema()` is the one method
+// that answers, so the interface carries that alone. `Schema<Out, In>`
+// here would promise a parse surface the runtime refuses, which is why
+// the mixin binding had no cast at all and fell to the runtime's own
+// class. `Out` names the shape the mixin contributes — the companion
+// alias other schemas intersect — rather than anything callable.
+const MIXIN_INTRINSICS = [
+  'interface MixinSchema<Out> {',
+  '  toJSONSchema(): Record<string, unknown>;',
   '}',
 ];
 
@@ -201,8 +217,11 @@ const MODEL_INTRINSICS = [
   '}',
 ];
 
-export const schemaIntrinsicLines = (withModel) =>
-  withModel ? [...VALIDATION_INTRINSICS, ...MODEL_INTRINSICS] : [...VALIDATION_INTRINSICS];
+export const schemaIntrinsicLines = (withModel, withMixin = false) => [
+  ...VALIDATION_INTRINSICS,
+  ...(withMixin ? MIXIN_INTRINSICS : []),
+  ...(withModel ? MODEL_INTRINSICS : []),
+];
 
 // ── collection ───────────────────────────────────────────────────────
 
@@ -462,7 +481,7 @@ export function schemaTypeStory(decl, byName, known) {
   if (kind === 'mixin') {
     return {
       aliasLines: [`type ${name} = ${intersect(braced(fieldProps(descriptor, known)), mixinRefs(descriptor, byName))};`],
-      constType: null,
+      constType: `MixinSchema<${name}>`,
       thisTypes: new Map(),
       typeNames: [name],
     };
@@ -594,6 +613,7 @@ export function buildSchemaTypeStory(programSexpr) {
   const byName = new Map(decls.map((d) => [d.name, d]));
   const userTypes = collectUserTypeNames(programSexpr);
   const withModel = decls.some((d) => d.descriptor.kind === 'model');
+  const withMixin = decls.some((d) => d.descriptor.kind === 'mixin');
 
   // The user-vs-intrinsic direction: the module is about to EMIT the
   // intrinsic block, so a user type/interface/class/enum name in the
@@ -604,13 +624,14 @@ export function buildSchemaTypeStory(programSexpr) {
   // can rename).
   for (const [name, user] of userTypes) {
     const emitted = VALIDATION_INTRINSIC_NAMES.has(name) ||
+      (withMixin && MIXIN_INTRINSIC_NAMES.has(name)) ||
       (withModel && MODEL_INTRINSIC_NAMES.has(name));
     if (emitted) {
       throw new SchemaTypeError(
         `${user.what} collides with the schema intrinsic declarations this module emits ` +
         `(a schema declaration is present${MODEL_INTRINSIC_NAMES.has(name) ? ', and a :model brings the persistence tier' : ''}) — ` +
         `rename it; the emitted intrinsic vocabulary here is ` +
-        `${[...VALIDATION_INTRINSIC_NAMES, ...(withModel ? MODEL_INTRINSIC_NAMES : [])].join(', ')}`,
+        `${[...VALIDATION_INTRINSIC_NAMES, ...(withMixin ? MIXIN_INTRINSIC_NAMES : []), ...(withModel ? MODEL_INTRINSIC_NAMES : [])].join(', ')}`,
         null, user.node);
     }
   }
@@ -658,7 +679,7 @@ export function buildSchemaTypeStory(programSexpr) {
   }
   return {
     stories,
-    intrinsicLines: schemaIntrinsicLines(withModel),
+    intrinsicLines: schemaIntrinsicLines(withModel, withMixin),
     withModel,
   };
 }

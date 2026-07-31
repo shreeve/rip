@@ -120,9 +120,11 @@ var VALIDATION_INTRINSIC_NAMES = new Set([
   "ArraySchema",
   "Schema"
 ]);
+var MIXIN_INTRINSIC_NAMES = new Set(["MixinSchema"]);
 var MODEL_INTRINSIC_NAMES = new Set(["SchemaQuery", "ModelSchema"]);
 var SCHEMA_INTRINSIC_NAMES = new Set([
   ...VALIDATION_INTRINSIC_NAMES,
+  ...MIXIN_INTRINSIC_NAMES,
   ...MODEL_INTRINSIC_NAMES
 ]);
 var VALIDATION_INTRINSICS = [
@@ -151,6 +153,11 @@ var VALIDATION_INTRINSICS = [
   "  partial(): Schema<Partial<In>, Partial<In>>;",
   "  required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;",
   "  extend<U>(other: Schema<U>): Schema<In & U, In & U>;",
+  "}"
+];
+var MIXIN_INTRINSICS = [
+  "interface MixinSchema<Out> {",
+  "  toJSONSchema(): Record<string, unknown>;",
   "}"
 ];
 var MODEL_INTRINSICS = [
@@ -187,7 +194,11 @@ var MODEL_INTRINSICS = [
   "  toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;",
   "}"
 ];
-var schemaIntrinsicLines = (withModel) => withModel ? [...VALIDATION_INTRINSICS, ...MODEL_INTRINSICS] : [...VALIDATION_INTRINSICS];
+var schemaIntrinsicLines = (withModel, withMixin = false) => [
+  ...VALIDATION_INTRINSICS,
+  ...withMixin ? MIXIN_INTRINSICS : [],
+  ...withModel ? MODEL_INTRINSICS : []
+];
 var isNode = (x) => Array.isArray(x);
 var isSchemaNode = (x) => isNode(x) && x[0] === "schema" && x.length === 2 && x[1] && typeof x[1] === "object" && Array.isArray(x[1].entries);
 function collectSchemaDecls(programSexpr) {
@@ -360,7 +371,7 @@ function schemaTypeStory(decl, byName, known) {
   if (kind === "mixin") {
     return {
       aliasLines: [`type ${name} = ${intersect(braced(fieldProps(descriptor, known)), mixinRefs(descriptor, byName))};`],
-      constType: null,
+      constType: `MixinSchema<${name}>`,
       thisTypes: new Map,
       typeNames: [name]
     };
@@ -481,10 +492,11 @@ function buildSchemaTypeStory(programSexpr) {
   const byName = new Map(decls.map((d) => [d.name, d]));
   const userTypes = collectUserTypeNames(programSexpr);
   const withModel = decls.some((d) => d.descriptor.kind === "model");
+  const withMixin = decls.some((d) => d.descriptor.kind === "mixin");
   for (const [name, user] of userTypes) {
-    const emitted = VALIDATION_INTRINSIC_NAMES.has(name) || withModel && MODEL_INTRINSIC_NAMES.has(name);
+    const emitted = VALIDATION_INTRINSIC_NAMES.has(name) || withMixin && MIXIN_INTRINSIC_NAMES.has(name) || withModel && MODEL_INTRINSIC_NAMES.has(name);
     if (emitted) {
-      throw new SchemaTypeError(`${user.what} collides with the schema intrinsic declarations this module emits ` + `(a schema declaration is present${MODEL_INTRINSIC_NAMES.has(name) ? ", and a :model brings the persistence tier" : ""}) — ` + `rename it; the emitted intrinsic vocabulary here is ` + `${[...VALIDATION_INTRINSIC_NAMES, ...withModel ? MODEL_INTRINSIC_NAMES : []].join(", ")}`, null, user.node);
+      throw new SchemaTypeError(`${user.what} collides with the schema intrinsic declarations this module emits ` + `(a schema declaration is present${MODEL_INTRINSIC_NAMES.has(name) ? ", and a :model brings the persistence tier" : ""}) — ` + `rename it; the emitted intrinsic vocabulary here is ` + `${[...VALIDATION_INTRINSIC_NAMES, ...withMixin ? MIXIN_INTRINSIC_NAMES : [], ...withModel ? MODEL_INTRINSIC_NAMES : []].join(", ")}`, null, user.node);
     }
   }
   const owners = new Map;
@@ -514,7 +526,7 @@ function buildSchemaTypeStory(programSexpr) {
   }
   return {
     stories,
-    intrinsicLines: schemaIntrinsicLines(withModel),
+    intrinsicLines: schemaIntrinsicLines(withModel, withMixin),
     withModel
   };
 }
