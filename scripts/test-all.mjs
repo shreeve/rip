@@ -361,7 +361,18 @@ for (const { name } of excluded) {
   console.log(`  ${dim('·')} ${dim(cols(`packages/${name}`))}  ${dim('excluded (CI runs it as its own step)')}`);
 }
 
+// A failing lane's output is printed where the lane finished, which in
+// CI is the middle of a very long log — and GitHub drops the MIDDLE of a
+// log it has to truncate, keeping the head and the tail. The root lane
+// alone prints ~6000 lines, so the one thing worth reading (the name of
+// the test that failed) is exactly what goes missing. Repeat the tail of
+// each failing lane after the summary, where truncation cannot reach it.
 if (failed.length > 0) {
+  for (const r of failed) {
+    const tail = r.output.split('\n').slice(-60).join('\n').trimEnd();
+    console.log(`\n${dim('─'.repeat(72))}\n${red(`✗ ${r.lane.label}`)} ${dim('— last 60 lines')}\n${dim('─'.repeat(72))}`);
+    if (tail) console.log(tail);
+  }
   console.log(red(`\n✗ ${failed.length} of ${results.length} lanes failed: ${failed.map((r) => r.lane.label).join(', ')}\n`));
   process.exit(1);
 }
