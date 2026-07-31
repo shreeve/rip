@@ -174,7 +174,6 @@ counts: Counts = { hits: 3 }
 console.log('operators:', hostKey, frozen[0], locked.id, hostName, counts.hits)
 
 # ── mapped types: `in` between `[` and `]`, the one position TS grammar puts it ──
-# Both spellings, since the type-body validator reads each through the same floor.
 
 type Copy<T> = { [K in keyof T]: T[K] }
 
@@ -217,7 +216,6 @@ branch: Branch = { label: 'root', kids: [{ label: 'leaf', kids: [] }] }
 console.log('recursive:', branch.label, branch.kids.length, branch.kids[0].label)
 
 # ── a call signature: the callable object type, and its named sibling ──
-# The NAMED method member in both spellings — indented (the interfaces above) and inline, which the vocabulary floor now reads as the same member row.
 
 type Formatter = { (value: number): string }
 type Greeter = { greet(name: string): string, times: number }

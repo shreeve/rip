@@ -74,7 +74,6 @@ settle = (risky: () => string) ->
 console.log(settle(-> 'delivered'), settle(-> throw new Error('nope')))
 
 # ── try as an expression: inline, inline with a catch, and the two together ──
-# The third carries a postfix cast AND a handler: the cast's type run stops at the clause keyword, so the handler survives as its own token rather than swallowing into the type string.
 
 live = try JSON.parse('{"live":true}') as { live: boolean }
 backed: { live: boolean } = try JSON.parse('broken') catch e then { live: false }
@@ -92,4 +91,5 @@ reject = (code: number) ->
 demand = (value: string | null) -> value ?? throw new Error('missing value')
 
 held = try reject(503) catch caught then caught
+
 console.log('held:', held, 'demand:', demand('present'))

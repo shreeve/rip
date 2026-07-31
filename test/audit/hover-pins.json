@@ -216,7 +216,7 @@
         "why": "VALUE-type target; today serves the whole bind cover's `__bind_value__`"
       },
       {
-        "line": 106,
+        "line": 105,
         "character": 2,
         "token": "stats",
         "expect": "(property) Routed.stats: any",
@@ -224,7 +224,7 @@
         "why": "value-first; an unannotated gate target's value IS any — truthful, and the kind label stays undecided"
       },
       {
-        "line": 106,
+        "line": 105,
         "character": 8,
         "token": "<~",
         "expect": null,
@@ -232,7 +232,7 @@
         "why": "punctuation is silent, permanently — measured null 2026-07-23, green"
       },
       {
-        "line": 106,
+        "line": 105,
         "character": 12,
         "token": "app",
         "expect": null,
@@ -240,7 +240,7 @@
         "why": "ruled silent — measured null 2026-07-23, green"
       },
       {
-        "line": 106,
+        "line": 105,
         "character": 16,
         "token": "data",
         "expect": null,
@@ -248,7 +248,7 @@
         "why": "ruled silent — measured null 2026-07-23, green"
       },
       {
-        "line": 106,
+        "line": 105,
         "character": 21,
         "token": "stats",
         "expect": null,
@@ -256,7 +256,7 @@
         "why": "the path leaf; ruled silent — measured null 2026-07-23, green"
       },
       {
-        "line": 108,
+        "line": 107,
         "character": 24,
         "token": "params",
         "expect": null,
@@ -264,7 +264,7 @@
         "why": "plain-inferred target; today serves the minted key-fn's own param"
       },
       {
-        "line": 108,
+        "line": 107,
         "character": 31,
         "token": "id",
         "expect": null,
@@ -272,7 +272,7 @@
         "why": "plain-inferred target; today serves bare `any` off the minted param"
       },
       {
-        "line": 109,
+        "line": 108,
         "character": 2,
         "token": "user",
         "expect": "(property) Routed.user: { name: string; }",

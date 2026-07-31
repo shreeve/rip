@@ -252,6 +252,7 @@ import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.js';
 import { compile } from '../../src/compile.js';
+import { readProjectConfig } from '../../src/config.js';
 import { codeMask } from './mask.js';
 import { Parser } from '../../src/parser.js';
 import { makeParserLexer, tokenize, ALIASES } from '../../src/lexer.js';
@@ -964,8 +965,32 @@ function tsDeclsOf(src) {
 // hover audit — over a shared workspace holding every fixture under its
 // real name (cross-file imports resolve; idle siblings never join the
 // program, so they don't collide).
+//
+// The corpus's own project config, read once from the real fixture
+// location through the COMPILER's resolver rather than a second copy of
+// the walk — a divergence there would reintroduce exactly the bug this
+// exists to close.
+let corpusConfigCache = null;
+const corpusConfig = () => (corpusConfigCache ??= readProjectConfig(CORPUS));
+
 class EditorServer {
-  constructor() { this.diags = new Map(); this.dir = mkTemp(path.join(os.tmpdir(), 'rip-audit-')); this.open = null; }
+  constructor() {
+    this.diags = new Map();
+    this.dir = mkTemp(path.join(os.tmpdir(), 'rip-audit-'));
+    this.open = null;
+    // THE FIXTURE'S OWN MODE travels with it. Each document is opened
+    // from a temp dir, so nothing above it carries the corpus's
+    // `package.json` — and the server resolves `rip.strict` from the
+    // NEAREST one. Without this the hover and token lanes probe the
+    // corpus in GRADUAL while `rip check`, the editor, and the
+    // diagnostics lane all read it as STRICT, and the two instruments
+    // silently answer about different programs.
+    //
+    // Only the `rip` block travels. A tsconfig would change what the
+    // faces resolve against, which every pin was measured under.
+    fs.writeFileSync(path.join(this.dir, 'package.json'),
+      JSON.stringify({ rip: { strict: corpusConfig().strict } }, null, 2));
+  }
 
   // ── THE INVARIANT THAT MAKES CONCURRENCY SAFE ────────────────────────────
   //
@@ -1069,6 +1094,25 @@ class EditorServer {
   // type" is a true readiness signal. Probing an arbitrary declaration would
   // conflate a program that is not built yet with a binding that is genuinely
   // `any`, and burn the whole timeout on the latter.
+  // The temp workspace answers about the SAME PROGRAM the corpus does.
+  // Asserted rather than assumed: the harness copies fixtures out of the
+  // tree, so nothing structural forces its config to match, and a
+  // mismatch is invisible — both modes answer identically for most
+  // fixtures, so the lanes drifted apart unnoticed until a mode-dependent
+  // face appeared. Cheap, and it fails at construction rather than as a
+  // wrong number three lanes later.
+  assertModeMatchesCorpus() {
+    const mine = JSON.parse(fs.readFileSync(path.join(this.dir, 'package.json'), 'utf8'));
+    const theirs = corpusConfig();
+    if (mine.rip?.strict !== theirs.strict) {
+      throw new Error(
+        `audit harness mode drift: the temp workspace resolves rip.strict=${mine.rip?.strict} ` +
+        `where the corpus resolves ${theirs.strict} — the hover and token lanes would probe a ` +
+        `different program than \`rip check\` and the editor do`,
+      );
+    }
+  }
+
   async openForHover(base, src, probe = null) {
     const uri = 'file://' + path.join(this.dir, base);
     this.claim(uri);
@@ -1724,6 +1768,7 @@ const POOL_SIZE = NEED_SERVER
   : 0;
 const poolP = Promise.all(Array.from({ length: POOL_SIZE }, async () => {
   const s = new EditorServer();
+  s.assertModeMatchesCorpus();
   await s.start();
   return s;
 }));
