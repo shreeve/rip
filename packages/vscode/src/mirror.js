@@ -173,7 +173,61 @@ export function hostFloorDts(workspaceRoot, { userSetsTypes = false } = {}) {
 // with the real workspace (a .rip file importing a real .ts sibling
 // resolves). The mirror root MUST sit two levels below the workspace so
 // the `../../` reach-ups (extends, ambient d.ts, node_modules) resolve.
-export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = new Set(), onUnresolved } = {}) {
+// A tsconfig path is written into a generated config, so it is always
+// POSIX-separated — a Windows `..\\pkg\\tsconfig.json` is not a legal
+// `extends` spec.
+const posix = (p) => p.split(path.sep).join('/');
+
+// The nearest `tsconfig.json` at or above `dir`, stopping AT `anchor`
+// (inclusive). Null when the walk reaches the anchor without finding
+// one, which is the ordinary case: most directories are governed by the
+// workspace root's config and need no wrapper of their own.
+export function nearestTsconfig(dir, anchor) {
+  for (let d = dir; ; d = path.dirname(d)) {
+    const candidate = path.join(d, 'tsconfig.json');
+    if (fs.existsSync(candidate)) return candidate;
+    if (d === anchor || path.dirname(d) === d) return null;
+  }
+}
+
+// The generated WRAPPER for one nested project: the same overrides the
+// mirror root gets, but reaching up to that project's own tsconfig
+// instead of the workspace root's, with every reach-up computed rather
+// than spelled. tsgo's LSP does per-file nearest-tsconfig discovery (the
+// tsserver configured-project model), so placing one of these at each
+// mirrored project dir partitions the faces by project inside a SINGLE
+// mirror tree and a SINGLE session — no multiplexing, and the pin pass
+// is untouched.
+//
+// The wrapper states its own include/exclude, so the source tsconfig's
+// FILE SET is not inherited — only its compilerOptions. And the floor is
+// emitted per project, from that project's own gate answers: a nested
+// project's strictness and installed types govern whether ITS files see
+// it, which a single workspace-root floor could never express.
+export function projectWrapper({ wrapperDir, sourceTsconfig, chain = new Set(), onUnresolved }) {
+  const sourceDir = path.dirname(sourceTsconfig);
+  const overrides = {
+    noImplicitAny: true,
+    noEmit: true,
+    allowImportingTsExtensions: true,
+    rootDirs: ['.', posix(path.relative(wrapperDir, sourceDir))],
+  };
+  chain.clear();
+  const setsTypes = chainSetsTypes(sourceTsconfig, chain, onUnresolved);
+  if (!setsTypes) overrides.types = ['*'];
+  const reachUp = posix(path.relative(wrapperDir, sourceDir));
+  return {
+    tsconfig: {
+      extends: posix(path.relative(wrapperDir, sourceTsconfig)),
+      compilerOptions: overrides,
+      include: ['**/*.ts', `${reachUp}/**/*.d.ts`],
+      exclude: ['node_modules', `${reachUp}/**/node_modules`],
+    },
+    hostFloorDts: hostFloorDts(sourceDir, { userSetsTypes: setsTypes }),
+  };
+}
+
+export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = new Set(), onUnresolved, excludeDirs = [] } = {}) {
   const overrides = {
     noImplicitAny: true,
     noEmit: true,
@@ -184,7 +238,11 @@ export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = n
   // program. An explicit `exclude` REPLACES the built-in defaults, so
   // `node_modules` is restated alongside the `../../` reach-up.
   const include = ['**/*.ts'];
-  const exclude = ['node_modules'];
+  // A nested project's mirrored subtree belongs to ITS wrapper. Without
+  // the exclusion both configs claim the same faces, and which one
+  // answers is tsgo's discovery order rather than the file's own
+  // nearest config.
+  const exclude = ['node_modules', ...excludeDirs.map((d) => `${posix(d)}/**`)];
   if (!mirrorRootIsFallback) {
     include.push('../../**/*.d.ts');
     exclude.push('../../**/node_modules');
