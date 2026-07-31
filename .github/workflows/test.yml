@@ -7,6 +7,10 @@
 # cannot cover, and a throttled Ubuntu mirror once stretched it past 20
 # minutes — inside a single job that stall held an already-green verdict
 # hostage until the job timeout killed it.
+#
+# If branch protection ever gains required status checks, require BOTH
+# `test` and `browser` — requiring only `test` quietly stops a red
+# browser suite from blocking merges.
 name: test
 
 on:
