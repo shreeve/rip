@@ -76,7 +76,6 @@ export Panel = component
         em 'from the panel slot'
 
 # ── Generic components: the two TYPE_PARAMS spellings, plain and exported ──
-# The carried/indented layout variants can never receive the token: the lexer mints TYPE_PARAMS only for a same-line `= component` head (the grammar gate's own exclusion table).
 
 Chip<TLabel extends string> = component
   @label?: TLabel
@@ -148,7 +147,7 @@ Quiet = component
 
   render null
 
-# The trailing semicolon carries `ComponentBody → ComponentBody TERMINATOR`, the 01-basics `done = 'basics';` idiom at component-body level.
+# The trailing semicolon is deliberate, not a stray: rip parses it, and no rip author writes one.
 
 Terse = component
   render null;

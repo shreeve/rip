@@ -27,7 +27,7 @@ import { readProjectConfig } from './config.js';
 import { startTsgo } from '../packages/vscode/src/tsgo.js';
 import { buildProbe, parseProbeHover } from '../packages/vscode/src/pins.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from '../packages/vscode/src/diagnostics.js';
-import { generatedMirror, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from '../packages/vscode/src/mirror.js';
+import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from '../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../packages/vscode/src/translate.js';
 
 const HELP = `rip check — type-check .rip files headlessly (the tsc --noEmit of rip-land)
@@ -240,9 +240,34 @@ if (compiled.size > 0) {
     fs.mkdirSync(path.dirname(mirrorPath), { recursive: true });
     fs.writeFileSync(mirrorPath, entry.good.code);
   }
-  const mirror = generatedMirror({ workspaceRoot, mirrorRootIsFallback });
+  // Per-project wrappers: one generated tsconfig at each mirrored dir whose
+  // OWN tsconfig governs it, so a nested package's compilerOptions — its
+  // strict, types, lib, jsx, paths — reach its files. tsgo assigns each file
+  // to its nearest config, so one mirror tree and one session still serve
+  // the whole workspace. Files under no nested project keep the root
+  // wrapper, which excludes these subtrees so no face has two owners.
+  const wrapperRels = new Set();
+  if (!mirrorRootIsFallback) {
+    for (const [fsPath] of compiled) {
+      const owner = nearestTsconfig(path.dirname(fsPath), workspaceRoot);
+      if (owner === null || path.dirname(owner) === workspaceRoot) continue;
+      wrapperRels.add(path.relative(workspaceRoot, path.dirname(owner)));
+    }
+  }
+  const mirror = generatedMirror({
+    workspaceRoot, mirrorRootIsFallback, excludeDirs: [...wrapperRels],
+  });
   fs.writeFileSync(path.join(mirrorRoot, 'tsconfig.json'), JSON.stringify(mirror.tsconfig, null, 2));
   fs.writeFileSync(path.join(mirrorRoot, HOST_FLOOR_NAME), mirror.hostFloorDts);
+  for (const rel of wrapperRels) {
+    const wrapperDir = path.join(mirrorRoot, rel);
+    const wrapper = projectWrapper({
+      wrapperDir, sourceTsconfig: path.join(workspaceRoot, rel, 'tsconfig.json'),
+    });
+    fs.mkdirSync(wrapperDir, { recursive: true });
+    fs.writeFileSync(path.join(wrapperDir, 'tsconfig.json'), JSON.stringify(wrapper.tsconfig, null, 2));
+    fs.writeFileSync(path.join(wrapperDir, HOST_FLOOR_NAME), wrapper.hostFloorDts);
+  }
 
   let session = null;
   try {
@@ -505,6 +530,9 @@ if (asJson) {
       console.log(`${String(info.count).padStart(6)}  ${rel(f)}${gray(':' + info.firstLine)}`);
     }
   }
+  // Named once, at the end, whatever the run's verdict — a clean run that
+  // hid 2,000 diagnostics is exactly the case where saying nothing
+  // misleads most.
 }
 
 // Exit: 1 on type errors; 2 when the run could not cover what was asked —

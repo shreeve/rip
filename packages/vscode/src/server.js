@@ -72,7 +72,7 @@ import {
   SUPPRESSED_TS_CODES,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
-import { generatedMirror as buildGeneratedMirror, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -273,9 +273,54 @@ const userConfigChain = new Set();
 function generatedMirror() {
   return buildGeneratedMirror({
     workspaceRoot, mirrorRootIsFallback, chain: userConfigChain,
+    excludeDirs: [...wrapperDirs],
     onUnresolved: (spec) =>
       connection.console.log(`[rip] tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
   });
+}
+
+// Workspace-relative dirs that own a nested `tsconfig.json` and have a
+// generated wrapper mirroring them. tsgo assigns each face to its
+// NEAREST config, so these partition the mirror by project inside the
+// one tree and the one session; the root config excludes them so no face
+// has two owners.
+const wrapperDirs = new Set();
+
+// Give `fsPath`'s owning project its wrapper, if it has one and does not
+// yet. Returns the mirror paths written — a new wrapper also rewrites the
+// ROOT config (its exclusions grew), so callers forward all of them to
+// tsgo or the new project's files stay in the root's program.
+function ensureProjectWrapper(fsPath) {
+  if (mirrorRootIsFallback || !workspaceRoot || !mirrorRootReady) return [];
+  const owner = nearestTsconfig(path.dirname(fsPath), workspaceRoot);
+  if (owner === null || path.dirname(owner) === workspaceRoot) return [];
+  const rel = path.relative(workspaceRoot, path.dirname(owner));
+  if (wrapperDirs.has(rel)) return [];
+  wrapperDirs.add(rel);
+  const wrapperDir = path.join(mirrorRoot, rel);
+  let wrapper;
+  try {
+    wrapper = projectWrapper({
+      wrapperDir, sourceTsconfig: owner, chain: userConfigChain,
+      onUnresolved: (spec) =>
+        connection.console.log(`[rip] ${rel}: tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
+    });
+  } catch (err) {
+    wrapperDirs.delete(rel);
+    connection.console.error(`[rip] wrapper for ${rel} not generated (${err.message}) — its files keep the root config`);
+    return [];
+  }
+  fs.mkdirSync(wrapperDir, { recursive: true });
+  const written = [];
+  for (const [name, text] of [['tsconfig.json', JSON.stringify(wrapper.tsconfig, null, 2)], [HOST_FLOOR_NAME, wrapper.hostFloorDts]]) {
+    const at = path.join(wrapperDir, name);
+    ensureOwnedFile(at, text);
+    written.push(at);
+  }
+  writeGeneratedTsconfig();
+  written.push(path.join(mirrorRoot, 'tsconfig.json'));
+  connection.console.log(`[rip] per-project tsconfig: ${rel} now extends its own config`);
+  return written;
 }
 
 // Idempotent: an unchanged file never rewrites (no spurious mtime for
@@ -636,6 +681,9 @@ function materializeClosure(seeds) {
       continue;
     }
     try {
+      // Before the face is written, so the project it belongs to already
+      // exists when tsgo reads it.
+      touched.push(...ensureProjectWrapper(file));
       const { mirrorPath, imports } = mirrorFromDisk(file, source);
       compiled++;
       touched.push(mirrorPath);
@@ -1063,8 +1111,20 @@ async function refresh(document) {
       const imports = ripImportsOf(result.stores, text, path.dirname(fsPath));
       const previous = state.imports ?? [];
       state.imports = imports;
-      cacheManifest.entries[fsPath] = { sourceHash: hashText(text), codeHash: hashText(result.code), imports };
+      cacheManifest.entries[fsPath] = {
+        sourceHash: hashText(text), codeHash: hashText(result.code), imports,
+        // An open buffer answers importers from its own last-good compile;
+        // the entry has to carry the names too, or closing this buffer
+        // leaves importers uncorrected until the file next changes.
+        enumNames: enumNamesOf(result),
+      };
       scheduleManifestSave();
+      const wrapperFiles = ensureProjectWrapper(fsPath);
+      if (wrapperFiles.length && tsgo) {
+        tsgo.client.notify('workspace/didChangeWatchedFiles', {
+          changes: wrapperFiles.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Changed })),
+        });
+      }
       const { compiled, cached, failed } = materializeClosure(imports);
       if (compiled || cached || failed) {
         connection.console.log(

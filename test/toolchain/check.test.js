@@ -37,6 +37,28 @@ function workspace(files, ripConfig = null) {
   return dir;
 }
 
+// A TWO-PACKAGE workspace: a loose root beside a nested project with its
+// own `tsconfig.json`. Every other fixture here is single-package, where a
+// flat mirror root is indistinguishable from a correct per-project one —
+// which is exactly why the per-project gap went unseen. `strict` is the
+// discriminator because it changes an ANSWER (TS2322 on `x: string = null`)
+// rather than merely a setting, so the assertion cannot pass by accident.
+function monorepo({ rootStrict = false, nestedStrict = true } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-mono-'));
+  const base = JSON.parse(fs.readFileSync(TSCONFIG, 'utf8'));
+  delete base.include;                       // the audit's own file set means nothing here
+  delete base.exclude;
+  base.compilerOptions.strict = rootStrict;
+  fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify(base, null, 2));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({}, null, 2));
+  fs.mkdirSync(path.join(dir, 'pkg'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'pkg', 'tsconfig.json'),
+    JSON.stringify({ compilerOptions: { strict: nestedStrict } }, null, 2));
+  fs.writeFileSync(path.join(dir, 'root.rip'), 'x: string = null\nconsole.log x\n');
+  fs.writeFileSync(path.join(dir, 'pkg', 'a.rip'), 'y: string = null\nconsole.log y\n');
+  return dir;
+}
+
 function check(dir, args = []) {
   const r = spawnSync('bun', [BIN, 'check', ...args], { cwd: dir, encoding: 'utf8', timeout: 60_000 });
   return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
@@ -1073,6 +1095,34 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // body's members carry their own spans, so "declared here" points at the
       // member that declared it.
       expect(primary.related?.[0]).toMatchObject({ file: 'lib.rip', line: 3, column: 3 });
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // A nested project's own tsconfig governs ITS files. Both polarities in
+  // one workspace, so neither answer can be the whole run's posture: the
+  // nested file rejects under its own `strict`, the root file stays loose
+  // under the root's. A single-package fixture cannot tell a correct
+  // per-project resolution from a flat one, which is why no gate saw this.
+  test('a nested tsconfig governs its own files; the loose root governs the rest', () => {
+    const dir = monorepo();
+    try {
+      const j = JSON.parse(check(dir, ['--json']).stdout);
+      const at = (file) => j.filter((d) => d.file === file && d.code === 2322);
+      expect(at('pkg/a.rip').length, 'the nested file rejects under its own strict config').toBe(1);
+      expect(at('root.rip').length, 'the root file stays loose under the root config').toBe(0);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // The inverse posture, so the assertion above is not passing on a
+  // hardcoded direction: strict at the root, loose in the nested project.
+  // A flat mirror answers the same way in both, which is the whole defect.
+  test('the polarity inverts with the configs — strict root, loose nested', () => {
+    const dir = monorepo({ rootStrict: true, nestedStrict: false });
+    try {
+      const j = JSON.parse(check(dir, ['--json']).stdout);
+      const at = (file) => j.filter((d) => d.file === file && d.code === 2322);
+      expect(at('root.rip').length, 'the root file rejects under the strict root').toBe(1);
+      expect(at('pkg/a.rip').length, 'the nested file stays loose under its own config').toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 });
