@@ -1,4 +1,12 @@
 # CI — the full suite on every push and pull request to main.
+#
+# Two independent jobs. `test` is the verdict: every suite test:all
+# carries, plus the byte gates — healthy in ~4 minutes. `browser` is the
+# real-browser certification, isolated because its slow part is not ours:
+# `playwright install --with-deps` runs an apt install the browser cache
+# cannot cover, and a throttled Ubuntu mirror once stretched it past 20
+# minutes — inside a single job that stall held an already-green verdict
+# hostage until the job timeout killed it.
 name: test
 
 on:
@@ -15,11 +23,10 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # A healthy run is ~4 minutes. The margin is for `playwright install
-    # --with-deps`, whose apt half is not covered by the browser cache and
-    # rides the Ubuntu mirrors — observed taking 20+ minutes on a throttled
-    # mirror, which under a 25-minute cap killed an otherwise-green run.
-    timeout-minutes: 40
+    # Healthy ~4 minutes. The floor is the orchestrator's own per-lane
+    # timeout (600s): a hung lane must fail INSIDE the run and report,
+    # not race the job cap to the kill.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 
@@ -59,11 +66,28 @@ jobs:
           bun run browser-bundle
           git diff --exit-code dist/browser
 
-      # The one suite test:all does not carry: it needs real browsers, which
-      # a local checkout is not required to have. The download dominates the
-      # step, so the browser binaries are cached against the pinned
-      # @playwright/test version — a version bump misses the key and
-      # reinstalls, which is the point.
+  # The one suite test:all does not carry: it needs real browsers, which
+  # a local checkout is not required to have. Parallel to `test`, so its
+  # environment setup — the slowest and least ours part of CI — cannot
+  # delay the main verdict.
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Bun (pinned)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install (workspace root — provisions @playwright/test through the root lock)
+        run: bun install --frozen-lockfile
+
+      # The download dominates the step, so the browser binaries are
+      # cached against the pinned @playwright/test version — a version
+      # bump misses the key and reinstalls, which is the point. The apt
+      # half of --with-deps is system packages; no cache covers it.
       - name: Cache Playwright browsers
         uses: actions/cache@v5
         with:
