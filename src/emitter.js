@@ -152,6 +152,10 @@ const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length 
 // only 'def' would silently misclassify void defs).
 const isDefHead = (h) => h === 'def' || h === 'void-def';
 const isUpdate = (x) => isNode(x) && (x[0] === '++' || x[0] === '--') && x.length === 3;
+// What may be a BINDING NAME. One spelling, read by the pattern walker and
+// by captureScan's own occurrence recorder — a walker that returned names
+// its caller then had to filter would be a helper you cannot reuse.
+const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 // The bindings a destructuring pattern introduces, each paired with the
 // ACCESSOR PATH from the assigned value to that binding's own value:
 // `{ json: media }` yields `media` at `.json`, `[p, q]` yields `p` at `[0]`
@@ -175,18 +179,20 @@ const patternBindings = (node, base = '', out = []) => {
       if (head !== ':' && head !== null) continue;   // '=' default, '...' rest: skipped
       const key = el[1];
       if (typeof key !== 'string') continue;         // computed key
-      const seg = /^[A-Za-z_$][\w$]*$/.test(key) ? `.${key}` : `[${key}]`;
+      const seg = IDENT.test(key) ? `.${key}` : `[${key}]`;
       const target = el[2];
-      if (typeof target === 'string') out.push([target, base + seg]);
+      if (typeof target === 'string') { if (IDENT.test(target)) out.push([target, base + seg]); }
       else patternBindings(target, base + seg, out);
     }
     return out;
   }
   if (node[0] === 'array') {
     node.slice(1).forEach((el, i) => {
-      if (el === null || el === undefined) return;   // a hole binds nothing
+      // A HOLE is the string `,` — it occupies its slot, which is what keeps
+      // the indices right (`[, b]` binds b at [1]), and it is not a name.
+      // Every other non-identifier string is refused for the same reason.
       if (isNode(el) && el[0] === '...') return;     // rest: skipped
-      if (typeof el === 'string') out.push([el, `${base}[${i}]`]);
+      if (typeof el === 'string') { if (IDENT.test(el)) out.push([el, `${base}[${i}]`]); }
       else patternBindings(el, `${base}[${i}]`, out);
     });
     return out;
@@ -2837,7 +2843,6 @@ class Emitter {
   captureScan(nodes) {
     const stmts = nodes.length === 1 && isBlock(nodes[0]) ? nodes[0].slice(1) : nodes;
     const top = new Set(stmts.filter(isNode));
-    const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
     const facts = new Map();
     // inFn levels: 0 — the scope's own straight line; 1 — inside a
     // DEFERRED construct (function expression, class, component, enum:
