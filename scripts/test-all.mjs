@@ -367,10 +367,26 @@ for (const { name } of excluded) {
 // alone prints ~6000 lines, so the one thing worth reading (the name of
 // the test that failed) is exactly what goes missing. Repeat the tail of
 // each failing lane after the summary, where truncation cannot reach it.
+// A runner prints a failure's DETAIL where the test ran and only its
+// NAME in the closing summary, so the tail alone carries the name and
+// loses the assertion message — which for a measurement gate is the
+// whole point. Lift the lines leading up to each `(fail)` marker too.
+const failureDetail = (output, lead = 30) => {
+  const lines = output.split('\n');
+  const out = [];
+  lines.forEach((line, i) => {
+    if (!/^\(fail\)/.test(line) || out.length > 400) return;
+    out.push(...lines.slice(Math.max(0, i - lead), i + 1), '');
+  });
+  return out.join('\n').trimEnd();
+};
+
 if (failed.length > 0) {
   for (const r of failed) {
+    const detail = failureDetail(r.output);
     const tail = r.output.split('\n').slice(-60).join('\n').trimEnd();
-    console.log(`\n${dim('─'.repeat(72))}\n${red(`✗ ${r.lane.label}`)} ${dim('— last 60 lines')}\n${dim('─'.repeat(72))}`);
+    console.log(`\n${dim('─'.repeat(72))}\n${red(`✗ ${r.lane.label}`)} ${dim('— failures, then last 60 lines')}\n${dim('─'.repeat(72))}`);
+    if (detail) console.log(`${detail}\n`);
     if (tail) console.log(tail);
   }
   console.log(red(`\n✗ ${failed.length} of ${results.length} lanes failed: ${failed.map((r) => r.lane.label).join(', ')}\n`));

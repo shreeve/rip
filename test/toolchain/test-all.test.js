@@ -88,7 +88,8 @@ describe('the lane orchestrator', () => {
     const afterSummary = r.stdout.slice(r.stdout.indexOf('summary —'));
     expect(afterSummary).toContain('✗ packages/beta');
     expect(afterSummary).toContain('last 60 lines');
-    expect(afterSummary).toContain("(fail) no");
+    expect(afterSummary).toContain('(fail) no');
+    expect(afterSummary).toContain('Expected: 2'); // the assertion detail, not just the name
   });
 
   test('a red ROOT lane fails the run (the root suite is aggregated like any other)', () => {
