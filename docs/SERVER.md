@@ -18,13 +18,13 @@ medlabs server
 │   ├── source
 │   └── worker(s) ◄─ manager supervises and hot reloads
 ├── static
-    ├── site-specific
+│   ├── site-specific
 │   ├── common
 │   └── generated
 │       ├── bundle.json
 │       └── manifest.json
 └── app
-    └── source and assets ◄── manager publishes and dings on changes
+    └── source and assets ◄── manager watches and dings on changes
 ```
 
 The manager controls the Medlabs server. Caddy and Janus form the shared edge
@@ -37,9 +37,11 @@ that serves its static files and routes its API requests.
 - The **manager** is the one long-running control process for that server.
 - The **API** is dynamic server-side source executed by workers.
 - A **worker** is a disposable process that executes API request handlers.
+- A **generation process** is a short-lived child that builds and validates one
+  candidate API artifact, then exits.
 - The **App** is the client application source and assets under `app/`, served
-  directly by Caddy and Janus. In development, the manager watches this tree
-  and dings changed files.
+  directly by Caddy and Janus. While watching is enabled, the manager watches
+  this tree and dings changed files.
 - **Static** contains site-specific files, common files, and manager-generated
   coordination files such as `bundle.json` and `manifest.json`.
 - **Caddy + Janus** is the shared edge for zero or more Rip servers.
@@ -56,9 +58,13 @@ One Caddy process is the machine's public HTTP server. It owns:
 - Network listeners and HTTP/1–3.
 - TLS termination and ACME certificates.
 - SNI and the HTTP handler pipeline.
+- Public connection parsing, transport timeouts, slow-client defense, and
+  other hostile-Internet concerns.
 - The Janus module running inside the same process.
 
-Caddy does not launch Rip managers or workers.
+Caddy does not launch Rip managers or workers. API workers listen on private
+Unix sockets and retain application-level protections, but they do not
+duplicate Caddy's public-server machinery.
 
 ### Janus
 
@@ -117,29 +123,40 @@ deregisters from Janus.
 The manager owns the API lifecycle:
 
 - Watches API and other server-side source.
-- Produces one server artifact for each source generation.
+- Spawns a short-lived generation process to build and validate each candidate
+  server artifact without importing it into the manager.
 - Starts workers on unique Unix sockets.
 - Waits for workers to report readiness.
 - Atomically publishes ready sockets to Janus.
 - Replaces crashed workers.
 - Drains and retires superseded workers.
 
-A server-side source change creates a dirty API generation:
+An API-source change first prepares a candidate while the active workers keep
+accepting requests. A failed build or validation reports the error and leaves
+the active generation untouched. Only a valid candidate may cut admission:
 
 ```text
 API source changes
         │
         ▼
+short-lived generation process builds and validates a candidate artifact
+        │
+        ├── failure ───────────────► report; active workers stay admitted
+        │
+        ▼ success
 manager publishes its doorbell as the only upstream
         │
         ▼
 Janus sends no new requests to the old workers
         │
         ▼
+old workers finish in-flight requests and retire
+        │
+        ▼
 the next API request causes Janus to ring the doorbell
         │
         ▼
-manager produces the latest server artifact and starts fresh workers
+manager starts fresh workers from the prepared artifact
         │
         ▼
 manager awaits readiness and publishes the fresh sockets
@@ -153,9 +170,14 @@ sends a separate bodyless `GET /ring` over the doorbell's Unix socket. The
 manager awaits Janus's acknowledgement of the new socket list before
 answering the ring.
 
-Concurrent requests join one bounded boot. Compilation failure, worker boot
-failure, timeout, or waiter overflow produces an explicit `503`; a request is
-delivered once to a fresh worker or not delivered at all.
+Concurrent requests join one bounded boot. A candidate compilation failure
+occurs before admission changes and therefore leaves requests on the active
+workers. After admission is cut, worker boot failure, timeout, or waiter
+overflow produces an explicit `503`; a request is delivered once to a fresh
+worker or not delivered at all.
+
+Building a generation never runs database migrations. Migrations are explicit
+operations coordinated separately from ordinary file watching.
 
 Caddy and Janus continue running throughout the replacement.
 
@@ -178,46 +200,96 @@ graph, browser-safe package sources, package-resolution metadata, and any
 synthetic client projections needed from API schemas. It avoids one initial
 request per Rip module.
 
-`manifest.json` is the lightweight inventory of current `{ id, etag }`
-generations used to populate and resynchronize the development Workspace.
+`manifest.json` is the lightweight inventory of current `{ id, hash }`
+representations used to populate and resynchronize the development Workspace.
 After first paint, a ding causes the browser to request only the changed live
 App file.
 
 The manager writes generated files atomically. A bundle lands before a
-manifest or notification names the generations it carries. Rip file-generation
-ETags remain manager-owned content identities; transport validators for static
-files are a separate HTTP concern.
+manifest or notification names the representations it carries. Rip hashes
+remain manager-owned App content identities; Janus-owned HTTP ETags are
+separate transport validators.
 
-In development, an App-source change:
+While watching is enabled, an App-source change:
 
 1. Re-snapshots the affected App files.
-2. Assigns their new content ETags.
+2. Assigns their new Rip hashes.
 3. Regenerates `bundle.json` and `manifest.json` coherently.
-4. Sends tiny `{ id, etag }` dings through Janus Hub.
+4. Sends tiny `{ id, hash }` dings through Janus Hub.
 5. Lets the browser choose `reload`, `css`, `update`, or `ignore`.
 
 An App-only change does not replace API workers. An API-source change replaces
 the API workers without reloading the client app.
 
-In production, the generated files are sealed and no development feed is
-exposed.
+With watching disabled, the generated files are sealed and no development feed
+is exposed.
 
 ### 4. Static-file policy
 
-The manager declares file policy to Janus but does not serve the files. It
-registers three static classes:
+The manager gives Janus an ordered list of places to check. Each place is a
+root template; Janus appends the request URI and serves the first regular-file
+match. A root may contain the trusted `${site}` selected from the hostname:
 
-1. Site-specific static files.
-2. Common static files.
-3. Generated App files.
+```text
+public/${uri}
+generated/${uri}
+sites/${site}/public/${uri}
+sites/common/public/${uri}
+app/${uri}
+```
 
-It separately registers the App tree and its SPA shell. Janus and Caddy
-perform the file lookup, conditional HTTP behavior, range handling, and
-response delivery.
+The order is policy. In this example, a tenant file overrides the common file,
+while `public` and `generated` take priority over both. Another server may
+choose a different order.
 
-Site-specific files can override shared resources while still inheriting
-common and generated files. App requests use their explicit App paths;
-the exact configured static-root order decides the first static match.
+The SPA shell is a separate HTML-only fallback, commonly `app/index.html`. It
+is not an unconditional final file candidate: a missing script, stylesheet,
+image, or Rip module must never receive HTML.
+
+Janus and Caddy perform path-confined lookup, conditional HTTP behavior, range
+handling, and response delivery. The manager neither handles the request nor
+serves the bytes.
+
+### 5. Hold, maintenance, and migrations
+
+The manager has three operational states:
+
+- **Active** observes and activates API and App changes.
+- **Held** continues serving the last activated API, bundle, and manifest while
+  declining to activate filesystem events. It sends no dings, exposes no new
+  generated state, and performs no worker replacement. Release rebuilds from
+  the current disk state whether or not individual events were retained.
+- **Maintenance** keeps the registration and heartbeats alive but publishes an
+  empty upstream list. Static and App requests continue; API requests receive
+  `503`. Maintenance never publishes the doorbell.
+
+Releasing a normal hold prepares one coherent API/App generation, exposes it,
+sends one full-reload ding, and only then clears hold.
+
+Hold is a coordination barrier, not a filesystem snapshot. Janus still reads
+the authored App tree directly, so an unsolicited request for one of those
+paths can observe bytes changed during hold. Normal clients receive no reason
+to make such a request because the manager sends no dings, and first paint
+continues to use the last generated bundle. This pragmatic exception avoids
+copying the App into a second publication tree.
+
+Database migration is explicit; it never runs because the server started, a
+file changed, or a worker booted. A server-coordinated migration follows this
+sequence:
+
+1. Enter hold and prepare the candidate API/App generation.
+2. Enter maintenance, stop API admission, and drain all workers.
+3. Run the database-only migration command in a short-lived process.
+4. If migration fails with no durable database change, restore the prior API
+   generation and return to held state.
+5. If migration commits, activate the candidate, send the full-reload ding,
+   and clear hold.
+
+Any durable database change crosses the rollback boundary. That includes a
+successful migration followed by candidate activation failure, and a
+multi-file migration run in which earlier files committed before a later file
+failed. The old API is no longer assumed compatible with the database; the
+server stays in maintenance and is fixed forward.
 
 ## Request Flow
 
@@ -234,13 +306,11 @@ Janus: host and tenant admission
     │
     ├── configured API prefix ───────────────► API worker
     │
-    ├── site-specific static hit ────────────► file
+    ├── first configured root hit ───────────► file
     │
-    ├── common static hit ───────────────────► file
+    ├── next configured root hit ────────────► file
     │
-    ├── generated-file hit ──────────────────► file
-    │
-    ├── App source/asset hit ────────────────► file
+    ├── … ───────────────────────────────────► file
     │
     ├── HTML navigation miss ────────────────► SPA shell
     │
@@ -253,13 +323,23 @@ Configured API prefixes such as `/api` are worker-first. They:
 
 - Never resolve as static assets.
 - Never receive the SPA shell.
-- Route to a ready worker or ring the manager's doorbell.
+- Route to a ready worker, ring the manager's doorbell, or return `503` while
+  the server is in maintenance.
 
 ### Static requests
 
 Janus searches the registered roots in order and serves the first regular-file
 match. Static delivery supports `GET` and `HEAD`, validators, ranges, and no
 directory listing.
+
+Ordinary HTTP validators describe transport bytes. Live App source uses a
+latest-wins protocol instead of historical-version retrieval. A ding's Rip hash
+is a change and deduplication hint: when the browser does not already hold that
+hash, it fetches the current file without using an HTTP-cached response,
+computes the Rip hash of the bytes actually received, and applies that
+representation. If the file advanced again before the fetch, receiving the
+newer bytes is correct; a later matching ding is ignored. Janus serves the
+latest file normally and does not compute or compare Rip hashes.
 
 ### App navigation
 
@@ -298,7 +378,7 @@ manager + App + static/generated files
 ```
 
 There are no API workers. The manager maintains registration, generated
-files, development dings when enabled, and heartbeats; Caddy and Janus serve
+files, watch dings when enabled, and heartbeats; Caddy and Janus serve
 every public request.
 
 ## Ownership Rule
@@ -309,3 +389,197 @@ The complete architecture reduces to four owners:
 - **Workers execute dynamic API code.**
 - **Janus admits, routes, coordinates, and serves registered files.**
 - **Caddy owns the network, HTTP, and TLS.**
+
+## URL-Addressable Resources and Cache Policy
+
+Cache policy follows a resource's semantics, not whether watching is enabled.
+Watching controls observation, generation, and dings. It does not redefine the
+meaning of a URL.
+
+Three mechanisms have separate jobs:
+
+- A **changed URL** makes the browser address a different cache entry and is
+  the reliable way to trigger browser-owned resources such as stylesheets and
+  images.
+- `Cache-Control: no-cache` permits storage but requires validation with the
+  server before a stored response may be reused. A matching Janus ETag allows
+  an efficient `304 Not Modified`.
+- `Cache-Control: no-store` forbids storage. A programmatic
+  `fetch(url, { cache: "no-store" })` also bypasses the browser's existing HTTP
+  cache for that request.
+
+The directive's side matters:
+
+- On a **request**, `no-cache` asks every cache to validate before answering.
+  Fetch's `cache: "no-store"` mode bypasses existing cache entries and does not
+  store the new response.
+- On a **response**, `no-cache` allows caches to retain the response but
+  requires validation before reuse; `no-store` tells them not to retain it.
+- A response directive cannot cause an idle page to make a request. Dings,
+  application state, navigation, or a changed resource URL do that.
+
+### 1. Immutable versioned assets
+
+Examples are `/company-logo-a83f92.svg`, `/rip-4.2.0.min.js`, and a font whose
+filename contains its content identity. The URL's bytes never change:
+
+```text
+Cache-Control: public, max-age=31536000, immutable
+```
+
+Janus serves the file directly. A changed asset receives a new URL.
+
+### 2. Mutable ordinary static files
+
+Examples are `/company-logo.svg`, `/build-state.svg`, and
+`/download/current.pdf`. Their bytes may change at a stable URL, but no live
+App protocol owns them:
+
+```text
+Cache-Control: no-cache
+ETag: W/"mtime-size"
+```
+
+Janus revalidates them when requested. An already-open page is not notified.
+If a build-state image must change immediately, application code must change
+its URL or trigger a reload.
+
+### 3. Generated coordination files
+
+`/bundle.json` and `/manifest.json` have stable URLs and manager-controlled
+contents:
+
+```text
+Cache-Control: no-cache
+ETag: W/"mtime-size"
+```
+
+The manager serializes deterministically, does not rewrite identical bytes,
+atomically replaces changed files, lands the bundle before the manifest, and
+dings only after publication. Janus's ETag then makes unchanged revalidation
+cheap. This policy remains the same when watching is disabled.
+
+### 4. Live Rip source
+
+Files such as `/app/routes/home.rip` are latest-wins App bag members. A browser
+whose current hash differs from a ding fetches the file with
+`cache: "no-store"`, computes `rash` from the bytes actually received, and
+applies that hash and source. The Workspace is already the useful source cache,
+so a second HTTP cache adds no value.
+
+`rash(bytes)` is the Rip hash: SHA-256 over the exact content, encoded as the
+first six unpadded Base64URL characters with `-` folded into `_`. The public
+manifest and ding field is `hash`; `rash` is the internal helper name.
+
+### 5. Live CSS
+
+The feed fetches the latest CSS source, computes its actual Rip hash, and
+changes the page's existing stylesheet link:
+
+```text
+/styles.css?hash=ABC123
+```
+
+The changed URL forces a stylesheet request. The stylesheet may use:
+
+```text
+Cache-Control: no-cache
+ETag: W/"mtime-size"
+```
+
+This retains useful cached CSS while requiring revalidation before reuse. The
+query hash is a reload trigger, not a promise that Janus retains historical
+bytes. If a request triggered by one ding receives a newer stylesheet, that is
+the desired latest-wins result.
+
+### 6. HTML shell and HTML bag files
+
+The top-level shell uses `Cache-Control: no-cache`, so every navigation
+validates it. An HTML bag ding currently produces the `reload` verdict because
+a changed file path and hash do not identify a DOM owner, target, or swap
+operation. HTMX can replace a fragment because the initiating request carries
+that context; a filesystem ding does not. A future fragment registration
+contract may add targeted HTML absorption without changing this safe default.
+
+### 7. Images, fonts, video, and other referenced assets
+
+These files are outside the default `app/**/*.{rip,css,html}` bag and therefore
+receive no ding. Choose one policy:
+
+- Content-versioned URL and `immutable` for bytes that never change at that
+  URL.
+- Stable URL with `no-cache` and Janus ETag for ordinary mutable files.
+- Changed URL such as `/badge.svg?hash=ABC123` when an open App must fetch a
+  new representation.
+- A full reload when the application cannot target the affected reference.
+
+A stylesheet's query string does not propagate into `url(...)` references.
+Changing `/styles.css?hash=ABC123` does not change
+`url("/images/background.png")`. A mutable embedded asset therefore needs its
+own changed URL, must revalidate at a stable URL, or must be covered by a
+reload.
+
+Query and pathname versions are different URLs, not aliases in HTTP caches:
+
+```text
+/app/video/intro.mp4?hash=AB31
+/app/video/intro-AB31.mp4
+```
+
+The query form can map to one stable disk path and is convenient for
+latest-wins cache busting. The pathname form needs a matching file or rewrite
+rule and is preferable for truly immutable assets because CDNs and caches
+universally treat the changed path as a new resource.
+
+Rip does not rewrite URLs embedded in CSS or string URLs embedded in Rip
+source, and CSS does not enter `bundle.json`. Rewriting those references would
+be a separate asset-build system. Applications instead use versioned asset
+URLs, ordinary revalidation, or reload semantics.
+
+### 8. Dynamic API responses
+
+API responses are not file resources. Workers own their cache semantics. The
+safe default is `Cache-Control: no-store`; an application may opt into caching
+explicitly through `@cache`.
+
+### 9. Hub and private control connections
+
+Hub WebSockets are not HTTP response-cache resources. Doorbell and manager
+control sockets are private Unix sockets and have no public cache policy.
+
+### Summary
+
+```text
+Immutable versioned asset       → immutable
+Mutable ordinary static file    → no-cache + Janus ETag
+Bundle/manifest                 → no-cache + Janus ETag
+Live Rip source                 → no-store
+Live CSS                        → changed URL + no-cache + Janus ETag
+HTML shell                      → no-cache
+Mutable live image/media        → changed URL, targeted state update, or reload
+API response                    → no-store unless the app explicitly caches
+```
+
+This preserves buttery delivery:
+
+1. `.rip` updates fetch and apply the latest source.
+2. CSS changes force a new stylesheet request.
+3. Generated bundle/manifest revalidate efficiently.
+4. Images update when their URL changes.
+5. Ordinary static files remain Janus's responsibility.
+6. Cache behavior remains stable regardless of watch state.
+
+Legend:
+
+1. A ding starts a cache-bypassing source fetch; the browser hashes and applies
+   the bytes it actually receives, so rapid saves converge to the newest file.
+2. The browser assigns the stylesheet link a URL containing the actual fetched
+   hash; changing `href` makes the browser request and install the stylesheet.
+3. Deterministic compare-before-write generation keeps the Janus ETag stable
+   for identical bytes, while `no-cache` permits cheap `304` validation.
+4. Browser caches key resources by URL, so changing an image or media URL
+   creates a new lookup; changing disk bytes alone does not notify an open page.
+5. Caddy and Janus continue to perform all public file lookup, validation,
+   range handling, and byte delivery; the manager only observes and coordinates.
+6. Policies are assigned by immutable, mutable, generated, live-source, HTML,
+   and API semantics. Watch state changes activity, not cache meaning.
