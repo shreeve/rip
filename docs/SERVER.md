@@ -291,6 +291,16 @@ multi-file migration run in which earlier files committed before a later file
 failed. The old API is no longer assumed compatible with the database; the
 server stays in maintenance and is fixed forward.
 
+The manager fsyncs an operation journal before cutting admission. Candidate
+API/App generations are immutable under `.rip/generations`, and coordinated
+migration writes a database-side outcome marker. A missing child report,
+process death, commit-ack ambiguity, or marker failure is `unknown`, never
+“nothing changed.” Startup with an unresolved journal registers and heartbeats
+in Maintenance with `upstreams: []`; `rip server recover <operation-id>`
+activates the durable candidate only after the operator fixes forward.
+Migration mutation IDs make retries idempotent while the manager remains
+running.
+
 ## Request Flow
 
 Every public request enters the shared edge:

@@ -1,22 +1,23 @@
 # ==============================================================================
-# The workspace feed — the hub subscriber half of the door (@rip-lang/app)
-#
-# connectFeed(workspace, opts) opens the app's Janus hub socket and turns
-# ding events into passport mutations: a ding carries { id, etag }
-# (Q2/Q8′ — never bodies over the hub; never a rev), file bytes ride
-# HTTP at /app/…?etag=E (latest representation, 200 or 409), and
-# workspace.set applies them. Staleness is etag equality: already holding
-# that generation skips the network. A superseded etag answers 409 with
-# the current ETag (never a silent stale body); the feed refetches once
-# at the current generation. A module fetch that misses resyncs from the
-# manifest. Dev/watch only by constitution: production has no hub, and a
-# sealed workspace rejects the feed at the door.
+# Workspace feed — hash hints over Hub, latest bytes over HTTP
 # ==============================================================================
+
+import { rash } from './rash.rip'
 
 export type Feed =
   close: () => void
   connected: () => boolean
   resync: () => Promise<void>
+
+export type ConnectFeedOpts =
+  hub?: string
+  makeSocket?: (url: string) => any
+  fetch?: (url: string, opts?: Record<string, unknown>) => Promise<any>
+  moduleUrl?: (id: string) => string
+  manifestUrl?: string
+  report?: (...args: any[]) => void
+  onEpoch?: (ding: Record<string, unknown>) => void
+  backoff?: { min?: number, max?: number }
 
 FEED_BACKOFF_MIN = 250
 FEED_BACKOFF_MAX = 8000
@@ -35,22 +36,12 @@ defaultSocketFactory = ->
 defaultFetch = ->
   if typeof fetch is 'undefined'
     throw new Error 'Rip Workspace: connectFeed needs a fetch (no global fetch)'
-  (url) -> fetch(url)
+  (url, opts) -> fetch(url, opts)
 
-# Store id `app/mood.rip` → `/app/mood.rip?etag=…` (path segments encoded).
-defaultModuleUrl = (id, etag) ->
-  path = '/' + id.split('/').map(encodeURIComponent).join('/')
-  if typeof etag is 'string' and etag isnt '' then "#{path}?etag=#{etag}" else path
+defaultModuleUrl = (id) -> '/' + id.split('/').map(encodeURIComponent).join('/')
+validWireHash = (hash) -> typeof hash is 'string' and /^[A-Za-z0-9_]{6}$/.test(hash)
 
-# Strip optional quotes from an ETag header value.
-etagToken = (raw) ->
-  return null unless typeof raw is 'string' and raw isnt ''
-  m = raw.match(/^"([0-9a-f]{16})"$/)
-  if m? then m[1] else if /^[0-9a-f]{16}$/.test(raw) then raw else null
-
-validWireEtag = (etag) -> typeof etag is 'string' and /^[0-9a-f]{16}$/.test(etag)
-
-export def connectFeed(workspace, opts = {}): Feed
+export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
   unless workspace? and typeof workspace.set is 'function' and typeof workspace.passport is 'function' and typeof workspace.sealed is 'function'
     throw new TypeError 'Rip Workspace: connectFeed expects a workspace'
   if workspace.sealed()
@@ -64,23 +55,10 @@ export def connectFeed(workspace, opts = {}): Feed
   report = opts.report ?? (...args) -> console.error(...args)
   backoffMin = opts.backoff?.min ?? FEED_BACKOFF_MIN
   backoffMax = opts.backoff?.max ?? FEED_BACKOFF_MAX
-  # An epoch ding names a pool swap: the page's code AND its server are
-  # both pre-swap, so the apply policy is the full reload — never the
-  # file path.
   onEpoch = opts.onEpoch ?? (ding) ->
     report "[Rip] workspace feed: a new epoch is live (#{ding.epoch}) — reloading"
     location.reload() if typeof location isnt 'undefined'
     return
-
-  # Fetch file bytes for a wanted etag. A 409 means the generation was
-  # superseded — refetch once at the current ETag from the response.
-  fetchModule = (id, etag) ->
-    res = fetchBytes! moduleUrl(id, etag)
-    if res.status is 409
-      next = etagToken(res.headers?.get?('etag') or res.headers?.get?('ETag'))
-      return res unless next? and next isnt etag
-      return fetchBytes! moduleUrl(id, next)
-    res
 
   closed = false
   isOpen = false
@@ -89,12 +67,38 @@ export def connectFeed(workspace, opts = {}): Feed
   timer = null
   resyncTimer = null
   resyncAttempts = 0
-  wants = {}       # id → { etag, sig }: dinged generation not yet applied
+  wants = {}       # id → { hash, sig }: hint not yet healed
+  owners = {}      # id → request/apply owner token
+
+  claim = (id) ->
+    owners[id] = (owners[id] or 0) + 1
+    workspace.claim?(id, owners[id])
+    owners[id]
+
+  owns = (id, owner) -> owners[id] is owner and not closed
+
+  fetchLatest = (id, owner) ->
+    res = fetchBytes! moduleUrl(id), { cache: 'no-store' }
+    return { res } unless res.ok
+    bytes = new Uint8Array(res.arrayBuffer!())
+    return null unless owns(id, owner)
+    { res, hash: rash(bytes), source: new TextDecoder().decode(bytes) }
+
+  applyLatest = (id, owner) ->
+    result = fetchLatest! id, owner
+    return { stale: true } unless result? and owns(id, owner)
+    return { status: result?.res?.status, ok: false } unless result.res.ok
+    current = workspace.passport id
+    passport: any = { id, hash: result.hash, source: result.source, owner }
+    passport.path = id unless current?
+    applied = workspace.set! passport
+    delete wants[id] if owns(id, owner)
+    { ok: true, hash: result.hash, applied }
 
   wantsSatisfied = ->
     for id, want of wants
       current = workspace.passport id
-      delete wants[id] if current? and current.etag is want.etag
+      delete wants[id] if current? and current.hash is want.hash
     Object.keys(wants).length is 0
 
   scheduleResync = ->
@@ -107,15 +111,10 @@ export def connectFeed(workspace, opts = {}): Feed
     ), delay
     return
 
-  # Reconciliation is additive-and-forward only: the manifest advances
-  # what it names and never deletes — the bag legally holds passports the
-  # server feed does not own (an editor's local mints). Deletions ride
-  # dings alone. A resync that could not fully reconcile schedules its
-  # own retry with backoff; a clean one clears the cursor. A structurally
-  # malformed manifest is a server bug, reported and never retried into.
+  # Additive-and-forward: manifests never delete local/editor passports.
   resync = ->
     clean = true
-    res = fetchBytes! manifestUrl
+    res = fetchBytes! manifestUrl, { cache: 'no-cache' }
     unless res.ok
       report "[Rip] workspace feed: manifest fetch failed (#{res.status})"
       scheduleResync()
@@ -127,45 +126,41 @@ export def connectFeed(workspace, opts = {}): Feed
       return
     named = new Set()
     for entry in files
-      etag = entry?.etag ?? entry?.hash
-      unless entry? and typeof entry.id is 'string' and validWireEtag(etag)
+      unless entry? and typeof entry.id is 'string' and validWireHash(entry.hash)
         report '[Rip] workspace feed: malformed manifest entry:', entry
+        clean = false
         continue
       named.add entry.id
       current = workspace.passport entry.id
-      if current? and current.etag is etag
-        continue
-      cres = fetchModule! entry.id, etag
-      unless cres.ok
-        report "[Rip] workspace feed: module fetch missed (#{cres.status}) for '#{entry.id}' during resync"
+      continue if current? and current.hash is entry.hash
+      owner = claim entry.id
+      result = applyLatest! entry.id, owner
+      unless result?.ok or result?.stale
+        report "[Rip] workspace feed: module fetch missed (#{result?.status}) for '#{entry.id}' during resync"
+        wants[entry.id] = { hash: entry.hash, sig: null }
         clean = false
-        continue
-      source = cres.text!()
-      applied = etagToken(cres.headers?.get?('etag') or cres.headers?.get?('ETag')) or etag
-      passport = { id: entry.id, etag: applied, source }
-      passport.path = entry.id unless current?
-      workspace.set! passport
-    # A want the manifest walk left unsatisfied retries the ding's OWN
-    # etag URL. Retirement needs EVIDENCE: a want that a moved manifest
-    # still does not name was retired upstream — nothing will ever
-    # satisfy it. An unchanged manifest proves nothing either way.
+
     sig = JSON.stringify files
     for id of { ...wants }
       want = wants[id]
       current = workspace.passport id
-      continue if current? and current.etag is want.etag
-      cres = fetchModule! id, want.etag
-      if cres.ok
-        source = cres.text!()
-        applied = etagToken(cres.headers?.get?('etag') or cres.headers?.get?('ETag')) or want.etag
-        passport = { id, etag: applied, source }
-        passport.path = id unless current?
-        workspace.set! passport
-      else if not named.has(id)
+      if current? and current.hash is want.hash
+        delete wants[id]
+        continue
+      # A successful latest fetch satisfies the want even when the hint was
+      # already superseded. Missing paths need two distinct manifest views
+      # before retirement is inferred.
+      owner = claim id
+      result = applyLatest! id, owner
+      if result?.ok
+        delete wants[id]
+      else if not result?.stale and not named.has(id)
         if want.sig? and want.sig isnt sig
           delete wants[id] if wants[id] is want
         else
           want.sig = sig
+      else unless result?.stale
+        clean = false
     if clean and wantsSatisfied()
       resyncAttempts = 0
     else
@@ -179,32 +174,23 @@ export def connectFeed(workspace, opts = {}): Feed
     unless ding? and typeof ding is 'object' and typeof ding.id is 'string'
       report '[Rip] workspace feed: malformed ding:', ding
       return
-    { id, kind } = ding
-    etag = ding.etag ?? ding.hash
-    if kind is 'delete'
-      unless validWireEtag(etag)
-        report '[Rip] workspace feed: malformed delete ding:', ding
-        return
-      delete wants[id]
-      workspace.set { id, etag, deleted: true }
+    { id, kind, hash } = ding
+    unless validWireHash(hash)
+      report "[Rip] workspace feed: malformed #{if kind is 'delete' then 'delete ' else ''}ding:", ding
       return
-    unless validWireEtag(etag)
-      report '[Rip] workspace feed: malformed ding:', ding
+    if kind is 'delete'
+      claim id
+      delete wants[id]
+      workspace.set { id, hash, deleted: true, owner: owners[id] }
       return
     current = workspace.passport id
-    if current? and current.etag is etag
-      return
-    res = fetchModule! id, etag
-    unless res.ok
-      report "[Rip] workspace feed: module fetch missed (#{res.status}) for '#{id}' — resyncing from the manifest"
-      wants[id] = { etag, sig: null }
-      resync!()
-      return
-    source = res.text!()
-    applied = etagToken(res.headers?.get?('etag') or res.headers?.get?('ETag')) or etag
-    passport = { id, etag: applied, source }
-    passport.path = id unless workspace.passport(id)?
-    workspace.set passport
+    return if current? and current.hash is hash
+    owner = claim id
+    result = applyLatest! id, owner
+    return if result?.stale or result?.ok
+    report "[Rip] workspace feed: module fetch missed (#{result?.status}) for '#{id}' — resyncing from the manifest"
+    wants[id] = { hash, sig: null }
+    resync!()
     return
 
   handleFrame = (text) ->
@@ -217,8 +203,7 @@ export def connectFeed(workspace, opts = {}): Feed
     objects = if Array.isArray(frame) then frame else [frame]
     for obj in objects
       continue unless obj? and typeof obj is 'object' and obj.ding isnt undefined
-      applyDing(obj.ding).catch (error) ->
-        report '[Rip] workspace feed: ding apply failed:', error
+      applyDing(obj.ding).catch (error) -> report '[Rip] workspace feed: ding apply failed:', error
     return
 
   schedule = ->
@@ -242,8 +227,8 @@ export def connectFeed(workspace, opts = {}): Feed
     socket.onopen = ->
       isOpen = true
       attempts = 0
-      resync().catch (error) ->
-        report '[Rip] workspace feed: resync failed:', error
+      try socket.send(JSON.stringify({ '+': ['/hub'] })) catch error then report '[Rip] workspace feed: self-join failed:', error
+      resync().catch (error) -> report '[Rip] workspace feed: resync failed:', error
       return
     socket.onmessage = (event) ->
       handleFrame String(event.data)
@@ -257,10 +242,11 @@ export def connectFeed(workspace, opts = {}): Feed
 
   connect()
 
-  feed =
+  {
     close: ->
       return if closed
       closed = true
+      owners[id] += 1 for id of owners
       if timer?
         clearTimeout timer
         timer = null
@@ -271,5 +257,4 @@ export def connectFeed(workspace, opts = {}): Feed
       return
     connected: -> isOpen and not closed
     resync: -> resync()
-
-  feed
+  }

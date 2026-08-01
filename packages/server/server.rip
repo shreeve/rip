@@ -842,28 +842,9 @@ export App = (fn) ->
 # fallback answers the boot page for GET requests accepting text/html — an
 # app's own later notFound registration replaces it.
 #
-# Two modes, decided by environment:
-#   worker (RIP_BUNDLE_PATH set) — the manager assembled the bundle before
-#     any worker spawned; the handler re-reads and re-tags it per request
-#     (the manager rewrites the pool's bundle file in place on a
-#     file-feed change; Janus's micro-cache absorbs the read at the edge).
-#   standalone (no RIP_BUNDLE_PATH) — the process runs under the rip loader,
-#     so the compiler is loadable; assemble at call time, failing fast,
-#     and serve the boot-time cached bytes.
-#
-# A WATCHING worker additionally carries the workspace dev feed
-# (docs/WORKSPACE.md Q8′): GET /manifest.json (no-store, read per request),
-# latest module bytes at /app/{store-path-without-app-prefix}?etag=…,
-# and the hub bridge endpoint enrolling dev sockets into the DEV_CHANNEL
-# (/hub — same string as the bridge path). Each surface keys on its
-# manager-provided environment — the manager sets the feed envs only
-# with watch on (production has no hub, Q2), and standalone mode has
-# no manager, so none of them register there.
-
-# The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
-# manager.rip (workers never import manager code). Exported so the mirror
-# is a pinned fact, not a convention. Same spelling as the bridge path.
-export DEV_CHANNEL = '/hub'
+# The standalone process runs under the Rip loader, so the compiler is
+# available to assemble the App at call time. Managed pooled workers set
+# RIP_API_ONLY and return before registering any App routes.
 
 # Standalone assemble is Rip-only. CSS under app/ is a watch-door concern
 # (manager syncFiles + browser soft-apply); it must never reach compile.
@@ -904,129 +885,52 @@ BOOT_PAGE = (workspace, title) -> """
 """
 
 export client = (dir = null) ->
-  bundleText = null
-  clientDir = null
-  runtimePath = null
-
-  if process.env.RIP_BUNDLE_PATH?
-    bundleText = readFileSync(process.env.RIP_BUNDLE_PATH, 'utf8')
-    runtimePath = process.env.RIP_BROWSER_RUNTIME
-    clientDir = process.env.RIP_CLIENT_DIR or null
-  else
-    clientDir = resolve(dir ?? 'app')
-    unless existsSync(clientDir)
-      throw new Error "client() found no app directory at #{clientDir}"
-    preload = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
-    unless preload?
-      throw new Error "client() cannot assemble the bundle: the rip loader is missing from execArgv — serving a browser app standalone requires running via `rip`"
-    srcDir = dirname(resolve(preload))
-    packagesDir = join(srcDir, '..', 'packages')
-    unless existsSync(packagesDir)
-      throw new Error "client() cannot assemble the bundle: no packages directory at #{packagesDir}"
-    runtimePath = join(srcDir, '..', 'dist', 'browser', 'rip.js')
-    unless existsSync(runtimePath)
-      throw new Error "client() cannot serve the browser runtime: nothing at #{runtimePath}"
-    # The specifier is a computed variable ON PURPOSE: worker artifacts are
-    # produced by Bun.build over this module, and a static (or statically
-    # analyzable) import here would drag the compiler into every worker,
-    # destroying the no-compiler-in-workers memory story. A variable
-    # specifier defeats the bundler's static analysis.
-    bundleModule = join(srcDir, 'bundle.js')
-    { assembleBundle } = import!(bundleModule)
-    { modules, moduleFiles, appDir } = clientModules(clientDir)
-    bundleText = JSON.stringify assembleBundle { modules, moduleFiles, appDir, packagesDir }
+  # Pooled workers are API-only. Janus serves the App, generated
+  # coordination files, runtime, static assets, shell, and Hub directly.
+  return if process.env.RIP_API_ONLY is '1'
+  clientDir = resolve(dir ?? 'app')
+  unless existsSync(clientDir)
+    throw new Error "client() found no app directory at #{clientDir}"
+  preload = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
+  unless preload?
+    throw new Error "client() cannot assemble the bundle: the rip loader is missing from execArgv — serving a browser app standalone requires running via `rip`"
+  srcDir = dirname(resolve(preload))
+  packagesDir = join(srcDir, '..', 'packages')
+  unless existsSync(packagesDir)
+    throw new Error "client() cannot assemble the bundle: no packages directory at #{packagesDir}"
+  runtimePath = join(srcDir, '..', 'dist', 'browser', 'rip.js')
+  unless existsSync(runtimePath)
+    throw new Error "client() cannot serve the browser runtime: nothing at #{runtimePath}"
+  # The specifier is a computed variable ON PURPOSE: importing this module
+  # statically would pull the compiler into the standalone server runtime.
+  bundleModule = join(srcDir, 'bundle.js')
+  { assembleBundle } = import!(bundleModule)
+  { modules, moduleFiles, appDir } = clientModules(clientDir)
+  bundleText = JSON.stringify assembleBundle { modules, moduleFiles, appDir, packagesDir }
 
   etag = "\"#{Bun.hash(bundleText).toString(16)}\""
   indexHtml = if clientDir? then join(clientDir, 'index.html') else null
   indexHtml = null unless indexHtml? and existsSync(indexHtml)
 
-  # The page opens the door only where the feed surface exists — a
-  # watching worker, where the manager wrote the manifest and files.
-  # Standalone has no manager and no feed routes: a workspace-mode boot
-  # there would die on its manifest fetch, so it boots plain.
-  door = process.env.RIP_MANIFEST_PATH?
-
-  # The page title: the manager's --name in worker mode, the app's
-  # directory name standalone. Escaped — a directory name is filesystem
-  # input, not HTML.
-  title = process.env.RIP_APP_NAME or (if clientDir? then basename(dirname(clientDir)) else 'rip app')
+  # The page title derives from the app directory. Escaped — a directory
+  # name is filesystem input, not HTML.
+  title = basename(dirname(clientDir))
   title = title.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 
   bootPage = (c) ->
     if indexHtml?
       c.send indexHtml, 'text/html; charset=UTF-8'
     else
-      c.html BOOT_PAGE(door, title)
+      c.html BOOT_PAGE(false, title)
 
   get '/', (c) -> bootPage(c)
-  if process.env.RIP_BUNDLE_PATH?
-    # Feed freshness: the manager rewrites this pool's bundle file in
-    # place on a file-feed change, so the handler re-reads and re-tags per
-    # request. With the door open (manifest present) the bundle is
-    # no-store like the manifest — a 1s micro-cache hit can otherwise
-    # pair a live manifest with stale bundle bytes (the silent-stale
-    # class). Standalone / production (no manifest) keeps ETag-only
-    # so the edge cache still earns its keep.
-    get '/bundle.json', (c) ->
-      text = readFileSync(process.env.RIP_BUNDLE_PATH, 'utf8')
-      live = "\"#{Bun.hash(text).toString(16)}\""
-      headers = { 'Content-Type': 'application/json', 'ETag': live }
-      headers['Cache-Control'] = 'no-store' if process.env.RIP_MANIFEST_PATH?
-      if c.req.header('if-none-match') is live
-        return new Response(null, { status: 304, headers })
-      c.body text, 200, headers
-  else
-    get '/bundle.json', (c) ->
-      if c.req.header('if-none-match') is etag
-        return new Response(null, { status: 304, headers: { 'ETag': etag } })
-      c.body bundleText, 200, { 'Content-Type': 'application/json', 'ETag': etag }
-  # Local checkout runtime until a CDN-pinned rip.js lands (Q8′).
+  get '/bundle.json', (c) ->
+    if c.req.header('if-none-match') is etag
+      return new Response(null, { status: 304, headers: { 'ETag': etag } })
+    c.body bundleText, 200, { 'Content-Type': 'application/json', 'ETag': etag }
+  # Local checkout runtime until a CDN-pinned rip.js lands.
   get '/@rip/rip.js', (c) -> c.send runtimePath
 
-  if process.env.RIP_MANIFEST_PATH?
-    get '/manifest.json', (c) ->
-      # Read per request: the manager rewrites the manifest on every file-feed
-      # change, and no-store keeps every cache out of the freshness path.
-      c.body readFileSync(process.env.RIP_MANIFEST_PATH, 'utf8'), 200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
-
-  if process.env.RIP_FILES_DIR?
-    # Q8′ latest-representation door: GET /app/<rel>?etag=E where the
-    # store id is app/<rel> (e.g. /app/mood.rip ↔ app/mood.rip). Exact
-    # etag → 200 + body + ETag; a superseded etag → 409 + current ETag
-    # (never a silent stale body). no-store: freshness is the query
-    # param, not the browser cache. The on-disk name is the percent-
-    # encoded store id — one file per module, overwritten on each save
-    # (no per-rev museum).
-    get '/app/*', (c) ->
-      wanted = c.req.query('etag')
-      unless wanted? and /^[0-9a-f]{16}$/.test(wanted)
-        error 'module URLs require ?etag=<16-hex> (docs/WORKSPACE.md, Q8′)', 400
-      rel = c.req.path.slice('/app/'.length)
-      id = try
-        'app/' + rel.split('/').map((s) -> decodeURIComponent(s)).join('/')
-      catch then error('malformed percent-encoding in module path', 400)
-      file = join(process.env.RIP_FILES_DIR, encodeURIComponent(id))
-      error "unknown module #{id}", 404 unless existsSync(file)
-      bytes = readFileSync(file, 'utf8')
-      current = new Bun.CryptoHasher('sha256').update(bytes).digest('hex').slice(0, 16)
-      headers = { 'Content-Type': 'text/plain; charset=utf-8', 'ETag': "\"#{current}\"", 'Cache-Control': 'no-store' }
-      if wanted isnt current
-        return new Response(null, { status: 409, headers })
-      c.body bytes, 200, headers
-
-  if process.env.RIP_BRIDGE_PATH?
-    # Janus POSTs every hub socket event here; answering an open with
-    # {"+": [DEV_CHANNEL]} enrolls that connection into the dev channel.
-    # Enrollment keys on the feed surface existing: with watch off the
-    # dev channel carries nothing, and an app-level hub socket (a
-    # production-legal use) must not ride it.
-    post process.env.RIP_BRIDGE_PATH, (c) ->
-      frame = c.req.header('sec-websocket-frame')
-      if frame is 'open'
-        return c.json { '+': [DEV_CHANNEL] } if process.env.RIP_MANIFEST_PATH?
-        return new Response(null, { status: 204 })
-      return new Response(null, { status: 204 }) if frame is 'text' or frame is 'close'
-      error "missing or unknown Sec-WebSocket-Frame header (got #{JSON.stringify(frame ?? null)})", 400
   # SPA fallback: an unmatched GET that accepts HTML answers the boot page,
   # so client-side routes deep-link; everything else stays a plain 404.
   # An app keeps its own notFound by registering it AFTER client(); one

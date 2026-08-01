@@ -1,4 +1,4 @@
-# HANDOFF — session launch document (2026-07-30)
+# HANDOFF — session launch document (2026-07-31)
 
 The tracked session launch document (see AGENTS.md, working ledgers):
 read it first when starting a session; rewrite it at session
@@ -11,24 +11,30 @@ boundaries with live-verified facts only.
 
 ## Active branch
 
-**Branch: `server-app-api-architecture`** (from `main` / `01328d5`).
+**Branch: `server-app-api-architecture`** (`60aaae6` before the current
+working tree).
 
-Apply verdicts are **`reload` | `css` | `update` | `ignore`**.
-The app tree is the serve root: the page links its sheet
-(`<link href="/styles.css">`); a CSS ding cache-busts that link
-(`?etag=`). No matching link → inject `<style>`. `*.css` never maps
-to `reload`.
+The Rip Server architecture implementation is present in the working tree:
 
-## Door doctrine
+- compile-only generation validates candidates before API admission cuts;
+- canonical local manager control provides status, hold, release, migrate,
+  and recover;
+- Active, Held, and Maintenance fence API/App activation and durable
+  migration recovery;
+- generated coordination files and authored App files register atomically
+  with Janus, including App-only projects and direct Hub admission;
+- pooled workers are API-only;
+- App delivery is latest-wins with six-character `rash(bytes)` identities,
+  `{id,hash}` update dings, generation-fenced delete dings, and epoch reload
+  dings.
 
-1. Bag = membership (`app/**/*.{rip,css,html}`).
-2. Hub dings `{id,etag}` only.
-3. Client: reload | css | update | ignore.
-4. One path per file the page already uses — no second CSS URL.
+Live verification on this working tree:
 
-## On main
-
-- #194 Probe 1 · #195 cell→file · #196 CSS soft-apply · #197 bag HTML
+- `bun run test:all` — passed (21 lanes).
+- `bun run test` in `packages/server` — passed.
+- `bun run test` in `packages/app` — passed.
+- `bunx playwright test` in `packages/browser-tests` — passed.
+- `./test.sh` in `~/Data/Code/janus` — 159 passed.
 
 ## Working agreements
 

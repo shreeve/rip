@@ -96,10 +96,10 @@ export async function bootApp(opts = {}) {
 
   // Workspace mode fetches the manifest BEFORE the bundle, and the
   // manager writes it AFTER the bundle: the only pairing a boot racing
-  // a save can observe is "manifest rev <= bundle bytes", which the
+  // a save can observe is "manifest hash <= bundle bytes", which the
   // feed's open resync heals forward. The reverse pairing (a manifest
-  // rev over older bundle bytes) would block its own healing on the
-  // bag's rev cursor — the silent-stale class.
+  // hash over older bundle bytes) would block its own healing on the
+  // bag's hash cursor — the silent-stale class.
   const workspaceMode = opts.workspace === true;
   let manifestUrl = null;
   let fetchBytes = null;
@@ -114,7 +114,7 @@ export async function bootApp(opts = {}) {
       );
     }
     fetchBytes = opts.feed?.fetch ?? (url => fetch(url));
-    const res = await fetchBytes(manifestUrl);
+    const res = await fetchBytes(manifestUrl, { cache: 'no-cache' });
     if (!res.ok) {
       throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
     }
@@ -196,9 +196,14 @@ export async function bootApp(opts = {}) {
       // The id IS the store path (B′ — the birth path is the id).
       const source = (bundle.modules ?? {})[entry.id];
       // A manifest file the bundle does not carry is skipped here: the
-      // feed's open resync fetches it by etag.
+      // feed's open resync fetches its latest bytes.
       if (source === undefined) continue;
-      records.push({ id: entry.id, path: entry.id, etag: entry.etag, source });
+      records.push({
+        id: entry.id,
+        path: entry.id,
+        hash: app.rash(new TextEncoder().encode(source)),
+        source,
+      });
     }
     bag.populate(records);
   }
@@ -229,9 +234,9 @@ export async function bootApp(opts = {}) {
 
   // The bag IS the component store (Q7), and the launch bundle carries
   // NO modules key on purpose: launch's load() would rewrite every
-  // passport and desync bag etags from the server's. The bag already
+  // passport and desync bag hashes from the server's. The bag already
   // holds the sources; launch only overlays projections (setCompiled
-  // never changes etag or notifies).
+  // never changes hash or notifies).
   const launchWith = compiledModules => app.launch({
     bundle: { compiled: compiledModules, data: bundle.data },
     components: bag,
@@ -250,7 +255,7 @@ export async function bootApp(opts = {}) {
   // Apply: compile barrier, then createApply → reload | css | update | ignore.
   // Projections rebuild THROUGH the loader; importers invalidate
   // transitively. CSS cache-busts the <link> the page already declared
-  // (?etag=); otherwise injects <style>. HTML reloads.
+  // (?hash=); otherwise injects <style>. HTML reloads.
   let destroyed = false;
   let timer = null;
   let remounting = false;
@@ -272,15 +277,15 @@ export async function bootApp(opts = {}) {
     }
     return null;
   };
-  // Find the page's <link> for this sheet and cache-bust ?etag=.
+  // Find the page's <link> for this sheet and cache-bust ?hash=.
   // No link → <style data-rip-css> (injected-sheet identity only).
-  const applyCssSheet = (id, source, etag) => {
+  const applyCssSheet = (id, source, hash) => {
     if (typeof document === 'undefined' || typeof source !== 'string') return;
     const link = cssLinkFor(id);
-    if (link && typeof etag === 'string' && etag.length > 0) {
+    if (link && typeof hash === 'string' && hash.length > 0) {
       const raw = link.getAttribute('href') || link.href;
       const path = raw.split('?')[0];
-      const next = `${path}?etag=${encodeURIComponent(etag)}`;
+      const next = `${path}?hash=${encodeURIComponent(hash)}`;
       if (link.getAttribute('href') !== next) link.setAttribute('href', next);
       link.disabled = false;
       for (const node of [...document.querySelectorAll('style[data-rip-css]')]) {
@@ -391,26 +396,32 @@ export async function bootApp(opts = {}) {
   });
 
   // Door: Rip passports compile-through; CSS → css; HTML → reload (on
-  // etag advance only — first birth is ignore). S10: compile failure
+  // hash advance only — first birth is ignore). S10: compile failure
   // never sets.
   const door = {
+    owners: new Map(),
+    claim(id, owner) {
+      this.owners.set(id, owner);
+    },
     passport: bag.passport,
     sealed: bag.sealed,
     set: async passport => {
-      // The bag's etag is THE staleness verdict — consult it BEFORE any
+      const owner = passport.owner;
+      if (owner !== undefined && door.owners.get(passport.id) !== owner) return false;
+      // The bag's hash is THE staleness verdict — consult it BEFORE any
       // mutation. Two dings in flight can resolve out of order: the
       // older fetch lands after the newer one applied, and while bag.set
-      // would reject a duplicate etag, the files/loader mutations below
+      // would reject a duplicate hash, the files/loader mutations below
       // would already carry stale bytes into the next remount (the
       // silent-stale class). Same guard for deletes: a replayed stale
       // delete must not evict the loader's file while the bag keeps the
       // passport.
       const known = bag.passport(passport.id);
-      if (known && typeof passport.etag === 'string' && passport.etag === known.etag) {
+      if (known && typeof passport.hash === 'string' && passport.hash === known.hash) {
         if (passport.deleted !== true) return false;
       }
       if (passport.deleted === true) {
-        if (known && typeof passport.etag === 'string' && passport.etag !== known.etag) return false;
+        if (known && typeof passport.hash === 'string' && passport.hash !== known.hash) return false;
         const path = bag.passport(passport.id)?.path;
         if (path !== undefined) {
           if (isCssPath(path)) {
@@ -426,18 +437,18 @@ export async function bootApp(opts = {}) {
       }
       const path = passport.path ?? passport.id;
       if (isCssPath(path)) {
-        const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
+        const applied = bag.set({ id: passport.id, path, hash: passport.hash, source: passport.source });
         if (applied) {
-          applyCssSheet(path, passport.source, passport.etag);
+          applyCssSheet(path, passport.source, passport.hash);
           console.log(`[Rip] applied ${path} — css`);
         }
         return applied;
       }
       if (isHtmlPath(path)) {
         // Birth (first feed resync) only records the passport — the shell
-        // already came from the static page. A later etag advance reloads.
+        // already came from the static page. A later hash advance reloads.
         const had = known != null;
-        const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
+        const applied = bag.set({ id: passport.id, path, hash: passport.hash, source: passport.source });
         if (applied && had) {
           console.log(`[Rip] applied ${path} — reload`);
           if (typeof location !== 'undefined') location.reload();
@@ -450,9 +461,15 @@ export async function bootApp(opts = {}) {
       try {
         module = await loader.import(path);
       } catch (error) {
-        report(`[Rip] ${path} etag ${passport.etag} failed to compile — keeping the last good version`, error);
+        if (owner === undefined || door.owners.get(passport.id) === owner) {
+          if (known) files.set(path, known.source);
+          else files.delete(path);
+          loader.invalidate(path);
+        }
+        report(`[Rip] ${path} hash ${passport.hash} failed to compile — keeping the last good version`, error);
         return false;
       }
+      if (owner !== undefined && door.owners.get(passport.id) !== owner) return false;
       return bag.set({ ...passport, compiled: { ...module } });
     },
   };

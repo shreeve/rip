@@ -18,10 +18,12 @@
     "server.rip",
     "middleware.rip",
     "worker.rip",
+    "generate.rip",
     "manager.rip",
     "README.md"
   ],
   "dependencies": {
+    "@rip-lang/app": "workspace:*",
     "@rip-lang/validate": "workspace:*"
   },
   "devDependencies": {
