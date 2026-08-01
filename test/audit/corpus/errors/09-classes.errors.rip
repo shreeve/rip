@@ -1,4 +1,4 @@
-# 09-classes.errors.rip — intentional negatives, each asserted by the Diagnostics Lane (bun run audit --diagnostics).
+# 09-classes.errors.rip — intentional negatives, each asserted by the Diagnostics Audit (bun run audit --diagnostics).
 # @ts-nocheck
 
 notAClass = 42

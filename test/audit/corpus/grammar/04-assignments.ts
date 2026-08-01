@@ -37,10 +37,12 @@ let reportCarried =
 function(): void { console.log('carried ran') }
 let reportDropped =
   function(): void { console.log('dropped ran') }
+let reportFat = (): void => { console.log('fat ran') }
 
 report()
 reportCarried()
 reportDropped()
+reportFat()
 
 // ── Compound assignment: inline, carried, indented ──
 
@@ -116,7 +118,6 @@ let card = new MediaCard()
 console.log(card.describe())
 
 // ── Index targets: the inline and indented key, slices, and the optional index ──
-// The regex-capture index text[/re/, n] is PARKED: its emission publishes TS2531 on every use, the match operator's root (FINDINGS.md).
 
 let scores = [10, 20, 30, 40]
 let flatKey = scores[1]
@@ -133,6 +134,16 @@ let softTheme = settings?.[
 ]
 
 console.log(flatKey, tallKey, midSlice.length, tallSlice.length, softTheme)
+
+// ── A regex index: the whole match, the nth capture, and the /m spelling ──
+
+let sentence = 'rip 42 lang'
+let wholeMatch = sentence.match(/\d+/)?.[0] ?? null
+let captured = sentence.match(/(\w+) (\d+)/)?.[2] ?? null
+let lines = 'one\ntwo'
+let spanning = lines.match(/^two$/m)?.[0] ?? null
+
+console.log(wholeMatch, captured, spanning)
 
 // ── Pick targets: inline, optional, and both indented lists ──
 

@@ -76,7 +76,10 @@ const awaitsIn = (x) => {
 // member list the renderers consume. Statements that carry no type
 // story (render, effects) skip; anything unrecognized skips rather
 // than guessing (the JS emission is the rejection authority).
-export function componentTypeInfo(stores, source, node) {
+// `behavior` names the face's per-component behavior object, or is
+// null on the road that has none (dts). Every member carries it, so
+// the segment assembly can read a computed's type through the body.
+export function componentTypeInfo(stores, source, node, behavior = null) {
   const [, parent, body] = node;
   const extendsTag = typeof parent === 'string' ? parent : null;
   const stmts = isBlock(body) ? body.slice(1) : [];
@@ -212,9 +215,10 @@ export function componentTypeInfo(stores, source, node) {
   // initializer rooted at another member cannot spell module-scope
   // typeof).
   const siblings = new Set(members.map((m) => m.name));
-  for (const m of members) m.siblings = siblings;
+  for (const m of members) { m.siblings = siblings; m.behavior = behavior; }
   return {
     extendsTag,
+    behavior,
     members,
     roleText,
     // The shared optionality reader, carried on `info` because BOTH
@@ -252,6 +256,60 @@ const containerish = (m) => m.kind === 'state' || m.kind === 'prop';
 // need the ambient-mode symbol and the inline-mode runtime's own
 // symbol to be the SAME type, which no spelling gives — `read` is
 // already on every real container's inferred type in every delivery).
+// The bare parameter NAMES of a type-parameter list, for the self-arguments
+// a generic component's own surface applies (`mount(): Select<TOption>` —
+// constraints stay on the header that declares them). Split at bracket
+// DEPTH ZERO: a constraint or default carries its own commas
+// (`<T extends Record<string, number>>`), and a naive split renders a list
+// that does not parse, which is a worse failure than the unbound name it
+// was meant to fix.
+export const typeParamNames = (typeParams) => {
+  if (!typeParams) return [];
+  const body = typeParams.slice(1, -1);
+  const names = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    // A quoted constraint carries whatever bytes it likes, commas and
+    // brackets included — skip to its close before counting anything.
+    if (c === '"' || c === "'" || c === '`') {
+      for (i++; i < body.length; i++) {
+        if (body[i] === '\\') { i++; continue; }
+        if (body[i] === c) break;
+      }
+      continue;
+    }
+    if (c === '<' || c === '(' || c === '[' || c === '{') depth++;
+    // The `>` of an ARROW closes nothing: a function-type constraint
+    // (`F extends () => void`) would otherwise drive depth negative and
+    // swallow the comma that ends the parameter.
+    else if (c === '>' && body[i - 1] === '=') continue;
+    else if (c === '>' || c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ',' && depth === 0) { names.push(body.slice(start, i)); start = i + 1; }
+  }
+  names.push(body.slice(start));
+  // A variance or const modifier precedes the name it governs.
+  const MODIFIERS = new Set(['const', 'in', 'out']);
+  return names.map((n) => {
+    const words = n.trim().split(/\s+/).filter(Boolean);
+    while (words.length > 1 && MODIFIERS.has(words[0])) words.shift();
+    return words[0] ?? '';
+  }).filter(Boolean);
+};
+
+// The same arity filled with `any` — for a surface that references the
+// component's own type where no parameter is in scope to name.
+export const anyArgsOf = (typeParams) => {
+  const n = typeParamNames(typeParams).length;
+  return n === 0 ? '' : `<${Array(n).fill('any').join(', ')}>`;
+};
+
+// The self-reference arguments for a generic surface — `<A, B>` — or ''.
+export const selfArgsOf = (typeParams) => {
+  const names = typeParamNames(typeParams);
+  return names.length === 0 ? '' : `<${names.join(', ')}>`;
+};
+
 export const containerType = (t, ro = '') => `{ ${ro}value: ${t}; read(): ${t} }`;
 
 // The member's INSTANCE type as segments (`declare name: …` bodies,
@@ -326,12 +384,40 @@ const typeofSpelling = (v) => {
   return null;
 };
 
+// Does the face declare this member as the lowering's CONTAINER rather
+// than as its value? Only these have a container for a declaration
+// hover to see past — a `=!` or plain member's declared type IS its
+// value type (`declare readonly cap: number`), and a member whose
+// annotation happens to spell the container shape by hand meant it.
+export const declaresContainer = (m) =>
+  containerish(m) || m.kind === 'computed' || m.kind === 'gate';
+
+// Does this member's face type read through the lowering's behavior
+// object? The projection below is the one member type spelled from a
+// MINTED name, which the editor cannot present in the author's
+// vocabulary — so the two places that care read one predicate.
+export const isBehaviorProjected = (m) =>
+  m.kind === 'computed' && m.annotation == null && Boolean(m.behavior);
+
 const memberTypeSegments = (m, lead) => {
+  // An unannotated computed reads its type from the BODY, through the
+  // face's behavior object (the emitter emits one per named component,
+  // carrying the same compiled bodies `_init` does). The form table
+  // below cannot do this: it reads the initializer's SHAPE, so `count
+  // * 2` types number and `words.length` types any. An author's own
+  // annotation still wins — it is a declaration, not a guess.
+  //
+  // `m.behavior` is absent on the dts road, which has no module-local
+  // value to name and keeps the form table (the schema-callable
+  // precedent: derivation reaches this checker, not consumers).
+  if (isBehaviorProjected(m)) {
+    const rt = `ReturnType<typeof ${m.behavior}.${m.name}>`;
+    return [{ text: `${lead}{ readonly value: ${rt}; read(): ${rt} }` }];
+  }
   // The typeof spelling resolves at MODULE scope (the declare row sits
   // on the class) — an initializer rooted at a SIBLING member
   // (`bad1 ~= store.itms`) must not spell it (this.store is not in
-  // scope there); those members keep any and their checking happens on
-  // the _init assignment line instead (the generic runtime types it).
+  // scope there); those members keep any.
   const rootOf = (v) => (typeof v === 'string' ? v
     : Array.isArray(v) && v[0] === '.' && v.length === 3 ? rootOf(v[1]) : null);
   const siblingRooted = m.siblings !== undefined &&
@@ -362,14 +448,53 @@ const memberTypeSegments = (m, lead) => {
 // One face `declare` line for a non-callable member (methods and
 // hooks are REAL class methods — their annotations ride the shared
 // param/return machinery).
-export const memberDeclareSegments = (m) => [
-  // A `=!` member is a CONST value: readonly on the declare, so
-  // instance writes draw TS2540.
-  { text: m.kind === 'readonly' ? 'declare readonly ' : 'declare ' },
-  { text: m.name, node: m.nameNode, role: m.nameRole },
-  ...memberTypeSegments(m, ': '),
-  { text: ';' },
-];
+export const memberDeclareSegments = (m) => {
+  // An unannotated computed takes an INFERRED position rather than a
+  // `declare` carrying a type node. TypeScript's quickinfo echoes a
+  // written type node VERBATIM — driven against tsgo, both
+  // `ReturnType<typeof f>` and an inlined conditional print exactly as
+  // spelled, resolved neither time — so no projection can be written that
+  // does not read as machinery, and no server-side rewrite reaches past
+  // it. A declaration with no type node has nothing to echo, so
+  // TypeScript prints the RESOLVED type instead.
+  //
+  // The initializer reuses the behavior object the face already carries,
+  // which holds the same compiled body `_init` assigns, so nothing is
+  // computed twice and the two cannot drift. At a field initializer
+  // `this` is the class, which is the position v3 reaches by
+  // construction (its shadow emits the computed as a field with its
+  // initializer). TS-only: the region strips, and `_init`'s assignment
+  // remains the only one the shipped JS carries.
+  if (isBehaviorProjected(m)) return [
+    { text: m.name, node: m.nameNode, role: m.nameRole },
+    // `this as any` is not sloppiness — it breaks a real circularity. The
+    // behavior function declares `this: <Component>`, and the member being
+    // initialized is PART of that component's type, so checking the
+    // argument's assignability means resolving the class while this field
+    // is still being inferred (driven: TS2345, `'this' is not assignable to
+    // parameter of type 'Badge'`). The cast costs nothing that matters: the
+    // return type comes from the function's own signature, not from the
+    // argument, so the member still infers its resolved value type. v3
+    // avoids the circularity differently, by inlining the body so `this` is
+    // only ever a receiver and never an argument.
+    { text: ` = __computed(() => ${m.behavior}.${m.name}.call(this as any));` },
+  ];
+  return [
+    // A `=!` member is a CONST value: readonly on the declare, so
+    // instance writes draw TS2540.
+    { text: m.kind === 'readonly' ? 'declare readonly ' : 'declare ' },
+    { text: m.name, node: m.nameNode, role: m.nameRole },
+    ...memberTypeSegments(m, ': '),
+    { text: ';' },
+  ];
+};
+
+// The `=!` seam's this-cast type: one MUTABLE member carrying the
+// declared type the class states readonly. `_init` is the lowering's
+// constructor seam, so its one legitimate readonly write has to quiet
+// TS2540 — through a cast that keeps the member's type, so the value
+// still checks against it.
+export const readonlyCastType = (m) => `{ ${m.name}${segmentsText(memberTypeSegments(m, ': '))} }`;
 
 export const isDeclarableMember = (m) => m.kind !== 'method' && m.kind !== 'hook';
 

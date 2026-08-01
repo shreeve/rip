@@ -21,7 +21,7 @@ A carrier is `fixture:symbol` — the fixture file and a symbol the gate verifie
 | a destructured binding types through the pin pass — the same hoisted read, bound by a pattern rather than assigned | ABSENT | ABSENT |
 | destructured bindings carry their source property's type, enforced at use | 20-inference.rip:introduceAll | 20-inference.errors.rip:wrongDestructured |
 | a write-only binding hovers its value type, never `any` | 01-basics.rip:recorded | — |
-| call arity survives paren injection — the implicit spelling is checked like the explicit one | 02-operations.rip:quiet | ABSENT |
+| call arity survives paren injection — the implicit spelling is checked like the explicit one | 02-operations.rip:quiet | 02-operations.errors.rip:wrongArityBare |
 
 ### Checker behaviors
 
@@ -72,15 +72,15 @@ What that costs is FALSIFIABILITY, not coverage. 10-modules.rip imports across e
 
 | behavior | carrier | negative carrier |
 | --- | --- | --- |
-| member-kind faces reached through an instance: `=!` rejects writes, `:=` exposes `.value`, `~=` computes, `=` stays plain | ABSENT | ABSENT |
+| member-kind faces reached through an instance: `=!` rejects writes, `:=` exposes `.value`, `~=` computes, `=` stays plain | 25-components.rip:meterWidth | 25-components.errors.rip:Gauge |
 | method faces: typed parameters keep their types in both member layouts (inline body and indented body), defaulted parameters become optional | 25-components.rip:tallied | 25-components.errors.rip:wrongStep |
 | `component extends <tag>` forwards use-site intrinsics typed from the element | 25-components.rip:Prompt | 25-components.errors.rip:Swatch |
 | a literal-union prop keeps its union at the use site rather than widening to its base type | 25-components.rip:Ribbon | 25-components.errors.rip:Tint |
 | a generic component's constraint violation rejects at the use site | 25-components.rip:Palette | 25-components.errors.rip:Palettes |
 | ref-cell nullability: a non-nullable cell rejects, an Element-or-null cell accepts any tag | 25-components.rip:Anchors | 25-components.errors.rip:Shell |
 | a render-head typo beyond `if` (unless, switch, for, `=`) rejects at the head line | ABSENT | ABSENT |
-| a wrong-typed write to component state inside a method rejects, while the legal write types | ABSENT | ABSENT |
-| array-typed reactive state keeps its ELEMENT type through the cell — `string[] := [...]` rejects a number element and types a read | ABSENT | ABSENT |
+| a wrong-typed write to component state inside a method rejects, while the legal write types | 25-components.rip:Ledger | 25-components.errors.rip:Books |
+| array-typed reactive state keeps its ELEMENT type through the cell — `string[] := [...]` rejects a number element and types a read | 25-components.rip:ledgerHead | 25-components.errors.rip:Books |
 | a forwarded element ref — a child `ref:` into a `<=>` bound parent cell — checks end to end | 25-components.rip:Cuff | 25-components.errors.rip:Liner |
 
 ### Schema
@@ -100,12 +100,8 @@ The park expires in one direction: the row becomes CARRIED. The gate paints red 
 
 | behavior | until |
 | --- | --- |
-| call arity survives paren injection — the implicit spelling is checked like the explicit one | the open paren-injected-arity finding closes (FINDINGS.md) — the code survives injection but the position lands on the first argument, so the negative cannot assert both |
 | a destructured binding types through the pin pass — the same hoisted read, bound by a pattern rather than assigned | the open destructured-hoisting finding closes (FINDINGS.md) — the pin pass reaches a plainly-assigned binding but not one bound by a pattern, so the shape is implicitly `any` under strict |
-| member-kind faces reached through an instance: `=!` rejects writes, `:=` exposes `.value`, `~=` computes, `=` stays plain | the open computed-member-type finding closes (FINDINGS.md) — `=!`, `:=` and `=` all hold, but a `~=` member's declared type comes from its body's FORM, so a bare-read computed types `any` and accepts any annotation; a fixture would go green on three kinds and prove nothing about the fourth |
-| a render-head typo beyond `if` (unless, switch, for, `=`) rejects at the head line | the identifier-read span finding closes (FINDINGS.md) — every head publishes TS2304 on the right line, but the column is the construct's cover start rather than the name, and the Diagnostics Lane asserts both, so pinning it would certify the mis-position |
-| a wrong-typed write to component state inside a method rejects, while the legal write types | the untyped-runtime-destructure finding closes (FINDINGS.md) — the method body IS checked, but no wrong write to a member publishes at all, so the row's own subject is dark |
-| array-typed reactive state keeps its ELEMENT type through the cell — `string[] := [...]` rejects a number element and types a read | the untyped-runtime-destructure finding closes (FINDINGS.md) — the read half holds and types the element, but the wrong-element initializer publishes nothing, so the row has no negative to name |
+| a render-head typo beyond `if` (unless, switch, for, `=`) rejects at the head line | **nothing — the park has expired and the row is authorable.** It waited on the identifier-read span, which has landed: driven over `unless` and `if` heads, TS2304 now underlines the NAME (`unless mistyped` reports at the `m`, not at the construct's cover start), which is the position the Diagnostics Audit asserts alongside the code. Carrying it is corpus work in the error lane, not a blocked claim |
 
 ## Containment
 

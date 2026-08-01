@@ -57,7 +57,7 @@ let vendor = VendorSchema.parse({ Id: 'V-9', DisplayName: 'Acme Corp' })
 
 console.log(`vendor: ${vendor.id} ${vendor.displayName}`)
 
-// ── The callable surface: eager transform for the derived field; the lazy getter and the method are parity-only spellings. No `.refine()` — the fixture cannot carry `@ensure` under strict (the callable-unknown finding) ──
+// ── The callable surface: eager transform for the derived field; the lazy getter and the method are parity-only spellings, and `.refine()` is the @ensure analogue ──
 
 const CartSchema = z.object({
   items: z.number().array(),
@@ -67,14 +67,16 @@ const CartSchema = z.object({
   return {
     ...c,
     subtotal,
-    total: c.items.reduce((a, b) => a + b, 0) * (1 + c.taxRate),
+    total: subtotal * (1 + c.taxRate),
     describe: () => `${c.items.length} items`,
   }
-})
+}).refine((c) => c.items.length > 0, { message: 'a cart needs items' })
 
 let cart = CartSchema.parse({ items: [700, 550], taxRate: 0.1 })
+const cartTotal: number = cart.total
+const cartLabel: string = cart.describe()
 
-console.log(`cart: ${cart.subtotal} ${cart.total} ${cart.describe()}`)
+console.log(`cart: ${cart.subtotal} ${cartTotal} ${cartLabel}`)
 
 // ── :enum ──
 

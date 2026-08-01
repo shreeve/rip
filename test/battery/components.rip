@@ -1440,6 +1440,40 @@ code 'svg element with children', '''
   };
   '''
 
+code 'svg static class: attribute closes its setAttribute call', '''
+  export A = component
+    render
+      svg class: 'animate-spin'
+  ''', '''
+  export const A = class extends __Component {
+    _init(props) {
+    }
+    _create() {
+      this._el0 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.setAttribute('class', "animate-spin");
+      return this._el0;
+    }
+  };
+  '''
+
+code 'svg static class: array closes both __clsx and setAttribute', '''
+  export A = component
+    render
+      svg class: ['icon', 'spin']
+  ''', '''
+  export const A = class extends __Component {
+    _init(props) {
+    }
+    _create() {
+      this._el0 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.setAttribute('class', __clsx(["icon", "spin"]));
+      return this._el0;
+    }
+  };
+  '''
+
 code 'svg with multiple element types', '''
   export A = component
     render

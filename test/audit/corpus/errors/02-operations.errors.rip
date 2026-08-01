@@ -1,4 +1,4 @@
-# 02-operations.errors.rip — intentional negatives, each asserted by the Diagnostics Lane (bun run audit --diagnostics).
+# 02-operations.errors.rip — intentional negatives, each asserted by the Diagnostics Audit (bun run audit --diagnostics).
 # @ts-nocheck
 
 text = 'abc'
@@ -18,3 +18,5 @@ wrongArgument = pair(1, text)
 wrongExist = missingName?
 wrongDelete = delete point.x
 wrongScale: ((n: number) => number) | null = 7
+wrongArityBare = pair 1, count, count
+wrongArityParen = pair(1, count, count)

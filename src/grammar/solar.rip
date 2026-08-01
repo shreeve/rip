@@ -133,6 +133,11 @@ class Generator
 
     # Semantic side table: ruleId → {kind, roles: [{name, grammarRef, childSlot, spread}]}
     @semantics = {}
+    # Source primitive occurrences carried by each rule's output, expressed
+    # as RHS grammar refs in output order. The runtime uses this table to
+    # preserve token spans through primitive-valued list plumbing without
+    # putting metadata on tree nodes.
+    @primitiveRefs = {}
     # Rules compiled as self-accumulators (ruleId → true): left-recursive
     # list rules whose action template spreads the rule's own position-1
     # value first ('[...1, 3]' with symbols[0] = lhs). They MUTATE the
@@ -228,6 +233,33 @@ class Generator
 
         ruleId = @rules.length + 1
         pattern = symbols.join(' ').trim()
+
+        # Every flat construction/pass-through rule states which RHS values
+        # survive in its output. At runtime their primitive occurrence rows
+        # follow the value through list accumulators and spread copies.
+        # `carried` is deliberately not named `refs`: the executable-action
+        # branch below assigns a `refs` in THIS scope, and an inner function
+        # assigning the same name shares it rather than shadowing it — the
+        # recursion would then clobber its own caller's accumulator and keep
+        # only the last nested array's refs.
+        refsOf = (els) ->
+          carried = []
+          for el in els
+            carried.push el.grammarRef if el.grammarRef?
+            carried.push ...(refsOf el.elements) if el.elements?
+          carried
+        if typeof action is 'number'
+          @primitiveRefs[ruleId] = [action]
+        else if typeof action is 'string' and (els = @_templateElements action, true)?
+          @primitiveRefs[ruleId] = refsOf els
+        else if typeof action is 'string'
+          # Executable actions are rare (parenthetical identity/flagging). A
+          # referenced RHS value is the only source value they can carry; keep
+          # each referenced position once in first-appearance order.
+          refs = (parseInt(m[1], 10) for m in action.matchAll /\$(\d+)/g)
+          @primitiveRefs[ruleId] = refs.filter (ref, i) -> refs.indexOf(ref) is i
+        else
+          @primitiveRefs[ruleId] = []
 
         # Semantic annotation → side table entry (validated; never alters
         # output). A '~ reason' annotation is the coverage opt-out: the rule is
@@ -997,6 +1029,7 @@ class Generator
       symbolIds: #{JSON.stringify @symbolIds},
       tokenNames: #{JSON.stringify(@tokenNames).replace /"([0-9]+)":/g, "$1:"},
       semantics: #{JSON.stringify @semantics},
+      primitiveRefs: #{JSON.stringify @primitiveRefs},
       accumulators: #{JSON.stringify @accumulators},
       parseTable: #{tableCode},
       ruleTable: #{JSON.stringify @ruleTable},
@@ -1041,7 +1074,7 @@ class Generator
   #
   # Returns {sexpr, stores, diagnostics, trivia}:
   #   sexpr       — the s-expression AST, or null when parsing failed
-  #   stores      — {nodes, roles, nodeIds}: plain NodeStore/RoleStore row
+  #   stores      — {nodes, roles, primitives, nodeIds}: plain side-table row
   #                 arrays populated at reduce time, plus the node → nodeId
   #                 WeakMap (the side map — how downstream consumers
   #                 join tree arrays to rows; it serializes to nothing).
@@ -1054,8 +1087,15 @@ class Generator
   #                 verbatim when the lexer exposes one; null otherwise.
   #                 Present on failure too — trivia is scan-time fact.
 
-  parse: (input) ->
-    [stk, vals, locs] = [[0], [null], [null]]
+  # `primitives` (default off) turns on the PrimitiveStore: the occurrence
+  # spans a primitive tree value cannot carry itself. Only the TS face reads
+  # them, and tracking costs a per-token allocation and a per-reduce splice,
+  # so the shipping JS compile does not pay for a side table it never queries.
+  # OFF, every primitiveLocs site below is skipped as one unit — the stack
+  # stays parallel to `vals` because none of it runs, not because it is kept
+  # in step.
+  parse: (input, {primitives: wantPrimitives = false} = {}) ->
+    [stk, vals, locs, primitiveLocs] = [[0], [null], [null], [[]]]
     parseTable = @parseTable
     EOF = 1
     diagnostics = []
@@ -1065,6 +1105,7 @@ class Generator
     # parse; the node itself carries nothing.
     nodes = []
     roles = []
+    primitives = []
     nodeIds = new WeakMap
     nextNodeId = 1
 
@@ -1116,6 +1157,13 @@ class Generator
         stk.push symbol, action
         vals.push lexer.text
         locs.push (lexer.loc ?? null)
+        if wantPrimitives
+          primitiveLocs.push if Array.isArray lexer.text?.primitiveSpans
+            lexer.text.primitiveSpans
+          else if lexer.loc?
+            [{value: lexer.text, sourceStart: lexer.loc.start, sourceEnd: lexer.loc.end}]
+          else
+            []
         symbol = null
 
       else if action < 0  # REDUCE
@@ -1141,6 +1189,15 @@ class Generator
 
         r = @ruleActions.call rv, -action, vals, locs, sharedState.ctx
         rv.$ = r if r?
+
+        # Primitive spans follow only RHS values the action carries. This is
+        # the occurrence identity a primitive string cannot hold itself; it
+        # survives accumulator mutation and spread-copying as side-table data.
+        base = vals.length - len
+        carriedPrimitives = []
+        if wantPrimitives
+          for ref in @primitiveRefs[-action]
+            carriedPrimitives.push ...(primitiveLocs[base + ref - 1] ?? [])
 
         # A reduction that CONSTRUCTED a node (a fresh array) registers it:
         # NodeStore row always, RoleStore rows when the rule is annotated.
@@ -1186,18 +1243,33 @@ class Generator
                 # Literal-sourced role: statically-known value, no span.
                 roles.push {nodeId, role: part.name, grammarRef: null, childSlot: part.childSlot, literal: part.literal, fileId: 0}
 
+        # A primitive occurrence belongs to the FIRST constructed node that
+        # carries it. Ancestors recover it by source containment, so the row is
+        # stored once instead of being copied at every tree depth. Once every
+        # carried occurrence has an owner, no descendant list needs to flow
+        # farther up the reduction stack; direct terminals continue until the
+        # first node-producing reduction claims them.
+        if wantPrimitives and Array.isArray(node) and nodeIds.has(node)
+          ownerNodeId = nodeIds.get node
+          for p in carriedPrimitives when not p.ownerNodeId?
+            p.ownerNodeId = ownerNodeId
+            primitives.push {nodeId: ownerNodeId, value: p.value, sourceStart: p.sourceStart, sourceEnd: p.sourceEnd, fileId: 0}
+          carriedPrimitives = []
+
         if len
           stk.length  -= len * 2
           vals.length -= len
           locs.length -= len
+          primitiveLocs.length -= len if wantPrimitives
 
         stk.push @ruleTable[(-action) * 2]
         vals.push rv.$
         locs.push span
+        primitiveLocs.push carriedPrimitives if wantPrimitives
         stk.push parseTable[stk[stk.length - 2]][stk[stk.length - 1]]
 
       else  # ACCEPT
-        return {sexpr: vals[vals.length - 1], stores: {nodes, roles, nodeIds}, diagnostics, trivia: lexer.trivia ?? null}
+        return {sexpr: vals[vals.length - 1], stores: {nodes, roles, primitives, nodeIds}, diagnostics, trivia: lexer.trivia ?? null}
 
 # ==============================================================================
 # Exports

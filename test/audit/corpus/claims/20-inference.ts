@@ -69,7 +69,13 @@ function recount() {
 
 let { json: media } = { json: 'application/json' }
 
+function mediaType() {
+  return media.toUpperCase()
+}
+
 console.log('media:', media.toUpperCase())
+
+console.log('mediaType:', mediaType())
 
 console.log('recount:', recount())
 

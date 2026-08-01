@@ -148,7 +148,10 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
 
   let result;
   try {
-    result = parser.parse(parseSource);
+    // Primitive occurrence spans are read only by the TS face (they give a
+    // primitive identifier read its own exact mapping row); the shipping JS
+    // emission never queries them, so it does not pay to record them.
+    result = parser.parse(parseSource, { primitives: face === 'ts' });
   } catch (err) {
     // Lexer rejections carry offset spans; anything else is a bug, not
     // a diagnostic — let it propagate.
@@ -195,6 +198,24 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     map,
     stores: emitted.stores,
     mappings: new Mappings(emitted.mappings),
+    // Source spans the compiler consumed as its OWN vocabulary — words that are
+    // syntax in their position and reach no face entity, each tagged with the
+    // kind that says why. TS face only; empty otherwise.
+    vocabulary: emitted.vocabulary ?? [],
+    // Source spans the EDITOR stays silent about. Distinct from
+    // `vocabulary` on purpose: these are real reads that DO reach a face
+    // entity and stay in the mapping population — a ref cell's name, a
+    // bind's right-hand name — silent only because at that position they
+    // are a channel's target, which the container the lowering wrote
+    // through does not honestly describe. TS face only; empty otherwise.
+    silences: emitted.silences ?? [],
+    // Component member DECLARATION name spans, each flagged `projected`
+    // where the face types the member through the lowering's behavior
+    // object. A declaration is the author's own vocabulary; a consumer
+    // holding an instance reads the container the face declares, and both
+    // resolve to the same face symbol — so the editor cannot tell them
+    // apart without this. TS face only; empty otherwise.
+    memberDecls: emitted.memberDecls ?? [],
     runtimes: emitted.runtimes,
     // The program's top-level binding inventory: [{name, kind}] with
     // kind plain / state / computed / effect / readonly / import /
@@ -215,6 +236,21 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // Generated spans of `:=` state names — writable in rip, `const` in the
     // face. The editor clears TypeScript's `readonly` token modifier on these.
     mutables: emitted.mutables,
+    // Generated spans of every ENUM name occurrence. The face's const
+    // object and its companion type alias share the name, so the symbols
+    // merge and tsgo colors every position `type`; the editor repaints
+    // the construct the author declared. TS face only; empty otherwise.
+    enums: emitted.enums,
+    // Generated spans of a HOISTED class-expression binding's declaration
+    // name. TypeScript classifies a binding from its declaration's
+    // initializer, and a forward reference splits the two — the editor
+    // repaints the construct the author declared. TS face only.
+    classDecls: emitted.classDecls,
+    // Generated spans of every reference to an IMPORTED name, each with
+    // the module it came from. One file's compile cannot know an imported
+    // name's kind — the editor resolves the specifier and asks the
+    // declaring module. TS face only; empty otherwise.
+    importedRefs: emitted.importedRefs,
     // Emitted module-specifier spans, recorded at emission — the
     // browser module loader splices resolved specifiers by offset.
     imports: emitted.imports,

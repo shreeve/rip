@@ -349,7 +349,7 @@ const CAST_STOPS = new Set([
   '+', '-', 'MATH', '**', 'SHIFT', 'COMPARE', '&&', '||', '??', '^',
   'RELATION', 'TERNARY', '?', 'PRESENCE', ':', '?.', 'DAMMIT', 'EXTENDS',
   'IF', 'UNLESS', 'ELSE', 'THEN', 'WHILE', 'UNTIL', 'LOOP', 'FOR',
-  'WHEN', 'BY', 'SWITCH', 'RETURN', 'THROW',
+  'WHEN', 'BY', 'SWITCH', 'RETURN', 'THROW', 'CATCH',
 ]);
 
 // Statement-clause keywords that end a TYPE ALIAS's right-hand run at
@@ -398,13 +398,56 @@ const TYPE_ATOM_ENDERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'BOOL',
   'NULL', 'UNDEFINED', ')', 'PARAM_END', ']', 'INDEX_END', '}',
 ]);
+// Does tokens[at] begin a MEMBER ROW of a type body? True at a layout
+// boundary (a block body's rows), after `{` or a comma (an inline
+// literal's), and after a member modifier. Shared by the two member
+// shapes the floor admits: a method shorthand's name, and a mapped
+// type's `[`. The CALLER supplies the enclosing group, because a comma
+// separates members only inside braces — inside `<…>` or `[…]` it
+// separates type arguments and tuple elements, and reading one as a
+// member row misreports a genuine call there.
+const MEMBER_ROW_OPENERS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', '{', ',']);
+const memberRowStart = (tokens, at, from) => {
+  if (at - 1 < from) return true;
+  const before = tokens[at - 1];
+  // A member modifier is transparent — the row starts at the modifier,
+  // so keep walking left. `readonly` has to be walked through rather
+  // than merely accepted: it also prefixes a TUPLE type, and
+  // `{ x: readonly [name in host] }` is a member whose VALUE happens
+  // to begin with it, not a mapped-type row.
+  if (before.value === 'readonly' ||
+      ((before.kind === '-' || before.kind === '+') && tokens[at].value === 'readonly')) {
+    return memberRowStart(tokens, at - 1, from);
+  }
+  return MEMBER_ROW_OPENERS.has(before.kind);
+};
+
+// Bracket kinds by the group they open, innermost-last. Only kinds the
+// vocabulary itself carries: a CALL_START/CALL_END pair reaches the floor
+// solely through the method-shorthand branch, which pushes and pops its
+// own group, so listing them here would double-count that pair.
+const GROUP_OPENERS = new Map([
+  ['{', '{'], ['[', '['], ['INDEX_START', '['],
+  ['(', '('], ['PARAM_START', '('],
+]);
+const GROUP_CLOSERS = new Set(['}', ']', 'INDEX_END', ')', 'PARAM_END']);
+
 const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
   let angle = 0;
+  // The open groups, innermost last. `enclosing()` is the group a
+  // token sits directly inside — what tells a member separator from a
+  // type-argument or tuple separator.
+  const groups = [];
+  const enclosing = (up = 0) => groups[groups.length - 1 - up];
   let openAngle = null; // outermost unmatched '<'
   let atomEnd = false;  // the previous token completed a type atom
-  let methodClose = -1; // index of the CALL_END closing an accepted method list
+  // Indices of the CALL_ENDs closing accepted method lists, innermost
+  // last. A STACK, not a scalar: a parameter's own object type can carry
+  // a member row of its own, and TypeScript nests these freely.
+  const methodCloses = [];
   const closeAngles = (t, n) => {
     angle -= n;
+    for (let k = 0; k < n; k++) groups.pop();
     if (angle < 0) {
       fail(`unbalanced '${t.value}' in a type body — the line is not a type`, t.start);
     }
@@ -417,6 +460,7 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     if (kd === 'COMPARE' && t.value === '<') {
       if (angle === 0) openAngle = t;
       angle++;
+      groups.push('<');
       atomEnd = false;
       continue;
     }
@@ -424,6 +468,32 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     if (kd === 'SHIFT' && t.value === '>>') { closeAngles(t, 2); atomEnd = true; continue; }
     if (kd === 'SHIFT' && t.value === '>>>') { closeAngles(t, 3); atomEnd = true; continue; }
     if (kd === 'UNARY' && t.value === 'typeof') { atomEnd = false; continue; }
+    // A type predicate: `(v: unknown) => v is string`, and the `asserts`
+    // spelling beside it. The token arrived rewritten (`is` aliases to
+    // COMPARE '=='); in type text it is TypeScript's predicate operator,
+    // and it reads as the word the user wrote. Admitted by the whole
+    // shape — the parameter name between the arrow (or `asserts`) and
+    // `is` — because that is the only place TS puts one, and `atomEnd`
+    // alone would admit `string is number` anywhere a type completed.
+    if (t.word === 'is' && atomEnd && j - 2 >= from &&
+        (tokens[j - 1].kind === 'IDENTIFIER' || tokens[j - 1].kind === 'PROPERTY') &&
+        (tokens[j - 2].kind === '=>' || tokens[j - 2].value === 'asserts')) {
+      atomEnd = false; continue;
+    }
+    // A mapped type's `in`: `{ [K in keyof T]: T[K] }`. Admitted by
+    // the whole shape — a `[` OPENING A MEMBER ROW inside braces, then
+    // the parameter name, then `in`. The bracket alone does not
+    // identify it: `[name in host]` (a tuple) and `Host[name in host]`
+    // (an indexed access) put the same three tokens in a row and are
+    // membership expressions no TS grammar allows there, so what
+    // separates a mapped type is where its `[` sits.
+    if (kd === 'RELATION' && t.value === 'in' &&
+        enclosing() === '[' && enclosing(1) === '{' && j - 2 >= from &&
+        (tokens[j - 2].kind === '[' || tokens[j - 2].kind === 'INDEX_START') &&
+        (tokens[j - 1].kind === 'IDENTIFIER' || tokens[j - 1].kind === 'PROPERTY') &&
+        memberRowStart(tokens, j - 2, from)) {
+      atomEnd = false; continue;
+    }
     // Optional-member marker: `name?: T` — the `?`
     // rides between a completed atom (the member name) and its `:`,
     // whatever kind the scanner gave it (PRESENCE/TERNARY). The same
@@ -431,11 +501,23 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     // (`m(x?: number): void`). Any other `?` stays code-shaped.
     if (t.value === '?' && atomEnd && tokens[j + 1]?.kind === ':') { atomEnd = false; continue; }
     if (kd === '-' && tokens[j + 1]?.kind === 'NUMBER' && !atomEnd) { j++; atomEnd = true; continue; }
+    // A mapped type's modifier prefix: `{ -readonly [K in keyof T]: … }`.
+    // Only directly inside braces at a member row, where `readonly` is
+    // the modifier rather than a tuple's.
+    if ((kd === '-' || kd === '+') && tokens[j + 1]?.value === 'readonly' &&
+        enclosing() === '{' && memberRowStart(tokens, j, from)) {
+      atomEnd = false; continue;
+    }
     if (kd === '=' && angle > 0) { atomEnd = false; continue; }
-    if (opts.methods && kd === 'CALL_START' && methodClose === -1) {
+    if ((enclosing() === '{' || (opts.methods && enclosing() === undefined)) &&
+        kd === 'CALL_START') {
       const name = tokens[j - 1];
-      const memberStart = j - 2 < from ||
-        tokens[j - 2].kind === 'TERMINATOR' || tokens[j - 2].kind === 'INDENT' || tokens[j - 2].kind === 'OUTDENT';
+      // The shorthand is the same member in either layout — block
+      // rows and an inline literal's — so both admit it. The inline
+      // call signature `{ (v: number): string }` already compiles,
+      // which is what makes the named member's rejection the check's
+      // reach rather than the sub-language's scope.
+      const memberStart = memberRowStart(tokens, j - 1, from);
       if (name && (name.kind === 'IDENTIFIER' || name.kind === 'PROPERTY') && memberStart) {
         let d = 1;
         let k = j + 1;
@@ -445,7 +527,8 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
           k++;
         }
         if (d === 0 && tokens[k]?.kind === ':') {
-          methodClose = k - 1;
+          methodCloses.push(k - 1);
+          groups.push('(');
           atomEnd = false;
           continue;
         }
@@ -457,8 +540,15 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
         }
       }
     }
-    if (kd === 'CALL_END' && j === methodClose) { methodClose = -1; atomEnd = true; continue; }
-    if (TYPE_VOCAB.has(kd)) { atomEnd = TYPE_ATOM_ENDERS.has(kd); continue; }
+    if (kd === 'CALL_END' && j === methodCloses[methodCloses.length - 1]) {
+      methodCloses.pop(); groups.pop(); atomEnd = true; continue;
+    }
+    if (TYPE_VOCAB.has(kd)) {
+      if (GROUP_OPENERS.has(kd)) groups.push(GROUP_OPENERS.get(kd));
+      else if (GROUP_CLOSERS.has(kd)) groups.pop();
+      atomEnd = TYPE_ATOM_ENDERS.has(kd);
+      continue;
+    }
     fail(
       `code expression ('${t.value}') in a type body — types erase and cannot execute`,
       t.start,
@@ -697,7 +787,11 @@ const collectTypeRun = (tokens, j, opts, fail) => {
       continue;
     }
 
-    parts.push(t.value); end = t.end; j++;
+    // A word alias keeps its WORD inside a type run: the rewrite is
+    // the value sub-language's, and `is` is TypeScript's own predicate
+    // operator here. The declaration path renders these parts through
+    // tidyType, so the operator reaching them ships `v == string`.
+    parts.push(t.word ?? t.value); end = t.end; j++;
   }
 
   // A run can only end with `<` still open at end-of-input or a
@@ -3022,7 +3116,14 @@ export function tokenize(text, path = '<anonymous>') {
           // its UNARY reading and rejects at the parser.
           push('NEW_TARGET', 'new', start, pos);
         } else {
-          push(kind, value, start, pos);
+          // The alias rewrite belongs to the VALUE sub-language. Type
+          // text is a different one — TypeScript owns `is` there, as
+          // the predicate operator — so the source word rides along
+          // and every type-text path renders it instead of the
+          // operator (collectTypeRun's parts, and the vocabulary
+          // floor). Without it the rewrite reaches the type and the
+          // shipped declaration carries `v == string`.
+          push(kind, value, start, pos, { word });
         }
       } else if ((word === 'offer' || word === 'accept') && insideComponentBody()) {
         push(word === 'offer' ? 'OFFER' : 'ACCEPT', word, start, pos);

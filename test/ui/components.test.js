@@ -562,8 +562,11 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     // Distinct FUNCTION scopes never collide — their bindings never
     // reach the module surface.
     expect(() => compile('f = ->\n  C = component\n    n := 1\n  C\ng = ->\n  C = component\n    m := 2\n  C\nconsole.log f, g', { runtimeDelivery: 'none' })).not.toThrow();
-    // Export + plain rebinding collides too.
-    emitFails('export X = component\n  n := 1\nX = component\n  m := 2', /bound more than once at module scope/);
+    // Export + plain rebinding rejects one step earlier and for a
+    // wider reason: an exported binding lowers to `export const`, so
+    // the second statement is a write to a const whatever its value
+    // is — the component-name rule never gets to speak.
+    emitFails('export X = component\n  n := 1\nX = component\n  m := 2', /cannot assign to exported 'X'/);
   });
 
   test("a user-SPELLED __bind_ key rejects — the compiler's two-way channel has ONE spelling (`<=>`)", () => {

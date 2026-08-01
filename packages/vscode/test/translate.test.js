@@ -11,7 +11,7 @@ import {
   insertionAboveAttachedDirectives, wholeImportLinesEdit,
   exactSpanMapper, staleOffsetMap,
   isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
-  diagnosticTagsFor,
+  diagnosticTagsFor, noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
 } from '../src/translate.js';
 
 describe('offset ↔ LSP position', () => {
@@ -354,5 +354,194 @@ describe('diagnostic tag restoration (the rendering seam)', () => {
     for (const code of [2322, 2339, 2578, 7043, 6134, 6205]) {
       expect(diagnosticTagsFor(code)).toEqual([]);
     }
+  });
+});
+
+// Spans the lowering owns whole — where hover declines rather than
+// describing the machinery the face put there. The BOUNDARY is the
+// whole content of this: a bare `~>` lowers into the `__effect` callee
+// and tsgo describes the runtime's own symbol, while a NAMED effect's
+// operator belongs to a construct that binds a user name. Today the
+// named operator happens to answer null anyway, so no end-to-end probe
+// can tell an over-wide list from a correct one — which is exactly why
+// the list itself is asserted here, by identity, rather than through
+// its current effect.
+describe('spans with no user symbol (the hover declines)', () => {
+  const src = [
+    "label = 'x'",
+    "named ~> console.log('named', label)",
+    "~> console.log('bare', label)",
+    '~>',
+    "  console.log('bare block')",
+  ].join('\n') + '\n';
+
+  test('the bare effect operators, and only those', () => {
+    const spans = noUserSymbolSpans(compile(src, { face: 'ts', runtimeDelivery: 'inline' }));
+    // Identity, not count: each span must BE a `~>`, and the named
+    // effect's own operator must not be among them.
+    expect(spans.map(([a, b]) => src.slice(a, b))).toEqual(['~>', '~>']);
+    const named = src.indexOf('~>');                       // the named effect's operator
+    expect(spans.some(([a]) => a === named)).toBe(false);
+    expect(spans.map(([a]) => a)).toEqual([src.indexOf('~>', named + 1), src.lastIndexOf('~>')]);
+  });
+
+  // The render channel and the reads it BINDS are two different
+  // populations, and conflating them is the live hazard: the compiler's
+  // `vocabulary` list feeds the mapping census, which nets every span in
+  // it out of the read population. A ref cell's name and a bind's
+  // right-hand name are real reads that reach a face entity — they must
+  // stay counted there while still being silent HERE, which is why the
+  // compiler reports them on a second channel.
+  test('the render channel silences its own words and the names they bind', () => {
+    const src = [
+      'Panel = component',
+      "  text := 'x'",
+      '  inputEl: HTMLInputElement | null := null',
+      '',
+      '  render',
+      '    input ref: inputEl',
+      '      value <=> text',
+      '',
+    ].join('\n');
+    const r = compile(src, { face: 'ts', runtimeDelivery: 'inline' });
+    const at = (word, from = 0) => src.indexOf(word, from);
+    const spans = noUserSymbolSpans(r);
+    const silenced = (o) => inNoUserSymbolSpan(spans, o);
+
+    const renderAt = src.indexOf('  render');
+    expect(silenced(at('ref:', renderAt))).toBe(true);            // the channel word
+    expect(silenced(at('inputEl', at('ref:', renderAt)))).toBe(true);   // the cell it names
+    expect(silenced(at('value', renderAt))).toBe(true);           // the bind target
+    expect(silenced(at('text', renderAt))).toBe(true);            // the name bound to it
+
+    // …and the census keeps the two reads it must still count.
+    const consumed = new Set(r.vocabulary.map((v) => v.start));
+    expect(consumed.has(at('inputEl', at('ref:', renderAt)))).toBe(false);
+    expect(consumed.has(at('text', renderAt))).toBe(false);
+    expect(consumed.has(at('ref:', renderAt))).toBe(true);        // the word itself IS consumed
+  });
+
+  // A schema transform's `it` is the DSL's own word — the grammar fixes
+  // the parameter list, so there is nothing to rename or annotate. A
+  // record FIELD the author happens to name `it` is the opposite: an
+  // ordinary member with an answer of its own. Spelling cannot tell them
+  // apart; the token kind can, and this is the only fixture anywhere that
+  // spells both on one line.
+  test("a transform silences the `it` PARAMETER, not a field named `it`", () => {
+    const src = "S = schema\n  label! -> it.it\n  other! -> String(it.name)\n";
+    const spans = noUserSymbolSpans(compile(src, { face: 'ts', runtimeDelivery: 'inline' }));
+    const first = src.indexOf('it.it');
+    expect(inNoUserSymbolSpan(spans, first)).toBe(true);          // the parameter read
+    expect(inNoUserSymbolSpan(spans, first + 3)).toBe(false);     // the field it reaches
+    expect(inNoUserSymbolSpan(spans, src.indexOf('it.name'))).toBe(true);
+    // …and an ordinary identifier in the same body is untouched: the
+    // predicate is the DSL's word AND the kind, not the kind alone.
+    expect(inNoUserSymbolSpan(spans, src.indexOf('String'))).toBe(false);
+    expect(spans.length).toBe(2);                                 // two parameters, nothing else
+  });
+
+  test('a DECLARATION outside render keeps its answer', () => {
+    const src = [
+      'Panel = component',
+      "  text := 'x'",
+      '',
+      '  render',
+      '    input',
+      '      value <=> text',
+      '',
+    ].join('\n');
+    const r = compile(src, { face: 'ts', runtimeDelivery: 'inline' });
+    // `text` at its own declaration is not a channel position — only the
+    // occurrence inside the render body is. A list that silenced the name
+    // everywhere would swallow the declaration too, and the ruled gauge
+    // probes the declaration under a different row.
+    expect(inNoUserSymbolSpan(noUserSymbolSpans(r), src.indexOf('  text :='))).toBe(false);
+  });
+
+  test('the span is half-open: its first byte silences, the byte after it does not', () => {
+    const spans = noUserSymbolSpans(compile(src, { face: 'ts', runtimeDelivery: 'inline' }));
+    const [start, end] = spans[0];
+    expect(inNoUserSymbolSpan(spans, start)).toBe(true);     // the hover probe lands here
+    expect(inNoUserSymbolSpan(spans, end - 1)).toBe(true);
+    expect(inNoUserSymbolSpan(spans, end)).toBe(false);      // the next construct answers for itself
+    expect(inNoUserSymbolSpan(spans, start - 1)).toBe(false);
+  });
+});
+
+// The compiler's record of component member DECLARATIONS — the one fact
+// that separates the author's own vocabulary from a consumer's view of
+// the same face symbol.
+describe('memberDeclKind', () => {
+  const src = [
+    'Roster = component',                      // 0
+    '  @label?: string',                       // 1
+    '  people := []',                          // 2
+    "  shade ~= 'hot'",                        // 3  unannotated computed — behavior-projected
+    "  tint: string ~= 'cold'",                // 4  annotated computed — the author's own type
+    '  cap =! 3',                              // 5  declares its VALUE type
+    '  cell: { value: number, read(): number } = box',  // 6  the shape, BY HAND
+    '  bump: (e) -> p(e)',                     // 7  a method: no declare line, no row
+    '',
+    '  render',                                // 9
+    '    div people',                          // 10 a READ, not a declaration
+    '',
+  ].join('\n');
+  const decls = compile(src, { face: 'ts', runtimeDelivery: 'inline' }).memberDecls;
+  const at = (needle, word) => src.indexOf(word, src.indexOf(needle));
+
+  test('the members the face declares as CONTAINERS are recorded, at the name', () => {
+    // `cap` and `cell` are absent on purpose. A `=!` member's declared
+    // type IS its value type, so there is nothing to see past; and a
+    // member whose own annotation spells the container shape by hand
+    // MEANT that shape — stripping it would answer with a type the
+    // author never wrote.
+    expect(decls.map((d) => src.slice(d.start, d.end)))
+      .toEqual(['label', 'people', 'shade', 'tint']);
+  });
+
+  test('no member reads through the lowering — the projected kind is retired', () => {
+    // An unannotated computed once carried a `projected` flag: its face
+    // type read through the lowering's behavior object, so every type
+    // spellable for it named machinery and the editor declined. The face
+    // now types that member from an INFERRED position — a declaration
+    // with no type node, which TypeScript prints resolved — so there is
+    // nothing to read through and no member needs the distinction. The
+    // flag going missing is the point; a member reacquiring one would
+    // mean the projection came back.
+    expect(decls.some((d) => d.projected)).toBe(false);
+  });
+
+  test('a declaration presents value-first; the same name at a READ does not', () => {
+    // The consumer half of the ruling: `inst.people.value` is real, so
+    // every position that is not a declaration keeps the container.
+    expect(memberDeclKind(decls, at('people :=', 'people'))).toBe('value');
+    expect(memberDeclKind(decls, at('div people', 'people'))).toBeNull();
+    // The unannotated computed answers like every other declaration now.
+    expect(memberDeclKind(decls, at('shade ~=', 'shade'))).toBe('value');
+    expect(memberDeclKind(decls, at('cap =!', 'cap'))).toBeNull();
+    expect(memberDeclKind(decls, at('cell:', 'cell'))).toBeNull();
+  });
+
+  test('the span comes from the role, not a text search — a self-named initializer is exact', () => {
+    // `people := people` puts the name twice on one line. The recorded
+    // span is the declaration's own role, so the READ beside it stays
+    // a consumer position.
+    const self = 'W = component\n  people := people\n';
+    const d = compile(self, { face: 'ts', runtimeDelivery: 'inline' }).memberDecls;
+    expect(d.map((x) => [x.start, x.end])).toEqual([[16, 22]]);
+    expect(memberDeclKind(d, self.indexOf('people'))).toBe('value');
+    expect(memberDeclKind(d, self.lastIndexOf('people'))).toBeNull();
+  });
+
+  test('the span is half-open, like every other', () => {
+    const d = decls[0];
+    expect(memberDeclKind(decls, d.start)).toBe('value');
+    expect(memberDeclKind(decls, d.end - 1)).toBe('value');
+    expect(memberDeclKind(decls, d.end)).toBeNull();
+    expect(memberDeclKind(decls, d.start - 1)).toBeNull();
+  });
+
+  test('the JS emission records nothing — the channel is the face\'s', () => {
+    expect(compile(src, { runtimeDelivery: 'inline' }).memberDecls).toEqual([]);
   });
 });

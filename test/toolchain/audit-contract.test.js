@@ -28,7 +28,7 @@ const withRed = (name, why) => withoutReds().map((c) => (c.name === name ? { ...
 // one case would leak into the next.
 const cleanStates = () => ({
   gr: { unallocated: 0, badExclusions: 0, negatives: { kindBad: 0, vocabUnfalsified: 0, claimsBroken: 0, cellsMissing: 0, staleMints: 0, headsUnseen: 0, badSpellingExclusions: 0, claimsBadParks: 0, splitDividers: 0 } },
-  mp: { missing: 0 },
+  mp: { missing: 0, drifted: 0, census: 0, badExclusions: 0 },
   fails: 0,
   el: { problems: [] },
   hp: { gap: 0, snapChanged: 0, violations: [] },
@@ -83,6 +83,7 @@ describe('the audit contract judges in both directions', () => {
     // never fire is a contract clause that gates nothing, and a row that fires
     // when another's input changes would mask its neighbour.
     const fire = {
+      'grammar.parses': (s) => { s.gr.unparsed = 1; },
       'grammar.allocation': (s) => { s.gr.unallocated = 1; },
       'grammar.exclusions': (s) => { s.gr.badExclusions = 1; },
       'lexer.mints': (s) => { s.gr.negatives.staleMints = 1; },
@@ -93,13 +94,19 @@ describe('the audit contract judges in both directions', () => {
       'claims.carriers': (s) => { s.gr.negatives.claimsBroken = 1; },
       'claims.parks': (s) => { s.gr.negatives.claimsBadParks = 1; },
       'corpus.dividers': (s) => { s.gr.negatives.splitDividers = 1; },
+      'mapping.identity': (s) => { s.mp.drifted = 1; },
       'mapping.spans': (s) => { s.mp.missing = 1; },
+      'mapping.census': (s) => { s.mp.census = 1; },
+      'mapping.exclusions': (s) => { s.mp.badExclusions = 1; },
       'type.dimensions': (s) => { s.fails = 1; },
       'diagnostics.codes': (s) => { s.el.problems = [{ kind: 'missing' }]; },
-      'diagnostics.positions': (s) => { s.el.problems = [{ kind: 'position' }]; },
+      'diagnostics.positions': (s) => { s.el.problems = [{ kind: 'position', file: '09-classes.errors.rip' }]; },
+      'diagnostics.positions.element': (s) => { s.el.problems = [{ kind: 'position', file: '11-types.errors.rip' }]; },
+      'diagnostics.positions.arity': (s) => { s.el.problems = [{ kind: 'position', file: '02-operations.errors.rip' }]; },
       'hover.parity': (s) => { s.hp.gap = 1; },
       'token.delivery': (s) => { s.tk.missing = [{}]; },
-      'token.type': (s) => { s.tk.badType = [{}]; },
+      'token.type': (s) => { s.tk.badType = [{ want: { type: 'variable' } }]; },
+      'token.type.enum': (s) => { s.tk.badType = [{ want: { type: 'enum' } }]; },
       'token.readonly': (s) => { s.tk.badReadonly = [{}]; },
     };
     expect(Object.keys(fire).sort()).toEqual(CONTRACT.map((c) => c.name).sort());
@@ -113,11 +120,12 @@ describe('the audit contract judges in both directions', () => {
 });
 
 // Every tolerated red must say WHY, in prose. A row number dangles the day the
-// row closes; the prose does not.
+// row closes; the prose does not. The set is allowed to be EMPTY, and is today
+// — every invariant holds — so this asserts the SHAPE of whatever is in it
+// rather than that anything is: the next agreement still has to arrive with a
+// reason a reader can act on, and the check has to be here when it does.
 test('every red the contract tolerates carries a prose reason, not a row number', () => {
-  const tolerated = CONTRACT.filter((c) => c.redBecause);
-  expect(tolerated.length, 'a contract tolerating nothing needs no reasons — delete this expectation with the last one').toBeGreaterThan(0);
-  for (const { name, redBecause } of tolerated) {
+  for (const { name, redBecause } of CONTRACT.filter((c) => c.redBecause)) {
     expect(redBecause.length > 40, `"${name}" needs a reason a reader can act on`).toBe(true);
     expect(/(finding|findings)\s*#\d+/i.test(redBecause), `"${name}" cites a ledger row by number — state the reason instead`).toBe(false);
   }

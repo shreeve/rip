@@ -150,6 +150,16 @@ test "partial defaults", "fn = (a = 1, b = 2) -> a + b\nfn(5)", 7
 # Expansion marker: (a, ..., b)
 test "expansion marker", "fn = (a, ..., b) -> a + b\nfn(1, 2, 3, 4)", 5
 
+# A tail parameter is a PARAMETER, not just a name: the shapes a parameter list
+# admits before the gap must work after it too. Each of these emitted a bare
+# stringified tree node into the `const` extraction — code that does not parse —
+# so a runtime case is the gate: the module has to load before it can answer.
+test "expansion tail destructures an array", "fn = (a, ..., [x, y]) -> a + x + y\nfn(1, 2, [3, 4])", 8
+test "expansion tail destructures an object", "fn = (a, ..., {x}) -> a + x\nfn(1, 2, {x: 5})", 6
+test "expansion tail default, argument supplied", "fn = (a, ..., b = 9) -> a + b\nfn(1, 2, 3)", 4
+test "expansion tail default, slot empty", "fn = (a, ..., b = 9) -> a + b\nfn(1)", 10
+test "expansion tail default, explicit undefined", "fn = (a, ..., b = 9) -> a + b\nfn(1, undefined)", 10
+
 # ==============================================================================
 # Return Statements: "return"
 # ==============================================================================

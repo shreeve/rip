@@ -60,6 +60,12 @@ const HAND_ROWS = [
   // enum declarations: numeric, string, negative, exported —
   // and the enum NAME usable in type position
   'enum Color\n  red = 0\n  green = 1\nexport enum Tier\n  free = "f"\nenum Dir\n  up = 1\n  down = -1\npick: Color = Color.red',
+  // a type predicate in a parameter, and in a type body reached
+  // through one: the declaration path renders the token VALUE, so
+  // rip's `is`→`==` alias reaching type text ships a `.d.ts` that
+  // does not parse — TS1005, from tsc itself
+  'export def apply(g: ((v: unknown) => v is string), x: unknown): boolean\n  g(x)\nexport def keep(rows: unknown[], p: ((v: unknown) => v is string)): string[]\n  rows.filter(p)',
+  'type Guard = { check: (value: unknown) => value is string }\nexport def run(g: Guard, v: unknown): boolean\n  g.check(v)',
   // typed reactive declarations: the annotation types the
   // container's `.value` slot (state mutable, computed readonly) —
   // exported and module-internal
@@ -171,6 +177,148 @@ describeTscExtended('component declarations: consumer programs check against the
     '  bump = (n: number): number -> count += n',
     '',
   ].join('\n')).declarations;
+
+  // A GENERIC component: the parameter list has to reach both shipped
+  // declarations, and every reference to it in the members already
+  // survives — so dropping the list leaves a file that cannot compile
+  // at all. The consumer is the point: it supplies the argument and the
+  // member types follow it.
+  // TWO parameters, and a constraint carrying its own comma: the
+  // self-arguments are re-derived from the list's source text, so one
+  // parameter cannot show a wrong split and a comma-free constraint
+  // cannot show a naive one — which renders a list that does not parse,
+  // a worse failure than the unbound name this row is about.
+  const genericDts = () => compile([
+    'export Listing<TItem extends string, TMeta extends Record<string, number>> = component',
+    '  @items: TItem[] := []',
+    '  @meta?: TMeta',
+    '',
+  ].join('\n')).declarations;
+
+  // A GATED generic has no constructor to hang a parameter list on, so
+  // its prototype cannot name one — the branch is unreachable from the
+  // fixture above and needs its own.
+  const gatedGenericDts = () => compile([
+    'export Card<TLabel extends string, TMeta extends number> = component',
+    '  user <~ @app.data.user',
+    '  @label: TLabel',
+    '  @meta: TMeta',
+    '  render',
+    '    div "x"',
+    '',
+  ].join('\n')).declarations;
+
+  // Parameter lists whose CONSTRAINTS carry the delimiters the list
+  // itself uses: a quoted comma, and a function type whose `=>` looks
+  // like a closing bracket. A scan that miscounts either renders a list
+  // that does not parse — a worse failure than the unbound name this row
+  // is about — and the arrow case is one a naive comma split got RIGHT,
+  // so it only appears once someone starts counting depth.
+  test('constraints carrying commas and arrows ship declarations that compile', () => {
+    const dts = compile([
+      "export Hostile<TKey extends 'a,b' | 'c', TFn extends (x: number) => (y: string) => void, TLast extends string> = component",
+      '  @k: TKey := \'c\'',
+      '  @last: TLast := \'z\'',
+      '',
+    ].join('\n')).declarations;
+    // Both parameters after the hostile ones must survive: a miscount
+    // drops the tail, and the interface then needs fewer arguments than
+    // it declares.
+    expect(dts).toContain('TLast');
+    const { status, byFile } = tscBatch(TSC, {
+      'hostile.d.ts': dts,
+      'consumer.ts': "import { Hostile } from './hostile';\nconst h: Hostile<'c', (x: number) => (y: string) => void, 'z'> | null = null;\nconsole.log(h);\nexport {};\n",
+    });
+    expect(byFile.get('hostile.d.ts')).toEqual([]);
+    expect(byFile.get('consumer.ts')).toEqual([]);
+    expect(status).toBe(0);
+  }, TSC_TIMEOUT);
+
+  test('a non-exported generic component does not poison the module it ships in', () => {
+    const dts = compile([
+      'Inner<TKey extends string> = component',
+      '  @keys: TKey[] := []',
+      '',
+      'export Outer<TVal extends number> = component',
+      '  @vals: TVal[] := []',
+      '',
+    ].join('\n')).declarations;
+    const { status, byFile } = tscBatch(TSC, {
+      'both.d.ts': dts,
+      'consumer.ts': "import { Outer } from './both';\nconst o = new Outer<1 | 2>({ vals: [1] });\nconst v: 1 | 2 = o.vals.value[0];\nconsole.log(v);\nexport {};\n",
+    });
+    expect(byFile.get('both.d.ts')).toEqual([]);
+    expect(byFile.get('consumer.ts')).toEqual([]);
+    expect(status).toBe(0);
+  }, TSC_TIMEOUT);
+
+  test('a gated generic component ships declarations that compile', () => {
+    // The prototype is a runtime identity on a VALUE, so no consumer
+    // annotation reaches it — the declaration text is the only gate. It
+    // pins the ARITY (one `any` per parameter) and that a type survives
+    // at all, both of which a wrong edit here satisfies silently.
+    expect(gatedGenericDts()).toContain('readonly prototype: Card<any, any>;');
+    const { status, byFile } = tscBatch(TSC, {
+      'card.d.ts': gatedGenericDts(),
+      'consumer.ts': "import { Card } from './card';\nconst c: Card<'a', 1> | null = null;\nconsole.log(c);\nexport {};\n",
+    });
+    expect(byFile.get('card.d.ts')).toEqual([]);
+    expect(status).toBe(0);
+  }, TSC_TIMEOUT);
+
+  test('a generic component ships declarations that compile, and its consumer supplies the argument', () => {
+    const consumer = [
+      "import { Listing } from './listing';",
+      "const l = new Listing<'a' | 'b', { n: number }>({ items: ['a'] });",
+      // Read the members straight off what `new` RETURNED. An
+      // annotated alias would throw that away and assert a property of
+      // the annotation instead — under which self-references applying
+      // `any`, or the fix reaching only exported components, both pass.
+      "const first: 'a' | 'b' = l.items.value[0];",
+      // optional prop, so the container's value is `TMeta | undefined` —
+      // reading through it is what proves the second parameter reached
+      // the members rather than being dropped or widened
+      "const m: number | undefined = l.meta.value?.n;",
+      "const viaMount = Listing.mount<'a' | 'b', { n: number }>();",
+      "const second: 'a' | 'b' = viaMount.items.value[0];",
+      'console.log(first, m, second);',
+      'export {};',
+      '',
+    ].join('\n');
+    const { status, byFile, unattributed } = tscBatch(TSC, {
+      'listing.d.ts': genericDts(),
+      'consumer.ts': consumer,
+    });
+    // The declaration file itself must be clean — an unbound parameter
+    // reports HERE, not at the consumer, which is why the .d.ts gets
+    // its own assertion rather than riding the consumer's.
+    expect(byFile.get('listing.d.ts')).toEqual([]);
+    expect(byFile.get('consumer.ts')).toEqual([]);
+    expect(unattributed).toEqual([]);
+    expect(status).toBe(0);
+  }, TSC_TIMEOUT);
+
+  test('the generic gate has teeth: an argument the constraint refuses, and a prop that does not match it', () => {
+    const bad = [
+      "import { Listing } from './listing';",
+      'new Listing<number, { n: number }>({ items: [1] });',
+      "new Listing<'a', { n: number }>({ items: ['zzz'] });",
+      // the members must SPECIALISE to the argument, not widen
+      "const w: number = new Listing<'a', { n: number }>({}).items.value[0];",
+      // the INTERFACE's constraints: an annotation is the only place
+      // they bind, since the constructor restates its own
+      'const ann: Listing<number, { n: number }> | null = null;',
+      'console.log(ann);',
+      'export {};',
+      '',
+    ].join('\n');
+    const { status, byFile } = tscBatch(TSC, {
+      'listing.d.ts': genericDts(),
+      'consumer.ts': bad,
+    });
+    expect(status).not.toBe(0);
+    expect(byFile.get('consumer.ts').length).toBeGreaterThanOrEqual(4);
+  }, TSC_TIMEOUT);
 
   test('a consumer constructs, mounts, reads members, and annotates with the companion type — clean', () => {
     const consumer = [
