@@ -283,11 +283,14 @@ alters surface syntax updates ALL THREE in the same change.
   `app/**/*.{rip,css,html}`); bag unit = **module** (path-keyed);
   in-memory record = **passport**; swappable component identity =
   **component definition**. Not “cell.” Hub dings `{ id, etag }` only —
-  no apply `kind` for CSS/HTML/Rip (client infers from extension).
-  Main server entry (`app.rip` / `index.rip` at project root) is outside
-  the client bag → epoch on change. Manifest + on-disk door store use
-  **files** (`{ files: [{id,etag}] }`, `runDir/files`, env
-  `RIP_FILES_DIR`).
+  no apply kind on the wire. Client apply verdicts:
+  **`reload` | `css` | `update` | `ignore`** (`*.css` → `css` never
+  `reload`; `*.html` → `reload`; `*.rip` → `update`). CSS updates the
+  stylesheet the page already linked (e.g. `/styles.css`) — one path,
+  cache-bust `?etag=`. Main server entry (`app.rip` / `index.rip` at
+  project root) is outside the client bag → epoch on change. Manifest
+  + on-disk door store use **files** (`{ files: [{id,etag}] }`,
+  `runDir/files`, env `RIP_FILES_DIR`).
 - **Comments explain non-obvious intent** — invariants, constraints,
   why a trade-off was taken. Never narrate what code obviously does,
   never reference project history or future plans. A comment that

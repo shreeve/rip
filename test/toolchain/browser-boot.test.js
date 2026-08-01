@@ -516,7 +516,7 @@ describe('bootApp workspace mode', () => {
     }
   });
 
-  test('a route ding remounts, the target shows the new content, and the remount is labeled escape', async () => {
+  test('a route ding updates in place and logs the update verdict', async () => {
     const table = manifestTable();
     const v2 = routeSource('Home', 'home v2');
     const e2 = etagOf(v2);
@@ -537,7 +537,7 @@ describe('bootApp workspace mode', () => {
       // The applied-log is user-facing: it names the file that changed
       // and is honest that the remount resets component state.
       const appliedLines = logs.filter(line => line.includes('applied'));
-      expect(appliedLines).toEqual(['[Rip] applied app/routes/index.rip — narrow remount (route state reset; stash kept)']);
+      expect(appliedLines).toEqual(['[Rip] applied app/routes/index.rip — update']);
       expect(result.router.current.route.file).toBe('app/routes/index.rip');
     } finally {
       console.log = originalLog;

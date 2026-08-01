@@ -15,8 +15,8 @@
 //
 // `workspace: true` opens the dev door (docs/WORKSPACE.md, M1): the
 // bag populates from the served manifest, the hub feed dings modules in,
-// and a change applies by remount — labeled escape, never hot apply.
-// Off, every path below is byte-identical to the plain boot.
+// and apply chooses reload | css | update | ignore. Off, every path
+// below is byte-identical to the plain boot.
 import { createModuleLoader } from './browser-modules.js';
 
 const APP_PACKAGE = '@rip-lang/app';
@@ -247,11 +247,10 @@ export async function bootApp(opts = {}) {
 
   const report = opts.feed?.report ?? ((...args) => console.error(...args));
 
-  // Apply: compile barrier, then createApply chooses narrow remount
-  // (route/layout; stash kept) or the labeled whole-launch escape (D7).
+  // Apply: compile barrier, then createApply → reload | css | update | ignore.
   // Projections rebuild THROUGH the loader; importers invalidate
-  // transitively. Unchanged modules answer from the loader cache.
-  // CSS sheets soft-apply via <style data-rip-css> and never remount (S12).
+  // transitively. CSS cache-busts the <link> the page already declared
+  // (?etag=); otherwise injects <style>. HTML reloads.
   let destroyed = false;
   let timer = null;
   let remounting = false;
@@ -259,10 +258,36 @@ export async function bootApp(opts = {}) {
   const handle = {};
   const isCssPath = path => typeof path === 'string' && path.endsWith('.css');
   const isHtmlPath = path => typeof path === 'string' && path.endsWith('.html');
-  // Non-Rip bag members never enter the module loader / remount path.
   const isNonRipBag = path => isCssPath(path) || isHtmlPath(path);
-  const applyCssSheet = (id, source) => {
+  const cssLinkFor = id => {
+    if (typeof document === 'undefined') return null;
+    for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
+      if (link.getAttribute('data-rip-css') === id) return link;
+    }
+    const base = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
+    for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
+      const href = link.getAttribute('href') || '';
+      const path = href.split('?')[0];
+      if (path === `/${base}` || path.endsWith(`/${base}`) || path === base) return link;
+    }
+    return null;
+  };
+  // Find the page's <link> for this sheet and cache-bust ?etag=.
+  // No link → <style data-rip-css> (injected-sheet identity only).
+  const applyCssSheet = (id, source, etag) => {
     if (typeof document === 'undefined' || typeof source !== 'string') return;
+    const link = cssLinkFor(id);
+    if (link && typeof etag === 'string' && etag.length > 0) {
+      const raw = link.getAttribute('href') || link.href;
+      const path = raw.split('?')[0];
+      const next = `${path}?etag=${encodeURIComponent(etag)}`;
+      if (link.getAttribute('href') !== next) link.setAttribute('href', next);
+      link.disabled = false;
+      for (const node of [...document.querySelectorAll('style[data-rip-css]')]) {
+        if (node.getAttribute('data-rip-css') === id) node.remove();
+      }
+      return;
+    }
     let el = null;
     for (const node of document.querySelectorAll('style[data-rip-css]')) {
       if (node.getAttribute('data-rip-css') === id) {
@@ -276,20 +301,16 @@ export async function bootApp(opts = {}) {
       document.head.appendChild(el);
     }
     el.textContent = source;
-    // Cold load may still hold a matching <link> (e.g. /styles.css for
-    // app/styles.css). Disable it so soft-apply is the sole sheet.
-    const base = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
-    for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
-      const href = link.getAttribute('href') || '';
-      if (href === `/${base}` || href.endsWith(`/${base}`) || href === base) {
-        link.disabled = true;
-      }
-    }
   };
   const removeCssSheet = id => {
     if (typeof document === 'undefined') return;
     for (const node of [...document.querySelectorAll('style[data-rip-css]')]) {
       if (node.getAttribute('data-rip-css') === id) node.remove();
+    }
+    const link = cssLinkFor(id);
+    if (link) {
+      const path = (link.getAttribute('href') || '').split('?')[0];
+      if (path) link.setAttribute('href', path);
     }
   };
   const escapeRemount = async (applied) => {
@@ -304,7 +325,7 @@ export async function bootApp(opts = {}) {
     current.destroy();
     current = launchWith(snapshot);
     Object.assign(handle, current, stable);
-    console.log(`[Rip] applied ${applied.join(', ') || 'a change'} — remounted (component state reset)`);
+    // createApply logs the public "— update" verdict; no second line here.
   };
   const apply = app.createApply({
     renderer: {
@@ -351,7 +372,7 @@ export async function bootApp(opts = {}) {
       }
       try {
         const verdict = await apply.absorb(applied);
-        if (verdict === 'narrow' || verdict === 'noop') {
+        if (verdict === 'update' || verdict === 'ignore' || verdict === 'css') {
           Object.assign(handle, current, stable);
         }
       } catch (error) {
@@ -363,17 +384,15 @@ export async function bootApp(opts = {}) {
   };
   const unwatch = bag.watch((_event, path) => {
     if (!path.startsWith('app/')) return;
-    // CSS/HTML handled in door.set — never queue a JS remount.
+    // CSS/HTML handled in door.set — never queue a Rip update.
     if (isNonRipBag(path)) return;
     pending.add(path);
     timer ??= setTimeout(absorb, 25);
   });
 
-  // The compile-through door: a Rip passport lands in the bag already
-  // projected, so ONE notify carries source and compiled together and
-  // launch's rebuild never observes a source-without-projection gap.
-  // CSS soft-applies (S12); HTML reloads the document. A compile failure
-  // reports and never sets — last-known-good stays interactive (S10).
+  // Door: Rip passports compile-through; CSS → css; HTML → reload (on
+  // etag advance only — first birth is ignore). S10: compile failure
+  // never sets.
   const door = {
     passport: bag.passport,
     sealed: bag.sealed,
@@ -397,7 +416,6 @@ export async function bootApp(opts = {}) {
           if (isCssPath(path)) {
             removeCssSheet(path);
           } else if (isHtmlPath(path)) {
-            // Shell gone — reload against the next generation.
             if (typeof location !== 'undefined') location.reload();
           } else {
             files.delete(path);
@@ -410,8 +428,8 @@ export async function bootApp(opts = {}) {
       if (isCssPath(path)) {
         const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
         if (applied) {
-          applyCssSheet(path, passport.source);
-          console.log(`[Rip] applied ${path} — css soft-apply (no remount)`);
+          applyCssSheet(path, passport.source, passport.etag);
+          console.log(`[Rip] applied ${path} — css`);
         }
         return applied;
       }
@@ -421,7 +439,7 @@ export async function bootApp(opts = {}) {
         const had = known != null;
         const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
         if (applied && had) {
-          console.log(`[Rip] applied ${path} — html reload`);
+          console.log(`[Rip] applied ${path} — reload`);
           if (typeof location !== 'undefined') location.reload();
         }
         return applied;

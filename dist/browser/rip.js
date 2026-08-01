@@ -23125,9 +23125,39 @@ async function bootApp(opts = {}) {
   const isCssPath = (path) => typeof path === "string" && path.endsWith(".css");
   const isHtmlPath = (path) => typeof path === "string" && path.endsWith(".html");
   const isNonRipBag = (path) => isCssPath(path) || isHtmlPath(path);
-  const applyCssSheet = (id, source) => {
+  const cssLinkFor = (id) => {
+    if (typeof document === "undefined")
+      return null;
+    for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
+      if (link.getAttribute("data-rip-css") === id)
+        return link;
+    }
+    const base = id.includes("/") ? id.slice(id.lastIndexOf("/") + 1) : id;
+    for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
+      const href = link.getAttribute("href") || "";
+      const path = href.split("?")[0];
+      if (path === `/${base}` || path.endsWith(`/${base}`) || path === base)
+        return link;
+    }
+    return null;
+  };
+  const applyCssSheet = (id, source, etag) => {
     if (typeof document === "undefined" || typeof source !== "string")
       return;
+    const link = cssLinkFor(id);
+    if (link && typeof etag === "string" && etag.length > 0) {
+      const raw = link.getAttribute("href") || link.href;
+      const path = raw.split("?")[0];
+      const next = `${path}?etag=${encodeURIComponent(etag)}`;
+      if (link.getAttribute("href") !== next)
+        link.setAttribute("href", next);
+      link.disabled = false;
+      for (const node of [...document.querySelectorAll("style[data-rip-css]")]) {
+        if (node.getAttribute("data-rip-css") === id)
+          node.remove();
+      }
+      return;
+    }
     let el = null;
     for (const node of document.querySelectorAll("style[data-rip-css]")) {
       if (node.getAttribute("data-rip-css") === id) {
@@ -23141,13 +23171,6 @@ async function bootApp(opts = {}) {
       document.head.appendChild(el);
     }
     el.textContent = source;
-    const base = id.includes("/") ? id.slice(id.lastIndexOf("/") + 1) : id;
-    for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
-      const href = link.getAttribute("href") || "";
-      if (href === `/${base}` || href.endsWith(`/${base}`) || href === base) {
-        link.disabled = true;
-      }
-    }
   };
   const removeCssSheet = (id) => {
     if (typeof document === "undefined")
@@ -23155,6 +23178,12 @@ async function bootApp(opts = {}) {
     for (const node of [...document.querySelectorAll("style[data-rip-css]")]) {
       if (node.getAttribute("data-rip-css") === id)
         node.remove();
+    }
+    const link = cssLinkFor(id);
+    if (link) {
+      const path = (link.getAttribute("href") || "").split("?")[0];
+      if (path)
+        link.setAttribute("href", path);
     }
   };
   const escapeRemount = async (applied) => {
@@ -23170,7 +23199,6 @@ async function bootApp(opts = {}) {
     current.destroy();
     current = launchWith(snapshot);
     Object.assign(handle, current, stable);
-    console.log(`[Rip] applied ${applied.join(", ") || "a change"} — remounted (component state reset)`);
   };
   const apply = app.createApply({
     renderer: {
@@ -23217,7 +23245,7 @@ async function bootApp(opts = {}) {
       }
       try {
         const verdict = await apply.absorb(applied);
-        if (verdict === "narrow" || verdict === "noop") {
+        if (verdict === "update" || verdict === "ignore" || verdict === "css") {
           Object.assign(handle, current, stable);
         }
       } catch (error) {
@@ -23265,8 +23293,8 @@ async function bootApp(opts = {}) {
       if (isCssPath(path)) {
         const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
         if (applied) {
-          applyCssSheet(path, passport.source);
-          console.log(`[Rip] applied ${path} — css soft-apply (no remount)`);
+          applyCssSheet(path, passport.source, passport.etag);
+          console.log(`[Rip] applied ${path} — css`);
         }
         return applied;
       }
@@ -23274,7 +23302,7 @@ async function bootApp(opts = {}) {
         const had = known != null;
         const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
         if (applied && had) {
-          console.log(`[Rip] applied ${path} — html reload`);
+          console.log(`[Rip] applied ${path} — reload`);
           if (typeof location !== "undefined")
             location.reload();
         }

@@ -145,13 +145,16 @@ test.describe('cart Probe 1 apply', () => {
           getComputedStyle(document.documentElement).getPropertyValue('--rip-s12').trim()),
       { timeout: 15000 }).toBe(token);
 
-      expect(await page.evaluate(() =>
-        !!document.querySelector('style[data-rip-css="app/styles.css"]'))).toBe(true);
+      // Same path the page linked: /styles.css → cache-bust ?etag=
       expect(await page.evaluate(() => {
-        const link = [...document.querySelectorAll('link[rel="stylesheet"]')]
-          .find((l) => (l.getAttribute('href') || '').includes('styles.css'));
-        return link?.disabled === true;
+        const links = [...document.querySelectorAll('link[rel="stylesheet"][href]')];
+        const link = links.find(l => (l.getAttribute('href') || '').split('?')[0] === '/styles.css'
+          || (l.getAttribute('href') || '').startsWith('/styles.css?'));
+        const href = link?.getAttribute('href') || '';
+        return href.startsWith('/styles.css?etag=') && link?.disabled !== true;
       })).toBe(true);
+      expect(await page.evaluate(() =>
+        !document.querySelector('style[data-rip-css="app/styles.css"]'))).toBe(true);
       expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
       expect(await page.evaluate(() => document.querySelector('nav')?.__layoutSentinel)).toBe('alive');
       await expect(page.locator('nav')).toContainText('Cart (1)');

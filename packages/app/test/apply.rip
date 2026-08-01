@@ -1,5 +1,5 @@
 # ==============================================================================
-# Apply engine — Probe 1 floor (narrow vs escape).
+# Apply engine — reload | css | update | ignore
 # Run via `rip test/apply.rip` (chained in the package's test script).
 # ==============================================================================
 
@@ -11,58 +11,58 @@ test "createApply validates its options", ->
   throws (-> createApply {}), 'requires renderer.remountDirty'
   throws (-> createApply { renderer: remountDirty: -> 'narrow' }), 'requires an escape remount'
 
-test! "absorb no-ops on empty or non-app paths", ->
+test! "absorb ignores empty or non-app paths", ->
   calls = []
   apply = createApply
     renderer: remountDirty: (paths) -> calls.push ['narrow', paths]; 'narrow'
     escape: (paths) -> calls.push ['escape', paths]
-  eq apply.absorb!([]), 'noop'
-  eq apply.absorb!(['api/x.rip']), 'noop'
+  eq apply.absorb!([]), 'ignore'
+  eq apply.absorb!(['api/x.rip']), 'ignore'
   eq calls, []
 
-test! "absorb no-ops on CSS-only dirty sets (S12 soft-apply)", ->
+test! "absorb reports css for CSS-only dirty sets (never reload)", ->
   calls = []
   apply = createApply
     renderer: remountDirty: (paths) -> calls.push ['narrow', paths]; 'narrow'
     escape: (paths) -> calls.push ['escape', paths]
-  eq apply.absorb!(['app/styles.css']), 'noop'
-  eq apply.absorb!(['app/styles.css', 'app/theme.css']), 'noop'
+  eq apply.absorb!(['app/styles.css']), 'css'
+  eq apply.absorb!(['app/styles.css', 'app/theme.css']), 'css'
   eq calls, []
 
-test! "absorb no-ops on HTML-only dirty sets (shell reload)", ->
+test! "absorb reports reload for HTML dirty sets", ->
   calls = []
   apply = createApply
     renderer: remountDirty: (paths) -> calls.push ['narrow', paths]; 'narrow'
     escape: (paths) -> calls.push ['escape', paths]
-  eq apply.absorb!(['app/index.html']), 'noop'
-  eq apply.absorb!(['app/index.html', 'app/styles.css']), 'noop'
+  eq apply.absorb!(['app/index.html']), 'reload'
+  eq apply.absorb!(['app/index.html', 'app/styles.css']), 'reload'
   eq calls, []
 
-test! "absorb prefers narrow remount when the renderer accepts", ->
+test! "absorb reports update when the renderer accepts a narrow remount", ->
   logs = []
   escaped = []
   apply = createApply
     renderer: remountDirty: -> 'narrow'
     escape: (paths) -> escaped.push paths
     report: (...args) -> logs.push args.join ' '
-  eq apply.absorb!(['app/routes/index.rip']), 'narrow'
+  eq apply.absorb!(['app/routes/index.rip']), 'update'
   eq escaped, []
-  eq (logs.some (l) -> l.includes('narrow remount') and l.includes 'stash kept'), true
+  eq (logs.some (l) -> l.includes('— update')), true
 
-test! "absorb escapes for stash edits", ->
+test! "absorb reports update after whole-launch remount for stash edits", ->
   escaped = []
   apply = createApply
     renderer: remountDirty: -> 'escape'
     escape: (paths) -> escaped.push paths
     report: ->
-  eq apply.absorb!(['app/stash.rip']), 'escape'
+  eq apply.absorb!(['app/stash.rip']), 'update'
   eq escaped, [['app/stash.rip']]
 
-test! "absorb falls back to escape when narrow throws", ->
+test! "absorb falls back to update when narrow throws", ->
   escaped = []
   apply = createApply
     renderer: remountDirty: -> throw new Error 'boom'
     escape: (paths) -> escaped.push paths
     report: ->
-  eq apply.absorb!(['app/routes/cart.rip']), 'escape'
+  eq apply.absorb!(['app/routes/cart.rip']), 'update'
   eq escaped, [['app/routes/cart.rip']]
