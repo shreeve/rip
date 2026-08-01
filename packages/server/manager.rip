@@ -1,1 +1,156 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 
+HEARTBEAT_MS = 5000
+READY_MS = 30000
+
+parseArgs = (argv) ->
+  args: any = { entry: null, name: null, host: null, control: process.env.JANUS_CONTROL or null }
+  i = 0
+  while i < argv.length
+    value = argv[i]
+    take = ->
+      i++
+      abort "rip-server: #{value} requires a value" if i >= argv.length
+      argv[i]
+    switch value
+      when '--name' then args.name = take()
+      when '--host' then args.host = take()
+      when '--control' then args.control = take()
+      when '--help', '-h'
+        p 'usage: rip server <entry> [--name <name>] [--host <host>] --control <socket-or-url>'
+        exit 0
+      else
+        abort "rip-server: unknown option #{value}" if value.startsWith '-'
+        abort "rip-server: multiple app entries (#{args.entry} and #{value})" if args.entry?
+        args.entry = value
+    i++
+  abort 'rip-server: an app entry is required' unless args.entry?
+  abort 'rip-server: --control or JANUS_CONTROL is required' unless args.control?
+  args.entry = resolve args.entry
+  args.name ?= basename(args.entry).replace(/\.[^.]+$/, '')
+  args.host ?= args.name
+  args
+
+controlFetch = (target, method, path, body: any = null) ->
+  options: any = { method }
+  if body?
+    options.body = JSON.stringify body
+    options.headers = { 'content-type': 'application/json' }
+  if target.startsWith('http://') or target.startsWith('https://')
+    fetch "#{target}#{path}", options
+  else
+    options.unix = target
+    fetch "http://janus#{path}", options
+
+generate = (entry, artifact, reportPath, taskId) ->
+  preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
+  abort 'rip-server: the Rip loader is missing' unless preload?
+  proc = Bun.spawn [process.execPath, preload, join(import.meta.dir, 'generate.rip'), entry, artifact, reportPath, taskId, '0'],
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'pipe'
+  stderrText = new Response(proc.stderr).text()
+  code = await proc.exited
+  diagnostic = await stderrText
+  throw new Error(diagnostic.trim() or "generation #{taskId} exited #{code}") unless code is 0
+  JSON.parse readFileSync(reportPath, 'utf8')
+
+waitReady = (proc, socket) ->
+  deadline = Date.now() + READY_MS
+  loop
+    throw new Error("worker exited with code #{proc.exitCode} before readiness") if proc.exitCode?
+    response = null
+    try
+      options: any = { unix: socket }
+      response = await fetch 'http://worker/ready', options
+    if response?
+      return if response.status is 200
+      if response.headers.has 'rip-boot-failed'
+        throw new Error(await response.text())
+    throw new Error('worker readiness deadline expired') if Date.now() >= deadline
+    await new Promise (done) -> setTimeout done, 25
+
+stopWorker = (proc) ->
+  return unless proc?
+  proc.kill 'SIGTERM' unless proc.exitCode?
+  deadline = Date.now() + 5000
+  while not proc.exitCode? and Date.now() < deadline
+    await new Promise (done) -> setTimeout done, 10
+  proc.kill 'SIGKILL' unless proc.exitCode?
+  await proc.exited
+
+export main = (argv) ->
+  args = parseArgs argv
+  runDir = mkdtempSync join(tmpdir(), 'rip-srv-')
+  worker = null
+  appId = null
+  heartbeat = null
+  finish = null
+  stopping = false
+  finished = new Promise (done) -> finish = done
+
+  registration = ->
+    name: args.name
+    hosts: [args.host]
+    upstreams: [{ path: join(runDir, 'worker.sock') }]
+
+  createRegistration = ->
+    response = controlFetch! args.control, 'POST', '/1.0/apps', registration()
+    detail = response.text!
+    throw new Error("Janus registration failed (#{response.status}): #{detail}") unless response.status is 201
+    body = JSON.parse detail
+    throw new Error('Janus registration returned no app id') unless body?.id?
+    appId = body.id
+
+  beat = ->
+    return if stopping or not appId?
+    try
+      response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/heartbeat"
+      if response.status is 404
+        createRegistration!()
+      else unless response.ok
+        warn "rip-server: Janus heartbeat failed (#{response.status})"
+    catch error
+      warn "rip-server: Janus heartbeat failed: #{String(error)}"
+
+  stop = (status = 0) ->
+    return if stopping
+    stopping = true
+    clearInterval heartbeat if heartbeat?
+    try
+      if appId?
+        response = await controlFetch args.control, 'DELETE', "/1.0/apps/#{appId}"
+        warn "rip-server: Janus deregistration failed (#{response.status})" unless response.ok
+    catch error
+      warn "rip-server: Janus deregistration failed: #{String(error)}"
+    await stopWorker worker
+    finish! status
+
+  try
+    appArtifact = join runDir, 'app.js'
+    workerArtifact = join runDir, 'worker.js'
+    generate! args.entry, appArtifact, join(runDir, 'app-result.json'), 'app'
+    generate! join(import.meta.dir, 'worker.rip'), workerArtifact, join(runDir, 'worker-result.json'), 'worker'
+
+    socket = join runDir, 'worker.sock'
+    worker = Bun.spawn [process.execPath, workerArtifact],
+      stdin: 'ignore'
+      stdout: 'inherit'
+      stderr: 'inherit'
+      env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: '1' }
+    waitReady! worker, socket
+    createRegistration!()
+    heartbeat = setInterval beat, HEARTBEAT_MS
+    process.once 'SIGINT', -> stop! 0
+    process.once 'SIGTERM', -> stop! 0
+    p "rip-server: https://#{args.host}/"
+    await finished
+  catch error
+    warn "rip-server: #{String(error)}"
+    try await controlFetch(args.control, 'DELETE', "/1.0/apps/#{appId}") if appId?
+    await stopWorker worker
+    process.exitCode = 1
+  finally
+    rmSync runDir, { recursive: true, force: true }

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 GENERATOR = join(import.meta.dir, '..', '..', 'generate.rip')
 WORKER = join(import.meta.dir, '..', '..', 'worker.rip')
+SERVER = join(import.meta.dir, '..', '..', 'server.rip')
 
 generate = (entry, artifact, result, task) ->
   proc = Bun.spawn [process.execPath, PRELOAD, GENERATOR, entry, artifact, result, task, '0'],
@@ -25,6 +26,10 @@ waitFor = (fn, timeout = 5000) ->
     return value if value
     throw new Error('verification timed out') if Date.now() >= deadline
     await new Promise (resolve) -> setTimeout resolve, 10
+
+unixFetch = (url, socket) ->
+  options: any = { unix: socket }
+  fetch url, options
 
 test! 'generation builds and reports one stable loader-free artifact', ->
   dir = mkdtempSync join(tmpdir(), 'rip-hello-api-')
@@ -60,11 +65,11 @@ test! 'artifact-only worker becomes ready, serves, and drains', ->
       env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: 'hello' }
     ready = await waitFor ->
       try
-        response = await fetch 'http://worker/ready', { unix: socket }
+        response = await unixFetch 'http://worker/ready', socket
         response.status is 200
       catch then false
     ok ready
-    response = await fetch 'http://worker/hello', { unix: socket }
+    response = await unixFetch 'http://worker/hello', socket
     eq response.status, 200
     eq (await response.json()), { message: 'hello' }
     proc.kill 'SIGTERM'
@@ -72,4 +77,51 @@ test! 'artifact-only worker becomes ready, serves, and drains', ->
   finally
     try proc?.kill('SIGKILL')
     await proc.exited if proc?
+    rmSync dir, { recursive: true, force: true }
+
+test! 'foreground manager registers one ready worker and deregisters before exit', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-manager-')
+  controlSocket = join dir, 'janus.sock'
+  registration: any = null
+  deleted = false
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = new URL request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = await request.json()
+        return Response.json({ id: 'hello-registration' }, { status: 201 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/hello-registration/heartbeat'
+        return new Response(null, { status: 204 })
+      if request.method is 'DELETE' and url.pathname is '/1.0/apps/hello-registration'
+        deleted = true
+        return new Response(null, { status: 204 })
+      new Response('Not Found', { status: 404 })
+  edge = Bun.serve
+    port: 0
+    fetch: (request) ->
+      return new Response('unregistered', { status: 503 }) unless registration?
+      url = new URL request.url
+      unixFetch "http://worker#{url.pathname}", registration.upstreams[0].path
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'index.rip'), '--name', 'hello', '--host', 'hello.test', '--control', controlSocket],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    await waitFor -> registration?
+    eq registration.name, 'hello'
+    eq registration.hosts, ['hello.test']
+    eq registration.upstreams.length, 1
+    response = await fetch "http://127.0.0.1:#{edge.port}/hello"
+    eq response.status, 200
+    eq (await response.json()), { message: 'hello' }
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 0
+    ok deleted, 'manager must deregister before foreground exit'
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    edge.stop true
+    control.stop true
     rmSync dir, { recursive: true, force: true }
