@@ -1,3 +1,5 @@
+#!/usr/bin/env rip
+
 routes = new Map
 
 respond = (value) ->
