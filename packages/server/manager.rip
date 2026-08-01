@@ -181,7 +181,6 @@ export state =
   bootingPool: null
   currentPool: null
   managedChildren: new Set
-  everServed: false    # a pool has been live this run (epoch dings fire only on SWAPS)
   poolCounter: 0
   ringWaiters: 0
   readyWhen: 1
@@ -518,7 +517,6 @@ buildClientPublication = ->
     writeFileSync tmp, text
     renameSync tmp, bundle
   if cfg.watch
-    state.manifestPath = join(state.generatedDir, 'manifest.json')
     syncFiles!(modules)
     writeManifest!()
   state.liveBundle = bundle
@@ -670,7 +668,6 @@ export DEV_CHANNEL =! '/hub'
 # the silent-stale class. Returns the changed { id, hash, deleted? } entries.
 syncFiles = (walk) ->
   modules = walk.modules
-  state.manifestPath ?= join(state.runDir, 'manifest.json')
   changed = []
   for path, source of modules
     h = rash(walk.moduleBytes[path] or new TextEncoder().encode(source))
@@ -1017,17 +1014,12 @@ bootLoop = ->
     state.prepared = null if state.prepared is candidate
     state.bootingPool = null if state.bootingPool is pool
     state.bootFailure = null
-    state.everServed = true
     attachLateJoins pool
     return
 
-# A pool SWAP is an epoch: every connected page holds pre-swap code, and no
-# ding describes a server change. The manager dings the dev channel with
-# the new epoch so open browsers reload into it — the apply policy for a
-# server change IS the full page reload. Fire-and-forget: a publish failure
-# warns and never blocks the boot (the reload is a courtesy; a manual refresh
-# always works). Hub sockets survive the swap at Janus, so the frame reaches
-# every page the OLD pool served.
+# A release or migration activation is an epoch: connected pages may hold
+# pre-activation code, and no file ding describes the coordinated change.
+# Fire-and-forget: a publish failure warns and never blocks activation.
 dingEpoch = (n) ->
   pr = do -> publish! [{ '@': [DEV_CHANNEL], ding: { kind: 'epoch', epoch: n } }]
   pr.catch (e) -> warn "rip-server: epoch ding publish failed: #{e?.message or e}"
@@ -2347,6 +2339,7 @@ export main = (argv) ->
 
   state.runDir = mkdtempSync(join(tmpdir(), 'rip-srv-'))
   state.generatedDir = join(cfg.appDir, 'static', 'generated')
+  state.manifestPath = join(state.generatedDir, 'manifest.json')
   try
     mkdirSync state.generatedDir, { recursive: true, mode: 0o755 }
     invalidServe "generated root is not a directory: #{state.generatedDir}" unless statSync(state.generatedDir).isDirectory()

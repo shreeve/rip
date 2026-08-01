@@ -3,10 +3,9 @@
 # ==============================================================================
 #
 # Usage:
-#   import { cors, logger, compress, sessions, htmlJson } from '@rip-lang/server/middleware'
+#   import { cors, compress, sessions, htmlJson } from '@rip-lang/server/middleware'
 #   import { session } from '@rip-lang/server'
 #
-#   use logger()
 #   use cors origin: 'https://myapp.com'
 #   use compress()
 #   use sessions()

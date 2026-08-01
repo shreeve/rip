@@ -2937,7 +2937,7 @@ test! "a failed read-back is reported as a failure, never as success", ->
   proc = spawnManager dir, ctlSock, ['--name', 'darkapp', '-w', '1', '--no-watch'], {}, 'inherit', 'pipe'
   try
     waitFor! -> reads.length >= 1
-    sleep! 300
+    sleep! 1000
     proc.kill('SIGTERM')
     await proc.exited
     out = new Response(proc.stdout).text!
@@ -3065,7 +3065,7 @@ test! "generated publication: a save after the snapshot cannot invent a manifest
   try
     managerCfg.appDir = appDir
     managerState.runDir = runDir
-    managerState.manifestPath = null
+    managerState.manifestPath = join(runDir, 'manifest.json')
     managerState.files = {}
     managerState.currentPool = {}
     managerState.liveBundle = join(runDir, 'bundle.json')
@@ -3808,7 +3808,7 @@ test! "a generated publication with no live bundle holds the manifest back", ->
   try
     managerCfg.appDir = appDir
     managerState.runDir = runDir
-    managerState.manifestPath = null
+    managerState.manifestPath = join(runDir, 'manifest.json')
     managerState.files = {}
     managerState.currentPool = null          # no live pool — must not write a manifest
     managerState.liveBundle = null
@@ -3858,7 +3858,7 @@ test! "concurrent generated publications serialize without interleaving a parked
   try
     managerCfg.appDir = appDir
     managerState.runDir = runDir
-    managerState.manifestPath = null
+    managerState.manifestPath = manifestPath
     managerState.files = {}
     managerState.currentPool = {}
     managerState.liveBundle = join(runDir, 'bundle.json')
@@ -3905,7 +3905,7 @@ test! "a bundle rewrite failure holds the manifest back; the next clean save wri
   try
     managerCfg.appDir = appDir
     managerState.runDir = runDir
-    managerState.manifestPath = null
+    managerState.manifestPath = join(runDir, 'manifest.json')
     managerState.files = {}
     # A DIRECTORY at the bundle path makes the tmp+rename rewrite fail.
     brokenBundle = join(runDir, 'bundle-as-dir')

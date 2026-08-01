@@ -100,7 +100,7 @@ Three project shapes use the same model:
   contributes to an automatically generated OpenAPI 3.1 document.
 - **Request context:** `ctx()`, `session`, `mark()`, and `subrequest()` ride
   `AsyncLocalStorage`; library code needs no threaded context argument.
-- **Middleware:** Koa-style composition plus CORS, logging, compression,
+- **Middleware:** Koa-style composition plus CORS, compression,
   sessions, CSRF, security headers, timeout, and mobile JSON rendering.
 - **Safe API reload:** a short-lived generation process validates a candidate
   before the manager cuts admission to the active workers.
