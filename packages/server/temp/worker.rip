@@ -9,30 +9,5 @@ h = if typeof fresh is 'function' then fresh
 else if typeof fresh?.fetch is 'function' then fresh.fetch.bind(fresh)
 else globalThis.__ripHandler
 
-# Hung-handler recycling.
-handlerMs = parseInt(process.env.RIP_HANDLER_DEADLINE_MS or '')
-HANDLER_DEADLINE_MS =! if Number.isFinite(handlerMs) and handlerMs >= 0 then handlerMs else 30000
-if HANDLER_DEADLINE_MS > 0
-  checkEvery = Math.min(1000, Math.max(25, Math.floor(HANDLER_DEADLINE_MS / 4)))
-  setInterval ->
-    return if state.draining
-    now = Date.now()
-    for t0 as state.inflightStarts.values()
-      if now - t0 > HANDLER_DEADLINE_MS
-        warn "[worker #{workerId}] in-flight request stuck past #{HANDLER_DEADLINE_MS}ms; recycling this worker"
-        shutdown!()
-        return
-  , checkEvery
-
-# Parent-death detection.
-ppidMs = parseInt(process.env.RIP_PPID_MS or '')
-PPID_CHECK_MS =! if Number.isFinite(ppidMs) and ppidMs > 0 then ppidMs else 1000
-bootPpid = process.ppid
-setInterval ->
-  return if process.ppid is bootPpid and process.ppid isnt 1
-  warn "[worker #{workerId}] parent gone (ppid #{bootPpid} → #{process.ppid}); exiting"
-  shutdown!()
-, PPID_CHECK_MS
-
 # Direct worker interruption.
 process.on 'SIGINT', shutdown

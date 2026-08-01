@@ -10,11 +10,21 @@ drainText = process.env.RIP_DRAIN_DEADLINE_MS or '4500'
 drainMs = parseInt drainText
 abort "worker #{workerId}: RIP_DRAIN_DEADLINE_MS must be an integer greater than zero" unless Number.isFinite(drainMs) and drainMs > 0 and String(drainMs) is drainText
 
-state =
+handlerText = process.env.RIP_HANDLER_DEADLINE_MS or '30000'
+handlerMs = parseInt handlerText
+abort "worker #{workerId}: RIP_HANDLER_DEADLINE_MS must be a nonnegative integer" unless Number.isFinite(handlerMs) and handlerMs >= 0 and String(handlerMs) is handlerText
+
+ppidText = process.env.RIP_PPID_MS or '1000'
+ppidMs = parseInt ppidText
+abort "worker #{workerId}: RIP_PPID_MS must be an integer greater than zero" unless Number.isFinite(ppidMs) and ppidMs > 0 and String(ppidMs) is ppidText
+
+state: any =
   ready: false
   bootError: null
   handler: null
   inflight: 0
+  inflightStarts: new Map
+  requestSerial: 0
   draining: false
 
 boot = ->
@@ -26,7 +36,7 @@ boot = ->
     state.handler = handler
     state.ready = true
   catch error
-    state.bootError = error?.message or String(error)
+    state.bootError = String error
     warn "[worker #{workerId}] boot failed: #{state.bootError}"
     setTimeout (-> exit 1), 1500
 
@@ -46,6 +56,8 @@ server = Bun.serve
       return new Response('busy', { status: 503, headers: { 'retry-after': '0', 'rip-worker-busy': '1' } })
 
     state.inflight++
+    serial = ++state.requestSerial
+    state.inflightStarts.set serial, Date.now()
     try
       response = state.handler! request
       throw new TypeError('Rip worker handlers must return a Response') unless response instanceof Response
@@ -54,6 +66,7 @@ server = Bun.serve
       warn "[worker #{workerId}] request failed:", error
       new Response('Internal Server Error', { status: 500 })
     finally
+      state.inflightStarts.delete serial
       state.inflight--
 
 boot!
@@ -68,3 +81,22 @@ shutdown = ->
   exit 0
 
 process.on 'SIGTERM', shutdown
+
+if handlerMs > 0
+  interval = Math.min(1000, Math.max(25, Math.floor(handlerMs / 4)))
+  setInterval ->
+    return if state.draining
+    now = Date.now()
+    for started as state.inflightStarts.values()
+      if now - started > handlerMs
+        warn "[worker #{workerId}] handler exceeded #{handlerMs}ms; recycling"
+        shutdown!()
+        return
+  , interval
+
+parent = process.ppid
+setInterval ->
+  return if process.ppid is parent and process.ppid isnt 1
+  warn "[worker #{workerId}] manager exited; draining"
+  shutdown!()
+, ppidMs

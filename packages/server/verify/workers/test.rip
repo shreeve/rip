@@ -1,5 +1,5 @@
 import { test, eq, ok } from '@rip-lang/testing'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -223,4 +223,51 @@ test! 'manager kills workers that miss the readiness deadline', ->
     try proc?.kill('SIGKILL')
     await proc.exited if proc?
     control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'hung handler recycles the worker after its drain bound', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-workers-hung-')
+  proc = null
+  try
+    built = buildWorker! dir, join(import.meta.dir, 'index.rip')
+    socket = join dir, 'worker.sock'
+    proc = spawnWorker built, socket, { RIP_HANDLER_DEADLINE_MS: '50', RIP_DRAIN_DEADLINE_MS: '100' }
+    await waitFor ->
+      try (await unixFetch('/ready', socket)).status is 200
+      catch then false
+    hung = unixFetch('/hang', socket).catch(-> null)
+    await waitFor ->
+      try (await unixFetch('/hello', socket)).headers.get('rip-worker-busy') is '1'
+      catch then false
+    eq (await proc.exited), 0
+    await hung
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    rmSync dir, { recursive: true, force: true }
+
+test! 'worker exits when its manager process disappears', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-workers-orphan-')
+  childPid = null
+  parent = null
+  try
+    built = buildWorker! dir, join(import.meta.dir, 'index.rip')
+    socket = join dir, 'worker.sock'
+    report = join dir, 'child.json'
+    parent = Bun.spawn [process.execPath, join(import.meta.dir, 'parent.mjs'), built.worker, built.app, socket, report],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    eq (await parent.exited), 0
+    childPid = JSON.parse(readFileSync(report, 'utf8')).pid
+    gone = await waitFor ->
+      try
+        await unixFetch '/ready', socket
+        false
+      catch then true
+    ok gone
+  finally
+    try process.kill(childPid, 'SIGKILL') if childPid?
+    try parent?.kill('SIGKILL')
+    await parent.exited if parent?
     rmSync dir, { recursive: true, force: true }
