@@ -516,7 +516,6 @@ addRoute = (method, path, ...handlers) ->
       inputSchema: null,
     }
 
-export get:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'GET',    path, ...handlers
 export post:  (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'POST',   path, ...handlers
 export put:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'PUT',    path, ...handlers
 export patch: (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'PATCH',  path, ...handlers
@@ -742,19 +741,6 @@ runHandler = (c, route) ->
       new Response JSON.stringify({ error: masked.error }), { status: masked.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
     applyMark(res)
 
-# ==============================================================================
-# Server Startup
-# ==============================================================================
-
-export startHandler = -> fetch
-
-export start = ->
-  unless process.env.WORKER_ID? or process.env.SOCKET_PATH?
-    throw new Error 'start() requires the Rip worker runtime — run the application with `rip server`'
-  handler = startHandler()
-  globalThis.__ripHandler = handler
-  handler
-
 export App = (fn) ->
   resetGlobals()
   fn?.()
@@ -928,13 +914,3 @@ export read = (name?: string, type?: string | RegExp | any[] | Record<string, an
 
   v
 
-# ==============================================================================
-# CLI — `rip server` / `rip-server`
-# ==============================================================================
-
-# Executed directly, this file is the manager bin. The manager loads
-# dynamically so DSL importers never pull in orchestration code; argv is
-# handed over unparsed.
-if import.meta.main
-  { main } = import!('./manager.rip')
-  main! process.argv.slice(2)

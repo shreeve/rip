@@ -1,1 +1,34 @@
+routes = new Map
 
+respond = (value) ->
+  return value if value instanceof Response
+  return new Response(null, { status: 204 }) unless value?
+  return Response.json(value) if typeof value is 'object'
+  new Response String(value), { headers: { 'content-type': 'text/plain; charset=UTF-8' } }
+
+export get = (path, handler) ->
+  throw new TypeError('get requires an absolute path') unless typeof path is 'string' and path.startsWith('/')
+  throw new TypeError("get #{path} requires a handler") unless typeof handler is 'function'
+  throw new Error("duplicate GET route #{path}") if routes.has path
+  routes.set path, handler
+  return
+
+export fetch = (request) ->
+  return new Response('Not Found', { status: 404 }) unless request.method is 'GET'
+  path = new URL(request.url).pathname
+  handler = routes.get path
+  return new Response('Not Found', { status: 404 }) unless handler?
+  try
+    respond! handler!()
+  catch error
+    warn 'Rip API request failed:', error
+    Response.json { error: 'Internal Server Error' }, { status: 500 }
+
+export start = ->
+  throw new Error('start() requires the Rip worker runtime') unless process.env.APP_ARTIFACT? and process.env.SOCKET_PATH?
+  globalThis.__ripHandler = fetch
+  fetch
+
+if import.meta.main
+  { main } = import!('./manager.rip')
+  main! process.argv.slice 2

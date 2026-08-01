@@ -51,7 +51,7 @@ test! 'artifact-only worker becomes ready, serves, and drains', ->
   socket = join dir, 'worker.sock'
   proc = null
   try
-    generate! join(import.meta.dir, 'worker-entry.rip'), appArtifact, join(dir, 'app-result.json'), 'app'
+    generate! join(import.meta.dir, 'index.rip'), appArtifact, join(dir, 'app-result.json'), 'app'
     generate! WORKER, workerArtifact, join(dir, 'worker-result.json'), 'worker'
     proc = Bun.spawn [process.execPath, workerArtifact],
       stdin: 'ignore'
@@ -66,7 +66,7 @@ test! 'artifact-only worker becomes ready, serves, and drains', ->
     ok ready
     response = await fetch 'http://worker/hello', { unix: socket }
     eq response.status, 200
-    eq (await response.json()), { message: 'hello', path: '/hello' }
+    eq (await response.json()), { message: 'hello' }
     proc.kill 'SIGTERM'
     eq (await proc.exited), 0
   finally
