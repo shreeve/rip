@@ -1,8 +1,8 @@
 // The Workspace door in a real page (docs/WORKSPACE.md, Probe 0): the
-// page boots under workspace mode, the harness bumps a cell and dings
+// page boots under workspace mode, the harness bumps a module and dings
 // the hub, and the DOM visibly updates without a navigation or a
-// reload (D5) — while the socket only ever carried {ding: {id, rev}}
-// envelopes, never source bytes (D2).
+// reload (D5) — while the socket only ever carried {ding: {id, etag}}
+// envelopes, never source bytes (D2 / Q8′).
 import { expect, test } from '@playwright/test';
 
 const HARNESS = 'http://localhost:4173';
@@ -28,13 +28,13 @@ test('a harness ding visibly updates the page without reload, and the hub never 
   expect(await page.evaluate(() => location.pathname)).toBe('/workspace.html');
   expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
 
-  // D2: every frame the hub ever sent is a bare {ding: {id, rev}}.
+  // D2: every frame the hub ever sent is a bare {ding: {id, etag}}.
   const frames = await (await fetch(`${HARNESS}/__test/frames`)).json();
   expect(frames.length).toBeGreaterThan(0);
   for (const frame of frames) {
     const parsed = JSON.parse(frame);
     expect(Object.keys(parsed)).toEqual(['ding']);
-    expect(Object.keys(parsed.ding).sort()).toEqual(['id', 'rev']);
+    expect(Object.keys(parsed.ding).sort()).toEqual(['etag', 'id']);
     expect(frame).not.toContain('component');
     expect(frame.includes(stamp)).toBe(false);
   }

@@ -1,8 +1,11 @@
 # Rip Workspace
 
-**Status:** living constitution — plan + backout charter. Experimental
-until the apply / refresh research lands and is pinned in tests.
-Not a completed HMR protocol. Not a Janus capability.
+**Status:** living constitution — plan + backout charter. The **door is
+the default** (Q10, 2026-07-29): every WATCHING manager-served browser
+app runs through the Workspace; a production manager (watch off) serves
+plain-booting pages — production has no hub (Q2). Apply excellence (hot
+swap, state intact) remains open research. Not a completed HMR protocol.
+Not a Janus capability.
 
 **Name:** singular — `WORKSPACE.md`, one **Workspace**. The product is
 one reactive bag of Rip components in the browser, not a catalog of
@@ -10,9 +13,11 @@ one reactive bag of Rip components in the browser, not a catalog of
 `docs/YYYYMMDD-HHMMSS-workspace.md`; this file stays the living pointer.
 
 Owner rulings below are dated **2026-07-23** (Q1–Q5 locked) with
-warm-collaboration polish **2026-07-24** and sequencing / store /
-freshness rulings **2026-07-28** (Q6–Q9). Amend this document when a
-lock changes; do not invent protocol detail that is still open research.
+warm-collaboration polish **2026-07-24**, sequencing / store / freshness
+rulings **2026-07-28** (Q6–Q9), the default ruling **2026-07-29**
+(Q10), and the app-rails / watch-door amendment **2026-07-30** (Q8′,
+layout, hub, exemplar). Amend this document when a lock changes; do not
+invent protocol detail that is still open research.
 
 ---
 
@@ -33,7 +38,7 @@ so by mutating the Workspace.
 | # | Ruling |
 |---|---|
 | **Q1** | Pure Rip. Projection (compiled JS / later WASM) is invisible. Production = sealed Workspace + Projection-cache hit by default. Signed Projection cells. CSP without `unsafe-eval` on the happy path. Janus = admission and (in watch mode) doorbell only — no Rip meaning at the edge. |
-| **Q2** | Hub ding **only in dev/watch**. Production = no Hub. Hub never carries bodies; HTTP carries bytes. Ding envelope stub: `id` + `rev` (+ optional `kind`); never source or Projection. |
+| **Q2** | Hub ding **only in dev/watch**. Production = no Hub. Hub never carries bodies; HTTP carries bytes. Ding envelope: `id` + `etag` (+ optional `kind`); never source, Projection, or a monotonic `rev`. Hub channel is `/hub` (same spelling as the Janus bridge path). |
 | **Q3** | **B′** — stable component id, path-derived at birth; path is a label; renames keep the id. |
 | **Q4** | **C + research-first** — apply quality is measured against the written scenario suite (**S1–S15**) and automated tests; industry systems (Vite / Vue SFC HMR / React Fast Refresh) are **citations**, not a slogan stand-in. Reload is an escape hatch, never the marketed product. Not “done” until research + tests land. |
 | **Q5** | **C** — M1 without RipFS/OPFS. Manager watches disk → Hub ding → HTTP → `Workspace.set`. OPFS/RipFS may arrive later as an optional backpack; they are never durable truth. |
@@ -53,7 +58,7 @@ so by mutating the Workspace.
 
 | Side | Fields (sketch) |
 |---|---|
-| **Public** | `id`, revision / times, `sourceHash`, `compilerId`, `projectionHash` |
+| **Public** | `id`, `etag` / times, `sourceHash`, `compilerId`, `projectionHash` |
 | **Private** | Rip `source` (optional in production), Projection bytes |
 
 Production may omit source bytes and still keep `sourceHash`. Key
@@ -67,15 +72,34 @@ forever and “CSP later” are **rejected** as M0 rewrites.
 |---|---|
 | **Q6** | **M0 and M1 are independent exits.** M1 (the dev door) may land first under `RIP_WORKSPACE=1` with dev-mode in-browser compile; M0 (signed cells, CSP without `unsafe-eval`) gates **production populate** only and is unweakened. D6 reads: the dev door never leaks into production — flag off is unchanged and production has no Hub. |
 | **Q7** | **The bag subsumes the app's component store.** The Workspace implements the `ComponentsStore` interface (`packages/app/components.rip`) as its app-facing view — path-keyed through the path→id map, passports underneath. `launch()` accepts an injected components store; flag off, it creates its own store exactly as today (D1). When the Workspace earns the default, `createComponents` retires and the bag is the only store. Two live stores of browser code never coexist. |
-| **Q8** | **Cell freshness is structural.** Cell bytes are addressed by `(id, rev)` in the URL; a rev-keyed response is immutable and cacheable (micro-cache, browser cache, CDN alike). The manifest route is `no-store`. A client applies a cell only when its rev matches the ding's rev; on mismatch it refetches the manifest (S14's foothold). Unversioned cell URLs are rejected — freshness never rests on a header convention or a purge side effect. |
+| **Q8** | **Module freshness is structural (Q8′).** The default client **bag** is membership `app/**/*.{rip,css,html}` (ids = birth paths). Watch serves the latest successful representation of each bag file; the ding carries an `etag` only — no apply kind on the wire; the client chooses the reaction (Rip remount / CSS soft-apply / HTML reload). URLs: `GET /app/mood.rip?etag=E` for store id `app/mood.rip` — **no `/cells/` noun, no per-rev museum.** Exact match → `200` + body + `ETag`; a superseded etag → **`409`** + current `ETag`. Post-ding GETs omit `If-None-Match`. First paint loads **`/bundle.json`** (strong etag) once — Rip modules only in the compile bundle. Project-root main entry (`app.rip` / `index.rip`) is outside the client bag → epoch. Hub: **`/hub`**. Production (watch off): same rails, no ding loop, plain boot. |
 | **Q9** | **Package shape confirmed.** `packages/workspace` and `packages/refresh` stay separate browser-side packages while experimental (kill switch #2); `packages/server` keeps only the muscles. If the Workspace earns the default, its merge destination is `packages/app`, never `packages/server`. |
 
+### Ruling 2026-07-29 (Q10)
+
+| # | Ruling |
+|---|---|
+| **Q10** | **The Workspace earned the default; the flag is retired.** `RIP_WORKSPACE` no longer exists: every WATCHING manager-served browser app takes the watch door (a client-only save feeds the live pool; any other save reloads the pool and dings the swap as an epoch), and the page opens the door wherever the feed surface exists — a WATCHING worker. The manager sets the feed environment only with watch on: a production manager (watch off) writes no file pool, no manifest, publishes no dings, and its pages boot plain — production has no hub (Q2), enforced structurally, not by convention. Q9's merge executed: `packages/workspace` folded into `packages/app` (`workspace.rip`, `feed.rip` — `createWorkspace` and `connectFeed` on the public entry), so `@rip-lang/app` **is** the client side. `packages/refresh` will never exist as a separate package: when apply research (M2) starts, the engine lands as a discardable `packages/app` module against the S-suite. The backout is architectural, not a flag: the boot's `workspace` option (standalone pages boot plain, byte-identically — D1) and the door/apply split remain. |
+
 The ledger and the bundle are one artifact: first paint fetches the
-ledger (manifest + cells in one document — today's `bundle.json`
-evolved, each entry carrying its passport) into `Workspace.populate`;
-live mutation fetches a single rev-keyed cell into `Workspace.set`.
-One record type, two package sizes — per the flexible-packaging lock
-above.
+ledger (virtual `bundle.json`, each entry carrying its passport) into
+`Workspace.populate`; live mutation fetches a single module generation
+into `Workspace.set`. One record type, two package sizes — per the
+flexible-packaging lock above.
+
+### Ruling 2026-07-30 — app rails + Q8′ door
+
+| Topic | Locked |
+|---|---|
+| **Server entry** | `index.rip` (also accepted: `app.rip` — manager resolves both) |
+| **Client tree** | `app/` + optional `app/index.html` SPA shell |
+| **API source** | `api/` on disk → app-chosen public prefix (`/api` or `/v1`); SPA fallback never serves that prefix |
+| **Static** | Multi-tenant: `sites/{slug}/public` then `sites/common/public`. Simple apps: `public/` (one fallback per app) |
+| **Edge** | try_files / alias: sites → common/public → `/app/*` modules → worker. Janus stays dumb (no Rip brain) |
+| **Runtime JS** | Prefer CDN-pinned `rip.js` once the slice lands; until then `/@rip/rip.js` from the checkout is fine |
+| **Hub** | `/hub` for workspace dings (bridge enrollment) |
+| **Full-shape exemplar** | [`examples/cart/`](../examples/cart/) — multi-route shop (SQLite first, then `@rip-lang/db` / DuckDB) |
+| **Thin door demo** | [`examples/pulse/`](../examples/pulse/) — status board proving the Workspace door |
 
 ---
 
@@ -99,7 +123,7 @@ exist as an internal escape hatch; it never exits a milestone that
 claims framework refresh.
 
 *Workspace = passport bag + mutation door. Hot-apply excellence =
-replaceable engine on top (`packages/refresh`).*
+replaceable engine on top (a discardable `packages/app` module, Q10).*
 
 ---
 
@@ -107,42 +131,40 @@ replaceable engine on top (`packages/refresh`).*
 
 | Piece | Owner | Role |
 |---|---|---|
-| Workspace brain (passport bag, populate / set / seal, Projection use) | `packages/workspace` | Door + passport meaning |
-| Apply / refresh engine | `packages/refresh` | Replaceable absorb policy; discardable |
-| Muscles (disk watch, path→id map, rev bump, HTTP cells/manifest) | `packages/server` | Thin feed for the bag |
+| Workspace brain (passport bag, populate / set / seal, Projection use) | `packages/app` (`workspace.rip`) | Door + passport meaning |
+| Feed (hub subscriber: ding → HTTP → set, resync, epoch reload) | `packages/app` (`feed.rip`) | The browser half of the door |
+| Apply / refresh engine | future `packages/app` module (Q10) | Replaceable absorb policy; discardable |
+| Muscles (disk watch, path→id map, file pool + etag, HTTP `/app/*` + manifest) | `packages/server` | Thin feed for the bag |
 | Hub doorbell | Janus (existing hub) | Tiny invalidate notices in watch mode |
 | Constitution / ratifications | `docs/WORKSPACE.md` (+ timestamped snapshots later) | Plan and backout |
 
-**Bootstrap order:** flag on → `packages/workspace` → thin server feed
-→ later `packages/refresh`. Do not grow apply before the door exists.
-
 **Rule of thumb:** do not put the reactive bag inside `server` (server
-owns reload smells). Do not put file watching inside `workspace` (not
-the browser’s job). Do not invent Janus capability 7 for this — Janus
-moves bytes and dings; Rip owns Workspace meaning.
+owns reload smells). Do not put file watching inside the browser
+packages (not the browser’s job). Do not invent Janus capability 7 for
+this — Janus moves bytes and dings; Rip owns Workspace meaning.
 
 ---
 
 ## How we don’t make a mess
 
-### Kill switch (mandatory for code)
+### Backout charter (Q10 — the door is the default)
 
-1. Long-lived feature branch (e.g. `workspace`); PRs land there, not
-   straight onto an unready `main` surface.
-2. Prefer **new packages** — `packages/workspace` (door / passport) and,
-   when apply research starts, `packages/refresh` — over weaving into
-   server/app guts. Kill switch #2 covers both.
-3. Explicit **feature flag** — spell it **`RIP_WORKSPACE=1`** (and
-   `data-workspace` if an HTML attribute is needed). **Mandatory** for
-   Workspace code paths. Flag **off** = current Rip path. Default stays
-   off until the door (and later apply) earn the default.
-4. **Production sealed populate (M0)** may run once M0 exit holds.
+The experimental kill switch (feature branch + separate packages +
+`RIP_WORKSPACE=1`) served M1 and retired with Q10. What protects the
+codebase now is architectural:
+
+1. **The boot's `workspace` option is the seam.** A page without it
+   boots plain, byte-identically (D1); standalone `client()` serves
+   plain pages because no feed surface exists there. The door opens
+   only where the manager wrote the manifest and file pool.
+2. **Door and apply stay separate kill criteria.** The door is default;
+   apply excellence is not. The apply engine, when M2 research starts,
+   is a discardable `packages/app` module developed against the
+   S-suite — deleting it must stay cheap.
+3. **Production sealed populate (M0)** may run once M0 exit holds.
    **No production live-mutate / apply** until refresh contract tests
-   pass. Flag remains off-by-default; door and apply are **separate**
-   kill criteria.
-5. **Delete the package / drop the branch** = discard the experiment.
-   That must remain cheap. If door and apply fuse, delete
-   `packages/refresh` first (and the branch if needed).
+   pass. Production has no hub (Q2) and a sealed workspace rejects the
+   feed at the door.
 
 ### Forbidden invariants
 
@@ -165,8 +187,8 @@ Reject loudly if any of these appear:
 - One passport record type; flexible packaging, not three protocols.
 - Prod = seal + Projection-cache hit; no compiler on the happy path;
   signed cells + CSP without `unsafe-eval` on that path.
-- Dev = same model, door open, Hub ding only (`id` + `rev`, optional
-  `kind`).
+- Dev = same model, door open, Hub ding only (`id` + `etag`,
+  optional `kind`).
 - Spec here before a large package explosion.
 - Present tense only; no “legacy compat” fog.
 
@@ -178,10 +200,10 @@ Honest exits. Do not promote a rung by renaming a weaker behavior.
 
 ### M0 — Populate
 
-- Serve / fetch a ledger (manifest + cells).
+- Serve / fetch a ledger (manifest + files).
 - Populate the Workspace; Projection-cache hit path works in prod.
 - Seal in production (no post-populate mutation).
-- Happy path **proves** Q1 constraints: signed Projection cells and
+- Happy path **proves** Q1 constraints: signed Projection bindings and
   CSP without `unsafe-eval`. Stub / deploy-dev signer allowed; key
   custody / rotation / mismatch UX stay open research.
 
@@ -199,14 +221,16 @@ without claiming live update — under those CSP/signed constraints.
   **door** is real and tested — but the product surface must not call
   this “Vite-class HMR” or “HMR done.”
 
-**Exit:** ding → HTTP → set → passport mutation → visible update under
-the flag. Not Vite-parity. Not an S-suite claim.
+**Exit:** ding → HTTP → set → passport mutation → visible update. Not
+Vite-parity. Not an S-suite claim. **Met 2026-07-29** — the door is the
+default worker-mode path (Q10); apply remains the labeled remount
+escape.
 
 ### Research apply track (parallel, discardable)
 
 See **Research / apply** below. Industry deep dive + scenario suite
-(**S1–S15**) land here first; then `packages/refresh` implements
-against the suite; iterate or delete.
+(**S1–S15**) land here first; then the apply module (in
+`packages/app`, Q10) implements against the suite; iterate or delete.
 
 **Exit:** automated suite green for the written Rip scenarios (industry
 citations as evidence, not a vague “≥ Vite” slogan alone). Only then
@@ -313,8 +337,8 @@ still match RFR’s ladder.
 
 | Industry concept | Rip mapping (locked constraints) |
 |---|---|
-| Dev notify channel | **Hub ding only** in watch (Q2). Envelope: `id` + `rev` (+ optional `kind`); **never bodies**. |
-| Module / cell bytes | **HTTP** fetch into `Workspace.set` (Q5 M1). Not Hub payload. Not SSE body bus. |
+| Dev notify channel | **Hub ding only** in watch (Q2). Envelope: `id` + `etag` (+ optional `kind`); **never bodies**. |
+| File bytes | **HTTP** fetch into `Workspace.set` (Q5 M1 / Q8′). Not Hub payload. Not SSE body bus. |
 | Module identity | Passport **B′** id, path-derived at birth; path is a label (Q3). |
 | Compiled form | **Projection** invisible to authors (Q1); apply swaps Projection behind the passport. |
 | Accept / invalidate graph | **Open research** for Rip — do not copy Vite’s `import.meta.hot` spelling; do not ratify a full protocol from this table alone. |
@@ -344,10 +368,10 @@ this suite (**S1–S15**), with industry rows as citations.
 | S8 | Edit module with **no accepting UI boundary** up to root | Full reload (honest escape) | industry (Vite dead-end walk) |
 | S9 | **Effect cleanup** ownership on replace | Outgoing effects dispose exactly once; no orphan timers/listeners | industry + Rip effect model (HMR.md) |
 | S10 | **Compile failure** mid-edit | Last-known-good stays interactive; overlay; no bag corruption | industry (Vite error overlay; RFR redbox) |
-| S11 | **Activation failure** after successful compile | Roll back apply; door passport may still show new rev only after successful activation — **open** (transaction vs door ordering). Mutation safety: a failed activation must not leave living instances half-applied. |
-| S12 | **CSS-only** shared sheet | Style update; zero component remount | industry |
+| S11 | **Activation failure** after successful compile | Roll back apply; door passport may still show new etag only after successful activation — **open** (transaction vs door ordering). Mutation safety: a failed activation must not leave living instances half-applied. |
+| S12 | **CSS-only** shared sheet | Style update via `<style data-rip-css>`; zero component remount; ding `{id,etag}` (extension branches — no `kind:style`) | industry (Probe 1 pin on cart) |
 | S13 | Rename file on disk (**B′ id stable**) | Same component identity; apply continues against id not path | open (Q3; no industry twin) |
-| S14 | Hub ding with **stale / duplicate rev** | Ignore or coalesce; no double-apply corruption | open (door; revision cursor design TBD) |
+| S14 | Hub ding with **stale / duplicate etag** | Ignore or coalesce; no double-apply corruption | industry (door; etag equality) |
 | S15 | Intentional **force remount** | Author/tooling can request remount without full reload | industry (`@refresh reset`) |
 
 This suite is the falsifiable Q4 contract seed. Amend rows when
@@ -363,26 +387,26 @@ Split door from apply. Do not invent a full HMR protocol.
 Watch → Hub ding → HTTP → `Workspace.set` → visible update.
 
 - Coarse remount / reload-as-escape is OK.
-- Exit = **M1 door** under `RIP_WORKSPACE=1`.
+- Exit = **M1 door** (met — Q10 made it the default).
 - No S-suite claim. No “HMR done.”
 
 Probe 0 observables (honesty bar, not a protocol):
 
 | # | Observable |
 |---|---|
-| D1 | Flag off → current Rip path unchanged |
-| D2 | Disk change → Hub ding with `id` + `rev` (no body) |
-| D3 | Client HTTP-fetches cell / manifest bytes (cells rev-keyed, Q8) |
-| D4 | `Workspace.set` mutates the passport (rev / hashes advance) |
+| D1 | A plain boot (no `workspace` option — standalone pages) → current Rip path unchanged |
+| D2 | Disk change → Hub ding with `id` + freshness address (no body). Target: `id` + `etag` (Q8′) |
+| D3 | Client HTTP-fetches module bytes at `/app/…?etag=` with 200-or-409 (Q8′) |
+| D4 | `Workspace.set` mutates the passport (etag / source advance) |
 | D5 | UI shows a visible change attributable to that mutation |
 | D6 | Seal / no-Hub path still holds for production populate (M0) |
 | D7 | Remount or reload, if used, is labeled escape — not apply excellence |
 
 #### Probe 1 — apply
 
-Discardable `packages/refresh` against **S1, S2, S3** (Vue remount
-floor), **S8, S10**. Stop before inventing full accept/invalidate. If
-door and apply fuse, **delete** `packages/refresh`.
+A discardable apply module in `packages/app` (Q10) against **S1, S2,
+S3** (Vue remount floor), **S8, S10**. Stop before inventing full
+accept/invalidate. If door and apply fuse, **delete the module**.
 
 Records pass/fail against the suite in automated browser tests. Do not
 fuse Vite-parity into M1 exit.
@@ -423,8 +447,8 @@ timestamped snapshot. Do not silently “fill in” protocol in code first.
   say so.
 - **Workspace** owns the mutation **door** — populate, set, seal, ding,
   passport integrity. **Apply** (refresh) decides how living instances
-  adopt a mutation; it stays a discardable engine under Q4 in
-  `packages/refresh`.
+  adopt a mutation; it stays a discardable engine under Q4, landing as
+  a `packages/app` module when its research starts (Q10).
 - **v3** (JSON source bundle + SSE → `location.reload`) is historical
   reference only. It proves a coarse door+reload escape; it is not
   this product. Workspace is greenfield: passport bag + door +
@@ -456,7 +480,7 @@ timestamped snapshot. Do not silently “fill in” protocol in code first.
 
 ## Document hygiene
 
-- Update this file when Q1–Q5 or the kill-switch rules change.
+- Update this file when Q1–Q10 or the backout rules change.
 - Amend **Research / apply** when scenario rows or industry citations
   change; do not grow a second constitution unless this file becomes
   unreadable.

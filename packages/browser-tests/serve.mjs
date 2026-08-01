@@ -12,7 +12,7 @@ const root = resolve(here, '../..');
 const MODULES = {
   'app/stash.rip': [
     "import { source } from '@rip-lang/app'",
-    'export appStash = {',
+    'export stash = {',
     "  user: source fetch: -> (await fetch('/user.json')).json()",
     '}',
   ].join('\n'),
@@ -37,11 +37,10 @@ const bundleText = JSON.stringify(assembleBundle({
 }));
 const bundleTag = `"${Bun.hash(bundleText).toString(16)}"`;
 
-// The workspace door surface (docs/WORKSPACE.md dev-feed shape): a
-// mutable cell registry with rev-keyed immutable bytes, a no-store
-// manifest, and a hub socket that only ever sends {ding: {id, rev}} —
-// never bodies. POST /__test/bump advances a cell from the spec, and
-// GET /__test/frames answers the full frame log so specs pin D2.
+// The workspace door surface (docs/WORKSPACE.md / Q8′): latest file bytes
+// addressed by etag, a no-store manifest, and a hub socket that only
+// ever sends {ding: {id, etag}} — never bodies. POST /__test/bump
+// advances a file from the spec; GET /__test/frames pins D2.
 const wsRoute = title => [
   'export Home = component',
   '  render',
@@ -49,15 +48,15 @@ const wsRoute = title => [
 ].join('\n');
 
 const wsModules = { 'app/routes/index.rip': wsRoute('workspace home') };
-const wsRevs = new Map([['app/routes/index.rip', 1]]);
-const wsBytes = new Map([['app/routes/index.rip@1', wsModules['app/routes/index.rip']]]);
+const wsEtags = new Map();
+const shortEtag = (text) => new Bun.CryptoHasher('sha256').update(text).digest('hex').slice(0, 16);
+wsEtags.set('app/routes/index.rip', shortEtag(wsModules['app/routes/index.rip']));
 let wsBundleText = null;
 let wsBundleTag = null;
 const rebuildWsBundle = () => {
   wsBundleText = JSON.stringify(assembleBundle({
     modules: wsModules,
     packagesDir: join(root, 'packages'),
-    claims: ['@rip-lang/workspace'],
   }));
   wsBundleTag = `"${Bun.hash(wsBundleText).toString(16)}"`;
 };
@@ -65,8 +64,8 @@ rebuildWsBundle();
 
 const wsSockets = new Set();
 const wsFrames = [];
-const ding = (id, rev) => {
-  const frame = JSON.stringify({ ding: { id, rev } });
+const ding = (id, etag) => {
+  const frame = JSON.stringify({ ding: { id, etag } });
   wsFrames.push(frame);
   for (const socket of wsSockets) socket.send(frame);
 };
@@ -79,10 +78,15 @@ Bun.serve({
     const url = new URL(request.url);
     const { pathname } = url;
     if (pathname === '/bundle.json') {
-      if (request.headers.get('If-None-Match') === bundleTag) {
-        return new Response(null, { status: 304, headers: { ETag: bundleTag } });
+      // ?door=1 is the workspace certification bundle (harness-only); the
+      // plain URL is the non-workspace app.spec bundle.
+      const door = url.searchParams.has('door');
+      const text = door ? wsBundleText : bundleText;
+      const tag = door ? wsBundleTag : bundleTag;
+      if (request.headers.get('If-None-Match') === tag) {
+        return new Response(null, { status: 304, headers: { ETag: tag } });
       }
-      return new Response(bundleText, { headers: { 'Content-Type': 'application/json', ETag: bundleTag } });
+      return new Response(text, { headers: { 'Content-Type': 'application/json', ETag: tag } });
     }
     if (pathname === '/user.json') {
       return new Response(JSON.stringify({ name: 'Ada Lovelace' }), { headers: { 'Content-Type': 'application/json' } });
@@ -90,36 +94,34 @@ Bun.serve({
     if (pathname === '/hub') {
       return server.upgrade(request) ? undefined : new Response('websocket only', { status: 400 });
     }
-    if (pathname === '/@rip/bundle.json') {
-      if (request.headers.get('If-None-Match') === wsBundleTag) {
-        return new Response(null, { status: 304, headers: { ETag: wsBundleTag } });
-      }
-      return new Response(wsBundleText, { headers: { 'Content-Type': 'application/json', ETag: wsBundleTag } });
-    }
-    if (pathname === '/@rip/manifest') {
-      const cells = [...wsRevs].map(([id, rev]) => ({ id, path: id, rev }));
-      return new Response(JSON.stringify({ cells }), {
+    if (pathname === '/manifest.json') {
+      const files = [...wsEtags].map(([id, etag]) => ({ id, etag }));
+      return new Response(JSON.stringify({ files }), {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       });
     }
-    if (pathname.startsWith('/@rip/cells/')) {
-      const id = pathname.slice('/@rip/cells/'.length);
-      const body = wsBytes.get(`${id}@${url.searchParams.get('rev')}`);
-      if (body === undefined) return new Response('unknown cell', { status: 404 });
-      return new Response(body, {
-        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=31536000, immutable' },
-      });
+    if (pathname.startsWith('/app/') && pathname.endsWith('.rip')) {
+      const id = pathname.slice(1); // app/...
+      const wanted = url.searchParams.get('etag');
+      const body = wsModules[id];
+      if (body === undefined) return new Response('unknown module', { status: 404 });
+      const current = wsEtags.get(id) ?? shortEtag(body);
+      const headers = { 'Content-Type': 'text/plain; charset=utf-8', ETag: `"${current}"`, 'Cache-Control': 'no-store' };
+      if (!wanted || !/^[0-9a-f]{16}$/.test(wanted)) {
+        return new Response('module URLs require ?etag=<16-hex>', { status: 400 });
+      }
+      if (wanted !== current) return new Response(null, { status: 409, headers });
+      return new Response(body, { headers });
     }
     if (pathname === '/__test/bump' && request.method === 'POST') {
       const { id, title } = await request.json();
-      const rev = (wsRevs.get(id) ?? 0) + 1;
       const source = wsRoute(title);
-      wsRevs.set(id, rev);
-      wsBytes.set(`${id}@${rev}`, source);
+      const etag = shortEtag(source);
+      wsEtags.set(id, etag);
       wsModules[id] = source;
       rebuildWsBundle();
-      ding(id, rev);
-      return new Response(JSON.stringify({ id, rev }), { headers: { 'Content-Type': 'application/json' } });
+      ding(id, etag);
+      return new Response(JSON.stringify({ id, etag }), { headers: { 'Content-Type': 'application/json' } });
     }
     if (pathname === '/__test/frames') {
       return new Response(JSON.stringify(wsFrames), { headers: { 'Content-Type': 'application/json' } });

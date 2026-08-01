@@ -8,6 +8,10 @@ Permanent documentation:
 
 - [README.md](README.md) — repository orientation and entry points.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
+- [docs/WORKSPACE.md](docs/WORKSPACE.md) — the Rip Workspace
+ constitution: the browser passport bag, the dev feed ("door"), and
+ the apply roadmap. The door is the DEFAULT for watching
+ manager-served browser apps; production has no hub.
 - [docs/HMR.md](docs/HMR.md) — HMR design and acceptance contract.
 - [docs/FRAME.md](docs/FRAME.md) — Rip-native hypermedia design and acceptance contract.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work.
@@ -249,30 +253,72 @@ alters surface syntax updates ALL THREE in the same change.
 
 ## Style
 
+- **Idiomatic Rip over verbose JS-shaped code.** Prefer the language's
+  own forms — never invent a JavaScript-looking equivalent that
+  happens to parse. Examples of the preference:
+  - `try return x catch then return y` and `try expr catch then
+    fallback` — not a braced `try { … } catch { … }` rewrite when the
+    inline form is enough
+  - `source fetch: -> …` / an indented multi-key `source` body on its
+    own binding, not `source({ fetch() { … }, staleTime: … })`
+  - keyword / indented call shape over forced `({ … })` object
+    literals when the callee accepts Rip's call forms
+  - dammit is the call: `client!` / `f! x`, not `client!()` / `f!(x)`
+    when there are no required parens
+  - postfix `?` is existence when bare (`x?` → `x != null`); a juxta
+    argument makes it optional call — `f? x` is the same as `f?(x)` /
+    `f?.(x)` (never a plain `f(x)`). Prefer the juxta form when it
+    matches surrounding dammit/juxta call style (`f! x`, `f x`). Keep
+    call parens when the arg would otherwise swallow a following
+    `or`/`and`/`??` (`f? a or b` is `f?.(a || b)` — write `f?(a) or b`)
+  - `->` / `=>`, dammit (`!`), existence (`?`), and match forms as the
+    surrounding code already uses them — do not rewrite working Rip
+    into `async`/`await`/`try`/`catch`/object-literal JS for familiarity
+  When a preferred form fails to parse, that is a grammar or lexer bug
+  at the owning layer (rule 4) — fix it there (as with `try return`),
+  or choose the nearest idiomatic alternative; never paper over with
+  curly-brace JS style. Read nearby `.rip` for the local dialect
+  before writing new code.
+- **Workspace vocabulary (door / apply):** bag = **membership** (default
+  `app/**/*.{rip,css,html}`); bag unit = **module** (path-keyed);
+  in-memory record = **passport**; swappable component identity =
+  **component definition**. Not “cell.” Hub dings `{ id, etag }` only —
+  no apply `kind` for CSS/HTML/Rip (client infers from extension).
+  Main server entry (`app.rip` / `index.rip` at project root) is outside
+  the client bag → epoch on change. Manifest + on-disk door store use
+  **files** (`{ files: [{id,etag}] }`, `runDir/files`, env
+  `RIP_FILES_DIR`).
 - **Comments explain non-obvious intent** — invariants, constraints,
- why a trade-off was taken. Never narrate what code obviously does,
- never reference project history or future plans. A comment that
- states a stale fact is a bug (rule 8 applies to comments).
+  why a trade-off was taken. Never narrate what code obviously does,
+  never reference project history or future plans. A comment that
+  states a stale fact is a bug (rule 8 applies to comments).
 - **Names come from the established vocabulary**: SourceFile, TokenTape,
- NodeStore, RoleStore, MappingStore, CodeBuilder, semanticKind, role,
- `_` (structural constant), grammarRef (null for literal-sourced
- roles), childSlot, `$self`, mappingKind (exact/cover/synthetic),
- ambientBindings, classifyCompleteness, replResultName,
- RecallTracker, Osc11Matcher. Do not invent synonyms for established
- concepts.
+  NodeStore, RoleStore, MappingStore, CodeBuilder, semanticKind, role,
+  `_` (structural constant), grammarRef (null for literal-sourced
+  roles), childSlot, `$self`, mappingKind (exact/cover/synthetic),
+  ambientBindings, classifyCompleteness, replResultName,
+  RecallTracker, Osc11Matcher. Do not invent synonyms for established
+  concepts.
 - **Spans are `[start, end)` UTF-16 code-unit offsets** plus a fileId.
 - Grammar/generator sources are Rip (`.rip`); supporting modules are
- plain JavaScript ES modules; runtime and tests use Bun.
+  plain JavaScript ES modules; runtime and tests use Bun.
 
 ## Seam decisions (rule 4 exemplars)
 
+- **`try return` × Catch → grammar.** `try return x catch then return y`
+  failed because `Return` is `Statement`, not `Expression`, and `Try`
+  only had `TRY Expression Catch`. Owned by the grammar: `TRY Statement`
+  / `TRY Statement Catch` (+ finally twins) in `grammar.rip`;
+  conflict-neutral. Pins: `test/battery/control.rip` (`try return catch
+  then return`). Expanding to braced JS `try`/`catch` in user code to
+  dodge the parse error is rejected.
 - **`new` × dammit → grammar.** `new Response(x).text!` nested the
- dammit under `new`; the emitter leaked a `dammit!` head. Owned by
- the grammar (JS NewExpression/MemberExpression split): retag
- `new`→`NEW`; `NewValue`/`NewCall`/`NewSpine` in `grammar.rip`;
- conflict-neutral. The competing lexer-rewriter scored the same on
- in-scope cells but re-detected construction boundaries the parse
- owns — rejected.
+  dammit under `new`; the emitter leaked a `dammit!` head. Owned by
+  the grammar (JS NewExpression/MemberExpression split): retag
+  `new`→`NEW`; `NewValue`/`NewCall`/`NewSpine` in `grammar.rip`;
+  conflict-neutral. The competing lexer-rewriter scored the same on
+  in-scope cells but re-detected construction boundaries the parse
+  owns — rejected.
 - **REPL dynamic imports → minted runtime resolver.** Literal-only
  span recording would leave computed specifiers (`import(someVar)`)
  silently broken — the forbidden defect class. Instead `repl: true`
@@ -282,6 +328,14 @@ alters surface syntax updates ALL THREE in the same change.
 
 ## Test-Authoring Sharp Edges
 
+- A PTY test must await text that occurs ONCE in the whole stream. The
+ terminal echoes the command line back before the command's output, so
+ `echo AAA` awaiting `AAA` matches its own echo; only the bytes up to
+ there are consumed, and whether the output had already landed decides
+ what remains. Put the awaited text in the output alone
+ (`echo A$(echo AA)`) — otherwise the assertion is a bet on PTY read
+ boundaries, which coalesce under load: measured 5 failures in 12
+ concurrent runs before, 0 in 44 after.
 - Battery files are themselves Rip source, so quoting nests: a `"""`
  heredoc interpolates `#{}` at the battery-file level (the test's
  source never sees it); a `'''` heredoc is raw for interpolation but
@@ -304,13 +358,16 @@ alters surface syntax updates ALL THREE in the same change.
  `bun <file>`) and `[test]` (for `bun test`) — and BOTH are
  load-bearing: on Bun 1.3.14 the test runner does not inherit the
  top-level list. Removing either breaks its half of the world.
-- `packages/vscode` tests never ride the compiler's fast loop; the two
- suites run separately (CI runs both).
-- An unreproduced single-failure `test:all` run is a KNOWN open
- mystery (two sightings, 2026-07-20/21; evidence points at timing
- sensitivity under machine load). If a logged run ever fails, capture
- the test NAME verbatim — identifying it matters more than the green
- rerun.
+- `packages/vscode` tests never ride the compiler's fast loop; the
+ extension suite is its own boundary, which `test:all` runs as one lane
+ through that package's own `bun run test` — the same command, and the
+ same ~60s, as running it in that directory.
+- An unreproduced single-failure suite run is a KNOWN open mystery
+ (sightings: `test:all` 2026-07-20/21, an audit lane 2026-07-28, one
+ Playwright firefox spec 2026-07-29 — all unreproduced; evidence
+ points at timing sensitivity under machine load). If a logged run
+ ever fails, capture the test NAME verbatim — identifying it matters
+ more than the green rerun.
 
 ## Commands
 
@@ -322,12 +379,25 @@ alters surface syntax updates ALL THREE in the same change.
  validity gates, scaling gates, fuzz drift) registers visible skips
  here.
 - `bun run test:all` — the CANONICAL full suite: everything above PLUS
- the extended tier. CI runs this, always. COMPLETION CLAIMS run
- against `bun run test:all`, not the fast loop.
-- `bun run test` FROM `packages/vscode` — the extension's own suite
+ the extended tier PLUS every `packages/*/` suite, which
+ `scripts/test-all.mjs` spawns as parallel lanes and aggregates into
+ one exit code. CI runs this, always. COMPLETION CLAIMS run against
+ `bun run test:all`, not the fast loop. The ONE suite it does not
+ carry is `packages/browser-tests` — it needs installed Playwright
+ browsers, and CI runs it as its own job.
+- `bun run test` FROM a package (`packages/vscode`, `packages/server`,
+ `packages/app`, …) — that package's own suite, and the inner loop
+ for work on that package; the root fast loop excludes `packages/**`
+ by bunfig, and `test:all` reaches these only by spawning them there
  (deps come from the repo-root `bun install`; no package-local lock).
+- `bunx playwright test` FROM `packages/browser-tests` — the real-DOM
+ certification (chromium, firefox, webkit), including the workspace
+ ding spec.
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus-expected` — regenerate the corpus expected outputs.
+- `bun run browser-bundle` — regenerate `dist/browser/rip.js` after any
+ `src/browser-*.js` change; a freshness gate in `test:all` catches a
+ stale bundle.
 - `bun run audit` — the typed-editor scoreboard, and NOT `bun audit`,
   which is Bun's dependency scanner. Six lanes (grammar, mapping, type,
   diagnostics, hover, token); no flag runs EVERY lane, and a lane's

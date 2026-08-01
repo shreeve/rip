@@ -1018,8 +1018,12 @@ grammar =
   Invocation: [
     o 'Value Arguments', '[1, ...2]', 'call: callee, ...args'
     o 'SUPER Arguments', '["super", ...2]', 'super: _, ...args'
-    # Optional call (`f?.(args)`).
+    # Optional call (`f?.(args)`). The juxta form `f? x` is the same
+    # node: the lexer opens an implicit call after postfix `?`, and
+    # CALL_START outranks `?` so `Value ? Arguments` shifts instead of
+    # reducing bare existence (`f?` alone still lowers to `f != null`).
     o 'Value ES6_OPTIONAL_CALL Arguments', '["optcall", 1, ...3]', 'optcall: _, callee, ...args'
+    o 'Value ? Arguments', '["optcall", 1, ...3]', 'optcall: _, callee, ...args'
     # Dynamic import: `import(url)` is a call node whose callee is the
     # token's own value; `import!(url)` is its awaited form (a real
     # await node — no hidden channels).
@@ -1151,9 +1155,16 @@ grammar =
     # undefined on throw.
     o 'TRY Expression'               , '["try", 2]'      , 'try: _, body'
     o 'TRY Expression Catch'         , '["try", 2, 3]'   , 'try: _, body, handler'
+    # Statement body: `try return x catch then return y` — Return (and
+    # break/continue/debugger) is Statement, not Expression; without
+    # these rows the CATCH after `try return …` is Unexpected.
+    o 'TRY Statement'                , '["try", 2]'      , 'try: _, body'
+    o 'TRY Statement Catch'          , '["try", 2, 3]'   , 'try: _, body, handler'
     o 'TRY Block Catch'              , '["try", 2, 3]'   , 'try: _, body, handler'
     o 'TRY Block FINALLY Block'      , '["try", 2, 4]'   , 'try: _, body, finalizer'
     o 'TRY Block Catch FINALLY Block', '["try", 2, 3, 5]', 'try: _, body, handler, finalizer'
+    o 'TRY Statement FINALLY Block'  , '["try", 2, 4]'   , 'try: _, body, finalizer'
+    o 'TRY Statement Catch FINALLY Block', '["try", 2, 3, 5]', 'try: _, body, handler, finalizer'
   ]
 
   # Catch bindings: an identifier, an object/array pattern (the emitter

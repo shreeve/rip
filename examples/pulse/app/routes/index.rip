@@ -29,16 +29,20 @@ export Home = component
 
   post: ->
     return if text is ""
-    fetch! '/api/statuses',
+    res = fetch! '/api/statuses',
       method: 'POST'
       headers:
         'Content-Type': 'application/json'
       body: JSON.stringify { text, mood }
+    unless res.ok
+      console.error "pulse: post rejected (#{res.status}):", res.text!
+      return
     text = ""
     refresh()
     # Announce to every /pulse member (including this page — the echo
-    # just re-runs the refetch above, which is idempotent).
-    hub?.send JSON.stringify '@': ['/pulse'], changed: {}
+    # just re-runs the refetch above, which is idempotent). A socket
+    # still CONNECTING cannot send; this page already refetched.
+    hub.send JSON.stringify('@': ['/pulse'], changed: {}) if hub?.readyState is 1
 
   render
     h1 "Pulse"

@@ -1,7 +1,7 @@
 # Pulse — a tiny status board proving the stack end to end: Rip Server
 # serves the boot page, the bundle, and this API; Rip App renders the
 # app/ directory in the browser. See README.md for the demo script.
-import { get, post, read, error, client, start } from '@rip-lang/server'
+import { get, post, read, error, start } from '@rip-lang/server'
 
 MOODS = ['up', 'even', 'down']
 
@@ -11,8 +11,6 @@ statuses = [
   mood: 'up'
   timestamp: Date.new().toISOString()
 ]
-
-client!()
 
 get '/api/statuses' -> statuses
 
@@ -25,4 +23,4 @@ post '/api/statuses' ->
   statuses.push status
   status
 
-start()
+start! 'app'

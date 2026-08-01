@@ -29,6 +29,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function openSession(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-lsp-'));
   const diags = new Map();
+  // Publications are COUNTED, not just stored: "the server answered again"
+  // is the thing a config-change test is waiting for, and the payload alone
+  // cannot distinguish a fresh answer from the previous one.
+  const pubs = new Map();
+  const seen = new Map();
   const versions = new Map();
 
   for (const [name, text] of Object.entries(files)) {
@@ -42,7 +47,11 @@ export async function openSession(files) {
 
   const client = new LspClient('bun', [SERVER, '--stdio'], {
     cwd: path.join(ROOT, 'packages/vscode'),
-    onNotification: (m, p) => { if (m === 'textDocument/publishDiagnostics') diags.set(p.uri, p.diagnostics); },
+    onNotification: (m, p) => {
+      if (m !== 'textDocument/publishDiagnostics') return;
+      diags.set(p.uri, p.diagnostics);
+      pubs.set(p.uri, (pubs.get(p.uri) ?? 0) + 1);
+    },
   });
   // Capture what the server asks the CLIENT to watch. This matters: a
   // didChangeWatchedFiles notification only ever arrives for a glob the
@@ -112,16 +121,33 @@ export async function openSession(files) {
     // assertion pass against a server that had stopped publishing entirely —
     // the exact regression these gates exist to catch. A test that wants to
     // assert silence must first know the server spoke.
+    // Waits for a publication NEWER than the one the previous call
+    // returned. A wait that ends when a publication merely EXISTS is
+    // satisfied forever after the first one, leaving nothing but the
+    // settle-sleep between a config change and reading the PREVIOUS
+    // answer as if it were the response — and a fixed sleep is a bet
+    // that the server is faster than whatever else the machine is doing.
     async diagnostics(name, { settle = 600, tries = 80, every = 100 } = {}) {
       const u = uri(name);
-      for (let i = 0; i < tries && !diags.has(u); i++) await sleep(every);
+      const want = (seen.get(u) ?? 0) + 1;
+      const deadline = Date.now() + tries * every;
+      while ((pubs.get(u) ?? 0) < want && Date.now() < deadline) await sleep(every);
       if (!diags.has(u)) {
         throw new Error(
           `no diagnostics publication for ${name} within ${(tries * every) / 1000}s — ` +
           'the server never (re)published. An empty result is NOT the same as silence.',
         );
       }
-      await sleep(settle);
+      // Then let a burst finish: return once the count has held still for
+      // `settle`, rather than after `settle` regardless of what is in
+      // flight — an intermediate publication must not decide the answer.
+      let quiet = 0;
+      while (quiet < settle && Date.now() < deadline + settle) {
+        const at = pubs.get(u);
+        await sleep(every);
+        quiet = pubs.get(u) === at ? quiet + every : 0;
+      }
+      seen.set(u, pubs.get(u) ?? 0);
       return diags.get(u) ?? [];
     },
 
@@ -143,7 +169,9 @@ export async function openSession(files) {
     // Forget what was published, so the next `diagnostics()` waits for a
     // FRESH publication rather than reading a stale one. This is what makes
     // "the open doc was re-governed" observable.
-    forget(name) { diags.delete(uri(name)); },
+    // Drops the counters with the payload: a later read then waits for the
+    // first publication AFTER this point, which is what forgetting means.
+    forget(name) { const u = uri(name); diags.delete(u); pubs.delete(u); seen.delete(u); },
 
     codes: (ds) => ds.map((d) => d.code),
 

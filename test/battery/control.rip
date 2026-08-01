@@ -951,6 +951,29 @@ code 'bare try statement generates catch {}', 'try foo()', '''
   } catch {}
 '''
 
+# Statement body on inline try — Return is Statement, not Expression.
+# CoffeeScript-shaped: `try return x catch then return y`.
+code 'try return catch then return', 'f = (v) ->\n  try return JSON.parse(v) catch then return v\n  "unreachable"', '''
+  let f = function(v) {
+    try {
+      return JSON.parse(v);
+    } catch {
+      return v;
+    }
+    return "unreachable";
+  };
+'''
+
+test 'try return catch then return succeeds', '''
+  f = (v) -> try return JSON.parse(v) catch then return v
+  f('{"a":1}').a
+''', 1
+
+test 'try return catch then return falls back', '''
+  f = (v) -> try return JSON.parse(v) catch then return v
+  f('nope')
+''', 'nope'
+
 test 'bare try expression returns undefined on throw', '''
   boom = -> throw new Error 'no'
   x = try boom()

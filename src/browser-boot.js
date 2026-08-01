@@ -14,13 +14,12 @@
 // turns it on when it arrives with the server).
 //
 // `workspace: true` opens the dev door (docs/WORKSPACE.md, M1): the
-// bag populates from the served manifest, the hub feed dings cells in,
+// bag populates from the served manifest, the hub feed dings modules in,
 // and a change applies by remount — labeled escape, never hot apply.
 // Off, every path below is byte-identical to the plain boot.
 import { createModuleLoader } from './browser-modules.js';
 
 const APP_PACKAGE = '@rip-lang/app';
-const WORKSPACE_PACKAGE = '@rip-lang/workspace';
 
 const bootGraphs = new Map();
 
@@ -94,6 +93,34 @@ export async function bootApp(opts = {}) {
   const fetchOpts = {};
   if (opts.fetchText) fetchOpts.fetchText = opts.fetchText;
   if ('bundleStorage' in opts) fetchOpts.storage = opts.bundleStorage;
+
+  // Workspace mode fetches the manifest BEFORE the bundle, and the
+  // manager writes it AFTER the bundle: the only pairing a boot racing
+  // a save can observe is "manifest rev <= bundle bytes", which the
+  // feed's open resync heals forward. The reverse pairing (a manifest
+  // rev over older bundle bytes) would block its own healing on the
+  // bag's rev cursor — the silent-stale class.
+  const workspaceMode = opts.workspace === true;
+  let manifestUrl = null;
+  let fetchBytes = null;
+  let manifest = null;
+  if (workspaceMode) {
+    // Derive from the bundle URL the same way: …/bundle.json → …/manifest.json.
+    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl
+      ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf('/') + 1)}manifest.json` : null);
+    if (!manifestUrl) {
+      throw new Error(
+        'rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl',
+      );
+    }
+    fetchBytes = opts.feed?.fetch ?? (url => fetch(url));
+    const res = await fetchBytes(manifestUrl);
+    if (!res.ok) {
+      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
+    }
+    manifest = await res.json();
+  }
+
   const bundle = opts.bundle ?? await fetchBundle(opts.url, fetchOpts);
   if (!bundle || typeof bundle !== 'object') {
     throw new Error('rip: bootApp requires a bundle or a url');
@@ -158,51 +185,20 @@ export async function bootApp(opts = {}) {
 
   const app = await loader.import(`${appEntry.root}/${appEntry.entry}`);
 
-  const workspaceMode = opts.workspace === true;
-  let createWorkspace = null;
-  let connectFeed = null;
-  let manifestUrl = null;
-  let fetchBytes = null;
   let bag = null;
   if (workspaceMode) {
-    // The workspace package rides the bundle like the app package
-    // does, and loads through the same graph — never a second copy.
-    const wsEntry = bundle.packages?.[WORKSPACE_PACKAGE];
-    if (!wsEntry) {
-      throw new Error(
-        `rip: workspace mode requires the '${WORKSPACE_PACKAGE}' package, which this bundle does not carry — ` +
-        'serve under RIP_WORKSPACE=1 so assembly claims it',
-      );
-    }
-    ({ createWorkspace } = await loader.import(`${wsEntry.root}/${wsEntry.entry}`));
-    const feedSub = wsEntry.exports?.['./feed'];
-    if (!feedSub) {
-      throw new Error(`rip: the '${WORKSPACE_PACKAGE}' package carries no './feed' export`);
-    }
-    ({ connectFeed } = await loader.import(`${wsEntry.root}/${feedSub}`));
-
-    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl
-      ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf('/') + 1)}manifest` : null);
-    if (!manifestUrl) {
-      throw new Error(
-        'rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl',
-      );
-    }
-    fetchBytes = opts.feed?.fetch ?? (url => fetch(url));
-    const res = await fetchBytes(manifestUrl);
-    if (!res.ok) {
-      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
-    }
-    const manifest = await res.json();
-    bag = createWorkspace();
+    // The workspace is part of the app package (docs/WORKSPACE.md, Q9):
+    // createWorkspace and connectFeed ride the same module the launch
+    // does — one graph, never a second copy.
+    bag = app.createWorkspace();
     const records = [];
-    for (const entry of manifest?.cells ?? []) {
-      const path = typeof entry.path === 'string' ? entry.path : entry.id;
-      const source = (bundle.modules ?? {})[path];
-      // A manifest cell the bundle does not carry is skipped here: the
-      // feed's open resync fetches it rev-keyed.
+    for (const entry of manifest?.files ?? []) {
+      // The id IS the store path (B′ — the birth path is the id).
+      const source = (bundle.modules ?? {})[entry.id];
+      // A manifest file the bundle does not carry is skipped here: the
+      // feed's open resync fetches it by etag.
       if (source === undefined) continue;
-      records.push({ id: entry.id, path, rev: entry.rev, source });
+      records.push({ id: entry.id, path: entry.id, etag: entry.etag, source });
     }
     bag.populate(records);
   }
@@ -233,9 +229,9 @@ export async function bootApp(opts = {}) {
 
   // The bag IS the component store (Q7), and the launch bundle carries
   // NO modules key on purpose: launch's load() would rewrite every
-  // passport and bump every rev, desyncing the bag's rev cursor from
-  // the server's. The bag already holds the sources; launch only
-  // overlays projections (setCompiled never bumps a rev or notifies).
+  // passport and desync bag etags from the server's. The bag already
+  // holds the sources; launch only overlays projections (setCompiled
+  // never changes etag or notifies).
   const launchWith = compiledModules => app.launch({
     bundle: { compiled: compiledModules, data: bundle.data },
     components: bag,
@@ -251,85 +247,198 @@ export async function bootApp(opts = {}) {
 
   const report = opts.feed?.report ?? ((...args) => console.error(...args));
 
-  // The escape apply: any route or app mutation coalesces into one
-  // remount of the whole launch against the same bag — the cached
-  // graph makes the relaunch legal (no second renderer claim). This is
-  // the labeled escape (D7), not hot apply.
-  //
-  // Projections rebuild THROUGH the loader, never from the bag's cache:
-  // a dinged cell's importers are invalidated transitively (they splice
-  // its object URL), so their bag projections are stale the moment the
-  // cell lands. Unchanged modules answer from the loader's own cache.
+  // Apply: compile barrier, then createApply chooses narrow remount
+  // (route/layout; stash kept) or the labeled whole-launch escape (D7).
+  // Projections rebuild THROUGH the loader; importers invalidate
+  // transitively. Unchanged modules answer from the loader cache.
+  // CSS sheets soft-apply via <style data-rip-css> and never remount (S12).
   let destroyed = false;
   let timer = null;
   let remounting = false;
+  const pending = new Set();
   const handle = {};
-  const remount = async () => {
+  const isCssPath = path => typeof path === 'string' && path.endsWith('.css');
+  const isHtmlPath = path => typeof path === 'string' && path.endsWith('.html');
+  // Non-Rip bag members never enter the module loader / remount path.
+  const isNonRipBag = path => isCssPath(path) || isHtmlPath(path);
+  const applyCssSheet = (id, source) => {
+    if (typeof document === 'undefined' || typeof source !== 'string') return;
+    let el = null;
+    for (const node of document.querySelectorAll('style[data-rip-css]')) {
+      if (node.getAttribute('data-rip-css') === id) {
+        el = node;
+        break;
+      }
+    }
+    if (!el) {
+      el = document.createElement('style');
+      el.setAttribute('data-rip-css', id);
+      document.head.appendChild(el);
+    }
+    el.textContent = source;
+    // Cold load may still hold a matching <link> (e.g. /styles.css for
+    // app/styles.css). Disable it so soft-apply is the sole sheet.
+    const base = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
+    for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
+      const href = link.getAttribute('href') || '';
+      if (href === `/${base}` || href.endsWith(`/${base}`) || href === base) {
+        link.disabled = true;
+      }
+    }
+  };
+  const removeCssSheet = id => {
+    if (typeof document === 'undefined') return;
+    for (const node of [...document.querySelectorAll('style[data-rip-css]')]) {
+      if (node.getAttribute('data-rip-css') === id) node.remove();
+    }
+  };
+  const escapeRemount = async (applied) => {
+    const snapshot = {};
+    for (const path of bag.paths()) {
+      if (isNonRipBag(path)) continue;
+      snapshot[path] = { ...(await loader.import(path)) };
+    }
+    for (const [path, module] of Object.entries(snapshot)) {
+      bag.setCompiled(path, module);
+    }
+    current.destroy();
+    current = launchWith(snapshot);
+    Object.assign(handle, current, stable);
+    console.log(`[Rip] applied ${applied.join(', ') || 'a change'} — remounted (component state reset)`);
+  };
+  const apply = app.createApply({
+    renderer: {
+      remountDirty: (paths) => current.renderer.remountDirty(paths),
+    },
+    escape: async (paths) => {
+      await escapeRemount(paths);
+    },
+    report: (...args) => {
+      if (typeof args[0] === 'string' && args[0].startsWith('[Rip] applied')) {
+        console.log(...args);
+      } else {
+        report(...args);
+      }
+    },
+  });
+  const absorb = async () => {
     timer = null;
     if (destroyed) return;
     if (remounting) {
-      timer = setTimeout(remount, 25);
+      timer = setTimeout(absorb, 25);
       return;
     }
     remounting = true;
+    const applied = [...pending];
+    pending.clear();
     try {
+      // Compile barrier (S10/S11): stage every projection locally first.
+      // A single import failure means ZERO bag.setCompiled calls and no
+      // apply — last-known-good stays interactive.
       const snapshot = {};
       for (const path of bag.paths()) {
-        let module = null;
+        if (isNonRipBag(path)) continue;
         try {
-          module = { ...(await loader.import(path)) };
-          bag.setCompiled(path, module);
+          snapshot[path] = { ...(await loader.import(path)) };
         } catch (error) {
-          report(`[Rip] workspace: '${path}' failed to recompile for the remount — keeping its last good projection`, error);
-          module = bag.getCompiled(path);
+          report(`[Rip] ${path} failed to compile — keeping the last good version`, error);
+          return;
         }
-        if (module) snapshot[path] = module;
       }
       if (destroyed) return;
-      current.destroy();
-      current = launchWith(snapshot);
-      Object.assign(handle, current, stable);
-      console.log('[Rip] workspace: change applied by remount (escape, not hot apply)');
+      for (const [path, module] of Object.entries(snapshot)) {
+        bag.setCompiled(path, module);
+      }
+      try {
+        const verdict = await apply.absorb(applied);
+        if (verdict === 'narrow' || verdict === 'noop') {
+          Object.assign(handle, current, stable);
+        }
+      } catch (error) {
+        report('[Rip] apply failed — waiting for the next good change', error);
+      }
     } finally {
       remounting = false;
     }
   };
   const unwatch = bag.watch((_event, path) => {
     if (!path.startsWith('app/')) return;
-    timer ??= setTimeout(remount, 25);
+    // CSS/HTML handled in door.set — never queue a JS remount.
+    if (isNonRipBag(path)) return;
+    pending.add(path);
+    timer ??= setTimeout(absorb, 25);
   });
 
-  // The compile-through door: a cell lands in the bag already
+  // The compile-through door: a Rip passport lands in the bag already
   // projected, so ONE notify carries source and compiled together and
   // launch's rebuild never observes a source-without-projection gap.
-  // A compile failure reports and never sets — last-known-good stays
-  // interactive (S10).
+  // CSS soft-applies (S12); HTML reloads the document. A compile failure
+  // reports and never sets — last-known-good stays interactive (S10).
   const door = {
     passport: bag.passport,
     sealed: bag.sealed,
-    set: async cell => {
-      if (cell.deleted === true) {
-        const path = bag.passport(cell.id)?.path;
-        if (path !== undefined) {
-          files.delete(path);
-          loader.invalidate(path);
-        }
-        return bag.set(cell);
+    set: async passport => {
+      // The bag's etag is THE staleness verdict — consult it BEFORE any
+      // mutation. Two dings in flight can resolve out of order: the
+      // older fetch lands after the newer one applied, and while bag.set
+      // would reject a duplicate etag, the files/loader mutations below
+      // would already carry stale bytes into the next remount (the
+      // silent-stale class). Same guard for deletes: a replayed stale
+      // delete must not evict the loader's file while the bag keeps the
+      // passport.
+      const known = bag.passport(passport.id);
+      if (known && typeof passport.etag === 'string' && passport.etag === known.etag) {
+        if (passport.deleted !== true) return false;
       }
-      const path = cell.path ?? cell.id;
-      files.set(path, cell.source);
+      if (passport.deleted === true) {
+        if (known && typeof passport.etag === 'string' && passport.etag !== known.etag) return false;
+        const path = bag.passport(passport.id)?.path;
+        if (path !== undefined) {
+          if (isCssPath(path)) {
+            removeCssSheet(path);
+          } else if (isHtmlPath(path)) {
+            // Shell gone — reload against the next generation.
+            if (typeof location !== 'undefined') location.reload();
+          } else {
+            files.delete(path);
+            loader.invalidate(path);
+          }
+        }
+        return bag.set(passport);
+      }
+      const path = passport.path ?? passport.id;
+      if (isCssPath(path)) {
+        const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
+        if (applied) {
+          applyCssSheet(path, passport.source);
+          console.log(`[Rip] applied ${path} — css soft-apply (no remount)`);
+        }
+        return applied;
+      }
+      if (isHtmlPath(path)) {
+        // Birth (first feed resync) only records the passport — the shell
+        // already came from the static page. A later etag advance reloads.
+        const had = known != null;
+        const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
+        if (applied && had) {
+          console.log(`[Rip] applied ${path} — html reload`);
+          if (typeof location !== 'undefined') location.reload();
+        }
+        return applied;
+      }
+      files.set(path, passport.source);
       loader.invalidate(path);
       let module;
       try {
         module = await loader.import(path);
       } catch (error) {
-        report(`[Rip] workspace: '${path}' rev ${cell.rev} failed to compile — keeping the last good revision`, error);
+        report(`[Rip] ${path} etag ${passport.etag} failed to compile — keeping the last good version`, error);
         return false;
       }
-      return bag.set({ ...cell, compiled: { ...module } });
+      return bag.set({ ...passport, compiled: { ...module } });
     },
   };
-  const feed = connectFeed(door, { ...(opts.feed ?? {}), manifestUrl, report });
+  const feed = app.connectFeed(door, { ...(opts.feed ?? {}), manifestUrl, report });
 
   const destroy = () => {
     if (destroyed) return;

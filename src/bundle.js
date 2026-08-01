@@ -1,14 +1,25 @@
 // Bundle assembly — the server-side half of the browser package
 // graph. An application's modules plus every browser-safe package they
 // reach become one JSON bundle: `modules` maps store paths to sources
-// and `packages` maps bare names to their `_pkg/<name>/` roots. A
-// package travels only when its manifest declares `rip.browser`;
+// and `packages` maps bare names to their `@rip-lang/<name>/` roots
+// (the same spelling authors import — store paths are not a second
+// vocabulary). A package travels only when its manifest declares
+// `rip.browser`;
 // a server-only or unknown import rejects assembly loudly, naming the
 // importer. Discovery compiles each module and follows the emitter's
 // RECORDED import spans — generated text is never scanned.
+//
+// Cross-boundary schema projections: a client module may import named
+// bindings from a server-only `.rip` outside the app tree (the v3 cart
+// pattern `import { UserPublic as User } from '../api/models.rip'`).
+// With `moduleFiles` + `appDir`, extractClientProjections overlays the
+// shippable shapes at the natural store path (`api/models.rip`) — the
+// author's relative specifier is unchanged; relative resolution finds
+// the overlay. :model / behavior refuse loudly.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { compile } from './compile.js';
+import { extractClientProjections } from './extract-projections.js';
 
 const RUNTIME_RE = /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/;
 
@@ -34,12 +45,111 @@ const ripFilesUnder = dir => {
   return out;
 };
 
-export function assembleBundle({ modules, packagesDir, data = null, claims = null }) {
+// Relative `.rip` import/re-export statements — the only edges that can
+// leave the app tree. Fresh regex per call so matchAll's lastIndex
+// never leaks. Captures the binding clause (group 1) and specifier
+// (group 2); re-exports are the idiomatic projection form.
+const RIP_REL_IMPORT = () =>
+  /(?:^|\n)[ \t]*(?:import|export)\s+(?:([\s\S]*?)\s+from\s+)?['"](\.[^'"]*\.rip)['"]/g;
+
+// Exported names in `{ a, b as c }` — left of any `as`. Local aliases
+// stay on the importer; the synthetic module re-exports the source names.
+const importedBindingNames = (clause) => {
+  if (!clause) return [];
+  const m = clause.match(/\{([^}]*)\}/);
+  if (!m) return [];
+  const names = [];
+  for (const n of m[1].split(',')) {
+    const t = n.trim();
+    if (!t) continue;
+    names.push(t.split(/\s+as\s+/)[0].trim());
+  }
+  return names;
+};
+
+// Overlay shippable projections at the project-relative path of the
+// server file (`api/models.rip`). Importers keep `from '../api/models.rip'`;
+// the loader's relative join lands on that key. Mutates `modules` in place.
+const materializeSharedSchemas = (modules, moduleFiles, appDir) => {
+  const absToStore = new Map();
+  for (const [store, abs] of Object.entries(moduleFiles)) {
+    absToStore.set(resolve(abs), store);
+  }
+  const insideBundle = (abs) => absToStore.has(resolve(abs));
+
+  // target abs → { key, names:Set }
+  const needs = new Map();
+  // store key → abs — two server files collapsing to one key refuse.
+  const overlayKeys = new Map();
+
+  for (const [key, src] of Object.entries(modules)) {
+    const file = moduleFiles[key];
+    if (!file) continue;
+    const fileDir = dirname(file);
+    for (const m of src.matchAll(RIP_REL_IMPORT())) {
+      const clause = m[1];
+      const spec = m[2];
+      const abs = resolve(fileDir, spec);
+      if (!existsSync(abs)) continue;
+      if (insideBundle(abs)) continue;
+      const names = importedBindingNames(clause);
+      if (names.length === 0) {
+        throw new Error(
+          `rip: cannot import server-only module '${spec}' into browser code (${key}). ` +
+          'Only named schema projections can cross the client boundary.',
+        );
+      }
+      let entry = needs.get(abs);
+      if (!entry) {
+        const overlayKey = relative(appDir, abs).replace(/\\/g, '/');
+        if (!overlayKey || overlayKey.startsWith('../') || overlayKey.startsWith('/')) {
+          throw new Error(
+            `rip: cannot materialize '${abs}' into the browser bundle — ` +
+            'the server file must sit under the app project root',
+          );
+        }
+        if (modules[overlayKey] != null) {
+          throw new Error(
+            `rip: projection overlay '${overlayKey}' collides with a bundle module`,
+          );
+        }
+        const prior = overlayKeys.get(overlayKey);
+        if (prior && prior !== abs) {
+          throw new Error(
+            `rip: projection key collision: '${abs}' and '${prior}' both map to '${overlayKey}'. ` +
+            "Two server-only modules can't materialize to the same browser-bundle key.",
+          );
+        }
+        overlayKeys.set(overlayKey, abs);
+        entry = { key: overlayKey, names: new Set() };
+        needs.set(abs, entry);
+      }
+      for (const n of names) entry.names.add(n);
+    }
+  }
+
+  for (const [abs, entry] of needs) {
+    const targetSrc = readFileSync(abs, 'utf8');
+    const result = extractClientProjections(targetSrc, [...entry.names], {
+      path: entry.key,
+    });
+    if (!result.ok) {
+      throw new Error(`rip: cannot ship schema import to the browser bundle: ${result.error}`);
+    }
+    modules[entry.key] = result.source;
+  }
+};
+
+export function assembleBundle({ modules, packagesDir, data = null, moduleFiles = null, appDir = null } = {}) {
   if (!modules || typeof modules !== 'object') {
     throw new TypeError('rip: assembleBundle requires a modules object');
   }
   const bundle = { modules: { ...modules }, packages: {} };
   if (data) bundle.data = data;
+
+  if (moduleFiles && appDir) {
+    materializeSharedSchemas(bundle.modules, moduleFiles, appDir);
+  }
 
   const claimPackage = (name, importer) => {
     if (bundle.packages[name]) return;
@@ -64,21 +174,20 @@ export function assembleBundle({ modules, packagesDir, data = null, claims = nul
       if (target?.endsWith('.rip')) exportsMap[key] = target.replace(/^\.\//, '');
     }
     bundle.packages[name] = {
-      root: `_pkg/${short}`,
+      root: name,
       entry: entryTarget.replace(/^\.\//, ''),
       exports: exportsMap,
     };
     for (const file of ripFilesUnder(root)) {
-      const relative = file.slice(root.length + 1);
-      bundle.modules[`_pkg/${short}/${relative}`] = readFileSync(file, 'utf8');
+      const relativePath = file.slice(root.length + 1);
+      bundle.modules[`${name}/${relativePath}`] = readFileSync(file, 'utf8');
     }
   };
 
   // The application package is the boot substrate: every bundle
-  // carries it, imported or not. `claims` names additional packages
-  // claimed the same way — the boot importer, imported or not.
+  // carries it, imported or not — and the workspace rides inside it
+  // (docs/WORKSPACE.md, Q9), so no second claim exists.
   if (packagesDir) claimPackage('@rip-lang/app', '<boot>');
-  for (const name of claims ?? []) claimPackage(name, '<boot>');
 
   const queue = Object.keys(bundle.modules);
   const seen = new Set();
@@ -103,7 +212,9 @@ export function assembleBundle({ modules, packagesDir, data = null, claims = nul
     for (const span of compiled.imports) {
       const spec = unquote(span.specifier);
       if (RUNTIME_RE.test(spec)) continue;
-      if (spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('_pkg/')) continue;
+      // Relative imports and already-claimed package store paths
+      // (`@rip-lang/app/feed.rip`) need no further package claim.
+      if (spec.startsWith('./') || spec.startsWith('../') || bundle.modules[spec]) continue;
       const bare = spec.match(/^(@rip-lang\/[\w-]+)(?:\/.+)?$/);
       if (!bare) {
         throw new Error(

@@ -1,0 +1,802 @@
+# ==============================================================================
+# @rip-lang/app workspace tests — passport bag: door, etag equality, store view,
+# seal, and the hub feed. Run via `rip test/workspace.rip` (the rip test
+# harness, not bun:test — chained in the package's test script).
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import { createWorkspace } from '../workspace.rip'
+import * as mod from '../workspace.rip'
+import { connectFeed } from '../feed.rip'
+import * as feedMod from '../feed.rip'
+import { readFileSync } from 'fs'
+
+# Mirrors the manager's shortHash / workspace etagOf — 16 hex of sha256.
+srcHash = (s) -> new Bun.CryptoHasher('sha256').update(s).digest('hex').slice(0, 16)
+
+SRC_APP = 'export App = component'
+SRC_HI  = 'export Hi = component'
+ETAG_APP = srcHash SRC_APP
+ETAG_HI  = srcHash SRC_HI
+
+# A workspace born through the door, plus an event log attached after birth.
+seeded = ->
+  ws = createWorkspace()
+  ws.populate [
+    { id: 'c1', path: 'app.rip',       etag: ETAG_APP, source: SRC_APP }
+    { id: 'c2', path: 'routes/hi.rip', etag: ETAG_HI,  source: SRC_HI }
+  ]
+  events = []
+  ws.watch (event, path) -> events.push [event, path]
+  { ws, events }
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "named exports", ->
+  eq Object.keys(mod).sort(), ['createWorkspace']
+  eq typeof createWorkspace, 'function'
+  eq Object.keys(feedMod).sort(), ['connectFeed']
+  eq typeof connectFeed, 'function'
+
+test "the workspace modules stay dependency-free; feed stays browser-safe", ->
+  for file in ['workspace.rip', 'feed.rip']
+    source = readFileSync("#{import.meta.dir}/../#{file}", 'utf8')
+    eq /^\s*import\b/m.test(source), false
+    eq /\bnode:|process\.|globalThis/.test(source), false
+  feed = readFileSync("#{import.meta.dir}/../feed.rip", 'utf8')
+  eq /\bBun\./.test(feed), false
+  # Local write/load mint etags via Bun.CryptoHasher; door set supplies etag.
+  ws = readFileSync("#{import.meta.dir}/../workspace.rip", 'utf8')
+  ok /\bBun\.CryptoHasher\b/.test(ws)
+
+# ==[ Store view: ComponentsStore parity ]==
+
+console.log "\nStore view"
+
+test "writes and reads source and compiled modules", ->
+  ws = createWorkspace()
+  first = { App: { name: 'App' } }
+  ws.write 'app.rip', 'export App = component'
+  eq ws.read('app.rip'), 'export App = component'
+  ws.setCompiled 'app.rip', first
+  ok ws.getCompiled('app.rip') is first
+  ws.write 'app.rip', 'export App = component\n  render null'
+  ok ws.read('app.rip').includes('render null')
+  eq ws.getCompiled('app.rip'), undefined
+
+test "rejects malformed and directory-shaped component paths", ->
+  ws = createWorkspace()
+  for path in ['/app.rip', 'routes//app.rip', 'routes/app.rip/', './app.rip', 'routes/../app.rip', 'routes/admin', 'routes/app.rip/child.rip', 'a\\b.rip', '.rip', '.css', '.html', 'styles.css/child.rip', 'index.html/child.rip']
+    throws (-> ws.write(path, 'source')), 'invalid component path'
+
+test "accepts CSS bag paths (S12 soft-apply sheets)", ->
+  ws = createWorkspace()
+  ws.write 'app/styles.css', ':root { --x: 1 }'
+  eq ws.read('app/styles.css'), ':root { --x: 1 }'
+  eq ws.exists('app/styles.css'), true
+
+test "accepts HTML bag paths (shell reload)", ->
+  ws = createWorkspace()
+  ws.write 'app/index.html', '<!doctype html><title>x</title>'
+  eq ws.read('app/index.html'), '<!doctype html><title>x</title>'
+  eq ws.exists('app/index.html'), true
+
+test "rejects non-string paths and content", ->
+  ws = createWorkspace()
+  throws (-> ws.write('', 'source')), 'non-empty string'
+  throws (-> ws.write(null, 'source')), 'non-empty string'
+  throws (-> ws.write('app.rip', null)), 'must be a string'
+  throws (-> ws.read(42)), 'non-empty string'
+
+test "exists and size", ->
+  ws = createWorkspace()
+  eq ws.exists('app.rip'), false
+  eq ws.size(), 0
+  ws.write 'app.rip', 'a'
+  ws.write 'routes/hi.rip', 'b'
+  eq ws.exists('app.rip'), true
+  eq ws.exists('nope.rip'), false
+  eq ws.size(), 2
+
+test "list is one level; listAll is recursive", ->
+  ws = createWorkspace()
+  ws.load
+    'app.rip': 'a'
+    'routes/hi.rip': 'b'
+    'routes/admin/users.rip': 'c'
+  eq ws.list(), ['app.rip']
+  eq ws.list('routes'), ['routes/hi.rip']
+  eq ws.listAll('routes'), ['routes/hi.rip', 'routes/admin/users.rip']
+  eq ws.listAll().length, 3
+  throws (-> ws.list('routes//admin')), 'invalid component directory'
+  throws (-> ws.list(42)), 'directory must be a string'
+
+test "load is bulk write and fires no events", ->
+  { ws, events } = seeded()
+  ws.load
+    'app.rip': 'updated'
+    'fresh.rip': 'born'
+  eq ws.read('app.rip'), 'updated'
+  eq ws.read('fresh.rip'), 'born'
+  eq events, []
+  throws (-> ws.load(null)), 'source object'
+  throws (-> ws.load(['app.rip'])), 'source object'
+
+test "load clears compiled for rewritten paths", ->
+  ws = createWorkspace()
+  ws.write 'app.rip', 'v1'
+  ws.setCompiled 'app.rip', { App: {} }
+  ws.load { 'app.rip': 'v2' }
+  eq ws.getCompiled('app.rip'), undefined
+
+test "del removes source and compiled and fires delete", ->
+  { ws, events } = seeded()
+  ws.setCompiled 'app.rip', { App: {} }
+  ws.del 'app.rip'
+  eq ws.exists('app.rip'), false
+  eq ws.read('app.rip'), undefined
+  eq ws.getCompiled('app.rip'), undefined
+  eq events, [['delete', 'app.rip']]
+
+test "del of an unknown path still fires delete", ->
+  { ws, events } = seeded()
+  ws.del 'ghost.rip'
+  eq events, [['delete', 'ghost.rip']]
+  eq ws.size(), 2
+
+test "watch sees create, change, delete", ->
+  { ws, events } = seeded()
+  ws.write 'new.rip', 'a'
+  ws.write 'new.rip', 'b'
+  ws.del 'new.rip'
+  eq events, [['create', 'new.rip'], ['change', 'new.rip'], ['delete', 'new.rip']]
+
+test "watch disposer is idempotent; non-function rejects", ->
+  ws = createWorkspace()
+  seen = []
+  stop = ws.watch (event, path) -> seen.push event
+  ws.write 'a.rip', 'x'
+  stop()
+  stop()
+  ws.write 'a.rip', 'y'
+  eq seen, ['create']
+  throws (-> ws.watch(null)), 'watch expects a function'
+
+test "a throwing watcher never silences the rest", ->
+  ws = createWorkspace()
+  seen = []
+  original = console.error
+  console.error = ->
+  try
+    ws.watch -> throw new Error 'boom'
+    ws.watch (event, path) -> seen.push [event, path]
+    ws.write 'a.rip', 'x'
+  finally
+    console.error = original
+  eq seen, [['create', 'a.rip']]
+
+test "setCompiled validates its module and requires a passport", ->
+  ws = createWorkspace()
+  ws.write 'app.rip', 'src'
+  throws (-> ws.setCompiled('app.rip', null)), 'must be an object'
+  throws (-> ws.setCompiled('app.rip', [1])), 'must be an object'
+  throws (-> ws.setCompiled('ghost.rip', {})), "unknown component path 'ghost.rip'"
+  eq ws.getCompiled('ghost.rip'), undefined
+
+# ==[ Door: populate ]==
+
+console.log "\nDoor: populate"
+
+test "populate seeds the bag; ids are taken as given", ->
+  { ws } = seeded()
+  eq ws.size(), 2
+  eq ws.read('app.rip'), SRC_APP
+  eq ws.ids().sort(), ['c1', 'c2']
+  eq ws.paths().sort(), ['app.rip', 'routes/hi.rip']
+  eq ws.passport('c1').path, 'app.rip'
+  eq ws.passport('c1').etag, ETAG_APP
+
+test "populate fires no watch events", ->
+  ws = createWorkspace()
+  events = []
+  ws.watch (event, path) -> events.push [event, path]
+  ws.populate [{ id: 'c1', path: 'app.rip', etag: srcHash('src'), source: 'src' }]
+  eq events, []
+
+test "populate carries compiled passports", ->
+  ws = createWorkspace()
+  module = { App: {} }
+  ws.populate [{ id: 'c1', path: 'app.rip', etag: srcHash('src'), source: 'src', compiled: module }]
+  ok ws.getCompiled('app.rip') is module
+
+test "populate is birth: a second populate rejects", ->
+  { ws } = seeded()
+  throws (-> ws.populate([{ id: 'c9', path: 'x.rip', etag: srcHash('s'), source: 's' }])), 'requires an empty workspace'
+
+test "populate rejects malformed input", ->
+  ws = createWorkspace()
+  throws (-> ws.populate(null)), 'expects an array'
+  throws (-> ws.populate({})), 'expects an array'
+  throws (-> ws.populate([null])), 'expects passport records'
+  throws (-> ws.populate([{ id: '', path: 'a.rip', etag: srcHash('s'), source: 's' }])), 'id must be a non-empty string'
+  throws (-> ws.populate([{ id: 'c1', path: 'bad', etag: srcHash('s'), source: 's' }])), 'invalid component path'
+  throws (-> ws.populate([{ id: 'c1', path: 'a.rip', source: 's' }])), '16 lowercase hex'
+  throws (-> ws.populate([{ id: 'c1', path: 'a.rip', etag: 1, source: 's' }])), '16 lowercase hex'
+  throws (-> ws.populate([{ id: 'c1', path: 'a.rip', etag: 'ABCDEF0123456789', source: 's' }])), '16 lowercase hex'
+  throws (-> ws.populate([{ id: 'c1', path: 'a.rip', etag: 'short', source: 's' }])), '16 lowercase hex'
+  throws (-> ws.populate([{ id: 'c1', path: 'a.rip', etag: srcHash('s'), source: null }])), 'source must be a string'
+  throws (-> ws.populate([{ id: 'c1', path: 'a.rip', etag: srcHash('s'), source: 's', compiled: [] }])), 'must be an object'
+
+test "populate rejects duplicate ids and duplicate paths", ->
+  ws = createWorkspace()
+  throws (->
+    ws.populate [
+      { id: 'c1', path: 'a.rip', etag: srcHash('s'), source: 's' }
+      { id: 'c1', path: 'b.rip', etag: srcHash('s'), source: 's' }
+    ]), "duplicate passport id 'c1'"
+  throws (->
+    ws.populate [
+      { id: 'c1', path: 'a.rip', etag: srcHash('s'), source: 's' }
+      { id: 'c2', path: 'a.rip', etag: srcHash('s'), source: 's' }
+    ]), "duplicate passport path 'a.rip'"
+
+test "a rejected populate leaves the bag empty", ->
+  ws = createWorkspace()
+  throws (->
+    ws.populate [
+      { id: 'c1', path: 'a.rip', etag: srcHash('s'), source: 's' }
+      { id: 'c2', path: 'broken', etag: srcHash('s'), source: 's' }
+    ]), 'invalid component path'
+  eq ws.size(), 0
+  eq ws.ids(), []
+
+# ==[ Door: set, etag equality ]==
+
+console.log "\nDoor: set"
+
+test "a duplicate etag is ignored", ->
+  { ws, events } = seeded()
+  ws.setCompiled 'app.rip', { App: {} }
+  events.length = 0
+  eq ws.set({ id: 'c1', etag: ETAG_APP, source: 'duplicate' }), false
+  eq ws.read('app.rip'), SRC_APP
+  eq ws.passport('c1').etag, ETAG_APP
+  ok ws.getCompiled('app.rip')?
+  eq events, []
+
+test "a different etag applies and fires change", ->
+  { ws, events } = seeded()
+  eq ws.set({ id: 'c1', etag: srcHash('v4'), source: 'v4' }), true
+  eq ws.read('app.rip'), 'v4'
+  eq ws.passport('c1').etag, srcHash('v4')
+  eq events, [['change', 'app.rip']]
+
+test "new source clears compiled unless the passport carries one", ->
+  { ws } = seeded()
+  ws.setCompiled 'app.rip', { App: {} }
+  ws.set { id: 'c1', etag: srcHash('v4'), source: 'v4' }
+  eq ws.getCompiled('app.rip'), undefined
+  module = { App: { fresh: true } }
+  ws.set { id: 'c1', etag: srcHash('v5'), source: 'v5', compiled: module }
+  ok ws.getCompiled('app.rip') is module
+
+test "a compiled-only passport swaps the projection", ->
+  { ws, events } = seeded()
+  module = { App: {} }
+  next = 'aaaaaaaaaaaaaaaa'
+  eq ws.set({ id: 'c1', etag: next, compiled: module }), true
+  ok ws.getCompiled('app.rip') is module
+  eq ws.read('app.rip'), SRC_APP
+  eq ws.passport('c1').etag, next
+  eq events, [['change', 'app.rip']]
+
+test "an unknown id with a full record creates", ->
+  { ws, events } = seeded()
+  born = 'bbbbbbbbbbbbbbbb'
+  eq ws.set({ id: 'c3', etag: born, path: 'routes/new.rip', source: 'born' }), true
+  eq ws.read('routes/new.rip'), 'born'
+  eq ws.passport('c3').etag, born
+  eq events, [['create', 'routes/new.rip']]
+
+test "an unknown id without a full record rejects", ->
+  { ws } = seeded()
+  throws (-> ws.set({ id: 'c9', etag: srcHash('no path'), source: 'no path' })), "unknown passport 'c9' requires a full record"
+  throws (-> ws.set({ id: 'c9', etag: 'cccccccccccccccc', path: 'x.rip' })), "unknown passport 'c9' requires a full record"
+
+test "set validates its passport", ->
+  { ws } = seeded()
+  throws (-> ws.set(null)), 'set expects a passport record'
+  throws (-> ws.set([])), 'set expects a passport record'
+  throws (-> ws.set({ etag: 'dddddddddddddddd' })), 'id must be a non-empty string'
+  throws (-> ws.set({ id: 'c1' })), '16 lowercase hex'
+  throws (-> ws.set({ id: 'c1', etag: 'eeeeeeeeeeeeeeee' })), 'carries nothing to apply'
+  throws (-> ws.set({ id: 'c1', etag: 'ffffffffffffffff', path: 'app.rip' })), 'carries nothing to apply'
+  throws (-> ws.set({ id: 'c1', etag: srcHash('42'), source: 42 })), 'source must be a string'
+  throws (-> ws.set({ id: 'c1', etag: '1111111111111111', compiled: [] })), 'must be an object'
+  eq ws.passport('c1').etag, ETAG_APP
+
+test "a new path re-labels the id", ->
+  { ws, events } = seeded()
+  eq ws.set({ id: 'c1', etag: '2222222222222222', path: 'main.rip' }), true
+  eq ws.passport('c1').path, 'main.rip'
+  eq ws.exists('app.rip'), false
+  eq ws.read('main.rip'), SRC_APP
+  eq events, [['delete', 'app.rip'], ['create', 'main.rip']]
+
+test "rename and source travel in one passport", ->
+  { ws } = seeded()
+  ws.set { id: 'c1', etag: srcHash('moved'), path: 'main.rip', source: 'moved' }
+  eq ws.read('main.rip'), 'moved'
+  eq ws.passport('c1').etag, srcHash('moved')
+
+test "renaming onto an occupied path rejects", ->
+  { ws } = seeded()
+  throws (-> ws.set({ id: 'c1', etag: '3333333333333333', path: 'routes/hi.rip' })), "already labels passport 'c2'"
+  eq ws.passport('c1').path, 'app.rip'
+
+test "creating on an occupied path rejects", ->
+  { ws } = seeded()
+  throws (-> ws.set({ id: 'c9', etag: srcHash('s'), path: 'app.rip', source: 's' })), "already labels passport 'c1'"
+
+test "deleted: true removes the record when etag matches", ->
+  { ws, events } = seeded()
+  eq ws.set({ id: 'c1', etag: '4444444444444444', deleted: true }), false
+  eq ws.exists('app.rip'), true
+  eq ws.set({ id: 'c1', etag: ETAG_APP, deleted: true }), true
+  eq ws.exists('app.rip'), false
+  eq ws.passport('c1'), undefined
+  eq events, [['delete', 'app.rip']]
+
+test "a delete for an id the bag no longer holds is ignored", ->
+  { ws, events } = seeded()
+  ws.set { id: 'c1', etag: ETAG_APP, deleted: true }
+  events.length = 0
+  eq ws.set({ id: 'c1', etag: ETAG_APP, deleted: true }), false
+  eq events, []
+
+# ==[ Door meets view ]==
+
+console.log "\nDoor meets view"
+
+test "write to a door-born path refreshes its content etag", ->
+  { ws } = seeded()
+  ws.write 'app.rip', 'edited'
+  eq ws.passport('c1').etag, srcHash('edited')
+  eq ws.read('app.rip'), 'edited'
+
+test "write to a new path mints a local id from the birth path", ->
+  ws = createWorkspace()
+  ws.write 'routes/new.rip', 'born'
+  record = ws.passport('routes/new.rip')
+  eq record.id, 'routes/new.rip'
+  eq record.etag, srcHash('born')
+
+test "minting rejects when a passport already holds that id", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'b.rip', etag: srcHash('s'), source: 's' }]
+  throws (-> ws.write('a.rip', 'x')), "cannot mint id 'a.rip'"
+
+test "renames keep the id across a later write", ->
+  { ws } = seeded()
+  ws.set { id: 'c1', etag: '5555555555555555', path: 'main.rip' }
+  ws.write 'main.rip', 'edited'
+  eq ws.passport('c1').etag, srcHash('edited')
+  eq ws.passport('main.rip').id, 'c1'
+
+# ==[ Seal ]==
+
+console.log "\nSeal"
+
+test "seal locks every mutator loudly", ->
+  { ws } = seeded()
+  eq ws.sealed(), false
+  ws.seal()
+  eq ws.sealed(), true
+  throws (-> ws.populate([])), 'populate on a sealed workspace'
+  throws (-> ws.set({ id: 'c1', etag: '6666666666666666', source: 's' })), 'set on a sealed workspace'
+  throws (-> ws.write('app.rip', 's')), 'write on a sealed workspace'
+  throws (-> ws.del('app.rip')), 'del on a sealed workspace'
+  throws (-> ws.load({ 'app.rip': 's' })), 'load on a sealed workspace'
+  throws (-> ws.setCompiled('app.rip', {})), 'setCompiled on a sealed workspace'
+
+test "sealing twice rejects", ->
+  ws = createWorkspace()
+  ws.seal()
+  throws (-> ws.seal()), 'already sealed'
+
+test "reads still work after seal", ->
+  { ws } = seeded()
+  ws.setCompiled 'app.rip', { App: {} }
+  ws.seal()
+  eq ws.read('app.rip'), SRC_APP
+  eq ws.exists('app.rip'), true
+  eq ws.size(), 2
+  eq ws.list(), ['app.rip']
+  eq ws.listAll('routes'), ['routes/hi.rip']
+  ok ws.getCompiled('app.rip')?
+  eq ws.passport('c1').id, 'c1'
+  eq ws.ids().length, 2
+  eq ws.paths().length, 2
+  stop = ws.watch ->
+  stop()
+
+# ==[ Inspection ]==
+
+console.log "\nInspection"
+
+test "passport resolves by id or by path", ->
+  { ws } = seeded()
+  byId = ws.passport('c1')
+  byPath = ws.passport('app.rip')
+  eq byId, byPath
+  eq byId, { id: 'c1', path: 'app.rip', etag: ETAG_APP, source: SRC_APP, compiled: undefined }
+
+test "passport returns a defensive copy", ->
+  { ws } = seeded()
+  copy = ws.passport('c1')
+  copy.etag = '9999999999999999'
+  copy.source = 'tampered'
+  eq ws.passport('c1').etag, ETAG_APP
+  eq ws.read('app.rip'), SRC_APP
+
+test "passport of an unknown key is undefined; non-strings reject", ->
+  { ws } = seeded()
+  eq ws.passport('ghost.rip'), undefined
+  eq ws.passport('c9'), undefined
+  throws (-> ws.passport('')), 'passport lookup expects'
+  throws (-> ws.passport(42)), 'passport lookup expects'
+
+test "ids and paths enumerate the bag", ->
+  { ws } = seeded()
+  eq ws.ids().sort(), ['c1', 'c2']
+  eq ws.paths().sort(), ['app.rip', 'routes/hi.rip']
+
+# ==[ Feed: the hub subscriber ]==
+
+console.log "\nFeed"
+
+# Two macrotask turns flush every microtask chain a ding apply spawns
+# (fetch → text → set).
+settle = ->
+  await new Promise (resolve) -> setTimeout resolve, 0
+  await new Promise (resolve) -> setTimeout resolve, 0
+  return
+
+# A socket factory whose sockets are driven by hand: tests fire onopen /
+# onmessage / onclose directly.
+fakeHub = ->
+  sockets = []
+  factory = (url) ->
+    s =
+      url: url
+      isClosed: false
+      onopen: null
+      onmessage: null
+      onclose: null
+      onerror: null
+    s.close = ->
+      s.isClosed = true
+      s.onclose?()
+      return
+    sockets.push s
+    s
+  { factory, sockets }
+
+# A fetch keyed by exact URL: a hit answers 200 with the mapped text,
+# a miss answers 404. Every call is recorded.
+fakeFetch = (routes) ->
+  calls = []
+  fn = (url) ->
+    calls.push url
+    body = routes[url]
+    if body isnt undefined
+      { ok: true, status: 200, text: (-> body), json: (-> JSON.parse(body)) }
+    else
+      { ok: false, status: 404, text: (-> ''), json: (-> null) }
+  { fn, calls }
+
+emptyManifest = JSON.stringify { files: [] }
+
+openFeed = (ws, routes, extra = {}) ->
+  { fn, calls } = fakeFetch routes
+  { factory, sockets } = fakeHub()
+  reports = []
+  feed = connectFeed ws, {
+    hub: 'ws://test/hub'
+    makeSocket: factory
+    fetch: fn
+    report: (...args) -> reports.push args
+    backoff: { min: 1, max: 2 }
+    ...extra
+  }
+  { feed, calls, sockets, reports }
+
+test "connectFeed validates its workspace and rejects a sealed one", ->
+  throws (-> connectFeed(null)), 'expects a workspace'
+  throws (-> connectFeed({})), 'expects a workspace'
+  ws = createWorkspace()
+  ws.seal()
+  throws (-> connectFeed(ws)), 'sealed workspace'
+
+test! "a ding fetches the module and mutates the passport", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'app/routes/index.rip', path: 'app/routes/index.rip', etag: srcHash('v1'), source: 'v1' }]
+  v2etag = srcHash('v2')
+  { feed, calls, sockets, reports } = openFeed ws,
+    '/manifest.json': JSON.stringify { files: [{ id: 'app/routes/index.rip', etag: srcHash('v1') }] }
+    "/app/routes/index.rip?etag=#{v2etag}": 'v2'
+  s = sockets[0]
+  eq s.url, 'ws://test/hub'
+  s.onopen()
+  await settle()
+  ok feed.connected()
+  s.onmessage { data: JSON.stringify { ding: { id: 'app/routes/index.rip', etag: v2etag } } }
+  await settle()
+  eq ws.passport('app/routes/index.rip').etag, v2etag
+  eq ws.read('app/routes/index.rip'), 'v2'
+  ok calls.includes("/app/routes/index.rip?etag=#{v2etag}")
+  eq reports, []
+  feed.close()
+  eq feed.connected(), false
+
+test! "a ding and a manifest entry fetch etag-keyed /app URLs", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', etag: srcHash('v1'), source: 'v1' }]
+  { feed, calls, sockets } = openFeed ws,
+    '/manifest.json': JSON.stringify { files: [{ id: 'b.rip', etag: 'beadfeedbeadfeed' }] }
+    '/a.rip?etag=cafef00dcafef00d': 'v2'
+    '/b.rip?etag=beadfeedbeadfeed': 'bb'
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', etag: 'cafef00dcafef00d' } } }
+  await settle()
+  eq ws.read('a.rip'), 'v2'
+  eq ws.read('b.rip'), 'bb'
+  ok calls.includes('/a.rip?etag=cafef00dcafef00d'), "the ding fetch rides the etag: #{JSON.stringify calls}"
+  ok calls.includes('/b.rip?etag=beadfeedbeadfeed'), "the resync fetch rides the etag: #{JSON.stringify calls}"
+  feed.close()
+
+test! "a ding whose etag the bag already holds skips the network", ->
+  ws = createWorkspace()
+  etag = srcHash('v3')
+  ws.populate [{ id: 'a.rip', path: 'a.rip', etag, source: 'v3' }]
+  { feed, calls, sockets } = openFeed ws, { '/manifest.json': emptyManifest }
+  sockets[0].onopen()
+  await settle()
+  before = calls.length
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', etag } } }
+  await settle()
+  eq calls.length, before
+  eq ws.passport('a.rip').etag, etag
+  feed.close()
+
+test! "a manifest entry whose etag the bag already holds skips the network", ->
+  ws = createWorkspace()
+  etag = srcHash('held')
+  ws.populate [{ id: 'a.rip', path: 'a.rip', etag, source: 'held' }]
+  { feed, calls, sockets } = openFeed ws,
+    { '/manifest.json': JSON.stringify { files: [{ id: 'a.rip', etag }] } }
+  sockets[0].onopen()
+  await settle()
+  eq calls.filter((u) -> u isnt '/manifest.json').length, 0
+  eq ws.passport('a.rip').etag, etag
+  eq ws.read('a.rip'), 'held'
+  feed.close()
+
+test! "a want retires only when the manifest MOVES without naming it — retirement needs evidence", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', etag: srcHash('v1'), source: 'v1' }]
+  routes = { '/manifest.json': JSON.stringify { files: [{ id: 'a.rip', etag: srcHash('v1') }] } }
+  { feed, calls, sockets, reports } = openFeed ws, routes
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'gone.rip', etag: '2222222222222222' } } }
+  await settle()
+  ok reports.some((args) -> String(args[0]).includes('module fetch missed')), 'the miss is loud'
+  base = calls.filter((u) -> u is '/manifest.json').length
+  await new Promise (resolve) -> setTimeout resolve, 30
+  ok calls.filter((u) -> u is '/manifest.json').length > base, 'an unchanged manifest keeps the retry alive'
+  routes['/manifest.json'] = JSON.stringify { files: [{ id: 'a.rip', etag: srcHash('v2') }] }
+  routes["/a.rip?etag=#{srcHash('v2')}"] = 'v2'
+  await new Promise (resolve) -> setTimeout resolve, 30
+  polls = calls.filter((u) -> u is '/manifest.json').length
+  await new Promise (resolve) -> setTimeout resolve, 30
+  eq calls.filter((u) -> u is '/manifest.json').length, polls, 'the moved manifest retires the want and stops the re-poll'
+  eq ws.passport('gone.rip'), undefined
+  eq ws.passport('a.rip').etag, srcHash('v2')
+  feed.close()
+
+test! "a want for a brand-new id survives a held-back manifest — the direct module retry heals it", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', etag: srcHash('v1'), source: 'v1' }]
+  routes = { '/manifest.json': JSON.stringify { files: [{ id: 'a.rip', etag: srcHash('v1') }] } }
+  { feed, sockets, reports } = openFeed ws, routes
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'new.rip', etag: 'feedfacefeedface' } } }
+  await settle()
+  eq ws.passport('new.rip'), undefined
+  ok reports.some((args) -> String(args[0]).includes('module fetch missed')), 'the miss is loud'
+  routes['/new.rip?etag=feedfacefeedface'] = 'born'
+  await new Promise (resolve) -> setTimeout resolve, 50
+  eq ws.passport('new.rip').etag, 'feedfacefeedface'
+  eq ws.passport('new.rip').path, 'new.rip'
+  eq ws.read('new.rip'), 'born'
+  feed.close()
+
+test! "a ding for an unknown id births the passport at its id path", ->
+  ws = createWorkspace()
+  { feed, sockets } = openFeed ws,
+    '/manifest.json': emptyManifest
+    '/app/new.rip?etag=1111111111111111': 'fresh'
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'app/new.rip', etag: '1111111111111111' } } }
+  await settle()
+  eq ws.passport('app/new.rip'), { id: 'app/new.rip', path: 'app/new.rip', etag: '1111111111111111', source: 'fresh', compiled: undefined }
+  feed.close()
+
+test! "a delete ding removes the passport without a fetch when etag matches", ->
+  ws = createWorkspace()
+  etag = srcHash('v1')
+  ws.populate [{ id: 'a.rip', path: 'a.rip', etag, source: 'v1' }]
+  { feed, calls, sockets } = openFeed ws, { '/manifest.json': emptyManifest }
+  sockets[0].onopen()
+  await settle()
+  before = calls.length
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', etag, kind: 'delete' } } }
+  await settle()
+  eq ws.passport('a.rip'), undefined
+  eq calls.length, before
+  feed.close()
+
+test! "a delete ding with the wrong etag is ignored", ->
+  ws = createWorkspace()
+  etag = srcHash('v1')
+  ws.populate [{ id: 'a.rip', path: 'a.rip', etag, source: 'v1' }]
+  { feed, sockets } = openFeed ws, { '/manifest.json': emptyManifest }
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', etag: '7777777777777777', kind: 'delete' } } }
+  await settle()
+  eq ws.passport('a.rip').etag, etag
+  feed.close()
+
+test! "malformed frames and dings are reported and the feed survives", ->
+  ws = createWorkspace()
+  { feed, sockets, reports } = openFeed ws,
+    '/manifest.json': emptyManifest
+    '/ok.rip?etag=1111111111111111': 'good'
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: 'not json' }
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 5 } } }
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip' } } }
+  await settle()
+  eq reports.length, 3
+  ok reports.some((args) -> String(args[0]).includes('malformed ding')), 'missing etag is loud'
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'ok.rip', etag: '1111111111111111' } } }
+  await settle()
+  eq ws.read('ok.rip'), 'good'
+  feed.close()
+
+test! "an array frame applies every ding object and ignores foreign events", ->
+  ws = createWorkspace()
+  { feed, sockets } = openFeed ws,
+    '/manifest.json': emptyManifest
+    '/a.rip?etag=1111111111111111': 'aa'
+    '/b.rip?etag=2222222222222222': 'bb'
+  sockets[0].onopen()
+  await settle()
+  frame = [
+    { ding: { id: 'a.rip', etag: '1111111111111111' } }
+    { chat: 'hello' }
+    { ding: { id: 'b.rip', etag: '2222222222222222' } }
+  ]
+  sockets[0].onmessage { data: JSON.stringify frame }
+  await settle()
+  eq ws.read('a.rip'), 'aa'
+  eq ws.read('b.rip'), 'bb'
+  feed.close()
+
+test! "a module miss resyncs from the manifest, which never deletes local mints", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', etag: srcHash('v1'), source: 'v1' }]
+  ws.write 'local.rip', 'mine'
+  { feed, sockets, reports } = openFeed ws,
+    '/manifest.json': JSON.stringify { files: [{ id: 'a.rip', etag: '4444444444444444' }] }
+    '/a.rip?etag=4444444444444444': 'v4'
+  sockets[0].onopen()
+  await settle()
+  eq ws.passport('a.rip').etag, '4444444444444444'
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', etag: '9999999999999999' } } }
+  await settle()
+  eq ws.passport('a.rip').etag, '4444444444444444'
+  eq ws.read('local.rip'), 'mine'
+  ok reports.some (args) -> String(args[0]).includes('module fetch missed')
+  feed.close()
+
+test! "the default module URL percent-encodes the id's segments", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'app/50%.rip', path: 'app/50%.rip', etag: srcHash('v1'), source: 'v1' }]
+  { feed, calls, sockets, reports } = openFeed ws,
+    '/manifest.json': emptyManifest
+    '/app/50%25.rip?etag=2222222222222222': 'v2'
+  sockets[0].onopen()
+  await settle()
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'app/50%.rip', etag: '2222222222222222' } } }
+  await settle()
+  ok calls.includes('/app/50%25.rip?etag=2222222222222222'), "the fetch rides the encoded URL: #{JSON.stringify calls}"
+  eq ws.passport('app/50%.rip').etag, '2222222222222222'
+  eq ws.read('app/50%.rip'), 'v2'
+  eq reports, []
+  feed.close()
+
+test! "a failed open-resync retries with backoff until the feed heals", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', etag: srcHash('v1'), source: 'v1' }]
+  routes = {}
+  { feed, sockets, reports } = openFeed ws, routes
+  sockets[0].onopen()
+  await settle()
+  ok reports.some((args) -> String(args[0]).includes('manifest fetch failed')), 'the miss is loud'
+  eq ws.passport('a.rip').etag, srcHash('v1')
+  routes['/manifest.json'] = JSON.stringify { files: [{ id: 'a.rip', etag: '2222222222222222' }] }
+  routes['/a.rip?etag=2222222222222222'] = 'v2'
+  await new Promise (resolve) -> setTimeout resolve, 50
+  eq ws.passport('a.rip').etag, '2222222222222222'
+  eq ws.read('a.rip'), 'v2'
+  feed.close()
+
+test! "a dinged etag the module route does not yet serve is retried until it appears — never silently dropped", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', etag: srcHash('v1'), source: 'v1' }]
+  routes = { '/manifest.json': JSON.stringify { files: [{ id: 'a.rip', etag: srcHash('v1') }] } }
+  { feed, sockets, reports } = openFeed ws, routes
+  sockets[0].onopen()
+  await settle()
+  v2 = srcHash('v2')
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', etag: v2 } } }
+  await settle()
+  eq ws.passport('a.rip').etag, srcHash('v1')
+  ok reports.some((args) -> String(args[0]).includes('module fetch missed')), 'the miss is loud'
+  routes['/manifest.json'] = JSON.stringify { files: [{ id: 'a.rip', etag: v2 }] }
+  routes["/a.rip?etag=#{v2}"] = 'v2'
+  await new Promise (resolve) -> setTimeout resolve, 50
+  eq ws.passport('a.rip').etag, v2
+  feed.close()
+
+test! "an epoch ding invokes the reload policy — never the module path, never a malformed report", ->
+  ws = createWorkspace()
+  epochs = []
+  { feed, calls, sockets, reports } = openFeed ws, { '/manifest.json': emptyManifest }, { onEpoch: (d) -> epochs.push d }
+  sockets[0].onopen()
+  await settle()
+  before = calls.length
+  sockets[0].onmessage { data: JSON.stringify { ding: { kind: 'epoch', epoch: 7 } } }
+  await settle()
+  eq epochs, [{ kind: 'epoch', epoch: 7 }]
+  eq calls.length, before
+  eq reports, []
+  feed.close()
+
+test! "a dropped socket reconnects with backoff and resyncs; close() stops it", ->
+  ws = createWorkspace()
+  { feed, calls, sockets } = openFeed ws, { '/manifest.json': emptyManifest }
+  sockets[0].onopen()
+  await settle()
+  manifestFetches = -> calls.filter((u) -> u is '/manifest.json').length
+  eq manifestFetches(), 1
+  sockets[0].onclose()
+  eq feed.connected(), false
+  await new Promise (resolve) -> setTimeout resolve, 20
+  eq sockets.length, 2
+  sockets[1].onopen()
+  await settle()
+  ok feed.connected()
+  eq manifestFetches(), 2
+  feed.close()
+  await new Promise (resolve) -> setTimeout resolve, 20
+  eq sockets.length, 2                       # closed: no further reconnect

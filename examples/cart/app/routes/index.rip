@@ -1,0 +1,61 @@
+import { Button } from '../components/button.rip'
+import { title, formatPrice } from '../config.rip'
+
+export Products = component
+  products <~ @app.data.products
+  cart     ~= @app.data.cart
+
+  search ~= @router.query.search ?? ''
+  sort   ~= @router.query.sort ?? ''
+
+  filtered ~=
+    result = products.slice()
+    if search
+      term = search.toLowerCase()
+      result = result.filter((p) -> p.name.toLowerCase().includes(term))
+    if sort is 'price-asc'
+      result.sort((a, b) -> a.price - b.price)
+    else if sort is 'price-desc'
+      result.sort((a, b) -> b.price - a.price)
+    result
+
+  mounted: -> document.title = title('Products')
+
+  setQuery: (opts: { search?: string, sort?: string }) ->
+    next = { ...@router.query, ...opts }
+    params = new URLSearchParams()
+    for key, val of next when val
+      params.set(key, val)
+    queryString = params.toString()
+    @router.replace(@router.path + (if queryString then "?#{queryString}" else ''))
+
+  clearFilters: -> @setQuery({ search: '', sort: '' })
+
+  render
+    h1 'Products'
+    div.product-filters
+      input
+        type: 'search'
+        placeholder: 'Search products...'
+        value: search
+        @input: (e) -> @setQuery({ search: e.target.value })
+      select
+        value: sort
+        @change: (e) -> @setQuery({ sort: e.target.value })
+        option value: '', disabled, 'Sort'
+        option value: 'price-asc', 'Price: Low to High'
+        option value: 'price-desc', 'Price: High to Low'
+    if filtered.length
+      div.product-list
+        for product in filtered
+          article
+            div.image product.image
+            h5 product.name
+            p "#{formatPrice(product.price)}"
+            if cart.items.some((i) -> i.id is product.id)
+              Button outline, @click: (-> cart.removeItem(product)), 'Added to Cart'
+            else
+              Button outline, @click: (-> cart.addItem(product)), 'Add to Cart'
+    else
+      p 'No products found. '
+        Button outline, link: true, @click: @clearFilters, 'Clear Filters'

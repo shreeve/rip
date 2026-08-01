@@ -319,12 +319,17 @@ double-submit with HMAC binding.
 An app serves its own SPA through one registration:
 
 ```coffee
-import { get, client, start } from '@rip-lang/server'
+import { get, start } from '@rip-lang/server'
 
-client!()                    # app/ next to the app entry, or client!('path/to/dir')
 get '/api/users' -> users()  # API routes coexist with the SPA
-start()
+start! 'app'                 # mount app/ then listen (or start! 'path/to/dir')
 ```
+
+`client!` then bare `start()` is still legal when you need the mount
+before other registrations; for the common case one call is enough.
+`start! 'app'` is the Promise path — dammit awaits bundle assembly.
+Bare `start()` (API-only) stays synchronous so worker handover cannot
+race.
 
 **The directory convention.** A directory named `app/` next to the app
 entry holds the browser app; route components live under `app/routes/`.
@@ -341,7 +346,7 @@ package.
 - `GET /` — the boot page. If `app/index.html` exists it is served
   as-is (with ETag revalidation); otherwise a minimal generated page
   mounts `<div id="app">` and boots via a module script.
-- `GET /@rip/bundle.json` — the bundle, `Content-Type: application/json`
+- `GET /bundle.json` — the bundle, `Content-Type: application/json`
   with a quoted ETag; a matching `If-None-Match` answers 304 with no body.
 - `GET /@rip/rip.js` — the browser runtime, served with the same
   file/ETag machinery as `@send`.
@@ -366,52 +371,70 @@ with a fresh ETag.
 generated page reads the query param and passes `debug` to `bootApp`,
 exactly as the browser certification fixture does.
 
-### The dev feed — RIP_WORKSPACE=1 (experimental)
+### The dev feed — the workspace door's server half
 
 The server half of the Rip Workspace door
-([docs/WORKSPACE.md](../../docs/WORKSPACE.md)) — experimental, gated
-behind `RIP_WORKSPACE=1` in the manager's environment. Flag off, nothing
-below exists and every path behaves exactly as documented above. This is
-the door's server half, not "HMR done": how a running app absorbs a cell
-is the apply engine's problem, and it lives elsewhere.
+([docs/WORKSPACE.md](../../docs/WORKSPACE.md)) — the default for every
+WATCHING manager-served browser app (Q10). The feed surface is
+watch-only: a production manager (watch off) writes no files and no
+manifest, sets none of the feed environment, and its pages boot plain —
+production has no hub (Q2). Standalone `client()` pages have no manager
+and therefore no feed: they boot plain too. This is the door's server
+half, not "HMR done": how a running app absorbs a module is the apply
+engine's problem, and it lives in `@rip-lang/app`.
 
-With the flag on, in watch mode:
+In watch mode:
 
 - **Change classification.** The watcher tracks a per-file hash map next
   to its whole-tree content-hash gate. A save whose every changed, added,
   or removed path lies under `app/` feeds the live pool in place — no
   admission cut, no pool reload, no doorbell. Any other save (server
   files, or a mixed set) takes the full-reload path above unchanged.
-- **Cells and the manifest.** Each `.rip` under `app/` is a cell whose
-  id is its birth path (`app/routes/index.rip`); a
-  rename retires the old id and mints a new one at rev 1 (id persistence
-  across renames is open research). Revs start at 1 and bump once per
-  content change; the registry lives in the manager's memory for the run.
-  `GET /@rip/manifest` answers `{"cells": [{id, path, rev}, …]}` sorted
-  by path, `Cache-Control: no-store`, read per request. Cell bytes — the
-  file's **source text**, dev-mode in-browser compile — are addressed by
-  `(id, rev)` in the URL: `GET /@rip/cells/<id>?rev=N` answers
-  `text/plain` with `Cache-Control: public, max-age=31536000, immutable`,
-  and old revs keep answering for the manager run. A request without a
-  valid positive-integer `rev` is a 400 — unversioned cell URLs are
-  rejected, never guessed at. An unknown `(id, rev)` is a 404.
-- **The ding.** After the cells, the manifest, and the rewritten bundle
-  are durable, the manager publishes one directive per changed cell to
-  the hub channel `/rip/dev` — the envelope is `{id, rev}` only; source
-  and compiled bodies never ride the hub (HTTP carries the bytes). A
-  deleted client file retires: it leaves the manifest, its retirement
-  occupies its own rev, and the ding carries `kind: "delete"` (no bytes
-  for that rev — old revs keep answering). A publish failure warns and
-  never blocks the cell path.
-- **Bundle freshness.** On the cell path the manager atomically rewrites
-  the live pool's bundle file, and the worker's `/@rip/bundle.json`
-  re-reads and re-tags per request (a dev-only cost) — so a hard refresh
-  never serves stale first-paint code.
+- **Bag membership (default).** The watching app’s client bag is
+  `app/**/*.{rip,css,html}` — ids are birth paths. The project-root
+  main entry (`app.rip` / `index.rip`) is **not** in that bag: changing
+  it takes the epoch path (rebuild/reload). Doctrine: the bag is
+  membership; the hub only dings `{id,etag}`; the client chooses the
+  reaction by extension (no `kind: "style"` / `"html"` on the wire).
+- **Files and the manifest (Q8′).** Each bag file’s id is its birth
+  path; a rename retires the old id and mints a new one (id persistence
+  across renames is open research). Freshness is a content **etag**
+  (16 hex of sha256). The registry lives in the manager's memory for
+  the run; on disk the latest bytes are served (no per-rev museum).
+  `GET /manifest.json` answers `{"files": [{id, etag}, …]}` sorted by
+  id, `Cache-Control: no-store`, read per request. File bytes are
+  addressed by etag: `GET /app/<id>?etag=<16-hex>` answers `text/plain`
+  with `Cache-Control: no-store` when the etag matches; a superseded
+  etag is **`409`** with the current `ETag` (never a silent stale body).
+  A missing or malformed `etag` query is a 400; an unknown id is a 404.
+  **`.rip`** enters the compile bundle; **`.css`** soft-applies
+  (`<style data-rip-css>`, S12); **`.html`** reloads the document.
+- **The ding.** After the file pool, the rewritten bundle, and the
+  manifest are durable (manifest last), the manager publishes one
+  directive per changed file to the hub channel `/hub` — the envelope is
+  `{id, etag}` only (`kind: "delete"` includes the retired generation's
+  etag); source and compiled bodies never ride the hub (HTTP carries the
+  bytes). A publish failure warns and never blocks the file path. Both
+  the client-only path and the epoch `buildApp` path walk `app/` once
+  and feed that snapshot to the bundle, the file pool, and the
+  manifest — a second walk mid-run can invent a manifest/bundle
+  reverse pairing (the silent-stale class). A scrapped epoch build
+  restores the prior registry and rewrites the manifest so it cannot
+  name an unlinked bundle's etags.
+- **Bundle freshness.** On the file-feed path the manager atomically rewrites
+  the live pool's bundle file, and the worker's `/bundle.json`
+  re-reads and re-tags per request. With the door open the bundle is
+  `Cache-Control: no-store` like the manifest (a micro-cache hit would
+  otherwise pair a live manifest with stale first-paint bytes); with
+  watch off, ETag-only so the edge cache still earns its keep. No live
+  pool bundle is a held-back-manifest verdict, never a silent skip.
 - **Bridge enrollment.** With `--bridge <path>`, the worker answers the
-  bridge's `Sec-WebSocket-Frame: open` POST with `{"+": ["/rip/dev"]}` —
+  bridge's `Sec-WebSocket-Frame: open` POST with `{"+": ["/hub"]}` —
   enrolling the opening connection into the dev channel — and `text` /
-  `close` frames with an empty 204. A missing or unknown frame header is
-  a 400 naming the header.
+  `close` frames with an empty 204. Enrollment keys on the feed surface
+  existing: with watch off the open answers a plain 204, so app-level
+  hub sockets (a production-legal use) never ride the dev channel. A
+  missing or unknown frame header is a 400 naming the header.
 
 ## Running under Janus — the pool runtime
 
@@ -653,10 +676,10 @@ sockets PUT before the 204), save coalescing, the identical-bytes no-op,
 boot-failure caching, prebuilt-artifact boots (loader-free workers,
 `import.meta.dir` preservation, loud build rejection), browser delivery
 through the pool (manager-assembled bundle, per-epoch reassembly with a
-fresh ETag), the `RIP_WORKSPACE=1` dev feed (in-process feed routes and
-flag-off identity, plus the cell path through a live pool — ding, rev
-bump, immutable old revs, in-place bundle rewrite, no reload — and the
-full-reload path for non-client edits), `--bridge`
+fresh ETag), the workspace dev feed (in-process feed routes and
+standalone identity, plus the file path through a live pool — ding
+`{id,etag}`, latest-only `/app/*?etag=`, in-place bundle rewrite, no
+reload — and the full-reload path for non-client edits), `--bridge`
 registration (carried `bridge_path`, loud startup rejection), the
 publish client (envelope round-trip, loud non-2xx), the startup report
 (`scale`, the read-back rule — the `bridge` line included, honest

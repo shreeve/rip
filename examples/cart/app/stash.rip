@@ -1,0 +1,39 @@
+import { source } from '@rip-lang/app'
+import { api } from './api-client.rip'
+import { UserPublic as User, ProductPublic as Product, OrderPublic as Order } from '../api/models.rip'
+
+type CartItem = Product & { quantity: number }
+
+export type Cart =
+  items: CartItem[]
+  addItem(product: Product): void
+  removeItem(product: Product): void
+  updateQuantity(product: Product, quantity: number): void
+  totalItems(): number
+  totalPrice(): number
+  clear(): void
+
+cart: Cart =
+  items: []
+  addItem: (product) -> @items = [...@items, { ...product, quantity: 1 }]
+  removeItem: (product) -> @items = @items.filter((i) -> i.id isnt product.id)
+  updateQuantity: (product, quantity) ->
+    item = @items.find((i) -> i.id is product.id)
+    if item then item.quantity = quantity
+  totalItems: -> @items.reduce(((sum, i) -> sum + i.quantity), 0)
+  totalPrice: -> @items.reduce(((sum, i) -> sum + i.price * i.quantity), 0)
+  clear: -> @items = []
+
+# Framework contract: launch reads `export stash` from app/stash.rip.
+export stash =
+  cart: cart
+  user: source
+    fetch: -> User.parse(api.get!('user').json!())
+    staleTime: '5 min'
+  products: source
+    fetch: -> Product.array.parse(api.get!('products').json!())
+    staleTime: '5 min'
+  orders: source
+    fetch: -> Order.array.parse(api.get!('orders').json!())
+  order: source
+    fetch: (id: string) -> Order.parse(api.get!("orders/#{id}").json!())

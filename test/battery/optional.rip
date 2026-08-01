@@ -76,6 +76,26 @@ test "optional call no dot chain", "obj = {fn: (x) -> x}\nobj?.fn?(42)", 42
 
 code "optional call no dot gen", "fn?(42)", "fn?.(42)"
 
+# Juxta optional call: fn? arg → fn?.(arg) — same as fn?(arg). Never
+# the plain call (v3 silently dropped the `?`; v4 must keep it).
+test "optional call juxta", "fn = (x) -> x * 2\nfn? 5", 10
+test "optional call juxta null", "fn = null\nfn? 5", undefined
+test "optional call juxta chain", "obj = {fn: (x) -> x}\nobj?.fn? 42", 42
+test "optional call juxta multi", "fn = (a, b) -> a + b\nfn? 3, 4", 7
+
+code "optional call juxta gen", "fn? 42", "fn?.(42)"
+code "optional call juxta multi gen", "fn? 3, 4", "fn?.(3, 4)"
+
+# Juxta shares implicit-call argument extent: `or` is absorbed into the
+# arg. Call parens keep the binary outside the call.
+code "optional call juxta or binds into arg", "fn? a or b", "fn?.(a || b)"
+code "optional call paren or stays outside", "fn?(a) or b", "fn?.(a) || b;"
+
+# Bare existence is unchanged when no juxta argument follows.
+test "existence still bare", "x = 42\nx?", true
+code "existence still bare gen", "x?", "x != null;"
+code "existence then binary gen", "x? + 1", "(x != null) + 1;"
+
 # ==============================================================================
 # Optional Chaining in Expressions
 # ==============================================================================

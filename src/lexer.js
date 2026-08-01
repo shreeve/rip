@@ -3370,6 +3370,10 @@ export function tokenize(text, path = '<anonymous>') {
       // check (`a?!` → `a ? true : undefined` — the Houdini operator),
       // and a '?' directly after a value-ending token is the postfix
       // existence check (`a?` → `a != null`) — real tokens and nodes.
+      // A juxta argument after that existence token (`f? x`) is an
+      // optional call: `?` is IMPLICIT_FUNC, so implicitCalls wraps the
+      // args and the grammar lowers `Value ? Arguments` to optcall
+      // (same as `f?(x)`). Bare `a?` with no juxta arg stays existence.
       if (!pendingSpaced) {
         if (text[pos + 1] === '(' || text[pos + 1] === '[') {
           push('?.', '?', pos, pos + 1);
@@ -3936,7 +3940,12 @@ export function implicitBlocks(tokens, mintId) {
 // call so the comprehension wraps it. Inserted CALL_START/CALL_END are
 // generated zero-width tokens anchored at the argument extent's edges,
 // so call spans stay honest.
-const IMPLICIT_FUNC = new Set(['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS', 'DAMMIT']);
+// Postfix existence `?` is callable the same way DAMMIT is: a spaced
+// argument after `f?` opens an implicit optional call (`f? x` → the
+// same shape as `f?(x)`). Bare `f?` (no juxta arg) stays existence —
+// the grammar's `Value ?` vs `Value ? Arguments` split, with CALL_START
+// above `?` in precedence, owns that fork.
+const IMPLICIT_FUNC = new Set(['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS', 'DAMMIT', '?']);
 const IMPLICIT_CALL_STARTERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_START', 'REGEX', 'HEREGEX_START', 'SYMBOL', 'MAP_START',
   'PARAM_START', 'IF', 'TRY', 'SWITCH', 'CLASS', 'THIS', 'SUPER',
@@ -4077,10 +4086,12 @@ const controlHeadBackwards = (tokens, j) => {
 // across TERMINATOR while the next line looks objectish; a comma whose
 // next element is not objectish closes (`x = a: 1, b` is an object
 // then a syntax error); enclosing closers and INDENT (unless
-// the previous token is `:` — an indented VALUE — or a block-argument
-// carrier) close; end of tape closes. CONTROL_IN_IMPLICIT frames
-// shield an object from a control construct's block INDENT exactly as
-// in the call pass. Inserted `{`/`}` are zero-width generated tokens:
+// the previous token is `:` — an indented VALUE — a block-argument
+// carrier — or an IMPLICIT_FUNC whose indented body looks objectish,
+// the pending indented-object call the call pass will wrap) close;
+// end of tape closes. CONTROL_IN_IMPLICIT frames shield an object
+// from a control construct's block INDENT exactly as in the call
+// pass. Inserted `{`/`}` are zero-width generated tokens:
 // `{` anchored at the key's start (origin = the key), `}` at the last
 // real token's end (origin = that token) — object spans in
 // NodeStore/MappingStore are the real source extent by construction.
@@ -4124,6 +4135,20 @@ export function implicitObjects(tokens, mintId) {
   // (the comma feeds the
   // call and the key starts a NESTED object) or at the object's own
   // level (the comma/key continues or ends the property list).
+  // Pending indented-object call: `f` + INDENT + `key:` body. The call
+  // pass inserts CALL_START before that INDENT; objects-first must keep
+  // the outer object open and treat keys under the INDENT as the call
+  // argument's nested object (`a: source` / indent / `fetch:`).
+  const pendingIndentedObjectCallAt = (indentAt) => {
+    const before = tokens[indentAt - 1];
+    return Boolean(
+      before &&
+      IMPLICIT_FUNC.has(before.kind) &&
+      looksObjectish(indentAt + 1) &&
+      !controlHeadBackwards(tokens, indentAt - 1),
+    );
+  };
+
   const openCallBetween = (from, i) => {
     let levels = 0;
     for (let j = i - 1; j > from; j--) {
@@ -4131,7 +4156,11 @@ export function implicitObjects(tokens, mintId) {
       const k = tokens[j].kind;
       if (PASS_CLOSERS.has(k)) { levels++; continue; }
       if (PASS_OPENERS.has(k)) {
-        if (k === 'INDENT' && levels === 0) return false;
+        if (k === 'INDENT' && levels === 0) {
+          // A level-0 INDENT ends in-scope spaced calls — unless it is
+          // the indented-object call argument (callee before INDENT).
+          return pendingIndentedObjectCallAt(j);
+        }
         levels--;
         if (levels < 0) return false;
         continue;
@@ -4180,9 +4209,10 @@ export function implicitObjects(tokens, mintId) {
 
     if (k === 'INDENT') {
       // INDENT closes a same-line object — except after `:` (the pair's
-      // value is the indented block) or a block-argument carrier — and
-      // consumes the CONTROL frame whose block this is.
-      if (prev && !BLOCK_ARG_CARRIERS.has(prev.kind)) {
+      // value is the indented block), a block-argument carrier, or a
+      // pending indented-object call (`user: source` + indent + pairs)
+      // — and consumes the CONTROL frame whose block this is.
+      if (prev && !BLOCK_ARG_CARRIERS.has(prev.kind) && !pendingIndentedObjectCallAt(i)) {
         while (top()?.kind === 'object' && prev.kind !== ':') closeObject(i);
       }
       if (top()?.kind === 'CONTROL') stack.pop();
@@ -4251,13 +4281,18 @@ export function implicitObjects(tokens, mintId) {
       // UNLESS an implicit call opened since the enclosing pair
       // boundary: then this key sits inside the pair's VALUE and
       // starts a NESTED object fed to that call
-      // (`x = a: 1, b: f 2, c: 3` is {a: 1, b: f(2, {c: 3})}).
+      // (`x = a: 1, b: f 2, c: 3` is {a: 1, b: f(2, {c: 3})};
+      // `a: source` + indent + `fetch:` is the indented-object form).
       const f = top();
       const under = stack[stack.length - 2];
       const isBraceFrame = (fr) => fr && (fr.kind === '{' || fr.kind === 'PICK_START' || fr.kind === 'OPTPICK_START' || fr.kind === 'object');
       const isBraceKind = (kd) => kd === '{' || kd === 'PICK_START' || kd === 'OPTPICK_START';
+      // When the top frame is an INDENT under a brace, search from the
+      // brace — openCallBetween's walk starts after `from`, so starting
+      // at the INDENT itself would never see the callee before it.
+      const callFrom = (f?.kind === 'INDENT' && under) ? under.at : f?.at;
       if (f && (isBraceFrame(f) || (f.kind === 'INDENT' && isBraceKind(under?.kind))) &&
-          !openCallBetween(f.at, s) &&
+          !(callFrom != null && openCallBetween(callFrom, s)) &&
           (startsLine || before?.kind === ',' || isBraceKind(before?.kind) || tokens[s]?.kind === '{')) {
         continue;
       }

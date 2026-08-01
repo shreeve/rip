@@ -14,6 +14,10 @@ The package currently provides:
 - `launch` for the one application boot path, with `persistStash`
 - `ariaCurrent` and `ownsAnchor` route-aware accessibility helpers
 - `createRenderer` for precompiled route/layout construction with render gates
+- `createWorkspace` for the Rip Workspace — the reactive passport bag of
+  component records ([docs/WORKSPACE.md](../../docs/WORKSPACE.md))
+- `connectFeed` for the workspace dev feed — the hub subscriber that turns
+  `{id, etag}` dings into HTTP `/app/…?etag=` fetches and `workspace.set` calls
 
 Only named exports are supported:
 
@@ -194,7 +198,7 @@ not provide source compilation, launch, or browser delivery.
 then the result is stamped as the reset baseline), loads the component
 registry, derives the route manifest, and wires router and renderer
 together before starting. The application declares its stash in the
-bundle module `app/stash.rip` through its `appStash` export — a stash
+bundle module `app/stash.rip` through its `stash` export — a stash
 module without the export rejects loudly — and the `stash` option
 overrides it for tests and embedding hosts. It installs `__ripApp` and `__ripRouter`; a
 second launch rejects loudly, as does a malformed bundle, and

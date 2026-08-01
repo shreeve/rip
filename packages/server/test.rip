@@ -14,9 +14,33 @@ import { get, post, put, patch, del, all, use, prefix, before, after, onError, n
          read, error, notice, bail, ctx, session, subrequest, mark,
          mimeType, errorEnvelope, openapi } from '@rip-lang/server'
 import { cors, logger, compress, sessions, csrf, secureHeaders, timeout, htmlJson } from '@rip-lang/server/middleware'
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, unlinkSync } from 'fs'
-import { join } from 'path'
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, unlinkSync, existsSync, readdirSync, symlinkSync, realpathSync } from 'fs'
+import { join, basename } from 'path'
 import { tmpdir } from 'os'
+
+# Fixture trees live under the OS tmpdir — never in the package checkout.
+# Bun resolves @rip-lang/* from the importing file upward, so a bare /tmp
+# app boots /ready against the wrong (or empty) package graph and serves
+# no routes. Seed one shared node_modules/@rip-lang under the fixture root
+# (symlinks into this checkout) so every APP_ENTRY beneath it resolves the
+# same packages the worker/preload use.
+FIXTURE_ROOT = join(tmpdir(), "rip-srv-test-#{process.pid}")
+mkdirSync FIXTURE_ROOT, { recursive: true }
+do ->
+  nm = join(FIXTURE_ROOT, 'node_modules', '@rip-lang')
+  mkdirSync nm, { recursive: true }
+  repoRipLang = join(import.meta.dir, '..', '..', 'node_modules', '@rip-lang')
+  for name in readdirSync(repoRipLang)
+    target = join(repoRipLang, name)
+    link = join(nm, name)
+    try unlinkSync(link) catch then null
+    symlinkSync target, link
+  # Legacy leftovers next to the sources (pre-/tmp fixtures).
+  for name in readdirSync(import.meta.dir)
+    rmSync join(import.meta.dir, name), { recursive: true, force: true } if name.startsWith('tmp-') or name is '.tmp'
+process.on 'exit', ->
+  try rmSync(FIXTURE_ROOT, { recursive: true, force: true }) catch then null
+tmpFixture = (prefix) -> mkdtempSync join(FIXTURE_ROOT, prefix)
 
 req = (method, path, opts = {}) -> new Request("http://test.local#{path}", { method, ...opts })
 jreq = (method, path, body) ->
@@ -466,6 +490,16 @@ test "bare start() defaults host and port (standalone)", ->
   finally
     Bun.serve = realServe
 
+test "bare start() stays synchronous (worker handover)", ->
+  process.env.WORKER_ID = '1'
+  try
+    h = start()
+    ok typeof h is 'function'
+    ok typeof h.then isnt 'function', 'bare start() must not return a Promise'
+  finally
+    delete process.env.WORKER_ID
+    delete globalThis.__ripHandler
+
 # ==[ Body parsing + input: schemas + OpenAPI ]==
 
 console.log "\nBodies and schemas"
@@ -760,7 +794,7 @@ console.log "\nclient()"
 
 CLIENT_STASH = """
 import { source } from '@rip-lang/app'
-export appStash = {
+export stash = {
   user: source fetch: -> (await fetch('/user.json')).json()
 }
 """
@@ -776,10 +810,30 @@ writeClientDir = (dir, route = CLIENT_ROUTE) ->
   writeFileSync join(dir, 'app', 'routes', 'index.rip'), route
   writeFileSync join(dir, 'app', 'stash.rip'), CLIENT_STASH
 
-clientAppDir = mkdtempSync join(import.meta.dir, 'tmp-client-')
+clientAppDir = tmpFixture('tmp-client-')
 writeClientDir clientAppDir
 resetGlobals()
 client! join(clientAppDir, 'app')
+
+test! "start! dir mounts the client then hands over (worker)", ->
+  dir = tmpFixture('tmp-start-app-')
+  writeClientDir dir
+  resetGlobals()
+  process.env.WORKER_ID = '1'
+  try
+    pending = start(join(dir, 'app'))
+    ok typeof pending.then is 'function', "start('app') returns a Promise — use start!"
+    h = await pending
+    ok typeof h is 'function'
+    ok globalThis.__ripHandler is h
+    res = handle! req('GET', '/')
+    eq res.status, 200
+    ok (res.text!).includes('id="app"'), 'start! dir registered the boot page'
+  finally
+    delete process.env.WORKER_ID
+    delete globalThis.__ripHandler
+    resetGlobals()
+    client! join(clientAppDir, 'app')
 
 test! "client(dir) serves the boot page at GET /: runtime import, bundle url, mount point", ->
   res = handle! req('GET', '/')
@@ -787,25 +841,25 @@ test! "client(dir) serves the boot page at GET /: runtime import, bundle url, mo
   ok res.headers.get('content-type').includes('text/html')
   html = res.text!
   ok html.includes('/@rip/rip.js'), 'imports the served browser runtime'
-  ok html.includes('/@rip/bundle.json'), 'boots from the served bundle'
+  ok html.includes('/bundle.json'), 'boots from the served bundle'
   ok html.includes('id="app"'), 'carries the mount point'
   ok html.includes('debug'), 'the ?debug query param reaches bootApp'
 
-test! "GET /@rip/bundle.json ships the client modules and the boot package", ->
-  res = handle! req('GET', '/@rip/bundle.json')
+test! "GET /bundle.json ships the client modules and the boot package", ->
+  res = handle! req('GET', '/bundle.json')
   eq res.status, 200
   eq res.headers.get('content-type'), 'application/json'
   bundle = res.json!
   ok bundle.modules['app/routes/index.rip']?, 'the route module travels under its store path'
   ok bundle.modules['app/stash.rip']?, 'the stash module travels under its store path'
-  ok Object.keys(bundle.modules).some((k) -> k.startsWith('_pkg/app/')), 'the app package modules travel'
+  ok Object.keys(bundle.modules).some((k) -> k.startsWith('@rip-lang/app/')), 'the app package modules travel'
   ok bundle.packages['@rip-lang/app']?, 'the boot package is claimed'
 
 test! "the bundle ETag round-trips as a 304", ->
-  first = handle! req('GET', '/@rip/bundle.json')
+  first = handle! req('GET', '/bundle.json')
   etag = first.headers.get('etag')
   ok etag?.startsWith('"'), "the ETag is quoted: #{etag}"
-  res = handle! req('GET', '/@rip/bundle.json', { headers: { 'If-None-Match': etag } })
+  res = handle! req('GET', '/bundle.json', { headers: { 'If-None-Match': etag } })
   eq res.status, 304
   eq res.headers.get('etag'), etag
 
@@ -833,7 +887,7 @@ test! "an app/index.html replaces the generated boot page", ->
   ok res.headers.get('etag')?, 'file serving keeps ETag revalidation'
 
 test! "a client module importing a server-only package rejects loudly at client()", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-client-')
+  dir = tmpFixture('tmp-client-')
   mkdirSync join(dir, 'app', 'routes'), { recursive: true }
   writeFileSync join(dir, 'app', 'routes', 'index.rip'), """
   import { get } from '@rip-lang/server'
@@ -852,28 +906,47 @@ test! "a client module importing a server-only package rejects loudly at client(
   ok err.message.includes('@rip-lang/server'), "names the package: #{err.message}"
   rmSync dir, { recursive: true, force: true }
 
+test! "client() warns when its SPA fallback replaces an earlier notFound registration", ->
+  dir = tmpFixture('tmp-client-')
+  writeClientDir dir
+  resetGlobals()
+  notFound (c) -> new Response('custom 404', { status: 404 })
+  warns = []
+  original = console.warn
+  console.warn = (...args) -> warns.push args.join(' ')
+  try
+    client! join(dir, 'app')
+  finally
+    console.warn = original
+  ok warns.some((w) -> w.includes('notFound')), "the replacement is loud: #{JSON.stringify warns}"
+  resetGlobals()
+  rmSync dir, { recursive: true, force: true }
+
 rmSync clientAppDir, { recursive: true, force: true }
 resetGlobals()
 
-# ==[ client() dev feed — the worker half of RIP_WORKSPACE=1 ]==
+# ==[ client() dev feed — the worker half of the workspace door ]==
 #
-# Worker-mode client() with the feed env set: the manifest, rev-keyed cell,
-# bridge, and fresh-bundle routes — driven in-process through the fetch
-# handler against files a manager would have written.
+# Worker-mode client() with the feed env set: the manifest, latest-file
+# door, bridge, and fresh-bundle routes — driven in-process through the
+# fetch handler against files a manager would have written.
 
 console.log "\nclient() dev feed"
 
-FEED_CELL_ID = 'app/routes/index.rip'
-feedDir = mkdtempSync join(import.meta.dir, 'tmp-feed-')
-mkdirSync join(feedDir, 'cells'), { recursive: true }
-writeFileSync join(feedDir, 'cells', "#{encodeURIComponent(FEED_CELL_ID)}@1"), CLIENT_ROUTE
-writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, path: FEED_CELL_ID, rev: 1 }] })
+# The content etag that rides manifests, dings, and module URLs —
+# mirrors the manager's shortHash (sha256, 16 hex chars).
+fileHash = (s) -> new Bun.CryptoHasher('sha256').update(s).digest('hex').slice(0, 16)
+
+FEED_FILE_ID = 'app/routes/index.rip'
+feedDir = tmpFixture('tmp-feed-')
+mkdirSync join(feedDir, 'files'), { recursive: true }
+writeFileSync join(feedDir, 'files', encodeURIComponent(FEED_FILE_ID)), CLIENT_ROUTE
+writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ files: [{ id: FEED_FILE_ID, etag: fileHash(CLIENT_ROUTE) }] })
 writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: {}, packages: {} })
 
 feedEnv =
-  RIP_WORKSPACE: '1'
   RIP_BUNDLE_PATH: join(feedDir, 'bundle.json')
-  RIP_CELLS_DIR: join(feedDir, 'cells')
+  RIP_FILES_DIR: join(feedDir, 'files')
   RIP_MANIFEST_PATH: join(feedDir, 'manifest.json')
   RIP_BRIDGE_PATH: '/hub'
 
@@ -884,39 +957,61 @@ for k, v of feedEnv
 resetGlobals()
 client!()
 
-test! "GET /@rip/manifest is no-store and read per request", ->
-  res = handle! req('GET', '/@rip/manifest')
+test! "GET /manifest.json is no-store and read per request", ->
+  res = handle! req('GET', '/manifest.json')
   eq res.status, 200
   eq res.headers.get('content-type'), 'application/json'
   eq res.headers.get('cache-control'), 'no-store'
-  eq (res.json!), { cells: [{ id: FEED_CELL_ID, path: FEED_CELL_ID, rev: 1 }] }
+  eq (res.json!), { files: [{ id: FEED_FILE_ID, etag: fileHash(CLIENT_ROUTE) }] }
   # a manager rewrite shows on the very next request — nothing is cached
-  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, path: FEED_CELL_ID, rev: 2 }] })
-  eq ((handle! req('GET', '/@rip/manifest')).json!).cells[0].rev, 2
-  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ cells: [{ id: FEED_CELL_ID, path: FEED_CELL_ID, rev: 1 }] })
+  v2etag = fileHash(CLIENT_ROUTE + 'v2')
+  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ files: [{ id: FEED_FILE_ID, etag: v2etag }] })
+  eq ((handle! req('GET', '/manifest.json')).json!).files[0].etag, v2etag
+  writeFileSync join(feedDir, 'manifest.json'), JSON.stringify({ files: [{ id: FEED_FILE_ID, etag: fileHash(CLIENT_ROUTE) }] })
 
-test! "a rev-keyed cell answers immutable text/plain source bytes", ->
-  res = handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1")
+test! "GET /bundle.json is no-store when the feed door is open", ->
+  # Manifest no-store + a micro-cached bundle invents the reverse pairing
+  # (live manifest over stale bundle bytes). With the door open both are
+  # no-store; production (no manifest) keeps ETag-only.
+  res = handle! req('GET', '/bundle.json')
+  eq res.status, 200
+  eq res.headers.get('cache-control'), 'no-store'
+  eq res.headers.get('content-type'), 'application/json'
+
+test! "GET /app/…?etag= answers the latest module as text/plain", ->
+  # Store id app/routes/index.rip ↔ URL /app/routes/index.rip
+  rel = FEED_FILE_ID.slice('app/'.length)
+  etag = fileHash(CLIENT_ROUTE)
+  res = handle! req('GET', "/app/#{rel}?etag=#{etag}")
   eq res.status, 200
   eq res.headers.get('content-type'), 'text/plain; charset=utf-8'
-  eq res.headers.get('cache-control'), 'public, max-age=31536000, immutable'
+  eq res.headers.get('cache-control'), 'no-store'
+  eq res.headers.get('etag'), "\"#{etag}\""
   eq (res.text!), CLIENT_ROUTE
 
-test! "a cell URL without a valid positive-integer rev is a 400 naming the rule", ->
-  for path in ["/@rip/cells/#{FEED_CELL_ID}", "/@rip/cells/#{FEED_CELL_ID}?rev=0", "/@rip/cells/#{FEED_CELL_ID}?rev=abc", "/@rip/cells/#{FEED_CELL_ID}?rev=1.5"]
+test! "a superseded etag answers 409 with the current ETag — never a silent stale body", ->
+  rel = FEED_FILE_ID.slice('app/'.length)
+  current = fileHash(CLIENT_ROUTE)
+  miss = handle! req('GET', "/app/#{rel}?etag=0123456789abcdef")
+  eq miss.status, 409
+  eq miss.headers.get('etag'), "\"#{current}\""
+  eq (miss.text!), ''
+
+test! "a module URL without a well-formed etag is a 400", ->
+  rel = FEED_FILE_ID.slice('app/'.length)
+  for path in ["/app/#{rel}", "/app/#{rel}?etag=abc", "/app/#{rel}?etag=0123456789ABCDEF"]
     res = handle! req('GET', path)
     eq res.status, 400
-    ok ((res.json!).error.message).includes('unversioned cell URLs are rejected'), "names the rule for #{path}"
+    ok ((res.json!).error.message).includes('module URLs require'), "names the rule for #{path}"
 
-test! "an unknown (id, rev) is a 404", ->
-  eq (handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=9")).status, 404
-  eq (handle! req('GET', '/@rip/cells/nope.rip?rev=1')).status, 404
+test! "an unknown module is a 404", ->
+  eq (handle! req('GET', "/app/nope.rip?etag=#{fileHash(CLIENT_ROUTE)}")).status, 404
 
-test! "a bridge open enrolls the connection into /rip/dev", ->
+test! "a bridge open enrolls the connection into /hub", ->
   res = handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })
   eq res.status, 200
   ok res.headers.get('content-type').includes('application/json')
-  eq (res.json!), { '+': ['/rip/dev'] }
+  eq (res.json!), { '+': ['/hub'] }
 
 test! "bridge text and close frames answer 204 with no directives", ->
   for frame in ['text', 'close']
@@ -931,16 +1026,16 @@ test! "a missing or unknown frame header is a 400 naming the header", ->
     ok ((res.json!).error.message).includes('Sec-WebSocket-Frame'), 'names the header'
 
 test! "the bundle route re-reads per request — a rewrite shows without re-registration", ->
-  first = handle! req('GET', '/@rip/bundle.json')
+  first = handle! req('GET', '/bundle.json')
   eq first.status, 200
   etag1 = first.headers.get('etag')
-  eq (handle! req('GET', '/@rip/bundle.json', { headers: { 'If-None-Match': etag1 } })).status, 304
+  eq (handle! req('GET', '/bundle.json', { headers: { 'If-None-Match': etag1 } })).status, 304
   writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: { 'x.rip': 'x' }, packages: {} })
-  fresh = handle! req('GET', '/@rip/bundle.json')
+  fresh = handle! req('GET', '/bundle.json')
   eq fresh.status, 200
   ok fresh.headers.get('etag') isnt etag1, 'the ETag tracks the rewritten file'
 
-test! "the generated boot page under the flag opens the workspace door", ->
+test! "the generated boot page opens the workspace door where the feed surface exists", ->
   res = handle! req('GET', '/')
   eq res.status, 200
   ok (res.text!).includes('workspace: true'), 'bootApp boots in workspace mode'
@@ -948,41 +1043,60 @@ test! "the generated boot page under the flag opens the workspace door", ->
 for k of feedEnv
   if savedFeedEnv[k]? then process.env[k] = savedFeedEnv[k] else delete process.env[k]
 
-test! "flag off: no feed routes, and the bundle stays the boot-time cached bytes", ->
+test! "without the manager's feed env there are no feed routes and no door; the worker bundle still re-reads", ->
   writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: {}, packages: {} })
   process.env.RIP_BUNDLE_PATH = join(feedDir, 'bundle.json')
   try
     resetGlobals()
     client!()
-    eq (handle! req('GET', '/@rip/manifest')).status, 404
-    eq (handle! req('GET', "/@rip/cells/#{FEED_CELL_ID}?rev=1")).status, 404
+    eq (handle! req('GET', '/manifest.json')).status, 404
+    eq (handle! req('GET', "/app/routes/index.rip?etag=#{fileHash(CLIENT_ROUTE)}")).status, 404
     eq (handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })).status, 404
-    ok not ((handle! req('GET', '/')).text!).includes('workspace'), 'flag off, the boot page never mentions the door'
-    etag1 = (handle! req('GET', '/@rip/bundle.json')).headers.get('etag')
+    ok not ((handle! req('GET', '/')).text!).includes('workspace'), 'no manifest env, no door'
+    # Worker mode re-reads the bundle per request — the manager rewrites
+    # it in place on a file-feed change, and Janus absorbs the cost.
+    etag1 = (handle! req('GET', '/bundle.json')).headers.get('etag')
     writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: { 'y.rip': 'y' }, packages: {} })
-    res = handle! req('GET', '/@rip/bundle.json')
-    eq res.headers.get('etag'), etag1   # cached at client() time; the process dies on reload
+    res = handle! req('GET', '/bundle.json')
+    ok res.headers.get('etag') isnt etag1, 'the rewrite shows on the next request'
   finally
     delete process.env.RIP_BUNDLE_PATH
     resetGlobals()
 
-test! "standalone assembly under the flag claims @rip-lang/workspace into the bundle", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-client-')
+test! "a bridge without the feed surface never enrolls the dev channel — app-level hub sockets stay off /hub", ->
+  writeFileSync join(feedDir, 'bundle.json'), JSON.stringify({ modules: {}, packages: {} })
+  process.env.RIP_BUNDLE_PATH = join(feedDir, 'bundle.json')
+  process.env.RIP_BRIDGE_PATH = '/hub'
+  try
+    resetGlobals()
+    client!()
+    res = handle! req('POST', '/hub', { headers: { 'Sec-WebSocket-Frame': 'open' } })
+    eq res.status, 204
+    eq (res.text!), ''
+  finally
+    delete process.env.RIP_BUNDLE_PATH
+    delete process.env.RIP_BRIDGE_PATH
+    resetGlobals()
+
+test! "the workspace rides the app package — one claim, no second package, door still closed standalone", ->
+  dir = tmpFixture('tmp-client-')
   writeClientDir dir
-  savedFlag = process.env.RIP_WORKSPACE
-  process.env.RIP_WORKSPACE = '1'
   try
     resetGlobals()
     client! join(dir, 'app')
-    bundle = (handle! req('GET', '/@rip/bundle.json')).json!
-    ok bundle.packages['@rip-lang/workspace']?, 'the workspace package is claimed'
-    ok bundle.modules['_pkg/workspace/feed.rip']?, 'the feed module travels'
-    # Standalone has no manager and therefore no manifest/cell routes: a
+    bundle = (handle! req('GET', '/bundle.json')).json!
+    ok bundle.packages['@rip-lang/app']?, 'the app package is claimed'
+    eq bundle.packages['@rip-lang/workspace'], undefined
+    ok bundle.modules['@rip-lang/app/workspace.rip']?, 'the workspace module travels inside the app package'
+    ok bundle.modules['@rip-lang/app/feed.rip']?, 'the feed module travels inside the app package'
+    # Standalone has no manager and therefore no manifest/file-feed routes: a
     # workspace-mode boot would die on its manifest fetch, so the page
     # opens the door only in worker mode (RIP_MANIFEST_PATH present).
-    ok not ((handle! req('GET', '/')).text!).includes('workspace: true'), 'standalone never opens the door'
+    standalonePage = (handle! req('GET', '/')).text!
+    ok not standalonePage.includes('workspace: true'), 'standalone never opens the door'
+    # Standalone titles the page after the app's directory.
+    ok standalonePage.includes("<title>#{basename(dir)}</title>"), "the standalone page is titled after its directory: #{basename(dir)}"
   finally
-    if savedFlag? then process.env.RIP_WORKSPACE = savedFlag else delete process.env.RIP_WORKSPACE
     resetGlobals()
     rmSync dir, { recursive: true, force: true }
 
@@ -1001,7 +1115,6 @@ SERVER_BIN = "#{import.meta.dir}/server.rip"
 
 TEST_KNOBS =
   RIP_ENV: 'development'
-  RIP_WORKSPACE: ''       # subprocess flag-off default; dev-feed tests override with '1'
   RIP_SETTLE_MS: '60'
   RIP_HEARTBEAT_MS: '150'
   RIP_DRAIN_MS: '100'
@@ -1057,7 +1170,7 @@ spawnWorkerProc = (entry, sock, extraEnv = {}) ->
 console.log "\nWorker runtime"
 
 test! "worker boots, /ready flips 200, and serves app routes over its socket", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  dir = tmpFixture('tmp-worker-')
   sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   proc = spawnWorkerProc join(dir, 'app.rip'), sock
@@ -1072,7 +1185,7 @@ test! "worker boots, /ready flips 200, and serves app routes over its socket", -
     rmSync dir, { recursive: true, force: true }
 
 test! "worker SIGTERM finishes the in-flight request (c:1), then exits 0", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  dir = tmpFixture('tmp-worker-')
   sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   proc = spawnWorkerProc join(dir, 'app.rip'), sock
@@ -1091,7 +1204,7 @@ test! "worker SIGTERM finishes the in-flight request (c:1), then exits 0", ->
     rmSync dir, { recursive: true, force: true }
 
 test! "a concurrent request at c:1 bounces 503 with the Rip-Worker-Busy marker", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  dir = tmpFixture('tmp-worker-')
   sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   proc = spawnWorkerProc join(dir, 'app.rip'), sock
@@ -1111,7 +1224,7 @@ test! "a concurrent request at c:1 bounces 503 with the Rip-Worker-Busy marker",
     rmSync dir, { recursive: true, force: true }
 
 test! "a c:2 worker holds two slow requests concurrently; the third bounces marked", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  dir = tmpFixture('tmp-worker-')
   sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   proc = spawnWorkerProc join(dir, 'app.rip'), sock, { WORKER_CONCURRENCY: '2' }
@@ -1136,7 +1249,7 @@ test! "a c:2 worker holds two slow requests concurrently; the third bounces mark
     rmSync dir, { recursive: true, force: true }
 
 test! "SIGTERM at c:2 drains BOTH in-flight requests before exiting 0", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  dir = tmpFixture('tmp-worker-')
   sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   proc = spawnWorkerProc join(dir, 'app.rip'), sock, { WORKER_CONCURRENCY: '2' }
@@ -1158,7 +1271,7 @@ test! "SIGTERM at c:2 drains BOTH in-flight requests before exiting 0", ->
     rmSync dir, { recursive: true, force: true }
 
 test! "the drain wait honors the manager-passed ceiling — a hung request can't hold the exit", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  dir = tmpFixture('tmp-worker-')
   sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   proc = spawnWorkerProc join(dir, 'app.rip'), sock, { RIP_DRAIN_DEADLINE_MS: '250', RIP_HANDLER_DEADLINE_MS: '0' }
@@ -1179,7 +1292,7 @@ test! "the drain wait honors the manager-passed ceiling — a hung request can't
     rmSync dir, { recursive: true, force: true }
 
 test! "the hung-handler watchdog recycles the worker on its own (RIP_HANDLER_DEADLINE_MS)", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  dir = tmpFixture('tmp-worker-')
   sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   proc = spawnWorkerProc join(dir, 'app.rip'), sock, { RIP_HANDLER_DEADLINE_MS: '200', RIP_DRAIN_DEADLINE_MS: '200' }
@@ -1195,7 +1308,7 @@ test! "the hung-handler watchdog recycles the worker on its own (RIP_HANDLER_DEA
     rmSync dir, { recursive: true, force: true }
 
 test! "a broken app surfaces its boot error on /ready and exits nonzero", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  dir = tmpFixture('tmp-worker-')
   sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
   writeFileSync join(dir, 'app.rip'), BROKEN_SOURCE
   proc = spawnWorkerProc join(dir, 'app.rip'), sock
@@ -1213,7 +1326,7 @@ test! "a broken app surfaces its boot error on /ready and exits nonzero", ->
     rmSync dir, { recursive: true, force: true }
 
 test! "an orphaned worker (parent gone) exits on its own", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  dir = tmpFixture('tmp-worker-')
   sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   # An intermediary bash spawns the worker and exits immediately, so the
@@ -1243,10 +1356,14 @@ test! "an orphaned worker (parent gone) exits on its own", ->
 
 console.log "\nPrebuild"
 
-import { buildArtifact, REGISTER_409_MS, scale, publish, state as managerState } from './manager.rip'
+import { buildArtifact, buildApp, revertFilesAndManifest, REGISTER_409_MS, scale, publish, state as managerState, cfg as managerCfg, onFileChange, DEV_CHANNEL as MANAGER_DEV_CHANNEL } from './manager.rip'
+
+test "DEV_CHANNEL mirrors across manager and worker — a pinned fact, not a convention", ->
+  eq MANAGER_DEV_CHANNEL, mod.DEV_CHANNEL
+  eq mod.DEV_CHANNEL, '/hub'
 
 test! "buildArtifact bundles an app to one JS file a loader-free worker serves", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')
+  dir = tmpFixture('tmp-prebuild-')
   sock = join(tmpdir(), "rip-pb-#{Date.now()}-#{rand(1e6)}.sock")
   writeFileSync join(dir, 'app.rip'), appSource('hi-artifact')
   # The exact shape the manager boots: prebuilt worker runtime + prebuilt
@@ -1270,7 +1387,7 @@ test! "buildArtifact bundles an app to one JS file a loader-free worker serves",
     rmSync dir, { recursive: true, force: true }
 
 test! "the artifact preserves a module's own import.meta.dir", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')
+  dir = tmpFixture('tmp-prebuild-')
   writeFileSync join(dir, 'app.rip'), """
   import { get, start } from '@rip-lang/server'
   get '/dir' -> import.meta.dir
@@ -1287,13 +1404,15 @@ test! "the artifact preserves a module's own import.meta.dir", ->
     """], { stdin: 'ignore', stdout: 'pipe', stderr: 'inherit', env: { ...process.env } }
     out = new Response(proc.stdout).text!
     await proc.exited
-    eq out.trim(), dir
+    # macOS tmpdir is often a symlink (/var → /private/var); import.meta.dir
+    # reports the real path.
+    eq out.trim(), realpathSync(dir)
   finally
     rmSync dir, { recursive: true, force: true }
     try unlinkSync appJs
 
 test! "buildArtifact rejects a broken app loudly, naming the file", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-prebuild-')
+  dir = tmpFixture('tmp-prebuild-')
   writeFileSync join(dir, 'app.rip'), BROKEN_SOURCE
   try
     err = null
@@ -1343,7 +1462,7 @@ latestSocks = ->
   return [] unless puts.length
   puts[puts.length - 1].body.upstreams.map (u) -> u.path
 
-mgrDir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+mgrDir = tmpFixture('tmp-manager-')
 writeFileSync join(mgrDir, 'app.rip'), appSource('hi')
 mgrProc = Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, '--control', janusSock, '--name', 'tapp', '-w', '2'],
   cwd: mgrDir
@@ -1496,7 +1615,7 @@ console.log "\nManager publish race"
 
 test! "a save landing while the boot publish waits in the chain yields no stale socks PUT", ->
   raceSock = join(tmpdir(), "rip-janus-race-#{Date.now()}-#{rand(1e6)}.sock")
-  raceDir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  raceDir = tmpFixture('tmp-manager-')
   writeFileSync join(raceDir, 'app.rip'), appSource('v1')
   calls = []
   gate = {}
@@ -1554,7 +1673,7 @@ test! "a save landing while the boot publish waits in the chain yields no stale 
 console.log "\nManager concurrency knob"
 
 test! "manager refuses c > 1 with watch on (eager included) and bad -c values, loudly", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   outcome = (args) ->
     proc = Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, ...args],
@@ -1642,7 +1761,7 @@ test "the default 409 retry window outlives a stale claim's worst case", ->
 
 test! "register retries a 409 within the TTL window and proceeds once the stale claim frees", ->
   ctlSock = join(tmpdir(), "rip-janus-409-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   calls = []
   posts = { n: 0 }
@@ -1667,7 +1786,7 @@ test! "register retries a 409 within the TTL window and proceeds once the stale 
 
 test! "register accepts only 201 — a 200 from POST /apps is retried, never trusted", ->
   ctlSock = join(tmpdir(), "rip-janus-200-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   calls = []
   posts = { n: 0 }
@@ -1692,7 +1811,7 @@ test! "register accepts only 201 — a 200 from POST /apps is retried, never tru
 
 test! "--bridge registers bridge_path with the app", ->
   ctlSock = join(tmpdir(), "rip-janus-bridge-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   calls = []
   stub = stubJanus ctlSock, calls
@@ -1707,7 +1826,7 @@ test! "--bridge registers bridge_path with the app", ->
     rmSync dir, { recursive: true, force: true }
 
 test! "--bridge without a leading / is a loud startup rejection", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   proc = spawnManager dir, '/nonexistent.sock', ['--name', 'badbridge', '--bridge', 'hub'], {}, 'pipe'
   try
@@ -1720,7 +1839,7 @@ test! "--bridge without a leading / is a loud startup rejection", ->
 
 test! "a 409 outlasting the retry window still aborts with the claim message", ->
   ctlSock = join(tmpdir(), "rip-janus-409x-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   calls = []
   stub = stubJanus ctlSock, calls, (call) ->
@@ -1741,7 +1860,7 @@ test! "a 409 outlasting the retry window still aborts with the claim message", -
 
 test! "a hung handler recycles its worker; the manager republishes a fresh socket", ->
   ctlSock = join(tmpdir(), "rip-janus-hang-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   calls = []
   stub = stubJanus ctlSock, calls
@@ -1777,7 +1896,7 @@ start()
 
 test! "rings past WAITER_CAP answer an immediate 503; held rings still complete", ->
   ctlSock = join(tmpdir(), "rip-janus-cap-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), slowBootSource(1500)
   calls = []
   stub = stubJanus ctlSock, calls
@@ -1806,7 +1925,7 @@ test! "rings past WAITER_CAP answer an immediate 503; held rings still complete"
 
 test! "a ring outliving RIP_HOLD_MS answers 503 with Retry-After while boot continues", ->
   ctlSock = join(tmpdir(), "rip-janus-hold-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), slowBootSource(2500)
   calls = []
   stub = stubJanus ctlSock, calls
@@ -1826,7 +1945,7 @@ test! "a ring outliving RIP_HOLD_MS answers 503 with Retry-After while boot cont
 
 test! "a heartbeat 404 re-registers the app and re-publishes the same upstreams", ->
   ctlSock = join(tmpdir(), "rip-janus-hb404-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   calls = []
   tripped = { fired: false }
@@ -1856,7 +1975,7 @@ test! "a heartbeat 404 re-registers the app and re-publishes the same upstreams"
 
 test! "--eager boots the fresh pool at settle — new socks publish with no ring", ->
   ctlSock = join(tmpdir(), "rip-janus-eager-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('v1')
   calls = []
   stub = stubJanus ctlSock, calls
@@ -1880,7 +1999,7 @@ test! "--eager boots the fresh pool at settle — new socks publish with no ring
 
 test! "production readyWhen:all — the first socks PUT ships every worker at once", ->
   ctlSock = join(tmpdir(), "rip-janus-prod-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   calls = []
   stub = stubJanus ctlSock, calls
@@ -1895,7 +2014,7 @@ test! "production readyWhen:all — the first socks PUT ships every worker at on
     rmSync dir, { recursive: true, force: true }
 
 test! "watch in production requires --allow-watch, loudly", ->
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   proc = spawnManager dir, '/nonexistent.sock', ['--name', 'prodwatch', '--watch'], { RIP_ENV: 'production' }, 'pipe'
   try
@@ -1908,7 +2027,7 @@ test! "watch in production requires --allow-watch, loudly", ->
 
 test! "manager -c 2 --no-watch plumbs the cap to workers: two in flight over one sock", ->
   cSock = join(tmpdir(), "rip-janus-c-#{Date.now()}-#{rand(1e6)}.sock")
-  cDir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  cDir = tmpFixture('tmp-manager-')
   writeFileSync join(cDir, 'app.rip'), appSource('hi')
   calls = []
   stub = Bun.serve
@@ -1961,7 +2080,7 @@ console.log "\nManager browser delivery"
 
 test! "an app/ dir ships through the pool: boot page, bundle ETag, per-epoch reassembly", ->
   ctlSock = join(tmpdir(), "rip-janus-client-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), """
   import { get, client, start } from '@rip-lang/server'
   client!()
@@ -1977,16 +2096,26 @@ test! "an app/ dir ships through the pool: boot page, bundle ETag, per-epoch rea
       managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
     page = uds!(sock1, '/', { headers: { Accept: 'text/html' } })
     eq page.status, 200
-    ok (page.text!).includes('id="app"'), 'the worker serves the boot page'
-    b1 = uds!(sock1, '/@rip/bundle.json')
+    pageText = page.text!
+    ok pageText.includes('id="app"'), 'the worker serves the boot page'
+    ok pageText.includes('<title>clientapp</title>'), "the page is titled with the manager's --name"
+    ok pageText.includes('name="viewport"'), 'the page carries the viewport meta'
+    b1 = uds!(sock1, '/bundle.json')
     eq b1.status, 200
     etag1 = b1.headers.get('etag')
     ok etag1?, 'the bundle carries an ETag'
     bundle = b1.json!
     ok bundle.modules['app/routes/index.rip']?, 'the manager-assembled bundle ships the client module'
-    # A client edit is an epoch like any other: settle cuts admission, the
-    # ring boots against a REASSEMBLED bundle — its ETag must differ.
+    # A MIXED save (server + client together) is an epoch: settle cuts
+    # admission, the ring boots against a REASSEMBLED bundle — its ETag
+    # must differ. (A client-only save takes the file-feed path instead.)
     bell = calls.find((c) -> c.method is 'PUT' and c.body?.upstreams?.some((u) -> u.doorbell)).body.upstreams[0].path
+    writeFileSync join(dir, 'app.rip'), """
+    import { get, client, start } from '@rip-lang/server'
+    client!()
+    get '/hi' -> 'hi v2'
+    start()
+    """
     writeFileSync join(dir, 'app', 'routes', 'index.rip'), CLIENT_ROUTE.replace('"home"', '"home v2"')
     waitFor! -> calls.filter((c) -> c.method is 'PUT' and c.body?.upstreams?.some((u) -> u.doorbell)).length >= 2
     res = uds!(bell, '/ring')
@@ -1995,7 +2124,7 @@ test! "an app/ dir ships through the pool: boot page, bundle ETag, per-epoch rea
       puts = managerSockPuts(calls).filter (c) -> c.body.upstreams.length is 1
       fresh = puts[puts.length - 1]?.body.upstreams[0].path
       if fresh? and fresh isnt sock1 then fresh else null
-    b2 = uds!(sock2, '/@rip/bundle.json')
+    b2 = uds!(sock2, '/bundle.json')
     eq b2.status, 200
     etag2 = b2.headers.get('etag')
     ok etag2? and etag2 isnt etag1, "the new epoch reassembled the bundle: #{etag1} vs #{etag2}"
@@ -2005,7 +2134,7 @@ test! "an app/ dir ships through the pool: boot page, bundle ETag, per-epoch rea
     stub.stop(true)
     rmSync dir, { recursive: true, force: true }
 
-# ==[ Manager: the workspace dev feed — RIP_WORKSPACE=1 through a live pool ]==
+# ==[ Manager: the workspace dev feed through a live pool ]==
 
 console.log "\nManager workspace dev feed"
 
@@ -2016,61 +2145,64 @@ get '/hi' -> '#{msg}'
 start()
 """
 
-test! "a client-only edit feeds cells in place: ding, rev bump, immutable old rev, fresh bundle, no reload", ->
+test! "a client-only edit feeds modules in place: ding, etag advances, etag door, fresh bundle, no reload", ->
   ctlSock = join(tmpdir(), "rip-janus-ws-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), wsAppSource('hi')
   writeClientDir dir
   calls = []
   stub = stubJanus ctlSock, calls
-  proc = spawnManager dir, ctlSock, ['--name', 'wsapp', '-w', '1', '--bridge', '/hub'], { RIP_WORKSPACE: '1' }
+  proc = spawnManager dir, ctlSock, ['--name', 'wsapp', '-w', '1', '--bridge', '/hub']
   puts = -> calls.filter (c) -> c.method is 'PUT'
   try
     sock = waitFor! ->
       managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
-    m1 = uds!(sock, '/@rip/manifest')
+    m1 = uds!(sock, '/manifest.json')
     eq m1.status, 200
     eq m1.headers.get('cache-control'), 'no-store'
-    eq (m1.json!), { cells: [
-      { id: 'app/routes/index.rip', path: 'app/routes/index.rip', rev: 1 }
-      { id: 'app/stash.rip',        path: 'app/stash.rip',        rev: 1 }
+    eq (m1.json!), { files: [
+      { id: 'app/routes/index.rip', etag: fileHash(CLIENT_ROUTE) }
+      { id: 'app/stash.rip',        etag: fileHash(CLIENT_STASH) }
     ] }
-    c1 = uds!(sock, '/@rip/cells/app/routes/index.rip?rev=1')
+    c1 = uds!(sock, "/app/routes/index.rip?etag=#{fileHash(CLIENT_ROUTE)}")
     eq c1.status, 200
-    eq c1.headers.get('cache-control'), 'public, max-age=31536000, immutable'
+    eq c1.headers.get('cache-control'), 'no-store'
+    eq c1.headers.get('etag'), "\"#{fileHash(CLIENT_ROUTE)}\""
     eq (c1.text!), CLIENT_ROUTE
-    etag1 = (uds!(sock, '/@rip/bundle.json')).headers.get('etag')
+    bundleTag1 = (uds!(sock, '/bundle.json')).headers.get('etag')
     putsAt = puts().length
     v2 = CLIENT_ROUTE.replace('"home"', '"home v2"')
     writeFileSync join(dir, 'app', 'routes', 'index.rip'), v2
     pub = waitFor! -> calls.find (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
     eq pub.path, '/1.0/apps/app-x/hub/publish'
-    eq pub.body, [{ '@': ['/rip/dev'], ding: { id: 'app/routes/index.rip', rev: 2 } }]
-    m2 = (uds!(sock, '/@rip/manifest')).json!
-    eq m2.cells.find((e) -> e.path is 'app/routes/index.rip').rev, 2
-    eq ((uds!(sock, '/@rip/cells/app/routes/index.rip?rev=2')).text!), v2
-    eq ((uds!(sock, '/@rip/cells/app/routes/index.rip?rev=1')).text!), CLIENT_ROUTE   # old revs keep answering
-    eq (uds!(sock, '/@rip/cells/app/routes/index.rip')).status, 400                   # unversioned → rejected
-    eq (uds!(sock, '/@rip/cells/app/routes/index.rip?rev=9')).status, 404
+    eq pub.body, [{ '@': ['/hub'], ding: { id: 'app/routes/index.rip', etag: fileHash(v2) } }]
+    m2 = (uds!(sock, '/manifest.json')).json!
+    eq m2.files.find((e) -> e.id is 'app/routes/index.rip').etag, fileHash(v2)
+    # Q8′ latest door: matching etag → 200; superseded → 409 + current; bare → 400.
+    eq ((uds!(sock, "/app/routes/index.rip?etag=#{fileHash(v2)}")).text!), v2
+    stale = uds!(sock, "/app/routes/index.rip?etag=#{fileHash(CLIENT_ROUTE)}")
+    eq stale.status, 409
+    eq stale.headers.get('etag'), "\"#{fileHash(v2)}\""
+    eq (uds!(sock, '/app/routes/index.rip')).status, 400
+    eq (uds!(sock, '/app/routes/index.rip?etag=not-hex')).status, 400
     open = uds!(sock, '/hub', { method: 'POST', headers: { 'Sec-WebSocket-Frame': 'open' } })
     eq open.status, 200
-    eq (open.json!), { '+': ['/rip/dev'] }
+    eq (open.json!), { '+': ['/hub'] }
     # no reload: no doorbell cut, no sockets churn — the SAME worker socket
     # answers, and its bundle ETag moved with the in-place rewrite
     eq puts().length, putsAt
-    etag2 = (uds!(sock, '/@rip/bundle.json')).headers.get('etag')
-    ok etag2? and etag2 isnt etag1, "the live pool's bundle was rewritten in place: #{etag1} vs #{etag2}"
-    # A deletion rides the same stream: the retirement occupies its own rev,
-    # dings with kind 'delete', leaves the manifest, and its old rev-keyed
-    # cells keep answering (Q8) — still no reload.
+    bundleTag2 = (uds!(sock, '/bundle.json')).headers.get('etag')
+    ok bundleTag2? and bundleTag2 isnt bundleTag1, "the live pool's bundle was rewritten in place: #{bundleTag1} vs #{bundleTag2}"
+    # A deletion rides the same stream: the ding carries the retired
+    # generation's etag with kind 'delete', leaves the manifest, and
+    # removes the latest file — still no reload.
     unlinkSync join(dir, 'app', 'stash.rip')
     pubs = -> calls.filter (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
     retirement = waitFor! -> pubs()[1]
-    eq retirement.body, [{ '@': ['/rip/dev'], ding: { id: 'app/stash.rip', rev: 2, kind: 'delete' } }]
-    m3 = (uds!(sock, '/@rip/manifest')).json!
-    eq m3.cells.map((e) -> e.path), ['app/routes/index.rip']
-    eq ((uds!(sock, '/@rip/cells/app/stash.rip?rev=1')).text!), CLIENT_STASH
-    eq (uds!(sock, '/@rip/cells/app/stash.rip?rev=2')).status, 404   # a retirement has no bytes
+    eq retirement.body, [{ '@': ['/hub'], ding: { id: 'app/stash.rip', etag: fileHash(CLIENT_STASH), kind: 'delete' } }]
+    m3 = (uds!(sock, '/manifest.json')).json!
+    eq m3.files.map((e) -> e.id), ['app/routes/index.rip']
+    eq (uds!(sock, "/app/stash.rip?etag=#{fileHash(CLIENT_STASH)}")).status, 404
     eq puts().length, putsAt
   finally
     try proc.kill('SIGKILL')
@@ -2078,14 +2210,117 @@ test! "a client-only edit feeds cells in place: ding, rev bump, immutable old re
     stub.stop(true)
     rmSync dir, { recursive: true, force: true }
 
-test! "flag on, a non-client edit still cuts admission and reloads through the doorbell", ->
+test! "a CSS-only edit feeds in place: ding, etag door, no bundle key, no reload (S12)", ->
+  ctlSock = join(tmpdir(), "rip-janus-css-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-manager-css-')
+  writeFileSync join(dir, 'app.rip'), wsAppSource('hi')
+  writeClientDir dir
+  css1 = ":root { --rip-s12: 1; }\n"
+  writeFileSync join(dir, 'app', 'styles.css'), css1
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'cssapp', '-w', '1', '--bridge', '/hub']
+  puts = -> calls.filter (c) -> c.method is 'PUT'
+  try
+    sock = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    m1 = (uds!(sock, '/manifest.json')).json!
+    eq m1.files.find((e) -> e.id is 'app/styles.css')?.etag, fileHash(css1)
+    eq m1.files.find((e) -> e.id is 'app/routes/index.rip')?.etag, fileHash(CLIENT_ROUTE)
+    bundle1 = (uds!(sock, '/bundle.json')).json!
+    eq bundle1.modules['app/styles.css'], undefined, 'CSS never enters the compile bundle'
+    ok bundle1.modules['app/routes/index.rip']?, 'Rip modules still ship'
+    c1 = uds!(sock, "/app/styles.css?etag=#{fileHash(css1)}")
+    eq c1.status, 200
+    eq (c1.text!), css1
+    putsAt = puts().length
+    css2 = ":root { --rip-s12: 2; }\n"
+    writeFileSync join(dir, 'app', 'styles.css'), css2
+    pub = waitFor! -> calls.find (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
+    eq pub.body, [{ '@': ['/hub'], ding: { id: 'app/styles.css', etag: fileHash(css2) } }]
+    eq pub.body[0].ding.kind, undefined, 'no kind:style — extension branches the apply'
+    m2 = (uds!(sock, '/manifest.json')).json!
+    eq m2.files.find((e) -> e.id is 'app/styles.css').etag, fileHash(css2)
+    eq ((uds!(sock, "/app/styles.css?etag=#{fileHash(css2)}")).text!), css2
+    eq puts().length, putsAt, 'CSS-only save must not cut admission'
+    bundle2 = (uds!(sock, '/bundle.json')).json!
+    eq bundle2.modules['app/styles.css'], undefined
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "an HTML-only edit feeds in place: ding, etag door, no bundle key, no admission cut", ->
+  ctlSock = join(tmpdir(), "rip-janus-html-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-manager-html-')
+  writeFileSync join(dir, 'app.rip'), wsAppSource('hi')
+  writeClientDir dir
+  html1 = "<!doctype html><title>one</title>\n"
+  writeFileSync join(dir, 'app', 'index.html'), html1
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'htmlapp', '-w', '1', '--bridge', '/hub']
+  puts = -> calls.filter (c) -> c.method is 'PUT'
+  try
+    sock = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    m1 = (uds!(sock, '/manifest.json')).json!
+    eq m1.files.find((e) -> e.id is 'app/index.html')?.etag, fileHash(html1)
+    bundle1 = (uds!(sock, '/bundle.json')).json!
+    eq bundle1.modules['app/index.html'], undefined, 'HTML never enters the compile bundle'
+    eq ((uds!(sock, "/app/index.html?etag=#{fileHash(html1)}")).text!), html1
+    putsAt = puts().length
+    html2 = "<!doctype html><title>two</title>\n"
+    writeFileSync join(dir, 'app', 'index.html'), html2
+    pub = waitFor! -> calls.find (c) -> c.method is 'POST' and c.path.endsWith('/hub/publish')
+    eq pub.body, [{ '@': ['/hub'], ding: { id: 'app/index.html', etag: fileHash(html2) } }]
+    eq pub.body[0].ding.kind, undefined
+    eq puts().length, putsAt, 'HTML-only save must not cut admission'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "watch off never opens the door: no feed routes, a plain boot page, no dev enrollment (production has no hub)", ->
+  # The feed surface is watch-only (Q2): a production manager (--no-watch)
+  # must serve pages that boot PLAIN — no unsealed bag, no hub socket per
+  # visitor — and its bridge must not enroll app-level hub sockets into
+  # the dev channel.
+  ctlSock = join(tmpdir(), "rip-janus-wsprod-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-manager-')
+  writeFileSync join(dir, 'app.rip'), wsAppSource('hi')
+  writeClientDir dir
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'wsprod', '-w', '1', '--no-watch', '--bridge', '/hub']
+  try
+    sock = waitFor! ->
+      managerSockPuts(calls).find((c) -> c.body.upstreams.length is 1)?.body.upstreams[0].path
+    page = uds!(sock, '/', { headers: { Accept: 'text/html' } })
+    eq page.status, 200
+    ok not (page.text!).includes('workspace'), 'the boot page boots plain'
+    eq (uds!(sock, '/bundle.json')).status, 200
+    eq (uds!(sock, '/manifest.json')).status, 404
+    eq (uds!(sock, "/app/routes/index.rip?etag=#{fileHash(CLIENT_ROUTE)}")).status, 404
+    open = uds!(sock, '/hub', { method: 'POST', headers: { 'Sec-WebSocket-Frame': 'open' } })
+    eq open.status, 204
+    eq (open.text!), ''
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "a non-client edit cuts admission, reloads through the doorbell, and dings the swap", ->
   ctlSock = join(tmpdir(), "rip-janus-wsfull-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), wsAppSource('v1')
   writeClientDir dir
   calls = []
   stub = stubJanus ctlSock, calls
-  proc = spawnManager dir, ctlSock, ['--name', 'wsfull', '-w', '1'], { RIP_WORKSPACE: '1' }
+  proc = spawnManager dir, ctlSock, ['--name', 'wsfull', '-w', '1']
   bells = -> calls.filter (c) -> c.method is 'PUT' and c.body?.upstreams?.some (u) -> u.doorbell
   try
     sock1 = waitFor! ->
@@ -2093,8 +2328,8 @@ test! "flag on, a non-client edit still cuts admission and reloads through the d
     eq ((uds!(sock1, '/hi')).text!), 'v1'
     bellsAt = bells().length
     writeFileSync join(dir, 'app.rip'), wsAppSource('v2')
-    waitFor! -> bells().length > bellsAt          # the save cut admission — a full epoch, not a cell feed
-    ok not calls.some((c) -> c.path.endsWith('/hub/publish')), 'no ding for a server edit'
+    waitFor! -> bells().length > bellsAt          # the save cut admission — a full epoch, not a file feed
+    ok not calls.some((c) -> c.path.endsWith('/hub/publish')), 'no ding at admission cut — the epoch is not live yet'
     bell = bells()[0].body.upstreams[0].path
     res = uds!(bell, '/ring')
     eq res.status, 204
@@ -2103,6 +2338,17 @@ test! "flag on, a non-client edit still cuts admission and reloads through the d
       last = fresh[fresh.length - 1]?.body.upstreams[0].path
       if last? and last isnt sock1 then last else null
     eq ((uds!(sock2, '/hi')).text!), 'v2'
+    # The swap dings the dev channel with the NEW epoch — connected pages
+    # reload into it. Exactly one, kind 'epoch', on /hub; and none was
+    # published at startup (the first pool serves no pre-swap pages).
+    epochDings = waitFor! ->
+      hits = calls.filter (c) -> c.path.endsWith('/hub/publish') and c.body?.some?((d) -> d.ding?.kind is 'epoch')
+      if hits.length then hits else null
+    eq epochDings.length, 1
+    frame = epochDings[0].body[0]
+    eq frame['@'], ['/hub']
+    eq frame.ding.kind, 'epoch'
+    ok Number.isInteger(frame.ding.epoch), 'the ding names the epoch'
   finally
     try proc.kill('SIGKILL')
     await proc.exited
@@ -2135,7 +2381,7 @@ report = { out: null }
 
 test! "the startup report states the registration as janus holds it (read-backs)", ->
   ctlSock = join(tmpdir(), "rip-janus-rep-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   calls = []
   seen = { reg: false }
@@ -2185,7 +2431,7 @@ test "piped manager stdout is mono — no ANSI escape bytes", ->
 
 test! "a bridge read-back that disagrees with what was sent is a loud mismatch, never success", ->
   ctlSock = join(tmpdir(), "rip-janus-repmis-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   calls = []
   seen = { reg: false }
@@ -2219,7 +2465,7 @@ test! "a bridge read-back that disagrees with what was sent is a loud mismatch, 
 
 test! "a failed read-back is reported as a failure, never as success", ->
   ctlSock = join(tmpdir(), "rip-janus-repfail-#{Date.now()}-#{rand(1e6)}.sock")
-  dir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+  dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), appSource('hi')
   calls = []
   reads = []
@@ -2312,3 +2558,318 @@ test! "publish() surfaces a non-2xx answer as an error carrying status and body"
     managerState.controlUnix = null
     managerState.appId = null
     stub.stop(true)
+
+# ==[ Manager: the file-feed path's correlation invariant ]==
+#
+# The manifest is the LAST durable document on the file-feed path: written only
+# after the pool bundle carrying the same etags is. A bundle rewrite failure
+# HOLDS THE MANIFEST BACK — a manifest naming etags the bundle does not carry
+# would silently strand fresh boots on the bag's etag door. Driven
+# in-process through the exported singleton (cfg/state/onFileChange/buildApp).
+#
+# The same pairing holds on the epoch path: buildApp walks app/ ONCE and
+# feeds that snapshot to the bundle, the files, and the manifest. A second
+# walk can observe a save mid-run and invent the reverse pairing.
+
+console.log "\nManager file-feed path"
+
+# Rip entries must pair with bundle bytes; CSS/HTML entries pair with
+# filesDir (they never enter assembleBundle — client soft paths).
+assertManifestMatchesBundle = (manifestPath, bundlePath, filesDir = null) ->
+  m = JSON.parse readFileSync(manifestPath, 'utf8')
+  b = JSON.parse readFileSync(bundlePath, 'utf8')
+  modules = b.modules or {}
+  for entry in m.files
+    if entry.id.endsWith('.css') or entry.id.endsWith('.html')
+      ok filesDir?, "non-Rip manifest entry #{entry.id} needs filesDir"
+      file = join(filesDir, encodeURIComponent(entry.id))
+      ok existsSync(file), "filesDir must carry #{entry.id}"
+      eq entry.etag, fileHash(readFileSync(file, 'utf8')), "#{entry.id}: manifest etag must match file bytes"
+      eq modules[entry.id], undefined, "bundle must not carry #{entry.id}"
+    else
+      source = modules[entry.id]
+      ok source?, "bundle must carry #{entry.id}"
+      eq entry.etag, fileHash(source), "#{entry.id}: manifest etag must match bundle bytes"
+
+test! "a scrapped epoch build restores the manifest so it cannot name unlinked bundle etags", ->
+  # buildApp writes files + manifest + bundle; bootLoop then sees dirty,
+  # unlinks the bundle, and calls revertFilesAndManifest. Without that
+  # restore the manifest would name etags whose bundle file is gone.
+  appDir = tmpFixture('tmp-scrap-')
+  runDir = tmpFixture('tmp-scrap-run-')
+  mkdirSync join(appDir, 'app'), { recursive: true }
+  writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
+  writeFileSync join(appDir, 'app.rip'), 'export default -> null'
+  saved =
+    appDir: managerCfg.appDir
+    entry: managerCfg.entry
+    watch: managerCfg.watch
+    runDir: managerState.runDir
+    filesDir: managerState.filesDir
+    manifestPath: managerState.manifestPath
+    files: managerState.files
+    buildCounter: managerState.buildCounter
+    afterAppSnapshot: managerState.afterAppSnapshot
+  try
+    managerCfg.appDir = appDir
+    managerCfg.entry = join(appDir, 'app.rip')
+    managerCfg.watch = true
+    managerState.runDir = runDir
+    managerState.filesDir = null
+    managerState.manifestPath = null
+    managerState.files = {}
+    managerState.buildCounter = 0
+    managerState.afterAppSnapshot = null
+    buildApp!()
+    filesBefore = {}
+    for path, entry of managerState.files
+      filesBefore[path] = { id: entry.id, hash: entry.hash, retired: entry.retired }
+    writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
+    build2 = buildApp!()
+    eq (JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')).files,
+      [{ id: 'app/x.rip', etag: fileHash('export A = 2') }]
+    unlinkSync build2.bundle
+    revertFilesAndManifest! filesBefore
+    m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
+    eq m.files, [{ id: 'app/x.rip', etag: fileHash('export A = 1') }]
+    ok not existsSync(build2.bundle), 'the scrapped bundle stays gone'
+  finally
+    managerCfg.appDir = saved.appDir
+    managerCfg.entry = saved.entry
+    managerCfg.watch = saved.watch
+    managerState.runDir = saved.runDir
+    managerState.filesDir = saved.filesDir
+    managerState.manifestPath = saved.manifestPath
+    managerState.files = saved.files
+    managerState.buildCounter = saved.buildCounter
+    managerState.afterAppSnapshot = saved.afterAppSnapshot
+    rmSync appDir, { recursive: true, force: true }
+    rmSync runDir, { recursive: true, force: true }
+
+test! "epoch buildApp: a save after the snapshot cannot invent a manifest/bundle reverse pairing", ->
+  # Red against a second disk walk: afterAppSnapshot mutates the file AFTER
+  # the producing run's snapshot. One snapshot keeps the manifest paired
+  # with the bundle; a second walk would advance the etag against bytes the
+  # bundle does not carry (the silent-stale class).
+  appDir = tmpFixture('tmp-epoch-corr-')
+  runDir = tmpFixture('tmp-epoch-corr-run-')
+  mkdirSync join(appDir, 'app'), { recursive: true }
+  writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
+  writeFileSync join(appDir, 'app.rip'), 'export default -> null'
+  saved =
+    appDir: managerCfg.appDir
+    entry: managerCfg.entry
+    watch: managerCfg.watch
+    runDir: managerState.runDir
+    filesDir: managerState.filesDir
+    manifestPath: managerState.manifestPath
+    files: managerState.files
+    buildCounter: managerState.buildCounter
+    afterAppSnapshot: managerState.afterAppSnapshot
+  try
+    managerCfg.appDir = appDir
+    managerCfg.entry = join(appDir, 'app.rip')
+    managerCfg.watch = true
+    managerState.runDir = runDir
+    managerState.filesDir = null
+    managerState.manifestPath = null
+    managerState.files = {}
+    managerState.buildCounter = 0
+    managerState.afterAppSnapshot = ->
+      writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
+    build = buildApp!()
+    ok build.bundle?, 'watch-mode buildApp writes a bundle'
+    assertManifestMatchesBundle join(runDir, 'manifest.json'), build.bundle, join(runDir, 'files')
+    m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
+    eq m.files, [{ id: 'app/x.rip', etag: fileHash('export A = 1') }]
+  finally
+    managerCfg.appDir = saved.appDir
+    managerCfg.entry = saved.entry
+    managerCfg.watch = saved.watch
+    managerState.runDir = saved.runDir
+    managerState.filesDir = saved.filesDir
+    managerState.manifestPath = saved.manifestPath
+    managerState.files = saved.files
+    managerState.buildCounter = saved.buildCounter
+    managerState.afterAppSnapshot = saved.afterAppSnapshot
+    rmSync appDir, { recursive: true, force: true }
+    rmSync runDir, { recursive: true, force: true }
+
+test! "file-feed path: a save after the snapshot cannot invent a manifest/bundle reverse pairing", ->
+  appDir = tmpFixture('tmp-file-corr-')
+  runDir = tmpFixture('tmp-file-corr-run-')
+  mkdirSync join(appDir, 'app'), { recursive: true }
+  writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
+  saved =
+    appDir: managerCfg.appDir
+    runDir: managerState.runDir
+    filesDir: managerState.filesDir
+    manifestPath: managerState.manifestPath
+    files: managerState.files
+    currentPool: managerState.currentPool
+    afterAppSnapshot: managerState.afterAppSnapshot
+  try
+    managerCfg.appDir = appDir
+    managerState.runDir = runDir
+    managerState.filesDir = null
+    managerState.manifestPath = null
+    managerState.files = {}
+    managerState.currentPool = { bundle: join(runDir, 'bundle.json') }
+    managerState.afterAppSnapshot = ->
+      writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
+    onFileChange!()
+    assertManifestMatchesBundle join(runDir, 'manifest.json'), join(runDir, 'bundle.json'), join(runDir, 'files')
+    m = JSON.parse readFileSync(join(runDir, 'manifest.json'), 'utf8')
+    eq m.files, [{ id: 'app/x.rip', etag: fileHash('export A = 1') }]
+  finally
+    managerCfg.appDir = saved.appDir
+    managerState.runDir = saved.runDir
+    managerState.filesDir = saved.filesDir
+    managerState.manifestPath = saved.manifestPath
+    managerState.files = saved.files
+    managerState.currentPool = saved.currentPool
+    managerState.afterAppSnapshot = saved.afterAppSnapshot
+    rmSync appDir, { recursive: true, force: true }
+    rmSync runDir, { recursive: true, force: true }
+
+test! "a file-feed run with no live pool bundle holds the manifest back", ->
+  appDir = tmpFixture('tmp-nopool-')
+  runDir = tmpFixture('tmp-nopool-run-')
+  mkdirSync join(appDir, 'app'), { recursive: true }
+  writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
+  saved =
+    appDir: managerCfg.appDir
+    runDir: managerState.runDir
+    filesDir: managerState.filesDir
+    manifestPath: managerState.manifestPath
+    files: managerState.files
+    currentPool: managerState.currentPool
+  try
+    managerCfg.appDir = appDir
+    managerState.runDir = runDir
+    managerState.filesDir = null
+    managerState.manifestPath = null
+    managerState.files = {}
+    managerState.currentPool = null          # no live pool — must not write a manifest
+    onFileChange!()
+    ok not existsSync(join(runDir, 'manifest.json')), 'no pool bundle ⇒ manifest held back'
+    ok existsSync(join(runDir, 'files', encodeURIComponent('app/x.rip'))), 'module bytes are durable regardless'
+  finally
+    managerCfg.appDir = saved.appDir
+    managerState.runDir = saved.runDir
+    managerState.filesDir = saved.filesDir
+    managerState.manifestPath = saved.manifestPath
+    managerState.files = saved.files
+    managerState.currentPool = saved.currentPool
+    rmSync appDir, { recursive: true, force: true }
+    rmSync runDir, { recursive: true, force: true }
+
+
+test! "concurrent file-feed runs serialize: a second save never interleaves a parked publish", ->
+  # The pin parks run 1 inside its ding publish (a stub Janus that answers
+  # /hub/publish slowly) and fires run 2 meanwhile. Serialized, run 2's
+  # syncFiles/manifest writes start only after run 1 completes — so the
+  # manifest observed DURING run 1's publish still names v1's etag.
+  appDir = tmpFixture('tmp-fileq-')
+  runDir = tmpFixture('tmp-fileq-run-')
+  mkdirSync join(appDir, 'app'), { recursive: true }
+  writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
+  qSock = join(tmpdir(), "rip-janus-fileq-#{Date.now()}-#{rand(1e6)}.sock")
+  qCalls = []
+  manifestDuringPublish = []
+  manifestPath = join(runDir, 'manifest.json')
+  stub = stubJanus qSock, qCalls, (call) ->
+    if call.method is 'POST' and call.path.endsWith('/hub/publish')
+      return do ->
+        await new Promise (resolve) -> setTimeout resolve, 60
+        seen = try JSON.parse(readFileSync(manifestPath, 'utf8')) catch then null
+        manifestDuringPublish.push seen
+        Response.json { objects: 1, deliveries: 0, unknown_targets: 0 }
+    null
+  saved =
+    appDir: managerCfg.appDir
+    runDir: managerState.runDir
+    filesDir: managerState.filesDir
+    manifestPath: managerState.manifestPath
+    files: managerState.files
+    currentPool: managerState.currentPool
+    controlUnix: managerState.controlUnix
+    appId: managerState.appId
+  try
+    managerCfg.appDir = appDir
+    managerState.runDir = runDir
+    managerState.filesDir = null
+    managerState.manifestPath = null
+    managerState.files = {}
+    managerState.currentPool = { bundle: join(runDir, 'bundle.json') }
+    managerState.controlUnix = qSock
+    managerState.appId = 'app-q'
+    p1 = onFileChange()
+    # Let run 1 reach its parked publish (the stub holds it 60ms) before
+    # the second save lands.
+    await new Promise (resolve) -> setTimeout resolve, 20
+    writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
+    p2 = onFileChange()                       # must WAIT for run 1
+    await p1
+    await p2
+    eq manifestDuringPublish.length, 2
+    eq manifestDuringPublish[0].files, [{ id: 'app/x.rip', etag: fileHash('export A = 1') }]
+    eq manifestDuringPublish[1].files, [{ id: 'app/x.rip', etag: fileHash('export A = 2') }]
+    m = JSON.parse readFileSync(manifestPath, 'utf8')
+    eq m.files, [{ id: 'app/x.rip', etag: fileHash('export A = 2') }]
+  finally
+    managerCfg.appDir = saved.appDir
+    managerState.runDir = saved.runDir
+    managerState.filesDir = saved.filesDir
+    managerState.manifestPath = saved.manifestPath
+    managerState.files = saved.files
+    managerState.currentPool = saved.currentPool
+    managerState.controlUnix = saved.controlUnix
+    managerState.appId = saved.appId
+    stub.stop(true)
+    rmSync appDir, { recursive: true, force: true }
+    rmSync runDir, { recursive: true, force: true }
+
+test! "a bundle rewrite failure holds the manifest back; the next clean save writes both", ->
+  appDir = tmpFixture('tmp-filepath-')
+  runDir = tmpFixture('tmp-filepath-run-')
+  mkdirSync join(appDir, 'app'), { recursive: true }
+  writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 1'
+  saved =
+    appDir: managerCfg.appDir
+    runDir: managerState.runDir
+    filesDir: managerState.filesDir
+    manifestPath: managerState.manifestPath
+    files: managerState.files
+    currentPool: managerState.currentPool
+  try
+    managerCfg.appDir = appDir
+    managerState.runDir = runDir
+    managerState.filesDir = null
+    managerState.manifestPath = null
+    managerState.files = {}
+    # A DIRECTORY at the bundle path makes the tmp+rename rewrite fail.
+    brokenBundle = join(runDir, 'bundle-as-dir')
+    mkdirSync brokenBundle, { recursive: true }
+    managerState.currentPool = { bundle: brokenBundle }
+    onFileChange!()          # publish warns (no app id) and never blocks
+    manifestPath = join(runDir, 'manifest.json')
+    ok not existsSync(manifestPath), 'the manifest must be held back when the bundle rewrite fails'
+    ok existsSync(join(runDir, 'files', encodeURIComponent('app/x.rip'))), 'module bytes are durable regardless'
+    # The next save against a writable bundle path writes bundle THEN manifest.
+    goodBundle = join(runDir, 'bundle.json')
+    managerState.currentPool = { bundle: goodBundle }
+    writeFileSync join(appDir, 'app', 'x.rip'), 'export A = 2'
+    onFileChange!()
+    ok existsSync(goodBundle), 'the pool bundle is rewritten'
+    m = JSON.parse readFileSync(manifestPath, 'utf8')
+    eq m.files, [{ id: 'app/x.rip', etag: fileHash('export A = 2') }]
+  finally
+    managerCfg.appDir = saved.appDir
+    managerState.runDir = saved.runDir
+    managerState.filesDir = saved.filesDir
+    managerState.manifestPath = saved.manifestPath
+    managerState.files = saved.files
+    managerState.currentPool = saved.currentPool
+    rmSync appDir, { recursive: true, force: true }
+    rmSync runDir, { recursive: true, force: true }

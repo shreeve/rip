@@ -34,7 +34,10 @@ state =
 OPENAI_MODELS = [
   { id: 'gpt-4o', created: 1700000000, owned_by: 'openai' }
   { id: 'gpt-5.5', created: 1710000000, owned_by: 'openai' }
-  { id: 'gpt-6', created: 1720000000, owned_by: 'openai' }
+  { id: 'gpt-5.6-luna', created: 1715000000, owned_by: 'openai' }
+  { id: 'gpt-5.6-terra', created: 1715000001, owned_by: 'openai' }
+  { id: 'gpt-5.6', created: 1715000002, owned_by: 'openai' }       # bare alias — loses to -sol on tie
+  { id: 'gpt-5.6-sol', created: 1715000003, owned_by: 'openai' }
   { id: 'gpt-6-mini', created: 1720000001, owned_by: 'openai' }
   { id: 'gpt-6-20240101', created: 1720000002, owned_by: 'openai' }
 ]
@@ -45,7 +48,7 @@ ANTHROPIC_MODELS = [
   { id: 'claude-opus-4-8-20260301', display_name: 'Claude Opus 4.8 (dated)', created_at: '2026-03-01T00:00:00Z', type: 'model' }
 ]
 # The ids the latest-flagship autodetect resolves to on these catalogs.
-LATEST_OPENAI = 'openai:gpt-6'
+LATEST_OPENAI = 'openai:gpt-5.6-sol'
 LATEST_ANTHROPIC = 'anthropic:claude-opus-4-8-20260301'
 
 defaultOpenAIChat = (body) ->
@@ -208,12 +211,15 @@ test "formatUsage: reasoning greater than tokens_out clamps answer to 0", ->
 p "\nProviders — pricing & cost"
 
 test "pricing: flagship-family ids price at the provider rate", ->
-  eq providers.priceFor('openai:gpt-5.5'), { input_per_million: 5, output_per_million: 15 }
-  eq providers.priceFor('openai:gpt-6'), { input_per_million: 5, output_per_million: 15 }
+  eq providers.priceFor('openai:gpt-5.5'), { input_per_million: 5, output_per_million: 30 }
+  eq providers.priceFor('openai:gpt-5.6-sol'), { input_per_million: 5, output_per_million: 30 }
+  eq providers.priceFor('openai:gpt-6'), { input_per_million: 5, output_per_million: 30 }
   eq providers.priceFor('anthropic:claude-opus-4-8'), { input_per_million: 15, output_per_million: 75 }
 
 test "pricing: non-flagship pins have unknown rates (null), never flagship-priced", ->
   eq providers.priceFor('openai:gpt-6-mini'), null
+  eq providers.priceFor('openai:gpt-5.6-terra'), null
+  eq providers.priceFor('openai:gpt-5.6-luna'), null
   eq providers.priceFor('anthropic:claude-sonnet-5'), null
   eq providers.priceFor('nope'), null
   eq providers.priceFor(null), null
@@ -223,7 +229,7 @@ test "pricing: dated snapshots — excluded from openai family, included in anth
   eq providers.priceFor('anthropic:claude-opus-4-8-20260301'), { input_per_million: 15, output_per_million: 75 }
 
 test "computeCost applies per-million rates; unpriced ids cost 0", ->
-  eq providers.computeCost('openai:gpt-6', 1000, 200), 0.008
+  eq providers.computeCost('openai:gpt-6', 1000, 200), 0.011
   eq providers.computeCost('anthropic:claude-opus-4-8', 1000000, 1000000), 90
   eq providers.computeCost('openai:gpt-6-mini', 1000, 200), 0
 
@@ -270,12 +276,13 @@ test "cold path without credentials resolves the SEED and writes no cache (zero 
   res = spawnSync(process.execPath, ['--preload', LOADER, '-e', script], { env, timeout: 30000 })
   eq res.status, 0
   out = JSON.parse res.stdout.toString()
-  eq out.pre, { provider: 'openai', model: 'gpt-5.5', id: 'openai:gpt-5.5' }
-  eq out.ensured, 'openai:gpt-5.5'
+  eq out.pre, { provider: 'openai', model: 'gpt-5.6-sol', id: 'openai:gpt-5.6-sol' }
+  eq out.ensured, 'openai:gpt-5.6-sol'
   ok not existsSync(join(coldHome, '.config', 'rip-ai', 'latest.json')), 'no cache written — ensureLatest touched no network'
 
-test! "openai pick: highest clean version — mini and dated ids excluded", ->
+test! "openai pick: Sol over bare alias; terra, luna, mini, and dated ids excluded", ->
   eq providers.ensureLatest!('openai'), LATEST_OPENAI
+  eq LATEST_OPENAI, 'openai:gpt-5.6-sol'
 
 test! "anthropic pick: a dated snapshot of the same version wins the tie-break", ->
   eq providers.ensureLatest!('claude'), LATEST_ANTHROPIC
@@ -304,11 +311,13 @@ p "\nProviders — catalog (listAll)"
 test! "listAll merges providers, flags is_latest, sorts latest first, prices flagships only", ->
   res = providers.listAll!({ refresh: true })
   byId = Object.fromEntries(res.models.map((m) -> [m.id, m]))
-  eq res.models.length, 9
+  eq res.models.length, 12
   eq res.models.filter((m) -> m.is_latest).map((m) -> m.id).sort(), [LATEST_ANTHROPIC, LATEST_OPENAI].sort()
   ok res.models.slice(0, 2).every((m) -> m.is_latest), 'latest entries sort ahead of the rest'
   eq byId['openai:gpt-6-mini'].pricing, null
-  eq byId[LATEST_OPENAI].pricing, { input_per_million: 5, output_per_million: 15 }
+  eq byId['openai:gpt-5.6-terra'].pricing, null
+  eq byId['openai:gpt-5.6-luna'].pricing, null
+  eq byId[LATEST_OPENAI].pricing, { input_per_million: 5, output_per_million: 30 }
   eq byId['anthropic:claude-opus-4-8'].display, 'Claude Opus 4.8'
   eq byId[LATEST_OPENAI].source, 'live'
   ok res.cache.hit is false, 'refresh bypasses the cache'
@@ -348,8 +357,8 @@ test! "preflight refusal names the estimate and the cap", ->
 
 test! "post-hoc overshoot succeeds and warns", ->
   res = providers.chat!({ model: 'gpt', messages: [{ role: 'user', text: 'small' }], max_cost_usd: 0.0041 })
-  eq res.cost_usd, 0.008
-  eq res.warnings, ['actual cost $0.0080 exceeded cap $0.0041']
+  eq res.cost_usd, 0.011
+  eq res.warnings, ['actual cost $0.0110 exceeded cap $0.0041']
 
 # ==[ Adapters — OpenAI ]=======================================================
 
@@ -397,7 +406,10 @@ test! "openai error body and HTTP error surface as provider-tagged messages", ->
 
 test! "openai listModels normalizes ids and created timestamps", ->
   rows = openai.listModels!()
-  eq rows.map((r) -> r.id), ['openai:gpt-4o', 'openai:gpt-5.5', 'openai:gpt-6', 'openai:gpt-6-mini', 'openai:gpt-6-20240101']
+  eq rows.map((r) -> r.id), [
+    'openai:gpt-4o', 'openai:gpt-5.5', 'openai:gpt-5.6-luna', 'openai:gpt-5.6-terra'
+    'openai:gpt-5.6', 'openai:gpt-5.6-sol', 'openai:gpt-6-mini', 'openai:gpt-6-20240101'
+  ]
   eq rows[0].provider_model, 'gpt-4o'
   eq rows[0].created_at, new Date(1700000000 * 1000).toISOString()
 
@@ -592,8 +604,8 @@ test! "chat: defaults to gpt, formats usage, no persistence", ->
   eq res.model, LATEST_OPENAI
   eq res.text, 'openai-echo:12'
   eq res.usage,
-    tokens_in: 1000, tokens_out: 200, reasoning_tokens: 50, cached_tokens: 10, cost_usd: 0.008
-    summary: '1,000 in · 200 out (50 reasoning + 150 answer) · 10 cached input · $0.0080'
+    tokens_in: 1000, tokens_out: 200, reasoning_tokens: 50, cached_tokens: 10, cost_usd: 0.011
+    summary: '1,000 in · 200 out (50 reasoning + 150 answer) · 10 cached input · $0.0110'
   eq res.warnings, []
   eq store.counts().conversations, before   # chat never persists
 
@@ -603,7 +615,7 @@ test! "chat: missing prompt raises; preflight cost cap refuses before dispatch",
 
 test! "chat: post-hoc cap overshoot succeeds with a warning", ->
   res = tools.chat!(ctx, { prompt: 'small', max_cost_usd: 0.0041 })
-  eq res.warnings, ['actual cost $0.0080 exceeded cap $0.0041']
+  eq res.warnings, ['actual cost $0.0110 exceeded cap $0.0041']
 
 test! "discuss: full lifecycle — create, persist, continue with history, detect changed attachments", ->
   samplePath = join(TOOL_FIXTURES, 'sample.md')
@@ -678,8 +690,8 @@ test! "panel: synthesis runs over successes and is included in the summed usage"
   res = tools.panel!(ctx, { prompt: 'panel q', models: ['gpt', 'claude'], synthesize: true })
   eq res.synthesis.model, LATEST_OPENAI
   eq res.usage,
-    tokens_in: 2800, tokens_out: 550, reasoning_tokens: 100, cached_tokens: 25, cost_usd: 0.03925
-    summary: '2,800 in · 550 out (100 reasoning + 450 answer) · 25 cached input · $0.0393'
+    tokens_in: 2800, tokens_out: 550, reasoning_tokens: 100, cached_tokens: 25, cost_usd: 0.04525
+    summary: '2,800 in · 550 out (100 reasoning + 450 answer) · 25 cached input · $0.0452'
 
 test! "panel: empty models raises", ->
   eq caught!(-> tools.panel(ctx, { prompt: 'x', models: [] })).message, "panel requires 'models' (non-empty array)"

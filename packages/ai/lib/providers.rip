@@ -46,19 +46,21 @@ ADAPTERS =! { openai, anthropic }
 # ==============================================================================
 
 FAMILY =! {
-  openai:    /^gpt-\d+(?:\.\d+)*$/           # gpt-5.5, gpt-6 — excludes -mini, -nano, dated snapshots
+  # Bare gpt-N(.M)* (legacy unsuffixed flagship) or gpt-N(.M)*-sol (GPT-5.6+).
+  # Excludes -terra/-luna/-mini/-nano/-pro and dated snapshots.
+  openai:    /^gpt-\d+(?:\.\d+)*(?:-sol)?$/
   anthropic: /^claude-opus-\d+(?:[-.]\d+)*$/ # claude-opus-4-8 — excludes sonnet, haiku, fable
 }
 
 SEED =! {
-  openai:    'openai:gpt-5.5'
+  openai:    'openai:gpt-5.6-sol'
   anthropic: 'anthropic:claude-opus-4-8'
 }
 
 # Per-flagship pricing (USD per 1M tokens). Provider-scoped so autodetected
 # successors inherit it without a code change; update when public rates move.
 PRICING =! {
-  openai:    { input_per_million: 5,  output_per_million: 15 }
+  openai:    { input_per_million: 5,  output_per_million: 30 }  # Sol / gpt-5.5 flagship rates
   anthropic: { input_per_million: 15, output_per_million: 75 }
 }
 
@@ -135,12 +137,6 @@ resolveLatestCached = (provider) ->
   hydrate(provider)
   latestMem[provider]?.id or SEED[provider]
 
-isLatestStale = (provider) ->
-  hydrate(provider)
-  entry = latestMem[provider]
-  return true unless entry?.resolved_at
-  (Date.now() - (Date.parse(entry.resolved_at) or 0)) > LATEST_TTL_MS
-
 # A trailing -YYYYMMDD snapshot date must not act as a version component, or an
 # old dated build (…-4-20250514) would outrank a newer clean release (…-4-8).
 DATE_SUFFIX =! /-(\d{8})$/
@@ -161,18 +157,45 @@ cmpVersion = (a, b) ->
     return av - bv if av isnt bv
   0
 
-# Newest = highest semantic version; ties broken by the newer snapshot date.
+seedModelName = (provider) ->
+  id = SEED[provider]
+  return '' unless id
+  idx = id.indexOf(':')
+  if idx > 0 then id.slice(idx + 1) else id
+
+isLatestStale = (provider) ->
+  hydrate(provider)
+  entry = latestMem[provider]
+  return true unless entry?.resolved_at
+  return true if (Date.now() - (Date.parse(entry.resolved_at) or 0)) > LATEST_TTL_MS
+  # A SEED bump that outranks a still-fresh cache forces refresh — otherwise a
+  # 12h TTL would keep serving gpt-5.5 after FAMILY/SEED already know about Sol.
+  seed = seedModelName(provider)
+  return false unless seed
+  cached = String(entry.id).slice(String(entry.id).indexOf(':') + 1)
+  cmp = cmpVersion(modelParts(seed).version, modelParts(cached).version)
+  return true if cmp > 0
+  cmp is 0 and /-sol$/.test(seed) and not /-sol$/.test(cached)
+
+# Newest = highest semantic version; ties broken by newer snapshot date, then
+# by the explicit -sol spelling over a bare gpt-N.M alias (same flagship tier).
 pickLatest = (rows, re) ->
   best = null
   bestP = null
+  bestSol = false
   for row in rows
     name = row.provider_model or ''
     continue unless re.test(name)
     parts = modelParts(name)
+    sol = /-sol$/.test(name)
     cmp = if best then cmpVersion(parts.version, bestP.version) else 1
-    if cmp > 0 or (cmp is 0 and parts.date > bestP.date)
+    better = cmp > 0 or
+      (cmp is 0 and parts.date > bestP.date) or
+      (cmp is 0 and parts.date is bestP.date and sol and not bestSol)
+    if better
       best = row
       bestP = parts
+      bestSol = sol
   best
 
 refreshLatest = (provider) ->

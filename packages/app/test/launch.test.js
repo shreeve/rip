@@ -103,6 +103,18 @@ describe('launch', () => {
     expect(host.children.map(child => child.name)).toEqual(['about']);
   });
 
+  test('clears a static placeholder (e.g. #app-loader) before the first mount', async () => {
+    const host = node('host');
+    const loader = node('loader');
+    host.appendChild(loader);
+    const result = launch({ bundle: bundle(), target: host, adapter: fakeAdapter('/') });
+    running.push(result);
+    await Bun.sleep(0);
+    await Bun.sleep(0);
+    expect(host.children.map(child => child.name)).toEqual(['home']);
+    expect(host.children).not.toContain(loader);
+  });
+
   test('installs the app globals and a second launch rejects', () => {
     const result = boot();
     expect(globalThis.__ripApp).toBe(result.app);
@@ -114,6 +126,17 @@ describe('launch', () => {
     const result = boot();
     result.destroy();
     result.destroy();
+    expect(globalThis.__ripApp).toBeUndefined();
+    expect(globalThis.__ripRouter).toBeUndefined();
+    boot();
+  });
+
+  test('destroy clears globals even when a disposer throws, and the next launch succeeds', () => {
+    // destroy latches `destroyed` before work; a mid-teardown throw must
+    // still clear __ripApp/__ripRouter or every future launch bricks.
+    const result = boot();
+    result.renderer.stop = () => { throw new Error('teardown boom'); };
+    expect(() => result.destroy()).toThrow(/teardown boom/);
     expect(globalThis.__ripApp).toBeUndefined();
     expect(globalThis.__ripRouter).toBeUndefined();
     boot();
@@ -139,7 +162,7 @@ describe('launch', () => {
     let fetches = 0;
     const result = boot({
       bundle: withStash({
-        appStash: {
+        stash: {
           user: source({ fetch: async () => { fetches += 1; return { name: 'live' }; } }),
           theme: 'dark',
         },
@@ -154,15 +177,15 @@ describe('launch', () => {
   test('an explicit stash option overrides the bundle stash module', () => {
     const result = boot({
       stash: { theme: 'light' },
-      bundle: withStash({ appStash: { theme: 'dark' } }),
+      bundle: withStash({ stash: { theme: 'dark' } }),
     });
     expect(result.app.data.theme).toBe('light');
   });
 
-  test('a stash module without appStash and a malformed stash reject loudly', () => {
+  test('a stash module without stash and a malformed stash reject loudly', () => {
     expect(() => boot({ bundle: withStash({ helpers: 1 }) }))
-      .toThrow(/'app\/stash\.rip' module must export 'appStash'/);
-    expect(() => boot({ bundle: withStash({ appStash: ['not', 'a', 'stash'] }) }))
+      .toThrow(/'app\/stash\.rip' module must export 'stash'/);
+    expect(() => boot({ bundle: withStash({ stash: ['not', 'a', 'stash'] }) }))
       .toThrow(/stash must be a plain object/);
     expect(globalThis.__ripApp).toBeUndefined();
   });
@@ -238,7 +261,7 @@ describe('launch reconciliation', () => {
 
   test('relaunch from a shared stash declaration starts from the declared baseline', () => {
     const cell = source({ fetch: async () => ({ id: 1 }) });
-    const declaration = { appStash: { user: cell, theme: 'dark', profile: { name: 'anon' } } };
+    const declaration = { stash: { user: cell, theme: 'dark', profile: { name: 'anon' } } };
     const first = boot({ bundle: withStash(declaration) });
     first.app.data.theme = 'light';
     first.app.data.profile.name = 'steve';
