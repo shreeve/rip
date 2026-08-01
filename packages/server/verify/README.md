@@ -16,3 +16,14 @@ Order:
 
 Code enters `@rip-lang/server` only when one of these fixtures demonstrates why
 the server, rather than Janus, Caddy, or application code, must own it.
+
+## Capability admission
+
+A fixture demonstrates an approved requirement; it never creates one. Before a
+fixture uses a server feature, that feature must be justified by the current v4
+contract, the released Janus interface, or an explicit product decision.
+
+Old implementation code, old tests, and convenient fixture authoring are not
+evidence that a feature belongs in v4. When they are the only reason a helper,
+syntax form, mode, or fallback appears necessary, stop and surface the decision
+instead of adding it. Fixtures use the smallest already-approved surface.
