@@ -52,9 +52,20 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 
 ### 22. Completion and signature help fail on an incomplete expression
 
-The broker builds its TypeScript face from a **successful** compile, so it can serve a request only where the source parses — but the two features whose trigger is an *incomplete* expression fire precisely where it does not. The trigger byte is the same byte that breaks the parse: type a member-access dot and pause (`items.‸`), or sit inside an open call (`add(‸`), and the buffer no longer parses, so no face carries the member-access / call context and the request has nothing to map into. rip's compiler throws where TypeScript's error-tolerant parser recovers — which is why the hand-written twin serves the correct answer on the identical incomplete text and the broker does not. What you actually get instead is nothing, or (for completion) the wrong list; the popup works only once the expression is complete enough to parse, which is backwards from how these features are used.
+The broker builds its TypeScript face from a **successful** compile, so it can serve a request only where the source parses — but the two features whose trigger is an *incomplete* expression fire precisely where it does not. The trigger byte is the same byte that breaks the compile: type a member-access dot and pause (`items.‸`), or sit inside an open call (`add(‸`), and the buffer no longer parses, so no face carries the member-access / call context and the request has nothing to map into. rip's compiler throws where TypeScript's error-tolerant parser recovers — which is why the hand-written twin serves the correct answer on the identical incomplete text and the broker does not. What you actually get instead is nothing, or (for completion) the wrong list; the popup works only once the expression is complete enough to parse, which is backwards from how these features are used.
 
-**Why (code) — two surfaces, one root.** Member completion at a bare dot and signature help inside an open call. Both are un-parseable at the cursor (`bin/rip --ts` on `items.` → `Unexpected end of input — expected PROPERTY`; on `add(` and `add(1,` → a parse error at the `(`), so neither has a face. They differ only in fallback: completion has a statement-context one (it serves *something* wrong), signature help has none (it serves plain null).
+**Why (code) — one root, but TWO failure sites, and the second is upstream of the parser.** The shared root is that no face exists without a successful compile. Where the compile dies is not shared, and that is what constrains the fix (driven on the gate's own buffers, 2026-08-01):
+
+| surface | dies in | message |
+| --- | --- | --- |
+| member completion — `x = items.` | the PARSER, `parse` ([parser.js](../../src/parser.js)) | `Unexpected end of input — expected PROPERTY` |
+| signature help — `r = add(1, ` | the LEXER, `failOpenAtEnd` ([lexer.js](../../src/lexer.js)) | `unclosed '(' — never closed by end of input` |
+
+For the open call **the parser never runs**. So any mechanism founded on what the parser already built — its LALR stack holds the reduced prefix at the error point, and the error path discards it along with the populated stores — serves member completion and cannot serve signature help at all. A fix must state how it reaches BOTH sites; the residue policy forbids closing one and splitting off the other.
+
+The sweep divides the same way. Parser: `items.`, `x = items.`, `obj.a.`, `this.`, `x = 1 +`, `x = a and`, `x = a?.`, `for a in`, `f = ->`. Lexer: `add(`, `add(1,`, `add(1`, `x = add(`, `x = items[`, `x = {`, `x = [`. Three shapes sit outside both — `x: ` raises `Unexpected '}'`, `if x` raises `Unexpected 'POST_IF'`, and a bare `@` parses clean.
+
+The two surfaces also differ in fallback: completion has a statement-context one (it serves *something* wrong), signature help has none (it serves plain null).
 
 **The fix — an error-tolerant face, or a fixup at the cursor.** v3's dot rewrite (below) is the cheap end and is proven on this exact surface, but it is per-trigger: signature help's open paren needs its own. The general form is a parser that recovers where TypeScript's does, which serves both. **Not** by widening the staleness fallback — serving the last good face's scope list is what produces the wrong list today, and a better-chosen wrong list is still wrong.
 
