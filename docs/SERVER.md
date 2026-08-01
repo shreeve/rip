@@ -8,21 +8,23 @@ Janus module.
 ```text
 Caddy process
 └── Janus
-    ├── reads files from ───────────► medlabs static files
-    └── proxies requests to ────────► medlabs API worker(s)
+    ├── reads files from ────► medlabs static files and app
+    └── proxies requests to ─► medlabs API worker(s)
 
 medlabs server
 ├── manager
-│   ├── registration/upstreams/heartbeats/dings ─► Janus control plane
-│   ├── api
-│   │   ├── source
-│   │   └── worker(s)
-│   └── app
-│       └── source → static/published App
-└── static
+│   └── registration/upstreams/heartbeats/dings ─► Janus control plane
+├── api
+│   ├── source
+│   └── worker(s) ◄─ manager supervises and hot reloads
+├── static
     ├── site-specific
-    ├── common
-    └── published App
+│   ├── common
+│   └── generated
+│       ├── bundle.json
+│       └── manifest.json
+└── app
+    └── source and assets ◄── manager publishes and dings on changes
 ```
 
 The manager controls the Medlabs server. Caddy and Janus form the shared edge
@@ -35,9 +37,11 @@ that serves its static files and routes its API requests.
 - The **manager** is the one long-running control process for that server.
 - The **API** is dynamic server-side source executed by workers.
 - A **worker** is a disposable process that executes API request handlers.
-- The **App** is browser-side source managed and published by the manager.
-- **Static** is every file Caddy and Janus can serve directly: site-specific
-  files, common files, and the published App.
+- The **App** is the client application source and assets under `app/`, served
+  directly by Caddy and Janus. In development, the manager watches this tree
+  and dings changed files.
+- **Static** contains site-specific files, common files, and manager-generated
+  coordination files such as `bundle.json` and `manifest.json`.
 - **Caddy + Janus** is the shared edge for zero or more Rip servers.
 
 One `rip server` invocation launches one manager. That manager may supervise
@@ -79,8 +83,8 @@ rewrite Caddy's configuration for each request or worker change.
 ## The Manager
 
 The manager is the long-running control process for one Rip server. It
-registers, watches, publishes, and supervises, but it never handles an
-ordinary client request or serves a static file.
+registers, watches, generates coordination files, sends dings, and
+supervises, but it never handles an ordinary client request or serves a file.
 
 ### 1. Registration and heartbeats
 
@@ -155,55 +159,65 @@ delivered once to a fresh worker or not delivered at all.
 
 Caddy and Janus continue running throughout the replacement.
 
-### 3. App publication and client hot dings
+### 3. App, generated files, and client hot dings
 
-The manager turns App source into browser-ready static files:
+The App remains in its authored tree. Janus serves eligible App source
+and assets directly; the manager does not copy every App file into a second
+publication tree.
 
 ```text
-App source
+App ────────────────────────────────────► served source and assets
     │
-    ▼
-manager publication
-    │
-    ▼
-static/published App
+    └── manager snapshots the graph ───► static/generated
+                                           ├── bundle.json
+                                           └── manifest.json
 ```
 
-A publication may contain an `index.html`, a manifest, browser-ready Rip
-modules, CSS, images, and startup metadata. Publication does not require a
-general-purpose bundler; it is the operation that makes the App directly
-servable by Caddy and Janus.
+`bundle.json` is the first-paint transfer. It carries the App's Rip source
+graph, browser-safe package sources, package-resolution metadata, and any
+synthetic client projections needed from API schemas. It avoids one initial
+request per Rip module.
 
-The manager writes publication changes atomically. File representations land
-before a manifest or notification names them.
+`manifest.json` is the lightweight inventory of current `{ id, etag }`
+generations used to populate and resynchronize the development Workspace.
+After first paint, a ding causes the browser to request only the changed live
+App file.
+
+The manager writes generated files atomically. A bundle lands before a
+manifest or notification names the generations it carries. Rip file-generation
+ETags remain manager-owned content identities; transport validators for static
+files are a separate HTTP concern.
 
 In development, an App-source change:
 
-1. Updates the affected published representations.
-2. Assigns their new ETags.
-3. Sends tiny `{ id, etag }` dings through Janus Hub.
-4. Lets the browser choose `reload`, `css`, `update`, or `ignore`.
+1. Re-snapshots the affected App files.
+2. Assigns their new content ETags.
+3. Regenerates `bundle.json` and `manifest.json` coherently.
+4. Sends tiny `{ id, etag }` dings through Janus Hub.
+5. Lets the browser choose `reload`, `css`, `update`, or `ignore`.
 
-An App-only change does not replace API workers. A server-side change replaces
-the API generation and tells connected browsers to reload against it.
+An App-only change does not replace API workers. An API-source change replaces
+the API workers without reloading the client app.
 
-In production, the publication is sealed and no development feed is exposed.
+In production, the generated files are sealed and no development feed is
+exposed.
 
 ### 4. Static-file policy
 
-The manager declares static-file policy to Janus but does not serve the
-files. It registers three ordered classes:
+The manager declares file policy to Janus but does not serve the files. It
+registers three static classes:
 
 1. Site-specific static files.
 2. Common static files.
-3. The published App.
+3. Generated App files.
 
-It also registers the App's SPA shell. Janus and Caddy perform the file
-lookup, conditional HTTP behavior, range handling, and response delivery.
+It separately registers the App tree and its SPA shell. Janus and Caddy
+perform the file lookup, conditional HTTP behavior, range handling, and
+response delivery.
 
 Site-specific files can override shared resources while still inheriting
-common and published App files. The exact configured root order decides the
-first match.
+common and generated files. App requests use their explicit App paths;
+the exact configured static-root order decides the first static match.
 
 ## Request Flow
 
@@ -224,7 +238,9 @@ Janus: host and tenant admission
     │
     ├── common static hit ───────────────────► file
     │
-    ├── published App hit ───────────────────► file
+    ├── generated-file hit ──────────────────► file
+    │
+    ├── App source/asset hit ────────────────► file
     │
     ├── HTML navigation miss ────────────────► SPA shell
     │
@@ -247,8 +263,8 @@ directory listing.
 
 ### App navigation
 
-An HTML navigation request that misses every static root receives the
-published App's shell. The browser-side router then resolves the route.
+An HTML navigation request that misses every file root receives the live
+App's shell. The client router then resolves the route.
 
 ### Not found
 
@@ -263,7 +279,7 @@ The same model permits three useful shapes.
 ### Full server
 
 ```text
-manager + API workers + published App + static files
+manager + API workers + App + static/generated files
 ```
 
 ### API-only server
@@ -272,24 +288,24 @@ manager + API workers + published App + static files
 manager + API workers
 ```
 
-There is no App publication. Janus routes the configured API surface to
-workers.
+There is no App or generated App state. Janus routes the configured API
+surface to workers.
 
 ### App-only server
 
 ```text
-manager + published App + static files
+manager + App + static/generated files
 ```
 
-There are no API workers. The manager maintains registration, publication,
-development dings when enabled, and heartbeats; Caddy and Janus serve every
-public request.
+There are no API workers. The manager maintains registration, generated
+files, development dings when enabled, and heartbeats; Caddy and Janus serve
+every public request.
 
 ## Ownership Rule
 
 The complete architecture reduces to four owners:
 
-- **The manager registers, watches, publishes, and supervises.**
+- **The manager registers, watches, generates, dings, and supervises.**
 - **Workers execute dynamic API code.**
 - **Janus admits, routes, coordinates, and serves registered files.**
 - **Caddy owns the network, HTTP, and TLS.**
