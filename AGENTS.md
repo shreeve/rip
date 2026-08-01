@@ -7,6 +7,8 @@ support.
 Permanent documentation:
 
 - [README.md](README.md) — repository orientation and entry points.
+- [docs/SERVER.md](docs/SERVER.md) — Rip Server's system-wide
+ Caddy/Janus/manager/worker architecture and lifecycle contract.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
 - [docs/WORKSPACE.md](docs/WORKSPACE.md) — the Rip Workspace
  constitution: the browser passport bag, the dev feed ("door"), and

@@ -1,9 +1,9 @@
-# Rip Server Architecture Objective
+# Rip Server Architecture Contract
 
-This document defines the target Rip Server architecture and its ownership
-contract. The objective is one independently managed server per invocation,
-with many Rip servers able to run behind one shared Caddy process and its
-Janus module.
+This document defines Rip Server's system-wide ownership and lifecycle
+contract. One `rip server` invocation manages one server; many independently
+managed Rip servers may run behind one shared Caddy process and its Janus
+module.
 
 ```text
 Caddy process
@@ -97,15 +97,16 @@ supervises, but it never handles an ordinary client request or serves a file.
 At startup, the manager:
 
 1. Loads and validates the server declaration.
-2. Resolves its host, tenant, API-prefix, static-root, SPA-shell, and Hub
-   policy.
+2. Resolves its identity, hosts or tenant site, registered file roots, API
+   prefixes, and SPA shell.
 3. Creates its private doorbell socket.
 4. Registers the server with Janus.
 5. Starts heartbeats.
 
 The declaration is stable for the manager's lifetime. Live state remains
-separate: its Janus app id, heartbeat clock, doorbell state, worker sockets,
-worker health, cache state, and Hub state.
+separate: its Janus app id, heartbeat clock, operational state, prepared
+generation, doorbell state, worker sockets, and worker health. Janus owns
+cache and Hub state.
 
 A heartbeat proves that the manager still owns and supervises the server. It
 does not claim that workers are ready. Worker readiness is represented by
@@ -221,26 +222,33 @@ While watching is enabled, an App-source change:
 An App-only change does not replace API workers. An API-source change replaces
 the API workers without reloading the client app.
 
-With watching disabled, the generated files are sealed and no development feed
-is exposed.
+With watching disabled, the manager publishes the startup bundle once. It
+does not publish a development manifest or expose the development feed.
 
 ### 4. Static-file policy
 
 The manager gives Janus an ordered list of places to check. Each place is a
 root template; Janus appends the request URI and serves the first regular-file
-match. A root may contain the trusted `${site}` selected from the hostname:
+match. A root may contain the trusted `{site}` selected from the hostname:
 
 ```text
-public/${uri}
-generated/${uri}
-sites/${site}/public/${uri}
-sites/common/public/${uri}
-app/${uri}
+public/<uri>
+generated/<uri>
+sites/{site}/public/<uri>
+sites/common/public/<uri>
+app/<uri>
 ```
 
 The order is policy. In this example, a tenant file overrides the common file,
 while `public` and `generated` take priority over both. Another server may
-choose a different order.
+choose a different order. When `serve.rip` declares `files`, only those roots
+plus the manager's generated root are registered; the project root is public
+only when the declaration lists it explicitly.
+
+Without a `files` declaration, conventional discovery registers the generated
+root, `public/` when present, `app/` when present, and the project directory as
+a final live fallback. A server that requires a finite public surface declares
+its roots explicitly.
 
 The SPA shell is a separate HTML-only fallback, commonly `app/index.html`. It
 is not an unconditional final file candidate: a missing script, stylesheet,
@@ -508,8 +516,7 @@ The top-level shell uses `Cache-Control: no-cache`, so every navigation
 validates it. An HTML bag ding currently produces the `reload` verdict because
 a changed file path and hash do not identify a DOM owner, target, or swap
 operation. HTMX can replace a fragment because the initiating request carries
-that context; a filesystem ding does not. A future fragment registration
-contract may add targeted HTML absorption without changing this safe default.
+that context; a filesystem ding does not.
 
 ### 7. Images, fonts, video, and other referenced assets
 
@@ -548,9 +555,11 @@ URLs, ordinary revalidation, or reload semantics.
 
 ### 8. Dynamic API responses
 
-API responses are not file resources. Workers own their cache semantics. The
-safe default is `Cache-Control: no-store`; an application may opt into caching
-explicitly through `@cache`.
+Workers own dynamic API response semantics. Without `@cache`, Rip emits no
+freshness directive and Janus's micro-cache declines to store the response.
+Applications that require the stronger browser-facing guarantee emit
+`Cache-Control: no-store` through `@cache off`; applications may opt into
+freshness explicitly through a positive `@cache` duration.
 
 ### 9. Hub and private control connections
 
@@ -567,7 +576,7 @@ Live Rip source                 → no-store
 Live CSS                        → changed URL + no-cache + Janus ETag
 HTML shell                      → no-cache
 Mutable live image/media        → changed URL, targeted state update, or reload
-API response                    → no-store unless the app explicitly caches
+API response                    → no Janus cache unless the app explicitly opts in
 ```
 
 This preserves buttery delivery:
