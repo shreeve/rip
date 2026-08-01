@@ -24,6 +24,7 @@ test('public entry exposes named substrate exports only', () => {
     'parseQuery',
     'persistStash',
     'preloadLinks',
+    'rash',
     'source',
     'throttle',
     'unwrapStash',

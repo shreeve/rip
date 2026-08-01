@@ -40,7 +40,7 @@ With a Janus control endpoint running:
 
 ```bash
 cd examples/cart
-rip server index.rip --name cart --bridge /hub
+rip server index.rip --name cart
 ```
 
 Same app as a worker pool. Watching mode opens the Workspace door; edit

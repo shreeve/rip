@@ -23023,7 +23023,7 @@ async function bootApp(opts = {}) {
       throw new Error("rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl");
     }
     fetchBytes = opts.feed?.fetch ?? ((url) => fetch(url));
-    const res = await fetchBytes(manifestUrl);
+    const res = await fetchBytes(manifestUrl, { cache: "no-cache" });
     if (!res.ok) {
       throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
     }
@@ -23082,7 +23082,12 @@ async function bootApp(opts = {}) {
       const source = (bundle.modules ?? {})[entry.id];
       if (source === undefined)
         continue;
-      records.push({ id: entry.id, path: entry.id, etag: entry.etag, source });
+      records.push({
+        id: entry.id,
+        path: entry.id,
+        hash: app.rash(new TextEncoder().encode(source)),
+        source
+      });
     }
     bag.populate(records);
   }
@@ -23125,9 +23130,39 @@ async function bootApp(opts = {}) {
   const isCssPath = (path) => typeof path === "string" && path.endsWith(".css");
   const isHtmlPath = (path) => typeof path === "string" && path.endsWith(".html");
   const isNonRipBag = (path) => isCssPath(path) || isHtmlPath(path);
-  const applyCssSheet = (id, source) => {
+  const cssLinkFor = (id) => {
+    if (typeof document === "undefined")
+      return null;
+    for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
+      if (link.getAttribute("data-rip-css") === id)
+        return link;
+    }
+    const base = id.includes("/") ? id.slice(id.lastIndexOf("/") + 1) : id;
+    for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
+      const href = link.getAttribute("href") || "";
+      const path = href.split("?")[0];
+      if (path === `/${base}` || path.endsWith(`/${base}`) || path === base)
+        return link;
+    }
+    return null;
+  };
+  const applyCssSheet = (id, source, hash) => {
     if (typeof document === "undefined" || typeof source !== "string")
       return;
+    const link = cssLinkFor(id);
+    if (link && typeof hash === "string" && hash.length > 0) {
+      const raw = link.getAttribute("href") || link.href;
+      const path = raw.split("?")[0];
+      const next = `${path}?hash=${encodeURIComponent(hash)}`;
+      if (link.getAttribute("href") !== next)
+        link.setAttribute("href", next);
+      link.disabled = false;
+      for (const node of [...document.querySelectorAll("style[data-rip-css]")]) {
+        if (node.getAttribute("data-rip-css") === id)
+          node.remove();
+      }
+      return;
+    }
     let el = null;
     for (const node of document.querySelectorAll("style[data-rip-css]")) {
       if (node.getAttribute("data-rip-css") === id) {
@@ -23141,13 +23176,6 @@ async function bootApp(opts = {}) {
       document.head.appendChild(el);
     }
     el.textContent = source;
-    const base = id.includes("/") ? id.slice(id.lastIndexOf("/") + 1) : id;
-    for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
-      const href = link.getAttribute("href") || "";
-      if (href === `/${base}` || href.endsWith(`/${base}`) || href === base) {
-        link.disabled = true;
-      }
-    }
   };
   const removeCssSheet = (id) => {
     if (typeof document === "undefined")
@@ -23155,6 +23183,12 @@ async function bootApp(opts = {}) {
     for (const node of [...document.querySelectorAll("style[data-rip-css]")]) {
       if (node.getAttribute("data-rip-css") === id)
         node.remove();
+    }
+    const link = cssLinkFor(id);
+    if (link) {
+      const path = (link.getAttribute("href") || "").split("?")[0];
+      if (path)
+        link.setAttribute("href", path);
     }
   };
   const escapeRemount = async (applied) => {
@@ -23170,7 +23204,6 @@ async function bootApp(opts = {}) {
     current.destroy();
     current = launchWith(snapshot);
     Object.assign(handle, current, stable);
-    console.log(`[Rip] applied ${applied.join(", ") || "a change"} — remounted (component state reset)`);
   };
   const apply = app.createApply({
     renderer: {
@@ -23217,7 +23250,7 @@ async function bootApp(opts = {}) {
       }
       try {
         const verdict = await apply.absorb(applied);
-        if (verdict === "narrow" || verdict === "noop") {
+        if (verdict === "update" || verdict === "ignore" || verdict === "css") {
           Object.assign(handle, current, stable);
         }
       } catch (error) {
@@ -23236,16 +23269,23 @@ async function bootApp(opts = {}) {
     timer ??= setTimeout(absorb, 25);
   });
   const door = {
+    owners: new Map,
+    claim(id, owner) {
+      this.owners.set(id, owner);
+    },
     passport: bag.passport,
     sealed: bag.sealed,
     set: async (passport) => {
+      const owner = passport.owner;
+      if (owner !== undefined && door.owners.get(passport.id) !== owner)
+        return false;
       const known = bag.passport(passport.id);
-      if (known && typeof passport.etag === "string" && passport.etag === known.etag) {
+      if (known && typeof passport.hash === "string" && passport.hash === known.hash) {
         if (passport.deleted !== true)
           return false;
       }
       if (passport.deleted === true) {
-        if (known && typeof passport.etag === "string" && passport.etag !== known.etag)
+        if (known && typeof passport.hash === "string" && passport.hash !== known.hash)
           return false;
         const path2 = bag.passport(passport.id)?.path;
         if (path2 !== undefined) {
@@ -23263,18 +23303,18 @@ async function bootApp(opts = {}) {
       }
       const path = passport.path ?? passport.id;
       if (isCssPath(path)) {
-        const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
+        const applied = bag.set({ id: passport.id, path, hash: passport.hash, source: passport.source });
         if (applied) {
-          applyCssSheet(path, passport.source);
-          console.log(`[Rip] applied ${path} — css soft-apply (no remount)`);
+          applyCssSheet(path, passport.source, passport.hash);
+          console.log(`[Rip] applied ${path} — css`);
         }
         return applied;
       }
       if (isHtmlPath(path)) {
         const had = known != null;
-        const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
+        const applied = bag.set({ id: passport.id, path, hash: passport.hash, source: passport.source });
         if (applied && had) {
-          console.log(`[Rip] applied ${path} — html reload`);
+          console.log(`[Rip] applied ${path} — reload`);
           if (typeof location !== "undefined")
             location.reload();
         }
@@ -23286,9 +23326,18 @@ async function bootApp(opts = {}) {
       try {
         module = await loader.import(path);
       } catch (error) {
-        report(`[Rip] ${path} etag ${passport.etag} failed to compile — keeping the last good version`, error);
+        if (owner === undefined || door.owners.get(passport.id) === owner) {
+          if (known)
+            files.set(path, known.source);
+          else
+            files.delete(path);
+          loader.invalidate(path);
+        }
+        report(`[Rip] ${path} hash ${passport.hash} failed to compile — keeping the last good version`, error);
         return false;
       }
+      if (owner !== undefined && door.owners.get(passport.id) !== owner)
+        return false;
       return bag.set({ ...passport, compiled: { ...module } });
     }
   };

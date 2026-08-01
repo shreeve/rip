@@ -34,11 +34,10 @@ but it must not block direct-path package implementation and tests.
 - **Server:** the edge belongs to Janus running with Caddy — proxy
   and stream execution, the TLS story (ACME, certificates, SNI), and
   WebSocket termination with hub fan-out — so none of that is Rip
-  Server work; `packages/server` publishes upstreams to the control
-  plane and stops there. Remaining in Rip Server itself (contracts in
-  the packages/server README's Planned section): hub ergonomics
-  (bridge-frame dispatch, sigil directive helpers, a publish client,
-  the `--bridge` registration flag) and opt-in file logging (a
+  Server work; `packages/server` atomically registers files, direct Hub
+  admission, and API upstreams with the control plane. Remaining in Rip
+  Server itself (contract in the packages/server README's Planned
+  section): opt-in file logging (a
   `logs:` knob / `RIP_LOG_DIR` redirect of the merged server stream
   to `logs/server.log`; stdout stays the default). Process workers,
   control-plane registration with heartbeats and upstream

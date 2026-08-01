@@ -2,6 +2,7 @@
 // with ETag revalidation on the bundle so the boot's 304 path runs in
 // a real browser.
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assembleBundle } from '../../src/bundle.js';
@@ -37,9 +38,8 @@ const bundleText = JSON.stringify(assembleBundle({
 }));
 const bundleTag = `"${Bun.hash(bundleText).toString(16)}"`;
 
-// The workspace door surface (docs/WORKSPACE.md / Q8′): latest file bytes
-// addressed by etag, a no-store manifest, and a hub socket that only
-// ever sends {ding: {id, etag}} — never bodies. POST /__test/bump
+// The workspace door surface: latest file bytes, a revalidated manifest,
+// and a hub socket that sends {ding: {id, hash}} — never bodies. POST /__test/bump
 // advances a file from the spec; GET /__test/frames pins D2.
 const wsRoute = title => [
   'export Home = component',
@@ -48,9 +48,9 @@ const wsRoute = title => [
 ].join('\n');
 
 const wsModules = { 'app/routes/index.rip': wsRoute('workspace home') };
-const wsEtags = new Map();
-const shortEtag = (text) => new Bun.CryptoHasher('sha256').update(text).digest('hex').slice(0, 16);
-wsEtags.set('app/routes/index.rip', shortEtag(wsModules['app/routes/index.rip']));
+const wsHashes = new Map();
+const ripHash = text => createHash('sha256').update(text).digest('base64url').slice(0, 6).replaceAll('-', '_');
+wsHashes.set('app/routes/index.rip', ripHash(wsModules['app/routes/index.rip']));
 let wsBundleText = null;
 let wsBundleTag = null;
 const rebuildWsBundle = () => {
@@ -64,8 +64,8 @@ rebuildWsBundle();
 
 const wsSockets = new Set();
 const wsFrames = [];
-const ding = (id, etag) => {
-  const frame = JSON.stringify({ ding: { id, etag } });
+const ding = (id, hash) => {
+  const frame = JSON.stringify({ ding: { id, hash } });
   wsFrames.push(frame);
   for (const socket of wsSockets) socket.send(frame);
 };
@@ -95,33 +95,26 @@ Bun.serve({
       return server.upgrade(request) ? undefined : new Response('websocket only', { status: 400 });
     }
     if (pathname === '/manifest.json') {
-      const files = [...wsEtags].map(([id, etag]) => ({ id, etag }));
+      const files = [...wsHashes].map(([id, hash]) => ({ id, hash }));
       return new Response(JSON.stringify({ files }), {
-        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
       });
     }
     if (pathname.startsWith('/app/') && pathname.endsWith('.rip')) {
       const id = pathname.slice(1); // app/...
-      const wanted = url.searchParams.get('etag');
       const body = wsModules[id];
       if (body === undefined) return new Response('unknown module', { status: 404 });
-      const current = wsEtags.get(id) ?? shortEtag(body);
-      const headers = { 'Content-Type': 'text/plain; charset=utf-8', ETag: `"${current}"`, 'Cache-Control': 'no-store' };
-      if (!wanted || !/^[0-9a-f]{16}$/.test(wanted)) {
-        return new Response('module URLs require ?etag=<16-hex>', { status: 400 });
-      }
-      if (wanted !== current) return new Response(null, { status: 409, headers });
-      return new Response(body, { headers });
+      return new Response(body, { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });
     }
     if (pathname === '/__test/bump' && request.method === 'POST') {
       const { id, title } = await request.json();
       const source = wsRoute(title);
-      const etag = shortEtag(source);
-      wsEtags.set(id, etag);
+      const hash = ripHash(source);
+      wsHashes.set(id, hash);
       wsModules[id] = source;
       rebuildWsBundle();
-      ding(id, etag);
-      return new Response(JSON.stringify({ id, etag }), { headers: { 'Content-Type': 'application/json' } });
+      ding(id, hash);
+      return new Response(JSON.stringify({ id, hash }), { headers: { 'Content-Type': 'application/json' } });
     }
     if (pathname === '/__test/frames') {
       return new Response(JSON.stringify(wsFrames), { headers: { 'Content-Type': 'application/json' } });

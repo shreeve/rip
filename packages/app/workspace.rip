@@ -7,16 +7,17 @@
 # interface from @rip-lang/app, so launch() can take it as an injected
 # store. Records + door + view — nothing more.
 #
-# Freshness is the content etag (16 hex of sha256), matching the Q8′
-# door wire — never a monotonic rev counter.
+# Freshness is the six-character Rip hash over exact UTF-8 source bytes.
 # ==============================================================================
+
+import { rash } from './rash.rip'
 
 export type WorkspaceEvent = 'create' | 'change' | 'delete'
 
 export type Passport =
   id: string
   path: string
-  etag: string
+  hash: string
   source: string
   compiled: Record<string, unknown> | undefined
 
@@ -75,81 +76,17 @@ validId = (id) ->
     throw new TypeError 'Rip Workspace: passport id must be a non-empty string'
   id
 
-validEtag = (etag) ->
-  unless typeof etag is 'string' and /^[0-9a-f]{16}$/.test(etag)
-    throw new TypeError 'Rip Workspace: passport etag must be 16 lowercase hex characters'
-  etag
+validHash = (hash) ->
+  unless typeof hash is 'string' and /^[A-Za-z0-9_]{6}$/.test(hash)
+    throw new TypeError 'Rip Workspace: passport hash must be six Base64URL-folded characters'
+  hash
 
 validModule = (module) ->
   unless module? and typeof module is 'object' and not Array.isArray(module)
     throw new TypeError 'Rip Workspace: compiled component module must be an object'
   module
 
-# Same domain as the manager's shortHash / feed sourceHash (16 hex of sha256).
-# Bun on the server/tests; a sync SHA-256 for the browser shell (SubtleCrypto
-# is async and launch may mint a local passport before any door etag arrives).
-etagOf = (text) ->
-  if typeof Bun isnt 'undefined' and Bun.CryptoHasher?
-    return new Bun.CryptoHasher('sha256').update(text).digest('hex').slice(0, 16)
-  syncSha256Hex(text).slice(0, 16)
-
-# Compact sync SHA-256 (FIPS 180-4) — browser fallback only.
-syncSha256Hex = (message) ->
-  K = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
-  ]
-  bytes = new TextEncoder().encode(message)
-  bitLen = bytes.length * 8
-  withPad = new Uint8Array(((bytes.length + 9 + 63) & ~63))
-  withPad.set bytes
-  withPad[bytes.length] = 0x80
-  view = new DataView(withPad.buffer)
-  view.setUint32 withPad.length - 4, bitLen >>> 0, false
-  view.setUint32 withPad.length - 8, Math.floor(bitLen / 0x100000000) >>> 0, false
-  H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]
-  rotr = (x, n) -> (x >>> n) | (x << (32 - n))
-  w = new Uint32Array(64)
-  i = 0
-  while i < withPad.length
-    for j in [0...16]
-      w[j] = view.getUint32(i + j * 4, false)
-    for j in [16...64]
-      s0 = rotr(w[j - 15], 7) ^ rotr(w[j - 15], 18) ^ (w[j - 15] >>> 3)
-      s1 = rotr(w[j - 2], 17) ^ rotr(w[j - 2], 19) ^ (w[j - 2] >>> 10)
-      w[j] = (w[j - 16] + s0 + w[j - 7] + s1) >>> 0
-    [a, b, c, d, e, f, g, h] = H
-    for j in [0...64]
-      S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)
-      ch = (e & f) ^ (~e & g)
-      temp1 = (h + S1 + ch + K[j] + w[j]) >>> 0
-      S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)
-      maj = (a & b) ^ (a & c) ^ (b & c)
-      temp2 = (S0 + maj) >>> 0
-      h = g
-      g = f
-      f = e
-      e = (d + temp1) >>> 0
-      d = c
-      c = b
-      b = a
-      a = (temp1 + temp2) >>> 0
-    H[0] = (H[0] + a) >>> 0
-    H[1] = (H[1] + b) >>> 0
-    H[2] = (H[2] + c) >>> 0
-    H[3] = (H[3] + d) >>> 0
-    H[4] = (H[4] + e) >>> 0
-    H[5] = (H[5] + f) >>> 0
-    H[6] = (H[6] + g) >>> 0
-    H[7] = (H[7] + h) >>> 0
-    i += 64
-  H.map((x) -> x.toString(16).padStart(8, '0')).join('')
+hashOf = (text) -> rash new TextEncoder().encode(text)
 
 export def createWorkspace(): Workspace
   passports = new Map()
@@ -188,12 +125,12 @@ export def createWorkspace(): Workspace
     return
 
   applySource = (record, content) ->
-    passports.set record.id, { ...record, etag: etagOf(content), source: content, compiled: undefined }
+    passports.set record.id, { ...record, hash: hashOf(content), source: content, compiled: undefined }
     return
 
   birthPassport = (path, content) ->
     id = mintId path
-    passports.set id, { id, path, etag: etagOf(content), source: content, compiled: undefined }
+    passports.set id, { id, path, hash: hashOf(content), source: content, compiled: undefined }
     pathToId.set path, id
     return
 
@@ -302,7 +239,7 @@ export def createWorkspace(): Workspace
           throw new TypeError 'Rip Workspace: populate expects passport records'
         id = validId record.id
         path = validPath record.path
-        etag = validEtag record.etag
+        hash = validHash record.hash
         source = validContent record.source
         compiled = if record.compiled? then validModule record.compiled else undefined
         if seenIds.has id
@@ -311,7 +248,7 @@ export def createWorkspace(): Workspace
           throw new Error "Rip Workspace: duplicate passport path '#{path}' in populate"
         seenIds.add id
         seenPaths.add path
-        next.push { id, path, etag, source, compiled }
+        next.push { id, path, hash, source, compiled }
       for row in next
         passports.set row.id, row
         pathToId.set row.path, row.id
@@ -322,7 +259,7 @@ export def createWorkspace(): Workspace
       unless record? and typeof record is 'object' and not Array.isArray(record)
         throw new TypeError 'Rip Workspace: set expects a passport record'
       id = validId record.id
-      etag = validEtag record.etag
+      hash = validHash record.hash
       current = passports.get id
 
       unless current
@@ -330,26 +267,25 @@ export def createWorkspace(): Workspace
         # ding — not an error.
         return false if record.deleted is true
         unless record.path? and record.source?
-          throw new Error "Rip Workspace: set of unknown passport '#{id}' requires a full record (id, path, etag, source)"
+          throw new Error "Rip Workspace: set of unknown passport '#{id}' requires a full record (id, path, hash, source)"
         path = validPath record.path
         source = validContent record.source
         compiled = if record.compiled? then validModule record.compiled else undefined
         claimPath path, id
-        passports.set id, { id, path, etag, source, compiled }
+        passports.set id, { id, path, hash, source, compiled }
         pathToId.set path, id
         notify 'create', path
         return true
 
       if record.deleted is true
         # Delete names the generation being retired; a newer passport wins.
-        return false unless etag is current.etag
+        return false unless hash is current.hash
         passports.delete id
         pathToId.delete current.path
         notify 'delete', current.path
         return true
 
-      # Q8′: already holding this generation — ignore (no mutation, no event).
-      return false if etag is current.etag
+      return false if hash is current.hash
 
       newPath = if record.path? then validPath record.path else current.path
       renamed = newPath isnt current.path
@@ -368,7 +304,7 @@ export def createWorkspace(): Workspace
 
       oldPath = current.path
       pathToId.delete oldPath if renamed
-      passports.set id, { id, path: newPath, etag, source, compiled }
+      passports.set id, { id, path: newPath, hash, source, compiled }
       pathToId.set newPath, id
       if renamed
         notify 'delete', oldPath

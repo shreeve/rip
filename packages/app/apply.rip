@@ -1,21 +1,25 @@
 # ==============================================================================
 # Apply — discardable hot-absorb policy for Workspace bag mutations
 #
-# Door mutates passports; apply decides how living instances adopt them.
-# Probe 1 floor: narrow remount of dirty route/layout modules while the
-# stash and ancestor layouts stay. Whole-launch remount remains the
-# labeled escape (stash edits, apply failure, no mounted route).
+# Door mutates passports; apply chooses a verdict:
+#   reload | css | update | ignore
+#
+# Soft paths (css / html reload) are adopted in the door; absorb reports
+# their verdicts when asked and runs Rip updates through the renderer.
+# `update` is the product verb — narrow remount vs whole-launch remount
+# is an implementation detail underneath.
 #
 # Delete this module if door and apply fuse — Q10.
 # ==============================================================================
 
-export type ApplyVerdict = 'narrow' | 'escape' | 'noop'
+export type ApplyVerdict = 'reload' | 'css' | 'update' | 'ignore'
 
 export type Apply =
   absorb: (paths: string[]) => Promise<ApplyVerdict>
 
 export type ApplyOpts =
-  renderer: { remountDirty: (paths: string[]) => Promise<ApplyVerdict> }
+  # Renderer seam still speaks narrow/escape/noop; absorb maps to update/ignore.
+  renderer: { remountDirty: (paths: string[]) => Promise<'narrow' | 'noop' | 'escape'> }
   escape: (paths: string[]) => Promise<void>
   report?: (...args: any[]) => void
 
@@ -30,25 +34,35 @@ export def createApply(opts: ApplyOpts): Apply
 
   absorb = (paths) ->
     unless Array.isArray(paths) and paths.length > 0
-      return 'noop'
-    # CSS/HTML soft paths never enter remount (door handles them). A
-    # dirty set of only those is an honest noop.
-    dirty = (p for p in paths when typeof p is 'string' and p.startsWith('app/') and not p.endsWith('.css') and not p.endsWith('.html'))
-    return 'noop' unless dirty.length > 0
+      return 'ignore'
+    appPaths = (p for p in paths when typeof p is 'string' and p.startsWith 'app/')
+    return 'ignore' unless appPaths.length > 0
+
+    css = (p for p in appPaths when p.endsWith '.css')
+    html = (p for p in appPaths when p.endsWith '.html')
+    rip = (p for p in appPaths when not p.endsWith('.css') and not p.endsWith('.html'))
+
+    # Soft paths: door already adopted; absorb only names the verdict.
+    # *.css is always css — never reload.
+    if rip.length is 0
+      return 'css' if css.length > 0 and html.length is 0
+      return 'reload' if html.length > 0
+      return 'ignore'
 
     verdict = 'escape'
     try
-      verdict = opts.renderer.remountDirty! dirty
+      verdict = opts.renderer.remountDirty! rip
     catch error
-      report '[Rip] narrow apply failed — falling back to full remount', error
+      report '[Rip] update failed — falling back to full in-page remount', error
       verdict = 'escape'
 
     if verdict is 'narrow'
-      report "[Rip] applied #{dirty.join ', '} — narrow remount (route state reset; stash kept)"
-      return 'narrow'
-    return 'noop' if verdict is 'noop'
+      report "[Rip] applied #{rip.join ', '} — update"
+      return 'update'
+    return 'ignore' if verdict is 'noop'
 
-    opts.escape! dirty
-    'escape'
+    opts.escape! rip
+    report "[Rip] applied #{rip.join ', '} — update"
+    'update'
 
   { absorb }

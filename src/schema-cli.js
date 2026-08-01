@@ -75,6 +75,8 @@ const flags = {
   allowDestructive: false,
   repair: false,
   force: false,
+  coordinated: false,
+  operationId: null,
 };
 const positional = [];
 for (let i = 0; i < rest.length; i++) {
@@ -87,6 +89,11 @@ for (let i = 0; i < rest.length; i++) {
   else if (a === '--allow-destructive') flags.allowDestructive = true;
   else if (a === '--repair') flags.repair = true;
   else if (a === '--force') flags.force = true;
+  else if (a === '--coordinated') flags.coordinated = true;
+  else if (a === '--operation-id') {
+    flags.operationId = rest[++i];
+    if (!flags.operationId) die('--operation-id requires a value', 2);
+  }
   else if (a.startsWith('-')) die(`unknown flag: ${a}\n\n${USAGE}`, 2);
   else positional.push(a);
 }
@@ -94,6 +101,8 @@ if (flags.allowLossy && cmd !== 'make') die('--allow-lossy only applies to make'
 if (flags.allowDestructive && cmd !== 'make') die('--allow-destructive only applies to make', 2);
 if (flags.repair && cmd !== 'migrate') die('--repair only applies to migrate', 2);
 if (flags.force && cmd !== 'migrate') die('--force only applies to migrate', 2);
+if (flags.coordinated && cmd !== 'migrate') die('--coordinated only applies to migrate', 2);
+if (flags.operationId && cmd !== 'migrate') die('--operation-id only applies to migrate', 2);
 
 // `make` takes a migration name first; every command takes an
 // optional models entry. Disambiguate by file existence: a
@@ -194,11 +203,24 @@ try {
         'rip schema: warning — the adapter has no begin(): migrations apply WITHOUT transactions, ' +
         'so an interrupted run leaves partial state (the failure report will say exactly what applied).');
     }
-    const out = await evolution.migrate({ dir: flags.dir, repair: flags.repair, force: flags.force });
+    const out = await evolution.migrate({
+      dir: flags.dir,
+      repair: flags.repair,
+      force: flags.force,
+      coordinated: flags.coordinated,
+      operationId: flags.operationId,
+    });
     if (!out.ran.length) console.log('no pending migrations');
     else for (const r of out.ran) console.log(`applied ${r}`);
+    if (flags.coordinated) console.log('RIP_MIGRATION_OUTCOME=' + JSON.stringify(out));
   }
   process.exit(0);
 } catch (e) {
+  if (flags.coordinated) {
+    console.error('RIP_MIGRATION_OUTCOME=' + JSON.stringify({
+      outcome: e?.migrationOutcome || 'unknown',
+      error: e?.message || String(e),
+    }));
+  }
   die(e?.message || String(e));
 }

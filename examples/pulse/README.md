@@ -56,16 +56,15 @@ With a Janus control endpoint running (`--control <target>` or the
 
 ```bash
 cd examples/pulse
-rip server index.rip --name pulse --bridge /hub
+rip server index.rip --name pulse
 ```
 
 The same `index.rip` now runs as a worker pool: the manager registers
-`pulse` with Janus, compiles the app and assembles the bundle once per
-boot epoch, and spawns workers on unix sockets. Caddy terminates TLS;
+`pulse` with Janus, publishes the browser App, prepares the API artifact,
+and spawns workers on unix sockets. Caddy terminates TLS;
 Janus admits the host, routes it to the live worker sockets
 (least-conn with health), answers anonymous GETs from its micro-cache,
-and owns the hub — `--bridge /hub` registers the endpoint Janus POSTs
-every hub socket event to.
+and owns the Hub directly.
 
 ## Leg 3 — the door
 
@@ -73,14 +72,14 @@ Same as leg 2, with the flag in the manager's environment:
 
 ```bash
 cd examples/pulse
-rip server index.rip --name pulse --bridge /hub
+rip server index.rip --name pulse
 ```
 
 Open the page, then edit `app/mood.rip`: change the `up` label
 `'riding high'` to anything else and save. The manager sees a
-client-only change, bumps the cell's rev, and dings the hub with
-`{id, rev}` — no bytes ride the socket. The page fetches the rev-keyed
-cell over HTTP, sets it into the Workspace, and every badge on the page
+client-only change and dings the Hub with `{id, hash}` — no bytes ride the
+socket. The page fetches the latest file over HTTP, verifies its rash,
+sets it into the Workspace, and every badge on the page
 updates without a manual refresh.
 
 The update applies by **remount labeled escape** (docs/WORKSPACE.md,

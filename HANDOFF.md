@@ -1,4 +1,4 @@
-# HANDOFF — session launch document (2026-07-30)
+# HANDOFF — session launch document (2026-07-31)
 
 The tracked session launch document (see AGENTS.md, working ledgers):
 read it first when starting a session; rewrite it at session
@@ -7,31 +7,36 @@ boundaries with live-verified facts only.
 ## Orientation
 
 - Repo: `~/Data/Code/rip` — the live v4 checkout.
-- `AGENTS.md` doctrine includes Workspace vocabulary (bag = membership).
 - Commands: `bun run test:all` · `bun run test` · `bun run browser-bundle`.
 
 ## Active branch
 
-**Branch: `bag-default-membership`** (from `main` / `bb28e8e`).
+**Branch: `server-app-api-architecture`** (`60aaae6` before the current
+working tree).
 
-Default client bag = `app/**/*.{rip,css,html}`: watch, sync, ding
-`{id,etag}`; client reacts by extension. Main entry
-(`app.rip` / `index.rip` at project root) → epoch. HTML → document
-reload; CSS → soft-apply (S12); Rip → remount floor.
+The Rip Server architecture implementation is present in the working tree:
 
-## On main
+- compile-only generation validates candidates before API admission cuts;
+- canonical local manager control provides status, hold, release, migrate,
+  and recover;
+- Active, Held, and Maintenance fence API/App activation and durable
+  migration recovery;
+- generated coordination files and authored App files register atomically
+  with Janus, including App-only projects and direct Hub admission;
+- pooled workers are API-only;
+- App delivery is latest-wins with six-character `rash(bytes)` identities,
+  `{id,hash}` update dings, generation-fenced delete dings, and epoch reload
+  dings.
 
-- PR #194 — Probe 1 etag door + narrow remount + cart harness
-- PR #195 — door leftovers cell → file
-- PR #196 — CSS soft-apply (S12)
+Live verification on this working tree:
 
-## Door doctrine (trivial)
-
-1. Bag = membership (default globs above; lists/globs later).
-2. Serve the bag; watch the bag; ding on change.
-3. Client: care or ignore; reaction from extension — not from the hub.
+- `bun run test:all` — passed (21 lanes).
+- `bun run test` in `packages/server` — passed.
+- `bun run test` in `packages/app` — passed.
+- `bunx playwright test` in `packages/browser-tests` — passed.
+- `./test.sh` in `~/Data/Code/janus` — 159 passed.
 
 ## Working agreements
 
-- **Land** = merge green + delete the feature branch.
-- PRs: TRUE MERGE only. No AI attribution in commits.
+- **Land** = merge green + delete feature branch.
+- PRs: TRUE MERGE only. No AI attribution.
