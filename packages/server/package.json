@@ -15,6 +15,7 @@
   "scripts": {
     "test": "rip test.rip",
     "verify:hello-api": "rip verify/hello-api/test.rip",
+    "verify:hello-app": "rip verify/hello-app/test.rip",
     "verify:workers": "rip verify/workers/test.rip"
   },
   "files": [

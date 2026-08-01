@@ -1,0 +1,67 @@
+import { test, eq, ok } from '@rip-lang/testing'
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
+SERVER = join(import.meta.dir, '..', '..', 'server.rip')
+
+waitFor = (fn, timeout = 5000) ->
+  deadline = Date.now() + timeout
+  loop
+    value = await fn()
+    return value if value
+    throw new Error('App publication verification timed out') if Date.now() >= deadline
+    sleep! 10
+
+test! 'App-only manager publishes a finite generated surface with no workers', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-app-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
+  controlSocket = join dir, 'janus.sock'
+  registration: any = null
+  deleted = false
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = new URL request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = await request.json()
+        return Response.json({ id: 'app-registration' }, { status: 201 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/app-registration/heartbeat'
+        return new Response(null, { status: 204 })
+      if request.method is 'DELETE' and url.pathname is '/1.0/apps/app-registration'
+        deleted = true
+        return new Response(null, { status: 204 })
+      new Response('Not Found', { status: 404 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--name', 'hello-app', '--host', 'hello-app.test', '--control', controlSocket],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    await waitFor -> registration?
+
+    eq registration.upstreams, []
+    eq registration.files.proxy_first, []
+    eq registration.files.roots, [
+      { path: join(project, 'static', 'generated'), cache: 'revalidate', browse: false }
+      { path: join(project, 'app'), cache: 'never', browse: false }
+    ]
+    eq registration.files.shell, join(project, 'static', 'generated', 'index.html')
+
+    generated = join project, 'static', 'generated'
+    ok existsSync(join(generated, 'bundle.json'))
+    ok existsSync(join(generated, '@rip', 'rip.js'))
+    ok existsSync(join(generated, 'index.html'))
+    ok not existsSync(join(generated, 'manifest.json'))
+    ok readFileSync(join(generated, 'bundle.json'), 'utf8').includes('app/routes/index.rip')
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 0
+    ok deleted
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }

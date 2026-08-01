@@ -1,5 +1,5 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { basename, join, resolve } from 'node:path'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
 HEARTBEAT_MS = 5000
@@ -54,9 +54,13 @@ controlFetch = (target, method, path, body: any = null) ->
     options.unix = target
     fetch "http://janus#{path}", options
 
-generate = (entry, artifact, reportPath, taskId) ->
+loaderDir = ->
   preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
   abort 'rip-server: the Rip loader is missing' unless preload?
+  dirname resolve(preload.slice('--preload='.length))
+
+generate = (entry, artifact, reportPath, taskId) ->
+  preload = "--preload=#{join(loaderDir(), 'loader.js')}"
   proc = Bun.spawn [process.execPath, preload, join(import.meta.dir, 'generate.rip'), entry, artifact, reportPath, taskId, '0'],
     stdin: 'ignore'
     stdout: 'ignore'
@@ -66,6 +70,84 @@ generate = (entry, artifact, reportPath, taskId) ->
   diagnostic = await stderrText
   throw new Error(diagnostic.trim() or "generation #{taskId} exited #{code}") unless code is 0
   JSON.parse readFileSync(reportPath, 'utf8')
+
+resolveProject = (input) ->
+  path = resolve input
+  abort "rip-server: project not found: #{input}" unless existsSync path
+  if statSync(path).isDirectory()
+    entry = null
+    for name in ['app.rip', 'index.rip']
+      candidate = join path, name
+      if existsSync candidate
+        entry = candidate
+        break
+    appRoot = join path, 'app'
+    abort "rip-server: #{input} has no API entry or app/ directory" unless entry? or existsSync(appRoot)
+    return { root: path, entry, appRoot: (if existsSync(appRoot) then appRoot else null) }
+  { root: dirname(path), entry: path, appRoot: (if existsSync(join(dirname(path), 'app')) then join(dirname(path), 'app') else null) }
+
+writeAtomic = (path, text) ->
+  tmp = "#{path}.tmp"
+  writeFileSync tmp, text
+  renameSync tmp, path
+
+escapeHtml = (value) ->
+  String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+
+appModules = (appRoot) ->
+  modules = {}
+  moduleFiles = {}
+  walk = (directory, prefix) ->
+    for entry in readdirSync(directory, { withFileTypes: true })
+      continue if entry.name.startsWith '.'
+      path = join directory, entry.name
+      if entry.isDirectory()
+        walk path, "#{prefix}#{entry.name}/"
+      else if entry.name.endsWith '.rip'
+        id = "#{prefix}#{entry.name}"
+        modules[id] = readFileSync path, 'utf8'
+        moduleFiles[id] = path
+  walk appRoot, 'app/'
+  { modules, moduleFiles }
+
+publishApp = (project, name) ->
+  return null unless project.appRoot?
+  generated = join project.root, 'static', 'generated'
+  mkdirSync join(generated, '@rip'), { recursive: true }
+  { assembleBundle } = import!(join(loaderDir(), 'bundle.js'))
+  graph = appModules project.appRoot
+  bundle = assembleBundle
+    modules: graph.modules
+    moduleFiles: graph.moduleFiles
+    appDir: project.root
+    packagesDir: join(loaderDir(), '..', 'packages')
+  writeAtomic join(generated, 'bundle.json'), JSON.stringify(bundle)
+
+  runtime = join(loaderDir(), '..', 'dist', 'browser', 'rip.js')
+  abort "rip-server: browser runtime missing at #{runtime}" unless existsSync runtime
+  copyFileSync runtime, join(generated, '@rip', 'rip.js')
+
+  authoredShell = join project.appRoot, 'index.html'
+  shell = authoredShell
+  unless existsSync authoredShell
+    shell = join generated, 'index.html'
+    writeAtomic shell, """
+    <!doctype html>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>#{escapeHtml(name)}</title>
+    <div id="app"></div>
+    <script type="module">
+      import { bootApp } from '/@rip/rip.js'
+      bootApp({ url: '/bundle.json' })
+    </script>
+    """
+
+  roots = [
+    { path: generated, cache: 'revalidate', browse: false }
+    { path: project.appRoot, cache: 'never', browse: false }
+  ]
+  { roots, proxy_first: (if project.entry? then ['/api'] else []), shell }
 
 waitReady = (proc, socket) ->
   deadline = Date.now() + READY_MS
@@ -97,11 +179,13 @@ killWorker = (proc) ->
 
 export main = (argv) ->
   args = parseArgs argv
+  project = resolveProject args.entry
   runDir = mkdtempSync join(tmpdir(), 'rip-srv-')
   workers = []
   workerSerial = 0
   appArtifact = null
   workerArtifact = null
+  files = null
   appId = null
   heartbeat = null
   finish = null
@@ -110,9 +194,12 @@ export main = (argv) ->
   updateChain = Promise.resolve()
 
   registration = ->
-    name: args.name
-    hosts: [args.host]
-    upstreams: workers.map (worker) -> { path: worker.socket }
+    body: any =
+      name: args.name
+      hosts: [args.host]
+      upstreams: workers.map (worker) -> { path: worker.socket }
+    body.files = files if files?
+    body
 
   createRegistration = ->
     response = controlFetch! args.control, 'POST', '/1.0/apps', registration()
@@ -203,13 +290,15 @@ export main = (argv) ->
     finish! status
 
   try
-    appArtifact = join runDir, 'app.js'
-    workerArtifact = join runDir, 'worker.js'
-    generate! args.entry, appArtifact, join(runDir, 'app-result.json'), 'app'
-    generate! join(import.meta.dir, 'worker.rip'), workerArtifact, join(runDir, 'worker-result.json'), 'worker'
+    files = publishApp! project, args.name
+    if project.entry?
+      appArtifact = join runDir, 'app.js'
+      workerArtifact = join runDir, 'worker.js'
+      generate! project.entry, appArtifact, join(runDir, 'app-result.json'), 'app'
+      generate! join(import.meta.dir, 'worker.rip'), workerArtifact, join(runDir, 'worker-result.json'), 'worker'
 
-    for slot in [0...args.workers]
-      await bootSlot()
+      for slot in [0...args.workers]
+        await bootSlot()
     createRegistration!()
     for worker in workers
       monitorWorker worker
