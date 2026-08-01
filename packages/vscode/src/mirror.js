@@ -287,6 +287,236 @@ export function mirrorRelForFsPath(fsPath, workspaceRoot) {
   return path.join('__external__', fsPath.replace(/^[/\\]/, '').replace(/:/g, ''));
 }
 
+// ---- the auto-import stub face: what a workspace `.rip` NOTHING has
+// opened or imported contributes to the program, so its exported names
+// are auto-import candidates from cold.
+//
+// Built from a SOURCE scan, not a compile, and that is the whole reason
+// the eager pass is affordable: compiling every workspace face is ~92%
+// of population time (1456 ms over 277 files, measured), against ~8 ms
+// to read the export lines. A stub and a full face produce the same
+// completion item and the same import edit, so the compile buys nothing
+// candidacy needs.
+//
+// Scanning SOURCE for a fact the compiler already knows is otherwise the
+// never-list's territory (ripImportsOf reads the stores, not text) — the
+// exemption is precise and holds only here: this runs where there is no
+// compile to read stores from, its output is thrown away the instant a
+// real edge materializes the true face over it, and a name this scan
+// misses costs a missing completion candidate, never a wrong answer. It
+// must NOT be reused anywhere a mapping, a diagnostic, or a closure edge
+// depends on it.
+
+const IDENT = String.raw`[A-Za-z_$][A-Za-z0-9_$]*`;
+// Words that open a declaration form and are therefore never the
+// exported NAME in rip's bare `export name = …` production.
+const EXPORT_KEYWORDS = new Set([
+  'default', 'from', 'as', 'declare', 'async', 'abstract', 'type', 'interface',
+  'class', 'enum', 'function', 'def', 'const', 'let', 'var', 'namespace', 'module',
+]);
+const DECLARATION = new RegExp(
+  String.raw`^(?:declare\s+)?(?:async\s+)?(?:abstract\s+)?(?:const\s+)?` +
+  String.raw`(type|interface|class|enum|function|def|const|let|var|namespace|module)\s+(${IDENT})\b`,
+);
+const STAR = new RegExp(String.raw`^\*\s*(?:as\s+(${IDENT})\s+)?from\s*['"]([^'"]+)['"]`);
+const CLAUSE = new RegExp(String.raw`^(?:(type)\s+)?(${IDENT}|default)(?:\s+as\s+(${IDENT}|default))?$`);
+// A binding inside a destructuring pattern: an identifier followed by a
+// separator, a closer, end of text, or `=` — the last because a binding
+// may carry a DEFAULT (`{ a = 1, b }`) and is still the name being bound.
+// A renamed key (`{ a: renamed }`) is deliberately not matched at `a`,
+// whose `:` is in none of these: `renamed` is the binding.
+const PATTERN_NAME = new RegExp(String.raw`(${IDENT})\s*(?:[,}\]=]|$)`, 'g');
+const FROM_SPEC = /^from\s*['"]([^'"]+)['"]/;
+
+// The exported names of one `.rip` SOURCE, split by declaration space.
+// `stars` carries the specifiers of `export * from …`, which name no
+// names of their own — the caller resolves those against its own scan of
+// the target (buildStubFaces does). `hasDefault` is tracked separately
+// because a default export has no name to carry: a consumer spells it
+// `import theme from …` or `import { default as theme } from …`, and a
+// stub that omitted it answered TS1192/TS2305 on every such consumer.
+export function scanExportNames(source) {
+  const values = new Set();
+  const types = new Set();
+  const stars = [];
+  let hasDefault = false;
+  const lines = source.split('\n');
+  let inBlockString = false;
+  for (let i = 0; i < lines.length; i++) {
+    // A block string's CONTENT can start a line with `export` — rip's own
+    // suites embed whole modules that way, and reading one as an export
+    // put two names in the candidate set that the face never exported.
+    const fences = (lines[i].match(/"""|'''/g) ?? []).length;
+    const wasInBlockString = inBlockString;
+    if (fences % 2) inBlockString = !inBlockString;
+    if (wasInBlockString) continue;
+    if (!/^export\b/.test(lines[i])) continue;   // exports are top-level: column 0
+    let rest = lines[i].slice('export'.length).trim();
+
+    const star = STAR.exec(rest);
+    if (star) {
+      if (star[1]) values.add(star[1]);          // export * as NS from '…'
+      else stars.push(star[2]);
+      continue;
+    }
+
+    // `export type { … }` — the whole list is type-only.
+    let typeOnly = false;
+    if (/^type\s*\{/.test(rest)) { typeOnly = true; rest = rest.slice('type'.length).trim(); }
+
+    if (rest.startsWith('{')) {
+      // A brace list may span lines (`export {\n  a,\n  b,\n}`), so read
+      // forward to the closing brace rather than judging one line. Joined
+      // with a COMMA: rip lets a multi-line list separate its entries by
+      // newline alone, and a space-join fuses those into one unparseable
+      // clause (an empty clause from a trailing comma is skipped below).
+      while (!rest.includes('}') && i + 1 < lines.length) rest += ',' + lines[++i].trim();
+      const close = rest.indexOf('}');
+      if (close < 0) continue;                   // unterminated: nothing trustworthy to emit
+      // A brace list is the whole statement or a re-export — and a
+      // re-export's target contributes nothing beyond the names written
+      // here (`export { a } from './x.rip'` states `a` outright). Anything
+      // ELSE after the brace is a shape this scan does not understand, so
+      // the clauses are not read: names guessed out of it would be offered
+      // as candidates the real face never exports. Checked BEFORE the
+      // clause loop, so it gates the names rather than trailing them.
+      const tail = rest.slice(close + 1).trim();
+      if (tail && !FROM_SPEC.test(tail)) continue;
+      for (const raw of rest.slice(1, close).split(',')) {
+        const clause = CLAUSE.exec(raw.trim());
+        if (!clause) continue;
+        const name = clause[3] ?? clause[2];
+        if (name === 'default') { hasDefault = true; continue; }
+        (typeOnly || clause[1] ? types : values).add(name);
+      }
+      continue;
+    }
+
+    if (/^default\b/.test(rest)) { hasDefault = true; continue; }
+
+    const decl = DECLARATION.exec(rest);
+    if (decl) {
+      const [, keyword, name] = decl;
+      if (keyword === 'type' || keyword === 'interface') types.add(name);
+      else if (keyword === 'class' || keyword === 'enum') { values.add(name); types.add(name); }
+      else values.add(name);
+      continue;
+    }
+
+    // `export const { a, b } = …` / `export const [a, b] = …`
+    const pattern = /^(?:declare\s+)?(?:const|let|var)\s*([[{])/.exec(rest);
+    if (pattern) {
+      const body = rest.slice(rest.indexOf(pattern[1]));
+      // The assignment `=` is the one at DEPTH ZERO. A binding's DEFAULT
+      // spells `=` too (`{ a = 1, b }`), and cutting at the first one
+      // drops every name after it — the pattern's own tail, not the
+      // initializer.
+      let depth = 0, end = -1;
+      for (let j = 0; j < body.length && end < 0; j++) {
+        const ch = body[j];
+        if (ch === '{' || ch === '[') depth++;
+        else if (ch === '}' || ch === ']') depth--;
+        else if (ch === '=' && depth === 0 && body[j + 1] !== '=' && body[j + 1] !== '>') end = j;
+      }
+      for (const m of (end < 0 ? body : body.slice(0, end)).matchAll(PATTERN_NAME)) values.add(m[1]);
+      continue;
+    }
+
+    // rip's own production: `export name = …`, with any of the binding
+    // markers the language spells after the name (`!`, `:=`, `=!`, an
+    // annotation, a type-parameter list).
+    const bare = new RegExp(String.raw`^(${IDENT})`).exec(rest);
+    if (!bare || EXPORT_KEYWORDS.has(bare[1])) continue;
+    const name = bare[1];
+    values.add(name);
+    // A schema binding is a TYPE as well as a value, and a `:model` also
+    // ships the two companion types its lowering derives from the name.
+    // This is the one place the scan encodes a lowering rule rather than
+    // reading what the source says, and the cost of it going stale is
+    // bounded to candidacy: an offered name the real face does not export
+    // fails loudly at the import the moment that face materializes.
+    const schema = /^(?:[^=]*)=\s*schema\s+:(\w+)/.exec(rest);
+    if (!schema) continue;
+    types.add(name);
+    if (schema[1] === 'model') { types.add(name + 'Data'); types.add(name + 'Create'); }
+  }
+  return { values: [...values], types: [...types], stars, hasDefault };
+}
+
+// The stub text for one file's exported names. Every name is `any`: the
+// stub exists to make the NAME reachable, and a shape it guessed would be
+// a shape that could be wrong. A type alias and a variable occupy
+// different declaration spaces, so a class or enum can legally be both.
+export function stubFace({ values = [], types = [], hasDefault = false } = {}) {
+  const lines = [];
+  for (const name of types) lines.push(`export type ${name} = any;`);
+  for (const name of values) lines.push(`export declare const ${name}: any;`);
+  if (hasDefault) lines.push('declare const __ripDefault: any;', 'export default __ripDefault;');
+  lines.push('export {};');   // a module even when it exports nothing
+  return lines.join('\n') + '\n';
+}
+
+// Stub faces from already-scanned sources (fsPath → scanExportNames
+// result), as fsPath → text. `export * from './x.rip'` is resolved
+// against the OTHER scans here — the one export form whose names are not
+// written where it appears. Split from the scan so a caller populating a
+// large workspace can yield between reads; `buildStubFaces` below is the
+// whole-thing convenience.
+export function stubFacesFromScans(scans) {
+  // Star edges, resolved once. A target outside `scans` contributes
+  // nothing — there is no source here to read names from.
+  const starsOf = new Map();
+  for (const [file, scan] of scans) {
+    starsOf.set(file, scan.stars
+      .filter((spec) => spec.endsWith('.rip'))   // a non-rip target has no scan here
+      .map((spec) => path.resolve(path.dirname(file), spec))
+      .filter((target) => scans.has(target)));
+  }
+  const values = new Map();
+  const types = new Map();
+  for (const [file, scan] of scans) {
+    values.set(file, new Set(scan.values));
+    types.set(file, new Set(scan.types));
+  }
+  // Grown to a FIXPOINT rather than resolved by recursion. `export *` is
+  // transitive and a cycle of them is legal (mutually re-exporting barrel
+  // files), so a recursive walk has to break the cycle somewhere and
+  // whichever file it breaks on gets a short answer — which a memo then
+  // stores as if it were complete, making the result depend on traversal
+  // order. Iterating to closure has no break to place: every file ends up
+  // with the union its stars reach, cycles included. It terminates because
+  // the sets only grow and the name space is finite.
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const [file, targets] of starsOf) {
+      for (const target of targets) {
+        for (const name of values.get(target)) if (!values.get(file).has(name)) { values.get(file).add(name); changed = true; }
+        for (const name of types.get(target)) if (!types.get(file).has(name)) { types.get(file).add(name); changed = true; }
+      }
+    }
+  }
+  const faces = new Map();
+  for (const [file, scan] of scans) {
+    // `export * from` carries names but never a DEFAULT — the star form
+    // is defined to skip it — so hasDefault stays this file's own.
+    faces.set(file, stubFace({
+      values: [...values.get(file)], types: [...types.get(file)], hasDefault: scan.hasDefault,
+    }));
+  }
+  return faces;
+}
+
+// Read, scan and build in one call. `read` returns a file's source or null.
+export function buildStubFaces(files, read) {
+  const scans = new Map();
+  for (const file of files) {
+    const source = read(file);
+    if (source === null || source === undefined) continue;
+    scans.set(file, scanExportNames(source));
+  }
+  return stubFacesFromScans(scans);
+}
+
 // The roles whose recorded span is TYPE TEXT — where an import type's
 // specifier lives, since it belongs to no import node.
 const TYPE_TEXT_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declaration']);

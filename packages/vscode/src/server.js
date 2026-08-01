@@ -72,7 +72,7 @@ import {
   SUPPRESSED_TS_CODES,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
-import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -690,6 +690,14 @@ function materializeClosure(seeds) {
       queue.push(...imports);
     } catch {
       failed++; // CompileError: the last-compiled mirror (if any) keeps serving
+      // A file with NO cache entry has no last-compiled face, so the only
+      // bytes on disk are its auto-import stub — which would answer `any`
+      // for every use and swallow the unresolved-module error the importer
+      // is owed. Candidacy must never buy silence: take the stub out.
+      if (!cacheManifest.entries[file]) {
+        const stale = mirrorPathOf('file://' + file);
+        try { fs.rmSync(stale); touched.push(stale); } catch { /* nothing there */ }
+      }
     }
   }
   return { compiled, cached, failed, touched };
@@ -790,6 +798,139 @@ function sweepOrphanMirrors() {
   }
   if (removed.length) {
     connection.console.log(`[rip] orphan mirror sweep: ${removed.length} manifest-less mirror(s) removed`);
+  }
+}
+
+// ---- auto-import candidacy: the whole workspace, as stubs.
+//
+// A candidate is offered only from tsgo's PROGRAM, and the program is the
+// open buffers' mirror closure — so a workspace `.rip` nothing has opened
+// or imported is not offered, which defeats auto-import's headline case.
+// Every such file therefore gets a declaration-only mirror: its exported
+// NAMES and nothing else, built from a source scan (mirror.js) rather
+// than a compile, because compiling the workspace is ~99% of the cost and
+// buys candidacy nothing — a stub and a full face yield the same
+// completion item and the same import edit.
+//
+// BYTES ONLY. A stub is written to disk and announced to tsgo, and is
+// deliberately absent from `materializedMirrors` and
+// `cacheManifest.entries`. Two things follow, and both are the point:
+//
+//   - `pruneClosure` iterates exactly those two collections, so a stub is
+//     invisible to it and survives with no exemption and no change there.
+//   - `materializeClosure` short-circuits on a REGISTERED mirror, so a
+//     registered stub would shadow the real face forever — hover
+//     answering `() => any`, go-to-definition empty, real type errors
+//     unraised. Unregistered, the first real import edge compiles the
+//     true face straight over the stub's bytes.
+//
+// Maintenance needs no code of its own: an edit to an unopened `.rip`
+// takes the watcher's in-closure branch (the mirror exists on disk) and
+// re-materializes the full face; a delete removes the mirror.
+//
+// RECORDED LIMIT, and the reason there is no re-stub after a prune: a file
+// that JOINS the closure is registered like any other member, so when it
+// later leaves — its importer closed, its import line removed — pruning
+// deletes its mirror and it stops being a candidate until the next
+// session. Restoring it would mean writing a mirror back inside
+// `pruneClosure`, which is exactly what the disk-layer hygiene gates in
+// `packages/vscode/test/project-model.test.js` forbid: they assert the
+// mirror is GONE, and the closure shrinking to the open buffers is a
+// design invariant older than this feature. Widening candidacy is not
+// worth quietly reversing it.
+//
+// The cap bounds tsgo's memory, which is what the closure exists to hold.
+// Measured against the pinned tsgo over this repo's corpus, replicated:
+// 279 stubs cost +12.7 MiB of tsgo RSS, 1116 cost +36.7 MiB — sublinear,
+// with a marginal ~25 KiB per stub, so the cap is worth roughly +130 MiB
+// at its limit. Full faces for the same 279 files cost +147 MiB, which is
+// the cost the demand-driven closure was built to refuse.
+const STUB_FILE_CAP = 5000;
+const STUB_WALK_SKIP = new Set(['node_modules']);
+
+// Every `.rip` under the workspace, minus the trees no source lives in.
+// Dot-directories are skipped, which is also what keeps the walk out of
+// our own mirror root (.rip/editor). Yields between directories: this
+// runs on the message loop, and a wide workspace must not cost a
+// keystroke.
+async function workspaceRipFiles() {
+  const files = [];
+  const queue = [[workspaceRoot, 0]];
+  let seen = 0;
+  while (queue.length && files.length < STUB_FILE_CAP) {
+    const [dir, depth] = queue.pop();
+    if (depth > 32) continue;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (entry.name.startsWith('.') || STUB_WALK_SKIP.has(entry.name)) continue;
+        queue.push([path.join(dir, entry.name), depth + 1]);
+      } else if (entry.name.endsWith('.rip')) {
+        files.push(path.join(dir, entry.name));
+      }
+    }
+    if (++seen % 25 === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  return files;
+}
+
+// A file wants a stub only when nothing better already speaks for it. The
+// on-disk check is the load-bearing one: a real face must never be
+// overwritten by a stub, whoever wrote it.
+function wantsStub(file) {
+  if (documents.get('file://' + file)) return false;      // an open buffer owns its mirror
+  if (materializedMirrors.has(file)) return false;        // the closure owns it
+  if (cacheManifest.entries[file]) return false;
+  return !fs.existsSync(mirrorPathOf('file://' + file));
+}
+
+// Populate stubs for `candidates` (default: the whole workspace).
+// Backgrounded by every caller — candidacy is never allowed in front of a
+// diagnostic — and yields in SMALL batches, which is not a tuning knob but
+// a measured one: the pass runs on the message loop at the same moment
+// the first document is being refreshed, and over this repo's corpus the
+// batch size is the difference between +19 ms and +6 ms on the first
+// diagnostics (150 ms baseline). Coarse batches are cheaper for the pass
+// and more expensive for the user.
+async function populateAutoImportStubs(candidates = null) {
+  if (!compile || !workspaceRoot || mirrorRootIsFallback) return;
+  const t0 = performance.now();
+  const scans = new Map();
+  let read = 0;
+  for (const file of candidates ?? await workspaceRipFiles()) {
+    if (!wantsStub(file)) continue;
+    let source;
+    try { source = fs.readFileSync(file, 'utf8'); } catch { continue; }
+    scans.set(file, scanExportNames(source));
+    if (++read % 10 === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  if (!scans.size) return;
+  ensureMirrorRoot();   // deferred to here: a workspace with no .rip stays untouched
+  const written = [];
+  let done = 0;
+  for (const [file, text] of stubFacesFromScans(scans)) {
+    // Re-checked at the write, not only at the scan: the awaits above let
+    // a refresh materialize the real face in between, and the check and
+    // the write together are one synchronous turn.
+    if (!wantsStub(file)) continue;
+    try {
+      writeMirror(mirrorPathOf('file://' + file), text);
+      written.push(mirrorPathOf('file://' + file));
+    } catch { /* candidacy only — never fatal */ }
+    if (++done % 10 === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  if (!written.length) return;
+  connection.console.log(
+    `[rip] auto-import stubs: ${written.length} declaration-only mirror(s) in ${Math.round(performance.now() - t0)} ms`,
+  );
+  // tsgo does not notice a bare mid-session disk write. The Created batch
+  // is what puts these files in its program — driven, and decisive.
+  await tsgoReady;
+  if (tsgo) {
+    tsgo.client.notify('workspace/didChangeWatchedFiles', {
+      changes: written.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Created })),
+    });
   }
 }
 
@@ -911,6 +1052,13 @@ connection.onInitialized(async () => {
   );
   await revalidateCache();
   repullOpenDocuments();
+  // Auto-import candidacy, and deliberately NOT awaited: it is a
+  // background convenience that must never sit in front of the first
+  // diagnostics. It runs AFTER revalidateCache so the orphan sweep — which
+  // deletes every manifest-less mirror, stubs included — has already run.
+  populateAutoImportStubs().catch(
+    (err) => connection.console.error(`[rip] auto-import stub population failed: ${err.stack ?? err}`),
+  );
 });
 
 const cleanupFallbackRoot = () => {
@@ -1363,14 +1511,29 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
       } catch { /* no mirror to remove */ }
     } else {
       const inClosure = materializedMirrors.has(fsPath) || pendingImports.has(fsPath) || fs.existsSync(mirrorPath);
-      if (!inClosure) continue;
+      if (!inClosure) {
+        // Outside the closure and with no mirror at all: a `.rip` CREATED
+        // this session. The startup pass never saw it, and a file you just
+        // wrote is exactly the one you are about to want to import, so it
+        // gets its stub now. Backgrounded; a no-op for anything already
+        // spoken for.
+        populateAutoImportStubs([fsPath]).catch(
+          (err) => connection.console.error(`[rip] auto-import stub for a new file failed: ${err.stack ?? err}`),
+        );
+        continue;
+      }
       const existed = fs.existsSync(mirrorPath);
       materializedMirrors.delete(fsPath); // force the re-read/recompile
       const { touched } = materializeClosure([fsPath]);
       for (const p of touched) {
+        // A path materialization TOUCHED can also be one it removed — a
+        // compile failure takes out the auto-import stub that would
+        // otherwise answer `any` in the real face's place — so the event
+        // follows what is on disk now.
         forward.push({
           uri: 'file://' + p,
-          type: p === mirrorPath && existed ? FileChangeType.Changed : FileChangeType.Created,
+          type: !fs.existsSync(p) ? FileChangeType.Deleted
+            : (p === mirrorPath && existed ? FileChangeType.Changed : FileChangeType.Created),
         });
       }
     }

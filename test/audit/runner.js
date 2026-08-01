@@ -1000,10 +1000,11 @@ class EditorServer {
   // — concurrency lives between server processes, never inside one program.
   //
   // This is not fussiness. The open-document set genuinely changes what the
-  // server answers: the auto-import candidate set IS the open program.
-  // Hovers and tokens happen not to depend on it for this corpus,
-  // but "happen not to" is an observation, not a guarantee, and observations are
-  // what this runner exists to distrust.
+  // server answers: it is the root of the COMPILED closure, so which faces
+  // are real and which are auto-import stubs turns on it. Hovers and tokens
+  // happen not to depend on that for this corpus, but "happen not to" is an
+  // observation, not a guarantee, and observations are what this runner
+  // exists to distrust.
   //
   // So it throws. A future edit that probes two documents through one server
   // fails loudly here instead of quietly answering from a program the serial run

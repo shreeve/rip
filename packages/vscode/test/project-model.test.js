@@ -178,8 +178,8 @@ async function inWorkspace(files, fn) {
   }
 }
 
-// Count the .rip mirrors materialized in a workspace's tree.
-const mirrorCount = (ws) => {
+// The .rip mirrors present in a workspace's tree.
+const mirrorPaths = (ws) => {
   const out = [];
   const walk = (dir) => {
     let entries;
@@ -190,8 +190,17 @@ const mirrorCount = (ws) => {
     }
   };
   walk(path.join(ws, '.rip', 'editor'));
-  return out.length;
+  return out;
 };
+const mirrorCount = (ws) => mirrorPaths(ws).length;
+
+// A mirror is a declaration-only auto-import stub when every line it
+// carries is one, and a COMPILED FACE otherwise. The distinction is what
+// the scaling and cache-purge pins are actually about: candidacy is
+// workspace-wide, compiling is not.
+const STUB_LINE = /^export (declare const [A-Za-z_$][\w$]*: any;|type [A-Za-z_$][\w$]* = any;|\{\};)$/;
+const isStub = (text) => text.split('\n').filter(Boolean).every((l) => STUB_LINE.test(l));
+const faceCount = (ws) => mirrorPaths(ws).filter((p) => !isStub(fs.readFileSync(p, 'utf8'))).length;
 
 const UTIL = 'export answer = 42\n';
 const APP = 'import { answer } from "./util.rip"\nbad = answer.toUpperCase()\n';
@@ -280,10 +289,12 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
     });
   }, 30000);
 
-  test('demand-driven: only the import closure materializes, however large the workspace', async () => {
+  test('demand-driven: only the import closure COMPILES, however large the workspace', async () => {
     // 200 unrelated .rip files + a 3-file chain: app → a → b. The
-    // program is the chain; the 200 contribute nothing (the scaling
-    // posture: startup work follows the closure, not the workspace).
+    // compiled program is the chain; the 200 are auto-import candidates
+    // and cost a source scan and a declaration line each (the scaling
+    // posture: startup COMPILE work follows the closure, not the
+    // workspace — candidacy is what follows the workspace).
     const files = {
       'chain/a.rip': 'import { b } from "./b.rip"\nexport a = b + 1\n',
       'chain/b.rip': 'export b = 41\n',
@@ -296,9 +307,11 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
       expect(api.codes('app.rip')).not.toContain(2307);
       expect(api.codes('app.rip')).toContain(2339); // the type crossed BOTH hops
 
-      // The structural pin: the mirror tree holds exactly the closure —
-      // app + a + b — never the 200 bystanders.
-      expect(mirrorCount(api.ws)).toBe(3);
+      // The structural pin: exactly the closure — app + a + b — holds a
+      // compiled face. The 200 bystanders are in the tree, and in tsgo's
+      // program, as stubs only; nothing compiled them.
+      await api.poll(() => mirrorCount(api.ws) === 203, 'every workspace .rip has a mirror');
+      expect(faceCount(api.ws)).toBe(3);
       const line = api.logs.find((l) => /closure of app\.rip: 2 compiled/.test(l));
       expect(line).toBeDefined();
     });
@@ -347,7 +360,11 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
       manifest.cacheIdentity = 'stale-build';
       fs.writeFileSync(manifestPath, JSON.stringify(manifest));
       await inSession(ws, async (api) => {
-        expect(mirrorCount(ws)).toBe(0); // purged at load, before any open
+        // Purged at load, before any open. Counted as FACES: stub
+        // population refills the tree behind the purge, and a stub carries
+        // no face from any build — it is derived from the source it sits
+        // beside, every session.
+        expect(faceCount(ws)).toBe(0);
         await api.open('app.rip', APP2);
         await api.change('app.rip', APP2 + '\n');
         expect(api.codes('app.rip')).toContain(2339); // and rebuilt on demand
@@ -374,11 +391,30 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
     });
   }, 30000);
 
-  test('lazy creation: a session that never opens a .rip document leaves the workspace untouched', async () => {
-    await inWorkspace({ 'util.rip': UTIL }, async (api) => {
+  // What creates the tree is the presence of RIP SOURCE, not a didOpen.
+  // Auto-import candidacy is workspace-wide — a `.rip` nothing has opened
+  // is still a candidate — so the whole workspace is stubbed at startup,
+  // which is a mirror tree with nothing open. The hygiene claim that
+  // survives is the one about territory: a workspace holding no `.rip`
+  // at all is never written to, whatever the session does.
+  test('lazy creation: a workspace with no .rip source is never written to', async () => {
+    await inWorkspace({ 'notes.md': '# nothing to mirror\n' }, async (api) => {
       // initialize + revalidation ran (the session helper waited for the
-      // cache log); nothing was opened — no .rip/ tree may exist.
+      // cache log), and stub population runs right behind it.
+      await api.sleep(1500);
       expect(fs.existsSync(path.join(api.ws, '.rip'))).toBe(false);
+    });
+  }, 30000);
+
+  test('a workspace .rip nothing opened is stubbed into the program at startup', async () => {
+    await inWorkspace({ 'util.rip': UTIL }, async (api) => {
+      await api.untilLog(/auto-import stubs:/);
+      const stub = fs.readFileSync(mirrorFileOf(api.ws, 'util.rip'), 'utf8');
+      // Declaration-only, and registered nowhere: the manifest that
+      // `pruneClosure` and `materializeClosure` both read has never heard
+      // of it, which is what lets the real face land over it later.
+      expect(stub).toContain('export declare const answer: any;');
+      expect(fs.existsSync(path.join(api.ws, '.rip', 'editor', '.cache.json'))).toBe(false);
     });
   }, 30000);
 

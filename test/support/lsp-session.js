@@ -190,6 +190,16 @@ export async function openSession(files) {
       });
     },
 
+    // A file DELETED from disk, announced exactly as VS Code's watcher
+    // would. The counterpart to touch(): the document is never opened,
+    // and only the watcher tells the server it is gone.
+    remove(name) {
+      try { fs.rmSync(path.join(dir, name)); } catch { /* already gone */ }
+      client.notify('workspace/didChangeWatchedFiles', {
+        changes: [{ uri: uri(name), type: 3 /* Deleted */ }],
+      });
+    },
+
     // Completion labels at a position.
     //
     // A completion issued while tsgo is still building the program answers
@@ -228,6 +238,32 @@ export async function openSession(files) {
         await sleep(every);
       }
       return null;
+    },
+
+    // Go-to-definition targets at a position, as `name.rip:line` strings
+    // relative to the session dir — what the editor would navigate to.
+    // Polls for a non-empty answer for the same reason completions() polls
+    // for a non-empty list: a request issued while tsgo is still building
+    // answers EMPTY, and an empty answer is exactly what a broken mirror
+    // produces, so the two must not be confusable. An empty result after
+    // the full wait is returned as-is — a caller asserting it must have
+    // proven the surface live somewhere that answers.
+    async definitions(name, line, character, { tries = 20, every = 300 } = {}) {
+      let targets = [];
+      for (let i = 0; i < tries; i++) {
+        const r = await client.request('textDocument/definition', {
+          textDocument: { uri: uri(name) }, position: { line, character },
+        }).catch(() => null);
+        const items = Array.isArray(r) ? r : (r ? [r] : []);
+        targets = items.map((it) => {
+          const target = it.uri ?? it.targetUri;
+          const range = it.range ?? it.targetSelectionRange ?? it.targetRange;
+          return path.relative(dir, fileURLToPath(target)) + ':' + range.start.line;
+        });
+        if (targets.length) return targets;
+        await sleep(every);
+      }
+      return targets;
     },
 
     // Semantic tokens for an open doc, decoded against the server's own legend
