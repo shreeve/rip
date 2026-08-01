@@ -65,3 +65,35 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
     await proc.exited if proc?
     control.stop true
     rmSync dir, { recursive: true, force: true }
+
+test! 'authored App shell is registered without generating a replacement', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-authored-shell-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
+  Bun.write! join(project, 'app', 'index.html'), '<!doctype html><h1>Authored</h1>'
+  controlSocket = join dir, 'janus.sock'
+  registration: any = null
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = new URL request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = await request.json()
+        return Response.json({ id: 'authored-registration' }, { status: 201 })
+      new Response(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--host', 'authored.test', '--control', controlSocket],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    await waitFor -> registration?
+    eq registration.files.shell, join(project, 'app', 'index.html')
+    ok not existsSync(join(project, 'static', 'generated', 'index.html'))
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 0
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
