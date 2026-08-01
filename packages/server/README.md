@@ -169,7 +169,8 @@ get '/export' ->
     'Content-Disposition': 'attachment; filename="export.bin"'
 ```
 
-`@send` serves a file chosen by API logic:
+`@body` sends bytes through the API worker. `@send` instead asks Janus to
+serve a file chosen by API logic:
 
 ```coffee
 get '/reports/:id.pdf' ->
@@ -179,10 +180,13 @@ get '/reports/:id.pdf' ->
   @send report.path, 'application/pdf'
 ```
 
-It uses `Bun.file`, infers MIME when no type is supplied, emits a weak ETag,
-answers matching `If-None-Match` requests with `304`, and defaults to
-`Cache-Control: no-cache`. Ordinary public/App files belong in Janus file
-roots; `@send` is for dynamic, protected, or otherwise API-selected files.
+`@send` resolves the path to an absolute pathname and returns an empty
+`X-Sendfile` instruction response. Janus opens and streams the file, supplies
+omitted type and validators, and owns conditional requests, ranges, framing,
+and transport. An explicit type and headers set through `@header` or `@cache`
+remain authoritative; the default cache policy is `no-cache`. Ordinary
+public/App files belong in Janus file roots; `@send` is for dynamic,
+protected, or otherwise API-selected files.
 
 ## Reading and Validating Input
 
@@ -308,7 +312,6 @@ Global and path-scoped middleware share one registration order. Calling
 Built-ins:
 
 - `cors`
-- `logger`
 - `compress`
 - `sessions`
 - `csrf`
@@ -367,10 +370,10 @@ export default
       localhost: 'ola'
   files:
     roots: [
-      { path: 'public', class: 'mutable' }
-      { path: 'sites/{site}/public', class: 'mutable' }
-      { path: 'sites/common/public', class: 'mutable' }
-      { path: 'app', class: 'live' }
+      { path: 'public' }
+      { path: 'sites/{site}/public', cache: 'revalidate', browse: true }
+      { path: 'sites/common/public', cache: 'forever' }
+      { path: 'app', cache: 'never' }
     ]
     proxyFirst: ['/api']
     shell: 'app/index.html'
@@ -379,18 +382,24 @@ export default
 Exact-host servers use `hosts` instead of `sites`. `hosts` and `sites` are
 mutually exclusive.
 
-File-root classes:
+Each root has optional `cache` policy: `never`, `revalidate`, or `forever`.
+Omission means `revalidate`. The manager emits the normalized policy on every
+Janus root. MIME detection is independent of cache policy.
 
-- `live` — `.rip` responses use `no-store`; other files revalidate.
-- `generated` — stable manager-produced coordination files.
-- `mutable` — stable URLs with Janus ETags and `no-cache`.
-- `versioned` — immutable content-addressed URLs.
+An object root may set strict Boolean `browse: true` to let Janus serve
+directory indexes for that root when browse is enabled in Caddy. The flag does
+not configure themes or renderers; those remain process-wide Janus
+configuration and are never exposed through Rip.
 
-The manager always prepends its own `static/generated` root. It resolves every
-declared path against the project directory and rejects unknown keys, missing
-roots, missing shells, malformed templates, overlapping API prefixes, and
-invalid hosts. With `files` declared, the project root is public only when its
-path is listed explicitly.
+The manager normally prepends its own `static/generated` root with
+`cache: 'revalidate'`. It resolves
+every declared path against the project directory and rejects unknown keys,
+missing roots, malformed browse values, missing shells, malformed templates,
+overlapping API prefixes, and invalid hosts. `shell` may be omitted only when
+every declared root is browsable, `proxyFirst` is empty, and the manager has no
+API upstreams. That terminal browse-only policy is registered exactly as
+declared, without generated or conventional roots. With `files` declared, the
+project root is public only when its path is listed explicitly.
 
 Without a `files` declaration, conventional discovery registers the generated
 root, `public/` and `app/` when present, and the project directory as a final
@@ -458,6 +467,8 @@ changed, activation failure stays in Maintenance for fix-forward recovery.
 
 ```bash
 rip server [project] [options]
+rip server browse <directory> [--host <host>] [--control <target>]
+rip server browse <directory> [--host <host>] [--until-restart]
 ```
 
 The project argument may identify an entry or directory. Discovery searches
@@ -472,10 +483,25 @@ for `app.rip`, `index.rip`, or `app/`.
 --allow-watch           required to watch under RIP_ENV=production
 --eager                 boot after settle instead of waiting for a ring
 --control <target>      Janus unix socket or HTTP(S) control endpoint
+--until-restart         process lease for `browse`; register and exit
+--access-log=<mode>     pretty, raw, or off (default pretty)
+--access-format <pic>   pretty-mode access picture
 ```
 
 `JANUS_CONTROL` supplies the control endpoint when `--control` is omitted.
 Startup validates the endpoint before claiming the server.
+
+`rip server browse` resolves and publishes exactly the named directory as one
+`revalidate` browsable root. It publishes no worker upstreams and no SPA shell. By
+default it chooses `browse-<random>.localhost`, prints
+`https://<host>/`, heartbeats while running, and deletes the registration on
+orderly shutdown. An explicit `--host` is claimed exactly and never changed on
+conflict.
+
+`--until-restart` creates a Janus process lease instead. The command prints the
+registration id, URL, and DELETE instruction, then exits without heartbeats or
+deletion. The registration survives Caddy reloads but ends with the Janus/Caddy
+process unless explicitly deleted.
 
 With watching enabled, one request per worker keeps retirement bounded.
 With watching disabled, raise concurrency for I/O-bound handlers and worker
@@ -496,10 +522,102 @@ Caddy and Janus own the public access log because they observe static hits,
 Hub traffic, cache hits, unknown hosts, and requests that never reach a
 worker.
 
-The manager and workers write lifecycle and application output to stdout.
-Worker lines identify their worker; a service manager such as journald owns
-rotation and retention. `mark()` lets application code attach one correlation
-value that Janus consumes for edge logging without exposing it to the client.
+The foreground manager subscribes to the current registration's live access
+stream. `--access-log=pretty` renders one line per request with the default
+picture:
+
+```text
+{local_time} {local_timezone} {duration_seconds:@s} │ {status} {mime_abbrev:<4} {response_bytes:@B} │ {method} {path} │ {mark}
+```
+
+Each replacement has this shape:
+
+```text
+{field}
+{field:[alignment]width[overflow]}
+{field:[alignment]width[overflow]@unit}
+{field:@unit}
+```
+
+`width` is an exact terminal display width from 1 through 1,024 columns.
+Alignment comes before the width:
+
+- omitted or `<` left-aligns a short value;
+- `>` right-aligns a short value;
+- `^` centers a short value.
+
+Let `S` be the requested width and `N` the value's natural display width. If
+`N <= S`, the renderer pads to exactly `S`: left alignment pads on the right,
+right alignment pads on the left, and center alignment puts
+`floor((S-N)/2)` spaces on the left and the remainder on the right.
+
+If `N > S`, omitted or `<` keeps the head and puts one ellipsis at the end;
+`>` keeps the tail and puts one ellipsis at the start. Leading `^` selects the
+centered interior and puts one ellipsis at each outer edge. That form requires
+`S >= 3`, so `{path:^2}` rejects.
+
+A trailing `^` after the width overrides those overflow rules and puts
+ellipsis in the middle. It works with omitted, `<`, or `>` alignment; alignment
+still affects only short-value padding. For slot `S`, the renderer assigns
+`L=floor(S/2)` columns to the prefix and `R=S-L-1` to the suffix, then emits
+`prefix(L) + … + suffix(R)`. Leading and trailing `^` cannot be combined:
+`{path:^20^}` rejects.
+
+For `ABCDEFG`, middle ellipsis produces:
+
+```text
+S=1  …
+S=2  A…
+S=3  A…G
+S=4  AB…G
+S=5  AB…FG
+S=6  ABC…FG
+```
+
+Examples:
+
+```text
+{method:8}                 exact 8 columns; left-align when short
+{status:>3}                exact 3 columns; right-align when short
+{path:^40}                 exact 40 columns; centered with edge ellipses
+{path:40^}                 exact 40 columns; put ellipsis in the middle
+{duration_seconds:@s}      scale only; no width bound
+{response_bytes:>8@B}      scale, then exact-width formatting
+{duration_seconds:20^@Hz}  scale, then put ellipsis in the middle
+```
+
+Scaling is available only for `duration_seconds` and `response_bytes`. The
+unit after `@` is arbitrary nonempty safe Unicode text; scaling happens before
+exact-width formatting. `{{` and `}}` emit literal braces.
+
+Raw event fields are `sequence`, `timestamp`, `request_id`, `app_id`,
+`app_name`, `tenant_site`, `request_host`, `client_ip`, `method`, `path`,
+`status`, `duration_seconds`, `response_bytes`, `mime_type`,
+`response_class`, `cache_verdict`, `selected_upstream`, `retry_count`,
+`outcome`, and `mark`. The renderer also provides `local_time`,
+`local_timezone`, and `mime_abbrev`. The first two are the event timestamp in
+the process local zone (`YYYY-MM-DD HH:mm:ss.SSS`) and its numeric
+`+HHMM`/`-HHMM` offset; `mime_abbrev` is the lowercase MIME subtype with
+common web types shortened. Null fields render `-`.
+
+Unknown fields, malformed formats, unsafe picture text, and invalid units
+reject at startup with zero-based UTF-16 offsets. `truncated_fields` and
+`omitted_fields` describe the wire record and are not picture fields.
+
+Widths use `Bun.stringWidth` and Unicode grapheme clusters. Combining
+sequences, wide glyphs, and ZWJ emoji are never split. Dangerous controls are
+first rendered as atomic `\u{XXXX}` text and are never cut in half. When a wide
+grapheme cannot exactly occupy its allocated content columns, deterministic
+spaces fill the gap so every bounded replacement is exactly `S` columns.
+
+`--access-log=raw` writes validated Janus NDJSON byte-for-byte to stdout.
+Manager reports, lifecycle notices, and both worker streams move to stderr so
+stdout remains pure. `off` opens no access subscription. A heartbeat-lease
+`browse` command follows re-registration; `browse --until-restart` has no
+foreground owner and rejects explicit access flags.
+
+`mark()` lets application code attach one correlation value that Janus
+consumes for access logging without exposing it to the client.
 
 ## Why Workers Stay Small
 

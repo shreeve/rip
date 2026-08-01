@@ -165,9 +165,8 @@ The experimental kill switch (feature branch + separate packages +
 codebase now is architectural:
 
 1. **The boot's `workspace` option is the seam.** A page without it
-   boots plain, byte-identically (D1); standalone `client()` serves
-   plain pages because no feed surface exists there. The door opens
-   only where the manager wrote the manifest and enabled the feed.
+   boots plain, byte-identically (D1). The manager enables the door
+   only when it writes the manifest and publishes the development feed.
 2. **Door and apply stay separate kill criteria.** The door is default;
    apply excellence is not. The apply engine, when M2 research starts,
    is a discardable `packages/app` module developed against the
@@ -405,7 +404,7 @@ Probe 0 observables (honesty bar, not a protocol):
 
 | # | Observable |
 |---|---|
-| D1 | A plain boot (no `workspace` option — standalone pages) → current Rip path unchanged |
+| D1 | A plain boot without the `workspace` option → non-Workspace launch path unchanged |
 | D2 | Disk change → Hub ding with `{id,hash}` as a freshness hint (no body) |
 | D3 | Client fetches latest module bytes at the ordinary `/app/…` URL with `cache: no-store` and computes `rash(bytes)` |
 | D4 | `Workspace.set` mutates the passport only after compile/activation succeeds (hash/source advance) |

@@ -5,28 +5,24 @@
 # ==============================================================================
 #
 # Routes, smart responses, read() validation, and AsyncLocalStorage-powered
-# request context. Apps written against this DSL run identically standalone
-# (`start port: 3000` → Bun.serve) and under a worker pool behind Janus
-# (the manager/worker runtime detects itself via environment).
+# request context for API workers managed behind Janus.
 #
 # Public exports:
 #   DSL:        get, post, put, patch, del, all, use, prefix
 #   Server:     start, startHandler, fetch, App
-#   Browser:    client
 #   Filters:    raw, before, after
 #   Handlers:   onError, notFound
 #   Errors:     error!, notice!, bail!
 #   Validation: read, registerValidator, getValidator, isRawType,
 #               validatorNames, check
 #   Context:    ctx, session, env, subrequest, mark
-#   Utilities:  isBlank, toName, toPhone, formatMoney, mimeType
+#   Utilities:  isBlank, toName, toPhone, formatMoney
 #   OpenAPI:    openapi, errorEnvelope
 #   Dev:        resetGlobals, requestContext, setCorsPreflightPolicy
 # ==============================================================================
 
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { readFileSync, readdirSync, existsSync } from 'node:fs'
-import { posix, join, resolve, dirname, basename } from 'node:path'
+import { posix, resolve } from 'node:path'
 
 # ==============================================================================
 # Module State
@@ -187,46 +183,6 @@ matchRoute = (method, pathname) ->
   null
 
 # ==============================================================================
-# MIME Types — Auto-detect content type from file extension
-# ==============================================================================
-
-_mimeTypes =
-  '.html':  'text/html; charset=UTF-8'
-  '.htm':   'text/html; charset=UTF-8'
-  '.css':   'text/css; charset=UTF-8'
-  '.js':    'application/javascript'
-  '.mjs':   'application/javascript'
-  '.json':  'application/json'
-  '.txt':   'text/plain; charset=UTF-8'
-  '.csv':   'text/csv; charset=UTF-8'
-  '.xml':   'application/xml'
-  '.svg':   'image/svg+xml'
-  '.png':   'image/png'
-  '.jpg':   'image/jpeg'
-  '.jpeg':  'image/jpeg'
-  '.gif':   'image/gif'
-  '.webp':  'image/webp'
-  '.avif':  'image/avif'
-  '.ico':   'image/x-icon'
-  '.woff':  'font/woff'
-  '.woff2': 'font/woff2'
-  '.ttf':   'font/ttf'
-  '.otf':   'font/otf'
-  '.mp3':   'audio/mpeg'
-  '.mp4':   'video/mp4'
-  '.webm':  'video/webm'
-  '.ogg':   'audio/ogg'
-  '.pdf':   'application/pdf'
-  '.zip':   'application/zip'
-  '.gz':    'application/gzip'
-  '.wasm':  'application/wasm'
-  '.rip':   'text/x-rip; charset=UTF-8'
-
-export mimeType = (path) ->
-  ext = path.substring(path.lastIndexOf('.'))
-  _mimeTypes[ext] or 'application/octet-stream'
-
-# ==============================================================================
 # Context Factory
 # ==============================================================================
 
@@ -328,15 +284,11 @@ CtxProto =
     @_respond data, status, headers, null
 
   send: (path, type) ->
-    file = Bun.file(path)
-    etag = "W/\"#{file.lastModified}-#{file.size}\""
-    if @req.raw.headers.get('if-none-match') is etag
-      return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control': @_out?.get('Cache-Control') or 'no-cache' } })
     out = (@_out ?= new Headers())
-    out.set 'Content-Type', (type or mimeType(path))
+    out.set 'X-Sendfile', resolve(path)
+    out.set 'Content-Type', type if type?
     out.set 'Cache-Control', 'no-cache' unless out.has 'Cache-Control'
-    out.set 'ETag', etag
-    new Response file, { status: 200, headers: out }
+    new Response null, { status: 200, headers: out }
 
   header: (name, value, opts: { append?: boolean } = {}) ->
     if value?
@@ -796,152 +748,17 @@ runHandler = (c, route) ->
 
 export startHandler = -> fetch
 
-# Bare start() stays synchronous: workers read __ripHandler after one
-# microtask, so a Promise-returning start() without top-level await would
-# race. start! 'app' takes the Promise path (client then listen) — dammit
-# makes the await explicit at the call site.
-export start = (dirOrOpts?: string | { host?: string, port?: number, silent?: boolean }, opts?: { host?: string, port?: number, silent?: boolean }) ->
-  if typeof dirOrOpts is 'string'
-    return client(dirOrOpts).then(-> startListen(opts ?? {}))
-  startListen(dirOrOpts ?? {})
-
-startListen = (opts) ->
-  opts ?= {}
+export start = ->
+  unless process.env.WORKER_ID? or process.env.SOCKET_PATH?
+    throw new Error 'start() requires the Rip worker runtime — run the application with `rip server`'
   handler = startHandler()
-
-  # Under the worker runtime, hand the fetch handler over and return —
-  # the worker owns the unix socket.
-  if process.env.WORKER_ID? or process.env.SOCKET_PATH?
-    globalThis.__ripHandler = handler
-    return handler
-
-  # Otherwise start standalone server
-  host = opts.host or 'localhost'
-  port = opts.port or 3000
-  server = Bun.serve { hostname: host, port: port, fetch: handler }
-  p "rip-server listening on http://#{host}:#{port}" unless opts.silent
-  server
+  globalThis.__ripHandler = handler
+  handler
 
 export App = (fn) ->
   resetGlobals()
   fn?.()
   startHandler()
-
-# ==============================================================================
-# Browser delivery — client()
-# ==============================================================================
-#
-# A directory named app/ next to the app entry holds the browser app:
-# every .rip file under it becomes a bundle module keyed by its disk path
-# ('app/routes/index.rip', 'app/stash.rip' — the disk path IS the store
-# path @rip-lang/app boots from; routes live under app/routes/).
-# client(dir) registers the delivery surface: GET / answers the boot page
-# (app/index.html when present, else
-# a generated one), GET /bundle.json ships the bundle with ETag
-# revalidation, GET /@rip/rip.js ships the browser runtime, and a notFound
-# fallback answers the boot page for GET requests accepting text/html — an
-# app's own later notFound registration replaces it.
-#
-# The standalone process runs under the Rip loader, so the compiler is
-# available to assemble the App at call time. Managed pooled workers set
-# RIP_API_ONLY and return before registering any App routes.
-
-# Standalone assemble is Rip-only. CSS under app/ is a watch-door concern
-# (manager syncFiles + browser soft-apply); it must never reach compile.
-clientModules = (dir) ->
-  modules = {}
-  moduleFiles = {}
-  walk = (at, prefix) ->
-    for e in readdirSync(at, { withFileTypes: true })
-      continue if e.name.startsWith('.')
-      full = join(at, e.name)
-      if e.isDirectory()
-        walk full, "#{prefix}#{e.name}/"
-      else if e.name.endsWith('.rip')
-        key = "#{prefix}#{e.name}"
-        modules[key] = readFileSync(full, 'utf8')
-        moduleFiles[key] = full
-  walk dir, 'app/'
-  # appDir is the project root (parent of app/) — projection overlays
-  # key as paths under it (api/models.rip), so relative imports resolve.
-  { modules, moduleFiles, appDir: dirname(dir) }
-
-# The generated boot page, titled with the app's name (the manager
-# passes its --name; standalone derives it from the app's directory).
-# Where the feed surface exists (a watching worker — the manager wrote
-# the manifest and files) the bootApp call carries `workspace: true`,
-# the browser half of the dev door; standalone pages boot plain.
-BOOT_PAGE = (workspace, title) -> """
-<!doctype html>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>#{title}</title>
-<div id="app"></div>
-<script type="module">
-  import { bootApp } from '/@rip/rip.js'
-  const debug = new URLSearchParams(location.search).has('debug')
-  bootApp({ url: '/bundle.json', debug#{if workspace then ', workspace: true' else ''} })
-</script>
-"""
-
-export client = (dir = null) ->
-  # Pooled workers are API-only. Janus serves the App, generated
-  # coordination files, runtime, static assets, shell, and Hub directly.
-  return if process.env.RIP_API_ONLY is '1'
-  clientDir = resolve(dir ?? 'app')
-  unless existsSync(clientDir)
-    throw new Error "client() found no app directory at #{clientDir}"
-  preload = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
-  unless preload?
-    throw new Error "client() cannot assemble the bundle: the rip loader is missing from execArgv — serving a browser app standalone requires running via `rip`"
-  srcDir = dirname(resolve(preload))
-  packagesDir = join(srcDir, '..', 'packages')
-  unless existsSync(packagesDir)
-    throw new Error "client() cannot assemble the bundle: no packages directory at #{packagesDir}"
-  runtimePath = join(srcDir, '..', 'dist', 'browser', 'rip.js')
-  unless existsSync(runtimePath)
-    throw new Error "client() cannot serve the browser runtime: nothing at #{runtimePath}"
-  # The specifier is a computed variable ON PURPOSE: importing this module
-  # statically would pull the compiler into the standalone server runtime.
-  bundleModule = join(srcDir, 'bundle.js')
-  { assembleBundle } = import!(bundleModule)
-  { modules, moduleFiles, appDir } = clientModules(clientDir)
-  bundleText = JSON.stringify assembleBundle { modules, moduleFiles, appDir, packagesDir }
-
-  etag = "\"#{Bun.hash(bundleText).toString(16)}\""
-  indexHtml = if clientDir? then join(clientDir, 'index.html') else null
-  indexHtml = null unless indexHtml? and existsSync(indexHtml)
-
-  # The page title derives from the app directory. Escaped — a directory
-  # name is filesystem input, not HTML.
-  title = basename(dirname(clientDir))
-  title = title.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
-
-  bootPage = (c) ->
-    if indexHtml?
-      c.send indexHtml, 'text/html; charset=UTF-8'
-    else
-      c.html BOOT_PAGE(false, title)
-
-  get '/', (c) -> bootPage(c)
-  get '/bundle.json', (c) ->
-    if c.req.header('if-none-match') is etag
-      return new Response(null, { status: 304, headers: { 'ETag': etag } })
-    c.body bundleText, 200, { 'Content-Type': 'application/json', 'ETag': etag }
-  # Local checkout runtime until a CDN-pinned rip.js lands.
-  get '/@rip/rip.js', (c) -> c.send runtimePath
-
-  # SPA fallback: an unmatched GET that accepts HTML answers the boot page,
-  # so client-side routes deep-link; everything else stays a plain 404.
-  # An app keeps its own notFound by registering it AFTER client(); one
-  # registered before would be replaced — loudly, never silently.
-  if _notFoundHandler?
-    console.warn 'rip-server: client() replaces the notFound handler registered before it — register the app notFound after client() to keep it'
-  notFound (c) ->
-    if c.req.method is 'GET' and (c.req.header('accept') or '').includes('text/html')
-      return bootPage(c)
-    new Response('Not Found', { status: 404 })
-  return
 
 # ==============================================================================
 # Utility: Get Current Environment/Context

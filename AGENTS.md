@@ -265,7 +265,7 @@ alters surface syntax updates ALL THREE in the same change.
     own binding, not `source({ fetch() { … }, staleTime: … })`
   - keyword / indented call shape over forced `({ … })` object
     literals when the callee accepts Rip's call forms
-  - dammit is the call: `client!` / `f! x`, not `client!()` / `f!(x)`
+ - dammit is the call: `f!` / `f! x`, not `f!()` / `f!(x)`
     when there are no required parens
   - postfix `?` is existence when bare (`x?` → `x != null`); a juxta
     argument makes it optional call — `f? x` is the same as `f?(x)` /

@@ -11,13 +11,15 @@ import { test, eq, ok, throws } from '@rip-lang/testing'
 import * as mod from '@rip-lang/server'
 import { rash } from '@rip-lang/app/rash'
 import { get, post, put, patch, del, all, use, prefix, before, after, onError, notFound, raw,
-         fetch as handle, App, resetGlobals, requestContext, startHandler, start, client,
+         fetch as handle, App, resetGlobals, requestContext, startHandler, start,
          read, error, notice, bail, ctx, session, subrequest, mark,
-         mimeType, errorEnvelope, openapi } from '@rip-lang/server'
-import { cors, logger, compress, sessions, csrf, secureHeaders, timeout, htmlJson } from '@rip-lang/server/middleware'
+         errorEnvelope, openapi } from '@rip-lang/server'
+import { cors, compress, sessions, csrf, secureHeaders, timeout, htmlJson } from '@rip-lang/server/middleware'
+import { DEFAULT_ACCESS_PICTURE, MAX_ACCESS_LINE_BYTES, AccessClient, AccessFramer, parseAccessPicture, pumpAccessOutput, renderAccess, scaleAccess, validateAccessLine, writeAccessOutput } from '@rip-lang/server/access'
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, unlinkSync, existsSync, readdirSync, symlinkSync, realpathSync } from 'fs'
-import { join, basename } from 'path'
+import { join, resolve } from 'path'
 import { tmpdir } from 'os'
+import { EventEmitter } from 'events'
 
 # Fixture trees live under the OS tmpdir — never in the package checkout.
 # Bun resolves @rip-lang/* from the importing file upward, so a bare /tmp
@@ -58,10 +60,10 @@ test "public entry exposes the DSL surface, named exports only", ->
   names = Object.keys(mod)
   for name in ['get', 'post', 'put', 'patch', 'del', 'all', 'use', 'prefix',
                'before', 'after', 'onError', 'notFound', 'raw',
-               'start', 'startHandler', 'fetch', 'App', 'client',
+               'start', 'startHandler', 'fetch', 'App',
                'read', 'error', 'notice', 'bail',
                'ctx', 'session', 'env', 'subrequest', 'mark',
-               'mimeType', 'errorEnvelope', 'openapi', 'resetGlobals']
+               'errorEnvelope', 'openapi', 'resetGlobals']
     ok names.includes(name), "missing export: #{name}"
   ok not ('default' of mod), 'no default export'
 
@@ -490,18 +492,8 @@ test "start() under a worker env hands over the fetch handler", ->
     delete process.env.WORKER_ID
     delete globalThis.__ripHandler
 
-test "bare start() defaults host and port (standalone)", ->
-  realServe = Bun.serve
-  captured = {}
-  Bun.serve = (o) ->
-    Object.assign(captured, o)
-    { stop: (->), port: o.port, hostname: o.hostname }
-  try
-    start()
-    eq captured.hostname, 'localhost'
-    eq captured.port, 3000
-  finally
-    Bun.serve = realServe
+test "start() rejects outside the managed worker runtime", ->
+  throws (-> start()), 'requires the Rip worker runtime'
 
 test "bare start() stays synchronous (worker handover)", ->
   process.env.WORKER_ID = '1'
@@ -706,15 +698,6 @@ test! "compress leaves an already-encoded response untouched", ->
   got = new Uint8Array(res.arrayBuffer!)
   ok Buffer.from(got).equals(Buffer.from(pre)), 'pre-encoded body passes through untouched'
 
-test! "logger writes one formatted line per request to a custom stream", ->
-  resetGlobals()
-  lines = []
-  use logger format: 'tiny', stream: { write: (msg) -> lines.push msg }
-  get '/logme' -> 'x'
-  handle! req('GET', '/logme')
-  eq lines.length, 1
-  ok /^GET \/logme 200 - \d+ms\n$/.test(lines[0]), "line: #{JSON.stringify(lines[0])}"
-
 test! "timeout middleware answers a slow handler with the 408 envelope", ->
   resetGlobals()
   use timeout ms: 60
@@ -738,16 +721,60 @@ test! "htmlJson renders JSON as html for iOS navigations only", ->
 
 console.log "\nUtilities"
 
-test "mimeType maps extensions and defaults to octet-stream", ->
-  eq mimeType('a/b.html'), 'text/html; charset=UTF-8'
-  eq mimeType('x.wasm'), 'application/wasm'
-  eq mimeType('mystery.bin'), 'application/octet-stream'
-
 test "App resets globals and returns a fresh handler", ->
   h = App ->
     get '/fresh' -> 'yes'
   ok typeof h is 'function'
   resetGlobals()
+
+# ==[ @send — Janus file-delivery instruction ]==
+
+console.log "\nsend()"
+
+resetGlobals()
+get '/send/default' -> @send 'server.rip'
+get '/send/custom' ->
+  @header 'Content-Disposition', 'attachment; filename="server.rip"'
+  @header 'ETag', '"release-42"'
+  @header 'Last-Modified', 'Sat, 01 Aug 2026 09:00:00 GMT'
+  @cache 'forever'
+  @send 'server.rip', 'text/x-rip; charset=UTF-8'
+get '/send/header-type' ->
+  @header 'Content-Type', 'application/x-custom'
+  @send 'server.rip'
+
+test! "send emits an absolute X-Sendfile instruction without reading file bytes", ->
+  res = handle! req('GET', '/send/default')
+  eq res.status, 200
+  eq res.headers.get('x-sendfile'), resolve('server.rip')
+  eq res.headers.get('content-type'), null
+  eq res.headers.get('etag'), null
+  eq res.headers.get('last-modified'), null
+  eq res.headers.get('cache-control'), 'no-cache'
+  eq (res.text!), ''
+
+test! "send preserves application representation and cache policy for Janus", ->
+  res = handle! req('GET', '/send/custom')
+  eq res.headers.get('x-sendfile'), resolve('server.rip')
+  eq res.headers.get('content-type'), 'text/x-rip; charset=UTF-8'
+  eq res.headers.get('content-disposition'), 'attachment; filename="server.rip"'
+  eq res.headers.get('etag'), '"release-42"'
+  eq res.headers.get('last-modified'), 'Sat, 01 Aug 2026 09:00:00 GMT'
+  eq res.headers.get('cache-control'), 'public, max-age=31536000, immutable'
+
+test! "send preserves a Content-Type header when no type argument is supplied", ->
+  res = handle! req('GET', '/send/header-type')
+  eq res.headers.get('content-type'), 'application/x-custom'
+
+test! "send leaves conditional and range semantics to Janus", ->
+  res = handle! req('GET', '/send/default', {
+    headers:
+      'If-None-Match': '"anything"'
+      Range: 'bytes=0-9'
+  })
+  eq res.status, 200
+  eq res.headers.get('x-sendfile'), resolve('server.rip')
+  eq (res.text!), ''
 
 # ==[ @cache — the Cache-Control directive vocabulary ]==
 
@@ -797,14 +824,6 @@ test! "a directive that does not parse throws — never a guessed TTL", ->
   for path in ['/c/word', '/c/unit', '/c/ms', '/c/neg', '/c/empty', '/c/frac']
     eq (handle! req('GET', path)).status, 500
 
-# ==[ client() — browser delivery through the DSL ]==
-#
-# These run standalone-mode assembly in-process: the suite runs under the
-# rip loader, so client() resolves the compiler-src bundle.js from the
-# --preload in execArgv exactly as an app run via `rip app.rip` would.
-
-console.log "\nclient()"
-
 CLIENT_STASH = """
 import { source } from '@rip-lang/app'
 export stash = {
@@ -823,153 +842,8 @@ writeClientDir = (dir, route = CLIENT_ROUTE) ->
   writeFileSync join(dir, 'app', 'routes', 'index.rip'), route
   writeFileSync join(dir, 'app', 'stash.rip'), CLIENT_STASH
 
-clientAppDir = tmpFixture('tmp-client-')
-writeClientDir clientAppDir
-resetGlobals()
-client! join(clientAppDir, 'app')
-
-test! "start! dir mounts the client then hands over (worker)", ->
-  dir = tmpFixture('tmp-start-app-')
-  writeClientDir dir
-  resetGlobals()
-  process.env.WORKER_ID = '1'
-  try
-    pending = start(join(dir, 'app'))
-    ok typeof pending.then is 'function', "start('app') returns a Promise — use start!"
-    h = await pending
-    ok typeof h is 'function'
-    ok globalThis.__ripHandler is h
-    res = handle! req('GET', '/')
-    eq res.status, 200
-    ok (res.text!).includes('id="app"'), 'start! dir registered the boot page'
-  finally
-    delete process.env.WORKER_ID
-    delete globalThis.__ripHandler
-    resetGlobals()
-    client! join(clientAppDir, 'app')
-
-test! "client(dir) serves the boot page at GET /: runtime import, bundle url, mount point", ->
-  res = handle! req('GET', '/')
-  eq res.status, 200
-  ok res.headers.get('content-type').includes('text/html')
-  html = res.text!
-  ok html.includes('/@rip/rip.js'), 'imports the served browser runtime'
-  ok html.includes('/bundle.json'), 'boots from the served bundle'
-  ok html.includes('id="app"'), 'carries the mount point'
-  ok html.includes('debug'), 'the ?debug query param reaches bootApp'
-
-test! "GET /bundle.json ships the client modules and the boot package", ->
-  res = handle! req('GET', '/bundle.json')
-  eq res.status, 200
-  eq res.headers.get('content-type'), 'application/json'
-  bundle = res.json!
-  ok bundle.modules['app/routes/index.rip']?, 'the route module travels under its store path'
-  ok bundle.modules['app/stash.rip']?, 'the stash module travels under its store path'
-  ok Object.keys(bundle.modules).some((k) -> k.startsWith('@rip-lang/app/')), 'the app package modules travel'
-  ok bundle.packages['@rip-lang/app']?, 'the boot package is claimed'
-
-test! "the bundle ETag round-trips as a 304", ->
-  first = handle! req('GET', '/bundle.json')
-  etag = first.headers.get('etag')
-  ok etag?.startsWith('"'), "the ETag is quoted: #{etag}"
-  res = handle! req('GET', '/bundle.json', { headers: { 'If-None-Match': etag } })
-  eq res.status, 304
-  eq res.headers.get('etag'), etag
-
-test! "GET /@rip/rip.js answers the browser runtime as JavaScript", ->
-  res = handle! req('GET', '/@rip/rip.js')
-  eq res.status, 200
-  eq res.headers.get('content-type'), 'application/javascript'
-  ok (res.text!).length > 0
-
-test! "the SPA fallback answers HTML navigations; everything else stays a 404", ->
-  page = handle! req('GET', '/profile', { headers: { Accept: 'text/html,application/xhtml+xml' } })
-  eq page.status, 200
-  ok (page.text!).includes('id="app"'), 'an unmatched HTML navigation gets the boot page'
-  api = handle! req('GET', '/nope', { headers: { Accept: 'application/json' } })
-  eq api.status, 404
-
-test! "an app/index.html replaces the generated boot page", ->
-  writeFileSync join(clientAppDir, 'app', 'index.html'),
-    '<!doctype html><title>custom</title><div id="app"></div>'
-  resetGlobals()
-  client! join(clientAppDir, 'app')
-  res = handle! req('GET', '/')
-  eq res.status, 200
-  ok (res.text!).includes('custom'), 'the app-provided page ships'
-  ok res.headers.get('etag')?, 'file serving keeps ETag revalidation'
-
-test! "a client module importing a server-only package rejects loudly at client()", ->
-  dir = tmpFixture('tmp-client-')
-  mkdirSync join(dir, 'app', 'routes'), { recursive: true }
-  writeFileSync join(dir, 'app', 'routes', 'index.rip'), """
-  import { get } from '@rip-lang/server'
-  export Home = component
-    render
-      h1 "x"
-  """
-  resetGlobals()
-  err = null
-  try
-    client! join(dir, 'app')
-  catch e
-    err = e
-  ok err?, 'a server-only import must not assemble'
-  ok err.message.includes('app/routes/index.rip'), "names the importer: #{err.message}"
-  ok err.message.includes('@rip-lang/server'), "names the package: #{err.message}"
-  rmSync dir, { recursive: true, force: true }
-
-test! "client() warns when its SPA fallback replaces an earlier notFound registration", ->
-  dir = tmpFixture('tmp-client-')
-  writeClientDir dir
-  resetGlobals()
-  notFound (c) -> new Response('custom 404', { status: 404 })
-  warns = []
-  original = console.warn
-  console.warn = (...args) -> warns.push args.join(' ')
-  try
-    client! join(dir, 'app')
-  finally
-    console.warn = original
-  ok warns.some((w) -> w.includes('notFound')), "the replacement is loud: #{JSON.stringify warns}"
-  resetGlobals()
-  rmSync dir, { recursive: true, force: true }
-
-rmSync clientAppDir, { recursive: true, force: true }
-resetGlobals()
-
-# ==[ client() dev feed — the worker half of the workspace door ]==
-#
-# Worker-mode client() with the feed env set: the manifest, latest-file
-# door, bridge, and fresh-bundle routes — driven in-process through the
-# fetch handler against files a manager would have written.
-
 fileHash = (s) -> new Bun.CryptoHasher('sha256').update(s).digest('hex').slice(0, 16)
 ripHash = (s) -> rash new TextEncoder().encode(s)
-
-test! "the workspace rides the app package — one claim, no second package, door still closed standalone", ->
-  dir = tmpFixture('tmp-client-')
-  writeClientDir dir
-  try
-    resetGlobals()
-    client! join(dir, 'app')
-    bundle = (handle! req('GET', '/bundle.json')).json!
-    ok bundle.packages['@rip-lang/app']?, 'the app package is claimed'
-    eq bundle.packages['@rip-lang/workspace'], undefined
-    ok bundle.modules['@rip-lang/app/workspace.rip']?, 'the workspace module travels inside the app package'
-    ok bundle.modules['@rip-lang/app/feed.rip']?, 'the feed module travels inside the app package'
-    # Standalone has no manager and therefore no generated manifest or door: a
-    # workspace-mode boot would die on its manifest fetch, so the page
-    # opens the door only in worker mode (RIP_MANIFEST_PATH present).
-    standalonePage = (handle! req('GET', '/')).text!
-    ok not standalonePage.includes('workspace: true'), 'standalone never opens the door'
-    # Standalone titles the page after the app's directory.
-    ok standalonePage.includes("<title>#{basename(dir)}</title>"), "the standalone page is titled after its directory: #{basename(dir)}"
-  finally
-    resetGlobals()
-    rmSync dir, { recursive: true, force: true }
-
-resetGlobals()
 
 # ==============================================================================
 # Worker + manager runtimes — real subprocesses over unix sockets, against a
@@ -980,6 +854,7 @@ resetGlobals()
 PRELOAD    = process.execArgv.find (a) -> a.startsWith('--preload=')
 WORKER_BIN = "#{import.meta.dir}/worker.rip"
 SERVER_BIN = "#{import.meta.dir}/server.rip"
+RIP_BIN    = "#{import.meta.dir}/../../bin/rip"
 
 TEST_KNOBS =
   RIP_ENV: 'development'
@@ -1329,8 +1204,8 @@ test "serve.rip normalization emits the exact Janus tenant shape with absolute p
           localhost: 'ola'
       files:
         roots: [
-          { path: join(dir, 'sites/{site}/public'), class: 'mutable' }
-          { path: join(dir, 'sites/common/public'), class: 'mutable' }
+          { path: join(dir, 'sites/{site}/public'), cache: 'revalidate', browse: false }
+          { path: join(dir, 'sites/common/public'), cache: 'revalidate', browse: false }
         ]
         proxy_first: ['/api']
         shell: join(dir, 'app/index.html')
@@ -1418,6 +1293,70 @@ test "ordinary serve.rip apps retain exact hosts", ->
     eq normalizeServeConfig({ name: 'plain', hosts: ['plain.example'] }, dir),
       name: 'plain'
       hosts: ['plain.example']
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test "serve.rip emits strict root cache and browse policy and permits terminal browse policy without a shell", ->
+  dir = tenantTree()
+  try
+    browsable =
+      files:
+        roots: [
+          { path: 'sites/common/public', cache: 'revalidate', browse: true }
+          { path: 'app', cache: 'never', browse: true }
+        ]
+    eq normalizeServeConfig(browsable, dir),
+      files:
+        roots: [
+          { path: join(dir, 'sites/common/public'), cache: 'revalidate', browse: true }
+          { path: join(dir, 'app'), cache: 'never', browse: true }
+        ]
+        proxy_first: []
+
+    withFalse = tenantConfig()
+    withFalse.files.roots[1] = { path: 'sites/common/public', cache: 'forever', browse: false }
+    eq normalizeServeConfig(withFalse, dir).files.roots[1].browse, false
+    eq normalizeServeConfig(withFalse, dir).files.roots[1].cache, 'forever'
+
+    bad: any = browsable
+    bad.files.roots[0].browse = null
+    throws (-> normalizeServeConfig(bad, dir)), 'browse must be a Boolean'
+
+    bad = browsable
+    bad.files.roots[0].browse = 'true'
+    throws (-> normalizeServeConfig(bad, dir)), 'browse must be a Boolean'
+
+    bad =
+      files:
+        roots: [{ path: 'app', cache: 'sometimes', browse: true }]
+    throws (-> normalizeServeConfig(bad, dir)), 'cache must be never, revalidate, or forever'
+
+    bad =
+      files:
+        roots: [{ path: 'app', class: 'anything', browse: true }]
+    throws (-> normalizeServeConfig(bad, dir)), 'unknown serve.rip files.roots[0] key "class"'
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test "serve.rip requires a shell outside all-browsable no-proxy policy", ->
+  dir = tenantTree()
+  try
+    bad: any =
+      files:
+        roots: [{ path: 'app', cache: 'never', browse: false }]
+    throws (-> normalizeServeConfig(bad, dir)), 'files.shell is required'
+
+    bad =
+      files:
+        roots: [{ path: 'app', cache: 'never', browse: true }]
+        proxyFirst: ['/api']
+    throws (-> normalizeServeConfig(bad, dir)), 'files.shell is required'
+
+    bad =
+      files:
+        roots: [{ path: 'app', cache: 'never', browse: true }]
+        shell: null
+    throws (-> normalizeServeConfig(bad, dir)), 'files.shell must be a non-empty string'
   finally
     rmSync dir, { recursive: true, force: true }
 
@@ -1576,7 +1515,7 @@ test! "fixing the file recovers on the next ring", ->
 test! "shutdown publishes [], drains, and deletes the app", ->
   mgrProc.kill('SIGTERM')
   code = await mgrProc.exited
-  eq code, 0
+  eq code, 143
   out = new Response(mgrProc.stdout).text!
   ok /rip-server: SIGTERM — deregistering tapp \(app-\d+\), draining workers/.test(out),
     "shutdown logs one line naming the signal: #{JSON.stringify(out)}"
@@ -1738,6 +1677,9 @@ spawnManager = (dir, controlSock, args, extraEnv = {}, stderr = 'inherit', stdou
 managerSockPuts = (calls) ->
   calls.filter (c) -> c.method is 'PUT' and c.body?.upstreams? and not c.body.upstreams.some (u) -> u.doorbell
 
+managerShutdownCut = (calls) ->
+  calls.some (call) -> call.method is 'PUT' and call.body?.upstreams?.length is 0
+
 managerCommand = (dir, args) ->
   proc = Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, ...args],
     cwd: dir
@@ -1749,6 +1691,455 @@ managerCommand = (dir, args) ->
   err = new Response(proc.stderr).text()
   code = await proc.exited
   { code, out: await out, err: await err }
+
+spawnBrowse = (dir, controlSock, args = [], extraEnv = {}) ->
+  Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, 'browse', dir, '--control', controlSock, ...args],
+    cwd: dir
+    stdin: 'ignore'
+    stdout: 'pipe'
+    stderr: 'pipe'
+    env: { ...process.env, ...TEST_KNOBS, ...extraEnv }
+
+processChildren = (pid) ->
+  result = Bun.spawnSync ['pgrep', '-P', "#{pid}"],
+    stdout: 'pipe'
+    stderr: 'ignore'
+  return [] unless result.exitCode is 0
+  result.stdout.toString().trim().split('\n').filter(Boolean).map(Number)
+
+processAlive = (pid) ->
+  result = Bun.spawnSync ['ps', '-o', 'stat=', '-p', "#{pid}"],
+    stdout: 'pipe'
+    stderr: 'ignore'
+  state = result.stdout.toString().trim()
+  result.exitCode is 0 and state.length > 0 and not state.startsWith('Z')
+
+test! "browse process lease registers one exact root, prints recovery data, and exits", ->
+  ctlSock = join(tmpdir(), "rip-janus-browse-process-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-browse-process-')
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnBrowse dir, ctlSock, ['--host', 'files.example', '--until-restart']
+  try
+    out = new Response(proc.stdout).text()
+    err = new Response(proc.stderr).text()
+    code = await proc.exited
+    eq code, 0
+    eq await err, ''
+    eq (await out).trim().split('\n'),
+      ['id: app-x', 'url: https://files.example/', "delete: DELETE /1.0/apps/app-x on #{ctlSock}"]
+    eq calls,
+      [{
+        method: 'POST'
+        path: '/1.0/apps'
+        body:
+          name: 'browse'
+          hosts: ['files.example']
+          upstreams: []
+          lease: 'process'
+          files:
+            roots: [{ path: realpathSync(dir), cache: 'revalidate', browse: true }]
+            proxy_first: []
+      }]
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "browse heartbeat lease beats while alive and deletes on orderly shutdown", ->
+  ctlSock = join(tmpdir(), "rip-janus-browse-heartbeat-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-browse-heartbeat-')
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnBrowse dir, ctlSock, ['--host', 'live-files.example']
+  try
+    waitFor! -> calls.some (call) -> call.path.endsWith('/heartbeat')
+    proc.kill('SIGTERM')
+    code = await proc.exited
+    eq code, 143
+    reg = calls.find (call) -> call.path is '/1.0/apps'
+    eq reg.body.lease, 'heartbeat'
+    eq reg.body.upstreams, []
+    eq reg.body.files,
+      roots: [{ path: realpathSync(dir), cache: 'revalidate', browse: true }]
+      proxy_first: []
+    ok calls.some((call) -> call.method is 'DELETE' and call.path is '/1.0/apps/app-x'), 'orderly shutdown deletes the registration'
+    eq (await new Response(proc.stdout).text()).trim(), 'https://live-files.example/'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "browse raw EPIPE stops access, deletes registration, and exits 1", ->
+  ctlSock = join(tmpdir(), "rip-janus-browse-epipe-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-browse-epipe-')
+  calls = []
+  gate: any = {}
+  gate.promise = new Promise (resolve) -> gate.open = resolve
+  accessRequested = false
+  stub = stubJanus ctlSock, calls, (call) ->
+    if call.method is 'POST' and call.path is '/1.0/apps'
+      return Response.json({ id: 'browse-aaaaaa' }, { status: 201 })
+    if call.method is 'GET' and call.path.endsWith('/access')
+      accessRequested = true
+      return gate.promise
+    null
+  proc = spawnBrowse dir, ctlSock, ['--host', 'epipe.example', '--access-log=raw']
+  errText = new Response(proc.stderr).text()
+  try
+    waitFor! -> accessRequested
+    reader = proc.stdout.getReader()
+    reader.cancel!()
+    hello = new TextEncoder().encode(JSON.stringify({ v: 1, type: 'hello', app_id: 'browse-aaaaaa', app_name: 'browse', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 }) + '\n')
+    gate.open new Response(new ReadableStream({ start: (controller) -> controller.enqueue(hello); controller.close() }))
+    code = await proc.exited
+    eq code, 1
+    ok calls.some((call) -> call.method is 'DELETE' and call.path is '/1.0/apps/browse-aaaaaa'), 'terminal output cleanup deregisters'
+    ok (await errText).includes('terminal access output failure'), 'the output failure is named'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "browse recovery output EPIPE deletes heartbeat and process registrations", ->
+  runCase = (untilRestart) ->
+    ctlSock = join(tmpdir(), "rip-janus-browse-report-epipe-#{untilRestart}-#{Date.now()}-#{rand(1e6)}.sock")
+    dir = tmpFixture('tmp-browse-report-epipe-')
+    calls = []
+    stub = stubJanus ctlSock, calls, (call) ->
+      return Response.json({ id: 'browse-aaaaaa' }, { status: 201 }) if call.method is 'POST' and call.path is '/1.0/apps'
+      null
+    args = ['--host', 'report-epipe.example']
+    args.push '--access-log=off' unless untilRestart
+    args.push '--until-restart' if untilRestart
+    proc = spawnBrowse dir, ctlSock, args
+    try
+      reader = proc.stdout.getReader()
+      reader.cancel!()
+      eq (await proc.exited), 1
+      ok calls.some((call) -> call.method is 'DELETE' and call.path is '/1.0/apps/browse-aaaaaa'), 'failed recovery output deletes its registration'
+    finally
+      try proc.kill('SIGKILL')
+      await proc.exited
+      stub.stop(true)
+      rmSync dir, { recursive: true, force: true }
+  runCase! false
+  runCase! true
+
+test! "a first signal observed at registration deletes before browse output", ->
+  runCase = (untilRestart, signal) ->
+    ctlSock = join(tmpdir(), "rip-janus-browse-early-#{untilRestart}-#{signal}-#{Date.now()}-#{rand(1e6)}.sock")
+    dir = tmpFixture('tmp-browse-early-')
+    calls = []
+    registration: any = {}
+    registration.promise = new Promise (resolve) -> registration.open = resolve
+    stub = stubJanus ctlSock, calls, (call) ->
+      return registration.promise if call.method is 'POST' and call.path is '/1.0/apps'
+      null
+    args = ['--host', 'early.example']
+    args.push '--access-log=off' unless untilRestart
+    args.push '--until-restart' if untilRestart
+    proc = spawnBrowse dir, ctlSock, args
+    try
+      while not calls.some((call) -> call.method is 'POST' and call.path is '/1.0/apps')
+        await Bun.sleep(0)
+      proc.kill signal
+      registration.open Response.json({ id: 'browse-aaaaaa' }, { status: 201 })
+      eq (await proc.exited), if signal is 'SIGINT' then 130 else 143
+      ok calls.some((call) -> call.method is 'DELETE' and call.path is '/1.0/apps/browse-aaaaaa'), 'the registration is deleted before any output handoff'
+    finally
+      try proc.kill('SIGKILL')
+      await proc.exited
+      stub.stop(true)
+      rmSync dir, { recursive: true, force: true }
+  for signal in ['SIGINT', 'SIGTERM']
+    runCase! false, signal
+    runCase! true, signal
+
+test! "raw manager startup output EPIPE performs orderly deregistration", ->
+  ctlSock = join(tmpdir(), "rip-janus-manager-report-epipe-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-manager-report-epipe-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  calls = []
+  never = new Promise(->)
+  stub = stubJanus ctlSock, calls, (call) ->
+    return Response.json({ id: 'manager-aaaaaa' }, { status: 201 }) if call.method is 'POST' and call.path is '/1.0/apps'
+    return never if call.method is 'GET' and call.path.endsWith('/access')
+    null
+  proc = spawnManager dir, ctlSock, ['--name', 'manager', '--host', 'manager.example', '-w', '1', '--no-watch', '--access-log=raw'], {}, 'pipe', 'pipe'
+  try
+    reader = proc.stderr.getReader()
+    reader.cancel!()
+    eq (await proc.exited), 1
+    ok managerShutdownCut(calls), 'raw report failure cuts admission'
+    ok calls.some((call) -> call.method is 'DELETE' and call.path is '/1.0/apps/manager-aaaaaa'), 'raw report failure deletes the registration'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "browse shutdown wins a heartbeat-404 race without re-registering", ->
+  ctlSock = join(tmpdir(), "rip-janus-browse-race-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-browse-race-')
+  calls = []
+  heartbeat: any = {}
+  heartbeat.promise = new Promise (resolve) -> heartbeat.open = resolve
+  heartbeatStarted = false
+  stub = stubJanus ctlSock, calls, (call) ->
+    if call.method is 'POST' and call.path is '/1.0/apps'
+      return Response.json({ id: 'browse-aaaaaa' }, { status: 201 })
+    if call.method is 'POST' and call.path.endsWith('/heartbeat')
+      heartbeatStarted = true
+      return heartbeat.promise
+    null
+  proc = spawnBrowse dir, ctlSock, ['--host', 'race.example', '--access-log=off']
+  try
+    waitFor! -> heartbeatStarted
+    proc.kill 'SIGTERM'
+    heartbeat.open new Response(null, { status: 404 })
+    code = await proc.exited
+    eq code, 143
+    eq calls.filter((call) -> call.method is 'POST' and call.path is '/1.0/apps').length, 1
+    ok calls.some((call) -> call.method is 'DELETE' and call.path is '/1.0/apps/browse-aaaaaa'), 'the original registration is deleted'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "browse shutdown deletes a replacement already in flight", ->
+  ctlSock = join(tmpdir(), "rip-janus-browse-replace-race-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-browse-replace-race-')
+  calls = []
+  replacement: any = {}
+  replacement.promise = new Promise (resolve) -> replacement.open = resolve
+  posts = 0
+  replacementStarted = false
+  stub = stubJanus ctlSock, calls, (call) ->
+    if call.method is 'POST' and call.path is '/1.0/apps'
+      posts += 1
+      return Response.json({ id: 'browse-aaaaaa' }, { status: 201 }) if posts is 1
+      replacementStarted = true
+      return replacement.promise
+    if call.method is 'POST' and call.path.endsWith('/heartbeat')
+      return new Response(null, { status: 404 })
+    null
+  proc = spawnBrowse dir, ctlSock, ['--host', 'replace-race.example', '--access-log=off']
+  try
+    waitFor! -> replacementStarted
+    proc.kill 'SIGTERM'
+    replacement.open Response.json({ id: 'browse-bbbbbb' }, { status: 201 })
+    code = await proc.exited
+    eq code, 143
+    eq posts, 2
+    ok calls.some((call) -> call.method is 'DELETE' and call.path is '/1.0/apps/browse-bbbbbb'), 'the in-flight replacement becomes shutdown cleanup authority'
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "first SIGINT/SIGTERM performs orderly cleanup for direct and bin/rip launches", ->
+  runOrderlyCase = (wrapped, signal) ->
+    ctlSock = join(tmpdir(), "rip-janus-orderly-#{if wrapped then 'wrapper' else 'direct'}-#{signal}-#{Date.now()}-#{rand(1e6)}.sock")
+    dir = tmpFixture('tmp-browse-orderly-')
+    calls = []
+    stub = stubJanus ctlSock, calls, (call) ->
+      if call.method is 'POST' and call.path is '/1.0/apps'
+        return Response.json({ id: 'browse-aaaaaa' }, { status: 201 })
+      null
+    command =
+      if wrapped
+        [process.execPath, RIP_BIN, 'server', 'browse', dir, '--control', ctlSock, '--host', 'orderly.example', '--access-log=off']
+      else
+        [process.execPath, PRELOAD, SERVER_BIN, 'browse', dir, '--control', ctlSock, '--host', 'orderly.example', '--access-log=off']
+    proc = Bun.spawn command,
+      cwd: dir
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'ignore'
+      env: { ...process.env, ...TEST_KNOBS }
+    try
+      waitFor! -> calls.some((call) -> call.method is 'POST' and call.path.endsWith('/heartbeat'))
+      proc.kill signal
+      eq (await proc.exited), if signal is 'SIGINT' then 130 else 143
+      ok calls.some((call) -> call.method is 'DELETE' and call.path is '/1.0/apps/browse-aaaaaa')
+    finally
+      try proc.kill('SIGKILL')
+      await proc.exited
+      stub.stop(true)
+      rmSync dir, { recursive: true, force: true }
+  for signal in ['SIGINT', 'SIGTERM']
+    runOrderlyCase! false, signal
+    runOrderlyCase! true, signal
+
+test! "second SIGINT/SIGTERM forwards that signal and exits immediately for direct and bin/rip launches", ->
+  runSignalCase = (wrapped, signal) ->
+    ctlSock = join(tmpdir(), "rip-janus-signal-#{if wrapped then 'wrapper' else 'direct'}-#{signal}-#{Date.now()}-#{rand(1e6)}.sock")
+    dir = tmpFixture('tmp-manager-signal-')
+    marker = join(dir, 'worker-signals')
+    writeFileSync join(dir, 'app.rip'), """
+import { appendFileSync } from 'fs'
+import { start } from '@rip-lang/server'
+process.on '#{signal}', -> appendFileSync #{JSON.stringify(marker)}, '#{signal}\\n'
+start()
+"""
+    calls = []
+    stub = stubJanus ctlSock, calls
+    command =
+      if wrapped
+        [process.execPath, RIP_BIN, 'server', '--control', ctlSock, '--name', 'signal', '-w', '2', '--no-watch', '--access-log=off']
+      else
+        [process.execPath, PRELOAD, SERVER_BIN, '--control', ctlSock, '--name', 'signal', '-w', '2', '--no-watch', '--access-log=off']
+    proc = Bun.spawn command,
+      cwd: dir
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'ignore'
+      env: { ...process.env, ...TEST_KNOBS, RIP_DRAIN_MS: '5000', RIP_KILL_MS: '5000' }
+    managerPid = null
+    workerPids = []
+    try
+      publication = waitFor! -> managerSockPuts(calls).find((call) -> call.body.upstreams.length is 2)
+      managerPid = if wrapped then waitFor!(-> processChildren(proc.pid)[0]) else proc.pid
+      workerPids = waitFor! ->
+        children = processChildren(managerPid)
+        if children.length >= 2 then children else null
+      proc.kill signal
+      waitFor! -> managerShutdownCut(calls)
+      proc.kill signal
+      code = await proc.exited
+      eq code, if signal is 'SIGINT' then 130 else 143
+      waitFor! -> existsSync(marker) and readFileSync(marker, 'utf8').trim().split('\n').length is 2
+      eq readFileSync(marker, 'utf8').trim().split('\n'), [signal, signal]
+    finally
+      try proc.kill('SIGKILL')
+      try process.kill(managerPid, 'SIGKILL') if managerPid?
+      for pid in workerPids
+        try process.kill pid, 'SIGKILL'
+      await proc.exited
+      stub.stop(true)
+      rmSync dir, { recursive: true, force: true }
+  for signal in ['SIGINT', 'SIGTERM']
+    runSignalCase! false, signal
+    runSignalCase! true, signal
+
+test! "second signal exits immediately while workers are still booting", ->
+  ctlSock = join(tmpdir(), "rip-janus-booting-signal-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-manager-booting-signal-')
+  writeFileSync join(dir, 'app.rip'), '''
+import { start } from '@rip-lang/server'
+process.on 'SIGINT', -> null
+process.on 'SIGTERM', -> null
+sleep! 30000
+start()
+'''
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['--name', 'booting', '-w', '2', '--no-watch', '--access-log=off'], { RIP_BOOT_DEADLINE_MS: '30000', RIP_DRAIN_MS: '5000', RIP_KILL_MS: '5000' }, 'ignore'
+  children = []
+  stage = (name, fn) ->
+    try
+      return waitFor! fn, 10000
+    catch e
+      throw new Error("#{name}: #{e.message}; children=#{JSON.stringify(processChildren(proc.pid))}; shutdownCut=#{managerShutdownCut(calls)}")
+  try
+    stage! 'waiting for two booting children', ->
+      found = processChildren(proc.pid)
+      if found.length >= 2
+        children = found
+        true
+      else
+        false
+    proc.kill 'SIGTERM'
+    stage! 'waiting for first-shutdown admission cut', -> managerShutdownCut(calls)
+    forcedAt = Date.now()
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+    ok Date.now() - forcedAt < 500, 'the second signal skips cleanup waits'
+  finally
+    try proc.kill('SIGKILL')
+    for pid in children
+      try process.kill pid, 'SIGKILL'
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "browse retries generated host conflicts but never changes an explicit host", ->
+  ctlSock = join(tmpdir(), "rip-janus-browse-conflict-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-browse-conflict-')
+  calls = []
+  conflicts = { n: 0 }
+  stub = stubJanus ctlSock, calls, (call) ->
+    if call.method is 'POST' and call.path is '/1.0/apps' and conflicts.n < 2
+      conflicts.n += 1
+      return new Response('claimed', { status: 409 })
+    null
+  proc = spawnBrowse dir, ctlSock, ['--until-restart']
+  try
+    code = await proc.exited
+    eq code, 0
+    registrations = calls.filter (call) -> call.path is '/1.0/apps'
+    eq registrations.length, 3
+    hosts = registrations.map (call) -> call.body.hosts[0]
+    ok hosts.every((host) -> /^browse-[a-f0-9]{12}\.localhost$/.test(host)), "all generated hosts have the contracted shape: #{hosts}"
+    eq new Set(hosts).size, 3
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+
+  explicitSock = join(tmpdir(), "rip-janus-browse-explicit-#{Date.now()}-#{rand(1e6)}.sock")
+  explicitCalls = []
+  explicitStub = stubJanus explicitSock, explicitCalls, (call) ->
+    return new Response('claimed', { status: 409 }) if call.method is 'POST' and call.path is '/1.0/apps'
+    null
+  explicit = spawnBrowse dir, explicitSock, ['--host', 'fixed.example', '--until-restart']
+  try
+    err = new Response(explicit.stderr).text()
+    code = await explicit.exited
+    ok code isnt 0, 'explicit conflict exits nonzero'
+    ok (await err).includes('fixed.example'), 'the conflict names the fixed host'
+    eq explicitCalls.filter((call) -> call.path is '/1.0/apps').length, 1
+  finally
+    try explicit.kill('SIGKILL')
+    await explicit.exited
+    explicitStub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "browse rejects a missing directory before touching the control plane", ->
+  dir = tmpFixture('tmp-browse-invalid-')
+  missing = join(dir, 'missing')
+  result = managerCommand dir, ['browse', missing, '--control', join(dir, 'no-control.sock'), '--until-restart']
+  try
+    got = await result
+    ok got.code isnt 0
+    ok got.err.includes('browse directory not found'), "directory error wins: #{got.err}"
+    ok not got.err.includes('control endpoint unreachable'), "control was not contacted: #{got.err}"
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test! "a managed shell-less browse policy rejects API upstreams before registration", ->
+  dir = tmpFixture('tmp-browse-managed-api-')
+  mkdirSync join(dir, 'files')
+  writeFileSync join(dir, 'app.rip'), appSource('api')
+  writeFileSync join(dir, 'serve.rip'), """
+  export default
+    files:
+      roots: [{ path: 'files', cache: 'revalidate', browse: true }]
+  """
+  try
+    result = managerCommand dir, ['--control', join(dir, 'no-control.sock'), '--no-watch']
+    got = await result
+    ok got.code isnt 0
+    ok got.err.includes('shell-less browse policy cannot publish API upstreams'), "names the policy violation: #{got.err}"
+    ok not got.err.includes('control endpoint unreachable'), "registration was never attempted: #{got.err}"
+  finally
+    rmSync dir, { recursive: true, force: true }
 
 writeTenantServe = (dir) ->
   mkdirSync join(dir, 'sites', 'common', 'public'), { recursive: true }
@@ -1788,9 +2179,9 @@ test! "manager registers normalized tenant sites from app-local serve.rip", ->
           localhost: 'ola'
       files:
         roots: [
-          { path: join(root, 'static/generated'), class: 'generated' }
-          { path: join(root, 'sites/{site}/public'), class: 'mutable' }
-          { path: join(root, 'sites/common/public'), class: 'mutable' }
+          { path: join(root, 'static/generated'), cache: 'revalidate', browse: false }
+          { path: join(root, 'sites/{site}/public'), cache: 'revalidate', browse: false }
+          { path: join(root, 'sites/common/public'), cache: 'revalidate', browse: false }
         ]
         proxy_first: ['/api']
         shell: join(root, 'app/index.html')
@@ -2223,8 +2614,7 @@ test! "an app/ dir publishes stable edge files while workers remain API-only", -
   ctlSock = join(tmpdir(), "rip-janus-client-#{Date.now()}-#{rand(1e6)}.sock")
   dir = tmpFixture('tmp-manager-')
   writeFileSync join(dir, 'app.rip'), """
-  import { get, client, start } from '@rip-lang/server'
-  client!()
+  import { get, start } from '@rip-lang/server'
   get '/hi' -> 'hi'
   start()
   """
@@ -2245,12 +2635,11 @@ test! "an app/ dir publishes stable edge files while workers remain API-only", -
     pageText = readFileSync(join(generated, 'index.html'), 'utf8')
     ok pageText.includes('<title>clientapp</title>')
     registration = calls.find (c) -> c.method is 'POST' and c.path is '/1.0/apps'
-    eq registration.body.files.roots[0], { path: generated, class: 'generated' }
+    eq registration.body.files.roots[0], { path: generated, cache: 'revalidate', browse: false }
     eq registration.body.files.shell, join(generated, 'index.html')
     bell = calls.find((c) -> c.method is 'PUT' and c.body?.upstreams?.some((u) -> u.doorbell)).body.upstreams[0].path
     writeFileSync join(dir, 'app.rip'), """
-    import { get, client, start } from '@rip-lang/server'
-    client!()
+    import { get, start } from '@rip-lang/server'
     get '/hi' -> 'hi v2'
     start()
     """
@@ -2276,8 +2665,7 @@ test! "an app/ dir publishes stable edge files while workers remain API-only", -
 console.log "\nManager workspace dev feed"
 
 wsAppSource = (msg) -> """
-import { get, client, start } from '@rip-lang/server'
-client!()
+import { get, start } from '@rip-lang/server'
 get '/hi' -> '#{msg}'
 start()
 """
@@ -2496,6 +2884,7 @@ test! "the startup report states the registration as janus holds it (read-backs)
   seen = { reg: false }
   stub = stubJanus ctlSock, calls, (call) ->
     return null unless call.method is 'GET'
+    return null if call.path.endsWith('/access')
     if call.path is '/1.0'
       return Response.json { api_version: '1.0', type: 'janus' }
     if call.path.startsWith('/1.0/apps/')
@@ -2511,7 +2900,7 @@ test! "the startup report states the registration as janus holds it (read-backs)
     sleep! 300                        # the report prints right after it
     proc.kill('SIGTERM')
     code = await proc.exited
-    eq code, 0
+    eq code, 143
     out = new Response(proc.stdout).text!
     report.out = out
     version = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8')).version
@@ -2696,6 +3085,713 @@ test! "generated publication: a save after the snapshot cannot invent a manifest
     managerState.afterAppSnapshot = saved.afterAppSnapshot
     rmSync appDir, { recursive: true, force: true }
     rmSync runDir, { recursive: true, force: true }
+
+# ==[ Capability 10 access client ]==
+
+console.log "\nAccess client"
+
+accessEvent = (overrides = {}) ->
+  {
+    v: 1
+    type: 'access'
+    sequence: '9007199254740993'
+    timestamp: '2026-08-01T14:16:01.100Z'
+    request_id: '10d21165-2701-4c37-b948-c93d891da3b1'
+    app_id: 'cart-a1b2c3'
+    app_name: 'cart'
+    tenant_site: null
+    request_host: 'cart.ripdev.io'
+    client_ip: '127.0.0.1'
+    method: 'GET'
+    path: '/products/blue%20cup'
+    status: 200
+    duration_seconds: 0.0021
+    response_bytes: '918'
+    mime_type: 'text/html; charset=utf-8'
+    response_class: 'file'
+    cache_verdict: 'off'
+    selected_upstream: null
+    retry_count: 0
+    outcome: 'complete'
+    mark: null
+    ...overrides
+  }
+
+accessBytes = (record) -> new TextEncoder().encode(JSON.stringify(record) + '\n')
+ACCESS_APP_ID =! 'cart-a1b2c3'
+
+memorySink = (writes, opts = {}) ->
+  count = 0
+  {
+    isTTY: opts.isTTY is true
+    write: (bytes, callback) ->
+      count += 1
+      value = if typeof bytes is 'string' then Buffer.from(bytes) else Buffer.from(bytes)
+      writes.push value
+      writeError = opts.errorAt?(count, value)
+      callback?(writeError)
+      not writeError?
+    once: -> null
+  }
+
+test "the default access picture is legal and carries the contracted fields", ->
+  parts = parseAccessPicture(DEFAULT_ACCESS_PICTURE)
+  fields = parts.filter((part) -> part.kind is 'field').map((part) -> part.field)
+  eq fields, ['local_time', 'local_timezone', 'duration_seconds', 'status', 'mime_abbrev', 'response_bytes', 'method', 'path', 'mark']
+
+test "pictures parse exact width, alignment, overflow, scale composition, and positioned errors", ->
+  formats = [
+    ['{method:8}', '<', 8, 'edge']
+    ['{method:<8}', '<', 8, 'edge']
+    ['{method:>8}', '>', 8, 'edge']
+    ['{method:^8}', '^', 8, 'edge']
+    ['{method:8^}', '<', 8, 'middle']
+    ['{method:<8^}', '<', 8, 'middle']
+    ['{method:>8^}', '>', 8, 'middle']
+  ]
+  for [picture, direction, width, overflow] in formats
+    part = parseAccessPicture(picture)[0]
+    eq [part.align.direction, part.align.width, part.align.overflow], [direction, width, overflow]
+  scaled = parseAccessPicture('{response_bytes:>8@B}')[0]
+  eq [scaled.align.direction, scaled.align.width, scaled.align.overflow, scaled.scaleUnit], ['>', 8, 'edge', 'B']
+  middleScaled = parseAccessPicture('{response_bytes:20^@Hz}')[0]
+  eq [middleScaled.align.direction, middleScaled.align.width, middleScaled.align.overflow, middleScaled.scaleUnit], ['<', 20, 'middle', 'Hz']
+  eq parseAccessPicture('{duration_seconds:@s}')[0].align, null
+  eq renderAccess(accessEvent(), '{{{method}}}'), '{GET}'
+  throws (-> parseAccessPicture('{unknown}')), 'offset 1'
+  throws (-> parseAccessPicture('🙂{method:0}')), 'offset 10'
+  throws (-> parseAccessPicture('{method:@s}')), 'cannot be scaled'
+  throws (-> parseAccessPicture('{response_bytes:@}')), 'must not be empty'
+  throws (-> parseAccessPicture('{response_bytes:@\n}')), 'unsafe scalar'
+  throws (-> parseAccessPicture('{response_bytes:<1025}')), '1 through 1024'
+  throws (-> parseAccessPicture('{method:^1}')), 'center width must be 3 through 1024'
+  throws (-> parseAccessPicture('{method:^2}')), 'center width must be 3 through 1024'
+  throws (-> parseAccessPicture('{method:^3^}')), 'center alignment cannot use trailing middle ellipsis'
+  throws (-> parseAccessPicture('🙂{method:^3^}')), 'offset 10'
+  throws (-> parseAccessPicture('{method:>2^^}')), "expected '}'"
+
+test "exact widths pad short values and apply every overflow placement", ->
+  event = accessEvent({ method: 'ABCDEFG' })
+  cases = [
+    ['{method:5}', 'ABCD…']
+    ['{method:<5}', 'ABCD…']
+    ['{method:>5}', '…DEFG']
+    ['{method:^5}', '…CDE…']
+    ['{method:5^}', 'AB…FG']
+    ['{method:<5^}', 'AB…FG']
+    ['{method:>5^}', 'AB…FG']
+  ]
+  for [picture, expected] in cases
+    actual = renderAccess event, picture
+    eq actual, expected
+    eq Bun.stringWidth(actual), 5
+  short = accessEvent({ method: 'ABC' })
+  eq renderAccess(short, '{method:6}'), 'ABC   '
+  eq renderAccess(short, '{method:<6}'), 'ABC   '
+  eq renderAccess(short, '{method:>6}'), '   ABC'
+  eq renderAccess(short, '{method:^6}'), ' ABC  '
+  eq renderAccess(short, '{method:6^}'), 'ABC   '
+  eq renderAccess(short, '{method:>6^}'), '   ABC'
+  eq renderAccess(accessEvent({ method: 'ABCDE' }), '{method:5}'), 'ABCDE'
+  eq renderAccess(accessEvent({ method: 'ABCDEF' }), '{method:5}'), 'ABCD…'
+
+test "middle ellipsis follows the exact S=1 through 6 split", ->
+  event = accessEvent({ method: 'ABCDEFG' })
+  expected = ['…', 'A…', 'A…G', 'AB…G', 'AB…FG', 'ABC…FG']
+  for slot in [1..6]
+    actual = renderAccess event, "{method:#{slot}^}"
+    eq actual, expected[slot - 1]
+    eq Bun.stringWidth(actual), slot
+
+test "exact widths preserve graphemes and fill wide allocation gaps deterministically", ->
+  cases = [
+    ['購物', '{mark:6}', '購物  ', 6]
+    ['界A', '{mark:3}', '界A', 3]
+    ['界A', '{mark:2}', ' …', 2]
+    ['界A', '{mark:>2}', '…A', 2]
+    ["e\u0301x", '{mark:2}', "e\u0301x", 2]
+    ["e\u0301x", '{mark:1}', '…', 1]
+    ['👩‍💻A', '{mark:3}', '👩‍💻A', 3]
+    ['👩‍💻A', '{mark:2}', ' …', 2]
+    ['A界BC', '{mark:4^}', 'A …C', 4]
+    ['A界BC', '{mark:^4}', '…界…', 4]
+  ]
+  for [value, picture, expected, width] in cases
+    actual = renderAccess accessEvent({ mark: value }), picture
+    eq actual, expected
+    eq Bun.stringWidth(actual), width
+  ok not renderAccess(accessEvent({ mark: '👩‍💻A' }), '{mark:2}').includes('👩'), 'a ZWJ grapheme is never split'
+
+test "every bounded Unicode mode reports its requested Bun.stringWidth", ->
+  values = ['界界ABC', "e\u0301e\u0301ABC", '👩‍💻👨‍👩‍👧‍👦ABC', "\u0301ABCDEF", "A\nB界C"]
+  for value in values
+    event = accessEvent({ mark: value })
+    for slot in [1..8]
+      pictures = ["{mark:#{slot}}", "{mark:<#{slot}}", "{mark:>#{slot}}", "{mark:#{slot}^}"]
+      pictures.push "{mark:^#{slot}}" if slot >= 3
+      for picture in pictures
+        rendered = renderAccess event, picture
+        eq Bun.stringWidth(rendered), slot, "#{JSON.stringify(value)} with #{picture}"
+        ok not rendered.includes('……'), "#{picture} never emits adjacent ellipses"
+
+test "escaped controls are atomic under exact-width truncation", ->
+  escaped = renderAccess accessEvent({ mark: "A\nB" }), '{mark}'
+  eq escaped, 'A\\u{000A}B'
+  eq Bun.stringWidth(escaped), 10
+  end = renderAccess accessEvent({ mark: "A\nB" }), '{mark:7}'
+  middle = renderAccess accessEvent({ mark: "A\nB" }), '{mark:9^}'
+  eq end, 'A     …'
+  eq middle, 'A   …   B'
+  eq Bun.stringWidth(end), 7
+  eq Bun.stringWidth(middle), 9
+  ok not end.includes('\\u{'), 'an escaped control is omitted whole'
+  ok not middle.includes('\\u{'), 'middle truncation never cuts an escaped control'
+
+test "scale runs before exact-width formatting while scale-only stays unbounded", ->
+  event = accessEvent({ response_bytes: '918' })
+  eq renderAccess(event, '{response_bytes:@B}'), '918 B'
+  eq renderAccess(event, '{response_bytes:>8@B}'), '   918 B'
+  eq renderAccess(event, '{response_bytes:>4@B}'), '…8 B'
+  eq renderAccess(event, '{response_bytes:4^@B}'), '91…B'
+  for picture in ['{response_bytes:>8@B}', '{response_bytes:>4@B}', '{response_bytes:4^@B}']
+    width = parseAccessPicture(picture)[0].align.width
+    eq Bun.stringWidth(renderAccess(event, picture)), width
+
+test "scale follows the v3 significand and SI-prefix oracle with arbitrary units", ->
+  eq scaleAccess(0, 'B'), '  0 B'
+  eq scaleAccess(0.000999, 's'), '1.0ms'
+  eq scaleAccess(0.000000000001, 'Hz'), '1.0pHz'
+  eq scaleAccess(999.49, 'B'), '999 B'
+  eq scaleAccess(999.5, 'B'), '1.0kB'
+  eq scaleAccess(Infinity, 'B'), '??? B'
+  eq scaleAccess(1, ' '), '1.0  '
+
+test "pretty rendering derives time/MIME, aligns by terminal width, and escapes controls", ->
+  event = accessEvent({ path: '/x', mark: "wide界\n\u202E" })
+  line = renderAccess event, '{mime_abbrev:<4}|{path}|{mark:>8}'
+  eq line, 'html|/x|…       '
+  eq Bun.stringWidth(line.split('|').pop()), 8
+  eq renderAccess(accessEvent({ mime_type: 'application/vnd.microsoft.icon' }), '{mime_abbrev}'), 'icon'
+  eq renderAccess(accessEvent({ mime_type: 'application/vnd.example' }), '{mime_abbrev}'), 'vnd.example'
+  eq renderAccess(accessEvent({ mark: '👩‍💻' }), '{mark}'), '👩‍💻'
+  eq renderAccess(accessEvent({ mark: null }), '{mark}'), '-'
+  throws (-> renderAccess(accessEvent({ status: '200' }), '{status}')), 'status must be'
+  throws (-> renderAccess(accessEvent({ path: "\ud800" }), '{path}')), 'lone surrogate'
+
+test "LF framing validates exact ordered envelopes and preserves source bytes", ->
+  bytes = accessBytes(accessEvent())
+  accepted = validateAccessLine(bytes)
+  eq accepted.record.sequence, '9007199254740993'
+  eq Buffer.from(accepted.bytes), Buffer.from(bytes)
+  throws (-> validateAccessLine(new TextEncoder().encode('{}\r\n'))), 'CRLF'
+  throws (-> validateAccessLine(new TextEncoder().encode('\n'))), 'empty'
+  duplicate = new TextEncoder().encode('{"v":1,"v":1,"type":"heartbeat","app_id":"x","head":"0","timestamp":"2026-08-01T14:16:15Z"}\n')
+  throws (-> validateAccessLine(duplicate)), 'duplicated'
+  reordered = new TextEncoder().encode('{"type":"heartbeat","v":1,"app_id":"x","head":"0","timestamp":"2026-08-01T14:16:15Z"}\n')
+  throws (-> validateAccessLine(reordered)), 'out of order'
+  throws (-> validateAccessLine(accessBytes(accessEvent({ timestamp: '2026-02-30T00:00:00Z' })))), 'timestamp is malformed'
+
+test "access validation enforces every bounded protocol field", ->
+  bad = [
+    [{ sequence: '01' }, 'sequence']
+    [{ sequence: '18446744073709551616' }, 'sequence']
+    [{ timestamp: '2026-02-29T00:00:00Z' }, 'timestamp']
+    [{ request_id: 'not-a-uuid' }, 'request_id']
+    [{ request_id: '10D21165-2701-4c37-b948-c93d891da3b1' }, 'request_id']
+    [{ app_name: 'Bad', app_id: 'Bad-a1b2c3' }, 'app_name']
+    [{ app_id: 'cart-short' }, 'app_id']
+    [{ app_name: 'a'.repeat(64), app_id: "#{'a'.repeat(64)}-a1b2c3" }, 'app_name']
+    [{ tenant_site: 'Bad_Site' }, 'tenant_site']
+    [{ tenant_site: 'a'.repeat(64) }, 'tenant_site']
+    [{ request_host: 'Bad Host' }, 'request_host']
+    [{ request_host: 'UPPER.example' }, 'request_host']
+    [{ client_ip: '999.1.1.1' }, 'client_ip']
+    [{ method: 'GET QUERY' }, 'method']
+    [{ method: '' }, 'method']
+    [{ method: 'G'.repeat(33) }, 'method']
+    [{ path: '/private?token=secret' }, 'path']
+    [{ path: '/bad%2' }, 'path']
+    [{ path: '/'.repeat(4097) }, 'path']
+    [{ status: 99 }, 'status']
+    [{ status: 600 }, 'status']
+    [{ duration_seconds: -1 }, 'duration_seconds']
+    [{ duration_seconds: Infinity }, 'duration_seconds']
+    [{ response_bytes: '18446744073709551616' }, 'response_bytes']
+    [{ mime_type: '' }, 'mime_type']
+    [{ mime_type: ' text/html ' }, 'mime_type']
+    [{ mime_type: 'x'.repeat(257) }, 'mime_type']
+    [{ selected_upstream: 'worker-NOT-OPAQUE' }, 'selected_upstream']
+    [{ retry_count: 1.5 }, 'retry_count']
+    [{ retry_count: 4294967296 }, 'retry_count']
+    [{ mark: '' }, 'mark']
+    [{ mark: '界'.repeat(86) }, 'mark']
+    [{ response_class: 'worker' }, 'response_class']
+    [{ cache_verdict: 'warm' }, 'cache_verdict']
+    [{ outcome: 'failed' }, 'outcome']
+  ]
+  for [change, field] in bad
+    throws (-> validateAccessLine(accessBytes(accessEvent(change)))), field
+  omittedWrong = { ...accessEvent({ mark: 'present' }), omitted_fields: ['mark'] }
+  throws (-> validateAccessLine(accessBytes(omittedWrong))), 'must name null fields'
+  validAdjusted = { ...accessEvent({ mime_type: null }), truncated_fields: ['method', 'path'], omitted_fields: ['mark', 'mime_type'] }
+  validateAccessLine accessBytes(validAdjusted)
+  name = 'a'.repeat(63)
+  host = "#{'a'.repeat(63)}.#{'b'.repeat(63)}.#{'c'.repeat(63)}.#{'d'.repeat(61)}"
+  validateAccessLine accessBytes(accessEvent({
+    app_name: name
+    app_id: "#{name}-a1b2c3"
+    tenant_site: 's'.repeat(63)
+    request_host: host
+    client_ip: '2001:db8::1'
+    method: 'M'.repeat(32)
+    path: '/' + 'p'.repeat(4095)
+    mime_type: 'm'.repeat(256)
+    mark: 'k'.repeat(256)
+    retry_count: 4294967295
+  }))
+
+test "the incremental framer spans chunks, rejects oversize lines, and diagnoses incomplete EOF", ->
+  lines = []
+  errors = []
+  hello = accessBytes({ v: 1, type: 'hello', app_id: ACCESS_APP_ID, app_name: 'cart', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 })
+  frame = new AccessFramer ((line) -> lines.push(line.record.type)), ((e) -> errors.push(e.message))
+  frame.feed hello.slice(0, 7)
+  frame.feed hello.slice(7)
+  frame.finish()
+  eq lines, ['hello']
+  eq errors, []
+  partial = new AccessFramer (-> null), ((e) -> errors.push(e.message))
+  partial.feed new TextEncoder().encode('{"v":1')
+  partial.finish()
+  ok errors.some((message) -> message.includes('incomplete record'))
+  tooBig = new AccessFramer (-> null), ((e) -> errors.push(e.message))
+  tooBig.feed new Uint8Array(8193).fill(120)
+  ok errors.some((message) -> message.includes('before LF'))
+
+test "the framer bounds retained and copied bytes for one attacker-sized chunk", ->
+  lines = []
+  errors = []
+  hello = accessBytes({ v: 1, type: 'hello', app_id: ACCESS_APP_ID, app_name: 'cart', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 })
+  attackBytes = 16 * 1024 * 1024
+  chunk = new Uint8Array(hello.length + attackBytes)
+  chunk.set hello
+  chunk.fill 120, hello.length
+  Bun.gc true
+  memoryBefore = process.memoryUsage().arrayBuffers
+  peakGrowth = 0
+  frame = new AccessFramer ((line) -> lines.push(line.record.type)), ((e) ->
+    peakGrowth = process.memoryUsage().arrayBuffers - memoryBefore
+    errors.push e.message
+  )
+  frame.feed chunk
+  Bun.gc true
+  retainedGrowth = process.memoryUsage().arrayBuffers - memoryBefore
+  eq lines, ['hello']
+  ok errors.some((message) -> message.includes('before LF'))
+  ok frame.buffer.length <= MAX_ACCESS_LINE_BYTES, "retained bytes stay bounded: #{frame.buffer.length}"
+  ok peakGrowth < attackBytes / 2, "framing does not copy the complete attacker chunk: peak growth=#{peakGrowth}"
+  ok retainedGrowth < attackBytes / 2, "framing does not retain the complete attacker chunk: growth=#{retainedGrowth}"
+
+test! "registration generations abort and move exactly one live subscription", ->
+  seen = []
+  sink =
+    write: (bytes, callback) ->
+      callback?(null)
+      true
+    once: -> null
+  fetcher = (url, opts) ->
+    appId = decodeURIComponent(new URL(url).pathname.split('/')[3])
+    seen.push appId
+    appName = appId.slice(0, appId.lastIndexOf('-'))
+    body = new ReadableStream
+      start: (controller) ->
+        controller.enqueue accessBytes({ v: 1, type: 'hello', app_id: appId, app_name: appName, after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 })
+        opts.signal.addEventListener 'abort', (-> controller.close()), { once: true }
+    new Response(body, { status: 200 })
+  client = new AccessClient { mode: 'pretty', control: { base: 'http://janus' }, stdout: sink, stderr: sink, fetch: fetcher, sample: -> 0 }
+  client.move('generation-aaaaaa')
+  waitFor! -> seen.includes('generation-aaaaaa')
+  client.move('generation-bbbbbb')
+  waitFor! -> seen.includes('generation-bbbbbb')
+  client.stop!()
+  eq seen.filter((id) -> id is 'generation-aaaaaa').length, 1
+  eq seen.filter((id) -> id is 'generation-bbbbbb').length, 1
+
+test! "a blocked old output completes before a replacement generation starts", ->
+  writes = []
+  callbacks = []
+  active = 0
+  maxActive = 0
+  sink =
+    write: (bytes, callback) ->
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      writes.push JSON.parse(Buffer.from(bytes).toString()).app_id
+      callbacks.push (error = null) ->
+        active -= 1
+        callback error
+      true
+    once: -> null
+  calls = []
+  fetcher = (url, opts) ->
+    appId = decodeURIComponent(new URL(url).pathname.split('/')[3])
+    calls.push appId
+    appName = appId.slice(0, appId.lastIndexOf('-'))
+    new Response(new ReadableStream
+      start: (controller) ->
+        controller.enqueue accessBytes({ v: 1, type: 'hello', app_id: appId, app_name: appName, after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 })
+        opts.signal.addEventListener 'abort', (-> controller.close()), { once: true }
+    )
+  client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: sink, stderr: memorySink([]), fetch: fetcher }
+  client.move 'old-aaaaaa'
+  waitFor! -> writes.length is 1
+  replacement = client.move 'new-bbbbbb'
+  sleep! 20
+  eq calls, ['old-aaaaaa']
+  eq writes, ['old-aaaaaa']
+  callbacks.shift()()
+  waitFor! -> writes.length is 2
+  eq calls, ['old-aaaaaa', 'new-bbbbbb']
+  eq maxActive, 1
+  callbacks.shift()()
+  client.stop!()
+  await replacement
+
+test! "an aborted old generation keeps its blocked terminal output failure", ->
+  callback = null
+  sink =
+    write: (bytes, done) ->
+      callback = done
+      true
+    once: -> null
+  calls = []
+  fetcher = (url, opts) ->
+    appId = decodeURIComponent(new URL(url).pathname.split('/')[3])
+    calls.push appId
+    appName = appId.slice(0, appId.lastIndexOf('-'))
+    new Response(new ReadableStream
+      start: (controller) ->
+        controller.enqueue accessBytes({ v: 1, type: 'hello', app_id: appId, app_name: appName, after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 })
+        opts.signal.addEventListener 'abort', (-> controller.close()), { once: true }
+    )
+  client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: sink, stderr: memorySink([]), fetch: fetcher }
+  client.move 'old-aaaaaa'
+  waitFor! -> callback?
+  replacement = client.move 'new-bbbbbb'
+  failure = Object.assign(new Error('old output failed'), { code: 'EPIPE' })
+  callback failure
+  caught = null
+  try
+    await replacement
+  catch e
+    caught = e
+  ok caught?.accessOutput, 'the old terminal output failure propagates through the generation cut'
+  eq calls, ['old-aaaaaa']
+
+test! "a stale generation resolving after move cannot write or reconnect", ->
+  output = []
+  oldGate: any = {}
+  oldGate.promise = new Promise (resolve) -> oldGate.open = resolve
+  calls = []
+  fetcher = (url, opts) ->
+    appId = decodeURIComponent(new URL(url).pathname.split('/')[3])
+    calls.push appId
+    return oldGate.promise if appId is 'old-aaaaaa'
+    body = new ReadableStream
+      start: (controller) ->
+        controller.enqueue accessBytes({ v: 1, type: 'hello', app_id: 'new-bbbbbb', app_name: 'new', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 })
+        opts.signal.addEventListener 'abort', (-> controller.close()), { once: true }
+    new Response(body)
+  client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(output), stderr: memorySink([]), fetch: fetcher, sample: -> 0 }
+  client.move 'old-aaaaaa'
+  waitFor! -> calls.includes('old-aaaaaa')
+  client.move 'new-bbbbbb'
+  sleep! 20
+  eq calls, ['old-aaaaaa']
+  oldGate.open new Response(new ReadableStream({ start: (controller) ->
+    controller.enqueue accessBytes({ v: 1, type: 'hello', app_id: 'old-aaaaaa', app_name: 'old', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 })
+    controller.enqueue accessBytes(accessEvent({ app_id: 'old-aaaaaa', app_name: 'old', sequence: '1' }))
+    controller.close()
+  }))
+  waitFor! -> calls.includes('new-bbbbbb') and output.length is 1
+  client.stop!()
+  text = Buffer.concat(output).toString()
+  ok text.includes('new-bbbbbb')
+  ok not text.includes('old-aaaaaa')
+  eq calls.filter((id) -> id is 'old-aaaaaa').length, 1
+
+test! "raw mode writes accepted source records byte-for-byte", ->
+  output = []
+  sink =
+    write: (bytes, callback) ->
+      output.push Buffer.from(bytes)
+      callback?(null)
+      true
+    once: -> null
+  errors =
+    write: (bytes, callback) ->
+      callback?(null)
+      true
+    once: -> null
+  calls = 0
+  fetcher = (url, opts) ->
+    calls += 1
+    appId = 'raw-aaaaaa'
+    body = new ReadableStream
+      start: (controller) ->
+        if calls is 1
+          controller.enqueue accessBytes({ v: 1, type: 'hello', app_id: appId, app_name: 'raw', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 })
+          controller.enqueue accessBytes(accessEvent({ app_id: appId, app_name: 'raw', sequence: '1' }))
+          controller.close()
+        else
+          opts.signal.addEventListener 'abort', (-> controller.close()), { once: true }
+    new Response(body, { status: 200 })
+  client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: sink, stderr: errors, fetch: fetcher, sample: -> 0 }
+  client.move('raw-aaaaaa')
+  waitFor! -> output.length is 2
+  client.stop!()
+  expected = Buffer.concat [
+    Buffer.from(accessBytes({ v: 1, type: 'hello', app_id: 'raw-aaaaaa', app_name: 'raw', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 }))
+    Buffer.from(accessBytes(accessEvent({ app_id: 'raw-aaaaaa', app_name: 'raw', sequence: '1' })))
+  ]
+  eq Buffer.concat(output), expected
+
+test! "valid records preceding a malformed record in one chunk are consumed first", ->
+  stdout = []
+  stderr = []
+  calls = 0
+  hello = accessBytes({ v: 1, type: 'hello', app_id: ACCESS_APP_ID, app_name: 'cart', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 })
+  event = accessBytes(accessEvent({ sequence: '1' }))
+  malformed = new TextEncoder().encode('{}\n')
+  fetcher = (url, opts) ->
+    calls += 1
+    if calls is 1
+      bytes = new Uint8Array(hello.length + event.length + malformed.length)
+      bytes.set hello
+      bytes.set event, hello.length
+      bytes.set malformed, hello.length + event.length
+      return new Response(new ReadableStream({ start: (controller) -> controller.enqueue(bytes); controller.close() }))
+    new Promise (resolve, reject) ->
+      opts.signal.addEventListener 'abort', (-> reject(opts.signal.reason)), { once: true }
+  client = new AccessClient
+    mode: 'raw'
+    control: { base: 'http://janus' }
+    stdout: memorySink(stdout)
+    stderr: memorySink(stderr)
+    fetch: fetcher
+    sample: -> 0
+  client.move ACCESS_APP_ID
+  waitFor! -> calls >= 2
+  client.stop!()
+  eq Buffer.concat(stdout), Buffer.concat([Buffer.from(hello), Buffer.from(event)])
+  ok Buffer.concat(stderr).toString().includes('reconnecting'), 'the later malformed record is diagnosed after both valid writes'
+
+test! "no_replay is exactly one immediate required post-hello transition", ->
+  runCase = (records) ->
+    stdout = []
+    stderr = []
+    calls = 0
+    fetcher = (url, opts) ->
+      calls += 1
+      if calls is 1
+        return new Response(new ReadableStream({ start: (controller) ->
+          controller.enqueue accessBytes(record) for record in records
+          controller.close()
+        }))
+      new Promise (resolve, reject) ->
+        opts.signal.addEventListener 'abort', (-> reject(opts.signal.reason)), { once: true }
+    client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(stdout), stderr: memorySink(stderr), fetch: fetcher, sample: -> 0 }
+    client.move ACCESS_APP_ID
+    waitFor! -> calls >= 2
+    client.stop!()
+    { stdout: Buffer.concat(stdout).toString(), stderr: Buffer.concat(stderr).toString() }
+  hello0 = { v: 1, type: 'hello', app_id: ACCESS_APP_ID, app_name: 'cart', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 }
+  heartbeat0 = { v: 1, type: 'heartbeat', app_id: ACCESS_APP_ID, head: '0', timestamp: '2026-08-01T14:16:15Z' }
+  lateGap = { v: 1, type: 'gap', app_id: ACCESS_APP_ID, from: '1', through: '1', head: '1', reason: 'no_replay' }
+  late = runCase! [hello0, heartbeat0, lateGap]
+  ok late.stderr.includes('only legal immediately after hello')
+  ok not late.stdout.includes('"type":"gap"'), 'the illegal late gap is never emitted'
+  hello2 = { ...hello0, head: '2' }
+  initial = { v: 1, type: 'gap', app_id: ACCESS_APP_ID, from: '1', through: '2', head: '2', reason: 'no_replay' }
+  second = { v: 1, type: 'gap', app_id: ACCESS_APP_ID, from: '3', through: '3', head: '3', reason: 'no_replay' }
+  duplicate = runCase! [hello2, initial, second]
+  ok duplicate.stderr.includes('only legal immediately after hello')
+  eq duplicate.stdout.match(/"reason":"no_replay"/g)?.length, 1
+
+test! "overflow gaps advance the cursor with diagnostic-before-raw ordering", ->
+  events = []
+  calls = 0
+  sink = (kind) ->
+    write: (bytes, callback) ->
+      events.push "#{kind}:#{Buffer.from(bytes).toString()}"
+      callback()
+      true
+    once: -> null
+  records = [
+    { v: 1, type: 'hello', app_id: ACCESS_APP_ID, app_name: 'cart', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 }
+    accessEvent({ sequence: '1' })
+    { v: 1, type: 'gap', app_id: ACCESS_APP_ID, from: '2', through: '4', head: '5', reason: 'overflow' }
+    accessEvent({ sequence: '5' })
+    accessEvent({ sequence: '7' })
+  ]
+  fetcher = (url, opts) ->
+    calls += 1
+    if calls is 1
+      return new Response(new ReadableStream({ start: (controller) ->
+        controller.enqueue accessBytes(record) for record in records
+        controller.close()
+      }))
+    new Promise (resolve, reject) ->
+      opts.signal.addEventListener 'abort', (-> reject(opts.signal.reason)), { once: true }
+  client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: sink('out'), stderr: sink('err'), fetch: fetcher, sample: -> 0 }
+  client.move ACCESS_APP_ID
+  waitFor! -> calls >= 2
+  client.stop!()
+  gapDiagnostic = events.findIndex((event) -> event.includes('access gap 2..4'))
+  gapRaw = events.findIndex((event) -> event.startsWith('out:') and event.includes('"type":"gap"'))
+  ok 0 <= gapDiagnostic < gapRaw, 'gap diagnostic completes before exact raw gap output'
+  ok events.some((event) -> event.startsWith('out:') and event.includes('"sequence":"5"')), 'the post-gap next sequence is accepted'
+  ok not events.some((event) -> event.startsWith('out:') and event.includes('"sequence":"7"')), 'a skipped sequence is rejected before output'
+
+test! "closed is consumed and reconnects without waiting for peer EOF", ->
+  stdout = []
+  calls = 0
+  canceled = false
+  fetcher = (url, opts) ->
+    calls += 1
+    if calls is 1
+      return new Response(new ReadableStream
+        start: (controller) ->
+          controller.enqueue accessBytes({ v: 1, type: 'hello', app_id: ACCESS_APP_ID, app_name: 'cart', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 })
+          controller.enqueue accessBytes({ v: 1, type: 'closed', app_id: ACCESS_APP_ID, head: '0', timestamp: '2026-08-01T14:16:20Z', reason: 'generation_stop' })
+        cancel: -> canceled = true
+      )
+    new Promise (resolve, reject) ->
+      opts.signal.addEventListener 'abort', (-> reject(opts.signal.reason)), { once: true }
+  client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(stdout), stderr: memorySink([]), fetch: fetcher, sample: -> 0 }
+  client.move ACCESS_APP_ID
+  waitFor! -> calls >= 2
+  client.stop!()
+  ok canceled, 'the still-open first body was canceled'
+  ok Buffer.concat(stdout).toString().includes('"type":"closed"'), 'closed was written before reconnect'
+
+test! "backoff doubles with full jitter and resets only after a valid hello", ->
+  delays = []
+  calls = 0
+  fetcher = (url, opts) ->
+    calls += 1
+    if calls is 2
+      body = new ReadableStream({ start: (controller) ->
+        controller.enqueue accessBytes({ v: 1, type: 'hello', app_id: 'other-aaaaaa', app_name: 'other', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 })
+        controller.close()
+      })
+      return new Response(body)
+    return new Response('no', { status: 500 }) if calls <= 8
+    if calls is 9
+      body = new ReadableStream({ start: (controller) ->
+        controller.enqueue accessBytes({ v: 1, type: 'hello', app_id: ACCESS_APP_ID, app_name: 'cart', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 })
+        controller.close()
+      })
+      return new Response(body)
+    new Promise (resolve, reject) ->
+      opts.signal.addEventListener 'abort', (-> reject(opts.signal.reason)), { once: true }
+  sleep = (ms, signal) -> delays.push(ms)
+  client = new AccessClient { mode: 'pretty', control: { base: 'http://janus' }, stdout: memorySink([]), stderr: memorySink([]), fetch: fetcher, sample: -> 0.5, sleep }
+  client.move ACCESS_APP_ID
+  waitFor! -> delays.length is 9
+  client.stop!()
+  eq delays, [50, 100, 200, 400, 800, 1600, 2500, 2500, 50]
+
+test! "raw partial EPIPE is terminal and never reconnects", ->
+  calls = 0
+  writes = []
+  broken = memorySink writes,
+    errorAt: (count, bytes) ->
+      return null unless count is 2
+      writes[writes.length - 1] = bytes.subarray(0, Math.floor(bytes.length / 2))
+      writeError = new Error('broken pipe')
+      writeError.code = 'EPIPE'
+      writeError
+  fetcher = ->
+    calls += 1
+    new Response(new ReadableStream({ start: (controller) ->
+      controller.enqueue accessBytes({ v: 1, type: 'hello', app_id: ACCESS_APP_ID, app_name: 'cart', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 })
+      controller.enqueue accessBytes(accessEvent({ sequence: '1' }))
+      controller.close()
+    }))
+  client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: broken, stderr: memorySink([]), fetch: fetcher, sample: -> 0 }
+  caught = null
+  try
+    client.move! ACCESS_APP_ID
+  catch e
+    caught = e
+  ok caught?.accessOutput, 'partial stdout failure is classified as terminal output'
+  eq calls, 1
+
+test! "pretty ANSI wraps the complete rendered picture only on color TTYs", ->
+  event = accessEvent({ sequence: '1' })
+  line = { record: event, bytes: accessBytes(event) }
+  prior = process.env.NO_COLOR
+  try
+    delete process.env.NO_COLOR
+    color = []
+    client = new AccessClient { mode: 'pretty', picture: '{method:>5}', stdout: memorySink(color, { isTTY: true }), stderr: memorySink([]), control: {} }
+    client.consume! line
+    eq Buffer.concat(color).toString(), '\x1b[36m  GET\x1b[0m\n'
+    mono = []
+    client = new AccessClient { mode: 'pretty', picture: '{method:>5}', stdout: memorySink(mono), stderr: memorySink([]), control: {} }
+    client.consume! line
+    eq Buffer.concat(mono).toString(), '  GET\n'
+    process.env.NO_COLOR = '1'
+    noColor = []
+    client = new AccessClient { mode: 'pretty', picture: '{method}', stdout: memorySink(noColor, { isTTY: true }), stderr: memorySink([]), control: {} }
+    client.consume! line
+    eq Buffer.concat(noColor).toString(), 'GET\n'
+  finally
+    if prior? then process.env.NO_COLOR = prior else delete process.env.NO_COLOR
+
+test! "worker output pump drains high volume under destination backpressure", ->
+  chunks = 256
+  bytes = 8192
+  readable = new ReadableStream
+    start: (controller) ->
+      controller.enqueue new Uint8Array(bytes).fill(i % 251) for i in [0...chunks]
+      controller.close()
+  total = 0
+  destination =
+    write: (chunk, callback) ->
+      setTimeout (->
+        total += chunk.length
+        callback()
+      ), 0
+      false
+    once: -> null
+  pumpAccessOutput! readable, destination
+  eq total, chunks * bytes
+
+test! "backpressured output removes every temporary error listener", ->
+  sink = new EventEmitter()
+  sink.write = (chunk, callback) ->
+    queueMicrotask -> callback()
+    false
+  for i in [0...1000]
+    writeAccessOutput! sink, 'x'
+    eq sink.listenerCount('error'), 0
+
+test! "access CLI rejects contract conflicts before touching Janus", ->
+  dir = tmpFixture('tmp-access-cli-')
+  try
+    result = await managerCommand(dir, ['browse', dir, '--until-restart', '--access-log=raw'])
+    ok result.code isnt 0
+    ok result.err.includes('explicit access flags conflict')
+    result = await managerCommand(dir, ['browse', dir, '--access-log=raw', '--access-format', '{method}'])
+    ok result.code isnt 0
+    ok result.err.includes('only applies with --access-log=pretty')
+    result = await managerCommand(dir, ['browse', dir, '--access-format', '{response_bytes:@}'])
+    ok result.code isnt 0
+    ok result.err.includes('scale unit must not be empty')
+  finally
+    rmSync dir, { recursive: true, force: true }
 
 test! "a generated publication with no live bundle holds the manifest back", ->
   appDir = tmpFixture('tmp-nopool-')

@@ -39,6 +39,8 @@ that serves its static files and routes its API requests.
 - A **worker** is a disposable process that executes API request handlers.
 - A **generation process** is a short-lived child that builds and validates one
   candidate API artifact, then exits.
+- A **browse registration** is a files-only Janus registration created by
+  `rip server browse`; it has no manager, workers, App, or generated roots.
 - The **App** is the client application source and assets under `app/`, served
   directly by Caddy and Janus. While watching is enabled, the manager watches
   this tree and dings changed files.
@@ -241,9 +243,21 @@ app/<uri>
 
 The order is policy. In this example, a tenant file overrides the common file,
 while `public` and `generated` take priority over both. Another server may
-choose a different order. When `serve.rip` declares `files`, only those roots
-plus the manager's generated root are registered; the project root is public
-only when the declaration lists it explicitly.
+choose a different order. A root object may set `cache` to exactly `never`,
+`revalidate`, or `forever`; omission means `revalidate`. It may independently
+set strict Boolean `browse: true`; when the Caddy site admits browse, Janus may
+select directories and directory indexes from that root. Every normalized
+Janus root carries `{path, cache, browse}`. MIME detection is independent of
+cache policy. Browse admission, themes, renderers, and renderer limits remain
+cold Janus configuration. Rip can select a root for browsing but cannot supply
+any renderer or theme command.
+
+When `serve.rip` declares `files`, those roots plus the manager's generated
+root are normally registered; the project root is public only when the
+declaration lists it explicitly. One terminal policy omits the generated root:
+if every declared root has `browse: true`, `proxyFirst` is empty, no shell is
+declared, and the project has no API upstreams, the manager registers exactly
+those roots. Any other policy requires the SPA shell.
 
 Without a `files` declaration, conventional discovery registers the generated
 root, `public/` when present, `app/` when present, and the project directory as
@@ -258,7 +272,22 @@ Janus and Caddy perform path-confined lookup, conditional HTTP behavior, range
 handling, and response delivery. The manager neither handles the request nor
 serves the bytes.
 
-### 5. Hold, maintenance, and migrations
+### 5. Standalone browse registrations
+
+`rip server browse <directory>` resolves exactly that directory and registers
+one `revalidate` browsable root with no upstreams or shell. `--control` and
+`JANUS_CONTROL` use the same discovery and startup reachability check as a
+manager. `--host` selects one exact host; otherwise Rip generates
+`browse-<12-lowercase-hex>.localhost`, retrying a generated-host conflict at
+most five times. The command prints `https://<host>/`.
+
+The default heartbeat lease lives with the command. Rip sends heartbeats and
+deletes the registration on orderly shutdown. `--until-restart` requests a
+process lease, prints the registration id, URL, and DELETE instruction, and
+exits without a heartbeat or DELETE. Janus retains that registration across
+Caddy reloads and loses it when the Janus/Caddy process exits.
+
+### 6. Hold, maintenance, and migrations
 
 The manager has three operational states:
 
@@ -347,8 +376,9 @@ Configured API prefixes such as `/api` are worker-first. They:
 ### Static requests
 
 Janus searches the registered roots in order and serves the first regular-file
-match. Static delivery supports `GET` and `HEAD`, validators, ranges, and no
-directory listing.
+match. Static delivery supports `GET` and `HEAD`, validators, and ranges.
+A directory is a match only for a root carrying `browse: true` on a
+browse-enabled Caddy site; Janus then owns redirects, indexes, and listings.
 
 Ordinary HTTP validators describe transport bytes. Live App source uses a
 latest-wins protocol instead of historical-version retrieval. A ding's Rip hash
@@ -600,5 +630,6 @@ Legend:
    creates a new lookup; changing disk bytes alone does not notify an open page.
 5. Caddy and Janus continue to perform all public file lookup, validation,
    range handling, and byte delivery; the manager only observes and coordinates.
-6. Policies are assigned by immutable, mutable, generated, live-source, HTML,
-   and API semantics. Watch state changes activity, not cache meaning.
+6. Registered roots carry explicit `never`, `revalidate`, or `forever` policy;
+   HTML and API behavior remains separately defined. Watch state changes
+   activity, not cache meaning.

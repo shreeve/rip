@@ -1,4 +1,4 @@
-# HANDOFF — session launch document (2026-07-31)
+# HANDOFF — session launch document (2026-08-01)
 
 The tracked session launch document (see AGENTS.md, working ledgers):
 read it first when starting a session; rewrite it at session
@@ -11,30 +11,32 @@ boundaries with live-verified facts only.
 
 ## Active branch
 
-**Branch: `server-app-api-architecture`** (`60aaae6` before the current
+**Branch: `rip-server-fixes`** (`e8d6d70` before the current
 working tree).
 
-The Rip Server architecture implementation is present in the working tree:
+The Rip Server simplification and access-log implementation are present in
+the working tree:
 
-- compile-only generation validates candidates before API admission cuts;
-- canonical local manager control provides status, hold, release, migrate,
-  and recover;
-- Active, Held, and Maintenance fence API/App activation and durable
-  migration recovery;
-- generated coordination files and authored App files register atomically
-  with Janus, including App-only projects and direct Hub admission;
-- pooled workers are API-only;
-- App delivery is latest-wins with six-character `rash(bytes)` identities,
-  `{id,hash}` update dings, generation-fenced delete dings, and epoch reload
-  dings.
+- Janus owns browser files, browse listings, cache policy, compression,
+  access completion, and `X-Sendfile`; workers remain API-only;
+- `rip server` subscribes to Janus's registration-scoped NDJSON access
+  stream in pretty, raw, or off mode;
+- pretty output uses the field-first picture grammar and fixed-width SI
+  scaler; raw mode reserves stdout for validated NDJSON;
+- registration generations, backpressure, EPIPE, browse leases, and
+  direct/wrapper signals have deterministic cleanup pins;
+- the generic worker request logger is removed after full response-class
+  certification.
 
 Live verification on this working tree:
 
 - `bun run test:all` — passed (21 lanes).
-- `bun run test` in `packages/server` — passed.
-- `bun run test` in `packages/app` — passed.
-- `bunx playwright test` in `packages/browser-tests` — passed.
-- `./test.sh` in `~/Data/Code/janus` — 159 passed.
+- `bun run test` in `packages/server` — 200 passed after logger removal.
+- `bunx playwright test` in `packages/browser-tests` — 21 passed, 2
+  intentional source-map skips.
+- `go test -race -count=1 ./...` in `~/Data/Code/janus` — passed.
+- final rebuilt Janus `./test.sh` — 171 passed.
+- Linux and Windows Janus builds — passed.
 
 ## Working agreements
 

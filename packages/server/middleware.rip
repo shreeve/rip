@@ -108,57 +108,6 @@ export cors = (opts: {
     next!
 
 # ==============================================================================
-# logger — Request Logging
-# ==============================================================================
-#
-# Options:
-#   format: 'tiny' | 'short' | 'dev' | 'full' | (info) -> string
-#   skip: (c) -> boolean
-#   stream: { write: (msg) -> } (default: console)
-
-export logger = (opts: {
-  format?: 'tiny' | 'short' | 'dev' | 'full' | ((info: any) => string)
-  skip?: (c: any) => boolean
-  stream?: { write: (msg: string) => any }
-} = {}) ->
-  format = opts.format or 'dev'
-  skip = opts.skip or null
-  stream = opts.stream or { write: (msg) -> p msg.trim() }
-
-  markTail = (info) -> if info.mark then " [#{info.mark}]" else ''
-
-  formatters =
-    tiny: (info) -> "#{info.method} #{info.path} #{info.status} - #{info.ms}ms#{markTail(info)}"
-    short: (info) -> "#{info.method} #{info.path} #{info.status} #{info.size} - #{info.ms}ms#{markTail(info)}"
-    dev: (info) ->
-      color = if info.status >= 500 then '\x1b[31m'      # red
-      else if info.status >= 400 then '\x1b[33m'         # yellow
-      else if info.status >= 300 then '\x1b[36m'         # cyan
-      else '\x1b[32m'                                    # green
-      reset = '\x1b[0m'
-      "#{info.method} #{info.path} #{color}#{info.status}#{reset} - #{info.ms}ms#{markTail(info)}"
-    full: (info) -> "[#{info.time}] #{info.method} #{info.path} #{info.status} #{info.size} - #{info.ms}ms#{markTail(info)}"
-
-  (c, next) ->
-    return next!() if skip?(c)
-
-    start = Date.now()
-    next!
-    ms = Date.now() - start
-
-    info =
-      method: c.req.method
-      path: c.req.path
-      status: c._response?.status or 200
-      ms: ms
-      size: c._response?.headers?.get('Content-Length') or '-'
-      time: new Date().toISOString()
-      mark: c.mark or null
-
-    msg = if typeof format is 'function' then format(info) else formatters[format]?(info) or formatters.dev(info)
-    stream.write "#{msg}\n"
-
-# ==============================================================================
 # compress — Response Compression (gzip, deflate)
 # ==============================================================================
 #
