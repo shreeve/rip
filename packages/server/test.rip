@@ -15,7 +15,7 @@ import { get, post, put, patch, del, all, use, prefix, before, after, onError, n
          read, error, notice, bail, ctx, session, subrequest, mark,
          errorEnvelope, openapi } from '@rip-lang/server'
 import { cors, compress, sessions, csrf, secureHeaders, timeout, htmlJson } from '@rip-lang/server/middleware'
-import { DEFAULT_ACCESS_PICTURE, MAX_ACCESS_LINE_BYTES, AccessClient, AccessFramer, parseAccessPicture, pumpAccessOutput, renderAccess, scaleAccess, validateAccessLine, writeAccessOutput } from '@rip-lang/server/access'
+import { DEFAULT_ACCESS_PICTURE, MAX_ACCESS_LINE_BYTES, AccessClient, AccessFramer, parseAccessPicture, pumpAccessOutput, renderAccess, scaleAccess, validateAccessLine, writeAccessOutput } from '@rip-lang/server/monitor'
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, unlinkSync, existsSync, readdirSync, symlinkSync, realpathSync } from 'fs'
 import { join, resolve } from 'path'
 import { tmpdir } from 'os'

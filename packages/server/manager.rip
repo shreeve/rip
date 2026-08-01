@@ -18,7 +18,7 @@ import { join, resolve, dirname, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { rash } from '@rip-lang/app/rash'
-import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './access.rip'
+import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
 
 # The compiler compiling THIS process is the one that builds artifacts —
 # resolved from the loader's --preload path, loaded once, on first build.

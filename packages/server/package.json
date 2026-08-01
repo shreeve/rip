@@ -7,7 +7,7 @@
   "exports": {
     ".": "./server.rip",
     "./middleware": "./middleware.rip",
-    "./access": "./access.rip"
+    "./monitor": "./monitor.rip"
   },
   "bin": {
     "rip-server": "./server.rip"
@@ -21,7 +21,7 @@
     "worker.rip",
     "generate.rip",
     "manager.rip",
-    "access.rip",
+    "monitor.rip",
     "README.md"
   ],
   "dependencies": {
