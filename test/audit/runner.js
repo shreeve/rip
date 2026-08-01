@@ -3380,7 +3380,22 @@ if (RUN_ERRORS) {
         problems.push({ kind: 'shape', note: `pin TS${p.code} at ${p.line}:${p.character}: the twin already derives this exact expectation — pins are for what derivation cannot spell` });
         continue;
       }
-      expected.push({ line: p.line - 1, character: p.character, code: p.code, token: p.token ?? '(pinned)' });
+      // `token` is the pin's CHECKSUM, not a label — the same duty it carries
+      // in hover-pins.json, and the reason a pin states one at all. Without
+      // this a fixture edit above a pin still fails, but as `missing` plus
+      // `stray`, which reads as a compiler regression and sends the next
+      // reader after the wrong thing. Reported instead of asserted, so the
+      // published diagnostic surfaces as a `stray` naming where the construct
+      // actually moved to — the pin's own repair instruction.
+      if (typeof p.token !== 'string' || p.token === '') {
+        problems.push({ kind: 'shape', note: `pin TS${p.code} at ${p.line}:${p.character}: no \`token\` — a pin states the source text it sits on so a fixture edit cannot move the corpus out from under it silently` });
+        continue;
+      }
+      if ((ripLines[p.line - 1] ?? '').slice(p.character, p.character + p.token.length) !== p.token) {
+        problems.push({ kind: 'shape', note: `pin \`${p.token}\` not at ${p.line}:${p.character} — the fixture moved under the pin (re-measure and re-pin)` });
+        continue;
+      }
+      expected.push({ line: p.line - 1, character: p.character, code: p.code, token: p.token });
     }
     if (expected.length === 0) problems.push({ kind: 'shape', note: 'the twin raises no errors — an error fixture must have some' });
 
