@@ -7,15 +7,16 @@ compiler = import!(join(dirname(resolve(preload)), 'compile.js')).compile
 
 rewriteMeta = (code, path) ->
   return code unless code.includes 'import.meta'
-  dir = dirname path
+  full = JSON.stringify path
+  folder = JSON.stringify dirname(path)
   transpiler = new Bun.Transpiler
     loader: 'js'
     define:
       'import.meta.url': JSON.stringify(Bun.pathToFileURL(path).href)
-      'import.meta.path': JSON.stringify(path)
-      'import.meta.filename': JSON.stringify(path)
-      'import.meta.dir': JSON.stringify(dir)
-      'import.meta.dirname': JSON.stringify(dir)
+      'import.meta.path': full
+      'import.meta.filename': full
+      'import.meta.dir': folder
+      'import.meta.dirname': folder
       'import.meta.file': JSON.stringify(basename(path))
   transpiler.transformSync code
 
