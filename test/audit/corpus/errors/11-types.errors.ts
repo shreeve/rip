@@ -25,12 +25,15 @@ type Loose = any
 type Locked = { readonly id: number }
 type Counts = { [label: string]: number }
 type Entry = [first: string, second: number]
+type Trio = [string, number, string]
 type Trailing = [string, number?]
 type Trail = [string, ...number[]]
 type IsText<T> = T extends string ? 'yes' : 'no'
 type Elem<T> = T extends Array<infer U> ? U : never
 type Branch = { label: string, kids: Branch[] }
 type Formatter = { (value: number): string }
+type Copy<T> = { [K in keyof T]: T[K] }
+type Guard = { check: (value: unknown) => value is string }
 let locked: Locked = { id: 1 }
 
 let wrongAlias: Code = 'zero'
@@ -57,12 +60,15 @@ locked.id = 5
 let wrongIndexed: Chart['mode'] = 4
 let wrongCounts: Counts = { hits: 'x' }
 let wrongEntry: Entry = ['a', 'b']
+let wrongTrio: Trio = ['a', 'a', 'a']
 let wrongTrailing: Trailing = ['a', label]
 let wrongTrail: Trail = ['a', label]
 let wrongIsText: IsText<number> = 'yes'
 let wrongElem: Elem<string[]> = 5
 let wrongBranch: Branch = { label: 'r', kids: [{ label: 2, kids: [] }] }
 let wrongFormatter: Formatter = 5
+let wrongCopy: Copy<Chart> = { mode: 9 }
+let wrongGuard: Guard = { check: 5 }
 let wrongAbstract: (abstract new () => Chart) = 5
 function wrongPredicate(value: number): value is string {
   return true }
@@ -75,3 +81,4 @@ let wrongThis: number = new WrongTally().bump()
 let presets = { theme: 'dark', depth: 2 }
 type Presets = typeof presets
 let wrongPreset: Presets = { theme: 7, depth: 3 }
+let wrongParcel: typeof import('./10-modules.errors').wrongTyped = 5

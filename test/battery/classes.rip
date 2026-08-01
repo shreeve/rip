@@ -195,6 +195,33 @@ code 'simple class', '''
     constructor: (@name) ->
 ''', 'class Animal { constructor(name) { this.name = name; } }'
 
+# A soaking spine cannot be constructed THROUGH — it seals into a value
+# first. Parens alone are what the spec asks for and node accepts them,
+# but bun, which runs rip, refuses every parenthesized optional chain
+# under `new`. So the seal has to yield a value, which is what the
+# coalesce is for: it reads like a no-op and is not, so the bytes are
+# pinned here rather than left to a comment.
+code 'new through a soaking spine seals it', 'x = new a?.b', 'let x = new (a?.b ?? undefined)();'
+code 'a sealed spine keeps its own arguments', 'x = new a?.b(1)', 'let x = new (a?.b ?? undefined)(1);'
+code 'a soak deeper in the spine seals the whole spine', 'x = new a.b?.c.d', 'let x = new (a.b?.c.d ?? undefined)();'
+# An INDEX link fails exactly as a member link does, so the seal walks
+# both — the spine's four link kinds are `.`, `?.`, `[]` and `optindex`.
+code 'an index tail after a soak seals too', 'x = new a?.b["c"]', 'let x = new (a?.b["c"] ?? undefined)();'
+code 'an index-tailed soak keeps its arguments', 'x = new a?.b["c"](1)', 'let x = new (a?.b["c"] ?? undefined)(1);'
+code 'a soaking spine under new new seals inside', 'x = new new a?.b', 'let x = new (new (a?.b ?? undefined)())();'
+code 'an ordinary new new keeps the path it already had', 'x = new new a', 'let x = new new(a);'
+code 'a plain index spine keeps its bare NewExpression', 'x = new a["b"]', 'let x = new a["b"];'
+# `X.new(...)` is rip's own construction sugar, so a soaking target
+# seals there too — and `new` OVER that form constructs what the ruby
+# construction returned, rather than reading a property named `new`.
+code 'ruby construction seals a soaking target', 'x = a?.b.new(1)', 'let x = new (a?.b ?? undefined)(1);'
+code 'new over a soaking ruby construction still constructs', 'x = new a?.b.new(1)', 'let x = new new (a?.b ?? undefined)(1);'
+code 'a bare .new read on a soaking spine stays a read', 'x = a?.b.new', 'let x = a?.b.new;'
+code 'a spine with no soak keeps its bare NewExpression', 'x = new a.b', 'let x = new a.b;'
+# The tag call IS the constructor: `new tag"hi"` constructs what the tag
+# returns, and the ordinary expression path already lowers the template.
+code 'new on a tagged template constructs the tag result', 'x = new tag"hi"', 'let x = new (tag`hi`)();'
+
 test 'super in constructor', '''
   class Animal
     constructor: (@name) ->

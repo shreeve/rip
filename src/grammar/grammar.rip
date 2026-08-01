@@ -636,11 +636,18 @@ grammar =
     o '@'   , '"this"'
   ]
 
+  # No object role: the `@` spelling has no object to name, and a
+  # literal-sourced role records a SPAN-LESS row over the emitted
+  # `this`, which reads as synthetic and shadows the member's own
+  # cover. Without it the emitted `this.name` maps through that cover
+  # to `@name` — so a diagnostic anchored at the lowering's `this`
+  # (every wrong-typed `@name = v` write) reaches the source instead
+  # of dropping in transit.
   ThisProperty: [
-    o '@ Property', '[".", "this", 2]', 'member: operator, object, property'
+    o '@ Property', '[".", "this", 2]', 'member: operator, _, property'
     # Static string-named member: `@"data-src" = v` in a class body;
     # anywhere else the read is this["data-src"].
-    o '@ STRING'  , '[".", "this", 2]', 'member: operator, object, property'
+    o '@ STRING'  , '[".", "this", 2]', 'member: operator, _, property'
   ]
 
   # ============================================================================

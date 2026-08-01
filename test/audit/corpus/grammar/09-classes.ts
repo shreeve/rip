@@ -108,8 +108,19 @@ let blueprints = { marker: Marker, animal: Animal }
 let viaDot = new blueprints.marker()
 let viaIndex = new blueprints['marker']()
 let viaParen = new (blueprints.animal)('Via')
+let nested = { inner: blueprints }
+let mintClass = (parts: TemplateStringsArray) => class Minted {
+  label() { return parts[0] }
+}
+let viaSoak = new (blueprints?.marker ?? undefined)()
+let viaSoakCall = new (blueprints?.animal ?? undefined)('Soaked')
+let viaSoakBelow = new (nested?.inner.marker ?? undefined)()
+let viaSoakIndex = new (nested?.inner['marker'] ?? undefined)()
+let viaTag = new (mintClass`minted`)()
 
 console.log('spines:', viaDot instanceof Marker, viaIndex instanceof Marker, viaParen.name)
+console.log('soaks:', viaSoak instanceof Marker, viaSoakCall.name, viaSoakBelow instanceof Marker, viaSoakIndex instanceof Marker)
+console.log('tag:', viaTag.label(), (new (mintClass`chained`)()).label())
 
 class Kennel {
   Tenant: typeof Dog = Dog
@@ -157,8 +168,10 @@ class Hatchery {
 // the cast records what TypeScript cannot express: this constructor genuinely returns a class, so constructing it yields a constructor
 let Hatch = Hatchery as new () => new () => { chirp: string }
 let hatched = new (new Hatch())()
+let mints = { hatch: Hatch }
+let hatchedSoak = new (new (mints?.hatch ?? undefined)())()
 
-console.log('hatched:', hatched.chirp)
+console.log('hatched:', hatched.chirp, hatchedSoak.chirp)
 
 // ── Prototype access: the `::` read, and the `?::` soak when the target may be absent ──
 

@@ -1,4 +1,4 @@
-# 26-schema.errors.rip — intentional negatives, each asserted by the Diagnostics Lane (bun run audit --diagnostics).
+# 26-schema.errors.rip — intentional negatives, each asserted by the Diagnostics Audit (bun run audit --diagnostics).
 # @ts-nocheck
 
 Stop = schema

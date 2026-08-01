@@ -28,6 +28,7 @@ import { compile } from '../../src/compile.js';
 import { describeExtended, EXTENDED } from '../support/extended.js';
 import { tscBatch } from '../support/tscbatch.js';
 import { resolveTsc } from '../support/tsc.js';
+import { AMBIENT } from '../support/ambient.js';
 
 // tsc is the repository's pinned TypeScript (resolveTsc), resolved only
 // in the extended tier that spawns it. A missing install throws here —
@@ -35,18 +36,6 @@ import { resolveTsc } from '../support/tsc.js';
 const TSC = EXTENDED ? resolveTsc() : null;
 const TSC_TIMEOUT = 120_000;
 
-// The feature-runtime names (set — reactive, schema, and the
-// M12 component family), ambient-declared: faces compile under
-// runtimeDelivery 'none' so the artifact under validation is the
-// FACE, not the runtime bodies.
-const AMBIENT =
- 'declare const __state: any, __computed: any, __effect: any, __batch: any, ' +
- '__readonly: any, __setErrorHandler: any, __handleError: any, __catchErrors: any, ' +
- 'getEffectSignal: any, __schema: any, SchemaError: any, registerCoercer: any, ' +
- '__Component: any, __pushComponent: any, __popComponent: any, setContext: any, ' +
- 'getContext: any, hasContext: any, __clsx: any, __lis: any, __reconcile: any, ' +
- '__transition: any, __handleComponentError: any, __detach: any, __ownerFrame: any, ' +
- '__pushOwner: any, __popOwner: any, __detachRef: any;\n';
 
 // tsc over a set of {name: text} files in a fresh temp dir; returns
 // the combined diagnostic output. noImplicitAny stays OFF — unannotated

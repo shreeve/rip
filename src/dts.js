@@ -47,6 +47,8 @@ import { buildSchemaTypeStory, SchemaTypeError } from './schema-types.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers } from './emitter.js';
 import {
   componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
+  selfArgsOf,
+  anyArgsOf,
 } from './component-types.js';
 
 export class DtsError extends Error {
@@ -167,6 +169,29 @@ export function emitDeclarations({ sexpr, stores, source }) {
     if (typeof name !== 'string') return;
     const members = [];
     const stmts = isNode(body) && body[0] === 'block' ? body.slice(1) : body != null ? [body] : [];
+    // Every field the BODY declares, scanned before any member is
+    // pushed. A promoted parameter declares the field it implies unless
+    // the body already does — and the body's declaration counts wherever
+    // it sits, so asking `members` (which holds only what has been
+    // pushed so far) sees one before the constructor and misses one
+    // after it, shipping the name twice.
+    const bodyFields = new Set();
+    for (const stmt of stmts) {
+      // The three shapes a field takes below: a bare typed forward, an
+      // annotated initializer, and a pair inside a member object. Only
+      // INSTANCE fields count — a static shares no name space with the
+      // property a promotion assigns.
+      if (isTypedWrapper(stmt) && typeof stmt[1] === 'string') bodyFields.add(stmt[1]);
+      else if (isNode(stmt) && stmt[0] === '=' && stmt.length === 3 && typeof stmt[1] === 'string') {
+        bodyFields.add(stmt[1]);
+      } else if (isNode(stmt) && stmt[0] === 'object') {
+        for (const pair of stmt.slice(1)) {
+          if (!isNode(pair) || pair.length < 2 || isStaticKey(pair[1])) continue;
+          const k = memberName(pair[1]);
+          if (typeof k === 'string') bodyFields.add(k);
+        }
+      }
+    }
     for (const stmt of stmts) {
       if (isNode(stmt) && stmt[0] === 'object') {
         for (const pair of stmt.slice(1)) {
@@ -192,7 +217,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
               const n = x[2];
               // The field may ALSO be declared explicitly in the
               // class body (`url: string = ""`) — one declaration.
-              if (typed !== null && !members.some((m) => m.startsWith(`${n}:`))) {
+              if (typed !== null && !bodyFields.has(n)) {
                 members.push(`${n}: ${tidyType(typed[2])};`);
               }
               const plain = typed !== null ? ['typed-var', n, typed[2]] : n;
@@ -288,28 +313,43 @@ export function emitDeclarations({ sexpr, stores, source }) {
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'component';
   };
 
-  const componentDecl = (node, name, exported) => {
+  const componentDecl = (node, name, exported, stmt) => {
     const info = componentTypeInfo(stores, source, node);
     const optional = propsParamOptional(info);
     const gated = info.members.some((m) => m.kind === 'gate');
     const exp = exported ? 'export ' : '';
-    lines.push(`${exp}interface ${name} {`);
-    for (const l of rendered(() => instanceTypeLines(info, name))) lines.push(`  ${l}`);
+    // A GENERIC component: the members already reference the parameter,
+    // so the list has to reach both shipped declarations or the file
+    // does not compile at all. The interface header carries the list
+    // with its constraints; every self-reference and the constructor
+    // apply the bare NAMES, and the constructor restates the list
+    // because the binding it sits on is a value, not a type — the
+    // same split the face's own companion makes.
+    const typeParams = typeParamsOf(stmt);
+    const self = `${name}${selfArgsOf(typeParams)}`;
+    lines.push(`${exp}interface ${name}${typeParams} {`);
+    for (const l of rendered(() => instanceTypeLines(info, self))) lines.push(`  ${l}`);
     lines.push('}');
     lines.push(`${exp}declare let ${name}: {`);
     if (gated) {
-      lines.push(`  readonly prototype: ${name};`);
+      // The gated branch has no constructor to declare a parameter list
+      // on, so the prototype cannot NAME one — `${name}<T>` would put an
+      // unbound T inside a value's object type, which is the very defect
+      // this row exists to remove. It applies `any` per parameter: the
+      // prototype is a runtime identity, and a gated component's consumer
+      // reaches the instance through its route, never through this.
+      lines.push(`  readonly prototype: ${name}${anyArgsOf(typeParams)};`);
       lines.push('};');
       return;
     }
-    lines.push(`  new (props${optional ? '?' : ''}: ${propsTypeText(info)}): ${name};`);
+    lines.push(`  new ${typeParams}(props${optional ? '?' : ''}: ${propsTypeText(info)}): ${self};`);
     // The static mount mirror constructs with NO props (`new this()`
     // in the runtime), so a component with a REQUIRED prop must not
     // offer it — the call would be tsc-clean while the runtime yields
     // a required container holding undefined. Requiredness is a TYPE-story fact (annotations
     // erase — the runtime never sees it), so the gate lives
     // here, never as a runtime throw.
-    if (optional) lines.push(`  mount(target?: any): ${name};`);
+    if (optional) lines.push(`  mount${typeParams}(target?: any): ${self};`);
     lines.push('};');
   };
 
@@ -444,7 +484,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     else if (head === '=' && stmt.length === 3 && schemaByNode.has(stmt[2])) {
       schemaDecl(schemaByNode.get(stmt[2]), exported);
     } else if (head === '=' && stmt.length === 3 && typeof stmt[1] === 'string' && isComponentDecl(stmt[2])) {
-      componentDecl(stmt[2], stmt[1], exported);
+      componentDecl(stmt[2], stmt[1], exported, stmt);
     } else if (head === '=' && stmt.length === 3 && protoMemberTarget(stmt) !== null) {
       // A typed prototype member on an OUTSIDE type (`String::m: T =
       // v`): the module's runtime patches the global, so its

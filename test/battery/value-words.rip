@@ -74,3 +74,34 @@ test "this-param in a type alias", "type H = (this: Window, x: number) => any\n1
 
 # The aliases keep their VALUE reading everywhere an expression is.
 test "alias reads still lower", "x = off\ny = on\n[x, y]", [false, true]
+
+# ==============================================================================
+# The rejection: destructuring patterns
+# ==============================================================================
+
+# A pattern element carries no colon, so the alias table rewrites it in
+# the scanner and the annotated-site guard never sees a name to reject.
+# `[ false ]` is a legal array literal, and assignment reinterprets it as
+# a pattern afterwards — so the pattern walk is the last place that can
+# still tell an identifier from a literal. Rejected there, positioned on
+# the enclosing pattern: the leaf is a bare string with no span of its
+# own, and the word in the source (`no`) is not the word in the tree
+# (`false`), so the caret is what points at what the author wrote.
+fail "array-destructured value word", "[ no ] = [ 7 ]\nno", "`false` cannot be a destructuring target"
+fail "array-destructured value word among names", "[ a, no ] = [ 1, 2 ]\na", "`false` cannot be a destructuring target"
+fail "rest-destructured value word", "[ ...off ] = [ 1, 2 ]\noff", "`false` cannot be a destructuring target"
+fail "nested destructured value word", "[[ yes ]] = [[ 7 ]]\nyes", "`true` cannot be a destructuring target"
+fail "object pattern renamed to a value word", "o = { a: 7 }\n{ a: on } = o\non", "`true` cannot be a destructuring target"
+fail "destructured def parameter", "def f([ no ])\n  no\nf([7])", "`false` cannot be a destructuring target"
+fail "destructured loop head", "for [ no ] in [[1]]\n  no", "`false` cannot be a destructuring target"
+
+# The literal keywords ride the same law. `undefined` is the one that
+# failed SILENTLY before this rejection: `let undefined` is valid
+# JavaScript, so the module built and shadowed the global.
+fail "destructured literal keyword", "[ true ] = [ 7 ]\n1", "`true` cannot be a destructuring target"
+fail "destructured undefined", "[ undefined ] = [ 7 ]\n1", "`undefined` cannot be a destructuring target"
+
+# The negative space: an ordinary name destructures as it always did,
+# including one that merely CONTAINS a value word.
+test "ordinary name destructures", "[ nope ] = [ 7 ]\nnope", 7
+test "name containing a value word destructures", "{ offset } = { offset: 3 }\noffset", 3

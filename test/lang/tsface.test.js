@@ -27,6 +27,7 @@ import { describe, test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { compile, CompileError } from '../../src/compile.js';
+import { toMatchable } from '../../src/runtime/stdlib.js';
 import { stripFace } from '../../src/emitter.js';
 
 const corpusDir = join(import.meta.dir, '../corpus');
@@ -51,18 +52,21 @@ const MARKER = '\nexport {};\n';
 const ID = String.raw`[$_\p{ID_Start}][$\u200c\u200d\p{ID_Continue}]*`;
 const REGION_SHAPES = [
   /^!?: \S/u,                                             // annotation `: T` / forward `!: T`
+  /^satisfies \S/u,                                       // a schema field default's value enforcement: `v satisfies T`
+  /^<\S/su,                                               // a type ARGUMENT list: an annotated reactive's `__state<T>(v)`, and a generic `def`'s own `<T>` parameters
+  /^!$/u,                                                 // the match lowering's assertion on its own toMatchable receiver
   /^[()]$/u,                                              // arrow-param / cast parens
   /^as\s+\S/u,                                            // the cast's `as T` spelling
   /^this: \S/u,                                           // schema callable `this` param 
   /^export \{\};$/u,                                      // module marker
   new RegExp(String.raw`^declare (static |readonly )?${ID}: \S`, 'su'), // component member declare / static-mount narrowing / =! readonly 
+  new RegExp(String.raw`^${ID}(: \S[^;]*)?;$`, 'su'),      // the field a promoted param or a constructor-body `@x =` declares (bare when the assignment's own inference is the honest type)
   /^\[key: `_\$\{string\}`\]: any;$/u,                    // the component slot-namespace index signature (M12-E)
   /^constructor\(props\??: \{ .*\{ super\(props\); \}$/su, // the component props ctor (M12-E)
   /^as any\)?$/u,                                          // scaffold/handler quieting casts (M12-E)
   /^\) as any$/u,                                          // handler cast's TS-only close (arrow-safe grouping)
-  /^satisfies \S/u,                                        // reactive value enforcement: `v satisfies T`
-  /^\($/u,                                                 // computed-lambda wrap opener for `) satisfies () => T`
-  /^\) satisfies \(\) => \S/su,                            // computed return enforcement
+  new RegExp(String.raw`^${ID} = __computed\(\(\) => __${ID}__computed\.${ID}\.call\(this as any\)\);$`, 'su'), // an unannotated computed's INFERRED position — a field with no type node, so quickinfo prints the resolved type instead of echoing a projection
+  new RegExp(String.raw`^const __${ID}__(behavior|computed) = \{`, 'su'), // the behavior objects (schema callable / component computed return types)
   new RegExp(String.raw`^(export )?type ${ID}`, 'u'),      // alias / enum companion / schema alias
   new RegExp(String.raw`^(export )?interface ${ID}`, 'u'), // interface / schema intrinsic block
   new RegExp(String.raw`^function ${ID}\(.*\): [^;]+;$`, 'su'), // overload signature
@@ -202,6 +206,70 @@ describe('TS-face emission pins', () => {
       .toBe('let p = function({a, b}: {a: number, b: string}) {\n  return a;\n};' + MARKER);
   });
 
+  // The destructure is the LOWERING's own statement — no seam exists
+  // where an author could narrow, so TypeScript's `unknown` catch type
+  // would publish on legal rip. The annotation is minted with the
+  // parameter and scoped to it: an IDENTIFIER catch keeps `unknown`,
+  // which the author governs the ordinary ways. Both tries carry the
+  // branch separately, so both are pinned; stripping restores the JS.
+  // The match lowering narrows its OWN receiver rather than softening the
+  // helper it calls. Both halves are pinned together because either alone
+  // is satisfiable the wrong way: annotate `toMatchable` as `=> string`
+  // and the assertion becomes unnecessary, which is the fix the finding
+  // ruled out — it would make the prelude lie about a helper that really
+  // answers null on the multi-line path, where the null IS the loud throw.
+  test('the match seam needs no assertion, because the helper cannot answer null', () => {
+    const src = "text = 'abc'\nfound = text =~ /b+/\nnth = text[/(b)/, 1]\n";
+    const code = ts(src).code;
+    // No narrowing anywhere: the receiver is a string by the helper's
+    // own contract, so the face and the JS twin are the same call.
+    expect(code).toContain('toMatchable(text).match(/b+/)');
+    expect(code).toContain('toMatchable(text).match(/(b)/)');
+    expect(js(src).code).toContain('toMatchable(text).match(/b+/)');
+    const withPrelude = compile(src, { runtimeDelivery: 'inline', face: 'ts' }).code;
+    expect(withPrelude).toContain('toMatchable: (v: any, allowNewlines?: boolean) => string');
+    // LIVENESS — the pair that keeps the signature from being a lie.
+    // `=> string` is honest only because the multi-line receiver THROWS
+    // instead of answering null; soften the runtime back and the
+    // annotation above becomes the false claim this row ruled out, with
+    // every byte pin still green. v3 ships that exact lie.
+    expect(() => toMatchable('one\ntwo')).toThrow(/\/m/);
+    expect(toMatchable('one\ntwo', true)).toBe('one\ntwo');
+    expect(toMatchable('plain')).toBe('plain');
+  });
+
+  // The injected runtime's face type is an ASSERTION on the IIFE's
+  // value, so its members are the runtime's OWN property names — never
+  // the aliases the destructure mints when a user binding collides.
+  // Key them by the local and the pattern reads a property the asserted
+  // type does not declare: every name in the unit types as an error,
+  // invisibly, because the injection's synthetic mapping swallows the
+  // TS2339 that would say so. The liveness pair is the same program
+  // without the shadow.
+  test('the injected runtime asserts its own property names, not the minted aliases', () => {
+    const shadowed = compile("__state = 'mine'\ncount := 1\nconsole.log(__state, count)\n",
+      { runtimeDelivery: 'inline', face: 'ts' }).code;
+    expect(shadowed).toContain('{ __state: __state_,');                 // the alias is minted
+    expect(shadowed).toContain('as { __state: <T>(value: T');           // and the assertion still keys by the NAME
+    expect(shadowed).not.toContain('as { __state_:');
+    const plain = compile("count := 1\nconsole.log(count)\n",
+      { runtimeDelivery: 'inline', face: 'ts' }).code;
+    expect(plain).toContain('as { __state: <T>(value: T');
+  });
+
+  test('catch patterns: the minted parameter carries a face-only `any`, in the statement try and the value try alike', () => {
+    const stmt = 'try\n  f()\ncatch {message}\n  message\n';
+    const value = 'v = try\n  f()\ncatch [first]\n  first\n';
+    expect(ts(stmt).code).toContain('} catch (_err: any) {');
+    expect(ts(value).code).toContain('} catch (_err: any) {');
+    for (const src of [stmt, value]) {
+      const r = ts(src);
+      expect(stripFace(r.code, r.tsRegions)).toBe(js(src).code);
+    }
+    // The identifier spelling mints nothing and gains nothing.
+    expect(ts('try\n  f()\ncatch e\n  e\n').code).toContain('} catch (e) {');
+  });
+
   test('single typed arrow param gains TS-only parens (TS requires them; stripping restores the bare name)', () => {
     const r = ts('g = (v: number) => v\n');
     expect(r.code).toBe('let g = (v: number) => v;' + MARKER);
@@ -222,7 +290,10 @@ describe('TS-face emission pins', () => {
 
   test('void definitions annotate `: void` (async: Promise<void>) under the voidMarker', () => {
     expect(ts('def save!(x)\n  x\n').code).toBe('function save(x): void {\n  x;\n  return;\n}' + MARKER);
-    expect(ts('tick! = (x) =>\n  x\n').code).toBe('let tick;\n\ntick = (x): void => {\n  x;\n  return;\n};' + MARKER);
+    // The binding declares in place, so the annotation sits on an
+    // INITIALIZED declaration — the span a semantic token and a hover
+    // are both read at carries the function value.
+    expect(ts('tick! = (x) =>\n  x\n').code).toBe('let tick = (x): void => {\n  x;\n  return;\n};' + MARKER);
     expect(ts('def flush!(x)\n  await x\n').code)
       .toBe('async function flush(x): Promise<void> {\n  await x;\n  return;\n}' + MARKER);
   });
@@ -296,10 +367,12 @@ describe('TS-face emission pins', () => {
 
   test('reactive containers type as the branded { value: T; read(): T } (computed readonly); readonly/effect handles as T', () => {
     const code = ts('count: number := 0\ntotal: number ~= count * 2\nro: string =! "s"\nh: Function ~> console.log(count)\n').code;
-    // Annotated reactives also ENFORCE the value via face-only
-    // `satisfies`.
-    expect(code).toContain('const count: { value: number; read(): number } = __state(0 satisfies number);');
-    expect(code).toContain('const total: { readonly value: number; read(): number } = __computed((() => (count.value * 2)) satisfies () => number);');
+    // Annotated reactives also ENFORCE the value, via a face-only
+    // explicit TYPE ARGUMENT — which checks the initializer and
+    // simultaneously makes the call's return type the annotated
+    // container, so a wrong value publishes once rather than twice.
+    expect(code).toContain('const count: { value: number; read(): number } = __state<number>(0);');
+    expect(code).toContain('const total: { readonly value: number; read(): number } = __computed<number>(() => (count.value * 2));');
     expect(code).toContain('const ro: string = "s";');
     expect(code).toContain('const h: Function = __effect(() => { console.log(count.value); });');
   });
@@ -701,7 +774,10 @@ describe('TS-face mapping rows (the same mark protocol)', () => {
     const at = r.code.indexOf(': number') + 3; // inside `number` in the hoist line
     const row = r.mappings.bestAtGenerated(at);
     expect(row).not.toBeNull();
-    expect(src.slice(row.sourceStart, row.sourceEnd)).toBe(': number');
+    // The type NAME carries its own exact row inside the annotation's cover,
+    // so the innermost row at a position inside `number` is `number` itself —
+    // the answer a hover there should give, not the whole `: number` span.
+    expect(src.slice(row.sourceStart, row.sourceEnd)).toBe('number');
   });
 });
 

@@ -113,8 +113,22 @@ class Badge {
   }
 }
 
+class Crate {
+  holder: string
+  weight: number
+  constructor(holder: string, weight: number = 1) {
+    this.holder = holder
+    this.weight = weight
+  }
+  manifest() {
+    return `${this.holder} carries ${this.weight}`
+  }
+}
+
 let badge = new Badge('ada')
+let crate = new Crate('grace', 3)
 console.log('badge:', badge.describe())
+console.log('crate:', crate.manifest(), crate.holder, crate.weight)
 
 // ── return: bare, valued, and the indented-object payload ──
 

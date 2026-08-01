@@ -173,7 +173,61 @@ export function hostFloorDts(workspaceRoot, { userSetsTypes = false } = {}) {
 // with the real workspace (a .rip file importing a real .ts sibling
 // resolves). The mirror root MUST sit two levels below the workspace so
 // the `../../` reach-ups (extends, ambient d.ts, node_modules) resolve.
-export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = new Set(), onUnresolved } = {}) {
+// A tsconfig path is written into a generated config, so it is always
+// POSIX-separated — a Windows `..\\pkg\\tsconfig.json` is not a legal
+// `extends` spec.
+const posix = (p) => p.split(path.sep).join('/');
+
+// The nearest `tsconfig.json` at or above `dir`, stopping AT `anchor`
+// (inclusive). Null when the walk reaches the anchor without finding
+// one, which is the ordinary case: most directories are governed by the
+// workspace root's config and need no wrapper of their own.
+export function nearestTsconfig(dir, anchor) {
+  for (let d = dir; ; d = path.dirname(d)) {
+    const candidate = path.join(d, 'tsconfig.json');
+    if (fs.existsSync(candidate)) return candidate;
+    if (d === anchor || path.dirname(d) === d) return null;
+  }
+}
+
+// The generated WRAPPER for one nested project: the same overrides the
+// mirror root gets, but reaching up to that project's own tsconfig
+// instead of the workspace root's, with every reach-up computed rather
+// than spelled. tsgo's LSP does per-file nearest-tsconfig discovery (the
+// tsserver configured-project model), so placing one of these at each
+// mirrored project dir partitions the faces by project inside a SINGLE
+// mirror tree and a SINGLE session — no multiplexing, and the pin pass
+// is untouched.
+//
+// The wrapper states its own include/exclude, so the source tsconfig's
+// FILE SET is not inherited — only its compilerOptions. And the floor is
+// emitted per project, from that project's own gate answers: a nested
+// project's strictness and installed types govern whether ITS files see
+// it, which a single workspace-root floor could never express.
+export function projectWrapper({ wrapperDir, sourceTsconfig, chain = new Set(), onUnresolved }) {
+  const sourceDir = path.dirname(sourceTsconfig);
+  const overrides = {
+    noImplicitAny: true,
+    noEmit: true,
+    allowImportingTsExtensions: true,
+    rootDirs: ['.', posix(path.relative(wrapperDir, sourceDir))],
+  };
+  chain.clear();
+  const setsTypes = chainSetsTypes(sourceTsconfig, chain, onUnresolved);
+  if (!setsTypes) overrides.types = ['*'];
+  const reachUp = posix(path.relative(wrapperDir, sourceDir));
+  return {
+    tsconfig: {
+      extends: posix(path.relative(wrapperDir, sourceTsconfig)),
+      compilerOptions: overrides,
+      include: ['**/*.ts', `${reachUp}/**/*.d.ts`],
+      exclude: ['node_modules', `${reachUp}/**/node_modules`],
+    },
+    hostFloorDts: hostFloorDts(sourceDir, { userSetsTypes: setsTypes }),
+  };
+}
+
+export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = new Set(), onUnresolved, excludeDirs = [] } = {}) {
   const overrides = {
     noImplicitAny: true,
     noEmit: true,
@@ -184,7 +238,11 @@ export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = n
   // program. An explicit `exclude` REPLACES the built-in defaults, so
   // `node_modules` is restated alongside the `../../` reach-up.
   const include = ['**/*.ts'];
-  const exclude = ['node_modules'];
+  // A nested project's mirrored subtree belongs to ITS wrapper. Without
+  // the exclusion both configs claim the same faces, and which one
+  // answers is tsgo's discovery order rather than the file's own
+  // nearest config.
+  const exclude = ['node_modules', ...excludeDirs.map((d) => `${posix(d)}/**`)];
   if (!mirrorRootIsFallback) {
     include.push('../../**/*.d.ts');
     exclude.push('../../**/node_modules');
@@ -229,18 +287,33 @@ export function mirrorRelForFsPath(fsPath, workspaceRoot) {
   return path.join('__external__', fsPath.replace(/^[/\\]/, '').replace(/:/g, ''));
 }
 
+// The roles whose recorded span is TYPE TEXT — where an import type's
+// specifier lives, since it belongs to no import node.
+const TYPE_TEXT_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declaration']);
+const IMPORT_TYPE = /\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
+
 // The relative .rip import targets of a compiled file, as absolute paths
 // — the closure edges. Read from the compiler's OWN stores (never
 // scanned from generated text — the never-list): import/export nodes
 // carry a `source` role whose exact source span is the specifier string;
 // dynimport nodes carry an `args` span, followed only when it is a single
-// static string literal (a computed specifier is a recorded closure miss).
+// static string literal (a computed specifier is a recorded closure miss);
+// and an IMPORT TYPE (`c: import('./lib.rip').Crate`) names its module
+// inside recorded type text, which is read the same way — a role's own
+// span over SOURCE, never a scan of anything generated. Program
+// membership is the whole fix there: with the sibling in the program the
+// untouched `.rip` specifier resolves by the mirror's filename, so
+// nothing rewrites a specifier and there is no second resolution rule.
 export function ripImportsOf(stores, sourceText, fromDir) {
+  const seen = new Set();
   const targets = [];
   const addSpec = (spec) => {
     if (!spec.endsWith('.rip')) return;
     if (!spec.startsWith('./') && !spec.startsWith('../')) return;
-    targets.push(path.resolve(fromDir, spec));
+    const abs = path.resolve(fromDir, spec);
+    if (seen.has(abs)) return;   // one edge per module, however many spellings name it
+    seen.add(abs);
+    targets.push(abs);
   };
   for (const kind of ['import', 'export']) {
     for (const node of stores.nodesByKind(kind)) {
@@ -255,6 +328,10 @@ export function ripImportsOf(stores, sourceText, fromDir) {
     const raw = sourceText.slice(args.sourceStart, args.sourceEnd);
     const literal = /^\(\s*(['"`])([^'"`]+)\1\s*\)$/.exec(raw);
     if (literal) addSpec(literal[2]);
+  }
+  for (const r of stores.roles) {
+    if (!TYPE_TEXT_ROLES.has(r.role) || typeof r.sourceStart !== 'number') continue;
+    for (const m of sourceText.slice(r.sourceStart, r.sourceEnd).matchAll(IMPORT_TYPE)) addSpec(m[2]);
   }
   return targets;
 }

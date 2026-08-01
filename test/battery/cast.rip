@@ -101,3 +101,24 @@ fail "a plus-signed literal is not a type", "x = y as +1",
 
 fail "a cast that claims no type rejects", "x = y as -z",
   "'as' begins a cast and takes a type"
+
+# ==============================================================================
+# The cast's type run and a following clause keyword
+# ==============================================================================
+
+# A cast inside a `try` expression that also carries a handler: the type run
+# ends at the clause keyword, so `catch` opens a handler instead of being
+# swallowed into the type string. Pinned rather than described in the corpus,
+# because the property is invisible in the source and a type-rewriter change
+# would take the handler with it silently.
+code "a clause keyword ends the cast's type run", '''
+  cast = try JSON.parse('broken') as { live: boolean } catch e then { live: false }
+''', '''
+  let cast;
+
+  cast = (() => { try {
+    return JSON.parse("broken");
+  } catch (e) {
+    return {live: false};
+  } })();
+'''

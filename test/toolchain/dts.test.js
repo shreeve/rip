@@ -141,6 +141,12 @@ const ROWS = [
   ['class A\n  m: (x: number): string -> "s"', 'declare class A {\n  m(x: number): string;\n}\nexport {};\n'],
   ['class A\n  save!: (x: number) ->\n    x', 'declare class A {\n  save(x: number): void;\n}\nexport {};\n'],
   ['class A\n  constructor: (a: number) ->\n    @a = a', 'declare class A {\n  constructor(a: number);\n}\nexport {};\n'],
+  // A promoted parameter declares the field it implies, ONCE — and the
+  // body's own declaration counts wherever it sits. Scanning only what
+  // has been pushed so far sees a declaration BEFORE the constructor and
+  // misses one after it, which ships a duplicate identifier.
+  ['class A\n  constructor: (@tag: string) ->\n  tag: string', 'declare class A {\n  constructor(tag: string);\n  tag: string;\n}\nexport {};\n'],
+  ['class A\n  tag: string\n  constructor: (@tag: string) ->', 'declare class A {\n  tag: string;\n  constructor(tag: string);\n}\nexport {};\n'],
   ['class A extends B\n  x: number = 5', 'declare class A extends B {\n  x: number;\n}\nexport {};\n'],
   ['export class W\n  w: number = 1', 'export declare class W {\n  w: number;\n}\n'],
   ['class A\n  x: number = 5\n  m: -> @x', 'declare class A {\n  x: number;\n}\nexport {};\n'],

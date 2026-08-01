@@ -1,4 +1,4 @@
-# 13-components.errors.rip — intentional negatives asserted by the Diagnostics Lane; the bind and ref rows are pinned (error-pins.json) because no honest TSX line spells the `<=>` channel and React's ref rejection fires for a different reason.
+# 13-components.errors.rip — intentional negatives asserted by the Diagnostics Audit; the bind and ref rows are pinned (error-pins.json) because no honest TSX line spells the `<=>` channel and React's ref rejection fires for a different reason.
 # @ts-nocheck
 
 Chip = component
@@ -34,3 +34,17 @@ Wrong = component
 
 wrongMount = Gated.mount()
 wrongConstruct = new Gated({})
+
+Member = component
+  wrongPlain: string = 42
+  wrongState: number := 'oops'
+  wrongComputed: string ~= 7 * 3
+  wrongConst: number =! 'nope'
+  ok := 0
+
+  bump: ->
+    ok = 'later'
+    @wrongPlain = 12
+
+  render
+    div ok

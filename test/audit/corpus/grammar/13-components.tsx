@@ -109,6 +109,21 @@ function Picker() {
   )
 }
 
+// ── SVG elements ──
+
+function Spinner() {
+  let spinning = true
+
+  return (
+    <svg viewBox='0 0 24 24' className='animate-spin' fill='none'>
+      <g className={['icon', 'spin'].filter(Boolean).join(' ')}>
+        <circle cx='12' cy='12' r='10' />
+      </g>
+      <path className={`trail-${spinning}`} d='M4 12a8 8 0 0 1 8-8' />
+    </svg>
+  )
+}
+
 // ── render Expression: the logic-only component ──
 
 function Quiet() {
@@ -120,6 +135,6 @@ function Terse() {
   return null
 }
 
-console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel)
+console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel, typeof Spinner)
 console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse)
 console.log('rip-native constructs:', true, true, true)

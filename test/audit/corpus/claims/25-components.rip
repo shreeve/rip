@@ -1,4 +1,4 @@
-# 25-components.rip — the component consumer face. Four more rows are parked (CLAIMS.md).
+# 25-components.rip — the component consumer face. One more row is parked (CLAIMS.md).
 
 # ── Method faces: a typed parameter keeps its type in both member layouts, a defaulted parameter becomes optional, and the body's return reaches the caller ──
 
@@ -79,3 +79,45 @@ Cuff = component
 
 console.log('use sites:', typeof Prompt, typeof Ribbon, typeof Palette, typeof Stage)
 console.log('refs:', typeof Anchors, typeof Sleeve, typeof Cuff)
+
+# ── A method's write to a member checks against the member's declared type, and array-typed state keeps its element type through the cell ──
+
+Ledger = component
+  entries: string[] := ['open']
+  status := 'idle'
+
+  post: (note: string) ->
+    status = note
+    entries = [note]
+
+  render null
+
+ledger = new Ledger({})
+ledgerHead: string = ledger.entries.value[0]
+ledgerStatus: string = ledger.status.value
+
+console.log('state:', ledgerHead, ledgerStatus)
+
+# ── Member-kind faces through an instance: `:=` exposes `.value`, `=!` is readonly, `=` stays plain, and `~=` types from what its body READS rather than from its shape ──
+
+Meter = component
+  labels: string[] := ['idle']
+  cap =! 3
+  note = 'flat'
+
+  width ~= labels.length
+
+  span ~=
+    base = labels.length
+    base + cap
+
+  render null
+
+meter = new Meter({})
+meterWidth: number = meter.width.value
+meterSpan: number = meter.span.value
+meterLabel: string = meter.labels.value[0]
+meterCap: number = meter.cap
+meterNote: string = meter.note
+
+console.log('members:', meterWidth, meterSpan, meterLabel, meterCap, meterNote)

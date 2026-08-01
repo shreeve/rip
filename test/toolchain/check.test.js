@@ -37,6 +37,28 @@ function workspace(files, ripConfig = null) {
   return dir;
 }
 
+// A TWO-PACKAGE workspace: a loose root beside a nested project with its
+// own `tsconfig.json`. Every other fixture here is single-package, where a
+// flat mirror root is indistinguishable from a correct per-project one —
+// which is exactly why the per-project gap went unseen. `strict` is the
+// discriminator because it changes an ANSWER (TS2322 on `x: string = null`)
+// rather than merely a setting, so the assertion cannot pass by accident.
+function monorepo({ rootStrict = false, nestedStrict = true } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-mono-'));
+  const base = JSON.parse(fs.readFileSync(TSCONFIG, 'utf8'));
+  delete base.include;                       // the audit's own file set means nothing here
+  delete base.exclude;
+  base.compilerOptions.strict = rootStrict;
+  fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify(base, null, 2));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({}, null, 2));
+  fs.mkdirSync(path.join(dir, 'pkg'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'pkg', 'tsconfig.json'),
+    JSON.stringify({ compilerOptions: { strict: nestedStrict } }, null, 2));
+  fs.writeFileSync(path.join(dir, 'root.rip'), 'x: string = null\nconsole.log x\n');
+  fs.writeFileSync(path.join(dir, 'pkg', 'a.rip'), 'y: string = null\nconsole.log y\n');
+  return dir;
+}
+
 function check(dir, args = []) {
   const r = spawnSync('bun', [BIN, 'check', ...args], { cwd: dir, encoding: 'utf8', timeout: 60_000 });
   return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
@@ -110,44 +132,531 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('the match operator publishes TS2531 on every use — an open gap, asserted as-is', () => {
+  test('the match operator and its regex-index sugar publish nothing', () => {
     // `text =~ /re/` lowers to `(_ = toMatchable(text).match(re))`, and the
     // face's prelude types toMatchable `(v: any, allowNewlines?: boolean) =>
     // string | null` — the null return is the deliberate loud-throw path for
-    // a multi-line receiver without /m, so the SIGNATURE is honest and the
-    // unguarded `.match` is not: every match expression publishes TS2531 on
-    // legal rip, permissive and strict alike. The regex-index sugar shares
-    // the emission spine (`regexIndex`, src/emitter.js) and flags identically.
+    // a multi-line receiver without /m, so the SIGNATURE stays as it is and
+    // the LOWERING carries the narrowing: the emitted spine asserts its own
+    // intermediate (a TS-only region — the JS bytes are untouched), so no
+    // match expression publishes on legal rip. The regex-index sugar shares
+    // that spine (`regexIndex`, src/emitter.js).
     //
-    // This is an OPEN gap, so this test asserts the current, wrong behavior
-    // on purpose — and says so. The day the emission is made null-clean, the
-    // TS2531 assertions below go red: that is the cue to invert this test to
-    // expect a clean pass, move `=~` and the regex-index spelling into the
-    // the audit's operations fixture (whose `verdict` dimension holds them
-    // from then on), and close the ledger row — not a regression.
-    // Deliberately NOT `test.failing`: under it any throw counts as a pass,
-    // so a dead server — or a checker that stopped reporting anything —
-    // would read as fixed. The liveness pair (a real TS2322 in the same
-    // workspace, asserted at its own position) keeps an empty run loud.
+    // Every branch of both lowerings is here, because the assertion is
+    // emitted per-branch: `=~` plain and under a literal /m, and the index
+    // in all four of its shapes (whole match / nth capture × plain / /m).
+    // The corpus carries these spellings too (02-operations, 04-assignments,
+    // under the Type Audit's `verdict`); this case is the CLI's own check,
+    // over a workspace with no rip config at all — permissive, no strict
+    // flag, which is where the gap used to reach every user.
+    // The liveness pair (a real TS2322 in the same workspace, asserted at
+    // its own position) keeps a checker that reports nothing at all from
+    // impersonating the clean run.
     const dir = workspace({
-      'match.rip': "text = 'abc'\nfound = text =~ /b+/\ngrabbed = text[/b+/]\nconsole.log found, grabbed\n",
+      'match.rip': "text = 'abc'\nlines = \"a\\nb\"\n"
+        + 'found = text =~ /b+/\nspanned = lines =~ /^b/m\n'
+        + 'grabbed = text[/b+/]\ncapture = text[/(b)(c)/, 2]\n'
+        + 'wide = lines[/^b/m]\nwideCapture = lines[/^(b)/m, 1]\n'
+        + 'console.log found, spanned, grabbed, capture, wide, wideCapture\n',
       'live.rip': "n: number = 'oops'\nconsole.log n\n",
     });
     try {
       const r = check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('live.rip:1:1 - error TS2322');       // liveness: the checker really reports
-      // Each spelling's TS2531 is BOUND to its line, column left free — a
-      // partial fix on either spelling goes red, a mapped-column shift is not a fix.
-      expect(r.stdout).toMatch(/match\.rip:2:\d+ - error TS2531/);     // `=~` — TS2531 on a legal match
-      expect(r.stdout).toMatch(/match\.rip:3:\d+ - error TS2531/);     // `text[/re/]` — same root, same flag
+      // Nothing anywhere in the match file — not a code, not a line.
+      expect(r.stdout).not.toContain('match.rip');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // Every component member form checks its initializer, and every wrong-typed
+  // member WRITE inside a method reaches the source. Two mechanisms hold this
+  // up and each has its own spelling below.
+  //
+  // The initializer half is the face's runtime destructure: a component-carrying
+  // file fuses the components runtime into the reactive one, and the fused unit
+  // states the union of their signatures, so `__state`/`__computed` stay generic
+  // and every `_init` assignment checks against the member's declared type. The
+  // `=!` member rides a second seam — its one legitimate constructor-seam write
+  // casts `this` to the member's own type rather than to `any`, which would
+  // swallow the value check along with TS2540.
+  //
+  // The write half is the mapping: an `@name` write lowers to `this.name…`, and
+  // the emitted `this` maps back through the member's own cover, so a
+  // diagnostic anchored there reaches `@name` instead of dropping in transit.
+  // Exact lists both ways — a form that stops checking, or a span that stops
+  // mapping, goes red here. The audit's components error pair holds the same
+  // negatives by code and position; this is the CLI's own check, over a
+  // workspace with no rip config, plus the strict posture the write half was
+  // driven under.
+  test('every component member form checks its initializer, and in-method writes reach the source', () => {
+    const initDir = workspace({
+      'member.rip': [
+        'export Box = component',
+        '  wrongPlain: string = 42',
+        "  wrongMember: number := 'oops'",
+        "  wrongComputed: string ~= 7 * 3",
+        "  wrongReadonly: number =! 'nope'",
+        '',
+        '  render',
+        '    div wrongPlain',
+      ].join('\n') + '\n',
+    });
+    // The prop's declared type is NUMBER and the write is a string: an earlier
+    // spelling of this fixture wrote `'nope'` into a `string` prop, which is a
+    // correct write, so the row asserted nothing either way.
+    const writeDir = workspace({
+      'writes.rip': [
+        'export Writer = component',
+        '  @value: number := 0',
+        '  count := 0',
+        '  plainField: number = 1',
+        '',
+        '  bump: ->',
+        "    @count = 'oops'",
+        "    @value = 'nope'",
+        "    @plainField = 'flat'",
+        '    nonexistentHelper(1)',
+        '',
+        '  render',
+        '    div count',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const init = JSON.parse(check(initDir, ['--json']).stdout);
+      // All four member forms, each on its own declaration line, anchored on
+      // the member name.
+      expect(init.map((d) => [d.code, d.line, d.column])).toEqual([
+        [2322, 2, 3], [2322, 3, 3], [2322, 4, 3], [2322, 5, 3],
+      ]);
+
+      const writes = JSON.parse(check(writeDir, ['--json']).stdout);
+      // State, prop, and plain non-reactive member alike — each anchored on
+      // the `@`, the first byte of the source the lowering's `this` stands
+      // for. The method body's TS2304 is the liveness pair.
+      expect(writes.map((d) => [d.code, d.line, d.column])).toEqual([
+        [2322, 7, 5], [2322, 8, 5], [2322, 9, 5], [2304, 10, 5],
+      ]);
+    } finally {
+      fs.rmSync(initDir, { recursive: true, force: true });
+      fs.rmSync(writeDir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // The two face-only BEHAVIOR OBJECTS (a component's computed members, a
+  // schema's callables) are re-emissions of bodies the descriptor and _init
+  // already carry, and each has a shape that the fixtures which drove them
+  // did not: a computed body of more than one statement, and a schema bound
+  // by `export`. Both produce a face that does not compile — the first
+  // because a multi-statement body is already a BRACED BLOCK and cannot be
+  // wrapped in `return …`, the second because the object is emitted at the
+  // plain `=` statement and the export path binds elsewhere. Legal rip, so
+  // the whole workspace must be silent; the liveness pair is a real error in
+  // a third file, which also proves a broken face cannot masquerade as one.
+  test('a multi-statement computed and an exported schema keep the face compiling', () => {
+    const dir = workspace({
+      'panel.rip': [
+        'Panel = component',
+        '  count := 3',
+        '',
+        '  summary ~=',
+        '    doubled = count * 2',
+        '    doubled + 1',
+        '',
+        '  render null',
+        '',
+        'panel = new Panel({})',
+        'total: number = panel.summary.value',
+        'console.log total',
+      ].join('\n') + '\n',
+      'cart.rip': [
+        'export Cart = schema :shape',
+        '  items! number[]',
+        '  total: ~> @items.length',
+        '',
+        'sum: number = Cart.parse({ items: [3] }).total',
+        'console.log sum',
+      ].join('\n') + '\n',
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
+      expect(diags.filter((d) => d.file !== 'live.rip')).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // TypeScript reads a class's properties from its DECLARATIONS alone,
+  // never from what the constructor assigns — so a constructor body's
+  // `@field = value` has to declare what it implies, exactly as a
+  // promoted parameter does. Without it, legal rip that runs correctly
+  // publishes TS2339 at every assignment AND every read, which is the
+  // whole surface of the class. The annotated spelling carries its type
+  // onto the declaration; the bare one declares the name alone, the
+  // promoted-parameter precedent. A body-level declaration of the same
+  // name still wins — one declaration, or TypeScript reads the pair as
+  // duplicate identifiers.
+  test('a constructor body\'s @field assignment declares its field', () => {
+    const dir = workspace({
+      // Legal, correctly-running rip: every spelling must be silent.
+      'box.rip': [
+        'export class Box',
+        '  tag: string = \'t\'',       // declared in the body — must not double
+        '',
+        '  constructor: ->',
+        '    @size = 3',
+        '    @label: string = \'b\'',
+        '    @tag = \'u\'',
+        '    if true',
+        '      @flag = 1',            // reached THROUGH control flow
+        '    bind = => @bound = 2',   // a BOUND arrow: its `this` IS the instance
+        '    bind()',
+        '',
+        'b = new Box()',
+        'console.log b.size, b.label, b.tag, b.flag, b.bound',
+      ].join('\n') + '\n',
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    // The claims a clean run cannot hold on its own. Declaring the NAME
+    // is most of the fix — TypeScript infers a bare property's type from
+    // the constructor's own assignment — so the annotation is load-bearing
+    // in exactly one place: where the author declares WIDER than the
+    // assignment infers. `wide` takes null and `plain` refuses it, which
+    // is the only pair that can tell the two apart.
+    //
+    // BOTH function forms are here, because the boundary is not "a nested
+    // function" but WHOSE `this` it is. `->` emits a plain function whose
+    // `this` is dynamic, so its assignment says nothing about the class;
+    // `=>` emits an arrow whose `this` is lexically the instance, so its
+    // assignment declares (the clean fixture's `bound`). The pairing that
+    // proves the line is drawn correctly rather than merely drawn: an
+    // arrow nested INSIDE a `->` still declares nothing, because by then
+    // the `this` it captures is the function's.
+    const negDir = workspace({
+      'crate.rip': [
+        'export class Crate',
+        '  constructor: ->',
+        '    @wide: string | null = \'b\'',
+        '    @plain = \'b\'',
+        '    later = -> @nested = 1',
+        '    outer = ->',
+        '      inner = => @deep = 1',   // an arrow under a `->`: captures the FUNCTION's this
+        '      inner()',
+        '    later',
+        '    outer',
+        '',
+        'c = new Crate()',
+        'c.wide = null',                // legal: the annotation rode onto the declaration
+        'c.plain = null',               // rejects: inferred from the assignment alone
+        'wrongNested = c.nested',
+        'wrongDeep = c.deep',
+      ].join('\n') + '\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
+      expect(diags.filter((d) => d.file !== 'live.rip')).toEqual([]);
+
+      const neg = JSON.parse(check(negDir, ['--json']).stdout);
+      expect(neg.map((d) => [d.code, d.line])).toEqual([
+        [2683, 5],   // the `->`'s own untyped `this` — not this class's
+        [2683, 7],   // and the arrow under it captures THAT one, not the instance
+        [2322, 14],  // `plain` inferred `string`; line 13's write to `wide` stays silent
+        [2339, 15],  // `nested` never declared: a plain function's `this` is another object
+        [2339, 16],  // nor `deep`: an arrow inherits whatever `this` encloses it
+      ]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(negDir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // A wrong-typed schema DEFAULT publishes: the face carries the descriptor's
+  // default under a `satisfies` against the field's declared type, so the
+  // relation the runtime enforces on every `.parse()` is stated where the
+  // checker can read it.
+  //
+  // The wrong-typed TRANSFORM stays silent, and that is the ruling, not a
+  // second gap: relating a transform's RETURN to its field needs its INPUT
+  // related to the row shape, and `it` is the declared `any` boundary — the
+  // wire shape is what a transform exists to absorb. The runtime rejects it
+  // on `.parse()`. The two are asserted apart so that a later change to
+  // either is visible on its own line.
+  test('a wrong-typed schema default publishes; the transform half stays runtime-only', () => {
+    const dir = workspace({
+      'schema.rip': [
+        'Person = schema',
+        '  id!   number, -> it.name',      // transform returns string on a number field
+        "  role  number, ['guest']",       // string default on a number field
+        '',
+        "person = Person.parse({ name: 'Ada' })",
+        'console.log person.id, person.role',
+      ].join('\n') + '\n',
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
+      // TS1360 is what `satisfies` publishes, anchored on the default LITERAL
+      // — not on the entry list that encloses it, which is where it lands
+      // without a span of its own. The transform's line (2) is absent: the
+      // ruled runtime-only half.
+      expect(diags.filter((d) => d.file === 'schema.rip')
+        .map((d) => [d.code, d.line, d.column, d.endColumn])).toEqual([[1360, 3, 18, 25]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A pattern catch mints its binding (`catch (_err) { ({message} = _err); … }`)
+  // and annotates it, so the lowering's own destructure never publishes —
+  // in EITHER try, statement or value, on EITHER pattern kind. The four
+  // spellings ride together because the two tries are separate emissions:
+  // annotating one leaves the other's destructure standing.
+  //
+  // The two guards below are what keep the annotation scoped to the minted
+  // binding, which is the whole ruling. The identifier spelling's `unknown`
+  // is honest and user-governable (`instanceof`, a cast), so its TS18046
+  // must survive: that assertion goes red the day someone loosens the catch
+  // type globally instead. And the handler BODY stays checked — a wrong
+  // assignment beside the destructure still publishes — so the annotation
+  // cannot have been spent on the whole clause. Codes bound to their lines,
+  // columns free. Liveness-paired.
+  test('a pattern catch never publishes from its own lowering, and the identifier spelling keeps unknown', () => {
+    const dir = workspace({
+      'catchpat.rip': [
+        'try',
+        "  JSON.parse('broken')",
+        'catch {message}',
+        '  console.log message',
+        '',
+        'try',
+        "  JSON.parse('broken')",
+        'catch [first]',
+        '  console.log first',
+        '',
+        'label = try',
+        "  JSON.parse('broken')",
+        'catch {message}',
+        '  message',
+        '',
+        'pair = try',
+        "  JSON.parse('broken')",
+        'catch [first]',
+        '  first',
+        '',
+        'console.log label, pair',
+      ].join('\n') + '\n',
+      'scoped.rip': [
+        'try',
+        "  JSON.parse('broken')",
+        'catch e',
+        '  console.log e.message',
+        '',
+        'try',
+        "  JSON.parse('broken')",
+        'catch {message}',
+        "  n: number = 'oops'",
+        '  console.log message, n',
+      ].join('\n') + '\n',
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
+      expect(diags.filter((d) => d.file === 'catchpat.rip')).toEqual([]);
+      expect(diags.filter((d) => d.file === 'scoped.rip').map((d) => [d.code, d.line]))
+        .toEqual([[18046, 4], [2322, 9]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A forward reference forces the hoist split, which is what puts a binding
+  // into the pin probe at all — a class declared before its uses takes
+  // declare-in-place and never rounds. tsgo types an anonymous class by its
+  // own binding, so the probe declaration answers `typeof __rip_probe_N_Box`,
+  // and accepting that annotated the REAL binding with a name deleted along
+  // with the probe file: TS2304 on legal code, spelled in vocabulary the
+  // author could find nowhere. `parseProbeHover` now refuses any answer
+  // naming a probe symbol, landing on the probe round's status quo.
+  //
+  // BOTH spellings, because the component is the shape that reaches real
+  // code — mutual and forward references between components are ordinary
+  // component-library structure, and a component lowers to a class
+  // expression. Liveness-paired: `live.rip` proves the run type-checked at
+  // all rather than reporting nothing because nothing ran.
+  test('a forward-referenced class and a forward-rendered component both check clean — no minted symbol escapes the probe', () => {
+    const dir = workspace({
+      'fwd.rip': [
+        'make = -> new Box()',    // reads Box above its declaration — forces the hoist split
+        'Box = class',
+        "  greet: -> 'hi'",
+        'console.log make().greet()',
+      ].join('\n') + '\n',
+      'comp.rip': [
+        'Parent = component',
+        '  render',
+        "    Child text: 'hi'",   // renders Child above its declaration
+        '',
+        'Child = component',
+        '  @text: string',
+        '  render',
+        '    div',
+        '      = @text',
+      ].join('\n') + '\n',
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
+      expect(diags.filter((d) => d.file === 'fwd.rip')).toEqual([]);
+      expect(diags.filter((d) => d.file === 'comp.rip')).toEqual([]);
+      // No diagnostic anywhere may wear the minted vocabulary — the substantive
+      // half of this row. A future pin shape that leaks the probe name through
+      // some other message reds here rather than in a fixture nobody reads.
+      expect(diags.filter((d) => /__rip_probe_/.test(d.message))).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // The FLOOR's accepted cost, asserted so it cannot be mistaken for a fix.
+  // Refusing the self-referential answer leaves the binding unpinned — an
+  // evolving `any` — so a wrong call through it is NOT caught. That is the
+  // status quo the probe round promises on every failure path, and it is
+  // strictly better than a false error; it is not the ceiling. Substituting
+  // the real name (`typeof Box`) is circular at the declaration site and
+  // needs a shape that avoids self-annotation, which is a design step beyond
+  // the filter. This assertion is that row's exit: it reds the day a pin
+  // arrives, which is the cue to invert it.
+  // The unpinned binding is STRICT WORKING, not a gap, and this is what says
+  // so: a strict project is told the binding is implicitly `any`, and has two
+  // ordinary spellings to answer with. Without this the residual reads like an
+  // unreachable corner — the difference between "rip cannot express it" and
+  // "rip asks you to", which is the whole of what `rip.strict` means.
+  // Declare-first also documents the trigger: a class declared before its uses
+  // takes declare-in-place and never enters the probe set at all.
+  test('under rip.strict the unpinned forward reference is an ordinary missing annotation — reordering or annotating answers it', () => {
+    const dir = workspace({
+      'bare.rip': [
+        'make = -> (new Box())',
+        'Box = class',
+        "  greet: -> 'hi'",
+        'console.log make().greet()',
+      ].join('\n') + '\n',
+      'first.rip': [
+        'class Box',                       // declared before its uses — never rounds
+        "  greet: -> 'hi'",
+        'make = -> (new Box())',
+        'console.log make().greet()',
+      ].join('\n') + '\n',
+      'said.rip': [
+        'interface BoxT',                  // the author states the shape
+        '  greet(): string',
+        'make = -> (new Box())',
+        'Box: { new(): BoxT } = class',
+        "  greet: -> 'hi'",
+        'console.log make().greet()',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      // The implicit-any family, which `rip.strict` exists to un-suppress —
+      // and NOT a 2304: the minted symbol must not come back under any mode.
+      expect(diags.filter((d) => d.file === 'bare.rip').map((d) => d.code).sort((a, b) => a - b))
+        .toEqual([7005, 7034]);
+      expect(diags.filter((d) => d.file === 'first.rip')).toEqual([]);
+      expect(diags.filter((d) => d.file === 'said.rip')).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('the refused answer leaves the binding unpinned — a wrong call through it is the floor\'s accepted cost', () => {
+    const dir = workspace({
+      'unpinned.rip': [
+        'make = -> new Box()',
+        'Box = class',
+        "  greet: -> 'hi'",
+        'console.log make().greet(1, 2, 3)',   // arity nobody declared — unpinned, so unchecked
+      ].join('\n') + '\n',
+      'live.rip': "n: number = 'oops'\nconsole.log n\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
+      expect(diags.filter((d) => d.file === 'unpinned.rip')).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('a promoted parameter declares its field — the field-less spelling checks clean', () => {
+    // `constructor: (@owner: string) ->` assigns the instance property and
+    // declares nothing, and TypeScript reads a class's properties from its
+    // DECLARATIONS alone — so the field-less spelling drew TS2339 at the
+    // promotion and again at every member use, on legal rip. The face now
+    // declares what the promotion implies, TS-only.
+    //
+    // All four promoted spellings ride one constructor here (bare, typed,
+    // defaulted, typed-and-defaulted): the annotation is what the field is
+    // typed from, so a fix reaching only the annotated ones leaves the
+    // others reporting. The DEDUPE is the second half — `Badge` and `Tag`
+    // spell the declaration themselves, on either side of the constructor,
+    // and a face that declares unconditionally reports them as duplicate
+    // identifiers (TS2300) rather than accepting the redundancy.
+    //
+    // The construction's own argument types are asserted through the
+    // liveness file's neighbours: `wrongPromoted` passes a number where the
+    // typed promotion takes a string, so a face that dropped the parameter's
+    // annotation while declaring the field would go red here.
+    const dir = workspace({
+      'promote.rip': [
+        'class Crate',
+        '  constructor: (@owner: string, @level: number = 1, @tag, @seal = false) ->',
+        '  describe: -> "#{@owner}/#{@level}/#{@tag}/#{@seal}"',
+        '',
+        '# A defaulted promotion whose annotation is NARROWER than the',
+        '# default infers: `\'on\'` alone widens to string, so the annotation',
+        '# has to ride the default wrapper or the field is declared string',
+        '# and the promotion publishes a spurious TS2322. `@level: number = 1`',
+        '# cannot see that — number is exactly what 1 infers to.',
+        'class Toggle',
+        "  constructor: (@mode: 'on' | 'off' = 'on') ->",
+        '  read: -> @mode',
+        '',
+        'class Badge',
+        '  owner: string',
+        '  constructor: (@owner: string) ->',
+        '  who: -> @owner',
+        '',
+        'class Tag',
+        '  constructor: (@name: string) ->',
+        '  name: string',
+        '  read: -> @name',
+        '',
+        "crate = new Crate('ada', 2, 'blue')",
+        "console.log(new Toggle().read(), new Toggle('off').read())",
+        "console.log(crate.owner, crate.describe(), new Badge('b').who(), new Tag('t').read())",
+        '',
+      ].join('\n'),
+      'live.rip': [
+        "n: number = 'oops'",
+        'console.log n',
+        '',
+        'class Vault',
+        '  constructor: (@holder: string) ->',
+        '',
+        'wrongPromoted = new Vault(7)',
+        'console.log wrongPromoted',
+        '',
+      ].join('\n'),
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      // The liveness file's two, and ONLY those — an exact list over the
+      // whole workspace, so a spelling that started reporting cannot hide
+      // behind a `toContain` on a different file.
+      expect(diags.map((d) => [d.file, d.code]))
+        .toEqual([['live.rip', 2322], ['live.rip', 2345]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
   test('a write to a computed is an emitter decline, bound to the write line', () => {
     // `doubled = 5` off `doubled ~= …` is REJECTED at compile — a real
     // message, never broken output (the for-range-ban model). This is the
-    // decline's home: the spelling cannot enter the Diagnostics Lane, whose
+    // decline's home: the spelling cannot enter the Diagnostics Audit, whose
     // error pairs need a face to publish from, and an emitter decline aborts
     // the compile before any face exists. The readonly-write beside it
     // (`limit = 7` off `limit =! 100`) is NOT this class — it compiles and
@@ -543,6 +1052,50 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  // The pin pass reaches a DESTRUCTURED binding, and reaches it with the
+  // binding's own type rather than the pattern's.
+  //
+  // Three failure modes, and one fixture each, because any one of them alone
+  // is satisfiable by an accident:
+  //   · unpinned      — `media` stays evolving `any`, and under rip.strict the
+  //                     TS7034/TS7005 pair fires. This is the gap.
+  //   · pinned WRONG  — the probe splices the assign's whole value span, so a
+  //                     pattern binding takes `{ json: string }`. That silences
+  //                     the pair, so a gap gate alone would call it fixed while
+  //                     `media.toUpperCase()` reports TS2339.
+  //   · pinned RIGHT  — `string`, so the call is clean AND a bogus member on it
+  //                     still errors. `wrong.rip` is what proves the pin is a
+  //                     real type and not `any`: under `any` the member is
+  //                     accepted and the row would pass while pinning nothing.
+  test('a destructured binding read by a hoisted def pins to its OWN type, not the pattern\'s', () => {
+    const dir = workspace({
+      'renamed.rip': [
+        "{ json: media } = { json: 'application/json' }",
+        'def mediaType()',
+        '  media.toUpperCase()',    // defined on string, not on { json: string }
+        'console.log mediaType()',
+      ].join('\n') + '\n',
+      'shorthand.rip': [
+        "{ json } = { json: 'application/json' }",
+        'def kind()',
+        '  json.toUpperCase()',
+        'console.log kind()',
+      ].join('\n') + '\n',
+      'wrong.rip': [
+        "{ json: media } = { json: 'application/json' }",
+        'def bad()',
+        '  media.nope()',           // on `any` this is accepted — it must not be
+        'console.log bad()',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'renamed.rip')).toEqual([]);
+      expect(diags.filter((d) => d.file === 'shorthand.rip')).toEqual([]);
+      expect(diags.filter((d) => d.file === 'wrong.rip').map((d) => d.code)).toEqual([2339]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // The parity guard for the pin pass: `items` is a hoisted binding read
   // ACROSS a closure (inside filterBy), which evolving-`let` alone leaves
   // `any[]` — so `matches` is `any[]`, `expectNum(matches)` does NOT error,
@@ -658,8 +1211,39 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       const j = JSON.parse(check(dir, ['--json', 'use.rip', 'lib.rip']).stdout);
       const primary = j.find((d) => d.code === 2322);
       expect(primary).toBeDefined();
-      // The secondary note maps into the OTHER file (lib.rip), not the error site.
-      expect(primary.related?.[0]).toMatchObject({ file: 'lib.rip', line: 1 });
+      // The secondary note maps into the OTHER file (lib.rip), not the error
+      // site — and onto `port`'s own line, not the declaration head: a type
+      // body's members carry their own spans, so "declared here" points at the
+      // member that declared it.
+      expect(primary.related?.[0]).toMatchObject({ file: 'lib.rip', line: 3, column: 3 });
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // A nested project's own tsconfig governs ITS files. Both polarities in
+  // one workspace, so neither answer can be the whole run's posture: the
+  // nested file rejects under its own `strict`, the root file stays loose
+  // under the root's. A single-package fixture cannot tell a correct
+  // per-project resolution from a flat one, which is why no gate saw this.
+  test('a nested tsconfig governs its own files; the loose root governs the rest', () => {
+    const dir = monorepo();
+    try {
+      const j = JSON.parse(check(dir, ['--json']).stdout);
+      const at = (file) => j.filter((d) => d.file === file && d.code === 2322);
+      expect(at('pkg/a.rip').length, 'the nested file rejects under its own strict config').toBe(1);
+      expect(at('root.rip').length, 'the root file stays loose under the root config').toBe(0);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // The inverse posture, so the assertion above is not passing on a
+  // hardcoded direction: strict at the root, loose in the nested project.
+  // A flat mirror answers the same way in both, which is the whole defect.
+  test('the polarity inverts with the configs — strict root, loose nested', () => {
+    const dir = monorepo({ rootStrict: true, nestedStrict: false });
+    try {
+      const j = JSON.parse(check(dir, ['--json']).stdout);
+      const at = (file) => j.filter((d) => d.file === file && d.code === 2322);
+      expect(at('root.rip').length, 'the root file rejects under the strict root').toBe(1);
+      expect(at('pkg/a.rip').length, 'the nested file stays loose under its own config').toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 });

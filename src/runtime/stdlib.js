@@ -74,7 +74,12 @@ const zip = (...a) => a[0].map((_, i) => a.map((b) => b[i]));
 // it the coercion yields null and the match throws loudly rather
 // than anchoring wrong.
 const toMatchable = (v, allowNewlines) => {
-  if (typeof v === 'string') return !allowNewlines && /[\n\r]/.test(v) ? null : v;
+  if (typeof v === 'string') {
+    if (!allowNewlines && /[\n\r]/.test(v)) {
+      throw new TypeError('match receiver spans lines — add the /m flag to match across them');
+    }
+    return v;
+  }
   if (v == null) return '';
   if (typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean') return String(v);
   if (typeof v === 'symbol') return v.description || '';

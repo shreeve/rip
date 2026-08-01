@@ -527,3 +527,69 @@ export function ripImportText(newText) {
     .replace(/\.rip\.ts(?=["'`])/g, '.rip')
     .replace(/^(\s*(?:import|export)\b[^\n]*?);([ \t]*)$/gm, '$1$2');
 }
+
+// Source spans that carry NO USER SYMBOL: the lowering consumed them
+// whole, so every symbol the face puts at that position is minted, and
+// a truthful description of the minted thing is exactly the wrong
+// answer (RULINGS.md, Reactive: punctuation is silent, permanently; a
+// machinery name is never a stand-in). Read from the compiler's own
+// stores rather than guessed from text.
+//
+// Two populations, both the compiler's own record:
+//
+//   the BARE effect operator — `~> …` with no binding, whose `~>` lowers
+//   into a `__effect(…)` callee, so tsgo truthfully describes the
+//   runtime's own symbol there. The bare form is recognized by its own
+//   recorded roles: a named effect's `target` role carries the binding's
+//   span, a bare one's carries no span at all.
+//
+//   the CONSUMED VOCABULARY the render walk records as it reads it
+//   (`noteVocabulary`, src/emitter.js) — DSL words the lowering spends
+//   whole: the render channel's own names and a gate's `@app.data`
+//   marker, which the lowering erases entirely, keeping only the route.
+//   RULINGS.md pins both to silence as their interim.
+export function noUserSymbolSpans({ stores, vocabulary = [], silences = [] }) {
+  const spans = [];
+  for (const node of stores.nodesByKind('effect')) {
+    const target = stores.role(node.nodeId, 'target');
+    if (target && typeof target.sourceStart === 'number') continue;   // named: the binding IS a user symbol
+    const op = stores.role(node.nodeId, 'operator');
+    if (op && typeof op.sourceStart === 'number') spans.push([op.sourceStart, op.sourceEnd]);
+  }
+  for (const v of vocabulary) {
+    if (v.kind === 'render-channel' || v.kind === 'gate-prefix') spans.push([v.start, v.end]);
+  }
+  for (const s of silences) spans.push(s);
+  return spans.sort((a, b) => a[0] - b[0]);
+}
+
+// Does `offset` fall inside a span the lowering owns whole? The end is
+// EXCLUSIVE, so a request one past the operator (the next construct's
+// first byte) is not silenced.
+export const inNoUserSymbolSpan = (spans, offset) =>
+  spans.some(([start, end]) => offset >= start && offset < end);
+
+// How a component member's DECLARATION position should present, read off
+// the compiler's own record (`memberDecls`, src/emitter.js):
+//
+//   'value'     — strip the container the face declares and answer the
+//                 member's value type. The author wrote `people := []`
+//                 and reads it as an array; the container belongs to
+//                 CONSUMER positions, where `inst.people.value` is real
+//                 and the wrapper is the honest answer.
+//   null        — not a member declaration; nothing to say.
+//
+// There is no third kind. An unannotated computed once needed one: its
+// face type read through the lowering's behavior object, so every type
+// spellable for it named machinery and the ruled interim was silence.
+// The face now types that member from an INFERRED position instead — a
+// declaration with no type node, which TypeScript prints resolved — so it
+// is an ordinary value member and answers like every other kind.
+//
+// End EXCLUSIVE, like every span predicate here.
+export const memberDeclKind = (decls, offset) => {
+  for (const d of decls) {
+    if (offset >= d.start && offset < d.end) return 'value';
+  }
+  return null;
+};

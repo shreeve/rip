@@ -61,22 +61,25 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startTsgo } from './tsgo.js';
 import { buildProbe, parseProbeHover } from './pins.js';
-import { hashText, hashTree } from './hash.js';
+import { hashText, cacheIdentityOf } from './hash.js';
 import {
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, generatedSpanToSource,
   generatedEditSpanToSource, generatedInsertionToSource, insertionAboveAttachedDirectives,
   isNocheckDirectiveRow, wholeImportLinesEdit, exactSpanMapper,
   staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
+  noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
   SUPPRESSED_TS_CODES,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
-import { generatedMirror as buildGeneratedMirror, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
-// hashTree over the compiler tree (recursive — nested runtime/ fragments
-// included) is the cache key's compiler identity.
+// The cache key spans the compiler tree AND this server's own tree
+// (recursive — nested runtime/ fragments included): the manifest caches
+// faces the compiler built and closure edge lists THIS code derived, so
+// either tree changing has to purge it.
 async function loadCompiler() {
   const candidates = [
     new URL('../../../src/compile.js', import.meta.url),   // in-repo
@@ -84,7 +87,10 @@ async function loadCompiler() {
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(fileURLToPath(candidate))) {
-      compilerHash = hashTree(path.dirname(fileURLToPath(candidate)));
+      cacheIdentity = cacheIdentityOf(
+        path.dirname(fileURLToPath(candidate)),
+        path.dirname(fileURLToPath(import.meta.url)),
+      );
       return (await import(candidate.href)).compile;
     }
   }
@@ -124,7 +130,7 @@ let mirrorRootIsFallback = false; // temp-dir mirror root (workspace unwritable/
 let mirrorRootReady = false;     // lazily created on first materialization
 let clientSupportsWatchers = false;
 let clientSupportsConfiguration = false;
-let compilerHash = null;         // the compiler build's identity (cache keying)
+let cacheIdentity = null;        // compiler build + server build (cache keying)
 
 // rip document uri → per-buffer state.
 const states = new Map();
@@ -138,8 +144,12 @@ const pendingImports = new Set();
 
 // The persistent face cache manifest (.cache.json at the mirror root):
 // absolute source path → { sourceHash, imports }. Valid only under the
-// manifest's recorded compilerHash — a compiler upgrade purges the tree.
-let cacheManifest = { compilerHash: null, entries: {} };
+// manifest's recorded cacheIdentity — a compiler OR server upgrade purges
+// the tree. The field is deliberately not the old `compilerHash` name:
+// a manifest written before the key widened carries no cacheIdentity,
+// mismatches on read, and purges — which is exactly right, since its
+// edge lists were derived by the narrower rule.
+let cacheManifest = { cacheIdentity: null, entries: {} };
 let manifestDirty = false;
 let manifestTimer = null;
 
@@ -225,29 +235,30 @@ function* walkFiles(dir, suffix) {
 }
 
 // Load the persistent cache: a manifest recorded under a DIFFERENT
-// compiler build invalidates the whole tree (every cached face was
-// produced by a compiler that no longer exists here). Read-only unless
-// a purge is due — a fresh session creates nothing.
+// build invalidates the whole tree — every cached face was produced by
+// a compiler that no longer exists here, and every recorded import list
+// by a closure walk that may no longer agree. Read-only unless a purge
+// is due — a fresh session creates nothing.
 function loadCache() {
   if (!mirrorRoot) {
-    cacheManifest = { compilerHash, entries: {} };
+    cacheManifest = { cacheIdentity, entries: {} };
     return;
   }
   try {
     const loaded = JSON.parse(fs.readFileSync(manifestPath(), 'utf8'));
-    if (loaded?.compilerHash === compilerHash && loaded.entries) {
+    if (loaded?.cacheIdentity === cacheIdentity && loaded.entries) {
       cacheManifest = loaded;
       return;
     }
-    // A manifest from another compiler build: purge the tree it keyed.
+    // A manifest from another build: purge the tree it keyed.
     for (const mirror of walkFiles(mirrorRoot, '.rip.ts')) {
       try { fs.rmSync(mirror); } catch { /* best effort */ }
     }
-    cacheManifest = { compilerHash, entries: {} };
+    cacheManifest = { cacheIdentity, entries: {} };
     scheduleManifestSave();
     return;
   } catch { /* absent or unreadable: start fresh, create nothing */ }
-  cacheManifest = { compilerHash, entries: {} };
+  cacheManifest = { cacheIdentity, entries: {} };
 }
 
 // JSONC → parseable JSON (comments stripped).
@@ -262,9 +273,54 @@ const userConfigChain = new Set();
 function generatedMirror() {
   return buildGeneratedMirror({
     workspaceRoot, mirrorRootIsFallback, chain: userConfigChain,
+    excludeDirs: [...wrapperDirs],
     onUnresolved: (spec) =>
       connection.console.log(`[rip] tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
   });
+}
+
+// Workspace-relative dirs that own a nested `tsconfig.json` and have a
+// generated wrapper mirroring them. tsgo assigns each face to its
+// NEAREST config, so these partition the mirror by project inside the
+// one tree and the one session; the root config excludes them so no face
+// has two owners.
+const wrapperDirs = new Set();
+
+// Give `fsPath`'s owning project its wrapper, if it has one and does not
+// yet. Returns the mirror paths written — a new wrapper also rewrites the
+// ROOT config (its exclusions grew), so callers forward all of them to
+// tsgo or the new project's files stay in the root's program.
+function ensureProjectWrapper(fsPath) {
+  if (mirrorRootIsFallback || !workspaceRoot || !mirrorRootReady) return [];
+  const owner = nearestTsconfig(path.dirname(fsPath), workspaceRoot);
+  if (owner === null || path.dirname(owner) === workspaceRoot) return [];
+  const rel = path.relative(workspaceRoot, path.dirname(owner));
+  if (wrapperDirs.has(rel)) return [];
+  wrapperDirs.add(rel);
+  const wrapperDir = path.join(mirrorRoot, rel);
+  let wrapper;
+  try {
+    wrapper = projectWrapper({
+      wrapperDir, sourceTsconfig: owner, chain: userConfigChain,
+      onUnresolved: (spec) =>
+        connection.console.log(`[rip] ${rel}: tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
+    });
+  } catch (err) {
+    wrapperDirs.delete(rel);
+    connection.console.error(`[rip] wrapper for ${rel} not generated (${err.message}) — its files keep the root config`);
+    return [];
+  }
+  fs.mkdirSync(wrapperDir, { recursive: true });
+  const written = [];
+  for (const [name, text] of [['tsconfig.json', JSON.stringify(wrapper.tsconfig, null, 2)], [HOST_FLOOR_NAME, wrapper.hostFloorDts]]) {
+    const at = path.join(wrapperDir, name);
+    ensureOwnedFile(at, text);
+    written.push(at);
+  }
+  writeGeneratedTsconfig();
+  written.push(path.join(mirrorRoot, 'tsconfig.json'));
+  connection.console.log(`[rip] per-project tsconfig: ${rel} now extends its own config`);
+  return written;
 }
 
 // Idempotent: an unchanged file never rewrites (no spurious mtime for
@@ -553,6 +609,10 @@ function sourcePathOfMirror(mirrorFsPath) {
 // mirror can never pass revalidation). A compile failure leaves the
 // previous mirror in place (the last-compiled face serves — the
 // the staleness posture at project scale).
+// The enum names a compile declares, read off the binding inventory.
+const enumNamesOf = (result) =>
+  (result.bindings ?? []).filter((b) => b.kind === 'enum').map((b) => b.name);
+
 function mirrorFromDisk(fsPath, source) {
   faceCache.delete(fsPath);
   const result = compile(source, { path: fsPath, runtimeDelivery: 'inline', face: 'ts' });
@@ -560,7 +620,15 @@ function mirrorFromDisk(fsPath, source) {
   warnOnMirrorCollision(mirrorPath, fsPath);
   writeMirror(mirrorPath, result.code);
   const imports = ripImportsOf(result.stores, source, path.dirname(fsPath));
-  cacheManifest.entries[fsPath] = { sourceHash: hashText(source), codeHash: hashText(result.code), imports };
+  cacheManifest.entries[fsPath] = {
+    sourceHash: hashText(source), codeHash: hashText(result.code), imports,
+    // The names this module declares as enums — what an IMPORTER needs to
+    // color its own uses, and the one fact it cannot compute for itself.
+    // Cheap to carry (names, no spans) and invalidated with the entry; a
+    // manifest written before this field existed is purged wholesale by
+    // the cacheIdentity key, which a server change already moves.
+    enumNames: enumNamesOf(result),
+  };
   scheduleManifestSave();
   return { mirrorPath, imports };
 }
@@ -613,6 +681,9 @@ function materializeClosure(seeds) {
       continue;
     }
     try {
+      // Before the face is written, so the project it belongs to already
+      // exists when tsgo reads it.
+      touched.push(...ensureProjectWrapper(file));
       const { mirrorPath, imports } = mirrorFromDisk(file, source);
       compiled++;
       touched.push(mirrorPath);
@@ -992,6 +1063,30 @@ async function refresh(document) {
     // binds their cell `const`. Semantic tokens clear TypeScript's `readonly`
     // on exactly these.
     mutables: result.mutables,
+    // Generated spans of every enum-name occurrence. The face's const
+    // object and its companion type alias merge into one symbol tsgo
+    // classifies `type`; the token names the construct the author
+    // declared.
+    enums: result.enums,
+    // Hoisted class-expression bindings whose declaration lost its
+    // initializer to the hoist split (see ripSemanticTokens).
+    classDecls: result.classDecls ?? [],
+    // The enum names this module declares — read by IMPORTERS, which
+    // cannot compute it from their own compile. An open buffer answers
+    // from here; a disk file from its manifest entry.
+    enumNames: enumNamesOf(result),
+    // Generated spans of references to imported names, each with its
+    // module — the editor resolves the specifier and asks that module
+    // what kind the name is (see ripSemanticTokens).
+    importedRefs: result.importedRefs ?? [],
+    dir: (() => { try { return path.dirname(fileURLToPath(document.uri)); } catch { return null; } })(),
+    // SOURCE spans the lowering owns whole — hover declines there rather
+    // than describing the machinery the face put in their place.
+    silent: noUserSymbolSpans(result),
+    // SOURCE spans of component member declaration names — where a hover
+    // answers in the author's vocabulary rather than the container the
+    // face declares (see `memberDeclKind`).
+    memberDecls: result.memberDecls ?? [],
     srcLineStarts,
     genLineStarts: lineStartsOf(result.code),
     strict: state.strict === true, // rides the compile it governed
@@ -1019,8 +1114,20 @@ async function refresh(document) {
       const imports = ripImportsOf(result.stores, text, path.dirname(fsPath));
       const previous = state.imports ?? [];
       state.imports = imports;
-      cacheManifest.entries[fsPath] = { sourceHash: hashText(text), codeHash: hashText(result.code), imports };
+      cacheManifest.entries[fsPath] = {
+        sourceHash: hashText(text), codeHash: hashText(result.code), imports,
+        // An open buffer answers importers from its own last-good compile;
+        // the entry has to carry the names too, or closing this buffer
+        // leaves importers uncorrected until the file next changes.
+        enumNames: enumNamesOf(result),
+      };
       scheduleManifestSave();
+      const wrapperFiles = ensureProjectWrapper(fsPath);
+      if (wrapperFiles.length && tsgo) {
+        tsgo.client.notify('workspace/didChangeWatchedFiles', {
+          changes: wrapperFiles.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Changed })),
+        });
+      }
       const { compiled, cached, failed } = materializeClosure(imports);
       if (compiled || cached || failed) {
         connection.console.log(
@@ -1526,7 +1633,14 @@ function reorderUnionHover(ctx, contents) {
 // type and the hover shows it back; whether it is a GOOD annotation is the
 // author's business. The editor's job is to be honest about what the source
 // says, not to second-guess it.
-function presentReactiveCellHover(contents) {
+// A component MEMBER declaration takes the same presentation for the same
+// reason — the author declared `people := []` and reads it as an array —
+// but only AT ITS DECLARATION. `atMemberDecl` says the request landed
+// there; at every other position the member's container is real (a
+// consumer holding an instance writes `inst.people.value`) and passes
+// through untouched. The two positions resolve to the same face symbol,
+// so the compiler's own record is what tells them apart.
+function presentReactiveCellHover(contents, atMemberDecl = false) {
   const value = contents?.value;
   if (typeof value !== 'string') return null;
   const fence = /(```(?:typescript|ts)\n)([^]*?)(\n?```)/.exec(value);
@@ -1534,14 +1648,23 @@ function presentReactiveCellHover(contents) {
   // tsgo renders object types with internal line breaks / run-on
   // spaces and a trailing `;` — normalize before matching.
   const flat = fence[2].replace(/\s+/g, ' ').trim();
-  const m = /^(const|let) ([A-Za-z_$][\w$]*): \{ (readonly )?value: (.+); read\(\): (.+?);? \}$/.exec(flat);
+  // The member arm's qualifier is whatever TypeScript prints before the
+  // final dot, NOT an identifier: a GENERIC component's containing type
+  // arrives with its parameter list (`Palette<TShade extends string>`),
+  // and anything narrower silently leaves the container standing on every
+  // generic component. The greedy run cannot swallow the type, which is
+  // anchored behind `: { … value: `.
+  const m = /^(?:(const|let) ([A-Za-z_$][\w$]*)|\(property\) ((?:.+\.)?[A-Za-z_$][\w$]*)): \{ (readonly )?value: (.+); read\(\): (.+?);? \}$/.exec(flat);
   if (!m) return null;
-  const [, , name, ro, t, readT] = m;
+  const [, , plain, qualified, ro, t, readT] = m;
+  const member = qualified !== undefined;
+  if (member && !atMemberDecl) return null;
   // depth guard: the `;` split above is greedy on `t` — verify T and
   // read()'s return agree after the same normalization (the brand
   // shape), else pass through.
   if (t.trim() !== readT.trim()) return null;
-  const reworded = value.replace(fence[0], `${fence[1]}${ro ? 'const' : 'let'} ${name}: ${t.trim()}${fence[3]}`);
+  const head = member ? `(property) ${qualified}` : `${ro ? 'const' : 'let'} ${plain}`;
+  const reworded = value.replace(fence[0], `${fence[1]}${head}: ${t.trim()}${fence[3]}`);
   return { ...contents, value: reworded };
 }
 
@@ -1585,6 +1708,11 @@ connection.onHover(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
   if (!ctx || ctx.genPosition === null) return null;
+  // A position the lowering owns whole answers nothing. tsgo would
+  // describe the minted symbol its own emission put there — truthfully,
+  // and about something the user never wrote.
+  if (inNoUserSymbolSpan(ctx.good.silent ?? [], ctx.offset)) return null;
+  const memberDecl = memberDeclKind(ctx.good.memberDecls ?? [], ctx.offset);
 
   const hover = await tsgoRequest('textDocument/hover', {
     textDocument: { uri: ctx.state.tsUri },
@@ -1594,7 +1722,7 @@ connection.onHover(async (params) => {
 
   let contents = (await enrichEvolvingAnyHover(ctx, hover)) ?? hover.contents;
   contents = reorderUnionHover(ctx, contents) ?? contents;
-  contents = presentReactiveCellHover(contents) ?? contents;
+  contents = presentReactiveCellHover(contents, memberDecl === 'value') ?? contents;
 
   // The response range travels the reverse path: generated → last-good
   // source → current buffer. If it does not survive both hops intact,
@@ -1862,6 +1990,22 @@ connection.onSignatureHelp(async (params) => {
 // generated span of each state name (`mutables`), and the bit is cleared there
 // and nowhere else — `=!`, `~=` and `~>` also emit `const` and really ARE
 // immutable, so they keep it.
+// Does the module `specifier` names, resolved from `fromDir`, declare
+// `name` as an enum? An OPEN buffer answers from its own last-good
+// compile; a disk file from its manifest entry, which the closure fills
+// as it materializes and which is invalidated with the file's source
+// hash. Unknown (not in the closure, or unreadable) answers no — a
+// missing correction leaves TypeScript's own answer, which is the
+// conservative direction.
+function declaresEnum(fromDir, specifier, name) {
+  if (fromDir === null || !specifier.endsWith('.rip')) return false;
+  if (!specifier.startsWith('./') && !specifier.startsWith('../')) return false;
+  const abs = path.resolve(fromDir, specifier);
+  const open = states.get('file://' + abs);
+  if (open?.lastGood?.enumNames) return open.lastGood.enumNames.includes(name);
+  return (cacheManifest.entries[abs]?.enumNames ?? []).includes(name);
+}
+
 function ripSemanticTokens(ctx, data) {
   const mapSpan = exactSpanMapper(ctx.good.mappings);
   const roIndex = semanticTokensLegend?.tokenModifiers?.indexOf('readonly') ?? -1;
@@ -1871,6 +2015,29 @@ function ripSemanticTokens(ctx, data) {
   // than a scan of every span for every token on a surface that fires on each
   // edit.
   const mutableStarts = new Set((ctx.good.mutables ?? []).map(([s]) => s));
+  // Same keying, the other correction: an enum name's TYPE, not a
+  // modifier bit. -1 when the client's legend omits `enum`, and then the
+  // rewrite is skipped rather than pointed at some other type's index.
+  const enumType = semanticTokensLegend?.tokenTypes?.indexOf('enum') ?? -1;
+  const enumStarts = new Set((ctx.good.enums ?? []).map(([s]) => s));
+  // The third correction of the same shape: TypeScript classifies a binding
+  // from its DECLARATION's initializer, so `let Shape = class {…}` colors
+  // `class` on its own and reports nothing here — but a forward reference
+  // splits the declaration from the class expression, and `let Box;` is a
+  // variable as far as tsgo can see. -1 when the client's legend omits
+  // `class`, and then the rewrite is skipped rather than pointed at some
+  // other type's index, exactly as the enum correction does.
+  const classType = semanticTokensLegend?.tokenTypes?.indexOf('class') ?? -1;
+  const classStarts = new Set((ctx.good.classDecls ?? []).map(([s]) => s));
+  // An IMPORTED enum carries the same merged-symbol `type` classification
+  // its declaration does, and the importing file's compile cannot know
+  // that — the kind lives in the declaring module. The compiler reports
+  // which references are imports and from where; the module answers.
+  // Only `./`-relative `.rip` specifiers resolve, matching the closure's
+  // own rule (mirror.js): a package import is TypeScript's to classify.
+  for (const [genStart, , name, specifier] of (ctx.good.importedRefs ?? [])) {
+    if (declaresEnum(ctx.good.dir, specifier, name)) enumStarts.add(genStart);
+  }
   const tokens = new Map(); // start → { start, length, type, modifiers }
   let line = 0, char = 0;
   for (let i = 0; i + 4 < data.length; i += 5) {
@@ -1889,12 +2056,23 @@ function ripSemanticTokens(ctx, data) {
     // of the same name would put the bit straight back.
     let modifiers = data[i + 4];
     if (roBit && mutableStarts.has(genStart)) modifiers &= ~roBit;
+    // An enum name carries the merged symbol's `readonly` too, off the
+    // `const` object half. The construct is a declaration, not a
+    // binding whose mutability is at issue, so the corrected token
+    // drops it with the type — TypeScript's own enum tokens carry
+    // neither.
+    let type = data[i + 3];
+    if (enumType >= 0 && enumStarts.has(genStart)) {
+      type = enumType;
+      modifiers &= ~roBit;
+    }
+    if (classType >= 0 && classStarts.has(genStart)) type = classType;
     const key = curStart * 0x100000 + length;
     const existing = tokens.get(key);
-    if (existing && existing.type === data[i + 3]) {
+    if (existing && existing.type === type) {
       existing.modifiers |= modifiers;
     } else if (!existing) {
-      tokens.set(key, { start: curStart, length, type: data[i + 3], modifiers });
+      tokens.set(key, { start: curStart, length, type, modifiers });
     }
   }
   const builder = new SemanticTokensBuilder();

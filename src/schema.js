@@ -136,6 +136,7 @@ const isKeywordWord = (t) =>
   (t.kind === t.value.toUpperCase() || t.kind === 'LEADING_WHEN' || t.kind === 'RELATION' || t.kind === 'STATEMENT');
 
 import { ops } from './ops.js';
+import { behaviorName } from './schema-types.js';
 
 // The symbol spelling: ':' followed by an UNSPACED word. The kind
 // position additionally admits keyword-kind tokens (`:enum` scans the
@@ -384,6 +385,17 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
   if (adapterTokens) descriptor.adapterTokens = adapterTokens;
   descriptor.start = (kindTok ?? bodyTokens[0]).start;
   descriptor.end = bodyEnd;
+  // SCHEMA_BODY collapses the entire DSL into one opaque parser token. Keep
+  // every word-token occurrence as side-band span data so the generated
+  // parser can carry primitive identity through that collapse just as it does
+  // for ordinary list elements. The descriptor remains the same tree value.
+  descriptor.primitiveSpans = [kindTok, ...bodyTokens]
+    .filter((t) => t && typeof t.value === 'string' && /^[A-Za-z_$][\w$]*$/.test(t.value))
+    .map((t) => ({
+      value: t.value,
+      sourceStart: t === kindTok && t.end - t.start === t.value.length + 1 ? t.start + 1 : t.start,
+      sourceEnd: t.end,
+    }));
 
   out.push({
     id: mintId(), kind: 'SCHEMA', value: 'schema',
@@ -675,6 +687,10 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   let range = null;
   let bracketDefault = undefined;
   let hasDefault = false;
+  // The default literal's own source span — the face marks its
+  // `satisfies` there, so a wrong-typed default anchors on the value
+  // the author wrote instead of on the enclosing entry list.
+  const defaultSpan = {};
   let regex = null;
   let transformTokens = null;
   let attrs = null;
@@ -710,7 +726,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
       const head = part[0];
       if (head.kind === '[' || head.kind === 'INDEX_START') {
         if (hasDefault) fail(`field '${name}' has more than one '[…]' default bracket`, head.start);
-        bracketDefault = parseDefaultBracket(part, name, fail);
+        bracketDefault = parseDefaultBracket(part, name, fail, defaultSpan);
         hasDefault = true;
       } else if (head.kind === '{') {
         // Persistence metadata may also ride a :mixin field — it takes
@@ -778,6 +794,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     literals, coerce, coercer, constraints, transformTokens,
     unique: uniqueAttr, attrs,
     start: first.start,
+    defaultSpan: defaultSpan.start === undefined ? null : [defaultSpan.start, defaultSpan.end],
   });
 }
 
@@ -1355,8 +1372,9 @@ function parseRangeTokens(tokens, fieldName, fail) {
 }
 
 // `[value]` — a single literal default.
-function parseDefaultBracket(tokens, fieldName, fail) {
+function parseDefaultBracket(tokens, fieldName, fail, span = {}) {
   const inner = tokens.slice(1, -1);
+  if (inner.length) { span.start = inner[0].start; span.end = inner[inner.length - 1].end; }
   const items = splitTopLevelByComma(inner);
   if (items.length !== 1) {
     fail(items.length === 2
@@ -1453,23 +1471,26 @@ function findTopLevelArrowIdx(tokens) {
 // returns the literal as an ordered list of plain strings and
 // `{ts: text}` face-only pieces — a callable whose entry index
 // appears in `thisTypes` gains a `this: T` parameter as a face-only
-// segment, so the builder records it as a TS-only region and the
-// strip gate holds by construction. With `thisTypes` absent every
-// segment is plain — the JS emission joins them to the pinned literal.
+// segment, and a field whose index appears in `defaultTypes` gains a
+// `satisfies T` on its default value, so the builder records each as a
+// TS-only region and the strip gate holds by construction. With both
+// absent every segment is plain — the JS emission joins them to the
+// pinned literal.
 
-export function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null, tsFace = false) {
+export function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null, tsFace = false, defaultTypes = null, ensureTypes = null) {
   const segs = [];
   const emit = (s) => {
     if (segs.length && typeof segs[segs.length - 1] === 'string') segs[segs.length - 1] += s;
     else segs.push(s);
   };
-  const emitTs = (s) => segs.push({ ts: s });
+  const emitTs = (s, span = null) => segs.push({ ts: s, span });
   emit(`{kind: ${JSON.stringify(descriptor.kind)}`);
   if (schemaName) emit(`, name: ${JSON.stringify(schemaName)}`);
   emit(`, entries: [`);
   descriptor.entries.forEach((e, i) => {
     if (i > 0) emit(', ');
-    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs, tsFace);
+    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs, tsFace, defaultTypes?.get(i) ?? null,
+      ensureTypes?.get(i) ?? null);
   });
   emit(']');
   // `schema :model, on: <expr>` — evaluated at declaration time in
@@ -1480,6 +1501,30 @@ export function descriptorSegments(descriptor, schemaName, fns, adapterCode = nu
 }
 
 const fnText = (fnCode) => (typeof fnCode === 'string' ? fnCode : fnCode.code);
+
+// The face-only behavior object: `const __X__behavior = {total: function
+// (this: X) {…}, …};` — one property per callable entry, carrying the
+// SAME compiled body the descriptor carries, so tsgo infers each
+// callable's return type and the companion states it rather than
+// minting `unknown`. Emitted after the binding statement (the
+// companion-placement precedent); the whole line is a TS-only region,
+// so the JS face never sees it. Null when the schema has no callable.
+export function behaviorObjectText(descriptor, name, fns, thisTypes) {
+  const props = [];
+  descriptor.entries.forEach((e, i) => {
+    if (e.tag !== 'derived' && e.tag !== 'computed' && e.tag !== 'method') return;
+    const fnCode = fns.get(i);
+    if (fnCode === undefined) return;
+    const thisType = thisTypes?.get(i) ?? null;
+    let code = fnText(fnCode);
+    if (thisType !== null && typeof fnCode !== 'string') {
+      const { thisAt } = fnCode;
+      code = code.slice(0, thisAt) + `this: ${thisType}${code[thisAt] === ')' ? '' : ', '}` + code.slice(thisAt);
+    }
+    props.push(`${e.name}: ${code}`);
+  });
+  return props.length ? `const ${behaviorName(name)} = {${props.join(', ')}};` : null;
+}
 
 // A compiled callable's code, with the face-only `this: T` parameter
 // inserted at the recorded parameter-list offset when the entry
@@ -1495,7 +1540,7 @@ function fnSegments(fnCode, thisType, emit, emitTs) {
   emit(code.slice(thisAt));
 }
 
-function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false) {
+function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaultType = null, ensureType = null) {
   switch (e.tag) {
     case 'computed':
     case 'method':
@@ -1518,21 +1563,35 @@ function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false) {
       // field literal's LAST property, so the splice offset is fixed
       // arithmetic off thisAt (the params open right there, and a
       // field's params are exactly `it` — schemaBodyParams).
+      const marks = {};
+      const whole = entryLiteral(e, fnCode, marks);
+      // Face-only splices into the field literal, in offset order: the
+      // default's `satisfies` (constraints come before the transform)
+      // and the transform's `it: any`.
+      const cuts = [];
+      if (tsFace && defaultType !== null && marks.defaultEnd !== undefined) {
+        cuts.push({ at: marks.defaultEnd, ts: ` satisfies ${defaultType}`, span: e.defaultSpan ?? null });
+      }
       if (tsFace && e.tag === 'field' && fnCode !== undefined && typeof fnCode !== 'string' &&
           fnText(fnCode).startsWith('it', fnCode.thisAt)) {
-        const whole = entryLiteral(e, fnCode);
         const fn = fnText(fnCode);
-        const cut = whole.length - 1 - fn.length + fnCode.thisAt + 'it'.length;
-        emit(whole.slice(0, cut));
-        emitTs(': any');
-        emit(whole.slice(cut));
-        return;
+        cuts.push({ at: whole.length - 1 - fn.length + fnCode.thisAt + 'it'.length, ts: ': any' });
       }
-      emit(entryLiteral(e, fnCode));
+      // `@ensure`'s predicate parameter — the DSL fixes the parameter
+      // list to the author's own name with no annotation slot, so the
+      // data type splices in after it.
+      if (tsFace && e.tag === 'ensure' && ensureType !== null && marks.fnAt !== undefined &&
+          typeof fnCode !== 'string' && fnCode !== undefined) {
+        const p0 = /^[A-Za-z_$][\w$]*/.exec(fnText(fnCode).slice(fnCode.thisAt))?.[0];
+        if (p0) cuts.push({ at: marks.fnAt + fnCode.thisAt + p0.length, ts: `: ${ensureType}` });
+      }
+      let pos = 0;
+      for (const c of cuts) { emit(whole.slice(pos, c.at)); emitTs(c.ts, c.span ?? null); pos = c.at; }
+      emit(whole.slice(pos));
   }
 }
 
-function entryLiteral(e, fnCode) {
+function entryLiteral(e, fnCode, marks = {}) {
   if (fnCode !== undefined) fnCode = fnText(fnCode);
   switch (e.tag) {
     case 'field': {
@@ -1553,9 +1612,23 @@ function entryLiteral(e, fnCode) {
         const c = [];
         if (e.constraints.min !== undefined) c.push(`min: ${serializeLiteral(e.constraints.min)}`);
         if (e.constraints.max !== undefined) c.push(`max: ${serializeLiteral(e.constraints.max)}`);
-        if (e.constraints.default !== undefined) c.push(`default: ${serializeLiteral(e.constraints.default)}`);
+        // The default's END offset within the finished literal — the
+        // face splices `satisfies T` there, so the relation the
+        // runtime enforces at parse time is stated where the checker
+        // can read it.
+        let defaultInC = -1;
+        if (e.constraints.default !== undefined) {
+          defaultInC = c.length;
+          c.push(`default: ${serializeLiteral(e.constraints.default)}`);
+        }
         if (e.constraints.regex !== undefined) c.push(`regex: ${e.constraints.regex.toString()}`);
-        if (c.length) obj.push(`constraints: {${c.join(', ')}}`);
+        if (c.length) {
+          if (defaultInC >= 0) {
+            const head = `{${obj.join(', ')}, constraints: {`;
+            marks.defaultEnd = head.length + c.slice(0, defaultInC + 1).join(', ').length;
+          }
+          obj.push(`constraints: {${c.join(', ')}}`);
+        }
       }
       if (e.attrs) {
         // Attr keys serialize in SORTED order, never source order —
@@ -1585,11 +1658,14 @@ function entryLiteral(e, fnCode) {
       return `{${obj.join(', ')}}`;
     }
     case 'ensure': {
-      const obj = [
+      const head = [
         `tag: "ensure"`,
         `message: ${JSON.stringify(e.message)}`,
-        `fn: ${fnCode}`,
       ];
+      // The predicate's offset within the finished literal — the face
+      // splices its parameter annotation there.
+      marks.fnAt = `{${head.join(', ')}, fn: `.length;
+      const obj = [...head, `fn: ${fnCode}`];
       if (e.field) obj.push(`field: ${JSON.stringify(e.field)}`);
       if (e.async) obj.push('async: true');
       return `{${obj.join(', ')}}`;

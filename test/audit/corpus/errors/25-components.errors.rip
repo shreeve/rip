@@ -1,4 +1,4 @@
-# 25-components.errors.rip — intentional negatives asserted by the Diagnostics Lane; the ref and `<=>` rows are pinned (error-pins.json).
+# 25-components.errors.rip — intentional negatives asserted by the Diagnostics Audit; the ref and `<=>` rows are pinned (error-pins.json).
 # The method-argument row is DOUBLE-quoted on purpose: a single-quoted literal is rewritten in the face, so its diagnostic falls back to the call's open paren (FINDINGS.md).
 # @ts-nocheck
 
@@ -47,3 +47,28 @@ Shell = component
       input ref: strictEl
       section ref: wrongTag
       Liner inner <=> wrongSleeve
+
+
+
+
+Books = component
+  entries: string[] := ['open', 2]
+  status := 'idle'
+
+  post: ->
+    status = 4
+
+  render null
+
+
+Gauge = component
+  labels: string[] := ['idle']
+  cap =! 3
+
+  width ~= labels.length
+
+  render null
+
+gauge = new Gauge({})
+wrongWidth: string = gauge.width.value
+gauge.cap = 4
