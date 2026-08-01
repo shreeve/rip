@@ -4,7 +4,7 @@ import { get, start } from '@rip-lang/server'
 import { setup } from './setup.rip'
 import './api/index.rip'
 
-setup!()
+setup!
 
 get '/styles.css' -> @send "#{import.meta.dir}/app/styles.css", 'text/css; charset=UTF-8'
 
