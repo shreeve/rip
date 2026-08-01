@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 GENERATOR = join(import.meta.dir, '..', '..', 'generate.rip')
 WORKER = join(import.meta.dir, '..', '..', 'worker.rip')
+SERVER = join(import.meta.dir, '..', '..', 'server.rip')
 
 generate = (entry, artifact, result, task) ->
   proc = Bun.spawn [process.execPath, PRELOAD, GENERATOR, entry, artifact, result, task, '0'],
@@ -106,4 +107,120 @@ test! 'invalid worker concurrency rejects before binding', ->
   finally
     try proc?.kill('SIGKILL')
     await proc.exited if proc?
+    rmSync dir, { recursive: true, force: true }
+
+test! 'manager configures a pool and replaces a crashed worker', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-workers-manager-')
+  controlSocket = join dir, 'janus.sock'
+  registration: any = null
+  updates: any[] = []
+  deleted = false
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = new URL request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = await request.json()
+        return Response.json({ id: 'workers-registration' }, { status: 201 })
+      if request.method is 'PUT' and url.pathname is '/1.0/apps/workers-registration/upstreams'
+        body = await request.json()
+        updates.push body.upstreams
+        return new Response(null, { status: 204 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/workers-registration/heartbeat'
+        return new Response(null, { status: 204 })
+      if request.method is 'DELETE' and url.pathname is '/1.0/apps/workers-registration'
+        deleted = true
+        return new Response(null, { status: 204 })
+      new Response('Not Found', { status: 404 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'index.rip'), '--name', 'workers', '--host', 'workers.test', '--workers', '2', '--concurrency', '3', '--control', controlSocket],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'ignore'
+    await waitFor -> registration?
+    eq registration.upstreams.length, 2
+
+    first = registration.upstreams[0].path
+    slow = [unixFetch('/slow', first), unixFetch('/slow', first), unixFetch('/slow', first)]
+    busy = await waitFor ->
+      try
+        response = await unixFetch '/hello', first
+        if response.headers.get('rip-worker-busy') is '1' then response else null
+      catch then null
+    eq busy.status, 503
+    await Promise.all slow
+
+    try await unixFetch '/crash', first
+    replacement = await waitFor ->
+      updates.find (list) -> list.length is 2 and list.every((item) -> item.path isnt first)
+    eq replacement.length, 2
+    response = await unixFetch '/hello', replacement[0].path
+    eq response.status, 200
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 0
+    ok deleted
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'manager replaces one startup crash before publishing readiness', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-workers-startup-crash-')
+  controlSocket = join dir, 'janus.sock'
+  registration: any = null
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = new URL request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = await request.json()
+        return Response.json({ id: 'startup-registration' }, { status: 201 })
+      if request.method is 'DELETE' and url.pathname is '/1.0/apps/startup-registration'
+        return new Response(null, { status: 204 })
+      new Response(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'startup-crash.rip'), '--host', 'startup.test', '--control', controlSocket],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'ignore'
+      env: { ...process.env, RIP_VERIFY_CRASH_ONCE: join(dir, 'crashed') }
+    await waitFor -> registration?
+    eq registration.upstreams.length, 1
+    ok registration.upstreams[0].path.endsWith('worker-2.sock')
+    response = await unixFetch '/hello', registration.upstreams[0].path
+    eq (await response.json()), { message: 'recovered' }
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 0
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'manager kills workers that miss the readiness deadline', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-workers-timeout-')
+  controlSocket = join dir, 'janus.sock'
+  registered = false
+  control = Bun.serve
+    unix: controlSocket
+    fetch: ->
+      registered = true
+      new Response('unexpected', { status: 500 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'hanging.rip'), '--host', 'hanging.test', '--control', controlSocket],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'ignore'
+      env: { ...process.env, RIP_BOOT_DEADLINE_MS: '100' }
+    eq (await proc.exited), 1
+    eq registered, false
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
     rmSync dir, { recursive: true, force: true }

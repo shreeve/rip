@@ -3,10 +3,12 @@ import { basename, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
 HEARTBEAT_MS = 5000
-READY_MS = 30000
+readyText = process.env.RIP_BOOT_DEADLINE_MS or '30000'
+READY_MS = parseInt readyText
+abort 'rip-server: RIP_BOOT_DEADLINE_MS must be an integer greater than zero' unless Number.isFinite(READY_MS) and READY_MS > 0 and String(READY_MS) is readyText
 
 parseArgs = (argv) ->
-  args: any = { entry: null, name: null, host: null, control: process.env.JANUS_CONTROL or null }
+  args: any = { entry: null, name: null, host: null, control: process.env.JANUS_CONTROL or null, workers: 1, concurrency: 1 }
   i = 0
   while i < argv.length
     value = argv[i]
@@ -18,8 +20,16 @@ parseArgs = (argv) ->
       when '--name' then args.name = take()
       when '--host' then args.host = take()
       when '--control' then args.control = take()
+      when '--workers', '-w'
+        text = take()
+        args.workers = parseInt text
+        abort 'rip-server: --workers must be an integer greater than zero' unless Number.isFinite(args.workers) and args.workers > 0 and String(args.workers) is text
+      when '--concurrency', '-c'
+        text = take()
+        args.concurrency = parseInt text
+        abort 'rip-server: --concurrency must be an integer greater than zero' unless Number.isFinite(args.concurrency) and args.concurrency > 0 and String(args.concurrency) is text
       when '--help', '-h'
-        p 'usage: rip server <entry> [--name <name>] [--host <host>] --control <socket-or-url>'
+        p 'usage: rip server <entry> [--name <name>] [--host <host>] [-w <workers>] [-c <concurrency>] --control <socket-or-url>'
         exit 0
       else
         abort "rip-server: unknown option #{value}" if value.startsWith '-'
@@ -81,20 +91,28 @@ stopWorker = (proc) ->
   proc.kill 'SIGKILL' unless proc.exitCode?
   await proc.exited
 
+killWorker = (proc) ->
+  proc.kill 'SIGKILL' unless proc.exitCode?
+  await proc.exited
+
 export main = (argv) ->
   args = parseArgs argv
   runDir = mkdtempSync join(tmpdir(), 'rip-srv-')
-  worker = null
+  workers = []
+  workerSerial = 0
+  appArtifact = null
+  workerArtifact = null
   appId = null
   heartbeat = null
   finish = null
   stopping = false
   finished = new Promise (done) -> finish = done
+  updateChain = Promise.resolve()
 
   registration = ->
     name: args.name
     hosts: [args.host]
-    upstreams: [{ path: join(runDir, 'worker.sock') }]
+    upstreams: workers.map (worker) -> { path: worker.socket }
 
   createRegistration = ->
     response = controlFetch! args.control, 'POST', '/1.0/apps', registration()
@@ -103,6 +121,62 @@ export main = (argv) ->
     body = JSON.parse detail
     throw new Error('Janus registration returned no app id') unless body?.id?
     appId = body.id
+
+  publishWorkers = ->
+    return unless appId? and not stopping
+    response = controlFetch! args.control, 'PUT', "/1.0/apps/#{appId}/upstreams", { upstreams: registration().upstreams }
+    throw new Error("Janus upstream update failed (#{response.status})") unless response.ok
+
+  queuePublish = ->
+    run = updateChain.then -> publishWorkers!()
+    updateChain = run.catch -> null
+    run
+
+  spawnReadyWorker = ->
+    workerSerial++
+    socket = join runDir, "worker-#{workerSerial}.sock"
+    proc = Bun.spawn [process.execPath, workerArtifact],
+      stdin: 'ignore'
+      stdout: 'inherit'
+      stderr: 'inherit'
+      env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: "#{workerSerial}", WORKER_CONCURRENCY: "#{args.concurrency}" }
+    worker = { proc, socket }
+    try
+      waitReady! proc, socket
+    catch error
+      await killWorker proc
+      throw error
+    workers.push worker
+    worker
+
+  bootSlot = ->
+    firstError = null
+    for attempt in [1..2]
+      try return await spawnReadyWorker()
+      catch error
+        firstError ?= error
+    throw firstError
+
+  monitorWorker = (worker) ->
+    do ->
+      code = await worker.proc.exited
+      return if stopping
+      workers = workers.filter (candidate) -> candidate isnt worker
+      try await queuePublish()
+      catch error
+        warn "rip-server: cannot remove crashed worker from Janus: #{String(error)}"
+      warn "rip-server: worker exited (#{code}); replacing"
+      loop
+        return if stopping
+        try
+          replacement = await spawnReadyWorker()
+          monitorWorker replacement
+          await queuePublish()
+          return
+        catch error
+          warn "rip-server: replacement worker failed: #{String(error)}"
+          await new Promise (done) -> setTimeout done, 250
+    return
 
   beat = ->
     return if stopping or not appId?
@@ -125,7 +199,7 @@ export main = (argv) ->
         warn "rip-server: Janus deregistration failed (#{response.status})" unless response.ok
     catch error
       warn "rip-server: Janus deregistration failed: #{String(error)}"
-    await stopWorker worker
+    await Promise.all workers.map (worker) -> stopWorker worker.proc
     finish! status
 
   try
@@ -134,14 +208,11 @@ export main = (argv) ->
     generate! args.entry, appArtifact, join(runDir, 'app-result.json'), 'app'
     generate! join(import.meta.dir, 'worker.rip'), workerArtifact, join(runDir, 'worker-result.json'), 'worker'
 
-    socket = join runDir, 'worker.sock'
-    worker = Bun.spawn [process.execPath, workerArtifact],
-      stdin: 'ignore'
-      stdout: 'inherit'
-      stderr: 'inherit'
-      env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: '1' }
-    waitReady! worker, socket
+    for slot in [0...args.workers]
+      await bootSlot()
     createRegistration!()
+    for worker in workers
+      monitorWorker worker
     heartbeat = setInterval beat, HEARTBEAT_MS
     process.once 'SIGINT', -> stop! 0
     process.once 'SIGTERM', -> stop! 0
@@ -150,7 +221,8 @@ export main = (argv) ->
   catch error
     warn "rip-server: #{String(error)}"
     try await controlFetch(args.control, 'DELETE', "/1.0/apps/#{appId}") if appId?
-    await stopWorker worker
+    stopping = true
+    await Promise.all workers.map (worker) -> stopWorker worker.proc
     process.exitCode = 1
   finally
     rmSync runDir, { recursive: true, force: true }

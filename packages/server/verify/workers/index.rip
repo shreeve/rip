@@ -4,5 +4,6 @@ get '/hello' -> { message: 'hello' }
 get '/slow' ->
   sleep! 250
   { complete: true }
+get '/crash' -> process.exit 7
 
 start!
