@@ -16,7 +16,7 @@
     "browser-bundle": "bun scripts/browser-bundle.mjs",
     "test": "bun test --timeout 15000",
     "test:rip": "bun test test/battery.test.js --timeout 15000",
-    "test:all": "bun scripts/preflight.mjs && RIP_EXTENDED=1 RIP_REQUIRE_TSC=1 bun test --timeout 15000",
+    "test:all": "bun scripts/test-all.mjs",
     "ext": "bun scripts/install-ext.mjs",
     "audit": "bun test/audit/runner.js"
   },

@@ -329,9 +329,15 @@ test! "spawn with sub-script array", ->
       'AFTER', ''
     ]
 
+# The awaited text occurs ONCE in the whole stream, and it has to: the
+# terminal echoes the command line back before the command's output, so
+# a command that spells AAA itself is matched on its own echo, and only
+# the bytes up to there are cleared. Whether the output had landed by
+# then is a question about read boundaries, not about the buffer — the
+# substitution keeps AAA out of the command line and in the output alone.
 test! "spawn buffer clears after match", ->
   withChat! (chat) ->
-    chat! [/\$\s*/, 'echo AAA; echo BBB', 'AAA', '']
+    chat! [/\$\s*/, 'echo A$(echo AA); echo BBB', 'AAA', '']
     eq chat.buffer.includes('AAA'), false
 
 test! "spawn with numeric send", ->
