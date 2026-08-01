@@ -20,7 +20,6 @@
     "server.rip",
     "middleware.rip",
     "worker.rip",
-    "build.rip",
     "generate.rip",
     "manager.rip",
     "monitor.rip",
