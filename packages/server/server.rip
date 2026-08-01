@@ -241,6 +241,7 @@ export type CtxReq =
   method: string
   url: string
   path: string
+  site: string | null
   param: (key?: string) => any
   query: (key?: string) => any
   header: (key?: string) => any
@@ -391,6 +392,10 @@ createContext = (req, params = {}, url = null, pathname = null) ->
   r.method = req.method
   r.url = req.url
   r.path = pathname
+  # Janus strips a client-supplied Rip-Site and injects its resolved tenant
+  # before proxying to a private worker socket. Standalone listeners have no
+  # trusted edge and therefore never project the header into request context.
+  r.site = if process.env.WORKER_ID? or process.env.SOCKET_PATH? then req.headers.get('rip-site') else null
   r._url = url
   r._params = params
   c = Object.create(CtxProto)

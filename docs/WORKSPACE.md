@@ -72,7 +72,7 @@ forever and “CSP later” are **rejected** as M0 rewrites.
 |---|---|
 | **Q6** | **M0 and M1 are independent exits.** M1 (the dev door) may land first under `RIP_WORKSPACE=1` with dev-mode in-browser compile; M0 (signed cells, CSP without `unsafe-eval`) gates **production populate** only and is unweakened. D6 reads: the dev door never leaks into production — flag off is unchanged and production has no Hub. |
 | **Q7** | **The bag subsumes the app's component store.** The Workspace implements the `ComponentsStore` interface (`packages/app/components.rip`) as its app-facing view — path-keyed through the path→id map, passports underneath. `launch()` accepts an injected components store; flag off, it creates its own store exactly as today (D1). When the Workspace earns the default, `createComponents` retires and the bag is the only store. Two live stores of browser code never coexist. |
-| **Q8** | **Module freshness is structural (Q8′).** The default client **bag** is membership `app/**/*.{rip,css,html}` (ids = birth paths). Watch serves the latest successful representation of each bag file; the ding carries an `etag` only — no apply kind on the wire; the client chooses the reaction (Rip remount / CSS soft-apply / HTML reload). URLs: `GET /app/mood.rip?etag=E` for store id `app/mood.rip` — **no `/cells/` noun, no per-rev museum.** Exact match → `200` + body + `ETag`; a superseded etag → **`409`** + current `ETag`. Post-ding GETs omit `If-None-Match`. First paint loads **`/bundle.json`** (strong etag) once — Rip modules only in the compile bundle. Project-root main entry (`app.rip` / `index.rip`) is outside the client bag → epoch. Hub: **`/hub`**. Production (watch off): same rails, no ding loop, plain boot. |
+| **Q8** | **Module freshness is structural (Q8′).** The default client **bag** is membership `app/**/*.{rip,css,html}` (ids = birth paths). Watch serves the latest successful representation of each bag file; the ding carries an `etag` only — no apply kind on the wire. Client apply verdicts: **`reload` \| `css` \| `update` \| `ignore`** (by extension: html→reload, css→css, rip→update). URLs: `GET /app/mood.rip?etag=E` — **no `/cells/` noun, no per-rev museum.** Exact match → `200` + body + `ETag`; superseded → **`409`**. First paint loads **`/bundle.json`** (Rip compile graph). Project-root main entry → epoch. Hub: **`/hub`**. Production (watch off): plain boot. |
 | **Q9** | **Package shape confirmed.** `packages/workspace` and `packages/refresh` stay separate browser-side packages while experimental (kill switch #2); `packages/server` keeps only the muscles. If the Workspace earns the default, its merge destination is `packages/app`, never `packages/server`. |
 
 ### Ruling 2026-07-29 (Q10)
@@ -95,11 +95,22 @@ flexible-packaging lock above.
 | **Client tree** | `app/` + optional `app/index.html` SPA shell |
 | **API source** | `api/` on disk → app-chosen public prefix (`/api` or `/v1`); SPA fallback never serves that prefix |
 | **Static** | Multi-tenant: `sites/{slug}/public` then `sites/common/public`. Simple apps: `public/` (one fallback per app) |
-| **Edge** | try_files / alias: sites → common/public → `/app/*` modules → worker. Janus stays dumb (no Rip brain) |
+| **Serve config** | Optional app-local `serve.rip`; strict `sites` + `files` normalization resolves paths to absolute Janus registration fields. Ordinary apps keep exact `hosts`. |
+| **Edge** | Janus resolves `{site}`, tries tenant/common file roots, and proxies `proxyFirst` paths before static lookup. Rip semantics remain in Rip. |
 | **Runtime JS** | Prefer CDN-pinned `rip.js` once the slice lands; until then `/@rip/rip.js` from the checkout is fine |
 | **Hub** | `/hub` for workspace dings (bridge enrollment) |
 | **Full-shape exemplar** | [`examples/cart/`](../examples/cart/) — multi-route shop (SQLite first, then `@rip-lang/db` / DuckDB) |
 | **Thin door demo** | [`examples/pulse/`](../examples/pulse/) — status board proving the Workspace door |
+
+For tenant apps, the manager loads `serve.rip` beside the server entry
+and POSTs `{name, site, files, bridge_path?}` to Janus. `site.host`
+contains exactly one `{site}`; `site.dir`, `files.roots`, and
+`files.shell` are absolute on the wire; `proxyFirst` becomes
+`proxy_first`. Static prefixes, shared roots, and the shell must exist
+at startup, while individual tenant child directories remain dynamic.
+Janus supplies the selected tenant to the private worker as trusted
+`Rip-Site`; the framework exposes only that value as `@req.site` and
+does not derive tenant identity from the public request.
 
 ---
 
@@ -369,7 +380,7 @@ this suite (**S1–S15**), with industry rows as citations.
 | S9 | **Effect cleanup** ownership on replace | Outgoing effects dispose exactly once; no orphan timers/listeners | industry + Rip effect model (HMR.md) |
 | S10 | **Compile failure** mid-edit | Last-known-good stays interactive; overlay; no bag corruption | industry (Vite error overlay; RFR redbox) |
 | S11 | **Activation failure** after successful compile | Roll back apply; door passport may still show new etag only after successful activation — **open** (transaction vs door ordering). Mutation safety: a failed activation must not leave living instances half-applied. |
-| S12 | **CSS-only** shared sheet | Style update via `<style data-rip-css>`; zero component remount; ding `{id,etag}` (extension branches — no `kind:style`) | industry (Probe 1 pin on cart) |
+| S12 | **CSS-only** shared sheet | Page already linked the sheet (`<link href="/styles.css">`); ding cache-busts that same href (`?etag=`); no link → inject `<style>`; zero component remount; ding `{id,etag}` (extension → `css`) | industry (Probe 1 pin on cart) |
 | S13 | Rename file on disk (**B′ id stable**) | Same component identity; apply continues against id not path | open (Q3; no industry twin) |
 | S14 | Hub ding with **stale / duplicate etag** | Ignore or coalesce; no double-apply corruption | industry (door; etag equality) |
 | S15 | Intentional **force remount** | Author/tooling can request remount without full reload | industry (`@refresh reset`) |

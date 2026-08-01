@@ -450,6 +450,7 @@ get '/marked' ->
 get '/sub' ->
   inner = subrequest!({ q: 'inner' }, -> read('q'))
   { inner }
+get '/site' -> { site: @req.site }
 
 test! "session proxy reads and writes through ALS", ->
   res = handle! req('GET', '/whoami')
@@ -466,6 +467,17 @@ test! "subrequest swaps data but keeps the context", ->
 test "ctx and mark are null outside a request", ->
   eq ctx(), null
   eq mark(), null
+
+test! "Rip-Site reaches @req.site only behind the trusted worker boundary", ->
+  headers = { 'Rip-Site': 'ola' }
+  direct = handle! req('GET', '/site', { headers })
+  eq (direct.json!), { site: null }
+  process.env.WORKER_ID = 'site-test'
+  try
+    proxied = handle! req('GET', '/site', { headers })
+    eq (proxied.json!), { site: 'ola' }
+  finally
+    delete process.env.WORKER_ID
 
 test "start() under a worker env hands over the fetch handler", ->
   process.env.WORKER_ID = '1'
@@ -1356,7 +1368,7 @@ test! "an orphaned worker (parent gone) exits on its own", ->
 
 console.log "\nPrebuild"
 
-import { buildArtifact, buildApp, revertFilesAndManifest, REGISTER_409_MS, scale, publish, state as managerState, cfg as managerCfg, onFileChange, DEV_CHANNEL as MANAGER_DEV_CHANNEL } from './manager.rip'
+import { buildArtifact, buildApp, revertFilesAndManifest, normalizeServeConfig, loadServeConfig, REGISTER_409_MS, scale, publish, state as managerState, cfg as managerCfg, onFileChange, DEV_CHANNEL as MANAGER_DEV_CHANNEL } from './manager.rip'
 
 test "DEV_CHANNEL mirrors across manager and worker — a pinned fact, not a convention", ->
   eq MANAGER_DEV_CHANNEL, mod.DEV_CHANNEL
@@ -1422,6 +1434,131 @@ test! "buildArtifact rejects a broken app loudly, naming the file", ->
       err = e
     ok err?, 'a broken app must not build'
     ok err.message.includes('app.rip'), "the diagnostic names the file: #{err.message}"
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+# ==[ serve.rip — Janus registration configuration ]==
+
+console.log "\nserve.rip"
+
+tenantTree = ->
+  dir = tmpFixture('tmp-serve-config-')
+  mkdirSync join(dir, 'sites', 'common', 'public'), { recursive: true }
+  mkdirSync join(dir, 'app'), { recursive: true }
+  writeFileSync join(dir, 'app', 'index.html'), '<main>shell</main>'
+  dir
+
+tenantConfig = ->
+  name: 'medlabs'
+  sites:
+    host: '{site}.medlabs.health'
+    dir: 'sites'
+    aliases:
+      localhost: 'ola'
+  files:
+    roots: ['sites/{site}/public', 'sites/common/public']
+    proxyFirst: ['/api']
+    shell: 'app/index.html'
+
+test "serve.rip normalization emits the exact Janus tenant shape with absolute paths", ->
+  dir = tenantTree()
+  try
+    got = normalizeServeConfig tenantConfig(), dir
+    eq got,
+      name: 'medlabs'
+      site:
+        host: '{site}.medlabs.health'
+        dir: join(dir, 'sites')
+        aliases:
+          localhost: 'ola'
+      files:
+        roots: [join(dir, 'sites/{site}/public'), join(dir, 'sites/common/public')]
+        proxy_first: ['/api']
+        shell: join(dir, 'app/index.html')
+    ok not existsSync(join(dir, 'sites', 'ola')), 'runtime tenant directories remain dynamic'
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test! "loadServeConfig loads an app-local default export; no file means no config", ->
+  dir = tenantTree()
+  try
+    eq (loadServeConfig! dir), null
+    writeFileSync join(dir, 'serve.rip'), """
+    export default
+      name: 'medlabs'
+      sites:
+        host: '{site}.medlabs.health'
+        dir: 'sites'
+        aliases:
+          localhost: 'ola'
+      files:
+        roots: ['sites/{site}/public', 'sites/common/public']
+        proxyFirst: ['/api']
+        shell: 'app/index.html'
+    """
+    got = loadServeConfig! dir
+    eq got.site.dir, join(dir, 'sites')
+    eq got.files.proxy_first, ['/api']
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test "serve.rip rejects unknown keys and malformed tenant templates", ->
+  dir = tenantTree()
+  try
+    bad: any = tenantConfig()
+    bad.extra = true
+    throws (-> normalizeServeConfig(bad, dir)), 'unknown serve.rip key "extra"'
+    bad = tenantConfig()
+    bad.sites.extra = true
+    throws (-> normalizeServeConfig(bad, dir)), 'unknown serve.rip sites key "extra"'
+    bad = tenantConfig()
+    bad.files.extra = true
+    throws (-> normalizeServeConfig(bad, dir)), 'unknown serve.rip files key "extra"'
+    bad = tenantConfig()
+    bad.sites.host = 'medlabs.health'
+    throws (-> normalizeServeConfig(bad, dir)), 'must contain exactly one {site}'
+    bad = tenantConfig()
+    bad.sites.host = 'x.{site}.medlabs.health'
+    throws (-> normalizeServeConfig(bad, dir)), 'must have the form {site}.<hostname>'
+    bad = tenantConfig()
+    bad.files.roots[0] = 'sites/prefix-{site}/public'
+    throws (-> normalizeServeConfig(bad, dir)), 'complete path segment'
+    bad = tenantConfig()
+    bad.files.roots[0] = '../sites/{site}/public'
+    throws (-> normalizeServeConfig(bad, dir)), 'clean relative path'
+    bad = tenantConfig()
+    bad.sites.aliases.localhost = 'common'
+    throws (-> normalizeServeConfig(bad, dir)), 'not a valid site name'
+    bad = tenantConfig()
+    bad.files.proxyFirst = ['/api', '/api/admin']
+    throws (-> normalizeServeConfig(bad, dir)), 'entries overlap'
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test "serve.rip rejects missing structural paths while leaving tenant children dynamic", ->
+  dir = tenantTree()
+  try
+    bad: any = tenantConfig()
+    bad.sites.dir = 'missing-sites'
+    throws (-> normalizeServeConfig(bad, dir)), 'sites.dir directory not found'
+    bad = tenantConfig()
+    bad.files.roots[1] = 'missing/public'
+    throws (-> normalizeServeConfig(bad, dir)), 'files.roots[1] directory not found'
+    bad = tenantConfig()
+    bad.files.shell = 'app/missing.html'
+    throws (-> normalizeServeConfig(bad, dir)), 'files.shell file not found'
+    bad = tenantConfig()
+    delete bad.files
+    throws (-> normalizeServeConfig(bad, dir)), 'sites requires files'
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test "ordinary serve.rip apps retain exact hosts", ->
+  dir = tenantTree()
+  try
+    eq normalizeServeConfig({ name: 'plain', hosts: ['plain.example'] }, dir),
+      name: 'plain'
+      hosts: ['plain.example']
   finally
     rmSync dir, { recursive: true, force: true }
 
@@ -1749,6 +1886,65 @@ spawnManager = (dir, controlSock, args, extraEnv = {}, stderr = 'inherit', stdou
 
 managerSockPuts = (calls) ->
   calls.filter (c) -> c.method is 'PUT' and c.body?.upstreams? and not c.body.upstreams.some (u) -> u.doorbell
+
+writeTenantServe = (dir) ->
+  mkdirSync join(dir, 'sites', 'common', 'public'), { recursive: true }
+  mkdirSync join(dir, 'app'), { recursive: true }
+  writeFileSync join(dir, 'app', 'index.html'), '<main>shell</main>'
+  writeFileSync join(dir, 'serve.rip'), """
+  export default
+    name: 'medlabs'
+    sites:
+      host: '{site}.medlabs.health'
+      dir: 'sites'
+      aliases:
+        localhost: 'ola'
+    files:
+      roots: ['sites/{site}/public', 'sites/common/public']
+      proxyFirst: ['/api']
+      shell: 'app/index.html'
+  """
+
+test! "manager registers normalized tenant sites from app-local serve.rip", ->
+  ctlSock = join(tmpdir(), "rip-janus-sites-#{Date.now()}-#{rand(1e6)}.sock")
+  dir = tmpFixture('tmp-manager-sites-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  writeTenantServe dir
+  calls = []
+  stub = stubJanus ctlSock, calls
+  proc = spawnManager dir, ctlSock, ['-w', '1', '--no-watch']
+  try
+    reg = waitFor! -> calls.find (c) -> c.method is 'POST' and c.path is '/1.0/apps'
+    root = realpathSync(dir)
+    eq reg.body,
+      name: 'medlabs'
+      site:
+        host: '{site}.medlabs.health'
+        dir: join(root, 'sites')
+        aliases:
+          localhost: 'ola'
+      files:
+        roots: [join(root, 'sites/{site}/public'), join(root, 'sites/common/public')]
+        proxy_first: ['/api']
+        shell: join(root, 'app/index.html')
+  finally
+    try proc.kill('SIGKILL')
+    await proc.exited
+    stub.stop(true)
+    rmSync dir, { recursive: true, force: true }
+
+test! "--host conflicts with serve.rip sites before control-plane startup", ->
+  dir = tmpFixture('tmp-manager-sites-')
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  writeTenantServe dir
+  proc = spawnManager dir, '/nonexistent.sock', ['--host', 'other.example'], {}, 'pipe'
+  try
+    errText = new Response(proc.stderr).text!
+    code = await proc.exited
+    ok code isnt 0, 'conflict exits nonzero'
+    ok errText.includes('--host conflicts with serve.rip sites'), "names both inputs: #{errText}"
+  finally
+    rmSync dir, { recursive: true, force: true }
 
 test "the default 409 retry window outlives a stale claim's worst case", ->
   # Alignment with the pool protocol: janus holds a dead predecessor's claim

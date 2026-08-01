@@ -145,6 +145,11 @@ value becomes the response: `Response` passes through, objects become
 JSON, strings become text (or HTML when they start with `<`), and
 `null`/`undefined` becomes 204.
 
+Behind Janus, `@req.site` is the request's resolved tenant from the
+trusted `Rip-Site` header. It is `null` when Janus did not select a
+tenant and always `null` on a standalone listener; the framework never
+guesses a tenant from `Host`, a route, or user input.
+
 ## read() — validated input, one call
 
 `read()` merges the parsed body, query string, and path params, then
@@ -407,8 +412,11 @@ In watch mode:
   with `Cache-Control: no-store` when the etag matches; a superseded
   etag is **`409`** with the current `ETag` (never a silent stale body).
   A missing or malformed `etag` query is a 400; an unknown id is a 404.
-  **`.rip`** enters the compile bundle; **`.css`** soft-applies
-  (`<style data-rip-css>`, S12); **`.html`** reloads the document.
+  **`.rip`** enters the compile bundle → client **`update`**; **`.css`**
+  → **`css`** (cache-bust the stylesheet the page already linked, e.g.
+  `<link href="/styles.css">` → `?etag=`; else inject `<style>`);
+  **`.html`** → **`reload`**. Apply verdicts are
+  `reload | css | update | ignore` — never an apply kind on the ding.
 - **The ding.** After the file pool, the rewritten bundle, and the
   manifest are durable (manifest last), the manager publishes one
   directive per changed file to the hub channel `/hub` — the envelope is
@@ -483,6 +491,41 @@ error carrying status and body. Nothing in the manager calls it yet — the
 framework-level hub ergonomics that will are planned (see **Planned**
 below).
 
+### App-local `serve.rip`
+
+An optional `serve.rip` next to the app entry owns Janus routing and
+static-file configuration. Tenant sites use this shape:
+
+```coffee
+export default
+  name: 'medlabs'
+  sites:
+    host: '{site}.medlabs.health'
+    dir: 'sites'
+    aliases:
+      localhost: 'ola'
+  files:
+    roots: ['sites/{site}/public', 'sites/common/public']
+    proxyFirst: ['/api']
+    shell: 'app/index.html'
+```
+
+The manager resolves every filesystem path against the app directory
+and registers:
+
+```json
+{"name":"medlabs","site":{"host":"{site}.medlabs.health","dir":"/absolute/app/sites","aliases":{"localhost":"ola"}},"files":{"roots":["/absolute/app/sites/{site}/public","/absolute/app/sites/common/public"],"proxy_first":["/api"],"shell":"/absolute/app/app/index.html"}}
+```
+
+Configuration is strict: unknown keys, malformed `{site}` templates,
+missing static roots, a missing shell, or a missing `sites.dir` stop
+startup. The dynamic tenant directories beneath `sites.dir` need not
+exist at manager startup. Exact-host apps remain `{name, hosts,
+bridge_path?}` registrations; `serve.rip` may provide `hosts`, and CLI
+`--host` still overrides those. `--host` with `sites` is a startup
+error. Worker count, concurrency, watch/eager mode, and the control
+endpoint remain process knobs.
+
 Workers never carry the Rip compiler. The manager compiles the app **once
 per boot epoch** — `Bun.build` with a `.rip` plugin over the compiler it is
 already running on — into a single ESM artifact in the pool's run tmpdir,
@@ -511,7 +554,7 @@ rip server [app-entry] [options]   # app-entry defaults to ./app.rip, then ./ind
 | Flag | Meaning |
 | --- | --- |
 | `--name <n>` | App name for registration (default: the app directory's name) |
-| `--host <h>` | Public host to claim; repeatable (default: the app name) |
+| `--host <h>` | Public host to claim; repeatable (default: `serve.rip` hosts, then the app name); conflicts with tenant `sites` |
 | `--bridge <path>` | Hub bridge endpoint, registered as `bridge_path` (must start with `/`) — Janus POSTs every hub socket event to it |
 | `-w, --workers <n>` | Worker processes (default: 2) |
 | `-c, --concurrency <n>` | Concurrent requests per worker (default: 1). Refused with watch on — `--eager` included — raise `c` only with watch off (`--no-watch`, or `RIP_ENV=production`); see the sizing maxim below |

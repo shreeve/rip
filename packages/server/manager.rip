@@ -97,11 +97,13 @@ RIP_HANDLER_DEADLINE_MS
 
 # Exported for the same reason state is (below): the manager is a process
 # singleton, and in-process tests configure it directly.
-export cfg =
+export cfg: any =
   entry: null          # absolute path to the app entry
   appDir: null         # directory the watcher covers
   name: null
   hosts: []
+  site: null           # normalized Janus tenant-site registration
+  files: null          # normalized Janus static-file registration
   bridge: null         # hub bridge endpoint, registered as bridge_path
   workers: 2
   concurrency: 1
@@ -171,7 +173,12 @@ cfetch = (method, path, body = null) ->
 registerApp = ->
   backoff = 200
   deadline409 = null
-  reg = { name: cfg.name, hosts: cfg.hosts }
+  reg: any = { name: cfg.name }
+  if cfg.site?
+    reg.site = cfg.site
+    reg.files = cfg.files
+  else
+    reg.hosts = cfg.hosts
   reg.bridge_path = cfg.bridge if cfg.bridge?
   loop
     res = null
@@ -190,8 +197,9 @@ registerApp = ->
         # treating the claim as genuinely foreign.
         deadline409 ?= Date.now() + REGISTER_409_MS
         if Date.now() >= deadline409
-          abort "rip-server: host already claimed at the control plane (409): #{cfg.hosts.join(', ')}"
-        warn "rip-server: hosts still claimed (409); retrying until the stale claim expires"
+          claim = if cfg.site? then cfg.site.host else cfg.hosts.join(', ')
+          abort "rip-server: host already claimed at the control plane (409): #{claim}"
+        warn "rip-server: host claim still held (409); retrying until the stale claim expires"
       else
         warn "rip-server: register failed (#{res.status}); retrying"
     else
@@ -1082,6 +1090,135 @@ startupReport = ->
 # Startup and shutdown
 # ==============================================================================
 
+# An app-local serve.rip owns Janus routing/static configuration. Process
+# controls (workers, concurrency, watch, eager, control) remain CLI/env knobs.
+# Paths are made absolute against the app directory before they cross /1.0.
+isRecord = (value) ->
+  value? and typeof value is 'object' and not Array.isArray(value)
+
+invalidServe = (message) ->
+  throw new Error("rip-server: #{message}")
+
+rejectUnknown = (value, allowed, at) ->
+  invalidServe "#{at} must be an object" unless isRecord(value)
+  for key of value
+    invalidServe "unknown #{at} key #{JSON.stringify(key)}" unless allowed.includes(key)
+
+needString = (value, at) ->
+  invalidServe "#{at} must be a non-empty string" unless typeof value is 'string' and value.length > 0 and value.trim() is value
+  value
+
+validHost = (host) ->
+  return false if host.length > 253 or host.includes(':') or host.includes('/') or host.includes(' ')
+  labels = host.split('.')
+  return false if labels.some((label) -> label.length is 0 or label.length > 63)
+  labels.every (label) -> /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label)
+
+siteTemplate = (value, at) ->
+  value = needString(value, at)
+  invalidServe "#{at} must contain exactly one {site}" unless value.split('{site}').length is 2
+  invalidServe "#{at} contains a malformed template" if /[{}]/.test(value.replace('{site}', ''))
+  invalidServe "#{at} must have the form {site}.<hostname>" unless value.startsWith('{site}.')
+  value
+
+pathTemplate = (value, at) ->
+  value = needString(value, at)
+  invalidServe "#{at} must be relative to the app" if value.startsWith('/')
+  invalidServe "#{at} must use / path separators" if value.includes('\\')
+  segments = value.split('/')
+  invalidServe "#{at} must be a clean relative path" if segments.some((part) -> part is '' or part is '.' or part is '..')
+  clean = value
+  invalidServe "#{at} contains a malformed template" if /[{}]/.test(clean.replace('{site}', ''))
+  count = clean.split('{site}').length - 1
+  invalidServe "#{at} may contain {site} at most once" if count > 1
+  if count is 1
+    invalidServe "#{at} must use {site} as a complete path segment" unless clean.split('/').includes('{site}')
+  { value, clean, dynamic: count is 1 }
+
+requireDir = (path, at) ->
+  invalidServe "#{at} directory not found: #{path}" unless existsSync(path)
+  invalidServe "#{at} is not a directory: #{path}" unless statSync(path).isDirectory()
+
+requireFile = (path, at) ->
+  invalidServe "#{at} file not found: #{path}" unless existsSync(path)
+  invalidServe "#{at} is not a file: #{path}" unless statSync(path).isFile()
+
+export normalizeServeConfig = (raw, appDir) ->
+  rejectUnknown raw, ['name', 'hosts', 'sites', 'files'], 'serve.rip'
+  out: any = {}
+  out.name = needString(raw.name, 'serve.rip name') if raw.name?
+
+  if raw.hosts?
+    invalidServe "serve.rip hosts must be a non-empty array" unless Array.isArray(raw.hosts) and raw.hosts.length > 0
+    out.hosts = raw.hosts.map (host, i) ->
+      host = needString(host, "serve.rip hosts[#{i}]")
+      invalidServe "serve.rip hosts[#{i}] is not a valid host: #{host}" unless validHost(host)
+      host
+
+  if raw.sites?
+    invalidServe "serve.rip cannot define both hosts and sites" if raw.hosts?
+    rejectUnknown raw.sites, ['host', 'dir', 'aliases'], 'serve.rip sites'
+    host = siteTemplate(raw.sites.host, 'serve.rip sites.host')
+    invalidServe "serve.rip sites.host is not a valid host template: #{host}" unless validHost(host.replace('{site}', 'tenant'))
+    dirValue = pathTemplate(raw.sites.dir, 'serve.rip sites.dir')
+    invalidServe "serve.rip sites.dir cannot contain a template" if dirValue.dynamic
+    siteDir = resolve(appDir, dirValue.value)
+    requireDir siteDir, 'serve.rip sites.dir'
+    aliases = raw.sites.aliases ?? {}
+    invalidServe "serve.rip sites.aliases must be an object" unless isRecord(aliases)
+    normalizedAliases = {}
+    for alias, site of aliases
+      invalidServe "serve.rip sites.aliases has an invalid host: #{alias}" unless validHost(alias)
+      site = needString(site, "serve.rip sites.aliases.#{alias}")
+      invalidServe "serve.rip sites.aliases.#{alias} is not a valid site name: #{site}" unless /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(site) and site isnt 'common'
+      normalizedAliases[alias] = site
+    out.site = { host, dir: siteDir, aliases: normalizedAliases }
+
+  if raw.files?
+    rejectUnknown raw.files, ['roots', 'proxyFirst', 'shell'], 'serve.rip files'
+    roots = raw.files.roots
+    invalidServe "serve.rip files.roots must be a non-empty array" unless Array.isArray(roots) and roots.length > 0
+    normalizedRoots = roots.map (root, i) ->
+      parsed = pathTemplate(root, "serve.rip files.roots[#{i}]")
+      full = resolve(appDir, parsed.value)
+      if parsed.dynamic
+        prefix = parsed.clean.split('/').slice(0, parsed.clean.split('/').indexOf('{site}')).join('/')
+        requireDir resolve(appDir, prefix or '.'), "serve.rip files.roots[#{i}] static prefix"
+      else
+        requireDir full, "serve.rip files.roots[#{i}]"
+      full
+    proxyFirst = raw.files.proxyFirst ?? []
+    invalidServe "serve.rip files.proxyFirst must be an array" unless Array.isArray(proxyFirst)
+    normalizedProxy = proxyFirst.map (path, i) ->
+      path = needString(path, "serve.rip files.proxyFirst[#{i}]")
+      invalidServe "serve.rip files.proxyFirst[#{i}] must be a clean /-prefixed path" unless path.startsWith('/') and not path.includes('?') and not path.includes('#') and not path.includes('\\') and (path is '/' or not path.endsWith('/')) and not path.split('/').some((part) -> part is '.' or part is '..')
+      path
+    for prefix, i in normalizedProxy
+      for prior in normalizedProxy.slice(0, i)
+        overlaps = prefix is '/' or prior is '/' or prefix is prior or prefix.startsWith("#{prior}/") or prior.startsWith("#{prefix}/")
+        invalidServe "serve.rip files.proxyFirst entries overlap: #{prior} and #{prefix}" if overlaps
+    shellValue = pathTemplate(raw.files.shell, 'serve.rip files.shell')
+    invalidServe "serve.rip files.shell cannot contain a template" if shellValue.dynamic
+    shell = resolve(appDir, shellValue.value)
+    requireFile shell, 'serve.rip files.shell'
+    out.files = { roots: normalizedRoots, proxy_first: normalizedProxy, shell }
+
+  invalidServe "serve.rip sites requires files" if out.site? and not out.files?
+  invalidServe "serve.rip files requires sites" if out.files? and not out.site?
+  out
+
+export loadServeConfig = (appDir) ->
+  configPath = join(appDir, 'serve.rip')
+  return null unless existsSync(configPath)
+  requireFile configPath, 'serve.rip config'
+  mod = null
+  try
+    mod = import!(configPath)
+  catch e
+    invalidServe "cannot load #{configPath}: #{e?.message or e}"
+  invalidServe "#{configPath} must export default an object" unless isRecord(mod?.default)
+  normalizeServeConfig mod.default, appDir
+
 # Signal listeners receive the signal name as the first argument; a direct
 # call carries none and logs as a plain shutdown.
 shutdown = (reason) ->
@@ -1159,14 +1296,27 @@ export main = (argv) ->
 
   cfg.entry = resolveEntry(args.entry)
   cfg.appDir = dirname(cfg.entry)
-  cfg.name = args.name or basename(cfg.appDir)
+  serve: any = null
+  try
+    serve = loadServeConfig! cfg.appDir
+  catch e
+    abort e?.message or String(e)
+  cfg.name = args.name or serve?.name or basename(cfg.appDir)
+  cfg.site = serve?.site ?? null
+  cfg.files = serve?.files ?? null
   cfg.bridge = args.bridge
   cfg.workers = args.workers
   cfg.concurrency = args.concurrency
   cfg.eager = args.eager
   cfg.control = args.control
-  if args.hosts.length > 0
+  if cfg.site? and args.hosts.length > 0
+    abort "rip-server: --host conflicts with serve.rip sites"
+  if cfg.site?
+    cfg.hosts = []
+  else if args.hosts.length > 0
     cfg.hosts = args.hosts
+  else if serve?.hosts?
+    cfg.hosts = serve.hosts
   else
     cfg.hosts = [cfg.name]
     p "rip-server: no --host given; claiming #{cfg.hosts[0]}"
