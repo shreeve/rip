@@ -2,6 +2,10 @@ artifact = process.env.APP_ARTIFACT or abort 'rip-server worker: APP_ARTIFACT is
 socket = process.env.SOCKET_PATH or abort 'rip-server worker: SOCKET_PATH is required'
 workerId = process.env.WORKER_ID or '?'
 
+concurrencyText = process.env.WORKER_CONCURRENCY or '1'
+concurrency = parseInt concurrencyText
+abort "worker #{workerId}: WORKER_CONCURRENCY must be an integer greater than zero" unless Number.isFinite(concurrency) and concurrency > 0 and String(concurrency) is concurrencyText
+
 drainText = process.env.RIP_DRAIN_DEADLINE_MS or '4500'
 drainMs = parseInt drainText
 abort "worker #{workerId}: RIP_DRAIN_DEADLINE_MS must be an integer greater than zero" unless Number.isFinite(drainMs) and drainMs > 0 and String(drainMs) is drainText
@@ -24,6 +28,7 @@ boot = ->
   catch error
     state.bootError = error?.message or String(error)
     warn "[worker #{workerId}] boot failed: #{state.bootError}"
+    setTimeout (-> exit 1), 1500
 
 server = Bun.serve
   unix: socket
@@ -34,7 +39,11 @@ server = Bun.serve
       headers = if state.bootError? then { 'rip-boot-failed': '1' } else {}
       return new Response(state.bootError or (if state.draining then 'draining' else 'not ready'), { status: 503, headers })
 
-    return new Response(state.bootError or 'not ready', { status: 503 }) unless state.ready and not state.draining
+    return new Response(state.bootError or 'not ready', { status: 503 }) unless state.ready
+    if state.draining
+      return new Response('draining', { status: 503, headers: { 'retry-after': '0', 'rip-worker-draining': '1' } })
+    if state.inflight >= concurrency
+      return new Response('busy', { status: 503, headers: { 'retry-after': '0', 'rip-worker-busy': '1' } })
 
     state.inflight++
     try

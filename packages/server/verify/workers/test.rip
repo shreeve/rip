@@ -1,0 +1,109 @@
+import { test, eq, ok } from '@rip-lang/testing'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
+GENERATOR = join(import.meta.dir, '..', '..', 'generate.rip')
+WORKER = join(import.meta.dir, '..', '..', 'worker.rip')
+
+generate = (entry, artifact, result, task) ->
+  proc = Bun.spawn [process.execPath, PRELOAD, GENERATOR, entry, artifact, result, task, '0'],
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'pipe'
+  diagnostic = new Response(proc.stderr).text()
+  code = await proc.exited
+  throw new Error(await diagnostic) unless code is 0
+
+unixFetch = (path, socket) ->
+  options: any = { unix: socket }
+  fetch "http://worker#{path}", options
+
+waitFor = (fn, timeout = 5000) ->
+  deadline = Date.now() + timeout
+  loop
+    value = await fn()
+    return value if value
+    throw new Error('worker verification timed out') if Date.now() >= deadline
+    sleep! 10
+
+buildWorker = (dir, appEntry) ->
+  app = join dir, 'app.js'
+  worker = join dir, 'worker.js'
+  generate! appEntry, app, join(dir, 'app-result.json'), 'app'
+  generate! WORKER, worker, join(dir, 'worker-result.json'), 'worker'
+  { app, worker }
+
+spawnWorker = (built, socket, env = {}) ->
+  Bun.spawn [process.execPath, built.worker],
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'ignore'
+    env: { ...process.env, APP_ARTIFACT: built.app, SOCKET_PATH: socket, WORKER_ID: 'verify', ...env }
+
+test! 'capacity bounces, shutdown marks, and admitted work completes', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-workers-capacity-')
+  proc = null
+  try
+    built = buildWorker! dir, join(import.meta.dir, 'index.rip')
+    socket = join dir, 'worker.sock'
+    proc = spawnWorker built, socket, { WORKER_CONCURRENCY: '1' }
+    await waitFor ->
+      try (await unixFetch('/ready', socket)).status is 200
+      catch then false
+
+    slow = unixFetch '/slow', socket
+    busy = await waitFor ->
+      try
+        response = await unixFetch '/hello', socket
+        if response.headers.get('rip-worker-busy') is '1' then response else null
+      catch then null
+    eq busy.status, 503
+    eq busy.headers.get('retry-after'), '0'
+
+    proc.kill 'SIGTERM'
+    draining = await waitFor ->
+      try
+        response = await unixFetch '/hello', socket
+        if response.headers.get('rip-worker-draining') is '1' then response else null
+      catch then null
+    eq draining.status, 503
+    eq (await slow).status, 200
+    eq (await proc.exited), 0
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    rmSync dir, { recursive: true, force: true }
+
+test! 'boot failure is reported before bounded nonzero exit', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-workers-boot-')
+  proc = null
+  try
+    built = buildWorker! dir, join(import.meta.dir, 'failed.rip')
+    socket = join dir, 'worker.sock'
+    proc = spawnWorker built, socket
+    failed = await waitFor ->
+      try
+        response = await unixFetch '/ready', socket
+        if response.headers.get('rip-boot-failed') is '1' then response else null
+      catch then null
+    eq failed.status, 503
+    ok (await failed.text()).includes('no start! handoff')
+    eq (await proc.exited), 1
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    rmSync dir, { recursive: true, force: true }
+
+test! 'invalid worker concurrency rejects before binding', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-workers-invalid-')
+  proc = null
+  try
+    built = buildWorker! dir, join(import.meta.dir, 'index.rip')
+    proc = spawnWorker built, join(dir, 'worker.sock'), { WORKER_CONCURRENCY: '0' }
+    eq (await proc.exited), 1
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    rmSync dir, { recursive: true, force: true }

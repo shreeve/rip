@@ -9,23 +9,6 @@ h = if typeof fresh is 'function' then fresh
 else if typeof fresh?.fetch is 'function' then fresh.fetch.bind(fresh)
 else globalThis.__ripHandler
 
-# Boot-failure process linger.
-failLinger = parseInt(process.env.RIP_FAIL_LINGER_MS or '')
-FAIL_LINGER_MS =! if Number.isFinite(failLinger) and failLinger > 0 then failLinger else 1500
-setTimeout (-> exit 1), FAIL_LINGER_MS
-
-# Configurable capacity and Janus retry markers.
-rawC = process.env.WORKER_CONCURRENCY
-cNum = if rawC? then parseInt(rawC) else 1
-if rawC? and not (Number.isFinite(cNum) and cNum >= 1 and String(cNum) is rawC)
-  abort "worker #{workerId}: WORKER_CONCURRENCY must be an integer >= 1, got #{rawC}"
-CONCURRENCY =! cNum
-
-if state.draining
-  return new Response('draining', { status: 503, headers: { 'Retry-After': '0', 'Rip-Worker-Draining': '1' } })
-if state.inflight >= CONCURRENCY
-  return new Response('busy', { status: 503, headers: { 'Retry-After': '0', 'Rip-Worker-Busy': '1' } })
-
 # Hung-handler recycling.
 handlerMs = parseInt(process.env.RIP_HANDLER_DEADLINE_MS or '')
 HANDLER_DEADLINE_MS =! if Number.isFinite(handlerMs) and handlerMs >= 0 then handlerMs else 30000

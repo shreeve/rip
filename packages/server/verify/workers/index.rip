@@ -1,0 +1,8 @@
+import { get, start } from '@rip-lang/server'
+
+get '/hello' -> { message: 'hello' }
+get '/slow' ->
+  sleep! 250
+  { complete: true }
+
+start!
