@@ -1,0 +1,65 @@
+import { readFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
+
+srcDir = null
+compiler = null
+
+loaderSrcDir = ->
+  return srcDir if srcDir?
+  preload = process.execArgv.find((arg) -> arg.startsWith('--preload='))?.slice('--preload='.length)
+  abort 'rip-server: the rip loader is missing from execArgv' unless preload?
+  srcDir = dirname resolve(preload)
+
+loadCompiler = ->
+  return compiler if compiler?
+  mod = import!(join(loaderSrcDir(), 'compile.js'))
+  compiler = mod.compile
+
+rewriteMeta = (code, path) ->
+  return code unless code.includes('import.meta')
+  dir = dirname path
+  transpiler = new Bun.Transpiler
+    loader: 'js'
+    define:
+      'import.meta.url': JSON.stringify(Bun.pathToFileURL(path).href)
+      'import.meta.path': JSON.stringify(path)
+      'import.meta.filename': JSON.stringify(path)
+      'import.meta.dir': JSON.stringify(dir)
+      'import.meta.dirname': JSON.stringify(dir)
+      'import.meta.file': JSON.stringify(basename(path))
+  transpiler.transformSync code
+
+recordInput = (inventory, path, bytes) ->
+  return unless inventory?
+  inventory[path] = new Bun.CryptoHasher('sha256').update(bytes).digest('hex')
+
+ripBuildPlugin = (compile, inventory) ->
+  name: 'rip'
+  setup: (build) ->
+    build.onLoad { filter: /\.rip$/ }, (args) ->
+      bytes = readFileSync args.path
+      recordInput inventory, args.path, bytes
+      { code } = compile(bytes.toString('utf8'), { path: args.path, runtimeDelivery: 'import' })
+      { contents: rewriteMeta(code, args.path), loader: 'js' }
+    build.onLoad { filter: /\.[mc]?js$/ }, (args) ->
+      bytes = readFileSync args.path
+      recordInput inventory, args.path, bytes
+      source = bytes.toString 'utf8'
+      { contents: (if source.includes('import.meta') then rewriteMeta(source, args.path) else source), loader: 'js' }
+    build.onLoad { filter: /.*/, namespace: 'file' }, (args) ->
+      recordInput inventory, args.path, readFileSync(args.path)
+      return
+    return
+
+export buildArtifact = (entry, outfile, opts: any = {}) ->
+  result = Bun.build!
+    entrypoints: [entry]
+    target: 'bun'
+    format: 'esm'
+    sourcemap: 'none'
+    throw: false
+    plugins: [ripBuildPlugin(loadCompiler!(), opts.inventory)]
+  unless result.success
+    throw new Error result.logs.map((log) -> log?.message or String(log)).join('\n')
+  Bun.write! outfile, result.outputs[0].text!
+  outfile

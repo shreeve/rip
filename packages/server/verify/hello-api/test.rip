@@ -1,0 +1,34 @@
+import { test, eq, ok } from '@rip-lang/testing'
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { buildArtifact } from '../../build.rip'
+
+test! 'builds and reports one stable loader-free artifact', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-api-')
+  entry = join(import.meta.dir, 'entry.rip')
+  artifact = join(dir, 'app.js')
+  result = join(dir, 'result.json')
+  preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
+  ok preload?, 'verification requires the Rip loader'
+  try
+    buildArtifact! entry, artifact
+    built = import!(artifact)
+    eq built.answer, 42
+
+    proc = Bun.spawn [process.execPath, preload, join(import.meta.dir, '..', '..', 'generate.rip'), entry, artifact, result, 'g1', '0'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'pipe'
+    stderrText = new Response(proc.stderr).text()
+    code = await proc.exited
+    diagnostic = await stderrText
+    eq code, 0, diagnostic
+    report = JSON.parse readFileSync(result, 'utf8')
+    eq report.taskId, 'g1'
+    eq report.sourceEpoch, 0
+    eq report.artifact, artifact
+    ok report.inputs.includes(entry)
+    ok not ('inputDigest' of report)
+  finally
+    rmSync dir, { recursive: true, force: true }

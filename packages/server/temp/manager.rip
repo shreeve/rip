@@ -29,14 +29,8 @@ loaderSrcDir = ->
   abort "rip-server: the rip loader is missing from execArgv — run via `rip server`" unless preload?
   _srcDir = dirname(resolve(preload))
 
-_compile = null
-loadCompiler = ->
-  return _compile if _compile?
-  mod = import!(join(loaderSrcDir(), 'compile.js'))
-  _compile = mod.compile
-
 # Bundle assembly requires the compiler, so it runs here in the manager —
-# never in a prebuilt worker. Cached like _compile.
+# never in a prebuilt worker.
 _assemble = null
 loadAssembler = ->
   return _assemble if _assemble?
@@ -356,83 +350,6 @@ export publish = (directives) ->
     detail = res.text!
     throw new Error("rip-server: publish failed (#{res.status}): #{detail}")
   res.json!
-
-# ==============================================================================
-# Prebuild — one JS artifact per boot epoch, built by the manager
-# ==============================================================================
-#
-# Workers never carry the Rip compiler: the manager compiles the app ONCE per
-# boot (Bun.build + a .rip plugin over the compiler already loaded here) into
-# a single ESM artifact in the run tmpdir, and every worker just imports it.
-# A build failure is a boot failure — cached, rings answer 503 with the
-# compile diagnostic, and the next content-changing save retries.
-#
-# Bytecode was measured and is not viable on Bun 1.3.14: ESM bytecode
-# requires `compile: true` (a standalone executable), and the one format
-# bytecode does accept (CJS) rejects top-level await — which idiomatic Rip
-# (module-level dammit) produces routinely. The plain-JS artifact ships.
-
-# Bundling must not change what a module's own import.meta says: freeze the
-# path-valued fields to the SOURCE module's location at build time.
-# import.meta.main stays live (false under the worker's dynamic import,
-# exactly as an unbundled dynamic import of the entry evaluated).
-rewriteMeta = (code, path) ->
-  return code unless code.includes('import.meta')
-  dir = dirname(path)
-  t = new Bun.Transpiler
-    loader: 'js'
-    define:
-      'import.meta.url':      JSON.stringify(Bun.pathToFileURL(path).href)
-      'import.meta.path':     JSON.stringify(path)
-      'import.meta.filename': JSON.stringify(path)
-      'import.meta.dir':      JSON.stringify(dir)
-      'import.meta.dirname':  JSON.stringify(dir)
-      'import.meta.file':     JSON.stringify(basename(path))
-  t.transformSync(code)
-
-recordInput = (inventory, path, bytes) ->
-  return unless inventory?
-  inventory[path] = new Bun.CryptoHasher('sha256').update(bytes).digest('hex')
-
-ripBuildPlugin = (compile, inventory = null) ->
-  name: 'rip'
-  setup: (build) ->
-    build.onLoad { filter: /\.rip$/ }, (args) ->
-      bytes = readFileSync(args.path)
-      recordInput inventory, args.path, bytes
-      source = bytes.toString('utf8')
-      { code } = compile(source, { path: args.path, runtimeDelivery: 'import' })
-      { contents: rewriteMeta(code, args.path), loader: 'js' }
-    # Plain-JS modules riding into the bundle keep their import.meta too.
-    build.onLoad { filter: /\.[mc]?js$/ }, (args) ->
-      bytes = readFileSync(args.path)
-      recordInput inventory, args.path, bytes
-      source = bytes.toString('utf8')
-      contents = if source.includes('import.meta') then rewriteMeta(source, args.path) else source
-      { contents, loader: 'js' }
-    # Record every other file Bun consumes while leaving its loader to Bun.
-    build.onLoad { filter: /.*/, namespace: 'file' }, (args) ->
-      recordInput inventory, args.path, readFileSync(args.path)
-      return
-    return
-
-# entry (.rip or .js) → one self-contained ESM artifact at outfile. `bun` and
-# node builtins stay external (target 'bun'); everything else bundles, so the
-# artifact needs no loader and no node_modules to boot. Throws with the full
-# compile/bundle diagnostic on failure.
-export buildArtifact = (entry, outfile, opts = {}) ->
-  compile = loadCompiler!()
-  result = Bun.build!
-    entrypoints: [entry]
-    target: 'bun'
-    format: 'esm'
-    sourcemap: 'none'
-    throw: false
-    plugins: [ripBuildPlugin(compile, opts.inventory)]
-  unless result.success
-    throw new Error(result.logs.map((l) -> l?.message or String(l)).join('\n'))
-  Bun.write! outfile, result.outputs[0].text!
-  outfile
 
 # Default client bag under <appDir>/app: app/**/*.{rip,css,html}, keyed by
 # disk path ('app/routes/index.rip', 'app/styles.css', 'app/index.html' —

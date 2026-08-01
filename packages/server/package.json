@@ -13,12 +13,14 @@
     "rip-server": "./server.rip"
   },
   "scripts": {
-    "test": "rip test.rip"
+    "test": "rip test.rip",
+    "verify:hello-api": "rip verify/hello-api/test.rip"
   },
   "files": [
     "server.rip",
     "middleware.rip",
     "worker.rip",
+    "build.rip",
     "generate.rip",
     "manager.rip",
     "monitor.rip",
