@@ -1,0 +1,2 @@
+globalThis.__ripHandler = (request) ->
+  Response.json { message: 'hello', path: new URL(request.url).pathname }

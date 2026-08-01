@@ -1,1 +1,61 @@
+artifact = process.env.APP_ARTIFACT or abort 'rip-server worker: APP_ARTIFACT is required'
+socket = process.env.SOCKET_PATH or abort 'rip-server worker: SOCKET_PATH is required'
+workerId = process.env.WORKER_ID or '?'
 
+drainText = process.env.RIP_DRAIN_DEADLINE_MS or '4500'
+drainMs = parseInt drainText
+abort "worker #{workerId}: RIP_DRAIN_DEADLINE_MS must be an integer greater than zero" unless Number.isFinite(drainMs) and drainMs > 0 and String(drainMs) is drainText
+
+state =
+  ready: false
+  bootError: null
+  handler: null
+  inflight: 0
+  draining: false
+
+boot = ->
+  try
+    import!(artifact)
+    Promise.resolve!
+    handler = globalThis.__ripHandler
+    throw new Error("no start! handoff in #{artifact}") unless typeof handler is 'function'
+    state.handler = handler
+    state.ready = true
+  catch error
+    state.bootError = error?.message or String(error)
+    warn "[worker #{workerId}] boot failed: #{state.bootError}"
+
+server = Bun.serve
+  unix: socket
+  fetch: (request) ->
+    url = request.url
+    if request.method is 'GET' and (url.endsWith('/ready') or url.includes('/ready?')) and new URL(url).pathname is '/ready'
+      return new Response('ok') if state.ready and not state.draining
+      headers = if state.bootError? then { 'rip-boot-failed': '1' } else {}
+      return new Response(state.bootError or (if state.draining then 'draining' else 'not ready'), { status: 503, headers })
+
+    return new Response(state.bootError or 'not ready', { status: 503 }) unless state.ready and not state.draining
+
+    state.inflight++
+    try
+      response = state.handler! request
+      throw new TypeError('Rip worker handlers must return a Response') unless response instanceof Response
+      response
+    catch error
+      warn "[worker #{workerId}] request failed:", error
+      new Response('Internal Server Error', { status: 500 })
+    finally
+      state.inflight--
+
+boot!
+
+shutdown = ->
+  return if state.draining
+  state.draining = true
+  deadline = Date.now() + drainMs
+  while state.inflight > 0 and Date.now() < deadline
+    sleep! 10
+  try server.stop()
+  exit 0
+
+process.on 'SIGTERM', shutdown

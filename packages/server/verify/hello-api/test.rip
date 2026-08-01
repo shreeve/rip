@@ -3,23 +3,37 @@ import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
+PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
+GENERATOR = join(import.meta.dir, '..', '..', 'generate.rip')
+WORKER = join(import.meta.dir, '..', '..', 'worker.rip')
+
+generate = (entry, artifact, result, task) ->
+  proc = Bun.spawn [process.execPath, PRELOAD, GENERATOR, entry, artifact, result, task, '0'],
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'pipe'
+  stderrText = new Response(proc.stderr).text()
+  code = await proc.exited
+  diagnostic = await stderrText
+  eq code, 0, diagnostic
+  JSON.parse readFileSync(result, 'utf8')
+
+waitFor = (fn, timeout = 5000) ->
+  deadline = Date.now() + timeout
+  loop
+    value = await fn()
+    return value if value
+    throw new Error('verification timed out') if Date.now() >= deadline
+    await new Promise (resolve) -> setTimeout resolve, 10
+
 test! 'generation builds and reports one stable loader-free artifact', ->
   dir = mkdtempSync join(tmpdir(), 'rip-hello-api-')
   entry = join(import.meta.dir, 'entry.rip')
   artifact = join(dir, 'app.js')
   result = join(dir, 'result.json')
-  preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
-  ok preload?, 'verification requires the Rip loader'
+  ok PRELOAD?, 'verification requires the Rip loader'
   try
-    proc = Bun.spawn [process.execPath, preload, join(import.meta.dir, '..', '..', 'generate.rip'), entry, artifact, result, 'g1', '0'],
-      stdin: 'ignore'
-      stdout: 'ignore'
-      stderr: 'pipe'
-    stderrText = new Response(proc.stderr).text()
-    code = await proc.exited
-    diagnostic = await stderrText
-    eq code, 0, diagnostic
-    report = JSON.parse readFileSync(result, 'utf8')
+    report = generate! entry, artifact, result, 'g1'
     eq report.taskId, 'g1'
     eq report.sourceEpoch, 0
     eq report.artifact, artifact
@@ -28,4 +42,34 @@ test! 'generation builds and reports one stable loader-free artifact', ->
     built = import!(artifact)
     eq built.answer, 42
   finally
+    rmSync dir, { recursive: true, force: true }
+
+test! 'artifact-only worker becomes ready, serves, and drains', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-worker-')
+  appArtifact = join dir, 'app.js'
+  workerArtifact = join dir, 'worker.js'
+  socket = join dir, 'worker.sock'
+  proc = null
+  try
+    generate! join(import.meta.dir, 'worker-entry.rip'), appArtifact, join(dir, 'app-result.json'), 'app'
+    generate! WORKER, workerArtifact, join(dir, 'worker-result.json'), 'worker'
+    proc = Bun.spawn [process.execPath, workerArtifact],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+      env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: 'hello' }
+    ready = await waitFor ->
+      try
+        response = await fetch 'http://worker/ready', { unix: socket }
+        response.status is 200
+      catch then false
+    ok ready
+    response = await fetch 'http://worker/hello', { unix: socket }
+    eq response.status, 200
+    eq (await response.json()), { message: 'hello', path: '/hello' }
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 0
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
     rmSync dir, { recursive: true, force: true }
