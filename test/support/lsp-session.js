@@ -141,14 +141,18 @@ export async function openSession(files) {
     // settle-sleep between a config change and reading the PREVIOUS
     // answer as if it were the response — and a fixed sleep is a bet
     // that the server is faster than whatever else the machine is doing.
-    async diagnostics(name, { settle = 150, tries = 80, every = 25 } = {}) {
+    // The deadline is MILLISECONDS, not tries×every. Poll granularity and how
+    // long a caller is willing to wait are independent, and tying them means a
+    // change to `every` silently rescales every caller's timeout — a re-govern
+    // that needs 15s gets 3.75s and reports the server never answered.
+    async diagnostics(name, { settle = 150, timeout = 8000, every = 25 } = {}) {
       const u = uri(name);
       const want = (seen.get(u) ?? 0) + 1;
-      const deadline = Date.now() + tries * every;
+      const deadline = Date.now() + timeout;
       while ((pubs.get(u) ?? 0) < want && Date.now() < deadline) await sleep(every);
       if (!diags.has(u)) {
         throw new Error(
-          `no diagnostics publication for ${name} within ${(tries * every) / 1000}s — ` +
+          `no diagnostics publication for ${name} within ${timeout / 1000}s — ` +
           'the server never (re)published. An empty result is NOT the same as silence.',
         );
       }

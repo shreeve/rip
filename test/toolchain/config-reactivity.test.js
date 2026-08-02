@@ -164,7 +164,7 @@ describeExtended('the config surface is reactive', () => {
       s.touch('package.json', JSON.stringify({ devDependencies: { '@types/bun': '0.0.0' } }, null, 2) + '\n');
 
       // Real types govern now: the member typo surfaces, no reload.
-      expect(s.codes(await s.diagnostics('app.rip', { tries: 150 }))).toContain(2339);
+      expect(s.codes(await s.diagnostics('app.rip', { timeout: 15000 }))).toContain(2339);
     } finally { await s.close(); }
   }, 90_000);
 
@@ -217,7 +217,7 @@ describeExtended('the config surface is reactive', () => {
 
       // Strict refuses the floor: the free name stops resolving, and the
       // diagnostic points the user at @types/bun.
-      const after = s.codes(await s.diagnostics('app.rip', { tries: 150 }));
+      const after = s.codes(await s.diagnostics('app.rip', { timeout: 15000 }));
       expect(after.some((c) => UNRESOLVED_BUN.includes(c))).toBe(true);
     } finally { await s.close(); }
   }, 90_000);

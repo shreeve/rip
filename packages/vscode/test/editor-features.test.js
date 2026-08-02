@@ -822,8 +822,19 @@ describe.skipIf(!tsgoAvailable)('source.* code actions', () => {
     await inWorkspace({ 'zed.rip': 'export zz = 1\n' }, async (api) => {
       const SRC = "console.log 'x'\nv = zz\nr = zz(1,\n";
       await api.open('app.rip', SRC);
-      const diags = api.diagnostics('app.rip');
+      // An incomplete buffer publishes TWICE: rip's own rejection lands first,
+      // ahead of the tsgo pull so it survives tsgo being dead, and the mapped TS
+      // set follows. `open()` resolves on the first, so the 2304 the quick fix
+      // is keyed to is not there yet — poll for it rather than reading whichever
+      // publication happened to arrive.
+      let diags = [];
+      for (let i = 0; i < 60; i++) {
+        diags = api.diagnostics('app.rip');
+        if (diags.some((d) => d.code === 2304)) break;
+        await api.sleep(100);
+      }
       expect(diags.some((d) => /unclosed '\('/.test(d.message ?? ''))).toBe(true);
+      expect(diags.some((d) => d.code === 2304), 'the unresolved name is reported').toBe(true);
 
       const at = { start: { line: 1, character: 4 }, end: { line: 1, character: 4 } };
       const actions = await api.codeAction('app.rip', at, diags.filter((d) => d.code === 2304));
