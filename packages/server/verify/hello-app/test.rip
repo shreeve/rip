@@ -2,6 +2,7 @@ import { test, eq, ok } from '@rip-lang/testing'
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { rash } from '@rip-lang/app/rash'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 SERVER = join(import.meta.dir, '..', '..', 'server.rip')
@@ -55,7 +56,11 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
     ok existsSync(join(generated, '@rip', 'rip.js'))
     ok existsSync(join(generated, 'index.html'))
     ok not existsSync(join(generated, 'manifest.json'))
-    ok readFileSync(join(generated, 'bundle.json'), 'utf8').includes('app/routes/index.rip')
+    bundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
+    eq bundle.files.map((entry) -> entry.id), ['app/routes/index.rip', 'app/styles.css', 'app/template.html']
+    eq Object.keys(bundle.modules).filter((id) -> id.startsWith('app/')), ['app/routes/index.rip']
+    inventory = JSON.stringify bundle.files.map (entry) -> [entry.id, entry.hash]
+    eq bundle.rash, rash(new TextEncoder().encode(inventory))
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 0

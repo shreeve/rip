@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import { rash } from '@rip-lang/app/rash'
 
 HEARTBEAT_MS = 5000
 readyText = process.env.RIP_BOOT_DEADLINE_MS or '30000'
@@ -87,9 +88,12 @@ resolveProject = (input) ->
   { root: dirname(path), entry: path, appRoot: (if existsSync(join(dirname(path), 'app')) then join(dirname(path), 'app') else null) }
 
 writeAtomic = (path, text) ->
+  current = if existsSync(path) then readFileSync(path, 'utf8') else null
+  return false if current is text
   tmp = "#{path}.tmp"
   writeFileSync tmp, text
   renameSync tmp, path
+  true
 
 escapeHtml = (value) ->
   String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
@@ -97,18 +101,24 @@ escapeHtml = (value) ->
 appModules = (appRoot) ->
   modules = {}
   moduleFiles = {}
+  entries = []
   walk = (directory, prefix) ->
     for entry in readdirSync(directory, { withFileTypes: true })
       continue if entry.name.startsWith '.'
       path = join directory, entry.name
       if entry.isDirectory()
         walk path, "#{prefix}#{entry.name}/"
-      else if entry.name.endsWith '.rip'
+      else if entry.name.endsWith('.rip') or entry.name.endsWith('.css') or entry.name.endsWith('.html')
         id = "#{prefix}#{entry.name}"
-        modules[id] = readFileSync path, 'utf8'
-        moduleFiles[id] = path
+        bytes = readFileSync path
+        entries.push { id, hash: rash(bytes) }
+        if entry.name.endsWith '.rip'
+          modules[id] = bytes.toString 'utf8'
+          moduleFiles[id] = path
   walk appRoot, 'app/'
-  { modules, moduleFiles }
+  entries.sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
+  inventory = JSON.stringify entries.map (entry) -> [entry.id, entry.hash]
+  { modules, moduleFiles, entries, rash: rash(new TextEncoder().encode(inventory)) }
 
 publishApp = (project, name) ->
   return null unless project.appRoot?
@@ -121,6 +131,8 @@ publishApp = (project, name) ->
     moduleFiles: graph.moduleFiles
     appDir: project.root
     packagesDir: join(loaderDir(), '..', 'packages')
+  bundle.files = graph.entries
+  bundle.rash = graph.rash
   writeAtomic join(generated, 'bundle.json'), JSON.stringify(bundle)
 
   runtime = join(loaderDir(), '..', 'dist', 'browser', 'rip.js')
@@ -299,12 +311,12 @@ export main = (argv) ->
 
       for slot in [0...args.workers]
         await bootSlot()
+    process.once 'SIGINT', -> stop! 0
+    process.once 'SIGTERM', -> stop! 0
     createRegistration!()
     for worker in workers
       monitorWorker worker
     heartbeat = setInterval beat, HEARTBEAT_MS
-    process.once 'SIGINT', -> stop! 0
-    process.once 'SIGTERM', -> stop! 0
     p "rip-server: https://#{args.host}/"
     await finished
   catch error
