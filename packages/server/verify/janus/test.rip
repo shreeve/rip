@@ -1,12 +1,32 @@
 import { test, eq, ok } from '@rip-lang/testing'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith('--preload=')
 SERVER = join(import.meta.dir, '..', '..', 'server.rip')
 PROJECT = join(import.meta.dir, '..', 'reloads', 'project')
-CADDY = process.env.JANUS_CADDY
+
+releasedCaddy = ->
+  return process.env.JANUS_CADDY if process.env.JANUS_CADDY?
+  xcaddy = Bun.which 'xcaddy'
+  throw new Error('verify:janus requires xcaddy or JANUS_CADDY') unless xcaddy?
+  cache = join tmpdir(), 'rip-janus-release'
+  binary = join cache, 'caddy-v1.5.0'
+  return binary if existsSync binary
+  mkdirSync cache, { recursive: true }
+  buildDir = mkdtempSync join(cache, 'build-')
+  candidate = join buildDir, 'caddy'
+  try
+    result = Bun.spawnSync [xcaddy, 'build', '--with', 'github.com/shreeve/janus@v1.5.0', '--output', candidate],
+      cwd: buildDir
+      stdout: 'pipe'
+      stderr: 'pipe'
+    throw new Error("cannot build published Janus v1.5.0:\n#{result.stderr.toString()}") unless result.exitCode is 0
+    renameSync candidate, binary
+  finally
+    rmSync buildDir, { recursive: true, force: true }
+  binary
 
 waitFor = (name, fn, timeout = 8000) ->
   deadline = Date.now() + timeout
@@ -20,7 +40,7 @@ edgeFetch = (port, path, headers = {}) ->
   fetch "http://127.0.0.1:#{port}#{path}", { headers: { host: 'integration.test', ...headers } }
 
 test! 'released Janus carries registration, files, sendfile, reload, and deregistration', ->
-  ok CADDY?, 'JANUS_CADDY must name a Caddy binary built with the published Janus release'
+  CADDY = releasedCaddy!
   info = Bun.spawnSync [CADDY, 'build-info']
   build = info.stdout.toString()
   eq info.exitCode, 0, info.stderr.toString()

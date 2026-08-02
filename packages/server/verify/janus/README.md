@@ -12,8 +12,13 @@ published `v1.5.0` module. It rejects a local module replacement and certifies:
 Run it with:
 
 ```sh
-JANUS_CADDY=/path/to/released/caddy bun run verify:janus
+bun run verify:janus
 ```
+
+The test builds and caches a Caddy binary from the published Janus `v1.5.0`
+module with `xcaddy`. `JANUS_CADDY=/path/to/released/caddy` may supply an
+existing binary instead. In both cases the test rejects a local module
+replacement.
 
 Directory browsing is a Janus-owned process lease and access observation is a
 separate Rip Server client; their verification belongs to the capabilities
