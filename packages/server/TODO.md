@@ -19,22 +19,7 @@ it lands; the commits and PRs retain the completed record.
 - [ ] Pin the finite default file roots: `static/generated`, `public/`, and
       `app/`; the project directory is never an implicit public root.
 
-## 2. Make worker tests use the production boot path
-
-- [ ] Remove `APP_ENTRY` and loader-backed source imports from `worker.rip`.
-- [ ] Require `APP_ARTIFACT` for every worker boot.
-- [ ] Build fixture artifacts before worker lifecycle tests.
-- [ ] Remove the fixture `node_modules/@rip-lang` symlink farm needed only by
-      `APP_ENTRY`.
-- [ ] Remove package-directory `tmp-*` cleanup now that every fixture lives
-      under the OS temporary directory.
-- [ ] Preserve readiness, boot failure, concurrency, drain, watchdog, and
-      orphan tests against generated artifacts.
-- [ ] Respawn a worker that crashes during boot under the readiness floor.
-- [ ] Kill a worker that remains alive after its readiness deadline instead
-      of leaving it live, unready, and unpublished.
-
-## 3. Land edge policy before removing API middleware
+## 2. Land edge policy before removing API middleware
 
 - [ ] Pin one Caddy compression policy, including encodings, minimum size,
       already-encoded responses, streaming bodies, and MIME exclusions.
@@ -42,61 +27,46 @@ it lands; the commits and PRs retain the completed record.
       `X-Sendfile`, and proxied API responses.
 - [ ] Certify compression through the Janus data plane, including streaming
       and an already-encoded response.
-- [ ] Remove `compress` and its buffering/encoding tests from server
-      middleware.
+- [ ] Pin application compression controls using standard response headers:
+      `Cache-Control: no-transform` disables transformation and an existing
+      `Content-Encoding` is preserved; no Rip-only compression header.
 - [ ] Pin the baseline security-header set and fill-only precedence: explicit
       application headers win; the edge supplies only absent defaults.
 - [ ] Apply the baseline to static files, generated files, SPA shells,
       `X-Sendfile`, proxied API responses, and Janus-generated errors.
 - [ ] Certify header precedence and parity across every response class.
-- [ ] Remove `secureHeaders`; document `@header` for application-specific CSP
-      and response policy.
-- [ ] Remove the non-cancelling `timeout` middleware; retain Janus transport
-      bounds and the worker hung-handler watchdog.
-- [ ] Keep and re-certify `cors`, `sessions`, and `csrf` as application
-      middleware.
+- [ ] Design and implement a real application `timeout` middleware: propagate
+      an abort signal to downstream work, return `504` at the deadline, and
+      recycle the worker when a handler ignores cancellation. Pin per-route
+      control, streaming behavior, side-effect limits, and watchdog handoff.
 
-## 4. Collapse manager modes
+## 3. Collapse manager modes
 
-- [ ] Remove `--eager` and settle-time pool boot; the doorbell remains the
-      single lazy activation path.
-- [ ] Remove `RIP_ENV=production` branches from watch and readiness behavior.
 - [ ] Remove `--watch` and `--allow-watch`; retain `--no-watch` as the
       explicit opt-out.
 - [ ] Make configured symlinked and workspace dependencies participate in
       watch invalidation instead of watching only `*.rip` project files.
-- [ ] Replace `readyWhen` environment branching with the pinned readiness
-      rule.
 - [ ] Bound control-plane writes during an outage so heartbeat retries cannot
       add one queued writer closure per tick.
-- [ ] Remove eager/production-only state, help text, status output, and tests.
 - [ ] Re-pin concurrency rules against watch on/off without environment
       aliases.
 
-## 5. Tighten the package surface
+## 4. Tighten the package surface
 
-- [ ] Remove the test-only public `App(fn)` helper.
-- [ ] Make `startHandler` private or call `fetch` directly from `start()`.
-- [ ] Decide whether `before` and `after` earn a distinct contract beyond
-      ordered `use()` middleware; remove them if not.
-- [ ] Move `resetGlobals` and direct `requestContext` access behind an
-      internal test seam instead of the package entry.
 - [ ] Re-pin the exact named export surface after deletions.
 
-## 6. Remove obsolete project usage
+## 5. Remove obsolete project usage
 
 - [ ] Remove Cart's worker route for authored `app/styles.css`; Janus serves
       it from the live App root.
 - [ ] Move Cart migration and seed setup out of worker import into an explicit
       one-off command.
-- [ ] Remove the implicit project-directory live root from
-      `configureEdgeFiles`.
 - [ ] Add a negative integration test proving API source, configuration,
       package metadata, and database files are not publicly addressable.
 - [ ] Update Cart, Pulse, ROADMAP, AGENTS, package metadata, and server docs
       to state only the final architecture.
 
-## 7. Certification and landing
+## 6. Certification and landing
 
 - [ ] Run `bun run test` in `packages/server` and inspect every remaining test
       name for present-tense product value.

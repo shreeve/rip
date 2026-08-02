@@ -1,4 +1,5 @@
 SESSION = Symbol.for 'rip.server.session'
+RECYCLE = Symbol.for 'rip.server.recycle'
 SAFE_METHODS = new Set ['GET', 'HEAD', 'OPTIONS']
 COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
 sameSites = new Set ['Strict', 'Lax', 'None']
@@ -227,6 +228,44 @@ export htmlJson = (request, next) ->
   <pre>#{highlightJson(pretty)}</pre>
   """
   new Response html, { status: response.status, statusText: response.statusText, headers }
+
+export timeout = (seconds = 30, opts = {}) ->
+  grace = opts.grace ?? 1
+  status = opts.status ?? 504
+  message = opts.message ?? 'Gateway Timeout'
+  exempt = opts.exempt or (-> false)
+  throw new TypeError('timeout seconds must be a positive integer') unless Number.isInteger(seconds) and seconds > 0
+  throw new TypeError('timeout grace must be a nonnegative integer of seconds') unless Number.isInteger(grace) and grace >= 0
+  throw new TypeError('timeout status must be an integer from 500 through 599') unless Number.isInteger(status) and status >= 500 and status <= 599
+  throw new TypeError('timeout message must be a string') unless typeof message is 'string'
+  throw new TypeError('timeout exempt must be a function') unless typeof exempt is 'function'
+
+  (request, next) ->
+    return next!() if await exempt request
+    controller = new AbortController
+    signal = AbortSignal.any [request.signal, controller.signal]
+    init = { method: request.method, headers: request.headers, signal, body: request.body }
+    timedRequest = new Request request.url, init
+    timer = null
+    deadline = new Promise (done) -> timer = setTimeout((-> done({ timeout: true })), seconds * 1000)
+    outcome = Promise.resolve(null).then((-> next timedRequest)).then(
+      ((response) -> { response }),
+      ((error) -> { error })
+    )
+    result = await Promise.race [outcome, deadline]
+    unless result.timeout
+      clearTimeout timer
+      throw result.error if result.error?
+      return result.response
+
+    controller.abort new DOMException(message, 'TimeoutError')
+    settled = false
+    outcome.then -> settled = true
+    setTimeout (->
+      unless settled
+        try globalThis[RECYCLE]?()
+    ), grace * 1000
+    new Response message, { status, headers: { 'content-type': 'text/plain; charset=UTF-8', connection: 'close' } }
 
 export sessions = (opts = {}) ->
   secret = opts.secret

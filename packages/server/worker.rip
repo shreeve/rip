@@ -1,6 +1,7 @@
 artifact = process.env.APP_ARTIFACT or abort 'rip-server worker: APP_ARTIFACT is required'
 socket = process.env.SOCKET_PATH or abort 'rip-server worker: SOCKET_PATH is required'
 workerId = process.env.WORKER_ID or '?'
+RECYCLE = Symbol.for 'rip.server.recycle'
 
 concurrencyText = process.env.WORKER_CONCURRENCY or '1'
 concurrency = parseInt concurrencyText
@@ -10,7 +11,7 @@ drainText = process.env.RIP_DRAIN_DEADLINE_MS or '4500'
 drainMs = parseInt drainText
 abort "worker #{workerId}: RIP_DRAIN_DEADLINE_MS must be an integer greater than zero" unless Number.isFinite(drainMs) and drainMs > 0 and String(drainMs) is drainText
 
-handlerText = process.env.RIP_HANDLER_DEADLINE_MS or '30000'
+handlerText = process.env.RIP_HANDLER_DEADLINE_MS or '0'
 handlerMs = parseInt handlerText
 abort "worker #{workerId}: RIP_HANDLER_DEADLINE_MS must be a nonnegative integer" unless Number.isFinite(handlerMs) and handlerMs >= 0 and String(handlerMs) is handlerText
 
@@ -26,6 +27,7 @@ state =
   inflightStarts: new Map
   requestSerial: 0
   draining: false
+  recycleScheduled: false
 
 boot = ->
   try
@@ -79,6 +81,12 @@ shutdown = ->
     sleep! 10
   try server.stop()
   exit 0
+
+globalThis[RECYCLE] = ->
+  return if state.recycleScheduled or state.draining
+  state.recycleScheduled = true
+  warn "[worker #{workerId}] handler ignored timeout cancellation; recycling"
+  setTimeout shutdown, 25
 
 process.on 'SIGTERM', shutdown
 

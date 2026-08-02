@@ -24,9 +24,15 @@ addRoute = (method, path, handler) ->
 export get = (path, handler) -> addRoute 'GET', path, handler
 export post = (path, handler) -> addRoute 'POST', path, handler
 
-export use = (middleware) ->
-  throw new TypeError('use requires a middleware function') unless typeof middleware is 'function'
-  middlewares.push middleware
+export use = (pathOrMiddleware, middleware = null) ->
+  if typeof pathOrMiddleware is 'function' and not middleware?
+    middlewares.push { path: null, handler: pathOrMiddleware }
+    return
+  throw new TypeError('use path must be absolute') unless typeof pathOrMiddleware is 'string' and pathOrMiddleware.startsWith('/')
+  throw new TypeError("use #{pathOrMiddleware} requires a middleware function") unless typeof middleware is 'function'
+  path = pathOrMiddleware.replace /\/+$/, ''
+  path = '/' if path is ''
+  middlewares.push { path, handler: middleware }
   return
 
 export session = new Proxy {},
@@ -47,20 +53,31 @@ export session = new Proxy {},
   getOwnPropertyDescriptor: -> { enumerable: true, configurable: true }
 
 export fetch = (request) ->
-  requests.run { request }, ->
+  store = { request }
+  requests.run store, ->
     last = -1
-    invoke = (index) ->
+    invoke = (index, currentRequest) ->
       throw new Error('middleware called next() more than once') if index <= last
       last = index
+      store.request = currentRequest
       if index < middlewares.length
-        return middlewares[index] request, -> invoke(index + 1)
-      path = new URL(request.url).pathname
-      handler = routes.get "#{request.method} #{path}"
+        entry = middlewares[index]
+        path = new URL(currentRequest.url).pathname
+        unless not entry.path? or entry.path is '/' or path is entry.path or path.startsWith("#{entry.path}/")
+          return invoke index + 1, currentRequest
+        return entry.handler currentRequest, (nextRequest = currentRequest) ->
+          throw new TypeError('middleware next() replacement must be a Request') unless nextRequest instanceof Request
+          if nextRequest isnt currentRequest
+            nextRequest[SESSION] = currentRequest[SESSION] if currentRequest[SESSION]?
+            nextRequest[key] = currentRequest[key] for key in Object.keys(currentRequest)
+          invoke index + 1, nextRequest
+      path = new URL(currentRequest.url).pathname
+      handler = routes.get "#{currentRequest.method} #{path}"
       return new Response('Not Found', { status: 404 }) unless handler?
-      value = await handler request
+      value = await handler currentRequest
       respond value
     try
-      response = await invoke 0
+      response = await invoke 0, request
       throw new TypeError('middleware chain returned no Response') unless response instanceof Response
       response
     catch error
