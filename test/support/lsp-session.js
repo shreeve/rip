@@ -45,9 +45,15 @@ export async function openSession(files) {
     fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
   }
 
+  const logs = [];
   const client = new LspClient('bun', [SERVER, '--stdio'], {
     cwd: path.join(ROOT, 'packages/vscode'),
     onNotification: (m, p) => {
+      // The server's own log stream. It is where a brokered surface says
+      // WHY it declined — a dropped code action names itself and its
+      // reason — so a test that only sees the empty result cannot tell a
+      // refusal from an absence.
+      if (m === 'window/logMessage') { logs.push(p.message ?? ''); return; }
       if (m !== 'textDocument/publishDiagnostics') return;
       diags.set(p.uri, p.diagnostics);
       pubs.set(p.uri, (pubs.get(p.uri) ?? 0) + 1);
@@ -90,6 +96,14 @@ export async function openSession(files) {
   const session = {
     dir,
     uri,
+
+    // A raw LSP request, for surfaces with no helper of their own yet. The
+    // helpers above exist because their surfaces need POLLING; anything that
+    // answers once and correctly can go straight through here.
+    request: (method, params) => client.request(method, params),
+
+    // Everything the server has logged so far, oldest first.
+    logs: () => [...logs],
 
     // The globs the server registered a file-watcher for. Real editors send
     // didChangeWatchedFiles for these and nothing else.
@@ -220,6 +234,27 @@ export async function openSession(files) {
         await sleep(every);
       }
       return labels;
+    },
+
+    // The completion ITEM for one label, resolved. An auto-import's inserted
+    // line arrives only through `completionItem/resolve` — the server
+    // advertises `additionalTextEdits` as a resolve property, so the first
+    // response carries the label and nothing to apply. A test that asserts
+    // what LANDS IN THE BUFFER has to take this second step; asking only the
+    // first answers what was offered, which is a different claim.
+    // Polls for the same reason completions() does.
+    async completionItem(name, line, character, label, { tries = 20, every = 300 } = {}) {
+      for (let i = 0; i < tries; i++) {
+        const r = await client.request('textDocument/completion', {
+          textDocument: { uri: uri(name) }, position: { line, character },
+        }).catch(() => null);
+        const items = Array.isArray(r) ? r : (r?.items ?? []);
+        const hit = items.find((it) => it.label === label);
+        if (hit) return await client.request('completionItem/resolve', hit).catch(() => null);
+        if (items.length) return null;   // live list, name absent — a real answer
+        await sleep(every);
+      }
+      return null;
     },
 
     // Signature help at a position. Polls for a LIVE (non-null) answer the

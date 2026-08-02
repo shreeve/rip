@@ -198,11 +198,12 @@ const mirrorCount = (ws) => mirrorPaths(ws).length;
 // carries is one, and a COMPILED FACE otherwise. The distinction is what
 // the scaling and cache-purge pins are actually about: candidacy is
 // workspace-wide, compiling is not.
-const STUB_LINE = /^export (declare const [A-Za-z_$][\w$]*: any;|type [A-Za-z_$][\w$]* = any;|\{\};)$/;
+const STUB_LINE = /^(export (declare const [A-Za-z_$][\w$]*: any;|type [A-Za-z_$][\w$]* = any;|default _default;|\{\};)|declare const _default: any;)$/;
 const isStub = (text) => text.split('\n').filter(Boolean).every((l) => STUB_LINE.test(l));
 const faceCount = (ws) => mirrorPaths(ws).filter((p) => !isStub(fs.readFileSync(p, 'utf8'))).length;
 
 const UTIL = 'export answer = 42\n';
+
 const APP = 'import { answer } from "./util.rip"\nbad = answer.toUpperCase()\n';
 
 describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
@@ -382,6 +383,17 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
 describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
   const mirrorFileOf = (ws, rel) => path.join(ws, '.rip', 'editor', rel + '.ts');
 
+  // What a PRUNE must remove is the compiled face, not every byte. A
+  // workspace `.rip` is stubbed into the program at startup (the gate
+  // below), so demanding an empty path after a prune would demand a state
+  // stricter than the file's own starting one — the same file, untouched all
+  // session, carries a stub. The closure invariant is that no compiled face
+  // outlives its last importer.
+  const noCompiledFace = (ws, name) => {
+    const at = mirrorFileOf(ws, name);
+    return !fs.existsSync(at) || isStub(fs.readFileSync(at, 'utf8'));
+  };
+
   test('user territory: a pre-existing .rip/.gitignore survives byte-identical; ours lives in editor/', async () => {
     const USER_GITIGNORE = '# user-owned rules\neditor/\n!keep-me\n';
     await inWorkspace({ '.rip/.gitignore': USER_GITIGNORE, 'util.rip': UTIL }, async (api) => {
@@ -427,7 +439,7 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
 
       api.close('app.rip');
       await api.poll(() => !fs.existsSync(mirrorFileOf(api.ws, 'app.rip')), 'closed buffer mirror pruned');
-      await api.poll(() => !fs.existsSync(mirrorFileOf(api.ws, 'util.rip')), 'exclusive import pruned');
+      await api.poll(() => noCompiledFace(api.ws, 'util.rip'), 'exclusive import pruned');
     });
   }, 30000);
 
@@ -438,7 +450,7 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
       expect(fs.existsSync(mirrorFileOf(api.ws, 'util.rip'))).toBe(true);
 
       await api.change('app.rip', 'k = 1\n'); // the import line is gone
-      await api.poll(() => !fs.existsSync(mirrorFileOf(api.ws, 'util.rip')), 'orphaned import pruned');
+      await api.poll(() => noCompiledFace(api.ws, 'util.rip'), 'orphaned import pruned');
       expect(fs.existsSync(mirrorFileOf(api.ws, 'app.rip'))).toBe(true); // the open buffer stays
     });
   }, 30000);
@@ -454,10 +466,10 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
       api.close('one.rip');
       await api.poll(() => !fs.existsSync(mirrorFileOf(api.ws, 'one.rip')), 'closed importer mirror pruned');
       await api.sleep(500); // give a wrong prune time to happen
-      expect(fs.existsSync(mirrorFileOf(api.ws, 'util.rip'))).toBe(true); // two.rip still imports it
+      expect(noCompiledFace(api.ws, 'util.rip')).toBe(false); // two.rip still imports it: the real face, not a stub
 
       api.close('two.rip');
-      await api.poll(() => !fs.existsSync(mirrorFileOf(api.ws, 'util.rip')), 'last importer gone → pruned');
+      await api.poll(() => noCompiledFace(api.ws, 'util.rip'), 'last importer gone → pruned');
     });
   }, 30000);
 

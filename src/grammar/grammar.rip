@@ -79,7 +79,13 @@ grammar =
   # ============================================================================
 
   Import: [
-    o 'IMPORT String'                                                               , '["import", "{}", 2]'   , 'import: _, spec, source'
+    # A SIDE-EFFECT import carries no clause, and none is minted for it: the
+    # node has a source and nothing else. Spelling it `["import", "{}", …]`
+    # made it indistinguishable from `import {} from …` two rows down, and
+    # the emitter wrote the empty-clause form for both — so TypeScript saw a
+    # named list waiting to be filled and offered to add to it, where it
+    # leaves a real side-effect import alone.
+    o 'IMPORT String'                                                               , '["import", 2]'         , 'import: _, source'
     o 'IMPORT ImportDefaultSpecifier FROM String'                                   , '["import", 2, 4]'      , 'import: _, spec, source'
     o 'IMPORT ImportNamespaceSpecifier FROM String'                                 , '["import", 2, 4]'      , 'import: _, spec, source'
     o 'IMPORT { } FROM String'                                                      , '["import", "{}", 5]'   , 'import: _, spec, source'

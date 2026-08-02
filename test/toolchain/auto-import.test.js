@@ -106,6 +106,45 @@ test('the export scan reads the forms a workspace actually writes', () => {
   expect(scan.types.sort()).toEqual(['Config', 'Padding', 'Priority', 'Widget']);
 });
 
+// THE LINE THAT LANDS IN THE BUFFER, which is the feature's whole payoff
+// and which nothing here asserted until it shipped wrong. Offering a
+// candidate and inserting a usable line are different claims: the label
+// arrives on the first response, the edit only on `completionItem/resolve`,
+// so a test that stops at the label never sees what the user gets.
+//
+// The specifier must be SINGLE-quoted. tsgo mints double; Rip source does
+// not (320 of the 320 `from` imports in this repo's `.rip` files are
+// single). There IS a re-quoting pass that matches the user's own style,
+// but it learns that style from an existing import of the same module —
+// and an auto-import is by definition of a module nothing has imported
+// yet, so it never fires here. The fixture therefore imports NOTHING,
+// which is the only state that exercises the default.
+describeExtended('the inserted import is idiomatic Rip', () => {
+  const FRESH = {
+    'widget.rip': 'export uniqueWidgetName = (n: number): string -> "w"\n',
+    'blank.rip': "console.log 'x'\nfirst = uniqueWidg\n",
+    'package.json': '{}\n',
+  };
+
+  test('a brand-new auto-import inserts a single-quoted, semicolon-free line', async () => {
+    const s = await openSession(FRESH);
+    try {
+      await awaitStub(s, 'widget.rip');
+      s.open('blank.rip');
+      await s.diagnostics('blank.rip');
+      const item = await s.completionItem('blank.rip', 1, 17, 'uniqueWidgetName');
+      expect(item, 'the candidate is offered at all').toBeTruthy();
+      const edits = item.additionalTextEdits ?? [];
+      expect(edits.length, 'an auto-import carries its import line').toBeGreaterThan(0);
+      const text = edits.map((e) => e.newText).join('');
+      expect(text).toContain("from './widget.rip'");
+      expect(text).not.toContain('"');       // tsgo's double quotes, gone
+      expect(text).not.toContain(';');       // Rip parses one; no Rip author writes one
+      expect(text).not.toContain('.rip.ts'); // the mirror extension never reaches the user
+    } finally { await s.close(); }
+  }, 90_000);
+});
+
 // A default export has no name for the stub to carry, so it needs its own
 // answer. Omitted, every consumer that imports it — `import theme from
 // './x.rip'`, `import { default as theme }`, `export { default } from` —
@@ -114,7 +153,71 @@ test('a default export is carried, however it is spelled', () => {
   expect(scanExportNames('export default host.toUpperCase()\n').hasDefault).toBe(true);
   expect(scanExportNames("export { default } from './lib.rip'\n").hasDefault).toBe(true);
   expect(scanExportNames('export { palette as default }\n').hasDefault).toBe(true);
-  expect(stubFace(scanExportNames('export default 1\n'))).toContain('export default __ripDefault;');
+  // The NAME is the mechanism, not decoration. A default export is offered
+  // under a name TypeScript derives from the file, and that derivation needs
+  // a declaration it will name — an identifier with a LEADING DOUBLE
+  // underscore is escaped in TypeScript's symbol tables (`__x` → `___x`) and
+  // the default then has no candidate at all. Driven both ways, every other
+  // byte identical: `__ripDefault` offered nothing, `_default` offers it.
+  // `_default` is also what TypeScript's own .d.ts emitter writes here.
+  expect(stubFace(scanExportNames('export default 1\n'))).toContain('declare const _default: any;');
+  expect(stubFace(scanExportNames('export default 1\n'))).toContain('export default _default;');
+  expect(stubFace(scanExportNames('export default 1\n'))).not.toMatch(/\b__/);
+});
+
+// The NAME the default is OFFERED under, which is the local it binds. A
+// named declaration beats TypeScript's own derivation from the file — and
+// the file here is a MIRROR, `theme.rip.ts`, which derives `themeRip` where
+// the author's file says `theme`. Driven both ways.
+test('a default export is offered under the source file\'s own name', () => {
+  const faces = buildStubFaces(
+    ['/w/theme.rip', '/w/10-modules.rip', '/w/my-widget.rip', '/w/theme2.rip', '/w/__hidden.rip'],
+    (f) => (f.endsWith('theme2.rip') ? 'export default 1\nexport theme2 = 1\n' : 'export default 1\n'),
+  );
+  const def = (f) => faces.get(f).split('\n').find((l) => l.startsWith('export default'));
+  expect(def('/w/theme.rip')).toBe('export default theme;');
+  // Sanitized: a hyphen is not an identifier character.
+  expect(def('/w/my-widget.rip')).toBe('export default my_widget;');
+  // The three fallbacks, each for its own reason: a leading digit cannot
+  // start an identifier; the name is already exported by this module, so
+  // binding it twice would not compile; and a leading DOUBLE underscore is
+  // escaped in TypeScript's symbol tables, which kills the candidate
+  // outright. All land on `_default`, which still works — it just answers
+  // with TypeScript's file-derived spelling.
+  expect(def('/w/10-modules.rip')).toBe('export default _default;');
+  expect(def('/w/theme2.rip')).toBe('export default _default;');
+  expect(def('/w/__hidden.rip')).toBe('export default _default;');
+});
+
+// A file named for a RESERVED WORD. `default.rip` is the plausible one, and
+// the whole set is here because the guard is a list and a list is exactly
+// what rots. Each of these cannot be a `const` binding — `declare const
+// default: any;` is a SYNTAX error (TS1389 and friends), so the stub stops
+// parsing and the default it exists to offer is lost. Named exports survive
+// (tsgo error-recovers), which is why this degrades quietly rather than
+// failing loudly, and why it needs a gate rather than a comment.
+test('a file named for a reserved word falls back rather than emitting a syntax error', () => {
+  const RESERVED = [
+    'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
+    'default', 'delete', 'do', 'else', 'enum', 'export', 'extends', 'false',
+    'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'let',
+    'new', 'null', 'return', 'super', 'switch', 'this', 'throw', 'true', 'try',
+    'typeof', 'var', 'void', 'while', 'with', 'yield',
+  ];
+  const faces = buildStubFaces(RESERVED.map((n) => `/w/${n}.rip`), () => 'export default 1\n');
+  for (const name of RESERVED) {
+    expect(faces.get(`/w/${name}.rip`), `${name}.rip must not bind its own name`)
+      .toContain('export default _default;');
+  }
+  // And NOT over-broad: these are contextual keywords, legal as bindings,
+  // so a file named for one keeps the name the author would write. Driven
+  // against the real compiler, not assumed.
+  const ctx = ['type', 'as', 'of', 'from', 'any', 'never'];
+  const okFaces = buildStubFaces(ctx.map((n) => `/w/${n}.rip`), () => 'export default 1\n');
+  for (const name of ctx) {
+    expect(okFaces.get(`/w/${name}.rip`), `${name} binds fine and must not fall back`)
+      .toContain(`export default ${name};`);
+  }
   // A named re-export of someone else's default is a NAMED export here,
   // not a default one.
   const resold = scanExportNames("export { default as theme } from './lib.rip'\n");
@@ -211,6 +314,102 @@ describeExtended('auto-import candidate scope', () => {
       expect(await candidatesAt(s, { line: 2, col: 13 })).toContain('orphanWidget');
     } finally { await s.close(); }
   }, 90_000);
+});
+
+// ACCEPT, THEN CHANGE YOUR MIND — the sequence that made the prune's own
+// bookkeeping eat candidacy. Accepting an auto-import puts the target IN the
+// closure (real face, registered); removing the import takes it back out and
+// the prune deletes the mirror it registered. Nothing then spoke for the
+// file, so it stopped being a candidate until the next session — reachable
+// in about fifteen seconds of ordinary editing, and curable only by a
+// restart nobody would guess at.
+//
+// The prune is right to delete the FACE. What has to come back is the stub.
+describeExtended('candidacy survives an import being removed', () => {
+  const CYCLE = {
+    'widget.rip': 'export uniqueWidgetName = (n: number): string -> "w"\n',
+    'test.rip': "console.log 'x'\nfirst = uni\n",
+    'package.json': '{}\n',
+  };
+  const AT = { line: 1, col: 11 };   // `first = uni|`
+  // candidatesAt() is bound to the shared app.rip fixture; this suite has its
+  // own document, so it carries its own liveness-checked read.
+  const offered = async (s) => {
+    const labels = await s.completions('test.rip', AT.line, AT.col);
+    expect(labels.length, 'the list is live before its membership means anything').toBeGreaterThan(0);
+    return labels;
+  };
+
+  test('a file offered, imported, then un-imported is offered again', async () => {
+    const s = await openSession(CYCLE);
+    try {
+      await awaitStub(s, 'widget.rip');
+      s.open('test.rip');
+      await s.diagnostics('test.rip');
+      expect(await offered(s)).toContain('uniqueWidgetName');
+
+      // Accept: the import edge exists, so the file joins the closure and
+      // its stub is replaced by a real compiled face.
+      s.change('test.rip', "import { uniqueWidgetName } from './widget.rip'\nconsole.log 'x'\nfirst = uni\n");
+      await s.diagnostics('test.rip');
+
+      // Change your mind. The edge goes, the prune runs, the face is
+      // removed — and the name must still be offered.
+      s.change('test.rip', "console.log 'x'\nfirst = uni\n");
+      await s.diagnostics('test.rip');
+      await new Promise((r) => setTimeout(r, 1500));   // the prune is backgrounded
+      expect(await offered(s)).toContain('uniqueWidgetName');
+      // And what came back is the STUB, not a resurrected face: the prune's
+      // own invariant is that no compiled face outlives its last importer.
+      expect(fs.readFileSync(mirrorOf(s, 'widget.rip'), 'utf8')).toContain('declare const uniqueWidgetName: any');
+    } finally { await s.close(); }
+  }, 120_000);
+});
+
+// THROUGH A BARREL, which is where the re-stub above quietly lost half its
+// answer. A barrel's `export * from` names are written in the TARGET, so a
+// stub built for the barrel ALONE resolves none of them — the population
+// pass never hits this because it scans the whole workspace at once, and
+// only the prune's single-file rebuild does. The symptom is narrow and
+// nasty: accepting an auto-import through a barrel and then removing it
+// takes the barrel out of candidacy, while the direct file stays offered.
+describeExtended('candidacy through a barrel survives an import being removed', () => {
+  const BARREL = {
+    'widget.rip': 'export uniqueWidgetName = (n: number): string -> "w"\n',
+    'barrel.rip': "export * from './widget.rip'\nexport barrelOwnName = (): number -> 1\n",
+    'test.rip': "console.log 'x'\nfirst = uni\n",
+    'package.json': '{}\n',
+  };
+  const AT = { line: 1, col: 11 };
+
+  test('a name re-exported through a barrel is still offered from BOTH sources', async () => {
+    const s = await openSession(BARREL);
+    try {
+      await awaitStub(s, 'barrel.rip');
+      s.open('test.rip');
+      await s.diagnostics('test.rip');
+      const before = await s.completions('test.rip', AT.line, AT.col);
+      expect(before.length, 'the list is live').toBeGreaterThan(0);
+      // Two entries: the barrel re-exports it and widget.rip declares it.
+      expect(before.filter((l) => l === 'uniqueWidgetName')).toHaveLength(2);
+
+      s.change('test.rip', "import { uniqueWidgetName } from './barrel.rip'\nconsole.log 'x'\nfirst = uni\n");
+      await s.diagnostics('test.rip');
+      s.change('test.rip', "console.log 'x'\nfirst = uni\n");
+      await s.diagnostics('test.rip');
+      await new Promise((r) => setTimeout(r, 1500));   // the prune is backgrounded
+
+      const after = await s.completions('test.rip', AT.line, AT.col);
+      expect(after.length, 'the list is live').toBeGreaterThan(0);
+      expect(after.filter((l) => l === 'uniqueWidgetName')).toHaveLength(2);
+      // The pass-through name is the one that needs the star resolved, and
+      // asserting the barrel's stub CONTENT is what names the defect: the
+      // count above would also pass if the barrel had vanished and widget
+      // were somehow offered twice.
+      expect(fs.readFileSync(mirrorOf(s, 'barrel.rip'), 'utf8'))
+        .toContain('declare const uniqueWidgetName: any');
+    } finally { await s.close(); }
+  }, 120_000);
 });
 
 // A consumer that imports a stub-populated file must get the SAME answers

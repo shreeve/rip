@@ -259,6 +259,22 @@ export function moduleSourceText(s) {
   return `'${inner}'`;
 }
 
+// Is this node a module IMPORT STATEMENT? Shape alone cannot say: a
+// dynamic `import(expr)` shares the head AND the length with a
+// side-effect `import './x.rip'` (both `["import", x]`), so the stores'
+// semanticKind is the only discriminator — `import` against `dynimport`.
+// The length test below is a fast reject, nothing more; it was once `< 3`
+// and silently stopped recognizing side-effect imports the day they
+// gained their own node shape.
+//
+// Exported because the .d.ts emitter asks the same question, and asking
+// it from a private copy is how the two came to disagree.
+export function isModuleImportNode(stores, x) {
+  if (!isNode(x) || x[0] !== 'import' || x.length < 2) return false;
+  const id = stores.idOf(x);
+  return (id !== null ? stores.node(id)?.semanticKind : null) === 'import';
+}
+
 class Emitter {
   constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, repl = false } = {}) {
     this.stores = stores;
@@ -618,10 +634,7 @@ class Emitter {
   }
 
   static isModuleImportIn(stores, x) {
-    if (!isNode(x) || x[0] !== 'import' || x.length < 3) return false;
-    const id = stores.idOf(x);
-    const kind = id !== null ? stores.node(id)?.semanticKind : null;
-    return kind === 'import';
+    return isModuleImportNode(stores, x);
   }
 
   // Reactive names a statement list's OWN scope declares. The walk
@@ -3568,18 +3581,27 @@ class Emitter {
     const specs = node.slice(1, -1);
     this.mark(node, '$self', () => {
       this.b.emit('import ');
-      specs.forEach((spec, i) => {
-        if (i > 0) this.b.emit(', ');
-        if (spec === '{}') this.b.emit('{}');
-        else if (typeof spec === 'string') this.b.emit(spec);
-        else if (spec[0] === '*') this.b.emit(`* as ${spec[1]}`);
-        else {
-          this.b.emit('{ ');
-          this.emitSpecifiers(spec);
-          this.b.emit(' }');
-        }
-      });
-      this.b.emit(' from ');
+      // A SIDE-EFFECT import has no clause and gets none. Both forms once
+      // lowered to `import {} from …`, which is equivalent at runtime but
+      // states something the author did not: an empty NAMED list. A reader
+      // of the emission — TypeScript included — takes that as a clause
+      // waiting to be filled, and an editor offering to add a name puts it
+      // there instead of on a real import. The two are distinct nodes now,
+      // so the emission can be what was written.
+      if (specs.length > 0) {
+        specs.forEach((spec, i) => {
+          if (i > 0) this.b.emit(', ');
+          if (spec === '{}') this.b.emit('{}');
+          else if (typeof spec === 'string') this.b.emit(spec);
+          else if (spec[0] === '*') this.b.emit(`* as ${spec[1]}`);
+          else {
+            this.b.emit('{ ');
+            this.emitSpecifiers(spec);
+            this.b.emit(' }');
+          }
+        });
+        this.b.emit(' from ');
+      }
       {
         const specStart = this.b.offset;
         this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));

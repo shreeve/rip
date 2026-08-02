@@ -66,7 +66,7 @@ import {
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, generatedSpanToSource,
   generatedEditSpanToSource, generatedInsertionToSource, insertionAboveAttachedDirectives,
-  isNocheckDirectiveRow, wholeImportLinesEdit, exactSpanMapper,
+  isNocheckDirectiveRow, wholeImportLinesEdit, importLineSpanEdit, exactSpanMapper,
   staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
   SUPPRESSED_TS_CODES,
@@ -733,11 +733,26 @@ function computeActiveClosure() {
 async function pruneClosure() {
   const active = computeActiveClosure();
   const removed = [];
+  // Mirrors overwritten with a stub rather than removed: the file left the
+  // CLOSURE but not the workspace, so its names stay auto-importable.
+  const restubbed = [];
+  // Decided here, WRITTEN below. The stub needs the file read and scanned,
+  // and doing that inside drop() put one synchronous read+scan+write on the
+  // message loop per pruned file — the cost the population pass yields
+  // against every 10 files, and a wide prune (closing a buffer whose
+  // closure is large) is exactly when there are many. Only the cheap tests
+  // run here; the work runs in a loop that can yield.
+  const maybeStub = [];
   const drop = (file) => {
     materializedMirrors.delete(file);
     faceCache.delete(file);
     delete cacheManifest.entries[file];
     const mirrorPath = mirrorPathOf('file://' + file);
+    if (workspaceRoot && file.startsWith(workspaceRoot + path.sep)
+        && fs.existsSync(mirrorPath) && fs.existsSync(file)) {
+      maybeStub.push({ file, mirrorPath });
+      return;
+    }
     try {
       fs.rmSync(mirrorPath);
       removed.push(mirrorPath);
@@ -752,13 +767,52 @@ async function pruneClosure() {
   for (const file of [...pendingImports]) {
     if (!active.has(file)) pendingImports.delete(file);
   }
-  if (!removed.length) return;
+  // A workspace source that still exports something keeps a
+  // declaration-only stub IN PLACE OF its compiled face — overwritten,
+  // never removed and rewritten. The distinction is the whole fix: any
+  // sequence that deletes the mirror first opens a window where the path
+  // does not exist, and tsgo drops the file from its auto-import index when
+  // it reads during that window. Driven, and the window is small enough to
+  // be a race rather than a rule — a 400 ms gap between the delete and the
+  // rewrite restored the candidate, 0 ms did not, which is exactly the
+  // shape of fix that works on this machine and fails on a slower one.
+  // Overwriting has no window: the file is a face, then it is a stub, and
+  // it is continuously present. Yields on the population pass's cadence,
+  // and finishes BEFORE the notify below, which is what the ordering needs.
+  let scanned = 0;
+  for (const { file, mirrorPath } of maybeStub) {
+    const stub = stubTextFor(file);
+    let kept = false;
+    if (stub !== null) {
+      try { writeMirror(mirrorPath, stub); restubbed.push(mirrorPath); kept = true; }
+      catch { /* candidacy is never worth a broken tree */ }
+    }
+    if (!kept) {
+      try { fs.rmSync(mirrorPath); removed.push(mirrorPath); } catch { /* already gone */ }
+    }
+    if (++scanned % 10 === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  if (!removed.length && !restubbed.length) return;
   scheduleManifestSave();
-  connection.console.log(`[rip] closure pruned: ${removed.length} mirror(s) left the program`);
+  connection.console.log(`[rip] closure pruned: ${removed.length + restubbed.length} mirror(s) left the program${restubbed.length ? ` (${restubbed.length} kept as auto-import stubs)` : ''}`);
+  // Re-stubbing does not undo the prune: the compiled FACE is gone and stays
+  // gone, and the stub sits in neither bookkeeping collection, so the closure
+  // is exactly as small as the prune made it. What it buys is candidacy —
+  // without it, accepting an import and then removing it takes that file out
+  // of auto-import for the rest of the session, curable only by a restart
+  // nobody would guess at. Any removed import does it.
+  //
+  // Two kinds of change, one batch. A removed mirror is Deleted; a mirror
+  // that became a stub is Changed — the file never left, so nothing has to
+  // be re-added to tsgo's index, which is what the delete-then-recreate
+  // sequences were fighting.
   await tsgoReady;
-  if (tsgo) {
+  if (tsgo && (removed.length || restubbed.length)) {
     tsgo.client.notify('workspace/didChangeWatchedFiles', {
-      changes: removed.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Deleted })),
+      changes: [
+        ...removed.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Deleted })),
+        ...restubbed.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Changed })),
+      ],
     });
   }
   repullOpenDocuments();
@@ -885,6 +939,42 @@ function wantsStub(file) {
   return !fs.existsSync(mirrorPathOf('file://' + file));
 }
 
+// One file's stub text, synchronously — the prune's re-stub path, which
+// must finish before its own notify goes out. Null when the file cannot be
+// read or exports nothing (no candidate to keep alive, so no mirror).
+//
+// The STAR TARGETS are scanned too, and that is not an optimization. A
+// barrel's `export * from './x.rip'` names live in the target, and
+// stubFacesFromScans resolves them by looking the target up in the map it
+// was handed — so a map of one file resolves nothing and the barrel comes
+// back carrying only the names it writes itself. The population pass never
+// sees this because it scans the whole workspace at once; only this path
+// builds a stub in isolation. Driven: a barrel re-stubbed after its import
+// was removed lost every pass-through name, so accepting an auto-import
+// through a barrel and then deleting it took that barrel out of candidacy
+// while the direct file stayed.
+function stubTextFor(file) {
+  const scans = new Map();
+  const queue = [file];
+  const seen = new Set();
+  while (queue.length) {
+    const at = queue.pop();
+    if (seen.has(at)) continue;                       // a star cycle closes here
+    seen.add(at);
+    let source;
+    try { source = fs.readFileSync(at, 'utf8'); } catch { continue; }
+    const scan = scanExportNames(source);
+    scans.set(at, scan);
+    for (const spec of scan.stars) {
+      if (spec.endsWith('.rip')) queue.push(path.resolve(path.dirname(at), spec));
+    }
+  }
+  const scan = scans.get(file);
+  if (!scan) return null;
+  if (!scan.values.length && !scan.types.length && !scan.stars.length && !scan.hasDefault) return null;
+  return stubFacesFromScans(scans).get(file) ?? null;
+}
+
 // Populate stubs for `candidates` (default: the whole workspace).
 // Backgrounded by every caller — candidacy is never allowed in front of a
 // diagnostic — and yields in SMALL batches, which is not a tuning knob but
@@ -904,6 +994,13 @@ async function populateAutoImportStubs(candidates = null) {
     try { source = fs.readFileSync(file, 'utf8'); } catch { continue; }
     scans.set(file, scanExportNames(source));
     if (++read % 10 === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  // A file that exports NOTHING offers no candidate, so its stub is pure
+  // cost: bytes, a program entry, and a mirror where a reader expects none.
+  // It also matters on the re-stub path — a closed buffer that exports
+  // nothing must not acquire a mirror it never had.
+  for (const [file, scan] of [...scans]) {
+    if (!scan.values.length && !scan.types.length && !scan.stars.length && !scan.hasDefault) scans.delete(file);
   }
   if (!scans.size) return;
   ensureMirrorRoot();   // deferred to here: a workspace with no .rip stays untouched
@@ -2003,6 +2100,14 @@ function faceEditToSourceEdit(face, edit) {
       if (whole) ({ span, newText } = whole);
     }
   }
+  // Either path may have refused an edit that is really a change to ONE
+  // import statement — the face's clause is not always the author's, so the
+  // bytes tsgo rewrites can be generated-only. Widen to a whole-line rewrite
+  // of that statement: a span the user CAN see, carrying the same guards.
+  if (!span) {
+    const widened = importLineSpanEdit(face, s, e, edit.newText);
+    if (widened) ({ span, newText } = widened);
+  }
   if (!span) return null;
   return {
     range: {
@@ -2605,11 +2710,24 @@ connection.onCodeAction(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
   if (!ctx) return null;
+  // The EXACT mapping, not the lenient one. A quick fix is keyed to a
+  // diagnostic's SPAN: tsgo looks for its own diagnostic at the range it is
+  // handed, and answers nothing when none sits there. The lenient flavor
+  // falls back to the innermost cover row's start, which turns a four-byte
+  // identifier into the whole statement — driven on 10-modules.rip, where
+  // `host` (13:47) arrived as a 36-byte range and tsgo returned ZERO
+  // actions where the TS twin offers four. Exact spans put all four back.
+  //
+  // This is the same rule translate.js states for definition, references
+  // and rename: anything that identifies or MUTATES a symbol takes the
+  // strict flavor, because a cover row's start is a different construct.
+  // A code action mutates, and was reading from the wrong list.
   const toGen = (position, exclusiveEnd) => {
     const cur = positionToOffset(ctx.curLineStarts, ctx.currentText.length, position);
     const offset = ctx.align.toGood(cur, { exclusiveEnd });
     if (offset === null) return null;
-    return sourceOffsetToGenerated(ctx.good.mappings, offset) ?? sourceCursorToGenerated(ctx.good.mappings, offset);
+    return sourceOffsetToGeneratedExact(ctx.good.mappings, offset, ctx.good.source, ctx.good.code)
+      ?? sourceCursorToGenerated(ctx.good.mappings, offset);
   };
   // A pure source.* ask (VS Code's organize-imports command, fix-all
   // on save) is document-scoped by nature: the face's whole range

@@ -1040,4 +1040,83 @@ describe.skipIf(!tsgoAvailable)('code actions', () => {
       expect(edits[0].newText).toBe(', shout');
     });
   }, 30000);
+
+  // THE SPAN. A quickfix is keyed to its diagnostic's range: tsgo looks for
+  // its own diagnostic where it is told to, and answers NOTHING when none
+  // sits there. Mapping the request with the lenient source→generated
+  // flavor lands on the innermost cover row's start, which turns a
+  // four-byte name into the whole statement — so a name inside a call
+  // argument list got zero fixes while the identical name alone got one.
+  // The exact flavor is the rule translate.js already states for anything
+  // that identifies or MUTATES a symbol; a code action mutates.
+  test('a name buried in a call argument list still gets its quickfix', async () => {
+    await inWorkspace({ 'util.rip': UTIL }, async (api) => {
+      await api.open('app.rip', [
+        'import { answer } from "./util.rip"',
+        "console.log('n:', answer, Math.max(1, 2), shout, answer + 1)",
+        '',
+      ].join('\n'));
+      const missing = api.diagnostics('app.rip').find((d) => d.code === 2304);
+      expect(missing, 'the unresolved name is reported').toBeDefined();
+      const actions = await api.codeAction('app.rip', missing.range, [missing]);
+      expect(actions.some((a) => /import/i.test(a.title)), 'a fix survives the span mapping').toBe(true);
+    });
+  }, 30000);
+
+  // EVERY IMPORT SPELLING takes an added name. The face's clause is not
+  // always the author's — `import { }` emits as `import {}` (the space is
+  // not carried) and a bare `import './x.rip'` grows minted braces nobody
+  // wrote — so tsgo rewrites bytes the user has never seen and the verbatim
+  // check refuses. Driven before the fix: those two offered ZERO fixes
+  // where the other two offered one each.
+  //
+  // The two that CAN map keep their minimal edit; only the two that cannot
+  // widen to a whole-line rewrite. That asymmetry is asserted, because a
+  // fix that widened everything would pass this suite while needlessly
+  // rewriting lines the user did not ask to have rewritten.
+  const SPELLINGS = [
+    // A whole-line rewrite replaces the line INCLUDING its newline, so the
+    // expected text carries one; a clause-only edit does not.
+    ["import { } from './util.rip'", "import { shout } from './util.rip'\n", 'whole line'],
+    ["import {} from './util.rip'", '{ shout }', 'clause only'],
+    ["import { answer } from './util.rip'", ', shout', 'clause only'],
+    // A SIDE-EFFECT import is left ALONE, and the name arrives on a new line —
+    // TypeScript's own answer, and the reason the grammar had to distinguish
+    // the two forms. While `import './x.rip'` and `import {} from './x.rip'`
+    // shared a parse tree, the emitter wrote the empty-clause form for both,
+    // tsgo saw a named list waiting to be filled, and the fix rewrote a
+    // statement the author never asked to change.
+    ["import './util.rip'", "import { shout } from './util.rip'\n", 'new line'],
+  ];
+  for (const [spelling, expected, shape] of SPELLINGS) {
+    test(`\`${spelling}\` takes an added name (${shape})`, async () => {
+      await inWorkspace({ 'util.rip': UTIL }, async (api) => {
+        await api.open('app.rip', `${spelling}\nk = shout('x')\n`);
+        const missing = api.diagnostics('app.rip').find((d) => d.code === 2304);
+        expect(missing, 'the unresolved name is reported').toBeDefined();
+        const actions = await api.codeAction('app.rip', missing.range, [missing]);
+        const fix = actions.find((a) => /^Update import|^Add import/i.test(a.title));
+        expect(fix, 'the add-to-existing-import fix is offered').toBeDefined();
+        const edits = fix.edit.changes[api.uriOf('app.rip')];
+        expect(edits).toHaveLength(1);
+        // WHICH LINE the edit touches is the claim. The import under test is
+        // line 0; a clause the name can join is edited there, and a
+        // side-effect import must not be — its name arrives below it,
+        // leaving the statement the author wrote intact. Asserting only the
+        // text would pass either way, since both spell the same line.
+        if (shape === 'new line') {
+          expect(edits[0].range.start.line, 'the side-effect import is untouched').toBeGreaterThan(0);
+        } else {
+          expect(edits[0].range.start.line, 'the existing clause is edited in place').toBe(0);
+        }
+        // Rip spelling throughout: the author's single quotes survive, and
+        // no semicolon is minted. `.rip.ts` is the mirror's extension and
+        // must never reach the buffer.
+        expect(edits[0].newText).toBe(expected);
+        expect(edits[0].newText).not.toContain('.rip.ts');
+        expect(edits[0].newText).not.toContain(';');
+        expect(edits[0].newText).not.toContain('"');
+      });
+    }, 30000);
+  }
 });

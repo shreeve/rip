@@ -447,11 +447,15 @@ export function scanExportNames(source) {
 // stub exists to make the NAME reachable, and a shape it guessed would be
 // a shape that could be wrong. A type alias and a variable occupy
 // different declaration spaces, so a class or enum can legally be both.
-export function stubFace({ values = [], types = [], hasDefault = false } = {}) {
+//
+// `defaultName` is the local the default export binds, and it is the name
+// the editor OFFERS the default under — see defaultLocalName below, where
+// every constraint on it is recorded.
+export function stubFace({ values = [], types = [], hasDefault = false, defaultName = '_default' } = {}) {
   const lines = [];
   for (const name of types) lines.push(`export type ${name} = any;`);
   for (const name of values) lines.push(`export declare const ${name}: any;`);
-  if (hasDefault) lines.push('declare const __ripDefault: any;', 'export default __ripDefault;');
+  if (hasDefault) lines.push(`declare const ${defaultName}: any;`, `export default ${defaultName};`);
   lines.push('export {};');   // a module even when it exports nothing
   return lines.join('\n') + '\n';
 }
@@ -462,6 +466,45 @@ export function stubFace({ values = [], types = [], hasDefault = false } = {}) {
 // written where it appears. Split from the scan so a caller populating a
 // large workspace can yield between reads; `buildStubFaces` below is the
 // whole-thing convenience.
+// The local a default export binds, and therefore the name the editor
+// offers it under. Derived from the SOURCE file, because that is the name
+// the author would write: a mirror is `theme.rip.ts`, and TypeScript's own
+// derivation from THAT yields `themeRip`. A named declaration beats the
+// file derivation, which is the whole reason this exists.
+//
+// Four fallbacks to `_default`, each driven, none theoretical:
+//   · not an identifier at all (`10-modules.rip` cannot start with a digit)
+//   · a LEADING DOUBLE underscore — escaped in TypeScript's symbol tables
+//     (`__x` → `___x`), which leaves the default with no candidate at all
+//   · already exported by this module, so binding it twice would not compile
+//   · a reserved word, which is a SYNTAX error in a const declaration
+// `_default` itself always works; it just answers with TypeScript's
+// file-derived spelling instead of the author's.
+//
+// Names that CANNOT be a `const` binding. Verified by compiling
+// `declare const X: any; export default X;` for each: every one draws a
+// syntax error (TS1389 and friends), while the contextual keywords —
+// `type`, `as`, `of`, `from`, `any`, `never` — bind fine and are
+// deliberately absent, also driven. `let` is here because a lexical
+// declaration cannot bind it, and `await` because a module body is always
+// async context.
+const NOT_BINDABLE = new Set([
+  'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
+  'default', 'delete', 'do', 'else', 'enum', 'export', 'extends', 'false',
+  'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'let',
+  'new', 'null', 'return', 'super', 'switch', 'this', 'throw', 'true', 'try',
+  'typeof', 'var', 'void', 'while', 'with', 'yield',
+]);
+
+function defaultLocalName(file, taken) {
+  const base = path.basename(file).replace(/\.rip$/, '');
+  const ident = base.replace(/[^A-Za-z0-9_$]/g, '_');
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(ident)) return '_default';
+  if (ident.startsWith('__') || taken.has(ident)) return '_default';
+  if (NOT_BINDABLE.has(ident)) return '_default';
+  return ident;
+}
+
 export function stubFacesFromScans(scans) {
   // Star edges, resolved once. A target outside `scans` contributes
   // nothing — there is no source here to read names from.
@@ -499,8 +542,11 @@ export function stubFacesFromScans(scans) {
   for (const [file, scan] of scans) {
     // `export * from` carries names but never a DEFAULT — the star form
     // is defined to skip it — so hasDefault stays this file's own.
+    const v = [...values.get(file)];
+    const t = [...types.get(file)];
     faces.set(file, stubFace({
-      values: [...values.get(file)], types: [...types.get(file)], hasDefault: scan.hasDefault,
+      values: v, types: t, hasDefault: scan.hasDefault,
+      defaultName: defaultLocalName(file, new Set([...v, ...t])),
     }));
   }
   return faces;

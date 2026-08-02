@@ -325,9 +325,20 @@ describe('TS-face artifact filters', () => {
     expect(scrubFaceArtifacts('f()!: never happens')).toBe('f()!: never happens');
   });
 
-  test('ripImportText: inserted import lines drop the semicolon and the mirror extension', () => {
+  test('ripImportText: inserted import lines drop the semicolon and the mirror extension, and single-quote the specifier', () => {
     expect(ripImportText('import { shout } from "./util.rip.ts";\n'))
-      .toBe('import { shout } from "./util.rip"\n');
+      .toBe("import { shout } from './util.rip'\n");
+    // Every import form tsgo can mint, since each is a line a user reads.
+    expect(ripImportText('import "./side.rip.ts";\n')).toBe("import './side.rip'\n");
+    expect(ripImportText('import theme from "./theme.rip.ts";\n')).toBe("import theme from './theme.rip'\n");
+    expect(ripImportText('export { total } from "./sum.rip.ts";\n')).toBe("export { total } from './sum.rip'\n");
+    // Already idiomatic: unchanged, so the pass is not style-churning a
+    // line the re-quoting path is about to hand back in the user's style.
+    expect(ripImportText("import { a } from './x.rip'\n")).toBe("import { a } from './x.rip'\n");
+    // A specifier carrying an apostrophe keeps its double quotes: re-quoting
+    // would need escaping, and a broken literal is worse than a stray style.
+    expect(ripImportText('import { a } from "./it\'s.rip.ts";\n'))
+      .toBe('import { a } from "./it\'s.rip"\n');
     expect(ripImportText(', shout')).toBe(', shout'); // clause merges pass through
     expect(ripImportText('total')).toBe('total');     // rename texts pass through
   });

@@ -44,7 +44,7 @@ import {
   renderParams, paramTyped, optionalReader,
 } from './typetext.js';
 import { buildSchemaTypeStory, SchemaTypeError } from './schema-types.js';
-import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers } from './emitter.js';
+import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode } from './emitter.js';
 import {
   componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
   selfArgsOf,
@@ -418,11 +418,10 @@ export function emitDeclarations({ sexpr, stores, source }) {
     return names;
   };
 
-  const isModuleImport = (x) => {
-    if (!isNode(x) || x[0] !== 'import' || x.length < 3) return false;
-    const id = stores.idOf(x);
-    return (id !== null ? stores.node(id)?.semanticKind : null) === 'import';
-  };
+  // The emitter's own predicate, not a copy of it: shape cannot tell a
+  // side-effect import from a dynamic one, and the copy that used to live
+  // here fell out of step the day the two stopped sharing a node shape.
+  const isModuleImport = (x) => isModuleImportNode(stores, x);
 
   // An export payload that is a specifier LIST, not a declaration.
   // Three tests, all required: no structural statement head, no
