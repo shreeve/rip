@@ -74,6 +74,38 @@ async function awaitStub(session, name, { tries = 100, every = 100 } = {}) {
   throw new Error(`no mirror for ${name} within ${(tries * every) / 1000}s — stub population never ran`);
 }
 
+// Everything backgrounded is waited for THROUGH THE STATE IT LEAVES, never
+// by sleeping: a fixed interval is a bet that the server is faster than
+// whatever else the machine is doing, and the bet is re-placed on every
+// loaded CI box. Throws on expiry, so a wait that never came true is a
+// failure with a name rather than an assertion against a half-finished pass.
+async function awaitState(read, what, { tries = 200, every = 25 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    const value = read();
+    if (value) return value;
+    await new Promise((r) => setTimeout(r, every));
+  }
+  throw new Error(`${what} — not within ${(tries * every) / 1000}s`);
+}
+
+// A mirror's current bytes, or null while it does not exist.
+const mirrorText = (session, name) => {
+  try { return fs.readFileSync(mirrorOf(session, name), 'utf8'); } catch { return null; }
+};
+
+// The closure's registry. Membership is what a prune CHANGES, so it is the
+// observable that says a backgrounded prune has finished — the stub the
+// tests below care about is deliberately absent from it either way.
+async function awaitEntries(session, holds, what) {
+  const at = path.join(session.dir, '.rip', 'editor', '.cache.json');
+  return awaitState(() => {
+    let manifest;
+    try { manifest = JSON.parse(fs.readFileSync(at, 'utf8')); } catch { return null; }
+    const keys = Object.keys(manifest.entries ?? {});
+    return holds(keys) ? manifest : null;
+  }, what);
+}
+
 // ---- the source scan, without a server. The stub is built by reading
 // export lines rather than compiling, so the scan's blind spots are the
 // feature's blind spots: a name it misses is a candidate nobody is
@@ -289,7 +321,11 @@ describeExtended('auto-import candidate scope', () => {
       await s.diagnostics('app.rip');
       const stub = await awaitStub(s, 'orphan.rip');
       expect(stub).toBe('export declare const orphanWidget: any;\nexport {};\n');
-      const manifest = JSON.parse(fs.readFileSync(path.join(s.dir, '.rip', 'editor', '.cache.json'), 'utf8'));
+      const manifest = await awaitEntries(
+        s,
+        (keys) => keys.includes(path.join(s.dir, 'util.rip')),
+        'the closure manifest never registered util.rip',
+      );
       expect(Object.keys(manifest.entries)).not.toContain(path.join(s.dir, 'orphan.rip'));
       // The closure's own members are registered exactly as before.
       expect(Object.keys(manifest.entries)).toContain(path.join(s.dir, 'util.rip'));
@@ -309,7 +345,13 @@ describeExtended('auto-import candidate scope', () => {
 
       s.change('app.rip', "console.log 'x'\nfirst = sh\nsecond = orph\n");   // the import edge goes
       await s.diagnostics('app.rip');
-      await new Promise((r) => setTimeout(r, 1500));                          // the prune is backgrounded
+      // The prune has RUN once its own members are gone; the stub, which it
+      // iterates no collection to find, is what must have outlived it.
+      await awaitEntries(
+        s,
+        (keys) => !keys.includes(path.join(s.dir, 'util.rip')),
+        'the prune never emptied the closure',
+      );
       expect(fs.existsSync(mirrorOf(s, 'orphan.rip'))).toBe(true);
       expect(await candidatesAt(s, { line: 2, col: 13 })).toContain('orphanWidget');
     } finally { await s.close(); }
@@ -357,7 +399,12 @@ describeExtended('candidacy survives an import being removed', () => {
       // removed — and the name must still be offered.
       s.change('test.rip', "console.log 'x'\nfirst = uni\n");
       await s.diagnostics('test.rip');
-      await new Promise((r) => setTimeout(r, 1500));   // the prune is backgrounded
+      // The re-stub IS the prune's completion here: the compiled face is
+      // replaced in place, so the stub's own bytes are the signal.
+      await awaitState(
+        () => mirrorText(s, 'widget.rip')?.includes('declare const uniqueWidgetName: any'),
+        'widget.rip was never re-stubbed after the prune',
+      );
       expect(await offered(s)).toContain('uniqueWidgetName');
       // And what came back is the STUB, not a resurrected face: the prune's
       // own invariant is that no compiled face outlives its last importer.
@@ -397,7 +444,10 @@ describeExtended('candidacy through a barrel survives an import being removed', 
       await s.diagnostics('test.rip');
       s.change('test.rip', "console.log 'x'\nfirst = uni\n");
       await s.diagnostics('test.rip');
-      await new Promise((r) => setTimeout(r, 1500));   // the prune is backgrounded
+      await awaitState(
+        () => mirrorText(s, 'barrel.rip')?.includes('declare const uniqueWidgetName: any'),
+        'barrel.rip was never re-stubbed with the star target resolved',
+      );
 
       const after = await s.completions('test.rip', AT.line, AT.col);
       expect(after.length, 'the list is live').toBeGreaterThan(0);
@@ -508,8 +558,10 @@ describeExtended('a stub maintains itself', () => {
       expect(await awaitStub(s, 'solo.rip')).toContain('export declare const solo: any;');
 
       s.touch('solo.rip', 'export solo = (): number -> 2\nexport extra = (): number -> 3\n');
-      await new Promise((r) => setTimeout(r, 1500));
-      const face = fs.readFileSync(mirrorOf(s, 'solo.rip'), 'utf8');
+      const face = await awaitState(
+        () => { const t = mirrorText(s, 'solo.rip'); return t?.includes('return 2') ? t : null; },
+        'the stub was never replaced by a compiled face',
+      );
       expect(face).not.toContain('declare const solo');   // a real compile, not a stub
       expect(face).toContain('return 2');
       expect(await candidatesAt(s, { line: 1, col: 10 })).toContain('solo');
@@ -542,7 +594,10 @@ describeExtended('a stub maintains itself', () => {
       await awaitStub(s, 'solo.rip');
 
       s.remove('solo.rip');
-      await new Promise((r) => setTimeout(r, 1500));
+      await awaitState(
+        () => !fs.existsSync(mirrorOf(s, 'solo.rip')),
+        'the mirror outlived its deleted source',
+      );
       expect(fs.existsSync(mirrorOf(s, 'solo.rip'))).toBe(false);
     } finally { await s.close(); }
   }, 90_000);

@@ -141,7 +141,7 @@ export async function openSession(files) {
     // settle-sleep between a config change and reading the PREVIOUS
     // answer as if it were the response — and a fixed sleep is a bet
     // that the server is faster than whatever else the machine is doing.
-    async diagnostics(name, { settle = 600, tries = 80, every = 100 } = {}) {
+    async diagnostics(name, { settle = 150, tries = 80, every = 25 } = {}) {
       const u = uri(name);
       const want = (seen.get(u) ?? 0) + 1;
       const deadline = Date.now() + tries * every;
