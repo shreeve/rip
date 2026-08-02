@@ -1,5 +1,5 @@
-SESSION = Symbol.for 'rip.server.session'
-RECYCLE = Symbol.for 'rip.server.recycle'
+SESSION = :rip.server.session
+RECYCLE = :rip.server.recycle
 SAFE_METHODS = new Set ['GET', 'HEAD', 'OPTIONS']
 COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
 sameSites = new Set ['Strict', 'Lax', 'None']

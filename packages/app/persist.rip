@@ -11,8 +11,8 @@
 import { unwrapStash, _stashVersion, _mergePlain } from './stash.rip'
 import { _isSourceCell } from './source.rip'
 
-PERSISTED =! Symbol.for 'rip.app.stash.persisted'
-PURGE =! Symbol.for 'rip.app.stash.purge'
+PERSISTED =! :rip.app.stash.persisted
+PURGE =! :rip.app.stash.purge
 
 sourceReplacer = (key, value) ->
   if _isSourceCell value then undefined else value
