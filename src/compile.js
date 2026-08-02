@@ -116,7 +116,16 @@ const diagnosticError = (file, path, d) => {
 // final top-level expression statement lands in a MINTED result slot
 // (reported as `replResultName`; null when nothing captured), and
 // top-level static imports lower to awaited dynamic imports.
-export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, foldProjections = false, ambientBindings = null, repl = false } = {}) {
+// `tolerant: true` (off by default) is the EDITOR's face compile: an
+// incomplete buffer — an open bracket at end of input, a trailing
+// member dot — still compiles, with zero-width holes at the
+// incompleteness, and the rejections that would have thrown are
+// returned as `parseDiagnostics` instead. Tolerance is never
+// acceptance: a recovered compile always carries at least one
+// diagnostic, and errors recovery cannot repair still throw. The
+// mechanism lives in the lexer's synthetic closers and the generated
+// driver's repair table (solar.rip).
+export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false } = {}) {
   // One stable identifying error for a non-string source — without
   // it, malformed input fails in whichever subsystem dereferences it
   // first, with an incidental TypeError.
@@ -144,14 +153,14 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
   }
 
   const parser = Parser();
-  parser.lexer = makeParserLexer(path);
+  parser.lexer = makeParserLexer(path, { tolerant });
 
   let result;
   try {
     // Primitive occurrence spans are read only by the TS face (they give a
     // primitive identifier read its own exact mapping row); the shipping JS
     // emission never queries them, so it does not pay to record them.
-    result = parser.parse(parseSource, { primitives: face === 'ts' });
+    result = parser.parse(parseSource, { primitives: face === 'ts', tolerant });
   } catch (err) {
     // Lexer rejections carry offset spans; anything else is a bug, not
     // a diagnostic — let it propagate.
@@ -159,7 +168,7 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     throw positioned(file, path, err.reason ?? err.message, err.start, err.end);
   }
 
-  if (result.diagnostics.length > 0) {
+  if (result.diagnostics.length > 0 && !(tolerant && result.sexpr != null)) {
     throw diagnosticError(file, path, result.diagnostics[0]);
   }
 
@@ -194,6 +203,10 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
   const map = toSourceMap(emitted, { source, sourcePath: path, file: `${path}.js` });
   let declarations = null;
   return {
+    // The parse/lex rejections a tolerant compile carried through
+    // instead of throwing — empty on a clean parse, and always empty
+    // when `tolerant` is off (a strict compile throws on the first).
+    parseDiagnostics: result.diagnostics,
     code: emitted.code,
     map,
     stores: emitted.stores,

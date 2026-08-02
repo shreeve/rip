@@ -360,8 +360,13 @@ describe.skipIf(!tsgoAvailable)('completions', () => {
     await inWorkspace({}, async (api) => {
       const GOOD = 'msg = "hi"\nk = msg.sub\n';
       await api.open('app.rip', GOOD);
-      // Break the parse by INSERTING a line at file start.
-      await api.change('app.rip', 'oops = (\n' + GOOD);
+      // Break the compile by INSERTING a line at file start. The breakage
+      // must be one the TOLERANT face compile cannot recover — a
+      // newline-broken string can never be completed by more input — or
+      // the buffer compiles, the face is CURRENT, and the staleness
+      // protocol this test guards never engages (an unclosed bracket no
+      // longer qualifies: tolerance closes it).
+      await api.change('app.rip', 'oops = "broken\n' + GOOD);
       expect(api.diagnostics('app.rip')[0].source).toBe('rip');
 
       // The inserted (changed) line has no aligned twin: null.
