@@ -69,14 +69,21 @@ test! 'App edits preserve workers and valid API candidates swap through the door
 
     writeFileSync join(project, 'index.rip'), """
     import { get, start } from '@rip-lang/server'
+    sleep! 300
     get '/version' -> { version: 'two' }
     start!
     """
     doorbell = await waitFor -> updates.find((list) -> list.length is 1 and list[0].doorbell is true)
     ring = unixFetch '/ring', doorbell[0].path
+    sleep! 50
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from '@rip-lang/server'
+    get '/version' -> { version: 'three' }
+    start!
+    """
     fresh = await waitFor -> updates.find((list) -> list.length is 1 and not list[0].doorbell and list[0].path isnt first)
     eq (await ring).status, 204
-    eq (await (await unixFetch('/version', fresh[0].path)).json()), { version: 'two' }
+    eq (await (await unixFetch('/version', fresh[0].path)).json()), { version: 'three' }
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 0

@@ -202,6 +202,7 @@ export main = (argv) ->
   project = resolveProject args.entry
   runDir = mkdtempSync join(tmpdir(), 'rip-srv-')
   workers = []
+  bootingWorkers = []
   workerSerial = 0
   appArtifact = null
   workerArtifact = null
@@ -215,6 +216,7 @@ export main = (argv) ->
   apiChain = Promise.resolve()
   apiInputs = new Set
   generation = 0
+  apiEpoch = 0
   prepared = null
   doorbell = null
   doorbellPath = join runDir, 'doorbell.sock'
@@ -254,7 +256,7 @@ export main = (argv) ->
     updateChain = run.catch -> null
     run
 
-  spawnReadyWorker = ->
+  spawnReadyWorker = (target = workers) ->
     workerSerial++
     socket = join runDir, "worker-#{workerSerial}.sock"
     proc = Bun.spawn [process.execPath, workerArtifact],
@@ -268,13 +270,13 @@ export main = (argv) ->
     catch error
       await killWorker proc
       throw error
-    workers.push worker
+    target.push worker
     worker
 
-  bootSlot = ->
+  bootSlot = (target = workers) ->
     firstError = null
     for attempt in [1..2]
-      try return await spawnReadyWorker()
+      try return await spawnReadyWorker(target)
       catch error
         firstError ?= error
     throw firstError
@@ -332,22 +334,33 @@ export main = (argv) ->
   bootPrepared = ->
     return bootPromise if bootPromise?
     bootPromise = do ->
-      throw new Error('no prepared API generation') unless prepared?
-      candidate = prepared
-      appArtifact = candidate.artifact
-      try
-        for slot in [0...args.workers]
-          await bootSlot()
+      loop
+        throw new Error('no prepared API generation') unless prepared?
+        candidate = prepared
+        appArtifact = candidate.artifact
+        candidateWorkers = []
+        bootingWorkers = candidateWorkers
+        try
+          for slot in [0...args.workers]
+            await bootSlot candidateWorkers
+        catch error
+          await Promise.all candidateWorkers.map (worker) -> killWorker worker.proc
+          bootingWorkers = []
+          continue if candidate isnt prepared
+          throw error
+        if candidate isnt prepared
+          await Promise.all candidateWorkers.map (worker) -> killWorker worker.proc
+          bootingWorkers = []
+          continue
+        workers = candidateWorkers
+        bootingWorkers = []
         for worker in workers
           monitorWorker worker
         doorbellPublished = false
         await queuePublish()
-        prepared = null if prepared is candidate
-      catch error
-        failed = workers
-        workers = []
-        await Promise.all failed.map (worker) -> killWorker worker.proc
-        throw error
+        continue if candidate isnt prepared
+        prepared = null
+        return
     bootPromise.finally(-> bootPromise = null).catch(-> null)
     bootPromise
 
@@ -359,7 +372,7 @@ export main = (argv) ->
     workers = []
     await Promise.all old.map (worker) -> stopWorker worker.proc
 
-  prepareApi = ->
+  prepareApi = (epoch) ->
     generation++
     artifact = join runDir, "app-#{generation}.js"
     reportPath = join runDir, "app-#{generation}.json"
@@ -368,7 +381,8 @@ export main = (argv) ->
     catch error
       warn "rip-server: API candidate rejected; keeping current workers: #{String(error)}"
       return
-    candidate = { artifact, inputs: report.inputs }
+    return if epoch isnt apiEpoch or stopping
+    candidate = { artifact, inputs: report.inputs, epoch }
     prepared = candidate
     apiInputs = new Set report.inputs
     cutForCandidate! candidate
@@ -380,9 +394,11 @@ export main = (argv) ->
       return if rel.startsWith('app/') or rel.startsWith('static/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
       path = resolve project.root, rel
       return unless path is project.entry or apiInputs.has path
+      apiEpoch++
+      epoch = apiEpoch
       clearTimeout apiTimer if apiTimer?
       apiTimer = setTimeout ->
-        next = apiChain.then -> prepareApi!()
+        next = apiChain.then -> prepareApi! epoch
         apiChain = next.catch (error) -> warn "rip-server: API reload failed: #{String(error)}"
       , 50
 
@@ -426,7 +442,8 @@ export main = (argv) ->
         warn "rip-server: Janus deregistration failed (#{response.status})" unless response.ok
     catch error
       warn "rip-server: Janus deregistration failed: #{String(error)}"
-    await Promise.all workers.map (worker) -> stopWorker worker.proc
+    allWorkers = [...workers, ...bootingWorkers]
+    await Promise.all allWorkers.map (worker) -> stopWorker worker.proc
     finish! status
 
   try
