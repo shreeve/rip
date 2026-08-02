@@ -1,0 +1,155 @@
+import { test, eq, ok } from '@rip-lang/testing'
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
+GENERATOR = join(import.meta.dir, '..', '..', 'generate.rip')
+WORKER = join(import.meta.dir, '..', '..', 'worker.rip')
+SERVER = join(import.meta.dir, '..', '..', 'server.rip')
+
+generate = (entry, artifact, result, task) ->
+  proc = Bun.spawn [process.execPath, PRELOAD, GENERATOR, entry, artifact, result, task, '0'],
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'pipe'
+  stderrText = new Response(proc.stderr).text()
+  code = await proc.exited
+  diagnostic = await stderrText
+  eq code, 0, diagnostic
+  JSON.parse readFileSync(result, 'utf8')
+
+waitFor = (fn, timeout = 5000) ->
+  deadline = Date.now() + timeout
+  loop
+    value = await fn()
+    return value if value
+    throw new Error('hello API test timed out') if Date.now() >= deadline
+    await new Promise (resolve) -> setTimeout resolve, 10
+
+unixFetch = (url, socket) ->
+  options = { unix: socket }
+  fetch url, options
+
+test! 'generation builds and reports one stable loader-free artifact', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-api-')
+  entry = join(import.meta.dir, 'entry.rip')
+  artifact = join(dir, 'app.js')
+  result = join(dir, 'result.json')
+  ok PRELOAD?, 'hello API test requires the Rip loader'
+  try
+    report = generate! entry, artifact, result, 'g1'
+    eq report.taskId, 'g1'
+    eq report.sourceEpoch, 0
+    eq report.artifact, artifact
+    ok report.inputs.includes(entry)
+    ok not ('inputDigest' of report)
+    built = import!(artifact)
+    eq built.answer, 42
+    eq built.directory, import.meta.dir
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test! 'artifact-only worker becomes ready, serves, and drains', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-worker-')
+  appArtifact = join dir, 'app.js'
+  workerArtifact = join dir, 'worker.js'
+  socket = join dir, 'worker.sock'
+  proc = null
+  try
+    generate! join(import.meta.dir, 'index.rip'), appArtifact, join(dir, 'app-result.json'), 'app'
+    generate! WORKER, workerArtifact, join(dir, 'worker-result.json'), 'worker'
+    proc = Bun.spawn [process.execPath, workerArtifact],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+      env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: 'hello' }
+    ready = await waitFor ->
+      try
+        response = await unixFetch 'http://worker/ready', socket
+        response.status is 200
+      catch then false
+    ok ready
+    response = await unixFetch 'http://worker/hello', socket
+    eq response.status, 200
+    eq (await response.json()), { message: 'hello' }
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 0
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    rmSync dir, { recursive: true, force: true }
+
+test! 'foreground manager registers one ready worker and deregisters before exit', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-manager-')
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  deleted = false
+  accessConnected = false
+  accessSource = null
+  accessRecord = (record) -> "#{JSON.stringify(record)}\n"
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = new URL request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = await request.json()
+        return Response.json({ id: 'hello-abc123' }, { status: 201 })
+      if request.method is 'GET' and url.pathname is '/1.0/apps/hello-abc123/access'
+        accessConnected = true
+        body = new ReadableStream
+          start: (controller) ->
+            accessSource = controller
+            controller.enqueue new TextEncoder().encode accessRecord {
+              v: 1, type: 'hello', app_id: 'hello-abc123', app_name: 'hello',
+              after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192
+            }
+            controller.enqueue new TextEncoder().encode accessRecord {
+              v: 1, type: 'access', sequence: '1', timestamp: '2026-08-01T12:00:00Z',
+              request_id: '12345678-1234-1234-1234-123456789abc',
+              app_id: 'hello-abc123', app_name: 'hello', tenant_site: null,
+              request_host: 'hello.test', client_ip: '127.0.0.1', method: 'GET',
+              path: '/hello', status: 200, duration_seconds: 0.001,
+              response_bytes: '19', mime_type: 'application/json',
+              response_class: 'proxy', cache_verdict: 'bypass',
+              selected_upstream: null, retry_count: 0, outcome: 'complete', mark: null
+            }
+        return new Response body
+      if request.method is 'POST' and url.pathname is '/1.0/apps/hello-abc123/heartbeat'
+        return new Response(null, { status: 204 })
+      if request.method is 'DELETE' and url.pathname is '/1.0/apps/hello-abc123'
+        deleted = true
+        try accessSource?.close()
+        return new Response(null, { status: 204 })
+      new Response('Not Found', { status: 404 })
+  edge = Bun.serve
+    port: 0
+    fetch: (request) ->
+      return new Response('unregistered', { status: 503 }) unless registration?
+      url = new URL request.url
+      unixFetch "http://worker#{url.pathname}", registration.upstreams[0].path
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'index.rip'), '--name', 'hello', '--host', 'hello.test', '--control', controlSocket, '--workers', '1', '--no-watch'],
+      stdin: 'ignore'
+      stdout: 'pipe'
+      stderr: 'pipe'
+    output = new Response(proc.stdout).text()
+    diagnostic = new Response(proc.stderr).text()
+    await waitFor -> registration? and accessConnected
+    eq registration.name, 'hello'
+    eq registration.hosts, ['hello.test']
+    eq registration.upstreams.length, 1
+    response = await fetch "http://127.0.0.1:#{edge.port}/hello"
+    eq response.status, 200
+    eq (await response.json()), { message: 'hello' }
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143, await diagnostic
+    ok (await output).includes('GET /hello'), 'foreground manager must print pretty access output'
+    ok deleted, 'manager must deregister before foreground exit'
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    edge.stop true
+    control.stop true
+    rmSync dir, { recursive: true, force: true }

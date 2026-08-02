@@ -7,6 +7,8 @@ support.
 Permanent documentation:
 
 - [README.md](README.md) — repository orientation and entry points.
+- [docs/SERVER.md](docs/SERVER.md) — Rip Server's system-wide
+ Caddy/Janus/manager/worker architecture and lifecycle contract.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
 - [docs/WORKSPACE.md](docs/WORKSPACE.md) — the Rip Workspace
  constitution: the browser passport bag, the dev feed ("door"), and
@@ -263,7 +265,7 @@ alters surface syntax updates ALL THREE in the same change.
     own binding, not `source({ fetch() { … }, staleTime: … })`
   - keyword / indented call shape over forced `({ … })` object
     literals when the callee accepts Rip's call forms
-  - dammit is the call: `client!` / `f! x`, not `client!()` / `f!(x)`
+ - dammit is the call: `f!` / `f! x`, not `f!()` / `f!(x)`
     when there are no required parens
   - postfix `?` is existence when bare (`x?` → `x != null`); a juxta
     argument makes it optional call — `f? x` is the same as `f?(x)` /

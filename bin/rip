@@ -5,10 +5,10 @@
 // transitively. Diagnostics print as path:line:col with a source excerpt
 // (CompileError's formatted message) and exit non-zero.
 
-import { readFileSync, writeFileSync, existsSync, statSync, rmSync, mkdirSync } from 'fs';
-import { spawnSync } from 'child_process';
+import { readFileSync, writeFileSync, existsSync, statSync, rmSync, mkdirSync, realpathSync } from 'fs';
+import { spawn, spawnSync } from 'child_process';
 import { randomBytes } from 'crypto';
-import { join, dirname, resolve, relative, sep } from 'path';
+import { join, dirname, resolve, relative, sep, delimiter } from 'path';
 import { fileURLToPath } from 'url';
 import { compile, CompileError } from '../src/compile.js';
 import { explainSource, explainGenerated, parseTarget, UsageError, PositionError } from '../src/explain.js';
@@ -34,6 +34,7 @@ Usage:
                                      (run 'rip schema --help' for the full surface)
   rip server [entry] [flags...]      Run a @rip-lang/server app under the worker-pool
                                      manager behind Janus
+  rip server browse <directory>      Publish one directory through Janus browse
                                      (run 'rip server --help' for the flags)
   rip test [args...]                 Run \`bun test\` with the .rip loader preloaded
                                      (default --timeout 15000; extra args pass through)
@@ -162,32 +163,70 @@ if (args[0] === 'test') {
 if (args.length > 0 && !args[0].startsWith('-') && !args[0].includes('/') && !args[0].includes('.') && !existsSync(args[0])) {
   const name = args[0];
   const subArgs = args.slice(1);
-  const runSub = (cmd) => {
-    const r = spawnSync(cmd, subArgs, { stdio: 'inherit', env: process.env });
-    process.exit(r.status ?? 1);
+  const runSub = async (cmd) => {
+    let executable = cmd;
+    if (!cmd.includes(sep)) {
+      for (const dir of (process.env.PATH ?? '').split(delimiter)) {
+        const candidate = join(dir, cmd);
+        if (existsSync(candidate)) {
+          executable = candidate;
+          break;
+        }
+      }
+    }
+    let command = cmd;
+    let commandArgs = subArgs;
+    try {
+      const target = realpathSync(executable);
+      if (target.endsWith('.rip')) {
+        command = 'bun';
+        commandArgs = [`--preload=${loaderPath}`, runnerPath, target, ...subArgs];
+      }
+    } catch {
+      // Let spawn report an unresolved command through its normal error event.
+    }
+    const child = spawn(command, commandArgs, { stdio: 'inherit', env: process.env });
+    let ownedStatus = null;
+    let signals = 0;
+    const forward = (signal) => {
+      signals++;
+      const number = signal === 'SIGINT' ? 2 : 15;
+      ownedStatus = 128 + number;
+      child.kill(signal);
+      if (signals > 1) process.exit(ownedStatus);
+    };
+    process.on('SIGINT', forward);
+    process.on('SIGTERM', forward);
+    const result = await new Promise((resolveChild) => {
+      child.once('error', (error) => resolveChild({ error }));
+      child.once('exit', (code, signal) => resolveChild({ code, signal }));
+    });
+    process.off('SIGINT', forward);
+    process.off('SIGTERM', forward);
+    if (result.error?.code === 'ENOENT') return false;
+    process.exit(ownedStatus ?? result.code ?? (result.signal === 'SIGINT' ? 130 : result.signal === 'SIGTERM' ? 143 : 1));
   };
 
   const binDir = dirname(fileURLToPath(import.meta.url));
-  if (existsSync(join(binDir, `rip-${name}`))) runSub(join(binDir, `rip-${name}`));
+  if (existsSync(join(binDir, `rip-${name}`))) await runSub(join(binDir, `rip-${name}`));
 
   const toplevel = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' });
   const repoRoot = toplevel.status === 0 ? toplevel.stdout.trim() : null;
   if (repoRoot) {
-    if (existsSync(join(repoRoot, 'bin', `rip-${name}`))) runSub(join(repoRoot, 'bin', `rip-${name}`));
-    if (existsSync(join(repoRoot, 'bin', name))) runSub(join(repoRoot, 'bin', name));
+    if (existsSync(join(repoRoot, 'bin', `rip-${name}`))) await runSub(join(repoRoot, 'bin', `rip-${name}`));
+    if (existsSync(join(repoRoot, 'bin', name))) await runSub(join(repoRoot, 'bin', name));
   }
 
   let nmDir = process.cwd();
   while (true) {
     const nmBin = join(nmDir, 'node_modules', '.bin', `rip-${name}`);
-    if (existsSync(nmBin)) runSub(nmBin);
+    if (existsSync(nmBin)) await runSub(nmBin);
     const parent = dirname(nmDir);
     if (parent === nmDir) break;
     nmDir = parent;
   }
 
-  const fromPath = spawnSync(`rip-${name}`, subArgs, { stdio: 'inherit', env: process.env });
-  if (fromPath.error?.code !== 'ENOENT') process.exit(fromPath.status ?? 1);
+  if (await runSub(`rip-${name}`)) process.exit(1);
 
   fail(`rip: unknown command '${name}'\n\nRun 'rip --help' for usage.`);
 }

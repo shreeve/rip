@@ -1,9 +1,9 @@
-# Rip Server Architecture Objective
+# Rip Server Architecture Contract
 
-This document defines the target Rip Server architecture and its ownership
-contract. The objective is one independently managed server per invocation,
-with many Rip servers able to run behind one shared Caddy process and its
-Janus module.
+This document defines Rip Server's system-wide ownership and lifecycle
+contract. One `rip server` invocation manages one server; many independently
+managed Rip servers may run behind one shared Caddy process and its Janus
+module.
 
 ```text
 Caddy process
@@ -39,6 +39,8 @@ that serves its static files and routes its API requests.
 - A **worker** is a disposable process that executes API request handlers.
 - A **generation process** is a short-lived child that builds and validates one
   candidate API artifact, then exits.
+- A **browse registration** is a files-only Janus registration created by
+  `rip server browse`; it has no manager, workers, App, or generated roots.
 - The **App** is the client application source and assets under `app/`, served
   directly by Caddy and Janus. While watching is enabled, the manager watches
   this tree and dings changed files.
@@ -97,15 +99,16 @@ supervises, but it never handles an ordinary client request or serves a file.
 At startup, the manager:
 
 1. Loads and validates the server declaration.
-2. Resolves its host, tenant, API-prefix, static-root, SPA-shell, and Hub
-   policy.
+2. Resolves its identity, hosts or tenant site, registered file roots, API
+   prefixes, and SPA shell.
 3. Creates its private doorbell socket.
 4. Registers the server with Janus.
 5. Starts heartbeats.
 
 The declaration is stable for the manager's lifetime. Live state remains
-separate: its Janus app id, heartbeat clock, doorbell state, worker sockets,
-worker health, cache state, and Hub state.
+separate: its Janus app id, heartbeat clock, operational state, prepared
+generation, doorbell state, worker sockets, and worker health. Janus owns
+cache and Hub state.
 
 A heartbeat proves that the manager still owns and supervises the server. It
 does not claim that workers are ready. Worker readiness is represented by
@@ -221,26 +224,45 @@ While watching is enabled, an App-source change:
 An App-only change does not replace API workers. An API-source change replaces
 the API workers without reloading the client app.
 
-With watching disabled, the generated files are sealed and no development feed
-is exposed.
+With watching disabled, the manager publishes the startup bundle once. It
+does not publish a development manifest or expose the development feed.
 
 ### 4. Static-file policy
 
 The manager gives Janus an ordered list of places to check. Each place is a
 root template; Janus appends the request URI and serves the first regular-file
-match. A root may contain the trusted `${site}` selected from the hostname:
+match. A root may contain the trusted `{site}` selected from the hostname:
 
 ```text
-public/${uri}
-generated/${uri}
-sites/${site}/public/${uri}
-sites/common/public/${uri}
-app/${uri}
+public/<uri>
+generated/<uri>
+sites/{site}/public/<uri>
+sites/common/public/<uri>
+app/<uri>
 ```
 
 The order is policy. In this example, a tenant file overrides the common file,
 while `public` and `generated` take priority over both. Another server may
-choose a different order.
+choose a different order. A root object may set `cache` to exactly `never`,
+`revalidate`, or `forever`; omission means `revalidate`. It may independently
+set strict Boolean `browse: true`; when the Caddy site admits browse, Janus may
+select directories and directory indexes from that root. Every normalized
+Janus root carries `{path, cache}` and carries `browse: true` only when enabled;
+`browse: false` is omitted. MIME detection is independent of cache policy.
+Browse admission, themes, renderers, and renderer limits remain cold Janus
+configuration. Rip can select a root for browsing but cannot supply any
+renderer or theme command.
+
+When `serve.rip` declares `files`, those roots plus the manager's generated
+root are normally registered; the project root is public only when the
+declaration lists it explicitly. One terminal policy omits the generated root:
+if every declared root has `browse: true`, `proxyFirst` is empty, no shell is
+declared, and the project has no API upstreams, the manager registers exactly
+those roots. Any other policy requires the SPA shell.
+
+Without a `files` declaration, conventional discovery registers the generated
+root plus `public/` and `app/` when present. The project directory is never an
+implicit public root.
 
 The SPA shell is a separate HTML-only fallback, commonly `app/index.html`. It
 is not an unconditional final file candidate: a missing script, stylesheet,
@@ -250,7 +272,22 @@ Janus and Caddy perform path-confined lookup, conditional HTTP behavior, range
 handling, and response delivery. The manager neither handles the request nor
 serves the bytes.
 
-### 5. Hold, maintenance, and migrations
+### 5. Standalone browse registrations
+
+`rip server browse <directory>` resolves exactly that directory and registers
+one `revalidate` browsable root with no upstreams or shell. `--control` and
+`JANUS_CONTROL` use the same discovery and startup reachability check as a
+manager. `--host` selects one exact host; otherwise Rip generates
+`browse-<12-lowercase-hex>.localhost`, retrying a generated-host conflict at
+most five times. The command prints `https://<host>/`.
+
+The default heartbeat lease lives with the command. Rip sends heartbeats and
+deletes the registration on orderly shutdown. `--until-restart` requests a
+process lease, prints the registration id, URL, and DELETE instruction, and
+exits without a heartbeat or DELETE. Janus retains that registration across
+Caddy reloads and loses it when the Janus/Caddy process exits.
+
+### 6. Hold, maintenance, and migrations
 
 The manager has three operational states:
 
@@ -339,8 +376,9 @@ Configured API prefixes such as `/api` are worker-first. They:
 ### Static requests
 
 Janus searches the registered roots in order and serves the first regular-file
-match. Static delivery supports `GET` and `HEAD`, validators, ranges, and no
-directory listing.
+match. Static delivery supports `GET` and `HEAD`, validators, and ranges.
+A directory is a match only for a root carrying `browse: true` on a
+browse-enabled Caddy site; Janus then owns redirects, indexes, and listings.
 
 Ordinary HTTP validators describe transport bytes. Live App source uses a
 latest-wins protocol instead of historical-version retrieval. A ding's Rip hash
@@ -508,8 +546,7 @@ The top-level shell uses `Cache-Control: no-cache`, so every navigation
 validates it. An HTML bag ding currently produces the `reload` verdict because
 a changed file path and hash do not identify a DOM owner, target, or swap
 operation. HTMX can replace a fragment because the initiating request carries
-that context; a filesystem ding does not. A future fragment registration
-contract may add targeted HTML absorption without changing this safe default.
+that context; a filesystem ding does not.
 
 ### 7. Images, fonts, video, and other referenced assets
 
@@ -548,9 +585,11 @@ URLs, ordinary revalidation, or reload semantics.
 
 ### 8. Dynamic API responses
 
-API responses are not file resources. Workers own their cache semantics. The
-safe default is `Cache-Control: no-store`; an application may opt into caching
-explicitly through `@cache`.
+Workers own dynamic API response semantics. Without `@cache`, Rip emits no
+freshness directive and Janus's micro-cache declines to store the response.
+Applications that require the stronger browser-facing guarantee emit
+`Cache-Control: no-store` through `@cache off`; applications may opt into
+freshness explicitly through a positive `@cache` duration.
 
 ### 9. Hub and private control connections
 
@@ -567,7 +606,7 @@ Live Rip source                 → no-store
 Live CSS                        → changed URL + no-cache + Janus ETag
 HTML shell                      → no-cache
 Mutable live image/media        → changed URL, targeted state update, or reload
-API response                    → no-store unless the app explicitly caches
+API response                    → no Janus cache unless the app explicitly opts in
 ```
 
 This preserves buttery delivery:
@@ -591,5 +630,6 @@ Legend:
    creates a new lookup; changing disk bytes alone does not notify an open page.
 5. Caddy and Janus continue to perform all public file lookup, validation,
    range handling, and byte delivery; the manager only observes and coordinates.
-6. Policies are assigned by immutable, mutable, generated, live-source, HTML,
-   and API semantics. Watch state changes activity, not cache meaning.
+6. Registered roots carry explicit `never`, `revalidate`, or `forever` policy;
+   HTML and API behavior remains separately defined. Watch state changes
+   activity, not cache meaning.

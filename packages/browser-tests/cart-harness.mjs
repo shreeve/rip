@@ -126,7 +126,8 @@ const workerSock = async () => {
       (c) => c.method === 'PUT' && c.body?.upstreams?.length &&
         !c.body.upstreams.some((u) => u.doorbell),
     );
-    const path = put?.body?.upstreams?.[0]?.path;
+    const upstreams = put?.body?.upstreams ?? registration?.upstreams;
+    const path = upstreams?.find((upstream) => !upstream.doorbell)?.path;
     if (path && existsSync(path)) return path;
     await Bun.sleep(25);
   }

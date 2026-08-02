@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Sinatra-style web framework — routes, smart responses, read() validation, and AsyncLocalStorage-powered request context; the same app runs standalone or under a worker pool behind Janus",
+  "description": "Sinatra-style API framework — routes, smart responses, read() validation, and AsyncLocalStorage-powered request context for managed workers behind Janus",
   "exports": {
     ".": "./server.rip",
     "./middleware": "./middleware.rip"
@@ -12,7 +12,17 @@
     "rip-server": "./server.rip"
   },
   "scripts": {
-    "test": "rip test.rip"
+    "test": "rip test/test.rip",
+    "test:framework": "rip test/framework/test.rip",
+    "test:hello-api": "rip test/hello-api/test.rip",
+    "test:hello-app": "rip test/hello-app/test.rip",
+    "test:janus": "rip test/janus/test.rip",
+    "test:manager-boundary": "rip test/manager-boundary/test.rip",
+    "test:middleware": "rip test/middleware/test.rip",
+    "test:monitor": "rip test/monitor/test.rip",
+    "test:operations": "rip test/operations/test.rip",
+    "test:reloads": "rip test/reloads/test.rip",
+    "test:workers": "rip test/workers/test.rip"
   },
   "files": [
     "server.rip",
@@ -20,6 +30,7 @@
     "worker.rip",
     "generate.rip",
     "manager.rip",
+    "monitor.rip",
     "README.md"
   ],
   "dependencies": {

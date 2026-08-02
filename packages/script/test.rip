@@ -148,9 +148,9 @@ test "symbols are interned", ->
   ok Symbol.for('redo') is :redo
 
 test "symbol descriptions match", ->
-  eq :redo.description, 'redo'
-  eq :skip.description, 'skip'
-  eq :else.description, 'else'
+  eq (:redo).description, 'redo'
+  eq (:skip).description, 'skip'
+  eq (:else).description, 'else'
 
 # ==[ Multiplexer maps ]==
 

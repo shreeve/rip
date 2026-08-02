@@ -8,4 +8,4 @@ setup!
 
 get '/styles.css' -> @send "#{import.meta.dir}/app/styles.css", 'text/css; charset=UTF-8'
 
-start! 'app'
+start!

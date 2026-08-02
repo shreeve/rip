@@ -28,6 +28,8 @@ const renderBlock = grammar.patterns.find((p) =>
   typeof p.begin === 'string' && p.begin.includes('(render)'));
 const flagRule = renderBlock.patterns.find((p) =>
   typeof p.match === 'string' && p.match.includes('disabled|'));
+const symbolRule = grammar.patterns.find((p) =>
+  p.name === 'constant.other.symbol.rip');
 
 describe('own-line bare-flag lockstep (grammar ⇄ compiler)', () => {
   test('the grammar alternation is BOOLEAN_ATTRS minus `loop`', () => {
@@ -57,5 +59,16 @@ describe('own-line bare-flag lockstep (grammar ⇄ compiler)', () => {
     const { code } = compile('P = component\n  render\n    div\n      spacer\n',
       { runtimeDelivery: 'none' });
     expect(code).toContain(`createElement('spacer')`);
+  });
+});
+
+describe('symbol-literal lockstep (grammar ⇄ compiler)', () => {
+  test('dotted and hyphenated names paint and compile as one symbol', () => {
+    const re = new RegExp(symbolRule.match);
+    for (const name of [':steve.shreeve-usa', ':one.two.three-four.five']) {
+      expect(name.match(re)?.[0]).toBe(name);
+      expect(compile(name, { runtimeDelivery: 'none' }).code)
+        .toContain(`Symbol.for("${name.slice(1)}")`);
+    }
   });
 });

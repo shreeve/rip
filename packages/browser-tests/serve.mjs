@@ -100,8 +100,8 @@ Bun.serve({
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
       });
     }
-    if (pathname.startsWith('/app/') && pathname.endsWith('.rip')) {
-      const id = pathname.slice(1); // app/...
+    if (pathname.startsWith('/') && pathname.endsWith('.rip')) {
+      const id = `app${pathname}`;
       const body = wsModules[id];
       if (body === undefined) return new Response('unknown module', { status: 404 });
       return new Response(body, { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });

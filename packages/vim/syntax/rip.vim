@@ -122,8 +122,8 @@ syn match  ripOperator      /\.=\|\*>\|\*{\@=\|?=/
 " Tagged-template bridge: sh $"cmd" (the $ heads the template)
 syn match  ripOperator      /\$\ze['"]/
 
-" Symbol literals: :name → Symbol.for("name")
-syn match  ripSymbol        /\%(\w\)\@<!:[a-zA-Z_$][a-zA-Z0-9_$]*/
+" Symbol literals: :name / :domain.name / :kebab-name → Symbol.for("…")
+syn match  ripSymbol        /\%(\w\)\@<!:[a-zA-Z_$][a-zA-Z0-9_$]*\%([.-][a-zA-Z_$][a-zA-Z0-9_$]*\)*/
 
 " Arrow functions
 syn match  ripArrow         /[=-]>/
