@@ -658,14 +658,6 @@ managerStatus = ->
     pid: process.pid
   }
 
-managerRuntime = (root) ->
-  uid = if typeof process.getuid is 'function' then process.getuid() else 'user'
-  dir = join(process.env.XDG_RUNTIME_DIR or '/tmp', "rip-#{uid}")
-  mkdirSync dir, { recursive: true, mode: 0o700 }
-  chmodSync dir, 0o700
-  key = new Bun.CryptoHasher('sha256').update(root).digest('hex').slice(0, 16)
-  { path: join(dir, "#{key}.sock"), meta: join(dir, "#{key}.json") }
-
 writeOperation = (record) ->
   dir = dirname(state.operationPath)
   mkdirSync dir, { recursive: true, mode: 0o700 }
@@ -780,17 +772,6 @@ probeManager = ->
     res.json!()
   catch
     null
-
-cleanupManagerIdentity = ->
-  return unless state.managerNonce? and state.managerMetaPath?
-  owned = false
-  try
-    meta = JSON.parse readFileSync(state.managerMetaPath, 'utf8')
-    owned = meta.nonce is state.managerNonce
-  return unless owned
-  try state.managerServer?.stop(true)
-  try unlinkSync state.managerPath
-  try unlinkSync state.managerMetaPath
 
 activateMigration = (record) ->
   state.operation = 'Maintenance'
@@ -909,41 +890,7 @@ recoverMigration = (id) ->
   activateMigration! record
 
 startManagerControl = ->
-  runtime = managerRuntime(state.projectRoot)
-  state.managerPath = runtime.path
-  state.managerMetaPath = runtime.meta
-  existing = probeManager!()
-  return { existing } if existing?
-  state.managerNonce = randomBytes(16).toString('hex')
-  metadata = JSON.stringify({ nonce: state.managerNonce, pid: process.pid, root: state.projectRoot })
-  acquired = false
-  loop
-    try
-      fd = openSync state.managerMetaPath, 'wx', 0o600
-      writeFileSync fd, metadata
-      closeSync fd
-      acquired = true
-      break
-    catch e
-      throw e unless e?.code is 'EEXIST'
-      # The owner writes metadata before binding. A racing second invocation
-      # waits for Starting to become reachable instead of unlinking its claim.
-      owner = try JSON.parse(readFileSync(state.managerMetaPath, 'utf8')) catch then null
-      alive = false
-      try
-        process.kill owner.pid, 0
-        alive = true
-      if alive
-        deadline = Date.now() + 2000
-        while Date.now() < deadline
-          existing = probeManager!()
-          return { existing } if existing?
-          sleep! 25
-        throw new Error("rip-server: manager owner #{owner.pid} holds #{state.managerMetaPath} but its control socket is unreachable")
-      try unlinkSync state.managerMetaPath
   try
-    # A dead process can leave only the socket inode after its claim is gone.
-    try unlinkSync state.managerPath
     state.managerServer = Bun.serve
       unix: state.managerPath
       fetch: (req) ->

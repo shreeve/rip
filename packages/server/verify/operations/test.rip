@@ -71,6 +71,14 @@ test! 'hold fences App publication, API replacement, and dings', ->
       stderr: 'inherit'
     await waitFor -> registration?
     first = registration.upstreams[0].path
+    rival = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'operations.test', '--control', controlSocket],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'ignore'
+    eq (await rival.exited), 1
+    eq (command!('status', project)).operation, 'Active'
+    eq (await (await unixFetch('/version', first)).json()), { version: 'one' }
+
     held = command! 'hold', project
     eq held.operation, 'Held'
 

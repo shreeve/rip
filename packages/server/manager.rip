@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { rash } from '@rip-lang/app/rash'
@@ -209,11 +209,11 @@ killWorker = (proc) ->
   proc.kill 'SIGKILL' unless proc.exitCode?
   await proc.exited
 
-managerSocket = (root) ->
+managerRuntime = (root) ->
   key = new Bun.CryptoHasher('sha256').update(root).digest('hex').slice 0, 16
   directory = join tmpdir(), 'rip-managers'
   mkdirSync directory, { recursive: true, mode: 0o700 }
-  join directory, "#{key}.sock"
+  { socket: join(directory, "#{key}.sock"), owner: join(directory, "#{key}.json") }
 
 managerRequest = (socket, method, path) ->
   options = { method, unix: socket }
@@ -222,7 +222,9 @@ managerRequest = (socket, method, path) ->
 export main = (argv) ->
   args = parseArgs argv
   project = resolveProject args.entry
-  managerPath = managerSocket project.root
+  managerRuntimePaths = managerRuntime project.root
+  managerPath = managerRuntimePaths.socket
+  managerOwner = managerRuntimePaths.owner
   if args.command isnt 'start'
     response = managerRequest! managerPath, (if args.command is 'status' then 'GET' else 'POST'), "/#{args.command}"
     body = response.text!
@@ -253,6 +255,7 @@ export main = (argv) ->
   bootPromise = null
   operation = 'Active'
   managerControl = null
+  managerOwned = false
   releaseHold = null
   appId = null
   heartbeat = null
@@ -274,11 +277,27 @@ export main = (argv) ->
     { name: args.name, root: project.root, operation, workers: workers.length, watch: args.watch }
 
   startManagerControl = ->
-    if existsSync managerPath
+    acquire = ->
       try
-        response = managerRequest! managerPath, 'GET', '/status'
-        abort "rip-server: manager already running for #{project.root}" if response.ok
-      try unlinkSync managerPath
+        fd = openSync managerOwner, 'wx', 0o600
+        try
+          writeFileSync fd, JSON.stringify({ pid: process.pid, root: project.root })
+        finally
+          closeSync fd
+        managerOwned = true
+        return
+      catch error
+        throw error unless error?.code is 'EEXIST'
+      owner = try JSON.parse(readFileSync(managerOwner, 'utf8')) catch then null
+      alive = false
+      try
+        process.kill owner?.pid, 0
+        alive = true
+      abort "rip-server: manager already running for #{project.root}" if alive
+      unlinkSync managerOwner
+      acquire()
+    acquire()
+    try unlinkSync managerPath
     managerControl = Bun.serve
       unix: managerPath
       fetch: (request) ->
@@ -538,7 +557,8 @@ export main = (argv) ->
     await apiChain
     try doorbell?.stop true
     try managerControl?.stop true
-    try unlinkSync managerPath
+    try unlinkSync managerPath if managerOwned
+    try unlinkSync managerOwner if managerOwned
     try
       if appId?
         response = await controlFetch args.control, 'DELETE', "/1.0/apps/#{appId}"
@@ -550,6 +570,7 @@ export main = (argv) ->
     finish! status
 
   try
+    startManagerControl()
     publication = publishApp! project, args.name, args.watch
     if publication?
       files = publication.files
@@ -564,7 +585,6 @@ export main = (argv) ->
       for slot in [0...args.workers]
         await bootSlot()
       startDoorbell()
-    startManagerControl()
     process.once 'SIGINT', -> stop! 0
     process.once 'SIGTERM', -> stop! 0
     createRegistration!()
@@ -583,5 +603,6 @@ export main = (argv) ->
     process.exitCode = 1
   finally
     try managerControl?.stop true
-    try unlinkSync managerPath
+    try unlinkSync managerPath if managerOwned
+    try unlinkSync managerOwner if managerOwned
     rmSync runDir, { recursive: true, force: true }
