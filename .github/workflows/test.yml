@@ -44,6 +44,11 @@ jobs:
       - name: Install (one workspace install provisions every member; compiler purity is gated separately)
         run: bun install --frozen-lockfile
 
+      - name: Install xcaddy for released Janus certification
+        run: |
+          go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
       # Every suite in the repository except packages/browser-tests: the
       # root suite with the extended tier, and one lane per workspace
       # package, spawned and aggregated by scripts/test-all.mjs. CI is set
