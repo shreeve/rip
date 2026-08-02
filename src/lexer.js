@@ -2167,6 +2167,15 @@ const IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, 'g
 export function identifierRuns(text) {
   return text.match(IDENT_RUN_RE) ?? [];
 }
+function symbolNameEnd(text, start) {
+  let end = start;
+  while (end < text.length && IDENT_PART.test(text[end])) end++;
+  while ((text[end] === '.' || text[end] === '-') && IDENT_START.test(text[end + 1] ?? '')) {
+    end++;
+    while (end < text.length && IDENT_PART.test(text[end])) end++;
+  }
+  return end;
+}
 const DIGIT = /[0-9]/;
 
 // The numeric-literal matcher: binary/octal/hex with optional
@@ -3449,7 +3458,8 @@ export function tokenize(text, path = '<anonymous>') {
       }
       fail("type annotations use a single ':' (e.g. `x: number`), not '::'", pos, pos + 2);
     }
-    // Symbol literals: `:name` → Symbol.for("name") — only where the
+    // Symbol literals: `:name`, `:domain.name`, and `:kebab-name`
+    // become one interned name — only where the
     // colon CANNOT be structural: after a value-ending token the
     // colon is a key/annotation/ternary colon (`{a:b}`, `x:number`,
     // `c ? a :b` all keep their readings), and a schema HEAD's kind
@@ -3477,8 +3487,7 @@ export function tokenize(text, path = '<anonymous>') {
         // (`c ? :yes : :no`).
         (scanTernary > 0 && prevTok.kind === 'IDENTIFIER'));
       if (!structural) {
-        let end2 = pos + 1;
-        while (end2 < text.length && IDENT_PART.test(text[end2])) end2++;
+        const end2 = symbolNameEnd(text, pos + 1);
         push('SYMBOL', text.slice(pos + 1, end2), pos, end2);
         pos = end2;
         continue;

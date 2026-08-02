@@ -34,7 +34,7 @@ html = hljs.highlight('tags = %w[alpha beta]', { language: 'rip' }).value
 - **Strings** — double/single quotes and heredocs, with `#{}`
   interpolation where Rip interpolates
 - **Word arrays** (`%w[…]` and paired-delimiter variants) and
-  **symbol literals** (`:name`)
+  **symbol literals** (`:name`, `:domain.name`, `:kebab-name`)
 - **Rip operators** — reactive (`:=`, `~=`, `~>`), two-way bind
   (`<=>`), method/merge/readonly assignment (`.=`, `*>`, `=!`),
   prototype `::`, dammit `!`, tagged-template `$`

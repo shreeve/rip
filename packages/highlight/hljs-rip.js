@@ -126,10 +126,10 @@ export default function(hljs) {
     begin: /@[a-zA-Z_$][\w$]*/,
   };
 
-  // :name → Symbol.for("name")
+  // :name / :domain.name / :kebab-name → Symbol.for("…")
   const SYMBOL_LIT = {
     className: 'symbol',
-    match: /(?<![\w$]):[a-zA-Z_$][\w$]*/,
+    match: /(?<![\w$]):[a-zA-Z_$][\w$]*(?:[.-][a-zA-Z_$][\w$]*)*/,
   };
 
   const SIGIL_ATTR = {
