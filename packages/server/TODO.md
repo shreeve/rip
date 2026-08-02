@@ -51,8 +51,6 @@ retain completed history.
 
 ## 5. Certify and land
 
-- [ ] Replace the burn-down package test with retained present-tense product
-      tests, then run `bun run test` in `packages/server`.
 - [ ] Run every `verify:*` script, including released-Janus verification.
 - [ ] Run `bun run test:all` at the repository root.
 - [ ] Run `bunx playwright test` in `packages/browser-tests`.

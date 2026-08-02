@@ -675,9 +675,8 @@ bun run verify:janus
 ```
 
 `verify:janus` builds and caches a Caddy binary with released Janus `v1.5.0`;
-`JANUS_CADDY` can override that binary.
-The broad `bun run test` remains the burn-down suite until every retained test
-has present-tense product value.
+`JANUS_CADDY` can override that binary. `bun run test` runs every verification
+fixture above.
 
 Repository-wide certification additionally runs:
 
