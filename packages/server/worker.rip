@@ -1,7 +1,7 @@
 artifact = process.env.APP_ARTIFACT or abort 'rip-server worker: APP_ARTIFACT is required'
 socket = process.env.SOCKET_PATH or abort 'rip-server worker: SOCKET_PATH is required'
 workerId = process.env.WORKER_ID or '?'
-RECYCLE = Symbol.for 'rip.server.recycle'
+RECYCLE = :rip.server.recycle
 
 concurrencyText = process.env.WORKER_CONCURRENCY or '1'
 concurrency = parseInt concurrencyText
