@@ -977,6 +977,9 @@ export main = (argv) ->
 
   publishDings = (dings) ->
     return unless dings.length > 0
+    while not appId? and not stopping
+      sleep! 5
+    return if stopping
     directives = dings.map (ding) -> { '@': ['/hub'], ding }
     for i in [0...directives.length] by 16
       response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", directives.slice(i, i + 16)
@@ -1429,6 +1432,8 @@ export main = (argv) ->
         for slot in [0...args.workers]
           await bootSlot()
         startDoorbell()
+    startAppWatcher()
+    startApiWatcher()
     if stopping
       process.exitCode = await finished
       return
@@ -1443,8 +1448,6 @@ export main = (argv) ->
     moveAccess()
     for worker in workers
       monitorWorker worker
-    startAppWatcher()
-    startApiWatcher()
     heartbeat = setInterval beat, HEARTBEAT_MS
     if operation is 'Maintenance'
       warn "rip-server: unresolved migration #{migration.id}; Maintenance has empty admission"
