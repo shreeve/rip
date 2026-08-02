@@ -13,7 +13,7 @@
     "rip-server": "./server.rip"
   },
   "scripts": {
-    "test": "bun run verify:hello-api && bun run verify:hello-app && bun run verify:workers && bun run verify:reloads && bun run verify:operations && bun run verify:middleware && bun run verify:monitor && bun run verify:janus",
+    "test": "bun verify.js",
     "verify:hello-api": "rip verify/hello-api/test.rip",
     "verify:hello-app": "rip verify/hello-app/test.rip",
     "verify:janus": "rip verify/janus/test.rip",

@@ -675,8 +675,8 @@ bun run verify:janus
 ```
 
 `verify:janus` builds and caches a Caddy binary with released Janus `v1.5.0`;
-`JANUS_CADDY` can override that binary. `bun run test` runs every verification
-fixture above.
+`JANUS_CADDY` can override that binary. `bun run test` discovers and runs every
+`verify/*/test.rip` fixture.
 
 Repository-wide certification additionally runs:
 
