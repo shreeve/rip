@@ -391,7 +391,9 @@ alters surface syntax updates ALL THREE in the same change.
  carry is `packages/browser-tests` — it needs installed Playwright
  browsers, and CI runs it as its own job. `packages/server` needs
  `xcaddy` on PATH — `go install
- github.com/caddyserver/xcaddy/cmd/xcaddy@latest`. Its janus lane
+ github.com/caddyserver/xcaddy/cmd/xcaddy@latest`, PLUS
+ `$(go env GOPATH)/bin` on PATH, which it is not by default: without
+ that the lane fails exactly as it does uninstalled. Its janus lane
  builds Caddy from the PUBLISHED Janus module and rejects a local
  module replacement; the binary is cached after the first build.
  `JANUS_CADDY=<path>` supplies a janus-enabled binary instead.

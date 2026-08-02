@@ -45,11 +45,14 @@ bun run audit
 
 ```sh
 go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+export PATH="$(go env GOPATH)/bin:$PATH"     # in your shell profile
 ```
 
-It builds a Caddy binary from the published Janus module on first run and
-caches it. `JANUS_CADDY=/path/to/caddy` supplies an existing janus-enabled
-binary instead.
+`go install` writes to `$(go env GOPATH)/bin`, which is not on PATH by
+default — without the second line the lane fails as though xcaddy were
+never installed. It builds a Caddy binary from the published Janus module
+on first run and caches it. `JANUS_CADDY=/path/to/caddy` supplies an
+existing janus-enabled binary instead.
 
 ## REPL
 
