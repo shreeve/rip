@@ -32,7 +32,7 @@
 
 **vs v3.** A **vs v3** line records what the typed editor did before the tsgo/LSP broker replaced v3's in-process LanguageService — the root almost every gap here traces back to. Each was established by driving v3, still reachable at 3.17.5 (`~/Code/shreeve/rip-lang`). It survives on an open row because it argues about a fix not yet made; it dies with the body when the row closes. This repo is **v4, cleaned up**; "v4" in a body means the code here.
 
-**Re-driving.** `bun run test:all` — green as of 2026-07-18. It sets `RIP_EXTENDED=1` itself, the tier where the tsc-backed gates spawn the repo's pinned TypeScript, resolved from the workspace install ([tsc.js](../support/tsc.js) `resolveTsc`) rather than PATH, throwing loudly rather than skipping when it is missing. An editor-path change is not live in VS Code until `bun run install-vscode` from `packages/vscode/` — the running extension is the installed `.vsix`, not the working tree. The audit itself is `bun run audit` (`--help` for what each audit is judged against; hover pins are hand-maintained per row — the run prints paste-ready rows for divergences, and adopting one is an explicit reviewed edit). The wider editor surface — completions, definition, references, rename, code actions — is covered by the extension's own suite in `packages/vscode/test/`, not here.
+**Re-driving.** `bun run test:all` — green as of 2026-08-02. It sets `RIP_EXTENDED=1` itself, the tier where the tsc-backed gates spawn the repo's pinned TypeScript, resolved from the workspace install ([tsc.js](../support/tsc.js) `resolveTsc`) rather than PATH, throwing loudly rather than skipping when it is missing. An editor-path change is not live in VS Code until `bun run install-vscode` from `packages/vscode/` — the running extension is the installed `.vsix`, not the working tree. The audit itself is `bun run audit` (`--help` for what each audit is judged against; hover pins are hand-maintained per row — the run prints paste-ready rows for divergences, and adopting one is an explicit reviewed edit). The wider editor surface — completions, definition, references, rename, code actions — is covered by the extension's own suite in `packages/vscode/test/`, not here.
 
 ## The road
 
@@ -40,78 +40,14 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 
 | # | Finding | Tags | Gate |
 | --- | --- | --- | --- |
-| [22](#22-completion-and-signature-help-fail-on-an-incomplete-expression) | Completion & signature help fail on an incomplete expression | `editor`, `compiler` | `incomplete-expression` — asserts the stale scope list at the dot and the null signature help **as the gap**, liveness-paired; it goes red the day the parse gap closes, the cue to invert it |
 | [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | `editor` | **none, and none is honest** — upstream; a naive gate is platform-dependent |
 
-**The ordering principles.** Audience first: #22 reaches every rip user, mode-independent — permissive still infers. Within a band, *silently wrong* outranks *visibly missing*: a wrong answer stated without hedging misleads, where a loud failure merely interrupts — so the loud rows (build breaks, parse errors) sink below the silent ones however broken their output is. #16 sits last because it is blocked upstream, not because it matters least. Each row's own body argues its place; this paragraph does not restate them.
+**The ordering principles.** Audience first; within a band, *silently wrong* outranks *visibly missing*: a wrong answer stated without hedging misleads, where a loud failure merely interrupts — so the loud rows (build breaks, parse errors) sink below the silent ones however broken their output is. One row remains, and it is blocked upstream rather than unimportant; the ordering matters again the day a second is filed. Each row's own body argues its place; this paragraph does not restate them.
 
 **The `strict` dimension's clean run is contractual** — a red row there is a discovery, not residue; the runner's header states the curation rules.
 
 ## Findings
 
-### 22. Completion and signature help fail on an incomplete expression
-
-The broker builds its TypeScript face from a **successful** compile, so it can serve a request only where the source parses — but the two features whose trigger is an *incomplete* expression fire precisely where it does not. The trigger byte is the same byte that breaks the compile: type a member-access dot and pause (`items.‸`), or sit inside an open call (`add(‸`), and the buffer no longer parses, so no face carries the member-access / call context and the request has nothing to map into. rip's compiler throws where TypeScript's error-tolerant parser recovers — which is why the hand-written twin serves the correct answer on the identical incomplete text and the broker does not. What you actually get instead is nothing, or (for completion) the wrong list; the popup works only once the expression is complete enough to parse, which is backwards from how these features are used.
-
-**Why (code) — one root, but TWO failure sites, and the second is upstream of the parser.** The shared root is that no face exists without a successful compile. Where the compile dies is not shared, and that is what constrains the fix (driven on the gate's own buffers, 2026-08-01):
-
-| surface | dies in | message |
-| --- | --- | --- |
-| member completion — `x = items.` | the PARSER, `parse` ([parser.js](../../src/parser.js)) | `Unexpected end of input — expected PROPERTY` |
-| signature help — `r = add(1, ` | the LEXER, `failOpenAtEnd` ([lexer.js](../../src/lexer.js)) | `unclosed '(' — never closed by end of input` |
-
-For the open call **the parser never runs**. So any mechanism founded on what the parser already built — its LALR stack holds the reduced prefix at the error point, and the error path discards it along with the populated stores — serves member completion and cannot serve signature help at all. A fix must state how it reaches BOTH sites; the residue policy forbids closing one and splitting off the other.
-
-The sweep divides the same way. Parser: `items.`, `x = items.`, `obj.a.`, `this.`, `x = 1 +`, `x = a and`, `x = a?.`, `for a in`, `f = ->`. Lexer: `add(`, `add(1,`, `add(1`, `x = add(`, `x = items[`, `x = {`, `x = [`. Three shapes sit outside both — `x: ` raises `Unexpected '}'`, `if x` raises `Unexpected 'POST_IF'`, and a bare `@` parses clean.
-
-The two surfaces also differ in fallback: completion has a statement-context one (it serves *something* wrong), signature help has none (it serves plain null).
-
-**The fix — an error-tolerant face, or a fixup at the cursor.** v3's dot rewrite (below) is the cheap end and is proven on this exact surface, but it is per-trigger: signature help's open paren needs its own. The general form is a parser that recovers where TypeScript's does, which serves both. **Not** by widening the staleness fallback — serving the last good face's scope list is what produces the wrong list today, and a better-chosen wrong list is still wrong.
-
-**Driven — member completion** (2026-07-15), the real server (`server.js --stdio`, `onCompletion`) against tsgo on the twin, `items` typed `number[]`, completion right after the dot:
-
-| buffer at the dot | server | result |
-| --- | --- | --- |
-| `x = items.` — fresh buffer, never compiled | rip broker | **empty** — no items |
-| `x = items.` — after a good compile, dot just typed | rip broker | **stale scope list** — in-scope names + ambient globals (`items`, `count`, `Date`, `Map`, …), **no members** |
-| `x = items.map` — parseable | rip broker | **correct** — `map`, `filter`, `join`, … |
-| `let x = items.` — same trailing dot | tsgo (twin) | **correct** — the same members |
-
-The two broker symptoms are the two branches of the staleness guard — [onCompletion](../../packages/vscode/src/server.js) maps the cursor into the **last good face** (the version before the dot, plain statement context → the in-scope identifier list) or, on a buffer that never compiled, nothing at all. Neither is the member list; make the expression parse (`items.map`) and a real face exists, member completion then matching the twin exactly.
-
-**Driven — signature help** (2026-07-15), the real server (`onSignatureHelp`) against the twin, `add` typed `(a: number, b: number): number`, cursor inside the call:
-
-| call state at the cursor | server | result |
-| --- | --- | --- |
-| `r = add(` — unclosed, fresh | rip broker | **null** |
-| `r = add(1, ` — unclosed mid-args, fresh | rip broker | **null** |
-| `r = add(1, 2)` — closed, cursor inside the 2nd arg | rip broker | **correct** — `add(a: number, b: number): number`, activeParameter 1 |
-| closed, then backspaced to `r = add(1, ` | rip broker | **null** (no fallback) |
-| `let r = add(1, ` — unclosed mid-args | tsgo (twin) | **correct** — same label, activeParameter 1 |
-
-Signature help is the harsher surface: with no statement-context fallback, every open-paren state returns plain null, prior compile or not. It works only on the **closed** call `add(1, 2)` — exactly when it is no longer needed — where the response passes through correctly (signatures / activeParameter untouched, the design the bodiless-overload note in `onSignatureHelp` relies on).
-
-**Why the suite missed it.** Both tests use the **already-complete** form — the one state that has a face. Member completion is tested at `msg.sub‸` (a complete member expression; [editor-features.test.js](../../packages/vscode/test/editor-features.test.js) "member completion serves with resolve-lazy detail") and signature help at a closed `pick(1, 2)` ("active parameter indices hold across bodiless overload rows"). `msg.sub` and `pick(1, 2)` parse; `msg.` and `pick(` do not. The twin proves the correct answer was reachable on the identical incomplete text the whole time.
-
-**vs v3 — established (driven both surfaces, 2026-07-15).** v3 type-checks in-process through the JS TypeScript LanguageService; the verdict **splits by surface**:
-
-- **Member completion — v4 regression.** v3 serves the correct members at the bare dot — driven, fresh `x = items.` → the full `number[]` member list (40 items, `map`/`filter`/…), no prior good compile needed. Its `onCompletion` (rip-lang 3.17.5, `packages/vscode/src/lsp.js`) rewrites `word.` → `word.__rip__` before compiling, so the compiler sees a real member access, recompiling that fixed-up text on the fly (`catch {}` on failure). v4 has no such rewrite, so the dot never yields a face — the whole of the regression.
-- **Signature help — split.** *Fresh* open paren is **inherited**: v3 has no equivalent open-paren fixup, so `r = add(` and `r = add(1,` compile-error (`missing )`) and return null in both. But the common interactive case — a call that *was* valid, now mid-edit — is a **v4 regression**: v3 falls back to the last good compile and `getSignatureHelpItems` still resolves the call (driven: closed `add(1, 2)` → backspace to `add(1, ` → `add(a: number, b: number): number`, activeParameter 1), where v4's stale path returns null.
-
-**Status.** ⬜ **Open** (2026-07-15), and now narrow. The tolerant face landed 2026-08-02 — an error-tolerant lex and parse carrying zero-width holes at the incompleteness, reaching both failure sites, so member completion at a bare dot and signature help inside an open call both answer from the buffer being typed. [incomplete-expression.test.js](../toolchain/incomplete-expression.test.js) is inverted and asserts the correct answers, each paired with the assertion that the buffer's rejection still publishes — tolerance is not acceptance, and `rip check` still exits non-zero on the same file.
-
-Two gaps survived that landing and were fixed the same day, both found by review rather than by the gate:
-
-- **The empty bracket.** The argument-slot hole was minted only when the synthetic closer would land after a COMMA, so `add(` and `items[` — the first keystroke of every call and every subscript — emitted a complete zero-argument call with no position between the parens, and signature help answered null. The hole is now minted for an empty `call` or `index` frame too; `object` and `array` are deliberately excluded, where an empty IDENTIFIER would fabricate a property name or an element.
-- **The whole-file edit refusal.** A recovered face refused *every* edit, which silently removed every auto-import quick fix for as long as the buffer was mid-expression — an import at offset 0 cannot be reached by an unclosed call three lines below. The refusal is now positional for quick fixes and stays whole-file for rename, which is one refactor across files and cannot be partially applied.
-
-A third gap was found the same way and fixed the same day — **the answer arrived too late to be the answer**. `refresh` coalesces `didChange` for 100ms, and completion answered from `lastGood` inside that window, so retyping a member dot served the face of the text before the keystroke. That face is not merely stale: deleting the dot leaves a buffer that compiles CLEAN, so the cursor sits in plain statement context and the popup returns the entire global scope — a thousand-odd names where thirty-four members belong, which is this row's original symptom surviving inside the debounce. Completion and signature help now flush and await the pending refresh before reading a face. Recompiling locally would not have worked: tsgo holds the face text, so an answer has to come from a face tsgo was actually given.
-
-**What remains: a nullable receiver serves nothing.** `maybe: { deep: number } | null` yields ZERO completions at `maybe?.` — and at a plain `maybe.` too, so this is not about optional chaining. It is not agreement with TypeScript either, which was the first guess and is wrong: driven 2026-08-02, tsgo on rip's OWN face text (`let a = maybe?.;`) offers `deep`, while the same request through the broker offers nothing. The cursor mapping is not the cause — source 49 resolves to generated 58, immediately after `maybe?.`, with a zero-width row present. So the answer exists on the face, the position resolves, and the delivery still comes back empty; the root is undiagnosed. Until it is, this row must not close: its gate is green over the surfaces it names and blind to this one.
-
-**Why the suite missed all three.** Every request in the gate follows a publication barrier — `forget()`, edit, await diagnostics — which is what makes those tests about the face. An editor never waits. The barrier is correct for asserting what a face CONTAINS and structurally blind to whether it ARRIVES, and all three gaps were found by driving the editor by hand. The debounce test added for the third deliberately omits the barrier; the same shape is what the other surfaces need.
-
-Superseded detail follows, kept until the row closes — the interim gating this replaced: the real server driven through both surfaces, the wrong answers asserted **as the gap** — the stale scope list at the bare dot, null inside the open call — each liveness-paired in the same session with the parseable form answering correctly (the auto-import pattern, and for the same reason not `test.failing`). One nuance the gating drive added (2026-07-29): the stale face is position-sensitive — when the last good compile already carried a member access at the cursor (`x = items.map` backspaced to `x = items.`), the stale face serves the member list, the same wrong mechanism returning a luckier answer — so the gate compiles the dotless statement first, and any re-drive must too. It goes red the day the parse gap closes — the cue to invert it, not a regression. The fuller instruments (a twin-oracled completion content audit; a signature-help audit on label + `activeParameter`) stay unbuilt; the interim watches the gap until either exists.
 ### 16. Library globals lose the `defaultLibrary` modifier
 
 Symbols declared in `lib.*.d.ts` reach the editor with **no `defaultLibrary` modifier**, so VS Code falls back to `variable.other.readwrite` / `entity.name.function` instead of the `support.*` scopes themes reserve for the standard library. Token *types* are correct; only the modifier is missing. Driven on `console`, `Math`, `parseInt` and `isNaN`, and true of the whole class — the lookup that sets the bit never consults the symbol, and **not one token** in the fixture carries it. The only finding here whose cause is outside rip.
@@ -164,6 +100,7 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 19 | Inline render-block directive lost from the face | `check`'s inline component-prop and two-way-bind directive cases; audit `verdict` |
 | 20 | Render branch/loop bodies unchecked (`ctx`, loop items) | `check`'s typed-factory-params case; audit `strict` (13-components' render branches and loops) |
 | 21 | Identifier reads carried no source span — hover, definition, diagnostics and tokens all resolved through a cover | `mapping`, audit `census`/`identity` |
+| 22 | Completion and signature help fired exactly where the compile died — a trailing dot in the parser, an open call in the lexer before the parser ran | `incomplete-expression` (inverted): the member list at a bare dot fresh and mid-edit; signature help and its active-parameter index in an open call, empty, mid-args, mid-file and at EOF. The face compile is tolerant, not permissive — every recovered request is paired with the assertion that the buffer's own rejection still publishes, and the batch checker still exits non-zero. Three gaps found by driving the editor after the fix landed, each now gated: the empty bracket minted no hole; a recovered face refused edits whole-file, taking auto-import quick fixes with it (`editor-features`, positional for quick fixes, whole-file for rename, which cannot be partly applied); and the answer arrived after the 100ms didChange debounce, serving the global scope where members belong — the ONE test here with no publication barrier, deliberately, because a barrier is what hid it |
 | 23 | An in-face value declaration could have retired the Tier 3 pin probe | none — closed by ruling, refused on measurement; the reasoning that would re-propose it is answered in pins.js, where it would be built |
 | 24 | A `schema` block's implicit `it` untyped | audit `strict` (14-schema's transforms); `schema-types`' transform case |
 | 25 | Event handler parameters get no event type | `check`'s handler case; `dom-vocab-lib` |
