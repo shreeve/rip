@@ -25,7 +25,7 @@ RAW =! Symbol 'rip.app.stash.raw'
 SIGNALS =! Symbol 'rip.app.stash.signals'
 KEYS =! Symbol 'rip.app.stash.keys'
 DEFAULTS =! Symbol 'rip.app.stash.defaults'
-PURGE =! Symbol.for 'rip.app.stash.purge'
+PURGE =! :rip.app.stash.purge
 PROXIES =! new WeakMap()
 keysVersion = 0
 

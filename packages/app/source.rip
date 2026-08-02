@@ -34,8 +34,8 @@ export type SourceFamily<T, K> = ((key: K) => T | null) & { cellFor: (key: K) =>
 export type SourceValue<T, A extends SourceArgs> = A extends [] ? T | null : A extends [infer K] ? SourceFamily<T, K> : never
 export type SourceDeclaration<T, A extends SourceArgs> = { readonly __ripSource: { value: T, args: A } }
 
-SOURCE =! Symbol.for 'rip.source'
-SOURCE_FAMILY =! Symbol.for 'rip.source.family'
+SOURCE =! :rip.source
+SOURCE_FAMILY =! :rip.source.family
 SOURCE_FAMILY_CAP =! 64
 PRELOAD_FRESH_MS =! 30_000
 DURATION_RE =! /^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/i
