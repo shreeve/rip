@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, watch, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { rash } from '@rip-lang/app/rash'
@@ -9,8 +9,9 @@ READY_MS = parseInt readyText
 abort 'rip-server: RIP_BOOT_DEADLINE_MS must be an integer greater than zero' unless Number.isFinite(READY_MS) and READY_MS > 0 and String(READY_MS) is readyText
 
 parseArgs = (argv) ->
-  args = { entry: null, name: null, host: null, control: process.env.JANUS_CONTROL or null, workers: 1, concurrency: 1, watch: false }
-  i = 0
+  command = if ['status', 'hold'].includes(argv[0]) then argv[0] else 'start'
+  args = { command, entry: null, name: null, host: null, control: process.env.JANUS_CONTROL or null, workers: 1, concurrency: 1, watch: false }
+  i = if command is 'start' then 0 else 1
   while i < argv.length
     value = argv[i]
     take = ->
@@ -39,8 +40,8 @@ parseArgs = (argv) ->
         abort "rip-server: multiple app entries (#{args.entry} and #{value})" if args.entry?
         args.entry = value
     i++
-  abort 'rip-server: an app entry is required' unless args.entry?
-  abort 'rip-server: --control or JANUS_CONTROL is required' unless args.control?
+  args.entry ?= '.'
+  abort 'rip-server: --control or JANUS_CONTROL is required' if command is 'start' and not args.control?
   args.entry = resolve args.entry
   args.name ?= basename(args.entry).replace(/\.[^.]+$/, '')
   args.host ?= args.name
@@ -197,9 +198,26 @@ killWorker = (proc) ->
   proc.kill 'SIGKILL' unless proc.exitCode?
   await proc.exited
 
+managerSocket = (root) ->
+  key = new Bun.CryptoHasher('sha256').update(root).digest('hex').slice 0, 16
+  directory = join tmpdir(), 'rip-managers'
+  mkdirSync directory, { recursive: true, mode: 0o700 }
+  join directory, "#{key}.sock"
+
+managerRequest = (socket, method, path) ->
+  options = { method, unix: socket }
+  fetch "http://manager#{path}", options
+
 export main = (argv) ->
   args = parseArgs argv
   project = resolveProject args.entry
+  managerPath = managerSocket project.root
+  if args.command isnt 'start'
+    response = managerRequest! managerPath, (if args.command is 'status' then 'GET' else 'POST'), "/#{args.command}"
+    body = response.text!
+    abort "rip-server: #{args.command} failed (#{response.status}): #{body}" unless response.ok
+    p body
+    return
   runDir = mkdtempSync join(tmpdir(), 'rip-srv-')
   workers = []
   bootingWorkers = []
@@ -222,6 +240,8 @@ export main = (argv) ->
   doorbellPath = join runDir, 'doorbell.sock'
   doorbellPublished = false
   bootPromise = null
+  operation = 'Active'
+  managerControl = null
   appId = null
   heartbeat = null
   finish = null
@@ -237,6 +257,28 @@ export main = (argv) ->
       upstreams: upstreams
     body.files = files if files?
     body
+
+  status = ->
+    { name: args.name, root: project.root, operation, workers: workers.length, watch: args.watch }
+
+  startManagerControl = ->
+    if existsSync managerPath
+      try
+        response = managerRequest! managerPath, 'GET', '/status'
+        abort "rip-server: manager already running for #{project.root}" if response.ok
+      try unlinkSync managerPath
+    managerControl = Bun.serve
+      unix: managerPath
+      fetch: (request) ->
+        path = new URL(request.url).pathname
+        return Response.json(status()) if request.method is 'GET' and path is '/status'
+        if request.method is 'POST' and path is '/hold'
+          return Response.json({ error: "cannot hold while #{operation}" }, { status: 409 }) unless operation is 'Active'
+          operation = 'Held'
+          clearTimeout appTimer if appTimer?
+          clearTimeout apiTimer if apiTimer?
+          return Response.json status()
+        new Response('Not Found', { status: 404 })
 
   createRegistration = ->
     response = controlFetch! args.control, 'POST', '/1.0/apps', registration()
@@ -325,6 +367,7 @@ export main = (argv) ->
   startAppWatcher = ->
     return unless args.watch and project.appRoot?
     appWatcher = watch project.appRoot, { recursive: true }, ->
+      return unless operation is 'Active'
       clearTimeout appTimer if appTimer?
       appTimer = setTimeout ->
         next = appChain.then -> refreshApp!()
@@ -390,6 +433,7 @@ export main = (argv) ->
   startApiWatcher = ->
     return unless args.watch and project.entry?
     apiWatcher = watch project.root, { recursive: true }, (event, filename) ->
+      return unless operation is 'Active'
       rel = String(filename or '')
       return if rel.startsWith('app/') or rel.startsWith('static/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
       path = resolve project.root, rel
@@ -436,6 +480,8 @@ export main = (argv) ->
     await appChain
     await apiChain
     try doorbell?.stop true
+    try managerControl?.stop true
+    try unlinkSync managerPath
     try
       if appId?
         response = await controlFetch args.control, 'DELETE', "/1.0/apps/#{appId}"
@@ -461,6 +507,7 @@ export main = (argv) ->
       for slot in [0...args.workers]
         await bootSlot()
       startDoorbell()
+    startManagerControl()
     process.once 'SIGINT', -> stop! 0
     process.once 'SIGTERM', -> stop! 0
     createRegistration!()
@@ -478,4 +525,6 @@ export main = (argv) ->
     await Promise.all workers.map (worker) -> stopWorker worker.proc
     process.exitCode = 1
   finally
+    try managerControl?.stop true
+    try unlinkSync managerPath
     rmSync runDir, { recursive: true, force: true }

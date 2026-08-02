@@ -1,0 +1,86 @@
+import { test, eq } from '@rip-lang/testing'
+import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
+SERVER = join(import.meta.dir, '..', '..', 'server.rip')
+RELOAD_PROJECT = join(import.meta.dir, '..', 'reloads', 'project')
+
+waitFor = (fn, timeout = 5000) ->
+  deadline = Date.now() + timeout
+  loop
+    value = await fn()
+    return value if value
+    throw new Error('operation verification timed out') if Date.now() >= deadline
+    sleep! 10
+
+unixFetch = (path, socket) ->
+  options = { unix: socket }
+  fetch "http://worker#{path}", options
+
+command = (name, project) ->
+  proc = Bun.spawn [process.execPath, PRELOAD, SERVER, name, project],
+    stdin: 'ignore'
+    stdout: 'pipe'
+    stderr: 'pipe'
+  out = new Response(proc.stdout).text()
+  err = new Response(proc.stderr).text()
+  code = await proc.exited
+  eq code, 0, await err
+  JSON.parse await out
+
+test! 'hold fences App publication, API replacement, and dings', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-operations-hold-')
+  project = join dir, 'project'
+  cpSync RELOAD_PROJECT, project, { recursive: true }
+  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
+  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'server'), 'dir'
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  updates = []
+  dings = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = new URL request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = await request.json()
+        return Response.json({ id: 'operations-registration' }, { status: 201 })
+      if request.method is 'PUT'
+        updates.push await request.json()
+        return new Response(null, { status: 204 })
+      if url.pathname.endsWith('/hub/publish')
+        dings.push ...(await request.json())
+        return Response.json({ deliveries: 0 })
+      new Response(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'operations.test', '--control', controlSocket],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    await waitFor -> registration?
+    first = registration.upstreams[0].path
+    held = command! 'hold', project
+    eq held.operation, 'Held'
+
+    writeFileSync join(project, 'app', 'routes', 'index.rip'), "export changed = true\n"
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from '@rip-lang/server'
+    get '/version' -> { version: 'held-change' }
+    start!
+    """
+    sleep! 300
+    eq updates, []
+    eq dings, []
+    eq (await (await unixFetch('/version', first)).json()), { version: 'one' }
+    eq (command!('status', project)).operation, 'Held'
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 0
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }

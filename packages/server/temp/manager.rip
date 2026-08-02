@@ -792,29 +792,6 @@ cleanupManagerIdentity = ->
   try unlinkSync state.managerPath
   try unlinkSync state.managerMetaPath
 
-enterHold = ->
-  return managerStatus() if state.operation is 'Held'
-  throw new Error("cannot hold while #{state.operation}") unless state.operation is 'Active'
-  state.operation = 'Held'
-  state.operationOwner += 1
-  state.sourceEpoch += 1
-  state.needsPreparation = true
-  state.cutToken += 1
-  preparing = state.preparation?.proc
-  try preparing?.kill('SIGTERM')
-  try unlinkSync state.prepared.artifact if state.prepared?.artifact?
-  state.prepared = null
-  if state.bootingPool?
-    scrapPool state.bootingPool
-    state.bootingPool = null
-  state.doorbellPublished = false
-  state.dirty = false
-  await preparing.exited if preparing?
-  await fileChain
-  version = bumpDesired()
-  await enqueue! -> putDesired! version
-  managerStatus()
-
 commitReleaseApp = (walk, text) ->
   return unless walk?
   oldFiles = snapshotFiles()
