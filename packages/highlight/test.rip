@@ -94,6 +94,8 @@ test "word arrays across delimiter variants", ->
 
 test "symbol literals", ->
   ok hl('k = :redo').includes span('symbol', ':redo')
+  ok hl('k = :steve.shreeve-usa').includes span('symbol', ':steve.shreeve-usa')
+  ok hl('k = :one.two.three-four.five').includes span('symbol', ':one.two.three-four.five')
   # a plain ternary colon is not a symbol
   ok not hl('x = a ? b : c').includes('hljs-symbol')
 

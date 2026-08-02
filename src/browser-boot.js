@@ -15,8 +15,8 @@
 //
 // `workspace: true` opens the dev door (docs/WORKSPACE.md, M1): the
 // bag populates from the served manifest, the hub feed dings modules in,
-// and a change applies by remount — labeled escape, never hot apply.
-// Off, every path below is byte-identical to the plain boot.
+// and apply chooses reload | css | update | ignore. Off, every path
+// below is byte-identical to the plain boot.
 import { createModuleLoader } from './browser-modules.js';
 
 const APP_PACKAGE = '@rip-lang/app';
@@ -96,10 +96,10 @@ export async function bootApp(opts = {}) {
 
   // Workspace mode fetches the manifest BEFORE the bundle, and the
   // manager writes it AFTER the bundle: the only pairing a boot racing
-  // a save can observe is "manifest rev <= bundle bytes", which the
+  // a save can observe is "manifest hash <= bundle bytes", which the
   // feed's open resync heals forward. The reverse pairing (a manifest
-  // rev over older bundle bytes) would block its own healing on the
-  // bag's rev cursor — the silent-stale class.
+  // hash over older bundle bytes) would block its own healing on the
+  // bag's hash cursor — the silent-stale class.
   const workspaceMode = opts.workspace === true;
   let manifestUrl = null;
   let fetchBytes = null;
@@ -114,7 +114,7 @@ export async function bootApp(opts = {}) {
       );
     }
     fetchBytes = opts.feed?.fetch ?? (url => fetch(url));
-    const res = await fetchBytes(manifestUrl);
+    const res = await fetchBytes(manifestUrl, { cache: 'no-cache' });
     if (!res.ok) {
       throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
     }
@@ -196,9 +196,14 @@ export async function bootApp(opts = {}) {
       // The id IS the store path (B′ — the birth path is the id).
       const source = (bundle.modules ?? {})[entry.id];
       // A manifest file the bundle does not carry is skipped here: the
-      // feed's open resync fetches it by etag.
+      // feed's open resync fetches its latest bytes.
       if (source === undefined) continue;
-      records.push({ id: entry.id, path: entry.id, etag: entry.etag, source });
+      records.push({
+        id: entry.id,
+        path: entry.id,
+        hash: app.rash(new TextEncoder().encode(source)),
+        source,
+      });
     }
     bag.populate(records);
   }
@@ -229,9 +234,9 @@ export async function bootApp(opts = {}) {
 
   // The bag IS the component store (Q7), and the launch bundle carries
   // NO modules key on purpose: launch's load() would rewrite every
-  // passport and desync bag etags from the server's. The bag already
+  // passport and desync bag hashes from the server's. The bag already
   // holds the sources; launch only overlays projections (setCompiled
-  // never changes etag or notifies).
+  // never changes hash or notifies).
   const launchWith = compiledModules => app.launch({
     bundle: { compiled: compiledModules, data: bundle.data },
     components: bag,
@@ -247,11 +252,10 @@ export async function bootApp(opts = {}) {
 
   const report = opts.feed?.report ?? ((...args) => console.error(...args));
 
-  // Apply: compile barrier, then createApply chooses narrow remount
-  // (route/layout; stash kept) or the labeled whole-launch escape (D7).
+  // Apply: compile barrier, then createApply → reload | css | update | ignore.
   // Projections rebuild THROUGH the loader; importers invalidate
-  // transitively. Unchanged modules answer from the loader cache.
-  // CSS sheets soft-apply via <style data-rip-css> and never remount (S12).
+  // transitively. CSS cache-busts the <link> the page already declared
+  // (?hash=); otherwise injects <style>. HTML reloads.
   let destroyed = false;
   let timer = null;
   let remounting = false;
@@ -259,10 +263,36 @@ export async function bootApp(opts = {}) {
   const handle = {};
   const isCssPath = path => typeof path === 'string' && path.endsWith('.css');
   const isHtmlPath = path => typeof path === 'string' && path.endsWith('.html');
-  // Non-Rip bag members never enter the module loader / remount path.
   const isNonRipBag = path => isCssPath(path) || isHtmlPath(path);
-  const applyCssSheet = (id, source) => {
+  const cssLinkFor = id => {
+    if (typeof document === 'undefined') return null;
+    for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
+      if (link.getAttribute('data-rip-css') === id) return link;
+    }
+    const base = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
+    for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
+      const href = link.getAttribute('href') || '';
+      const path = href.split('?')[0];
+      if (path === `/${base}` || path.endsWith(`/${base}`) || path === base) return link;
+    }
+    return null;
+  };
+  // Find the page's <link> for this sheet and cache-bust ?hash=.
+  // No link → <style data-rip-css> (injected-sheet identity only).
+  const applyCssSheet = (id, source, hash) => {
     if (typeof document === 'undefined' || typeof source !== 'string') return;
+    const link = cssLinkFor(id);
+    if (link && typeof hash === 'string' && hash.length > 0) {
+      const raw = link.getAttribute('href') || link.href;
+      const path = raw.split('?')[0];
+      const next = `${path}?hash=${encodeURIComponent(hash)}`;
+      if (link.getAttribute('href') !== next) link.setAttribute('href', next);
+      link.disabled = false;
+      for (const node of [...document.querySelectorAll('style[data-rip-css]')]) {
+        if (node.getAttribute('data-rip-css') === id) node.remove();
+      }
+      return;
+    }
     let el = null;
     for (const node of document.querySelectorAll('style[data-rip-css]')) {
       if (node.getAttribute('data-rip-css') === id) {
@@ -276,20 +306,16 @@ export async function bootApp(opts = {}) {
       document.head.appendChild(el);
     }
     el.textContent = source;
-    // Cold load may still hold a matching <link> (e.g. /styles.css for
-    // app/styles.css). Disable it so soft-apply is the sole sheet.
-    const base = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
-    for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
-      const href = link.getAttribute('href') || '';
-      if (href === `/${base}` || href.endsWith(`/${base}`) || href === base) {
-        link.disabled = true;
-      }
-    }
   };
   const removeCssSheet = id => {
     if (typeof document === 'undefined') return;
     for (const node of [...document.querySelectorAll('style[data-rip-css]')]) {
       if (node.getAttribute('data-rip-css') === id) node.remove();
+    }
+    const link = cssLinkFor(id);
+    if (link) {
+      const path = (link.getAttribute('href') || '').split('?')[0];
+      if (path) link.setAttribute('href', path);
     }
   };
   const escapeRemount = async (applied) => {
@@ -304,7 +330,7 @@ export async function bootApp(opts = {}) {
     current.destroy();
     current = launchWith(snapshot);
     Object.assign(handle, current, stable);
-    console.log(`[Rip] applied ${applied.join(', ') || 'a change'} — remounted (component state reset)`);
+    // createApply logs the public "— update" verdict; no second line here.
   };
   const apply = app.createApply({
     renderer: {
@@ -351,7 +377,7 @@ export async function bootApp(opts = {}) {
       }
       try {
         const verdict = await apply.absorb(applied);
-        if (verdict === 'narrow' || verdict === 'noop') {
+        if (verdict === 'update' || verdict === 'ignore' || verdict === 'css') {
           Object.assign(handle, current, stable);
         }
       } catch (error) {
@@ -363,41 +389,44 @@ export async function bootApp(opts = {}) {
   };
   const unwatch = bag.watch((_event, path) => {
     if (!path.startsWith('app/')) return;
-    // CSS/HTML handled in door.set — never queue a JS remount.
+    // CSS/HTML handled in door.set — never queue a Rip update.
     if (isNonRipBag(path)) return;
     pending.add(path);
     timer ??= setTimeout(absorb, 25);
   });
 
-  // The compile-through door: a Rip passport lands in the bag already
-  // projected, so ONE notify carries source and compiled together and
-  // launch's rebuild never observes a source-without-projection gap.
-  // CSS soft-applies (S12); HTML reloads the document. A compile failure
-  // reports and never sets — last-known-good stays interactive (S10).
+  // Door: Rip passports compile-through; CSS → css; HTML → reload (on
+  // hash advance only — first birth is ignore). S10: compile failure
+  // never sets.
   const door = {
+    owners: new Map(),
+    claim(id, owner) {
+      this.owners.set(id, owner);
+    },
     passport: bag.passport,
     sealed: bag.sealed,
     set: async passport => {
-      // The bag's etag is THE staleness verdict — consult it BEFORE any
+      const owner = passport.owner;
+      if (owner !== undefined && door.owners.get(passport.id) !== owner) return false;
+      // The bag's hash is THE staleness verdict — consult it BEFORE any
       // mutation. Two dings in flight can resolve out of order: the
       // older fetch lands after the newer one applied, and while bag.set
-      // would reject a duplicate etag, the files/loader mutations below
+      // would reject a duplicate hash, the files/loader mutations below
       // would already carry stale bytes into the next remount (the
       // silent-stale class). Same guard for deletes: a replayed stale
       // delete must not evict the loader's file while the bag keeps the
       // passport.
       const known = bag.passport(passport.id);
-      if (known && typeof passport.etag === 'string' && passport.etag === known.etag) {
+      if (known && typeof passport.hash === 'string' && passport.hash === known.hash) {
         if (passport.deleted !== true) return false;
       }
       if (passport.deleted === true) {
-        if (known && typeof passport.etag === 'string' && passport.etag !== known.etag) return false;
+        if (known && typeof passport.hash === 'string' && passport.hash !== known.hash) return false;
         const path = bag.passport(passport.id)?.path;
         if (path !== undefined) {
           if (isCssPath(path)) {
             removeCssSheet(path);
           } else if (isHtmlPath(path)) {
-            // Shell gone — reload against the next generation.
             if (typeof location !== 'undefined') location.reload();
           } else {
             files.delete(path);
@@ -408,20 +437,20 @@ export async function bootApp(opts = {}) {
       }
       const path = passport.path ?? passport.id;
       if (isCssPath(path)) {
-        const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
+        const applied = bag.set({ id: passport.id, path, hash: passport.hash, source: passport.source });
         if (applied) {
-          applyCssSheet(path, passport.source);
-          console.log(`[Rip] applied ${path} — css soft-apply (no remount)`);
+          applyCssSheet(path, passport.source, passport.hash);
+          console.log(`[Rip] applied ${path} — css`);
         }
         return applied;
       }
       if (isHtmlPath(path)) {
         // Birth (first feed resync) only records the passport — the shell
-        // already came from the static page. A later etag advance reloads.
+        // already came from the static page. A later hash advance reloads.
         const had = known != null;
-        const applied = bag.set({ id: passport.id, path, etag: passport.etag, source: passport.source });
+        const applied = bag.set({ id: passport.id, path, hash: passport.hash, source: passport.source });
         if (applied && had) {
-          console.log(`[Rip] applied ${path} — html reload`);
+          console.log(`[Rip] applied ${path} — reload`);
           if (typeof location !== 'undefined') location.reload();
         }
         return applied;
@@ -432,9 +461,15 @@ export async function bootApp(opts = {}) {
       try {
         module = await loader.import(path);
       } catch (error) {
-        report(`[Rip] ${path} etag ${passport.etag} failed to compile — keeping the last good version`, error);
+        if (owner === undefined || door.owners.get(passport.id) === owner) {
+          if (known) files.set(path, known.source);
+          else files.delete(path);
+          loader.invalidate(path);
+        }
+        report(`[Rip] ${path} hash ${passport.hash} failed to compile — keeping the last good version`, error);
         return false;
       }
+      if (owner !== undefined && door.owners.get(passport.id) !== owner) return false;
       return bag.set({ ...passport, compiled: { ...module } });
     },
   };

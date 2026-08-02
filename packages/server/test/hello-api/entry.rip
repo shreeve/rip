@@ -1,0 +1,2 @@
+export answer = 42
+export directory = import.meta.dir

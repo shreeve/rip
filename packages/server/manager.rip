@@ -1,1242 +1,1466 @@
-# ==============================================================================
-# @rip-lang/server — manager runtime (the `rip server` process)
-#
-# Implements the Rip Server half of the Janus pool coordination protocol
-# (janus: docs/20260719-002000-pool-protocol.md): register the app on /1.0,
-# heartbeat every 5s starting immediately, own the doorbell socket, spawn
-# worker pools on unique unix socket paths, and drive the dirty epoch —
-# saves settle, hash-gate, cut admission with a doorbell PUT, and boot on
-# demand when a ring arrives. The manager is the single writer of its
-# app's upstream list: every control call is awaited in order, and a
-# sockets PUT is acknowledged (200) before any held ring is answered 204.
-#
-# Never on the data path: client traffic flows Janus → worker socket.
-# ==============================================================================
-
-import { watch, readdirSync, readFileSync, existsSync, statSync, unlinkSync, mkdtempSync, mkdirSync, renameSync, rmSync } from 'node:fs'
-import { join, resolve, dirname, basename } from 'node:path'
+import { closeSync, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-
-# The compiler compiling THIS process is the one that builds artifacts —
-# resolved from the loader's --preload path, loaded once, on first build.
-_srcDir = null
-loaderSrcDir = ->
-  return _srcDir if _srcDir?
-  preload = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
-  abort "rip-server: the rip loader is missing from execArgv — run via `rip server`" unless preload?
-  _srcDir = dirname(resolve(preload))
-
-_compile = null
-loadCompiler = ->
-  return _compile if _compile?
-  mod = import!(join(loaderSrcDir(), 'compile.js'))
-  _compile = mod.compile
-
-# Bundle assembly requires the compiler, so it runs here in the manager —
-# never in a prebuilt worker. Cached like _compile.
-_assemble = null
-loadAssembler = ->
-  return _assemble if _assemble?
-  mod = import!(join(loaderSrcDir(), 'bundle.js'))
-  _assemble = mod.assembleBundle
-
-# --- Tunables — env-overridable, defaults per the pool protocol ----------------
-
-envNum = (name, fallback) ->
-  n = parseInt(process.env[name] or '')
-  if Number.isFinite(n) and n > 0 then n else fallback
-
-SETTLE_MS        =! envNum 'RIP_SETTLE_MS', 150         # trailing settle after fs events
-DRAIN_MS         =! envNum 'RIP_DRAIN_MS', 2500         # flat grace before SIGTERM on retire
-KILL_MS          =! envNum 'RIP_KILL_MS', 5000          # SIGTERM → SIGKILL escalation
-HEARTBEAT_MS     =! envNum 'RIP_HEARTBEAT_MS', 5000     # heartbeat cadence
-HOLD_MS          =! envNum 'RIP_HOLD_MS', 15000         # ring hold cap, then 503
-BOOT_DEADLINE_MS =! envNum 'RIP_BOOT_DEADLINE_MS', 30000  # per-worker /ready deadline
-WAITER_CAP       =! envNum 'RIP_WAITER_CAP', 64         # held rings per app, then 503
-
-# The 409 retry window must outlive a genuinely stale claim: the control
-# plane holds a dead predecessor's claim for its heartbeat TTL (janus
-# defaultHeartbeatTTL, 15s), its reap sweep ticks at TTL/3 (the host frees
-# up to 5s after expiry), and registerApp's backoff spaces retries up to
-# 5s apart — so the first retry that can succeed lands by 25s. 30s clears
-# that worst case with margin.
-export REGISTER_409_MS =! envNum 'RIP_REGISTER_409_MS', 30000
-
-# The worker's in-flight drain wait after SIGTERM must finish under THIS
-# manager's SIGTERM → SIGKILL ceiling (KILL_MS — see retirePool), with margin
-# for exit housekeeping. Passed to every worker via RIP_DRAIN_DEADLINE_MS.
-WORKER_DRAIN_MS  =! Math.max(KILL_MS - 500, Math.floor(KILL_MS / 2))
-
-IGNORED_DIRS =! new Set ['node_modules', '.git', 'dist', 'coverage', 'tmp', '.rip-cache', '.cache']
-
-USAGE =! """
-rip server — run an app under a worker pool behind a Janus control plane
-
-Usage:
-  rip server [app-entry] [options]     app-entry defaults to ./app.rip, then ./index.rip
-
-Options:
-  --name <n>          App name for registration (default: the app directory's name)
-  --host <h>          Public host to claim; repeatable (default: the app name)
-  --bridge <path>     Hub bridge endpoint, registered as bridge_path (must start with /)
-  -w, --workers <n>   Worker processes (default: 2)
-  -c, --concurrency <n>  Concurrent requests per worker (default: 1; c > 1 requires watch off)
-  --watch             Watch app files and hot-reload (default ON unless RIP_ENV=production)
-  --no-watch          Disable the watcher
-  --allow-watch       Required to enable --watch when RIP_ENV=production
-  --eager             Boot the fresh pool at settle instead of waiting for a ring
-  --control <target>  Janus control endpoint: a unix socket path or an http(s) URL
-                      (or env JANUS_CONTROL); required, verified at startup
-
-Env knobs: RIP_SETTLE_MS, RIP_DRAIN_MS, RIP_KILL_MS, RIP_HEARTBEAT_MS,
-RIP_HOLD_MS, RIP_BOOT_DEADLINE_MS, RIP_WAITER_CAP, RIP_REGISTER_409_MS,
-RIP_HANDLER_DEADLINE_MS
-"""
-
-# --- Module state ---------------------------------------------------------------
-
-# Exported for the same reason state is (below): the manager is a process
-# singleton, and in-process tests configure it directly.
-export cfg =
-  entry: null          # absolute path to the app entry
-  appDir: null         # directory the watcher covers
-  name: null
-  hosts: []
-  bridge: null         # hub bridge endpoint, registered as bridge_path
-  workers: 2
-  concurrency: 1
-  watch: false
-  eager: false
-  control: null
-
-# Exported: the manager is a process singleton, and its module state IS the
-# process state — in-process tests (the publish client) configure it directly.
-export state =
-  appId: null
-  controlUnix: null    # unix socket path to the control plane, or
-  controlBase: null    # http(s) base URL
-  workerJs: null       # the worker runtime, prebuilt to plain JS at startup
-  browserRuntime: null # dist/browser/rip.js, copied into runDir when app/ exists
-  buildCounter: 0      # one app artifact per boot epoch, uniquely named
-  runDir: null         # tmpdir holding the doorbell, worker sockets, artifacts
-  filesDir: null       # latest module bytes under runDir/files (env RIP_FILES_DIR)
-  manifestPath: null   # the atomically rewritten file manifest
-  files: {}            # id (birth store path, 'app/…') → { id, hash, retired }
-  bellPath: null
-  bell: null
-  watcher: null
-  settleTimer: null
-  hbTimer: null
-  lastHash: null       # content hash of the watched *.rip files
-  lastFiles: null      # per-file content hashes from the same walk (change classification)
-  lastUpstreams: []    # the registry's current statement (re-PUT after re-register)
-  dirty: false         # files changed since the last upstreams PUT
-  doorbellPublished: false
-  bootFailure: null    # cached boot error; cleared only by a content-changing save
-  bootPromise: null    # the single in-flight boot, joined by concurrent rings
-  currentPool: null
-  everServed: false    # a pool has been live this run (epoch dings fire only on SWAPS)
-  poolCounter: 0
-  ringWaiters: 0
-  readyWhen: 1
-  shuttingDown: false
-  # Test seam: invoked after the one app/ snapshot is taken and before any
-  # durable document is written from it. Pins mutate the disk here to prove
-  # a second walk cannot affect the producing run.
-  afterAppSnapshot: null
-
-# ==============================================================================
-# Control-plane client — single writer, every call awaited in order
-# ==============================================================================
-
-_chain = Promise.resolve()
-
-# Serialize control-plane work: no later control message is sent until the
-# previous one (including its retries) resolves.
-enqueue = (fn) ->
-  run = _chain.then -> fn()
-  _chain = run.catch -> null
-  run
-
-cfetch = (method, path, body = null) ->
-  opts = { method }
-  if body?
-    opts.body = JSON.stringify(body)
-    opts.headers = { 'content-type': 'application/json' }
-  if state.controlUnix?
-    fetch "http://janus#{path}", { ...opts, unix: state.controlUnix }
-  else
-    fetch "#{state.controlBase}#{path}", opts
-
-registerApp = ->
-  backoff = 200
-  deadline409 = null
-  reg = { name: cfg.name, hosts: cfg.hosts }
-  reg.bridge_path = cfg.bridge if cfg.bridge?
-  loop
-    res = null
-    try
-      res = cfetch! 'POST', '/1.0/apps', reg
-    if res?
-      if res.status is 201            # per the pool protocol: created, only
-        body = res.json!
-        abort "rip-server: control returned no app id" unless body?.id?
-        state.appId = body.id
-        return
-      if res.status is 409
-        # A restart under a supervisor lands inside the heartbeat TTL while
-        # the dead manager's claim is still live — retry for REGISTER_409_MS
-        # (sized to the claim's worst-case lifetime, see the knob) before
-        # treating the claim as genuinely foreign.
-        deadline409 ?= Date.now() + REGISTER_409_MS
-        if Date.now() >= deadline409
-          abort "rip-server: host already claimed at the control plane (409): #{cfg.hosts.join(', ')}"
-        warn "rip-server: hosts still claimed (409); retrying until the stale claim expires"
-      else
-        warn "rip-server: register failed (#{res.status}); retrying"
-    else
-      warn "rip-server: control unreachable during register; retrying"
-    sleep! backoff
-    backoff = Math.min(backoff * 2, 5000)
-
-# Runs inside the writer chain. Retries with backoff; a 404 means the control
-# plane restarted and lost us — re-register, then re-send this same statement.
-putUpstreams = (list) ->
-  backoff = 200
-  attempts = 0
-  loop
-    attempts += 1
-    res = null
-    try
-      res = cfetch! 'PUT', "/1.0/apps/#{state.appId}/upstreams", { upstreams: list }
-    if res?
-      if res.status is 200
-        state.lastUpstreams = list
-        return
-      if res.status is 404
-        warn "rip-server: control lost the app; re-registering"
-        registerApp!()
-        continue
-      warn "rip-server: upstreams PUT failed (#{res.status}); retrying"
-    return if state.shuttingDown and attempts >= 3
-    sleep! backoff
-    backoff = Math.min(backoff * 2, 5000)
-
-# Runs enqueued in the writer chain, one closure per tick. A failed beat has
-# no local retry loop — the next tick's enqueued heartbeat IS the retry, and
-# during a control outage those closures queue behind putUpstreams' backoff,
-# so the effective retry cadence follows that backoff, not the flat interval.
-heartbeatOnce = ->
-  return unless state.appId?
-  res = null
-  try
-    res = cfetch! 'POST', "/1.0/apps/#{state.appId}/heartbeat"
-  unless res?
-    warn "rip-server: heartbeat unreachable; the next tick retries"
-    return
-  if res.status is 404
-    warn "rip-server: heartbeat 404 — re-registering and re-publishing upstreams"
-    registerApp!()
-    putUpstreams! state.lastUpstreams
-
-deleteApp = ->
-  try cfetch! 'DELETE', "/1.0/apps/#{state.appId}"
-
-# POST a directive object/list to the app's hub publish plane. Hot-plane by
-# contract (janus: publish touches hub state only — never upstreams, never
-# the doorbell), so it never rides the writer chain: a broadcast must not
-# queue behind an upstreams retry. Returns the parsed delivery envelope
-# ({objects, deliveries, unknown_targets}); a non-2xx answer throws carrying
-# status and body, never a silent swallow.
-export publish = (directives) ->
-  throw new Error("rip-server: publish before registration — no app id") unless state.appId?
-  res = cfetch! 'POST', "/1.0/apps/#{state.appId}/hub/publish", directives
-  unless res.ok
-    detail = res.text!
-    throw new Error("rip-server: publish failed (#{res.status}): #{detail}")
-  res.json!
-
-# ==============================================================================
-# Prebuild — one JS artifact per boot epoch, built by the manager
-# ==============================================================================
-#
-# Workers never carry the Rip compiler: the manager compiles the app ONCE per
-# boot (Bun.build + a .rip plugin over the compiler already loaded here) into
-# a single ESM artifact in the run tmpdir, and every worker just imports it.
-# A build failure is a boot failure — cached, rings answer 503 with the
-# compile diagnostic, and the next content-changing save retries.
-#
-# Bytecode was measured and is not viable on Bun 1.3.14: ESM bytecode
-# requires `compile: true` (a standalone executable), and the one format
-# bytecode does accept (CJS) rejects top-level await — which idiomatic Rip
-# (module-level dammit) produces routinely. The plain-JS artifact ships.
-
-# Bundling must not change what a module's own import.meta says: freeze the
-# path-valued fields to the SOURCE module's location at build time.
-# import.meta.main stays live (false under the worker's dynamic import,
-# exactly as an unbundled dynamic import of the entry evaluated).
-rewriteMeta = (code, path) ->
-  return code unless code.includes('import.meta')
-  dir = dirname(path)
-  t = new Bun.Transpiler
-    loader: 'js'
-    define:
-      'import.meta.url':      JSON.stringify(Bun.pathToFileURL(path).href)
-      'import.meta.path':     JSON.stringify(path)
-      'import.meta.filename': JSON.stringify(path)
-      'import.meta.dir':      JSON.stringify(dir)
-      'import.meta.dirname':  JSON.stringify(dir)
-      'import.meta.file':     JSON.stringify(basename(path))
-  t.transformSync(code)
-
-ripBuildPlugin = (compile) ->
-  name: 'rip'
-  setup: (build) ->
-    build.onLoad { filter: /\.rip$/ }, (args) ->
-      source = readFileSync(args.path, 'utf8')
-      { code } = compile(source, { path: args.path, runtimeDelivery: 'import' })
-      { contents: rewriteMeta(code, args.path), loader: 'js' }
-    # Plain-JS modules riding into the bundle keep their import.meta too.
-    build.onLoad { filter: /\.[mc]?js$/ }, (args) ->
-      source = readFileSync(args.path, 'utf8')
-      return unless source.includes('import.meta')
-      { contents: rewriteMeta(source, args.path), loader: 'js' }
-    return
-
-# entry (.rip or .js) → one self-contained ESM artifact at outfile. `bun` and
-# node builtins stay external (target 'bun'); everything else bundles, so the
-# artifact needs no loader and no node_modules to boot. Throws with the full
-# compile/bundle diagnostic on failure.
-export buildArtifact = (entry, outfile) ->
-  compile = loadCompiler!()
-  result = Bun.build!
-    entrypoints: [entry]
-    target: 'bun'
-    format: 'esm'
-    sourcemap: 'none'
-    throw: false
-    plugins: [ripBuildPlugin(compile)]
-  unless result.success
-    throw new Error(result.logs.map((l) -> l?.message or String(l)).join('\n'))
-  Bun.write! outfile, result.outputs[0].text!
-  outfile
-
-# Default client bag under <appDir>/app: app/**/*.{rip,css,html}, keyed by
-# disk path ('app/routes/index.rip', 'app/styles.css', 'app/index.html' —
-# the disk path IS the store id). Doctrine: the bag is membership; the hub
-# only dings {id,etag}; the client chooses the reaction. The compile bundle
-# takes .rip only (see ripWalk); CSS soft-applies (S12); HTML reloads.
-# Project-root app.rip / index.rip is the main server entry — outside this
-# walk — and takes the epoch path when it changes. No app/ dir means no
-# bundle (null). An assembly failure throws — it rides the same
-# boot-failure caching as a compile failure, so rings answer 503 with the
-# diagnostic.
-isBagFile = (name) ->
-  name.endsWith('.rip') or name.endsWith('.css') or name.endsWith('.html')
-
-clientModules = (dir) ->
-  modules = {}
-  moduleFiles = {}
-  walk = (at, prefix) ->
-    for e in readdirSync(at, { withFileTypes: true })
-      continue if e.name.startsWith('.')
-      full = join(at, e.name)
-      if e.isDirectory()
-        walk full, "#{prefix}#{e.name}/"
-      else if isBagFile(e.name)
-        key = "#{prefix}#{e.name}"
-        modules[key] = readFileSync(full, 'utf8')
-        moduleFiles[key] = full
-  walk dir, 'app/'
-  { modules, moduleFiles, appDir: dirname(dir) }
-
-# One app/ walk feeds every document in a producing run. A second walk can
-# observe a save mid-run and write a manifest naming revs the bundle does
-# not carry — the silent-stale class the boot's rev cursor cannot heal.
-readAppModules = ->
-  appRoot = join(cfg.appDir, 'app')
-  return null unless existsSync(appRoot)
-  clientModules(appRoot)
-
-# assembleBundle compiles every module — CSS/HTML must never enter it.
-ripWalk = (walk) ->
-  return null unless walk?
-  modules = {}
-  moduleFiles = {}
-  for path, source of walk.modules
-    continue unless path.endsWith('.rip')
-    modules[path] = source
-    moduleFiles[path] = walk.moduleFiles[path] if walk.moduleFiles?[path]?
-  { modules, moduleFiles, appDir: walk.appDir }
-
-assembleBundleText = (walk) ->
-  rip = ripWalk(walk)
-  assemble = loadAssembler!()
-  JSON.stringify assemble {
-    modules: rip.modules
-    moduleFiles: rip.moduleFiles
-    appDir: rip.appDir
-    packagesDir: join(loaderSrcDir(), '..', 'packages')
-  }
-
-buildBundle = (walk) ->
-  return null unless walk?
-  out = join(state.runDir, "b#{state.buildCounter}-bundle.json")
-  Bun.write! out, assembleBundleText!(walk)
-  out
-
-# Deep-clone the file registry so a scrapped epoch build can restore it —
-# buildApp advances files + manifest before bootLoop knows whether the
-# artifact will publish, and a scrap that only unlinks the bundle would
-# leave the manifest naming revs whose bundle file is gone.
-snapshotFiles = ->
-  out = {}
-  for path, entry of state.files
-    out[path] = { id: entry.id, hash: entry.hash, retired: entry.retired }
-  out
-
-# Restore the file registry and rewrite the manifest. Exported as the
-# scrap pin's seam — bootLoop calls this whenever a build's bundle will
-# not stay published. A rewrite failure is loud — a silent leave-behind
-# would re-open the pairing the restore exists to close.
-export revertFilesAndManifest = (filesBefore) ->
-  return unless cfg.watch
-  state.files = filesBefore
-  return unless state.manifestPath?
-  writeManifest!()
-
-# Exported as an in-process test seam (the epoch-path correlation pin
-# drives it directly through cfg/state).
-export buildApp = ->
-  state.buildCounter += 1
-  artifact = buildArtifact! cfg.entry, join(state.runDir, "b#{state.buildCounter}-app.js")
-  modules = readAppModules!()
-  state.afterAppSnapshot?()
-  bundle = buildBundle!(modules)
-  if bundle? and cfg.watch
-    # The bundle is durable (buildBundle wrote it) BEFORE the manifest
-    # names the new etags — the correlation invariant below. Watch only:
-    # the feed surface exists exactly where saves can ding it. With
-    # watch off (production) no files, no manifest, and the boot page
-    # stays plain — production has no hub (Q2). One snapshot: syncFiles
-    # (all bag files) and the Rip-only bundle share the same walk, so a
-    # save landing after the walk cannot invent the reverse pairing.
-    # CSS entries are in the manifest/filesDir only — never in the bundle.
-    syncFiles!(modules)
-    writeManifest!()
-  { artifact, bundle }
-
-# ==============================================================================
-# The workspace dev feed (docs/WORKSPACE.md)
-# ==============================================================================
-#
-# A save touching ONLY app/ feeds the live pool in place: mint or bump
-# latest file bytes, rewrite the current pool's bundle and the manifest, then
-# ding /hub with {id, etag} envelopes — no new epoch, no pool reload, no
-# doorbell. Any other save takes the dirty-epoch path above and dings the
-# swap (kind 'epoch') once the new pool is live.
-
-# The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
-# server.rip (workers never import manager code). Exported so the mirror
-# is a pinned fact, not a convention. Same spelling as the bridge path.
-export DEV_CHANNEL =! '/hub'
-
-sha256hex = (text) -> new Bun.CryptoHasher('sha256').update(text).digest('hex')
-
-# The content etag that rides module URLs (manifest entries and dings) —
-# 16 hex chars of sha256. The door serves the latest representation at
-# /app/…?etag=E (Q8′); a superseded etag answers 409 with the current
-# ETag, so freshness never rests on an immutable museum cache.
-shortHash = (hash) -> hash.slice(0, 16)
-
-# Latest-only on-disk name: the percent-encoded store id (contains
-# slashes). Mirrored by the /app/* route in server.rip.
-moduleFile = (id) -> join(state.filesDir, encodeURIComponent(id))
-
-# Sync the registry against a modules snapshot and write what changed. A new
-# path mints its id — the birth path, Q3/B′. A changed path updates its
-# content hash. A deleted path retires: dropped from the manifest, its
-# latest file removed; the delete ding carries the retired generation's
-# etag so the bag ignores a stale delete after a recreate. A rename is
-# retire + mint (id persistence across renames is open research). The
-# caller supplies the snapshot — a second disk walk here would re-open
-# the silent-stale class. Returns the changed { id, hash, deleted? } entries.
-syncFiles = (walk) ->
-  modules = walk.modules
-  state.filesDir ?= join(state.runDir, 'files')
-  state.manifestPath ?= join(state.runDir, 'manifest.json')
-  mkdirSync state.filesDir, { recursive: true }
-  changed = []
-  for path, source of modules
-    h = sha256hex(source)
-    entry = state.files[path]
-    if not entry?
-      entry = { id: path, hash: h, retired: false }
-      state.files[path] = entry
-      changed.push entry
-    else if entry.retired
-      entry.retired = false
-      entry.hash = h
-      changed.push entry
-    else if entry.hash isnt h
-      entry.hash = h
-      changed.push entry
-  for path, entry of state.files
-    if not modules[path]? and not entry.retired
-      entry.retired = true
-      changed.push { id: entry.id, hash: entry.hash, deleted: true }
-  # Latest representation only (Q8′ — no per-rev museum). A retirement
-  # removes the file; its etag rides the delete ding.
-  for entry in changed
-    if entry.deleted
-      try unlinkSync moduleFile(entry.id)
-    else
-      Bun.write! moduleFile(entry.id), modules[entry.id]
-  changed
-
-# The manifest is the LAST durable document on every file path — written
-# only after the bundle carrying the same etags is. The browser fetches
-# the manifest FIRST, so a boot can heal forward via feed resync. tmp +
-# rename: workers read the manifest per request and must never see a
-# torn document.
-writeManifest = ->
-  live = []
-  for path, entry of state.files
-    # The id IS the store path (B′ — the birth path is the id, a rename
-    # retires and mints), so the entry carries one spelling of that fact.
-    live.push { id: entry.id, etag: shortHash(entry.hash) } unless entry.retired
-  live.sort (a, b) -> if a.id < b.id then -1 else 1
-  tmp = "#{state.manifestPath}.tmp"
-  Bun.write! tmp, JSON.stringify({ files: live })
-  renameSync tmp, state.manifestPath
-  return
-
-# Rewrite the live pool's bundle file in place (tmp + rename — workers
-# re-read it per request under the flag), so a hard refresh never serves
-# stale first-paint code. No live pool bundle is a held-back-manifest
-# verdict — never a silent skip that lets writeManifest name revs the
-# page cannot pair with bundle bytes.
-refreshPoolBundle = (walk) ->
-  pool = state.currentPool
-  unless pool?.bundle?
-    throw new Error('rip-server: no live pool bundle to rewrite — manifest held back')
-  tmp = "#{pool.bundle}.tmp"
-  Bun.write! tmp, assembleBundleText!(walk)
-  renameSync tmp, pool.bundle
-
-# The file-feed path: files, then the bundle, then the manifest — every
-# document durable BEFORE the ding names the new etags, and the manifest
-# last (the correlation invariant on writeManifest). A reassembly failure
-# warns and HOLDS THE MANIFEST BACK — a manifest naming etags the bundle
-# does not carry would silently strand fresh boots — while the dings still
-# publish: live feeds fetch modules directly and never need the manifest
-# for a named etag. A publish failure warns and never blocks the file-feed
-# path or crashes the manager — the module bytes are already servable.
-# Exported as an in-process
-# test seam (the manifest-holdback and serialization pins drive it directly).
-#
-# Runs SERIALIZE on one promise chain: overlapping runs would race on the
-# shared tmp paths (manifest.json.tmp, the pool bundle's .tmp), and
-# interleaved writes can land a torn document through the rename. A run's
-# failure surfaces to its own caller and never blocks the next run.
-fileChain = Promise.resolve()
-
-export onFileChange = ->
-  next = fileChain.then -> runFileChange()
-  fileChain = next.catch -> null
-  next
-
-runFileChange = ->
-  modules = readAppModules!()
-  return unless modules?
-  state.afterAppSnapshot?()
-  changed = syncFiles!(modules)
-  try
-    refreshPoolBundle!(modules)
-    writeManifest!()
-  catch e
-    warn "rip-server: bundle/manifest rewrite failed on the file-feed path — manifest held back: #{e?.message or e}"
-  dings = changed.map (c) ->
-    ding = { id: c.id, etag: shortHash(c.hash) }
-    ding.kind = 'delete' if c.deleted is true
-    { '@': [DEV_CHANNEL], ding }
-  i = 0
-  while i < dings.length                 # the publish plane caps 16 objects per frame
-    try
-      publish! dings.slice(i, i + 16)
-    catch e
-      warn "rip-server: dev ding publish failed: #{e?.message or e}"
-    i += 16
-  return
-
-# ==============================================================================
-# Workers and pools
-# ==============================================================================
-
-workerPath =! join(import.meta.dir, 'worker.rip')
-
-spawnWorker = (pool) ->
-  pool.serial += 1
-  sock = join(state.runDir, "p#{pool.n}w#{pool.serial}.sock")
-  env = { ...process.env, APP_ARTIFACT: pool.artifact, SOCKET_PATH: sock, WORKER_ID: "#{pool.n}.#{pool.serial}", WORKER_CONCURRENCY: "#{cfg.concurrency}", RIP_DRAIN_DEADLINE_MS: "#{WORKER_DRAIN_MS}" }
-  if pool.bundle?
-    env.RIP_BUNDLE_PATH = pool.bundle
-    env.RIP_BROWSER_RUNTIME = state.browserRuntime
-    env.RIP_CLIENT_DIR = join(cfg.appDir, 'app')
-    env.RIP_APP_NAME = cfg.name
-    # The feed surface is watch-only: these envs are what open the
-    # workspace door in the worker (feed routes, workspace: true on the
-    # boot page). Production (watch off) never sets them — production
-    # has no hub and its pages boot plain (Q2, backout charter).
-    if cfg.watch
-      env.RIP_FILES_DIR = state.filesDir
-      env.RIP_MANIFEST_PATH = state.manifestPath
-    env.RIP_BRIDGE_PATH = cfg.bridge if cfg.bridge?
-  proc = Bun.spawn ['bun', state.workerJs],
-    stdout: 'inherit'
-    stderr: 'inherit'
-    stdin: 'ignore'
-    env: env
-  w = { sock, proc, ready: false, spawnedAt: Date.now(), readyAt: null }
-  monitorWorker pool, w
-  w
-
-# Crash respawn — outside reloads only: a retired or superseded pool's exits
-# are expected, and a pool that never published is the boot path's problem.
-monitorWorker = (pool, w) ->
-  do ->
-    code = await w.proc.exited
-    return if state.shuttingDown or pool.retired or pool isnt state.currentPool
-    warn "rip-server: worker exited (code #{code}); respawning"
-    w.ready = false
-    try unlinkSync w.sock
-    publishSocks pool             # crashed sock leaves the registry while down
-    sleep! 250
-    return if state.shuttingDown or pool.retired or pool isnt state.currentPool or state.dirty
-    fresh = spawnWorker(pool)
-    idx = pool.workers.indexOf(w)
-    pool.workers[idx] = fresh if idx >= 0
-    outcome = pollWorker! fresh
-    publishSocks pool if outcome.ok
-  null
-
-pollWorker = (w) ->
-  deadline = Date.now() + BOOT_DEADLINE_MS
-  lastBody = null
-  loop
-    if w.proc.exitCode?
-      return { ok: false, w, error: lastBody or "worker exited with code #{w.proc.exitCode} before ready" }
-    try
-      res = fetch! 'http://worker/ready', { unix: w.sock }
-      if res.status is 200
-        w.ready = true
-        w.readyAt = Date.now()
-        return { ok: true, w }
-      lastBody = res.text!
-      # The worker marks a failed boot on /ready — no point waiting out
-      # the deadline for an import that already threw.
-      if res.headers.get('rip-boot-failed')?
-        return { ok: false, w, error: lastBody }
-    if Date.now() > deadline
-      return { ok: false, w, error: lastBody or 'worker boot deadline expired' }
-    sleep! 25
-
-spawnPool = (artifact, bundle) ->
-  state.poolCounter += 1
-  pool = { n: state.poolCounter, serial: 0, workers: [], polls: [], retired: false, artifact, bundle }
-  for i in [0...cfg.workers]
-    pool.workers.push spawnWorker(pool)
-  pool.polls = pool.workers.map (w) -> pollWorker(w)
-  pool
-
-# Resolves when `need` workers are ready; throws when readiness is impossible.
-awaitReady = (pool, need) ->
-  if need >= pool.polls.length
-    outcomes = Promise.all! pool.polls
-    bad = outcomes.find (o) -> not o.ok
-    throw new Error(bad.error) if bad?
-    return
-  firstReady = new Promise (resolveReady, rejectReady) ->
-    remaining = pool.polls.length
-    firstError = null
-    settleOne = (o) ->
-      if o.ok
-        resolveReady(o)
-      else
-        firstError ?= o.error
-        remaining -= 1
-        rejectReady(new Error(firstError or 'no worker became ready')) if remaining is 0
-    for pr in pool.polls
-      pr.then settleOne
-  await firstReady
-  return
-
-readySocks = (pool) ->
-  out = []
-  for w in pool.workers
-    out.push({ path: w.sock }) if w.ready
-  out
-
-sameList = (a, b) -> JSON.stringify(a) is JSON.stringify(b)
-
-# Awaited full-list PUT for the current pool: late-ready workers join, crashed
-# workers leave. The dirty check applies to every publish.
-publishSocks = (pool) ->
-  enqueue ->
-    return if state.shuttingDown or pool.retired or pool isnt state.currentPool
-    return if state.dirty or state.doorbellPublished
-    list = readySocks(pool)
-    return if sameList(list, state.lastUpstreams)
-    putUpstreams! list
-
-# With readyWhen 1, workers still booting after the first publish each trigger
-# one more awaited full-list PUT as they come ready. A worker whose readiness
-# poll gave up gets killed so the crash monitor can respawn it.
-attachLateJoins = (pool) ->
-  return unless state.readyWhen < pool.workers.length
-  for pr in pool.polls
-    pr.then (o) ->
-      if o.ok
-        publishSocks pool
-      else unless o.w.proc.exitCode?
-        try o.w.proc.kill('SIGTERM')
-  return
-
-# Retire a pool: flat drain grace, SIGTERM, SIGKILL if needed, unlink after
-# exit. Returns the completion promise; callers that must not wait ignore it.
-retirePool = (pool, graceMs = DRAIN_MS) ->
-  return null unless pool? and not pool.retired
-  pool.retired = true
-  do ->
-    sleep! graceMs if graceMs > 0
-    for w in pool.workers
-      try w.proc.kill('SIGTERM')
-    hardKill = setTimeout ->
-      for w in pool.workers
-        try w.proc.kill('SIGKILL') unless w.proc.exitCode?
-    , KILL_MS
-    Promise.all! pool.workers.map (w) -> w.proc.exited
-    clearTimeout hardKill
-    for w in pool.workers
-      try unlinkSync w.sock
-    try unlinkSync pool.artifact if pool.artifact?   # per-epoch, dies with the pool
-    try unlinkSync pool.bundle if pool.bundle?
-    return
-
-scrapPool = (pool) -> retirePool pool, 0
-
-# ==============================================================================
-# The dirty epoch
-# ==============================================================================
-
-# Admission cut: publish the doorbell as the only upstream, then retire the
-# old pool in the background. Idempotent — one doorbell PUT per epoch.
-cutAdmission = ->
-  return if state.doorbellPublished
-  state.doorbellPublished = true
-  oldPool = state.currentPool
-  state.currentPool = null
-  enqueue ->
-    putUpstreams! [{ path: state.bellPath, doorbell: true }]
-    retirePool oldPool if oldPool?
-    null
-
-onContentChange = ->
-  state.bootFailure = null
-  state.dirty = true
-  cutAdmission()
-  kickBoot().catch(-> null) if cfg.eager
-
-# Single-flight: one boot per app at a time; concurrent demand joins it.
-kickBoot = ->
-  return state.bootPromise if state.bootPromise?
-  pr = bootLoop()
-  state.bootPromise = pr
-  # The cleanup chain must swallow the failure itself — `finally` passes a
-  # rejection through, and an unhandled one kills the process.
-  cleanup = pr.finally ->
-    state.bootPromise = null if state.bootPromise is pr
-  cleanup.catch -> null       # the failure is cached; rings read it as 503
-  pr
-
-# Boot from the latest files — build the epoch's artifact, then spawn against
-# it — scrap-at-publish when dirty again, publish via an awaited PUT, repeat
-# while saves keep landing. A build failure takes the exact boot-failure path.
-bootLoop = ->
-  loop
-    state.dirty = false
-    build = null
-    # buildApp advances files + manifest before we know whether this
-    # artifact will publish. Snapshot the registry so a scrap can restore
-    # it — otherwise the manifest would name revs whose bundle file was
-    # unlinked (the silent-stale class on the epoch path).
-    filesBefore = snapshotFiles()
-    try
-      build = buildApp!()
-    catch err
-      revertFilesAndManifest filesBefore
-      continue if state.dirty        # files changed mid-build; the failure may be stale
-      state.bootFailure = err?.message or String(err)
-      warn "rip-server: app build failed: #{state.bootFailure}"
-      throw err
-    if state.dirty                   # saved during the build — this artifact is stale
-      try unlinkSync build.artifact
-      try unlinkSync build.bundle if build.bundle?
-      revertFilesAndManifest filesBefore
-      continue
-    pool = spawnPool(build.artifact, build.bundle)
-    try
-      awaitReady! pool, state.readyWhen
-    catch err
-      scrapPool pool
-      revertFilesAndManifest filesBefore
-      continue if state.dirty        # files changed mid-boot; the failure may be stale
-      state.bootFailure = err?.message or String(err)
-      warn "rip-server: pool boot failed: #{state.bootFailure}"
-      throw err
-    if state.dirty                   # check at publish: never publish a stale pool
-      scrapPool pool
-      revertFilesAndManifest filesBefore
-      continue
-    # The enqueued fn runs behind whatever the writer chain already holds —
-    # a save or a shutdown can land in that gap, so re-check inside the
-    # chain (mirrors publishSocks). The list is computed inside the writer
-    # chain so workers that came ready in the meantime ride the same PUT.
-    enqueue! ->
-      return if state.dirty or state.shuttingDown
-      putUpstreams! readySocks(pool)
-    state.currentPool = pool
-    # A dev-feed frame: only watch-mode pages hold feed sockets, so the
-    # epoch ding is watch-only like the rest of the feed surface.
-    dingEpoch pool.n if state.everServed and cfg.watch
-    state.everServed = true
-    state.doorbellPublished = false
-    attachLateJoins pool
-    if state.dirty                   # saved during the PUT flight — cut again, boot again
-      cutAdmission()
-      continue
-    return
-
-# A pool SWAP is an epoch: every connected page holds pre-swap code, and no
-# ding describes a server change. The manager dings the dev channel with
-# the new epoch so open browsers reload into it — the apply policy for a
-# server change IS the full page reload. Fire-and-forget: a publish failure
-# warns and never blocks the boot (the reload is a courtesy; a manual refresh
-# always works). Hub sockets survive the swap at Janus, so the frame reaches
-# every page the OLD pool served.
-dingEpoch = (n) ->
-  pr = do -> publish! [{ '@': [DEV_CHANNEL], ding: { kind: 'epoch', epoch: n } }]
-  pr.catch (e) -> warn "rip-server: epoch ding publish failed: #{e?.message or e}"
-  return
-
-# ==============================================================================
-# The doorbell
-# ==============================================================================
-
-handleRing = ->
-  if state.shuttingDown                              # never spawn during shutdown
-    return new Response('shutting down', { status: 503 })
-  if state.bootFailure?
-    return new Response(state.bootFailure, { status: 503 })
-  if not state.dirty and not state.doorbellPublished and state.currentPool?
-    return new Response(null, { status: 204 })      # stray ring; pool already live
-  if state.ringWaiters >= WAITER_CAP
-    return new Response('too many held requests', { status: 503, headers: { 'Retry-After': '1' } })
-  state.ringWaiters += 1
-  try
-    outcome = holdBoot! kickBoot()
-    if outcome is 'ok'
-      new Response(null, { status: 204 })            # the sockets PUT's 200 already landed
-    else if outcome is 'timeout'
-      new Response('boot still in progress', { status: 503, headers: { 'Retry-After': '2' } })
-    else
-      new Response(state.bootFailure or outcome.error or 'boot failed', { status: 503 })
-  finally
-    state.ringWaiters -= 1
-
-holdBoot = (bootPr) ->
-  timer = null
-  hold = new Promise (resolveHold) ->
-    timer = setTimeout (-> resolveHold 'timeout'), HOLD_MS
-  outcome = Promise.race! [
-    bootPr.then((-> 'ok'), ((e) -> { error: e?.message or String(e) }))
-    hold
-  ]
-  clearTimeout timer
-  outcome
-
-startDoorbell = ->
-  state.bellPath = join(state.runDir, 'bell.sock')
-  state.bell = Bun.serve
-    unix: state.bellPath
-    fetch: (req) ->
-      url = new URL(req.url)
-      if req.method is 'GET' and url.pathname is '/ring'
-        return handleRing!()
-      new Response('Not Found', { status: 404 })
-
-# ==============================================================================
-# The watcher — bag allowlist *.rip / *.css / *.html, rename-safe via hash gate
-# ==============================================================================
-
-# Editors save temp-then-rename, so event basenames are untrusted. Any
-# non-ignored event just arms the settle timer; the decision comes from
-# hashing the real bag files on disk — identical bytes cost nothing.
-# Project-root main entry (app.rip / index.rip) is included when present;
-# a change there (or anywhere outside app/) takes the epoch path.
-ignoredPath = (rel) ->
-  return false unless rel?
-  for seg in rel.split('/')
-    return true if IGNORED_DIRS.has(seg)
-  false
-
-hashApp = ->
-  files = []
-  walk = (dir) ->
-    entries = []
-    try entries = readdirSync(dir, { withFileTypes: true })
-    for e in entries
-      continue if e.name.startsWith('.') or IGNORED_DIRS.has(e.name)
-      full = join(dir, e.name)
-      if e.isDirectory()
-        walk(full)
-      else if isBagFile(e.name)
-        files.push(full)
-  walk cfg.appDir
-  files.sort()
-  # Per-file hashes feed both the whole-tree gate and (flag on) the
-  # client-only (app/-only) change classification in settle.
-  map = {}
-  hasher = new Bun.CryptoHasher('sha256')
-  for f in files
-    one = new Bun.CryptoHasher('sha256')
-    try one.update readFileSync(f)
-    map[f] = one.digest 'hex'
-    hasher.update f
-    hasher.update map[f]
-  { hash: hasher.digest('hex'), files: map }
-
-# Every changed, added, or removed path lies under app/ (the default
-# client bag) — then the save is a file feed, not a reload. The main
-# server entry lives next to app/ and therefore takes the epoch path.
-clientOnlyChange = (prev, cur) ->
-  boundary = join(cfg.appDir, 'app') + '/'
-  for path, h of cur
-    return false if prev[path] isnt h and not path.startsWith(boundary)
-  for path of prev
-    return false if not cur[path]? and not path.startsWith(boundary)
-  true
-
-settle = ->
-  state.settleTimer = null
-  snap = hashApp()
-  return if snap.hash is state.lastHash
-  prev = state.lastFiles
-  state.lastHash = snap.hash
-  state.lastFiles = snap.files
-  # A save touching only app/ mutates a LIVE pool in place. With no live
-  # pool to feed (admission already cut, a cached boot failure, mid-reload)
-  # the save joins the pending epoch exactly as a server save would.
-  if prev? and state.currentPool? and not state.dirty and not state.bootFailure? and clientOnlyChange(prev, snap.files)
-    onFileChange().catch (e) -> warn "rip-server: file-feed update failed: #{e?.message or e}"
-    return
-  onContentChange()
-
-startWatcher = ->
-  snap = hashApp()
-  state.lastHash = snap.hash
-  state.lastFiles = snap.files
-  state.watcher = watch cfg.appDir, { recursive: true }, (event, filename) ->
-    return if state.shuttingDown or ignoredPath(filename)
-    clearTimeout state.settleTimer if state.settleTimer?
-    state.settleTimer = setTimeout settle, SETTLE_MS
-
-# ==============================================================================
-# The startup report
-# ==============================================================================
-
-# Humanize a value in base units (seconds or bytes) with SI prefixes spanning
-# T G M k (space) m µ n p — fixed width: 3 chars of digits, 1 char of prefix,
-# then the unit. One decimal below 10 (`1.5`), integers from 10 up (` 57`);
-# the no-prefix slot pads with a space so `1.5 s` aligns with `1.5ms`.
-# Scale-down below 0.995, scale-up at 999.5 — rounding promotes across the
-# boundary (9.97 → ` 10`). Zero prints `  0 s`; NaN, negatives, and
-# out-of-range magnitudes print `???` + unit.
-export scale = (value, unit, pad = true) ->
-  if value > 0 and Number.isFinite(value)
-    span = ['T', 'G', 'M', 'k', (if pad then ' ' else ''), 'm', 'µ', 'n', 'p']
-    minSlot = 0
-    maxSlot = span.length - 1
-    slot = 4                      # the no-prefix slot
-    while value < 0.995 and slot <= maxSlot
-      value *= 1000
-      slot++
-    while value >= 999.5 and slot >= minSlot
-      value /= 1000
-      slot--
-    if slot >= minSlot and slot <= maxSlot
-      tens = Math.round(value * 10) / 10
-      nums = if tens >= 10 then Math.round(value).toString() else tens.toFixed(1)
-      nums = nums.padStart(3, ' ') if pad
-      return "#{nums}#{span[slot]}#{unit}"
-  return (if pad then '  0 ' else '0') + unit if value is 0
-  '???' + (if pad then ' ' else '') + unit
-
-serverVersion =! JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8')).version
-
-# The report's ONE color decision: mono (empty codes) when NO_COLOR is set or
-# stdout is not a TTY; ANSI otherwise.
-reportTheme = ->
-  if process.env.NO_COLOR? or not process.stdout.isTTY
-    { d: '', r: '', b: '', c: '', g: '', y: '' }
-  else
-    { d: '\x1b[2m', r: '\x1b[0m', b: '\x1b[1m', c: '\x1b[36m', g: '\x1b[32m', y: '\x1b[33m' }
-
-# Printed once, after the startup boot fully completes: every worker poll has
-# settled, the registration is confirmed, and the upstreams PUT has landed.
-# The registration facts are READ BACK from the control plane (GET /1.0 and
-# GET /1.0/apps/{id}) so the report states what JANUS holds, not what this
-# manager sent; a failed read-back is reported as a failure, never as success.
-startupReport = ->
-  pool = state.currentPool
-  outcomes = if pool? then Promise.all! pool.polls else []
-
-  plane = null
-  planeErr = null
-  reg = null
-  regErr = null
-  # Read-backs ride the writer chain so they observe every PUT already sent
-  # (late-join publishes included), never a half-published pool.
-  enqueue! ->
-    try
-      res = cfetch! 'GET', '/1.0'
-      if res.status is 200
-        plane = res.json!
-      else
-        planeErr = "GET /1.0 → #{res.status}"
-    catch e
-      planeErr = e?.message or String(e)
-    try
-      res = cfetch! 'GET', "/1.0/apps/#{state.appId}"
-      if res.status is 200
-        reg = res.json!
-      else
-        regErr = "GET /1.0/apps/#{state.appId} → #{res.status}"
-    catch e
-      regErr = e?.message or String(e)
-
-  { d, r, b, c, g, y } = reportTheme()
-  label = (name) -> "#{d}#{name}#{r}" + ' '.repeat(9 - name.length)
-  target = if state.controlUnix? then "unix:#{state.controlUnix}" else state.controlBase
-
-  lines = []
-  lines.push ''
-  lines.push "  #{b}rip server#{r} #{d}v#{serverVersion}#{r}"
-  lines.push ''
-  lines.push "  #{label('app')}#{cfg.name} #{d}(#{state.appId})#{r}"
-  if plane?
-    lines.push "  #{label('control')}#{c}#{target}#{r} #{d}— #{plane.type} #{plane.api_version}#{r}"
-  else
-    lines.push "  #{label('control')}#{c}#{target}#{r} #{d}—#{r} #{y}read-back failed (#{planeErr})#{r}"
-  # The bridge line states what janus holds (GET /1.0/apps/{id} returns
-  # bridge_path), never merely what this manager sent.
-  if cfg.bridge?
-    if reg?
-      if reg.bridge_path is cfg.bridge
-        lines.push "  #{label('bridge')}#{reg.bridge_path}"
-      else
-        lines.push "  #{label('bridge')}#{y}read-back mismatch (janus holds #{JSON.stringify(reg.bridge_path ?? null)})#{r}"
-    else
-      lines.push "  #{label('bridge')}#{y}read-back failed (#{regErr})#{r}"
-  lines.push "  #{label('workers')}#{cfg.workers}"
-  lines.push "  #{label('watch')}#{if cfg.watch then "*.rip#{if cfg.eager then ', eager' else ''}" else "#{y}off#{r}"}"
-
-  if outcomes.length > 0
-    lines.push ''
-    width = 0
-    width = Math.max(width, o.w.sock.length) for o in outcomes
-    for o, i in outcomes
-      sock = o.w.sock.padEnd(width)
-      if o.ok
-        lines.push "  #{g}✓#{r} worker #{i + 1}   #{sock}   #{d}#{scale((o.w.readyAt - o.w.spawnedAt) / 1000, 's')}#{r}"
-      else
-        lines.push "  #{y}✗#{r} worker #{i + 1}   #{sock}   #{y}#{o.error}#{r}"
-
-  lines.push ''
-  if reg?
-    held = reg.upstreams?.length or 0
-    lines.push "  #{d}registered#{r}  #{held} upstream#{if held is 1 then '' else 's'} published, heartbeating every #{scale(HEARTBEAT_MS / 1000, 's', false)}"
-  else
-    lines.push "  #{d}registered#{r}  #{y}read-back failed (#{regErr})#{r}"
-
-  ready = outcomes.filter((o) -> o.ok).length
-  lines.push ''
-  if reg?
-    lines.push "  #{g}#{b}→#{r} #{g}#{cfg.name} registered with janus, #{ready} worker#{if ready is 1 then '' else 's'} ready#{r}"
-  else
-    lines.push "  #{y}#{b}→#{r} #{y}#{cfg.name} up, #{ready} worker#{if ready is 1 then '' else 's'} ready — registration read-back failed#{r}"
-  lines.push ''
-  p lines.join('\n')
-
-# ==============================================================================
-# Startup and shutdown
-# ==============================================================================
-
-# Signal listeners receive the signal name as the first argument; a direct
-# call carries none and logs as a plain shutdown.
-shutdown = (reason) ->
-  return if state.shuttingDown
-  state.shuttingDown = true
-  p "rip-server: #{reason or 'shutdown'} — deregistering #{cfg.name} (#{state.appId}), draining workers"
-  try state.watcher?.close()
-  clearTimeout state.settleTimer if state.settleTimer?
-  clearInterval state.hbTimer if state.hbTimer?
-  pool = state.currentPool
-  state.currentPool = null
-  enqueue! -> putUpstreams! []       # bare empty list: down on purpose
-  drained = retirePool(pool)
-  await drained if drained?
-  enqueue! -> deleteApp!()
-  try state.bell?.stop(true)
-  try rmSync state.runDir, { recursive: true, force: true }
-  exit 0
+import { randomBytes } from 'node:crypto'
+import { rash } from '@rip-lang/app/rash'
+import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
+
+positiveEnv = (name, fallback) ->
+  text = process.env[name] or String(fallback)
+  value = parseInt text
+  abort "rip-server: #{name} must be an integer greater than zero" unless Number.isFinite(value) and value > 0 and String(value) is text
+  value
+
+HEARTBEAT_MS = positiveEnv 'RIP_HEARTBEAT_MS', 5000
+READY_MS = positiveEnv 'RIP_BOOT_DEADLINE_MS', 30000
+# Janus retains a dead manager's claim for its 15-second heartbeat TTL and
+# reaps on a TTL/3 sweep. A 30-second retry window covers that worst case plus
+# the capped retry spacing without turning a genuinely foreign claim infinite.
+REGISTER_409_MS = positiveEnv 'RIP_REGISTER_409_MS', 30000
 
 parseArgs = (argv) ->
-  args = { entry: null, name: null, hosts: [], bridge: null, workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, control: process.env.JANUS_CONTROL or null }
-  i = 0
+  command = if ['browse', 'status', 'hold', 'release', 'migrate', 'recover'].includes(argv[0]) then argv[0] else 'start'
+  args: any = { command, entry: null, migrationEntry: null, migrationDir: 'migrations', operationId: null, name: null, hosts: [], control: process.env.JANUS_CONTROL or null, workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, untilRestart: false, accessMode: 'pretty', accessPicture: null, accessExplicit: false, startupFlags: [] }
+  i = if command is 'start' then 0 else 1
   while i < argv.length
-    a = argv[i]
-    nextValue = ->
-      i += 1
-      abort "rip-server: #{a} requires a value" if i >= argv.length
+    value = argv[i]
+    take = ->
+      i++
+      abort "rip-server: #{value} requires a value" if i >= argv.length
       argv[i]
-    switch a
-      when '--name' then args.name = nextValue()
-      when '--host' then args.hosts.push nextValue()
-      when '--bridge'
-        raw = nextValue()
-        abort "rip-server: --bridge takes a /-prefixed path, got #{raw}" unless raw.startsWith('/')
-        args.bridge = raw
+    switch value
+      when '--name'
+        abort 'rip-server: --name does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.name = take()
+      when '--host'
+        args.startupFlags.push value
+        args.hosts.push take()
+      when '--control'
+        args.startupFlags.push value
+        args.control = take()
+      when '--watch'
+        abort 'rip-server: --watch does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.watch = true
+      when '--no-watch'
+        abort 'rip-server: --no-watch does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.watch = false
+      when '--allow-watch'
+        abort 'rip-server: --allow-watch does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.allowWatch = true
+      when '--eager'
+        abort 'rip-server: --eager does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.eager = true
+      when '--until-restart'
+        abort 'rip-server: --until-restart only applies to browse' unless command is 'browse'
+        args.untilRestart = true
+      when '--access-format'
+        args.accessExplicit = true
+        args.accessPicture = take()
+      when '--dir'
+        abort 'rip-server: --dir only applies to migrate' unless command is 'migrate'
+        args.migrationDir = take()
+      when '--id'
+        abort 'rip-server: --id only applies to migrate' unless command is 'migrate'
+        args.operationId = take()
+        abort 'rip-server: --id requires exactly 32 lowercase hex characters' unless /^[a-f0-9]{32}$/.test(args.operationId)
       when '--workers', '-w'
-        args.workers = parseInt(nextValue())
-        abort "rip-server: --workers takes a positive integer" unless Number.isFinite(args.workers) and args.workers >= 1
+        abort "rip-server: #{value} does not apply to browse" if command is 'browse'
+        args.startupFlags.push value
+        text = take()
+        args.workers = parseInt text
+        abort 'rip-server: --workers must be an integer greater than zero' unless Number.isFinite(args.workers) and args.workers > 0 and String(args.workers) is text
       when '--concurrency', '-c'
-        raw = nextValue()
-        args.concurrency = parseInt(raw)
-        abort "rip-server: --concurrency takes an integer >= 1, got #{raw}" unless Number.isFinite(args.concurrency) and args.concurrency >= 1 and String(args.concurrency) is raw
-      when '--watch' then args.watch = true
-      when '--no-watch' then args.watch = false
-      when '--allow-watch' then args.allowWatch = true
-      when '--eager' then args.eager = true
-      when '--control' then args.control = nextValue()
+        abort "rip-server: #{value} does not apply to browse" if command is 'browse'
+        args.startupFlags.push value
+        text = take()
+        args.concurrency = parseInt text
+        abort 'rip-server: --concurrency must be an integer greater than zero' unless Number.isFinite(args.concurrency) and args.concurrency > 0 and String(args.concurrency) is text
       when '--help', '-h'
-        p USAGE
+        p 'usage: rip server [project] [options] | rip server browse <directory> [--host HOST] [--until-restart] | rip server migrate [migration-entry] [--dir DIR] [--id 32hex] | rip server recover <operation-id>'
         exit 0
       else
-        abort "rip-server: unknown option #{a}\n\n#{USAGE}" if a.startsWith('-')
-        abort "rip-server: multiple app entries (#{args.entry} and #{a})" if args.entry?
-        args.entry = a
-    i += 1
+        if value.startsWith '--access-log='
+          args.accessExplicit = true
+          args.accessMode = value.slice '--access-log='.length
+          abort 'rip-server: --access-log must be pretty, raw, or off' unless args.accessMode in ['pretty', 'raw', 'off']
+        else
+          abort "rip-server: unknown option #{value}" if value.startsWith '-'
+          if command is 'migrate'
+            abort "rip-server: multiple migration entries (#{args.migrationEntry} and #{value})" if args.migrationEntry?
+            args.migrationEntry = value
+          else if command is 'recover'
+            abort 'rip-server: recover takes exactly one operation id' if args.operationId?
+            args.operationId = value
+          else if command is 'browse'
+            abort 'rip-server: browse takes exactly one directory' if args.entry?
+            args.entry = value
+          else
+            abort "rip-server: multiple app entries (#{args.entry} and #{value})" if args.entry?
+            args.entry = value
+    i++
+  abort 'rip-server: recover requires an operation id' if command is 'recover' and not args.operationId?
+  abort 'rip-server: recover operation id must be exactly 32 lowercase hex characters' if command is 'recover' and not /^[a-f0-9]{32}$/.test(args.operationId)
+  abort 'rip-server: --access-format only applies with --access-log=pretty' if args.accessPicture? and args.accessMode isnt 'pretty'
+  abort 'rip-server: explicit access flags conflict with browse --until-restart' if args.untilRestart and args.accessExplicit
+  abort "rip-server: access flags do not apply to #{command}" if args.accessExplicit and command not in ['start', 'browse']
+  abort "rip-server: #{command} does not accept startup options: #{args.startupFlags.join(', ')}" if command not in ['start', 'browse'] and args.startupFlags.length
+  if args.accessPicture?
+    try
+      parseAccessPicture args.accessPicture
+    catch error
+      abort "rip-server: #{error?.message or error}"
+  abort 'rip-server: browse requires exactly one directory' if command is 'browse' and not args.entry?
   args
 
-resolveEntry = (given) ->
-  if given?
-    full = resolve(given)
-    abort "rip-server: app entry not found: #{given}" unless existsSync(full)
-    if statSync(full).isDirectory()
-      for cand in ['app.rip', 'index.rip']
-        inner = join(full, cand)
-        return inner if existsSync(inner)
-      abort "rip-server: #{given} has no app.rip or index.rip"
-    return full
-  for cand in ['app.rip', 'index.rip']
-    full = resolve(cand)
-    return full if existsSync(full)
-  abort "rip-server: no app entry — pass one, or create ./app.rip or ./index.rip"
+controlFetch = (target, method, path, body = null) ->
+  options = { method }
+  if body?
+    options.body = JSON.stringify body
+    options.headers = { 'content-type': 'application/json' }
+  if target.startsWith('http://') or target.startsWith('https://')
+    fetch "#{target}#{path}", options
+  else
+    options.unix = target
+    fetch "http://janus#{path}", options
+
+loaderDir = ->
+  preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
+  abort 'rip-server: the Rip loader is missing' unless preload?
+  dirname resolve(preload.slice('--preload='.length))
+
+generate = (entry, artifact, reportPath, taskId) ->
+  preload = "--preload=#{join(loaderDir(), 'loader.js')}"
+  proc = Bun.spawn [process.execPath, preload, join(import.meta.dir, 'generate.rip'), entry, artifact, reportPath, taskId, '0'],
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'pipe'
+  stderrText = new Response(proc.stderr).text()
+  code = await proc.exited
+  diagnostic = await stderrText
+  throw new Error(diagnostic.trim() or "generation #{taskId} exited #{code}") unless code is 0
+  JSON.parse readFileSync(reportPath, 'utf8')
+
+resolveProject = (input) ->
+  if input?
+    given = resolve input
+    abort "rip-server: project not found: #{input}" unless existsSync given
+    path = realpathSync given
+    unless statSync(path).isDirectory()
+      root = dirname path
+      return { root, entry: path, appRoot: (if existsSync(join(root, 'app')) then join(root, 'app') else null) }
+    starts = [path]
+  else
+    starts = []
+    at = realpathSync process.cwd()
+    loop
+      starts.push at
+      parent = dirname at
+      break if parent is at
+      at = parent
+  for root in starts
+    entry = null
+    for name in ['app.rip', 'index.rip']
+      candidate = join root, name
+      if existsSync candidate
+        entry = realpathSync candidate
+        break
+    appRoot = join root, 'app'
+    return { root, entry, appRoot: (if existsSync(appRoot) then realpathSync(appRoot) else null) } if entry? or existsSync(appRoot)
+  if input?
+    abort "rip-server: #{input} has no API entry or app/ directory"
+  abort 'rip-server: no App — pass a project, or create app.rip, index.rip, or app/ here or above'
+
+isRecord = (value) ->
+  value? and typeof value is 'object' and not Array.isArray(value)
+
+invalidServe = (message) ->
+  throw new Error "rip-server: #{message}"
+
+rejectUnknown = (value, allowed, at) ->
+  invalidServe "#{at} must be an object" unless isRecord value
+  for key of value
+    invalidServe "unknown #{at} key #{JSON.stringify(key)}" unless allowed.includes key
+
+needString = (value, at) ->
+  invalidServe "#{at} must be a non-empty string" unless typeof value is 'string' and value.length > 0 and value.trim() is value
+  value
+
+validHost = (host) ->
+  return false if host.length > 253 or host.includes(':') or host.includes('/') or host.includes(' ')
+  labels = host.split '.'
+  return false if labels.some (label) -> label.length is 0 or label.length > 63
+  labels.every (label) -> /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test label
+
+siteTemplate = (value, at) ->
+  value = needString value, at
+  invalidServe "#{at} must contain exactly one {site}" unless value.split('{site}').length is 2
+  invalidServe "#{at} contains a malformed template" if /[{}]/.test value.replace('{site}', '')
+  invalidServe "#{at} must have the form {site}.<hostname>" unless value.startsWith '{site}.'
+  value
+
+pathTemplate = (value, at) ->
+  value = needString value, at
+  invalidServe "#{at} must be relative to the app" if value.startsWith '/'
+  invalidServe "#{at} must use / path separators" if value.includes '\\'
+  segments = value.split '/'
+  invalidServe "#{at} must be a clean relative path" if segments.some (part) -> part is '' or part is '.' or part is '..'
+  invalidServe "#{at} contains a malformed template" if /[{}]/.test value.replace('{site}', '')
+  count = value.split('{site}').length - 1
+  invalidServe "#{at} may contain {site} at most once" if count > 1
+  if count is 1
+    invalidServe "#{at} must use {site} as a complete path segment" unless segments.includes '{site}'
+  { value, dynamic: count is 1 }
+
+requireDir = (path, at) ->
+  invalidServe "#{at} directory not found: #{path}" unless existsSync path
+  invalidServe "#{at} is not a directory: #{path}" unless statSync(path).isDirectory()
+
+requireFile = (path, at) ->
+  invalidServe "#{at} file not found: #{path}" unless existsSync path
+  invalidServe "#{at} is not a file: #{path}" unless statSync(path).isFile()
+
+normalizeServeConfig = (raw, appDir) ->
+  rejectUnknown raw, ['name', 'hosts', 'sites', 'files'], 'serve.rip'
+  out = {}
+  out.name = needString(raw.name, 'serve.rip name') if raw.name?
+  if raw.hosts?
+    invalidServe 'serve.rip hosts must be a non-empty array' unless Array.isArray(raw.hosts) and raw.hosts.length > 0
+    out.hosts = raw.hosts.map (host, i) ->
+      host = needString host, "serve.rip hosts[#{i}]"
+      invalidServe "serve.rip hosts[#{i}] is not a valid host: #{host}" unless validHost host
+      host
+  if raw.sites?
+    invalidServe 'serve.rip cannot define both hosts and sites' if raw.hosts?
+    rejectUnknown raw.sites, ['host', 'dir', 'aliases'], 'serve.rip sites'
+    host = siteTemplate raw.sites.host, 'serve.rip sites.host'
+    invalidServe "serve.rip sites.host is not a valid host template: #{host}" unless validHost host.replace('{site}', 'tenant')
+    dirValue = pathTemplate raw.sites.dir, 'serve.rip sites.dir'
+    invalidServe 'serve.rip sites.dir cannot contain a template' if dirValue.dynamic
+    siteDir = resolve appDir, dirValue.value
+    requireDir siteDir, 'serve.rip sites.dir'
+    aliases = raw.sites.aliases ?? {}
+    invalidServe 'serve.rip sites.aliases must be an object' unless isRecord aliases
+    normalizedAliases = {}
+    for alias, site of aliases
+      invalidServe "serve.rip sites.aliases has an invalid host: #{alias}" unless validHost alias
+      site = needString site, "serve.rip sites.aliases.#{alias}"
+      invalidServe "serve.rip sites.aliases.#{alias} is not a valid site name: #{site}" unless /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(site) and site isnt 'common'
+      normalizedAliases[alias] = site
+    out.site = { host, dir: siteDir, aliases: normalizedAliases }
+  if raw.files?
+    rejectUnknown raw.files, ['roots', 'proxyFirst', 'shell'], 'serve.rip files'
+    roots = raw.files.roots
+    invalidServe 'serve.rip files.roots must be a non-empty array' unless Array.isArray(roots) and roots.length > 0
+    normalizedRoots = roots.map (root, i) ->
+      cache = 'revalidate'
+      browse = false
+      if isRecord root
+        rejectUnknown root, ['path', 'cache', 'browse'], "serve.rip files.roots[#{i}]"
+        if 'cache' of root
+          cache = needString root.cache, "serve.rip files.roots[#{i}].cache"
+          invalidServe "serve.rip files.roots[#{i}].cache must be never, revalidate, or forever" unless ['never', 'revalidate', 'forever'].includes cache
+        if 'browse' of root
+          invalidServe "serve.rip files.roots[#{i}].browse must be a Boolean" unless typeof root.browse is 'boolean'
+          browse = root.browse
+        root = root.path
+      parsed = pathTemplate root, "serve.rip files.roots[#{i}]"
+      full = resolve appDir, parsed.value
+      if parsed.dynamic
+        segments = parsed.value.split '/'
+        prefix = segments.slice(0, segments.indexOf('{site}')).join '/'
+        requireDir resolve(appDir, prefix or '.'), "serve.rip files.roots[#{i}] static prefix"
+      else
+        requireDir full, "serve.rip files.roots[#{i}]"
+      normalized = { path: full, cache }
+      normalized.browse = true if browse
+      normalized
+    proxyFirst = raw.files.proxyFirst ?? []
+    invalidServe 'serve.rip files.proxyFirst must be an array' unless Array.isArray proxyFirst
+    normalizedProxy = proxyFirst.map (path, i) ->
+      path = needString path, "serve.rip files.proxyFirst[#{i}]"
+      invalidServe "serve.rip files.proxyFirst[#{i}] must be a clean /-prefixed path" unless path.startsWith('/') and not path.includes('?') and not path.includes('#') and not path.includes('\\') and (path is '/' or not path.endsWith('/')) and not path.split('/').some((part) -> part is '.' or part is '..')
+      path
+    for prefix, i in normalizedProxy
+      for prior in normalizedProxy.slice 0, i
+        overlaps = prefix is '/' or prior is '/' or prefix is prior or prefix.startsWith("#{prior}/") or prior.startsWith("#{prefix}/")
+        invalidServe "serve.rip files.proxyFirst entries overlap: #{prior} and #{prefix}" if overlaps
+    shell = null
+    if 'shell' of raw.files
+      shellValue = pathTemplate raw.files.shell, 'serve.rip files.shell'
+      invalidServe 'serve.rip files.shell cannot contain a template' if shellValue.dynamic
+      shell = resolve appDir, shellValue.value
+      requireFile shell, 'serve.rip files.shell'
+    else
+      allBrowsable = normalizedRoots.every (root) -> root.browse is true
+      invalidServe 'serve.rip files.shell is required unless every root is browsable and proxyFirst is empty' unless allBrowsable and normalizedProxy.length is 0
+    out.files = { roots: normalizedRoots, proxy_first: normalizedProxy }
+    out.files.shell = shell if shell?
+  invalidServe 'serve.rip sites requires files' if out.site? and not out.files?
+  out
+
+loadServeConfig = (appDir) ->
+  configPath = join appDir, 'serve.rip'
+  return null unless existsSync configPath
+  requireFile configPath, 'serve.rip config'
+  mod = null
+  try
+    mod = import!(configPath)
+  catch error
+    invalidServe "cannot load #{configPath}: #{error?.message or error}"
+  invalidServe "#{configPath} must export default an object" unless isRecord mod?.default
+  normalizeServeConfig mod.default, appDir
+
+probeControl = (target) ->
+  try
+    controlFetch! target, 'GET', '/1.0'
+  catch error
+    abort "rip-server: control endpoint unreachable at #{target}: #{error?.message or error}"
+
+defaultBrowseHost = ->
+  "browse-#{randomBytes(6).toString('hex')}.localhost"
+
+runBrowse = (args) ->
+  directory = resolve args.entry
+  abort "rip-server: browse directory not found: #{args.entry}" unless existsSync directory
+  abort "rip-server: browse path is not a directory: #{args.entry}" unless statSync(directory).isDirectory()
+  directory = realpathSync directory
+  abort 'rip-server: browse accepts at most one --host' if args.hosts.length > 1
+  explicitHost = args.hosts[0] ?? null
+  abort "rip-server: browse host is not valid: #{explicitHost}" if explicitHost? and not validHost(explicitHost)
+  abort 'rip-server: --control or JANUS_CONTROL is required' unless args.control?
+  probeControl! args.control
+  earlySignalStatus = null
+  earlySignalCount = 0
+  earlyStop = (signal) ->
+    earlySignalCount++
+    number = if signal is 'SIGINT' then 2 else 15
+    exit(128 + number) if earlySignalCount > 1
+    earlySignalStatus = 128 + number
+  process.on 'SIGINT', earlyStop
+  process.on 'SIGTERM', earlyStop
+
+  bodyFor = (host) ->
+    name: 'browse'
+    hosts: [host]
+    upstreams: []
+    lease: if args.untilRestart then 'process' else 'heartbeat'
+    files:
+      roots: [{ path: directory, cache: 'revalidate', browse: true }]
+      proxy_first: []
+
+  host = explicitHost or defaultBrowseHost()
+  retries = 0
+  registration = null
+  loop
+    response = controlFetch! args.control, 'POST', '/1.0/apps', bodyFor(host)
+    if response.status is 201
+      registration = response.json!()
+      abort 'rip-server: Janus registration returned no app id' unless registration?.id?
+      break
+    if response.status is 409 and not explicitHost? and retries < 5
+      retries++
+      host = defaultBrowseHost()
+      continue
+    detail = try response.text! catch then ''
+    if response.status is 409
+      abort "rip-server: browse host already claimed at the control plane (409): #{host}"
+    abort "rip-server: browse registration failed (#{response.status})#{if detail then ": #{detail}" else ''}"
+  if earlySignalStatus?
+    try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registration.id}"
+    process.off 'SIGINT', earlyStop
+    process.off 'SIGTERM', earlyStop
+    return earlySignalStatus
+
+  output = (text) ->
+    stream = if args.accessMode is 'raw' then process.stderr else process.stdout
+    writeAccessOutput! stream, "#{text}\n"
+  url = "https://#{host}/"
+  try
+    if args.untilRestart
+      output! "id: #{registration.id}"
+      output! "url: #{url}"
+      output! "delete: DELETE /1.0/apps/#{registration.id} on #{args.control}"
+      process.off 'SIGINT', earlyStop
+      process.off 'SIGTERM', earlyStop
+      return 0
+    output! url
+  catch error
+    try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registration.id}"
+    process.off 'SIGINT', earlyStop
+    process.off 'SIGTERM', earlyStop
+    warn "rip-server: browse output failure: #{error?.message or error}"
+    return 1
+  if earlySignalStatus?
+    try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registration.id}"
+    process.off 'SIGINT', earlyStop
+    process.off 'SIGTERM', earlyStop
+    return earlySignalStatus
+
+  stopping = false
+  status = 0
+  heartbeat = null
+  heartbeatTask = null
+  access = null
+  finish = null
+  finished = new Promise (done) -> finish = done
+  stop = (signal = null, failure = null) ->
+    return if stopping
+    stopping = true
+    status = if failure? then 1 else if signal is 'SIGINT' then 130 else if signal is 'SIGTERM' then 143 else 0
+    clearInterval heartbeat if heartbeat?
+    do ->
+      try await heartbeatTask if heartbeatTask?
+      try await access?.stop()
+      try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registration.id}"
+      finish! status
+    return
+  onSigint = -> stop 'SIGINT'
+  onSigterm = -> stop 'SIGTERM'
+  process.on 'SIGINT', onSigint
+  process.on 'SIGTERM', onSigterm
+  process.off 'SIGINT', earlyStop
+  process.off 'SIGTERM', earlyStop
+  unless args.accessMode is 'off'
+    access = new AccessClient
+      mode: args.accessMode
+      picture: args.accessPicture
+      control: (if args.control.startsWith('http://') or args.control.startsWith('https://') then { base: args.control } else { unix: args.control })
+    access.move(registration.id).catch (error) ->
+      unless stopping
+        warn "rip-server: terminal access output failure: #{error?.message or error}"
+        stop null, error
+  beat = ->
+    return if stopping or heartbeatTask?
+    heartbeatTask = do ->
+      try
+        response = controlFetch! args.control, 'POST', "/1.0/apps/#{registration.id}/heartbeat"
+        return if stopping
+        if response.status is 404
+          fresh = controlFetch! args.control, 'POST', '/1.0/apps', bodyFor(host)
+          if fresh.status is 201
+            registration = fresh.json!()
+            abort 'rip-server: Janus registration returned no app id' unless registration?.id?
+            access?.move(registration.id).catch (error) ->
+              unless stopping
+                warn "rip-server: terminal access output failure: #{error?.message or error}"
+                stop null, error
+          else
+            warn "rip-server: browse re-registration failed (#{fresh.status})"
+        else unless response.ok
+          warn "rip-server: browse heartbeat failed (#{response.status})"
+      catch error
+        warn "rip-server: browse heartbeat failed: #{error?.message or error}" unless stopping
+      finally
+        heartbeatTask = null
+    heartbeatTask
+  heartbeat = setInterval beat, HEARTBEAT_MS
+  result = await finished
+  process.off 'SIGINT', onSigint
+  process.off 'SIGTERM', onSigterm
+  result
+
+fsyncDirectory = (path) ->
+  fd = openSync path, 'r'
+  try
+    fsyncSync fd
+  finally
+    closeSync fd
+
+durableWrite = (path, bytes) ->
+  fd = openSync path, 'w', 0o600
+  try
+    writeFileSync fd, bytes
+    fsyncSync fd
+  finally
+    closeSync fd
+
+writeOperation = (path, record) ->
+  directory = dirname path
+  existed = existsSync directory
+  mkdirSync directory, { recursive: true, mode: 0o700 }
+  temporary = "#{path}.tmp"
+  durableWrite temporary, JSON.stringify(record)
+  renameSync temporary, path
+  fsyncDirectory directory
+  fsyncDirectory dirname(directory) unless existed
+  record
+
+clearOperation = (path) ->
+  unlinkSync path
+  fsyncDirectory dirname(path)
+
+readOperation = (path) ->
+  return null unless existsSync path
+  record = null
+  try
+    record = JSON.parse readFileSync(path, 'utf8')
+  catch error
+    abort "rip-server: malformed operation journal at #{path}: #{String(error)}"
+  valid = record? and typeof record is 'object' and not Array.isArray(record) and record.version is 1 and /^[a-f0-9]{32}$/.test(record.id or '') and typeof record.phase is 'string' and typeof record.targetArtifact is 'string'
+  abort "rip-server: malformed operation journal at #{path}" unless valid
+  record
+
+writeAtomic = (path, text) ->
+  current = if existsSync(path) then readFileSync(path, 'utf8') else null
+  return false if current is text
+  tmp = "#{path}.tmp"
+  writeFileSync tmp, text
+  renameSync tmp, path
+  true
+
+escapeHtml = (value) ->
+  String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+
+appModules = (appRoot) ->
+  modules = {}
+  moduleFiles = {}
+  entries = []
+  walk = (directory, prefix) ->
+    for entry in readdirSync(directory, { withFileTypes: true })
+      continue if entry.name.startsWith '.'
+      path = join directory, entry.name
+      if entry.isDirectory()
+        walk path, "#{prefix}#{entry.name}/"
+      else if entry.name.endsWith('.rip') or entry.name.endsWith('.css') or entry.name.endsWith('.html')
+        id = "#{prefix}#{entry.name}"
+        bytes = readFileSync path
+        entries.push { id, hash: rash(bytes) }
+        if entry.name.endsWith '.rip'
+          modules[id] = bytes.toString 'utf8'
+          moduleFiles[id] = path
+  walk appRoot, 'app/'
+  entries.sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
+  inventory = JSON.stringify entries.map (entry) -> [entry.id, entry.hash]
+  { modules, moduleFiles, entries, rash: rash(new TextEncoder().encode(inventory)) }
+
+sourceRashes = (paths) ->
+  paths.map (path) -> { path, hash: (if existsSync(path) then rash(readFileSync(path)) else null) }
+
+buildAppDocuments = (project, includeManifest) ->
+  { assembleBundle } = import!(join(loaderDir(), 'bundle.js'))
+  graph = appModules project.appRoot
+  bundle = assembleBundle
+    modules: graph.modules
+    moduleFiles: graph.moduleFiles
+    appDir: project.root
+    packagesDir: join(loaderDir(), '..', 'packages')
+  bundle.files = graph.entries
+  bundle.rash = graph.rash
+  {
+    graph
+    bundle: JSON.stringify(bundle)
+    manifest: (if includeManifest then JSON.stringify({ rash: graph.rash, files: graph.entries }) else null)
+  }
+
+commitAppDocuments = (project, documents) ->
+  generated = join project.root, 'static', 'generated'
+  mkdirSync generated, { recursive: true }
+  writeAtomic join(generated, 'bundle.json'), documents.bundle
+  writeAtomic join(generated, 'manifest.json'), documents.manifest if documents.manifest?
+
+writeAppDocuments = (project, includeManifest) ->
+  documents = buildAppDocuments! project, includeManifest
+  commitAppDocuments project, documents
+  documents.graph
+
+publishApp = (project, name, includeManifest, documents = undefined, declaredShell = null) ->
+  return null unless project.appRoot?
+  generated = join project.root, 'static', 'generated'
+  mkdirSync join(generated, '@rip'), { recursive: true }
+  graph = null
+  if documents is undefined
+    graph = writeAppDocuments! project, includeManifest
+  else if documents?
+    commitAppDocuments project, documents
+    graph = documents.graph
+  runtime = join(loaderDir(), '..', 'dist', 'browser', 'rip.js')
+  abort "rip-server: browser runtime missing at #{runtime}" unless existsSync runtime
+  copyFileSync runtime, join(generated, '@rip', 'rip.js')
+
+  authoredShell = join project.appRoot, 'index.html'
+  shell = declaredShell or authoredShell
+  unless declaredShell? or existsSync authoredShell
+    shell = join generated, 'index.html'
+    writeAtomic shell, """
+    <!doctype html>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>#{escapeHtml(name)}</title>
+    <div id="app"></div>
+    <script type="module">
+      import { bootApp } from '/@rip/rip.js'
+      bootApp({ url: '/bundle.json'#{if includeManifest then ', workspace: true' else ''} })
+    </script>
+    """
+
+  roots = [
+    { path: generated, cache: 'revalidate' }
+    { path: project.appRoot, cache: 'never' }
+  ]
+  { files: { roots, proxy_first: (if project.entry? then ['/api'] else []), shell }, graph }
+
+registrationFiles = (project, declared, publication) ->
+  generated = join project.root, 'static', 'generated'
+  try
+    mkdirSync generated, { recursive: true }
+    invalidServe "generated root is not a directory: #{generated}" unless statSync(generated).isDirectory()
+  catch error
+    invalidServe "generated root is not writable at #{generated}: #{error?.message or error}"
+  if declared?
+    terminal = not declared.shell? and declared.proxy_first.length is 0 and declared.roots.every (root) -> root.browse is true
+    return declared if terminal
+    files =
+      roots: [{ path: generated, cache: 'revalidate' }, ...declared.roots]
+      proxy_first: declared.proxy_first
+    files.shell = declared.shell if declared.shell?
+    return files
+  roots = [{ path: generated, cache: 'revalidate' }]
+  publicRoot = join project.root, 'public'
+  roots.push { path: publicRoot, cache: 'revalidate' } if existsSync(publicRoot) and statSync(publicRoot).isDirectory()
+  roots.push { path: project.appRoot, cache: 'never' } if project.appRoot?
+  files =
+    roots: roots
+    proxy_first: if project.entry? then ['/api'] else []
+  files.shell = publication.files.shell if publication?
+  files
+
+waitReady = (proc, socket) ->
+  deadline = Date.now() + READY_MS
+  loop
+    throw new Error("worker exited with code #{proc.exitCode} before readiness") if proc.exitCode?
+    response = null
+    try
+      options = { unix: socket }
+      response = await fetch 'http://worker/ready', options
+    if response?
+      return if response.status is 200
+      if response.headers.has 'rip-boot-failed'
+        throw new Error(await response.text())
+    throw new Error('worker readiness deadline expired') if Date.now() >= deadline
+    await new Promise (done) -> setTimeout done, 25
+
+stopWorker = (proc) ->
+  return unless proc?
+  proc.kill 'SIGTERM' unless proc.exitCode?
+  deadline = Date.now() + 5000
+  while not proc.exitCode? and Date.now() < deadline
+    await new Promise (done) -> setTimeout done, 10
+  proc.kill 'SIGKILL' unless proc.exitCode?
+  await proc.exited
+
+killWorker = (proc) ->
+  proc.kill 'SIGKILL' unless proc.exitCode?
+  await proc.exited
+
+managerRuntime = (root) ->
+  abort 'rip-server: manager control requires a POSIX user identity' unless typeof process.getuid is 'function'
+  uid = process.getuid()
+  key = new Bun.CryptoHasher('sha256').update(root).digest('hex').slice 0, 16
+  directory = join tmpdir(), "rip-managers-#{uid}"
+  try
+    mkdirSync directory, { mode: 0o700 }
+  catch error
+    throw error unless error?.code is 'EEXIST'
+  info = lstatSync directory
+  abort "rip-server: unsafe manager runtime path (not a directory): #{directory}" unless info.isDirectory() and not info.isSymbolicLink()
+  abort "rip-server: unsafe manager runtime ownership at #{directory}" unless info.uid is uid
+  mode = info.mode & 0o777
+  abort "rip-server: unsafe manager runtime permissions at #{directory}: expected 0700" unless mode is 0o700
+  { socket: join(directory, "#{key}.sock"), owner: join(directory, "#{key}.json") }
+
+managerRequest = (socket, method, path) ->
+  options = { method, unix: socket }
+  fetch "http://manager#{path}", options
 
 export main = (argv) ->
-  args = parseArgs(argv)
-
-  cfg.entry = resolveEntry(args.entry)
-  cfg.appDir = dirname(cfg.entry)
-  cfg.name = args.name or basename(cfg.appDir)
-  cfg.bridge = args.bridge
-  cfg.workers = args.workers
-  cfg.concurrency = args.concurrency
-  cfg.eager = args.eager
-  cfg.control = args.control
-  if args.hosts.length > 0
-    cfg.hosts = args.hosts
-  else
-    cfg.hosts = [cfg.name]
-    p "rip-server: no --host given; claiming #{cfg.hosts[0]}"
-
+  args = parseArgs argv
+  if args.command is 'browse'
+    process.exitCode = await runBrowse args
+    return
+  project = resolveProject args.entry
+  managerRuntimePaths = managerRuntime project.root
+  managerPath = managerRuntimePaths.socket
+  managerOwner = managerRuntimePaths.owner
+  if args.command isnt 'start'
+    body = null
+    if args.command is 'migrate'
+      migrationEntry = resolve args.migrationEntry if args.migrationEntry?
+      abort "rip-server: migration entry not found: #{args.migrationEntry}" if migrationEntry? and not existsSync(migrationEntry)
+      body = { id: args.operationId or randomBytes(16).toString('hex'), entry: migrationEntry, dir: resolve(args.migrationDir) }
+    else if args.command is 'recover'
+      body = { id: args.operationId }
+    options = { method: (if args.command is 'status' then 'GET' else 'POST'), unix: managerPath }
+    if body?
+      options.body = JSON.stringify body
+      options.headers = { 'content-type': 'application/json' }
+    response = fetch! "http://manager/#{args.command}", options
+    body = response.text!
+    abort "rip-server: #{args.command} failed (#{response.status}): #{body}" unless response.ok
+    p body
+    return
+  serve = null
+  try
+    serve = loadServeConfig! project.root
+  catch error
+    abort error?.message or String(error)
+  args.name = args.name or serve?.name or basename(project.root).replace(/\.[^.]+$/, '')
+  site = serve?.site ?? null
+  if site? and args.hosts.length > 0
+    abort 'rip-server: --host conflicts with serve.rip sites'
+  hosts =
+    if site? then []
+    else if args.hosts.length > 0 then args.hosts
+    else if serve?.hosts? then serve.hosts
+    else [args.name]
+  for host, i in hosts
+    abort "rip-server: --host value is not valid: #{host}" unless typeof host is 'string' and validHost host
+  if serve?.files? and not serve.files.shell? and project.entry?
+    abort 'rip-server: shell-less browse policy cannot publish API upstreams'
   prod = process.env.RIP_ENV is 'production'
-  cfg.watch = args.watch ?? (not prod)
-  if cfg.watch and prod
-    abort "rip-server: watch in production requires --allow-watch" unless args.allowWatch
-    warn "rip-server: WATCH ENABLED IN PRODUCTION — saves cut admission and retire live pools"
-  # c > 1 and hot reload do not mix: retiring a pool must drain up to c
-  # in-flight requests per worker, and the protocol pins "raise only with
-  # watch off". Eager rides the watcher, so it counts as watch here.
-  if cfg.concurrency > 1 and (cfg.watch or cfg.eager)
-    abort "rip-server: -c #{cfg.concurrency} requires watch off — raise c only with watch off (use --no-watch, or RIP_ENV=production)"
-  state.readyWhen = if prod then cfg.workers else 1
+  args.watch = args.watch ?? (not prod)
+  if args.watch and prod
+    abort 'rip-server: watch in production requires --allow-watch' unless args.allowWatch
+    warn 'rip-server: WATCH ENABLED IN PRODUCTION'
+  if project.entry? and args.concurrency > 1 and (args.watch or args.eager)
+    abort "rip-server: -c #{args.concurrency} requires watch off — raise c only with watch off"
+  abort 'rip-server: --control or JANUS_CONTROL is required' unless args.control?
+  probeControl! args.control
+  runDir = mkdtempSync join(tmpdir(), 'rip-srv-')
+  workers = []
+  bootingWorkers = []
+  workerSerial = 0
+  appArtifact = null
+  workerArtifact = null
+  files = null
+  appGraph = null
+  appWatcher = null
+  appTimer = null
+  appChain = Promise.resolve()
+  apiWatcher = null
+  apiTimer = null
+  apiChain = Promise.resolve()
+  apiInputs = new Set
+  generation = 0
+  apiEpoch = 0
+  apiSettledEpoch = 0
+  prepared = null
+  doorbell = null
+  doorbellPath = join runDir, 'doorbell.sock'
+  doorbellPublished = false
+  bootPromise = null
+  operation = 'Active'
+  operationPromise = null
+  operationKey = null
+  operationResults = new Map
+  migrationChild = null
+  migration = null
+  operationPath = join project.root, '.rip', 'server-operation.json'
+  migration = readOperation operationPath
+  operation = 'Maintenance' if migration?
+  managerControl = null
+  managerOwned = false
+  releaseHold = null
+  appId = null
+  heartbeat = null
+  heartbeatTask = null
+  accessClient = null
+  unless args.accessMode is 'off'
+    accessClient = new AccessClient {
+      mode: args.accessMode
+      picture: args.accessPicture
+      control: (if args.control.startsWith('http://') or args.control.startsWith('https://') then { base: args.control } else { unix: args.control })
+    }
+  workerPumps = new Set
+  finish = null
+  stopping = false
+  stopTask = null
+  finished = new Promise (done) -> finish = done
+  updateChain = Promise.resolve()
 
-  abort "rip-server: no control endpoint — pass --control <unix-path-or-url> or set JANUS_CONTROL" unless args.control?
-  if args.control.startsWith('http://') or args.control.startsWith('https://')
-    state.controlBase = args.control.replace(/\/+$/, '')
-  else
-    state.controlUnix = resolve(args.control)
-  try
-    cfetch! 'GET', '/1.0'          # any HTTP answer proves reachability
-  catch e
-    abort "rip-server: control endpoint unreachable at #{args.control}: #{e?.message or e}"
+  registration = ->
+    upstreams =
+      if operation is 'Maintenance' then []
+      else if doorbellPublished then [{ path: doorbellPath, doorbell: true }]
+      else workers.map (worker) -> { path: worker.socket }
+    body =
+      name: args.name
+      upstreams: upstreams
+    if site?
+      body.site = site
+    else
+      body.hosts = hosts
+    body.files = files if files?
+    body
 
-  state.runDir = mkdtempSync(join(tmpdir(), 'rip-srv-'))
+  status = ->
+    { name: args.name, root: project.root, operation, workers: workers.length, watch: args.watch, migration: (if migration? then { id: migration.id, phase: migration.phase, outcome: migration.outcome } else null) }
 
-  # The worker runtime is fixed code — prebuild it to plain JS once, here,
-  # so workers spawn with no loader and no compiler. Failing to build our
-  # own runtime is a toolchain defect, not an app error: abort.
-  try
-    state.workerJs = buildArtifact! workerPath, join(state.runDir, 'worker.js')
-  catch e
-    abort "rip-server: cannot build the worker runtime: #{e?.message or e}"
+  managerOutput = (text) ->
+    stream = if args.accessMode is 'raw' then process.stderr else process.stdout
+    writeAccessOutput! stream, "#{text}\n"
 
-  # An app with an app/ dir serves the browser runtime from the run
-  # tmpdir — copied once per manager start. A missing runtime file is a
-  # toolchain defect, not an app error: abort.
-  if existsSync(join(cfg.appDir, 'app'))
-    runtimeSrc = join(loaderSrcDir(), '..', 'dist', 'browser', 'rip.js')
-    abort "rip-server: browser runtime missing at #{runtimeSrc} — an app/ dir requires dist/browser/rip.js" unless existsSync(runtimeSrc)
-    state.browserRuntime = join(state.runDir, 'rip.js')
-    Bun.write! state.browserRuntime, Bun.file(runtimeSrc)
+  monitorOutput = (readable) ->
+    task = pumpAccessOutput readable, process.stderr
+    workerPumps.add task
+    task.finally(-> workerPumps.delete(task)).catch(-> null)
+    task.catch (error) ->
+      return if stopping
+      warn "rip-server: worker output failed: #{String(error)}"
+      stop! 1
 
-  startDoorbell()
+  moveAccess = ->
+    return unless accessClient? and appId?
+    task = accessClient.move appId
+    task.catch (error) ->
+      return if stopping
+      warn "rip-server: access output failed: #{String(error)}"
+      stop! 1
 
-  registerApp!()
-  enqueue heartbeatOnce            # heartbeats start immediately, before any worker
-  state.hbTimer = setInterval (-> enqueue heartbeatOnce), HEARTBEAT_MS
+  operationResponse = (key, run) ->
+    return Response.json({ error: 'manager is stopping' }, { status: 409 }) if stopping
+    cached = operationResults.get key
+    return Response.json(cached.body, { status: cached.status }) if cached?
+    if operationPromise?
+      return Response.json({ error: 'another migration or recovery is running' }, { status: 409 }) unless operationKey is key
+    else
+      operationKey = key
+      operationPromise = do ->
+        result = null
+        try
+          result = { status: 200, body: await run() }
+        catch error
+          result = { status: 409, body: { error: String(error), status: status() } }
+        operationResults.set key, result
+        result
+      operationPromise.finally(->
+        operationPromise = null
+        operationKey = null
+      ).catch(-> null)
+    result = await operationPromise
+    Response.json result.body, { status: result.status }
 
-  process.on 'SIGINT', shutdown
-  process.on 'SIGTERM', shutdown
+  startManagerControl = ->
+    acquire = ->
+      try
+        fd = openSync managerOwner, 'wx', 0o600
+        try
+          writeFileSync fd, JSON.stringify({ pid: process.pid, root: project.root })
+        finally
+          closeSync fd
+        managerOwned = true
+        return
+      catch error
+        throw error unless error?.code is 'EEXIST'
+      owner = try JSON.parse(readFileSync(managerOwner, 'utf8')) catch then null
+      alive = false
+      try
+        process.kill owner?.pid, 0
+        alive = true
+      abort "rip-server: manager already running for #{project.root}" if alive
+      unlinkSync managerOwner
+      acquire()
+    acquire()
+    try unlinkSync managerPath
+    managerControl = Bun.serve
+      unix: managerPath
+      fetch: (request) ->
+        path = new URL(request.url).pathname
+        return Response.json(status()) if request.method is 'GET' and path is '/status'
+        if request.method is 'POST' and path is '/hold'
+          return Response.json({ error: "cannot hold while #{operation}" }, { status: 409 }) unless operation is 'Active'
+          operation = 'Held'
+          clearTimeout appTimer if appTimer?
+          clearTimeout apiTimer if apiTimer?
+          return Response.json status()
+        if request.method is 'POST' and path is '/release'
+          try return Response.json(await releaseHold())
+          catch error then return Response.json({ error: String(error) }, { status: 409 })
+        if request.method is 'POST' and path is '/migrate'
+          body = try await request.json() catch then null
+          return Response.json({ error: 'migrate requires a JSON body' }, { status: 400 }) unless body?
+          return Response.json({ error: 'migrate requires exactly 32 lowercase hex characters' }, { status: 400 }) unless typeof body.id is 'string' and /^[a-f0-9]{32}$/.test(body.id)
+          return operationResponse! "migrate:#{body.id}", -> runCoordinatedMigration body
+        if request.method is 'POST' and path is '/recover'
+          body = try await request.json() catch then null
+          return Response.json({ error: 'recover requires a valid operation id' }, { status: 400 }) unless typeof body?.id is 'string' and /^[a-f0-9]{32}$/.test(body.id)
+          return operationResponse! "recover:#{body.id}", -> recoverMigration body.id
+        new Response('Not Found', { status: 404 })
 
-  if cfg.watch
-    # Doorbell first: requests arriving mid-boot ring and hold, as in reload.
-    state.dirty = true
-    cutAdmission()
-    startWatcher()
-    p "rip-server: #{cfg.name} registered (#{state.appId}) — #{cfg.workers} worker(s), watch on#{if cfg.eager then ', eager' else ''}"
-    booted = kickBoot()
-    # A startup boot failure is cached and already warned; the doorbell stays.
-    reported = booted.then((-> startupReport()), (-> null))
-    reported.catch (e) -> warn "rip-server: startup report failed: #{e?.message or e}"
-  else
-    state.dirty = true
-    p "rip-server: #{cfg.name} registered (#{state.appId}) — #{cfg.workers} worker(s), watch off"
+  createRegistration = ->
+    backoff = 200
+    conflictDeadline = null
+    loop
+      response = controlFetch! args.control, 'POST', '/1.0/apps', registration()
+      detail = response.text!
+      if response.status is 201
+        body = JSON.parse detail
+        throw new Error('Janus registration returned no app id') unless body?.id?
+        return body.id
+      unless response.status is 409
+        throw new Error("Janus registration failed (#{response.status}): #{detail}")
+      conflictDeadline ?= Date.now() + REGISTER_409_MS
+      if Date.now() >= conflictDeadline
+        claim = if site? then site.host else hosts.join(', ')
+        throw new Error("Janus host claim remained occupied (409): #{claim}")
+      sleep! backoff
+      backoff = Math.min backoff * 2, 5000
+
+  publishUpstreams = (upstreams) ->
+    throw new Error('manager is stopping') if stopping
+    return unless appId?
+    response = controlFetch! args.control, 'PUT', "/1.0/apps/#{appId}/upstreams", { upstreams }
+    throw new Error("Janus upstream update failed (#{response.status})") unless response.ok
+
+  publishWorkers = -> publishUpstreams! registration().upstreams
+
+  queuePublish = ->
+    run = updateChain.then -> publishWorkers!()
+    updateChain = run.catch -> null
+    run
+
+  spawnReadyWorker = (target = workers) ->
+    throw new Error('manager is stopping') if stopping
+    workerSerial++
+    socket = join runDir, "worker-#{workerSerial}.sock"
+    proc = Bun.spawn [process.execPath, workerArtifact],
+      stdin: 'ignore'
+      stdout: (if args.accessMode is 'raw' then 'pipe' else 'inherit')
+      stderr: (if args.accessMode is 'raw' then 'pipe' else 'inherit')
+      env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: "#{workerSerial}", WORKER_CONCURRENCY: "#{args.concurrency}" }
+    if args.accessMode is 'raw'
+      monitorOutput proc.stdout
+      monitorOutput proc.stderr
+    worker = { proc, socket }
     try
-      kickBoot!()
-    catch e
-      warn "rip-server: startup boot failed: #{state.bootFailure or e?.message or e}"
-      exit 1
-    startupReport!()
+      waitReady! proc, socket
+    catch error
+      await killWorker proc
+      throw error
+    target.push worker
+    worker
+
+  bootSlot = (target = workers) ->
+    firstError = null
+    for attempt in [1..2]
+      throw new Error('manager is stopping') if stopping
+      try return await spawnReadyWorker(target)
+      catch error
+        firstError ?= error
+    throw firstError
+
+  monitorWorker = (worker) ->
+    do ->
+      code = await worker.proc.exited
+      return if stopping
+      return unless workers.includes(worker) and not doorbellPublished
+      workers = workers.filter (candidate) -> candidate isnt worker
+      try await queuePublish()
+      catch error
+        warn "rip-server: cannot remove crashed worker from Janus: #{String(error)}"
+      managerOutput! "rip-server: worker exited (#{code}); replacing"
+      loop
+        return if stopping
+        try
+          replacement = await spawnReadyWorker()
+          monitorWorker replacement
+          await queuePublish()
+          return
+        catch error
+          warn "rip-server: replacement worker failed: #{String(error)}"
+          await new Promise (done) -> setTimeout done, 250
+    return
+
+  publishDings = (dings) ->
+    return unless dings.length > 0
+    while not appId? and not stopping
+      sleep! 5
+    return if stopping
+    directives = dings.map (ding) -> { '@': ['/hub'], ding }
+    for i in [0...directives.length] by 16
+      response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", directives.slice(i, i + 16)
+      throw new Error("Janus ding publish failed (#{response.status})") unless response.ok
+
+  refreshApp = ->
+    next = writeAppDocuments! project, true
+    prior = new Map((appGraph?.entries or []).map((entry) -> [entry.id, entry.hash]))
+    current = new Map(next.entries.map((entry) -> [entry.id, entry.hash]))
+    dings = []
+    for entry in next.entries
+      dings.push { id: entry.id, hash: entry.hash } unless prior.get(entry.id) is entry.hash
+    for entry in appGraph?.entries or []
+      dings.push { id: entry.id, hash: entry.hash, kind: 'delete' } unless current.has entry.id
+    appGraph = next
+    publishDings! dings
+
+  startAppWatcher = ->
+    return unless args.watch and project.appRoot?
+    appWatcher = watch project.appRoot, { recursive: true }, ->
+      return unless operation is 'Active'
+      clearTimeout appTimer if appTimer?
+      appTimer = setTimeout ->
+        next = appChain.then -> refreshApp!()
+        appChain = next.catch (error) -> warn "rip-server: App publication failed: #{String(error)}"
+      , 50
+
+  bootPrepared = ->
+    return bootPromise if bootPromise?
+    bootPromise = do ->
+      loop
+        throw new Error('no prepared API generation') unless prepared?
+        if apiSettledEpoch isnt apiEpoch
+          sleep! 10
+          continue
+        candidate = prepared
+        appArtifact = candidate.artifact
+        candidateWorkers = []
+        bootingWorkers = candidateWorkers
+        try
+          for slot in [0...args.workers]
+            await bootSlot candidateWorkers
+        catch error
+          await Promise.all candidateWorkers.map (worker) -> killWorker worker.proc
+          bootingWorkers = []
+          continue if candidate isnt prepared or apiSettledEpoch isnt apiEpoch
+          throw error
+        if candidate isnt prepared or apiSettledEpoch isnt apiEpoch
+          await Promise.all candidateWorkers.map (worker) -> killWorker worker.proc
+          bootingWorkers = []
+          continue
+        workers = candidateWorkers
+        bootingWorkers = []
+        for worker in workers
+          monitorWorker worker
+        doorbellPublished = false
+        await queuePublish()
+        continue if candidate isnt prepared
+        prepared = null
+        return
+    bootPromise.finally(-> bootPromise = null).catch(-> null)
+    bootPromise
+
+  cutForCandidate = (candidate) ->
+    return if stopping or candidate isnt prepared
+    doorbellPublished = true
+    await queuePublish()
+    old = workers
+    workers = []
+    await Promise.all old.map (worker) -> stopWorker worker.proc
+
+  prepareApi = (epoch) ->
+    generation++
+    artifact = join runDir, "app-#{generation}.js"
+    reportPath = join runDir, "app-#{generation}.json"
+    try
+      report = generate! project.entry, artifact, reportPath, "api-#{generation}"
+    catch error
+      apiSettledEpoch = epoch if epoch is apiEpoch
+      warn "rip-server: API candidate rejected; keeping current workers: #{String(error)}"
+      return
+    return if epoch isnt apiEpoch or stopping
+    candidate = { artifact, inputs: report.inputs, epoch }
+    prepared = candidate
+    apiInputs = new Set report.inputs
+    cutForCandidate! candidate
+    apiSettledEpoch = epoch
+    bootPrepared!() if args.eager
+
+  startApiWatcher = ->
+    return unless args.watch and project.entry?
+    apiWatcher = watch project.root, { recursive: true }, (event, filename) ->
+      return unless operation is 'Active'
+      rel = String(filename or '')
+      return if rel.startsWith('app/') or rel.startsWith('static/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
+      path = resolve project.root, rel
+      return unless path is project.entry or apiInputs.has path
+      apiEpoch++
+      epoch = apiEpoch
+      clearTimeout apiTimer if apiTimer?
+      apiTimer = setTimeout ->
+        next = apiChain.then -> prepareApi! epoch
+        apiChain = next.catch (error) -> warn "rip-server: API reload failed: #{String(error)}"
+      , 50
+
+  startDoorbell = ->
+    return unless project.entry?
+    doorbell = Bun.serve
+      unix: doorbellPath
+      fetch: (request) ->
+        return new Response('Not Found', { status: 404 }) unless request.method is 'GET' and new URL(request.url).pathname is '/ring'
+        try
+          await bootPrepared()
+          new Response(null, { status: 204 })
+        catch error
+          new Response(String(error), { status: 503 })
+
+  releaseHold = ->
+    throw new Error("cannot release while #{operation}") unless operation is 'Held'
+    operation = 'Releasing'
+    oldWorkers = workers
+    oldArtifact = appArtifact
+    candidateWorkers = []
+    documents = null
+    swapped = false
+    try
+      documents = buildAppDocuments!(project, args.watch) if project.appRoot?
+      if project.entry?
+        generation++
+        candidateArtifact = join runDir, "release-#{generation}.js"
+        report = generate! project.entry, candidateArtifact, join(runDir, "release-#{generation}.json"), "release-#{generation}"
+        appArtifact = candidateArtifact
+        for slot in [0...args.workers]
+          await bootSlot candidateWorkers
+        apiInputs = new Set report.inputs
+
+      workers = candidateWorkers
+      await queuePublish()
+      swapped = true
+      commitAppDocuments project, documents if documents?
+      appGraph = documents.graph if documents?
+      for worker in workers
+        monitorWorker worker
+      try
+        response = await controlFetch args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/hub'], ding: { kind: 'epoch', epoch: generation } }]
+        warn "rip-server: release reload ding failed (#{response.status})" unless response.ok
+      catch error
+        warn "rip-server: release reload ding failed: #{String(error)}"
+      operation = 'Active'
+      await Promise.all oldWorkers.map (worker) -> stopWorker worker.proc
+      status()
+    catch error
+      await Promise.all candidateWorkers.map (worker) -> killWorker worker.proc
+      workers = oldWorkers
+      appArtifact = oldArtifact
+      try await queuePublish() if swapped
+      operation = 'Held'
+      throw error
+
+  persistMigration = (record) ->
+    migration = writeOperation operationPath, record
+    migration
+
+  clearMigration = (record = migration) ->
+    clearOperation operationPath
+    migration = null
+    for path in [record?.targetArtifact, record?.oldArtifact, record?.appCandidate]
+      try unlinkSync path if path?
+    try fsyncDirectory join(project.root, '.rip', 'generations')
+
+  readAppCandidate = (path) ->
+    return null unless path?
+    JSON.parse readFileSync(path, 'utf8')
+
+  migrationOutcome = (text) ->
+    lines = String(text).split('\n').filter (line) -> line.startsWith('RIP_MIGRATION_OUTCOME=')
+    return { outcome: 'unknown', error: 'migration child produced no outcome report' } unless lines.length
+    return { outcome: 'unknown', error: 'migration child produced multiple outcome reports' } unless lines.length is 1
+    try
+      JSON.parse lines.at(-1).slice('RIP_MIGRATION_OUTCOME='.length)
+    catch
+      { outcome: 'unknown', error: 'migration child produced a malformed outcome report' }
+
+  runMigrationChild = (body) ->
+    bin = join loaderDir(), '..', 'bin', 'rip'
+    childArgs = [process.execPath, bin, 'schema', 'migrate']
+    childArgs.push body.entry if body.entry?
+    childArgs.push '--dir', body.dir, '--coordinated', '--operation-id', body.id
+    migrationChild = Bun.spawn childArgs,
+      cwd: project.root
+      stdin: 'ignore'
+      stdout: 'pipe'
+      stderr: 'pipe'
+    [stdout, stderr, code] = await Promise.all [
+      new Response(migrationChild.stdout).text()
+      new Response(migrationChild.stderr).text()
+      migrationChild.exited
+    ]
+    migrationChild = null
+    report = migrationOutcome "#{stdout}\n#{stderr}"
+    { ...report, code, output: (if code is 0 then stdout.trim() else stderr.trim()) }
+
+  epochDing = ->
+    return unless args.watch
+    response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/hub'], ding: { kind: 'epoch', epoch: generation } }]
+    throw new Error("Janus epoch ding failed (#{response.status})") unless response.ok
+
+  bootArtifact = (artifact) ->
+    appArtifact = artifact
+    pool = []
+    bootingWorkers = pool
+    try
+      for slot in [0...args.workers]
+        await bootSlot pool
+      pool
+    catch error
+      bootingWorkers = []
+      await Promise.all pool.map (worker) -> killWorker worker.proc
+      throw error
+
+  activateMigration = (record) ->
+    operation = 'Maintenance'
+    candidateWorkers = []
+    admissionAttempted = false
+    try
+      record = persistMigration { ...record, phase: 'activating' }
+      activeArtifact = join runDir, "active-#{record.id}.js"
+      copyFileSync record.targetArtifact, activeArtifact
+      candidateWorkers = bootArtifact! activeArtifact
+      startDoorbell() unless doorbell?
+      documents = readAppCandidate record.appCandidate
+      commitAppDocuments project, documents if documents?
+      appGraph = documents.graph if documents?
+      apiInputs = new Set record.inputs
+      appChanged = documents? and appModules(project.appRoot).rash isnt documents.graph.rash
+      apiChanged = JSON.stringify(sourceRashes(record.inputs)) isnt JSON.stringify(record.inputRashes)
+      operation = 'Activating'
+      admissionAttempted = true
+      await publishUpstreams candidateWorkers.map (worker) -> { path: worker.socket }
+      workers = candidateWorkers
+      bootingWorkers = []
+      for worker in workers
+        monitorWorker worker
+      epochDing!()
+      operation = 'Active'
+      clearMigration record
+      if appChanged
+        next = appChain.then -> refreshApp!()
+        appChain = next.catch (error) -> warn "rip-server: post-migration App refresh failed: #{String(error)}"
+      if apiChanged
+        apiEpoch++
+        epoch = apiEpoch
+        next = apiChain.then -> prepareApi! epoch
+        apiChain = next.catch (error) -> warn "rip-server: post-migration API refresh failed: #{String(error)}"
+      status()
+    catch error
+      try await publishUpstreams [] if admissionAttempted
+      operation = 'Maintenance'
+      workers = []
+      bootingWorkers = []
+      await Promise.all candidateWorkers.map (worker) -> killWorker worker.proc
+      record = persistMigration { ...record, phase: 'maintenance', error: String(error) }
+      throw error
+
+  restoreHeld = (record) ->
+    restored = []
+    admissionAttempted = false
+    try
+      activeArtifact = join runDir, "restored-#{record.id}.js"
+      copyFileSync record.oldArtifact, activeArtifact
+      restored = bootArtifact! activeArtifact
+      operation = 'Restoring'
+      admissionAttempted = true
+      await publishUpstreams restored.map (worker) -> { path: worker.socket }
+      workers = restored
+      bootingWorkers = []
+      for worker in workers
+        monitorWorker worker
+      operation = 'Held'
+      clearMigration()
+      status()
+    catch error
+      try await publishUpstreams [] if admissionAttempted
+      operation = 'Maintenance'
+      workers = []
+      bootingWorkers = []
+      await Promise.all restored.map (worker) -> killWorker worker.proc
+      persistMigration { ...record, phase: 'maintenance', error: String(error) }
+      throw error
+
+  runCoordinatedMigration = (body) ->
+    throw new Error("cannot migrate while #{operation}") unless operation is 'Held'
+    throw new Error('cannot migrate an App-only project') unless project.entry?
+    operation = 'Migrating'
+    oldWorkers = workers
+    record = null
+    cut = false
+    try
+      documents = buildAppDocuments!(project, args.watch) if project.appRoot?
+      generation++
+      candidateArtifact = join runDir, "migration-#{generation}.js"
+      reportPath = join runDir, "migration-#{generation}.json"
+      report = generate! project.entry, candidateArtifact, reportPath, "migration-#{generation}"
+      generations = join project.root, '.rip', 'generations'
+      mkdirSync generations, { recursive: true, mode: 0o700 }
+      fsyncDirectory join(project.root, '.rip')
+      fsyncDirectory project.root
+      targetArtifact = join generations, "#{body.id}.js"
+      oldArtifact = join generations, "#{body.id}-old.js"
+      appCandidate = if documents? then join(generations, "#{body.id}-app.json") else null
+      durableWrite targetArtifact, readFileSync(candidateArtifact)
+      durableWrite oldArtifact, readFileSync(appArtifact)
+      durableWrite appCandidate, JSON.stringify(documents) if appCandidate?
+      fsyncDirectory generations
+      record =
+        version: 1
+        id: body.id
+        phase: 'prepared'
+        outcome: null
+        targetArtifact: targetArtifact
+        oldArtifact: oldArtifact
+        appCandidate: appCandidate
+        inputs: report.inputs
+        inputRashes: sourceRashes(report.inputs)
+        migrationEntry: body.entry or null
+        migrationDir: body.dir
+      persistMigration record
+
+      operation = 'Maintenance'
+      workers = []
+      doorbellPublished = false
+      cut = true
+      await publishUpstreams []
+      await Promise.all oldWorkers.map (worker) -> stopWorker worker.proc
+      record = persistMigration { ...record, phase: 'migration-running', outcome: 'unknown' }
+      migrationReport = runMigrationChild! body
+      record = persistMigration { ...record, phase: 'migration-finished', outcome: migrationReport.outcome, migration: migrationReport }
+      if migrationReport.code is 0 and ['committed', 'confirmed-none'].includes(migrationReport.outcome)
+        apiInputs = new Set record.inputs
+        return activateMigration! record
+      if migrationReport.code isnt 0 and migrationReport.outcome is 'confirmed-none'
+        return restoreHeld! record
+      throw new Error(migrationReport.error or migrationReport.output or 'migration outcome is unresolved')
+    catch error
+      if not cut
+        operation = 'Held'
+        clearMigration() if record?
+      else
+        operation = 'Maintenance'
+        await Promise.all oldWorkers.map (worker) -> stopWorker worker.proc
+        persistMigration { ...record, phase: 'maintenance', error: String(error) } if record?
+        try await publishUpstreams []
+      throw error
+
+  recoverMigration = (id) ->
+    throw new Error("cannot recover while #{operation}") unless operation is 'Maintenance'
+    record = readOperation operationPath
+    throw new Error('no migration operation requires recovery') unless record?
+    throw new Error("operation id mismatch: want #{record.id}") unless id is record.id
+    activateMigration! persistMigration({ ...record, phase: 'fix-forward', outcome: record.outcome or 'unknown' })
+
+  beat = ->
+    return if stopping or not appId? or heartbeatTask?
+    heartbeatTask = do ->
+      currentId = appId
+      try
+        response = controlFetch! args.control, 'POST', "/1.0/apps/#{currentId}/heartbeat"
+        return if stopping or appId isnt currentId
+        if response.status is 404
+          replacementId = createRegistration!()
+          if stopping
+            try await controlFetch args.control, 'DELETE', "/1.0/apps/#{replacementId}"
+            return
+          appId = replacementId
+          moveAccess()
+        else unless response.ok
+          warn "rip-server: Janus heartbeat failed (#{response.status})"
+      catch error
+        warn "rip-server: Janus heartbeat failed: #{String(error)}" unless stopping
+      finally
+        heartbeatTask = null
+    heartbeatTask
+
+  stop = (status = 0) ->
+    return stopTask if stopTask?
+    stopping = true
+    stopTask = do ->
+      clearInterval heartbeat if heartbeat?
+      clearTimeout appTimer if appTimer?
+      clearTimeout apiTimer if apiTimer?
+      appWatcher?.close()
+      apiWatcher?.close()
+      try managerControl?.stop true
+      try unlinkSync managerPath if managerOwned
+      try migrationChild?.kill('SIGTERM')
+      try await operationPromise if operationPromise?
+      await appChain
+      await apiChain
+      try await heartbeatTask if heartbeatTask?
+      try doorbell?.stop true
+      try managerControl?.stop true
+      try unlinkSync managerPath if managerOwned
+      try unlinkSync managerOwner if managerOwned
+      accessStop = null
+      try accessStop = accessClient?.stop()
+      try
+        if appId?
+          response = await controlFetch args.control, 'DELETE', "/1.0/apps/#{appId}"
+          warn "rip-server: Janus deregistration failed (#{response.status})" unless response.ok
+      catch error
+        warn "rip-server: Janus deregistration failed: #{String(error)}"
+      try await accessStop if accessStop?
+      allWorkers = [...workers, ...bootingWorkers]
+      await Promise.all allWorkers.map (worker) -> stopWorker worker.proc
+      await Promise.allSettled [...workerPumps]
+      finish! status
+      status
+    stopTask
+
+  onSignal = (signal, status) ->
+    if stopping
+      process.off 'SIGINT', onSigint
+      process.off 'SIGTERM', onSigterm
+      migrationChild?.kill signal
+      worker.proc.kill signal for worker in [...workers, ...bootingWorkers]
+      process.kill process.pid, signal
+      return
+    stop(status).catch (error) ->
+      warn "rip-server: signal cleanup failed: #{String(error)}"
+      process.exitCode = 1
+
+  onSigint = -> onSignal 'SIGINT', 130
+  onSigterm = -> onSignal 'SIGTERM', 143
+  process.on 'SIGINT', onSigint
+  process.on 'SIGTERM', onSigterm
+
+  try
+    startManagerControl()
+    publication = publishApp! project, args.name, args.watch, (if operation is 'Maintenance' then null else undefined), serve?.files?.shell
+    if publication?
+      appGraph = publication.graph
+    files = registrationFiles project, serve?.files, publication
+    if project.entry?
+      workerArtifact = join runDir, 'worker.js'
+      generate! join(import.meta.dir, 'worker.rip'), workerArtifact, join(runDir, 'worker-result.json'), 'worker'
+      unless operation is 'Maintenance'
+        appArtifact = join runDir, 'app.js'
+        report = generate! project.entry, appArtifact, join(runDir, 'app-result.json'), 'app'
+        apiInputs = new Set report.inputs
+        for slot in [0...args.workers]
+          await bootSlot()
+        startDoorbell()
+    startAppWatcher()
+    startApiWatcher()
+    if stopping
+      process.exitCode = await finished
+      return
+    registrationId = createRegistration!()
+    if stopping
+      try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registrationId}"
+      process.exitCode = await finished
+      return
+    appId = registrationId
+    # Let the finite POST release its control transport before opening the
+    # registration's long-lived stream; control writes must remain independent.
+    moveAccess()
+    for worker in workers
+      monitorWorker worker
+    heartbeat = setInterval beat, HEARTBEAT_MS
+    if operation is 'Maintenance'
+      warn "rip-server: unresolved migration #{migration.id}; Maintenance has empty admission"
+    else
+      managerOutput! "rip-server: https://#{if site? then site.host else hosts[0]}/"
+    process.exitCode = await finished
+  catch error
+    warn "rip-server: #{String(error)}" unless stopping
+    process.exitCode = await stop 1
+  finally
+    process.off 'SIGINT', onSigint
+    process.off 'SIGTERM', onSigterm
+    try managerControl?.stop true
+    try unlinkSync managerPath if managerOwned
+    try unlinkSync managerOwner if managerOwned
+    rmSync runDir, { recursive: true, force: true }

@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./index.rip"
+    ".": "./index.rip",
+    "./rash": "./rash.rip"
   },
   "scripts": {
     "test": "rip test && rip test/workspace.rip && rip test/apply.rip"

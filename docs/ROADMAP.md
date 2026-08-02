@@ -34,11 +34,10 @@ but it must not block direct-path package implementation and tests.
 - **Server:** the edge belongs to Janus running with Caddy — proxy
   and stream execution, the TLS story (ACME, certificates, SNI), and
   WebSocket termination with hub fan-out — so none of that is Rip
-  Server work; `packages/server` publishes upstreams to the control
-  plane and stops there. Remaining in Rip Server itself (contracts in
-  the packages/server README's Planned section): hub ergonomics
-  (bridge-frame dispatch, sigil directive helpers, a publish client,
-  the `--bridge` registration flag) and opt-in file logging (a
+  Server work; `packages/server` atomically registers files, direct Hub
+  admission, and API upstreams with the control plane. Remaining in Rip
+  Server itself (contract in the packages/server README's Planned
+  section): opt-in file logging (a
   `logs:` knob / `RIP_LOG_DIR` redirect of the merged server stream
   to `logs/server.log`; stdout stays the default). Process workers,
   control-plane registration with heartbeats and upstream
@@ -71,10 +70,10 @@ plus real-browser Playwright runs across Chromium, Firefox, and WebKit
 `assembleBundle` → `bootApp` → `launch` path end to end — SPA
 navigation, ETag revalidation, debug-gated source maps.
 
-The page/bundle product surface is `client()` in `@rip-lang/server`
-(manager-assembled per boot epoch, worker-served; the certification
+The manager assembles the page and bundle for Janus to serve directly;
+API workers do not carry a browser-delivery surface. The certification
 fixture `packages/browser-tests/serve.mjs` remains the browser-CI
-harness). The remaining work is development-server integration:
+harness. The remaining browser work is:
 
 - the watch→browser transport (none exists in v4; for Workspace door
   work follow [WORKSPACE.md](WORKSPACE.md) Q2 — Hub ding, HTTP bytes —

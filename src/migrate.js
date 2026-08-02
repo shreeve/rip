@@ -47,11 +47,12 @@ import {
 
 const MIGRATIONS_TABLE = '_rip_migrations';
 const LOCK_TABLE = '_rip_migration_lock';
+const OPERATIONS_TABLE = '_rip_migration_operations';
 
 // The runner's own state tables — history and lock — are never part of
 // the schema under management, so they must never reach a diff (where
 // "not declared" would read as drop-table).
-const RUNNER_TABLES = new Set([MIGRATIONS_TABLE, LOCK_TABLE]);
+const RUNNER_TABLES = new Set([MIGRATIONS_TABLE, LOCK_TABLE, OPERATIONS_TABLE]);
 
 export { __schemaAdapterConfigured as adapterConfigured };
 
@@ -806,6 +807,17 @@ async function ensureMigrationsTable() {
     ' (version VARCHAR PRIMARY KEY, name VARCHAR, checksum VARCHAR, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)', []);
 }
 
+async function recordMigrationOperation(id, outcome, detail = null) {
+  if (!id) return;
+  await __schemaRunSQL(null,
+    'CREATE TABLE IF NOT EXISTS ' + OPERATIONS_TABLE +
+    ' (id VARCHAR PRIMARY KEY, outcome VARCHAR, detail VARCHAR, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)', []);
+  await __schemaRunSQL(null, 'DELETE FROM ' + OPERATIONS_TABLE + ' WHERE id = ?', [id]);
+  await __schemaRunSQL(null,
+    'INSERT INTO ' + OPERATIONS_TABLE + ' (id, outcome, detail) VALUES (?, ?, ?)',
+    [id, outcome, detail]);
+}
+
 // ── the migration lock ────────────────────────────────────────────────
 //
 // A single-row lock table serializes concurrent `migrate` runs so two
@@ -826,8 +838,15 @@ async function acquireMigrationLock(opts = {}) {
   // --force takes over a lock a crashed run never released. It deletes
   // unconditionally, so it also steals a LIVE peer's lock — the CLI
   // documents it as safe only when no migration is running.
+  if (opts.coordinated && (opts.force || opts.repair)) {
+    throw new Error('schema.migrate: coordinated migration rejects --force and --repair');
+  }
   if (opts.force) await __schemaRunSQL(null, 'DELETE FROM ' + LOCK_TABLE, []);
-  const owner = (typeof process !== 'undefined' && process.pid) ? 'pid:' + process.pid : 'rip-schema';
+  const owner = opts.ownerToken || (
+    (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : ((typeof process !== 'undefined' && process.pid) ? 'pid:' + process.pid + ':' + Date.now() : 'rip-schema:' + Date.now())
+  );
   try {
     await __schemaRunSQL(null, 'INSERT INTO ' + LOCK_TABLE + ' (id, owner) VALUES (1, ?)', [owner]);
   } catch (e) {
@@ -841,14 +860,15 @@ async function acquireMigrationLock(opts = {}) {
     }
     throw e;
   }
+  return owner;
 }
 
-async function releaseMigrationLock() {
+async function releaseMigrationLock(owner) {
   // Best-effort: a failed release (e.g. the connection dropped after a
   // successful apply) leaves a stale lock the next run clears with
   // --force; it must never mask the migration's own outcome.
   try {
-    await __schemaRunSQL(null, 'DELETE FROM ' + LOCK_TABLE + ' WHERE id = 1', []);
+    await __schemaRunSQL(null, 'DELETE FROM ' + LOCK_TABLE + ' WHERE id = 1 AND owner = ?', [owner]);
   } catch {
     // swallowed on purpose — see above
   }
@@ -1036,11 +1056,29 @@ export async function migrate(opts = {}) {
   // Applies run under the migration lock; it is released even when a
   // file fails, so a stuck lock always means a crashed process, not a
   // caught error.
-  await acquireMigrationLock(opts);
+  const owner = await acquireMigrationLock(opts);
   try {
-    return await migrateApply(opts, files);
+    if (opts.coordinated) {
+      if (!opts.operationId) throw new Error('schema.migrate: coordinated migration requires an operation id');
+      await recordMigrationOperation(opts.operationId, 'unknown', 'migration started');
+    }
+    try {
+      const result = await migrateApply(opts, files);
+      if (opts.coordinated) await recordMigrationOperation(opts.operationId, result.outcome, JSON.stringify(result.ran));
+      return result;
+    } catch (e) {
+      if (opts.coordinated) {
+        try {
+          await recordMigrationOperation(opts.operationId, e?.migrationOutcome || 'unknown', e?.message || String(e));
+        } catch (markerError) {
+          e.migrationOutcome = 'unknown';
+          e.message += '\nCould not durably record the migration outcome: ' + (markerError?.message || String(markerError));
+        }
+      }
+      throw e;
+    }
   } finally {
-    await releaseMigrationLock();
+    await releaseMigrationLock(owner);
   }
 }
 
@@ -1125,9 +1163,21 @@ async function migrateApply(opts, files) {
       const err = new Error(
         'schema.migrate: ' + label + ' failed at ' + where + '\n' + (e?.message || String(e)) + '\n' + posture);
       err.cause = e;
+      err.migrationOutcome = ran.length
+        ? 'committed'
+        : ddlTransactional
+          ? 'confirmed-none'
+          : (!transactional && at > 0)
+            ? 'partial'
+            : 'unknown';
       throw err;
     }
     ran.push(f.version + '_' + f.name);
   }
-  return { ran, pending: [], transactional };
+  return {
+    outcome: ran.length ? 'committed' : 'confirmed-none',
+    ran,
+    pending: [],
+    transactional,
+  };
 }

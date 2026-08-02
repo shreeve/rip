@@ -1122,6 +1122,22 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
         expect(adapter.lock.held).toBe(false); // cleared, applied, released
       });
     });
+
+    test('coordinated runs reject unsafe overrides and durably bracket the outcome', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        await scoped(adapter, async () => {
+          await expect(mig.migrate({ dir: mdir, coordinated: true })).rejects.toThrow(/requires an operation id/);
+          await expect(mig.migrate({ dir: mdir, coordinated: true, operationId: 'op', force: true })).rejects.toThrow(/rejects --force and --repair/);
+          const out = await mig.migrate({ dir: mdir, coordinated: true, operationId: '0123456789abcdef0123456789abcdef' });
+          expect(out.outcome).toBe('committed');
+        });
+        const operationCalls = adapter.calls.filter((c) => /_rip_migration_operations/.test(c.sql));
+        expect(operationCalls.some((c) => c.params?.includes('unknown'))).toBe(true);
+        expect(operationCalls.some((c) => c.params?.includes('committed'))).toBe(true);
+      });
+    });
   });
 });
 

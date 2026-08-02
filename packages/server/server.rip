@@ -5,28 +5,24 @@
 # ==============================================================================
 #
 # Routes, smart responses, read() validation, and AsyncLocalStorage-powered
-# request context. Apps written against this DSL run identically standalone
-# (`start port: 3000` → Bun.serve) and under a worker pool behind Janus
-# (the manager/worker runtime detects itself via environment).
+# request context for API workers managed behind Janus.
 #
 # Public exports:
 #   DSL:        get, post, put, patch, del, all, use, prefix
-#   Server:     start, startHandler, fetch, App
-#   Browser:    client
+#   Server:     start, fetch, App
 #   Filters:    raw, before, after
 #   Handlers:   onError, notFound
 #   Errors:     error!, notice!, bail!
 #   Validation: read, registerValidator, getValidator, isRawType,
 #               validatorNames, check
 #   Context:    ctx, session, env, subrequest, mark
-#   Utilities:  isBlank, toName, toPhone, formatMoney, mimeType
+#   Utilities:  isBlank, toName, toPhone, formatMoney
 #   OpenAPI:    openapi, errorEnvelope
-#   Dev:        resetGlobals, requestContext, setCorsPreflightPolicy
+#   Dev:        resetGlobals, requestContext
 # ==============================================================================
 
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { readFileSync, readdirSync, existsSync } from 'node:fs'
-import { posix, join, resolve, dirname, basename } from 'node:path'
+import { posix, resolve } from 'node:path'
 
 # ==============================================================================
 # Module State
@@ -40,8 +36,8 @@ _beforeFilters: Function[]            = []    # Before request filters
 _afterFilters: Function[]             = []    # After request filters
 _routes: any[]                        = []    # Route definitions
 _middlewares: { fn: Function, regex?: RegExp, path?: string }[] = []  # Global + path-scoped middleware, in registration order
+SESSION = Symbol.for 'rip.server.session'
 _prefix: string                       = ''    # Current route prefix for grouping
-_corsPreflightPolicy: Function | null = null  # Policy fn set by cors middleware: see setCorsPreflightPolicy
 _openapiRegistered: boolean           = false # GET /openapi.json auto-registered?
 _openapiInfo: Record<string, any>     = { title: 'Rip API', version: '0.0.0' }
 _routeIndex: any                      = null  # method → { statics, dynamics }; built lazily, cleared on registration
@@ -56,31 +52,10 @@ export resetGlobals = ->
   _routes              = []
   _middlewares         = []
   _prefix              = ''
-  _corsPreflightPolicy = null
   _openapiRegistered   = false
   _openapiInfo         = { title: 'Rip API', version: '0.0.0' }
   _routeIndex          = null
   _composeEpoch++
-
-# Register a CORS preflight policy. Called by the `cors()` middleware when
-# opts.preflight is set. The policy function receives the request Origin
-# header and returns an object shaped like:
-#
-#   {
-#     allowedOrigin: string | null,   # null means reject / no headers
-#     methods: string,                # "GET,POST,..."
-#     headers: string,                # "Content-Type,..."
-#     credentials: boolean,
-#     maxAge: number                  # seconds
-#   }
-#
-# Early-OPTIONS handling uses this SAME policy so the preflight response
-# and the actual-request CORS check agree. Without it, preflight could
-# advertise a permissive policy (reflect any origin + credentials) that
-# the middleware would later reject on the real request — a misleading
-# posture that middleware/CSRF audits would flag.
-export setCorsPreflightPolicy = (fn) ->
-  _corsPreflightPolicy = if typeof fn is 'function' then fn else null
 
 # AsyncLocalStorage for request context (enables sync read() in handlers)
 export requestContext: AsyncLocalStorage<{ env?: any, data: any }> = new AsyncLocalStorage()
@@ -187,46 +162,6 @@ matchRoute = (method, pathname) ->
   null
 
 # ==============================================================================
-# MIME Types — Auto-detect content type from file extension
-# ==============================================================================
-
-_mimeTypes =
-  '.html':  'text/html; charset=UTF-8'
-  '.htm':   'text/html; charset=UTF-8'
-  '.css':   'text/css; charset=UTF-8'
-  '.js':    'application/javascript'
-  '.mjs':   'application/javascript'
-  '.json':  'application/json'
-  '.txt':   'text/plain; charset=UTF-8'
-  '.csv':   'text/csv; charset=UTF-8'
-  '.xml':   'application/xml'
-  '.svg':   'image/svg+xml'
-  '.png':   'image/png'
-  '.jpg':   'image/jpeg'
-  '.jpeg':  'image/jpeg'
-  '.gif':   'image/gif'
-  '.webp':  'image/webp'
-  '.avif':  'image/avif'
-  '.ico':   'image/x-icon'
-  '.woff':  'font/woff'
-  '.woff2': 'font/woff2'
-  '.ttf':   'font/ttf'
-  '.otf':   'font/otf'
-  '.mp3':   'audio/mpeg'
-  '.mp4':   'video/mp4'
-  '.webm':  'video/webm'
-  '.ogg':   'audio/ogg'
-  '.pdf':   'application/pdf'
-  '.zip':   'application/zip'
-  '.gz':    'application/gzip'
-  '.wasm':  'application/wasm'
-  '.rip':   'text/x-rip; charset=UTF-8'
-
-export mimeType = (path) ->
-  ext = path.substring(path.lastIndexOf('.'))
-  _mimeTypes[ext] or 'application/octet-stream'
-
-# ==============================================================================
 # Context Factory
 # ==============================================================================
 
@@ -241,6 +176,7 @@ export type CtxReq =
   method: string
   url: string
   path: string
+  site: string | null
   param: (key?: string) => any
   query: (key?: string) => any
   header: (key?: string) => any
@@ -327,15 +263,11 @@ CtxProto =
     @_respond data, status, headers, null
 
   send: (path, type) ->
-    file = Bun.file(path)
-    etag = "W/\"#{file.lastModified}-#{file.size}\""
-    if @req.raw.headers.get('if-none-match') is etag
-      return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control': @_out?.get('Cache-Control') or 'no-cache' } })
     out = (@_out ?= new Headers())
-    out.set 'Content-Type', (type or mimeType(path))
+    out.set 'X-Sendfile', resolve(path)
+    out.set 'Content-Type', type if type?
     out.set 'Cache-Control', 'no-cache' unless out.has 'Cache-Control'
-    out.set 'ETag', etag
-    new Response file, { status: 200, headers: out }
+    new Response null, { status: 200, headers: out }
 
   header: (name, value, opts: { append?: boolean } = {}) ->
     if value?
@@ -391,53 +323,34 @@ createContext = (req, params = {}, url = null, pathname = null) ->
   r.method = req.method
   r.url = req.url
   r.path = pathname
+  # Janus strips a client-supplied Rip-Site and injects its resolved tenant
+  # before proxying to a private worker socket. Standalone listeners have no
+  # trusted edge and therefore never project the header into request context.
+  r.site = if process.env.WORKER_ID? or process.env.SOCKET_PATH? then req.headers.get('rip-site') else null
   r._url = url
   r._params = params
   c = Object.create(CtxProto)
   c._out = null
-  c.session = {}
+  c.session = req[SESSION] or {}
+  c.csrfToken = req.csrfToken if req.csrfToken?
   c.req = r
   c
 
 # ==============================================================================
-# Middleware Composition (Koa-style)
+# Filter Composition
 # ==============================================================================
 
-compose = (middlewares, beforeFilters, afterFilters, handler) ->
+compose = (beforeFilters, afterFilters, handler) ->
   (c) ->
-    index = -1
-    dispatch = (i) ->
-      if i <= index
-        throw new Error 'next() called multiple times'
-      index = i
-
-      # Run middlewares first — a path-scoped entry is skipped (not called)
-      # when the request path is outside its pattern
-      if i < middlewares.length
-        m = middlewares[i]
-        return dispatch!(i + 1) if m.regex? and not m.regex.test(c.req.path)
-        result = m.fn.call!(c, c, -> dispatch!(i + 1))
-        c._response = result if result instanceof Response
-        return
-
-      # After middlewares, run before filters, handler, after filters
-      if i is middlewares.length
-        # Run before filters
-        for filter in beforeFilters
-          result = filter.call!(c, c)
-          if result instanceof Response
-            c._response = result
-            return
-
-        # Run handler
-        result = handler.call!(c, c)
-        c._response = result if result instanceof Response
-
-        # Run after filters
-        for filter in afterFilters
-          filter.call!(c, c)
-
-    dispatch!(0)
+    for filter in beforeFilters
+      result = filter.call!(c, c)
+      if result instanceof Response
+        c._response = result
+        return c
+    result = handler.call!(c, c)
+    c._response = result if result instanceof Response
+    for filter in afterFilters
+      filter.call!(c, c)
     c
 
 # ==============================================================================
@@ -480,21 +393,16 @@ export errorEnvelope = (err: any): { status: number, error: ApiError } ->
 
 smart = (fn) ->
   (c, next) ->
-    try
-      result = if fn.length > 0 then fn.call!(c, c) else fn.call!(c)
-      return result if result instanceof Response
-      return c.json(result) if result? and typeof result is 'object'
-      if typeof result is 'string'
-        type = if result.trimStart().startsWith('<') then 'html' else 'text'
-        return c[type](result)
-      return c.text(String(result)) if typeof result in ['number', 'boolean']
-      if result is null or result is undefined
-        return new Response(null, { status: 204 })
-      result
-    catch err
-      { status, error } = errorEnvelope(err)
-      warn 'Handler error:', err if status >= 500
-      new Response JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
+    result = if fn.length > 0 then fn.call!(c, c) else fn.call!(c)
+    return result if result instanceof Response
+    return c.json(result) if result? and typeof result is 'object'
+    if typeof result is 'string'
+      type = if result.trimStart().startsWith('<') then 'html' else 'text'
+      return c[type](result)
+    return c.text(String(result)) if typeof result in ['number', 'boolean']
+    if result is null or result is undefined
+      return new Response(null, { status: 204 })
+    result
 
 # ==============================================================================
 # DSL: Route Registration
@@ -502,7 +410,7 @@ smart = (fn) ->
 
 # Validate the JSON body through a schema before the handler runs. On
 # failure the request never reaches the handler — a 400 with structured
-# {field, error, message} issues goes out instead (see smart's catch).
+# {field, error, message} issues goes out instead.
 # On success the parsed, defaulted, coerced value is `@input`. Uses
 # safeAsync so schemas with @ensure! async refinements work too.
 withInput = (schema, fn) ->
@@ -522,6 +430,7 @@ withInput = (schema, fn) ->
     if fn.length > 0 then fn.call!(c, c) else fn.call!(c)
 
 addRoute = (method, path, ...handlers) ->
+  throw new TypeError("#{method} requires an absolute path") unless typeof path is 'string' and path.startsWith('/')
   # Route options: a leading plain-object slot carries route metadata.
   # `input: SomeSchema` wires schema validation + the OpenAPI contract:
   #
@@ -531,6 +440,7 @@ addRoute = (method, path, ...handlers) ->
   if handlers.length > 1 and handlers[0]? and typeof handlers[0] is 'object'
     opts = handlers[0]
     handlers = handlers.slice(1)
+  throw new TypeError("#{method} #{path} requires a handler") unless handlers.length and handlers.every((handler) -> typeof handler is 'function')
   _routeIndex = null
   fullPath = "#{_prefix}#{path}"
   if fullPath.includes(':') and fullPath.endsWith('?')
@@ -637,12 +547,12 @@ compileMiddlewarePattern = (path) ->
 
 export use = (pathOrMw, mw = null) ->
   _composeEpoch++
-  if typeof pathOrMw is 'function'
+  if typeof pathOrMw is 'function' and not mw?
     _middlewares.push { fn: pathOrMw }
-  else if typeof pathOrMw is 'string' and typeof mw is 'function'
+  else if typeof pathOrMw is 'string' and pathOrMw.startsWith('/') and typeof mw is 'function'
     _middlewares.push { fn: mw, regex: compileMiddlewarePattern(pathOrMw), path: pathOrMw }
   else
-    throw new TypeError "use() takes (middleware) or (path, middleware); got (#{kind(pathOrMw)}, #{kind(mw)})"
+    throw new TypeError 'use() takes a middleware function or an absolute path and middleware function'
 
 export prefix = (base, fn) ->
   old = _prefix
@@ -669,41 +579,14 @@ export after: (fn: RouteHandler) => void = (fn) ->
 # Main Fetch Handler
 # ==============================================================================
 
-export fetch = (req) ->
+dispatchRequest = (req) ->
   url = new URL(req.url)
   pathname = posix.normalize(url.pathname)
   method = req.method
 
-  if method is 'HEAD'
-    res = fetch!(new Request(req.url, { method: 'GET', headers: req.headers }))
-    return new Response(null, { status: res.status, headers: res.headers })
-
-  # Handle CORS preflight (OPTIONS) requests early, before route matching.
-  # The policy function is set by `cors({preflight: true})` and MUST agree
-  # with the middleware's origin validation — otherwise preflight could
-  # advertise a more permissive CORS posture than the app actually enforces.
-  if method is 'OPTIONS' and _corsPreflightPolicy?
-    requestOrigin = req.headers.get('origin')
-    decision = try _corsPreflightPolicy(requestOrigin) catch then null
-    if decision? and decision.allowedOrigin?
-      h =
-        'Access-Control-Allow-Origin':   decision.allowedOrigin
-        'Access-Control-Allow-Methods':  decision.methods  or 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS'
-        'Access-Control-Allow-Headers':  decision.headers  or (req.headers.get('access-control-request-headers') or 'Content-Type,Authorization')
-        'Access-Control-Max-Age':        String(decision.maxAge or 86400)
-      # Credentials: ONLY when the policy allows it AND the origin is not
-      # the wildcard (browsers reject credentials + '*' anyway, but the
-      # combination is a well-known misconfig worth refusing to emit).
-      if decision.credentials and decision.allowedOrigin isnt '*'
-        h['Access-Control-Allow-Credentials'] = 'true'
-      return new Response null, { status: 204, headers: h }
-    # Policy rejected this origin — fall through with no CORS headers.
-    # Browsers interpret a missing Access-Control-Allow-Origin as deny.
-    return new Response null, { status: 204 }
-
   match = null
   try
-    match = matchRoute(method, pathname)
+    match = matchRoute((if method is 'HEAD' then 'GET' else method), pathname)
   catch err
     { status, error } = errorEnvelope(err)
     return new Response JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
@@ -711,7 +594,8 @@ export fetch = (req) ->
   unless match
     c = createContext(req, {}, url, pathname)
     if _notFoundHandler?
-      return _notFoundHandler.call!(c, c)
+      data = c.req.query()
+      return requestContext.run! { env: c, data }, -> _notFoundHandler.call!(c, c)
     return new Response('Not Found', { status: 404 })
 
   c = createContext(req, match.params, url, pathname)
@@ -751,13 +635,44 @@ export fetch = (req) ->
   requestContext.run! { env: c, data: merged }, ->
     runHandler!(c, match.route)
 
-# Each route's composed chain is cached on the route object; a use/before/
-# after registration (or resetGlobals) bumps _composeEpoch and stale chains
-# rebuild on their next request.
+# Web-standard middleware wraps routing. Passing a Request to next() replaces
+# the downstream request while preserving request-local middleware state.
+invokeMiddleware = (request) ->
+  last = -1
+  invoke = (index, currentRequest) ->
+    throw new Error('middleware called next() more than once') if index <= last
+    last = index
+    if index < _middlewares.length
+      entry = _middlewares[index]
+      path = posix.normalize(new URL(currentRequest.url).pathname)
+      return invoke!(index + 1, currentRequest) if entry.regex? and not entry.regex.test(path)
+      return entry.fn currentRequest, (nextRequest = currentRequest) ->
+        throw new TypeError('middleware next() replacement must be a Request') unless nextRequest instanceof Request
+        if nextRequest isnt currentRequest
+          nextRequest[SESSION] = currentRequest[SESSION] if currentRequest[SESSION]?
+          nextRequest[key] = currentRequest[key] for key in Object.keys(currentRequest)
+        invoke!(index + 1, nextRequest)
+    dispatchRequest! currentRequest
+  invoke! 0, request
+
+export fetch = (request) ->
+  try
+    response = await invokeMiddleware request
+    throw new TypeError('middleware chain returned no Response') unless response instanceof Response
+    if request.method is 'HEAD'
+      new Response null, { status: response.status, statusText: response.statusText, headers: response.headers }
+    else
+      response
+  catch err
+    console.warn 'Request error:', err if not err?.status or err.status >= 500
+    { status, error } = errorEnvelope(err)
+    new Response JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
+
+# Each route's filter chain is cached on the route object.
 composedChain = (route) ->
   return route._chain if route._chain? and route._chainEpoch is _composeEpoch
   route._chainEpoch = _composeEpoch
-  route._chain = compose(_middlewares, _beforeFilters, _afterFilters, route.handler)
+  route._chain = compose(_beforeFilters, _afterFilters, route.handler)
 
 # Internal: Execute handler with middleware and error handling
 runHandler = (c, route) ->
@@ -771,12 +686,11 @@ runHandler = (c, route) ->
     try r.headers.set('rip-mark', String(c.mark))
     r
   try
-    # Compose runs: middlewares → before filters → handler → after filters
     chain = composedChain(route)
     chain!(c)
     applyMark(c._response or new Response('', { status: 204 }))
   catch err
-    warn 'Request error:', err if not err?.status or err.status >= 500
+    console.warn 'Request error:', err if not err?.status or err.status >= 500
     res = if _errorHandler?
       _errorHandler.call!(c, err, c)
     else
@@ -789,250 +703,16 @@ runHandler = (c, route) ->
 # Server Startup
 # ==============================================================================
 
-export startHandler = -> fetch
-
-# Bare start() stays synchronous: workers read __ripHandler after one
-# microtask, so a Promise-returning start() without top-level await would
-# race. start! 'app' takes the Promise path (client then listen) — dammit
-# makes the await explicit at the call site.
-export start = (dirOrOpts?: string | { host?: string, port?: number, silent?: boolean }, opts?: { host?: string, port?: number, silent?: boolean }) ->
-  if typeof dirOrOpts is 'string'
-    return client(dirOrOpts).then(-> startListen(opts ?? {}))
-  startListen(dirOrOpts ?? {})
-
-startListen = (opts) ->
-  opts ?= {}
-  handler = startHandler()
-
-  # Under the worker runtime, hand the fetch handler over and return —
-  # the worker owns the unix socket.
-  if process.env.WORKER_ID? or process.env.SOCKET_PATH?
-    globalThis.__ripHandler = handler
-    return handler
-
-  # Otherwise start standalone server
-  host = opts.host or 'localhost'
-  port = opts.port or 3000
-  server = Bun.serve { hostname: host, port: port, fetch: handler }
-  p "rip-server listening on http://#{host}:#{port}" unless opts.silent
-  server
+export start = ->
+  unless process.env.APP_ARTIFACT? and process.env.SOCKET_PATH?
+    throw new Error 'start() requires the Rip worker runtime — run the application with `rip server`'
+  globalThis.__ripHandler = fetch
+  fetch
 
 export App = (fn) ->
   resetGlobals()
   fn?.()
-  startHandler()
-
-# ==============================================================================
-# Browser delivery — client()
-# ==============================================================================
-#
-# A directory named app/ next to the app entry holds the browser app:
-# every .rip file under it becomes a bundle module keyed by its disk path
-# ('app/routes/index.rip', 'app/stash.rip' — the disk path IS the store
-# path @rip-lang/app boots from; routes live under app/routes/).
-# client(dir) registers the delivery surface: GET / answers the boot page
-# (app/index.html when present, else
-# a generated one), GET /bundle.json ships the bundle with ETag
-# revalidation, GET /@rip/rip.js ships the browser runtime, and a notFound
-# fallback answers the boot page for GET requests accepting text/html — an
-# app's own later notFound registration replaces it.
-#
-# Two modes, decided by environment:
-#   worker (RIP_BUNDLE_PATH set) — the manager assembled the bundle before
-#     any worker spawned; the handler re-reads and re-tags it per request
-#     (the manager rewrites the pool's bundle file in place on a
-#     file-feed change; Janus's micro-cache absorbs the read at the edge).
-#   standalone (no RIP_BUNDLE_PATH) — the process runs under the rip loader,
-#     so the compiler is loadable; assemble at call time, failing fast,
-#     and serve the boot-time cached bytes.
-#
-# A WATCHING worker additionally carries the workspace dev feed
-# (docs/WORKSPACE.md Q8′): GET /manifest.json (no-store, read per request),
-# latest module bytes at /app/{store-path-without-app-prefix}?etag=…,
-# and the hub bridge endpoint enrolling dev sockets into the DEV_CHANNEL
-# (/hub — same string as the bridge path). Each surface keys on its
-# manager-provided environment — the manager sets the feed envs only
-# with watch on (production has no hub, Q2), and standalone mode has
-# no manager, so none of them register there.
-
-# The hub channel dev clients enroll in — mirrored as DEV_CHANNEL in
-# manager.rip (workers never import manager code). Exported so the mirror
-# is a pinned fact, not a convention. Same spelling as the bridge path.
-export DEV_CHANNEL = '/hub'
-
-# Standalone assemble is Rip-only. CSS under app/ is a watch-door concern
-# (manager syncFiles + browser soft-apply); it must never reach compile.
-clientModules = (dir) ->
-  modules = {}
-  moduleFiles = {}
-  walk = (at, prefix) ->
-    for e in readdirSync(at, { withFileTypes: true })
-      continue if e.name.startsWith('.')
-      full = join(at, e.name)
-      if e.isDirectory()
-        walk full, "#{prefix}#{e.name}/"
-      else if e.name.endsWith('.rip')
-        key = "#{prefix}#{e.name}"
-        modules[key] = readFileSync(full, 'utf8')
-        moduleFiles[key] = full
-  walk dir, 'app/'
-  # appDir is the project root (parent of app/) — projection overlays
-  # key as paths under it (api/models.rip), so relative imports resolve.
-  { modules, moduleFiles, appDir: dirname(dir) }
-
-# The generated boot page, titled with the app's name (the manager
-# passes its --name; standalone derives it from the app's directory).
-# Where the feed surface exists (a watching worker — the manager wrote
-# the manifest and files) the bootApp call carries `workspace: true`,
-# the browser half of the dev door; standalone pages boot plain.
-BOOT_PAGE = (workspace, title) -> """
-<!doctype html>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>#{title}</title>
-<div id="app"></div>
-<script type="module">
-  import { bootApp } from '/@rip/rip.js'
-  const debug = new URLSearchParams(location.search).has('debug')
-  bootApp({ url: '/bundle.json', debug#{if workspace then ', workspace: true' else ''} })
-</script>
-"""
-
-export client = (dir = null) ->
-  bundleText = null
-  clientDir = null
-  runtimePath = null
-
-  if process.env.RIP_BUNDLE_PATH?
-    bundleText = readFileSync(process.env.RIP_BUNDLE_PATH, 'utf8')
-    runtimePath = process.env.RIP_BROWSER_RUNTIME
-    clientDir = process.env.RIP_CLIENT_DIR or null
-  else
-    clientDir = resolve(dir ?? 'app')
-    unless existsSync(clientDir)
-      throw new Error "client() found no app directory at #{clientDir}"
-    preload = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
-    unless preload?
-      throw new Error "client() cannot assemble the bundle: the rip loader is missing from execArgv — serving a browser app standalone requires running via `rip`"
-    srcDir = dirname(resolve(preload))
-    packagesDir = join(srcDir, '..', 'packages')
-    unless existsSync(packagesDir)
-      throw new Error "client() cannot assemble the bundle: no packages directory at #{packagesDir}"
-    runtimePath = join(srcDir, '..', 'dist', 'browser', 'rip.js')
-    unless existsSync(runtimePath)
-      throw new Error "client() cannot serve the browser runtime: nothing at #{runtimePath}"
-    # The specifier is a computed variable ON PURPOSE: worker artifacts are
-    # produced by Bun.build over this module, and a static (or statically
-    # analyzable) import here would drag the compiler into every worker,
-    # destroying the no-compiler-in-workers memory story. A variable
-    # specifier defeats the bundler's static analysis.
-    bundleModule = join(srcDir, 'bundle.js')
-    { assembleBundle } = import!(bundleModule)
-    { modules, moduleFiles, appDir } = clientModules(clientDir)
-    bundleText = JSON.stringify assembleBundle { modules, moduleFiles, appDir, packagesDir }
-
-  etag = "\"#{Bun.hash(bundleText).toString(16)}\""
-  indexHtml = if clientDir? then join(clientDir, 'index.html') else null
-  indexHtml = null unless indexHtml? and existsSync(indexHtml)
-
-  # The page opens the door only where the feed surface exists — a
-  # watching worker, where the manager wrote the manifest and files.
-  # Standalone has no manager and no feed routes: a workspace-mode boot
-  # there would die on its manifest fetch, so it boots plain.
-  door = process.env.RIP_MANIFEST_PATH?
-
-  # The page title: the manager's --name in worker mode, the app's
-  # directory name standalone. Escaped — a directory name is filesystem
-  # input, not HTML.
-  title = process.env.RIP_APP_NAME or (if clientDir? then basename(dirname(clientDir)) else 'rip app')
-  title = title.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
-
-  bootPage = (c) ->
-    if indexHtml?
-      c.send indexHtml, 'text/html; charset=UTF-8'
-    else
-      c.html BOOT_PAGE(door, title)
-
-  get '/', (c) -> bootPage(c)
-  if process.env.RIP_BUNDLE_PATH?
-    # Feed freshness: the manager rewrites this pool's bundle file in
-    # place on a file-feed change, so the handler re-reads and re-tags per
-    # request. With the door open (manifest present) the bundle is
-    # no-store like the manifest — a 1s micro-cache hit can otherwise
-    # pair a live manifest with stale bundle bytes (the silent-stale
-    # class). Standalone / production (no manifest) keeps ETag-only
-    # so the edge cache still earns its keep.
-    get '/bundle.json', (c) ->
-      text = readFileSync(process.env.RIP_BUNDLE_PATH, 'utf8')
-      live = "\"#{Bun.hash(text).toString(16)}\""
-      headers = { 'Content-Type': 'application/json', 'ETag': live }
-      headers['Cache-Control'] = 'no-store' if process.env.RIP_MANIFEST_PATH?
-      if c.req.header('if-none-match') is live
-        return new Response(null, { status: 304, headers })
-      c.body text, 200, headers
-  else
-    get '/bundle.json', (c) ->
-      if c.req.header('if-none-match') is etag
-        return new Response(null, { status: 304, headers: { 'ETag': etag } })
-      c.body bundleText, 200, { 'Content-Type': 'application/json', 'ETag': etag }
-  # Local checkout runtime until a CDN-pinned rip.js lands (Q8′).
-  get '/@rip/rip.js', (c) -> c.send runtimePath
-
-  if process.env.RIP_MANIFEST_PATH?
-    get '/manifest.json', (c) ->
-      # Read per request: the manager rewrites the manifest on every file-feed
-      # change, and no-store keeps every cache out of the freshness path.
-      c.body readFileSync(process.env.RIP_MANIFEST_PATH, 'utf8'), 200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
-
-  if process.env.RIP_FILES_DIR?
-    # Q8′ latest-representation door: GET /app/<rel>?etag=E where the
-    # store id is app/<rel> (e.g. /app/mood.rip ↔ app/mood.rip). Exact
-    # etag → 200 + body + ETag; a superseded etag → 409 + current ETag
-    # (never a silent stale body). no-store: freshness is the query
-    # param, not the browser cache. The on-disk name is the percent-
-    # encoded store id — one file per module, overwritten on each save
-    # (no per-rev museum).
-    get '/app/*', (c) ->
-      wanted = c.req.query('etag')
-      unless wanted? and /^[0-9a-f]{16}$/.test(wanted)
-        error 'module URLs require ?etag=<16-hex> (docs/WORKSPACE.md, Q8′)', 400
-      rel = c.req.path.slice('/app/'.length)
-      id = try
-        'app/' + rel.split('/').map((s) -> decodeURIComponent(s)).join('/')
-      catch then error('malformed percent-encoding in module path', 400)
-      file = join(process.env.RIP_FILES_DIR, encodeURIComponent(id))
-      error "unknown module #{id}", 404 unless existsSync(file)
-      bytes = readFileSync(file, 'utf8')
-      current = new Bun.CryptoHasher('sha256').update(bytes).digest('hex').slice(0, 16)
-      headers = { 'Content-Type': 'text/plain; charset=utf-8', 'ETag': "\"#{current}\"", 'Cache-Control': 'no-store' }
-      if wanted isnt current
-        return new Response(null, { status: 409, headers })
-      c.body bytes, 200, headers
-
-  if process.env.RIP_BRIDGE_PATH?
-    # Janus POSTs every hub socket event here; answering an open with
-    # {"+": [DEV_CHANNEL]} enrolls that connection into the dev channel.
-    # Enrollment keys on the feed surface existing: with watch off the
-    # dev channel carries nothing, and an app-level hub socket (a
-    # production-legal use) must not ride it.
-    post process.env.RIP_BRIDGE_PATH, (c) ->
-      frame = c.req.header('sec-websocket-frame')
-      if frame is 'open'
-        return c.json { '+': [DEV_CHANNEL] } if process.env.RIP_MANIFEST_PATH?
-        return new Response(null, { status: 204 })
-      return new Response(null, { status: 204 }) if frame is 'text' or frame is 'close'
-      error "missing or unknown Sec-WebSocket-Frame header (got #{JSON.stringify(frame ?? null)})", 400
-  # SPA fallback: an unmatched GET that accepts HTML answers the boot page,
-  # so client-side routes deep-link; everything else stays a plain 404.
-  # An app keeps its own notFound by registering it AFTER client(); one
-  # registered before would be replaced — loudly, never silently.
-  if _notFoundHandler?
-    console.warn 'rip-server: client() replaces the notFound handler registered before it — register the app notFound after client() to keep it'
-  notFound (c) ->
-    if c.req.method is 'GET' and (c.req.header('accept') or '').includes('text/html')
-      return bootPage(c)
-    new Response('Not Found', { status: 404 })
-  return
+  fetch
 
 # ==============================================================================
 # Utility: Get Current Environment/Context
@@ -1066,14 +746,13 @@ export session = new Proxy {},
   get: (_, key) ->
     requestContext.getStore()?.env?.session?[key]
   set: (_, key, value) ->
-    ctx = requestContext.getStore()?.env
-    return false unless ctx?
+    ctx = requestContext.getStore()?.env or throw new Error 'session is only available during a request'
     ctx.session ?= {}
     ctx.session[key] = value
     true
   deleteProperty: (_, key) ->
-    ctx = requestContext.getStore()?.env
-    delete ctx.session[key] if ctx?.session?
+    ctx = requestContext.getStore()?.env or throw new Error 'session is only available during a request'
+    delete ctx.session[key] if ctx.session?
     true
 
 # Env proxy — access env.FOO anywhere (shortcut for process.env)

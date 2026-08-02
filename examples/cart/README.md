@@ -11,7 +11,7 @@ It is a runnable example — not a CI suite.
 
 | Path | Role |
 | --- | --- |
-| `index.rip` | Server entry: migrate/seed, `/styles.css`, `start! 'app'` |
+| `index.rip` | API entry: migrate/seed, `/styles.css`, bare `start!` handoff |
 | `setup.rip` | One-shot `migrate` + `seed` |
 | `api/` | SQLite adapter, models, seed, `/api/*` handlers (not a public URL tree) |
 | `app/index.html` | SPA shell (Pico + styles + `bootApp`) |
@@ -24,24 +24,16 @@ bundler overlays shippable projections at that path (`:model` stays server-side)
 Persistence starts on **bun:sqlite**. A follow-up swaps `api/db.rip` to
 `@rip-lang/db` (DuckDB over duckdb-harbor).
 
-## Leg 1 — standalone
-
-```bash
-cd examples/cart
-rip index.rip
-```
-
-Open the printed URL. Seeded products render; add to cart, place an
-order, edit the profile. Data lives in `api/cart.sqlite` (gitignored).
-
-## Leg 2 — pooled behind Janus
+## Run
 
 With a Janus control endpoint running:
 
 ```bash
 cd examples/cart
-rip server index.rip --name cart --bridge /hub
+rip server index.rip --name cart
 ```
 
-Same app as a worker pool. Watching mode opens the Workspace door; edit
-a client module under `app/` to see a live update.
+Open the registered site. Seeded products render; add to cart, place an
+order, and edit the profile. Data lives in `api/cart.sqlite` (gitignored).
+Watching mode opens the Workspace door; edit a client module under `app/`
+to see a live update.

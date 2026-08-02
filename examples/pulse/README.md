@@ -1,9 +1,8 @@
 # Pulse
 
-A tiny status board that proves the whole stack end to end: Rip Server
-serves the boot page, the bundle, and a small API; Rip App renders the
-page in the browser; and behind Janus, saving a component file updates
-the running page through the Workspace door.
+A tiny status board that proves the whole stack end to end: Janus serves
+the browser App, Rip Server handles a small API, and saving a component
+file updates the running page through the Workspace door.
 
 It is a runnable example and a demo script — not a test suite. Nothing
 here is wired into CI.
@@ -12,7 +11,7 @@ here is wired into CI.
 
 | File | Role |
 | --- | --- |
-| `index.rip` | The server: statuses API, `start! 'app'` |
+| `index.rip` | The API: statuses routes and bare `start!` handoff |
 | `app/index.html` | SPA shell (`bootApp` over `/bundle.json`) |
 | `app/stash.rip` | `stash` — the `statuses` source over `/api/statuses` |
 | `app/mood.rip` | `MoodBadge`, the mood → label leaf. **This is the file the live demo edits.** |
@@ -33,39 +32,24 @@ Two endpoints over an in-memory list. Each status is
   a `text` over 140 characters, or a `mood` outside the vocabulary is
   a 400 with a named message — never a silent default.
 
-Statuses live in the worker's memory. Standalone that means they last
-until you stop the process; pooled behind Janus, any pool reload (a
-server-file save, a restart) boots fresh workers and clears the list.
+Statuses live in worker memory. Any pool reload (an API-source save or a
+restart) boots fresh workers and clears the list.
 
-## Leg 1 — standalone
-
-```bash
-cd examples/pulse
-rip index.rip
-```
-
-Open the printed URL (http://localhost:3000). The page boots from
-`/bundle.json`, the seeded status renders through its mood badge,
-and posting from the form updates the list in place — the handler POSTs,
-then refetches the `statuses` source.
-
-## Leg 2 — pooled behind Janus
+## Run
 
 With a Janus control endpoint running (`--control <target>` or the
 `JANUS_CONTROL` env var):
 
 ```bash
 cd examples/pulse
-rip server index.rip --name pulse --bridge /hub
+rip server index.rip --name pulse
 ```
 
-The same `index.rip` now runs as a worker pool: the manager registers
-`pulse` with Janus, compiles the app and assembles the bundle once per
-boot epoch, and spawns workers on unix sockets. Caddy terminates TLS;
+The manager registers `pulse` with Janus, publishes the browser App,
+prepares the API artifact, and spawns workers on unix sockets. Caddy terminates TLS;
 Janus admits the host, routes it to the live worker sockets
 (least-conn with health), answers anonymous GETs from its micro-cache,
-and owns the hub — `--bridge /hub` registers the endpoint Janus POSTs
-every hub socket event to.
+and owns the Hub directly.
 
 ## Leg 3 — the door
 
@@ -73,14 +57,14 @@ Same as leg 2, with the flag in the manager's environment:
 
 ```bash
 cd examples/pulse
-rip server index.rip --name pulse --bridge /hub
+rip server index.rip --name pulse
 ```
 
 Open the page, then edit `app/mood.rip`: change the `up` label
 `'riding high'` to anything else and save. The manager sees a
-client-only change, bumps the cell's rev, and dings the hub with
-`{id, rev}` — no bytes ride the socket. The page fetches the rev-keyed
-cell over HTTP, sets it into the Workspace, and every badge on the page
+client-only change and dings the Hub with `{id, hash}` — no bytes ride the
+socket. The page fetches the latest file over HTTP, verifies its rash,
+sets it into the Workspace, and every badge on the page
 updates without a manual refresh.
 
 The update applies by **remount labeled escape** (docs/WORKSPACE.md,
