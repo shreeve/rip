@@ -19,7 +19,7 @@ Six lanes, each judged by a different reference so they can't all fail the same 
 
 Each closed denominator has a bottom and stays there once drained. The AXIS LIST needs a bottom too, or every "what about X?" adds a census forever. It has one: every construct passes through the same pipeline — lex, parse, type-text, semantics, emit, run — so the stages are a closed list and coverage axes are stages.
 
-**The charter: claims are tests, populations are the audit.** A test asserts one claim and must be GREEN; this instrument measures a POPULATION against a denominator and may be RED. Capability is not the line — `check.test.js` drives `rip check` over tsgo, and four `test/toolchain` suites drive the real LSP. What a test cannot hold is the answer's SHAPE: a census over a closed set is a report, and gating its number blesses a baseline while losing the actionable list; a red held by agreement is expressible only by asserting the wrong behavior as current, which inverts when the bug is fixed; and a ruled-uncarried row is neither pass nor fail. So a lone reproducible defect with a known-correct answer belongs in a test — this instrument's job is to FIND it, not hold it, which is why the empty program left for `check.test.js`.
+**The charter: claims are tests, populations are the audit.** A test asserts one claim and must be GREEN; this instrument measures a POPULATION against a denominator and may be RED. Capability is not the line — `check.test.js` drives `rip check` over tsgo, and six `test/toolchain` suites drive the real LSP. What a test cannot hold is the answer's SHAPE: a census over a closed set is a report, and gating its number blesses a baseline while losing the actionable list; a red held by agreement is expressible only by asserting the wrong behavior as current, which inverts when the bug is fixed; and a ruled-uncarried row is neither pass nor fail. So a lone reproducible defect with a known-correct answer belongs in a test — this instrument's job is to FIND it, not hold it, which is why the empty program left for `check.test.js`.
 
 **Complete means, for every stage:** its denominator is NAMED, or the absence of one is ruled with its replacing registry named; the denominator is DRAINED — every item exercised, parked behind an open FINDINGS row, or excluded by a ruled table; every registry row is CARRIED IN BOTH POLARITIES; and a gate FAILS IN BOTH DIRECTIONS when that stops holding. The last clause is what makes the others assertable, and it is what the exit-code contract provides.
 
@@ -116,14 +116,16 @@ Depends on M2 (built), RULINGS.md (the components/schema files and their pinned 
 
 *Not built; hover and definition driven.*
 
-Same program, two spellings, same LSP answers: `console.log total` and `console.log(total)` must hover, go-to-def, and complete identically. Reaches the LSP surfaces M1 never drives, because it asks the server — but needs no oracle, since the two spellings check each other. Driven on the #21 pair, where hovering `total` in the paren-less form answers about `console.log` and go-to-def lands in `lib.dom.d.ts`; a whitespace-only respelling holds, so the check isn't trivially red.
+Same program, two spellings, same LSP answers: `console.log total` and `console.log(total)` must hover, go-to-def, and complete identically. Reaches the LSP surfaces M1 never drives, because it asks the server — but needs no oracle, since the two spellings check each other. Driven on the identifier-span pair (the read carried no source span of its own, so four surfaces resolved through a cover), where hovering `total` in the paren-less form answered about `console.log` and go-to-def landed in `lib.dom.d.ts`; a whitespace-only respelling holds, so the check isn't trivially red.
 
 Depends on the server; benefits from M3. Produces: surface coverage across the LSP entry points, no twins written.
 
-## M5 — Content oracles (#22)
+## M5 — Content oracles
 
 *Not started.*
 
 Hover CONTENT at use sites, completion, signature help — what M4 cannot reach by symmetry alone, checked against hand-written twins.
 
-Depends on the server + new twins. Produces: the content-level checks #22 asks for.
+The incomplete-expression work closed without these, on interim gates that drive the real server and assert the answers by hand. That is the whole argument for building M5: those gates say what one buffer answers at one position, where a twin-oracled content audit would say it for the corpus. Note what they also taught, which M5 must carry: a barriered request proves what a face CONTAINS and is blind to whether the answer ARRIVES, and every gap in that work was found by driving the editor rather than by the suite. An oracle that settles before it asks would inherit exactly that blindness (`test/toolchain/arrival.test.js` holds the counter-shape).
+
+Depends on the server + new twins. Produces: content-level checks over the corpus, replacing per-buffer assertions written by hand.
