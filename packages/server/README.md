@@ -2,7 +2,8 @@
 
 # Rip Server - @rip-lang/server
 
-> **Small API framework and managed runtime — exact routes, Web-standard middleware, safe reloads, and disposable workers behind Caddy and Janus.**
+> **Small API framework and managed runtime — exact routes, Web-standard
+> middleware, safe reloads, and disposable workers behind Caddy and Janus.**
 
 Rip Server is a small API framework and project manager for applications served
 through Caddy and [Janus](https://github.com/shreeve/janus).
