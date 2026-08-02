@@ -1,5 +1,5 @@
 import { test, eq, ok } from '@rip-lang/testing'
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { rash } from '@rip-lang/app/rash'
@@ -19,6 +19,7 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
   dir = mkdtempSync join(tmpdir(), 'rip-hello-app-')
   project = join dir, 'project'
   cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
+  project = realpathSync project
   controlSocket = join dir, 'janus.sock'
   registration = null
   deleted = false
@@ -75,6 +76,7 @@ test! 'authored App shell is registered without generating a replacement', ->
   dir = mkdtempSync join(tmpdir(), 'rip-hello-authored-shell-')
   project = join dir, 'project'
   cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
+  project = realpathSync project
   Bun.write! join(project, 'app', 'index.html'), '<!doctype html><h1>Authored</h1>'
   controlSocket = join dir, 'janus.sock'
   registration = null
@@ -107,6 +109,7 @@ test! 'watch publication commits one shared inventory then batches per-file ding
   dir = mkdtempSync join(tmpdir(), 'rip-hello-watch-')
   project = join dir, 'project'
   cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
+  project = realpathSync project
   controlSocket = join dir, 'janus.sock'
   registration = null
   batches = []

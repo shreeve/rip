@@ -77,9 +77,6 @@ Usage:
   rip server status [app-entry]        report the canonical project's manager
   rip server hold [app-entry]          fence activation, publication, and dings
   rip server release [app-entry]       activate one coherent API/App snapshot
-  rip server migrate [models] [--dir migrations] [--id 32-hex]
-                                       migrate only from Held, then activate coherently
-  rip server recover <operation-id>    fix-forward an unresolved Maintenance operation
 
 Options:
   --name <n>          App name for registration (default: the app directory's name)
@@ -134,10 +131,6 @@ export state =
   managerMetaPath: null
   managerNonce: null
   managerServer: null
-  operationPath: null
-  migrationPromise: null
-  migration: null
-  migrationResults: {}
   appId: null
   controlUnix: null    # unix socket path to the control plane, or
   controlBase: null    # http(s) base URL
@@ -653,110 +646,9 @@ managerStatus = ->
       ready: if state.currentPool? then readySocks(state.currentPool).length else 0
     sourceEpoch: state.sourceEpoch
     preparation: if state.preparation? then 'running' else if state.prepared? then 'prepared' else 'none'
-    migration: if state.migration? then { id: state.migration.id, phase: state.migration.phase, outcome: state.migration.outcome } else null
     error: state.prepareError or state.bootFailure
     pid: process.pid
   }
-
-writeOperation = (record) ->
-  dir = dirname(state.operationPath)
-  mkdirSync dir, { recursive: true, mode: 0o700 }
-  tmp = "#{state.operationPath}.tmp"
-  fd = openSync tmp, 'w', 0o600
-  try
-    writeFileSync fd, JSON.stringify(record)
-    fsyncSync fd
-  finally
-    closeSync fd
-  renameSync tmp, state.operationPath
-  dfd = openSync dir, 'r'
-  try
-    fsyncSync dfd
-  finally
-    closeSync dfd
-  state.migration = record
-
-clearOperation = ->
-  try unlinkSync state.operationPath
-  if state.operationPath? and existsSync(dirname(state.operationPath))
-    dfd = openSync dirname(state.operationPath), 'r'
-    try
-      fsyncSync dfd
-    finally
-      closeSync dfd
-  state.migration = null
-
-readOperation = ->
-  return null unless existsSync(state.operationPath)
-  try
-    JSON.parse readFileSync(state.operationPath, 'utf8')
-  catch e
-    throw new Error("rip-server: operation journal is unreadable at #{state.operationPath}: #{e?.message or e}")
-
-durableCandidate = (candidate, operationId) ->
-  dir = join(state.projectRoot, '.rip', 'generations')
-  mkdirSync dir, { recursive: true, mode: 0o700 }
-  target = join(dir, "#{operationId}.js")
-  bytes = readFileSync candidate.artifact
-  writeFileSync target, bytes
-  fd = openSync target, 'r'
-  try
-    fsyncSync fd
-  finally
-    closeSync fd
-  { ...candidate, artifact: target }
-
-durableWrite = (bytes, target) ->
-  writeFileSync target, bytes
-  fd = openSync target, 'r'
-  try
-    fsyncSync fd
-  finally
-    closeSync fd
-  target
-
-durableCopy = (source, target) -> durableWrite readFileSync(source), target
-
-writeAppCandidate = (walk, operationId) ->
-  return null unless walk?
-  dir = join(state.projectRoot, '.rip', 'generations')
-  path = join(dir, "#{operationId}-app.json")
-  durableWrite Buffer.from(JSON.stringify({ modules: walk.modules, appDir: walk.appDir })), path
-  path
-
-readAppCandidate = (path) ->
-  return null unless path?
-  { modules, appDir } = JSON.parse readFileSync(path, 'utf8')
-  moduleBytes = {}
-  moduleBytes[id] = new TextEncoder().encode(source) for id, source of modules
-  { modules, moduleBytes, moduleFiles: {}, appDir }
-
-migrationOutcome = (text) ->
-  lines = String(text).split('\n').filter (line) -> line.startsWith('RIP_MIGRATION_OUTCOME=')
-  return { outcome: 'unknown', error: 'migration child produced no durable outcome report' } unless lines.length
-  try return JSON.parse(lines[lines.length - 1].slice('RIP_MIGRATION_OUTCOME='.length)) catch then return { outcome: 'unknown', error: 'migration child produced a malformed outcome report' }
-
-runMigrationChild = (body) ->
-  bin = join(loaderSrcDir(), '..', 'bin', 'rip')
-  args = [process.execPath, bin, 'schema', 'migrate']
-  args.push body.entry if body?.entry?
-  args.push '--dir', (body?.dir or 'migrations')
-  args.push '--coordinated', '--operation-id', body.id
-  proc = trackChild Bun.spawn args,
-    cwd: state.projectRoot
-    stdin: 'ignore'
-    stdout: 'pipe'
-    stderr: 'pipe'
-    env: process.env
-  [out, err, code] = await Promise.all [
-    new Response(proc.stdout).text()
-    new Response(proc.stderr).text()
-    proc.exited
-  ]
-  report = migrationOutcome "#{out}\n#{err}"
-  report.code = code
-  report.output = if code is 0 then out.trim() else err.trim()
-  report
 
 managerRequest = (path, method = 'GET', body = null) ->
   opts = { method, unix: state.managerPath }
@@ -773,122 +665,6 @@ probeManager = ->
   catch
     null
 
-activateMigration = (record) ->
-  state.operation = 'Maintenance'
-  pool = null
-  try
-    pool = spawnPool(record.targetArtifact, true)
-    state.bootingPool = pool
-    awaitReady! pool, cfg.workers
-    state.currentPool = pool
-    state.doorbellPublished = false
-    version = bumpDesired()
-    writeOperation { ...record, phase: 'activating', outcome: record.outcome }
-    published = await enqueue! -> putDesired! version
-    throw new Error('migration activation sockets were superseded') unless published
-    app = readAppCandidate record.appCandidate
-    commitReleaseApp app, assembleBundleText!(app) if app?
-    state.bootingPool = null
-    state.bootFailure = null
-    state.prepareError = null
-    dingEpoch! state.sourceEpoch if cfg.watch
-    state.operation = 'Active'
-    clearOperation()
-    snap = hashApp()
-    changedDuring = snap.hash isnt record.sourceHash
-    state.lastHash = snap.hash
-    state.lastFiles = snap.files
-    if changedDuring
-      onFileChange().catch (e) -> warn "rip-server: post-migration App refresh failed: #{e?.message or e}"
-      onContentChange()
-    managerStatus()
-  catch e
-    state.currentPool = null
-    state.bootingPool = null
-    scrapPool pool if pool?
-    state.operation = 'Maintenance'
-    state.bootFailure = e?.message or String(e)
-    version = bumpDesired()
-    await enqueue! -> putDesired! version
-    writeOperation { ...record, phase: 'maintenance', outcome: record.outcome, error: state.bootFailure }
-    throw e
-
-runCoordinatedMigration = (body = {}) ->
-  throw new Error("cannot migrate while #{state.operation}") unless state.operation is 'Held'
-  throw new Error('App-only projects have no API migration activation') unless cfg.entry?
-  state.operation = 'Migrating'
-  state.operationOwner += 1
-  operationId = body.id or randomBytes(16).toString('hex')
-  candidate = null
-  record = null
-  oldPool = state.currentPool
-  try
-    walk = readAppModules!()
-    sourceHash = hashApp().hash
-    candidate = acceptPrepared! kickPrepare!()
-    throw new Error('migration preparation was superseded') unless candidate?
-    target = durableCandidate candidate, operationId
-    state.prepared = null if state.prepared is candidate
-    try unlinkSync candidate.artifact
-    apiDir = dirname(target.artifact)
-    oldArtifact = if oldPool?.artifact? then durableCopy(oldPool.artifact, join(apiDir, "#{operationId}-old.js")) else null
-    appCandidate = writeAppCandidate walk, operationId
-    record =
-      version: 1
-      id: operationId
-      phase: 'prepared'
-      outcome: null
-      sourceEpoch: state.sourceEpoch
-      sourceHash: sourceHash
-      oldArtifact: oldArtifact
-      targetArtifact: target.artifact
-      appCandidate: appCandidate
-      migrationDir: body.dir or 'migrations'
-      migrationEntry: body.entry or null
-    writeOperation record
-
-    state.operation = 'Maintenance'
-    state.currentPool = null
-    state.doorbellPublished = false
-    version = bumpDesired()
-    await enqueue! -> putDesired! version
-    await retirePool(oldPool) if oldPool?
-    record = { ...record, phase: 'migration-running', outcome: 'unknown' }
-    writeOperation record
-    report = runMigrationChild! body
-    record = { ...record, phase: 'migration-finished', outcome: report.outcome, migration: report }
-    writeOperation record
-
-    if report.code isnt 0
-      if report.outcome is 'confirmed-none' and oldArtifact?
-        restored = spawnPool(oldArtifact, true)
-        awaitReady! restored, cfg.workers
-        state.currentPool = restored
-        state.operation = 'Held'
-        version = bumpDesired()
-        await enqueue! -> putDesired! version
-        clearOperation()
-        return managerStatus()
-      state.operation = 'Maintenance'
-      state.bootFailure = report.error or report.output or 'migration failed'
-      throw new Error(state.bootFailure)
-
-    activateMigration! record
-  catch e
-    if state.operation is 'Migrating'
-      state.operation = 'Held'
-      clearOperation() if record? and record.phase is 'prepared'
-    throw e
-
-recoverMigration = (id) ->
-  throw new Error("cannot recover while #{state.operation}") unless state.operation is 'Maintenance'
-  record = readOperation!()
-  throw new Error('no migration operation requires recovery') unless record?
-  throw new Error("operation id mismatch: want #{record.id}") unless id is record.id
-  record = { ...record, outcome: record.outcome or 'unknown', phase: 'fix-forward' }
-  writeOperation record
-  activateMigration! record
-
 startManagerControl = ->
   try
     state.managerServer = Bun.serve
@@ -901,24 +677,6 @@ startManagerControl = ->
           try return Response.json(enterHold!()) catch e then return Response.json({ error: e?.message or String(e) }, { status: 409 })
         if req.method is 'POST' and url.pathname is '/release'
           try return Response.json(releaseHold!()) catch e then return Response.json({ error: e?.message or String(e) }, { status: 409 })
-        if req.method is 'POST' and url.pathname is '/migrate'
-          body = try req.json! catch then {}
-          id = body.id
-          unless typeof id is 'string' and /^[a-f0-9]{32}$/.test(id)
-            return Response.json({ error: 'migrate requires a 32-hex mutation id' }, { status: 400 })
-          return Response.json(state.migrationResults[id]) if state.migrationResults[id]?
-          unless state.migrationPromise?
-            state.migrationPromise = do ->
-              try
-                result = runCoordinatedMigration! body
-                state.migrationResults[id] = result
-                result
-              finally
-                state.migrationPromise = null
-          try return Response.json(await state.migrationPromise) catch e then return Response.json({ error: e?.message or String(e), status: managerStatus() }, { status: 409 })
-        if req.method is 'POST' and url.pathname is '/recover'
-          body = try req.json! catch then {}
-          try return Response.json(recoverMigration!(body.id)) catch e then return Response.json({ error: e?.message or String(e), status: managerStatus() }, { status: 409 })
         new Response('Not Found', { status: 404 })
   catch e
     try unlinkSync state.managerMetaPath if acquired
@@ -1143,8 +901,8 @@ runBrowse = (args) ->
   await new Promise(->)
 
 parseArgs = (argv) ->
-  command = if ['browse', 'status', 'hold', 'release', 'migrate', 'recover'].includes(argv[0]) then argv[0] else 'start'
-  args = { command, entry: null, migrationEntry: null, migrationDir: 'migrations', operationId: null, mutationId: null, name: null, hosts: [], workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, control: process.env.JANUS_CONTROL or null, untilRestart: false, accessMode: 'pretty', accessPicture: null, accessExplicit: false, startupFlags: [] }
+  command = if ['browse', 'status', 'hold', 'release'].includes(argv[0]) then argv[0] else 'start'
+  args = { command, entry: null, name: null, hosts: [], workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, control: process.env.JANUS_CONTROL or null, untilRestart: false, accessMode: 'pretty', accessPicture: null, accessExplicit: false, startupFlags: [] }
   i = if command is 'start' then 0 else 1
   while i < argv.length
     a = argv[i]
@@ -1197,13 +955,6 @@ parseArgs = (argv) ->
         abort 'rip-server: --access-format requires a picture' if i + 1 >= argv.length
         args.accessExplicit = true
         args.accessPicture = nextValue()
-      when '--dir'
-        abort 'rip-server: --dir only applies to migrate' unless command is 'migrate'
-        args.migrationDir = nextValue()
-      when '--id'
-        abort 'rip-server: --id only applies to migrate' unless command is 'migrate'
-        args.mutationId = nextValue()
-        abort 'rip-server: --id requires 32 lowercase hex characters' unless /^[a-f0-9]{32}$/.test(args.mutationId)
       when '--help', '-h'
         p USAGE
         exit 0
@@ -1214,13 +965,7 @@ parseArgs = (argv) ->
           abort "rip-server: --access-log must be pretty, raw, or off" unless args.accessMode in ['pretty', 'raw', 'off']
         else
           abort "rip-server: unknown option #{a}\n\n#{USAGE}" if a.startsWith('-')
-        if not a.startsWith('-') and command is 'migrate'
-          abort "rip-server: multiple migration entries (#{args.migrationEntry} and #{a})" if args.migrationEntry?
-          args.migrationEntry = a
-        else if not a.startsWith('-') and command is 'recover'
-          abort "rip-server: recover takes one operation id" if args.operationId?
-          args.operationId = a
-        else if not a.startsWith('-') and command is 'browse'
+        if not a.startsWith('-') and command is 'browse'
           abort "rip-server: browse takes one directory" if args.entry?
           args.entry = a
         else if not a.startsWith('-')
@@ -1268,15 +1013,10 @@ export main = (argv) ->
     runBrowse! args
     return
 
-  project = resolveProject(if args.command is 'migrate' or args.command is 'recover' then null else args.entry)
+  project = resolveProject(args.entry)
   cfg.entry = project.entry
   cfg.appDir = project.root
   state.projectRoot = project.root
-  state.operationPath = join(state.projectRoot, '.rip', 'server-operation.json')
-  pendingOperation = readOperation!()
-  if pendingOperation?
-    state.migration = pendingOperation
-    state.operation = 'Maintenance'
   if args.command isnt 'start'
     abort "rip-server: #{args.command} does not accept startup options: #{args.startupFlags.join(', ')}" if args.startupFlags.length
     runtime = managerRuntime(state.projectRoot)
@@ -1285,14 +1025,7 @@ export main = (argv) ->
     status = probeManager!()
     abort "rip-server: no manager is running for #{state.projectRoot}" unless status?
     if args.command isnt 'status'
-      body = null
-      if args.command is 'migrate'
-        entry = if args.migrationEntry? then realpathSync(resolve(args.migrationEntry)) else null
-        body = { id: args.mutationId or randomBytes(16).toString('hex'), entry, dir: resolve(args.migrationDir) }
-      else if args.command is 'recover'
-        abort 'rip-server: recover requires an operation id' unless args.operationId?
-        body = { id: args.operationId }
-      res = managerRequest! "/#{args.command}", 'POST', body
+      res = managerRequest! "/#{args.command}", 'POST'
       body = res.json!()
       abort "rip-server: #{args.command} failed: #{body?.error or "HTTP #{res.status}"}" unless res.ok
       status = body
@@ -1373,7 +1106,7 @@ export main = (argv) ->
   # An app with an app/ dir serves the browser runtime from the run
   # tmpdir — copied once per manager start. A missing runtime file is a
   # toolchain defect, not an app error: abort.
-  if existsSync(join(cfg.appDir, 'app')) and state.operation isnt 'Maintenance'
+  if existsSync(join(cfg.appDir, 'app'))
     runtimeSrc = join(loaderSrcDir(), '..', 'dist', 'browser', 'rip.js')
     abort "rip-server: browser runtime missing at #{runtimeSrc} — an app/ dir requires dist/browser/rip.js" unless existsSync(runtimeSrc)
     state.browserRuntime = join(state.generatedDir, '@rip', 'rip.js')
@@ -1382,11 +1115,10 @@ export main = (argv) ->
 
   configureEdgeFiles()
 
-  if state.operation isnt 'Maintenance'
-    try
-      buildClientPublication!()
-    catch e
-      abort "rip-server: cannot publish the client App: #{e?.message or e}"
+  try
+    buildClientPublication!()
+  catch e
+    abort "rip-server: cannot publish the client App: #{e?.message or e}"
 
   startDoorbell() if cfg.entry? and state.operation is 'Active'
   if cfg.watch and cfg.entry? and state.operation is 'Active'
@@ -1403,13 +1135,6 @@ export main = (argv) ->
   state.hbTimer = setInterval (-> enqueue heartbeatOnce), HEARTBEAT_MS
 
   installSignals()
-
-  if state.operation is 'Maintenance'
-    startWatcher() if cfg.watch
-    state.lifecycle = 'Running'
-    state.bootFailure = state.migration?.error or 'migration recovery required'
-    warn "rip-server: unresolved migration #{state.migration?.id or 'unknown'} — Maintenance, API admission is empty; use `rip server recover #{state.migration?.id or '<operation-id>'}` after fixing forward"
-    return
 
   unless cfg.entry?
     cfg.workers = 0
