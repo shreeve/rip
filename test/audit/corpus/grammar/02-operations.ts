@@ -79,8 +79,9 @@ let maybeList: number[] | null = [5, 6]
 let first = maybeList?.[0]
 let scale: ((n: number) => number) | null = function(n: number) { return n * 2 }
 let scaled = scale?.(21) ?? 42
+let called = scale?.(21)
 
-console.log('presence:', chosen, exists, hostname, present, retries, first, scaled)
+console.log('presence:', chosen, exists, hostname, present, retries, first, scaled, called)
 
 // ── Invocation: explicit parens, the implicit spelling, do, dammit, tagged ──
 

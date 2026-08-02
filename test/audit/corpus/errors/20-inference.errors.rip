@@ -26,3 +26,8 @@ wrongReturn: string = scale(2)
 wrongBranch: number = verdict
 wrongHoisted: number = describe()
 wrongDestructured = introduceAll({ name: 'Ada', years: 'old' })
+
+{ json: media } = { json: 'app/json' }
+def mediaType()
+  media
+wrongPatternHoisted: number = mediaType()

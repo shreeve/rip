@@ -26,3 +26,8 @@ let wrongReturn: string = scale(2)
 let wrongBranch: number = verdict
 let wrongHoisted: number = describe()
 let wrongDestructured = introduceAll({ name: 'Ada', years: 'old' })
+
+let { json: media } = { json: 'app/json' }
+function mediaType() {
+  return media }
+let wrongPatternHoisted: number = mediaType()

@@ -48,3 +48,11 @@ function Member() {
 
   return <div>{ok}</div>
 }
+
+function Heads() {
+  return <div>
+    {
+    !missingUnless && <span>u</span>}
+    {
+    missingSwitch === 1 && <span>s</span>}
+  </div> }

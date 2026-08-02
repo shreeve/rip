@@ -46,7 +46,7 @@ A blank cell is the only incompleteness that counts. Numbers stay out: the audit
 
 The motivating case: `console.log total` is paren-less, so rip injects the parens and the face reads `console.log(total)`. The compiler emits one `args` row for the injected `(total)` and it round-trips EXACTLY — which is all `mapping.test.js` asserts. But `total` itself maps to that row's left edge, onto `(tota`, so hover there answers about `console.log`. The row is self-consistent and wrong, and no other lane visits that use site.
 
-**Standalone by design.** No oracle, and none needed: the logic was validated against the real editor once (2026-07-17, driven) and the scaffolds removed rather than wired in. A change to the mapping internals it reads re-validates by recovering that drive from git. **Overlap, settled:** the Token Audit's `member` invariant is fully subsumed here; `survival` is root-subsumed but also checks the server DELIVERS a token, which M1 cannot see — when the mapping gap closes, both revert to guarding delivery.
+**Standalone by design.** No oracle, and none needed: the logic was validated against the real editor once (2026-07-17, driven) and the scaffolds removed rather than wired in. A change to the mapping internals it reads re-validates by recovering that drive from git. **Overlap, settled:** the Token Audit's `member` invariant was fully subsumed here and is retired — the mapping fix landed and it went green. `survival` was declared root-subsumed too and did not follow: members went clean while use-site drops held at 84, which is the evidence that those are a DELIVERY gap rather than the coarse-cover-row one, and that they need a root of their own.
 
 Depends on nothing. Produces: use-site position coverage and the root classifier.
 

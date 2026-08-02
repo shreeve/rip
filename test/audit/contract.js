@@ -208,6 +208,19 @@ export const CONTRACT = [
     red: (s) => s.tk.badType.some((r) => r.want?.type === 'enum'),
   },
   {
+    // USE SITES, the half `token.delivery` cannot reach: it enumerates probed
+    // DECLARATIONS, so a name the editor colors at its declaration and drops at
+    // every read satisfies it. The population here is positions where a token is
+    // DUE — the face offset carries a tsgo token holding the same bytes — which
+    // is why zero is assertable rather than a gauge. Skipped, never assumed
+    // green, when the face oracle did not come up: `survDrops` is then absent,
+    // and an absent measurement is not a passing one.
+    name: 'token.delivery.use-site', lane: 'token',
+    property: 'the server delivers a semantic token at every use site TypeScript classifies one',
+    skip: (s) => !s.tk.facesAvailable,
+    red: (s) => (s.tk.survDrops ?? []).reduce((n, d) => n + d.count, 0) > 0,
+  },
+  {
     name: 'token.readonly', lane: 'token',
     property: "the readonly modifier follows the binding form, at declarations and at writes",
     red: (s) => s.tk.badReadonly.length > 0,
@@ -221,6 +234,11 @@ export const CONTRACT = [
 export const judge = ({ states, ran, table = CONTRACT }) => {
   const verdicts = table.map((c) => {
     if (!ran(c.lane)) return { ...c, state: 'skipped' };
+    // A lane can run while one of its measurements is unavailable — an optional
+    // oracle that did not come up. `skip` says so, and skipping is the only
+    // honest verdict: the predicate would read a missing measurement as a
+    // satisfied one.
+    if (c.skip?.(states)) return { ...c, state: 'skipped' };
     const isRed = c.red(states);
     return {
       ...c,

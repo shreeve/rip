@@ -129,7 +129,9 @@ test('every gate the ledger names resolves — a renamed gate cannot rot in the 
   // The token audit's invariants and the mapping audit's census are not in DIMS
   // (that table is the Type Audit's). Listed here, but each is asserted to still
   // appear in the runner, so a rename fails rather than rotting.
-  const invariants = ['present', 'type', 'readonly', 'member', 'use-site', 'census', 'identity', 'silence', 'ruled'];
+  // Retiring one means deleting it here too: a name kept in this list after the
+  // runner drops it asserts a gauge that no longer exists.
+  const invariants = ['present', 'type', 'readonly', 'use-site', 'census', 'identity', 'silence', 'ruled'];
   for (const name of invariants) {
     expect(runner.includes(`'${name}'`), `runner.js no longer mentions the '${name}' invariant`).toBe(true);
   }

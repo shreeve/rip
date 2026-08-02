@@ -48,3 +48,11 @@ Member = component
 
   render
     div ok
+
+Heads = component
+  render
+    div
+      unless missingUnless
+        span 'u'
+      switch missingSwitch
+        when 1 then span 's'

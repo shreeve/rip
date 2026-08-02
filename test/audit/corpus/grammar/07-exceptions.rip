@@ -81,6 +81,30 @@ cast = try JSON.parse('broken') as { live: boolean } catch e then { live: false 
 
 console.log('live:', live, 'backed:', backed, 'cast:', cast)
 
+# ── try with a STATEMENT body: `return` is a statement, not an expression, so each of these four is its own production ──
+
+earlyExit = (n: number): number ->
+  try return n
+  0
+
+exitGuarded = (n: number): number ->
+  try return n catch then return 0
+  0
+
+exitClosing = (n: number): number ->
+  try return n
+  finally
+    console.log('closing')
+
+exitBoth = (n: number): number ->
+  try return n
+  catch
+    return 0
+  finally
+    console.log('both')
+
+console.log('statement try:', earlyExit(1), exitGuarded(2), exitClosing(3), exitBoth(4))
+
 # ── throw: the indented-object payload, and the expression position ──
 
 reject = (code: number) ->

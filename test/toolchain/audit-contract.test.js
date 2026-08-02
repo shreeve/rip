@@ -32,7 +32,7 @@ const cleanStates = () => ({
   fails: 0,
   el: { problems: [] },
   hp: { gap: 0, snapChanged: 0, violations: [] },
-  tk: { missing: [], badType: [], badReadonly: [] },
+  tk: { missing: [], badType: [], badReadonly: [], survDrops: [], facesAvailable: true },
 });
 const allRan = () => true;
 
@@ -108,6 +108,7 @@ describe('the audit contract judges in both directions', () => {
       'token.type': (s) => { s.tk.badType = [{ want: { type: 'variable' } }]; },
       'token.type.enum': (s) => { s.tk.badType = [{ want: { type: 'enum' } }]; },
       'token.readonly': (s) => { s.tk.badReadonly = [{}]; },
+      'token.delivery.use-site': (s) => { s.tk.survDrops = [{ name: 'x', count: 1 }]; },
     };
     expect(Object.keys(fire).sort()).toEqual(CONTRACT.map((c) => c.name).sort());
     for (const [name, seed] of Object.entries(fire)) {

@@ -79,8 +79,10 @@ maybeList: number[] | null = [5, 6]
 first = maybeList?.[0]
 scale: ((n: number) => number) | null = (n: number) -> n * 2
 scaled = scale?.(21) ?? 42
+# The space is load-bearing: `scale?(21)` is the soak call above.
+called = scale? (21)
 
-console.log('presence:', chosen, exists, hostname, present, retries, first, scaled)
+console.log('presence:', chosen, exists, hostname, present, retries, first, scaled, called)
 
 # ── Invocation: explicit parens, the implicit spelling, do, dammit, tagged ──
 

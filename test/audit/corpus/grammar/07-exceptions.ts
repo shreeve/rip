@@ -98,6 +98,32 @@ let cast = (() => { try { return JSON.parse('broken') as { live: boolean } } cat
 
 console.log('live:', live, 'backed:', backed, 'cast:', cast)
 
+let earlyExit = function(n: number): number {
+  try {
+    return n
+  } catch {}
+  return 0
+}
+
+let exitGuarded = function(n: number): number {
+  try {
+    return n
+  } catch {
+    return 0
+  }
+  return 0
+}
+
+let exitClosing = function(n: number): number {
+  return (() => { try { return n } finally { console.log('closing') } })()
+}
+
+let exitBoth = function(n: number): number {
+  return (() => { try { return n } catch { return 0 } finally { console.log('both') } })()
+}
+
+console.log('statement try:', earlyExit(1), exitGuarded(2), exitClosing(3), exitBoth(4))
+
 // ── throw: the indented-object payload, and the expression position ──
 
 let reject = function(code: number) {

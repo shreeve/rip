@@ -128,18 +128,6 @@
 //                  really immutable IN RIP — a rule certified against the
 //                  compiler, not assumed (see READONLY_FORMS)
 //
-//   And ONE more, over TYPE-BODY MEMBERS (see typeMembersOf):
-//     · member     a property name inside a `type`/`interface` body gets a
-//                  token — presence only, same oracle (rip source names the
-//                  member, so it must classify). This is EXPECTED RED —
-//                  the mapping gap: members ride one coarse cover row and
-//                  map only where verbatim from its start, so a
-//                  quote-normalized literal or a block body's inserted `{`
-//                  truncates the prefix and drops every later member token.
-//                  The token twin of the `strict` gauge — a red row that
-//                  goes green the day the mapping fix lands, at which point
-//                  the gauge is retired.
-//
 //   And ONE more, the OTHER direction — over the FACE, not the source (see
 //   FaceOracle / faceSurvival):
 //     · survival   a classified source identifier the server DROPS. Counted,
@@ -149,11 +137,13 @@
 //                  compare source code occurrences to what the server delivered
 //                  — the deficit is the drop. The only invariant that reaches
 //                  USE sites and rip-native names (a reactive read has no
-//                  column-0 declaration and no TS twin). EXPECTED RED —
-//                  the same coarse-cover-row root as `member`, so both
-//                  flip green on the mapping fix. A length-≥2 floor plus a rip
-//                  declaration-keyword denylist and a `delivered >= 1` gate keep
-//                  keywords and synthetic tokens out of the count.
+//                  column-0 declaration and no TS twin). Expected ZERO: a
+//                  position enters the population only where its own face
+//                  offset carries a tsgo token holding the same bytes, so a
+//                  drop is a token the server owed and did not ship. A
+//                  length-≥2 floor and a rip declaration-keyword denylist admit
+//                  only identifier-shaped names; the same-bytes test is what
+//                  keeps operator keywords and synthetic tokens out.
 //
 //   SCOPE: top-level DECLARATION sites (the reach of `declsOf`, a column-0
 //   heuristic) and type-body MEMBERS carry the source-enumerated invariants
@@ -1305,41 +1295,81 @@ const FACE_IDENT = /^[A-Za-z_$][\w$]*$/;
 // source-word count cannot tell the keyword from the identifier (`type X =` vs
 // `type: 'a'`). Excluded wholesale — a few genuine property-`type` drops are
 // forgone rather than count every `type`/`interface`/`class` header as one. The
-// OPERATOR keywords (`is`/`for`/`in`/`when`/…) need no list: the editor never
-// tokens them, so the `delivered >= 1` gate below drops them for free.
+// OPERATOR keywords (`is`/`for`/`in`/`when`/…) need no list: a lowering can land
+// one on a real face token (`if`/`else` on a ternary's operands), and the
+// same-bytes test in the population below is what rejects those.
 const RIP_KEYWORDS = new Set(['type', 'interface', 'class', 'enum', 'def', 'component', 'schema', 'render', 'extends', 'implements', 'import', 'export', 'namespace', 'module']);
-function faceSurvival(src, code, faceDecoded, serverTokens) {
+function faceSurvival(src, code, mappings, faceDecoded, serverTokens) {
   const genStarts = lineStartsOf(code);
   const srcStarts = lineStartsOf(src);
-  const classified = new Set();
+  const keep = (nm) => FACE_IDENT.test(nm) && nm.length >= 2 && !RIP_KEYWORDS.has(nm);
+
+  // WHERE tsgo classified a token, as FACE offsets. Position, never name: the
+  // population below asks whether a token is due at THIS occurrence, and only a
+  // position answers that. A name reaches the face in several places and most
+  // of them are not identifiers at all — a schema field is `name: "street"`, an
+  // element tag is `createElement('div')`, a gate path is `__gates = ['stats']`
+  // — so a name-keyed set admits every one of them on the strength of the same
+  // word being a real identifier elsewhere.
+  const faceTokenAt = new Set();
   for (const t of faceDecoded) {
-    const nm = code.slice(genStarts[t.line] + t.character, genStarts[t.line] + t.character + t.length);
-    if (FACE_IDENT.test(nm) && nm.length >= 2 && !RIP_KEYWORDS.has(nm)) classified.add(nm);
+    const off = genStarts[t.line] + t.character;
+    if (keep(code.slice(off, off + t.length))) faceTokenAt.add(off);
   }
-  const delivered = new Map();
-  let unclassified = 0;
+
+  // WHERE the server delivered, as SOURCE offset → name. The name is carried
+  // rather than recovered later: the drift check below needs it per token, and
+  // re-deriving it there costs a source-to-EOF copy apiece.
+  const deliveredAt = new Map();
   for (const t of (serverTokens ?? [])) {
-    const nm = src.slice(srcStarts[t.line] + t.character, srcStarts[t.line] + t.character + t.length);
-    if (!FACE_IDENT.test(nm) || nm.length < 2 || RIP_KEYWORDS.has(nm)) continue;
-    if (!classified.has(nm)) unclassified++;   // server shipped a name TS never classifies
-    delivered.set(nm, (delivered.get(nm) ?? 0) + 1);
+    const off = srcStarts[t.line] + t.character;
+    const nm = src.slice(off, off + t.length);
+    if (keep(nm)) deliveredAt.set(off, nm);
   }
-  const realOcc = new Map();
-  for (const nm of codeMask(src).match(/[A-Za-z_$][\w$]*/g) ?? []) {
-    if (nm.length >= 2 && classified.has(nm)) realOcc.set(nm, (realOcc.get(nm) ?? 0) + 1);
-  }
+
+  // The population: an occurrence is DUE a token only where its own exact face
+  // position carries one. Everything else is a position no TypeScript
+  // implementation classifies — the name lowered to a string, or it is an
+  // import specifier, which tsgo declines to tokenize on hand-written .ts just
+  // as it does here.
   let survived = 0;
-  const drops = [];   // { name, count } — a name the editor colors somewhere that loses tokens at some uses
-  for (const [nm, occ] of realOcc) {
-    const got = delivered.get(nm) ?? 0;
-    survived += Math.min(occ, got);
-    // A use-site drop is a COLORED identifier losing its token at a use; if the
-    // editor never tokens the name (got 0) there is no use-site token to lose —
-    // it is a keyword or a fully-dropped decl (the `member` gauge's job).
-    if (occ > got && got > 0) drops.push({ name: nm, count: occ - got });
+  const missed = [];
+  for (const m of codeMask(src).matchAll(/[A-Za-z_$][\w$]*/g)) {
+    if (!keep(m[0])) continue;
+    const g = sourceOffsetToGeneratedExact(mappings, m.index, src, code);
+    if (g === null || !faceTokenAt.has(g)) continue;
+    // VERBATIM, the mapping audit's own rule: the face must hold the same bytes.
+    // A keyword whose lowering lands it on some other identifier (`if`/`else`
+    // reaching a ternary's operands) resolves to a real face token without ever
+    // being that token's name, and the server is right not to ship one. Testing
+    // the bytes rejects those without a keyword denylist, which would need
+    // curating forever and erodes as it ages.
+    if (code.slice(g, g + m[0].length) !== m[0]) continue;
+    if (deliveredAt.has(m.index)) survived++;
+    else missed.push({ name: m[0], offset: m.index });
   }
-  const dropCount = drops.reduce((n, d) => n + d.count, 0);
-  return { survived, dropCount, drops, unclassified };
+
+  // A server token whose NAME tsgo classifies nowhere: the two oracles disagree
+  // about what an identifier is, and the gauge is untrustworthy until they do.
+  // Name-keyed on purpose, unlike the population above. This is a DRIFT
+  // detector — has the standalone FaceOracle's tsgo diverged from the server's
+  // — and a name reaches the face in more than one place, so asking whether one
+  // chosen face offset carries a token answers a different question: it reports
+  // a disagreement wherever two manifestations of one name differ.
+  const classifiedNames = new Set();
+  for (const t of faceDecoded) {
+    const off = genStarts[t.line] + t.character;
+    const nm = code.slice(off, off + t.length);
+    if (keep(nm)) classifiedNames.add(nm);
+  }
+  let unclassified = 0;
+  for (const nm of deliveredAt.values()) {
+    if (!classifiedNames.has(nm)) unclassified++;
+  }
+
+  const byName = new Map();
+  for (const d of missed) byName.set(d.name, (byName.get(d.name) ?? 0) + 1);
+  return { survived, dropCount: missed.length, drops: [...byName].map(([name, count]) => ({ name, count })), unclassified };
 }
 
 // The declaration to poll for READINESS: one whose hover cannot legitimately be
@@ -3584,7 +3614,8 @@ if (RUN_HOVER || RUN_TOKENS) {
       const dec = await faces[lane].faceTokens(f);
       const { code } = FACES.get(f);
       // probe.tokens is the REAL server's delivered output — the survival oracle.
-      survival = faceSurvival(src, code, dec, probe.tokens);
+      const { mappings: faceMappings } = FACES.get(f);
+      survival = faceSurvival(src, code, faceMappings, dec, probe.tokens);
     }
 
     return {
@@ -3711,14 +3742,31 @@ if (RUN_HOVER) {
     const occ = new Map();
     decls.forEach((d, i) => {
       const k = occ.get(d.name) ?? 0; occ.set(d.name, k + 1);
-      allRows.push({ ...d, occurrence: k, hover: hovers[i], ts: tmap ? (tmap.get(`${d.name}#${k}`) ?? null) : null, file: f });
+      const ts = tmap ? (tmap.get(`${d.name}#${k}`) ?? null) : null;
+      allRows.push({ ...d, occurrence: k, hover: hovers[i], ts, file: f });
       probeCount++;
       // `any` OR no answer at all. A null hover is a probe that FAILED, never a
       // typed one — testing `hovers[i] ?? ''` against the `any` pattern would
       // score it as a real type and let the gauge read full while probes were
       // silently dying. The coverage gate rejects nulls outright; the gauge
       // counts them here so the two cannot disagree about what "typed" means.
-      if (hovers[i] == null || /(?:^|:\s*)any$/.test(hovers[i])) anyCount++;
+      //
+      // An `any` the TWIN ALSO ANSWERS is not one of these. `any` is a keyword
+      // type in TypeScript's own vocabulary, so the corpus is obliged to carry
+      // it (`type Loose = any`, 11-types) — and a binding annotated with it
+      // hovers `any` because that is the correct answer, not because anything
+      // degraded. Scoring it as a miss made the gauge unreachable by
+      // construction and, worse, indistinguishable from the failure it exists
+      // to catch: a hover that fell to `any` where a real type was due
+      // DISAGREES with the twin, which still names the real type. Deferring to
+      // the oracle keeps that signal and needs no curated exception list —
+      // which the exclusion tables warn erodes as it ages. A probe with no
+      // twin (rip-native, pinned-only) has no oracle to defer to, so its `any`
+      // still counts.
+      const missing = hovers[i] == null;
+      const saysAny = !missing && /(?:^|:\s*)any$/.test(hovers[i]);
+      const twinSaysAny = ts != null && /(?:^|:\s*)any$/.test(ts);
+      if (missing || (saysAny && !twinSaysAny)) anyCount++;
     });
   }
 
@@ -3937,7 +3985,7 @@ if (RUN_HOVER) {
   }
 
   const typedRatio = `${probeCount - anyCount} / ${probeCount}`;
-  out(`\n  ${bold('Gauge')} ${dim('(hover probes answering a real type, not `any` — keep this full)')}`);
+  out(`\n  ${bold('Gauge')} ${dim('(hover probes answering a real type — an `any` the twin also answers is one; keep this full)')}`);
   console.log(`    ${pad('typed hovers', 12)} ${anyCount === 0 ? green(typedRatio) : yellow(typedRatio)}`);
 
   hp = { probed, gap: tally.gap, snapChanged: snapChanged.length, violations };
@@ -3964,15 +4012,7 @@ if (RUN_TOKENS) {
   }
   {
     const missing = [], badType = [], badReadonly = [], unasserted = [];
-    // Type-body member PRESENCE. A property in a type/interface
-    // body must get a token; it rides one coarse cover row and maps only
-    // where verbatim from that row's start, so any face rewrite before it —
-    // a quote-normalized literal on an inline line, the `{`/reflow of a
-    // block body — truncates the prefix and drops it. This invariant is
-    // EXPECTED RED until the mapping fix lands (per-name rows for members,
-    // or literals left un-normalized in the face), then flips green.
-    const memberMissing = []; let memberProbed = 0;
-    // Face-survival accumulators (the mapping gap's use sites): survivors, the dropped
+    // Face-survival accumulators: survivors, the dropped
     // classified names ({name, count} per fixture), and `unclassified` — server
     // tokens whose name tsgo never classifies (the sanity check; must be 0, or
     // the server and face oracles disagree and the gauge is untrustworthy).
@@ -4026,7 +4066,7 @@ if (RUN_TOKENS) {
       return out;
     };
 
-    for (const [f, { decls, tokens: toks, members, survival }] of PROBES) {
+    for (const [f, { decls, tokens: toks, survival }] of PROBES) {
       // A declaration's token is the one STARTING at its name.
       const at = new Map(toks.map((t) => [`${t.line}:${t.character}`, t]));
       // Face-survival rolls up independently of the source-enumerated
@@ -4035,13 +4075,6 @@ if (RUN_TOKENS) {
         survSurvived += survival.survived;
         survUnclassified += survival.unclassified;
         for (const d of survival.drops) survDrops.push({ ...d, file: f });
-      }
-      // Members carry the SAME keying — a present member's token starts at
-      // its name. Presence only: type-body members do not pin a type/readonly
-      // expectation the way a declaration form does.
-      for (const mem of (members ?? [])) {
-        memberProbed++;
-        if (!at.get(`${mem.line}:${mem.character}`)) memberMissing.push({ ...mem, file: f, text: `${mem.name} (${mem.form})` });
       }
       for (const d of decls) {
         // `String::titleCase = …` extends an EXISTING prototype: the
@@ -4137,24 +4170,17 @@ if (RUN_TOKENS) {
     irow('present', missing.length, probed, 'a declared name gets a token');
     irow('type', badType.length, typeAsserted, `token type matches the declaring form${unasserted.length ? ` · ${unasserted.length} unasserted` : ''}`);
     irow('readonly', badReadonly.length, roAsserted + stateUses, `readonly IFF the binding is immutable in rip, at declarations AND at every use${probed - roAsserted ? ` · ${probed - roAsserted} unasserted` : ''}`);
-    // Type-body member presence — EXPECTED RED (the mapping gap), the token
-    // twin of the `strict` gauge. Its own line so the wording is "gap" (a
-    // known-open hole), not "violation" (a fresh regression), and green means
-    // the mapping fix has landed and this gauge should be retired.
-    irow('member', memberMissing.length, memberProbed,
-      memberMissing.length ? 'type-body member tokens drop — expected red until the mapping fix'
-                           : 'type-body member tokens — the mapping fix appears to have landed; retire this gauge', 'gap');
-    // Face-survival — USE-SITE token drops (the mapping gap), the direction the
-    // source-enumerated invariants above cannot see: a classified source
-    // identifier the server drops, covering use sites AND rip-native names with
-    // no twin. EXPECTED RED like `member`; green means the mapping fix has
-    // landed. Denominator is classified source identifiers (survivors + drops),
-    // so the ratio reads as delivery FIDELITY.
+    // Face-survival — USE-SITE delivery, the direction the source-enumerated
+    // invariants above cannot see: they enumerate declarations, and this is the
+    // only measurement reaching use sites and rip-native names with no twin.
+    // The denominator is positions where a token is DUE — the face offset
+    // carries a tsgo token holding the same bytes — so the ratio is delivery
+    // fidelity and zero is the whole of it.
     if (facesAvailable) {
       const dropTotal = survDrops.reduce((n, d) => n + d.count, 0);
       irow('use-site', dropTotal, survSurvived + dropTotal,
-        dropTotal ? 'identifiers tsgo tokenizes that the server never ships at a use site — expected red until the mapping fix'
-                  : 'use-site tokens — the mapping fix appears to have landed; retire this gauge', 'drop');
+        dropTotal ? 'tokens TypeScript classifies at a use site that the server never ships'
+                  : 'every use-site token TypeScript classifies reaches the editor', 'drop');
       // Silent guard (surfaces only on failure): count-based uses the server's
       // tokens directly, so `delivered ⊆ classified` holds by construction —
       // EXCEPT if this standalone FaceOracle's tsgo drifts from the server's.
@@ -4201,10 +4227,10 @@ if (RUN_TOKENS) {
         const ranked = [...byFile].map(([file, entries]) => [file, tally(entries)]).sort((a, b) => b[1] - a[1]);
         const total = ranked.reduce((n, [, c]) => n + c, 0);
         const top = ranked.slice(0, 3).map(([f, c]) => `${f} (${c})`).join(', ');
-        out(`\n    ${bold(title)} ${dim(`— the mapping gap, expected red · ${total} across ${ranked.length} file${ranked.length === 1 ? '' : 's'}, heaviest in ${top}; -v names them`)}`);
+        out(`\n    ${bold(title)} ${dim(`— a delivery gap, expected red · ${total} across ${ranked.length} file${ranked.length === 1 ? '' : 's'}, heaviest in ${top}; -v names them`)}`);
         return;
       }
-      console.log(`\n    ${bold(title)} ${dim('— the mapping gap, expected red')}`);
+      console.log(`\n    ${bold(title)} ${dim('— a delivery gap, expected red')}`);
       for (const [file, entries] of byFile) {
         // filename stays plain (the terminal linkifies it) and full — never
         // dimmed and never stripped of `.rip`, so the click target survives.
@@ -4218,7 +4244,6 @@ if (RUN_TOKENS) {
         rows.forEach((r, i) => console.log((i === 0 ? head : ' '.repeat(COL)) + dim(r)));
       }
     };
-    if (memberMissing.length) dropSection('Type-body members with no token', byFileOf(memberMissing), (e) => e.length, (r) => r.name);
     if (survDrops.length) dropSection('Use-site tokens lost in remap', byFileOf(survDrops), (e) => e.reduce((n, r) => n + r.count, 0), (r) => r.count > 1 ? `${r.name}×${r.count}` : r.name);
     // Both polarities, per binding form — a vacuity check on the readonly
     // invariant above, not decoration.
@@ -4245,7 +4270,7 @@ if (RUN_TOKENS) {
       for (const r of unasserted) out(`      ${dim('•')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text}) → ${fmt(r.got)}`)}`);
     }
 
-    tk = { probed, missing, badType, badReadonly, memberProbed, memberMissing, survSurvived, survDrops, survUnclassified };
+    tk = { probed, missing, badType, badReadonly, survSurvived, survDrops, survUnclassified, facesAvailable };
   }
 }
 
@@ -4425,18 +4450,12 @@ if (tk) {
   // regressions. Its own clause keeps the real-regression signal clean.
   // Each segment paints itself — never dim() wrapping a yellow()/green(), or
   // ANSI faint stacks onto the color and the count renders washed-out.
-  const memberClause = tk.memberMissing.length
-    ? dim(' · ') + yellow(`${tk.memberMissing.length}/${tk.memberProbed} type-body member gap${tk.memberMissing.length === 1 ? '' : 's'}`)
-    : dim(' · ') + green('type-body members clean');
-  // Face-survival rides the same expected-red logic as the member clause: its
-  // own segment so use-site drops never read as fresh invariant regressions.
-  // Absent entirely when the face oracle did not run (no survDrops key set).
+  // Face-survival gets its own segment so use-site drops never read as fresh
+  // invariant regressions. Absent entirely when the face oracle did not run
+  // (no survDrops key set).
   const survDropTotal = (tk.survDrops ?? []).reduce((n, d) => n + d.count, 0);
-  // Joined to the member clause with `, ` rather than ` · `: both gauges asked
-  // the same question and carried the same trailing sentence, so as separate
-  // groups they spent two lines saying it twice. One group, one statement of
-  // what they are both waiting on — which is now delivery, the mapping half
-  // having closed underneath them.
+  // Its own segment: a use-site drop is a delivery failure, distinct from the
+  // declaration-site invariants above.
   const survivalClause = !facesAvailable
     ? ''
     : tk.survUnclassified
@@ -4448,8 +4467,8 @@ if (tk) {
     + (bad === 0 ? green('all invariants hold')
       : red(`${bad} invariant violation${bad === 1 ? '' : 's'}`)
         + dim(` (${[[tk.missing, 'missing'], [tk.badType, 'wrong type'], [tk.badReadonly, 'wrong readonly']].filter(([r]) => r.length).map(([r, l]) => `${r.length} ${l}`).join(', ')})`))
-    + memberClause + survivalClause
-    + (tk.memberMissing.length || survDropTotal
+    + survivalClause
+    + (survDropTotal
       ? dim(' — server DELIVERY, not mapping: every read owns its own span (the census gates it), so what is dropped here is dropped on the way out')
       : dim(' — nothing dropped')));
 }
