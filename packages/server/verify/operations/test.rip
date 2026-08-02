@@ -1,5 +1,5 @@
 import { test, eq } from '@rip-lang/testing'
-import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -29,6 +29,15 @@ command = (name, project) ->
   code = await proc.exited
   eq code, 0, await err
   JSON.parse await out
+
+failedCommand = (name, project) ->
+  proc = Bun.spawn [process.execPath, PRELOAD, SERVER, name, project],
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'pipe'
+  diagnostic = new Response(proc.stderr).text()
+  code = await proc.exited
+  { code, diagnostic: await diagnostic }
 
 test! 'hold fences App publication, API replacement, and dings', ->
   dir = mkdtempSync join(tmpdir(), 'rip-operations-hold-')
@@ -66,6 +75,12 @@ test! 'hold fences App publication, API replacement, and dings', ->
     eq held.operation, 'Held'
 
     writeFileSync join(project, 'app', 'routes', 'index.rip'), "export changed = true\n"
+    writeFileSync join(project, 'index.rip'), 'broken API @@@'
+    failed = failedCommand! 'release', project
+    eq failed.code, 1
+    eq (command!('status', project)).operation, 'Held'
+    eq (await (await unixFetch('/version', first)).json()), { version: 'one' }
+
     writeFileSync join(project, 'index.rip'), """
     import { get, start } from '@rip-lang/server'
     get '/version' -> { version: 'held-change' }
@@ -76,6 +91,18 @@ test! 'hold fences App publication, API replacement, and dings', ->
     eq dings, []
     eq (await (await unixFetch('/version', first)).json()), { version: 'one' }
     eq (command!('status', project)).operation, 'Held'
+
+    released = command! 'release', project
+    eq released.operation, 'Active'
+    fresh = updates.at(-1).upstreams[0].path
+    eq (await (await unixFetch('/version', fresh)).json()), { version: 'held-change' }
+    eq dings.length, 1
+    eq dings[0].ding.kind, 'epoch'
+    generated = join project, 'static', 'generated'
+    bundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
+    manifest = JSON.parse readFileSync(join(generated, 'manifest.json'), 'utf8')
+    eq bundle.rash, manifest.rash
+    eq bundle.modules['app/routes/index.rip'], "export changed = true\n"
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 0
