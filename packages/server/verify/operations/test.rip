@@ -108,13 +108,13 @@ test! 'hold fences App publication, API replacement, and dings', ->
       new Response(null, { status: 204 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'operations.test', '--control', controlSocket],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'operations.test', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'inherit'
     await waitFor -> registration?
     first = registration.upstreams[0].path
-    rival = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'operations.test', '--control', controlSocket],
+    rival = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'operations.test', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'ignore'
@@ -156,7 +156,7 @@ test! 'hold fences App publication, API replacement, and dings', ->
     eq bundle.modules['app/routes/index.rip'], "export changed = true\n"
 
     proc.kill 'SIGTERM'
-    eq (await proc.exited), 0
+    eq (await proc.exited), 143
   finally
     try proc?.kill('SIGKILL')
     await proc.exited if proc?
@@ -194,7 +194,7 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
       new Response(null, { status: 204 })
 
   startManager = ->
-    Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'migration.test', '--control', controlSocket],
+    Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'migration.test', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'inherit'
@@ -270,7 +270,7 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
     eq updates.at(-1).upstreams, []
 
     proc.kill 'SIGTERM'
-    eq (await proc.exited), 0
+    eq (await proc.exited), 143
     proc = null
     registration = null
     updates = []

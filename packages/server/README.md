@@ -670,10 +670,12 @@ bun run verify:hello-app
 bun run verify:reloads
 bun run verify:operations
 bun run verify:middleware
-JANUS_CADDY=/path/to/released/caddy bun run verify:janus
+bun run verify:monitor
+bun run verify:janus
 ```
 
-`verify:janus` requires a Caddy binary built with released Janus `v1.5.0`.
+`verify:janus` builds and caches a Caddy binary with released Janus `v1.5.0`;
+`JANUS_CADDY` can override that binary.
 The broad `bun run test` remains the burn-down suite until every retained test
 has present-tense product value.
 

@@ -3,6 +3,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { rash } from '@rip-lang/app/rash'
+import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
 
 HEARTBEAT_MS = 5000
 readyText = process.env.RIP_BOOT_DEADLINE_MS or '30000'
@@ -11,7 +12,7 @@ abort 'rip-server: RIP_BOOT_DEADLINE_MS must be an integer greater than zero' un
 
 parseArgs = (argv) ->
   command = if ['status', 'hold', 'release', 'migrate', 'recover'].includes(argv[0]) then argv[0] else 'start'
-  args = { command, entry: null, migrationEntry: null, migrationDir: 'migrations', operationId: null, name: null, host: null, control: process.env.JANUS_CONTROL or null, workers: 1, concurrency: 1, watch: false }
+  args = { command, entry: null, migrationEntry: null, migrationDir: 'migrations', operationId: null, name: null, host: null, control: process.env.JANUS_CONTROL or null, workers: 1, concurrency: 1, watch: false, accessMode: 'pretty', accessPicture: null }
   i = if command is 'start' then 0 else 1
   while i < argv.length
     value = argv[i]
@@ -25,6 +26,9 @@ parseArgs = (argv) ->
       when '--control' then args.control = take()
       when '--watch' then args.watch = true
       when '--no-watch' then args.watch = false
+      when '--access-format'
+        abort 'rip-server: --access-format only applies to start' unless command is 'start'
+        args.accessPicture = take()
       when '--dir'
         abort 'rip-server: --dir only applies to migrate' unless command is 'migrate'
         args.migrationDir = take()
@@ -41,22 +45,33 @@ parseArgs = (argv) ->
         args.concurrency = parseInt text
         abort 'rip-server: --concurrency must be an integer greater than zero' unless Number.isFinite(args.concurrency) and args.concurrency > 0 and String(args.concurrency) is text
       when '--help', '-h'
-        p 'usage: rip server <entry> [options] | rip server migrate [migration-entry] [--dir DIR] [--id 32hex] | rip server recover <operation-id>'
+        p 'usage: rip server <entry> [--access-log=pretty|raw|off] [--access-format PICTURE] [options] | rip server migrate [migration-entry] [--dir DIR] [--id 32hex] | rip server recover <operation-id>'
         exit 0
       else
-        abort "rip-server: unknown option #{value}" if value.startsWith '-'
-        if command is 'migrate'
-          abort "rip-server: multiple migration entries (#{args.migrationEntry} and #{value})" if args.migrationEntry?
-          args.migrationEntry = value
-        else if command is 'recover'
-          abort 'rip-server: recover takes exactly one operation id' if args.operationId?
-          args.operationId = value
+        if value.startsWith '--access-log='
+          abort 'rip-server: --access-log only applies to start' unless command is 'start'
+          args.accessMode = value.slice '--access-log='.length
+          abort 'rip-server: --access-log must be pretty, raw, or off' unless args.accessMode in ['pretty', 'raw', 'off']
         else
-          abort "rip-server: multiple app entries (#{args.entry} and #{value})" if args.entry?
-          args.entry = value
+          abort "rip-server: unknown option #{value}" if value.startsWith '-'
+          if command is 'migrate'
+            abort "rip-server: multiple migration entries (#{args.migrationEntry} and #{value})" if args.migrationEntry?
+            args.migrationEntry = value
+          else if command is 'recover'
+            abort 'rip-server: recover takes exactly one operation id' if args.operationId?
+            args.operationId = value
+          else
+            abort "rip-server: multiple app entries (#{args.entry} and #{value})" if args.entry?
+            args.entry = value
     i++
   abort 'rip-server: recover requires an operation id' if command is 'recover' and not args.operationId?
   abort 'rip-server: recover operation id must be exactly 32 lowercase hex characters' if command is 'recover' and not /^[a-f0-9]{32}$/.test(args.operationId)
+  abort 'rip-server: --access-format only applies with --access-log=pretty' if args.accessPicture? and args.accessMode isnt 'pretty'
+  if args.accessPicture?
+    try
+      parseAccessPicture args.accessPicture
+    catch error
+      abort "rip-server: #{error?.message or error}"
   args.entry ?= '.' unless command is 'migrate' or command is 'recover'
   abort 'rip-server: --control or JANUS_CONTROL is required' if command is 'start' and not args.control?
   args.entry = resolve args.entry if args.entry?
@@ -345,8 +360,18 @@ export main = (argv) ->
   releaseHold = null
   appId = null
   heartbeat = null
+  heartbeatTask = null
+  accessClient = null
+  unless args.accessMode is 'off'
+    accessClient = new AccessClient {
+      mode: args.accessMode
+      picture: args.accessPicture
+      control: (if args.control.startsWith('http://') or args.control.startsWith('https://') then { base: args.control } else { unix: args.control })
+    }
+  workerPumps = new Set
   finish = null
   stopping = false
+  stopTask = null
   finished = new Promise (done) -> finish = done
   updateChain = Promise.resolve()
 
@@ -364,6 +389,27 @@ export main = (argv) ->
 
   status = ->
     { name: args.name, root: project.root, operation, workers: workers.length, watch: args.watch, migration: (if migration? then { id: migration.id, phase: migration.phase, outcome: migration.outcome } else null) }
+
+  managerOutput = (text) ->
+    stream = if args.accessMode is 'raw' then process.stderr else process.stdout
+    writeAccessOutput! stream, "#{text}\n"
+
+  monitorOutput = (readable) ->
+    task = pumpAccessOutput readable, process.stderr
+    workerPumps.add task
+    task.finally(-> workerPumps.delete(task)).catch(-> null)
+    task.catch (error) ->
+      return if stopping
+      warn "rip-server: worker output failed: #{String(error)}"
+      stop! 1
+
+  moveAccess = ->
+    return unless accessClient? and appId?
+    task = accessClient.move appId
+    task.catch (error) ->
+      return if stopping
+      warn "rip-server: access output failed: #{String(error)}"
+      stop! 1
 
   operationResponse = (key, run) ->
     return Response.json({ error: 'manager is stopping' }, { status: 409 }) if stopping
@@ -441,7 +487,7 @@ export main = (argv) ->
     throw new Error("Janus registration failed (#{response.status}): #{detail}") unless response.status is 201
     body = JSON.parse detail
     throw new Error('Janus registration returned no app id') unless body?.id?
-    appId = body.id
+    body.id
 
   publishUpstreams = (upstreams) ->
     throw new Error('manager is stopping') if stopping
@@ -457,13 +503,17 @@ export main = (argv) ->
     run
 
   spawnReadyWorker = (target = workers) ->
+    throw new Error('manager is stopping') if stopping
     workerSerial++
     socket = join runDir, "worker-#{workerSerial}.sock"
     proc = Bun.spawn [process.execPath, workerArtifact],
       stdin: 'ignore'
-      stdout: 'inherit'
-      stderr: 'inherit'
+      stdout: (if args.accessMode is 'raw' then 'pipe' else 'inherit')
+      stderr: (if args.accessMode is 'raw' then 'pipe' else 'inherit')
       env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: "#{workerSerial}", WORKER_CONCURRENCY: "#{args.concurrency}" }
+    if args.accessMode is 'raw'
+      monitorOutput proc.stdout
+      monitorOutput proc.stderr
     worker = { proc, socket }
     try
       waitReady! proc, socket
@@ -476,6 +526,7 @@ export main = (argv) ->
   bootSlot = (target = workers) ->
     firstError = null
     for attempt in [1..2]
+      throw new Error('manager is stopping') if stopping
       try return await spawnReadyWorker(target)
       catch error
         firstError ?= error
@@ -490,7 +541,7 @@ export main = (argv) ->
       try await queuePublish()
       catch error
         warn "rip-server: cannot remove crashed worker from Janus: #{String(error)}"
-      warn "rip-server: worker exited (#{code}); replacing"
+      managerOutput! "rip-server: worker exited (#{code}); replacing"
       loop
         return if stopping
         try
@@ -861,43 +912,79 @@ export main = (argv) ->
     activateMigration! persistMigration({ ...record, phase: 'fix-forward', outcome: record.outcome or 'unknown' })
 
   beat = ->
-    return if stopping or not appId?
-    try
-      response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/heartbeat"
-      if response.status is 404
-        createRegistration!()
-      else unless response.ok
-        warn "rip-server: Janus heartbeat failed (#{response.status})"
-    catch error
-      warn "rip-server: Janus heartbeat failed: #{String(error)}"
+    return if stopping or not appId? or heartbeatTask?
+    heartbeatTask = do ->
+      currentId = appId
+      try
+        response = controlFetch! args.control, 'POST', "/1.0/apps/#{currentId}/heartbeat"
+        return if stopping or appId isnt currentId
+        if response.status is 404
+          replacementId = createRegistration!()
+          if stopping
+            try await controlFetch args.control, 'DELETE', "/1.0/apps/#{replacementId}"
+            return
+          appId = replacementId
+          moveAccess()
+        else unless response.ok
+          warn "rip-server: Janus heartbeat failed (#{response.status})"
+      catch error
+        warn "rip-server: Janus heartbeat failed: #{String(error)}" unless stopping
+      finally
+        heartbeatTask = null
+    heartbeatTask
 
   stop = (status = 0) ->
-    return if stopping
+    return stopTask if stopTask?
     stopping = true
-    clearInterval heartbeat if heartbeat?
-    clearTimeout appTimer if appTimer?
-    clearTimeout apiTimer if apiTimer?
-    appWatcher?.close()
-    apiWatcher?.close()
-    try managerControl?.stop true
-    try unlinkSync managerPath if managerOwned
-    try migrationChild?.kill('SIGTERM')
-    try await operationPromise if operationPromise?
-    await appChain
-    await apiChain
-    try doorbell?.stop true
-    try managerControl?.stop true
-    try unlinkSync managerPath if managerOwned
-    try unlinkSync managerOwner if managerOwned
-    try
-      if appId?
-        response = await controlFetch args.control, 'DELETE', "/1.0/apps/#{appId}"
-        warn "rip-server: Janus deregistration failed (#{response.status})" unless response.ok
-    catch error
-      warn "rip-server: Janus deregistration failed: #{String(error)}"
-    allWorkers = [...workers, ...bootingWorkers]
-    await Promise.all allWorkers.map (worker) -> stopWorker worker.proc
-    finish! status
+    stopTask = do ->
+      clearInterval heartbeat if heartbeat?
+      clearTimeout appTimer if appTimer?
+      clearTimeout apiTimer if apiTimer?
+      appWatcher?.close()
+      apiWatcher?.close()
+      try managerControl?.stop true
+      try unlinkSync managerPath if managerOwned
+      try migrationChild?.kill('SIGTERM')
+      try await operationPromise if operationPromise?
+      await appChain
+      await apiChain
+      try await heartbeatTask if heartbeatTask?
+      try doorbell?.stop true
+      try managerControl?.stop true
+      try unlinkSync managerPath if managerOwned
+      try unlinkSync managerOwner if managerOwned
+      accessStop = null
+      try accessStop = accessClient?.stop()
+      try
+        if appId?
+          response = await controlFetch args.control, 'DELETE', "/1.0/apps/#{appId}"
+          warn "rip-server: Janus deregistration failed (#{response.status})" unless response.ok
+      catch error
+        warn "rip-server: Janus deregistration failed: #{String(error)}"
+      try await accessStop if accessStop?
+      allWorkers = [...workers, ...bootingWorkers]
+      await Promise.all allWorkers.map (worker) -> stopWorker worker.proc
+      await Promise.allSettled [...workerPumps]
+      finish! status
+      status
+    stopTask
+
+  onSignal = (signal, status) ->
+    if stopping
+      process.off 'SIGINT', onSigint
+      process.off 'SIGTERM', onSigterm
+      migrationChild?.kill signal
+      worker.proc.kill signal for worker in [...workers, ...bootingWorkers]
+      process.kill process.pid, signal
+      return
+    stop(status).catch (error) ->
+      warn "rip-server: signal cleanup failed: #{String(error)}"
+      process.exitCode = 1
+
+  onSigint = -> onSignal 'SIGINT', 130
+  onSigterm = -> onSignal 'SIGTERM', 143
+  process.on 'SIGINT', onSigint
+  process.on 'SIGTERM', onSigterm
 
   try
     startManagerControl()
@@ -915,9 +1002,18 @@ export main = (argv) ->
         for slot in [0...args.workers]
           await bootSlot()
         startDoorbell()
-    process.once 'SIGINT', -> stop! 0
-    process.once 'SIGTERM', -> stop! 0
-    createRegistration!()
+    if stopping
+      process.exitCode = await finished
+      return
+    registrationId = createRegistration!()
+    if stopping
+      try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registrationId}"
+      process.exitCode = await finished
+      return
+    appId = registrationId
+    # Let the finite POST release its control transport before opening the
+    # registration's long-lived stream; control writes must remain independent.
+    moveAccess()
     for worker in workers
       monitorWorker worker
     startAppWatcher()
@@ -926,15 +1022,14 @@ export main = (argv) ->
     if operation is 'Maintenance'
       warn "rip-server: unresolved migration #{migration.id}; Maintenance has empty admission"
     else
-      p "rip-server: https://#{args.host}/"
-    await finished
+      managerOutput! "rip-server: https://#{args.host}/"
+    process.exitCode = await finished
   catch error
-    warn "rip-server: #{String(error)}"
-    try await controlFetch(args.control, 'DELETE', "/1.0/apps/#{appId}") if appId?
-    stopping = true
-    await Promise.all workers.map (worker) -> stopWorker worker.proc
-    process.exitCode = 1
+    warn "rip-server: #{String(error)}" unless stopping
+    process.exitCode = await stop 1
   finally
+    process.off 'SIGINT', onSigint
+    process.off 'SIGTERM', onSigterm
     try managerControl?.stop true
     try unlinkSync managerPath if managerOwned
     try unlinkSync managerOwner if managerOwned

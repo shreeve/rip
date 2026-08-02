@@ -84,17 +84,41 @@ test! 'foreground manager registers one ready worker and deregisters before exit
   controlSocket = join dir, 'janus.sock'
   registration = null
   deleted = false
+  accessConnected = false
+  accessSource = null
+  accessRecord = (record) -> "#{JSON.stringify(record)}\n"
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
       url = new URL request.url
       if request.method is 'POST' and url.pathname is '/1.0/apps'
         registration = await request.json()
-        return Response.json({ id: 'hello-registration' }, { status: 201 })
-      if request.method is 'POST' and url.pathname is '/1.0/apps/hello-registration/heartbeat'
+        return Response.json({ id: 'hello-abc123' }, { status: 201 })
+      if request.method is 'GET' and url.pathname is '/1.0/apps/hello-abc123/access'
+        accessConnected = true
+        body = new ReadableStream
+          start: (controller) ->
+            accessSource = controller
+            controller.enqueue new TextEncoder().encode accessRecord {
+              v: 1, type: 'hello', app_id: 'hello-abc123', app_name: 'hello',
+              after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192
+            }
+            controller.enqueue new TextEncoder().encode accessRecord {
+              v: 1, type: 'access', sequence: '1', timestamp: '2026-08-01T12:00:00Z',
+              request_id: '12345678-1234-1234-1234-123456789abc',
+              app_id: 'hello-abc123', app_name: 'hello', tenant_site: null,
+              request_host: 'hello.test', client_ip: '127.0.0.1', method: 'GET',
+              path: '/hello', status: 200, duration_seconds: 0.001,
+              response_bytes: '19', mime_type: 'application/json',
+              response_class: 'proxy', cache_verdict: 'bypass',
+              selected_upstream: null, retry_count: 0, outcome: 'complete', mark: null
+            }
+        return new Response body
+      if request.method is 'POST' and url.pathname is '/1.0/apps/hello-abc123/heartbeat'
         return new Response(null, { status: 204 })
-      if request.method is 'DELETE' and url.pathname is '/1.0/apps/hello-registration'
+      if request.method is 'DELETE' and url.pathname is '/1.0/apps/hello-abc123'
         deleted = true
+        try accessSource?.close()
         return new Response(null, { status: 204 })
       new Response('Not Found', { status: 404 })
   edge = Bun.serve
@@ -107,9 +131,11 @@ test! 'foreground manager registers one ready worker and deregisters before exit
   try
     proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'index.rip'), '--name', 'hello', '--host', 'hello.test', '--control', controlSocket],
       stdin: 'ignore'
-      stdout: 'ignore'
-      stderr: 'inherit'
-    await waitFor -> registration?
+      stdout: 'pipe'
+      stderr: 'pipe'
+    output = new Response(proc.stdout).text()
+    diagnostic = new Response(proc.stderr).text()
+    await waitFor -> registration? and accessConnected
     eq registration.name, 'hello'
     eq registration.hosts, ['hello.test']
     eq registration.upstreams.length, 1
@@ -117,7 +143,8 @@ test! 'foreground manager registers one ready worker and deregisters before exit
     eq response.status, 200
     eq (await response.json()), { message: 'hello' }
     proc.kill 'SIGTERM'
-    eq (await proc.exited), 0
+    eq (await proc.exited), 143, await diagnostic
+    ok (await output).includes('GET /hello'), 'foreground manager must print pretty access output'
     ok deleted, 'manager must deregister before foreground exit'
   finally
     try proc?.kill('SIGKILL')

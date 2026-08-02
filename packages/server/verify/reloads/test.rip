@@ -45,7 +45,7 @@ test! 'App edits preserve workers and valid API candidates swap through the door
       new Response(null, { status: 204 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'reload.test', '--control', controlSocket],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'reload.test', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'inherit'
@@ -86,7 +86,7 @@ test! 'App edits preserve workers and valid API candidates swap through the door
     eq (await (await unixFetch('/version', fresh[0].path)).json()), { version: 'three' }
 
     proc.kill 'SIGTERM'
-    eq (await proc.exited), 0
+    eq (await proc.exited), 143
   finally
     try proc?.kill('SIGKILL')
     await proc.exited if proc?

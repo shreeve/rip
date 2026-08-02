@@ -1,0 +1,321 @@
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import {
+  AccessClient, AccessFramer, DEFAULT_ACCESS_PICTURE, parseAccessPicture,
+  renderAccess, scaleAccess, validateAccessEvent, validateAccessLine,
+  writeAccessOutput
+} from '../../monitor.rip'
+
+encoder = new TextEncoder
+PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
+SERVER = join(import.meta.dir, '..', '..', 'server.rip')
+ENTRY = join(import.meta.dir, '..', 'hello-api', 'index.rip')
+
+record = (changes = {}) ->
+  {
+    sequence: '42'
+    timestamp: '2026-07-30T12:34:56.123456789Z'
+    request_id: '12345678-1234-1234-1234-123456789abc'
+    app_id: 'cart-abc123'
+    app_name: 'cart'
+    tenant_site: null
+    request_host: 'cart.test'
+    client_ip: '127.0.0.1'
+    method: 'GET'
+    path: '/api/items'
+    status: 200
+    duration_seconds: 0.0125
+    response_bytes: '1536'
+    mime_type: 'application/json; charset=utf-8'
+    response_class: 'proxy'
+    cache_verdict: 'bypass'
+    selected_upstream: 'worker-0123456789abcdef'
+    retry_count: 0
+    outcome: 'complete'
+    mark: 'items'
+    ...changes
+  }
+
+accessLine = (changes = {}) ->
+  encoder.encode "#{JSON.stringify({ v: 1, type: 'access', ...record(changes) })}\n"
+
+helloLine = ->
+  encoder.encode "#{JSON.stringify({
+    v: 1, type: 'hello', app_id: 'cart-abc123', app_name: 'cart',
+    after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192
+  })}\n"
+
+heartbeatLine = (head) ->
+  encoder.encode "#{JSON.stringify({
+    v: 1, type: 'heartbeat', app_id: 'cart-abc123', head,
+    timestamp: '2026-07-30T12:34:56.123456789Z'
+  })}\n"
+
+waitFor = (fn, timeout = 2000) ->
+  deadline = Date.now() + timeout
+  loop
+    value = fn()
+    return value if value
+    throw new Error('monitor verification timed out') if Date.now() >= deadline
+    sleep! 5
+
+test! 'validated NDJSON accepts exactly the Janus v1.5 record shape', ->
+  value = validateAccessEvent record()
+  eq value.sequence, '42'
+  eq value.response_bytes, '1536'
+  eq value.status, 200
+  eq value.duration_seconds, 0.0125
+
+  eq validateAccessLine(accessLine()).record.method, 'GET'
+  throws (-> validateAccessLine encoder.encode(JSON.stringify({ v: 1, type: 'access' }) + '\n')), 'missing, extra, duplicated, or out of order'
+  throws (-> validateAccessLine encoder.encode(JSON.stringify({ v: 1, type: 'access', ...record(), surprise: true }) + '\n')), 'missing, extra, duplicated, or out of order'
+  throws (-> validateAccessEvent record(sequence: 42)), 'canonical uint64 decimal'
+  throws (-> validateAccessEvent record(response_bytes: '-1')), 'canonical uint64 decimal'
+  throws (-> validateAccessEvent record(status: 99)), '100 through 599'
+  throws (-> validateAccessEvent record(duration_seconds: -1)), 'finite nonnegative number'
+  throws (-> validateAccessEvent record(timestamp: 'yesterday')), 'timestamp is malformed'
+  throws (-> validateAccessEvent record(response_class: 'magic')), 'response_class is malformed'
+  validateAccessEvent record(mime_type: '\u00a0text/plain\u00a0')
+  throws (-> validateAccessEvent record(mime_type: ' text/plain')), 'mime_type is malformed'
+
+test! 'picture parsing is strict and formatting owns scale, width, and Unicode', ->
+  parsed = parseAccessPicture DEFAULT_ACCESS_PICTURE
+  ok parsed.length > 10
+  eq renderAccess(record(), '{method:>6} │ {path:<24} │ {response_bytes:@B}'), '   GET │ /api/items               │ 1.5kB'
+  eq renderAccess(record(mark: '狐'), '🦊 {mark:^5}'), '🦊  狐  '
+  eq renderAccess(record(mark: null), '{method} {mark}'), 'GET -'
+  throws (-> parseAccessPicture('{bogus}')), 'unknown field'
+  throws (-> parseAccessPicture('{method:0}')), 'width must start'
+  throws (-> parseAccessPicture('{method:@ms}')), 'cannot be scaled'
+  throws (-> parseAccessPicture('{method')), "expected '}'"
+  throws (-> parseAccessPicture('method}')), 'unescaped'
+
+test! 'scale keeps a fixed three-character significand and free-form units', ->
+  eq scaleAccess(0, 's'), '  0 s'
+  eq scaleAccess(0.0015, 's'), '1.5ms'
+  eq scaleAccess(57, 'widgets'), ' 57 widgets'
+  eq scaleAccess(1536, 'B'), '1.5kB'
+  eq scaleAccess(NaN, ''), '??? '
+
+test! 'framer accepts split LF records and rejects CRLF, malformed, or oversized input', ->
+  lines = []
+  errors = []
+  framer = new AccessFramer ((line) -> lines.push line), ((error) -> errors.push error)
+  bytes = new Uint8Array [...helloLine(), ...accessLine()]
+  framer.feed bytes.slice(0, 5)
+  framer.feed bytes.slice(5)
+  framer.finish()
+  eq lines.map((line) -> line.record.type), ['hello', 'access']
+  eq errors, []
+
+  crlf = new AccessFramer (->), ((error) -> errors.push error)
+  crlf.feed encoder.encode("#{new TextDecoder().decode(helloLine()).trim()}\r\n")
+  eq errors.length, 1
+  ok errors.at(-1).message.includes 'CRLF'
+
+  malformed = new AccessFramer (->), ((error) -> errors.push error)
+  malformed.feed new Uint8Array [0xff, 0x0a]
+  eq errors.length, 2
+
+  oversized = new AccessFramer (->), ((error) -> errors.push error)
+  oversized.feed encoder.encode('x'.repeat(8193))
+  eq errors.length, 3
+  ok errors.at(-1).message.includes '8192'
+
+  partial = new AccessFramer (->), ((error) -> errors.push error)
+  partial.feed encoder.encode('{"v":1}')
+  partial.finish()
+  eq errors.length, 4
+  ok errors.at(-1).message.includes 'incomplete'
+
+test! 'bounded output waits for callbacks and reports stream errors', ->
+  writes = []
+  output =
+    write: (chunk, callback) ->
+      writes.push chunk
+      queueMicrotask -> callback()
+      true
+  writeAccessOutput! output, 'one\n'
+  eq writes, ['one\n']
+
+  broken =
+    write: (_chunk, callback) ->
+      error = Object.assign(new Error('closed'), { code: 'EPIPE' })
+      queueMicrotask -> callback error
+      true
+  failed = null
+  try
+    writeAccessOutput! broken, 'two\n'
+  catch error
+    failed = error
+  eq failed.code, 'EPIPE'
+
+test! 'access client subscribes by app id and preserves raw NDJSON bytes', ->
+  source = null
+  requested = null
+  stdout =
+    chunks: []
+    write: (chunk, callback) ->
+      @chunks.push chunk
+      callback()
+      true
+  stderr =
+    write: (_chunk, callback) ->
+      callback()
+      true
+  client = new AccessClient {
+    mode: 'raw'
+    control: { unix: '/tmp/janus.sock' }
+    stdout
+    stderr
+    fetch: (url, options) ->
+      requested = { url, options }
+      body = new ReadableStream
+        start: (controller) ->
+          source = controller
+          controller.enqueue helloLine()
+          options.signal.addEventListener 'abort', -> controller.close()
+      new Response body, { status: 200 }
+  }
+  task = client.move 'cart-abc123'
+  await waitFor -> stdout.chunks.length > 0
+  eq requested.url, 'http://janus/1.0/apps/cart-abc123/access?after=0'
+  eq requested.options.unix, '/tmp/janus.sock'
+  eq new TextDecoder().decode(stdout.chunks[0]), new TextDecoder().decode(helloLine())
+  await client.stop()
+  await task
+
+test! 'pretty client validates records and renders only access events', ->
+  stdout =
+    text: ''
+    write: (chunk, callback) ->
+      @text += chunk
+      callback()
+      true
+  fetches = 0
+  pretty = new AccessClient {
+    mode: 'pretty'
+    picture: '{method} {path}'
+    stdout
+    control: { base: 'http://janus' }
+    fetch: (_url, options) ->
+      fetches++
+      body = new ReadableStream
+        start: (controller) ->
+          controller.enqueue new Uint8Array [...helloLine(), ...accessLine(sequence: '1')]
+          options.signal.addEventListener 'abort', -> controller.close()
+      new Response body
+  }
+  task = pretty.move 'cart-abc123'
+  await waitFor -> stdout.text.length > 0
+  eq stdout.text, "GET /api/items\n"
+  await pretty.stop()
+  await task
+  eq fetches, 1
+
+test! 'stream heads never regress below an observed high-water mark', ->
+  stderr =
+    text: ''
+    write: (chunk, callback) ->
+      @text += chunk
+      callback()
+      true
+  fetches = 0
+  client = new AccessClient {
+    mode: 'pretty'
+    picture: '{method}'
+    stderr
+    control: { base: 'http://janus' }
+    sleep: -> null
+    fetch: (_url, options) ->
+      fetches++
+      body = new ReadableStream
+        start: (controller) ->
+          if fetches is 1
+            controller.enqueue new Uint8Array [...helloLine(), ...heartbeatLine('2'), ...heartbeatLine('1')]
+            controller.close()
+          else
+            options.signal.addEventListener 'abort', -> controller.close()
+      new Response body
+  }
+  task = client.move 'cart-abc123'
+  await waitFor -> stderr.text.includes 'heartbeat head regressed'
+  await client.stop()
+  await task
+
+test! 'foreground flags reject invalid modes and pictures before startup', ->
+  invalidMode = Bun.spawnSync [process.execPath, PRELOAD, SERVER, ENTRY, '--control', '/tmp/missing-janus.sock', '--access-log=loud']
+  eq invalidMode.exitCode, 1
+  ok invalidMode.stderr.toString().includes '--access-log must be pretty, raw, or off'
+
+  invalidPicture = Bun.spawnSync [process.execPath, PRELOAD, SERVER, ENTRY, '--control', '/tmp/missing-janus.sock', '--access-format', '{bogus}']
+  eq invalidPicture.exitCode, 1
+  ok invalidPicture.stderr.toString().includes 'unknown field'
+
+  rawPicture = Bun.spawnSync [process.execPath, PRELOAD, SERVER, ENTRY, '--control', '/tmp/missing-janus.sock', '--access-log=raw', '--access-format', '{method}']
+  eq rawPicture.exitCode, 1
+  ok rawPicture.stderr.toString().includes 'only applies with --access-log=pretty'
+
+test! 'foreground raw stdout is pure NDJSON and off opens no subscription', ->
+  run = (mode) ->
+    dir = mkdtempSync join(tmpdir(), 'rip-monitor-mode-')
+    socket = join dir, 'janus.sock'
+    registered = false
+    accessCount = 0
+    accessSource = null
+    control = Bun.serve
+      unix: socket
+      fetch: (request) ->
+        url = new URL request.url
+        if request.method is 'POST' and url.pathname is '/1.0/apps'
+          registered = true
+          return Response.json({ id: 'cart-abc123' }, { status: 201 })
+        if request.method is 'GET' and url.pathname is '/1.0/apps/cart-abc123/access'
+          accessCount++
+          body = new ReadableStream
+            start: (controller) ->
+              accessSource = controller
+              controller.enqueue new Uint8Array [...helloLine(), ...accessLine(sequence: '1')]
+          return new Response body
+        if request.method is 'POST' and url.pathname is '/1.0/apps/cart-abc123/heartbeat'
+          return new Response(null, { status: 204 })
+        if request.method is 'DELETE' and url.pathname is '/1.0/apps/cart-abc123'
+          try accessSource?.close()
+          return new Response(null, { status: 204 })
+        new Response('Not Found', { status: 404 })
+    proc = null
+    try
+      proc = Bun.spawn [process.execPath, PRELOAD, SERVER, ENTRY, '--name', 'cart', '--host', 'cart.test', '--control', socket, "--access-log=#{mode}"],
+        stdin: 'ignore'
+        stdout: 'pipe'
+        stderr: 'pipe'
+      output = new Response(proc.stdout).text()
+      diagnostic = new Response(proc.stderr).text()
+      if mode is 'raw'
+        await waitFor -> accessCount is 1
+        sleep! 25
+      else
+        await waitFor -> registered
+        sleep! 25
+      signal = if mode is 'off' then 'SIGINT' else 'SIGTERM'
+      proc.kill signal
+      code = await proc.exited
+      diagnosticText = await diagnostic
+      eq code, (if signal is 'SIGINT' then 130 else 143), diagnosticText
+      { output: await output, diagnostic: diagnosticText, accessCount }
+    finally
+      try proc?.kill('SIGKILL')
+      await proc.exited if proc?
+      control.stop true
+      rmSync dir, { recursive: true, force: true }
+
+  raw = run! 'raw'
+  eq raw.output, new TextDecoder().decode(new Uint8Array([...helloLine(), ...accessLine(sequence: '1')]))
+  eq raw.accessCount, 1
+  ok raw.diagnostic.includes 'rip-server: https://cart.test/'
+
+  disabled = run! 'off'
+  eq disabled.accessCount, 0
+  ok disabled.output.includes 'rip-server: https://cart.test/'

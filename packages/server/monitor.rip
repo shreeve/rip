@@ -1,1 +1,794 @@
+import { identifierRuns, isIdentifierName } from '../../src/lexer.js'
 
+export DEFAULT_ACCESS_PICTURE =! '{local_time} {local_timezone} {duration_seconds:@s} │ {status} {mime_abbrev:<4} {response_bytes:@B} │ {method} {path} │ {mark}'
+export MAX_ACCESS_LINE_BYTES =! 8192
+
+DECIMAL_FIELDS =! new Set ['sequence', 'response_bytes']
+NUMBER_FIELDS =! new Set ['duration_seconds']
+INTEGER_FIELDS =! new Set ['status', 'retry_count']
+NULLABLE_FIELDS =! new Set ['tenant_site', 'status', 'mime_type', 'selected_upstream', 'mark']
+RAW_FIELDS =! [
+  'sequence', 'timestamp', 'request_id', 'app_id', 'app_name', 'tenant_site',
+  'request_host', 'client_ip', 'method', 'path', 'status', 'duration_seconds',
+  'response_bytes', 'mime_type', 'response_class', 'cache_verdict',
+  'selected_upstream', 'retry_count', 'outcome', 'mark'
+]
+PICTURE_FIELDS =! new Set [...RAW_FIELDS, 'local_time', 'local_timezone', 'mime_abbrev']
+UINT64_MAX =! 18446744073709551615n
+UINT32_MAX =! 4294967295
+GRAPHEME_SEGMENTER =! new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
+MIME_ABBREV =!
+  html: 'html', css: 'css', javascript: 'js', json: 'json', plain: 'text', xml: 'xml'
+  png: 'png', jpeg: 'jpg', gif: 'gif', webp: 'webp', avif: 'avif'
+  'svg+xml': 'svg', svg: 'svg', 'x-icon': 'icon', 'vnd.microsoft.icon': 'icon'
+  woff: 'font', woff2: 'font', ttf: 'font', otf: 'font'
+  mpeg: 'mp3', mp4: 'mp4', ogg: 'ogg', webm: 'webm'
+  pdf: 'pdf', zip: 'zip', gzip: 'gz', wasm: 'wasm'
+  'octet-stream': 'bin', 'x-rip': 'rip'
+
+SCHEMAS =!
+  hello: ['v', 'type', 'app_id', 'app_name', 'after', 'head', 'heartbeat_seconds', 'max_line_bytes']
+  access: ['v', 'type', ...RAW_FIELDS]
+  gap: ['v', 'type', 'app_id', 'from', 'through', 'head', 'reason']
+  heartbeat: ['v', 'type', 'app_id', 'head', 'timestamp']
+  closed: ['v', 'type', 'app_id', 'head', 'timestamp', 'reason']
+
+dangerous = (code) ->
+  code <= 0x1f or 0x7f <= code <= 0x9f or code in [0x061c, 0x200e, 0x200f, 0x2028, 0x2029] or 0x202a <= code <= 0x202e or 0x2066 <= code <= 0x2069
+
+scalarError = (text) ->
+  i = 0
+  while i < text.length
+    code = text.charCodeAt(i)
+    if 0xd800 <= code <= 0xdbff
+      next = text.charCodeAt(i + 1)
+      return i unless 0xdc00 <= next <= 0xdfff
+      i += 2
+    else if 0xdc00 <= code <= 0xdfff
+      return i
+    else
+      i += 1
+  -1
+
+escapeControls = (text) ->
+  out = ''
+  for scalar in text
+    code = scalar.codePointAt(0)
+    if dangerous(code)
+      out += "\\u{#{code.toString(16).toUpperCase().padStart(4, '0')}}"
+    else
+      out += scalar
+  out
+
+pictureError = (picture, offset, message) ->
+  err = new Error("access picture at offset #{offset}: #{message}")
+  throw err
+
+safePictureScalar = (scalar) ->
+  code = scalar.codePointAt(0)
+  not (0xd800 <= code <= 0xdfff) and scalar isnt '{' and scalar isnt '}' and not dangerous(code)
+
+export parseAccessPicture = (picture) ->
+  pictureError picture, 0, 'picture must be a string' unless typeof picture is 'string'
+  parts = []
+  text = ''
+  flush = ->
+    if text
+      parts.push { kind: 'text', text }
+      text = ''
+  i = 0
+  while i < picture.length
+    if picture.startsWith('{{', i)
+      text += '{'
+      i += 2
+      continue
+    if picture.startsWith('}}', i)
+      text += '}'
+      i += 2
+      continue
+    scalar = String.fromCodePoint(picture.codePointAt(i))
+    width = scalar.length
+    if scalar is '}'
+      pictureError picture, i, "unescaped '}'"
+    if scalar isnt '{'
+      pictureError picture, i, 'unsafe control in picture text' unless safePictureScalar(scalar)
+      text += scalar
+      i += width
+      continue
+    flush()
+    start = i
+    i += 1
+    rest = picture.slice(i)
+    runs = identifierRuns(rest)
+    field = runs[0]
+    pictureError picture, i, 'expected a field name' unless field? and rest.startsWith(field) and isIdentifierName(field)
+    pictureError picture, i, "unknown field #{JSON.stringify(field)}" unless PICTURE_FIELDS.has(field)
+    i += field.length
+    align = null
+    scaleUnit = null
+    if picture[i] is ':'
+      i += 1
+      formatStart = i
+      if picture[i] isnt '@'
+        direction = '<'
+        if picture[i] in ['<', '>', '^']
+          direction = picture[i]
+          directionOffset = i
+          i += 1
+        digitStart = i
+        i += 1 while i < picture.length and '0' <= picture[i] <= '9'
+        digits = picture.slice(digitStart, i)
+        pictureError picture, digitStart, 'width must start with 1–9' unless digits.length and digits[0] isnt '0'
+        n = Number(digits)
+        pictureError picture, digitStart, 'width must be 1 through 1024' unless Number.isInteger(n) and 1 <= n <= 1024
+        if direction is '^' and n < 3
+          pictureError picture, digitStart, 'center width must be 3 through 1024'
+        overflow = 'edge'
+        if picture[i] is '^'
+          pictureError picture, directionOffset, 'center alignment cannot use trailing middle ellipsis' if direction is '^'
+          overflow = 'middle'
+          i += 1
+        align = { direction, width: n, overflow }
+      if picture[i] is '@'
+        pictureError picture, i, "#{field} cannot be scaled" unless field in ['duration_seconds', 'response_bytes']
+        i += 1
+        unitStart = i
+        unit = ''
+        while i < picture.length and picture[i] isnt '}'
+          unitScalar = String.fromCodePoint(picture.codePointAt(i))
+          pictureError picture, i, 'unsafe scalar in scale unit' unless safePictureScalar(unitScalar)
+          unit += unitScalar
+          i += unitScalar.length
+        pictureError picture, unitStart, 'scale unit must not be empty' unless unit.length
+        scaleUnit = unit
+      pictureError picture, formatStart, 'format needs alignment or scale' unless align? or scaleUnit?
+    pictureError picture, i, "expected '}'" unless picture[i] is '}'
+    i += 1
+    parts.push { kind: 'field', field, align, scaleUnit, offset: start }
+  flush()
+  parts
+
+export scaleAccess = (value, unit) ->
+  if value > 0 and Number.isFinite(value)
+    span = ['T', 'G', 'M', 'k', ' ', 'm', 'µ', 'n', 'p']
+    slot = 4
+    while value < 0.995 and slot <= 8
+      value *= 1000
+      slot++
+    while value >= 999.5 and slot >= 0
+      value /= 1000
+      slot--
+    if 0 <= slot <= 8
+      tenth = Math.round(value * 10) / 10
+      digits = if tenth >= 10 then Math.round(value).toString() else tenth.toFixed(1)
+      return "#{digits.padStart(3, ' ')}#{span[slot]}#{unit}"
+  return "  0 #{unit}" if value is 0
+  "??? #{unit}"
+
+trimHttpWhitespace = (text) ->
+  start = 0
+  end = text.length
+  start += 1 while start < end and text[start] in [' ', '\t']
+  end -= 1 while end > start and text[end - 1] in [' ', '\t']
+  text.slice start, end
+
+mimeAbbrev = (mime) ->
+  return null unless mime?
+  subtype = trimHttpWhitespace(mime.split(';', 1)[0]).toLowerCase()
+  slash = subtype.indexOf('/')
+  subtype = subtype.slice(slash + 1) if slash >= 0
+  MIME_ABBREV[subtype] or subtype
+
+derivedFields = (event) ->
+  date = new Date(event.timestamp)
+  local = date.getFullYear().toString().padStart(4, '0') + '-' +
+    (date.getMonth() + 1).toString().padStart(2, '0') + '-' +
+    date.getDate().toString().padStart(2, '0') + ' ' +
+    date.getHours().toString().padStart(2, '0') + ':' +
+    date.getMinutes().toString().padStart(2, '0') + ':' +
+    date.getSeconds().toString().padStart(2, '0') + '.' +
+    date.getMilliseconds().toString().padStart(3, '0')
+  minutes = -date.getTimezoneOffset()
+  sign = if minutes >= 0 then '+' else '-'
+  absolute = Math.abs(minutes)
+  {
+    local_time: local
+    local_timezone: sign + Math.floor(absolute / 60).toString().padStart(2, '0') + (absolute % 60).toString().padStart(2, '0')
+    mime_abbrev: mimeAbbrev(event.mime_type)
+  }
+
+displayAtoms = (text) ->
+  atoms = []
+  for entry in GRAPHEME_SEGMENTER.segment(text)
+    escaped = escapeControls(entry.segment)
+    atoms.push { text: escaped, width: Bun.stringWidth(escaped) }
+  atoms
+
+atomsWidth = (atoms) ->
+  atoms.reduce ((total, atom) -> total + atom.width), 0
+
+prefixSlot = (atoms, width) ->
+  text = ''
+  used = 0
+  for atom in atoms
+    break if used + atom.width > width
+    text += atom.text
+    used += atom.width
+  text + ' '.repeat(width - used)
+
+suffixSlot = (atoms, width) ->
+  selected = []
+  used = 0
+  i = atoms.length - 1
+  while i >= 0
+    atom = atoms[i]
+    break if used + atom.width > width
+    selected.unshift atom.text
+    used += atom.width
+    i -= 1
+  ' '.repeat(width - used) + selected.join('')
+
+centerSlot = (atoms, width) ->
+  return ' '.repeat(width) unless atoms.length and width > 0
+  prefix = [0]
+  for atom in atoms
+    prefix.push prefix[prefix.length - 1] + atom.width
+  total = prefix[prefix.length - 1]
+  bestStart = 0
+  bestEnd = 0
+  bestWidth = -1
+  bestDistance = Infinity
+  right = 0
+  for left in [0...atoms.length]
+    right = left if right < left
+    right += 1 while right < atoms.length and prefix[right + 1] - prefix[left] <= width
+    candidateWidth = prefix[right] - prefix[left]
+    distance = Math.abs(prefix[left] + prefix[right] - total)
+    if candidateWidth > bestWidth or (candidateWidth is bestWidth and distance < bestDistance)
+      bestStart = left
+      bestEnd = right
+      bestWidth = candidateWidth
+      bestDistance = distance
+  text = atoms.slice(bestStart, bestEnd).map((atom) -> atom.text).join('')
+  missing = width - bestWidth
+  leftPad = Math.floor(missing / 2)
+  ' '.repeat(leftPad) + text + ' '.repeat(missing - leftPad)
+
+exactAccessWidth = (atoms, align) ->
+  slot = align.width
+  natural = atomsWidth(atoms)
+  if natural <= slot
+    text = atoms.map((atom) -> atom.text).join('')
+    missing = slot - natural
+    if align.direction is '>'
+      return ' '.repeat(missing) + text
+    if align.direction is '^'
+      leftPad = Math.floor(missing / 2)
+      return ' '.repeat(leftPad) + text + ' '.repeat(missing - leftPad)
+    return text + ' '.repeat(missing)
+  if align.overflow is 'middle'
+    leftWidth = Math.floor(slot / 2)
+    rightWidth = slot - leftWidth - 1
+    return prefixSlot(atoms, leftWidth) + '…' + suffixSlot(atoms, rightWidth)
+  if align.direction is '>'
+    return '…' + suffixSlot(atoms, slot - 1)
+  if align.direction is '^'
+    return '…' + centerSlot(atoms, slot - 2) + '…'
+  prefixSlot(atoms, slot - 1) + '…'
+
+export renderAccess = (event, picture = DEFAULT_ACCESS_PICTURE) ->
+  parts = if typeof picture is 'string' then parseAccessPicture(picture) else picture
+  validateAccessEvent event
+  values = { ...event, ...derivedFields(event) }
+  out = ''
+  for part in parts
+    if part.kind is 'text'
+      out += part.text
+      continue
+    value = values[part.field]
+    rendered = '-'
+    if value?
+      if part.scaleUnit?
+        number = if part.field is 'response_bytes' then Number(value) else value
+        rendered = scaleAccess(number, part.scaleUnit)
+      else
+        rendered = String(value)
+    atoms = displayAtoms(rendered)
+    rendered = if part.align? then exactAccessWidth(atoms, part.align) else atoms.map((atom) -> atom.text).join('')
+    out += rendered
+  out
+
+canonicalDecimal = (value) ->
+  typeof value is 'string' and (value is '0' or ('1' <= value.charAt(0) <= '9' and [...value].every((c) -> '0' <= c <= '9'))) and value.length <= 20 and BigInt(value) <= UINT64_MAX
+
+compareDecimal = (a, b) ->
+  return a.length - b.length if a.length isnt b.length
+  if a < b then -1 else if a > b then 1 else 0
+
+nextDecimal = (value) -> (BigInt(value) + 1n).toString()
+
+validTimestamp = (value) ->
+  return false unless typeof value is 'string' and value.length <= 35
+  match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?Z$/)
+  return false unless match?
+  year = Number(match[1])
+  month = Number(match[2])
+  day = Number(match[3])
+  hour = Number(match[4])
+  minute = Number(match[5])
+  second = Number(match[6])
+  return false unless 1 <= month <= 12 and 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59
+  leap = year % 4 is 0 and (year % 100 isnt 0 or year % 400 is 0)
+  days = [31, (if leap then 29 else 28), 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  1 <= day <= days[month - 1]
+
+validateUnicode = (value, name) ->
+  throw new Error("access record #{name} contains a lone surrogate") if typeof value is 'string' and scalarError(value) >= 0
+
+ascii = (value) ->
+  typeof value is 'string' and [...value].every((c) -> c.charCodeAt(0) <= 0x7f)
+
+utf8Bytes = (value) -> new TextEncoder().encode(value).length
+
+validAppName = (value) ->
+  typeof value is 'string' and value.length <= 63 and /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)
+
+validAppId = (value, name = null) ->
+  return false unless typeof value is 'string' and value.length <= 70 and ascii(value)
+  split = value.lastIndexOf('-')
+  return false unless split > 0
+  prefix = value.slice(0, split)
+  suffix = value.slice(split + 1)
+  validAppName(prefix) and (not name? or prefix is name) and /^[a-z0-9]{6}$/.test(suffix)
+
+validDNSLabel = (value) ->
+  typeof value is 'string' and value.length <= 63 and /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(value)
+
+validDNSHost = (value) ->
+  typeof value is 'string' and value.length <= 253 and value.length > 0 and value is value.toLowerCase() and
+    ascii(value) and value.split('.').every(validDNSLabel)
+
+validHTTPToken = (value) ->
+  typeof value is 'string' and 1 <= value.length <= 32 and /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(value)
+
+validEscapedPath = (value) ->
+  return false unless typeof value is 'string' and 1 <= value.length <= 4096 and ascii(value) and not value.includes('?') and not value.includes('#')
+  i = 0
+  while i < value.length
+    if value[i] is '%'
+      return false unless i + 2 < value.length and /^[0-9A-Fa-f]{2}$/.test(value.slice(i + 1, i + 3))
+      i += 3
+    else
+      i += 1
+  true
+
+validIP = (value) ->
+  return false unless typeof value is 'string' and 1 <= value.length <= 64 and ascii(value)
+  if value.includes(':')
+    return false if value.includes('%')
+    try
+      new URL("http://[#{value}]/")
+      return true
+    catch
+      return false
+  parts = value.split('.')
+  parts.length is 4 and parts.every (part) ->
+    part.length > 0 and [...part].every((c) -> '0' <= c <= '9') and (part is '0' or part[0] isnt '0') and Number(part) <= 255
+
+validHeaderValue = (value, allowEmpty = true) ->
+  typeof value is 'string' and (allowEmpty or value.length > 0) and utf8Bytes(value) <= 256 and scalarError(value) < 0
+
+export validateAccessEvent = (event) ->
+  throw new Error('access record must be an object') unless event? and typeof event is 'object' and not Array.isArray(event)
+  for field in RAW_FIELDS
+    throw new Error("access record missing #{field}") unless field of event
+    value = event[field]
+    if value is null
+      throw new Error("access record #{field} must not be null") unless NULLABLE_FIELDS.has(field)
+      continue
+    if DECIMAL_FIELDS.has(field)
+      throw new Error("access record #{field} must be canonical uint64 decimal") unless canonicalDecimal(value)
+    else if NUMBER_FIELDS.has(field)
+      throw new Error("access record #{field} must be a finite nonnegative number") unless typeof value is 'number' and Number.isFinite(value) and value >= 0
+    else if INTEGER_FIELDS.has(field)
+      if field is 'status'
+        throw new Error('access record status must be 100 through 599 or null') unless Number.isInteger(value) and 100 <= value <= 599
+      else
+        throw new Error('access record retry_count must be a uint32 integer') unless Number.isInteger(value) and 0 <= value <= UINT32_MAX
+    else
+      throw new Error("access record #{field} must be a string or null") unless typeof value is 'string'
+    validateUnicode value, field
+  throw new Error('access record timestamp is malformed') unless validTimestamp(event.timestamp)
+  throw new Error('access record request_id is malformed') unless /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(event.request_id)
+  throw new Error('access record app_name is malformed') unless validAppName(event.app_name)
+  throw new Error('access record app_id is malformed') unless validAppId(event.app_id, event.app_name)
+  throw new Error('access record tenant_site is malformed') if event.tenant_site? and not validDNSLabel(event.tenant_site)
+  throw new Error('access record request_host is malformed') unless validDNSHost(event.request_host)
+  throw new Error('access record client_ip is malformed') unless validIP(event.client_ip)
+  throw new Error('access record method is malformed') unless validHTTPToken(event.method)
+  throw new Error('access record path is malformed') unless validEscapedPath(event.path)
+  throw new Error('access record mime_type is malformed') if event.mime_type? and (not validHeaderValue(event.mime_type, false) or event.mime_type isnt trimHttpWhitespace(event.mime_type))
+  throw new Error('access record response_class is malformed') unless event.response_class in ['auth', 'browse_asset', 'browse_listing', 'browse_render', 'file', 'hub', 'janus', 'proxy', 'sendfile']
+  throw new Error('access record cache_verdict is malformed') unless event.cache_verdict in ['off', 'bypass', 'miss', 'hit', 'coalesced']
+  throw new Error('access record selected_upstream is malformed') if event.selected_upstream? and not /^worker-[0-9a-f]{16}$/.test(event.selected_upstream)
+  throw new Error('access record outcome is malformed') unless event.outcome in ['upgraded', 'upstream_aborted', 'client_canceled', 'write_error', 'complete']
+  throw new Error('access record mark is malformed') if event.mark? and not validHeaderValue(event.mark, false)
+  event
+
+topLevelKeys = (text) ->
+  keys = []
+  i = 0
+  space = -> i += 1 while text[i] in [' ', '\t', '\n', '\r']
+  scanString = ->
+    throw new Error('expected JSON string') unless text[i] is '"'
+    start = i
+    i += 1
+    while i < text.length
+      if text[i] is '\\'
+        i += 2
+      else if text[i] is '"'
+        i += 1
+        return JSON.parse(text.slice(start, i))
+      else
+        i += 1
+    throw new Error('unterminated JSON string')
+  skipValue = ->
+    if text[i] is '"'
+      scanString()
+      return
+    if text[i] is '{' or text[i] is '['
+      open = text[i]
+      close = if open is '{' then '}' else ']'
+      depth = 0
+      while i < text.length
+        if text[i] is '"'
+          scanString()
+          continue
+        depth += 1 if text[i] is open
+        if text[i] is close
+          depth -= 1
+          i += 1
+          return if depth is 0
+          continue
+        i += 1
+      throw new Error('unterminated JSON value')
+    i += 1 while i < text.length and text[i] isnt ',' and text[i] isnt '}'
+  space()
+  throw new Error('record must be a JSON object') unless text[i] is '{'
+  i += 1
+  space()
+  return keys if text[i] is '}'
+  loop
+    space()
+    keys.push scanString()
+    space()
+    throw new Error("expected ':' after JSON member") unless text[i] is ':'
+    i += 1
+    space()
+    skipValue()
+    space()
+    if text[i] is ','
+      i += 1
+      continue
+    throw new Error("expected '}' after JSON member") unless text[i] is '}'
+    i += 1
+    space()
+    throw new Error('trailing bytes after JSON object') unless i is text.length
+    return keys
+
+exactKeys = (record, keys) ->
+  schema = SCHEMAS[record.type]
+  throw new Error("unknown access record type #{JSON.stringify(record.type)}") unless schema?
+  expected = schema
+  if record.type is 'access'
+    expected = [...schema]
+    expected.push('truncated_fields') if 'truncated_fields' of record
+    expected.push('omitted_fields') if 'omitted_fields' of record
+  throw new Error("access #{record.type} members are missing, extra, duplicated, or out of order") unless keys.length is expected.length and keys.every((key, i) -> key is expected[i])
+
+export validateAccessLine = (bytes) ->
+  bytes = new Uint8Array(bytes) unless bytes instanceof Uint8Array
+  throw new Error('access record must end with LF') unless bytes.length and bytes[bytes.length - 1] is 10
+  throw new Error('access record uses CRLF') if bytes.length >= 2 and bytes[bytes.length - 2] is 13
+  throw new Error("access record exceeds #{MAX_ACCESS_LINE_BYTES} bytes") if bytes.length > MAX_ACCESS_LINE_BYTES
+  text = new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, bytes.length - 1))
+  throw new Error('access record is empty') unless text.length
+  keys = topLevelKeys(text)
+  record = JSON.parse(text)
+  throw new Error('access record must be an object') unless record? and typeof record is 'object' and not Array.isArray(record)
+  throw new Error('access record version must be integer 1') unless record.v is 1
+  throw new Error('access record type must be a string') unless typeof record.type is 'string'
+  exactKeys record, keys
+  validateEnvelope record
+  { record, bytes }
+
+validateEnvelope = (record) ->
+  for key, value of record
+    validateUnicode value, key
+  switch record.type
+    when 'hello'
+      throw new Error('hello app identity is malformed') unless validAppName(record.app_name) and validAppId(record.app_id, record.app_name)
+      throw new Error('hello decimal fields are malformed') unless canonicalDecimal(record.after) and canonicalDecimal(record.head)
+      throw new Error('hello head is below after') if compareDecimal(record.head, record.after) < 0
+      throw new Error('hello constants are malformed') unless record.heartbeat_seconds is 15 and record.max_line_bytes is 8192
+    when 'access'
+      validateAccessEvent record
+      for name in ['truncated_fields', 'omitted_fields']
+        if name of record
+          value = record[name]
+          throw new Error("access record #{name} must be a nonempty string array") unless Array.isArray(value) and value.length and value.every((v) -> typeof v is 'string')
+          allowed = if name is 'truncated_fields' then ['method', 'path'] else ['mark', 'mime_type']
+          throw new Error("access record #{name} has an unknown, duplicate, or unsorted field") unless value.every((field) -> allowed.includes(field)) and value.every((field, i) -> i is 0 or value[i - 1] < field)
+          if name is 'omitted_fields'
+            throw new Error('access record omitted_fields must name null fields') unless value.every((field) -> record[field] is null)
+    when 'gap'
+      throw new Error('gap app_id is malformed') unless validAppId(record.app_id)
+      throw new Error('gap decimals are malformed') unless canonicalDecimal(record.from) and canonicalDecimal(record.through) and canonicalDecimal(record.head)
+      throw new Error('gap interval is malformed') unless compareDecimal(record.from, record.through) <= 0 and compareDecimal(record.through, record.head) <= 0
+      throw new Error('gap reason is malformed') unless record.reason in ['no_replay', 'overflow']
+    when 'heartbeat'
+      throw new Error('heartbeat fields are malformed') unless validAppId(record.app_id) and canonicalDecimal(record.head) and validTimestamp(record.timestamp)
+    when 'closed'
+      throw new Error('closed fields are malformed') unless validAppId(record.app_id) and canonicalDecimal(record.head) and validTimestamp(record.timestamp) and record.reason in ['generation_stop', 'registration_deleted', 'registration_reaped', 'sequence_exhausted']
+  record
+
+export class AccessFramer
+  onLine = null
+  onError = null
+  buffer = new Uint8Array(0)
+  failed = false
+
+  constructor: (onLine, onError = null) ->
+    @onLine = onLine
+    @onError = onError
+    @buffer = new Uint8Array(0)
+    @failed = false
+
+  feed: (chunk) ->
+    return if @failed
+    chunk = new Uint8Array(chunk) unless chunk instanceof Uint8Array
+    start = 0
+    for byte, i in chunk
+      continue unless byte is 10
+      segmentLength = i + 1 - start
+      lineLength = @buffer.length + segmentLength
+      if lineLength > MAX_ACCESS_LINE_BYTES
+        @fail new Error("access record exceeds #{MAX_ACCESS_LINE_BYTES} bytes")
+        return
+      line = null
+      if @buffer.length
+        line = new Uint8Array(lineLength)
+        line.set @buffer
+        line.set chunk.subarray(start, i + 1), @buffer.length
+      else
+        line = chunk.slice(start, i + 1)
+      try
+        @onLine validateAccessLine(line)
+      catch e
+        @fail e
+        return
+      @buffer = new Uint8Array(0)
+      start = i + 1
+    remaining = chunk.length - start
+    return unless remaining
+    if @buffer.length + remaining > MAX_ACCESS_LINE_BYTES
+      @buffer = new Uint8Array(0)
+      @fail new Error("access record exceeds #{MAX_ACCESS_LINE_BYTES} bytes before LF")
+      return
+    next = new Uint8Array(@buffer.length + remaining)
+    next.set @buffer
+    next.set chunk.subarray(start), @buffer.length
+    @buffer = next
+
+  finish: ->
+    return unless @buffer.length
+    @fail new Error('access stream ended with an incomplete record')
+
+  fail: (error) ->
+    @failed = true
+    @onError?(error)
+
+export writeAccessOutput = (stream, bytes) ->
+  new Promise (resolve, reject) ->
+    settled = false
+    listening = false
+    finish = (error) ->
+      return if settled
+      settled = true
+      stream.off('error', finish) if listening
+      if error then reject(error) else resolve(null)
+    try
+      accepted = stream.write bytes, finish
+      if not accepted and not settled and typeof stream.once is 'function' and typeof stream.off is 'function'
+        listening = true
+        stream.once 'error', finish
+    catch e
+      finish e
+
+export pumpAccessOutput = (readable, stream) ->
+  reader = readable.getReader()
+  loop
+    { done, value } = reader.read!()
+    break if done
+    writeAccessOutput! stream, value
+
+sleepAbortable = (ms, signal) ->
+  new Promise (resolve, reject) ->
+    return reject(signal.reason or new Error('aborted')) if signal.aborted
+    done = ->
+      signal.removeEventListener 'abort', aborted
+      resolve(null)
+    aborted = ->
+      clearTimeout timer
+      reject signal.reason or new Error('aborted')
+    timer = setTimeout done, ms
+    signal.addEventListener 'abort', aborted, { once: true }
+
+export class AccessClient
+  mode = null
+  picture = null
+  stdout = null
+  stderr = null
+  fetch = null
+  sample = null
+  sleep = null
+  control = null
+  ansi = false
+  generation = 0
+  controller = null
+  reader = null
+  task = null
+  terminal = null
+
+  constructor: (opts = {}) ->
+    @mode = opts.mode or 'pretty'
+    @picture = if typeof opts.picture is 'string' then parseAccessPicture(opts.picture) else (opts.picture or parseAccessPicture(DEFAULT_ACCESS_PICTURE))
+    @stdout = opts.stdout or process.stdout
+    @stderr = opts.stderr or process.stderr
+    @fetch = opts.fetch or fetch
+    @sample = opts.sample or Math.random
+    @sleep = opts.sleep or sleepAbortable
+    @control = opts.control
+    @ansi = opts.ansi ?? (@mode is 'pretty' and @stdout.isTTY is true and not process.env.NO_COLOR?)
+    @generation = 0
+    @controller = null
+    @reader = null
+    @task = null
+    @terminal = null
+
+  move: (appId) ->
+    @generation += 1
+    generation = @generation
+    prior = @task
+    priorReader = @reader
+    @controller?.abort()
+    @task = do =>
+      try priorReader?.cancel().catch(-> null)
+      await prior if prior?
+      return unless generation is @generation
+      controller = new AbortController()
+      @controller = controller
+      @run! generation, appId, controller.signal
+    @task.catch (e) =>
+      @terminal = e
+    @task
+
+  stop: ->
+    @generation += 1
+    @controller?.abort()
+    try @reader?.cancel().catch(-> null)
+    await @task if @task?
+
+  request: (appId, cursor, signal) ->
+    path = "/1.0/apps/#{encodeURIComponent(appId)}/access?after=#{cursor}"
+    if @control.unix?
+      @fetch "http://janus#{path}", { unix: @control.unix, signal }
+    else
+      @fetch "#{@control.base}#{path}", { signal }
+
+  run: (generation, appId, signal) ->
+    cursor = '0'
+    base = 100
+    while generation is @generation and not signal.aborted
+      validHello = false
+      reader = null
+      try
+        requested = cursor
+        response = @request! appId, requested, signal
+        unless response.status is 200
+          detail = (await response.text()).trim()
+          throw new Error("access stream HTTP #{response.status}#{if detail then ": #{detail}" else ''}")
+        throw new Error('access stream response has no body') unless response.body?
+        reader = response.body.getReader()
+        @reader = reader
+        expectedInitialGap = false
+        sawAfterHello = false
+        helloHead = null
+        highWater = requested
+        protocolError = null
+        connectionClosed = false
+        pending = []
+        framer = new AccessFramer ((line) -> pending.push line), ((error) -> protocolError = error)
+        loop
+          { done, value } = reader.read!()
+          break if done
+          framer.feed value
+          for line in pending.splice(0)
+            return unless generation is @generation and not signal.aborted
+            record = line.record
+            throw new Error('access stream did not start with hello') unless validHello or record.type is 'hello'
+            if record.type is 'hello'
+              throw new Error('duplicate hello') if validHello
+              throw new Error('hello does not match registration generation') unless record.app_id is appId and record.after is requested
+              validHello = true
+              base = 100
+              helloHead = record.head
+              highWater = record.head
+              expectedInitialGap = compareDecimal(record.head, requested) > 0
+            else
+              throw new Error('record belongs to another app') if record.app_id isnt appId
+              if expectedInitialGap and not sawAfterHello
+                throw new Error('missing initial no_replay gap') unless record.type is 'gap' and record.reason is 'no_replay' and record.from is nextDecimal(cursor) and record.through is helloHead and record.head is helloHead
+              if not expectedInitialGap and not sawAfterHello and record.type is 'gap' and record.reason is 'no_replay'
+                throw new Error('unexpected initial no_replay gap')
+              if sawAfterHello and record.type is 'gap' and record.reason is 'no_replay'
+                throw new Error('no_replay gap is only legal immediately after hello')
+              sawAfterHello = true
+              if record.type is 'access'
+                throw new Error('access sequence skipped or regressed') unless record.sequence is nextDecimal(cursor)
+                highWater = record.sequence if compareDecimal(record.sequence, highWater) > 0
+              else if record.type is 'gap'
+                throw new Error('gap does not begin at the next sequence') unless record.from is nextDecimal(cursor)
+                throw new Error('gap head regressed') if compareDecimal(record.head, highWater) < 0
+                highWater = record.head
+              else if record.type is 'heartbeat' or record.type is 'closed'
+                throw new Error("#{record.type} head regressed") if compareDecimal(record.head, highWater) < 0
+                highWater = record.head
+            try
+              @consume! line
+            catch caughtOutput
+              outputError = caughtOutput
+              outputError.accessOutput = true
+              throw outputError
+            return unless generation is @generation and not signal.aborted
+            cursor = record.sequence if record.type is 'access'
+            cursor = record.through if record.type is 'gap'
+            connectionClosed = true if record.type is 'closed'
+            break if connectionClosed
+          throw protocolError if protocolError?
+          break if connectionClosed
+        if connectionClosed
+          try reader.cancel().catch(-> null)
+        else
+          framer.finish()
+          throw protocolError if protocolError?
+        throw new Error('access stream ended before hello') unless validHello
+        throw new Error('access stream omitted its initial no_replay gap') if expectedInitialGap and not sawAfterHello
+      catch caught
+        e = caught
+        try reader?.cancel().catch(-> null)
+        throw e if e?.accessOutput or e?.code is 'EPIPE'
+        return if signal.aborted
+        try await writeAccessOutput(@stderr, "rip-server: access stream: #{e?.message or e}; reconnecting\n")
+        catch outputError
+          throw outputError
+      break unless generation is @generation and not signal.aborted
+      delay = Math.floor(@sample() * (base + 1))
+      try
+        @sleep! delay, signal
+      catch
+        return if signal.aborted
+        throw new Error('access reconnect sleep failed')
+      base = Math.min(base * 2, 5000)
+
+  consume: (line) ->
+    record = line.record
+    if record.type is 'gap'
+      await writeAccessOutput @stderr, "rip-server: access gap #{record.from}..#{record.through} (#{record.reason})\n"
+    if @mode is 'raw'
+      await writeAccessOutput @stdout, line.bytes
+    else if @mode is 'pretty' and record.type is 'access'
+      rendered = renderAccess(record, @picture)
+      rendered = "\x1b[36m#{rendered}\x1b[0m" if @ansi
+      await writeAccessOutput @stdout, rendered + '\n'

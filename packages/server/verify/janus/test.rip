@@ -2,6 +2,7 @@ import { test, eq, ok } from '@rip-lang/testing'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { AccessFramer } from '../../monitor.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith('--preload=')
 SERVER = join(import.meta.dir, '..', '..', 'server.rip')
@@ -12,7 +13,7 @@ releasedCaddy = ->
   xcaddy = Bun.which 'xcaddy'
   throw new Error('verify:janus requires xcaddy or JANUS_CADDY') unless xcaddy?
   cache = join tmpdir(), 'rip-janus-release'
-  binary = join cache, 'caddy-v1.5.0'
+  binary = join cache, 'caddy-v1.5.0-access'
   return binary if existsSync binary
   mkdirSync cache, { recursive: true }
   buildDir = mkdtempSync join(cache, 'build-')
@@ -84,6 +85,10 @@ test! 'released Janus carries registration, files, sendfile, reload, and deregis
     janus {
       auth off
     }
+    log {
+      output stderr
+      format janus
+    }
   }
   """
 
@@ -101,6 +106,10 @@ test! 'released Janus carries registration, files, sendfile, reload, and deregis
     await waitFor 'control socket', ->
       throw new Error("released Caddy exited #{caddy.exitCode}: #{await caddyErr}") if caddy.exitCode?
       existsSync control
+    accessStatus = await fetch 'http://janus/1.0/access', { unix: control }
+    eq accessStatus.status, 200
+    accessState = await accessStatus.json()
+    ok accessState.provisioned_encoders > 0, JSON.stringify(accessState)
 
     manager = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'integration.test', '--control', control],
       stdin: 'ignore'
@@ -124,6 +133,23 @@ test! 'released Janus carries registration, files, sendfile, reload, and deregis
     catch error
       throw new Error("#{error}; last edge result #{edgeDiagnostic}")
     eq first, { version: 'one' }
+    activeAccess = await fetch 'http://janus/1.0/access', { unix: control }
+    eq (await activeAccess.json()).registrations, 1
+    apps = await (await fetch('http://janus/1.0/apps', { unix: control })).json()
+    directAccess = await fetch "http://janus/1.0/apps/#{apps[0].id}/access?after=0", { unix: control }
+    unless directAccess.status is 200
+      eq directAccess.status, 200, await directAccess.text()
+    accessRecords = []
+    accessError = null
+    framer = new AccessFramer ((line) -> accessRecords.push line), ((error) -> accessError = error)
+    reader = directAccess.body.getReader()
+    await waitFor 'released Janus access hello', ->
+      { done, value } = reader.read!()
+      framer.feed value unless done
+      throw accessError if accessError?
+      accessRecords.length > 0
+    eq accessRecords[0].record.type, 'hello'
+    await reader.cancel()
 
     shell = await edgeFetch port, '/'
     eq shell.status, 200
@@ -166,7 +192,8 @@ test! 'released Janus carries registration, files, sendfile, reload, and deregis
     eq second, { version: 'two' }
 
     manager.kill 'SIGTERM'
-    eq (await manager.exited), 0, await managerErr
+    eq (await manager.exited), 143, await managerErr
+    ok (await managerOut).includes('/api/version'), 'released Janus access events must reach foreground output'
     manager = null
     await waitFor 'deregistration', ->
       response = await edgeFetch port, '/api/version'

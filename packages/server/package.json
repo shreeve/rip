@@ -18,6 +18,7 @@
     "verify:hello-app": "rip verify/hello-app/test.rip",
     "verify:janus": "rip verify/janus/test.rip",
     "verify:middleware": "rip verify/middleware/test.rip",
+    "verify:monitor": "rip verify/monitor/test.rip",
     "verify:operations": "rip verify/operations/test.rip",
     "verify:reloads": "rip verify/reloads/test.rip",
     "verify:workers": "rip verify/workers/test.rip"

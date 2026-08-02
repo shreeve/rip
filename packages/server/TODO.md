@@ -30,16 +30,7 @@ retain completed history.
 - [ ] Pin finite conventional file roots: `static/generated`, `public/`, and
       `app/`; the project root is never an implicit public root.
 
-## 3. Restore access observation
-
-- [ ] Reconstruct `monitor.rip` from the released Janus v1.5 access stream
-      contract; do not inherit behavior solely because it exists in `temp/`.
-- [ ] Pin NDJSON framing, validation, pretty/raw/off output, picture parsing,
-      Unicode width, scaling, and bounded writes.
-- [ ] Connect foreground manager output to the app-scoped access subscription
-      without mixing raw stdout with manager or worker diagnostics.
-
-## 4. Tighten the package surface
+## 3. Tighten the package surface
 
 - [ ] Decide and pin the exact named exports after the burn-down. Remove empty
       or unjustified package exports.
@@ -47,7 +38,7 @@ retain completed history.
       support code. Move only behavior justified by a current contract or
       verification fixture; delete the rest.
 
-## 5. Remove obsolete project usage
+## 4. Remove obsolete project usage
 
 - [ ] Remove Cart's worker route for authored `app/styles.css`; Janus serves
       it from the App root.
@@ -58,7 +49,7 @@ retain completed history.
 - [ ] Update Cart, Pulse, ROADMAP, AGENTS, package metadata, and server docs to
       state only the final architecture.
 
-## 6. Certify and land
+## 5. Certify and land
 
 - [ ] Replace the burn-down package test with retained present-tense product
       tests, then run `bun run test` in `packages/server`.

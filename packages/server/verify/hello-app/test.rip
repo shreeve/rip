@@ -38,7 +38,7 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
       new Response('Not Found', { status: 404 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--name', 'hello-app', '--host', 'hello-app.test', '--control', controlSocket],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--name', 'hello-app', '--host', 'hello-app.test', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'inherit'
@@ -64,7 +64,7 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
     eq bundle.rash, rash(new TextEncoder().encode(inventory))
 
     proc.kill 'SIGTERM'
-    eq (await proc.exited), 0
+    eq (await proc.exited), 143
     ok deleted
   finally
     try proc?.kill('SIGKILL')
@@ -90,7 +90,7 @@ test! 'authored App shell is registered without generating a replacement', ->
       new Response(null, { status: 204 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--host', 'authored.test', '--control', controlSocket],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--host', 'authored.test', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'inherit'
@@ -98,7 +98,7 @@ test! 'authored App shell is registered without generating a replacement', ->
     eq registration.files.shell, join(project, 'app', 'index.html')
     ok not existsSync(join(project, 'static', 'generated', 'index.html'))
     proc.kill 'SIGTERM'
-    eq (await proc.exited), 0
+    eq (await proc.exited), 143
   finally
     try proc?.kill('SIGKILL')
     await proc.exited if proc?
@@ -126,7 +126,7 @@ test! 'watch publication commits one shared inventory then batches per-file ding
       new Response(null, { status: 204 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'watch.test', '--control', controlSocket],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'watch.test', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'inherit'
@@ -159,7 +159,7 @@ test! 'watch publication commits one shared inventory then batches per-file ding
     eq batches[1][0].ding, { id: 'app/template.html', hash: manifest.files.find((entry) -> entry.id is 'app/template.html').hash, kind: 'delete' }
 
     proc.kill 'SIGTERM'
-    eq (await proc.exited), 0
+    eq (await proc.exited), 143
   finally
     try proc?.kill('SIGKILL')
     await proc.exited if proc?

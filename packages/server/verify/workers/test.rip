@@ -134,7 +134,7 @@ test! 'manager configures a pool and replaces a crashed worker', ->
       new Response('Not Found', { status: 404 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'index.rip'), '--name', 'workers', '--host', 'workers.test', '--workers', '2', '--concurrency', '3', '--control', controlSocket],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'index.rip'), '--name', 'workers', '--host', 'workers.test', '--workers', '2', '--concurrency', '3', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'ignore'
@@ -159,7 +159,7 @@ test! 'manager configures a pool and replaces a crashed worker', ->
     eq response.status, 200
 
     proc.kill 'SIGTERM'
-    eq (await proc.exited), 0
+    eq (await proc.exited), 143
     ok deleted
   finally
     try proc?.kill('SIGKILL')
@@ -183,7 +183,7 @@ test! 'manager replaces one startup crash before publishing readiness', ->
       new Response(null, { status: 204 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'startup-crash.rip'), '--host', 'startup.test', '--control', controlSocket],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'startup-crash.rip'), '--host', 'startup.test', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'ignore'
@@ -194,7 +194,7 @@ test! 'manager replaces one startup crash before publishing readiness', ->
     response = await unixFetch '/hello', registration.upstreams[0].path
     eq (await response.json()), { message: 'recovered' }
     proc.kill 'SIGTERM'
-    eq (await proc.exited), 0
+    eq (await proc.exited), 143
   finally
     try proc?.kill('SIGKILL')
     await proc.exited if proc?
@@ -212,7 +212,7 @@ test! 'manager kills workers that miss the readiness deadline', ->
       new Response('unexpected', { status: 500 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'hanging.rip'), '--host', 'hanging.test', '--control', controlSocket],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'hanging.rip'), '--host', 'hanging.test', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'ignore'
