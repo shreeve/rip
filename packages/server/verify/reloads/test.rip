@@ -44,11 +44,13 @@ test! 'App edits preserve workers and valid API candidates swap through the door
         return Response.json({ deliveries: 0 })
       new Response(null, { status: 204 })
   proc = null
+  diagnostic = null
   try
     proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'reload.test', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
-      stderr: 'inherit'
+      stderr: 'pipe'
+    diagnostic = new Response(proc.stderr).text()
     await waitFor -> registration?
     first = registration.upstreams[0].path
     eq (await (await unixFetch('/version', first)).json()), { version: 'one' }
@@ -87,8 +89,12 @@ test! 'App edits preserve workers and valid API candidates swap through the door
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143
+    output = await diagnostic
+    ok output.includes 'API candidate rejected; keeping current workers'
+    ok output.includes 'this is not valid Rip @@@'
   finally
     try proc?.kill('SIGKILL')
     await proc.exited if proc?
+    await diagnostic if diagnostic?
     control.stop true
     rmSync dir, { recursive: true, force: true }
