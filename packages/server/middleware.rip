@@ -267,6 +267,33 @@ export timeout = (seconds = 30, opts = {}) ->
     ), grace * 1000
     new Response message, { status, headers: { 'content-type': 'text/plain; charset=UTF-8', connection: 'close' } }
 
+securityHeader = (opts, name, fallback) ->
+  value = opts[name]
+  return fallback if value is undefined
+  return null if value is false
+  throw new TypeError("secureHeaders #{name} must be a nonempty header value or false") unless typeof value is 'string'
+  value = value.trim()
+  throw new TypeError("secureHeaders #{name} must be a nonempty header value or false") unless value.length > 0
+  try
+    new Headers { 'x-rip-policy': value }
+  catch
+    throw new TypeError("secureHeaders #{name} must be a valid header value or false")
+  value
+
+export secureHeaders = (opts = {}) ->
+  policy = [
+    ['x-content-type-options', securityHeader(opts, 'contentTypeOptions', 'nosniff')]
+    ['referrer-policy', securityHeader(opts, 'referrerPolicy', 'strict-origin-when-cross-origin')]
+    ['content-security-policy', securityHeader(opts, 'contentSecurityPolicy', "frame-ancestors 'self'; base-uri 'self'; object-src 'none'")]
+    ['x-frame-options', securityHeader(opts, 'frameOptions', 'SAMEORIGIN')]
+    ['permissions-policy', securityHeader(opts, 'permissionsPolicy', null)]
+  ]
+
+  (request, next) ->
+    response = await next()
+    withHeaders response, (headers) ->
+      headers.set name, value for [name, value] in policy when value? and not headers.has(name)
+
 export sessions = (opts = {}) ->
   secret = opts.secret
   throw new TypeError('sessions requires a nonempty secret') unless typeof secret is 'string' and secret.length > 0

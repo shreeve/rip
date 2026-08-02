@@ -14,6 +14,9 @@ Application-owned request policy:
   while API requests retain JSON; its representation inputs are all in `Vary`.
 - `timeout 30, grace: 1` expresses both deadlines in integer seconds, aborts
   cooperative work, and recycles a worker that ignores cancellation.
+- `secureHeaders` fills absent API response headers without overriding explicit
+  application policy; it omits obsolete `X-XSS-Protection` and edge-owned HSTS.
 
-Compression, baseline security headers, transport deadlines, static files, and
-access logging are edge responsibilities and do not enter this fixture.
+Compression, HSTS, transport deadlines, static files, and access logging are
+edge responsibilities and do not enter this fixture. The edge must also cover
+security defaults for responses that never reach API middleware.

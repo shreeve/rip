@@ -2,7 +2,7 @@ import { test, eq, ok, throws } from '@rip-lang/testing'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { cors, csrf, htmlJson, sessions, timeout } from '../../middleware.rip'
+import { cors, csrf, htmlJson, secureHeaders, sessions, timeout } from '../../middleware.rip'
 import * as Server from '../../server.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith('--preload=')
@@ -227,6 +227,28 @@ test! 'htmlJson renders direct iOS navigation and leaves API JSON alone', ->
     new Promise((_, reject) -> setTimeout((-> reject(new Error('htmlJson size cancellation blocked'))), 1000))
   ]
   eq (await streamed.text()).length, largeText.length
+
+test! 'secureHeaders fills API defaults without overriding application policy', ->
+  policy = secureHeaders permissionsPolicy: 'camera=(), microphone=()'
+  response = await policy new Request('http://worker/state'), ->
+    new Response 'ok',
+      headers:
+        'content-security-policy': "default-src 'none'"
+        'x-frame-options': 'DENY'
+  eq response.headers.get('x-content-type-options'), 'nosniff'
+  eq response.headers.get('referrer-policy'), 'strict-origin-when-cross-origin'
+  eq response.headers.get('content-security-policy'), "default-src 'none'"
+  eq response.headers.get('x-frame-options'), 'DENY'
+  eq response.headers.get('permissions-policy'), 'camera=(), microphone=()'
+  eq response.headers.get('x-xss-protection'), null
+  eq response.headers.get('strict-transport-security'), null
+
+  reduced = secureHeaders contentSecurityPolicy: false, frameOptions: false
+  response = await reduced new Request('http://worker/state'), -> new Response 'ok'
+  eq response.headers.get('content-security-policy'), null
+  eq response.headers.get('x-frame-options'), null
+  throws (-> secureHeaders({ referrerPolicy: '   ' })), 'nonempty header value or false'
+  throws (-> secureHeaders({ referrerPolicy: "same-origin\nunsafe-url" })), 'valid header value or false'
 
 test! 'middleware next is one-shot and prototype-named cookies are data', ->
   Server.use (request, next) ->
