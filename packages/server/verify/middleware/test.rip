@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { cors, csrf, htmlJson, secureHeaders, sessions, timeout } from '../../middleware.rip'
-import * as Server from '../../server.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith('--preload=')
 GENERATOR = join(import.meta.dir, '..', '..', 'generate.rip')
@@ -66,7 +65,11 @@ runMode = (encrypt) ->
   use sessions secret: 'session-secret', encrypt: #{encrypt}
   use csrf secret: 'csrf-secret'
   use '/timed', timeout 1, grace: 1
+  use '/once', (request, next) ->
+    await next()
+    next()
 
+  get '/once' -> { reached: true }
   get '/state', (request) ->
     session.count = (session.count or 0) + 1
     { count: session.count, token: request.csrfToken }
@@ -86,16 +89,20 @@ runMode = (encrypt) ->
   start!
   """
   proc = null
+  diagnostic = null
   try
     generate! entry, appArtifact, join(dir, 'app.json'), 'middleware-app'
     generate! WORKER, workerArtifact, join(dir, 'worker.json'), 'middleware-worker'
     proc = Bun.spawn [process.execPath, workerArtifact],
       stdin: 'ignore'
       stdout: 'ignore'
-      stderr: 'inherit'
+      stderr: 'pipe'
       env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: 'middleware', WORKER_CONCURRENCY: '2' }
+    diagnostic = new Response(proc.stderr).text()
     await waitFor ->
       try (await unixFetch(socket, '/ready')).status is 200 catch then false
+    repeated = await unixFetch socket, '/once'
+    eq repeated.status, 500
 
     preflight = await unixFetch socket, '/write',
       method: 'OPTIONS'
@@ -174,6 +181,10 @@ runMode = (encrypt) ->
   finally
     try proc?.kill('SIGTERM')
     await proc.exited if proc?
+    if diagnostic?
+      output = await diagnostic
+      ok output.includes 'middleware called next() more than once'
+      ok output.includes('[worker middleware] handler ignored timeout cancellation; recycling') unless encrypt
     rmSync dir, { recursive: true, force: true }
 
 test 'invalid middleware policy rejects during registration', ->
@@ -250,13 +261,7 @@ test! 'secureHeaders fills API defaults without overriding application policy', 
   throws (-> secureHeaders({ referrerPolicy: '   ' })), 'nonempty header value or false'
   throws (-> secureHeaders({ referrerPolicy: "same-origin\nunsafe-url" })), 'valid header value or false'
 
-test! 'middleware next is one-shot and prototype-named cookies are data', ->
-  Server.use (request, next) ->
-    await next()
-    next()
-  Server.get '/once' -> { reached: true }
-  repeated = await Server.fetch new Request('http://worker/once')
-  eq repeated.status, 500
+test! 'prototype-named cookies are data', ->
   policy = csrf secret: 'csrf-secret', cookieName: 'toString'
   response = await policy(new Request('http://worker/state', { headers: { cookie: 'toString=not-a-token' } }), -> new Response('ok'))
   eq response.status, 200
