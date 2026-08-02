@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, watch, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { rash } from '@rip-lang/app/rash'
@@ -9,7 +9,7 @@ READY_MS = parseInt readyText
 abort 'rip-server: RIP_BOOT_DEADLINE_MS must be an integer greater than zero' unless Number.isFinite(READY_MS) and READY_MS > 0 and String(READY_MS) is readyText
 
 parseArgs = (argv) ->
-  args: any = { entry: null, name: null, host: null, control: process.env.JANUS_CONTROL or null, workers: 1, concurrency: 1 }
+  args: any = { entry: null, name: null, host: null, control: process.env.JANUS_CONTROL or null, workers: 1, concurrency: 1, watch: false }
   i = 0
   while i < argv.length
     value = argv[i]
@@ -21,6 +21,8 @@ parseArgs = (argv) ->
       when '--name' then args.name = take()
       when '--host' then args.host = take()
       when '--control' then args.control = take()
+      when '--watch' then args.watch = true
+      when '--no-watch' then args.watch = false
       when '--workers', '-w'
         text = take()
         args.workers = parseInt text
@@ -30,7 +32,7 @@ parseArgs = (argv) ->
         args.concurrency = parseInt text
         abort 'rip-server: --concurrency must be an integer greater than zero' unless Number.isFinite(args.concurrency) and args.concurrency > 0 and String(args.concurrency) is text
       when '--help', '-h'
-        p 'usage: rip server <entry> [--name <name>] [--host <host>] [-w <workers>] [-c <concurrency>] --control <socket-or-url>'
+        p 'usage: rip server <entry> [--name <name>] [--host <host>] [-w <workers>] [-c <concurrency>] [--watch] --control <socket-or-url>'
         exit 0
       else
         abort "rip-server: unknown option #{value}" if value.startsWith '-'
@@ -120,8 +122,7 @@ appModules = (appRoot) ->
   inventory = JSON.stringify entries.map (entry) -> [entry.id, entry.hash]
   { modules, moduleFiles, entries, rash: rash(new TextEncoder().encode(inventory)) }
 
-publishApp = (project, name) ->
-  return null unless project.appRoot?
+writeAppDocuments = (project, includeManifest) ->
   generated = join project.root, 'static', 'generated'
   mkdirSync join(generated, '@rip'), { recursive: true }
   { assembleBundle } = import!(join(loaderDir(), 'bundle.js'))
@@ -134,7 +135,14 @@ publishApp = (project, name) ->
   bundle.files = graph.entries
   bundle.rash = graph.rash
   writeAtomic join(generated, 'bundle.json'), JSON.stringify(bundle)
+  if includeManifest
+    writeAtomic join(generated, 'manifest.json'), JSON.stringify({ rash: graph.rash, files: graph.entries })
+  graph
 
+publishApp = (project, name, includeManifest) ->
+  return null unless project.appRoot?
+  generated = join project.root, 'static', 'generated'
+  graph = writeAppDocuments! project, includeManifest
   runtime = join(loaderDir(), '..', 'dist', 'browser', 'rip.js')
   abort "rip-server: browser runtime missing at #{runtime}" unless existsSync runtime
   copyFileSync runtime, join(generated, '@rip', 'rip.js')
@@ -151,7 +159,7 @@ publishApp = (project, name) ->
     <div id="app"></div>
     <script type="module">
       import { bootApp } from '/@rip/rip.js'
-      bootApp({ url: '/bundle.json' })
+      bootApp({ url: '/bundle.json'#{if includeManifest then ', workspace: true' else ''} })
     </script>
     """
 
@@ -159,7 +167,7 @@ publishApp = (project, name) ->
     { path: generated, cache: 'revalidate', browse: false }
     { path: project.appRoot, cache: 'never', browse: false }
   ]
-  { roots, proxy_first: (if project.entry? then ['/api'] else []), shell }
+  { files: { roots, proxy_first: (if project.entry? then ['/api'] else []), shell }, graph }
 
 waitReady = (proc, socket) ->
   deadline = Date.now() + READY_MS
@@ -198,6 +206,10 @@ export main = (argv) ->
   appArtifact = null
   workerArtifact = null
   files = null
+  appGraph = null
+  appWatcher = null
+  appTimer = null
+  appChain = Promise.resolve()
   appId = null
   heartbeat = null
   finish = null
@@ -277,6 +289,34 @@ export main = (argv) ->
           await new Promise (done) -> setTimeout done, 250
     return
 
+  publishDings = (dings) ->
+    return unless dings.length > 0
+    directives = dings.map (ding) -> { '@': ['/hub'], ding }
+    for i in [0...directives.length] by 16
+      response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", directives.slice(i, i + 16)
+      throw new Error("Janus ding publish failed (#{response.status})") unless response.ok
+
+  refreshApp = ->
+    next = writeAppDocuments! project, true
+    prior = new Map((appGraph?.entries or []).map((entry) -> [entry.id, entry.hash]))
+    current = new Map(next.entries.map((entry) -> [entry.id, entry.hash]))
+    dings = []
+    for entry in next.entries
+      dings.push { id: entry.id, hash: entry.hash } unless prior.get(entry.id) is entry.hash
+    for entry in appGraph?.entries or []
+      dings.push { id: entry.id, hash: entry.hash, kind: 'delete' } unless current.has entry.id
+    appGraph = next
+    publishDings! dings
+
+  startAppWatcher = ->
+    return unless args.watch and project.appRoot?
+    appWatcher = watch project.appRoot, { recursive: true }, ->
+      clearTimeout appTimer if appTimer?
+      appTimer = setTimeout ->
+        next = appChain.then -> refreshApp!()
+        appChain = next.catch (error) -> warn "rip-server: App publication failed: #{String(error)}"
+      , 50
+
   beat = ->
     return if stopping or not appId?
     try
@@ -292,6 +332,9 @@ export main = (argv) ->
     return if stopping
     stopping = true
     clearInterval heartbeat if heartbeat?
+    clearTimeout appTimer if appTimer?
+    appWatcher?.close()
+    await appChain
     try
       if appId?
         response = await controlFetch args.control, 'DELETE', "/1.0/apps/#{appId}"
@@ -302,7 +345,10 @@ export main = (argv) ->
     finish! status
 
   try
-    files = publishApp! project, args.name
+    publication = publishApp! project, args.name, args.watch
+    if publication?
+      files = publication.files
+      appGraph = publication.graph
     if project.entry?
       appArtifact = join runDir, 'app.js'
       workerArtifact = join runDir, 'worker.js'
@@ -316,6 +362,7 @@ export main = (argv) ->
     createRegistration!()
     for worker in workers
       monitorWorker worker
+    startAppWatcher()
     heartbeat = setInterval beat, HEARTBEAT_MS
     p "rip-server: https://#{args.host}/"
     await finished

@@ -1,5 +1,5 @@
 import { test, eq, ok } from '@rip-lang/testing'
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { rash } from '@rip-lang/app/rash'
@@ -95,6 +95,66 @@ test! 'authored App shell is registered without generating a replacement', ->
     await waitFor -> registration?
     eq registration.files.shell, join(project, 'app', 'index.html')
     ok not existsSync(join(project, 'static', 'generated', 'index.html'))
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 0
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'watch publication commits one shared inventory then batches per-file dings', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-watch-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
+  controlSocket = join dir, 'janus.sock'
+  registration: any = null
+  batches = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = new URL request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = await request.json()
+        return Response.json({ id: 'watch-registration' }, { status: 201 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/watch-registration/hub/publish'
+        batches.push await request.json()
+        return Response.json({ deliveries: 0 })
+      new Response(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'watch.test', '--control', controlSocket],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    await waitFor -> registration?
+    generated = join project, 'static', 'generated'
+    bundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
+    manifest = JSON.parse readFileSync(join(generated, 'manifest.json'), 'utf8')
+    eq manifest.rash, bundle.rash
+    eq manifest.files, bundle.files
+
+    writeFileSync join(project, 'app', 'styles.css'), 'body { color: green; }'
+    await waitFor -> batches.length > 0
+    eq batches[0].length, 1
+    eq batches[0][0]['@'], ['/hub']
+    eq batches[0][0].ding.id, 'app/styles.css'
+
+    nextBundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
+    nextManifest = JSON.parse readFileSync(join(generated, 'manifest.json'), 'utf8')
+    eq nextManifest.rash, nextBundle.rash
+    eq nextManifest.files, nextBundle.files
+    ok nextManifest.rash isnt manifest.rash
+
+    writeFileSync join(project, 'app', 'styles.css'), 'body { color: green; }'
+    sleep! 150
+    eq batches.length, 1
+
+    unlinkSync join(project, 'app', 'template.html')
+    await waitFor -> batches.length is 2
+    eq batches[1].length, 1
+    eq batches[1][0].ding, { id: 'app/template.html', hash: manifest.files.find((entry) -> entry.id is 'app/template.html').hash, kind: 'delete' }
+
     proc.kill 'SIGTERM'
     eq (await proc.exited), 0
   finally
