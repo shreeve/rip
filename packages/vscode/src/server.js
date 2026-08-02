@@ -529,6 +529,8 @@ function stateOf(uri) {
       lastCompletion: null,  // tsgo's raw items from the newest completion (resolve reads them)
       hoverEnrich: new Map(), // version-keyed evolving-any enrichment memo
       refreshTimer: null,
+      refreshRun: null,      // the debounced refresh body, so a flush runs THE SAME one
+      settling: null,        // resolves when the owed refresh has finished; null when nothing is owed
       pinCache: new Map(),   // Tier 3 pins: `${name}@${valueHash}` → type text | null (probed-and-rejected)
       probing: false,        // one probe round in flight per document
     };
@@ -1567,14 +1569,21 @@ function scheduleRefresh(document) {
   // would not fix it: tsgo holds the face text, so an answer has to come
   // from a face tsgo has actually been given. Hence flush-and-await
   // rather than compile-on-demand.
-  const settled = new Promise((resolve) => {
-    state.refreshTimer = setTimeout(async () => {
-      state.refreshTimer = null;
-      try { await refresh(document); }
-      catch (err) { connection.console.error(`[rip] refresh failed: ${err.stack ?? err}`); }
-      finally { if (state.settling === settled) state.settling = null; resolve(); }
-    }, 100);
-  });
+  //
+  // The body is held so a FLUSH can run the very same one. Clearing the
+  // timer and running a separate refresh would strand this promise
+  // unresolved, and a second request already awaiting it would never be
+  // answered — one flusher and one waiter is the ordinary case, because
+  // an editor fires completion and signature help on the same keystroke.
+  let done;
+  const settled = new Promise((resolve) => { done = resolve; });
+  state.refreshRun = async () => {
+    state.refreshTimer = null;
+    try { await refresh(document); }
+    catch (err) { connection.console.error(`[rip] refresh failed: ${err.stack ?? err}`); }
+    finally { if (state.settling === settled) state.settling = null; done(); }
+  };
+  state.refreshTimer = setTimeout(() => state.refreshRun(), 100);
   state.settling = settled;
 }
 
@@ -1584,18 +1593,14 @@ function scheduleRefresh(document) {
 async function settleDocument(uri) {
   const state = states.get(uri);
   if (!state) return;
-  const document = documents.get(uri);
-  if (!document) return;
-  // Two ways to be behind: the debounce has not fired (flush it now —
-  // the user has stopped typing long enough to ask a question), or it
-  // fired and the refresh is still in flight (just wait).
+  // Two ways to be behind: the debounce has not fired (flush it — the user
+  // has stopped typing long enough to ask a question), or it fired and the
+  // refresh is still in flight. Both end at the SAME promise, so any number
+  // of concurrent requests share one refresh and all of them are answered.
   if (state.refreshTimer) {
     clearTimeout(state.refreshTimer);
     state.refreshTimer = null;
-    try { await refresh(document); }
-    catch (err) { connection.console.error(`[rip] refresh failed: ${err.stack ?? err}`); }
-    state.settling = null;
-    return;
+    state.refreshRun?.();
   }
   if (state.settling) await state.settling;
 }

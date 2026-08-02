@@ -79,6 +79,40 @@ describeExtended('a read surface answers the buffer being typed', () => {
     } finally { await s.close(); }
   }, 90_000);
 
+  // Settling is shared, not per-request. An editor fires more than one
+  // surface on a single keystroke — completion and signature help arrive
+  // together the moment you type `(` — so two requests routinely land inside
+  // one debounce window. The first flushes it; the second must join the same
+  // refresh rather than wait on something the flush cancelled. Getting that
+  // wrong strands a request forever, which is worse than the staleness the
+  // settling exists to fix: a wrong answer is at least an answer.
+  test('concurrent requests in one debounce window are all answered', async () => {
+    const s = await openSession({
+      'app.rip': 'items: number[] = [1, 2]\na = items.\n',
+      'package.json': '{}\n',
+    });
+    try {
+      s.open('app.rip');
+      await s.diagnostics('app.rip');
+      s.change('app.rip', 'items: number[] = [1, 2]\na = items\n');
+      await s.diagnostics('app.rip');
+
+      s.change('app.rip', 'items: number[] = [1, 2]\na = items.\n');
+      const uri = s.uri('app.rip');
+      const both = Promise.all([
+        s.request('textDocument/completion', { textDocument: { uri }, position: { line: 1, character: 10 } }),
+        s.request('textDocument/hover', { textDocument: { uri }, position: { line: 1, character: 5 } }),
+      ]);
+      // A hang is the failure mode, so the assertion is against a deadline —
+      // without one this test does not fail, it never finishes.
+      const raced = await Promise.race([
+        both.then(() => 'answered'),
+        new Promise((r) => setTimeout(() => r('hung'), 8000)),
+      ]);
+      expect(raced, 'both requests returned').toBe('answered');
+    } finally { await s.close(); }
+  }, 90_000);
+
   // Signature help has no statement-context fallback, so a stale face here
   // shows up as plain null rather than a wrong list — quieter, and just as
   // wrong at the moment the popup is wanted.
