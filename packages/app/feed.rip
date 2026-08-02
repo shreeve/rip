@@ -38,7 +38,9 @@ defaultFetch = ->
     throw new Error 'Rip Workspace: connectFeed needs a fetch (no global fetch)'
   (url, opts) -> fetch(url, opts)
 
-defaultModuleUrl = (id) -> '/' + id.split('/').map(encodeURIComponent).join('/')
+defaultModuleUrl = (id) ->
+  path = if id.startsWith('app/') then id.slice('app/'.length) else id
+  '/' + path.split('/').map(encodeURIComponent).join('/')
 validWireHash = (hash) -> typeof hash is 'string' and /^[A-Za-z0-9_]{6}$/.test(hash)
 
 export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed

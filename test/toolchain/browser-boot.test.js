@@ -481,7 +481,7 @@ describe('bootApp workspace mode', () => {
     const table = manifestTable();
     const v2 = routeSource('Home', 'home v2');
     const e2 = hashOf(v2);
-    table.set('/app/routes/index.rip', v2);
+    table.set('/routes/index.rip', v2);
     const hub = fakeHub();
     const { result, fetch } = await bootWorkspace({ table, hub });
     try {
@@ -490,7 +490,7 @@ describe('bootApp workspace mode', () => {
       await until(() => fetch.calls.includes('/manifest.json'));
       socket.onmessage({ data: JSON.stringify({ ding: { id: 'app/routes/index.rip', hash: e2 } }) });
       await until(() => result.workspace.passport('app/routes/index.rip').hash === e2);
-      expect(fetch.calls).toContain('/app/routes/index.rip');
+      expect(fetch.calls).toContain('/routes/index.rip');
       const passport = result.workspace.passport('app/routes/index.rip');
       expect(passport.source).toBe(v2);
       expect(passport.compiled).toBeDefined();
@@ -504,7 +504,7 @@ describe('bootApp workspace mode', () => {
     const table = manifestTable();
     const bad = 'x = ((';
     const eBad = hashOf(bad);
-    table.set('/app/routes/index.rip', bad);
+    table.set('/routes/index.rip', bad);
     const hub = fakeHub();
     const reports = [];
     const { result } = await bootWorkspace({ table, hub, reports });
@@ -526,7 +526,7 @@ describe('bootApp workspace mode', () => {
     const table = manifestTable();
     const v2 = routeSource('Home', 'home v2');
     const e2 = hashOf(v2);
-    table.set('/app/routes/index.rip', v2);
+    table.set('/routes/index.rip', v2);
     const hub = fakeHub();
     const logs = [];
     const originalLog = console.log;
@@ -577,7 +577,7 @@ describe('bootApp workspace mode', () => {
     const table = new Map([['/manifest.json', JSON.stringify(manifest)]]);
     const v2 = "export LABEL = 'badge v2'";
     const e2 = hashOf(v2);
-    table.set('/app/badge.rip', v2);
+    table.set('/badge.rip', v2);
     const hub = fakeHub();
     const { result, target } = await bootWorkspace({ table, hub, bundle });
     try {
@@ -620,7 +620,7 @@ describe('bootApp workspace mode', () => {
     const v3 = "export LABEL = 'badge v3'";
     const e2 = hashOf(broken);
     const e3 = hashOf(v3);
-    table.set('/app/badge.rip', broken);
+    table.set('/badge.rip', broken);
     const hub = fakeHub();
     const reports = [];
     const { result, target } = await bootWorkspace({ table, hub, bundle, reports });
@@ -633,7 +633,7 @@ describe('bootApp workspace mode', () => {
       expect(target.textContent).toContain('badge v1');
       expect(target.textContent).not.toContain('badge v3');
       // The next good generation recovers through the same path.
-      table.set('/app/badge.rip', v3);
+      table.set('/badge.rip', v3);
       hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/badge.rip', hash: e3 } }) });
       await until(() => result.workspace.passport('app/badge.rip').hash === e3);
       await settleEscape();
@@ -697,13 +697,13 @@ describe('bootApp workspace mode', () => {
     const e3 = hashOf(v3);
     const aboutV2 = routeSource('About', 'about v2');
     const aboutE2 = hashOf(aboutV2);
-    table.set('/app/routes/about.rip', aboutV2);
+    table.set('/routes/about.rip', aboutV2);
     let releaseV2 = null;
     const gate = new Promise(resolve => { releaseV2 = resolve; });
     const base = fakeFetch(table);
     let indexFetches = 0;
     const fetchImpl = async url => {
-      if (url === '/app/routes/index.rip') {
+      if (url === '/routes/index.rip') {
         const ordinal = ++indexFetches;
         if (ordinal === 1) await gate;
         const text = ordinal === 1 ? v2 : v3;
@@ -755,7 +755,7 @@ describe('bootApp workspace mode', () => {
     const goodStash = 'export stash = {}';
     const e1 = hashOf(badStash);
     const e2 = hashOf(goodStash);
-    table.set('/app/stash.rip', badStash);
+    table.set('/stash.rip', badStash);
     const hub = fakeHub();
     const reports = [];
     const { result, target } = await bootWorkspace({ table, hub, reports });
@@ -765,7 +765,7 @@ describe('bootApp workspace mode', () => {
       await until(() => result.workspace.passport('app/stash.rip')?.hash === e1);
       await settleEscape();
       await until(() => reports.some(line => line.includes('remount failed') || line.includes('apply failed')));
-      table.set('/app/stash.rip', goodStash);
+      table.set('/stash.rip', goodStash);
       hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'app/stash.rip', hash: e2 } }) });
       await until(() => result.workspace.passport('app/stash.rip')?.hash === e2);
       await settleEscape();
