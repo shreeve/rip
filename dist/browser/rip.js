@@ -4584,6 +4584,17 @@ function isIdentifierName(value) {
   return true;
 }
 var IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, "g");
+function symbolNameEnd(text, start) {
+  let end = start;
+  while (end < text.length && IDENT_PART.test(text[end]))
+    end++;
+  while ((text[end] === "." || text[end] === "-") && IDENT_START.test(text[end + 1] ?? "")) {
+    end++;
+    while (end < text.length && IDENT_PART.test(text[end]))
+      end++;
+  }
+  return end;
+}
 var DIGIT = /[0-9]/;
 var NUMBER_RE = /^0b[01](?:_?[01])*n?|^0o[0-7](?:_?[0-7])*n?|^0x[\da-f](?:_?[\da-f])*n?|^\d+(?:_\d+)*n|^(?:\d+(?:_\d+)*)?\.?\d+(?:_\d+)*(?:e[+-]?\d+(?:_\d+)*)?/i;
 var REGEX_RE = /^\/(?!\/)((?:[^[\/\n\\]|\\[^\n]|\[(?:\\[^\n]|[^\]\n\\])*\])*)(\/)?/;
@@ -5530,9 +5541,7 @@ ${baseline}`).join(`
       const prevTok = tokens[tokens.length - 1];
       const structural = prevTok !== undefined && (prevTok.kind === "PROPERTY" || prevTok.kind === ")" || prevTok.kind === "]" || prevTok.kind === "}" || prevTok.kind === "CALL_END" || prevTok.kind === "INDEX_END" || prevTok.kind === "PARAM_END" || prevTok.kind === "PICK_END" || prevTok.kind === "STRING" || prevTok.kind === "STRING_END" || prevTok.kind === "NUMBER" || prevTok.kind === "REGEX" || prevTok.kind === "HEREGEX_END" || prevTok.kind === "BOOL" || prevTok.kind === "NULL" || prevTok.kind === "UNDEFINED" || prevTok.kind === "DAMMIT" || prevTok.kind === "?" || prevTok.kind === "PRESENCE" || prevTok.kind === "OPT_MARKER" || prevTok.kind === "THIS" || prevTok.kind === "@" || prevTok.kind === "SYMBOL" || scanTernary > 0 && prevTok.kind === "IDENTIFIER");
       if (!structural) {
-        let end2 = pos + 1;
-        while (end2 < text.length && IDENT_PART.test(text[end2]))
-          end2++;
+        const end2 = symbolNameEnd(text, pos + 1);
         push("SYMBOL", text.slice(pos + 1, end2), pos, end2);
         pos = end2;
         continue;
