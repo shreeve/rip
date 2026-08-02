@@ -64,6 +64,21 @@ export function mapTsDiagnostic(good, d) {
     const row = good.mappings.bestAtGenerated(s);
     if (!row || row.mappingKind !== 'exact') return null;
   }
+  // A RECOVERED face (tolerant compile of an incomplete buffer) holds
+  // bytes the user never typed: the synthetic closers and the zero-width
+  // holes repair minted. TypeScript reads those as ordinary text and
+  // reports on them — `items.` becomes `items.;`, and TS1003 "Identifier
+  // expected" lands on the synthesized `;`. Such a span maps to no exact
+  // row, so the cover fallback below paints the whole enclosing
+  // construct: the import statement three lines up turns red for an
+  // error about a byte rip invented. Rip already publishes its OWN
+  // rejection at the true position, so the cover-mapped one is a
+  // duplicate in the wrong place. Exactly-mapped errors still publish —
+  // those are about the user's own bytes and survive the incompleteness.
+  if ((good.parseDiagnostics?.length ?? 0) > 0) {
+    const row = good.mappings.bestAtGenerated(s);
+    if (!row || row.mappingKind !== 'exact') return null;
+  }
   return {
     severity: d.severity ?? 1,
     code: d.code,

@@ -6138,7 +6138,9 @@ ${baseline}`).join(`
       });
       const closerKind = frame.kind === "call" ? "CALL_END" : frame.kind === "group" ? ")" : frame.kind === "index" ? "INDEX_END" : frame.kind === "array" ? "]" : frame.pick ? "PICK_END" : "}";
       closeBracket();
-      if (tokens[tokens.length - 1]?.kind === ",") {
+      const tail = tokens[tokens.length - 1]?.kind;
+      const emptySlot = frame.kind === "call" && tail === "CALL_START" || frame.kind === "index" && tail === "INDEX_START";
+      if (tail === "," || emptySlot) {
         synth("IDENTIFIER", cursorEnd);
         tokens[tokens.length - 1].value = "";
       }
@@ -7771,11 +7773,15 @@ var parserInstance = {
       action = parseTable[state]?.[symbol];
       if (action == null && tolerant && repairBudget > 0) {
         atPos = symbol === EOF ? inputEnd : tokenLoc?.start ?? inputEnd;
-        recordFirst = () => {
+        recordFirst = (wanted = null) => {
           if (diagnostics.length !== 0)
             return;
           got = symbol === EOF ? "end of input" : `'${this.tokenNames[symbol] || symbol}'`;
-          return diagnostics.push({ message: `Unexpected ${got}`, start: atPos, end: tokenLoc?.end ?? atPos, expected: [], got });
+          expected = wanted != null ? [this.tokenNames[wanted] || wanted] : [];
+          message = `Unexpected ${got}`;
+          if (expected.length)
+            message += ` — expected ${expected.join(", ")}`;
+          return diagnostics.push({ message, start: atPos, end: tokenLoc?.end ?? atPos, expected, got });
         };
         if (symbol === this.symbolIds.INDENT || symbol === this.symbolIds.OUTDENT) {
           recordFirst();
@@ -7794,7 +7800,7 @@ var parserInstance = {
           }
         }
         if (inserted != null) {
-          recordFirst();
+          recordFirst(inserted);
           repairBudget--;
           repairedHere.add(state * 1024 + inserted);
           pendingSymbols.unshift({ symbol, loc: tokenLoc, text: lexer.text, token: lexer.token });

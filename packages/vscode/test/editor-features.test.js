@@ -810,6 +810,40 @@ describe.skipIf(!tsgoAvailable)('rename', () => {
 describe.skipIf(!tsgoAvailable)('source.* code actions', () => {
   const WHOLE_DOC = { start: { line: 0, character: 0 }, end: { line: 99, character: 0 } };
 
+  // The tolerant face made READ surfaces work on an incomplete buffer,
+  // and the first cut of the edit guard refused the whole FILE whenever
+  // one existed — which silently removed every quick fix for as long as
+  // the user was mid-expression, the editor's most-used edit surface,
+  // for an incompleteness that cannot reach the edit. An import inserted
+  // at offset 0 is settled text; the unclosed call three lines below it
+  // is not. The boundary is positional, so both halves are asserted in
+  // one session: offered before the incompleteness, refused at it.
+  test('a quick fix before an incomplete expression still applies; one at it is refused', async () => {
+    await inWorkspace({ 'zed.rip': 'export zz = 1\n' }, async (api) => {
+      const SRC = "console.log 'x'\nv = zz\nr = zz(1,\n";
+      await api.open('app.rip', SRC);
+      const diags = api.diagnostics('app.rip');
+      expect(diags.some((d) => /unclosed '\('/.test(d.message ?? ''))).toBe(true);
+
+      const at = { start: { line: 1, character: 4 }, end: { line: 1, character: 4 } };
+      const actions = await api.codeAction('app.rip', at, diags.filter((d) => d.code === 2304));
+      const add = (actions ?? []).find((a) => /Add import/.test(a.title ?? ''));
+      expect(add, 'the import quick fix survives an incompleteness below it').toBeTruthy();
+
+      // And it lands where it should — at the top, not beside the hole.
+      const edits = add.edit.changes[api.uriOf('app.rip')];
+      expect(edits).toHaveLength(1);
+      expect(edits[0].range.start.line).toBe(0);
+      expect(edits[0].newText).toContain("from './zed.rip'");
+
+      // Rename is the reference for the other half: it refuses outright
+      // on a recovered face, and must keep refusing.
+      const renamed = await api.rename('app.rip', 1, 4, 'zzz')
+        .catch((e) => ({ error: String(e.message ?? e) }));
+      expect(JSON.stringify(renamed)).toMatch(/does not compile|error/i);
+    });
+  }, 30000);
+
   test('organize imports drops the unused import and keeps the survivor in the USER\'s spelling', async () => {
     await inWorkspace({ 'util.rip': UTIL, 'zed.rip': 'export zz = 1\n' }, async (api) => {
       // zz is unused; the kept import spells with DOUBLE quotes and no

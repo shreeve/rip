@@ -3665,7 +3665,21 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // and the emitted face would drop the comma, losing the position
       // signature help's activeParameter is computed from. A zero-width
       // IDENTIFIER hole keeps the slot.
-      if (tokens[tokens.length - 1]?.kind === ',') {
+      //
+      // The SAME slot has to be kept when the bracket is still EMPTY —
+      // `add(` and `items[`, the first keystroke of every call and every
+      // index. A closer straight after the opener emits `add()`, a
+      // complete zero-argument call with no position between the
+      // parens, so the cursor resolves to nothing and signature help
+      // answers null. Only `call` and `index` qualify: an empty
+      // IDENTIFIER is a legal argument and a legal subscript, where in
+      // an object literal it would fabricate a property name and in an
+      // array an element the user has not typed.
+      const tail = tokens[tokens.length - 1]?.kind;
+      const emptySlot =
+        (frame.kind === 'call' && tail === 'CALL_START') ||
+        (frame.kind === 'index' && tail === 'INDEX_START');
+      if (tail === ',' || emptySlot) {
         synth('IDENTIFIER', cursorEnd);
         tokens[tokens.length - 1].value = '';
       }

@@ -1557,9 +1557,47 @@ function scheduleRefresh(document) {
   const state = stateOf(document.uri);
   // Keystroke coalescing; compiles are fast but tsgo round-trips add up.
   clearTimeout(state.refreshTimer);
-  state.refreshTimer = setTimeout(() => {
-    refresh(document).catch((err) => connection.console.error(`[rip] refresh failed: ${err.stack ?? err}`));
-  }, 100);
+  // The pending work is made AWAITABLE, because a debounce is invisible
+  // to a request that arrives inside it: completion and signature help
+  // answer from `lastGood`, and for 100ms after a keystroke that is the
+  // face of the PREVIOUS text. Retyping a member dot is the case that
+  // shows it — the buffer without the dot compiles clean, so `lastGood`
+  // has plain statement context there and the popup serves the whole
+  // global scope instead of the receiver's members. Recompiling locally
+  // would not fix it: tsgo holds the face text, so an answer has to come
+  // from a face tsgo has actually been given. Hence flush-and-await
+  // rather than compile-on-demand.
+  const settled = new Promise((resolve) => {
+    state.refreshTimer = setTimeout(async () => {
+      state.refreshTimer = null;
+      try { await refresh(document); }
+      catch (err) { connection.console.error(`[rip] refresh failed: ${err.stack ?? err}`); }
+      finally { if (state.settling === settled) state.settling = null; resolve(); }
+    }, 100);
+  });
+  state.settling = settled;
+}
+
+// Await whatever refresh this document owes before reading its face.
+// A request that arrives with the buffer already settled pays nothing:
+// no timer, no pending refresh, and `lastGood` is current by definition.
+async function settleDocument(uri) {
+  const state = states.get(uri);
+  if (!state) return;
+  const document = documents.get(uri);
+  if (!document) return;
+  // Two ways to be behind: the debounce has not fired (flush it now —
+  // the user has stopped typing long enough to ask a question), or it
+  // fired and the refresh is still in flight (just wait).
+  if (state.refreshTimer) {
+    clearTimeout(state.refreshTimer);
+    state.refreshTimer = null;
+    try { await refresh(document); }
+    catch (err) { connection.console.error(`[rip] refresh failed: ${err.stack ?? err}`); }
+    state.settling = null;
+    return;
+  }
+  if (state.settling) await state.settling;
 }
 
 documents.onDidChangeContent(({ document }) => scheduleRefresh(document));
@@ -2215,6 +2253,10 @@ function ripCompletionItem(ctx, raw, index) {
 
 connection.onCompletion(async (params) => {
   await tsgoReady;
+  // The buffer being typed is the whole point of these two
+  // surfaces, so they wait for it rather than answering about the
+  // text of 100ms ago.
+  await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return null;
   const genCursor = ctx.genCursor ?? ctx.genExact;
@@ -2267,6 +2309,10 @@ connection.onCompletionResolve(async (item) => {
 // overload list itself).
 connection.onSignatureHelp(async (params) => {
   await tsgoReady;
+  // The buffer being typed is the whole point of these two
+  // surfaces, so they wait for it rather than answering about the
+  // text of 100ms ago.
+  await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return null;
   const genCursor = ctx.genCursor ?? ctx.genExact;
@@ -2618,7 +2664,29 @@ connection.onWorkspaceSymbol(async (params) => {
 // generated manifestations of the IDENTICAL source span, so their
 // mapped edits coincide — coincident spans with identical newText
 // collapse to one edit, and any remaining overlap refuses loudly.
-function mapWorkspaceEditToRip(edit) {
+// Strictly-before, on LSP positions.
+const beforePosition = (a, b) => a.line < b.line || (a.line === b.line && a.character < b.character);
+
+// The earliest point a tolerant compile marked incomplete, as an LSP
+// position — or null when the face is a clean compile. Everything from
+// here to end of buffer is what the user is still typing; everything
+// before it is settled text an edit may touch.
+function earliestIncompleteness(face) {
+  let at = null;
+  for (const d of face.parseDiagnostics ?? []) {
+    if (at === null || d.start < at) at = d.start;
+  }
+  return at === null ? null : offsetToPosition(face.srcLineStarts, at);
+}
+
+// `atomic` (the default) is the RENAME contract: every participating
+// buffer must be settled, because a rename is one refactor spread across
+// files and a partial apply is worse than none — a buffer mid-keystroke
+// cannot promise its occurrences are the ones the user means. A quick fix
+// is the opposite shape: one local insertion, whose only requirement is
+// that its OWN span is settled text, so it passes `atomic: false` and is
+// judged positionally.
+function mapWorkspaceEditToRip(edit, { atomic = true } = {}) {
   const byUri = new Map(); // tsUri → TextEdit[]
   for (const [uri, edits] of Object.entries(edit?.changes ?? {})) {
     byUri.set(uri, edits);
@@ -2633,21 +2701,27 @@ function mapWorkspaceEditToRip(edit) {
   const changes = {};
   for (const [uri, edits] of byUri) {
     const open = stateByTsUri(uri);
-    let face, ripUri;
+    let face, ripUri, incompleteFrom = null;
     if (open) {
       const document = documents.get(open.uri);
       if (!document || document.getText() !== open.state.lastGood.source) {
         return { failure: `${open.uri.split('/').pop()} has unapplied changes that do not compile — fix it and retry` };
       }
-      // A RECOVERED face (tolerant compile of an incomplete buffer) never
-      // receives edits: its holes are keystrokes in flight, and an edit
-      // that lands beside one commits the workspace to a text the user is
-      // mid-way through changing. Read surfaces serve from it; edits wait.
-      if (open.state.lastGood.parseDiagnostics?.length > 0) {
+      if (atomic && open.state.lastGood.parseDiagnostics?.length > 0) {
         return { failure: `${open.uri.split('/').pop()} does not compile — fix it and retry` };
       }
       face = open.state.lastGood;
       ripUri = open.uri;
+      // A RECOVERED face (tolerant compile of an incomplete buffer) takes
+      // edits BEFORE its incompleteness and refuses them at or after it.
+      // The hole is a keystroke in flight, so an edit landing on or past
+      // one commits the workspace to a text the user is mid-way through
+      // changing. Refusing the whole FILE is what this used to do, and it
+      // takes the editor's most-used edit surface with it: an import
+      // inserted at offset 0 cannot be affected by an unclosed call three
+      // lines below, yet the auto-import quick fix silently disappeared
+      // for as long as the buffer was mid-expression.
+      incompleteFrom = earliestIncompleteness(face);
     } else {
       let fsPath = null;
       if (uri.startsWith('file://')) {
@@ -2680,6 +2754,9 @@ function mapWorkspaceEditToRip(edit) {
       const srcEdit = faceEditToSourceEdit(face, e);
       if (!srcEdit) {
         return { failure: `an edit in ${ripUri.split('/').pop()} lands on generated-only bytes with no Rip source` };
+      }
+      if (incompleteFrom !== null && !beforePosition(srcEdit.range.end, incompleteFrom)) {
+        return { failure: `an edit in ${ripUri.split('/').pop()} lands on an incomplete expression — finish it and retry` };
       }
       mapped.push(srcEdit);
     }
@@ -2830,7 +2907,7 @@ connection.onCodeAction(async (params) => {
   for (const action of result) {
     if (action.kind && !action.kind.startsWith('quickfix') && !action.kind.startsWith('source.')) continue;
     if (!action.edit) continue; // command-only actions execute inside tsgo — not brokered
-    const { changes, failure } = mapWorkspaceEditToRip(action.edit);
+    const { changes, failure } = mapWorkspaceEditToRip(action.edit, { atomic: false });
     if (failure) {
       connection.console.log(`[rip] code action '${action.title}' dropped: ${failure}`);
       continue;

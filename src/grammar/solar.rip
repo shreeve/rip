@@ -1283,10 +1283,20 @@ class Generator
         atPos = if symbol is EOF then inputEnd else (tokenLoc?.start ?? inputEnd)
         # Recovery never silences the rejection it papers over: the first
         # error is recorded whenever a repair actually fires.
-        recordFirst = =>
+        # The repair knows WHICH token it is about to fabricate, and that
+        # is the useful half of the message: "expected PROPERTY" tells the
+        # reader what to type, where "end of input" only reports what the
+        # parser experienced — and at a trailing dot the reader is not at
+        # the end of anything. The strict driver below already says both;
+        # this says the same, in the same words, so the two paths cannot
+        # describe one buffer differently.
+        recordFirst = (wanted = null) =>
           return unless diagnostics.length is 0
           got = if symbol is EOF then 'end of input' else "'#{@tokenNames[symbol] or symbol}'"
-          diagnostics.push {message: "Unexpected #{got}", start: atPos, end: tokenLoc?.end ?? atPos, expected: [], got}
+          expected = if wanted? then [@tokenNames[wanted] or wanted] else []
+          message = "Unexpected #{got}"
+          message += " — expected #{expected.join(', ')}" if expected.length
+          diagnostics.push {message, start: atPos, end: tokenLoc?.end ?? atPos, expected, got}
         if symbol is @symbolIds.INDENT or symbol is @symbolIds.OUTDENT
           # Rule: unexpected block scaffolding deletes.
           recordFirst()
@@ -1303,7 +1313,7 @@ class Generator
             inserted = id
             break
         if inserted?
-          recordFirst()
+          recordFirst(inserted)
           repairBudget--
           repairedHere.add(state * 1024 + inserted)
           pendingSymbols.unshift {symbol, loc: tokenLoc, text: lexer.text, token: lexer.token}
