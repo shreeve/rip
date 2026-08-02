@@ -180,6 +180,28 @@ export async function openSession(files) {
       });
     },
 
+    // THE ARRIVAL PROBE — an edit and a request in the SAME TICK, with no
+    // publication barrier between them.
+    //
+    // Every other read here waits for diagnostics first, and that barrier is
+    // correct: it is what makes those assertions about what a FACE CONTAINS.
+    // But it also makes them structurally blind to whether the answer
+    // ARRIVES, because the server coalesces didChange for 100ms and a
+    // barriered test always asks after the coalescing window. An editor never
+    // waits — the popup fires on the keystroke — so a surface that answers
+    // from the previous text is invisible to the whole suite. Four gaps in the
+    // incomplete-expression work were found by hand for exactly this reason,
+    // and one of them (completion serving the global scope after a member dot
+    // was retyped) was the original symptom surviving inside the debounce.
+    //
+    // Do not add a sleep, a diagnostics() call, or any other settling step to
+    // a test that uses this. Doing so restores the barrier under another name
+    // and the assertion passes against the bug it exists to catch.
+    async askWhileTyping(name, text, method, params = {}) {
+      this.change(name, text);
+      return client.request(method, { textDocument: { uri: uri(name) }, ...params });
+    },
+
     // Forget what was published, so the next `diagnostics()` waits for a
     // FRESH publication rather than reading a stale one. This is what makes
     // "the open doc was re-governed" observable.

@@ -2053,6 +2053,11 @@ async function enrichEvolvingAnyHover(ctx, hover) {
 
 connection.onHover(async (params) => {
   await tsgoReady;
+  // Position-identifying surfaces (definition, references) survive a stale
+  // face because staleOffsetMap re-aligns coordinates. A TYPE cannot be
+  // re-aligned: change a binding's annotation and hover inside the debounce
+  // and the old type is simply the wrong answer. So hover settles too.
+  await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx || ctx.genPosition === null) return null;
   // A position the lowering owns whole answers nothing. tsgo would
