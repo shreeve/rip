@@ -1,5 +1,5 @@
 import { test, eq, ok } from '@rip-lang/testing'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -26,7 +26,7 @@ waitFor = (fn, timeout = 5000) ->
   loop
     value = await fn()
     return value if value
-    throw new Error('worker verification timed out') if Date.now() >= deadline
+    throw new Error('worker test timed out') if Date.now() >= deadline
     sleep! 10
 
 buildWorker = (dir, appEntry) ->
@@ -36,12 +36,19 @@ buildWorker = (dir, appEntry) ->
   generate! WORKER, worker, join(dir, 'worker-result.json'), 'worker'
   { app, worker }
 
+temporaryProject = (dir, fixture) ->
+  project = join dir, 'project'
+  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
+  copyFileSync join(import.meta.dir, fixture), join(project, 'index.rip')
+  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'server'), 'dir'
+  project
+
 spawnWorker = (built, socket, env = {}) ->
   Bun.spawn [process.execPath, built.worker],
     stdin: 'ignore'
     stdout: 'ignore'
     stderr: 'ignore'
-    env: { ...process.env, APP_ARTIFACT: built.app, SOCKET_PATH: socket, WORKER_ID: 'verify', ...env }
+    env: { ...process.env, APP_ARTIFACT: built.app, SOCKET_PATH: socket, WORKER_ID: 'test', ...env }
 
 test! 'capacity bounces, shutdown marks, and admitted work completes', ->
   dir = mkdtempSync join(tmpdir(), 'rip-workers-capacity-')
@@ -111,6 +118,7 @@ test! 'invalid worker concurrency rejects before binding', ->
 
 test! 'manager configures a pool and replaces a crashed worker', ->
   dir = mkdtempSync join(tmpdir(), 'rip-workers-manager-')
+  project = temporaryProject dir, 'index.rip'
   controlSocket = join dir, 'janus.sock'
   registration = null
   updates = []
@@ -134,7 +142,7 @@ test! 'manager configures a pool and replaces a crashed worker', ->
       new Response('Not Found', { status: 404 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'index.rip'), '--name', 'workers', '--host', 'workers.test', '--workers', '2', '--concurrency', '3', '--control', controlSocket, '--access-log=off'],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--name', 'workers', '--host', 'workers.test', '--workers', '2', '--concurrency', '3', '--no-watch', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'ignore'
@@ -169,6 +177,7 @@ test! 'manager configures a pool and replaces a crashed worker', ->
 
 test! 'manager replaces one startup crash before publishing readiness', ->
   dir = mkdtempSync join(tmpdir(), 'rip-workers-startup-crash-')
+  project = temporaryProject dir, 'crash.rip'
   controlSocket = join dir, 'janus.sock'
   registration = null
   control = Bun.serve
@@ -183,11 +192,11 @@ test! 'manager replaces one startup crash before publishing readiness', ->
       new Response(null, { status: 204 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'startup-crash.rip'), '--host', 'startup.test', '--control', controlSocket, '--access-log=off'],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--host', 'startup.test', '--workers', '1', '--no-watch', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'ignore'
-      env: { ...process.env, RIP_VERIFY_CRASH_ONCE: join(dir, 'crashed') }
+      env: { ...process.env, RIP_TEST_CRASH_ONCE: join(dir, 'crashed') }
     await waitFor -> registration?
     eq registration.upstreams.length, 1
     ok registration.upstreams[0].path.endsWith('worker-2.sock')
@@ -203,16 +212,17 @@ test! 'manager replaces one startup crash before publishing readiness', ->
 
 test! 'manager kills workers that miss the readiness deadline', ->
   dir = mkdtempSync join(tmpdir(), 'rip-workers-timeout-')
+  project = temporaryProject dir, 'hanging.rip'
   controlSocket = join dir, 'janus.sock'
   registered = false
   control = Bun.serve
     unix: controlSocket
-    fetch: ->
-      registered = true
+    fetch: (request) ->
+      registered = true if request.method is 'POST' and new URL(request.url).pathname is '/1.0/apps'
       new Response('unexpected', { status: 500 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'hanging.rip'), '--host', 'hanging.test', '--control', controlSocket, '--access-log=off'],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--host', 'hanging.test', '--workers', '1', '--no-watch', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'ignore'

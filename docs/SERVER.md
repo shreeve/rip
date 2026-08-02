@@ -247,10 +247,11 @@ choose a different order. A root object may set `cache` to exactly `never`,
 `revalidate`, or `forever`; omission means `revalidate`. It may independently
 set strict Boolean `browse: true`; when the Caddy site admits browse, Janus may
 select directories and directory indexes from that root. Every normalized
-Janus root carries `{path, cache, browse}`. MIME detection is independent of
-cache policy. Browse admission, themes, renderers, and renderer limits remain
-cold Janus configuration. Rip can select a root for browsing but cannot supply
-any renderer or theme command.
+Janus root carries `{path, cache}` and carries `browse: true` only when enabled;
+`browse: false` is omitted. MIME detection is independent of cache policy.
+Browse admission, themes, renderers, and renderer limits remain cold Janus
+configuration. Rip can select a root for browsing but cannot supply any
+renderer or theme command.
 
 When `serve.rip` declares `files`, those roots plus the manager's generated
 root are normally registered; the project root is public only when the
@@ -260,9 +261,8 @@ declared, and the project has no API upstreams, the manager registers exactly
 those roots. Any other policy requires the SPA shell.
 
 Without a `files` declaration, conventional discovery registers the generated
-root, `public/` when present, `app/` when present, and the project directory as
-a final live fallback. A server that requires a finite public surface declares
-its roots explicitly.
+root plus `public/` and `app/` when present. The project directory is never an
+implicit public root.
 
 The SPA shell is a separate HTML-only fallback, commonly `app/index.html`. It
 is not an unconditional final file candidate: a missing script, stylesheet,

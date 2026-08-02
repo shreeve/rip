@@ -11,7 +11,7 @@ waitFor = (fn, timeout = 5000) ->
   loop
     value = await fn()
     return value if value
-    throw new Error('reload verification timed out') if Date.now() >= deadline
+    throw new Error('reload test timed out') if Date.now() >= deadline
     sleep! 10
 
 unixFetch = (path, socket) ->
@@ -46,7 +46,7 @@ test! 'App edits preserve workers and valid API candidates swap through the door
   proc = null
   diagnostic = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'reload.test', '--control', controlSocket, '--access-log=off'],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--workers', '1', '--host', 'reload.test', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'pipe'

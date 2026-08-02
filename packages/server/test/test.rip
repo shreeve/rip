@@ -3,7 +3,7 @@ import { join, relative } from 'node:path'
 
 root = join(import.meta.dir, '..')
 rip = Bun.which 'rip'
-throw new Error('server verification requires the rip executable') unless rip?
+throw new Error('server tests require the rip executable') unless rip?
 
 tests = readdirSync(import.meta.dir, { withFileTypes: true })
   .filter((entry) -> entry.isDirectory())
@@ -11,7 +11,7 @@ tests = readdirSync(import.meta.dir, { withFileTypes: true })
   .filter(existsSync)
   .sort()
 
-throw new Error('server verification found no verify/*/test.rip files') unless tests.length
+throw new Error('server tests found no test/*/test.rip files') unless tests.length
 
 for test in tests
   name = relative root, test

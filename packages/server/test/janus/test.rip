@@ -11,7 +11,7 @@ PROJECT = join(import.meta.dir, '..', 'reloads', 'project')
 releasedCaddy = ->
   return process.env.JANUS_CADDY if process.env.JANUS_CADDY?
   xcaddy = Bun.which 'xcaddy'
-  throw new Error('verify:janus requires xcaddy or JANUS_CADDY') unless xcaddy?
+  throw new Error('test:janus requires xcaddy or JANUS_CADDY') unless xcaddy?
   cache = join tmpdir(), 'rip-janus-release'
   binary = join cache, 'caddy-v1.5.0-access'
   return binary if existsSync binary
@@ -34,7 +34,7 @@ waitFor = (name, fn, timeout = 8000) ->
   loop
     value = await fn()
     return value if value
-    throw new Error("released Janus verification timed out waiting for #{name}") if Date.now() >= deadline
+    throw new Error("released Janus test timed out waiting for #{name}") if Date.now() >= deadline
     sleep! 20
 
 edgeFetch = (port, path, headers = {}) ->

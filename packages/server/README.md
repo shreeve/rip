@@ -313,6 +313,24 @@ use '/api/private', (request, next) ->
 Global and path-scoped middleware share one registration order. Calling
 `next!()` continues the chain; returning a `Response` short-circuits it.
 
+Framework filters operate on the Rip request context:
+
+```coffee
+raw (request) ->                     # before body parsing
+  ...
+
+before ->
+  bail! unless session.user
+
+after ->
+  recordAudit! @req.path, @mark
+```
+
+`before` and `after` apply to every matched route in registration order.
+`raw` receives the Web `Request` before Rip parses its body. `App`, `env`,
+`resetGlobals`, and `requestContext` remain available for embedded runtimes,
+configuration, and isolated framework tests.
+
 Built-ins:
 
 - `cors`
@@ -428,8 +446,8 @@ declared, without generated or conventional roots. With `files` declared, the
 project root is public only when its path is listed explicitly.
 
 Without a `files` declaration, conventional discovery registers the generated
-root, `public/` and `app/` when present, and the project directory as a final
-live fallback. Declare `files` when the public surface must be finite.
+root plus `public/` and `app/` when present. The project directory is never an
+implicit public root.
 
 Janus receives one atomic registration containing identity, site or hosts,
 normalized file policy, and the initial upstream list. Hub direct mode is
@@ -661,22 +679,24 @@ preserving real process isolation and parallelism.
 
 ## Test
 
-The reconstruction fixtures earn one server capability at a time:
+The focused fixtures test one server capability at a time:
 
 ```bash
-bun run verify:hello-api
-bun run verify:workers
-bun run verify:hello-app
-bun run verify:reloads
-bun run verify:operations
-bun run verify:middleware
-bun run verify:monitor
-bun run verify:janus
+bun run test:framework
+bun run test:hello-api
+bun run test:workers
+bun run test:hello-app
+bun run test:reloads
+bun run test:operations
+bun run test:manager-boundary
+bun run test:middleware
+bun run test:monitor
+bun run test:janus
 ```
 
-`verify:janus` builds and caches a Caddy binary with released Janus `v1.5.0`;
+`test:janus` builds and caches a Caddy binary with released Janus `v1.5.0`;
 `JANUS_CADDY` can override that binary. `bun run test` discovers and runs every
-`verify/*/test.rip` fixture.
+`test/*/test.rip` fixture.
 
 Repository-wide certification additionally runs:
 

@@ -11,8 +11,8 @@ published `v1.5.0` module. It rejects a local module replacement and certifies:
 
 Run it with:
 
-```sh
-bun run verify:janus
+```bash
+bun run test:janus
 ```
 
 The test builds and caches a Caddy binary from the published Janus `v1.5.0`
@@ -21,5 +21,5 @@ existing binary instead. In both cases the test rejects a local module
 replacement.
 
 Directory browsing is a Janus-owned process lease and access observation is a
-separate Rip Server client; their verification belongs to the capabilities
+separate Rip Server client; their tests belong to the capabilities
 that consume those interfaces.

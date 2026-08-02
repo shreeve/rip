@@ -24,7 +24,7 @@ waitFor = (fn, timeout = 5000) ->
   loop
     value = await fn()
     return value if value
-    throw new Error('verification timed out') if Date.now() >= deadline
+    throw new Error('hello API test timed out') if Date.now() >= deadline
     await new Promise (resolve) -> setTimeout resolve, 10
 
 unixFetch = (url, socket) ->
@@ -36,7 +36,7 @@ test! 'generation builds and reports one stable loader-free artifact', ->
   entry = join(import.meta.dir, 'entry.rip')
   artifact = join(dir, 'app.js')
   result = join(dir, 'result.json')
-  ok PRELOAD?, 'verification requires the Rip loader'
+  ok PRELOAD?, 'hello API test requires the Rip loader'
   try
     report = generate! entry, artifact, result, 'g1'
     eq report.taskId, 'g1'
@@ -46,6 +46,7 @@ test! 'generation builds and reports one stable loader-free artifact', ->
     ok not ('inputDigest' of report)
     built = import!(artifact)
     eq built.answer, 42
+    eq built.directory, import.meta.dir
   finally
     rmSync dir, { recursive: true, force: true }
 
@@ -129,7 +130,7 @@ test! 'foreground manager registers one ready worker and deregisters before exit
       unixFetch "http://worker#{url.pathname}", registration.upstreams[0].path
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'index.rip'), '--name', 'hello', '--host', 'hello.test', '--control', controlSocket],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'index.rip'), '--name', 'hello', '--host', 'hello.test', '--control', controlSocket, '--workers', '1', '--no-watch'],
       stdin: 'ignore'
       stdout: 'pipe'
       stderr: 'pipe'

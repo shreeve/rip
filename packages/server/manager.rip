@@ -1,18 +1,26 @@
-import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { rash } from '@rip-lang/app/rash'
 import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
 
-HEARTBEAT_MS = 5000
-readyText = process.env.RIP_BOOT_DEADLINE_MS or '30000'
-READY_MS = parseInt readyText
-abort 'rip-server: RIP_BOOT_DEADLINE_MS must be an integer greater than zero' unless Number.isFinite(READY_MS) and READY_MS > 0 and String(READY_MS) is readyText
+positiveEnv = (name, fallback) ->
+  text = process.env[name] or String(fallback)
+  value = parseInt text
+  abort "rip-server: #{name} must be an integer greater than zero" unless Number.isFinite(value) and value > 0 and String(value) is text
+  value
+
+HEARTBEAT_MS = positiveEnv 'RIP_HEARTBEAT_MS', 5000
+READY_MS = positiveEnv 'RIP_BOOT_DEADLINE_MS', 30000
+# Janus retains a dead manager's claim for its 15-second heartbeat TTL and
+# reaps on a TTL/3 sweep. A 30-second retry window covers that worst case plus
+# the capped retry spacing without turning a genuinely foreign claim infinite.
+REGISTER_409_MS = positiveEnv 'RIP_REGISTER_409_MS', 30000
 
 parseArgs = (argv) ->
-  command = if ['status', 'hold', 'release', 'migrate', 'recover'].includes(argv[0]) then argv[0] else 'start'
-  args = { command, entry: null, migrationEntry: null, migrationDir: 'migrations', operationId: null, name: null, host: null, control: process.env.JANUS_CONTROL or null, workers: 1, concurrency: 1, watch: false, accessMode: 'pretty', accessPicture: null }
+  command = if ['browse', 'status', 'hold', 'release', 'migrate', 'recover'].includes(argv[0]) then argv[0] else 'start'
+  args: any = { command, entry: null, migrationEntry: null, migrationDir: 'migrations', operationId: null, name: null, hosts: [], control: process.env.JANUS_CONTROL or null, workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, untilRestart: false, accessMode: 'pretty', accessPicture: null, accessExplicit: false, startupFlags: [] }
   i = if command is 'start' then 0 else 1
   while i < argv.length
     value = argv[i]
@@ -21,13 +29,37 @@ parseArgs = (argv) ->
       abort "rip-server: #{value} requires a value" if i >= argv.length
       argv[i]
     switch value
-      when '--name' then args.name = take()
-      when '--host' then args.host = take()
-      when '--control' then args.control = take()
-      when '--watch' then args.watch = true
-      when '--no-watch' then args.watch = false
+      when '--name'
+        abort 'rip-server: --name does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.name = take()
+      when '--host'
+        args.startupFlags.push value
+        args.hosts.push take()
+      when '--control'
+        args.startupFlags.push value
+        args.control = take()
+      when '--watch'
+        abort 'rip-server: --watch does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.watch = true
+      when '--no-watch'
+        abort 'rip-server: --no-watch does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.watch = false
+      when '--allow-watch'
+        abort 'rip-server: --allow-watch does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.allowWatch = true
+      when '--eager'
+        abort 'rip-server: --eager does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.eager = true
+      when '--until-restart'
+        abort 'rip-server: --until-restart only applies to browse' unless command is 'browse'
+        args.untilRestart = true
       when '--access-format'
-        abort 'rip-server: --access-format only applies to start' unless command is 'start'
+        args.accessExplicit = true
         args.accessPicture = take()
       when '--dir'
         abort 'rip-server: --dir only applies to migrate' unless command is 'migrate'
@@ -37,19 +69,23 @@ parseArgs = (argv) ->
         args.operationId = take()
         abort 'rip-server: --id requires exactly 32 lowercase hex characters' unless /^[a-f0-9]{32}$/.test(args.operationId)
       when '--workers', '-w'
+        abort "rip-server: #{value} does not apply to browse" if command is 'browse'
+        args.startupFlags.push value
         text = take()
         args.workers = parseInt text
         abort 'rip-server: --workers must be an integer greater than zero' unless Number.isFinite(args.workers) and args.workers > 0 and String(args.workers) is text
       when '--concurrency', '-c'
+        abort "rip-server: #{value} does not apply to browse" if command is 'browse'
+        args.startupFlags.push value
         text = take()
         args.concurrency = parseInt text
         abort 'rip-server: --concurrency must be an integer greater than zero' unless Number.isFinite(args.concurrency) and args.concurrency > 0 and String(args.concurrency) is text
       when '--help', '-h'
-        p 'usage: rip server <entry> [--access-log=pretty|raw|off] [--access-format PICTURE] [options] | rip server migrate [migration-entry] [--dir DIR] [--id 32hex] | rip server recover <operation-id>'
+        p 'usage: rip server [project] [options] | rip server browse <directory> [--host HOST] [--until-restart] | rip server migrate [migration-entry] [--dir DIR] [--id 32hex] | rip server recover <operation-id>'
         exit 0
       else
         if value.startsWith '--access-log='
-          abort 'rip-server: --access-log only applies to start' unless command is 'start'
+          args.accessExplicit = true
           args.accessMode = value.slice '--access-log='.length
           abort 'rip-server: --access-log must be pretty, raw, or off' unless args.accessMode in ['pretty', 'raw', 'off']
         else
@@ -60,6 +96,9 @@ parseArgs = (argv) ->
           else if command is 'recover'
             abort 'rip-server: recover takes exactly one operation id' if args.operationId?
             args.operationId = value
+          else if command is 'browse'
+            abort 'rip-server: browse takes exactly one directory' if args.entry?
+            args.entry = value
           else
             abort "rip-server: multiple app entries (#{args.entry} and #{value})" if args.entry?
             args.entry = value
@@ -67,16 +106,15 @@ parseArgs = (argv) ->
   abort 'rip-server: recover requires an operation id' if command is 'recover' and not args.operationId?
   abort 'rip-server: recover operation id must be exactly 32 lowercase hex characters' if command is 'recover' and not /^[a-f0-9]{32}$/.test(args.operationId)
   abort 'rip-server: --access-format only applies with --access-log=pretty' if args.accessPicture? and args.accessMode isnt 'pretty'
+  abort 'rip-server: explicit access flags conflict with browse --until-restart' if args.untilRestart and args.accessExplicit
+  abort "rip-server: access flags do not apply to #{command}" if args.accessExplicit and command not in ['start', 'browse']
+  abort "rip-server: #{command} does not accept startup options: #{args.startupFlags.join(', ')}" if command not in ['start', 'browse'] and args.startupFlags.length
   if args.accessPicture?
     try
       parseAccessPicture args.accessPicture
     catch error
       abort "rip-server: #{error?.message or error}"
-  args.entry ?= '.' unless command is 'migrate' or command is 'recover'
-  abort 'rip-server: --control or JANUS_CONTROL is required' if command is 'start' and not args.control?
-  args.entry = resolve args.entry if args.entry?
-  args.name ?= basename(args.entry or process.cwd()).replace(/\.[^.]+$/, '')
-  args.host ?= args.name
+  abort 'rip-server: browse requires exactly one directory' if command is 'browse' and not args.entry?
   args
 
 controlFetch = (target, method, path, body = null) ->
@@ -108,20 +146,323 @@ generate = (entry, artifact, reportPath, taskId) ->
   JSON.parse readFileSync(reportPath, 'utf8')
 
 resolveProject = (input) ->
-  given = resolve input
-  abort "rip-server: project not found: #{input}" unless existsSync given
-  path = realpathSync given
-  if statSync(path).isDirectory()
+  if input?
+    given = resolve input
+    abort "rip-server: project not found: #{input}" unless existsSync given
+    path = realpathSync given
+    unless statSync(path).isDirectory()
+      root = dirname path
+      return { root, entry: path, appRoot: (if existsSync(join(root, 'app')) then join(root, 'app') else null) }
+    starts = [path]
+  else
+    starts = []
+    at = realpathSync process.cwd()
+    loop
+      starts.push at
+      parent = dirname at
+      break if parent is at
+      at = parent
+  for root in starts
     entry = null
     for name in ['app.rip', 'index.rip']
-      candidate = join path, name
+      candidate = join root, name
       if existsSync candidate
-        entry = candidate
+        entry = realpathSync candidate
         break
-    appRoot = join path, 'app'
-    abort "rip-server: #{input} has no API entry or app/ directory" unless entry? or existsSync(appRoot)
-    return { root: path, entry, appRoot: (if existsSync(appRoot) then appRoot else null) }
-  { root: dirname(path), entry: path, appRoot: (if existsSync(join(dirname(path), 'app')) then join(dirname(path), 'app') else null) }
+    appRoot = join root, 'app'
+    return { root, entry, appRoot: (if existsSync(appRoot) then realpathSync(appRoot) else null) } if entry? or existsSync(appRoot)
+  if input?
+    abort "rip-server: #{input} has no API entry or app/ directory"
+  abort 'rip-server: no App — pass a project, or create app.rip, index.rip, or app/ here or above'
+
+isRecord = (value) ->
+  value? and typeof value is 'object' and not Array.isArray(value)
+
+invalidServe = (message) ->
+  throw new Error "rip-server: #{message}"
+
+rejectUnknown = (value, allowed, at) ->
+  invalidServe "#{at} must be an object" unless isRecord value
+  for key of value
+    invalidServe "unknown #{at} key #{JSON.stringify(key)}" unless allowed.includes key
+
+needString = (value, at) ->
+  invalidServe "#{at} must be a non-empty string" unless typeof value is 'string' and value.length > 0 and value.trim() is value
+  value
+
+validHost = (host) ->
+  return false if host.length > 253 or host.includes(':') or host.includes('/') or host.includes(' ')
+  labels = host.split '.'
+  return false if labels.some (label) -> label.length is 0 or label.length > 63
+  labels.every (label) -> /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test label
+
+siteTemplate = (value, at) ->
+  value = needString value, at
+  invalidServe "#{at} must contain exactly one {site}" unless value.split('{site}').length is 2
+  invalidServe "#{at} contains a malformed template" if /[{}]/.test value.replace('{site}', '')
+  invalidServe "#{at} must have the form {site}.<hostname>" unless value.startsWith '{site}.'
+  value
+
+pathTemplate = (value, at) ->
+  value = needString value, at
+  invalidServe "#{at} must be relative to the app" if value.startsWith '/'
+  invalidServe "#{at} must use / path separators" if value.includes '\\'
+  segments = value.split '/'
+  invalidServe "#{at} must be a clean relative path" if segments.some (part) -> part is '' or part is '.' or part is '..'
+  invalidServe "#{at} contains a malformed template" if /[{}]/.test value.replace('{site}', '')
+  count = value.split('{site}').length - 1
+  invalidServe "#{at} may contain {site} at most once" if count > 1
+  if count is 1
+    invalidServe "#{at} must use {site} as a complete path segment" unless segments.includes '{site}'
+  { value, dynamic: count is 1 }
+
+requireDir = (path, at) ->
+  invalidServe "#{at} directory not found: #{path}" unless existsSync path
+  invalidServe "#{at} is not a directory: #{path}" unless statSync(path).isDirectory()
+
+requireFile = (path, at) ->
+  invalidServe "#{at} file not found: #{path}" unless existsSync path
+  invalidServe "#{at} is not a file: #{path}" unless statSync(path).isFile()
+
+normalizeServeConfig = (raw, appDir) ->
+  rejectUnknown raw, ['name', 'hosts', 'sites', 'files'], 'serve.rip'
+  out = {}
+  out.name = needString(raw.name, 'serve.rip name') if raw.name?
+  if raw.hosts?
+    invalidServe 'serve.rip hosts must be a non-empty array' unless Array.isArray(raw.hosts) and raw.hosts.length > 0
+    out.hosts = raw.hosts.map (host, i) ->
+      host = needString host, "serve.rip hosts[#{i}]"
+      invalidServe "serve.rip hosts[#{i}] is not a valid host: #{host}" unless validHost host
+      host
+  if raw.sites?
+    invalidServe 'serve.rip cannot define both hosts and sites' if raw.hosts?
+    rejectUnknown raw.sites, ['host', 'dir', 'aliases'], 'serve.rip sites'
+    host = siteTemplate raw.sites.host, 'serve.rip sites.host'
+    invalidServe "serve.rip sites.host is not a valid host template: #{host}" unless validHost host.replace('{site}', 'tenant')
+    dirValue = pathTemplate raw.sites.dir, 'serve.rip sites.dir'
+    invalidServe 'serve.rip sites.dir cannot contain a template' if dirValue.dynamic
+    siteDir = resolve appDir, dirValue.value
+    requireDir siteDir, 'serve.rip sites.dir'
+    aliases = raw.sites.aliases ?? {}
+    invalidServe 'serve.rip sites.aliases must be an object' unless isRecord aliases
+    normalizedAliases = {}
+    for alias, site of aliases
+      invalidServe "serve.rip sites.aliases has an invalid host: #{alias}" unless validHost alias
+      site = needString site, "serve.rip sites.aliases.#{alias}"
+      invalidServe "serve.rip sites.aliases.#{alias} is not a valid site name: #{site}" unless /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(site) and site isnt 'common'
+      normalizedAliases[alias] = site
+    out.site = { host, dir: siteDir, aliases: normalizedAliases }
+  if raw.files?
+    rejectUnknown raw.files, ['roots', 'proxyFirst', 'shell'], 'serve.rip files'
+    roots = raw.files.roots
+    invalidServe 'serve.rip files.roots must be a non-empty array' unless Array.isArray(roots) and roots.length > 0
+    normalizedRoots = roots.map (root, i) ->
+      cache = 'revalidate'
+      browse = false
+      if isRecord root
+        rejectUnknown root, ['path', 'cache', 'browse'], "serve.rip files.roots[#{i}]"
+        if 'cache' of root
+          cache = needString root.cache, "serve.rip files.roots[#{i}].cache"
+          invalidServe "serve.rip files.roots[#{i}].cache must be never, revalidate, or forever" unless ['never', 'revalidate', 'forever'].includes cache
+        if 'browse' of root
+          invalidServe "serve.rip files.roots[#{i}].browse must be a Boolean" unless typeof root.browse is 'boolean'
+          browse = root.browse
+        root = root.path
+      parsed = pathTemplate root, "serve.rip files.roots[#{i}]"
+      full = resolve appDir, parsed.value
+      if parsed.dynamic
+        segments = parsed.value.split '/'
+        prefix = segments.slice(0, segments.indexOf('{site}')).join '/'
+        requireDir resolve(appDir, prefix or '.'), "serve.rip files.roots[#{i}] static prefix"
+      else
+        requireDir full, "serve.rip files.roots[#{i}]"
+      normalized = { path: full, cache }
+      normalized.browse = true if browse
+      normalized
+    proxyFirst = raw.files.proxyFirst ?? []
+    invalidServe 'serve.rip files.proxyFirst must be an array' unless Array.isArray proxyFirst
+    normalizedProxy = proxyFirst.map (path, i) ->
+      path = needString path, "serve.rip files.proxyFirst[#{i}]"
+      invalidServe "serve.rip files.proxyFirst[#{i}] must be a clean /-prefixed path" unless path.startsWith('/') and not path.includes('?') and not path.includes('#') and not path.includes('\\') and (path is '/' or not path.endsWith('/')) and not path.split('/').some((part) -> part is '.' or part is '..')
+      path
+    for prefix, i in normalizedProxy
+      for prior in normalizedProxy.slice 0, i
+        overlaps = prefix is '/' or prior is '/' or prefix is prior or prefix.startsWith("#{prior}/") or prior.startsWith("#{prefix}/")
+        invalidServe "serve.rip files.proxyFirst entries overlap: #{prior} and #{prefix}" if overlaps
+    shell = null
+    if 'shell' of raw.files
+      shellValue = pathTemplate raw.files.shell, 'serve.rip files.shell'
+      invalidServe 'serve.rip files.shell cannot contain a template' if shellValue.dynamic
+      shell = resolve appDir, shellValue.value
+      requireFile shell, 'serve.rip files.shell'
+    else
+      allBrowsable = normalizedRoots.every (root) -> root.browse is true
+      invalidServe 'serve.rip files.shell is required unless every root is browsable and proxyFirst is empty' unless allBrowsable and normalizedProxy.length is 0
+    out.files = { roots: normalizedRoots, proxy_first: normalizedProxy }
+    out.files.shell = shell if shell?
+  invalidServe 'serve.rip sites requires files' if out.site? and not out.files?
+  out
+
+loadServeConfig = (appDir) ->
+  configPath = join appDir, 'serve.rip'
+  return null unless existsSync configPath
+  requireFile configPath, 'serve.rip config'
+  mod = null
+  try
+    mod = import!(configPath)
+  catch error
+    invalidServe "cannot load #{configPath}: #{error?.message or error}"
+  invalidServe "#{configPath} must export default an object" unless isRecord mod?.default
+  normalizeServeConfig mod.default, appDir
+
+probeControl = (target) ->
+  try
+    controlFetch! target, 'GET', '/1.0'
+  catch error
+    abort "rip-server: control endpoint unreachable at #{target}: #{error?.message or error}"
+
+defaultBrowseHost = ->
+  "browse-#{randomBytes(6).toString('hex')}.localhost"
+
+runBrowse = (args) ->
+  directory = resolve args.entry
+  abort "rip-server: browse directory not found: #{args.entry}" unless existsSync directory
+  abort "rip-server: browse path is not a directory: #{args.entry}" unless statSync(directory).isDirectory()
+  directory = realpathSync directory
+  abort 'rip-server: browse accepts at most one --host' if args.hosts.length > 1
+  explicitHost = args.hosts[0] ?? null
+  abort "rip-server: browse host is not valid: #{explicitHost}" if explicitHost? and not validHost(explicitHost)
+  abort 'rip-server: --control or JANUS_CONTROL is required' unless args.control?
+  probeControl! args.control
+  earlySignalStatus = null
+  earlySignalCount = 0
+  earlyStop = (signal) ->
+    earlySignalCount++
+    number = if signal is 'SIGINT' then 2 else 15
+    exit(128 + number) if earlySignalCount > 1
+    earlySignalStatus = 128 + number
+  process.on 'SIGINT', earlyStop
+  process.on 'SIGTERM', earlyStop
+
+  bodyFor = (host) ->
+    name: 'browse'
+    hosts: [host]
+    upstreams: []
+    lease: if args.untilRestart then 'process' else 'heartbeat'
+    files:
+      roots: [{ path: directory, cache: 'revalidate', browse: true }]
+      proxy_first: []
+
+  host = explicitHost or defaultBrowseHost()
+  retries = 0
+  registration = null
+  loop
+    response = controlFetch! args.control, 'POST', '/1.0/apps', bodyFor(host)
+    if response.status is 201
+      registration = response.json!()
+      abort 'rip-server: Janus registration returned no app id' unless registration?.id?
+      break
+    if response.status is 409 and not explicitHost? and retries < 5
+      retries++
+      host = defaultBrowseHost()
+      continue
+    detail = try response.text! catch then ''
+    if response.status is 409
+      abort "rip-server: browse host already claimed at the control plane (409): #{host}"
+    abort "rip-server: browse registration failed (#{response.status})#{if detail then ": #{detail}" else ''}"
+  if earlySignalStatus?
+    try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registration.id}"
+    process.off 'SIGINT', earlyStop
+    process.off 'SIGTERM', earlyStop
+    return earlySignalStatus
+
+  output = (text) ->
+    stream = if args.accessMode is 'raw' then process.stderr else process.stdout
+    writeAccessOutput! stream, "#{text}\n"
+  url = "https://#{host}/"
+  try
+    if args.untilRestart
+      output! "id: #{registration.id}"
+      output! "url: #{url}"
+      output! "delete: DELETE /1.0/apps/#{registration.id} on #{args.control}"
+      process.off 'SIGINT', earlyStop
+      process.off 'SIGTERM', earlyStop
+      return 0
+    output! url
+  catch error
+    try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registration.id}"
+    process.off 'SIGINT', earlyStop
+    process.off 'SIGTERM', earlyStop
+    warn "rip-server: browse output failure: #{error?.message or error}"
+    return 1
+  if earlySignalStatus?
+    try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registration.id}"
+    process.off 'SIGINT', earlyStop
+    process.off 'SIGTERM', earlyStop
+    return earlySignalStatus
+
+  stopping = false
+  status = 0
+  heartbeat = null
+  heartbeatTask = null
+  access = null
+  finish = null
+  finished = new Promise (done) -> finish = done
+  stop = (signal = null, failure = null) ->
+    return if stopping
+    stopping = true
+    status = if failure? then 1 else if signal is 'SIGINT' then 130 else if signal is 'SIGTERM' then 143 else 0
+    clearInterval heartbeat if heartbeat?
+    do ->
+      try await heartbeatTask if heartbeatTask?
+      try await access?.stop()
+      try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registration.id}"
+      finish! status
+    return
+  onSigint = -> stop 'SIGINT'
+  onSigterm = -> stop 'SIGTERM'
+  process.on 'SIGINT', onSigint
+  process.on 'SIGTERM', onSigterm
+  process.off 'SIGINT', earlyStop
+  process.off 'SIGTERM', earlyStop
+  unless args.accessMode is 'off'
+    access = new AccessClient
+      mode: args.accessMode
+      picture: args.accessPicture
+      control: (if args.control.startsWith('http://') or args.control.startsWith('https://') then { base: args.control } else { unix: args.control })
+    access.move(registration.id).catch (error) ->
+      unless stopping
+        warn "rip-server: terminal access output failure: #{error?.message or error}"
+        stop null, error
+  beat = ->
+    return if stopping or heartbeatTask?
+    heartbeatTask = do ->
+      try
+        response = controlFetch! args.control, 'POST', "/1.0/apps/#{registration.id}/heartbeat"
+        return if stopping
+        if response.status is 404
+          fresh = controlFetch! args.control, 'POST', '/1.0/apps', bodyFor(host)
+          if fresh.status is 201
+            registration = fresh.json!()
+            abort 'rip-server: Janus registration returned no app id' unless registration?.id?
+            access?.move(registration.id).catch (error) ->
+              unless stopping
+                warn "rip-server: terminal access output failure: #{error?.message or error}"
+                stop null, error
+          else
+            warn "rip-server: browse re-registration failed (#{fresh.status})"
+        else unless response.ok
+          warn "rip-server: browse heartbeat failed (#{response.status})"
+      catch error
+        warn "rip-server: browse heartbeat failed: #{error?.message or error}" unless stopping
+      finally
+        heartbeatTask = null
+    heartbeatTask
+  heartbeat = setInterval beat, HEARTBEAT_MS
+  result = await finished
+  process.off 'SIGINT', onSigint
+  process.off 'SIGTERM', onSigterm
+  result
 
 fsyncDirectory = (path) ->
   fd = openSync path, 'r'
@@ -227,7 +568,7 @@ writeAppDocuments = (project, includeManifest) ->
   commitAppDocuments project, documents
   documents.graph
 
-publishApp = (project, name, includeManifest, documents = undefined) ->
+publishApp = (project, name, includeManifest, documents = undefined, declaredShell = null) ->
   return null unless project.appRoot?
   generated = join project.root, 'static', 'generated'
   mkdirSync join(generated, '@rip'), { recursive: true }
@@ -242,8 +583,8 @@ publishApp = (project, name, includeManifest, documents = undefined) ->
   copyFileSync runtime, join(generated, '@rip', 'rip.js')
 
   authoredShell = join project.appRoot, 'index.html'
-  shell = authoredShell
-  unless existsSync authoredShell
+  shell = declaredShell or authoredShell
+  unless declaredShell? or existsSync authoredShell
     shell = join generated, 'index.html'
     writeAtomic shell, """
     <!doctype html>
@@ -258,10 +599,35 @@ publishApp = (project, name, includeManifest, documents = undefined) ->
     """
 
   roots = [
-    { path: generated, cache: 'revalidate', browse: false }
-    { path: project.appRoot, cache: 'never', browse: false }
+    { path: generated, cache: 'revalidate' }
+    { path: project.appRoot, cache: 'never' }
   ]
   { files: { roots, proxy_first: (if project.entry? then ['/api'] else []), shell }, graph }
+
+registrationFiles = (project, declared, publication) ->
+  generated = join project.root, 'static', 'generated'
+  try
+    mkdirSync generated, { recursive: true }
+    invalidServe "generated root is not a directory: #{generated}" unless statSync(generated).isDirectory()
+  catch error
+    invalidServe "generated root is not writable at #{generated}: #{error?.message or error}"
+  if declared?
+    terminal = not declared.shell? and declared.proxy_first.length is 0 and declared.roots.every (root) -> root.browse is true
+    return declared if terminal
+    files =
+      roots: [{ path: generated, cache: 'revalidate' }, ...declared.roots]
+      proxy_first: declared.proxy_first
+    files.shell = declared.shell if declared.shell?
+    return files
+  roots = [{ path: generated, cache: 'revalidate' }]
+  publicRoot = join project.root, 'public'
+  roots.push { path: publicRoot, cache: 'revalidate' } if existsSync(publicRoot) and statSync(publicRoot).isDirectory()
+  roots.push { path: project.appRoot, cache: 'never' } if project.appRoot?
+  files =
+    roots: roots
+    proxy_first: if project.entry? then ['/api'] else []
+  files.shell = publication.files.shell if publication?
+  files
 
 waitReady = (proc, socket) ->
   deadline = Date.now() + READY_MS
@@ -292,9 +658,19 @@ killWorker = (proc) ->
   await proc.exited
 
 managerRuntime = (root) ->
+  abort 'rip-server: manager control requires a POSIX user identity' unless typeof process.getuid is 'function'
+  uid = process.getuid()
   key = new Bun.CryptoHasher('sha256').update(root).digest('hex').slice 0, 16
-  directory = join tmpdir(), 'rip-managers'
-  mkdirSync directory, { recursive: true, mode: 0o700 }
+  directory = join tmpdir(), "rip-managers-#{uid}"
+  try
+    mkdirSync directory, { mode: 0o700 }
+  catch error
+    throw error unless error?.code is 'EEXIST'
+  info = lstatSync directory
+  abort "rip-server: unsafe manager runtime path (not a directory): #{directory}" unless info.isDirectory() and not info.isSymbolicLink()
+  abort "rip-server: unsafe manager runtime ownership at #{directory}" unless info.uid is uid
+  mode = info.mode & 0o777
+  abort "rip-server: unsafe manager runtime permissions at #{directory}: expected 0700" unless mode is 0o700
   { socket: join(directory, "#{key}.sock"), owner: join(directory, "#{key}.json") }
 
 managerRequest = (socket, method, path) ->
@@ -303,7 +679,10 @@ managerRequest = (socket, method, path) ->
 
 export main = (argv) ->
   args = parseArgs argv
-  project = resolveProject(args.entry or process.cwd())
+  if args.command is 'browse'
+    process.exitCode = await runBrowse args
+    return
+  project = resolveProject args.entry
   managerRuntimePaths = managerRuntime project.root
   managerPath = managerRuntimePaths.socket
   managerOwner = managerRuntimePaths.owner
@@ -324,6 +703,33 @@ export main = (argv) ->
     abort "rip-server: #{args.command} failed (#{response.status}): #{body}" unless response.ok
     p body
     return
+  serve = null
+  try
+    serve = loadServeConfig! project.root
+  catch error
+    abort error?.message or String(error)
+  args.name = args.name or serve?.name or basename(project.root).replace(/\.[^.]+$/, '')
+  site = serve?.site ?? null
+  if site? and args.hosts.length > 0
+    abort 'rip-server: --host conflicts with serve.rip sites'
+  hosts =
+    if site? then []
+    else if args.hosts.length > 0 then args.hosts
+    else if serve?.hosts? then serve.hosts
+    else [args.name]
+  for host, i in hosts
+    abort "rip-server: --host value is not valid: #{host}" unless typeof host is 'string' and validHost host
+  if serve?.files? and not serve.files.shell? and project.entry?
+    abort 'rip-server: shell-less browse policy cannot publish API upstreams'
+  prod = process.env.RIP_ENV is 'production'
+  args.watch = args.watch ?? (not prod)
+  if args.watch and prod
+    abort 'rip-server: watch in production requires --allow-watch' unless args.allowWatch
+    warn 'rip-server: WATCH ENABLED IN PRODUCTION'
+  if project.entry? and args.concurrency > 1 and (args.watch or args.eager)
+    abort "rip-server: -c #{args.concurrency} requires watch off — raise c only with watch off"
+  abort 'rip-server: --control or JANUS_CONTROL is required' unless args.control?
+  probeControl! args.control
   runDir = mkdtempSync join(tmpdir(), 'rip-srv-')
   workers = []
   bootingWorkers = []
@@ -382,8 +788,11 @@ export main = (argv) ->
       else workers.map (worker) -> { path: worker.socket }
     body =
       name: args.name
-      hosts: [args.host]
       upstreams: upstreams
+    if site?
+      body.site = site
+    else
+      body.hosts = hosts
     body.files = files if files?
     body
 
@@ -482,12 +891,23 @@ export main = (argv) ->
         new Response('Not Found', { status: 404 })
 
   createRegistration = ->
-    response = controlFetch! args.control, 'POST', '/1.0/apps', registration()
-    detail = response.text!
-    throw new Error("Janus registration failed (#{response.status}): #{detail}") unless response.status is 201
-    body = JSON.parse detail
-    throw new Error('Janus registration returned no app id') unless body?.id?
-    body.id
+    backoff = 200
+    conflictDeadline = null
+    loop
+      response = controlFetch! args.control, 'POST', '/1.0/apps', registration()
+      detail = response.text!
+      if response.status is 201
+        body = JSON.parse detail
+        throw new Error('Janus registration returned no app id') unless body?.id?
+        return body.id
+      unless response.status is 409
+        throw new Error("Janus registration failed (#{response.status}): #{detail}")
+      conflictDeadline ?= Date.now() + REGISTER_409_MS
+      if Date.now() >= conflictDeadline
+        claim = if site? then site.host else hosts.join(', ')
+        throw new Error("Janus host claim remained occupied (409): #{claim}")
+      sleep! backoff
+      backoff = Math.min backoff * 2, 5000
 
   publishUpstreams = (upstreams) ->
     throw new Error('manager is stopping') if stopping
@@ -638,6 +1058,7 @@ export main = (argv) ->
     prepared = candidate
     apiInputs = new Set report.inputs
     cutForCandidate! candidate
+    bootPrepared!() if args.eager
 
   startApiWatcher = ->
     return unless args.watch and project.entry?
@@ -988,10 +1409,10 @@ export main = (argv) ->
 
   try
     startManagerControl()
-    publication = publishApp! project, args.name, args.watch, (if operation is 'Maintenance' then null else undefined)
+    publication = publishApp! project, args.name, args.watch, (if operation is 'Maintenance' then null else undefined), serve?.files?.shell
     if publication?
-      files = publication.files
       appGraph = publication.graph
+    files = registrationFiles project, serve?.files, publication
     if project.entry?
       workerArtifact = join runDir, 'worker.js'
       generate! join(import.meta.dir, 'worker.rip'), workerArtifact, join(runDir, 'worker-result.json'), 'worker'
@@ -1022,7 +1443,7 @@ export main = (argv) ->
     if operation is 'Maintenance'
       warn "rip-server: unresolved migration #{migration.id}; Maintenance has empty admission"
     else
-      managerOutput! "rip-server: https://#{args.host}/"
+      managerOutput! "rip-server: https://#{if site? then site.host else hosts[0]}/"
     process.exitCode = await finished
   catch error
     warn "rip-server: #{String(error)}" unless stopping

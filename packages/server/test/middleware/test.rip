@@ -2,7 +2,7 @@ import { test, eq, ok, throws } from '@rip-lang/testing'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { cors, csrf, htmlJson, secureHeaders, sessions, timeout } from '../../middleware.rip'
+import { cors, csrf, htmlJson, secureHeaders, sessions, timeout } from '@rip-lang/server/middleware'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith('--preload=')
 GENERATOR = join(import.meta.dir, '..', '..', 'generate.rip')
@@ -24,7 +24,7 @@ waitFor = (fn) ->
   loop
     value = await fn()
     return value if value
-    throw new Error('middleware verification timed out') if Date.now() >= deadline
+    throw new Error('middleware test timed out') if Date.now() >= deadline
     sleep! 10
 
 unixFetch = (socket, path, options = {}) ->
@@ -70,21 +70,22 @@ runMode = (encrypt) ->
     next()
 
   get '/once' -> { reached: true }
-  get '/state', (request) ->
+  get '/state', (c) ->
     session.count = (session.count or 0) + 1
-    { count: session.count, token: request.csrfToken }
+    { count: session.count, token: c.req.raw.csrfToken }
 
   post '/write' -> { count: session.count }
 
-  get '/timed/abort', (request) ->
+  get '/timed/abort', (c) ->
+    signal = c.req.raw.signal
     new Promise (_, reject) ->
-      request.signal.addEventListener 'abort', -> reject request.signal.reason
+      signal.addEventListener 'abort', -> reject signal.reason
 
   get '/timed/ignore' ->
     sleep! 3000
     { tooLate: true }
 
-  post '/timed/body', (request) -> request.text()
+  post '/timed/body', (c) -> c.req.raw.text!()
 
   start!
   """

@@ -1,6 +1,6 @@
-# TODO — Rip Server reconstruction
+# TODO — Rip Server
 
-Open work only. Remove an item when it lands; commits and verification fixtures
+Open work only. Remove an item when it lands; commits and test fixtures
 retain completed history.
 
 ## 1. Finish edge policy
@@ -27,18 +27,8 @@ retain completed history.
 - [ ] Bound heartbeat and re-registration requests so a stalled control plane
       cannot accumulate overlapping requests.
 - [ ] Pin one concurrency policy independent of environment-named modes.
-- [ ] Pin finite conventional file roots: `static/generated`, `public/`, and
-      `app/`; the project root is never an implicit public root.
 
-## 3. Tighten the package surface
-
-- [ ] Decide and pin the exact named exports after the burn-down. Remove empty
-      or unjustified package exports.
-- [ ] Review every remainder in `temp/`, the broad package test, and unused
-      support code. Move only behavior justified by a current contract or
-      verification fixture; delete the rest.
-
-## 4. Remove obsolete project usage
+## 3. Remove obsolete project usage
 
 - [ ] Remove Cart's worker route for authored `app/styles.css`; Janus serves
       it from the App root.
@@ -49,9 +39,9 @@ retain completed history.
 - [ ] Update Cart, Pulse, ROADMAP, AGENTS, package metadata, and server docs to
       state only the final architecture.
 
-## 5. Certify and land
+## 4. Certify and land
 
-- [ ] Run every `verify:*` script, including released-Janus verification.
+- [ ] Run every `test:*` script, including released-Janus verification.
 - [ ] Run `bun run test:all` at the repository root.
 - [ ] Run `bunx playwright test` in `packages/browser-tests`.
 - [ ] Run `go test ./...` and `./test.sh` in Janus.

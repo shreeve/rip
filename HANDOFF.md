@@ -1,4 +1,4 @@
-# HANDOFF — session launch document (2026-08-01)
+# HANDOFF — session launch document (2026-08-02)
 
 The tracked session launch document (see AGENTS.md, working ledgers):
 read it first when starting a session; rewrite it at session
@@ -11,32 +11,32 @@ boundaries with live-verified facts only.
 
 ## Active branch
 
-**Branch: `rip-server-fixes`** (`e8d6d70` before the current
-working tree).
+**Branch: `rip-server-fixes`** with an uncommitted Rip Server
+module-boundary burn-down.
 
-The Rip Server simplification and access-log implementation are present in
-the working tree:
+Current working-tree facts:
 
-- Janus owns browser files, browse listings, cache policy, compression,
-  access completion, and `X-Sendfile`; workers remain API-only;
-- `rip server` subscribes to Janus's registration-scoped NDJSON access
-  stream in pretty, raw, or off mode;
-- pretty output uses the field-first picture grammar and fixed-width SI
-  scaler; raw mode reserves stdout for validated NDJSON;
-- registration generations, backpressure, EPIPE, browse leases, and
-  direct/wrapper signals have deterministic cleanup pins;
-- the generic worker request logger is removed after full response-class
-  certification.
+- `server.rip` owns the documented Sinatra framework, including routing,
+  Web middleware, filters, validation, request context, OpenAPI, `@cache`,
+  and `@send`; `worker.rip` remains the artifact-only process host.
+- `manager.rip` owns strict `serve.rip` normalization, finite Janus file
+  roots, standalone browse leases, worker supervision, App publication,
+  operations, and access observation.
+- `browse: false` is omitted; the project root is never implicitly public.
+- manager registrations retry bounded stale `409` claims, manager control
+  files live in an ownership-checked per-user `0700` runtime directory, and
+  control commands reject startup-only flags.
+- focused package fixtures live under `packages/server/test/`; scripts are
+  `test:*`. The broad root test and the `temp/` burn-down directory are gone.
+- `monitor.rip` is internal to the manager; the package exports only the
+  framework root and `./middleware`.
 
-Live verification on this working tree:
+Live verification:
 
-- `bun run test:all` — passed (21 lanes).
-- `bun run test` in `packages/server` — 200 passed after logger removal.
-- `bunx playwright test` in `packages/browser-tests` — 21 passed, 2
-  intentional source-map skips.
-- `go test -race -count=1 ./...` in `~/Data/Code/janus` — passed.
-- final rebuilt Janus `./test.sh` — 171 passed.
-- Linux and Windows Janus builds — passed.
+- `bun run test:all` — 21 lanes, 7,967 tests passed.
+- `packages/server`: 84 tests passed, including released Janus v1.5.
+- `git diff --check` — passed.
+- One cold review completed; all actionable findings were fixed and pinned.
 
 ## Working agreements
 

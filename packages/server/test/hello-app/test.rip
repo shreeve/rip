@@ -12,7 +12,7 @@ waitFor = (fn, timeout = 5000) ->
   loop
     value = await fn()
     return value if value
-    throw new Error('App publication verification timed out') if Date.now() >= deadline
+    throw new Error('App publication test timed out') if Date.now() >= deadline
     sleep! 10
 
 test! 'App-only manager publishes a finite generated surface with no workers', ->
@@ -38,7 +38,7 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
       new Response('Not Found', { status: 404 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--name', 'hello-app', '--host', 'hello-app.test', '--control', controlSocket, '--access-log=off'],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--name', 'hello-app', '--host', 'hello-app.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'inherit'
@@ -47,8 +47,8 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
     eq registration.upstreams, []
     eq registration.files.proxy_first, []
     eq registration.files.roots, [
-      { path: join(project, 'static', 'generated'), cache: 'revalidate', browse: false }
-      { path: join(project, 'app'), cache: 'never', browse: false }
+      { path: join(project, 'static', 'generated'), cache: 'revalidate' }
+      { path: join(project, 'app'), cache: 'never' }
     ]
     eq registration.files.shell, join(project, 'static', 'generated', 'index.html')
 
@@ -90,7 +90,7 @@ test! 'authored App shell is registered without generating a replacement', ->
       new Response(null, { status: 204 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--host', 'authored.test', '--control', controlSocket, '--access-log=off'],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--host', 'authored.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'inherit'
