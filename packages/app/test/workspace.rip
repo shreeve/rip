@@ -553,7 +553,7 @@ test! "a ding fetches the module and mutates the passport", ->
   v2hash = srcHash('v2')
   { feed, calls, requests, sockets, reports } = openFeed ws,
     '/manifest.json': JSON.stringify { files: [{ id: 'app/routes/index.rip', hash: srcHash('v1') }] }
-    '/app/routes/index.rip': 'v2'
+    '/routes/index.rip': 'v2'
   s = sockets[0]
   eq s.url, 'ws://test/hub'
   s.onopen()
@@ -564,8 +564,8 @@ test! "a ding fetches the module and mutates the passport", ->
   await settle()
   eq ws.passport('app/routes/index.rip').hash, v2hash
   eq ws.read('app/routes/index.rip'), 'v2'
-  ok calls.includes('/app/routes/index.rip')
-  eq requests.find((r) -> r.url is '/app/routes/index.rip').opts.cache, 'no-store'
+  ok calls.includes('/routes/index.rip')
+  eq requests.find((r) -> r.url is '/routes/index.rip').opts.cache, 'no-store'
   eq requests.find((r) -> r.url is '/manifest.json').opts.cache, 'no-cache'
   eq reports, []
   feed.close()
@@ -660,7 +660,7 @@ test! "a ding for an unknown id births the passport at its id path", ->
   ws = createWorkspace()
   { feed, sockets } = openFeed ws,
     '/manifest.json': emptyManifest
-    '/app/new.rip': 'fresh'
+    '/new.rip': 'fresh'
   sockets[0].onopen()
   await settle()
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'app/new.rip', hash: '111111' } } }
@@ -755,12 +755,12 @@ test! "the default module URL percent-encodes the id's segments", ->
   ws.populate [{ id: 'app/50%.rip', path: 'app/50%.rip', hash: srcHash('v1'), source: 'v1' }]
   { feed, calls, sockets, reports } = openFeed ws,
     '/manifest.json': emptyManifest
-    '/app/50%25.rip': 'v2'
+    '/50%25.rip': 'v2'
   sockets[0].onopen()
   await settle()
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'app/50%.rip', hash: '222222' } } }
   await settle()
-  ok calls.includes('/app/50%25.rip'), "the fetch uses the encoded URL: #{JSON.stringify calls}"
+  ok calls.includes('/50%25.rip'), "the fetch uses the encoded mounted URL: #{JSON.stringify calls}"
   eq ws.passport('app/50%.rip').hash, srcHash('v2')
   eq ws.read('app/50%.rip'), 'v2'
   eq reports, []
