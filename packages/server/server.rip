@@ -1,6 +1,11 @@
 #!/usr/bin/env rip
 
+import { AsyncLocalStorage } from 'node:async_hooks'
+
 routes = new Map
+middlewares = []
+requests = new AsyncLocalStorage
+SESSION = Symbol.for 'rip.server.session'
 
 respond = (value) ->
   return value if value instanceof Response
@@ -8,23 +13,59 @@ respond = (value) ->
   return Response.json(value) if typeof value is 'object'
   new Response String(value), { headers: { 'content-type': 'text/plain; charset=UTF-8' } }
 
-export get = (path, handler) ->
-  throw new TypeError('get requires an absolute path') unless typeof path is 'string' and path.startsWith('/')
-  throw new TypeError("get #{path} requires a handler") unless typeof handler is 'function'
-  throw new Error("duplicate GET route #{path}") if routes.has path
-  routes.set path, handler
+addRoute = (method, path, handler) ->
+  throw new TypeError("#{method} requires an absolute path") unless typeof path is 'string' and path.startsWith('/')
+  throw new TypeError("#{method} #{path} requires a handler") unless typeof handler is 'function'
+  key = "#{method} #{path}"
+  throw new Error("duplicate #{method} route #{path}") if routes.has key
+  routes.set key, handler
   return
 
+export get = (path, handler) -> addRoute 'GET', path, handler
+export post = (path, handler) -> addRoute 'POST', path, handler
+
+export use = (middleware) ->
+  throw new TypeError('use requires a middleware function') unless typeof middleware is 'function'
+  middlewares.push middleware
+  return
+
+export session = new Proxy {},
+  get: (_, key) -> requests.getStore()?.request[SESSION]?[key]
+  set: (_, key, value) ->
+    current = requests.getStore()
+    throw new Error('session is only available during a request') unless current?
+    current.request[SESSION] ?= {}
+    current.request[SESSION][key] = value
+    true
+  deleteProperty: (_, key) ->
+    current = requests.getStore()
+    throw new Error('session is only available during a request') unless current?
+    data = current.request[SESSION]
+    delete data[key] if data?
+    true
+  ownKeys: -> Reflect.ownKeys(requests.getStore()?.request[SESSION] or {})
+  getOwnPropertyDescriptor: -> { enumerable: true, configurable: true }
+
 export fetch = (request) ->
-  return new Response('Not Found', { status: 404 }) unless request.method is 'GET'
-  path = new URL(request.url).pathname
-  handler = routes.get path
-  return new Response('Not Found', { status: 404 }) unless handler?
-  try
-    respond! handler!()
-  catch error
-    warn 'Rip API request failed:', error
-    Response.json { error: 'Internal Server Error' }, { status: 500 }
+  requests.run { request }, ->
+    last = -1
+    invoke = (index) ->
+      throw new Error('middleware called next() more than once') if index <= last
+      last = index
+      if index < middlewares.length
+        return middlewares[index] request, -> invoke(index + 1)
+      path = new URL(request.url).pathname
+      handler = routes.get "#{request.method} #{path}"
+      return new Response('Not Found', { status: 404 }) unless handler?
+      value = await handler request
+      respond value
+    try
+      response = await invoke 0
+      throw new TypeError('middleware chain returned no Response') unless response instanceof Response
+      response
+    catch error
+      warn 'Rip API request failed:', error
+      Response.json { error: 'Internal Server Error' }, { status: 500 }
 
 export start = ->
   throw new Error('start() requires the Rip worker runtime') unless process.env.APP_ARTIFACT? and process.env.SOCKET_PATH?

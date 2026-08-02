@@ -1,1 +1,284 @@
+SESSION = Symbol.for 'rip.server.session'
+SAFE_METHODS = new Set ['GET', 'HEAD', 'OPTIONS']
+COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
+sameSites = new Set ['Strict', 'Lax', 'None']
+hmacKeys = new Map
+aesKeys = new Map
 
+list = (value, fallback) ->
+  value ?= fallback
+  if Array.isArray(value) then value.join(',') else String(value)
+
+booleanOption = (opts, name, fallback = false) ->
+  value = opts[name]
+  return fallback if value is undefined
+  throw new TypeError("#{name} must be boolean") unless typeof value is 'boolean'
+  value
+
+cookies = (request) ->
+  result = Object.create null
+  for pair in (request.headers.get('cookie') or '').split(';')
+    at = pair.indexOf '='
+    continue unless at > 0
+    name = pair.slice(0, at).trim()
+    value = pair.slice at + 1
+    result[name] = try decodeURIComponent(value) catch then value
+  result
+
+appendVary = (headers, name) ->
+  values = (headers.get('vary') or '').split(',').map((value) -> value.trim()).filter(Boolean)
+  headers.set 'vary', [...values, name].join(', ') unless values.some (value) -> value.toLowerCase() is name.toLowerCase()
+
+withHeaders = (response, change) ->
+  headers = new Headers response.headers
+  change headers
+  new Response response.body, { status: response.status, statusText: response.statusText, headers }
+
+cookieOptions = (name, opts, httpOnly) ->
+  throw new TypeError("invalid cookie name #{JSON.stringify(name)}") unless COOKIE_NAME.test name
+  sameSite = opts.sameSite or 'Lax'
+  throw new TypeError("invalid SameSite value #{JSON.stringify(sameSite)}") unless sameSites.has sameSite
+  secure = booleanOption opts, 'secure'
+  throw new TypeError('SameSite=None requires Secure') if sameSite is 'None' and not secure
+  { sameSite, secure, httpOnly }
+
+setCookie = (response, name, value, policy, maxAge = null) ->
+  parts = ["#{name}=#{encodeURIComponent(value)}", 'Path=/']
+  parts.push "Max-Age=#{maxAge}" if maxAge?
+  parts.push 'HttpOnly' if policy.httpOnly
+  parts.push 'Secure' if policy.secure
+  parts.push "SameSite=#{policy.sameSite}"
+  withHeaders response, (headers) -> headers.append 'set-cookie', parts.join('; ')
+
+hmacKey = (secret) ->
+  hmacKeys.set(secret, crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])) unless hmacKeys.has secret
+  hmacKeys.get secret
+
+sign = (text, secret) ->
+  key = hmacKey! secret
+  bytes = crypto.subtle.sign! 'HMAC', key, new TextEncoder().encode(text)
+  Buffer.from(bytes).toString 'base64url'
+
+verify = (text, signature, secret) ->
+  try
+    signatureBytes = base64url signature
+    return false unless signatureBytes?
+    key = hmacKey! secret
+    crypto.subtle.verify! 'HMAC', key, signatureBytes, new TextEncoder().encode(text)
+  catch
+    false
+
+aesKey = (secret) ->
+  unless aesKeys.has secret
+    digest = crypto.subtle.digest! 'SHA-256', new TextEncoder().encode(secret)
+    aesKeys.set secret, crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
+  aesKeys.get secret
+
+base64url = (text) ->
+  return null unless typeof text is 'string' and /^[A-Za-z0-9_-]+$/.test(text)
+  bytes = Buffer.from text, 'base64url'
+  if bytes.toString('base64url') is text then bytes else null
+
+encodeSession = (data, secret, encrypt, expires) ->
+  text = JSON.stringify { expires, data }
+  if encrypt
+    nonce = crypto.getRandomValues new Uint8Array(12)
+    key = aesKey! secret
+    encrypted = crypto.subtle.encrypt! { name: 'AES-GCM', iv: nonce }, key, new TextEncoder().encode(text)
+    return "e1.#{Buffer.concat([Buffer.from(nonce), Buffer.from(encrypted)]).toString('base64url')}"
+  payload = Buffer.from(text, 'utf8').toString 'base64url'
+  "s1.#{payload}.#{sign!(payload, secret)}"
+
+decodeSession = (value, secret, encrypt) ->
+  return {} unless value?
+  try
+    text = null
+    if encrypt
+      return {} unless value.startsWith 'e1.'
+      bytes = base64url value.slice(3)
+      return {} unless bytes? and bytes.length > 12
+      key = aesKey! secret
+      plain = crypto.subtle.decrypt! { name: 'AES-GCM', iv: bytes.subarray(0, 12) }, key, bytes.subarray(12)
+      text = new TextDecoder().decode plain
+    else
+      parts = value.split '.'
+      return {} unless parts.length is 3 and parts[0] is 's1'
+      return {} unless verify! parts[1], parts[2], secret
+      payload = base64url parts[1]
+      return {} unless payload?
+      text = payload.toString 'utf8'
+    envelope = JSON.parse text
+    return {} unless Number.isFinite(envelope?.expires) and envelope.expires > Date.now()
+    return {} unless envelope.data? and typeof envelope.data is 'object' and not Array.isArray(envelope.data)
+    envelope.data
+  catch
+    {}
+
+export cors = (opts = {}) ->
+  origin = opts.origin ?? '*'
+  throw new TypeError('cors origin must be *, a string, an array, or a function') unless origin is '*' or typeof origin is 'string' or Array.isArray(origin) or typeof origin is 'function'
+  throw new TypeError('cors origin strings must be nonempty') if typeof origin is 'string' and origin.length is 0
+  throw new TypeError('cors origin arrays require nonempty strings') if Array.isArray(origin) and not origin.every((value) -> typeof value is 'string' and value.length > 0)
+  credentials = booleanOption opts, 'credentials'
+  throw new TypeError('cors credentials require a specific origin') if credentials and origin is '*'
+  methods = list opts.methods, 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
+  allowedHeaders = list opts.headers, 'Content-Type,Authorization,X-Requested-With'
+  exposed = list opts.exposeHeaders, ''
+  maxAge = opts.maxAge ?? 86400
+  throw new TypeError('cors maxAge must be a nonnegative integer') unless Number.isInteger(maxAge) and maxAge >= 0
+
+  allowed = (requestOrigin) ->
+    return null unless requestOrigin?
+    if typeof origin is 'function'
+      if (await origin(requestOrigin)) is true then requestOrigin else null
+    else if Array.isArray(origin)
+      if origin.includes(requestOrigin) then requestOrigin else null
+    else if origin is '*'
+      '*'
+    else
+      if origin is requestOrigin then origin else null
+
+  (request, next) ->
+    requestOrigin = request.headers.get 'origin'
+    chosen = await allowed requestOrigin
+    if request.method is 'OPTIONS'
+      unless chosen?
+        headers = new Headers
+        appendVary headers, 'Origin' if requestOrigin? and origin isnt '*'
+        return new Response null, { status: 204, headers }
+      headers = new Headers
+      headers.set 'access-control-allow-origin', chosen
+      headers.set 'access-control-allow-methods', methods
+      headers.set 'access-control-allow-headers', allowedHeaders
+      headers.set 'access-control-max-age', String(maxAge)
+      headers.set 'access-control-allow-credentials', 'true' if credentials
+      appendVary headers, 'Origin' unless chosen is '*'
+      return new Response null, { status: 204, headers }
+    response = await next()
+    unless chosen?
+      return response unless requestOrigin? and origin isnt '*'
+      return withHeaders response, (headers) -> appendVary headers, 'Origin'
+    withHeaders response, (headers) ->
+      headers.set 'access-control-allow-origin', chosen
+      headers.set 'access-control-allow-credentials', 'true' if credentials
+      headers.set 'access-control-expose-headers', exposed if exposed
+      appendVary headers, 'Origin' unless chosen is '*'
+
+escapeHtml = (text) ->
+  text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+
+highlightJson = (text) ->
+  escapeHtml(text)
+    .replace(/"([^"]+)":/g, '<span class="key">"$1"</span>:')
+    .replace(/: "([^"]*)"/g, ': <span class="string">"$1"</span>')
+    .replace(/: (-?\d+(?:\.\d+)?)/g, ': <span class="number">$1</span>')
+    .replace(/: (true|false|null)/g, ': <span class="literal">$1</span>')
+
+export htmlJson = (request, next) ->
+  response = await next()
+  type = response.headers.get('content-type') or ''
+  return response unless type.toLowerCase().includes 'application/json'
+  return response if response.headers.has 'content-encoding'
+  response = withHeaders response, (headers) ->
+    appendVary headers, 'User-Agent'
+    appendVary headers, 'Accept'
+    appendVary headers, 'Sec-Fetch-Dest'
+  userAgent = request.headers.get('user-agent') or ''
+  accept = request.headers.get('accept') or ''
+  destination = request.headers.get('sec-fetch-dest') or ''
+  acceptsHtml = accept.split(',').some (range) ->
+    [media, ...params] = range.split(';').map (part) -> part.trim().toLowerCase()
+    return false unless media is 'text/html'
+    quality = params.find (part) -> part.startsWith 'q='
+    not quality? or parseFloat(quality.slice(2)) > 0
+  navigation = acceptsHtml and (destination is 'document' or not destination)
+  return response unless /iPhone|iPad|iPod/i.test(userAgent) and navigation
+  length = parseInt(response.headers.get('content-length') or '0')
+  return response if length > 1_000_000
+  try
+    clone = response.clone()
+    reader = clone.body.getReader()
+    chunks = []
+    size = 0
+    loop
+      { done, value } = await reader.read()
+      break if done
+      size += value.byteLength
+      if size > 1_000_000
+        reader.cancel()
+        return response
+      chunks.push Buffer.from(value)
+    data = JSON.parse Buffer.concat(chunks).toString('utf8')
+    pretty = JSON.stringify data, null, 2
+  catch
+    return response
+  headers = new Headers response.headers
+  headers.set 'content-type', 'text/html; charset=UTF-8'
+  headers.delete 'content-length'
+  html = """<!doctype html>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JSON</title>
+  <style>
+  body{font:14px/1.5 ui-monospace,monospace;background:#1a1a2e;color:#e0e0e0;margin:0;padding:16px}
+  pre{margin:0;white-space:pre-wrap;word-break:break-word}
+  .key{color:#82aaff}.string{color:#c3e88d}.number{color:#f78c6c}.literal{color:#89ddff}
+  </style>
+  <pre>#{highlightJson(pretty)}</pre>
+  """
+  new Response html, { status: response.status, statusText: response.statusText, headers }
+
+export sessions = (opts = {}) ->
+  secret = opts.secret
+  throw new TypeError('sessions requires a nonempty secret') unless typeof secret is 'string' and secret.length > 0
+  encrypt = booleanOption opts, 'encrypt'
+  name = opts.name or 'session'
+  maxAge = opts.maxAge ?? 86400
+  throw new TypeError('sessions maxAge must be a positive integer') unless Number.isInteger(maxAge) and maxAge > 0
+  policy = cookieOptions name, opts, booleanOption(opts, 'httpOnly', true)
+
+  (request, next) ->
+    data = decodeSession! cookies(request)[name], secret, encrypt
+    request[SESSION] = data
+    before = JSON.stringify data
+    response = await next()
+    return response if JSON.stringify(data) is before
+    value = encodeSession! data, secret, encrypt, Date.now() + maxAge * 1000
+    throw new Error('encoded session exceeds the 4096-byte cookie limit') if value.length > 3800
+    setCookie response, name, value, policy, maxAge
+
+randomToken = ->
+  Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString 'base64url'
+
+equal = (left, right) ->
+  return false unless typeof left is 'string' and typeof right is 'string' and left.length is right.length
+  different = 0
+  for i in [0...left.length]
+    different |= left.charCodeAt(i) ^ right.charCodeAt(i)
+  different is 0
+
+export csrf = (opts = {}) ->
+  secret = opts.secret
+  throw new TypeError('csrf requires a nonempty secret') unless typeof secret is 'string' and secret.length > 0
+  name = opts.cookieName or 'csrf_token'
+  header = opts.headerName or 'x-csrf-token'
+  exempt = opts.exempt or (-> false)
+  throw new TypeError('csrf exempt must be a function') unless typeof exempt is 'function'
+  policy = cookieOptions name, opts, false
+
+  (request, next) ->
+    return next!() if exempt request
+    raw = cookies(request)[name]
+    parts = raw?.split('.') or []
+    token = if parts.length is 2 and verify!(parts[0], parts[1], secret) then parts[0] else null
+    unless SAFE_METHODS.has request.method
+      submitted = request.headers.get header
+      return new Response('CSRF token mismatch', { status: 403, headers: { 'content-type': 'text/plain; charset=UTF-8' } }) unless token? and equal(submitted, token)
+    emit = false
+    unless token?
+      token = randomToken()
+      emit = true
+    request.csrfToken = token
+    response = await next()
+    return response unless emit
+    setCookie response, name, "#{token}.#{sign!(token, secret)}", policy

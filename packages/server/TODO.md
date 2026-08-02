@@ -53,8 +53,6 @@ it lands; the commits and PRs retain the completed record.
       and response policy.
 - [ ] Remove the non-cancelling `timeout` middleware; retain Janus transport
       bounds and the worker hung-handler watchdog.
-- [ ] Remove `htmlJson`; API representation never changes from user-agent
-      sniffing.
 - [ ] Keep and re-certify `cors`, `sessions`, and `csrf` as application
       middleware.
 

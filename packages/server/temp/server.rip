@@ -35,9 +35,7 @@ _rawFilter: Function | null           = null  # Raw request filter (before body 
 _beforeFilters: Function[]            = []    # Before request filters
 _afterFilters: Function[]             = []    # After request filters
 _routes: any[]                        = []    # Route definitions
-_middlewares: { fn: Function, regex?: RegExp, path?: string }[] = []  # Global + path-scoped middleware, in registration order
 _prefix: string                       = ''    # Current route prefix for grouping
-_corsPreflightPolicy: Function | null = null  # Policy fn set by cors middleware: see setCorsPreflightPolicy
 _openapiRegistered: boolean           = false # GET /openapi.json auto-registered?
 _openapiInfo: Record<string, any>     = { title: 'Rip API', version: '0.0.0' }
 _routeIndex: any                      = null  # method → { statics, dynamics }; built lazily, cleared on registration
@@ -50,33 +48,11 @@ export resetGlobals = ->
   _beforeFilters       = []
   _afterFilters        = []
   _routes              = []
-  _middlewares         = []
   _prefix              = ''
-  _corsPreflightPolicy = null
   _openapiRegistered   = false
   _openapiInfo         = { title: 'Rip API', version: '0.0.0' }
   _routeIndex          = null
   _composeEpoch++
-
-# Register a CORS preflight policy. Called by the `cors()` middleware when
-# opts.preflight is set. The policy function receives the request Origin
-# header and returns an object shaped like:
-#
-#   {
-#     allowedOrigin: string | null,   # null means reject / no headers
-#     methods: string,                # "GET,POST,..."
-#     headers: string,                # "Content-Type,..."
-#     credentials: boolean,
-#     maxAge: number                  # seconds
-#   }
-#
-# Early-OPTIONS handling uses this SAME policy so the preflight response
-# and the actual-request CORS check agree. Without it, preflight could
-# advertise a permissive policy (reflect any origin + credentials) that
-# the middleware would later reject on the real request — a misleading
-# posture that middleware/CSRF audits would flag.
-export setCorsPreflightPolicy = (fn) ->
-  _corsPreflightPolicy = if typeof fn is 'function' then fn else null
 
 # AsyncLocalStorage for request context (enables sync read() in handlers)
 export requestContext: AsyncLocalStorage<{ env?: any, data: any }> = new AsyncLocalStorage()
@@ -356,45 +332,17 @@ createContext = (req, params = {}, url = null, pathname = null) ->
   c.req = r
   c
 
-# ==============================================================================
-# Middleware Composition (Koa-style)
-# ==============================================================================
-
-compose = (middlewares, beforeFilters, afterFilters, handler) ->
+compose = (beforeFilters, afterFilters, handler) ->
   (c) ->
-    index = -1
-    dispatch = (i) ->
-      if i <= index
-        throw new Error 'next() called multiple times'
-      index = i
-
-      # Run middlewares first — a path-scoped entry is skipped (not called)
-      # when the request path is outside its pattern
-      if i < middlewares.length
-        m = middlewares[i]
-        return dispatch!(i + 1) if m.regex? and not m.regex.test(c.req.path)
-        result = m.fn.call!(c, c, -> dispatch!(i + 1))
-        c._response = result if result instanceof Response
-        return
-
-      # After middlewares, run before filters, handler, after filters
-      if i is middlewares.length
-        # Run before filters
-        for filter in beforeFilters
-          result = filter.call!(c, c)
-          if result instanceof Response
-            c._response = result
-            return
-
-        # Run handler
-        result = handler.call!(c, c)
-        c._response = result if result instanceof Response
-
-        # Run after filters
-        for filter in afterFilters
-          filter.call!(c, c)
-
-    dispatch!(0)
+    for filter in beforeFilters
+      result = filter.call!(c, c)
+      if result instanceof Response
+        c._response = result
+        return c
+    result = handler.call!(c, c)
+    c._response = result if result instanceof Response
+    for filter in afterFilters
+      filter.call!(c, c)
     c
 
 # ==============================================================================
@@ -578,28 +526,6 @@ export openapi = (info = null) ->
   Object.assign(_openapiInfo, info) if info
   buildOpenAPI()
 
-# use(mw) registers global middleware; use(path, mw) scopes it to requests
-# whose path matches the pattern — the pattern covers the path itself AND
-# anything beneath it (use '/api' runs for /api and /api/users), using the
-# same :param / * grammar as routes. Patterns are match-only: their :params
-# are never exposed to middleware or handlers. Global and scoped middleware
-# share ONE registration order; a scoped entry is skipped when the request
-# path is outside its pattern.
-compileMiddlewarePattern = (path) ->
-  path = path.replace /\/+$/, ''
-  source = liftParams(path, false)
-  source = source.replace /(?<![\\*])\*(?!\*)/g, '.*'
-  new RegExp("^#{source}(?:/|$)")
-
-export use = (pathOrMw, mw = null) ->
-  _composeEpoch++
-  if typeof pathOrMw is 'function'
-    _middlewares.push { fn: pathOrMw }
-  else if typeof pathOrMw is 'string' and typeof mw is 'function'
-    _middlewares.push { fn: mw, regex: compileMiddlewarePattern(pathOrMw), path: pathOrMw }
-  else
-    throw new TypeError "use() takes (middleware) or (path, middleware); got (#{kind(pathOrMw)}, #{kind(mw)})"
-
 export prefix = (base, fn) ->
   old = _prefix
   _prefix = "#{_prefix}#{base}"
@@ -633,29 +559,6 @@ export fetch = (req) ->
   if method is 'HEAD'
     res = fetch!(new Request(req.url, { method: 'GET', headers: req.headers }))
     return new Response(null, { status: res.status, headers: res.headers })
-
-  # Handle CORS preflight (OPTIONS) requests early, before route matching.
-  # The policy function is set by `cors({preflight: true})` and MUST agree
-  # with the middleware's origin validation — otherwise preflight could
-  # advertise a more permissive CORS posture than the app actually enforces.
-  if method is 'OPTIONS' and _corsPreflightPolicy?
-    requestOrigin = req.headers.get('origin')
-    decision = try _corsPreflightPolicy(requestOrigin) catch then null
-    if decision? and decision.allowedOrigin?
-      h =
-        'Access-Control-Allow-Origin':   decision.allowedOrigin
-        'Access-Control-Allow-Methods':  decision.methods  or 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS'
-        'Access-Control-Allow-Headers':  decision.headers  or (req.headers.get('access-control-request-headers') or 'Content-Type,Authorization')
-        'Access-Control-Max-Age':        String(decision.maxAge or 86400)
-      # Credentials: ONLY when the policy allows it AND the origin is not
-      # the wildcard (browsers reject credentials + '*' anyway, but the
-      # combination is a well-known misconfig worth refusing to emit).
-      if decision.credentials and decision.allowedOrigin isnt '*'
-        h['Access-Control-Allow-Credentials'] = 'true'
-      return new Response null, { status: 204, headers: h }
-    # Policy rejected this origin — fall through with no CORS headers.
-    # Browsers interpret a missing Access-Control-Allow-Origin as deny.
-    return new Response null, { status: 204 }
 
   match = null
   try
@@ -707,13 +610,11 @@ export fetch = (req) ->
   requestContext.run! { env: c, data: merged }, ->
     runHandler!(c, match.route)
 
-# Each route's composed chain is cached on the route object; a use/before/
-# after registration (or resetGlobals) bumps _composeEpoch and stale chains
-# rebuild on their next request.
+# Each route's filter chain is cached on the route object.
 composedChain = (route) ->
   return route._chain if route._chain? and route._chainEpoch is _composeEpoch
   route._chainEpoch = _composeEpoch
-  route._chain = compose(_middlewares, _beforeFilters, _afterFilters, route.handler)
+  route._chain = compose(_beforeFilters, _afterFilters, route.handler)
 
 # Internal: Execute handler with middleware and error handling
 runHandler = (c, route) ->
@@ -727,7 +628,6 @@ runHandler = (c, route) ->
     try r.headers.set('rip-mark', String(c.mark))
     r
   try
-    # Compose runs: middlewares → before filters → handler → after filters
     chain = composedChain(route)
     chain!(c)
     applyMark(c._response or new Response('', { status: 204 }))
@@ -772,21 +672,6 @@ export subrequest = (data, fn) ->
   store = requestContext.getStore() or throw new Error 'no context for subrequest()'
   requestContext.run! { env: store.env, data }, ->
     fn.call!(store.env)
-
-# Session proxy — access session.foo anywhere (via AsyncLocalStorage)
-export session = new Proxy {},
-  get: (_, key) ->
-    requestContext.getStore()?.env?.session?[key]
-  set: (_, key, value) ->
-    ctx = requestContext.getStore()?.env
-    return false unless ctx?
-    ctx.session ?= {}
-    ctx.session[key] = value
-    true
-  deleteProperty: (_, key) ->
-    ctx = requestContext.getStore()?.env
-    delete ctx.session[key] if ctx?.session?
-    true
 
 # Env proxy — access env.FOO anywhere (shortcut for process.env)
 export env = new Proxy {}, get: (_, key) -> process.env[String(key)]
