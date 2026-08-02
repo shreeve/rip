@@ -266,6 +266,13 @@ export function sourceCursorToGenerated(mappings, offset) {
       return before.generatedStart + (before.generatedEnd - before.generatedStart);
     }
   }
+  // A HOLE: the zero-width row a tolerant compile minted at the cursor's
+  // incompleteness (`add(1, ‸` — the argument slot the user is typing).
+  // Zero-width spans satisfy neither containment tier above, and no real
+  // construct is zero-width in source, so this cannot land a cursor
+  // anywhere a wider row would have claimed first.
+  const hole = mappings.zeroWidthExactAtSource?.(offset);
+  if (hole) return hole.generatedStart;
   return null;
 }
 

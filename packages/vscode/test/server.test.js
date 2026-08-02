@@ -77,12 +77,15 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       });
       expect((await wait()).diagnostics).toEqual([]);
 
-      // Break the parse by INSERTING a line at file start: every
-      // construct shifts down one line.
+      // Break the compile by INSERTING a line at file start: every
+      // construct shifts down one line. The breakage must be one the
+      // TOLERANT face compile cannot recover — a newline-broken string
+      // can never be completed by more input — or the buffer compiles
+      // and the staleness protocol under test never engages.
       wait = nextDiagnostics(published);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 2 },
-        contentChanges: [{ text: 'oops = (\n' + GOOD }],
+        contentChanges: [{ text: 'oops = "broken\n' + GOOD }],
       });
       const broken = await wait();
       expect(broken.diagnostics).toHaveLength(1);
@@ -121,16 +124,19 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       expect(children.length).toBeGreaterThan(0);
       for (const pid of children) process.kill(Number(pid), 'SIGKILL');
 
-      // Parse diagnostics never depend on tsgo: a broken edit still
-      // publishes, promptly.
+      // Rip's own diagnostics never depend on tsgo: an incomplete edit
+      // still publishes its rejection, promptly. (The tolerant compile
+      // carries the rejection through and the server publishes it at
+      // compile time; once the restart-once policy revives tsgo, mapped
+      // TS diagnostics may ride the SAME publish — so the assertion is
+      // presence of the rip rejection, not an exact count.)
       wait = nextDiagnostics(published);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 2 },
         contentChanges: [{ text: GOOD + 'oops = (\n' }],
       });
       const broken = await wait();
-      expect(broken.diagnostics).toHaveLength(1);
-      expect(broken.diagnostics[0].source).toBe('rip');
+      expect(broken.diagnostics.some((d) => d.source === 'rip' && /unclosed '\('/.test(d.message))).toBe(true);
 
       // A valid edit after the crash: the restart-once policy brings
       // TS diagnostics back (the bad call maps onto .rip source again).

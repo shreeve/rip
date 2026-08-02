@@ -955,6 +955,22 @@ function compileErrorDiagnostic(err, text, lineStarts) {
   };
 }
 
+// The rejections a TOLERANT compile carried instead of throwing, as LSP
+// diagnostics. Source-positioned already (parse and lex diagnostics are
+// offsets into the .rip text), so no face mapping is involved — which is
+// what lets them publish with tsgo dead or mid-restart.
+function ripParseDiagnostics(good) {
+  return (good.parseDiagnostics ?? []).map((d) => ({
+    severity: 1,
+    source: 'rip',
+    message: d.message,
+    range: {
+      start: offsetToPosition(good.srcLineStarts, d.start),
+      end: offsetToPosition(good.srcLineStarts, d.end),
+    },
+  }));
+}
+
 // mapTsDiagnostic / ripDirectiveLines / applyRipDirectives — the
 // diagnostic-mapping core — live in diagnostics.js (shared with the
 // batch `rip check`).
@@ -1042,7 +1058,15 @@ async function refresh(document) {
     for (const [key, type] of state.pinCache) {
       if (type !== null) (pins ??= new Map()).set(key, type);
     }
-    result = compile(text, { path: document.uri, runtimeDelivery: 'inline', face: 'ts', pins, strict: state.strict });
+    // The OPEN BUFFER's face compile is tolerant: an incomplete buffer
+    // (a trailing dot, an open call) still yields a CURRENT face, with
+    // zero-width holes at the incompleteness, so completion and
+    // signature help map into the buffer being typed rather than the
+    // last good one. The rejections the compile carried instead of
+    // throwing publish below — tolerance is never acceptance. Disk-file
+    // closure compiles stay strict: a mirror is a statement about a
+    // file at rest, not a keystroke in flight.
+    result = compile(text, { path: document.uri, runtimeDelivery: 'inline', face: 'ts', pins, strict: state.strict, tolerant: true });
   } catch (err) {
     if (err?.name !== 'CompileError') throw err;
     // staleness: lastGood (and the overlay/mirror) stay as they are.
@@ -1059,6 +1083,10 @@ async function refresh(document) {
     mappings: result.mappings,
     stores: result.stores,
     trivia: result.trivia,
+    // Parse/lex rejections the tolerant compile carried through —
+    // published beside the mapped TS diagnostics, so an incomplete
+    // buffer still says it is incomplete.
+    parseDiagnostics: result.parseDiagnostics ?? [],
     // Generated spans of `:=` state names — writable in rip though the face
     // binds their cell `const`. Semantic tokens clear TypeScript's `readonly`
     // on exactly these.
@@ -1096,11 +1124,17 @@ async function refresh(document) {
   // tree (unopened importers resolve against it) and what this file
   // serves from after its buffer closes. The open buffer's overlay
   // below takes precedence over these bytes while the doc is open.
-  try {
-    warnOnMirrorCollision(state.mirrorPath, document.uri);
-    writeMirror(state.mirrorPath, result.code);
-  } catch (err) {
-    connection.console.error(`[rip] mirror write failed: ${err.message}`);
+  // A RECOVERED face never lands here: the mirror is what IMPORTERS
+  // resolve against, and a face with holes is a keystroke in flight,
+  // not a statement about the module — during incompleteness the disk
+  // keeps the last good face, exactly as it did when the compile threw.
+  if (good.parseDiagnostics.length === 0) {
+    try {
+      warnOnMirrorCollision(state.mirrorPath, document.uri);
+      writeMirror(state.mirrorPath, result.code);
+    } catch (err) {
+      connection.console.error(`[rip] mirror write failed: ${err.message}`);
+    }
   }
 
   // The demand-driven closure: this buffer's .rip imports (from the
@@ -1142,9 +1176,10 @@ async function refresh(document) {
 
   await tsgoReady;
   if (!tsgo) {
-    // No TS server: Rip parse diagnostics alone (none — the buffer compiled).
+    // No TS server: Rip's own diagnostics alone — empty on a clean
+    // compile, the carried rejections on a tolerant one.
     state.lastGood = good;
-    connection.sendDiagnostics({ uri: document.uri, diagnostics: [] });
+    connection.sendDiagnostics({ uri: document.uri, diagnostics: ripParseDiagnostics(good) });
     return;
   }
 
@@ -1166,6 +1201,14 @@ async function refresh(document) {
   // before any subsequent hover, so a hover can never pair the new
   // mapping table with the previous virtual-doc text.
   state.lastGood = good;
+
+  // An INCOMPLETE buffer's own rejections publish NOW, ahead of the TS
+  // pull — they depend on nothing but the compile, so they must not wait
+  // on (or die with) tsgo. The pull below re-publishes them merged with
+  // the mapped TS set.
+  if (good.parseDiagnostics.length > 0) {
+    connection.sendDiagnostics({ uri: document.uri, diagnostics: ripParseDiagnostics(good) });
+  }
 
   // rip.noCheck: the file stays in the program — imports resolve,
   // exported types flow to typed consumers — but its OWN diagnostics
@@ -1198,7 +1241,13 @@ async function refresh(document) {
       connection.console.log(`[rip] dropped unmappable TS diagnostic ${d.code}: ${d.message}`);
     }
   }
-  connection.sendDiagnostics({ uri: document.uri, diagnostics: applyRipDirectives(state.lastGood, mapped) });
+  // rip's own parse rejections ride in front of the mapped TS set — a
+  // tolerant compile carried them instead of throwing, and the buffer
+  // must still read as incomplete.
+  connection.sendDiagnostics({
+    uri: document.uri,
+    diagnostics: [...ripParseDiagnostics(state.lastGood), ...applyRipDirectives(state.lastGood, mapped)],
+  });
 
   // This buffer's new face can change what OTHER open buffers see
   // (cross-file type flow); their diagnostics re-pull without recompiling.
@@ -2322,6 +2371,13 @@ function mapWorkspaceEditToRip(edit) {
       if (!document || document.getText() !== open.state.lastGood.source) {
         return { failure: `${open.uri.split('/').pop()} has unapplied changes that do not compile — fix it and retry` };
       }
+      // A RECOVERED face (tolerant compile of an incomplete buffer) never
+      // receives edits: its holes are keystrokes in flight, and an edit
+      // that lands beside one commits the workspace to a text the user is
+      // mid-way through changing. Read surfaces serve from it; edits wait.
+      if (open.state.lastGood.parseDiagnostics?.length > 0) {
+        return { failure: `${open.uri.split('/').pop()} does not compile — fix it and retry` };
+      }
       face = open.state.lastGood;
       ripUri = open.uri;
     } else {
@@ -2416,7 +2472,7 @@ connection.onRenameRequest(async (params) => {
   };
   const ctx = requestContext(params);
   if (!ctx) refuse('the position does not map to the compiled document');
-  if (ctx.currentText !== ctx.good.source) {
+  if (ctx.currentText !== ctx.good.source || ctx.good.parseDiagnostics?.length > 0) {
     refuse('the buffer does not compile — fix the parse error and retry');
   }
   if (ctx.genExactPosition === null) refuse('the position does not map to the compiled document');

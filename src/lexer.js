@@ -2277,13 +2277,18 @@ const REGEX_FLAGS_RE = /^\w*/;
 const VALID_FLAGS_RE = /^(?!.*(.).*\1)[gimsuy]*$/;
 const NOT_REGEX = new Set([...INDEXABLE, '++', '--']);
 
-export function tokenize(text, path = '<anonymous>') {
+export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) {
   // The RIP_COUNT_OPS flag re-reads per call (and resets the count) so
   // a COUNT-ratio gate measures exactly one tokenize run.
   syncOpsFlag();
   const source = new SourceFile(text, path);
   const tokens = [];
   const trivia = [];
+  // Tolerant-mode lexer diagnostics — rejections recorded instead of
+  // thrown, same {message, start, end} shape the parser's diagnostics
+  // carry; the tolerant parse merges them into its own list. Empty
+  // (and never appended to) when `tolerant` is off.
+  const lexDiagnostics = [];
   // Indentation is a LITERAL PREFIX, not a width: each entry is the
   // exact whitespace string opening that block. A nested block's prefix
   // must string-extend the enclosing block's; a dedent must return to
@@ -3612,9 +3617,51 @@ export function tokenize(text, path = '<anonymous>') {
   // glyph and span, so the caret lands on the bracket to fix, not at
   // end of input.
   if (parens.length > 0) {
-    const open = parens[0];
-    const glyph = { call: '(', group: '(', index: '[', array: '[', object: '{', interp: '#{' }[open.kind] ?? open.kind;
-    failOpenAtEnd(`unclosed '${glyph}' — never closed by end of input`, open.at, open.at + glyph.length);
+    // In tolerant mode, an open bracket at end of input synthesizes the
+    // closer its frame implies — innermost first, each recorded as a
+    // diagnostic — instead of rejecting the whole scan. The OUTDENT loop
+    // below is this exact move for blocks; brackets extend it. Interp
+    // frames keep the throw (the scan is suspended inside a string
+    // literal there; resuming it is the string scanner's business).
+    const tolerable = tolerant && parens.every((f) => f.kind !== 'interp');
+    if (!tolerable) {
+      const open = parens[0];
+      const glyph = { call: '(', group: '(', index: '[', array: '[', object: '{', interp: '#{' }[open.kind] ?? open.kind;
+      failOpenAtEnd(`unclosed '${glyph}' — never closed by end of input`, open.at, open.at + glyph.length);
+    }
+    // Everything synthesized here anchors where the CURSOR pauses — past
+    // trailing intraline whitespace, before trailing newlines — so a
+    // hole's zero-width row IS the position a completion or signature
+    // request carries, and every closer sits at or after the content it
+    // closes (a closer anchored earlier would put the hole outside its
+    // own frame's role span, where no claim can reach it).
+    let cursorEnd = text.length;
+    while (cursorEnd > 0 && (text[cursorEnd - 1] === '\n' || text[cursorEnd - 1] === '\r')) cursorEnd--;
+    while (parens.length > 0) {
+      const frame = parens[parens.length - 1];
+      const glyph = { call: '(', group: '(', index: '[', array: '[', object: '{' }[frame.kind] ?? frame.kind;
+      lexDiagnostics.push({
+        message: `unclosed '${glyph}' — never closed by end of input`,
+        start: frame.at, end: frame.at + glyph.length, expected: [], got: 'end of input',
+      });
+      const closerKind =
+        frame.kind === 'call' ? 'CALL_END' :
+        frame.kind === 'group' ? ')' :
+        frame.kind === 'index' ? 'INDEX_END' :
+        frame.kind === 'array' ? ']' :
+        frame.pick ? 'PICK_END' : '}';
+      closeBracket();
+      // A synthetic closer directly after a comma would let the grammar's
+      // trailing-comma tolerance swallow the in-progress argument slot —
+      // and the emitted face would drop the comma, losing the position
+      // signature help's activeParameter is computed from. A zero-width
+      // IDENTIFIER hole keeps the slot.
+      if (tokens[tokens.length - 1]?.kind === ',') {
+        synth('IDENTIFIER', cursorEnd);
+        tokens[tokens.length - 1].value = '';
+      }
+      synth(closerKind, cursorEnd);
+    }
   }
 
   // Close any open blocks at end of input, anchored at the end of the
@@ -3674,7 +3721,7 @@ export function tokenize(text, path = '<anonymous>') {
   applyInsertionPass(tokens, implicitCalls, mintId);
   insertArrowCommas(tokens);
 
-  return { tokens, trivia, source };
+  return { tokens, trivia, source, lexDiagnostics };
 }
 
 // The insertion-pass runner — the ONE place the pipeline mutates the
@@ -4551,16 +4598,18 @@ export function tagPostfixConditionals(tokens) {
 //   setInput(input) then lex() → kind (falsy at EOF), exposing .text and
 //   .loc = {start, end} after each lex(). A FRESH loc object is allocated
 //   per token — the parser stores loc references on its location stack.
-export function makeParserLexer(path = '<anonymous>') {
+export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {}) {
   return {
     setInput(input) {
-      const tape = tokenize(input, path);
+      const tape = tokenize(input, path, { tolerant });
       this.tokens = tape.tokens;
       this.trivia = tape.trivia;
       this.source = tape.source;
+      this.lexDiagnostics = tape.lexDiagnostics ?? [];
       this.index = 0;
       this.text = '';
       this.loc = null;
+      this.token = null;
     },
     lex() {
       const t = this.tokens[this.index];
@@ -4568,6 +4617,7 @@ export function makeParserLexer(path = '<anonymous>') {
       this.index++;
       this.text = t.value;
       this.loc = { start: t.start, end: t.end };
+      this.token = t;
       return t.kind;
     },
   };

@@ -265,6 +265,28 @@ export class Mappings {
     return this.atSource(offset).find(Mappings.isDirect) ?? null;
   }
 
+  // The zero-width exact row AT this source offset, or null. Zero-width
+  // spans are invisible to the interval index (a half-open [x, x) contains
+  // nothing), so they need their own lookup. The population is holes — the
+  // zero-width tokens a tolerant parse minted at the cursor's
+  // incompleteness — plus the rare verbatim-empty correspondence (an empty
+  // delimiter), for which answering the empty face position is equally
+  // right. Several rows can share an offset (a repair can mint several
+  // holes at one point); the earliest face position wins — the first hole
+  // is the construct the cursor is typing.
+  zeroWidthExactAtSource(offset) {
+    if (this._zeroSrcCount !== this.rows.length) {
+      this._zeroSrc = new Map();
+      for (const r of this.rows) {
+        if (r.mappingKind !== 'exact' || r.sourceStart !== r.sourceEnd) continue;
+        const held = this._zeroSrc.get(r.sourceStart);
+        if (held === undefined || r.generatedStart < held.generatedStart) this._zeroSrc.set(r.sourceStart, r);
+      }
+      this._zeroSrcCount = this.rows.length;
+    }
+    return this._zeroSrc.get(offset) ?? null;
+  }
+
   // Innermost direct row, falling back to the innermost cover row.
   bestAtGenerated(offset) {
     return this.directAtGenerated(offset) ?? this.atGenerated(offset)[0] ?? null;
