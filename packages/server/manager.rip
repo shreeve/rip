@@ -209,19 +209,30 @@ export main = (argv) ->
   appGraph = null
   appWatcher = null
   appTimer = null
-  appChain = Promise.resolve()
+  appChain: any = Promise.resolve()
+  apiWatcher = null
+  apiTimer = null
+  apiChain: any = Promise.resolve()
+  apiInputs = new Set
+  generation = 0
+  prepared = null
+  doorbell = null
+  doorbellPath = join runDir, 'doorbell.sock'
+  doorbellPublished = false
+  bootPromise: any = null
   appId = null
   heartbeat = null
   finish = null
   stopping = false
   finished = new Promise (done) -> finish = done
-  updateChain = Promise.resolve()
+  updateChain: any = Promise.resolve()
 
   registration = ->
+    upstreams = if doorbellPublished then [{ path: doorbellPath, doorbell: true }] else workers.map (worker) -> { path: worker.socket }
     body: any =
       name: args.name
       hosts: [args.host]
-      upstreams: workers.map (worker) -> { path: worker.socket }
+      upstreams: upstreams
     body.files = files if files?
     body
 
@@ -272,6 +283,7 @@ export main = (argv) ->
     do ->
       code = await worker.proc.exited
       return if stopping
+      return unless workers.includes(worker) and not doorbellPublished
       workers = workers.filter (candidate) -> candidate isnt worker
       try await queuePublish()
       catch error
@@ -317,6 +329,75 @@ export main = (argv) ->
         appChain = next.catch (error) -> warn "rip-server: App publication failed: #{String(error)}"
       , 50
 
+  bootPrepared = ->
+    return bootPromise if bootPromise?
+    bootPromise = do ->
+      throw new Error('no prepared API generation') unless prepared?
+      candidate = prepared
+      appArtifact = candidate.artifact
+      try
+        for slot in [0...args.workers]
+          await bootSlot()
+        for worker in workers
+          monitorWorker worker
+        doorbellPublished = false
+        await queuePublish()
+        prepared = null if prepared is candidate
+      catch error
+        failed = workers
+        workers = []
+        await Promise.all failed.map (worker) -> killWorker worker.proc
+        throw error
+    bootPromise.finally(-> bootPromise = null).catch(-> null)
+    bootPromise
+
+  cutForCandidate = (candidate) ->
+    return if stopping or candidate isnt prepared
+    doorbellPublished = true
+    await queuePublish()
+    old = workers
+    workers = []
+    await Promise.all old.map (worker) -> stopWorker worker.proc
+
+  prepareApi = ->
+    generation++
+    artifact = join runDir, "app-#{generation}.js"
+    reportPath = join runDir, "app-#{generation}.json"
+    try
+      report = generate! project.entry, artifact, reportPath, "api-#{generation}"
+    catch error
+      warn "rip-server: API candidate rejected; keeping current workers: #{String(error)}"
+      return
+    candidate = { artifact, inputs: report.inputs }
+    prepared = candidate
+    apiInputs = new Set report.inputs
+    cutForCandidate! candidate
+
+  startApiWatcher = ->
+    return unless args.watch and project.entry?
+    apiWatcher = watch project.root, { recursive: true }, (event, filename) ->
+      rel = String(filename or '')
+      return if rel.startsWith('app/') or rel.startsWith('static/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
+      path = resolve project.root, rel
+      return unless path is project.entry or apiInputs.has path
+      clearTimeout apiTimer if apiTimer?
+      apiTimer = setTimeout ->
+        next = apiChain.then -> prepareApi!()
+        apiChain = next.catch (error) -> warn "rip-server: API reload failed: #{String(error)}"
+      , 50
+
+  startDoorbell = ->
+    return unless project.entry?
+    doorbell = Bun.serve
+      unix: doorbellPath
+      fetch: (request) ->
+        return new Response('Not Found', { status: 404 }) unless request.method is 'GET' and new URL(request.url).pathname is '/ring'
+        try
+          await bootPrepared()
+          new Response(null, { status: 204 })
+        catch error
+          new Response(String(error), { status: 503 })
+
   beat = ->
     return if stopping or not appId?
     try
@@ -333,8 +414,12 @@ export main = (argv) ->
     stopping = true
     clearInterval heartbeat if heartbeat?
     clearTimeout appTimer if appTimer?
+    clearTimeout apiTimer if apiTimer?
     appWatcher?.close()
+    apiWatcher?.close()
     await appChain
+    await apiChain
+    try doorbell?.stop true
     try
       if appId?
         response = await controlFetch args.control, 'DELETE', "/1.0/apps/#{appId}"
@@ -352,17 +437,20 @@ export main = (argv) ->
     if project.entry?
       appArtifact = join runDir, 'app.js'
       workerArtifact = join runDir, 'worker.js'
-      generate! project.entry, appArtifact, join(runDir, 'app-result.json'), 'app'
+      report = generate! project.entry, appArtifact, join(runDir, 'app-result.json'), 'app'
+      apiInputs = new Set report.inputs
       generate! join(import.meta.dir, 'worker.rip'), workerArtifact, join(runDir, 'worker-result.json'), 'worker'
 
       for slot in [0...args.workers]
         await bootSlot()
+      startDoorbell()
     process.once 'SIGINT', -> stop! 0
     process.once 'SIGTERM', -> stop! 0
     createRegistration!()
     for worker in workers
       monitorWorker worker
     startAppWatcher()
+    startApiWatcher()
     heartbeat = setInterval beat, HEARTBEAT_MS
     p "rip-server: https://#{args.host}/"
     await finished

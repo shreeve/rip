@@ -1,0 +1,87 @@
+import { test, eq, ok } from '@rip-lang/testing'
+import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
+SERVER = join(import.meta.dir, '..', '..', 'server.rip')
+
+waitFor = (fn, timeout = 5000) ->
+  deadline = Date.now() + timeout
+  loop
+    value = await fn()
+    return value if value
+    throw new Error('reload verification timed out') if Date.now() >= deadline
+    sleep! 10
+
+unixFetch = (path, socket) ->
+  options: any = { unix: socket }
+  fetch "http://worker#{path}", options
+
+test! 'App edits preserve workers and valid API candidates swap through the doorbell', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-reloads-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'project'), project, { recursive: true }
+  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
+  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'server'), 'dir'
+  controlSocket = join dir, 'janus.sock'
+  registration: any = null
+  updates = []
+  dings = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = new URL request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = await request.json()
+        return Response.json({ id: 'reload-registration' }, { status: 201 })
+      if request.method is 'PUT' and url.pathname is '/1.0/apps/reload-registration/upstreams'
+        body = await request.json()
+        updates.push body.upstreams
+        return new Response(null, { status: 204 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/reload-registration/hub/publish'
+        dings.push ...(await request.json())
+        return Response.json({ deliveries: 0 })
+      new Response(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'reload.test', '--control', controlSocket],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    await waitFor -> registration?
+    first = registration.upstreams[0].path
+    eq (await (await unixFetch('/version', first)).json()), { version: 'one' }
+
+    writeFileSync join(project, 'app', 'routes', 'index.rip'), """
+    export Index = component
+      render
+        h1 'Reload two'
+    """
+    await waitFor -> dings.length > 0
+    eq updates.length, 0
+    eq (await (await unixFetch('/version', first)).json()), { version: 'one' }
+
+    writeFileSync join(project, 'index.rip'), 'this is not valid Rip @@@'
+    sleep! 300
+    eq updates.length, 0
+    eq (await (await unixFetch('/version', first)).json()), { version: 'one' }
+
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from '@rip-lang/server'
+    get '/version' -> { version: 'two' }
+    start!
+    """
+    doorbell = await waitFor -> updates.find((list) -> list.length is 1 and list[0].doorbell is true)
+    ring = unixFetch '/ring', doorbell[0].path
+    fresh = await waitFor -> updates.find((list) -> list.length is 1 and not list[0].doorbell and list[0].path isnt first)
+    eq (await ring).status, 204
+    eq (await (await unixFetch('/version', fresh[0].path)).json()), { version: 'two' }
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 0
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
