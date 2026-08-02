@@ -71,7 +71,7 @@ test! 'App edits preserve workers and valid API candidates swap through the door
 
     writeFileSync join(project, 'index.rip'), """
     import { get, start } from '@rip-lang/server'
-    sleep! 300
+    sleep! 1000
     get '/version' -> { version: 'two' }
     start!
     """
