@@ -41,6 +41,16 @@ bun run corpus-expected
 bun run audit
 ```
 
+`test:all` needs `xcaddy` on PATH for the `packages/server` janus lane:
+
+```sh
+go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+```
+
+It builds a Caddy binary from the published Janus module on first run and
+caches it. `JANUS_CADDY=/path/to/caddy` supplies an existing janus-enabled
+binary instead.
+
 ## REPL
 
 `rip` on a TTY (or `rip -r`) starts the interactive REPL: reactive
