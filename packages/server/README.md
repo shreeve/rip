@@ -100,8 +100,8 @@ Three project shapes use the same model:
   contributes to an automatically generated OpenAPI 3.1 document.
 - **Request context:** `ctx()`, `session`, `mark()`, and `subrequest()` ride
   `AsyncLocalStorage`; library code needs no threaded context argument.
-- **Middleware:** Koa-style composition plus CORS, compression,
-  sessions, CSRF, security headers, timeout, and mobile JSON rendering.
+- **Middleware:** Web-standard composition plus CORS, sessions, CSRF,
+  security headers, cooperative timeout, and mobile JSON rendering.
 - **Safe API reload:** a short-lived generation process validates a candidate
   before the manager cuts admission to the active workers.
 - **Latest-wins App updates:** tiny `{id,hash}` dings trigger ordinary HTTP
@@ -294,25 +294,28 @@ connections lives in [docs/SERVER.md](../../docs/SERVER.md#url-addressable-resou
 
 ```coffee
 import { use, session } from '@rip-lang/server'
-import { cors, sessions, csrf } from '@rip-lang/server/middleware'
+import {
+  cors, csrf, htmlJson, secureHeaders, sessions, timeout
+} from '@rip-lang/server/middleware'
 
-use cors origin: 'https://app.example.com', preflight: true
+use secureHeaders!
+use cors origin: 'https://app.example.com'
 use sessions secret: process.env.SESSION_SECRET, encrypt: true
 use csrf secret: process.env.SESSION_SECRET
+use '/api/reports', timeout 120, grace: 2
+use htmlJson
 
-use '/api/private', (c, next) ->
-  return c.text('unauthorized', 401) unless session.user
+use '/api/private', (request, next) ->
+  return new Response('unauthorized', { status: 401 }) unless session.user
   next!()
 ```
 
 Global and path-scoped middleware share one registration order. Calling
 `next!()` continues the chain; returning a `Response` short-circuits it.
-`before` and `after` filters wrap matched routes after middleware.
 
 Built-ins:
 
 - `cors`
-- `compress`
 - `sessions`
 - `csrf`
 - `secureHeaders`
@@ -320,7 +323,30 @@ Built-ins:
 - `htmlJson`
 
 Sessions are HMAC-signed by default or AES-256-GCM sealed with
-`encrypt: true`. CSRF uses a double-submit cookie with optional HMAC binding.
+`encrypt: true`. CSRF uses a signed double-submit cookie and constant-time
+header comparison. Both require a secret.
+
+`cors` handles every `OPTIONS` request with `204`; allowed preflights receive
+the configured CORS headers. Wildcard credentials reject.
+
+`timeout 30, grace: 1` uses integer seconds. At the timeout it aborts the
+downstream `Request`, returns `504 Gateway Timeout`, and gives cancellation one
+grace period to settle before recycling the worker. It can be scoped with
+`use '/path', timeout 120, grace: 2`.
+
+`secureHeaders` fills absent application response headers with `nosniff`,
+`strict-origin-when-cross-origin`, a minimal CSP, and `SAMEORIGIN`. Explicit
+response headers win; individual defaults accept `false`. It does not emit
+obsolete `X-XSS-Protection` or edge-owned HSTS.
+
+`htmlJson` renders bounded JSON as escaped, highlighted HTML for direct iOS
+navigation. API requests, encoded bodies, and responses larger than 1 MB pass
+through as JSON with cache-correct `Vary` headers.
+
+Compression belongs at the Caddy edge, where streaming `encode` can cover
+static, generated, `X-Sendfile`, and proxied API responses. Applications use
+standard controls: `Cache-Control: no-transform` disables transformation and
+an existing `Content-Encoding` remains authoritative.
 
 ## Browser App and Development Feed
 
@@ -635,17 +661,21 @@ preserving real process isolation and parallelism.
 
 ## Test
 
-From this package:
+The reconstruction fixtures earn one server capability at a time:
 
 ```bash
-bun run test
+bun run verify:hello-api
+bun run verify:workers
+bun run verify:hello-app
+bun run verify:reloads
+bun run verify:operations
+bun run verify:middleware
+JANUS_CADDY=/path/to/released/caddy bun run verify:janus
 ```
 
-The suite covers the API framework in-process and drives generation, workers,
-manager control, Janus registration, doorbell reload, App publication,
-latest-wins dings, Full/API-only/App-only shapes, Held and Maintenance
-transitions, migration recovery, and shutdown through real subprocesses and
-Unix sockets.
+`verify:janus` requires a Caddy binary built with released Janus `v1.5.0`.
+The broad `bun run test` remains the burn-down suite until every retained test
+has present-tense product value.
 
 Repository-wide certification additionally runs:
 

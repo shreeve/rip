@@ -1,111 +1,72 @@
-# TODO — Rip Server simplification
+# TODO — Rip Server reconstruction
 
-Ordered implementation checklist for `rip-server-fixes`. Remove each item when
-it lands; the commits and PRs retain the completed record.
+Open work only. Remove an item when it lands; commits and verification fixtures
+retain completed history.
 
-## 1. Pin the contracts before deleting code
+## 1. Finish edge policy
 
-- [ ] State one launch contract: public serving always enters Caddy+Janus;
-      `start!` only hands an API handler to the private worker runtime.
-- [ ] State one App contract: the manager discovers and publishes `app/`;
-      API source never mounts browser routes.
-- [ ] State one file contract: ordinary files and opt-in directory browse use
-      registered Janus roots; API-authorized files use `X-Sendfile`.
-- [ ] Choose and pin one pool readiness rule instead of branching on
-      `RIP_ENV=production`.
-- [ ] Choose and pin the manager switch surface: watching defaults on,
-      `--no-watch` is the explicit opt-out, and no environment-named server
-      mode changes lifecycle semantics.
-- [ ] Pin the finite default file roots: `static/generated`, `public/`, and
-      `app/`; the project directory is never an implicit public root.
-
-## 2. Make worker tests use the production boot path
-
-- [ ] Remove `APP_ENTRY` and loader-backed source imports from `worker.rip`.
-- [ ] Require `APP_ARTIFACT` for every worker boot.
-- [ ] Build fixture artifacts before worker lifecycle tests.
-- [ ] Remove the fixture `node_modules/@rip-lang` symlink farm needed only by
-      `APP_ENTRY`.
-- [ ] Remove package-directory `tmp-*` cleanup now that every fixture lives
-      under the OS temporary directory.
-- [ ] Preserve readiness, boot failure, concurrency, drain, watchdog, and
-      orphan tests against generated artifacts.
-- [ ] Respawn a worker that crashes during boot under the readiness floor.
-- [ ] Kill a worker that remains alive after its readiness deadline instead
-      of leaving it live, unready, and unpublished.
-
-## 3. Land edge policy before removing API middleware
-
-- [ ] Pin one Caddy compression policy, including encodings, minimum size,
-      already-encoded responses, streaming bodies, and MIME exclusions.
+- [ ] Pin one Caddy compression policy: encodings, minimum size, MIME
+      exclusions, streaming bodies, pre-encoded responses, and
+      `Cache-Control: no-transform`.
 - [ ] Configure Caddy streaming compression for static, generated,
       `X-Sendfile`, and proxied API responses.
-- [ ] Certify compression through the Janus data plane, including streaming
-      and an already-encoded response.
-- [ ] Remove `compress` and its buffering/encoding tests from server
-      middleware.
-- [ ] Pin the baseline security-header set and fill-only precedence: explicit
-      application headers win; the edge supplies only absent defaults.
-- [ ] Apply the baseline to static files, generated files, SPA shells,
-      `X-Sendfile`, proxied API responses, and Janus-generated errors.
-- [ ] Certify header precedence and parity across every response class.
-- [ ] Remove `secureHeaders`; document `@header` for application-specific CSP
-      and response policy.
-- [ ] Remove the non-cancelling `timeout` middleware; retain Janus transport
-      bounds and the worker hung-handler watchdog.
-- [ ] Remove `htmlJson`; API representation never changes from user-agent
-      sniffing.
-- [ ] Keep and re-certify `cors`, `sessions`, and `csrf` as application
-      middleware.
+- [ ] Certify compression through released Janus, including streaming,
+      `no-transform`, and an already encoded response.
+- [ ] Pin the edge security-header baseline and fill-only precedence so
+      explicit application headers win.
+- [ ] Apply and certify that baseline across static files, generated files,
+      SPA shells, `X-Sendfile`, proxied API responses, redirects, and
+      Janus-generated errors.
 
-## 4. Collapse manager modes
+## 2. Finish manager policy
 
-- [ ] Remove `--eager` and settle-time pool boot; the doorbell remains the
-      single lazy activation path.
-- [ ] Remove `RIP_ENV=production` branches from watch and readiness behavior.
-- [ ] Remove `--watch` and `--allow-watch`; retain `--no-watch` as the
-      explicit opt-out.
-- [ ] Make configured symlinked and workspace dependencies participate in
-      watch invalidation instead of watching only `*.rip` project files.
-- [ ] Replace `readyWhen` environment branching with the pinned readiness
-      rule.
-- [ ] Bound control-plane writes during an outage so heartbeat retries cannot
-      add one queued writer closure per tick.
-- [ ] Remove eager/production-only state, help text, status output, and tests.
-- [ ] Re-pin concurrency rules against watch on/off without environment
-      aliases.
+- [ ] Make watching the default, remove `--watch`, and retain `--no-watch` as
+      the explicit opt-out.
+- [ ] Make configured symlinked and workspace dependencies participate in API
+      invalidation.
+- [ ] Bound heartbeat and re-registration requests so a stalled control plane
+      cannot accumulate overlapping requests.
+- [ ] Pin one concurrency policy independent of environment-named modes.
+- [ ] Pin finite conventional file roots: `static/generated`, `public/`, and
+      `app/`; the project root is never an implicit public root.
 
-## 5. Tighten the package surface
+## 3. Restore access observation
 
-- [ ] Remove the test-only public `App(fn)` helper.
-- [ ] Make `startHandler` private or call `fetch` directly from `start()`.
-- [ ] Decide whether `before` and `after` earn a distinct contract beyond
-      ordered `use()` middleware; remove them if not.
-- [ ] Move `resetGlobals` and direct `requestContext` access behind an
-      internal test seam instead of the package entry.
-- [ ] Re-pin the exact named export surface after deletions.
+- [ ] Reconstruct `monitor.rip` from the released Janus v1.5 access stream
+      contract; do not inherit behavior solely because it exists in `temp/`.
+- [ ] Pin NDJSON framing, validation, pretty/raw/off output, picture parsing,
+      Unicode width, scaling, and bounded writes.
+- [ ] Connect foreground manager output to the app-scoped access subscription
+      without mixing raw stdout with manager or worker diagnostics.
 
-## 6. Remove obsolete project usage
+## 4. Tighten the package surface
+
+- [ ] Decide and pin the exact named exports after the burn-down. Remove empty
+      or unjustified package exports.
+- [ ] Review every remainder in `temp/`, the broad package test, and unused
+      support code. Move only behavior justified by a current contract or
+      verification fixture; delete the rest.
+
+## 5. Remove obsolete project usage
 
 - [ ] Remove Cart's worker route for authored `app/styles.css`; Janus serves
-      it from the live App root.
+      it from the App root.
 - [ ] Move Cart migration and seed setup out of worker import into an explicit
       one-off command.
-- [ ] Remove the implicit project-directory live root from
-      `configureEdgeFiles`.
 - [ ] Add a negative integration test proving API source, configuration,
       package metadata, and database files are not publicly addressable.
-- [ ] Update Cart, Pulse, ROADMAP, AGENTS, package metadata, and server docs
-      to state only the final architecture.
+- [ ] Update Cart, Pulse, ROADMAP, AGENTS, package metadata, and server docs to
+      state only the final architecture.
 
-## 7. Certification and landing
+## 6. Certify and land
 
-- [ ] Run `bun run test` in `packages/server` and inspect every remaining test
-      name for present-tense product value.
-- [ ] Run `bun run test:all` at the Rip repository root.
+- [ ] Replace the burn-down package test with retained present-tense product
+      tests, then run `bun run test` in `packages/server`.
+- [ ] Run every `verify:*` script, including released-Janus verification.
+- [ ] Run `bun run test:all` at the repository root.
 - [ ] Run `bunx playwright test` in `packages/browser-tests`.
 - [ ] Run `go test ./...` and `./test.sh` in Janus.
 - [ ] Run `git diff --check` in both repositories.
 - [ ] Perform independent empirical verification of `X-Sendfile`, API reload,
       App delivery, and migration state transitions.
-- [ ] Run one cold review over both complete branch diffs before landing.
+- [ ] Run one cold review over both complete branch diffs.
