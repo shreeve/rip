@@ -20,7 +20,7 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
   project = join dir, 'project'
   cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
   controlSocket = join dir, 'janus.sock'
-  registration: any = null
+  registration = null
   deleted = false
   control = Bun.serve
     unix: controlSocket
@@ -77,7 +77,7 @@ test! 'authored App shell is registered without generating a replacement', ->
   cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
   Bun.write! join(project, 'app', 'index.html'), '<!doctype html><h1>Authored</h1>'
   controlSocket = join dir, 'janus.sock'
-  registration: any = null
+  registration = null
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
@@ -108,7 +108,7 @@ test! 'watch publication commits one shared inventory then batches per-file ding
   project = join dir, 'project'
   cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
   controlSocket = join dir, 'janus.sock'
-  registration: any = null
+  registration = null
   batches = []
   control = Bun.serve
     unix: controlSocket

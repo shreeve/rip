@@ -15,7 +15,7 @@ waitFor = (fn, timeout = 5000) ->
     sleep! 10
 
 unixFetch = (path, socket) ->
-  options: any = { unix: socket }
+  options = { unix: socket }
   fetch "http://worker#{path}", options
 
 test! 'App edits preserve workers and valid API candidates swap through the doorbell', ->
@@ -25,7 +25,7 @@ test! 'App edits preserve workers and valid API candidates swap through the door
   mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
   symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'server'), 'dir'
   controlSocket = join dir, 'janus.sock'
-  registration: any = null
+  registration = null
   updates = []
   dings = []
   control = Bun.serve

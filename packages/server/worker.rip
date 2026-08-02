@@ -18,7 +18,7 @@ ppidText = process.env.RIP_PPID_MS or '1000'
 ppidMs = parseInt ppidText
 abort "worker #{workerId}: RIP_PPID_MS must be an integer greater than zero" unless Number.isFinite(ppidMs) and ppidMs > 0 and String(ppidMs) is ppidText
 
-state: any =
+state =
   ready: false
   bootError: null
   handler: null

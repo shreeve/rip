@@ -18,7 +18,7 @@ generate = (entry, artifact, result, task) ->
   throw new Error(await diagnostic) unless code is 0
 
 unixFetch = (path, socket) ->
-  options: any = { unix: socket }
+  options = { unix: socket }
   fetch "http://worker#{path}", options
 
 waitFor = (fn, timeout = 5000) ->
@@ -112,8 +112,8 @@ test! 'invalid worker concurrency rejects before binding', ->
 test! 'manager configures a pool and replaces a crashed worker', ->
   dir = mkdtempSync join(tmpdir(), 'rip-workers-manager-')
   controlSocket = join dir, 'janus.sock'
-  registration: any = null
-  updates: any[] = []
+  registration = null
+  updates = []
   deleted = false
   control = Bun.serve
     unix: controlSocket
@@ -170,7 +170,7 @@ test! 'manager configures a pool and replaces a crashed worker', ->
 test! 'manager replaces one startup crash before publishing readiness', ->
   dir = mkdtempSync join(tmpdir(), 'rip-workers-startup-crash-')
   controlSocket = join dir, 'janus.sock'
-  registration: any = null
+  registration = null
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->

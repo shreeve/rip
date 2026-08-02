@@ -9,7 +9,7 @@ READY_MS = parseInt readyText
 abort 'rip-server: RIP_BOOT_DEADLINE_MS must be an integer greater than zero' unless Number.isFinite(READY_MS) and READY_MS > 0 and String(READY_MS) is readyText
 
 parseArgs = (argv) ->
-  args: any = { entry: null, name: null, host: null, control: process.env.JANUS_CONTROL or null, workers: 1, concurrency: 1, watch: false }
+  args = { entry: null, name: null, host: null, control: process.env.JANUS_CONTROL or null, workers: 1, concurrency: 1, watch: false }
   i = 0
   while i < argv.length
     value = argv[i]
@@ -46,8 +46,8 @@ parseArgs = (argv) ->
   args.host ?= args.name
   args
 
-controlFetch = (target, method, path, body: any = null) ->
-  options: any = { method }
+controlFetch = (target, method, path, body = null) ->
+  options = { method }
   if body?
     options.body = JSON.stringify body
     options.headers = { 'content-type': 'application/json' }
@@ -175,7 +175,7 @@ waitReady = (proc, socket) ->
     throw new Error("worker exited with code #{proc.exitCode} before readiness") if proc.exitCode?
     response = null
     try
-      options: any = { unix: socket }
+      options = { unix: socket }
       response = await fetch 'http://worker/ready', options
     if response?
       return if response.status is 200
@@ -209,27 +209,27 @@ export main = (argv) ->
   appGraph = null
   appWatcher = null
   appTimer = null
-  appChain: any = Promise.resolve()
+  appChain = Promise.resolve()
   apiWatcher = null
   apiTimer = null
-  apiChain: any = Promise.resolve()
+  apiChain = Promise.resolve()
   apiInputs = new Set
   generation = 0
   prepared = null
   doorbell = null
   doorbellPath = join runDir, 'doorbell.sock'
   doorbellPublished = false
-  bootPromise: any = null
+  bootPromise = null
   appId = null
   heartbeat = null
   finish = null
   stopping = false
   finished = new Promise (done) -> finish = done
-  updateChain: any = Promise.resolve()
+  updateChain = Promise.resolve()
 
   registration = ->
     upstreams = if doorbellPublished then [{ path: doorbellPath, doorbell: true }] else workers.map (worker) -> { path: worker.socket }
-    body: any =
+    body =
       name: args.name
       hosts: [args.host]
       upstreams: upstreams

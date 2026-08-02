@@ -28,7 +28,7 @@ waitFor = (fn, timeout = 5000) ->
     await new Promise (resolve) -> setTimeout resolve, 10
 
 unixFetch = (url, socket) ->
-  options: any = { unix: socket }
+  options = { unix: socket }
   fetch url, options
 
 test! 'generation builds and reports one stable loader-free artifact', ->
@@ -82,7 +82,7 @@ test! 'artifact-only worker becomes ready, serves, and drains', ->
 test! 'foreground manager registers one ready worker and deregisters before exit', ->
   dir = mkdtempSync join(tmpdir(), 'rip-hello-manager-')
   controlSocket = join dir, 'janus.sock'
-  registration: any = null
+  registration = null
   deleted = false
   control = Bun.serve
     unix: controlSocket
