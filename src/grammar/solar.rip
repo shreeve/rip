@@ -1058,6 +1058,17 @@ class Generator
         best = Math.min best, (@_symbolCost(head) - 1) + rest
     best
 
+  # THE GENERICITY BOUNDARY, RULED (2026-08-03): Solar may give special
+  # repair treatment to CONVENTIONALLY-NAMED tokens — the fabricable
+  # alphabet below, and the driver's INDENT/OUTDENT deletion rule —
+  # provided every name is looked up in the grammar's own symbol table
+  # and degrades to a no-op when the grammar does not declare it. The
+  # mechanism is generic; the names are a convention a grammar opts
+  # into by using them. No rule may ASSUME a token exists, and none may
+  # encode what a token means beyond the repair role named here. If
+  # Solar ever serves a second grammar, the upgrade path is for the
+  # GRAMMAR to declare its own scaffolding/fabricable tokens and for
+  # this list to become that declaration's default.
   buildRepairTable!: ->
     @_computeInsertCosts()
     fabricable = [['PROPERTY', 0], ['IDENTIFIER', 0], ['TERMINATOR', 1], ['INDENT', 1], ['OUTDENT', 1]]

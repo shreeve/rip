@@ -1,20 +1,14 @@
 // toMatchable — the match operator's receiver coercion, and a
-// user-referenceable stdlib export in its own right. Two contracts:
-//
-// 1. It RETURNS A STRING for every receiver (the face annotates
-//    `=> string`; the null this helper once answered surfaced as a
-//    downstream TypeError on `.match`, a worse error at a worse
-//    distance).
-// 2. A multi-line answer without /m THROWS — anchors mislead across
-//    embedded newlines — and the guard sits after the coercion, so a
-//    receiver that merely COERCES to multi-line text (a decoded
-//    Uint8Array, an array element carrying a newline, a custom
-//    toString spanning lines) is the same refusal as a multi-line
-//    string. A guard on the string path alone let those through.
+// user-referenceable stdlib export in its own right. One contract,
+// RULED (2026-08-03): it coerces every reasonable receiver to a string
+// and matching is exactly JavaScript's — always a string, never a
+// null, never a throw. Multi-line semantics are the regex's own
+// business (`^`/`$` cross lines only under /m, as everywhere in JS);
+// the guard that once refused multi-line receivers intercepted
+// standard regex behavior to teach standard regex behavior, and broke
+// every main-legal program that greps decoded file bytes.
 import { describe, expect, test } from 'bun:test';
 import { toMatchable } from '../../src/runtime/stdlib.js';
-
-const MULTILINE = /spans lines/;
 
 describe('toMatchable coerces every receiver to a string', () => {
   test.each([
@@ -32,20 +26,25 @@ describe('toMatchable coerces every receiver to a string', () => {
   });
 });
 
-describe('the newline guard holds for every receiver, not only strings', () => {
+describe('multi-line receivers coerce like any other — the regex decides what anchors mean', () => {
   test.each([
-    ['a multi-line string', 'a\nb'],
-    ['a CR receiver', 'a\rb'],
-    ['a Uint8Array decoding to lines', new TextEncoder().encode('a\nb')],
-    ['an array whose element carries a newline', ['a\nb']],
-    ['a custom toString spanning lines', { toString: () => 'a\nb' }],
-  ])('%s throws without /m', (_label, v) => {
-    expect(() => toMatchable(v)).toThrow(MULTILINE);
+    ['a multi-line string', 'a\nb', 'a\nb'],
+    ['a CR receiver', 'a\rb', 'a\rb'],
+    ['a Uint8Array decoding to lines', new TextEncoder().encode('a\nb'), 'a\nb'],
+    ['an array whose element carries a newline', ['a\nb'], 'a\nb'],
+    ['a custom toString spanning lines', { toString: () => 'a\nb' }, 'a\nb'],
+  ])('%s coerces without complaint', (_label, v, expected) => {
+    expect(toMatchable(v)).toBe(expected);
   });
 
-  test('the same receivers pass under /m (allowNewlines)', () => {
-    expect(toMatchable('a\nb', true)).toBe('a\nb');
-    expect(toMatchable(new TextEncoder().encode('a\nb'), true)).toBe('a\nb');
-    expect(toMatchable(['a\nb'], true)).toBe('a\nb');
+  // The behavior the coercion feeds: matching IS JavaScript's. An
+  // anchor-free grep finds its text across lines; an anchored pattern
+  // needs /m to cross them — standard regex literacy, not rip's to
+  // intercept.
+  test('matching over the coercion behaves exactly like hand-written JS', () => {
+    const text = toMatchable(new TextEncoder().encode('name: app\nversion: 2\n'));
+    expect(text.match(/version: \d/)?.[0]).toBe('version: 2');
+    expect(text.match(/^version: \d$/)).toBeNull();
+    expect(text.match(/^version: \d$/m)?.[0]).toBe('version: 2');
   });
 });

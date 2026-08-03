@@ -134,17 +134,16 @@ describeExtended('rip check: type diagnostics over the real server', () => {
 
   test('the match operator and its regex-index sugar publish nothing', () => {
     // `text =~ /re/` lowers to `(_ = toMatchable(text).match(re))`, and the
-    // face's prelude types toMatchable `(v: any, allowNewlines?: boolean) =>
-    // string | null` — the null return is the deliberate loud-throw path for
-    // a multi-line receiver without /m, so the SIGNATURE stays as it is and
-    // the LOWERING carries the narrowing: the emitted spine asserts its own
-    // intermediate (a TS-only region — the JS bytes are untouched), so no
-    // match expression publishes on legal rip. The regex-index sugar shares
-    // that spine (`regexIndex`, src/emitter.js).
+    // face's prelude types toMatchable `(v: any) => string` — RULED: the
+    // coercion always answers a string and carries no multi-line guard
+    // (`^`/`$` across newlines are the regex's own /m business, exactly
+    // as in hand-written JS), so no narrowing rides the lowering and no
+    // match expression publishes on legal rip. The regex-index sugar
+    // shares that spine (`regexIndex`, src/emitter.js).
     //
-    // Every branch of both lowerings is here, because the assertion is
-    // emitted per-branch: `=~` plain and under a literal /m, and the index
-    // in all four of its shapes (whole match / nth capture × plain / /m).
+    // Every branch of both lowerings is here: `=~` plain and under a
+    // literal /m, and the index in all four of its shapes (whole match /
+    // nth capture × plain / /m).
     // The corpus carries these spellings too (02-operations, 04-assignments,
     // under the Type Audit's `verdict`); this case is the CLI's own check,
     // over a workspace with no rip config at all — permissive, no strict

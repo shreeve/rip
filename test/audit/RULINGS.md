@@ -73,6 +73,8 @@ Measured 2026-07-23 over 14-schema's spellings (the `ruled` gauge, hover-pins.js
 
 "Pinnable, unpinned": the identifier-read span these positions waited on has landed, so each now HAS a source position to answer at. What the server serves there is unmeasured — the pin is the measurement, and adopting one is an explicit reviewed edit, so these rows stay unpinned until someone drives them.
 
+**`[null]` defaults widen the face — RULED (2026-08-03), a deliberate compat break.** A non-`!` field whose default is `[null]` types as `T | null` in the companion type and the shipped .d.ts, because that is what the runtime already delivers: `parse` substitutes the default on undefined OR null, so every default-taking parse of such a field answers null, and main's narrower `invite?: string` was a lie about unchanged runtime behavior. Types follow the runtime, even when correcting the lie changes a shipped surface; consumers who compiled against the old face were compiling against a false claim. Under `!` the widening is skipped — a required field never takes the default path that produces the null.
+
 ## Tokens
 
 The semantic token names the construct the user DECLARED, judged at rip's level — never the binding operator alone, and never the lowering alone. The measuring invariant is the Token Audit's `expectedToken` (runner.js); these rows are the decided cases.
@@ -86,3 +88,9 @@ The semantic token names the construct the user DECLARED, judged at rip's level 
 | state name at ANY occurrence (the `count := 0` declaration, the `count = 5` write, a read) | no `readonly` modifier — `readonly` describes the BINDING, not the position, and a `:=` binding is writable in rip; the lowering's const cell must not leak into the color. Clearing it at the declaration alone would paint one binding in two colors, with the write — the position that PROVES the classification false — keeping the wrong one | served at every occurrence, measured 2026-07-30; the invariant scores declarations and use sites in one verdict |
 | named effect binding, unannotated (`watcher ~> …`) | token type `function`, with `readonly` — the binding's value is the disposer, a callable; tsgo's classification of the value is the informative answer, the class-expression doctrine | the invariant expects `function` in every form, inline and carried alike |
 | named effect binding, annotated (`logger: Function ~> …`) | the annotation governs the classification — tsgo's own rule, identical on the equivalent plain-TS line | reported, never scored — dual like `X = schema`; asserting against the annotation is an expectation the audit cannot defend |
+
+## Disk — the editor's writes
+
+Not a hover surface, but the same convention: the decided answer, recorded where a reviewer can cite it. These rulings were carried only in commit messages and test prose until 2026-08-03.
+
+- **Faces are lazy, candidacy is eager — RULED (bc88d03).** A workspace that contains .rip source gets its `.rip/` mirror tree — auto-import stubs included — written at session start, before any document is opened: candidacy is a workspace property, not a per-document event. Real faces still materialize only when a document forces them. The territory doctrine bounds the eagerness: every write stays inside `.rip/`, a workspace with no .rip source is never written to, stub bytes are declaration-only, and a stub never shadows a real face nor buys diagnostic silence. Gates: packages/vscode/test/project-model.test.js (territory, eager candidacy), test/toolchain/auto-import.test.js (stub-never-shadows, stub-never-buys-silence).

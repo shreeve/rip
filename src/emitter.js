@@ -13601,18 +13601,16 @@ class Emitter {
   }
 
   // The seam both match lowerings share: close `toMatchable(`'s
-  // arguments, then open `.match(`. No narrowing rides here, because
-  // `toMatchable` cannot answer null: the multi-line receiver it used
-  // to coerce to null now THROWS, which is what that null was always
-  // for — it existed only so the following `.match` would blow up
-  // rather than anchor wrong. Throwing at the coercion says the same
-  // thing sooner and in the user's vocabulary, and it makes the
-  // helper's `=> string` annotation true rather than asserted around.
-  // v3 ships the same annotation over a runtime that really does
-  // return null, which is the lie this row ruled out — the difference
-  // is which side was changed to meet the other.
-  matchReceiverClose(multiline) {
-    this.b.emit(multiline ? ', true)' : ')');
+  // argument, then open `.match(`. No narrowing rides here, because
+  // `toMatchable` always answers a string — RULED (2026-08-03): the
+  // coercion carries no multi-line guard; `^`/`$` across newlines are
+  // the regex's own /m business, exactly as in hand-written JS. (The
+  // guard's history: v3 returned null for multi-line receivers under a
+  // `=> string` annotation — a lie; a branch then threw instead —
+  // honest, but it broke every main-legal program grepping decoded
+  // file bytes. Standard semantics need no chaperone.)
+  matchReceiverClose() {
+    this.b.emit(')');
     this.b.emit('.match(');
   }
 
@@ -13621,13 +13619,12 @@ class Emitter {
   // `((_ = toMatchable(text).match(/re/)) && _[n])`, sharing the
   // last-match binding with `=~`. The outer parens keep the whole
   // guard one operand (`not x[/re/]` negates the READ, not the
-  // assignment). A literal /m flag admits multi-line receivers.
+  // assignment).
   regexIndex(node, obj, regex, capture) {
-    const multiline = /^\/(?:[^\\/]|\\.)*\/[a-z]*m[a-z]*$/.test(regex);
     this.mark(node, '$self', () => {
       this.b.emit(`((_ = ${this.runtimeName('toMatchable')}(`);
       this.mark(node, 'object', () => this.expr(obj));
-      this.matchReceiverClose(multiline);
+      this.matchReceiverClose();
       this.mark(node, 'key', () => this.b.emit(regex));
       this.b.emit(')) && _[');
       if (capture === null) this.b.emit('0');
@@ -13664,19 +13661,18 @@ class Emitter {
   // ["=~", left, right] — the match operator: `text =~ /re/` emits
   // `(_ = toMatchable(text).match(/re/))` — the match array or null,
   // with `_` (the last-match binding, hoisted at the scope) holding
-  // it for later reads (`_[1]`). A literal /m flag allows multi-line
-  // receivers. Deliberately NON-chaining: `a =~ b =~ c` would match
-  // the first RESULT against the second pattern — reject loudly.
+  // it for later reads (`_[1]`). Deliberately NON-chaining: `a =~ b
+  // =~ c` would match the first RESULT against the second pattern —
+  // reject loudly.
   matchOp(node) {
     if (isNode(node[1]) && node[1][0] === '=~' && !node[1].parenthesized) {
       throw this.positionedError(node, 'emitter: `=~` does not chain — `a =~ b =~ c` would match the first match RESULT against the second pattern (parenthesize: `(a =~ b) =~ c`, or split the matches)');
     }
     const r = node[2];
-    const multiline = typeof r === 'string' && /^\/(?:[^\\/]|\\.)*\/[a-z]*m[a-z]*$/.test(r);
     this.mark(node, '$self', () => {
       this.b.emit(`(_ = ${this.runtimeName('toMatchable')}(`);
       this.mark(node, 'left', () => this.expr(node[1]));
-      this.matchReceiverClose(multiline);
+      this.matchReceiverClose();
       this.mark(node, 'right', () => this.expr(r));
       this.b.emit('))');
     });
@@ -14063,7 +14059,7 @@ const RUNTIME_TABLE = [
       raise: '(a: any, b?: any) => never',
       rand: '(a?: number, b?: number) => number',
       sleep: '(ms: number) => Promise<void>',
-      toMatchable: '(v: any, allowNewlines?: boolean) => string',
+      toMatchable: '(v: any) => string',
       todo: '(msg?: string) => never',
       warn: '(...args: any[]) => void',
       zip: '(...arrays: any[][]) => any[][]',

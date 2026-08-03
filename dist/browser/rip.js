@@ -19370,16 +19370,15 @@ ${"  ".repeat(ind)}`);
       this.b.emit("])");
     });
   }
-  matchReceiverClose(multiline) {
-    this.b.emit(multiline ? ", true)" : ")");
+  matchReceiverClose() {
+    this.b.emit(")");
     this.b.emit(".match(");
   }
   regexIndex(node, obj, regex, capture) {
-    const multiline = /^\/(?:[^\\/]|\\.)*\/[a-z]*m[a-z]*$/.test(regex);
     this.mark(node, "$self", () => {
       this.b.emit(`((_ = ${this.runtimeName("toMatchable")}(`);
       this.mark(node, "object", () => this.expr(obj));
-      this.matchReceiverClose(multiline);
+      this.matchReceiverClose();
       this.mark(node, "key", () => this.b.emit(regex));
       this.b.emit(")) && _[");
       if (capture === null)
@@ -19415,11 +19414,10 @@ ${"  ".repeat(ind)}`);
       throw this.positionedError(node, "emitter: `=~` does not chain — `a =~ b =~ c` would match the first match RESULT against the second pattern (parenthesize: `(a =~ b) =~ c`, or split the matches)");
     }
     const r = node[2];
-    const multiline = typeof r === "string" && /^\/(?:[^\\/]|\\.)*\/[a-z]*m[a-z]*$/.test(r);
     this.mark(node, "$self", () => {
       this.b.emit(`(_ = ${this.runtimeName("toMatchable")}(`);
       this.mark(node, "left", () => this.expr(node[1]));
-      this.matchReceiverClose(multiline);
+      this.matchReceiverClose();
       this.mark(node, "right", () => this.expr(r));
       this.b.emit("))");
     });
@@ -19679,7 +19677,7 @@ var RUNTIME_TABLE = [
       raise: "(a: any, b?: any) => never",
       rand: "(a?: number, b?: number) => number",
       sleep: "(ms: number) => Promise<void>",
-      toMatchable: "(v: any, allowNewlines?: boolean) => string",
+      toMatchable: "(v: any) => string",
       todo: "(msg?: string) => never",
       warn: "(...args: any[]) => void",
       zip: "(...arrays: any[][]) => any[][]"
@@ -21007,34 +21005,28 @@ var todo = (msg) => {
 };
 var warn = console.warn;
 var zip = (...a) => a[0].map((_, i) => a.map((b) => b[i]));
-var toMatchable = (v, allowNewlines) => {
-  const s = (() => {
-    if (typeof v === "string")
-      return v;
-    if (v == null)
-      return "";
-    if (typeof v === "number" || typeof v === "bigint" || typeof v === "boolean")
-      return String(v);
-    if (typeof v === "symbol")
-      return v.description || "";
-    if (v instanceof Uint8Array || v instanceof ArrayBuffer) {
-      return new TextDecoder().decode(v instanceof Uint8Array ? v : new Uint8Array(v));
-    }
-    if (Array.isArray(v))
-      return v.join(",");
-    if (typeof v.toString === "function" && v.toString !== Object.prototype.toString) {
-      try {
-        return v.toString();
-      } catch {
-        return "";
-      }
-    }
+var toMatchable = (v) => {
+  if (typeof v === "string")
+    return v;
+  if (v == null)
     return "";
-  })();
-  if (!allowNewlines && /[\n\r]/.test(s)) {
-    throw new TypeError("match receiver spans lines — add the /m flag to match across them");
+  if (typeof v === "number" || typeof v === "bigint" || typeof v === "boolean")
+    return String(v);
+  if (typeof v === "symbol")
+    return v.description || "";
+  if (v instanceof Uint8Array || v instanceof ArrayBuffer) {
+    return new TextDecoder().decode(v instanceof Uint8Array ? v : new Uint8Array(v));
   }
-  return s;
+  if (Array.isArray(v))
+    return v.join(",");
+  if (typeof v.toString === "function" && v.toString !== Object.prototype.toString) {
+    try {
+      return v.toString();
+    } catch {
+      return "";
+    }
+  }
+  return "";
 };
 
 // src/runtime/schema.js
