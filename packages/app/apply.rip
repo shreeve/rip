@@ -25,11 +25,11 @@ export type ApplyOpts =
 
 export def createApply(opts: ApplyOpts): Apply
   unless opts? and typeof opts is 'object'
-    throw new TypeError 'Rip App: createApply expects an options object'
+    throw TypeError.new 'Rip App: createApply expects an options object'
   unless typeof opts.renderer?.remountDirty is 'function'
-    throw new TypeError 'Rip App: createApply requires renderer.remountDirty'
+    throw TypeError.new 'Rip App: createApply requires renderer.remountDirty'
   unless typeof opts.escape is 'function'
-    throw new TypeError 'Rip App: createApply requires an escape remount'
+    throw TypeError.new 'Rip App: createApply requires an escape remount'
   report = opts.report ?? (...args) -> console.log ...args
 
   absorb = (paths) ->

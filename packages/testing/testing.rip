@@ -80,10 +80,10 @@ deepEq = (a, b) ->
 
 export def eq(a, b)
   unless deepEq(a, b)
-    throw new Error "expected #{JSON.stringify(b)}, got #{JSON.stringify(a)}"
+    throw Error.new "expected #{JSON.stringify(b)}, got #{JSON.stringify(a)}"
 
 export def ok(cond, message = 'assertion failed')
-  throw new Error(message) unless cond
+  throw Error.new(message) unless cond
 
 # `expected` refines the assertion: an Error class checks instanceof,
 # a string checks message containment, and both can be given in order.
@@ -95,11 +95,11 @@ export def throws(fn, ...expected)
   catch e
     caught = e
     threw  = true
-  throw new Error('expected throw') unless threw
+  throw Error.new('expected throw') unless threw
   for want in expected
     if typeof want is 'string'
       unless String(caught?.message).includes(want)
-        throw new Error "expected message containing #{JSON.stringify(want)}, got #{JSON.stringify(caught?.message)}"
+        throw Error.new "expected message containing #{JSON.stringify(want)}, got #{JSON.stringify(caught?.message)}"
     else
       unless caught instanceof want
-        throw new Error "expected #{want?.name ?? 'error class'}, got #{caught?.constructor?.name}"
+        throw Error.new "expected #{want?.name ?? 'error class'}, got #{caught?.constructor?.name}"

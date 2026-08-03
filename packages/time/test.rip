@@ -50,9 +50,9 @@ console.log "\nConstruction & getters"
 
 test "now()", ->
   now = time()
-  eq now.year(),  new Date().getFullYear()
-  eq now.month(), new Date().getMonth()
-  eq now.date(),  new Date().getDate()
+  eq now.year(),  Date.new().getFullYear()
+  eq now.month(), Date.new().getMonth()
+  eq now.date(),  Date.new().getDate()
 
 test "from ISO string", ->
   d = time('2026-04-19')
@@ -90,7 +90,7 @@ test "from US 12 PM", ->
   eq time('04/19/2026 12:00 PM').hour(), 12
 
 test "from Date object", ->
-  d = time(new Date(2026, 3, 19))
+  d = time(Date.new(2026, 3, 19))
   eq d.year(), 2026
   eq d.date(), 19
 

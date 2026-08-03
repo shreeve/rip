@@ -12,7 +12,7 @@ import * as feedMod from '../feed.rip'
 import { rash } from '../rash.rip'
 import { readFileSync } from 'fs'
 
-bytes = (s) -> new TextEncoder().encode s
+bytes = (s) -> TextEncoder.new().encode s
 srcHash = (s) -> rash bytes(s)
 
 SRC_APP = 'export App = component'
@@ -60,7 +60,7 @@ test "rash accepts byte views and rejects text", ->
   data = bytes 'abc'
   eq rash(data), 'ungWv4'
   eq rash(data.buffer), 'ungWv4'
-  eq rash(new DataView(data.buffer)), 'ungWv4'
+  eq rash(DataView.new(data.buffer)), 'ungWv4'
   throws (-> rash('abc')), 'expects bytes'
 
 # ==[ Store view: ComponentsStore parity ]==
@@ -182,7 +182,7 @@ test "a throwing watcher never silences the rest", ->
   original = console.error
   console.error = ->
   try
-    ws.watch -> throw new Error 'boom'
+    ws.watch -> throw Error.new 'boom'
     ws.watch (event, path) -> seen.push [event, path]
     ws.write 'a.rip', 'x'
   finally
@@ -474,8 +474,8 @@ console.log "\nFeed"
 # Two macrotask turns flush every microtask chain a ding apply spawns
 # (fetch → text → set).
 settle = ->
-  new Promise! (resolve) -> setTimeout resolve, 0
-  new Promise! (resolve) -> setTimeout resolve, 0
+  Promise.new! (resolve) -> setTimeout resolve, 0
+  Promise.new! (resolve) -> setTimeout resolve, 0
   return
 
 # A socket factory whose sockets are driven by hand: tests fire onopen /
@@ -521,7 +521,7 @@ fakeFetch = (routes) ->
         json: (-> JSON.parse(body))
       }
     else
-      { ok: false, status: 404, arrayBuffer: (-> new ArrayBuffer(0)), json: (-> null) }
+      { ok: false, status: 404, arrayBuffer: (-> ArrayBuffer.new(0)), json: (-> null) }
   { fn, calls, requests }
 
 emptyManifest = JSON.stringify { files: [] }
@@ -626,13 +626,13 @@ test! "a want retires only when the manifest MOVES without naming it — retirem
   settle!
   ok reports.some((args) -> String(args[0]).includes('module fetch missed')), 'the miss is loud'
   base = calls.filter((u) -> u is '/manifest.json').length
-  new Promise! (resolve) -> setTimeout resolve, 30
+  Promise.new! (resolve) -> setTimeout resolve, 30
   ok calls.filter((u) -> u is '/manifest.json').length > base, 'an unchanged manifest keeps the retry alive'
   routes['/manifest.json'] = JSON.stringify { files: [{ id: 'a.rip', hash: srcHash('v2') }] }
   routes['/a.rip'] = 'v2'
-  new Promise! (resolve) -> setTimeout resolve, 30
+  Promise.new! (resolve) -> setTimeout resolve, 30
   polls = calls.filter((u) -> u is '/manifest.json').length
-  new Promise! (resolve) -> setTimeout resolve, 30
+  Promise.new! (resolve) -> setTimeout resolve, 30
   eq calls.filter((u) -> u is '/manifest.json').length, polls, 'the moved manifest retires the want and stops the re-poll'
   eq ws.passport('gone.rip'), undefined
   eq ws.passport('a.rip').hash, srcHash('v2')
@@ -650,7 +650,7 @@ test! "a want for a brand-new id survives a held-back manifest — the direct mo
   eq ws.passport('new.rip'), undefined
   ok reports.some((args) -> String(args[0]).includes('module fetch missed')), 'the miss is loud'
   routes['/new.rip'] = 'born'
-  new Promise! (resolve) -> setTimeout resolve, 50
+  Promise.new! (resolve) -> setTimeout resolve, 50
   eq ws.passport('new.rip').hash, srcHash('born')
   eq ws.passport('new.rip').path, 'new.rip'
   eq ws.read('new.rip'), 'born'
@@ -777,7 +777,7 @@ test! "a failed open-resync retries with backoff until the feed heals", ->
   eq ws.passport('a.rip').hash, srcHash('v1')
   routes['/manifest.json'] = JSON.stringify { files: [{ id: 'a.rip', hash: '222222' }] }
   routes['/a.rip'] = 'v2'
-  new Promise! (resolve) -> setTimeout resolve, 50
+  Promise.new! (resolve) -> setTimeout resolve, 50
   eq ws.passport('a.rip').hash, srcHash('v2')
   eq ws.read('a.rip'), 'v2'
   feed.close()
@@ -796,7 +796,7 @@ test! "a dinged hash the module route does not yet serve is retried until it app
   ok reports.some((args) -> String(args[0]).includes('module fetch missed')), 'the miss is loud'
   routes['/manifest.json'] = JSON.stringify { files: [{ id: 'a.rip', hash: v2 }] }
   routes['/a.rip'] = 'v2'
-  new Promise! (resolve) -> setTimeout resolve, 50
+  Promise.new! (resolve) -> setTimeout resolve, 50
   eq ws.passport('a.rip').hash, v2
   feed.close()
 
@@ -824,7 +824,7 @@ test! "a stale out-of-order response cannot overwrite newer ownership", ->
     '/a.rip': ->
       turn += 1
       value = if turn is 1 then 'stale bytes' else 'newest bytes'
-      new Promise! (resolve) -> releases.push -> resolve value
+      Promise.new! (resolve) -> releases.push -> resolve value
   { feed, sockets } = openFeed ws, routes
   sockets[0].onopen()
   settle!
@@ -864,12 +864,12 @@ test! "a dropped socket reconnects with backoff and resyncs; close() stops it", 
   eq manifestFetches(), 1
   sockets[0].onclose()
   eq feed.connected(), false
-  new Promise! (resolve) -> setTimeout resolve, 20
+  Promise.new! (resolve) -> setTimeout resolve, 20
   eq sockets.length, 2
   sockets[1].onopen()
   settle!
   ok feed.connected()
   eq manifestFetches(), 2
   feed.close()
-  new Promise! (resolve) -> setTimeout resolve, 20
+  Promise.new! (resolve) -> setTimeout resolve, 20
   eq sockets.length, 2                       # closed: no further reconnect

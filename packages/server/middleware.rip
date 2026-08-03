@@ -1,10 +1,10 @@
 SESSION = :rip.server.session
 RECYCLE = :rip.server.recycle
-SAFE_METHODS = new Set ['GET', 'HEAD', 'OPTIONS']
+SAFE_METHODS = Set.new ['GET', 'HEAD', 'OPTIONS']
 COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
-sameSites = new Set ['Strict', 'Lax', 'None']
-hmacKeys = new Map
-aesKeys = new Map
+sameSites = Set.new ['Strict', 'Lax', 'None']
+hmacKeys = Map.new()
+aesKeys = Map.new()
 
 list = (value, fallback) ->
   value ?= fallback
@@ -13,7 +13,7 @@ list = (value, fallback) ->
 booleanOption = (opts, name, fallback = false) ->
   value = opts[name]
   return fallback if value is undefined
-  throw new TypeError("#{name} must be boolean") unless typeof value is 'boolean'
+  throw TypeError.new("#{name} must be boolean") unless typeof value is 'boolean'
   value
 
 cookies = (request) ->
@@ -31,16 +31,16 @@ appendVary = (headers, name) ->
   headers.set 'vary', [...values, name].join(', ') unless values.some (value) -> value.toLowerCase() is name.toLowerCase()
 
 withHeaders = (response, change) ->
-  headers = new Headers response.headers
+  headers = Headers.new response.headers
   change headers
-  new Response response.body, { status: response.status, statusText: response.statusText, headers }
+  Response.new response.body, { status: response.status, statusText: response.statusText, headers }
 
 cookieOptions = (name, opts, httpOnly) ->
-  throw new TypeError("invalid cookie name #{JSON.stringify(name)}") unless COOKIE_NAME.test name
+  throw TypeError.new("invalid cookie name #{JSON.stringify(name)}") unless COOKIE_NAME.test name
   sameSite = opts.sameSite or 'Lax'
-  throw new TypeError("invalid SameSite value #{JSON.stringify(sameSite)}") unless sameSites.has sameSite
+  throw TypeError.new("invalid SameSite value #{JSON.stringify(sameSite)}") unless sameSites.has sameSite
   secure = booleanOption opts, 'secure'
-  throw new TypeError('SameSite=None requires Secure') if sameSite is 'None' and not secure
+  throw TypeError.new('SameSite=None requires Secure') if sameSite is 'None' and not secure
   { sameSite, secure, httpOnly }
 
 setCookie = (response, name, value, policy, maxAge = null) ->
@@ -52,12 +52,12 @@ setCookie = (response, name, value, policy, maxAge = null) ->
   withHeaders response, (headers) -> headers.append 'set-cookie', parts.join('; ')
 
 hmacKey = (secret) ->
-  hmacKeys.set(secret, crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])) unless hmacKeys.has secret
+  hmacKeys.set(secret, crypto.subtle.importKey('raw', TextEncoder.new().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])) unless hmacKeys.has secret
   hmacKeys.get secret
 
 sign = (text, secret) ->
   key = hmacKey! secret
-  bytes = crypto.subtle.sign! 'HMAC', key, new TextEncoder().encode(text)
+  bytes = crypto.subtle.sign! 'HMAC', key, TextEncoder.new().encode(text)
   Buffer.from(bytes).toString 'base64url'
 
 verify = (text, signature, secret) ->
@@ -65,13 +65,13 @@ verify = (text, signature, secret) ->
     signatureBytes = base64url signature
     return false unless signatureBytes?
     key = hmacKey! secret
-    crypto.subtle.verify! 'HMAC', key, signatureBytes, new TextEncoder().encode(text)
+    crypto.subtle.verify! 'HMAC', key, signatureBytes, TextEncoder.new().encode(text)
   catch
     false
 
 aesKey = (secret) ->
   unless aesKeys.has secret
-    digest = crypto.subtle.digest! 'SHA-256', new TextEncoder().encode(secret)
+    digest = crypto.subtle.digest! 'SHA-256', TextEncoder.new().encode(secret)
     aesKeys.set secret, crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
   aesKeys.get secret
 
@@ -83,9 +83,9 @@ base64url = (text) ->
 encodeSession = (data, secret, encrypt, expires) ->
   text = JSON.stringify { expires, data }
   if encrypt
-    nonce = crypto.getRandomValues new Uint8Array(12)
+    nonce = crypto.getRandomValues Uint8Array.new(12)
     key = aesKey! secret
-    encrypted = crypto.subtle.encrypt! { name: 'AES-GCM', iv: nonce }, key, new TextEncoder().encode(text)
+    encrypted = crypto.subtle.encrypt! { name: 'AES-GCM', iv: nonce }, key, TextEncoder.new().encode(text)
     return "e1.#{Buffer.concat([Buffer.from(nonce), Buffer.from(encrypted)]).toString('base64url')}"
   payload = Buffer.from(text, 'utf8').toString 'base64url'
   "s1.#{payload}.#{sign!(payload, secret)}"
@@ -100,7 +100,7 @@ decodeSession = (value, secret, encrypt) ->
       return {} unless bytes? and bytes.length > 12
       key = aesKey! secret
       plain = crypto.subtle.decrypt! { name: 'AES-GCM', iv: bytes.subarray(0, 12) }, key, bytes.subarray(12)
-      text = new TextDecoder().decode plain
+      text = TextDecoder.new().decode plain
     else
       parts = value.split '.'
       return {} unless parts.length is 3 and parts[0] is 's1'
@@ -117,16 +117,16 @@ decodeSession = (value, secret, encrypt) ->
 
 export cors = (opts = {}) ->
   origin = opts.origin ?? '*'
-  throw new TypeError('cors origin must be *, a string, an array, or a function') unless origin is '*' or typeof origin is 'string' or Array.isArray(origin) or typeof origin is 'function'
-  throw new TypeError('cors origin strings must be nonempty') if typeof origin is 'string' and origin.length is 0
-  throw new TypeError('cors origin arrays require nonempty strings') if Array.isArray(origin) and not origin.every((value) -> typeof value is 'string' and value.length > 0)
+  throw TypeError.new('cors origin must be *, a string, an array, or a function') unless origin is '*' or typeof origin is 'string' or Array.isArray(origin) or typeof origin is 'function'
+  throw TypeError.new('cors origin strings must be nonempty') if typeof origin is 'string' and origin.length is 0
+  throw TypeError.new('cors origin arrays require nonempty strings') if Array.isArray(origin) and not origin.every((value) -> typeof value is 'string' and value.length > 0)
   credentials = booleanOption opts, 'credentials'
-  throw new TypeError('cors credentials require a specific origin') if credentials and origin is '*'
+  throw TypeError.new('cors credentials require a specific origin') if credentials and origin is '*'
   methods = list opts.methods, 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
   allowedHeaders = list opts.headers, 'Content-Type,Authorization,X-Requested-With'
   exposed = list opts.exposeHeaders, ''
   maxAge = opts.maxAge ?? 86400
-  throw new TypeError('cors maxAge must be a nonnegative integer') unless Number.isInteger(maxAge) and maxAge >= 0
+  throw TypeError.new('cors maxAge must be a nonnegative integer') unless Number.isInteger(maxAge) and maxAge >= 0
 
   allowed = (requestOrigin) ->
     return null unless requestOrigin?
@@ -144,17 +144,17 @@ export cors = (opts = {}) ->
     chosen = allowed! requestOrigin
     if request.method is 'OPTIONS'
       unless chosen?
-        headers = new Headers
+        headers = Headers.new()
         appendVary headers, 'Origin' if requestOrigin? and origin isnt '*'
-        return new Response null, { status: 204, headers }
-      headers = new Headers
+        return Response.new null, { status: 204, headers }
+      headers = Headers.new()
       headers.set 'access-control-allow-origin', chosen
       headers.set 'access-control-allow-methods', methods
       headers.set 'access-control-allow-headers', allowedHeaders
       headers.set 'access-control-max-age', String(maxAge)
       headers.set 'access-control-allow-credentials', 'true' if credentials
       appendVary headers, 'Origin' unless chosen is '*'
-      return new Response null, { status: 204, headers }
+      return Response.new null, { status: 204, headers }
     response = next!
     unless chosen?
       return response unless requestOrigin? and origin isnt '*'
@@ -213,7 +213,7 @@ export htmlJson = (request, next) ->
     pretty = JSON.stringify data, null, 2
   catch
     return response
-  headers = new Headers response.headers
+  headers = Headers.new response.headers
   headers.set 'content-type', 'text/html; charset=UTF-8'
   headers.delete 'content-length'
   html = """<!doctype html>
@@ -227,27 +227,27 @@ export htmlJson = (request, next) ->
   </style>
   <pre>#{highlightJson(pretty)}</pre>
   """
-  new Response html, { status: response.status, statusText: response.statusText, headers }
+  Response.new html, { status: response.status, statusText: response.statusText, headers }
 
 export timeout = (seconds = 30, opts = {}) ->
   grace = opts.grace ?? 1
   status = opts.status ?? 504
   message = opts.message ?? 'Gateway Timeout'
   exempt = opts.exempt or (-> false)
-  throw new TypeError('timeout seconds must be a positive integer') unless Number.isInteger(seconds) and seconds > 0
-  throw new TypeError('timeout grace must be a nonnegative integer of seconds') unless Number.isInteger(grace) and grace >= 0
-  throw new TypeError('timeout status must be an integer from 500 through 599') unless Number.isInteger(status) and status >= 500 and status <= 599
-  throw new TypeError('timeout message must be a string') unless typeof message is 'string'
-  throw new TypeError('timeout exempt must be a function') unless typeof exempt is 'function'
+  throw TypeError.new('timeout seconds must be a positive integer') unless Number.isInteger(seconds) and seconds > 0
+  throw TypeError.new('timeout grace must be a nonnegative integer of seconds') unless Number.isInteger(grace) and grace >= 0
+  throw TypeError.new('timeout status must be an integer from 500 through 599') unless Number.isInteger(status) and status >= 500 and status <= 599
+  throw TypeError.new('timeout message must be a string') unless typeof message is 'string'
+  throw TypeError.new('timeout exempt must be a function') unless typeof exempt is 'function'
 
   (request, next) ->
     return next! if exempt! request
-    controller = new AbortController
+    controller = AbortController.new()
     signal = AbortSignal.any [request.signal, controller.signal]
     init = { method: request.method, headers: request.headers, signal, body: request.body }
-    timedRequest = new Request request.url, init
+    timedRequest = Request.new request.url, init
     timer = null
-    deadline = new Promise (done) -> timer = setTimeout((-> done({ timeout: true })), seconds * 1000)
+    deadline = Promise.new (done) -> timer = setTimeout((-> done({ timeout: true })), seconds * 1000)
     outcome = Promise.resolve(null).then((-> next timedRequest)).then(
       ((response) -> { response }),
       ((error) -> { error })
@@ -258,26 +258,26 @@ export timeout = (seconds = 30, opts = {}) ->
       throw result.error if result.error?
       return result.response
 
-    controller.abort new DOMException(message, 'TimeoutError')
+    controller.abort DOMException.new(message, 'TimeoutError')
     settled = false
     outcome.then -> settled = true
     setTimeout (->
       unless settled
         try globalThis[RECYCLE]?()
     ), grace * 1000
-    new Response message, { status, headers: { 'content-type': 'text/plain; charset=UTF-8', connection: 'close' } }
+    Response.new message, { status, headers: { 'content-type': 'text/plain; charset=UTF-8', connection: 'close' } }
 
 securityHeader = (opts, name, fallback) ->
   value = opts[name]
   return fallback if value is undefined
   return null if value is false
-  throw new TypeError("secureHeaders #{name} must be a nonempty header value or false") unless typeof value is 'string'
+  throw TypeError.new("secureHeaders #{name} must be a nonempty header value or false") unless typeof value is 'string'
   value = value.trim()
-  throw new TypeError("secureHeaders #{name} must be a nonempty header value or false") unless value.length > 0
+  throw TypeError.new("secureHeaders #{name} must be a nonempty header value or false") unless value.length > 0
   try
-    new Headers { 'x-rip-policy': value }
+    Headers.new { 'x-rip-policy': value }
   catch
-    throw new TypeError("secureHeaders #{name} must be a valid header value or false")
+    throw TypeError.new("secureHeaders #{name} must be a valid header value or false")
   value
 
 export secureHeaders = (opts = {}) ->
@@ -296,11 +296,11 @@ export secureHeaders = (opts = {}) ->
 
 export sessions = (opts = {}) ->
   secret = opts.secret
-  throw new TypeError('sessions requires a nonempty secret') unless typeof secret is 'string' and secret.length > 0
+  throw TypeError.new('sessions requires a nonempty secret') unless typeof secret is 'string' and secret.length > 0
   encrypt = booleanOption opts, 'encrypt'
   name = opts.name or 'session'
   maxAge = opts.maxAge ?? 86400
-  throw new TypeError('sessions maxAge must be a positive integer') unless Number.isInteger(maxAge) and maxAge > 0
+  throw TypeError.new('sessions maxAge must be a positive integer') unless Number.isInteger(maxAge) and maxAge > 0
   policy = cookieOptions name, opts, booleanOption(opts, 'httpOnly', true)
 
   (request, next) ->
@@ -310,11 +310,11 @@ export sessions = (opts = {}) ->
     response = next!
     return response if JSON.stringify(data) is before
     value = encodeSession! data, secret, encrypt, Date.now() + maxAge * 1000
-    throw new Error('encoded session exceeds the 4096-byte cookie limit') if value.length > 3800
+    throw Error.new('encoded session exceeds the 4096-byte cookie limit') if value.length > 3800
     setCookie response, name, value, policy, maxAge
 
 randomToken = ->
-  Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString 'base64url'
+  Buffer.from(crypto.getRandomValues(Uint8Array.new(24))).toString 'base64url'
 
 equal = (left, right) ->
   return false unless typeof left is 'string' and typeof right is 'string' and left.length is right.length
@@ -325,11 +325,11 @@ equal = (left, right) ->
 
 export csrf = (opts = {}) ->
   secret = opts.secret
-  throw new TypeError('csrf requires a nonempty secret') unless typeof secret is 'string' and secret.length > 0
+  throw TypeError.new('csrf requires a nonempty secret') unless typeof secret is 'string' and secret.length > 0
   name = opts.cookieName or 'csrf_token'
   header = opts.headerName or 'x-csrf-token'
   exempt = opts.exempt or (-> false)
-  throw new TypeError('csrf exempt must be a function') unless typeof exempt is 'function'
+  throw TypeError.new('csrf exempt must be a function') unless typeof exempt is 'function'
   policy = cookieOptions name, opts, false
 
   (request, next) ->
@@ -339,7 +339,7 @@ export csrf = (opts = {}) ->
     token = if parts.length is 2 and verify!(parts[0], parts[1], secret) then parts[0] else null
     unless SAFE_METHODS.has request.method
       submitted = request.headers.get header
-      return new Response('CSRF token mismatch', { status: 403, headers: { 'content-type': 'text/plain; charset=UTF-8' } }) unless token? and equal(submitted, token)
+      return Response.new('CSRF token mismatch', { status: 403, headers: { 'content-type': 'text/plain; charset=UTF-8' } }) unless token? and equal(submitted, token)
     emit = false
     unless token?
       token = randomToken()

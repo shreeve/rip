@@ -72,7 +72,7 @@ BIG = 'z'.repeat 2_500_000
 server = Bun.serve
   port: 0
   fetch: (req) ->
-    url = new URL req.url
+    url = URL.new req.url
     path = url.pathname
     bodyText = req.text!
     body = null
@@ -100,35 +100,35 @@ server = Bun.serve
         next = state.anthropicNext.shift()
         if next?.status then Response.json((next.body ?? {}), { status: next.status }) else Response.json(next?.body ?? defaultAnthropicChat())
       # fixture.test — URL-attachment fixtures
-      when '/fixture/doc.txt' then new Response('fixture document body\n', { headers: { 'content-type': 'text/plain; charset=utf-8' } })
-      when '/fixture/hop1'    then new Response(null, { status: 302, headers: { location: 'http://fixture.test/fixture/hop2' } })
-      when '/fixture/hop2'    then new Response(null, { status: 302, headers: { location: '/fixture/doc.txt' } })
-      when '/fixture/evil'    then new Response(null, { status: 302, headers: { location: 'http://127.0.0.1:9/secret' } })
-      when '/fixture/evil6'   then new Response(null, { status: 302, headers: { location: 'http://[::1]:9/secret' } })
-      when '/fixture/loop'    then new Response(null, { status: 302, headers: { location: '/fixture/loop' } })
-      when '/fixture/big'     then new Response(BIG, { headers: { 'content-type': 'text/plain' } })
-      when '/fixture/binary'  then new Response(new Uint8Array([1, 0, 2, 3, 0, 4]), { headers: { 'content-type': 'application/octet-stream' } })
-      when '/fixture/missing' then new Response('nope', { status: 404 })
-      else new Response("unknown path #{path}", { status: 500 })
+      when '/fixture/doc.txt' then Response.new('fixture document body\n', { headers: { 'content-type': 'text/plain; charset=utf-8' } })
+      when '/fixture/hop1'    then Response.new(null, { status: 302, headers: { location: 'http://fixture.test/fixture/hop2' } })
+      when '/fixture/hop2'    then Response.new(null, { status: 302, headers: { location: '/fixture/doc.txt' } })
+      when '/fixture/evil'    then Response.new(null, { status: 302, headers: { location: 'http://127.0.0.1:9/secret' } })
+      when '/fixture/evil6'   then Response.new(null, { status: 302, headers: { location: 'http://[::1]:9/secret' } })
+      when '/fixture/loop'    then Response.new(null, { status: 302, headers: { location: '/fixture/loop' } })
+      when '/fixture/big'     then Response.new(BIG, { headers: { 'content-type': 'text/plain' } })
+      when '/fixture/binary'  then Response.new(Uint8Array.new([1, 0, 2, 3, 0, 4]), { headers: { 'content-type': 'application/octet-stream' } })
+      when '/fixture/missing' then Response.new('nope', { status: 404 })
+      else Response.new("unknown path #{path}", { status: 500 })
 
 LOCAL = "http://127.0.0.1:#{server.port}"
 realFetch = globalThis.fetch.bind globalThis
 globalThis.fetch = (input, opts) ->
   raw = if typeof input is 'string' then input else if input instanceof URL then input.toString() else input.url
-  u = new URL raw
+  u = URL.new raw
   return realFetch("#{LOCAL}/openai#{u.pathname}#{u.search}", opts) if u.hostname is 'api.openai.com'
   return realFetch("#{LOCAL}/anthropic#{u.pathname}#{u.search}", opts) if u.hostname is 'api.anthropic.com'
   return realFetch("#{LOCAL}#{u.pathname}#{u.search}", opts) if u.hostname is 'fixture.test'
-  throw new Error "test fetch blocked unexpected host: #{u.hostname}"
+  throw Error.new "test fetch blocked unexpected host: #{u.hostname}"
 
 # ── package modules (loaded AFTER the environment is pinned) ───────────
-providers = import!(new URL('./lib/providers.rip', import.meta.url).href)
-openai    = import!(new URL('./lib/openai.rip', import.meta.url).href)
-anthropic = import!(new URL('./lib/anthropic.rip', import.meta.url).href)
-att       = import!(new URL('./lib/attachments.rip', import.meta.url).href)
-cred      = import!(new URL('./lib/credentials.rip', import.meta.url).href)
-storeMod  = import!(new URL('./lib/store.rip', import.meta.url).href)
-toolsMod  = import!(new URL('./lib/tools.rip', import.meta.url).href)
+providers = import!(URL.new('./lib/providers.rip', import.meta.url).href)
+openai    = import!(URL.new('./lib/openai.rip', import.meta.url).href)
+anthropic = import!(URL.new('./lib/anthropic.rip', import.meta.url).href)
+att       = import!(URL.new('./lib/attachments.rip', import.meta.url).href)
+cred      = import!(URL.new('./lib/credentials.rip', import.meta.url).href)
+storeMod  = import!(URL.new('./lib/store.rip', import.meta.url).href)
+toolsMod  = import!(URL.new('./lib/tools.rip', import.meta.url).href)
 
 # One store + tool ctx shared by the run (the db lives under the temp HOME).
 store = storeMod.open()
@@ -148,11 +148,11 @@ caught = (fn) ->
 urlError = (url) -> caught!(-> att.load(store, null, [{ type: 'url', url: url }])).message
 
 # Paths for the subprocess tests: run the entry under the repo loader.
-PKG_DIR = new URL('.', import.meta.url).pathname
-LOADER  = new URL('../../src/loader.js', import.meta.url).pathname
+PKG_DIR = URL.new('.', import.meta.url).pathname
+LOADER  = URL.new('../../src/loader.js', import.meta.url).pathname
 AI_RIP  = join PKG_DIR, 'ai.rip'
 
-pkg = JSON.parse readFileSync(new URL('./package.json', import.meta.url), 'utf8')
+pkg = JSON.parse readFileSync(URL.new('./package.json', import.meta.url), 'utf8')
 
 # ==[ Package surface ]=========================================================
 
@@ -177,9 +177,9 @@ test "does not claim browser safety (filesystem, sqlite, stdio)", ->
 
 test "the rip-ai bin is ai.rip itself, shebang'd and executable", ->
   eq pkg.bin, { 'rip-ai': './ai.rip' }
-  source = readFileSync(new URL('./ai.rip', import.meta.url), 'utf8')
+  source = readFileSync(URL.new('./ai.rip', import.meta.url), 'utf8')
   ok source.startsWith('#!/usr/bin/env rip\n')
-  mode = statSync(new URL('./ai.rip', import.meta.url)).mode
+  mode = statSync(URL.new('./ai.rip', import.meta.url)).mode
   ok (mode & 0o111) isnt 0, 'executable bit set'
 
 test! "importing the entry as a module starts nothing and exports nothing", ->
@@ -326,7 +326,7 @@ test! "listAll second call hits the memory cache; provider filter applies", ->
   hit = providers.listAll!({})
   ok hit.cache.hit, 'memory cache hit'
   filtered = providers.listAll!({ provider: 'anthropic' })
-  eq [...new Set(filtered.models.map((m) -> m.provider))], ['anthropic']
+  eq [...Set.new(filtered.models.map((m) -> m.provider))], ['anthropic']
 
 test "models.json disk cache is written 0600", ->
   path = join(HOME, '.config', 'rip-ai', 'models.json')
@@ -411,7 +411,7 @@ test! "openai listModels normalizes ids and created timestamps", ->
     'openai:gpt-5.6', 'openai:gpt-5.6-sol', 'openai:gpt-6-mini', 'openai:gpt-6-20240101'
   ]
   eq rows[0].provider_model, 'gpt-4o'
-  eq rows[0].created_at, new Date(1700000000 * 1000).toISOString()
+  eq rows[0].created_at, Date.new(1700000000 * 1000).toISOString()
 
 # ==[ Adapters — Anthropic ]====================================================
 
@@ -595,7 +595,7 @@ test "status: reports server info, credentials, defaults, counts", ->
 
 test! "list_models: provider filter and is_latest flag", ->
   res = tools.list_models!(ctx, { provider: 'openai', refresh: true })
-  eq [...new Set(res.models.map((m) -> m.provider))], ['openai']
+  eq [...Set.new(res.models.map((m) -> m.provider))], ['openai']
   eq res.models.filter((m) -> m.is_latest).map((m) -> m.id), [LATEST_OPENAI]
 
 test! "chat: defaults to gpt, formats usage, no persistence", ->

@@ -18,7 +18,7 @@ installGlobal = (host: any, key: string, value: any) ->
 export _renderComponent = (ComponentClass: any, props: Record<string, any>, consume: any, after: any = null): any ->
   host = globalThis as any
   if host.document?.__ripRenderActive
-    throw new Error 'nested or concurrent Rip SSR is not supported — complete the active synchronous render first'
+    throw Error.new 'nested or concurrent Rip SSR is not supported — complete the active synchronous render first'
 
   documentDescriptor = Object.getOwnPropertyDescriptor host, 'document'
   nodeDescriptor = Object.getOwnPropertyDescriptor host, 'Node'
@@ -34,14 +34,14 @@ export _renderComponent = (ComponentClass: any, props: Record<string, any>, cons
     instance = ComponentClass.new props
     instance.mount root
     unless instance._state is 'mounted'
-      throw new Error "#{ComponentClass.name ?? 'component'} did not complete synchronous SSR mount"
+      throw Error.new "#{ComponentClass.name ?? 'component'} did not complete synchronous SSR mount"
     if after
       result = after root
       if result and typeof result.then is 'function'
-        throw new Error 'Rip SSR post-render hooks must be synchronous'
+        throw Error.new 'Rip SSR post-render hooks must be synchronous'
     output = consume root
     if output and typeof output.then is 'function'
-      throw new Error 'Rip SSR consumers must be synchronous'
+      throw Error.new 'Rip SSR consumers must be synchronous'
     output
   finally
     cleanupError: any = null

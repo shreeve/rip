@@ -88,8 +88,8 @@ serve = (args, cwd = fixtures) ->
     catch
       sleep! 50
   exitCode = await proc.exited
-  stdout = new Response(proc.stdout).text!
-  stderr = new Response(proc.stderr).text!
+  stdout = Response.new(proc.stdout).text!
+  stderr = Response.new(proc.stderr).text!
   { html, headers, stdout, stderr, exitCode }
 
 # ==[ Package surface ]==

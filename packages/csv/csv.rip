@@ -176,7 +176,7 @@ def readFull(str, cfg)
   pos       = 0
 
   width = 0
-  row = new Array(width)
+  row = Array.new(width)
   fi  = 0
   atLineStart = true
 
@@ -227,7 +227,7 @@ def readFull(str, cfg)
             field += str.slice(pos)
             pos = len
             break
-          throw new Error "CSV: unclosed quote at position #{pos}"
+          throw Error.new "CSV: unclosed quote at position #{pos}"
 
         field += str.slice(pos, q)
         pos = q + quote.length
@@ -257,7 +257,7 @@ def readFull(str, cfg)
 
         # unexpected character after closing quote
         unless relax
-          throw new Error "CSV: unexpected character after quote at position #{pos}"
+          throw Error.new "CSV: unexpected character after quote at position #{pos}"
 
         # relax mode: stray quote — scan through to next quote (censive approach)
         q2 = str.indexOf(quote, pos)
@@ -284,7 +284,7 @@ def readFull(str, cfg)
           row.length = fi if fi < row.length
           width = fi
           cont = emit(row)
-          row = new Array(width)
+          row = Array.new(width)
           fi  = 0
           atLineStart = true
           break unless cont
@@ -295,7 +295,7 @@ def readFull(str, cfg)
       row.length = fi if fi < row.length
       width = fi
       cont = emit(row)
-      row = new Array(width)
+      row = Array.new(width)
       fi  = 0
       atLineStart = true
       break unless cont
@@ -338,7 +338,7 @@ def readFull(str, cfg)
         row.length = fi if fi < row.length
         width = fi
         cont = emit(row)
-        row = new Array(width)
+        row = Array.new(width)
         fi  = 0
         atLineStart = true
         break unless cont
@@ -430,7 +430,7 @@ export CSV =
 
   # format row arrays into a CSV string
   write: (rows, opts = {}) ->
-    new Writer(opts).rows(rows)
+    Writer.new(opts).rows(rows)
 
   # read and parse a CSV file (async — uses Bun.file)
   load: (path, opts = {}) ->
@@ -443,11 +443,11 @@ export CSV =
 
   # create a reusable Writer instance
   writer: (opts = {}) ->
-    new Writer(opts)
+    Writer.new(opts)
 
   # format a single row (convenience — creates a one-shot Writer)
   formatRow: (row, opts = {}) ->
-    new Writer(opts).row(row)
+    Writer.new(opts).row(row)
 
 # ==============================================================================
 # CLI — run directly with: bun csv.rip [options] <input> [output]
@@ -499,7 +499,7 @@ if import.meta.main
   output = files[1]
 
   rows = CSV.read(Bun.file(input).text!, readOpts)
-  writer = new Writer(writeOpts)
+  writer = Writer.new(writeOpts)
 
   if output
     Bun.write! output, writer.rows(rows)

@@ -92,7 +92,7 @@ mappedIPv4 = (h) ->
   "#{hi >> 8}.#{hi & 0xff}.#{lo >> 8}.#{lo & 0xff}"
 
 validateUrl = (str) ->
-  parsed = (try new URL(str)) or raise "invalid URL: #{str}"
+  parsed = (try URL.new(str)) or raise "invalid URL: #{str}"
   unless parsed.protocol is 'http:' or parsed.protocol is 'https:'
     raise "URL must be http or https: #{str}"
   host = parsed.hostname
@@ -180,7 +180,7 @@ fetchUrl = (rawUrl) ->
       headers: { 'user-agent': 'rip-ai' }
     if res.status >= 300 and res.status < 400 and res.headers.get('location')
       raise "too many redirects fetching #{rawUrl}" if hop is URL_MAX_REDIRECTS
-      current = new URL(res.headers.get('location'), parsed).toString()
+      current = URL.new(res.headers.get('location'), parsed).toString()
       continue
     raise "URL #{rawUrl} returned HTTP #{res.status}" unless res.ok
     return { res, finalUrl: parsed.toString() }

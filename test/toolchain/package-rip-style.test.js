@@ -1,13 +1,14 @@
-// Rip's dammit operator is the call-and-await form. A written `await` is
-// reserved for promise values that are already in hand; spelling
-// `await fn()` duplicates the language's own call vocabulary and makes the
-// package sources read like JavaScript. Parse real syntax so examples embedded
-// in strings and comments are never mistaken for authored operations.
+// Authored Rip uses its own call and construction vocabulary. Dammit is the
+// call-and-await form; a written `await` is reserved for promise values already
+// in hand. `.new` is construction, and `.new!` is construction plus await.
+// Parse/tokenize real syntax so examples embedded in strings and comments are
+// never mistaken for authored operations. Language fixtures keep the alternate
+// spellings because their job is to exercise the complete accepted grammar.
 import { test, expect } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { Parser } from '../../src/parser.js';
-import { makeParserLexer } from '../../src/lexer.js';
+import { makeParserLexer, tokenize } from '../../src/lexer.js';
 
 const ROOT = join(import.meta.dir, '../..');
 
@@ -22,12 +23,22 @@ const ripFiles = (directory, files = []) => {
 
 const lineAt = (source, offset) => source.slice(0, offset).split('\n').length;
 
-test('package Rip sources use dammit for calls and await only stored promises', () => {
+test('authored Rip uses dammit calls, Ruby construction, and awaits only stored promises', () => {
   const violations = [];
-  const files = ripFiles(join(ROOT, 'packages'));
+  const files = [
+    ...ripFiles(join(ROOT, 'packages')),
+    ...ripFiles(join(ROOT, 'examples')),
+    join(ROOT, 'src/grammar/solar.rip'),
+  ];
 
   for (const file of files) {
     const source = readFileSync(file, 'utf8');
+    for (const token of tokenize(source, file).tokens) {
+      if (token.kind === 'NEW') {
+        violations.push(`${relative(ROOT, file)}:${lineAt(source, token.start)}: prefix new; use .new or .new!`);
+      }
+    }
+
     const parser = Parser();
     parser.lexer = makeParserLexer(file);
     const result = parser.parse(source);
@@ -63,6 +74,6 @@ test('package Rip sources use dammit for calls and await only stored promises', 
     }
   }
 
-  expect(files.length).toBeGreaterThan(30);
+  expect(files.length).toBeGreaterThan(150);
   expect(violations, violations.join('\n')).toEqual([]);
 });

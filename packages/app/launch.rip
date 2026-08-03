@@ -56,7 +56,7 @@ export type LaunchResult =
 
 ROUTE_ROOT = 'app/routes'
 
-fail = (message) -> throw new Error "Rip App: #{message}"
+fail = (message) -> throw Error.new "Rip App: #{message}"
 
 validBundle = (bundle) ->
   fail 'launch requires a bundle object' unless bundle? and typeof bundle is 'object' and not Array.isArray(bundle)
@@ -186,7 +186,7 @@ export def launch(opts: LaunchOpts): LaunchResult
     if errors.length is 1
       throw errors[0]
     if errors.length > 1
-      throw new AggregateError errors, 'Rip App: launch.destroy failed'
+      throw AggregateError.new errors, 'Rip App: launch.destroy failed'
     return
 
   # A failing start must not wedge the process: destroy clears the

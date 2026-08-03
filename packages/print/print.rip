@@ -17,7 +17,7 @@ import { execSync } from 'child_process'
 
 # A pure CLI with no library surface: importing this module is always a
 # mistake, so it rejects loudly instead of silently running the program.
-throw new Error('@rip-lang/print is a CLI, not a library; run print.rip (rip-print)') unless import.meta.main
+throw Error.new('@rip-lang/print is a CLI, not a library; run print.rip (rip-print)') unless import.meta.main
 
 VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
 
@@ -119,7 +119,7 @@ dark   = args.includes('-d') or args.includes('--dark')
 bypass = args.includes('-b') or args.includes('--bypass')
 
 # Extract -x excludes
-excludeExts = new Set()
+excludeExts = Set.new()
 for arg, i in args
   if arg is '-x' and args[i + 1]
     for ext in args[i + 1].split(',')
@@ -131,7 +131,7 @@ paths = args.filter (a, i) -> not a.startsWith('-') and (xIdx < 0 or i isnt xIdx
 paths = ['.'] if paths.length is 0
 
 # Default exclusions (binary, generated, etc.)
-defaultExclude = new Set [
+defaultExclude = Set.new [
   'css', 'gif', 'ico', 'jpg', 'jpeg', 'png', 'svg', 'pdf', 'webp',
   'otf', 'ttf', 'eot', 'woff', 'woff2',
   'o', 'a', 'dylib', 'so', 'dll',
@@ -148,7 +148,7 @@ for ext in excludeExts
 # File discovery
 # ==============================================================================
 
-skipDirs = new Set ['.git', 'node_modules', '.rip-cache', '.zig-cache', 'zig-out', 'dist', 'misc']
+skipDirs = Set.new ['.git', 'node_modules', '.rip-cache', '.zig-cache', 'zig-out', 'dist', 'misc']
 
 def walkDir(dir, base = dir)
   files = []
@@ -399,7 +399,7 @@ html = """
   <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Printed on #{new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} at #{new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase()}</title>
+    <title>Printed on #{Date.new().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} at #{Date.new().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase()}</title>
     <link rel="icon" href="data:,">
     <style id="hljs-theme">#{defaultCss}</style>
     <style>
@@ -525,7 +525,7 @@ server = Bun.serve
   port: 9111
   fetch: ->
     served = true
-    new Response html, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }
+    Response.new html, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }
 
 console.log "\nOpening browser..."
 

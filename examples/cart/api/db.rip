@@ -11,7 +11,7 @@
 import { Database } from 'bun:sqlite'
 import { User, Product, Order } from './models.rip'
 
-export db = new Database "#{import.meta.dir}/cart.sqlite"
+export db = Database.new "#{import.meta.dir}/cart.sqlite"
 
 # Wait for the write lock instead of failing with SQLITE_BUSY when several
 # workers open the file at once on boot.
@@ -35,7 +35,7 @@ export migrate = ->
 # decoded on read, so a VARCHAR value that merely looks like JSON (a name like
 # "[redacted]") is left untouched rather than parsed.
 # toSQL quotes identifiers (`"items" JSON`), so the name may be wrapped.
-jsonCols = new Set([...(User.toSQL() + Product.toSQL() + Order.toSQL()).matchAll(/"?(\w+)"?\s+JSON\b/g)].map((m) -> m[1]))
+jsonCols = Set.new([...(User.toSQL() + Product.toSQL() + Order.toSQL()).matchAll(/"?(\w+)"?\s+JSON\b/g)].map((m) -> m[1]))
 
 # Route the schema ORM through SQLite. `.values()` returns row arrays and
 # `.columnNames` the headers — exactly the adapter's result shape. Object

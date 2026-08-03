@@ -24,7 +24,7 @@ state =
   bootError: null
   handler: null
   inflight: 0
-  inflightStarts: new Map
+  inflightStarts: Map.new()
   requestSerial: 0
   draining: false
   recycleScheduled: false
@@ -34,7 +34,7 @@ boot = ->
     import!(artifact)
     Promise.resolve!
     handler = globalThis.__ripHandler
-    throw new Error("no start! handoff in #{artifact}") unless typeof handler is 'function'
+    throw Error.new("no start! handoff in #{artifact}") unless typeof handler is 'function'
     state.handler = handler
     state.ready = true
   catch error
@@ -46,27 +46,27 @@ server = Bun.serve
   unix: socket
   fetch: (request) ->
     url = request.url
-    if request.method is 'GET' and (url.endsWith('/ready') or url.includes('/ready?')) and new URL(url).pathname is '/ready'
-      return new Response('ok') if state.ready and not state.draining
+    if request.method is 'GET' and (url.endsWith('/ready') or url.includes('/ready?')) and URL.new(url).pathname is '/ready'
+      return Response.new('ok') if state.ready and not state.draining
       headers = if state.bootError? then { 'rip-boot-failed': '1' } else {}
-      return new Response(state.bootError or (if state.draining then 'draining' else 'not ready'), { status: 503, headers })
+      return Response.new(state.bootError or (if state.draining then 'draining' else 'not ready'), { status: 503, headers })
 
-    return new Response(state.bootError or 'not ready', { status: 503 }) unless state.ready
+    return Response.new(state.bootError or 'not ready', { status: 503 }) unless state.ready
     if state.draining
-      return new Response('draining', { status: 503, headers: { 'retry-after': '0', 'rip-worker-draining': '1' } })
+      return Response.new('draining', { status: 503, headers: { 'retry-after': '0', 'rip-worker-draining': '1' } })
     if state.inflight >= concurrency
-      return new Response('busy', { status: 503, headers: { 'retry-after': '0', 'rip-worker-busy': '1' } })
+      return Response.new('busy', { status: 503, headers: { 'retry-after': '0', 'rip-worker-busy': '1' } })
 
     state.inflight++
     serial = ++state.requestSerial
     state.inflightStarts.set serial, Date.now()
     try
       response = state.handler! request
-      throw new TypeError('Rip worker handlers must return a Response') unless response instanceof Response
+      throw TypeError.new('Rip worker handlers must return a Response') unless response instanceof Response
       response
     catch error
       warn "[worker #{workerId}] request failed:", error
-      new Response('Internal Server Error', { status: 500 })
+      Response.new('Internal Server Error', { status: 500 })
     finally
       state.inflightStarts.delete serial
       state.inflight--

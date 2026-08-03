@@ -11,7 +11,7 @@ PROJECT = join(import.meta.dir, '..', 'reloads', 'project')
 releasedCaddy = ->
   return process.env.JANUS_CADDY if process.env.JANUS_CADDY?
   xcaddy = Bun.which 'xcaddy'
-  throw new Error('test:janus requires xcaddy or JANUS_CADDY') unless xcaddy?
+  throw Error.new('test:janus requires xcaddy or JANUS_CADDY') unless xcaddy?
   cache = join tmpdir(), 'rip-janus-release'
   binary = join cache, 'caddy-v1.5.0-access'
   return binary if existsSync binary
@@ -23,7 +23,7 @@ releasedCaddy = ->
       cwd: buildDir
       stdout: 'pipe'
       stderr: 'pipe'
-    throw new Error("cannot build published Janus v1.5.0:\n#{result.stderr.toString()}") unless result.exitCode is 0
+    throw Error.new("cannot build published Janus v1.5.0:\n#{result.stderr.toString()}") unless result.exitCode is 0
     renameSync candidate, binary
   finally
     rmSync buildDir, { recursive: true, force: true }
@@ -34,7 +34,7 @@ waitFor = (name, fn, timeout = 8000) ->
   loop
     value = fn!
     return value if value
-    throw new Error("released Janus test timed out waiting for #{name}") if Date.now() >= deadline
+    throw Error.new("released Janus test timed out waiting for #{name}") if Date.now() >= deadline
     sleep! 20
 
 edgeFetch = (port, path, headers = {}) ->
@@ -69,7 +69,7 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
   start!
   """
 
-  reservation = Bun.serve { port: 0, fetch: -> new Response(null) }
+  reservation = Bun.serve { port: 0, fetch: -> Response.new(null) }
   port = reservation.port
   reservation.stop true
   control = join dir, 'janus.sock'
@@ -106,10 +106,10 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
       stdout: 'pipe'
       stderr: 'pipe'
       env: { ...process.env, JANUS_HEARTBEAT_TTL: '6s', XDG_DATA_HOME: join(dir, 'data'), XDG_CONFIG_HOME: join(dir, 'config') }
-    caddyOut = new Response(caddy.stdout).text()
-    caddyErr = new Response(caddy.stderr).text()
+    caddyOut = Response.new(caddy.stdout).text()
+    caddyErr = Response.new(caddy.stderr).text()
     waitFor! 'control socket', ->
-      throw new Error("released Caddy exited #{caddy.exitCode}: #{await caddyErr}") if caddy.exitCode?
+      throw Error.new("released Caddy exited #{caddy.exitCode}: #{await caddyErr}") if caddy.exitCode?
       existsSync control
     accessStatus = fetch! 'http://janus/1.0/access', { unix: control }
     eq accessStatus.status, 200
@@ -120,13 +120,13 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
       stdin: 'ignore'
       stdout: 'pipe'
       stderr: 'pipe'
-    managerOut = new Response(manager.stdout).text()
-    managerErr = new Response(manager.stderr).text()
+    managerOut = Response.new(manager.stdout).text()
+    managerErr = Response.new(manager.stderr).text()
 
     edgeDiagnostic = 'no response'
     try
       first = waitFor! 'initial API response', ->
-        throw new Error("manager exited #{manager.exitCode}: #{await managerErr}") if manager.exitCode?
+        throw Error.new("manager exited #{manager.exitCode}: #{await managerErr}") if manager.exitCode?
         try
           response = edgeFetch! port, '/api/version'
           text = response.text!
@@ -136,7 +136,7 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
           edgeDiagnostic = String(error)
           null
     catch error
-      throw new Error("#{error}; last edge result #{edgeDiagnostic}")
+      throw Error.new("#{error}; last edge result #{edgeDiagnostic}")
     eq first, { version: 'one' }
     activeAccess = fetch! 'http://janus/1.0/access', { unix: control }
     eq (activeAccess.json!).registrations, 1
@@ -146,7 +146,7 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
       eq directAccess.status, 200, directAccess.text!
     accessRecords = []
     accessError = null
-    framer = new AccessFramer ((line) -> accessRecords.push line), ((error) -> accessError = error)
+    framer = AccessFramer.new ((line) -> accessRecords.push line), ((error) -> accessError = error)
     reader = directAccess.body.getReader()
     waitFor! 'released Janus access hello', ->
       { done, value } = reader.read!

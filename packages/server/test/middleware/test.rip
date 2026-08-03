@@ -14,7 +14,7 @@ generate = (entry, artifact, report, task) ->
     stdin: 'ignore'
     stdout: 'ignore'
     stderr: 'pipe'
-  diagnostic = new Response(proc.stderr).text()
+  diagnostic = Response.new(proc.stderr).text()
   code = await proc.exited
   eq code, 0, await diagnostic
   JSON.parse readFileSync(report, 'utf8')
@@ -24,7 +24,7 @@ waitFor = (fn) ->
   loop
     value = fn!
     return value if value
-    throw new Error('middleware test timed out') if Date.now() >= deadline
+    throw Error.new('middleware test timed out') if Date.now() >= deadline
     sleep! 10
 
 unixFetch = (socket, path, options = {}) ->
@@ -47,7 +47,7 @@ responseJson = (response) ->
   try
     JSON.parse text
   catch
-    throw new Error("expected JSON from #{response.status}: #{text}")
+    throw Error.new("expected JSON from #{response.status}: #{text}")
 
 runMode = (encrypt) ->
   dir = mkdtempSync join(tmpdir(), "rip-middleware-#{if encrypt then 'encrypted' else 'signed'}-")
@@ -99,7 +99,7 @@ runMode = (encrypt) ->
       stdout: 'ignore'
       stderr: 'pipe'
       env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: 'middleware', WORKER_CONCURRENCY: '2' }
-    diagnostic = new Response(proc.stderr).text()
+    diagnostic = Response.new(proc.stderr).text()
     waitFor! ->
       try (unixFetch!(socket, '/ready')).status is 200 catch then false
     repeated = unixFetch! socket, '/once'
@@ -200,17 +200,17 @@ test 'invalid middleware policy rejects during registration', ->
 
 test! 'CORS distinguishes preflight, denied variants, and async predicates', ->
   policy = cors origin: -> Promise.resolve false
-  denied = policy!(new Request('http://worker/state', { headers: { origin: 'https://other.test' } }), -> new Response('ok'))
+  denied = policy!(Request.new('http://worker/state', { headers: { origin: 'https://other.test' } }), -> Response.new('ok'))
   eq denied.status, 200
   eq denied.headers.get('access-control-allow-origin'), null
   eq denied.headers.get('vary'), 'Origin'
-  ordinary = policy!(new Request('http://worker/state', { method: 'OPTIONS' }), -> new Response('ordinary', { status: 209 }))
+  ordinary = policy!(Request.new('http://worker/state', { method: 'OPTIONS' }), -> Response.new('ordinary', { status: 209 }))
   eq ordinary.status, 204
   eq ordinary.text!, ''
 
 test! 'htmlJson renders direct iOS navigation and leaves API JSON alone', ->
   json = -> Response.json { unsafe: '<script>', count: 2 }
-  navigation = new Request 'http://worker/state',
+  navigation = Request.new 'http://worker/state',
     headers:
       'user-agent': 'Mozilla/5.0 (iPhone)'
       accept: 'text/html'
@@ -221,29 +221,29 @@ test! 'htmlJson renders direct iOS navigation and leaves API JSON alone', ->
   html = rendered.text!
   ok html.includes '&lt;script&gt;'
   ok html.includes '<span class="number">2</span>'
-  api = htmlJson!(new Request('http://worker/state', { headers: { 'user-agent': 'Mozilla/5.0 (iPhone)', accept: 'application/json' } }), json)
+  api = htmlJson!(Request.new('http://worker/state', { headers: { 'user-agent': 'Mozilla/5.0 (iPhone)', accept: 'application/json' } }), json)
   ok api.headers.get('content-type').startsWith 'application/json'
   eq api.headers.get('vary'), 'User-Agent, Accept, Sec-Fetch-Dest'
   eq api.json!, { unsafe: '<script>', count: 2 }
-  rejected = htmlJson!(new Request('http://worker/state', { headers: { 'user-agent': 'Mozilla/5.0 (iPhone)', accept: 'application/json, text/html;q=0', 'sec-fetch-dest': 'document' } }), json)
+  rejected = htmlJson!(Request.new('http://worker/state', { headers: { 'user-agent': 'Mozilla/5.0 (iPhone)', accept: 'application/json, text/html;q=0', 'sec-fetch-dest': 'document' } }), json)
   ok rejected.headers.get('content-type').startsWith 'application/json'
   largeText = JSON.stringify({ value: 'x'.repeat(1_000_001) })
-  large = htmlJson! navigation, -> new Response(largeText, { headers: { 'content-type': 'application/json', 'content-length': String(largeText.length) } })
+  large = htmlJson! navigation, -> Response.new(largeText, { headers: { 'content-type': 'application/json', 'content-length': String(largeText.length) } })
   ok large.headers.get('content-type').startsWith 'application/json'
-  stream = new ReadableStream
+  stream = ReadableStream.new
     start: (controller) ->
-      controller.enqueue new TextEncoder().encode(largeText)
+      controller.enqueue TextEncoder.new().encode(largeText)
       controller.close()
   streamed = Promise.race! [
-    htmlJson navigation, -> new Response(stream, { headers: { 'content-type': 'application/json' } })
-    new Promise((_, reject) -> setTimeout((-> reject(new Error('htmlJson size cancellation blocked'))), 1000))
+    htmlJson navigation, -> Response.new(stream, { headers: { 'content-type': 'application/json' } })
+    Promise.new((_, reject) -> setTimeout((-> reject(Error.new('htmlJson size cancellation blocked'))), 1000))
   ]
   eq (streamed.text!).length, largeText.length
 
 test! 'secureHeaders fills API defaults without overriding application policy', ->
   policy = secureHeaders permissionsPolicy: 'camera=(), microphone=()'
-  response = policy! new Request('http://worker/state'), ->
-    new Response 'ok',
+  response = policy! Request.new('http://worker/state'), ->
+    Response.new 'ok',
       headers:
         'content-security-policy': "default-src 'none'"
         'x-frame-options': 'DENY'
@@ -256,7 +256,7 @@ test! 'secureHeaders fills API defaults without overriding application policy', 
   eq response.headers.get('strict-transport-security'), null
 
   reduced = secureHeaders contentSecurityPolicy: false, frameOptions: false
-  response = reduced! new Request('http://worker/state'), -> new Response 'ok'
+  response = reduced! Request.new('http://worker/state'), -> Response.new 'ok'
   eq response.headers.get('content-security-policy'), null
   eq response.headers.get('x-frame-options'), null
   throws (-> secureHeaders({ referrerPolicy: '   ' })), 'nonempty header value or false'
@@ -264,7 +264,7 @@ test! 'secureHeaders fills API defaults without overriding application policy', 
 
 test! 'prototype-named cookies are data', ->
   policy = csrf secret: 'csrf-secret', cookieName: 'toString'
-  response = policy!(new Request('http://worker/state', { headers: { cookie: 'toString=not-a-token' } }), -> new Response('ok'))
+  response = policy!(Request.new('http://worker/state', { headers: { cookie: 'toString=not-a-token' } }), -> Response.new('ok'))
   eq response.status, 200
   ok response.headers.get('set-cookie').startsWith 'toString='
 

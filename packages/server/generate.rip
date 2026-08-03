@@ -9,7 +9,7 @@ rewriteMeta = (code, path) ->
   return code unless code.includes 'import.meta'
   full = JSON.stringify path
   folder = JSON.stringify dirname(path)
-  transpiler = new Bun.Transpiler
+  transpiler = Bun.Transpiler.new
     loader: 'js'
     define:
       'import.meta.url': JSON.stringify(Bun.pathToFileURL(path).href)
@@ -22,7 +22,7 @@ rewriteMeta = (code, path) ->
 
 inventory = {}
 record = (path, bytes) ->
-  inventory[path] = new Bun.CryptoHasher('sha256').update(bytes).digest('hex')
+  inventory[path] = Bun.CryptoHasher.new('sha256').update(bytes).digest('hex')
 
 plugin =
   name: 'rip'
@@ -51,7 +51,7 @@ buildArtifact = (entry, artifact) ->
     throw: false
     plugins: [plugin]
   unless result.success
-    throw new Error result.logs.map((log) -> log?.message or String(log)).join('\n')
+    throw Error.new result.logs.map((log) -> log?.message or String(log)).join('\n')
   Bun.write! artifact, result.outputs[0].text!
 
 [entry, artifact, resultPath, taskId, epochText] = process.argv.slice 2
@@ -66,8 +66,8 @@ try
 
   inputs = []
   for path, expected of inventory
-    actual = new Bun.CryptoHasher('sha256').update(readFileSync(path)).digest('hex')
-    throw new Error("input changed during generation: #{path}") unless actual is expected
+    actual = Bun.CryptoHasher.new('sha256').update(readFileSync(path)).digest('hex')
+    throw Error.new("input changed during generation: #{path}") unless actual is expected
     inputs.push path
   inputs.sort()
 

@@ -273,7 +273,7 @@ test "the row table: #{rows.length} contracts", ->
   for [type, input, expected] in rows
     got = check input, type
     unless JSON.stringify(got) is JSON.stringify(expected)
-      throw new Error "#{type} #{JSON.stringify(input)}: expected #{JSON.stringify(expected)}, got #{JSON.stringify(got)}"
+      throw Error.new "#{type} #{JSON.stringify(input)}: expected #{JSON.stringify(expected)}, got #{JSON.stringify(got)}"
 
 test "the raw set receives values untouched", ->
   eq check([1, 2], 'array'), [1, 2]

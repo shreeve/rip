@@ -40,7 +40,7 @@ class SpawnTransport
         cols: opts.cols ?? 80
         rows: opts.rows ?? 24
         data: (term, raw) =>
-          chunk = new TextDecoder().decode(raw)
+          chunk = TextDecoder.new().decode(raw)
           if @waiting
             fn = @waiting
             @waiting = null
@@ -54,7 +54,7 @@ class SpawnTransport
   read: (timeout) ->
     return null if @closed
     return @queue.shift() if @queue.length > 0
-    new Promise (resolve) =>
+    Promise.new (resolve) =>
       timer = setTimeout =>
         @waiting = null
         resolve null
@@ -75,7 +75,7 @@ class TcpTransport
     @queue   = []
     @waiting = null
     @closed  = false
-    @ready   = new Promise (resolve, reject) =>
+    @ready   = Promise.new (resolve, reject) =>
       Bun.connect
         hostname: host
         port:     port
@@ -84,7 +84,7 @@ class TcpTransport
             @socket = socket
             resolve()
           data: (socket, raw) =>
-            chunk = if typeof raw is 'string' then raw else new TextDecoder().decode(raw)
+            chunk = if typeof raw is 'string' then raw else TextDecoder.new().decode(raw)
             if @waiting
               fn = @waiting
               @waiting = null
@@ -103,7 +103,7 @@ class TcpTransport
   read: (timeout) ->
     return null if @closed
     return @queue.shift() if @queue.length > 0
-    new Promise (resolve) =>
+    Promise.new (resolve) =>
       timer = setTimeout =>
         @waiting = null
         resolve null
@@ -426,8 +426,8 @@ export class Script
       opts = args
       args = []
     opts ??= {}
-    transport = new SpawnTransport(cmd, args ?? [], opts)
-    engine = new Engine(transport, opts)
+    transport = SpawnTransport.new(cmd, args ?? [], opts)
+    engine = Engine.new(transport, opts)
     if opts.auth
       engine.chat! opts.auth
     if opts.init
@@ -435,13 +435,13 @@ export class Script
     createChat engine
 
   @ssh: (url, opts = {}) ->
-    parsed = new URL(if url.includes('://') then url else "ssh://#{url}")
+    parsed = URL.new(if url.includes('://') then url else "ssh://#{url}")
     args = []
     args.push '-p', parsed.port if parsed.port
     args.push '-l', decodeURIComponent(parsed.username) if parsed.username
     args.push parsed.hostname
-    transport = new SpawnTransport('ssh', args, opts)
-    engine = new Engine(transport, opts)
+    transport = SpawnTransport.new('ssh', args, opts)
+    engine = Engine.new(transport, opts)
     if parsed.password
       engine.chat! [/[Pp]assword/, decodeURIComponent(parsed.password)]
     if opts.auth
@@ -451,9 +451,9 @@ export class Script
     createChat engine
 
   @tcp: (host, port, opts = {}) ->
-    transport = new TcpTransport(host, port, opts)
+    transport = TcpTransport.new(host, port, opts)
     await transport.ready
-    engine = new Engine(transport, opts)
+    engine = Engine.new(transport, opts)
     if opts.auth
       engine.chat! opts.auth
     if opts.init
@@ -469,8 +469,8 @@ export class Script
       else raise "Unknown scheme: #{scheme}"
 
   @trace: (opts = {}) ->
-    transport = new TraceTransport()
-    engine = new Engine(transport, { ...opts, live: false })
+    transport = TraceTransport.new()
+    engine = Engine.new(transport, { ...opts, live: false })
     createChat engine
 
 # ==[ Helper Functions ]==

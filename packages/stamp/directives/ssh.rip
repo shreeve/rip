@@ -29,7 +29,7 @@ export check = (name, props) ->
     want = entries[0].args[0]
     sshdKey = OPTION_MAP[key]?.toLowerCase()
     continue unless sshdKey
-    match = out.stdout.match new RegExp "^#{sshdKey}\\s+(\\S+)", 'mi'
+    match = out.stdout.match RegExp.new "^#{sshdKey}\\s+(\\S+)", 'mi'
     return 'drift' if normalize(match?[1]) != want
 
   'ok'
@@ -60,7 +60,7 @@ export verify = (name, props) ->
     want = entries[0].args[0]
     sshdKey = OPTION_MAP[key]?.toLowerCase()
     continue unless sshdKey
-    match = out.stdout.match new RegExp "^#{sshdKey}\\s+(\\S+)", 'mi'
+    match = out.stdout.match RegExp.new "^#{sshdKey}\\s+(\\S+)", 'mi'
     actual = normalize match?[1]
     if actual == want
       results.push { status: 'pass', message: "#{key} is #{want}" }

@@ -58,7 +58,7 @@ class X12
 
     # Detect separators from ISA header
     m = @str.match /^ISA(.).{78}(.).{21}(.)(.)/
-    throw new Error "malformed X12" unless m
+    throw Error.new "malformed X12" unless m
     @fld = m[1]
     @rep = m[2]
     @com = m[3]
@@ -87,7 +87,7 @@ class X12
 
   toArray: ->
     return @ary if @ary
-    re = new RegExp "[#{escRe @seg}\\r\\n]+", 'g'
+    re = RegExp.new "[#{escRe @seg}\\r\\n]+", 'g'
     rows = @str.trim().split re
     # The terminator after the last segment splits off one empty tail;
     # drop it so 17 segments parse to 17 rows and raw() never emits "~~".
@@ -176,11 +176,11 @@ class X12
 
     # Parse the selector
     m = pos.match SELECTOR
-    throw new Error "bad selector '#{pos}'" unless m
+    throw Error.new "bad selector '#{pos}'" unless m
     seg = m[1]
     wantPat = "^#{seg}[^#{escRe @seg}\\r\\n]*"
-    want = new RegExp wantPat, 'i'
-    wantG = new RegExp wantPat, 'gim'
+    want = RegExp.new wantPat, 'i'
+    wantG = RegExp.new wantPat, 'gim'
 
     numStr = m[2] or ""
     isDigit = /^\d+$/
@@ -191,7 +191,7 @@ class X12
 
     fldStr = m[3]
     fld = if fldStr? then parseInt fldStr else null
-    throw new Error "zero index on field" if len > 1 and fld is 0
+    throw Error.new "zero index on field" if len > 1 and fld is 0
 
     repStr = m[4] or ""
     rep = if repStr.length > 0 and isDigit.test repStr then parseInt repStr else null
@@ -201,7 +201,7 @@ class X12
 
     comStr = m[5]
     com = if comStr? then parseInt comStr else null
-    throw new Error "zero index on component" if len > 1 and com is 0
+    throw Error.new "zero index on component" if len > 1 and com is 0
 
     if len <= 1  # GET
       @toString() unless @str
@@ -293,7 +293,7 @@ class X12
         val = String(val).split @com, -1
         how = 'com'
 
-      throw new Error "invalid fld/rep/com: [#{fld}, #{rep}, #{com}]" unless how
+      throw Error.new "invalid fld/rep/com: [#{fld}, #{rep}, #{com}]" unless how
 
       val = [""] if val.length is 0
 
@@ -429,10 +429,10 @@ class X12
         continue
 
       m = pos.match SELECTOR
-      throw new Error "bad selector '#{pos}'" unless m
+      throw Error.new "bad selector '#{pos}'" unless m
       seg = m[1]
       wantPat = "^#{seg}[^#{escRe @seg}\\r\\n]*"
-      wantG = new RegExp wantPat, 'gim'
+      wantG = RegExp.new wantPat, 'gim'
 
       numStr = m[2] or ""
       isDigit = /^\d+$/
@@ -453,7 +453,7 @@ class X12
       matches = str.match(wantG) or []
 
       if allNum
-        throw new Error "multi query allows only one selector" if ask.length > 1
+        throw Error.new "multi query allows only one selector" if ask.length > 1
         result = []
         for match in matches
           out = match
@@ -514,8 +514,8 @@ X12.load = (file) ->
   try
     str = readFileSync file, 'utf-8'
   catch
-    throw new Error "unreadable file: #{file}"
-  new X12 str
+    throw Error.new "unreadable file: #{file}"
+  X12.new str
 
 export { X12, ISA_WIDTHS, SELECTOR }
 
@@ -616,10 +616,10 @@ if import.meta.main
   if opts.after
     d = opts.after
     iso = "#{d.slice(0,4)}-#{d.slice(4,6)}-#{d.slice(6,8)}"
-    afterTime = new Date iso
+    afterTime = Date.new iso
 
   # File discovery
-  skipDirs = new Set ['.git', 'node_modules', '.rip-cache']
+  skipDirs = Set.new ['.git', 'node_modules', '.rip-cache']
 
   walkDir = (dir) ->
     files = []
@@ -680,7 +680,7 @@ if import.meta.main
       continue
 
     try
-      x12 = new X12 str
+      x12 = X12.new str
     catch e
       unless opts.ignore
         console.error "ERROR: malformed X12: \"#{file}\" (#{e.message})"

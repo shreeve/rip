@@ -27,15 +27,15 @@ server =! Bun.serve
     method  = req.method
     headers = Object.fromEntries(req.headers.entries())
     body    = req.text!
-    path = new URL(req.url).pathname
+    path = URL.new(req.url).pathname
     if path is '/plain'
-      return new Response('hello plain', { status: 200 })
+      return Response.new('hello plain', { status: 200 })
     if path is '/json'
-      return new Response(JSON.stringify({ ok: true, n: 1 }), {
+      return Response.new(JSON.stringify({ ok: true, n: 1 }), {
         status: 200
         headers: { 'content-type': 'application/json' }
       })
-    new Response(JSON.stringify({ method, path, headers, body }), {
+    Response.new(JSON.stringify({ method, path, headers, body }), {
       status: 200
       headers: { 'content-type': 'application/json' }
     })
@@ -64,8 +64,8 @@ def run(args, opts = {})
     proc.stdin.write opts.input
     proc.stdin.end()
   status = await proc.exited
-  stdout = new Response(proc.stdout).text!
-  stderr = new Response(proc.stderr).text!
+  stdout = Response.new(proc.stdout).text!
+  stderr = Response.new(proc.stderr).text!
   { status, stdout, stderr }
 
 # ==[ Package surface ]==

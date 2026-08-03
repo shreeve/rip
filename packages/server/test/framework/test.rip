@@ -10,7 +10,7 @@ import {
 import { resolve } from 'node:path'
 
 request = (method, path, opts = {}) ->
-  new Request "http://framework.test#{path}", { method, ...opts }
+  Request.new "http://framework.test#{path}", { method, ...opts }
 
 jsonRequest = (method, path, body) ->
   request method, path,
@@ -85,12 +85,12 @@ test! 'middleware uses Request and next in registration order', ->
     order.push "in:#{request.method}"
     response = next!
     order.push 'out'
-    new Response response.body,
+    Response.new response.body,
       status: response.status
       headers: { ...Object.fromEntries(response.headers), 'x-global': 'yes' }
   use '/api', (request, next) ->
     order.push 'scoped'
-    replacement = new Request request.url,
+    replacement = Request.new request.url,
       method: request.method
       headers: { ...Object.fromEntries(request.headers), 'x-replaced': 'yes' }
     next replacement
@@ -103,7 +103,7 @@ test! 'middleware uses Request and next in registration order', ->
 
 test! 'middleware can short-circuit and rejects duplicate next calls', ->
   resetGlobals()
-  use '/private', -> new Response('denied', { status: 401 })
+  use '/private', -> Response.new('denied', { status: 401 })
   get '/private/data' -> 'never'
   eq (handle! request('GET', '/private/data')).status, 401
 
@@ -163,7 +163,7 @@ test! 'before and after filters compose around handlers and short-circuit', ->
   eq late, ['handler', 'before', 'handler', 'after']
 
   resetGlobals()
-  before -> throw new Error 'filter secret'
+  before -> throw Error.new 'filter secret'
   get '/failure' -> 'never'
   warnings = captureWarnings! ->
     failure = handle! request('GET', '/failure')
@@ -192,7 +192,7 @@ test! 'error helpers, terminal handlers, and masking follow the contract', ->
   get '/bail' ->
     session.secret = 'discard'
     bail!
-  get '/secret' -> throw new Error 'database password'
+  get '/secret' -> throw Error.new 'database password'
   notFound -> @text 'lost', 404
   warnings = captureWarnings! ->
     bad = handle! request('GET', '/bad')
@@ -209,7 +209,7 @@ test! 'error helpers, terminal handlers, and masking follow the contract', ->
 
     resetGlobals()
     onError (failure) -> @json { handled: failure.message }, 409
-    get '/custom' -> throw new Error 'handled here'
+    get '/custom' -> throw Error.new 'handled here'
     custom = handle! request('GET', '/custom')
     eq custom.status, 409
     eq custom.json!, { handled: 'handled here' }
@@ -223,10 +223,10 @@ test! 'error helpers, terminal handlers, and masking follow the contract', ->
   ok warnings.some((message) -> message.includes('handled here'))
 
 test 'error envelopes expose client details and mask server details', ->
-  eq errorEnvelope(new Error('database password')),
+  eq errorEnvelope(Error.new('database password')),
     status: 500
     error: { message: 'Internal Server Error' }
-  failure = Object.assign new Error('invalid input'),
+  failure = Object.assign Error.new('invalid input'),
     status: 400
     issues: [{ field: 'email' }]
   eq errorEnvelope(failure),
@@ -416,7 +416,7 @@ test! 'cache directives emit exact policy and reject guesses', ->
 test! 'App resets registrations and returns the shared fetch handler', ->
   resetGlobals()
   get '/stale' -> 'stale'
-  before -> throw new Error 'stale filter'
+  before -> throw Error.new 'stale filter'
   notFound -> @text 'stale not found', 404
   handler = App ->
     get '/fresh' -> 'fresh'

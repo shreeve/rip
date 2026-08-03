@@ -60,29 +60,29 @@ stableRecord = (previous, next) ->
 
 validManifest = (manifest) ->
   unless manifest? and typeof manifest.match is 'function' and Array.isArray(manifest.routes)
-    throw new TypeError 'Rip App: createRouter requires a route manifest'
+    throw TypeError.new 'Rip App: createRouter requires a route manifest'
   manifest
 
 validBase = (base) ->
   return '' if base is '' or not base?
   unless typeof base is 'string' and base.startsWith('/') and not base.endsWith('/')
-    throw new TypeError "Rip App: invalid router base '#{base}'"
+    throw TypeError.new "Rip App: invalid router base '#{base}'"
   base
 
 export def createRouter(opts: RouterOpts): Router
   { routes, adapter, onError } = opts ?? {}
   unless routes? and (typeof routes is 'function' or (typeof routes.match is 'function' and Array.isArray(routes.routes)))
-    throw new TypeError 'Rip App: createRouter requires a route manifest or manifest thunk'
+    throw TypeError.new 'Rip App: createRouter requires a route manifest or manifest thunk'
   for method in ['read', 'push', 'replace', 'go', 'listen']
     unless typeof adapter?[method] is 'function'
-      throw new TypeError "Rip App: router adapter requires a #{method} function"
+      throw TypeError.new "Rip App: router adapter requires a #{method} function"
   base = validBase opts?.base
   hashMode = opts?.hash is true
   if base and hashMode
-    throw new TypeError 'Rip App: a base path does not apply in hash mode'
+    throw TypeError.new 'Rip App: a base path does not apply in hash mode'
 
   activeManifest = if typeof routes is 'function' then validManifest routes() else validManifest routes
-  callbacks: Set<any> = new Set()
+  callbacks: Set<any> = Set.new()
   unlisten: any = null
 
   _path = __state null
@@ -158,7 +158,7 @@ export def createRouter(opts: RouterOpts): Router
     true
 
   guardLoop = ->
-    throw new Error 'Rip App: navigation loop — ten nested navigations from onNavigate' if depth >= 10
+    throw Error.new 'Rip App: navigation loop — ten nested navigations from onNavigate' if depth >= 10
 
   handleExternal = ->
     external = adapter.read()
@@ -261,7 +261,7 @@ export def createRouter(opts: RouterOpts): Router
 
     onNavigate: (fn) ->
       unless typeof fn is 'function'
-        throw new TypeError 'Rip App: onNavigate expects a function'
+        throw TypeError.new 'Rip App: onNavigate expects a function'
       callbacks.add fn
       -> callbacks.delete fn
 
@@ -294,7 +294,7 @@ export def createRouter(opts: RouterOpts): Router
 # rejects loudly.
 export def browserAdapter(): RouterAdapter
   if typeof window is 'undefined' or not window.history? or not window.location?
-    throw new Error 'Rip App: browserAdapter requires a browser environment'
+    throw Error.new 'Rip App: browserAdapter requires a browser environment'
   window.history.scrollRestoration = 'manual'
   # requestAnimationFrame must be invoked with `window` as receiver or
   # browsers throw "Illegal invocation".

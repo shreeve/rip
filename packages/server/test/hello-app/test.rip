@@ -12,7 +12,7 @@ waitFor = (fn, timeout = 5000) ->
   loop
     value = fn!
     return value if value
-    throw new Error('App publication test timed out') if Date.now() >= deadline
+    throw Error.new('App publication test timed out') if Date.now() >= deadline
     sleep! 10
 
 test! 'App-only manager publishes a finite generated surface with no workers', ->
@@ -26,16 +26,16 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
-      url = new URL request.url
+      url = URL.new request.url
       if request.method is 'POST' and url.pathname is '/1.0/apps'
         registration = request.json!
         return Response.json({ id: 'app-registration' }, { status: 201 })
       if request.method is 'POST' and url.pathname is '/1.0/apps/app-registration/heartbeat'
-        return new Response(null, { status: 204 })
+        return Response.new(null, { status: 204 })
       if request.method is 'DELETE' and url.pathname is '/1.0/apps/app-registration'
         deleted = true
-        return new Response(null, { status: 204 })
-      new Response('Not Found', { status: 404 })
+        return Response.new(null, { status: 204 })
+      Response.new('Not Found', { status: 404 })
   proc = null
   try
     proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--name', 'hello-app', '--host', 'hello-app.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
@@ -61,7 +61,7 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
     eq bundle.files.map((entry) -> entry.id), ['app/routes/index.rip', 'app/styles.css', 'app/template.html']
     eq Object.keys(bundle.modules).filter((id) -> id.startsWith('app/')), ['app/routes/index.rip']
     inventory = JSON.stringify bundle.files.map (entry) -> [entry.id, entry.hash]
-    eq bundle.rash, rash(new TextEncoder().encode(inventory))
+    eq bundle.rash, rash(TextEncoder.new().encode(inventory))
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143
@@ -83,11 +83,11 @@ test! 'authored App shell is registered without generating a replacement', ->
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
-      url = new URL request.url
+      url = URL.new request.url
       if request.method is 'POST' and url.pathname is '/1.0/apps'
         registration = request.json!
         return Response.json({ id: 'authored-registration' }, { status: 201 })
-      new Response(null, { status: 204 })
+      Response.new(null, { status: 204 })
   proc = null
   try
     proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--host', 'authored.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
@@ -117,7 +117,7 @@ test! 'watch publication commits one shared inventory then batches per-file ding
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
-      url = new URL request.url
+      url = URL.new request.url
       if request.method is 'POST' and url.pathname is '/1.0/apps'
         registration = request.json!
         while registrationHeld
@@ -126,7 +126,7 @@ test! 'watch publication commits one shared inventory then batches per-file ding
       if request.method is 'POST' and url.pathname is '/1.0/apps/watch-registration/hub/publish'
         batches.push request.json!
         return Response.json({ deliveries: 0 })
-      new Response(null, { status: 204 })
+      Response.new(null, { status: 204 })
   proc = null
   try
     proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'watch.test', '--control', controlSocket, '--access-log=off'],

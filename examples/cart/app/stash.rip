@@ -28,12 +28,12 @@ cart: Cart =
 export stash =
   cart: cart
   user: source
-    fetch: -> User.parse(api.get!('user').json!())
+    fetch: -> User.parse(api.get!('user').json!)
     staleTime: '5 min'
   products: source
-    fetch: -> Product.array.parse(api.get!('products').json!())
+    fetch: -> Product.array.parse(api.get!('products').json!)
     staleTime: '5 min'
   orders: source
-    fetch: -> Order.array.parse(api.get!('orders').json!())
+    fetch: -> Order.array.parse(api.get!('orders').json!)
   order: source
-    fetch: (id: string) -> Order.parse(api.get!("orders/#{id}").json!())
+    fetch: (id: string) -> Order.parse(api.get!("orders/#{id}").json!)

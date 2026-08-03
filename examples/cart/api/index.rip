@@ -9,7 +9,7 @@ def errorResponse(errors: { form?: string, field?: Partial<Record<string, string
 currentUser = () -> User.find!(1)
 
 get '/api/user' ->
-  user = currentUser!()
+  user = currentUser!
   if not user then return errorResponse({ form: 'No user found' }, 404)
   return UserPublic.parse(user)
 
@@ -24,28 +24,28 @@ patch '/api/user' ->
 
   if Object.keys(field).length then return errorResponse({ field })
 
-  user = currentUser!()
+  user = currentUser!
   if not user then return errorResponse({ form: 'No user found' }, 404)
 
   Object.assign(user, { firstName, lastName, phone })
-  user.save!()
+  user.save!
 
   return UserPublic.parse(user)
 
-get '/api/products' -> Product.all!().map((p) -> ProductPublic.parse(p))
+get '/api/products' -> Product.all!.map((p) -> ProductPublic.parse(p))
 
 get '/api/orders' ->
-  user = currentUser!()
+  user = currentUser!
   if not user then return []
-  return user.orders!().reverse().map((o) -> OrderPublic.parse(o))
+  return user.orders!.reverse().map((o) -> OrderPublic.parse(o))
 
 get '/api/orders/:id' ->
   id = read 'id', 'id'
 
-  user = currentUser!()
+  user = currentUser!
   if not user then return errorResponse({ form: 'No user found' }, 404)
 
-  order = Order.where({ id, userId: user.id }).first!()
+  order = Order.where({ id, userId: user.id }).first!
   if not order then return errorResponse({ form: 'Order not found' }, 404)
 
   return OrderPublic.parse(order)
@@ -68,7 +68,7 @@ post '/api/orders' ->
     total += product.price * quantity
     items.push({ productId, name: product.name, price: product.price, image: product.image, quantity })
 
-  user = currentUser!()
+  user = currentUser!
   if not user then return errorResponse({ form: 'No user found' }, 404)
 
   order = Order.create!({ userId: user.id, total, items })

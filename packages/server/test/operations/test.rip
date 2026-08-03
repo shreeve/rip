@@ -55,7 +55,7 @@ waitFor = (fn, timeout = 5000) ->
   loop
     value = fn!
     return value if value
-    throw new Error('operation test timed out') if Date.now() >= deadline
+    throw Error.new('operation test timed out') if Date.now() >= deadline
     sleep! 10
 
 unixFetch = (path, socket) ->
@@ -67,8 +67,8 @@ command = (name, project) ->
     stdin: 'ignore'
     stdout: 'pipe'
     stderr: 'pipe'
-  out = new Response(proc.stdout).text()
-  err = new Response(proc.stderr).text()
+  out = Response.new(proc.stdout).text()
+  err = Response.new(proc.stderr).text()
   code = await proc.exited
   eq code, 0, await err
   JSON.parse await out
@@ -78,7 +78,7 @@ failedCommand = (name, project) ->
     stdin: 'ignore'
     stdout: 'ignore'
     stderr: 'pipe'
-  diagnostic = new Response(proc.stderr).text()
+  diagnostic = Response.new(proc.stderr).text()
   code = await proc.exited
   { code, diagnostic: await diagnostic }
 
@@ -95,17 +95,17 @@ test! 'hold fences App publication, API replacement, and dings', ->
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
-      url = new URL request.url
+      url = URL.new request.url
       if request.method is 'POST' and url.pathname is '/1.0/apps'
         registration = request.json!
         return Response.json({ id: 'operations-registration' }, { status: 201 })
       if request.method is 'PUT'
         updates.push request.json!
-        return new Response(null, { status: 204 })
+        return Response.new(null, { status: 204 })
       if url.pathname.endsWith('/hub/publish')
         dings.push ...(request.json!)
         return Response.json({ deliveries: 0 })
-      new Response(null, { status: 204 })
+      Response.new(null, { status: 204 })
   proc = null
   try
     proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'operations.test', '--control', controlSocket, '--access-log=off'],
@@ -181,17 +181,17 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
-      url = new URL request.url
+      url = URL.new request.url
       if request.method is 'POST' and url.pathname is '/1.0/apps'
         registration = request.json!
         return Response.json({ id: 'migration-registration' }, { status: 201 })
       if request.method is 'PUT'
         updates.push request.json!
-        return new Response(null, { status: 204 })
+        return Response.new(null, { status: 204 })
       if url.pathname.endsWith('/hub/publish')
         dings.push ...(request.json!)
         return Response.json({ deliveries: 0 })
-      new Response(null, { status: 204 })
+      Response.new(null, { status: 204 })
 
   diagnostics = []
   startManager = ->
@@ -199,7 +199,7 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'pipe'
-    diagnostics.push new Response(proc.stderr).text()
+    diagnostics.push Response.new(proc.stderr).text()
     proc
 
   operation = (args) ->
@@ -222,9 +222,9 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
 
     firstId = '11111111111111111111111111111111'
     migrationProc = operation ['migrate', 'models.rip', '--dir', 'migrations', '--id', firstId]
-    migrationError = new Response(migrationProc.stderr).text()
+    migrationError = Response.new(migrationProc.stderr).text()
     waitFor! ->
-      throw new Error("migration exited before cutting admission: #{await migrationError}") if migrationProc.exitCode?
+      throw Error.new("migration exited before cutting admission: #{await migrationError}") if migrationProc.exitCode?
       updates.some (update) -> update.upstreams.length is 0
     eq migrationProc.exitCode, null
     writeFileSync join(project, 'index.rip'), """
@@ -234,7 +234,7 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
     start!
     """
     eq (await migrationProc.exited), 0, await migrationError
-    migrated = JSON.parse new Response(migrationProc.stdout).text!
+    migrated = JSON.parse Response.new(migrationProc.stdout).text!
     eq migrated.operation, 'Active'
     bell = waitFor! ->
       update = updates.findLast (candidate) -> candidate.upstreams[0]?.doorbell is true
@@ -250,8 +250,8 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
       socket if socket? and socket isnt active
     eq ((unixFetch!('/version', replacement)).json!), { version: 'reconciled' }
     retry = operation ['migrate', 'models.rip', '--dir', 'migrations', '--id', firstId]
-    eq (await retry.exited), 0, new Response(retry.stderr).text!
-    eq (JSON.parse(new Response(retry.stdout).text!)).operation, 'Active'
+    eq (await retry.exited), 0, Response.new(retry.stderr).text!
+    eq (JSON.parse(Response.new(retry.stdout).text!)).operation, 'Active'
     eq JSON.parse(readFileSync(join(project, 'db.json'), 'utf8')).history[0].version, '0001'
     eq existsSync(join(project, '.rip', 'server-operation.json')), false
 
@@ -289,8 +289,8 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
     eq existsSync(journalPath), true
 
     recoveredProc = operation ['recover', secondId]
-    eq (await recoveredProc.exited), 0, new Response(recoveredProc.stderr).text!
-    recovered = JSON.parse new Response(recoveredProc.stdout).text!
+    eq (await recoveredProc.exited), 0, Response.new(recoveredProc.stderr).text!
+    recovered = JSON.parse Response.new(recoveredProc.stdout).text!
     eq recovered.operation, 'Active'
     recoveredSocket = updates.at(-1).upstreams[0].path
     eq ((unixFetch!('/version', recoveredSocket)).json!), { version: 'recovered' }

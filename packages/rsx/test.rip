@@ -196,7 +196,7 @@ console.log "\nParse — forceArray"
 
 test "accepts an array, a Set, or a predicate function", ->
   eq parse('<l><i>a</i></l>', forceArray: ['i']), { l: { i: ['a'] } }
-  eq parse('<l><i>a</i></l>', forceArray: new Set(['i'])), { l: { i: ['a'] } }
+  eq parse('<l><i>a</i></l>', forceArray: Set.new(['i'])), { l: { i: ['a'] } }
   eq parse('<l><i>a</i></l>', forceArray: (n) -> n is 'i'), { l: { i: ['a'] } }
 
 test "applies to self-closing elements too", ->
@@ -269,7 +269,7 @@ test "unterminated markup throws with a scan offset", ->
     eq err.offset, offset
 
 test "RsxError is a proper Error subclass", ->
-  err = new RsxError('boom', 7)
+  err = RsxError.new('boom', 7)
   ok err instanceof Error
   eq err.name, 'RsxError'
   eq err.message, 'boom'
@@ -350,7 +350,7 @@ console.log "\nStringify — CDATA"
 
 test "cdata option wraps listed tag content, array or Set", ->
   eq stringify('a', { p: 'raw <x> & y' }, cdata: ['p']), '<a><p><![CDATA[raw <x> & y]]></p></a>'
-  eq stringify('a', { p: 'z' }, cdata: new Set(['p'])), '<a><p><![CDATA[z]]></p></a>'
+  eq stringify('a', { p: 'z' }, cdata: Set.new(['p'])), '<a><p><![CDATA[z]]></p></a>'
   eq stringify('p', 7, cdata: ['p']), '<p><![CDATA[7]]></p>'
 
 test "']]>' inside CDATA content splits into two sections", ->

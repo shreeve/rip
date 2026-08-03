@@ -17,7 +17,7 @@ export type Mutation<R> =
 
 export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onSuccess?: (r: R) => void, onError?: (e: unknown) => unknown } = {}): Mutation<R>
   unless typeof fn is 'function'
-    throw new TypeError 'Rip App: createMutation expects a function'
+    throw TypeError.new 'Rip App: createMutation expects a function'
   _pending   = __state false
   _succeeded = __state false
   _error     = __state(null as any)

@@ -24,18 +24,18 @@ FEED_BACKOFF_MAX = 8000
 
 defaultHubUrl = ->
   if typeof location is 'undefined'
-    throw new Error 'Rip Workspace: connectFeed needs a hub URL (no location to derive one from)'
+    throw Error.new 'Rip Workspace: connectFeed needs a hub URL (no location to derive one from)'
   scheme = if location.protocol is 'https:' then 'wss' else 'ws'
   "#{scheme}://#{location.host}/hub"
 
 defaultSocketFactory = ->
   if typeof WebSocket is 'undefined'
-    throw new Error 'Rip Workspace: connectFeed needs a socket factory (no global WebSocket)'
-  (url) -> new WebSocket(url)
+    throw Error.new 'Rip Workspace: connectFeed needs a socket factory (no global WebSocket)'
+  (url) -> WebSocket.new(url)
 
 defaultFetch = ->
   if typeof fetch is 'undefined'
-    throw new Error 'Rip Workspace: connectFeed needs a fetch (no global fetch)'
+    throw Error.new 'Rip Workspace: connectFeed needs a fetch (no global fetch)'
   (url, opts) -> fetch(url, opts)
 
 defaultModuleUrl = (id) ->
@@ -45,9 +45,9 @@ validWireHash = (hash) -> typeof hash is 'string' and /^[A-Za-z0-9_]{6}$/.test(h
 
 export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
   unless workspace? and typeof workspace.set is 'function' and typeof workspace.passport is 'function' and typeof workspace.sealed is 'function'
-    throw new TypeError 'Rip Workspace: connectFeed expects a workspace'
+    throw TypeError.new 'Rip Workspace: connectFeed expects a workspace'
   if workspace.sealed()
-    throw new Error 'Rip Workspace: connectFeed on a sealed workspace — production has no hub'
+    throw Error.new 'Rip Workspace: connectFeed on a sealed workspace — production has no hub'
 
   hubUrl = opts.hub ?? defaultHubUrl()
   makeSocket = opts.makeSocket ?? defaultSocketFactory()
@@ -82,9 +82,9 @@ export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
   fetchLatest = (id, owner) ->
     res = fetchBytes! moduleUrl(id), { cache: 'no-store' }
     return { res } unless res.ok
-    bytes = new Uint8Array(res.arrayBuffer!)
+    bytes = Uint8Array.new(res.arrayBuffer!)
     return null unless owns(id, owner)
-    { res, hash: rash(bytes), source: new TextDecoder().decode(bytes) }
+    { res, hash: rash(bytes), source: TextDecoder.new().decode(bytes) }
 
   applyLatest = (id, owner) ->
     result = fetchLatest! id, owner
@@ -126,7 +126,7 @@ export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
     unless Array.isArray files
       report '[Rip] workspace feed: malformed manifest:', manifest
       return
-    named = new Set()
+    named = Set.new()
     for entry in files
       unless entry? and typeof entry.id is 'string' and validWireHash(entry.hash)
         report '[Rip] workspace feed: malformed manifest entry:', entry

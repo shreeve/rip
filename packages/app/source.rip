@@ -51,7 +51,7 @@ parseStaleTime = (value: any) ->
   return 0 unless value?
   if typeof value is 'number'
     unless Number.isFinite(value) and value >= 0
-      throw new TypeError 'Rip App: source staleTime must be a non-negative finite number, a duration string, or "forever"'
+      throw TypeError.new 'Rip App: source staleTime must be a non-negative finite number, a duration string, or "forever"'
     return value
   if typeof value is 'string'
     return Infinity if value is 'forever'
@@ -66,7 +66,7 @@ parseStaleTime = (value: any) ->
         when 'd' then amount * 86400000
         when 'w' then amount * 604800000
         when 'y' then amount * 31536000000
-  throw new TypeError 'Rip App: source staleTime must be a non-negative number, a duration such as "5 min", or "forever"'
+  throw TypeError.new 'Rip App: source staleTime must be a non-negative number, a duration such as "5 min", or "forever"'
 
 makeSourceCell = (fetchFn, staleTime, onSettle = null) ->
   data = __state null
@@ -83,14 +83,14 @@ makeSourceCell = (fetchFn, staleTime, onSettle = null) ->
 
   load = (background = false, preload = false) ->
     controller?.abort()
-    controller = if typeof AbortController isnt 'undefined' then new AbortController() else null
+    controller = if typeof AbortController isnt 'undefined' then AbortController.new() else null
     mine = ++generation
     loading.value = true unless background
     wasLoaded = loaded
     try
       pending = fetchFn controller?.signal
       unless pending? and typeof pending.then is 'function'
-        throw new TypeError 'Rip App: source fetch must return a Promise'
+        throw TypeError.new 'Rip App: source fetch must return a Promise'
       result = await pending
       return result if mine isnt generation
       failure.value = null
@@ -202,13 +202,13 @@ normalizeKey = (key) ->
     try
       encoded = JSON.stringify key
     catch
-      throw new TypeError 'Rip App: keyed source object keys must be JSON-serializable'
-    throw new TypeError 'Rip App: keyed source object keys must be JSON-serializable' unless encoded?
+      throw TypeError.new 'Rip App: keyed source object keys must be JSON-serializable'
+    throw TypeError.new 'Rip App: keyed source object keys must be JSON-serializable' unless encoded?
     return encoded
   key
 
 makeSourceFamily = (fetchFn, staleTime) ->
-  cells = new Map()
+  cells = Map.new()
 
   prune = (protectedKey = undefined) ->
     while cells.size > SOURCE_FAMILY_CAP
@@ -224,7 +224,7 @@ makeSourceFamily = (fetchFn, staleTime) ->
     return
 
   cellFor = (key) ->
-    throw new TypeError 'Rip App: keyed source requires a key' unless key?
+    throw TypeError.new 'Rip App: keyed source requires a key' unless key?
     normalized = normalizeKey key
     cell = cells.get normalized
     if cell
@@ -249,22 +249,22 @@ makeSourceFamily = (fetchFn, staleTime) ->
 
 export def source<T extends NonNullSourceValue, A extends SourceArgs>(opts: SourceOpts<T, A> | SingletonSourceOpts<T> | KeyedSourceOpts<T, any>): SourceDeclaration<T, A>
   unless opts? and typeof opts is 'object' and not Array.isArray(opts)
-    throw new TypeError 'Rip App: source expects an options object'
+    throw TypeError.new 'Rip App: source expects an options object'
   unless typeof opts.fetch is 'function'
-    throw new TypeError 'Rip App: source options require a fetch function'
+    throw TypeError.new 'Rip App: source options require a fetch function'
   staleTime = parseStaleTime opts.staleTime
   hasKind = Object.prototype.hasOwnProperty.call opts, 'kind'
   if hasKind
     unless opts.kind is 'singleton' or opts.kind is 'keyed'
-      throw new TypeError "Rip App: source kind must be 'singleton' or 'keyed'"
+      throw TypeError.new "Rip App: source kind must be 'singleton' or 'keyed'"
     if opts.kind is 'singleton'
       if opts.fetch.length > 1
-        throw new TypeError "Rip App: singleton source fetch accepts at most one AbortSignal parameter"
+        throw TypeError.new "Rip App: singleton source fetch accepts at most one AbortSignal parameter"
       return makeSourceCell opts.fetch, staleTime
     if opts.fetch.length < 1 or opts.fetch.length > 2
-      throw new TypeError "Rip App: keyed source fetch requires a key parameter and accepts one optional AbortSignal parameter"
+      throw TypeError.new "Rip App: keyed source fetch requires a key parameter and accepts one optional AbortSignal parameter"
     return makeSourceFamily opts.fetch, staleTime
 
   if opts.fetch.length > 1
-    throw new TypeError 'Rip App: inferred source fetch accepts no parameters for a singleton or one key parameter for a keyed family'
+    throw TypeError.new 'Rip App: inferred source fetch accepts no parameters for a singleton or one key parameter for a keyed family'
   if opts.fetch.length is 1 then makeSourceFamily(opts.fetch, staleTime) else makeSourceCell(opts.fetch, staleTime)

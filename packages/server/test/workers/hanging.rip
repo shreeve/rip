@@ -1,1 +1,1 @@
-new Promise! (->)
+Promise.new! (->)

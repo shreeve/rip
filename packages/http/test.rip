@@ -12,7 +12,7 @@ import { readFileSync } from 'fs'
 # ==[ Fixture server ]==
 
 hits     = []          # every request the fixture saw: { method, path, search }
-counters = new Map()   # per-key attempt counts for flaky endpoints
+counters = Map.new()   # per-key attempt counts for flaky endpoints
 
 caught    = (promise) -> promise.then((-> null), ((e) -> e))
 countHits = (path, search) ->
@@ -21,7 +21,7 @@ countHits = (path, search) ->
 server = Bun.serve
   port: 0
   fetch: (req) ->
-    url  = new URL(req.url)
+    url  = URL.new(req.url)
     body = req.text!
     hits.push { method: req.method, path: url.pathname, search: url.search }
 
@@ -35,7 +35,7 @@ server = Bun.serve
 
     if url.pathname.startsWith('/status/')
       status = Number(url.pathname.slice('/status/'.length))
-      return new Response("status #{status}", { status })
+      return Response.new("status #{status}", { status })
 
     # Fails with 500 the first `fails` times per key, then succeeds.
     if url.pathname is '/flaky'
@@ -43,7 +43,7 @@ server = Bun.serve
       fails   = Number(url.searchParams.get('fails'))
       attempt = (counters.get(key) ?? 0) + 1
       counters.set(key, attempt)
-      return new Response('boom', { status: 500 }) if attempt <= fails
+      return Response.new('boom', { status: 500 }) if attempt <= fails
       return Response.json({ attempts: attempt })
 
     # 503 with a Retry-After header once per key, then succeeds.
@@ -52,18 +52,18 @@ server = Bun.serve
       attempt = (counters.get(key) ?? 0) + 1
       counters.set(key, attempt)
       if attempt is 1
-        value = url.searchParams.get('format') is 'date' ? new Date(Date.now() - 1000).toUTCString() : '0'
-        return new Response('wait', { status: 503, headers: { 'Retry-After': value } })
+        value = url.searchParams.get('format') is 'date' ? Date.new(Date.now() - 1000).toUTCString() : '0'
+        return Response.new('wait', { status: 503, headers: { 'Retry-After': value } })
       return Response.json({ attempts: attempt })
 
     if url.pathname is '/slow'
       Bun.sleep! 300
-      return new Response('slow-ok')
+      return Response.new('slow-ok')
 
     if url.pathname is '/redirect'
-      return new Response(null, { status: 302, headers: { Location: '/echo' } })
+      return Response.new(null, { status: 302, headers: { Location: '/echo' } })
 
-    new Response('ok')
+    Response.new('ok')
 
 base = "http://localhost:#{server.port}"
 
@@ -120,7 +120,7 @@ test! "string searchParams overlay the input URL query, set-style", ->
   eq res.json!.search, '?x=1&a=2'
 
 test! "URLSearchParams are applied set-style", ->
-  sp = new URLSearchParams()
+  sp = URLSearchParams.new()
   sp.set('page', '3')
   res = http.get!("#{base}/echo", { searchParams: sp })
   eq res.json!.search, '?page=3'
@@ -268,7 +268,7 @@ test! "Retry-After as an HTTP date is honored", ->
   ok Date.now() - started < 250
 
 test! "network errors retry then rethrow the original error", ->
-  probe = Bun.serve({ port: 0, fetch: -> new Response('x') })
+  probe = Bun.serve({ port: 0, fetch: -> Response.new('x') })
   closed = probe.port
   probe.stop(true)
 
@@ -312,7 +312,7 @@ test! "timeout: false lets a slow response finish", ->
   eq res.text!, 'slow-ok'
 
 test! "a caller abort surfaces as AbortError, not TimeoutError", ->
-  ctrl = new AbortController()
+  ctrl = AbortController.new()
   pending = caught(http.get("#{base}/slow", { signal: ctrl.signal }))
   setTimeout (-> ctrl.abort()), 20
   err = await pending
@@ -320,7 +320,7 @@ test! "a caller abort surfaces as AbortError, not TimeoutError", ->
   ok not (err instanceof TimeoutError)
 
 test! "a caller abort with timeout disabled still aborts", ->
-  ctrl = new AbortController()
+  ctrl = AbortController.new()
   pending = caught(http.get("#{base}/slow", { timeout: false, signal: ctrl.signal }))
   setTimeout (-> ctrl.abort()), 20
   err = await pending
@@ -338,14 +338,14 @@ test! "beforeRequest can mutate the request headers", ->
 
 test! "beforeRequest can replace the request", ->
   res = http.get!("#{base}/echo", {
-    hooks: { beforeRequest: [(req) -> new Request("#{base}/echo?swapped=1", req)] }
+    hooks: { beforeRequest: [(req) -> Request.new("#{base}/echo?swapped=1", req)] }
   })
   eq res.json!.search, '?swapped=1'
 
 test! "beforeRequest returning a Response short-circuits the fetch", ->
   before = hits.length
   res = http.get!("#{base}/echo", {
-    hooks: { beforeRequest: [-> new Response('shortcut', { status: 203 })] }
+    hooks: { beforeRequest: [-> Response.new('shortcut', { status: 203 })] }
   })
   eq res.status, 203
   eq res.text!, 'shortcut'
@@ -357,7 +357,7 @@ test! "afterResponse can replace the response, averting throw and retry", ->
     hooks:
       afterResponse: [(req, opts, r) ->
         args.push([req.constructor.name, opts.method, r.status])
-        r.status is 500 ? new Response('fixed') : undefined
+        r.status is 500 ? Response.new('fixed') : undefined
       ]
   })
   eq res.status, 200

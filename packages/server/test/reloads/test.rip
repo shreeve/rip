@@ -11,7 +11,7 @@ waitFor = (fn, timeout = 5000) ->
   loop
     value = fn!
     return value if value
-    throw new Error('reload test timed out') if Date.now() >= deadline
+    throw Error.new('reload test timed out') if Date.now() >= deadline
     sleep! 10
 
 unixFetch = (path, socket) ->
@@ -31,18 +31,18 @@ test! 'App edits preserve workers and valid API candidates swap through the door
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
-      url = new URL request.url
+      url = URL.new request.url
       if request.method is 'POST' and url.pathname is '/1.0/apps'
         registration = request.json!
         return Response.json({ id: 'reload-registration' }, { status: 201 })
       if request.method is 'PUT' and url.pathname is '/1.0/apps/reload-registration/upstreams'
         body = request.json!
         updates.push body.upstreams
-        return new Response(null, { status: 204 })
+        return Response.new(null, { status: 204 })
       if request.method is 'POST' and url.pathname is '/1.0/apps/reload-registration/hub/publish'
         dings.push ...(request.json!)
         return Response.json({ deliveries: 0 })
-      new Response(null, { status: 204 })
+      Response.new(null, { status: 204 })
   proc = null
   diagnostic = null
   try
@@ -50,7 +50,7 @@ test! 'App edits preserve workers and valid API candidates swap through the door
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'pipe'
-    diagnostic = new Response(proc.stderr).text()
+    diagnostic = Response.new(proc.stderr).text()
     waitFor! -> registration?
     first = registration.upstreams[0].path
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }

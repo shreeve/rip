@@ -11,7 +11,7 @@ waitFor = (name, fn, timeout = 7000) ->
   loop
     value = fn!
     return value if value
-    throw new Error("manager boundary test timed out waiting for #{name}") if Date.now() >= deadline
+    throw Error.new("manager boundary test timed out waiting for #{name}") if Date.now() >= deadline
     sleep! 10
 
 startControl = (socket, calls, handlers: any = {}) ->
@@ -20,7 +20,7 @@ startControl = (socket, calls, handlers: any = {}) ->
   Bun.serve
     unix: socket
     fetch: (request) ->
-      url = new URL request.url
+      url = URL.new request.url
       body = if request.method in ['POST', 'PUT'] then try request.json! catch then null else null
       calls.push { method: request.method, path: url.pathname, body }
       if request.method is 'GET' and url.pathname is '/1.0'
@@ -32,7 +32,7 @@ startControl = (socket, calls, handlers: any = {}) ->
       if request.method is 'POST' and url.pathname.endsWith('/heartbeat')
         heartbeatSerial++
         return handlers.heartbeat(heartbeatSerial, url.pathname) if handlers.heartbeat?
-      new Response null, { status: 204 }
+      Response.new null, { status: 204 }
 
 run = (cwd, args, env = {}) ->
   proc = Bun.spawn [process.execPath, PRELOAD, SERVER, ...args],
@@ -41,8 +41,8 @@ run = (cwd, args, env = {}) ->
     stdout: 'pipe'
     stderr: 'pipe'
     env: { ...process.env, ...env }
-  out = new Response(proc.stdout).text()
-  err = new Response(proc.stderr).text()
+  out = Response.new(proc.stdout).text()
+  err = Response.new(proc.stderr).text()
   { proc, out, err }
 
 test! 'manager loads and normalizes the app-local declaration before registering', ->
@@ -161,7 +161,7 @@ test! 'manager retries stale registration claims within a bounded window', ->
   controlSocket = join dir, 'janus.sock'
   control = startControl controlSocket, calls,
     register: (attempt) ->
-      return new Response('claimed', { status: 409 }) if attempt <= 2
+      return Response.new('claimed', { status: 409 }) if attempt <= 2
       Response.json({ id: 'registration-live' }, { status: 201 })
   process = null
   try
@@ -187,7 +187,7 @@ test! 'manager stops retrying a registration claim after its deadline', ->
   calls = []
   controlSocket = join dir, 'janus.sock'
   control = startControl controlSocket, calls,
-    register: -> new Response('claimed', { status: 409 })
+    register: -> Response.new('claimed', { status: 409 })
   try
     { proc, err } = run project, [project, '--host', 'occupied.example.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
       RIP_REGISTER_409_MS: '100'
@@ -208,10 +208,10 @@ test! 'heartbeat recovery retries a stale replacement claim', ->
   control = startControl controlSocket, calls,
     register: (attempt) ->
       return Response.json({ id: 'registration-old' }, { status: 201 }) if attempt is 1
-      return new Response('claimed', { status: 409 }) if attempt <= 3
+      return Response.new('claimed', { status: 409 }) if attempt <= 3
       Response.json({ id: 'registration-new' }, { status: 201 })
     heartbeat: (attempt) ->
-      if attempt is 1 then new Response(null, { status: 404 }) else new Response(null, { status: 204 })
+      if attempt is 1 then Response.new(null, { status: 404 }) else Response.new(null, { status: 204 })
   process = null
   try
     launched = run project, [project, '--host', 'recover.example.test', '--control', controlSocket, '--no-watch', '--access-log=off'],

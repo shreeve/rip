@@ -14,15 +14,21 @@ live-verified facts only.
 
 **Branch: `main`, synchronized with `origin/main`.**
 
-The current tip makes maybe dammit a first-class language construct. Bare
-`fn?!` remains Houdini/presence; `fn?!()`, `fn?!(arg)`, and `fn?! arg` are
-optional calls whose results are awaited. The compiler records a mapped
-`dammit?` node, and the TextMate, highlight.js, Rip Print, and Vim surfaces
-recognize the shared spelling.
+The current tip makes authored Rip consistently use its own call and
+construction vocabulary. Packages, package tests, examples, and the parser
+generator use dammit for awaited calls, `.new` for construction, and `.new!`
+for awaited construction. Written `await` remains only for promise values
+already in hand. A syntax-aware toolchain gate enforces those boundaries while
+the language fixtures continue to exercise every accepted spelling.
 
 Live verification for that commit:
 
+- `bun run test` — 6,122 passed, 35 extended-tier skips.
 - `bun run test:all` — all 21 lanes passed, 8,334 tests total.
+- `bun run parser` — regenerated `src/parser.js` byte-identically.
+- Emission comparison — 78 of 84 changed Rip files byte-identical; the other
+  six differ only by redundant parentheses around member-qualified constructor
+  targets.
 - `packages/browser-tests` remains the documented CI-only Playwright lane.
 - `git diff --check` — passed.
 - Commit pushed to `origin/main`.

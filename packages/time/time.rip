@@ -196,7 +196,7 @@ _zoneFormatters =! {}
 
 def zoneFormatter(zone)
   _zoneFormatters[zone] ?? do ->
-    _zoneFormatters[zone] = new Intl.DateTimeFormat 'en-US',
+    _zoneFormatters[zone] = Intl.DateTimeFormat.new 'en-US',
       hour12:   false
       timeZone: zone
       year:   'numeric'
@@ -228,7 +228,7 @@ _zoneNameFormatters =! {}
 def zoneAbbreviation(date, zone, long = false)
   key = "#{zone ?? 'local'}|#{long ? 'L' : 'S'}"
   dtf = _zoneNameFormatters[key] ?? do ->
-    _zoneNameFormatters[key] = new Intl.DateTimeFormat 'en-US',
+    _zoneNameFormatters[key] = Intl.DateTimeFormat.new 'en-US',
       timeZone: zone ?? undefined
       timeZoneName: long ? 'long' : 'short'
   for { type, value } in dtf.formatToParts(date)
@@ -263,7 +263,7 @@ def parseTwoDigitYear(n)
 # bail exception so each branch can just `bail()` on mismatch.
 class ParseMismatch extends Error then noop
 
-bail =! -> throw new ParseMismatch()
+bail =! -> throw ParseMismatch.new()
 
 def parseWithFormat(input, fmt, utc = false)
   parts  = { year: 1970, month: 0, date: 1, hours: 0, minutes: 0, seconds: 0, ms: 0, afternoon: null, zone: null }
@@ -337,22 +337,22 @@ def parseWithFormat(input, fmt, utc = false)
   { year, month, date, hours, minutes, seconds, ms, zone } = parts
 
   if zone?
-    new Date(Date.UTC(year, month, date, hours, minutes, seconds, ms) + (zone * MS_MINUTE))
+    Date.new(Date.UTC(year, month, date, hours, minutes, seconds, ms) + (zone * MS_MINUTE))
   else if utc
-    new Date(Date.UTC(year, month, date, hours, minutes, seconds, ms))
+    Date.new(Date.UTC(year, month, date, hours, minutes, seconds, ms))
   else
-    new Date(year, month, date, hours, minutes, seconds, ms)
+    Date.new(year, month, date, hours, minutes, seconds, ms)
 
 # Auto-detect parsing. Never throws; returns an invalid Date for garbage.
 def parseDate(input, utc = false)
-  return new Date(NaN) if input is null
-  return new Date()    unless input?
-  return new Date(input.getTime()) if input instanceof Date
-  return new Date(input) if typeof input is 'number'
+  return Date.new(NaN) if input is null
+  return Date.new()    unless input?
+  return Date.new(input.getTime()) if input instanceof Date
+  return Date.new(input) if typeof input is 'number'
 
   if typeof input is 'string'
     # Explicit trailing Z — let the engine parse it
-    return new Date(input) if /Z$/i.test(input)
+    return Date.new(input) if /Z$/i.test(input)
 
     # Try US format first (M/D/YYYY) since ISO regex would reject it
     m = input.match(REGEX_US)
@@ -368,7 +368,7 @@ def parseDate(input, utc = false)
         lc = ap.toLowerCase()
         h = 0  if lc is 'am' and h is 12
         h += 12 if lc is 'pm' and h < 12
-      return utc ? new Date(Date.UTC(year, month, day, h, mm, s)) : new Date(year, month, day, h, mm, s)
+      return utc ? Date.new(Date.UTC(year, month, day, h, mm, s)) : Date.new(year, month, day, h, mm, s)
 
     # ISO-ish fallback (YYYY-MM-DD...)
     m = input.match(REGEX_ISO)
@@ -376,9 +376,9 @@ def parseDate(input, utc = false)
       month = (+m[2] or 1) - 1
       ms    = +((m[7] ?? '0').slice(0, 3))
       args: [number, number, number, number, number, number, number] = [+m[1], month, +(m[3] or 1), +(m[4] or 0), +(m[5] or 0), +(m[6] or 0), ms]
-      return utc ? new Date(Date.UTC(...args)) : new Date(...args)
+      return utc ? Date.new(Date.UTC(...args)) : Date.new(...args)
 
-  new Date(input)
+  Date.new(input)
 
 # ==[ Time class ]==
 
@@ -410,7 +410,7 @@ export class Time
       @$s  = +p.second
       @$ms = d.getUTCMilliseconds()    # Intl doesn't give milliseconds
       # Derive weekday from reconstructed wall-clock date (zone-independent).
-      @$W = new Date(Date.UTC(@$y, @$M, @$D)).getUTCDay()
+      @$W = Date.new(Date.UTC(@$y, @$M, @$D)).getUTCDay()
     else if @$u
       @$y  = d.getUTCFullYear()
       @$M  = d.getUTCMonth()
@@ -434,7 +434,7 @@ export class Time
   # ---- Validity & identity ----
   isValid: -> @$d.toString() isnt INVALID_DATE
   clone: ->
-    new Time({ fromInstance: new Date(@$d.getTime()), utc: @$u, zone: @$z })
+    Time.new({ fromInstance: Date.new(@$d.getTime()), utc: @$u, zone: @$z })
 
   # ---- Getters (symbol or method form) ----
   year:        -> @$y
@@ -451,8 +451,8 @@ export class Time
   isLeapYear:  -> (@$y % 4 is 0 and @$y % 100 isnt 0) or (@$y % 400 is 0)
 
   dayOfYear: ->
-    start = new Date(Date.UTC(@$y, 0, 1))
-    here  = new Date(Date.UTC(@$y, @$M, @$D))
+    start = Date.new(Date.UTC(@$y, 0, 1))
+    here  = Date.new(Date.UTC(@$y, @$M, @$D))
     Math.floor((here.getTime() - start.getTime()) / MS_DAY) + 1
 
   # ISO-ish week-of-year with configurable Sunday start (US default).
@@ -460,7 +460,7 @@ export class Time
     # move to the first day of this week
     gap    = (@$W - startDow + 7) % 7
     start  = @subtract(gap, :day).startOf(:day)
-    yrStart= time(new Date(start.year(), 0, 1))
+    yrStart= time(Date.new(start.year(), 0, 1))
     yrGap  = (yrStart.day() - startDow + 7) % 7
     anchor = yrStart.subtract(yrGap, :day)
     Math.round((start.valueOf() - anchor.valueOf()) / MS_WEEK) + 1
@@ -498,7 +498,7 @@ export class Time
     arg = unit is :day ? @$D + (int - @$W) : int
 
     if unit is :month or unit is :year
-      tmp = new Date(@$d.getTime())
+      tmp = Date.new(@$d.getTime())
       if @$u
         tmp.setUTCDate(1)
       else
@@ -543,7 +543,7 @@ export class Time
       when :millisecond then 1
       else 1
     ms = @$d.getTime() + (number * step)
-    new Time({ fromInstance: new Date(ms), utc: @$u })
+    Time.new({ fromInstance: Date.new(ms), utc: @$u })
 
   _addDays: (n) ->
     d = @clone()
@@ -563,8 +563,8 @@ export class Time
 
   _bound: (unit, isStart) ->
     make = (y, m, d) =>
-      stamp = @$u ? Date.UTC(y, m, d) : new Date(y, m, d).getTime()
-      ins = new Time({ fromInstance: new Date(stamp), utc: @$u })
+      stamp = @$u ? Date.UTC(y, m, d) : Date.new(y, m, d).getTime()
+      ins = Time.new({ fromInstance: Date.new(stamp), utc: @$u })
       isStart ? ins : ins._endOfDay()
 
     switch unit
@@ -678,11 +678,11 @@ export class Time
 
   # ---- UTC / timezone mode ----
   utc: (keepLocalTime = false) ->
-    ins = new Time({ fromInstance: new Date(@$d.getTime()), utc: true })
+    ins = Time.new({ fromInstance: Date.new(@$d.getTime()), utc: true })
     keepLocalTime ? ins.add(@utcOffset(), :minute) : ins
 
   local: ->
-    new Time({ fromInstance: new Date(@$d.getTime()), utc: false })
+    Time.new({ fromInstance: Date.new(@$d.getTime()), utc: false })
 
   isUTC: -> @$u
 
@@ -691,18 +691,18 @@ export class Time
   # wall-clock numbers are preserved and the instant shifts.
   tz: (zone, keepLocalTime = false) ->
     iana = resolveZone(zone)
-    ins  = new Time({ fromInstance: new Date(@$d.getTime()), zone: iana })
+    ins  = Time.new({ fromInstance: Date.new(@$d.getTime()), zone: iana })
     return ins unless keepLocalTime
     # Recompute the Date so the wall-clock in `iana` matches this instance's.
     target = Date.UTC(@$y, @$M, @$D, @$H, @$m, @$s, @$ms)
-    offset = zoneOffsetMinutes(new Date(target), iana)
-    shifted = new Date(target - offset * 60000)
+    offset = zoneOffsetMinutes(Date.new(target), iana)
+    shifted = Date.new(target - offset * 60000)
     # DST boundary: re-check offset at the resulting instant and re-apply if
     # the zone's offset has changed between the two moments.
     offset2 = zoneOffsetMinutes(shifted, iana)
     if offset2 isnt offset
-      shifted = new Date(target - offset2 * 60000)
-    new Time({ fromInstance: shifted, zone: iana })
+      shifted = Date.new(target - offset2 * 60000)
+    Time.new({ fromInstance: shifted, zone: iana })
 
   # Legible names for the two zone operations (otherwise hidden behind tz()'s
   # keepLocalTime flag), mirroring the `zones` gem's to/as distinction:
@@ -728,7 +728,7 @@ export class Time
   # ---- Output ----
   valueOf:     -> @$d.getTime()
   unix:        -> Math.floor(@valueOf() / 1000)
-  toDate:      -> new Date(@valueOf())
+  toDate:      -> Date.new(@valueOf())
   toJSON:      -> @isValid() ? @toISOString() : null
   toISOString: -> @$d.toISOString()
   toString:    -> @$d.toUTCString()
@@ -784,7 +784,7 @@ export class Time
 def daysInGivenMonth(date, utc)
   y = utc ? date.getUTCFullYear() : date.getFullYear()
   m = utc ? date.getUTCMonth()    : date.getMonth()
-  new Date(Date.UTC(y, m + 1, 0)).getUTCDate()
+  Date.new(Date.UTC(y, m + 1, 0)).getUTCDate()
 
 def fromToBase(input, withoutSuffix, instance, isFrom)
   result   = null
@@ -903,7 +903,7 @@ export class Duration
     @$d.milliseconds = ms
     this
 
-  clone: -> new Duration(@$ms)
+  clone: -> Duration.new(@$ms)
 
   # Component getter — e.g., `.hours()` returns the hour component (0..23)
   # after normalization. Use `.asHours()` for the total duration in hours.
@@ -924,18 +924,18 @@ export class Duration
     other = switch
       when input instanceof Duration then input.$ms
       when unit?                     then Number(input) * UNIT_TO_MS[durationUnit(unit)]
-      else new Duration(input).$ms
-    new Duration(@$ms + other)
+      else Duration.new(input).$ms
+    Duration.new(@$ms + other)
 
   subtract: (input, unit) ->
     other = switch
       when input instanceof Duration then input.$ms
       when unit?                     then Number(input) * UNIT_TO_MS[durationUnit(unit)]
-      else new Duration(input).$ms
-    new Duration(@$ms - other)
+      else Duration.new(input).$ms
+    Duration.new(@$ms - other)
 
-  negated: -> new Duration(-@$ms)
-  abs:     -> new Duration(Math.abs(@$ms))
+  negated: -> Duration.new(-@$ms)
+  abs:     -> Duration.new(Math.abs(@$ms))
 
   valueOf: -> @$ms
 
@@ -1036,18 +1036,18 @@ def toTimeList(args)
 # static members and is exported as the package default (the full factory).
 export def time(input, opts = {})
   return asTime(input).clone() if isTime(input)
-  new Time({ input, utc: !!opts.utc, format: opts.format })
+  Time.new({ input, utc: !!opts.utc, format: opts.format })
 
 def makeTime()
   Object.assign time,
     utc: (input) ->
-      new Time({ input, utc: true })
+      Time.new({ input, utc: true })
 
     # Parse with an explicit format — `time.parse('04/19/2026 3:45 PM', 'MM/DD/YYYY h:mm A')`
     parse: (input, fmt, utc = false) ->
       d = parseWithFormat(input, fmt, utc)
       return time(NaN) unless d?
-      new Time({ fromInstance: d, utc })
+      Time.new({ fromInstance: d, utc })
 
     # Parse an input and anchor it to an IANA zone. If the input is a string
     # without timezone info, the wall-clock is interpreted AS IF IN `zone`.
@@ -1059,11 +1059,11 @@ def makeTime()
           # Parse as UTC to get the wall-clock numbers, then shift by zone offset.
           asUTC   = parseDate(input, true)
           offset  = zoneOffsetMinutes(asUTC, iana)
-          shifted = new Date(asUTC.getTime() - offset * 60000)
+          shifted = Date.new(asUTC.getTime() - offset * 60000)
           offset2 = zoneOffsetMinutes(shifted, iana)
           if offset2 isnt offset
-            shifted = new Date(asUTC.getTime() - offset2 * 60000)
-          new Time({ fromInstance: shifted, zone: iana })
+            shifted = Date.new(asUTC.getTime() - offset2 * 60000)
+          Time.new({ fromInstance: shifted, zone: iana })
         else
           time(input).tz(iana)
       ,
@@ -1077,7 +1077,7 @@ def makeTime()
 
     # Duration factory — accepts a number+unit, a number (ms), an object, or an
     # ISO-8601 duration string.
-    duration:   (input, unit) -> new Duration(input, unit)
+    duration:   (input, unit) -> Duration.new(input, unit)
     Duration:   Duration
     Time:       Time
 

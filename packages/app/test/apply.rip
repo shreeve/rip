@@ -61,7 +61,7 @@ test! "absorb reports update after whole-launch remount for stash edits", ->
 test! "absorb falls back to update when narrow throws", ->
   escaped = []
   apply = createApply
-    renderer: remountDirty: -> throw new Error 'boom'
+    renderer: remountDirty: -> throw Error.new 'boom'
     escape: (paths) -> escaped.push paths
     report: ->
   eq apply.absorb!(['app/routes/cart.rip']), 'update'

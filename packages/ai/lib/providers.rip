@@ -206,7 +206,7 @@ refreshLatest = (provider) ->
       latestMem[provider] =
         id: best.id
         provider_model: best.provider_model
-        resolved_at: new Date().toISOString()
+        resolved_at: Date.new().toISOString()
       persistLatest()
       return best.id
   catch err
@@ -353,7 +353,7 @@ writeDiskCache = (payload) ->
 mergeMeta = (live) ->
   # Flag is_latest from the live rows themselves, so a forced refresh reflects
   # what was actually fetched rather than a possibly-seeded cache.
-  latestIds = new Set()
+  latestIds = Set.new()
   for provider in Object.keys(ADAPTERS)
     continue unless FAMILY[provider]
     rows = live.filter (entry) -> String(entry.id).split(':')[0] is provider
@@ -393,7 +393,7 @@ export listAll = (opts = {}) ->
 
   if memCache and not refresh and age < MEMORY_TTL_MS
     models = if filter then memCache.filter((m) -> m.provider is filter) else memCache
-    return { models, fetched_at: new Date(memFetchedAt).toISOString(), cache: { hit: true, ttl_seconds: Math.ceil((MEMORY_TTL_MS - age) / 1000) } }
+    return { models, fetched_at: Date.new(memFetchedAt).toISOString(), cache: { hit: true, ttl_seconds: Math.ceil((MEMORY_TTL_MS - age) / 1000) } }
 
   liveAll = []
   warnings = []
@@ -414,7 +414,7 @@ export listAll = (opts = {}) ->
   merged = mergeMeta(liveAll)
   memCache = merged
   memFetchedAt = Date.now()
-  payload = { models: merged, fetched_at: new Date(memFetchedAt).toISOString() }
+  payload = { models: merged, fetched_at: Date.new(memFetchedAt).toISOString() }
   writeDiskCache(payload)
   models = if filter then merged.filter((m) -> m.provider is filter) else merged
   { models, fetched_at: payload.fetched_at, cache: { hit: false, ttl_seconds: Math.floor(MEMORY_TTL_MS / 1000) }, warnings }

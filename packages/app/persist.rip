@@ -20,7 +20,7 @@ sourceReplacer = (key, value) ->
 resolveStorage = (opts) ->
   return opts.storage if opts.storage?
   unless typeof window isnt 'undefined' and window.localStorage?
-    throw new Error 'Rip App: persistStash requires a browser or an injected storage'
+    throw Error.new 'Rip App: persistStash requires a browser or an injected storage'
   if opts.local then window.localStorage else window.sessionStorage
 
 export def persistStash(app: any, opts: { local?: boolean, key?: string, debounce?: number, storage?: any } = {}): () => void

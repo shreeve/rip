@@ -147,7 +147,7 @@ tokenize = (text) ->
     if rest[0] in ['"', "'"]
       quote = rest[0]
       end = rest.indexOf quote, 1
-      throw new Error "Unterminated string: #{rest}" if end == -1
+      throw Error.new "Unterminated string: #{rest}" if end == -1
       tokens.push rest[1...end]
       rest = rest[end + 1..].trimStart()
     else
@@ -187,7 +187,7 @@ export parse = (source, env = {}) ->
     trimmed = line.trimStart()
     continue if trimmed == ''
     continue if trimmed[0] == '#'
-    throw new Error "Tabs are not allowed (line #{i + 1})" if /\t/.test line
+    throw Error.new "Tabs are not allowed (line #{i + 1})" if /\t/.test line
     filtered.push { text: line, num: i + 1 }
 
   # Pass 1: Process `set` lines → build variable map
@@ -353,7 +353,7 @@ resolveHandlers = (directives, uses, stampDir) ->
       # unless the Stampfile either pins the content hash (`sha256: <hex>`) or
       # explicitly opts out (`insecure: true`) — no silent trust-on-first-use.
       unless entry.sha256 or entry.insecure
-        throw new Error "Remote handler '#{source}' needs a 'sha256: <hex>' pin or an explicit 'insecure: true' — refusing to run unverified remote code"
+        throw Error.new "Remote handler '#{source}' needs a 'sha256: <hex>' pin or an explicit 'insecure: true' — refusing to run unverified remote code"
 
       cacheDir  = path.join STAMP_HOME, 'cache'
       cacheName = source.replace(/[^a-zA-Z0-9.-]/g, '_')
@@ -366,7 +366,7 @@ resolveHandlers = (directives, uses, stampDir) ->
         log.info "Fetching #{source}..."
         response = fetch! source
         unless response.ok
-          throw new Error "Failed to fetch #{source}: #{response.status}"
+          throw Error.new "Failed to fetch #{source}: #{response.status}"
         response.text!
 
       # Verify BEFORE anything touches disk or gets imported.
@@ -374,7 +374,7 @@ resolveHandlers = (directives, uses, stampDir) ->
         actual = createHash('sha256').update(text).digest('hex')
         want   = entry.sha256.toLowerCase()
         unless actual == want
-          throw new Error "Integrity check failed for #{source}: expected sha256 #{want}, got #{actual}"
+          throw Error.new "Integrity check failed for #{source}: expected sha256 #{want}, got #{actual}"
       else
         log.warn "Loading #{source} without integrity verification (insecure: true)"
 
@@ -392,7 +392,7 @@ resolveHandlers = (directives, uses, stampDir) ->
     unless handlers[dir.type]
       handler = resolveHandler! dir.type, stampDir
       unless handler
-        throw new Error "Unknown directive '#{dir.type}' (line #{dir.line or '?'})"
+        throw Error.new "Unknown directive '#{dir.type}' (line #{dir.line or '?'})"
       handlers[dir.type] = handler
 
   handlers
@@ -473,7 +473,7 @@ export execute = (mode, parsed, stampDir) ->
     when 'apply'  then apply!  directives, handlers
     when 'verify' then verify! directives, handlers
     when 'plan'   then plan!   directives, handlers
-    else throw new Error "Unknown mode: #{mode}"
+    else throw Error.new "Unknown mode: #{mode}"
 
 # ==[ CLI ]=====================================================================
 

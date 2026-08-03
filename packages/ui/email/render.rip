@@ -16,14 +16,14 @@ inlineTailwind = (root: any) ->
   expected = configKey config
   for entry in entries[1..]
     if configKey(entry.config ?? {}) isnt expected
-      throw new Error 'one email render cannot use multiple Tailwind configurations'
+      throw Error.new 'one email render cannot use multiple Tailwind configurations'
 
   result = inlineEmailTree root, config
   if result.unsupported.length
     console.warn "Tailwind: unsupported classes retained: #{result.unsupported.join(' ')}"
 
 dedupeStyles = (root: any) ->
-  seen: Set<string> = new Set()
+  seen: Set<string> = Set.new()
   visit = (node: any) ->
     marker = node.attributes?.get 'data-email-style'
     if node.tag is 'style' and marker and node._innerHTML?

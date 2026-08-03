@@ -84,7 +84,7 @@ DDL =! '''
   CREATE INDEX IF NOT EXISTS idx_attachments_sha256 ON attachments(sha256);
 '''
 
-now = -> new Date().toISOString()
+now = -> Date.new().toISOString()
 hex = (bytes) -> randomBytes(bytes).toString('hex')
 
 genConversationId = -> "c_#{hex(8)}"
@@ -97,7 +97,7 @@ ensureRoot = ->
 
 quarantine = (path) ->
   return unless existsSync(path)
-  stamp = new Date().toISOString().replace(/[^\d]/g, '').slice(0, 14)
+  stamp = Date.new().toISOString().replace(/[^\d]/g, '').slice(0, 14)
   for ext in ['', '-shm', '-wal']
     src = "#{path}#{ext}"
     if existsSync(src)
@@ -106,13 +106,13 @@ quarantine = (path) ->
 openDatabase = ->
   ensureRoot()
   try
-    db = new Database(DB_PATH, { create: true })
+    db = Database.new(DB_PATH, { create: true })
     db.exec(DDL)
     try chmodSync(DB_PATH, 0o600)
     return { db, recovered: false, error: null }
   catch err
     quarantine(DB_PATH)
-    db = new Database(DB_PATH, { create: true })
+    db = Database.new(DB_PATH, { create: true })
     db.exec(DDL)
     try chmodSync(DB_PATH, 0o600)
     { db, recovered: true, error: err.message }
@@ -267,7 +267,7 @@ export open = ->
 
   store.appendMessage = (conversationId, message) ->
     conv = stmts.conversationById.get(conversationId)
-    throw new Error("conversation not found: #{conversationId}") unless conv
+    throw Error.new("conversation not found: #{conversationId}") unless conv
 
     seq = stmts.nextSeq.get(conversationId).seq
     msgId = message.id or genMessageId()
@@ -326,7 +326,7 @@ export open = ->
 
   store.redactConversation = (id, mode = 'content') ->
     conv = stmts.conversationById.get(id)
-    throw new Error("conversation not found: #{id}") unless conv
+    throw Error.new("conversation not found: #{id}") unless conv
     ts = now()
     switch mode
       when 'content' then stmts.redactContent.run(id)

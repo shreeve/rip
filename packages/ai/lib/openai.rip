@@ -34,7 +34,7 @@ export listModels = ->
   for row in rows
     provider_model: row.id
     id: "openai:#{row.id}"
-    created_at: row.created and new Date(row.created * 1000).toISOString()
+    created_at: row.created and Date.new(row.created * 1000).toISOString()
     raw: { owned_by: row.owned_by }
 
 # ==============================================================================

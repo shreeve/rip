@@ -107,7 +107,7 @@ RIP_SRC =! 'tags = %w[alpha beta]\nkind = :friendly\npresent = value?!\nresult =
 
 test "two files: TOC, headers, nav, line numbers, theme switcher, print button", ->
   html = generatePrintHtml [
-    { file: 'hello.rip', code: RIP_SRC, mtime: new Date('2026-01-02T15:04:00') }
+    { file: 'hello.rip', code: RIP_SRC, mtime: Date.new('2026-01-02T15:04:00') }
     { file: 'util.js', code: 'export const add = (a, b) => a + b;\n' }
   ]
   ok html.includes('<div class="toc">')

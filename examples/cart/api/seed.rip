@@ -17,14 +17,14 @@ products = [
 ]
 
 export def seed()
-  unless User.where(email: user.email).first!()
+  unless User.where(email: user.email).first!
     User.create!(user)
     console.log('Seeded user.')
 
-  if Product.all!().length is 0
+  if Product.all!.length is 0
     Product.create!(item) for item in products
     console.log("Seeded #{products.length} products.")
 
 if import.meta.main
-  seed!()
+  seed!
   console.log 'Seed complete.'

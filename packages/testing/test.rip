@@ -97,15 +97,15 @@ test "passes when the body throws, throws when it does not", ->
   throws (-> throws(-> null)), 'expected throw'
 
 test "an Error class refines by instanceof", ->
-  throws (-> throw new TypeError('t')), TypeError
-  throws (-> throws((-> throw new Error('e')), TypeError)), 'expected TypeError, got Error'
+  throws (-> throw TypeError.new('t')), TypeError
+  throws (-> throws((-> throw Error.new('e')), TypeError)), 'expected TypeError, got Error'
 
 test "a string refines by message containment", ->
-  throws (-> throw new Error('bad selector')), 'selector'
-  throws (-> throws((-> throw new Error('abc')), 'xyz')), 'expected message containing'
+  throws (-> throw Error.new('bad selector')), 'selector'
+  throws (-> throws((-> throw Error.new('abc')), 'xyz')), 'expected message containing'
 
 test "class and message refine together", ->
-  throws (-> throw new RangeError('out of range')), RangeError, 'range'
+  throws (-> throw RangeError.new('out of range')), RangeError, 'range'
 
 # ==[ test: async support, in-process ]==
 
@@ -113,7 +113,7 @@ console.log "\ntest"
 
 order = []
 test! "an async body is awaited in place (test!)", ->
-  new Promise! (r) -> setTimeout r, 5
+  Promise.new! (r) -> setTimeout r, 5
   order.push 1
 test "async cases finish before later cases run", ->
   eq order, [1]

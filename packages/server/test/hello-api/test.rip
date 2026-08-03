@@ -13,7 +13,7 @@ generate = (entry, artifact, result, task) ->
     stdin: 'ignore'
     stdout: 'ignore'
     stderr: 'pipe'
-  stderrText = new Response(proc.stderr).text()
+  stderrText = Response.new(proc.stderr).text()
   code = await proc.exited
   diagnostic = await stderrText
   eq code, 0, diagnostic
@@ -24,8 +24,8 @@ waitFor = (fn, timeout = 5000) ->
   loop
     value = fn!
     return value if value
-    throw new Error('hello API test timed out') if Date.now() >= deadline
-    new Promise! (resolve) -> setTimeout resolve, 10
+    throw Error.new('hello API test timed out') if Date.now() >= deadline
+    Promise.new! (resolve) -> setTimeout resolve, 10
 
 unixFetch = (url, socket) ->
   options = { unix: socket }
@@ -91,20 +91,20 @@ test! 'foreground manager registers one ready worker and deregisters before exit
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
-      url = new URL request.url
+      url = URL.new request.url
       if request.method is 'POST' and url.pathname is '/1.0/apps'
         registration = request.json!
         return Response.json({ id: 'hello-abc123' }, { status: 201 })
       if request.method is 'GET' and url.pathname is '/1.0/apps/hello-abc123/access'
         accessConnected = true
-        body = new ReadableStream
+        body = ReadableStream.new
           start: (controller) ->
             accessSource = controller
-            controller.enqueue new TextEncoder().encode accessRecord {
+            controller.enqueue TextEncoder.new().encode accessRecord {
               v: 1, type: 'hello', app_id: 'hello-abc123', app_name: 'hello',
               after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192
             }
-            controller.enqueue new TextEncoder().encode accessRecord {
+            controller.enqueue TextEncoder.new().encode accessRecord {
               v: 1, type: 'access', sequence: '1', timestamp: '2026-08-01T12:00:00Z',
               request_id: '12345678-1234-1234-1234-123456789abc',
               app_id: 'hello-abc123', app_name: 'hello', tenant_site: null,
@@ -114,19 +114,19 @@ test! 'foreground manager registers one ready worker and deregisters before exit
               response_class: 'proxy', cache_verdict: 'bypass',
               selected_upstream: null, retry_count: 0, outcome: 'complete', mark: null
             }
-        return new Response body
+        return Response.new body
       if request.method is 'POST' and url.pathname is '/1.0/apps/hello-abc123/heartbeat'
-        return new Response(null, { status: 204 })
+        return Response.new(null, { status: 204 })
       if request.method is 'DELETE' and url.pathname is '/1.0/apps/hello-abc123'
         deleted = true
         try accessSource?.close()
-        return new Response(null, { status: 204 })
-      new Response('Not Found', { status: 404 })
+        return Response.new(null, { status: 204 })
+      Response.new('Not Found', { status: 404 })
   edge = Bun.serve
     port: 0
     fetch: (request) ->
-      return new Response('unregistered', { status: 503 }) unless registration?
-      url = new URL request.url
+      return Response.new('unregistered', { status: 503 }) unless registration?
+      url = URL.new request.url
       unixFetch "http://worker#{url.pathname}", registration.upstreams[0].path
   proc = null
   try
@@ -134,8 +134,8 @@ test! 'foreground manager registers one ready worker and deregisters before exit
       stdin: 'ignore'
       stdout: 'pipe'
       stderr: 'pipe'
-    output = new Response(proc.stdout).text()
-    diagnostic = new Response(proc.stderr).text()
+    output = Response.new(proc.stdout).text()
+    diagnostic = Response.new(proc.stderr).text()
     waitFor! -> registration? and accessConnected
     eq registration.name, 'hello'
     eq registration.hosts, ['hello.test']
