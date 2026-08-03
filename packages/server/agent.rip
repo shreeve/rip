@@ -80,10 +80,7 @@ saveState = ->
     closeSync fd
   renameSync temporary, paths.state
   directory = openSync paths.stateRoot, 'r'
-  try
-    fsyncSync directory
-  finally
-    closeSync directory
+  try fsyncSync(directory) finally closeSync(directory)
 
 tail = (path, lines = 100) ->
   return '' unless existsSync path
@@ -463,10 +460,7 @@ handle = (request) ->
 acquire = ->
   try
     fd = openSync paths.owner, 'wx', 0o600
-    try
-      writeFileSync fd, JSON.stringify({ pid: process.pid })
-    finally
-      closeSync fd
+    try writeFileSync(fd, JSON.stringify({ pid: process.pid })) finally closeSync(fd)
     return
   catch error
     throw error unless error?.code is 'EEXIST'

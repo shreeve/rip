@@ -34,6 +34,8 @@ const maybeDammitRule = grammar.patterns.find((p) =>
   p.name === 'keyword.control.await.rip' && p.match?.startsWith('\\?!'));
 const presenceRule = grammar.patterns.find((p) =>
   p.name === 'keyword.operator.presence.rip');
+const controlRule = grammar.patterns.find((p) =>
+  p.name === 'keyword.control.rip' && p.match?.includes('finally'));
 const vimSyntax = readFileSync(
   path.resolve(import.meta.dir, '..', '..', 'vim', 'syntax', 'rip.vim'), 'utf8');
 
@@ -104,5 +106,21 @@ describe('Houdini / maybe dammit lockstep (editor grammars ⇄ compiler)', () =>
 
   test('Vim recognizes ?! as one special operator token', () => {
     expect(vimSyntax).toContain('syn match  ripOperator      /!?\\|?!\\|??\\|?\\./');
+  });
+});
+
+describe('inline try/finally lockstep (editor grammars ⇄ compiler)', () => {
+  const source = 'try fsyncSync(directory) finally closeSync(directory)';
+
+  test('TextMate paints both clause words and the source compiles', () => {
+    const re = new RegExp(controlRule.match, 'g');
+    expect([...source.matchAll(re)].map((match) => match[0]))
+      .toEqual(['try', 'finally']);
+    expect(compile(source, { runtimeDelivery: 'none' }).code)
+      .toBe('try {\n  fsyncSync(directory);\n} finally {\n  closeSync(directory);\n}');
+  });
+
+  test('Vim carries both clause words in its control-keyword group', () => {
+    expect(vimSyntax).toMatch(/syn keyword ripKeyword\s+try catch finally/);
   });
 });

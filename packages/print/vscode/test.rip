@@ -141,6 +141,12 @@ test "the shared grammar highlights word arrays, symbols, Houdini, and maybe dam
   eq html.match(/<span class="hljs-operator">\?!<\/span>/g).length, 2
   ok html.includes('<span class="hljs-keyword">def</span>')
 
+test "inline try/finally highlights in the extension", ->
+  source = 'try fsyncSync(directory) finally closeSync(directory)\n'
+  html = generatePrintHtml [{ file: 'inline.rip', code: source }]
+  ok html.includes('<span class="hljs-keyword">try</span>')
+  ok html.includes('<span class="hljs-keyword">finally</span>')
+
 test '<script type="text/rip"> inside HTML re-highlights as Rip', ->
   page = '<html>\n<body>\n<script type="text/rip">\ndef greet(name)\n  "hi #{name}"\n</script>\n</body>\n</html>\n'
   html = generatePrintHtml [{ file: 'page.html', code: page }]

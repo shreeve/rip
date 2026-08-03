@@ -1171,10 +1171,19 @@ grammar =
     o 'TRY Statement'                , '["try", 2]'      , 'try: _, body'
     o 'TRY Statement Catch'          , '["try", 2, 3]'   , 'try: _, body, handler'
     o 'TRY Block Catch'              , '["try", 2, 3]'   , 'try: _, body, handler'
-    o 'TRY Block FINALLY Block'      , '["try", 2, 4]'   , 'try: _, body, finalizer'
-    o 'TRY Block Catch FINALLY Block', '["try", 2, 3, 5]', 'try: _, body, handler, finalizer'
-    o 'TRY Statement FINALLY Block'  , '["try", 2, 4]'   , 'try: _, body, finalizer'
-    o 'TRY Statement Catch FINALLY Block', '["try", 2, 3, 5]', 'try: _, body, handler, finalizer'
+    o 'TRY Block Finalizer'          , '["try", 2, 3]'   , 'try: _, body, finalizer'
+    o 'TRY Block Catch Finalizer'    , '["try", 2, 3, 4]', 'try: _, body, handler, finalizer'
+    o 'TRY Expression Finalizer'     , '["try", 2, 3]'   , 'try: _, body, finalizer'
+    o 'TRY Expression Catch Finalizer', '["try", 2, 3, 4]', 'try: _, body, handler, finalizer'
+    o 'TRY Statement Finalizer'      , '["try", 2, 3]'   , 'try: _, body, finalizer'
+    o 'TRY Statement Catch Finalizer', '["try", 2, 3, 4]', 'try: _, body, handler, finalizer'
+  ]
+
+  # JavaScript requires a block finalizer. Rip's inline spelling wraps its
+  # expression here so every downstream consumer sees the one canonical tree.
+  Finalizer: [
+    o 'FINALLY Block', 2
+    o 'FINALLY Expression', '["block", 2]', 'block: _, statements'
   ]
 
   # Catch bindings: an identifier, an object/array pattern (the emitter

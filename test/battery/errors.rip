@@ -19,6 +19,43 @@ test "try catch finally", "x = 0; try\n  throw 'err'\ncatch e\n  x = 1\nfinally\
 # Try-finally (no catch)
 test "try finally", "x = 0; try\n  42\nfinally\n  x = 1\nx", 1
 
+# Inline finalizers compose with every legal try-body shape.
+test "inline try expression finally expression", '''
+  log = []
+  body = ->
+    log.push 'body'
+    42
+  value = try body() finally log.push('cleanup')
+  [value, log]
+  ''', [42, ['body', 'cleanup']]
+
+test "block try with inline finally expression", '''
+  log = []
+  value = try
+    log.push 'body'
+    42
+  finally log.push 'cleanup'
+  [value, log]
+  ''', [42, ['body', 'cleanup']]
+
+test "inline try catch finally expressions", '''
+  log = []
+  fail = -> throw 'nope'
+  value = try fail()
+  catch
+    'fallback'
+  finally log.push 'cleanup'
+  [value, log]
+  ''', ['fallback', ['cleanup']]
+
+test "inline statement try finally expression", '''
+  log = []
+  f = -> try return 42 finally log.push('cleanup')
+  [f(), log]
+  ''', [42, ['cleanup']]
+
+code "inline try finally emission", "try fsyncSync(directory) finally closeSync(directory)", "try { fsyncSync(directory); } finally { closeSync(directory); }"
+
 # Catch with destructuring
 test "catch with pattern", "result = try\n  throw {code: 404}\ncatch {code}\n  code\nresult", 404
 
