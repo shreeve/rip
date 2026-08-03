@@ -25,8 +25,11 @@ in [docs/ROADMAP.md](docs/ROADMAP.md).
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) — mandatory repository rules and invariants
+- [docs/SERVER.md](docs/SERVER.md) — server, Janus, manager, and worker architecture
 - [docs/TYPES.md](docs/TYPES.md) — type-system and editor architecture
+- [docs/WORKSPACE.md](docs/WORKSPACE.md) — browser passport and development-feed architecture
 - [docs/HMR.md](docs/HMR.md) — hot-module-replacement design
+- [docs/FRAME.md](docs/FRAME.md) — Rip-native hypermedia design
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work
 - [docs/CLEANROOM.md](docs/CLEANROOM.md) — the clean-room engine rewrite plan (activates when v4 is declared done)
 
@@ -36,6 +39,7 @@ in [docs/ROADMAP.md](docs/ROADMAP.md).
 bun run test:rip       # language battery
 bun run test           # fast compiler/runtime suite
 bun run test:all       # canonical full suite: extended tier + every package
+rip check [paths...]   # headless TypeScript checking over Rip source
 bun run parser         # regenerate src/parser.js
 bun run corpus-expected
 bun run audit
