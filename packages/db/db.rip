@@ -478,21 +478,21 @@ export def connect(urlOrOpts = null, opts = {})
 # exposes rows/one/value; those names are too common as locals to also
 # export at module scope.)
 export def query(sql, params = null, opts = {})
-  defaultPair!().client.query! sql, params, opts
+  defaultPair!.client.query! sql, params, opts
 
 export def findAll(sql, params = null, opts = {})
-  defaultPair!().client.rows! sql, params, opts
+  defaultPair!.client.rows! sql, params, opts
 
 export def findOne(sql, params = null, opts = {})
-  defaultPair!().client.one! sql, params, opts
+  defaultPair!.client.one! sql, params, opts
 
 export def transaction(fn)
-  defaultPair!().client.transaction! fn
+  defaultPair!.client.transaction! fn
 
 # Raw adapter begin (session + BEGIN) — what schema.transaction uses under
 # the hood. App code usually wants `transaction(fn)` instead.
 export def begin(opts = {})
-  adapter = defaultPair!().adapter
+  adapter = defaultPair!.adapter
   fail 'this adapter does not support transactions' unless typeof adapter.begin is 'function'
   adapter.begin! opts
 
@@ -1284,7 +1284,7 @@ if import.meta.main
         console.log checkpoint!(force, makeDeps())
     else if cmd is 'mcp'
       if args.includes('--help') or args.includes('-h') then process.stdout.write HELP.mcp
-      else startStdio!()
+      else startStdio!
     else
       process.stderr.write "rip-db: unknown subcommand '#{cmd}'\n\n"
       process.stdout.write USAGE

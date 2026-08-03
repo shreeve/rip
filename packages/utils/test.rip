@@ -102,7 +102,7 @@ test "importing curl.rip rejects loudly", ->
   guard = join dir, 'guard.rip'
   writeFileSync guard, [
     'try'
-    "  await import('#{curlRip}')"
+    "  import!('#{curlRip}')"
     "  p 'no-throw'"
     'catch e'
     '  p "guarded: #{e.message}"'

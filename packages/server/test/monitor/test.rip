@@ -382,11 +382,11 @@ test! 'access client subscribes by app id and preserves raw NDJSON bytes', ->
       new Response body, { status: 200 }
   }
   task = client.move 'cart-abc123'
-  await waitFor -> stdout.chunks.length > 0
+  waitFor! -> stdout.chunks.length > 0
   eq requested.url, 'http://janus/1.0/apps/cart-abc123/access?after=0'
   eq requested.options.unix, '/tmp/janus.sock'
   eq new TextDecoder().decode(stdout.chunks[0]), new TextDecoder().decode(helloLine())
-  await client.stop()
+  client.stop!
   await task
 
 test! 'pretty client validates records and renders only access events', ->
@@ -411,9 +411,9 @@ test! 'pretty client validates records and renders only access events', ->
       new Response body
   }
   task = pretty.move 'cart-abc123'
-  await waitFor -> stdout.text.length > 0
+  waitFor! -> stdout.text.length > 0
   eq stdout.text, "GET /api/items\n"
-  await pretty.stop()
+  pretty.stop!
   await task
   eq fetches, 1
 
@@ -443,8 +443,8 @@ test! 'stream heads never regress below an observed high-water mark', ->
       new Response body
   }
   task = client.move 'cart-abc123'
-  await waitFor -> stderr.text.includes 'heartbeat head regressed'
-  await client.stop()
+  waitFor! -> stderr.text.includes 'heartbeat head regressed'
+  client.stop!
   await task
 
 test! 'the framer bounds retained and copied bytes for an attacker-sized chunk', ->
@@ -488,10 +488,10 @@ test! 'registration generations abort and move exactly one live subscription', -
     new Response body
   client = new AccessClient { mode: 'pretty', control: { base: 'http://janus' }, stdout: sink, stderr: sink, fetch: fetcher, sample: -> 0 }
   client.move 'generation-aaaaaa'
-  await waitFor -> seen.includes('generation-aaaaaa')
+  waitFor! -> seen.includes('generation-aaaaaa')
   client.move 'generation-bbbbbb'
-  await waitFor -> seen.includes('generation-bbbbbb')
-  await client.stop()
+  waitFor! -> seen.includes('generation-bbbbbb')
+  client.stop!
   eq seen.filter((id) -> id is 'generation-aaaaaa').length, 1
   eq seen.filter((id) -> id is 'generation-bbbbbb').length, 1
 
@@ -525,17 +525,17 @@ test! 'a blocked old output completes before a replacement generation starts', -
     )
   client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: sink, stderr: memorySink([]), fetch: fetcher }
   client.move 'old-aaaaaa'
-  await waitFor -> writes.length is 1
+  waitFor! -> writes.length is 1
   replacement = client.move 'new-bbbbbb'
   sleep! 20
   eq calls, ['old-aaaaaa']
   eq writes, ['old-aaaaaa']
   callbacks.shift()()
-  await waitFor -> writes.length is 2
+  waitFor! -> writes.length is 2
   eq calls, ['old-aaaaaa', 'new-bbbbbb']
   eq maxActive, 1
   callbacks.shift()()
-  await client.stop()
+  client.stop!
   await replacement
 
 test! 'an aborted old generation keeps its blocked terminal output failure', ->
@@ -560,7 +560,7 @@ test! 'an aborted old generation keeps its blocked terminal output failure', ->
     )
   client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: sink, stderr: memorySink([]), fetch: fetcher }
   client.move 'old-aaaaaa'
-  await waitFor -> callback?
+  waitFor! -> callback?
   replacement = client.move 'new-bbbbbb'
   failure = Object.assign(new Error('old output failed'), { code: 'EPIPE' })
   callback failure
@@ -591,7 +591,7 @@ test! 'a stale generation resolving after move cannot write or reconnect', ->
     new Response body
   client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(output), stderr: memorySink([]), fetch: fetcher, sample: -> 0 }
   client.move 'old-aaaaaa'
-  await waitFor -> calls.includes('old-aaaaaa')
+  waitFor! -> calls.includes('old-aaaaaa')
   client.move 'new-bbbbbb'
   sleep! 20
   eq calls, ['old-aaaaaa']
@@ -603,8 +603,8 @@ test! 'a stale generation resolving after move cannot write or reconnect', ->
     controller.enqueue accessLine(app_id: 'old-aaaaaa', app_name: 'old', sequence: '1')
     controller.close()
   }))
-  await waitFor -> calls.includes('new-bbbbbb') and output.length is 1
-  await client.stop()
+  waitFor! -> calls.includes('new-bbbbbb') and output.length is 1
+  client.stop!
   text = Buffer.concat(output).toString()
   ok text.includes('new-bbbbbb')
   ok not text.includes('old-aaaaaa')
@@ -635,8 +635,8 @@ test! 'valid records before malformed input in one chunk are consumed first', ->
     fetch: fetcher
     sample: -> 0
   client.move 'cart-abc123'
-  await waitFor -> calls >= 2
-  await client.stop()
+  waitFor! -> calls >= 2
+  client.stop!
   eq Buffer.concat(stdout), Buffer.concat([Buffer.from(hello), Buffer.from(event)])
   ok Buffer.concat(stderr).toString().includes('reconnecting')
 
@@ -656,8 +656,8 @@ test! 'no_replay is exactly one immediate required post-hello transition', ->
         options.signal.addEventListener 'abort', (-> reject(options.signal.reason)), { once: true }
     client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(stdout), stderr: memorySink(stderr), fetch: fetcher, sample: -> 0 }
     client.move 'cart-abc123'
-    await waitFor -> calls >= 2
-    await client.stop()
+    waitFor! -> calls >= 2
+    client.stop!
     { stdout: Buffer.concat(stdout).toString(), stderr: Buffer.concat(stderr).toString() }
   hello0 = { v: 1, type: 'hello', app_id: 'cart-abc123', app_name: 'cart', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 }
   heartbeat0 = { v: 1, type: 'heartbeat', app_id: 'cart-abc123', head: '0', timestamp: '2026-08-01T14:16:15Z' }
@@ -699,8 +699,8 @@ test! 'overflow gaps advance the cursor with diagnostic-before-raw ordering', ->
       options.signal.addEventListener 'abort', (-> reject(options.signal.reason)), { once: true }
   client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: sink('out'), stderr: sink('err'), fetch: fetcher, sample: -> 0 }
   client.move 'cart-abc123'
-  await waitFor -> calls >= 2
-  await client.stop()
+  waitFor! -> calls >= 2
+  client.stop!
   gapDiagnostic = events.findIndex((event) -> event.includes('access gap 2..4'))
   gapRaw = events.findIndex((event) -> event.startsWith('out:') and event.includes('"type":"gap"'))
   ok 0 <= gapDiagnostic < gapRaw, 'gap diagnostic completes before exact raw gap output'
@@ -727,8 +727,8 @@ test! 'closed is consumed and reconnects without waiting for peer EOF', ->
       options.signal.addEventListener 'abort', (-> reject(options.signal.reason)), { once: true }
   client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(stdout), stderr: memorySink([]), fetch: fetcher, sample: -> 0 }
   client.move 'cart-abc123'
-  await waitFor -> calls >= 2
-  await client.stop()
+  waitFor! -> calls >= 2
+  client.stop!
   ok canceled, 'the still-open first body was canceled'
   ok Buffer.concat(stdout).toString().includes('"type":"closed"')
 
@@ -758,8 +758,8 @@ test! 'backoff doubles with full jitter and resets only after a valid hello', ->
   sleep = (ms, _signal) -> delays.push ms
   client = new AccessClient { mode: 'pretty', control: { base: 'http://janus' }, stdout: memorySink([]), stderr: memorySink([]), fetch: fetcher, sample: -> 0.5, sleep }
   client.move 'cart-abc123'
-  await waitFor -> delays.length is 9
-  await client.stop()
+  waitFor! -> delays.length is 9
+  client.stop!
   eq delays, [50, 100, 200, 400, 800, 1600, 2500, 2500, 50]
 
 test! 'raw partial EPIPE is terminal and never reconnects', ->
@@ -780,7 +780,7 @@ test! 'raw partial EPIPE is terminal and never reconnects', ->
   client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: broken, stderr: memorySink([]), fetch: fetcher, sample: -> 0 }
   caught = null
   try
-    await client.move('cart-abc123')
+    client.move!('cart-abc123')
   catch error
     caught = error
   ok caught?.accessOutput, 'partial stdout failure is terminal output'
@@ -794,16 +794,16 @@ test! 'pretty ANSI wraps the complete picture only on color TTYs', ->
     delete process.env.NO_COLOR
     color = []
     client = new AccessClient { mode: 'pretty', picture: '{method:>5}', stdout: memorySink(color, { isTTY: true }), stderr: memorySink([]), control: {} }
-    await client.consume(line)
+    client.consume!(line)
     eq Buffer.concat(color).toString(), '\x1b[36m  GET\x1b[0m\n'
     mono = []
     client = new AccessClient { mode: 'pretty', picture: '{method:>5}', stdout: memorySink(mono), stderr: memorySink([]), control: {} }
-    await client.consume(line)
+    client.consume!(line)
     eq Buffer.concat(mono).toString(), '  GET\n'
     process.env.NO_COLOR = '1'
     noColor = []
     client = new AccessClient { mode: 'pretty', picture: '{method}', stdout: memorySink(noColor, { isTTY: true }), stderr: memorySink([]), control: {} }
-    await client.consume(line)
+    client.consume!(line)
     eq Buffer.concat(noColor).toString(), 'GET\n'
   finally
     if prior? then process.env.NO_COLOR = prior else delete process.env.NO_COLOR
@@ -824,7 +824,7 @@ test! 'output pumping drains high volume under destination backpressure', ->
       ), 0
       false
     once: -> null
-  await pumpAccessOutput readable, destination
+  pumpAccessOutput! readable, destination
   eq total, chunks * bytes
 
 test! 'backpressured output removes every temporary error listener', ->
@@ -833,7 +833,7 @@ test! 'backpressured output removes every temporary error listener', ->
     queueMicrotask -> callback()
     false
   for _i in [0...1000]
-    await writeAccessOutput sink, 'x'
+    writeAccessOutput! sink, 'x'
     eq sink.listenerCount('error'), 0
 
 test! 'foreground flags reject invalid modes and pictures before startup', ->
@@ -885,10 +885,10 @@ test! 'foreground raw stdout is pure NDJSON and off opens no subscription', ->
       output = new Response(proc.stdout).text()
       diagnostic = new Response(proc.stderr).text()
       if mode is 'raw'
-        await waitFor -> accessCount is 1
+        waitFor! -> accessCount is 1
         sleep! 25
       else
-        await waitFor -> registered
+        waitFor! -> registered
         sleep! 25
       signal = if mode is 'off' then 'SIGINT' else 'SIGTERM'
       proc.kill signal

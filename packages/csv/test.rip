@@ -363,4 +363,4 @@ test! "save then load round-trips through a real file", ->
     eq CSV.load!(path), rows
     eq CSV.load!(path, headers: true), [{name: 'Alice', note: 'likes, commas'}, {name: 'Bob', note: 'say "hi"'}]
   finally
-    try (await import('fs')).unlinkSync(path)
+    try (import!('fs')).unlinkSync(path)

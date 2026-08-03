@@ -82,7 +82,7 @@ export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
   fetchLatest = (id, owner) ->
     res = fetchBytes! moduleUrl(id), { cache: 'no-store' }
     return { res } unless res.ok
-    bytes = new Uint8Array(res.arrayBuffer!())
+    bytes = new Uint8Array(res.arrayBuffer!)
     return null unless owns(id, owner)
     { res, hash: rash(bytes), source: new TextDecoder().decode(bytes) }
 
@@ -121,7 +121,7 @@ export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
       report "[Rip] workspace feed: manifest fetch failed (#{res.status})"
       scheduleResync()
       return
-    manifest = res.json!()
+    manifest = res.json!
     files = manifest?.files
     unless Array.isArray files
       report '[Rip] workspace feed: malformed manifest:', manifest
@@ -192,7 +192,7 @@ export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
     return if result?.stale or result?.ok
     report "[Rip] workspace feed: module fetch missed (#{result?.status}) for '#{id}' — resyncing from the manifest"
     wants[id] = { hash, sig: null }
-    resync!()
+    resync!
     return
 
   handleFrame = (text) ->

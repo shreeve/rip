@@ -163,7 +163,7 @@ export def createRenderer(opts: RendererOpts): Renderer
 
   ensureGates = (entries, params, query, mine) ->
     jobs = gateJobs entries, params, query
-    results = await Promise.allSettled (job.cell.ensure() for job in jobs)
+    results = Promise.allSettled! (job.cell.ensure() for job in jobs)
     return false if mine isnt generation
     # Failures are collected, not thrown mid-scan: the SHALLOWEST failing
     # entry decides the boundary, and every entry below it still gets its
@@ -381,7 +381,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     if not forcedFrom? and current? and lastRoute? and route.file is lastRoute.file
       if sameChain([...layoutFiles, route.file], mountedFiles) and shallowEqual(params, lastRoute.params)
         unless shallowEqual(query, lastRoute.query) or queryKeyedRetargets(mountedEntries, params, query)
-          await current.load params, query if typeof current.load is 'function'
+          current.load! params, query if typeof current.load is 'function'
           return null if mine isnt generation
           lastRoute = { file: route.file, params, query }
           return current
@@ -417,7 +417,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     fresh = entries.slice firstNew
 
     try
-      ready = await ensureGates fresh, params, query, mine
+      ready = ensureGates! fresh, params, query, mine
       return null unless ready
     catch caught
       failure: any = caught

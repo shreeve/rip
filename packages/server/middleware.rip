@@ -131,7 +131,7 @@ export cors = (opts = {}) ->
   allowed = (requestOrigin) ->
     return null unless requestOrigin?
     if typeof origin is 'function'
-      if (await origin(requestOrigin)) is true then requestOrigin else null
+      if (origin!(requestOrigin)) is true then requestOrigin else null
     else if Array.isArray(origin)
       if origin.includes(requestOrigin) then requestOrigin else null
     else if origin is '*'
@@ -141,7 +141,7 @@ export cors = (opts = {}) ->
 
   (request, next) ->
     requestOrigin = request.headers.get 'origin'
-    chosen = await allowed requestOrigin
+    chosen = allowed! requestOrigin
     if request.method is 'OPTIONS'
       unless chosen?
         headers = new Headers
@@ -155,7 +155,7 @@ export cors = (opts = {}) ->
       headers.set 'access-control-allow-credentials', 'true' if credentials
       appendVary headers, 'Origin' unless chosen is '*'
       return new Response null, { status: 204, headers }
-    response = await next()
+    response = next!
     unless chosen?
       return response unless requestOrigin? and origin isnt '*'
       return withHeaders response, (headers) -> appendVary headers, 'Origin'
@@ -176,7 +176,7 @@ highlightJson = (text) ->
     .replace(/: (true|false|null)/g, ': <span class="literal">$1</span>')
 
 export htmlJson = (request, next) ->
-  response = await next()
+  response = next!
   type = response.headers.get('content-type') or ''
   return response unless type.toLowerCase().includes 'application/json'
   return response if response.headers.has 'content-encoding'
@@ -202,7 +202,7 @@ export htmlJson = (request, next) ->
     chunks = []
     size = 0
     loop
-      { done, value } = await reader.read()
+      { done, value } = reader.read!
       break if done
       size += value.byteLength
       if size > 1_000_000
@@ -241,7 +241,7 @@ export timeout = (seconds = 30, opts = {}) ->
   throw new TypeError('timeout exempt must be a function') unless typeof exempt is 'function'
 
   (request, next) ->
-    return next!() if await exempt request
+    return next! if exempt! request
     controller = new AbortController
     signal = AbortSignal.any [request.signal, controller.signal]
     init = { method: request.method, headers: request.headers, signal, body: request.body }
@@ -252,7 +252,7 @@ export timeout = (seconds = 30, opts = {}) ->
       ((response) -> { response }),
       ((error) -> { error })
     )
-    result = await Promise.race [outcome, deadline]
+    result = Promise.race! [outcome, deadline]
     unless result.timeout
       clearTimeout timer
       throw result.error if result.error?
@@ -290,7 +290,7 @@ export secureHeaders = (opts = {}) ->
   ]
 
   (request, next) ->
-    response = await next()
+    response = next!
     withHeaders response, (headers) ->
       headers.set name, value for [name, value] in policy when value? and not headers.has(name)
 
@@ -307,7 +307,7 @@ export sessions = (opts = {}) ->
     data = decodeSession! cookies(request)[name], secret, encrypt
     request[SESSION] = data
     before = JSON.stringify data
-    response = await next()
+    response = next!
     return response if JSON.stringify(data) is before
     value = encodeSession! data, secret, encrypt, Date.now() + maxAge * 1000
     throw new Error('encoded session exceeds the 4096-byte cookie limit') if value.length > 3800
@@ -333,7 +333,7 @@ export csrf = (opts = {}) ->
   policy = cookieOptions name, opts, false
 
   (request, next) ->
-    return next!() if exempt request
+    return next! if exempt request
     raw = cookies(request)[name]
     parts = raw?.split('.') or []
     token = if parts.length is 2 and verify!(parts[0], parts[1], secret) then parts[0] else null
@@ -345,6 +345,6 @@ export csrf = (opts = {}) ->
       token = randomToken()
       emit = true
     request.csrfToken = token
-    response = await next()
+    response = next!
     return response unless emit
     setCookie response, name, "#{token}.#{sign!(token, secret)}", policy

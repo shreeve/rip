@@ -99,7 +99,7 @@ console.log "\nPackage"
 test "a pure CLI: importing the module rejects loudly", ->
   guard = write scratch(), 'guard.rip', [
     'try'
-    "  await import('#{printRip}')"
+    "  import!('#{printRip}')"
     "  p 'no-throw'"
     'catch e'
     '  p "guarded: #{e.message}"'

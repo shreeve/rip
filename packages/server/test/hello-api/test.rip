@@ -22,10 +22,10 @@ generate = (entry, artifact, result, task) ->
 waitFor = (fn, timeout = 5000) ->
   deadline = Date.now() + timeout
   loop
-    value = await fn()
+    value = fn!
     return value if value
     throw new Error('hello API test timed out') if Date.now() >= deadline
-    await new Promise (resolve) -> setTimeout resolve, 10
+    new Promise! (resolve) -> setTimeout resolve, 10
 
 unixFetch = (url, socket) ->
   options = { unix: socket }
@@ -64,15 +64,15 @@ test! 'artifact-only worker becomes ready, serves, and drains', ->
       stdout: 'ignore'
       stderr: 'inherit'
       env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: 'hello' }
-    ready = await waitFor ->
+    ready = waitFor! ->
       try
-        response = await unixFetch 'http://worker/ready', socket
+        response = unixFetch! 'http://worker/ready', socket
         response.status is 200
       catch then false
     ok ready
-    response = await unixFetch 'http://worker/hello', socket
+    response = unixFetch! 'http://worker/hello', socket
     eq response.status, 200
-    eq (await response.json()), { message: 'hello' }
+    eq (response.json!), { message: 'hello' }
     proc.kill 'SIGTERM'
     eq (await proc.exited), 0
   finally
@@ -93,7 +93,7 @@ test! 'foreground manager registers one ready worker and deregisters before exit
     fetch: (request) ->
       url = new URL request.url
       if request.method is 'POST' and url.pathname is '/1.0/apps'
-        registration = await request.json()
+        registration = request.json!
         return Response.json({ id: 'hello-abc123' }, { status: 201 })
       if request.method is 'GET' and url.pathname is '/1.0/apps/hello-abc123/access'
         accessConnected = true
@@ -136,13 +136,13 @@ test! 'foreground manager registers one ready worker and deregisters before exit
       stderr: 'pipe'
     output = new Response(proc.stdout).text()
     diagnostic = new Response(proc.stderr).text()
-    await waitFor -> registration? and accessConnected
+    waitFor! -> registration? and accessConnected
     eq registration.name, 'hello'
     eq registration.hosts, ['hello.test']
     eq registration.upstreams.length, 1
-    response = await fetch "http://127.0.0.1:#{edge.port}/hello"
+    response = fetch! "http://127.0.0.1:#{edge.port}/hello"
     eq response.status, 200
-    eq (await response.json()), { message: 'hello' }
+    eq (response.json!), { message: 'hello' }
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143, await diagnostic
     ok (await output).includes('GET /hello'), 'foreground manager must print pretty access output'

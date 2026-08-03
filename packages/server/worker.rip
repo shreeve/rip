@@ -98,7 +98,7 @@ if handlerMs > 0
     for started as state.inflightStarts.values()
       if now - started > handlerMs
         warn "[worker #{workerId}] handler exceeded #{handlerMs}ms; recycling"
-        shutdown!()
+        shutdown!
         return
   , interval
 
@@ -106,5 +106,5 @@ parent = process.ppid
 setInterval ->
   return if process.ppid is parent and process.ppid isnt 1
   warn "[worker #{workerId}] manager exited; draining"
-  shutdown!()
+  shutdown!
 , ppidMs

@@ -74,7 +74,7 @@ server = Bun.serve
   fetch: (req) ->
     url = new URL req.url
     path = url.pathname
-    bodyText = req.text!()
+    bodyText = req.text!
     body = null
     try
       body = if bodyText then JSON.parse(bodyText) else null
@@ -138,7 +138,7 @@ tools = toolsMod
 # Run a thunk and return its rejection (or null on success) — the async
 # twin of `throws`, which only catches synchronous throws.
 caught = (fn) ->
-  try fn!() catch e then return e
+  try fn! catch e then return e
   null
 
 # Load one URL attachment and return the resulting error message. Shared by the
@@ -405,7 +405,7 @@ test! "openai error body and HTTP error surface as provider-tagged messages", ->
   eq caught!(-> openai.chat({ model: 'gpt-6', messages: [{ role: 'user', text: 'x' }] })).message, 'OpenAI returned HTTP 500'
 
 test! "openai listModels normalizes ids and created timestamps", ->
-  rows = openai.listModels!()
+  rows = openai.listModels!
   eq rows.map((r) -> r.id), [
     'openai:gpt-4o', 'openai:gpt-5.5', 'openai:gpt-5.6-luna', 'openai:gpt-5.6-terra'
     'openai:gpt-5.6', 'openai:gpt-5.6-sol', 'openai:gpt-6-mini', 'openai:gpt-6-20240101'
@@ -452,7 +452,7 @@ test! "anthropic error body and HTTP error surface as provider-tagged messages",
   eq caught!(-> anthropic.chat({ model: 'claude-opus-4-8', messages: [{ role: 'user', text: 'x' }] })).message, 'Anthropic returned HTTP 529'
 
 test! "anthropic listModels normalizes ids and display names", ->
-  rows = anthropic.listModels!()
+  rows = anthropic.listModels!
   eq rows.map((r) -> r.id), [
     'anthropic:claude-opus-4-20250514'
     'anthropic:claude-opus-4-8'
@@ -714,7 +714,7 @@ test! "fresh_review: everything excluded raises with the resolved exclusion list
   eq caught!(-> tools.fresh_review(ctx, { artifact: samplePath, exclude_models: ['gpt', 'claude'] })).message, "no available model after exclusions: #{LATEST_OPENAI}, #{LATEST_ANTHROPIC}"
 
 test! "conversations: list / get shapes; attachments trimmed unless include_attachments", ->
-  id = seedConversation!()
+  id = seedConversation!
   listed = tools.list_conversations!(ctx, { limit: 100 })
   row = listed.conversations.find((c) -> c.id is id)
   eq Object.keys(row).sort(), [
@@ -731,7 +731,7 @@ test! "conversations: list / get shapes; attachments trimmed unless include_atta
   store.deleteConversation(id)
 
 test! "conversations: export json and markdown", ->
-  id = seedConversation!()
+  id = seedConversation!
   asJson = tools.export_conversation!(ctx, { conversation_id: id, format: 'json' })
   eq asJson.format, 'json'
   parsed = JSON.parse(asJson.content)
@@ -746,7 +746,7 @@ test! "conversations: export json and markdown", ->
   store.deleteConversation(id)
 
 test! "conversations: redact content then all; bad modes and missing ids raise", ->
-  id = seedConversation!()
+  id = seedConversation!
   red = tools.redact!(ctx, { conversation_id: id, mode: 'content' })
   eq red, { redacted: true, mode: 'content', conversation_id: id }
   ok store.listMessages(id).every((m) -> m.text is '[redacted]'), 'all texts redacted'

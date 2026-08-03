@@ -9,7 +9,7 @@ SERVER = join(import.meta.dir, '..', '..', 'server.rip')
 waitFor = (name, fn, timeout = 7000) ->
   deadline = Date.now() + timeout
   loop
-    value = await fn()
+    value = fn!
     return value if value
     throw new Error("manager boundary test timed out waiting for #{name}") if Date.now() >= deadline
     sleep! 10
@@ -21,7 +21,7 @@ startControl = (socket, calls, handlers: any = {}) ->
     unix: socket
     fetch: (request) ->
       url = new URL request.url
-      body = if request.method in ['POST', 'PUT'] then try await request.json() catch then null else null
+      body = if request.method in ['POST', 'PUT'] then try request.json! catch then null else null
       calls.push { method: request.method, path: url.pathname, body }
       if request.method is 'GET' and url.pathname is '/1.0'
         return Response.json { type: 'janus', api_version: '1.0' }
@@ -77,7 +77,7 @@ test! 'manager loads and normalizes the app-local declaration before registering
   process = null
   try
     { proc: process } = run nested, ['--control', controlSocket, '--no-watch', '--access-log=off']
-    registration = await waitFor 'declaration registration', ->
+    registration = waitFor! 'declaration registration', ->
       calls.find (call) -> call.method is 'POST' and call.path is '/1.0/apps'
     eq calls[0].method, 'GET'
     eq registration.body.name, 'declared-app'
@@ -121,7 +121,7 @@ test! 'shell-less all-browsable declaration registers exactly its declared roots
   process = null
   try
     { proc: process } = run project, [project, '--control', controlSocket, '--no-watch', '--access-log=off']
-    registration = await waitFor 'browse-policy registration', ->
+    registration = waitFor! 'browse-policy registration', ->
       calls.find (call) -> call.method is 'POST' and call.path is '/1.0/apps'
     eq registration.body.hosts, ['files.example.test']
     eq registration.body.files,
@@ -168,7 +168,7 @@ test! 'manager retries stale registration claims within a bounded window', ->
     launched = run project, [project, '--host', 'retry.example.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
       RIP_REGISTER_409_MS: '1000'
     process = launched.proc
-    await waitFor 'registration retry success', ->
+    waitFor! 'registration retry success', ->
       calls.filter((call) -> call.method is 'POST' and call.path is '/1.0/apps').length is 3
     ok not process.exitCode?
     process.kill 'SIGTERM'
@@ -218,7 +218,7 @@ test! 'heartbeat recovery retries a stale replacement claim', ->
       RIP_HEARTBEAT_MS: '25'
       RIP_REGISTER_409_MS: '1000'
     process = launched.proc
-    await waitFor 'heartbeat replacement registration', ->
+    waitFor! 'heartbeat replacement registration', ->
       calls.filter((call) -> call.method is 'POST' and call.path is '/1.0/apps').length is 4
     ok not process.exitCode?
     process.kill 'SIGTERM'
@@ -239,10 +239,10 @@ test! 'manager runtime is private to the current POSIX user', ->
   try
     { proc } = run project, ['status', project], { TMPDIR: runtimeRoot }
     eq await proc.exited, 1
-    runtime = join runtimeRoot, "rip-managers-#{process.getuid!()}"
+    runtime = join runtimeRoot, "rip-managers-#{process.getuid!}"
     info = statSync runtime
     ok info.isDirectory()
-    eq info.uid, process.getuid!()
+    eq info.uid, process.getuid!
     eq info.mode & 0o777, 0o700
   finally
     rmSync dir, { recursive: true, force: true }
@@ -251,7 +251,7 @@ test! 'manager runtime rejects unsafe existing permissions', ->
   dir = mkdtempSync join(tmpdir(), 'rip-manager-runtime-unsafe-')
   project = join dir, 'project'
   runtimeRoot = join dir, 'tmp'
-  runtime = join runtimeRoot, "rip-managers-#{process.getuid!()}"
+  runtime = join runtimeRoot, "rip-managers-#{process.getuid!}"
   mkdirSync join(project, 'app'), { recursive: true }
   mkdirSync runtime, { recursive: true }
   chmodSync runtime, 0o755
@@ -308,7 +308,7 @@ test! 'stop command gracefully deregisters and exits the canonical manager', ->
   manager = null
   try
     { proc: manager } = run project, [project, '--host', 'stop.example.test', '--control', controlSocket, '--no-watch', '--access-log=off']
-    await waitFor 'manager registration before stop', ->
+    waitFor! 'manager registration before stop', ->
       calls.some (call) -> call.method is 'POST' and call.path is '/1.0/apps'
 
     stopped = run project, ['stop', project]
@@ -371,7 +371,7 @@ test! 'standalone browse heartbeat lease deletes on orderly shutdown', ->
   try
     launched = run dir, ['browse', files, '--host', 'live.example.test', '--control', controlSocket, '--access-log=off']
     process = launched.proc
-    await waitFor 'browse heartbeat', (->
+    waitFor! 'browse heartbeat', (->
       calls.some (call) -> call.method is 'POST' and call.path.endsWith('/heartbeat')
     ), 7000
     process.kill 'SIGTERM'

@@ -113,7 +113,7 @@ console.log "\ntest"
 
 order = []
 test! "an async body is awaited in place (test!)", ->
-  await new Promise (r) -> setTimeout r, 5
+  new Promise! (r) -> setTimeout r, 5
   order.push 1
 test "async cases finish before later cases run", ->
   eq order, [1]

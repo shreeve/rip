@@ -55,35 +55,35 @@ test! 'routes, parameters, prefixes, and smart responses compose', ->
   prefix '/api', -> get '/ping' -> 'pong'
 
   text = handle! request('GET', '/text')
-  eq await text.text(), 'hello'
+  eq text.text!, 'hello'
   eq text.headers.get('content-type'), 'text/plain; charset=UTF-8'
   ok (handle! request('GET', '/html')).headers.get('content-type').startsWith 'text/html'
-  eq await (handle! request('GET', '/number')).text(), '42'
-  eq await (handle! request('GET', '/boolean')).text(), 'true'
-  eq await (handle! request('GET', '/object')).json(), { ok: true }
+  eq (handle! request('GET', '/number')).text!, '42'
+  eq (handle! request('GET', '/boolean')).text!, 'true'
+  eq (handle! request('GET', '/object')).json!, { ok: true }
   eq (handle! request('GET', '/empty')).status, 204
-  eq await (handle! request('GET', '/users/a%20b')).json(), { id: 'a b' }
-  eq await (handle! request('GET', '/users/7/books/9')).json(), { id: '7', book: '9' }
-  eq await (handle! request('GET', '/files/a/b')).text(), '/files/a/b'
-  eq await (handle! request('GET', '/numbers/42')).text(), '42'
+  eq (handle! request('GET', '/users/a%20b')).json!, { id: 'a b' }
+  eq (handle! request('GET', '/users/7/books/9')).json!, { id: '7', book: '9' }
+  eq (handle! request('GET', '/files/a/b')).text!, '/files/a/b'
+  eq (handle! request('GET', '/numbers/42')).text!, '42'
   eq (handle! request('GET', '/numbers/nope')).status, 404
-  eq await (handle! request('GET', '/maybe')).text(), 'none'
-  eq await (handle! request('DELETE', '/method')).text(), 'DELETE'
-  eq await (handle! request('GET', '/api/ping')).text(), 'pong'
+  eq (handle! request('GET', '/maybe')).text!, 'none'
+  eq (handle! request('DELETE', '/method')).text!, 'DELETE'
+  eq (handle! request('GET', '/api/ping')).text!, 'pong'
   eq (handle! request('GET', '/text/')).status, 200
   malformed = handle! request('GET', '/users/%zz')
   eq malformed.status, 400
-  eq await malformed.json(), { error: { message: 'malformed percent-encoding in path' } }
+  eq malformed.json!, { error: { message: 'malformed percent-encoding in path' } }
   head = handle! request('HEAD', '/text')
   eq head.status, 200
-  eq await head.text(), ''
+  eq head.text!, ''
 
 test! 'middleware uses Request and next in registration order', ->
   resetGlobals()
   order = []
   use (request, next) ->
     order.push "in:#{request.method}"
-    response = await next()
+    response = next!
     order.push 'out'
     new Response response.body,
       status: response.status
@@ -97,7 +97,7 @@ test! 'middleware uses Request and next in registration order', ->
   get '/api/check' -> { replaced: @req.header('x-replaced') }
 
   response = handle! request('GET', '/api/check')
-  eq await response.json(), { replaced: 'yes' }
+  eq response.json!, { replaced: 'yes' }
   eq response.headers.get('x-global'), 'yes'
   eq order, ['in:GET', 'scoped', 'out']
 
@@ -109,13 +109,13 @@ test! 'middleware can short-circuit and rejects duplicate next calls', ->
 
   resetGlobals()
   use (request, next) ->
-    await next()
+    next!
     next()
   get '/once' -> 'ok'
   warnings = captureWarnings! ->
     response = handle! request('GET', '/once')
     eq response.status, 500
-    eq await response.json(), { error: { message: 'Internal Server Error' } }
+    eq response.json!, { error: { message: 'Internal Server Error' } }
   ok warnings.some((message) -> message.includes('next() more than once'))
 
 test! 'before and after filters compose around handlers and short-circuit', ->
@@ -123,7 +123,7 @@ test! 'before and after filters compose around handlers and short-circuit', ->
   order = []
   use (request, next) ->
     order.push 'middleware-in'
-    response = await next()
+    response = next!
     order.push 'middleware-out'
     response
   before -> order.push 'before-1'
@@ -133,7 +133,7 @@ test! 'before and after filters compose around handlers and short-circuit', ->
   get '/flow' ->
     order.push 'handler'
     'ok'
-  eq await (handle! request('GET', '/flow')).text(), 'ok'
+  eq (handle! request('GET', '/flow')).text!, 'ok'
   eq order, [
     'middleware-in', 'before-1', 'before-2', 'handler',
     'after-1', 'after-2', 'middleware-out',
@@ -148,7 +148,7 @@ test! 'before and after filters compose around handlers and short-circuit', ->
     'never'
   blocked = handle! request('GET', '/blocked')
   eq blocked.status, 403
-  eq await blocked.text(), 'halted'
+  eq blocked.text!, 'halted'
   eq reached, { handler: false, after: false }
 
   resetGlobals()
@@ -168,7 +168,7 @@ test! 'before and after filters compose around handlers and short-circuit', ->
   warnings = captureWarnings! ->
     failure = handle! request('GET', '/failure')
     eq failure.status, 500
-    eq await failure.json(), { error: { message: 'Internal Server Error' } }
+    eq failure.json!, { error: { message: 'Internal Server Error' } }
   ok warnings.some((message) -> message.includes('filter secret'))
 
 test! 'raw filters run before body parsing on write requests only', ->
@@ -180,7 +180,7 @@ test! 'raw filters run before body parsing on write requests only', ->
   post '/raw-json' -> { name: read('name') }
   get '/raw-get' -> 'ok'
   response = handle! request('POST', '/raw-json', { body: '{"name":"Amy"}' })
-  eq await response.json(), { name: 'Amy' }
+  eq response.json!, { name: 'Amy' }
   eq calls, ['POST']
   handle! request('GET', '/raw-get')
   eq calls, ['POST']
@@ -197,28 +197,28 @@ test! 'error helpers, terminal handlers, and masking follow the contract', ->
   warnings = captureWarnings! ->
     bad = handle! request('GET', '/bad')
     eq bad.status, 422
-    eq await bad.json(), { error: { message: 'invalid' } }
+    eq bad.json!, { error: { message: 'invalid' } }
     noticeResponse = handle! request('GET', '/notice')
     eq noticeResponse.status, 400
-    eq await noticeResponse.json(), { error: { notice: 'try again' } }
+    eq noticeResponse.json!, { error: { notice: 'try again' } }
     bailResponse = handle! request('GET', '/bail')
     eq bailResponse.status, 401
-    eq await bailResponse.json(), { error: { message: 'Unauthorized' } }
-    eq await (handle! request('GET', '/secret')).json(), { error: { message: 'Internal Server Error' } }
-    eq await (handle! request('GET', '/missing')).text(), 'lost'
+    eq bailResponse.json!, { error: { message: 'Unauthorized' } }
+    eq (handle! request('GET', '/secret')).json!, { error: { message: 'Internal Server Error' } }
+    eq (handle! request('GET', '/missing')).text!, 'lost'
 
     resetGlobals()
     onError (failure) -> @json { handled: failure.message }, 409
     get '/custom' -> throw new Error 'handled here'
     custom = handle! request('GET', '/custom')
     eq custom.status, 409
-    eq await custom.json(), { handled: 'handled here' }
+    eq custom.json!, { handled: 'handled here' }
 
     resetGlobals()
     get '/present' -> 'yes'
     missing = handle! request('GET', '/missing')
     eq missing.status, 404
-    eq await missing.text(), 'Not Found'
+    eq missing.text!, 'Not Found'
   ok warnings.some((message) -> message.includes('database password'))
   ok warnings.some((message) -> message.includes('handled here'))
 
@@ -264,7 +264,7 @@ test! 'read merges body, query, and path with request-local context', ->
     qty: '7'
     note: 'order-123'
     patient: { name: 'Amy' }
-  eq await response.json(),
+  eq response.json!,
     id: 42
     email: 'a@b.com'
     page: 3
@@ -280,7 +280,7 @@ test! 'read merges body, query, and path with request-local context', ->
     token: 'minted'
   required = handle! jsonRequest('POST', '/required', {})
   eq required.status, 400
-  eq await required.json(), { error: { message: 'Missing required field: missing' } }
+  eq required.json!, { error: { message: 'Missing required field: missing' } }
   eq ctx(), null
   eq mark(), null
   throws (-> read('outside')), 'no context for read()'
@@ -292,12 +292,12 @@ test! 'request marks and trusted tenant context stay request-local', ->
     { mark: mark(), site: @req.site }
   direct = handle! request('GET', '/context', { headers: { 'Rip-Site': 'ola' } })
   eq direct.headers.get('rip-mark'), 'corr-1'
-  eq await direct.json(), { mark: 'corr-1', site: null }
+  eq direct.json!, { mark: 'corr-1', site: null }
   priorWorker = process.env.WORKER_ID
   process.env.WORKER_ID = 'framework-test'
   try
     proxied = handle! request('GET', '/context', { headers: { 'Rip-Site': 'ola' } })
-    eq await proxied.json(), { mark: 'corr-1', site: 'ola' }
+    eq proxied.json!, { mark: 'corr-1', site: 'ola' }
   finally
     if priorWorker? then process.env.WORKER_ID = priorWorker else delete process.env.WORKER_ID
 
@@ -324,21 +324,21 @@ test! 'schema input and OpenAPI stay tied to live routes', ->
   post '/signup', input: Signup, -> { input: @input }
   post '/teams/:team/signup', input: Signup, -> { input: @input }
   good = handle! jsonRequest('POST', '/signup', { name: 'Amy', age: '30' })
-  eq await good.json(), { input: { name: 'Amy', age: 30 } }
+  eq good.json!, { input: { name: 'Amy', age: 30 } }
   bad = handle! jsonRequest('POST', '/signup', { name: 'x' })
   eq bad.status, 400
-  badBody = await bad.json()
+  badBody = bad.json!
   eq badBody.error.message, 'Validation failed'
   ok Array.isArray(badBody.error.issues)
   invalid = handle! request 'POST', '/signup',
     body: '{oops'
     headers: { 'content-type': 'application/json' }
   eq invalid.status, 400
-  eq await invalid.json(),
+  eq invalid.json!,
     error:
       message: 'Invalid JSON body'
       issues: [{ field: '', error: 'json', message: 'request body is not valid JSON' }]
-  document = await (handle! request('GET', '/openapi.json')).json()
+  document = (handle! request('GET', '/openapi.json')).json!
   eq document.openapi, '3.1.0'
   eq document.info, { title: 'Framework Test', version: '1.0.0' }
   ok document.paths['/signup'].post.requestBody?
@@ -365,14 +365,14 @@ test! 'response helpers preserve explicit headers and emit send instructions', -
   eq defaultResponse.headers.get('content-type'), null
   eq defaultResponse.headers.get('etag'), null
   eq defaultResponse.headers.get('cache-control'), 'no-cache'
-  eq await defaultResponse.text(), ''
+  eq defaultResponse.text!, ''
   response = handle! request('GET', '/send')
   eq response.headers.get('x-sendfile'), resolve('report.rip')
   eq response.headers.get('content-type'), 'text/x-rip'
   eq response.headers.get('content-disposition'), 'attachment; filename="report.rip"'
   eq response.headers.get('etag'), '"release-42"'
   eq response.headers.get('cache-control'), 'public, max-age=31536000, immutable'
-  eq await response.text(), ''
+  eq response.text!, ''
   eq (handle! request('GET', '/send-header-type')).headers.get('content-type'), 'application/x-custom'
 
 test! 'cache directives emit exact policy and reject guesses', ->
@@ -423,8 +423,8 @@ test! 'App resets registrations and returns the shared fetch handler', ->
   ok handler is handle
   stale = handler! request('GET', '/stale')
   eq stale.status, 404
-  eq await stale.text(), 'Not Found'
-  eq await (handler! request('GET', '/fresh')).text(), 'fresh'
+  eq stale.text!, 'Not Found'
+  eq (handler! request('GET', '/fresh')).text!, 'fresh'
 
 test 'start performs only the artifact-worker handoff', ->
   priorArtifact = process.env.APP_ARTIFACT

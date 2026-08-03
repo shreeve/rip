@@ -657,7 +657,7 @@ invokeMiddleware = (request) ->
 
 export fetch = (request) ->
   try
-    response = await invokeMiddleware request
+    response = invokeMiddleware! request
     throw new TypeError('middleware chain returned no Response') unless response instanceof Response
     if request.method is 'HEAD'
       new Response null, { status: response.status, statusText: response.statusText, headers: response.headers }

@@ -451,7 +451,7 @@ test "a coercer-name collision rejects the package import, naming the coercer", 
     "import { registerCoercer } from '#{join(import.meta.dir, '..', '..', 'src', 'runtime', 'schema.js')}'"
     "registerCoercer 'money', (v) -> v"
     "try"
-    "  await import('#{join(import.meta.dir, 'validate.rip')}')"
+    "  import!('#{join(import.meta.dir, 'validate.rip')}')"
     "  p 'imported'"
     "catch e"
     '  p "guarded: #{e.message}"'

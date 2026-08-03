@@ -32,7 +32,7 @@ releasedCaddy = ->
 waitFor = (name, fn, timeout = 8000) ->
   deadline = Date.now() + timeout
   loop
-    value = await fn()
+    value = fn!
     return value if value
     throw new Error("released Janus test timed out waiting for #{name}") if Date.now() >= deadline
     sleep! 20
@@ -108,12 +108,12 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
       env: { ...process.env, JANUS_HEARTBEAT_TTL: '6s', XDG_DATA_HOME: join(dir, 'data'), XDG_CONFIG_HOME: join(dir, 'config') }
     caddyOut = new Response(caddy.stdout).text()
     caddyErr = new Response(caddy.stderr).text()
-    await waitFor 'control socket', ->
+    waitFor! 'control socket', ->
       throw new Error("released Caddy exited #{caddy.exitCode}: #{await caddyErr}") if caddy.exitCode?
       existsSync control
-    accessStatus = await fetch 'http://janus/1.0/access', { unix: control }
+    accessStatus = fetch! 'http://janus/1.0/access', { unix: control }
     eq accessStatus.status, 200
-    accessState = await accessStatus.json()
+    accessState = accessStatus.json!
     ok accessState.provisioned_encoders > 0, JSON.stringify(accessState)
 
     manager = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'integration.test', '--control', control],
@@ -125,11 +125,11 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
 
     edgeDiagnostic = 'no response'
     try
-      first = await waitFor 'initial API response', ->
+      first = waitFor! 'initial API response', ->
         throw new Error("manager exited #{manager.exitCode}: #{await managerErr}") if manager.exitCode?
         try
-          response = await edgeFetch port, '/api/version'
-          text = await response.text()
+          response = edgeFetch! port, '/api/version'
+          text = response.text!
           edgeDiagnostic = "#{response.status}: #{text}"
           JSON.parse(text) if response.status is 200
         catch error
@@ -138,36 +138,36 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
     catch error
       throw new Error("#{error}; last edge result #{edgeDiagnostic}")
     eq first, { version: 'one' }
-    activeAccess = await fetch 'http://janus/1.0/access', { unix: control }
-    eq (await activeAccess.json()).registrations, 1
-    apps = await (await fetch('http://janus/1.0/apps', { unix: control })).json()
-    directAccess = await fetch "http://janus/1.0/apps/#{apps[0].id}/access?after=0", { unix: control }
+    activeAccess = fetch! 'http://janus/1.0/access', { unix: control }
+    eq (activeAccess.json!).registrations, 1
+    apps = (fetch!('http://janus/1.0/apps', { unix: control })).json!
+    directAccess = fetch! "http://janus/1.0/apps/#{apps[0].id}/access?after=0", { unix: control }
     unless directAccess.status is 200
-      eq directAccess.status, 200, await directAccess.text()
+      eq directAccess.status, 200, directAccess.text!
     accessRecords = []
     accessError = null
     framer = new AccessFramer ((line) -> accessRecords.push line), ((error) -> accessError = error)
     reader = directAccess.body.getReader()
-    await waitFor 'released Janus access hello', ->
-      { done, value } = reader.read!()
+    waitFor! 'released Janus access hello', ->
+      { done, value } = reader.read!
       framer.feed value unless done
       throw accessError if accessError?
       accessRecords.length > 0
     eq accessRecords[0].record.type, 'hello'
-    await reader.cancel()
+    reader.cancel!
 
-    shell = await edgeFetch port, '/'
+    shell = edgeFetch! port, '/'
     eq shell.status, 200
-    shellBody = await shell.text()
+    shellBody = shell.text!
     ok shellBody.includes('<div id="app"></div>')
-    bundle = await edgeFetch port, '/bundle.json'
+    bundle = edgeFetch! port, '/bundle.json'
     eq bundle.status, 200
     etag = bundle.headers.get 'etag'
     ok etag?.startsWith('W/"')
-    eq (await edgeFetch(port, '/bundle.json', { 'if-none-match': etag })).status, 304
-    css = await edgeFetch port, '/styles.css'
+    eq (edgeFetch!(port, '/bundle.json', { 'if-none-match': etag })).status, 304
+    css = edgeFetch! port, '/styles.css'
     eq css.status, 200
-    eq (await css.text()).trim(), 'body { color: navy; }'
+    eq (css.text!).trim(), 'body { color: navy; }'
 
     for [path, secret] in [
       ['/index.rip', 'api-source-secret']
@@ -176,8 +176,8 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
       ['/data/app.sqlite', 'database-file-secret']
       ['/private.txt', 'authorized bytes']
     ]
-      response = await edgeFetch port, path
-      body = await response.text()
+      response = edgeFetch! port, path
+      body = response.text!
       # A configured SPA may answer an unknown path with its shell. Exact
       # shell bytes are still isolation: the requested authored file did not
       # reach the response.
@@ -185,18 +185,18 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
       eq [path, isolated], [path, true]
       ok not body.includes(secret), "#{path} leaked its authored bytes"
 
-    sent = await edgeFetch port, '/api/send'
+    sent = edgeFetch! port, '/api/send'
     eq sent.status, 200
     eq sent.headers.get('x-sendfile'), null
-    eq await sent.text(), 'authorized bytes'
-    partial = await edgeFetch port, '/api/send', { range: 'bytes=0-9' }
+    eq sent.text!, 'authorized bytes'
+    partial = edgeFetch! port, '/api/send', { range: 'bytes=0-9' }
     eq partial.status, 206
-    eq await partial.text(), 'authorized'
+    eq partial.text!, 'authorized'
 
     sleep! 6200
-    alive = await edgeFetch port, '/api/version'
+    alive = edgeFetch! port, '/api/version'
     eq alive.status, 200
-    eq await alive.json(), { version: 'one' }
+    eq alive.json!, { version: 'one' }
 
     writeFileSync join(project, 'index.rip'), """
     import { get, start } from '@rip-lang/server'
@@ -205,10 +205,10 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
     get '/api/send' -> new Response null, { headers: { 'X-Sendfile': #{JSON.stringify(privateFile)} } }
     start!
     """
-    second = await waitFor 'reloaded API response', ->
+    second = waitFor! 'reloaded API response', ->
       try
-        response = await edgeFetch port, '/api/version'
-        body = await response.json()
+        response = edgeFetch! port, '/api/version'
+        body = response.json!
         body if body.version is 'two'
       catch then null
     eq second, { version: 'two' }
@@ -217,8 +217,8 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
     eq (await manager.exited), 143, await managerErr
     ok (await managerOut).includes('/api/version'), 'released Janus access events must reach foreground output'
     manager = null
-    await waitFor 'deregistration', ->
-      response = await edgeFetch port, '/api/version'
+    waitFor! 'deregistration', ->
+      response = edgeFetch! port, '/api/version'
       response.status is 404
   finally
     try manager?.kill('SIGKILL')

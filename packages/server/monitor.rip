@@ -609,7 +609,7 @@ export writeAccessOutput = (stream, bytes) ->
 export pumpAccessOutput = (readable, stream) ->
   reader = readable.getReader()
   loop
-    { done, value } = reader.read!()
+    { done, value } = reader.read!
     break if done
     writeAccessOutput! stream, value
 
@@ -697,7 +697,7 @@ export class AccessClient
         requested = cursor
         response = @request! appId, requested, signal
         unless response.status is 200
-          detail = (await response.text()).trim()
+          detail = (response.text!).trim()
           throw new Error("access stream HTTP #{response.status}#{if detail then ": #{detail}" else ''}")
         throw new Error('access stream response has no body') unless response.body?
         reader = response.body.getReader()
@@ -711,7 +711,7 @@ export class AccessClient
         pending = []
         framer = new AccessFramer ((line) -> pending.push line), ((error) -> protocolError = error)
         loop
-          { done, value } = reader.read!()
+          { done, value } = reader.read!
           break if done
           framer.feed value
           for line in pending.splice(0)
@@ -770,7 +770,7 @@ export class AccessClient
         try reader?.cancel().catch(-> null)
         throw e if e?.accessOutput or e?.code is 'EPIPE'
         return if signal.aborted
-        try await writeAccessOutput(@stderr, "rip-server: access stream: #{e?.message or e}; reconnecting\n")
+        try writeAccessOutput!(@stderr, "rip-server: access stream: #{e?.message or e}; reconnecting\n")
         catch outputError
           throw outputError
       break unless generation is @generation and not signal.aborted
@@ -785,10 +785,10 @@ export class AccessClient
   consume: (line) ->
     record = line.record
     if record.type is 'gap'
-      await writeAccessOutput @stderr, "rip-server: access gap #{record.from}..#{record.through} (#{record.reason})\n"
+      writeAccessOutput! @stderr, "rip-server: access gap #{record.from}..#{record.through} (#{record.reason})\n"
     if @mode is 'raw'
-      await writeAccessOutput @stdout, line.bytes
+      writeAccessOutput! @stdout, line.bytes
     else if @mode is 'pretty' and record.type is 'access'
       rendered = renderAccess(record, @picture)
       rendered = "\x1b[36m#{rendered}\x1b[0m" if @ansi
-      await writeAccessOutput @stdout, rendered + '\n'
+      writeAccessOutput! @stdout, rendered + '\n'

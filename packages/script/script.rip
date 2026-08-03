@@ -290,7 +290,7 @@ class Engine
               @opts.onMatch?(str, back)
               talk = true
             else
-              @read!()
+              @read!
               done = false
 
         # -- regexp: pattern match --
@@ -311,7 +311,7 @@ class Engine
               talk = true
             else
               talk = false
-              @read!()
+              @read!
               done = false
 
         # -- map / object: multiplexer --

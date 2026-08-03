@@ -436,9 +436,9 @@ test! "begin pins a session, carries it per statement, and drops it on commit", 
     '/sql/sessions/new': { json: { sessionId: 'sess-1' } }
     '/sql': { json: { columns: [], data: [], rowCount: 0 } }
   }
-  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!
   tx.query! 'INSERT INTO u VALUES (?)', ['x']
-  tx.commit!()
+  tx.commit!
   bodies = fetch.calls.filter((c) -> c.url.endsWith('/sql')).map (c) -> c.body
   eq bodies[0], { sql: 'BEGIN', sessionId: 'sess-1' }
   eq bodies[1], { sql: 'INSERT INTO u VALUES (?)', params: ['x'], sessionId: 'sess-1' }
@@ -450,8 +450,8 @@ test! "rollback issues ROLLBACK and still drops the session", ->
     '/sql/sessions/new': { json: { sessionId: 'sess-2' } }
     '/sql': { json: { columns: [], data: [], rowCount: 0 } }
   }
-  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
-  tx.rollback!()
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!
+  tx.rollback!
   ok fetch.calls.some (c) -> c.body?.sql is 'ROLLBACK'
   ok fetch.calls.some (c) -> c.method is 'DELETE'
 
@@ -461,24 +461,24 @@ test! "a failed session drop never masks the transaction outcome", ->
     '/sql': { json: { columns: [], data: [], rowCount: 0 } }
     '/sql/sessions/sess-3': { status: 500, json: { error: 'gone' } }
   }
-  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
-  tx.commit!()
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!
+  tx.commit!
 
 test! "a failed COMMIT still drops the session", ->
   fetch = bySql { COMMIT: { ok: false, json: { ok: false, error: 'conflict', errorCode: 'SERIALIZATION' } } }
-  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
-  err = trap! (-> tx.commit!())
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!
+  err = trap! (-> tx.commit!)
   ok /conflict/.test err.message
   ok fetch.wasDropped()
 
 test! "a session response missing its id refuses to run a fake transaction", ->
   fetch = fetchDouble { '/sql/sessions/new': { json: {} }, '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
-  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).begin!())
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).begin!)
   ok /session id/i.test err.message
 
 test! "a failed BEGIN drops the orphaned session", ->
   fetch = bySql { BEGIN: { ok: false, json: { ok: false, error: 'begin failed', errorCode: 'X' } } }
-  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).begin!())
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).begin!)
   ok /begin failed/.test err.message
   ok fetch.wasDropped()
 
@@ -548,7 +548,7 @@ test! "a transaction statement honors the caller signal too", ->
       return Promise.resolve { ok: true, status: 200, json: (-> { columns: [], data: [], rowCount: 0 }) }
     seen.signal = init?.signal ?? null
     new Promise (->)
-  tx = harborAdapter!({ url: 'http://h', fetch, timeoutMs: 0 }).begin!()
+  tx = harborAdapter!({ url: 'http://h', fetch, timeoutMs: 0 }).begin!
   controller = new AbortController()
   pending = tx.query 'SELECT 1', [], { signal: controller.signal }
   controller.abort()
@@ -645,9 +645,9 @@ test! "decode is keyed by duckdbType alone — lossless never gates it", ->
 
 test! "a transaction statement decodes through the same seam", ->
   fetch = harborFetch [{ name: 'ts', duckdbType: 'TIMESTAMP', lossless: true }], [['2024-03-15T10:30:00']]
-  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!
   { data } = tx.query! 'SELECT ts FROM t'
-  tx.commit!()
+  tx.commit!
   ok data[0][0] instanceof Date
   eq data[0][0].getTime(), UTC
 
@@ -668,9 +668,9 @@ test! "an Invalid Date param throws loudly", ->
 
 test! "a transaction statement encodes through the same seam", ->
   fetch = harborFetch [], []
-  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!
   tx.query! 'INSERT INTO t VALUES (?)', [new Date(UTC)]
-  tx.commit!()
+  tx.commit!
   insert = fetch.calls.find (c) -> c.body?.sql?.startsWith 'INSERT'
   eq insert.body.params, ['2024-03-15T10:30:00.000Z']
 
@@ -1293,14 +1293,14 @@ p "\nCertification — concurrency and failure"
 test! "two transactions each pin their own harbor session", ->
   fetch = harborFetchCert()
   adapter = harborAdapter { url: 'http://h', fetch }
-  [txA, txB] = await Promise.all [adapter.begin!(), adapter.begin!()]
+  [txA, txB] = Promise.all! [adapter.begin!, adapter.begin!]
   txA.query! 'INSERT INTO a VALUES (1)'
   txB.query! 'INSERT INTO b VALUES (2)'
   sidA = fetch.calls.find((c) -> c.sql is 'INSERT INTO a VALUES (1)').sessionId
   sidB = fetch.calls.find((c) -> c.sql is 'INSERT INTO b VALUES (2)').sessionId
   ok sidA isnt sidB
-  txA.commit!()
-  txB.rollback!()
+  txA.commit!
+  txB.rollback!
   eq fetch.calls.filter((c) -> c.method is 'DELETE').length, 2
 
 test! "a 5xx during a query is a retryable ConnectionError", ->
@@ -1455,7 +1455,7 @@ test! "include() loads a has_many relation with one IN query", ->
     users = User.where({}).includes('orders').all!
     counts = []
     for u in users
-      counts.push (u.orders!()).length
+      counts.push (u.orders!).length
     {
       counts
       orderQuery: sqls().find (s) -> s.startsWith 'SELECT * FROM "orders"'
