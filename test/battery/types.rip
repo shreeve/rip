@@ -109,6 +109,16 @@ code "interface extends erased", '''
     breed: string
   ''', ""
 
+# The polymorphic `this` type — RULED (2026-08-03): `this` is type
+# vocabulary. The fluent return and the `this is Foo` predicate subject
+# erase like any member.
+
+code "this-typed members erased", '''
+  interface Fluent
+    chain(): this
+    isFoo(): this is Fluent
+  ''', ""
+
 # Multiple type declarations in sequence
 
 code "multiple types erased", '''
@@ -463,6 +473,20 @@ type "interface dts", '''
   ''', '''
   interface Readable {
     read: => string;
+  }
+  export {};
+  '''
+
+# The polymorphic `this` type rides the declaration verbatim
+
+type "this-typed interface dts", '''
+    interface Fluent
+      chain(): this
+      isFoo(): this is Fluent
+  ''', '''
+  interface Fluent {
+    chain(): this;
+    isFoo(): this is Fluent;
   }
   export {};
   '''

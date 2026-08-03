@@ -3646,6 +3646,7 @@ var TYPE_VOCAB = new Set([
   "BOOL",
   "NULL",
   "UNDEFINED",
+  "THIS",
   ".",
   ",",
   ":",
@@ -3679,6 +3680,7 @@ var TYPE_ATOM_ENDERS = new Set([
   "BOOL",
   "NULL",
   "UNDEFINED",
+  "THIS",
   ")",
   "PARAM_END",
   "]",
@@ -3752,7 +3754,7 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = false;
       continue;
     }
-    if (t.word === "is" && atomEnd && j - 2 >= from && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY") && (tokens[j - 2].kind === "=>" || tokens[j - 2].value === "asserts" || tokens[j - 2].kind === ":" && tokens[j - 3]?.kind === "CALL_END")) {
+    if (t.word === "is" && atomEnd && j - 2 >= from && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY" || tokens[j - 1].kind === "THIS") && (tokens[j - 2].kind === "=>" || tokens[j - 2].value === "asserts" || tokens[j - 2].kind === ":" && tokens[j - 3]?.kind === "CALL_END")) {
       atomEnd = false;
       continue;
     }
