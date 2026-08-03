@@ -189,6 +189,21 @@ export const CONTRACT = [
     property: 'hover answers what the twin answers, and every pinned answer is unchanged',
     red: (s) => s.hp.gap > 0 || s.hp.snapChanged > 0 || s.hp.violations.length > 0,
   },
+  // The two rows below were PRINT-ONLY while their findings were open —
+  // soft by agreement, since a gate that must stay red gates nothing.
+  // Their findings closed, and a closure verified against a gauge that
+  // cannot fail the run is not verified: promoted, so the next
+  // divergence is an exit code, not a red fraction in a report.
+  {
+    name: 'hover.silence', lane: 'hover',
+    property: 'ruled-silent bare ~> positions serve null (RULINGS.md, Reactive)',
+    red: (s) => s.hp.silentLeaks > 0,
+  },
+  {
+    name: 'hover.ruled', lane: 'hover',
+    property: 'RULINGS-governed in-body positions serve their pinned answer',
+    red: (s) => s.hp.ruledDiverging > 0,
+  },
   {
     name: 'token.delivery', lane: 'token',
     property: 'the server delivers a semantic token for every probed declaration',
@@ -219,6 +234,20 @@ export const CONTRACT = [
     property: 'the server delivers a semantic token at every use site TypeScript classifies one',
     skip: (s) => !s.tk.facesAvailable,
     red: (s) => (s.tk.survDrops ?? []).reduce((n, d) => n + d.count, 0) > 0,
+  },
+  {
+    // The use-site population is defined by the instrument's own inputs — an
+    // occurrence enters only where the mapping resolves exactly AND the face
+    // carries a tsgo token with the same bytes — so a compiler regression that
+    // makes positions unclassifiable SHRINKS the gauge instead of failing it,
+    // and `use-site` above greens on the survivors. The pin holds the
+    // denominator still: every fixture's population is a reviewed count
+    // (survival-pins.json, the hover-pins discipline), so a shrink is a red to
+    // explain, not a silence.
+    name: 'token.delivery.population', lane: 'token',
+    property: "each fixture's use-site population matches its reviewed pin — the gauge's denominator cannot silently shrink",
+    skip: (s) => !s.tk.facesAvailable,
+    red: (s) => (s.tk.popDrift ?? []).length > 0,
   },
   {
     name: 'token.readonly', lane: 'token',

@@ -3675,13 +3675,29 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // IDENTIFIER is a legal argument and a legal subscript, where in
       // an object literal it would fabricate a property name and in an
       // array an element the user has not typed.
-      const tail = tokens[tokens.length - 1]?.kind;
+      // The probe reaches PAST the structure tokens closeBracket just
+      // minted: a multiline call's trailing comma sits behind the
+      // OUTDENT that closed its argument block, and the slot must be
+      // kept INSIDE that block — the hole splices before the structure,
+      // where a real argument would sit — or the face completes the
+      // call without the position activeParameter is computed from.
+      // Single-line streams have no trailing structure, so the splice
+      // degenerates to the plain append.
+      let at = tokens.length;
+      while (at > 0 && (tokens[at - 1].kind === 'OUTDENT' || tokens[at - 1].kind === 'INDENT' ||
+                        tokens[at - 1].kind === 'TERMINATOR')) at--;
+      const tail = tokens[at - 1]?.kind;
       const emptySlot =
         (frame.kind === 'call' && tail === 'CALL_START') ||
         (frame.kind === 'index' && tail === 'INDEX_START');
       if (tail === ',' || emptySlot) {
-        synth('IDENTIFIER', cursorEnd);
-        tokens[tokens.length - 1].value = '';
+        const hole = {
+          id: nextId++,
+          kind: 'IDENTIFIER', value: '', start: cursorEnd, end: cursorEnd,
+          spaced: false, newLine: false, generated: true, origin: null,
+        };
+        pendingOrigin.push(hole);
+        tokens.splice(at, 0, hole);
       }
       synth(closerKind, cursorEnd);
     }

@@ -31,8 +31,8 @@ const cleanStates = () => ({
   mp: { missing: 0, drifted: 0, census: 0, badExclusions: 0 },
   fails: 0,
   el: { problems: [] },
-  hp: { gap: 0, snapChanged: 0, violations: [] },
-  tk: { missing: [], badType: [], badReadonly: [], survDrops: [], facesAvailable: true },
+  hp: { gap: 0, snapChanged: 0, violations: [], silentLeaks: 0, ruledDiverging: 0 },
+  tk: { missing: [], badType: [], badReadonly: [], survDrops: [], popDrift: [], facesAvailable: true },
 });
 const allRan = () => true;
 
@@ -104,11 +104,14 @@ describe('the audit contract judges in both directions', () => {
       'diagnostics.positions.element': (s) => { s.el.problems = [{ kind: 'position', file: '11-types.errors.rip' }]; },
       'diagnostics.positions.arity': (s) => { s.el.problems = [{ kind: 'position', file: '02-operations.errors.rip' }]; },
       'hover.parity': (s) => { s.hp.gap = 1; },
+      'hover.silence': (s) => { s.hp.silentLeaks = 1; },
+      'hover.ruled': (s) => { s.hp.ruledDiverging = 1; },
       'token.delivery': (s) => { s.tk.missing = [{}]; },
       'token.type': (s) => { s.tk.badType = [{ want: { type: 'variable' } }]; },
       'token.type.enum': (s) => { s.tk.badType = [{ want: { type: 'enum' } }]; },
       'token.readonly': (s) => { s.tk.badReadonly = [{}]; },
       'token.delivery.use-site': (s) => { s.tk.survDrops = [{ name: 'x', count: 1 }]; },
+      'token.delivery.population': (s) => { s.tk.popDrift = [{ file: 'x.rip', pinned: 10, now: 9 }]; },
     };
     expect(Object.keys(fire).sort()).toEqual(CONTRACT.map((c) => c.name).sort());
     for (const [name, seed] of Object.entries(fire)) {

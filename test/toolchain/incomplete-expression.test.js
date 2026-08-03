@@ -122,6 +122,31 @@ describeExtended('completion and signature help on an incomplete expression', ()
     } finally { await s.close(); }
   }, 90_000);
 
+  test('a MULTILINE call with a trailing comma keeps the in-progress slot', async () => {
+    // The shape the single-line gates above cannot see: the lexer mints
+    // an OUTDENT between the trailing comma and end of input when the
+    // arguments sit on their own lines, and a tail probe that read only
+    // the last token saw structure instead of the comma — no hole, and
+    // the face completed the call one argument short. The hole must
+    // splice INSIDE the argument block, where the next argument would
+    // sit, for the cursor to resolve to slot 2.
+    const s = await openSession({
+      'ml.rip': 'pick = (a: number, b: number, c: number): number -> a + b + c\nr = pick(1, 2, 3)\n',
+      'package.json': '{}\n',
+    });
+    try {
+      s.open('ml.rip');
+      await s.diagnostics('ml.rip');
+      s.forget('ml.rip');
+      s.change('ml.rip', 'pick = (a: number, b: number, c: number): number -> a + b + c\nr = pick(1,\n  2,\n');
+      const broken = await s.diagnostics('ml.rip');
+      expect(broken.some((d) => /unclosed '\('/.test(d.message ?? ''))).toBe(true);
+      const open = await s.signatureHelp('ml.rip', 2, 4, { tries: 2 });   // after `  2,`
+      expect(open?.signatures?.[0]?.label).toContain('pick(a: number, b: number, c: number): number');
+      expect(open?.activeParameter ?? open?.signatures?.[0]?.activeParameter).toBe(2);
+    } finally { await s.close(); }
+  }, 90_000);
+
   // THE FIRST KEYSTROKE, which the two tests above both miss: they type a
   // comma before they ask, and the argument-slot hole was minted ONLY
   // after a comma. An empty bracket closed straight away emits `add()` —

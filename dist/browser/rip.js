@@ -6138,11 +6138,25 @@ ${baseline}`).join(`
       });
       const closerKind = frame.kind === "call" ? "CALL_END" : frame.kind === "group" ? ")" : frame.kind === "index" ? "INDEX_END" : frame.kind === "array" ? "]" : frame.pick ? "PICK_END" : "}";
       closeBracket();
-      const tail = tokens[tokens.length - 1]?.kind;
+      let at = tokens.length;
+      while (at > 0 && (tokens[at - 1].kind === "OUTDENT" || tokens[at - 1].kind === "INDENT" || tokens[at - 1].kind === "TERMINATOR"))
+        at--;
+      const tail = tokens[at - 1]?.kind;
       const emptySlot = frame.kind === "call" && tail === "CALL_START" || frame.kind === "index" && tail === "INDEX_START";
       if (tail === "," || emptySlot) {
-        synth("IDENTIFIER", cursorEnd);
-        tokens[tokens.length - 1].value = "";
+        const hole = {
+          id: nextId++,
+          kind: "IDENTIFIER",
+          value: "",
+          start: cursorEnd,
+          end: cursorEnd,
+          spaced: false,
+          newLine: false,
+          generated: true,
+          origin: null
+        };
+        pendingOrigin.push(hole);
+        tokens.splice(at, 0, hole);
       }
       synth(closerKind, cursorEnd);
     }

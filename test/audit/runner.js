@@ -278,8 +278,17 @@ const ERRD = path.join(CORPUS, 'errors');
 //     is a rotted pin and fails the coverage gate), and the expected
 //     hover (`null` = ruled silence / an unserved target's interim;
 //     text = a reviewed truthful interim). The `ruled` gauge below
-//     reports divergences red by agreement, soft, like the silence gauge.
+//     gates divergences through the contract's `hover.ruled`, as the
+//     silence gauge does through `hover.silence`.
 const HOVERS = path.join(HERE, 'hover-pins.json');
+// The use-site POPULATION pins — per-fixture counts of positions where a
+// token is due (survival's denominator), reviewed-edit disciplined like
+// hover-pins. The population is defined by the instrument's own inputs, so
+// without a pin a regression that makes positions unclassifiable shrinks
+// the gauge silently instead of failing it. A corpus edit moves a count on
+// purpose; the paste-ready block the drift report prints is the reviewed
+// edit.
+const SURVIVAL_PINS = path.join(HERE, 'survival-pins.json');
 // The Diagnostics Audit's pinned expectations — ADDITIVE per error pair, for
 // exactly the diagnostics no honest twin line can spell (a lowering's second
 // publish). Rows the twin CAN judge stay derived; a pin that duplicates a
@@ -3902,26 +3911,25 @@ if (RUN_HOVER) {
     snapChanged.length ? 'diverging vs hover-pins.json decls' : `${pinnedCount} pinned, unchanged`);
   prow('invariant', violations.length, violations.length ? red : green, violations.length ? 'an initialized binding hovers `any`' : 'no initialized binding hovers `any`');
   // The `silence` gauge — ruled-silent positions (bare `~>` operators) must
-  // serve null. EXPECTED RED while the bare-effect finding is open: the
-  // server leaks the runtime's `__effect` symbol there today, and this
-  // gauge is that row's gate — soft, like the token audit's enum rows.
+  // serve null. Soft while the bare-effect finding was open (a gate that
+  // must stay red gates nothing); the finding closed, so this is now the
+  // contract's `hover.silence` — a leak is an exit code, not a fraction.
   const silentRows = [...PROBES].flatMap(([file, p]) => (p.silent ?? []).map((s) => ({ file, ...s })));
   const silentLeaks = silentRows.filter((s) => s.hover !== null);
   if (silentRows.length) {
     pfrac('silence', silentRows.length - silentLeaks.length, silentRows.length,
-      `ruled-silent bare ~> positions serve null${silentLeaks.length ? ' — red by agreement: the open bare-effect finding (FINDINGS.md)' : ''}`);
+      `ruled-silent bare ~> positions serve null${silentLeaks.length ? ' — gated: hover.silence' : ''}`);
   }
   // The `ruled` gauge — RULINGS-governed in-body positions (hover-pins.json `positions`:
   // render-DSL words, member declarations, gate spellings) must serve their
   // pinned answer: null where the ruling's interim is silence, text where a
-  // truthful interim is pinned. EXPECTED RED while the render-DSL finding is
-  // open — the server serves scaffold symbols at positions ruled otherwise.
-  // Soft, like `silence`.
+  // truthful interim is pinned. Soft while the render-DSL finding was open;
+  // closed, so this is now the contract's `hover.ruled`.
   const ruledRows = [...PROBES].flatMap(([file, p]) => (p.ruled ?? []).map((r) => ({ file, ...r })));
   const ruledDiverging = ruledRows.filter((r) => (r.expect ?? null) !== (r.hover ?? null));
   if (ruledRows.length) {
     pfrac('ruled', ruledRows.length - ruledDiverging.length, ruledRows.length,
-      `RULINGS-governed in-body positions serve their pin${ruledDiverging.length ? ' — red by agreement: the render-DSL finding (FINDINGS.md)' : ''}`);
+      `RULINGS-governed in-body positions serve their pin${ruledDiverging.length ? ' — gated: hover.ruled' : ''}`);
   }
 
   {
@@ -3950,17 +3958,14 @@ if (RUN_HOVER) {
     for (const v of violations) console.log(`      ${red('✗')} ${dim(v)}`);
   }
   if (silentLeaks.length) {
-    out(`\n    ${bold('Ruled-silent positions serving an answer')} ${dim('(bare ~> — RULINGS.md, Reactive; red by agreement while the bare-effect finding is open)')}`);
+    out(`\n    ${bold('Ruled-silent positions serving an answer')} ${dim('(bare ~> — RULINGS.md, Reactive; gated by hover.silence)')}`);
     for (const s of silentLeaks) out(`      ${red('✗')} ${s.file}:${s.line + 1}  ${dim(`→ ${s.hover}`)}`);
   }
   if (ruledDiverging.length) {
-    // 63 lines — the largest block left in the report, and every row of it is
-    // red BY AGREEMENT: it cannot move until the render-DSL finding closes, so
-    // each run reprints yesterday's state at three lines a
-    // row. The `ruled` fraction above carries the count; what survives here is
-    // WHICH RULES are diverging, since that is the part that would change if
-    // one of them were fixed alone.
-    out(`\n    ${bold('Ruled positions diverging from their pins')} ${dim('(RULINGS.md, Components / render; red by agreement while the render-DSL finding is open)')}`);
+    // The `ruled` fraction above carries the count; what survives here is
+    // WHICH RULES are diverging, since that is the part that says where
+    // the regression concentrates.
+    out(`\n    ${bold('Ruled positions diverging from their pins')} ${dim('(RULINGS.md, Components / render; gated by hover.ruled)')}`);
     if (VERBOSE) {
       for (const r of ruledDiverging) {
         console.log(`      ${red('✗')} ${r.file}:${r.line}:${r.character} ${bold(r.token)} ${dim(`[${r.rule}]`)}`);
@@ -3988,7 +3993,10 @@ if (RUN_HOVER) {
   out(`\n  ${bold('Gauge')} ${dim('(hover probes answering a real type — an `any` the twin also answers is one; keep this full)')}`);
   console.log(`    ${pad('typed hovers', 12)} ${anyCount === 0 ? green(typedRatio) : yellow(typedRatio)}`);
 
-  hp = { probed, gap: tally.gap, snapChanged: snapChanged.length, violations };
+  hp = {
+    probed, gap: tally.gap, snapChanged: snapChanged.length, violations,
+    silentLeaks: silentLeaks.length, ruledDiverging: ruledDiverging.length,
+  };
 }
 
 // ── the Token Audit: source-derived invariants — no oracle, no baseline
@@ -4017,6 +4025,15 @@ if (RUN_TOKENS) {
     // tokens whose name tsgo never classifies (the sanity check; must be 0, or
     // the server and face oracles disagree and the gauge is untrustworthy).
     const survDrops = []; let survSurvived = 0, survUnclassified = 0;
+    // Population integrity: each fixture's denominator (survived + dropped)
+    // against its reviewed pin. Drift in EITHER direction is red — a shrink
+    // is the regression this pin exists to catch, a growth is a corpus edit
+    // whose new count needs its review. A fixture with survival but no pin
+    // drifts too (`pinned: null`), so a new fixture cannot enter unwatched.
+    let survivalPins = null;
+    try { survivalPins = JSON.parse(fs.readFileSync(SURVIVAL_PINS, 'utf8')); } catch { /* absent: every fixture drifts */ }
+    const popDrift = [];
+    const popNow = {};
     let probed = 0;
     const tskip = fixtures.length - PROBES.size;
     // Each invariant reports against the rows it ACTUALLY asserted — a
@@ -4042,7 +4059,7 @@ if (RUN_TOKENS) {
     // themselves, so it survives that refactor.
     //
     // PRESENCE is deliberately NOT asserted here — that is the `use-site`
-    // gauge's question, and it is expected red for the mapping gap. This
+    // gauge's question, gated at zero by `token.delivery.use-site`. This
     // probe judges the MODIFIER on tokens that exist, which is why a
     // spelling inside a string or a comment costs nothing: neither
     // carries a token, so neither is scored.
@@ -4075,6 +4092,10 @@ if (RUN_TOKENS) {
         survSurvived += survival.survived;
         survUnclassified += survival.unclassified;
         for (const d of survival.drops) survDrops.push({ ...d, file: f });
+        const population = survival.survived + survival.dropCount;
+        popNow[f] = population;
+        const pinned = survivalPins?.[f] ?? null;
+        if (pinned !== population) popDrift.push({ file: f, pinned, now: population });
       }
       for (const d of decls) {
         // `String::titleCase = …` extends an EXISTING prototype: the
@@ -4181,6 +4202,15 @@ if (RUN_TOKENS) {
       irow('use-site', dropTotal, survSurvived + dropTotal,
         dropTotal ? 'tokens TypeScript classifies at a use site that the server never ships'
                   : 'every use-site token TypeScript classifies reaches the editor', 'drop');
+      // A pin with no fixture left is stale — the fixture was deleted or
+      // renamed, and the pin must follow it out (a dangling pin is a count
+      // nobody can ever match again).
+      for (const f of Object.keys(survivalPins ?? {})) {
+        if (!(f in popNow)) popDrift.push({ file: f, pinned: survivalPins[f], now: null });
+      }
+      irow('population', popDrift.length, Object.keys(popNow).length,
+        popDrift.length ? 'fixture populations diverging from survival-pins.json'
+                        : 'every fixture\'s use-site population matches its reviewed pin', 'drift');
       // Silent guard (surfaces only on failure): count-based uses the server's
       // tokens directly, so `delivered ⊆ classified` holds by construction —
       // EXCEPT if this standalone FaceOracle's tsgo drifts from the server's.
@@ -4193,6 +4223,14 @@ if (RUN_TOKENS) {
     // four entirely on a run where tsgo never settled.
     flushIrows();
     if (driftNote) console.log(`    ${pad('  ↳ drift', 12)} ${red(`${driftNote} unclassified`)}   ${dim('the server shipped a name tsgo never tokenizes — the reference drifted, distrust the use-site count')}`);
+    if (popDrift.length) {
+      console.log(`\n    ${bold('Use-site populations diverging from survival-pins.json')} ${dim('(verify each shift is a reviewed corpus edit, then paste the block below)')}`);
+      for (const d of popDrift) {
+        console.log(`      ${red('✗')} ${pad(d.file, NAME_W)} ${dim('pin')} ${green(String(d.pinned ?? '(unpinned)'))} ${dim('now')} ${yellow(String(d.now ?? '(fixture gone)'))}`);
+      }
+      console.log(`\n    ${dim('paste-ready survival-pins.json:')}`);
+      console.log('    ' + JSON.stringify(popNow, null, 2).split('\n').join('\n    '));
+    }
 
     show(missing, 'No token — the name gets no semantic color', () => {});
     show(badType, 'Wrong token type', (r) => {
@@ -4270,7 +4308,7 @@ if (RUN_TOKENS) {
       for (const r of unasserted) out(`      ${dim('•')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text}) → ${fmt(r.got)}`)}`);
     }
 
-    tk = { probed, missing, badType, badReadonly, survSurvived, survDrops, survUnclassified, facesAvailable };
+    tk = { probed, missing, badType, badReadonly, survSurvived, survDrops, survUnclassified, popDrift, facesAvailable };
   }
 }
 
