@@ -143,6 +143,20 @@ export function ripDirectiveLines(good) {
 }
 
 export function applyRipDirectives(good, mapped) {
+  // IDENTICAL mapped diagnostics collapse to one before anything else:
+  // a lowering can spell one source construct at several face positions
+  // (a render `for` declares its loop parameter in both the reconcile
+  // callback and the keyed extractor), and each publishes the same code
+  // with the same message at the same mapped source range. One source
+  // position, one claim, one squiggle — the duplicate tells the user
+  // nothing and double-charges an @ts-expect-error's governed line.
+  const seen = new Set();
+  mapped = mapped.filter((m) => {
+    const key = `${m.code} ${m.severity} ${m.range.start.line}:${m.range.start.character}-${m.range.end.line}:${m.range.end.character} ${m.message}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   const directives = ripDirectiveLines(good);
   if (directives.length === 0) return mapped;
   const is2578 = (m) => String(m.code) === '2578';

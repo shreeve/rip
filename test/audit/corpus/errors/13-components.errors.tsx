@@ -55,4 +55,8 @@ function Heads() {
     !missingUnless && <span>u</span>}
     {
     missingSwitch === 1 && <span>s</span>}
+    {
+    missingList.map((item) => <span>{item}</span>)}
+    {
+    missingExpr}
   </div> }

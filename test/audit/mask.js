@@ -45,6 +45,12 @@ export function codeMask(src) {
   const stack = [];   // string contexts: { delim, interp, brace } — brace>0 ⇒ inside its #{…}
   let lastCode = '';  // last non-space code byte emitted, for the regex/division test
   let lastWord = '';  // the identifier run ending at it, '' when that byte is not one
+  // A keyword SPELLING is not a keyword after a dot: `total.of` is a
+  // property read — a value — so a following `/` is division. Without
+  // this bit, `share = total.of / parts / 2` blanks `/ parts /` as a
+  // regex and `parts` vanishes from every population built on the mask
+  // (over-blanking, the dangerous direction).
+  let lastWordDotted = false;
   // Blank [from, to) wholesale, keeping newlines so line numbers survive.
   const blank = (from, to) => { for (let k = from; k < to; k++) out.push(src[k] === '\n' ? '\n' : ' '); };
   // Copy a `#{…}` interpolation body verbatim from `at` (the `#`), blanking only
@@ -91,7 +97,7 @@ export function codeMask(src) {
       i = k - 1; lastCode = '/'; lastWord = ''; continue;
     }
     if (!stack.length && c === '/' &&
-        (!REGEX_DIVIDES_AFTER.test(lastCode) || REGEX_FOLLOWS_WORD.has(lastWord))) {
+        (!REGEX_DIVIDES_AFTER.test(lastCode) || (REGEX_FOLLOWS_WORD.has(lastWord) && !lastWordDotted))) {
       // Commit only if a close on the SAME line exists — otherwise this `/` is
       // division (or a stray) and the bytes after it stay code.
       let k = i + 1, inClass = false, end = -1;
@@ -119,8 +125,11 @@ export function codeMask(src) {
       continue;
     }
     out.push(c);
-    if (/[\w$]/.test(c)) lastWord = /[\w$]/.test(src[i - 1] ?? '') ? lastWord + c : c;
-    else if (!/\s/.test(c)) lastWord = '';
+    if (/[\w$]/.test(c)) {
+      const continues = /[\w$]/.test(src[i - 1] ?? '');
+      if (!continues) lastWordDotted = src[i - 1] === '.';
+      lastWord = continues ? lastWord + c : c;
+    } else if (!/\s/.test(c)) lastWord = '';
     if (!/\s/.test(c)) lastCode = c;
   }
   return out.join('');

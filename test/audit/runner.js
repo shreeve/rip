@@ -1198,18 +1198,18 @@ class TwinOracle {
   async stop() { await this.client.stop().catch(() => {}); }
 }
 
-// ── the face-survival oracle (the mapping gap's USE-SITE surface). The token
-// audit's `present`/`member` invariants enumerate SOURCE names (declarations,
+// ── the face-survival oracle (the USE-SITE surface). The token audit's
+// `present`/`member` invariants enumerate SOURCE names (declarations,
 // type-body members) and ask whether each got a token — a source→token check
 // that structurally cannot reach USE sites or rip-native names (a reactive
 // `:=` read in a render block has no column-0 declaration and no TS twin).
-// `faceSurvival` reaches them by comparing three oracles by COUNT (see its
-// header for why position correspondence is impossible for a dropped token):
-// tsgo on the compiled FACE supplies the SET of names TypeScript classifies,
-// the source supplies each classified name's code occurrences, and the real
-// server (session.semanticTokens) supplies what was delivered — the deficit is
-// the drop. The face is the classified-name oracle here; no twin, rip-native
-// covered.
+// `faceSurvival` reaches them POSITION-KEYED (its header below has the
+// population's exact terms): tsgo on the compiled FACE says where a token is
+// due, the mapping carries each source occurrence to its face position, and
+// the real server (session.semanticTokens) says what was delivered at the
+// source position — an occurrence that is due one and got none is a drop,
+// and the contract gates the population's drift at zero. The face is the
+// classified-position oracle here; no twin, rip-native covered.
 //
 // Faces live in ONE shared dir named `<base>.rip.ts`, so a cross-file import
 // (`from './08-functions.rip'`) resolves to its sibling face: TS appends `.ts`
@@ -1273,25 +1273,29 @@ class FaceOracle {
   async stop() { await this.client.stop().catch(() => {}); }
 }
 
-// FACE-SURVIVAL for one fixture — COUNT-BASED, no position correspondence.
+// FACE-SURVIVAL for one fixture — POSITION-KEYED, occurrence by occurrence.
 //
-// A dropped token's source position is UNRECOVERABLE: it drops precisely
-// because it sits past a byte divergence on a cover row, and there both map
-// directions collapse to the row's start (the `total` use maps to the `(`
-// before its string, not the name). So any position-based classifier fails —
-// arithmetic under-counts, cover-span over-counts. Do not correspond by
-// position at all. Instead compare COUNTS, with the real server as the delivery
-// oracle (no remap is reimplemented, so there is nothing to drift):
-//   · classified   the SET of names tsgo tokenizes on the face — position-free,
-//                   just "does TS ever classify this name" (excludes keywords).
-//   · realOcc(n)   source CODE occurrences of a classified name (codeMask
-//                   blanks string LITERALS but keeps `#{…}` interpolation reads,
-//                   across lines, so only real code positions count).
-//   · delivered(n) tokens the SERVER actually shipped for that name
-//                   (session.semanticTokens — the ground truth for drops).
-//   drop(n) = max(0, realOcc(n) - delivered(n)); a synthetic face token (a
-//   `.value` unwrap, a generic re-instantiation) never adds a source occurrence,
-//   so it cannot inflate the count. Name FLOOR (length >= 2) as before.
+// This was count-based once, when a dropped token's source position really was
+// unrecoverable: past a byte divergence every cover row collapsed both map
+// directions to its start. The emitTypeText alignment fix retired that — an
+// emitter-inserted type token no longer steals a source token's span — so an
+// exact source→face correspondence exists at every genuine identifier, and the
+// population can finally ask the sharp question: is THIS occurrence due a
+// token, and did the server ship one HERE?
+//   · faceTokenAt   FACE offsets where tsgo classified a kept identifier —
+//                    where a token is DUE. Position, never name: a name reaches
+//                    the face in many places that are not identifiers at all
+//                    (a schema field string, an element tag), and a name-keyed
+//                    set admits every one of them.
+//   · deliveredAt   SOURCE offset → name the real server shipped
+//                    (session.semanticTokens — the ground truth for drops).
+//   · the population: each masked source occurrence that maps EXACTLY to a
+//     face position holding a token, with the same bytes at both ends —
+//     the verbatim rule that rejects a lowering landing a keyword on some
+//     other identifier without a curated denylist.
+//   An occurrence in the population with no delivered token is a drop; the
+//   contract gates the per-fixture population against survival-pins.json in
+//   both directions, so growth and shrinkage each demand a reviewed pin.
 //
 // A silent DRIFT guard rides along: `delivered ⊆ classified` holds by
 // construction (the server derives its tokens from tsgo classifying the same
@@ -1505,8 +1509,8 @@ function expectedTokenType(d, form) {
   // constructor cast above, and the rulings' own doctrine that a callable
   // VALUE is the informative answer (RULINGS.md, Tokens — the named-effect
   // row). Scoring `variable` here would manufacture a red on correct
-  // behavior, and `token.type` is red by agreement for an unrelated reason,
-  // so that red would be invisible.
+  // behavior — a permanent red on a green gauge, indistinguishable
+  // from a real regression.
   if (/^\s*[A-Za-z_$][\w$.]*\??::/.test(val)) return null;
   // A function-valued PLAIN binding classifies as `function`, not
   // `variable` — TS's own rule, and the right one. Restricted to `plain`:
@@ -2892,7 +2896,8 @@ if (RUN_MAP) {
   };
   invLine('unplaced', unplaced, '`placed` fails — nothing resolves, so definition and rename find nothing there');
   invLine('mistext', mistext, '`text` fails — the span is wider than the name, so a hover names the wrong symbol');
-  // EXPECTED ZERO, unlike the two above. Those count the known mapping gap;
+  // EXPECTED ZERO, like everything here since the mapping gap closed (the
+  // two above gate through the census now, not by expectation alone);
   // this one closes the hole byte-equality leaves — a read landing on another
   // occurrence of its own name — so any count here is a defect nobody has
   // seen, not a queue. Green at zero and named either way, because a check
@@ -3393,12 +3398,14 @@ if (RUN_ERRORS) {
       // reports the absence rather than silently missing it.
       const token = twinLine.slice(d.col - 1).match(/^(?:[A-Za-z_$][\w$]*|'[^']*'|"[^"]*"|-?\d[\w.]*)/)?.[0];
       if (!token) { problems.push({ kind: 'shape', note: `twin ${d.line}:${d.col} TS${d.code}: no identifier or literal at the flagged position — a derivation limit; widen the extraction here rather than reshaping the fixture` }); continue; }
-      // The measurement side is the PERMISSIVE editor (its workspace carries
-      // no package.json, so rip.strict is off and mapTsDiagnostic drops the
-      // implicit-any family before publishing). An expectation carrying one
-      // of those codes is structurally unassertable here — say so, instead
-      // of reporting a permanent `missing` that reads as a server bug.
-      if (SUPPRESSED_TS_CODES.has(d.code)) { problems.push({ kind: 'shape', note: `twin ${d.line}:${d.col} raises TS${d.code} — implicit-any family, which the permissive editor never publishes; this negative belongs with the strict dimension's shapes, not in the lane` }); continue; }
+      // The measurement side runs in THE FIXTURE'S OWN MODE (EditorServer
+      // writes the corpus's rip.strict into its workspace), so what the
+      // implicit-any family means here follows the corpus config: strict
+      // publishes them and the codes derive like any other; permissive
+      // suppresses them before publishing, and an expectation carrying one
+      // is structurally unassertable — say so, instead of reporting a
+      // permanent `missing` that reads as a server bug.
+      if (!corpusConfig().strict && SUPPRESSED_TS_CODES.has(d.code)) { problems.push({ kind: 'shape', note: `twin ${d.line}:${d.col} raises TS${d.code} — implicit-any family, which the permissive editor never publishes; this negative belongs with the strict dimension's shapes, not in the lane` }); continue; }
       const rank = occurrencesOf(twinLine, token).indexOf(d.col - 1);
       if (rank < 0) { problems.push({ kind: 'shape', note: `twin ${d.line}:${d.col} TS${d.code}: flagged position is not a clean occurrence of \`${token}\`` }); continue; }
       const character = occurrencesOf(ripLines[d.line - 1] ?? '', token)[rank];
@@ -3592,10 +3599,9 @@ if (RUN_HOVER || RUN_TOKENS) {
         // (RULINGS.md, Reactive: punctuation is silent, permanently).
         // Probed after the same readiness wait as the declarations, so a
         // null here is the position's real answer, not an unbuilt
-        // program's. Today the server leaks the runtime's `__effect`
-        // symbol at these positions — the open bare-effect finding — so
-        // the `silence` gauge below is red by agreement until the server
-        // declines to answer.
+        // program's. The bare-effect finding (the server once leaked the
+        // runtime's `__effect` symbol here) is closed: the contract's
+        // `hover.silence` now gates any leak at zero.
         const silent = RUN_HOVER
           ? await Promise.all(src.split('\n')
               .map((text, line) => (/^~>/.test(text) ? line : -1)).filter((l) => l >= 0)
@@ -3614,7 +3620,7 @@ if (RUN_HOVER || RUN_TOKENS) {
       twinBase ? twin.hoverTwin(path.join(fixDirOf(f), twinBase)).catch(() => null) : Promise.resolve(null),
     ]);
 
-    // Face-survival (the mapping gap's use sites): raw face tokens run through the
+    // Face-survival (the use-site surface): raw face tokens run through the
     // server's remap; the drops naming a verbatim source identifier are the
     // real use-site regressions. Its own tsgo, so it neither shares nor
     // perturbs the editor read above.
@@ -3682,6 +3688,18 @@ if (RUN_HOVER || RUN_TOKENS) {
     if (RUN_TOKENS) {
       const members = typeMembersOf(src);
       if ((p.members?.length ?? 0) !== members.length) gaps.push(`${f}: probed ${p.members?.length ?? 0} type-body members, source has ${members.length}`);
+      // The use-site population's keep() excludes keyword spellings and
+      // one-letter names (a source-word count cannot tell `type X =` from
+      // `type: 'a'`), so a member spelled that way is watched by NOTHING —
+      // today's corpus has none, and this gate is what keeps that a fact
+      // rather than an accident. A fixture entering the carve-out fails
+      // coverage loudly until the gauge is extended or the member renamed.
+      const unwatched = members.filter((m) => RIP_KEYWORDS.has(m.name) || m.name.length < 2);
+      if (unwatched.length) {
+        gaps.push(`${f}: member name${unwatched.length === 1 ? '' : 's'} ${unwatched.map((m) => `'${m.name}'`).join(', ')} `
+          + `fall${unwatched.length === 1 ? 's' : ''} in the delivery population's keyword/length carve-out — no gauge watches ${unwatched.length === 1 ? 'it' : 'them'}; `
+          + 'extend faceSurvival\'s keep() or rename the member');
+      }
       // The face oracle must have produced a face AND answered with tokens; a
       // silent shortfall here is the exact failure the coverage section exists
       // to make fatal. Two distinct modes, named distinctly: the in-process
@@ -4247,28 +4265,31 @@ if (RUN_TOKENS) {
       console.log(`        ${dim('expected')} ${green(want)} ${dim(`— a \`${r.want.form}\` binding is ${r.want.readonly ? 'immutable' : 'WRITABLE'} in rip`)}`);
       console.log(`        ${dim('actual  ')} ${yellow(fmt(r.got))}`);
     });
-    // The mapping gap's expected-red evidence, kept apart from the regression
-    // sections above: these are known-open holes, not surprises. The name lists
-    // are long by nature, so each fixture's names WRAP with a hanging indent
-    // aligned under the fixture column (adapting to terminal width) — every name
-    // visible by default, but never soft-wrapped into a jumble.
+    // Use-site drops, kept apart from the regression sections above because
+    // they are a different KIND of failure (delivery, not classification) —
+    // but no longer expected: the population gates against survival-pins.json,
+    // so anything printed here is a regression the contract has already
+    // reddened. The name lists are long by nature, so each fixture's names
+    // WRAP with a hanging indent aligned under the fixture column (adapting
+    // to terminal width) — every name visible by default, never soft-wrapped
+    // into a jumble.
     const byFileOf = (rows) => { const m = new Map(); for (const r of rows) { if (!m.has(r.file)) m.set(r.file, []); m.get(r.file).push(r); } return m; };
     const COL = 6 + (NAME_W + 2) + 1 + 3 + 3;                        // leading + filename + sp + count + gap = name column
     const WRAP = TERM_W - 2;
-    // The NAMES go behind -v. This is a known-open gap that cannot move until
-    // the mapping fix lands, and 398 identifiers spread over 45 wrapped lines
-    // is the largest block in the report saying something the invariant row
-    // above already totals. What survives by default is where the drops
-    // CONCENTRATE, which is the only part anyone reads for direction.
+    // The NAMES go behind -v: hundreds of identifiers over dozens of wrapped
+    // lines is the largest block the report can print, saying something the
+    // invariant row above already totals. What survives by default is where
+    // the drops CONCENTRATE, which is the only part anyone reads for
+    // direction.
     const dropSection = (title, byFile, tally, nameOf) => {
       if (!VERBOSE) {
         const ranked = [...byFile].map(([file, entries]) => [file, tally(entries)]).sort((a, b) => b[1] - a[1]);
         const total = ranked.reduce((n, [, c]) => n + c, 0);
         const top = ranked.slice(0, 3).map(([f, c]) => `${f} (${c})`).join(', ');
-        out(`\n    ${bold(title)} ${dim(`— a delivery gap, expected red · ${total} across ${ranked.length} file${ranked.length === 1 ? '' : 's'}, heaviest in ${top}; -v names them`)}`);
+        out(`\n    ${bold(title)} ${dim(`— a delivery regression, gated: token.delivery.population · ${total} across ${ranked.length} file${ranked.length === 1 ? '' : 's'}, heaviest in ${top}; -v names them`)}`);
         return;
       }
-      console.log(`\n    ${bold(title)} ${dim('— a delivery gap, expected red')}`);
+      console.log(`\n    ${bold(title)} ${dim('— a delivery regression, gated: token.delivery.population')}`);
       for (const [file, entries] of byFile) {
         // filename stays plain (the terminal linkifies it) and full — never
         // dimmed and never stripped of `.rip`, so the click target survives.
@@ -4483,14 +4504,12 @@ if (hp) totalLine('Hover', `${hp.probed} hover probes: `
     : `${hp.gap ? yellow(hp.gap + ' twin gap' + (hp.gap === 1 ? '' : 's')) : green('0 twin gaps')}, ${hp.snapChanged ? red(hp.snapChanged + ' pinned answer' + (hp.snapChanged === 1 ? '' : 's') + ' changed') : green('pins unchanged')}${hp.violations.length ? `, ${red(hp.violations.length + ' invariant hit' + (hp.violations.length === 1 ? '' : 's'))}` : ''}`));
 if (tk) {
   const bad = tk.missing.length + tk.badType.length + tk.badReadonly.length;
-  // The member gauge is reported SEPARATELY from the invariant total: it is
-  // expected red (the mapping gap), so folding it in would read as N fresh
-  // regressions. Its own clause keeps the real-regression signal clean.
   // Each segment paints itself — never dim() wrapping a yellow()/green(), or
   // ANSI faint stacks onto the color and the count renders washed-out.
-  // Face-survival gets its own segment so use-site drops never read as fresh
-  // invariant regressions. Absent entirely when the face oracle did not run
-  // (no survDrops key set).
+  // Face-survival gets its own segment because a use-site drop is a DELIVERY
+  // failure, distinct in kind from the declaration-site invariants — folding
+  // the two together would let either mask the other. Absent entirely when
+  // the face oracle did not run (no survDrops key set).
   const survDropTotal = (tk.survDrops ?? []).reduce((n, d) => n + d.count, 0);
   // Its own segment: a use-site drop is a delivery failure, distinct from the
   // declaration-site invariants above.

@@ -37,6 +37,16 @@ describe('codeMask: what counts as code', () => {
     ['division by a variable', 'total = a / b / c\n', ['total', 'a', 'b', 'c']],
     ['division after a paren', 'half = (x + 1) / 2\n', ['half', 'x']],
     ['division after an index', 'arr = items[0] / 2\n', ['arr', 'items']],
+    // A keyword SPELLING after a dot is a property read — a value — so
+    // the `/` after it is division. Without the dot bit, `/ parts /`
+    // blanks as a regex and `parts` vanishes from every population the
+    // mask feeds: over-blanking, the dangerous direction this file names.
+    ['division after a property spelled `of`', 'share = total.of / parts / 2\n', ['share', 'total', 'of', 'parts']],
+    ['division after a property spelled `in`', 'q = p.in / r / 2\n', ['q', 'p', 'in', 'r']],
+    ['division after a property spelled `is`', 'w = v.is / u / 2\n', ['w', 'v', 'is', 'u']],
+    // The same spelling UNDOTTED keeps its keyword reading: a regex
+    // after `of` still masks (both polarities, or the fix overcorrects).
+    ['a regex after a genuine `of`', 'for k of /ab/.exec(s)\n  k\n', ['for', 'k', 'of', 'exec', 's', 'k']],
     ['a heregex, interpolation LIVE', 'h = ///\n  ab+   # note\n  #{single}\n///i\n', ['h', 'single']],
     ['a string, interpolation LIVE', "s = 'lit' + \"a#{inner}b\"\n", ['s', 'inner']],
     ['a comment', 'v = 1 # commented word\n', ['v']],
