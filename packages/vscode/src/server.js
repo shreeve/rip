@@ -881,6 +881,14 @@ function sweepOrphanMirrors() {
 
 // ---- auto-import candidacy: the whole workspace, as stubs.
 //
+// The doctrine, RULED: faces are lazy, candidacy is eager. The
+// demand-driven closure keeps everything expensive — compiled faces,
+// tsgo program growth — behind an open buffer's demand; candidacy is
+// the one eager act, because a candidate written late is no candidate
+// at all. Its writes stay inside `.rip/editor`, its bytes come from a
+// scan and never a compile, and the disk-layer hygiene gates
+// (project-model.test.js) enforce exactly those edges.
+//
 // A candidate is offered only from tsgo's PROGRAM, and the program is the
 // open buffers' mirror closure — so a workspace `.rip` nothing has opened
 // or imported is not offered, which defeats auto-import's headline case.

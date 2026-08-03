@@ -403,13 +403,17 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
     });
   }, 30000);
 
-  // What creates the tree is the presence of RIP SOURCE, not a didOpen.
-  // Auto-import candidacy is workspace-wide — a `.rip` nothing has opened
-  // is still a candidate — so the whole workspace is stubbed at startup,
-  // which is a mirror tree with nothing open. The hygiene claim that
-  // survives is the one about territory: a workspace holding no `.rip`
-  // at all is never written to, whatever the session does.
-  test('lazy creation: a workspace with no .rip source is never written to', async () => {
+  // The disk doctrine, RULED not drifted: faces are lazy, candidacy is
+  // eager. The expensive thing — compiled faces, tsgo program growth —
+  // stays demand-driven through the open-buffer closure. The cheap
+  // thing — scan-derived name stubs — is written for the whole
+  // workspace at startup, because a candidate written late is no
+  // candidate at all (tsgo offers imports only from files it already
+  // holds). The gates below enforce the ruling's sharp edges rather
+  // than ratifying whatever startup does: writes confined to `.rip/`,
+  // stub bytes declaration-only (a scan, never a compile), stubs
+  // registered nowhere.
+  test('territory: a workspace with no .rip source is never written to', async () => {
     await inWorkspace({ 'notes.md': '# nothing to mirror\n' }, async (api) => {
       // initialize + revalidation ran (the session helper waited for the
       // cache log), and stub population runs right behind it.
@@ -418,14 +422,30 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
     });
   }, 30000);
 
-  test('a workspace .rip nothing opened is stubbed into the program at startup', async () => {
-    await inWorkspace({ 'util.rip': UTIL }, async (api) => {
+  test('candidacy is eager, confined, and declaration-only: startup stubs the workspace inside .rip/ and registers nothing', async () => {
+    await inWorkspace({ 'util.rip': UTIL, 'docs/readme.md': '# hands off\n' }, async (api) => {
       await api.untilLog(/auto-import stubs:/);
+      // Territory: startup wrote inside `.rip/` and NOWHERE else — the
+      // user's tree holds exactly the fixture afterward.
+      const outside = [];
+      const walk = (dir) => {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (e.name === '.rip') continue;
+          if (e.isDirectory()) walk(path.join(dir, e.name));
+          else outside.push(path.relative(api.ws, path.join(dir, e.name)));
+        }
+      };
+      walk(api.ws);
+      expect(outside.sort()).toEqual(['docs/readme.md', 'util.rip']);
+      // Scan, never a compile: every line of the stub is a declaration —
+      // one compiled statement in these bytes and startup cost what the
+      // demand-driven closure exists to refuse.
       const stub = fs.readFileSync(mirrorFileOf(api.ws, 'util.rip'), 'utf8');
-      // Declaration-only, and registered nowhere: the manifest that
-      // `pruneClosure` and `materializeClosure` both read has never heard
-      // of it, which is what lets the real face land over it later.
       expect(stub).toContain('export declare const answer: any;');
+      expect(isStub(stub)).toBe(true);
+      // Registered nowhere: the manifest that `pruneClosure` and
+      // `materializeClosure` both read has never heard of it, which is
+      // what lets the real face land over it later.
       expect(fs.existsSync(path.join(api.ws, '.rip', 'editor', '.cache.json'))).toBe(false);
     });
   }, 30000);
