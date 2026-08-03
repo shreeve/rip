@@ -304,6 +304,9 @@ describe('generated-scope inventory', () => {
       }
     }
     expect(unknown).toEqual([]);
-    expect(categories).toEqual({ diagnostic: 36, semantic: 20, type: 25 });
+    // semantic 21: ctorAtFields' arrow-boundary propagation compares a
+    // node head against '=>' — whose `this` an assignment describes,
+    // not an emission of one.
+    expect(categories).toEqual({ diagnostic: 36, semantic: 21, type: 25 });
   });
 });

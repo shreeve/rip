@@ -124,6 +124,74 @@ export function protoMemberTarget(node) {
   if (!isNode(o) || o[0] !== '.' || o[2] !== 'prototype' || typeof o[1] !== 'string') return null;
   return { head: o[1], member: t[2] };
 }
+
+// A promoted parameter's name: `@name`, typed or defaulted, at any
+// wrapper depth — null when the param is not a ThisProperty. Shared
+// with the declaration pipeline (dts.js), which must see the same
+// fields the TS face declares — the emitter's own predicate, not a
+// copy of it.
+export function atParamName(p) {
+  let x = p;
+  if (isNode(x) && x[0] === 'typed-var' && x.length === 3) x = x[1];
+  if (isNode(x) && x[0] === '.' && x[1] === 'this' && typeof x[2] === 'string') return x[2];
+  return null;
+}
+
+// The field a promoted parameter declares — its name and the
+// ["typed-var", …] node carrying the annotation, null when the
+// parameter is untyped. Reaches through a default (`@level = 1`),
+// which wraps the promotion the annotation sits on.
+export function atParamField(p) {
+  let x = p;
+  if (isNode(x) && x[0] === 'default' && x.length === 3) x = x[1];
+  const name = atParamName(x);
+  if (name === null) return null;
+  return { name, typed: isNode(x) && x[0] === 'typed-var' && x.length === 3 ? x : null };
+}
+
+// Every `@name = …` a constructor body assigns, in source order,
+// deduped by name (a field written twice declares once). A plain
+// function is not entered — its `this` is another object; a bound
+// arrow is, because its `this` is this instance's. `viaArrow` marks
+// the fields only an arrow assigns: TypeScript's own constructor
+// inference does not descend into arrows, so a bare declaration for
+// one is an implicit `any` (TS7008 under noImplicitAny) instead of an
+// inferred type — the declaring emission spells the `any` explicitly.
+export function ctorAtFields(body) {
+  const out = [];
+  const seen = new Map();
+  const walk = (n, inArrow) => {
+    if (!isNode(n)) return;
+    const h = n[0];
+    // The boundary is WHOSE `this` a function has, not whether one is
+    // nested. `->`/`def` emit a plain function, whose `this` is
+    // dynamic — an assignment there says nothing about this class. A
+    // BOUND `=>` emits an arrow, whose `this` is lexically whatever
+    // encloses it, so inside the constructor it is the instance and
+    // its assignment declares. An arrow under a `->` is still excluded
+    // by the `->` above it, which is the correct reading: by then the
+    // `this` it captures is the function's.
+    if (h === '->' || h === 'def' || h === 'void-def' ||
+        h === 'class' || h === 'component' || h === 'schema') return;
+    if ((h === '=' || h === 'void-assign') && n.length === 3 &&
+        isNode(n[1]) && n[1][0] === '.' && n[1][1] === 'this' && typeof n[1][2] === 'string') {
+      const name = n[1][2];
+      const prior = seen.get(name);
+      if (prior === undefined) {
+        const entry = { name, node: n, viaArrow: inArrow };
+        seen.set(name, entry);
+        out.push(entry);
+      } else if (prior.viaArrow && !inArrow) {
+        // A direct assignment supplies the inference an arrow's
+        // cannot, wherever it sits — the field is not arrow-only.
+        prior.viaArrow = false;
+      }
+    }
+    for (const el of n.slice(1)) walk(el, inArrow || h === '=>');
+  };
+  walk(body, false);
+  return out;
+}
 // The comparison family — every COMPARE-level operator chains,
 // equality included (otherwise `a == b < c` silently compares a
 // boolean against c).
@@ -12105,7 +12173,7 @@ class Emitter {
     // declaration, or TypeScript reads the pair as duplicate identifiers.
     if (this.ts && ctorParams !== null) {
       for (const p of ctorParams) {
-        const field = Emitter.atParamField(p);
+        const field = atParamField(p);
         if (field === null || declared.has(field.name)) continue;
         declared.add(field.name);
         const text = field.typed === null ? null
@@ -12130,11 +12198,17 @@ class Emitter {
     // class. The `declared` set keeps a body-level declaration winning,
     // here as for promotions — one declaration, or TypeScript reads the
     // pair as duplicate identifiers.
+    //
+    // A field only a BOUND ARROW assigns spells `: any` when the author
+    // did not annotate it: TypeScript's constructor inference does not
+    // descend into arrows, so its bare declaration would be an implicit
+    // any — TS7008 under noImplicitAny, minted on generated-only bytes
+    // no source position answers for (the tsScaffoldAny doctrine).
     if (this.ts && ctorBody !== null) {
-      for (const at of Emitter.ctorAtFields(ctorBody)) {
+      for (const at of ctorAtFields(ctorBody)) {
         if (declared.has(at.name)) continue;
         declared.add(at.name);
-        const text = this.annotationText(at.node);
+        const text = this.annotationText(at.node) ?? (at.viaArrow ? 'any' : null);
         this.b.tsOnly(() => this.b.emit(`${pad}${at.name}${text ? `: ${text}` : ''};\n`));
       }
     }
@@ -12223,13 +12297,13 @@ class Emitter {
               // `this` is not available yet); everywhere else it
               // stays a normal instance read.
               const strip = (p) => {
-                const n = Emitter.atParamName(p);
+                const n = atParamName(p);
                 if (n !== null) {
                   atParams.push(n);
                   return isNode(p) && p[0] === 'typed-var' ? ['typed-var', n, p[2]] : n;
                 }
                 if (isNode(p) && p[0] === 'default' && p.length === 3) {
-                  const dn = Emitter.atParamName(p[1]);
+                  const dn = atParamName(p[1]);
                   if (dn !== null) {
                     atParams.push(dn);
                     // The annotation rides through the default wrapper:
@@ -12414,59 +12488,6 @@ class Emitter {
         this.b.emit(`.length - ${tail.length - i}]`);
       });
     });
-  }
-
-  // A promoted parameter's name: `@name`, typed or defaulted, at any
-  // wrapper depth — null when the param is not a ThisProperty.
-  static atParamName(p) {
-    let x = p;
-    if (isNode(x) && x[0] === 'typed-var' && x.length === 3) x = x[1];
-    if (isNode(x) && x[0] === '.' && x[1] === 'this' && typeof x[2] === 'string') return x[2];
-    return null;
-  }
-
-  // Every `@name = …` a constructor body assigns, in source order,
-  // deduped by name (a field written twice declares once). A plain
-  // function is not entered — its `this` is another object; a bound
-  // arrow is, because its `this` is this instance's.
-  static ctorAtFields(body) {
-    const out = [];
-    const seen = new Set();
-    const walk = (n) => {
-      if (!isNode(n)) return;
-      const h = n[0];
-      // The boundary is WHOSE `this` a function has, not whether one is
-      // nested. `->`/`def` emit a plain function, whose `this` is
-      // dynamic — an assignment there says nothing about this class. A
-      // BOUND `=>` emits an arrow, whose `this` is lexically whatever
-      // encloses it, so inside the constructor it is the instance and
-      // its assignment declares. An arrow under a `->` is still excluded
-      // by the `->` above it, which is the correct reading: by then the
-      // `this` it captures is the function's.
-      if (h === '->' || h === 'def' || h === 'void-def' ||
-          h === 'class' || h === 'component' || h === 'schema') return;
-      if ((h === '=' || h === 'void-assign') && n.length === 3 &&
-          isNode(n[1]) && n[1][0] === '.' && n[1][1] === 'this' && typeof n[1][2] === 'string' &&
-          !seen.has(n[1][2])) {
-        seen.add(n[1][2]);
-        out.push({ name: n[1][2], node: n });
-      }
-      for (const el of n.slice(1)) walk(el);
-    };
-    walk(body);
-    return out;
-  }
-
-  // The field a promoted parameter declares — its name and the
-  // ["typed-var", …] node carrying the annotation, null when the
-  // parameter is untyped. Reaches through a default (`@level = 1`),
-  // which wraps the promotion the annotation sits on.
-  static atParamField(p) {
-    let x = p;
-    if (isNode(x) && x[0] === 'default' && x.length === 3) x = x[1];
-    const name = Emitter.atParamName(x);
-    if (name === null) return null;
-    return { name, typed: isNode(x) && x[0] === 'typed-var' && x.length === 3 ? x : null };
   }
 
   methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, atParams = [] }) {
@@ -12706,8 +12727,8 @@ class Emitter {
       // A promoted parameter reaching emission was NOT stripped by a
       // constructor — the shape belongs to constructors alone (there
       // is no instance for any other function's `@name` to bind).
-      if (Emitter.atParamName(p) !== null ||
-          (isNode(p) && p[0] === 'default' && Emitter.atParamName(p[1]) !== null)) {
+      if (atParamName(p) !== null ||
+          (isNode(p) && p[0] === 'default' && atParamName(p[1]) !== null)) {
         throw this.positionedError(isNode(p) ? p : params, 'emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here');
       }
       if (i > 0) this.b.emit(', ');

@@ -9289,6 +9289,49 @@ function protoMemberTarget(node) {
     return null;
   return { head: o[1], member: t[2] };
 }
+function atParamName(p) {
+  let x = p;
+  if (isNode4(x) && x[0] === "typed-var" && x.length === 3)
+    x = x[1];
+  if (isNode4(x) && x[0] === "." && x[1] === "this" && typeof x[2] === "string")
+    return x[2];
+  return null;
+}
+function atParamField(p) {
+  let x = p;
+  if (isNode4(x) && x[0] === "default" && x.length === 3)
+    x = x[1];
+  const name = atParamName(x);
+  if (name === null)
+    return null;
+  return { name, typed: isNode4(x) && x[0] === "typed-var" && x.length === 3 ? x : null };
+}
+function ctorAtFields(body) {
+  const out = [];
+  const seen = new Map;
+  const walk = (n, inArrow) => {
+    if (!isNode4(n))
+      return;
+    const h = n[0];
+    if (h === "->" || h === "def" || h === "void-def" || h === "class" || h === "component" || h === "schema")
+      return;
+    if ((h === "=" || h === "void-assign") && n.length === 3 && isNode4(n[1]) && n[1][0] === "." && n[1][1] === "this" && typeof n[1][2] === "string") {
+      const name = n[1][2];
+      const prior = seen.get(name);
+      if (prior === undefined) {
+        const entry = { name, node: n, viaArrow: inArrow };
+        seen.set(name, entry);
+        out.push(entry);
+      } else if (prior.viaArrow && !inArrow) {
+        prior.viaArrow = false;
+      }
+    }
+    for (const el of n.slice(1))
+      walk(el, inArrow || h === "=>");
+  };
+  walk(body, false);
+  return out;
+}
 var COMPARISONS = new Set(["<", ">", "<=", ">=", "==", "!="]);
 var isChainLink = (x) => isNode4(x) && COMPARISONS.has(x[0]) && x.length === 3 && isNode4(x[1]) && COMPARISONS.has(x[1][0]) && x[1].length === 3 && !x[1].parenthesized;
 var isUnary = (x) => isNode4(x) && (x[0] === "-" || x[0] === "+" || x[0] === "!" || x[0] === "~" || x[0] === "typeof" || x[0] === "delete") && x.length === 2;
@@ -18199,7 +18242,7 @@ ${this.replayPad}}` : " }");
     }
     if (this.ts && ctorParams !== null) {
       for (const p of ctorParams) {
-        const field = Emitter.atParamField(p);
+        const field = atParamField(p);
         if (field === null || declared.has(field.name))
           continue;
         declared.add(field.name);
@@ -18209,11 +18252,11 @@ ${this.replayPad}}` : " }");
       }
     }
     if (this.ts && ctorBody !== null) {
-      for (const at of Emitter.ctorAtFields(ctorBody)) {
+      for (const at of ctorAtFields(ctorBody)) {
         if (declared.has(at.name))
           continue;
         declared.add(at.name);
-        const text = this.annotationText(at.node);
+        const text = this.annotationText(at.node) ?? (at.viaArrow ? "any" : null);
         this.b.tsOnly(() => this.b.emit(`${pad}${at.name}${text ? `: ${text}` : ""};
 `));
       }
@@ -18284,13 +18327,13 @@ ${this.replayPad}}` : " }");
               let atParams = [];
               if (mName === "constructor") {
                 const strip = (p) => {
-                  const n = Emitter.atParamName(p);
+                  const n = atParamName(p);
                   if (n !== null) {
                     atParams.push(n);
                     return isNode4(p) && p[0] === "typed-var" ? ["typed-var", n, p[2]] : n;
                   }
                   if (isNode4(p) && p[0] === "default" && p.length === 3) {
-                    const dn = Emitter.atParamName(p[1]);
+                    const dn = atParamName(p[1]);
                     if (dn !== null) {
                       atParams.push(dn);
                       const typed = isNode4(p[1]) && p[1][0] === "typed-var" && p[1].length === 3;
@@ -18451,42 +18494,6 @@ ${"  ".repeat(ind)}`);
         this.b.emit(`.length - ${tail.length - i}]`);
       });
     });
-  }
-  static atParamName(p) {
-    let x = p;
-    if (isNode4(x) && x[0] === "typed-var" && x.length === 3)
-      x = x[1];
-    if (isNode4(x) && x[0] === "." && x[1] === "this" && typeof x[2] === "string")
-      return x[2];
-    return null;
-  }
-  static ctorAtFields(body) {
-    const out = [];
-    const seen = new Set;
-    const walk = (n) => {
-      if (!isNode4(n))
-        return;
-      const h = n[0];
-      if (h === "->" || h === "def" || h === "void-def" || h === "class" || h === "component" || h === "schema")
-        return;
-      if ((h === "=" || h === "void-assign") && n.length === 3 && isNode4(n[1]) && n[1][0] === "." && n[1][1] === "this" && typeof n[1][2] === "string" && !seen.has(n[1][2])) {
-        seen.add(n[1][2]);
-        out.push({ name: n[1][2], node: n });
-      }
-      for (const el of n.slice(1))
-        walk(el);
-    };
-    walk(body);
-    return out;
-  }
-  static atParamField(p) {
-    let x = p;
-    if (isNode4(x) && x[0] === "default" && x.length === 3)
-      x = x[1];
-    const name = Emitter.atParamName(x);
-    if (name === null)
-      return null;
-    return { name, typed: isNode4(x) && x[0] === "typed-var" && x.length === 3 ? x : null };
   }
   methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, atParams = [] }) {
     const stmts = this.liveStmts(isNode4(block) && block[0] === "block" ? block.slice(1) : [block], { forwards: true });
@@ -18657,7 +18664,7 @@ ${"  ".repeat(ind)}`);
   }
   emitParams(params, firstParamTypeText = null) {
     Emitter.expansionSplit(params).list.forEach((p, i) => {
-      if (Emitter.atParamName(p) !== null || isNode4(p) && p[0] === "default" && Emitter.atParamName(p[1]) !== null) {
+      if (atParamName(p) !== null || isNode4(p) && p[0] === "default" && atParamName(p[1]) !== null) {
         throw this.positionedError(isNode4(p) ? p : params, "emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here");
       }
       if (i > 0)
@@ -20392,6 +20399,7 @@ function emitDeclarations({ sexpr, stores, source }) {
           let params = value[1];
           const returnType = roleType(value, "returnType") ?? (pair[0] === "void-pair" ? "void" : null);
           if (mName === "constructor") {
+            const declared = new Set(bodyFields);
             params = params.map((pp) => {
               let x = pp;
               let dflt = null;
@@ -20407,12 +20415,20 @@ function emitDeclarations({ sexpr, stores, source }) {
               if (!(isNode5(x) && x[0] === "." && x[1] === "this" && typeof x[2] === "string"))
                 return pp;
               const n = x[2];
-              if (typed !== null && !bodyFields.has(n)) {
-                members.push(`${n}: ${tidyType(typed[2])};`);
+              if (!declared.has(n)) {
+                declared.add(n);
+                members.push(`${n}: ${typed !== null ? tidyType(typed[2]) : "any"};`);
               }
               const plain = typed !== null ? ["typed-var", n, typed[2]] : n;
               return dflt !== null ? ["default", plain, dflt[2]] : plain;
             });
+            for (const at of ctorAtFields(value[2])) {
+              if (declared.has(at.name))
+                continue;
+              declared.add(at.name);
+              const annotation = roleType(at.node, "annotation");
+              members.push(`${at.name}: ${annotation ?? "any"};`);
+            }
             if (params.some(paramTyped))
               members.push(`constructor${rendered(() => renderParams(params, isOptionalParam))};`);
             continue;

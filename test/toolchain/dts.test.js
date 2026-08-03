@@ -140,7 +140,23 @@ const ROWS = [
   ['class A\n  @x: number', 'declare class A {\n  static x: number;\n}\nexport {};\n'],
   ['class A\n  m: (x: number): string -> "s"', 'declare class A {\n  m(x: number): string;\n}\nexport {};\n'],
   ['class A\n  save!: (x: number) ->\n    x', 'declare class A {\n  save(x: number): void;\n}\nexport {};\n'],
-  ['class A\n  constructor: (a: number) ->\n    @a = a', 'declare class A {\n  constructor(a: number);\n}\nexport {};\n'],
+  // A constructor-body `@field = value` declares in the .d.ts exactly
+  // as the TS face declares it (the emitter's own ctorAtFields walker,
+  // not a copy): a consumer type-checks against this declaration, and
+  // a property the face and the runtime really have must not publish
+  // TS2339 cross-module. The declaration pipeline has no constructor
+  // body to infer from, so an unannotated field's honest spelling is
+  // `any`; the author's annotation is carried when present.
+  ['class A\n  constructor: (a: number) ->\n    @a = a', 'declare class A {\n  a: any;\n  constructor(a: number);\n}\nexport {};\n'],
+  ['class C\n  constructor: () ->\n    @count: number = 0', 'declare class C {\n  count: number;\n}\nexport {};\n'],
+  // A bound arrow's assignment declares too — its `this` is the
+  // instance's (the walker's boundary doctrine rides in with it).
+  ['class S\n  constructor: (name: string) ->\n    @label = name\n    @sync = =>\n      @dirty = false',
+    'declare class S {\n  label: any;\n  sync: any;\n  dirty: any;\n  constructor(name: string);\n}\nexport {};\n'],
+  // An UNTYPED promotion declares its field as well — the face
+  // declares it bare and lets constructor inference type it; the
+  // declaration file cannot, so `any`.
+  ['class A\n  constructor: (@tag) ->', 'declare class A {\n  tag: any;\n}\nexport {};\n'],
   // A promoted parameter declares the field it implies, ONCE — and the
   // body's own declaration counts wherever it sits. Scanning only what
   // has been pushed so far sees a declaration BEFORE the constructor and

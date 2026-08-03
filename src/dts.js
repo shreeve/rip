@@ -44,7 +44,7 @@ import {
   renderParams, paramTyped, optionalReader,
 } from './typetext.js';
 import { buildSchemaTypeStory, SchemaTypeError } from './schema-types.js';
-import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode } from './emitter.js';
+import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode, ctorAtFields } from './emitter.js';
 import {
   componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
   selfArgsOf,
@@ -204,9 +204,19 @@ export function emitDeclarations({ sexpr, stores, source }) {
           let params = value[1];
           const returnType = roleType(value, 'returnType') ?? (pair[0] === 'void-pair' ? 'void' : null);
           if (mName === 'constructor') {
+            // The fields the constructor implies, exactly as the TS
+            // face declares them (the emitter's own walkers, not a
+            // copy) — a consumer type-checks against this declaration,
+            // and a property the face and the runtime really have must
+            // not publish TS2339 cross-module. `declared` accumulates
+            // so promotions, body declarations and `@field =` walks
+            // yield ONE declaration per name.
+            const declared = new Set(bodyFields);
             // Promoted parameters (`(@url: string)`) declare BOTH the
             // class field and a plain constructor parameter — the
-            // strip mirrors the emitter's.
+            // strip mirrors the emitter's. An untyped promotion still
+            // declares: the declaration pipeline has no constructor
+            // body to infer from, so its honest spelling is `any`.
             params = params.map((pp) => {
               let x = pp;
               let dflt = null;
@@ -215,14 +225,25 @@ export function emitDeclarations({ sexpr, stores, source }) {
               if (isNode(x) && x[0] === 'typed-var' && x.length === 3) { typed = x; x = x[1]; }
               if (!(isNode(x) && x[0] === '.' && x[1] === 'this' && typeof x[2] === 'string')) return pp;
               const n = x[2];
-              // The field may ALSO be declared explicitly in the
-              // class body (`url: string = ""`) — one declaration.
-              if (typed !== null && !bodyFields.has(n)) {
-                members.push(`${n}: ${tidyType(typed[2])};`);
+              if (!declared.has(n)) {
+                declared.add(n);
+                members.push(`${n}: ${typed !== null ? tidyType(typed[2]) : 'any'};`);
               }
               const plain = typed !== null ? ['typed-var', n, typed[2]] : n;
               return dflt !== null ? ['default', plain, dflt[2]] : plain;
             });
+            // Constructor-body `@field = value` assignments declare
+            // the same way (bound arrows included — the emitter's
+            // boundary doctrine rides in with the walker). The
+            // author's annotation when there is one; `any` otherwise —
+            // a declaration file cannot repeat the constructor
+            // inference the face relies on.
+            for (const at of ctorAtFields(value[2])) {
+              if (declared.has(at.name)) continue;
+              declared.add(at.name);
+              const annotation = roleType(at.node, 'annotation');
+              members.push(`${at.name}: ${annotation ?? 'any'};`);
+            }
             if (params.some(paramTyped)) members.push(`constructor${rendered(() => renderParams(params, isOptionalParam))};`);
             continue;
           }

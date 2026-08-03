@@ -163,6 +163,24 @@ describe('TS-face emission pins', () => {
     expect(ts('x: number = 5\nx = 7\n').code).toBe('let x: number = 5;\nx = 7;' + MARKER);
   });
 
+  test('a ctor field only a bound arrow assigns spells its any; a directly-assigned one stays bare', () => {
+    // TypeScript's constructor inference reads direct assignments but
+    // never descends into arrows — a bare declaration for an
+    // arrow-only field is an implicit any (TS7008 under
+    // noImplicitAny) on generated-only bytes no source position
+    // answers for. The direct field keeps the inference, which is the
+    // honest type.
+    const faced = ts('class S\n  constructor: (name: string) ->\n    @label = name\n    @sync = =>\n      @dirty = false\n');
+    expect(faced.code).toContain('\n  label;\n');
+    expect(faced.code).toContain('\n  sync;\n');
+    expect(faced.code).toContain('\n  dirty: any;\n');
+    // A direct assignment ANYWHERE in the body supplies the
+    // inference — the arrow's earlier write does not force the any.
+    const both = ts('class T\n  constructor: () ->\n    @go = =>\n      @n = 1\n    @n = 2\n');
+    expect(both.code).toContain('\n  n;\n');
+    expect(both.code).not.toContain('n: any');
+  });
+
   test('bare typed forward: the annotation reaches the hoist line with the definite-assignment assertion', () => {
     // `!` because a forward has no declaration-site initializer: plain
     // `let r: T` would raise TS2454 on read-before-assign patterns

@@ -293,9 +293,12 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // publishes TS2339 at every assignment AND every read, which is the
   // whole surface of the class. The annotated spelling carries its type
   // onto the declaration; the bare one declares the name alone, the
-  // promoted-parameter precedent. A body-level declaration of the same
-  // name still wins — one declaration, or TypeScript reads the pair as
-  // duplicate identifiers.
+  // promoted-parameter precedent — except a field only a bound arrow
+  // assigns, which spells `: any`: TypeScript's constructor inference
+  // never descends into arrows, so its bare declaration would be an
+  // implicit any. A body-level declaration of the same name still
+  // wins — one declaration, or TypeScript reads the pair as duplicate
+  // identifiers.
   test('a constructor body\'s @field assignment declares its field', () => {
     const dir = workspace({
       // Legal, correctly-running rip: every spelling must be silent.
