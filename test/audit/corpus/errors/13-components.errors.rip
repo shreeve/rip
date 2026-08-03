@@ -56,3 +56,6 @@ Heads = component
         span 'u'
       switch missingSwitch
         when 1 then span 's'
+      for item in missingList
+        span item
+      = missingExpr

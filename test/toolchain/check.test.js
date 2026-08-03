@@ -409,6 +409,109 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // Mutually-recursive computeds deserve their error — the pattern
+  // recurses forever on read — but the error must be usable: TS detects
+  // the cycle in the companion interface's behavior projection and
+  // names the reactive container's `value` across the whole component
+  // span. The projection's anchored rows and the mapper's requote turn
+  // that into one diagnostic PER computed, at the member the author
+  // wrote, quoting the member's own name.
+  test('a computed cycle anchors at each involved computed with its own name, not the whole component', () => {
+    const dir = workspace({
+      'cycle.rip': [
+        'Badge = component',
+        '  loop1 ~= @loop2 + 1',
+        '  loop2 ~= @loop1 + 1',
+        '  render',
+        '    div "{@loop1}"',
+        'console.log Badge',
+      ].join('\n') + '\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.map((d) => [d.code, d.line, d.column, d.endColumn])).toEqual([
+        [2502, 2, 3, 8],
+        [2502, 3, 3, 8],
+      ]);
+      expect(diags[0].message).toContain("'loop1' is referenced");
+      expect(diags[1].message).toContain("'loop2' is referenced");
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // The default-satisfies relation follows the runtime's ORDER of
+  // operations, not just its vocabulary. Dates are the one exception
+  // that earns an admission: `_coerceDates` runs AFTER `_applyDefaults`,
+  // so an ISO-string default becomes a real Date on every parse and the
+  // satisfies admits the string spelling. The `[null]` default under a
+  // required `!` goes the other way: `_validate` runs after defaults and
+  // rejects the substituted null on every default-taking parse, so the
+  // face stops widening the field to `| null` and the satisfies flags
+  // the literal — the checker saying first what the runtime says late.
+  // The @ensure parameter follows the same discipline: the create path
+  // runs ensures before id/timestamps exist, so the implicit columns
+  // type Partial<> and an unguarded `m.id` is refused (TS18048) instead
+  // of crashing the first create.
+  test('the schema face follows runtime ordering: date defaults admit strings, required [null] publishes, ensures see Partial implicits', () => {
+    const dir = workspace({
+      'ordering.rip': [
+        'Ev = schema :shape',
+        '  when! date, ["2024-01-01"]',
+        '  at! datetime, ["2024-01-01T10:00:00Z"]',
+        'M = schema :model',
+        '  name! string',
+        '  @timestamps',
+        '  @ensure "fresh", (m) -> not m.id? or m.id > 0',
+        'd: Date = Ev.parse({}).when',
+        'console.log d, M',
+      ].join('\n') + '\n',
+      'landmine.rip': [
+        'Req = schema :shape',
+        '  code! string, [null]',
+        'unguarded = schema :model',
+        '  name! string',
+        '  @ensure "fresh", (m) -> m.id > 0',
+        'console.log Req, unguarded',
+      ].join('\n') + '\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'ordering.rip')).toEqual([]);
+      expect(diags.filter((d) => d.file === 'landmine.rip').map((d) => d.code).sort()).toEqual([1360, 18048]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // The mixin face promises exactly what the runtime serves, in both
+  // directions. The projection algebra works on a mixin — __schemaDerive
+  // refuses only :union/:enum, and a mixin derivation is an instantiable
+  // :shape — so every algebra call checks clean, INCLUDING Schema.extend
+  // taking a mixin argument. The parse surface is refused on the mixin
+  // itself: `parse` throws at runtime, so the checker says no first.
+  test('mixin projection algebra checks clean; the mixin parse surface stays refused', () => {
+    const dir = workspace({
+      'algebra.rip': [
+        'T = schema :mixin',
+        '  createdAt! datetime',
+        '  updatedAt! datetime',
+        'U = schema :shape',
+        '  name! string',
+        'Stamps = T.pick("createdAt")',
+        'stamped = Stamps.parse({ createdAt: "2024-01-01" })',
+        'console.log stamped.createdAt, T.partial(), T.omit("updatedAt"),',
+        '  T.required("createdAt"), U.extend(T), T.extend(U), T.toJSONSchema()',
+      ].join('\n') + '\n',
+      'refused.rip': [
+        'T = schema :mixin',
+        '  createdAt! datetime',
+        'console.log T.parse({})',
+      ].join('\n') + '\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.filter((d) => d.file === 'algebra.rip')).toEqual([]);
+      expect(diags.filter((d) => d.file === 'refused.rip').map((d) => d.code)).toEqual([2339]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // A pattern catch mints its binding (`catch (_err) { ({message} = _err); … }`)
   // and annotates it, so the lowering's own destructure never publishes —
   // in EITHER try, statement or value, on EITHER pattern kind. The four

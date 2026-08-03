@@ -285,7 +285,7 @@ const parserInstance = {
   parse(input, { primitives: wantPrimitives = !1, tolerant = !1 } = {}) {
     let action, allowedAll, at, atPos, base, carriedPrimitives, end, expected, first, got, guardKey, inserted, last, len, loc, locs, message, node, nodeId, ownerNodeId, primitiveLocs, q, r, recordFirst, row, sem, span, start, state, stk, vals;
     [stk, vals, locs, primitiveLocs] = [[0], [null], [null], [[]]];
-    let parseTable = this.parseTable, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, holes = [], inputEnd = input.length;
+    let parseTable = this.parseTable, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, inputEnd = input.length;
     if (tolerant)
       while (inputEnd > 0 && (input[inputEnd - 1] === `
 ` || input[inputEnd - 1] === "\r"))
@@ -365,7 +365,6 @@ const parserInstance = {
           lexer.text = "";
           lexer.loc = tokenLoc;
           lexer.token = { generated: !0, hole: !0 };
-          holes.push({ kind: this.tokenNames[inserted], at: atPos });
           action = parseTable[state]?.[symbol];
         } else if (symbol !== EOF) {
           recordFirst();
@@ -480,7 +479,7 @@ const parserInstance = {
           primitiveLocs.push(carriedPrimitives);
         stk.push(parseTable[stk[stk.length - 2]][stk[stk.length - 1]]);
       } else
-        return { sexpr: vals[vals.length - 1], stores: { nodes, roles, primitives, nodeIds }, diagnostics, trivia: lexer.trivia ?? null, holes };
+        return { sexpr: vals[vals.length - 1], stores: { nodes, roles, primitives, nodeIds }, diagnostics, trivia: lexer.trivia ?? null };
     }
   },
   ctx: {},

@@ -165,16 +165,29 @@ const VALIDATION_INTRINSICS = [
 
 // The mixin tier — emitted only where a `:mixin` exists, the persistence
 // tier's rule. A `:mixin` is NOT instantiable: driven against
-// src/runtime/schema.js (2026-07-30), `parse` throws, `safe` always
-// fails, `ok` is always false, and `toJSONSchema()` is the one method
-// that answers, so the interface carries that alone. `Schema<Out, In>`
-// here would promise a parse surface the runtime refuses, which is why
-// the mixin binding had no cast at all and fell to the runtime's own
-// class. `Out` names the shape the mixin contributes — the companion
-// alias other schemas intersect — rather than anything callable.
+// src/runtime/schema.js (2026-08-03), `parse` throws, `safe` always
+// fails, `ok` is always false — so the parse surface stays absent and
+// the checker refuses what the runtime would throw on. The projection
+// algebra is a different story: `__schemaDerive` refuses only `:union`
+// and `:enum`, and a derivation from a mixin is a plain `:shape`,
+// instantiable like any other — so pick/omit/partial/required/extend
+// answer here, each returning `Schema` over the projected shape.
+// `Out` names the shape the mixin contributes — the companion alias
+// other schemas intersect — rather than anything callable. The second
+// declaration MERGES into `Schema` (TS interface merging), adding the
+// mixin-argument overload of `extend` only where the tier exists —
+// the runtime's `extend()` refuses only `:union`.
 const MIXIN_INTRINSICS = [
   'interface MixinSchema<Out> {',
   '  toJSONSchema(): Record<string, unknown>;',
+  '  pick<K extends keyof Out>(...keys: K[]): Schema<Pick<Out, K>, Pick<Out, K>>;',
+  '  omit<K extends keyof Out>(...keys: K[]): Schema<Omit<Out, K>, Omit<Out, K>>;',
+  '  partial(): Schema<Partial<Out>, Partial<Out>>;',
+  '  required<K extends keyof Out>(...keys: K[]): Schema<Omit<Out, K> & Required<Pick<Out, K>>, Omit<Out, K> & Required<Pick<Out, K>>>;',
+  '  extend<U>(other: Schema<U, any> | MixinSchema<U>): Schema<Out & U, Out & U>;',
+  '}',
+  'interface Schema<Out, In = unknown> {',
+  '  extend<U>(other: MixinSchema<U>): Schema<In & U, In & U>;',
   '}',
 ];
 
@@ -318,9 +331,15 @@ export const behaviorName = (name) => `__${name}__behavior`;
 // A `[null]` default widens the type: the runtime substitutes it when
 // the input is absent OR null (_applyDefaults), so `invite? string,
 // [null]` parses to `invite: null` and a bare `string` would be a lie
-// about the value every default-taking parse produces.
+// about the value every default-taking parse produces. NOT under `!`:
+// a required field rejects the substituted null on every parse
+// (_validate runs after _applyDefaults), so the null never survives
+// to a parsed value — widening there would promise one anyway. The
+// default-satisfies relation keeps the unwidened type, so a `[null]`
+// default on a required field publishes at the literal instead of
+// landing as a runtime error on every default-taking parse.
 export const fieldType = (entry, known) => {
-  const nullable = entry.constraints?.default === null ? ' | null' : '';
+  const nullable = entry.constraints?.default === null && !entry.modifiers?.includes('!') ? ' | null' : '';
   if (entry.typeName === 'literal-union' && entry.literals?.length) {
     return entry.literals.map((l) => JSON.stringify(l)).join(' | ') + nullable;
   }
@@ -430,9 +449,9 @@ const braced = (props) => (props.length ? `{ ${props.join('; ')} }` : '{}');
 // One schema's type story:
 //   aliasLines — the `type …` lines (may be empty for a kind that
 //                needs none beyond the const)
-//   constType  — the declared type of the binding, or null when the
-//                binding deliberately stays untyped (:mixin — its
-//                runtime value is not a user surface)
+//   constType  — the declared type of the binding (every kind casts;
+//                :mixin's is MixinSchema — the parse surface absent,
+//                the projection algebra present)
 //   thisTypes  — entry index → the callable's `this` type ()
 //   typeNames  — every type name these lines bind (collision fodder)
 export function schemaTypeStory(decl, byName, known) {
@@ -546,14 +565,25 @@ export function schemaTypeStory(decl, byName, known) {
       `savedChanges: Map<string, [unknown, unknown]>`,
       `toJSON(): ${dataName}`,
     ];
+    // The ensure predicate's shape is its OWN alias, not ${dataName}:
+    // ensures run on BOTH validation paths, and the create path hands
+    // them input-derived data where the runtime-managed columns (id,
+    // FKs, timestamps) do not exist yet — only the existing-row path
+    // passes a row that has them. `Partial<>` over exactly those
+    // columns is the honest union of the two paths; typing them
+    // non-optional blessed `m.id.toFixed()` in a predicate the create
+    // path then crashed.
+    const ensureName = `${name}Ensure`;
+    const hasEnsures = ensureIdx.length > 0;
     const linesFor = (face) => [
       `type ${dataName} = ${dataType} & ${braced(modelImplicitProps(descriptor))};`,
       `type ${createName} = ${intersect(braced(modelCreateProps(descriptor, known)), mixinRefs(descriptor, byName))};`,
+      ...(hasEnsures ? [`type ${ensureName} = ${dataType} & Partial<${braced(modelImplicitProps(descriptor))}>;`] : []),
       `type ${name} = ${dataName} & ${braced(instanceExtras(face))};`,
     ];
     const aliasLines = linesFor(false);
     const faceAliasLines = linesFor(true);
-    const typeNames = [dataName, createName, name];
+    const typeNames = [dataName, createName, ...(hasEnsures ? [ensureName] : []), name];
     let constType = `ModelSchema<${name}, ${dataName}, number, ${createName}>`;
     if (scopeNames.length) {
       const scopeSigs = scopeNames.map((s) => `${s}(...args: any[]): ${queryName}`);
@@ -566,7 +596,7 @@ export function schemaTypeStory(decl, byName, known) {
     for (const i of instanceIdx) thisTypes.set(i, name);
     for (const i of scopeIdx) thisTypes.set(i, queryType);
     return { aliasLines, faceAliasLines, constType, thisTypes, typeNames, behaviorName: bname,
-             ensureTypes: ensuresOf(dataName) };
+             ensureTypes: ensuresOf(ensureName) };
   }
 
   // :input / :shape — collapse to one bare name when instance === data.
@@ -673,7 +703,14 @@ export function buildSchemaTypeStory(programSexpr) {
     // row shape, and `it` is the declared `any` boundary.
     const defaultTypes = new Map();
     d.descriptor.entries.forEach((e, i) => {
-      if (e.tag === 'field' && e.constraints?.default !== undefined) defaultTypes.set(i, fieldType(e, known));
+      if (e.tag !== 'field' || e.constraints?.default === undefined) return;
+      // Dates are the one ordering exception: `_coerceDates` runs
+      // AFTER `_applyDefaults`, so an ISO-string default becomes a
+      // real Date on every parse — the satisfies admits the string
+      // spelling the runtime deliberately serves. (`~` coercions run
+      // before defaults, so no other type earns this.)
+      const admits = e.typeName === 'date' || e.typeName === 'datetime' ? ' | string' : '';
+      defaultTypes.set(i, fieldType(e, known) + admits);
     });
     stories.push({ decl: d, ...story, defaultTypes });
   }

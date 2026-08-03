@@ -69,28 +69,36 @@ const todo = (msg) => { throw new Error(msg || 'Not implemented'); };
 const warn = console.warn;
 const zip = (...a) => a[0].map((_, i) => a.map((b) => b[i]));
 // The match operator's receiver coercion: anything reasonable becomes
-// a string to match against. A multi-line string matches only under
-// /m (anchors mislead across embedded newlines otherwise) — without
-// it the coercion yields null and the match throws loudly rather
-// than anchoring wrong.
+// a string to match against. A multi-line receiver matches only under
+// /m (anchors mislead across embedded newlines otherwise) — without it
+// the coercion throws loudly rather than anchoring wrong, and the
+// guard sits AFTER the coercion so it holds for every receiver alike:
+// a decoded Uint8Array, an array whose element carries a newline, a
+// custom toString spanning lines — each is the same hazard the string
+// path names, and a guard on the string path alone let them through.
+// (Historically the string path returned null here; the throw is the
+// stdlib's contract now — the face annotates `=> string`, and a null
+// that surfaced as a downstream TypeError on .match was a worse error
+// at a worse distance.)
 const toMatchable = (v, allowNewlines) => {
-  if (typeof v === 'string') {
-    if (!allowNewlines && /[\n\r]/.test(v)) {
-      throw new TypeError('match receiver spans lines — add the /m flag to match across them');
+  const s = (() => {
+    if (typeof v === 'string') return v;
+    if (v == null) return '';
+    if (typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean') return String(v);
+    if (typeof v === 'symbol') return v.description || '';
+    if (v instanceof Uint8Array || v instanceof ArrayBuffer) {
+      return new TextDecoder().decode(v instanceof Uint8Array ? v : new Uint8Array(v));
     }
-    return v;
+    if (Array.isArray(v)) return v.join(',');
+    if (typeof v.toString === 'function' && v.toString !== Object.prototype.toString) {
+      try { return v.toString(); } catch { return ''; }
+    }
+    return '';
+  })();
+  if (!allowNewlines && /[\n\r]/.test(s)) {
+    throw new TypeError('match receiver spans lines — add the /m flag to match across them');
   }
-  if (v == null) return '';
-  if (typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean') return String(v);
-  if (typeof v === 'symbol') return v.description || '';
-  if (v instanceof Uint8Array || v instanceof ArrayBuffer) {
-    return new TextDecoder().decode(v instanceof Uint8Array ? v : new Uint8Array(v));
-  }
-  if (Array.isArray(v)) return v.join(',');
-  if (typeof v.toString === 'function' && v.toString !== Object.prototype.toString) {
-    try { return v.toString(); } catch { return ''; }
-  }
-  return '';
+  return s;
 };
 
 export { abort, assert, exit, kind, noop, p, pp, pj, pr, raise, rand, sleep, toMatchable, todo, warn, zip };

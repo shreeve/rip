@@ -158,6 +158,14 @@ var VALIDATION_INTRINSICS = [
 var MIXIN_INTRINSICS = [
   "interface MixinSchema<Out> {",
   "  toJSONSchema(): Record<string, unknown>;",
+  "  pick<K extends keyof Out>(...keys: K[]): Schema<Pick<Out, K>, Pick<Out, K>>;",
+  "  omit<K extends keyof Out>(...keys: K[]): Schema<Omit<Out, K>, Omit<Out, K>>;",
+  "  partial(): Schema<Partial<Out>, Partial<Out>>;",
+  "  required<K extends keyof Out>(...keys: K[]): Schema<Omit<Out, K> & Required<Pick<Out, K>>, Omit<Out, K> & Required<Pick<Out, K>>>;",
+  "  extend<U>(other: Schema<U, any> | MixinSchema<U>): Schema<Out & U, Out & U>;",
+  "}",
+  "interface Schema<Out, In = unknown> {",
+  "  extend<U>(other: MixinSchema<U>): Schema<In & U, In & U>;",
   "}"
 ];
 var MODEL_INTRINSICS = [
@@ -257,7 +265,7 @@ function isModuleShaped(programSexpr, isModuleImport) {
 }
 var behaviorName = (name) => `__${name}__behavior`;
 var fieldType = (entry, known) => {
-  const nullable = entry.constraints?.default === null ? " | null" : "";
+  const nullable = entry.constraints?.default === null && !entry.modifiers?.includes("!") ? " | null" : "";
   if (entry.typeName === "literal-union" && entry.literals?.length) {
     return entry.literals.map((l) => JSON.stringify(l)).join(" | ") + nullable;
   }
@@ -426,14 +434,17 @@ function schemaTypeStory(decl, byName, known) {
       `savedChanges: Map<string, [unknown, unknown]>`,
       `toJSON(): ${dataName}`
     ];
+    const ensureName = `${name}Ensure`;
+    const hasEnsures = ensureIdx.length > 0;
     const linesFor = (face) => [
       `type ${dataName} = ${dataType} & ${braced(modelImplicitProps(descriptor))};`,
       `type ${createName} = ${intersect(braced(modelCreateProps(descriptor, known)), mixinRefs(descriptor, byName))};`,
+      ...hasEnsures ? [`type ${ensureName} = ${dataType} & Partial<${braced(modelImplicitProps(descriptor))}>;`] : [],
       `type ${name} = ${dataName} & ${braced(instanceExtras(face))};`
     ];
     const aliasLines = linesFor(false);
     const faceAliasLines = linesFor(true);
-    const typeNames = [dataName, createName, name];
+    const typeNames = [dataName, createName, ...hasEnsures ? [ensureName] : [], name];
     let constType = `ModelSchema<${name}, ${dataName}, number, ${createName}>`;
     if (scopeNames.length) {
       const scopeSigs = scopeNames.map((s) => `${s}(...args: any[]): ${queryName}`);
@@ -454,7 +465,7 @@ function schemaTypeStory(decl, byName, known) {
       thisTypes: thisTypes2,
       typeNames,
       behaviorName: bname,
-      ensureTypes: ensuresOf(dataName)
+      ensureTypes: ensuresOf(ensureName)
     };
   }
   const thisTypes = new Map;
@@ -519,8 +530,10 @@ function buildSchemaTypeStory(programSexpr) {
     }
     const defaultTypes = new Map;
     d.descriptor.entries.forEach((e, i) => {
-      if (e.tag === "field" && e.constraints?.default !== undefined)
-        defaultTypes.set(i, fieldType(e, known));
+      if (e.tag !== "field" || e.constraints?.default === undefined)
+        return;
+      const admits = e.typeName === "date" || e.typeName === "datetime" ? " | string" : "";
+      defaultTypes.set(i, fieldType(e, known) + admits);
     });
     stories.push({ decl: d, ...story, defaultTypes });
   }
@@ -7747,7 +7760,7 @@ var parserInstance = {
   parse(input, { primitives: wantPrimitives = false, tolerant = false } = {}) {
     let action, allowedAll, at, atPos, base, carriedPrimitives, end, expected, first, got, guardKey, inserted, last, len, loc, locs, message, node, nodeId, ownerNodeId, primitiveLocs, q, r, recordFirst, row, sem, span, start, state, stk, vals;
     [stk, vals, locs, primitiveLocs] = [[0], [null], [null], [[]]];
-    let parseTable = this.parseTable, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, holes = [], inputEnd = input.length;
+    let parseTable = this.parseTable, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, inputEnd = input.length;
     if (tolerant)
       while (inputEnd > 0 && (input[inputEnd - 1] === `
 ` || input[inputEnd - 1] === "\r"))
@@ -7827,7 +7840,6 @@ var parserInstance = {
           lexer.text = "";
           lexer.loc = tokenLoc;
           lexer.token = { generated: true, hole: true };
-          holes.push({ kind: this.tokenNames[inserted], at: atPos });
           action = parseTable[state]?.[symbol];
         } else if (symbol !== EOF) {
           recordFirst();
@@ -7942,7 +7954,7 @@ var parserInstance = {
           primitiveLocs.push(carriedPrimitives);
         stk.push(parseTable[stk[stk.length - 2]][stk[stk.length - 1]]);
       } else
-        return { sexpr: vals[vals.length - 1], stores: { nodes, roles, primitives, nodeIds }, diagnostics, trivia: lexer.trivia ?? null, holes };
+        return { sexpr: vals[vals.length - 1], stores: { nodes, roles, primitives, nodeIds }, diagnostics, trivia: lexer.trivia ?? null };
     }
   },
   ctx: {}
@@ -9227,18 +9239,21 @@ function instanceTypeLines(info, selfType) {
       const declared = info.roleText(m.func, "returnType");
       const base = declared ?? (m.isVoid ? "void" : "any");
       const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push(`${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};`);
+      lines.push({ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};` });
       continue;
     }
-    lines.push(`${m.kind === "readonly" ? "readonly " : ""}${m.name}${segmentsText(memberTypeSegments(m, ": "))};`);
+    lines.push({
+      text: `${m.kind === "readonly" ? "readonly " : ""}${m.name}${segmentsText(memberTypeSegments(m, ": "))};`,
+      ...isBehaviorProjected(m) ? { node: m.nameNode, role: m.nameRole } : {}
+    });
   }
   if (!hasChildren)
-    lines.push("children?: any;");
+    lines.push({ text: "children?: any;" });
   if (info.extendsTag !== null)
-    lines.push(`rest: ${containerType("Record<string, any>")};`);
-  lines.push(`mount(target?: any): ${selfType};`);
-  lines.push("unmount(options?: { removeDOM?: boolean }): void;");
-  lines.push("emit(name: string, detail?: any): void;");
+    lines.push({ text: `rest: ${containerType("Record<string, any>")};` });
+  lines.push({ text: `mount(target?: any): ${selfType};` });
+  lines.push({ text: "unmount(options?: { removeDOM?: boolean }): void;" });
+  lines.push({ text: "emit(name: string, detail?: any): void;" });
   return lines;
 }
 
@@ -10619,13 +10634,17 @@ class Emitter {
       this.b.emit(`
 ` + pad);
       this.mark(compNode, "$self", () => {
-        const lines = [
-          `${exported ? "export " : ""}interface ${name}${typeParams ?? ""} {`,
-          ...instanceTypeLines(info, `${name}${selfArgs}`).map((l) => `  ${l}`),
-          "}"
-        ];
-        this.b.emit(lines.join(`
-` + pad));
+        this.b.emit(`${exported ? "export " : ""}interface ${name}${typeParams ?? ""} {`);
+        for (const l of instanceTypeLines(info, `${name}${selfArgs}`)) {
+          this.b.emit(`
+` + pad + "  ");
+          if (l.node !== undefined)
+            this.mark(l.node, l.role, () => this.b.emit(l.text));
+          else
+            this.b.emit(l.text);
+        }
+        this.b.emit(`
+` + pad + "}");
       });
     });
     const bodies = info.computedBodies ?? [];
@@ -20536,7 +20555,7 @@ function emitDeclarations({ sexpr, stores, source }) {
     const self = `${name}${selfArgsOf(typeParams)}`;
     lines.push(`${exp}interface ${name}${typeParams} {`);
     for (const l of rendered(() => instanceTypeLines(info, self)))
-      lines.push(`  ${l}`);
+      lines.push(`  ${l.text}`);
     lines.push("}");
     lines.push(`${exp}declare let ${name}: {`);
     if (gated) {
@@ -20989,31 +21008,33 @@ var todo = (msg) => {
 var warn = console.warn;
 var zip = (...a) => a[0].map((_, i) => a.map((b) => b[i]));
 var toMatchable = (v, allowNewlines) => {
-  if (typeof v === "string") {
-    if (!allowNewlines && /[\n\r]/.test(v)) {
-      throw new TypeError("match receiver spans lines — add the /m flag to match across them");
-    }
-    return v;
-  }
-  if (v == null)
-    return "";
-  if (typeof v === "number" || typeof v === "bigint" || typeof v === "boolean")
-    return String(v);
-  if (typeof v === "symbol")
-    return v.description || "";
-  if (v instanceof Uint8Array || v instanceof ArrayBuffer) {
-    return new TextDecoder().decode(v instanceof Uint8Array ? v : new Uint8Array(v));
-  }
-  if (Array.isArray(v))
-    return v.join(",");
-  if (typeof v.toString === "function" && v.toString !== Object.prototype.toString) {
-    try {
-      return v.toString();
-    } catch {
+  const s = (() => {
+    if (typeof v === "string")
+      return v;
+    if (v == null)
       return "";
+    if (typeof v === "number" || typeof v === "bigint" || typeof v === "boolean")
+      return String(v);
+    if (typeof v === "symbol")
+      return v.description || "";
+    if (v instanceof Uint8Array || v instanceof ArrayBuffer) {
+      return new TextDecoder().decode(v instanceof Uint8Array ? v : new Uint8Array(v));
     }
+    if (Array.isArray(v))
+      return v.join(",");
+    if (typeof v.toString === "function" && v.toString !== Object.prototype.toString) {
+      try {
+        return v.toString();
+      } catch {
+        return "";
+      }
+    }
+    return "";
+  })();
+  if (!allowNewlines && /[\n\r]/.test(s)) {
+    throw new TypeError("match receiver spans lines — add the /m flag to match across them");
   }
-  return "";
+  return s;
 };
 
 // src/runtime/schema.js

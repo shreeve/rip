@@ -277,53 +277,16 @@ describeExtended('completion and signature help on an incomplete expression', ()
     } finally { await s.close(); }
   }, 90_000);
 
-  // THE ONE TEST IN THIS FILE WITH NO BARRIER, and it is deliberate.
-  // Every other request here waits for a diagnostics publication first,
-  // which is what makes those tests about the FACE. An editor does not
-  // wait: the popup fires on the keystroke. The server coalesces
-  // didChange for 100ms, and inside that window completion used to
-  // answer from the face of the PREVIOUS text.
-  //
-  // Retyping a member dot is the case that exposes it, because deleting
-  // the dot leaves a buffer that compiles CLEAN — so the stale face is
-  // not merely old, it has plain statement context at the cursor and
-  // answers with the entire global scope. A thousand-item list where
-  // thirty-four members belong is the original finding's symptom, and it
-  // survived the tolerant face by hiding in the debounce.
-  //
-  // The assertion is deliberately made at zero delay. Sleeping first
-  // would restore the barrier by another name and the gate would pass
-  // against the bug.
-  test('completion answers the CURRENT buffer inside the debounce window', async () => {
-    const s = await openSession({
-      'race.rip': 'items: number[] = [1, 2, 3]\na = items.\n',
-      'package.json': '{}\n',
-    });
-    try {
-      s.open('race.rip');
-      await s.diagnostics('race.rip');
-
-      // Delete the dot: this buffer is VALID, so the face that lands has
-      // no member access at the cursor at all.
-      s.change('race.rip', 'items: number[] = [1, 2, 3]\na = items\n');
-      await s.diagnostics('race.rip');
-
-      // Retype it and ask AT ONCE — no forget(), no diagnostics await.
-      s.change('race.rip', 'items: number[] = [1, 2, 3]\na = items.\n');
-      const r = await s.request('textDocument/completion', {
-        textDocument: { uri: s.uri('race.rip') },
-        position: { line: 1, character: 10 },
-      });
-      const labels = (r?.items ?? r ?? []).map((i) => i.label);
-
-      expect(labels.length, 'the list is live').toBeGreaterThan(0);
-      expect(labels).toContain('map');
-      expect(labels).toContain('filter');
-      // The stale answer was the global scope — a thousand-odd names. Any
-      // list that large is the wrong one however many members it contains.
-      expect(labels.length, 'the receiver\'s members, not the global scope').toBeLessThan(100);
-    } finally { await s.close(); }
-  }, 90_000);
+  // NO BARRIER-FREE TEST LIVES HERE, and that is deliberate. Every
+  // request in this file waits for a diagnostics publication first, which
+  // is what makes these tests about the FACE. The other half of the
+  // contract — a surface answering the buffer AS TYPED, inside the 100ms
+  // didChange debounce — is arrival.test.js's charter, whose
+  // `askWhileTyping` helper structurally prevents a barrier from sneaking
+  // between the edit and the ask. The retyped-member-dot probe this file
+  // once duplicated inline lives there ('completion, after a member dot
+  // is retyped'); one enforcement point, so the no-barrier discipline
+  // cannot drift in two places independently.
 
   test('a cross-file re-pull cannot wipe an incomplete buffer\'s own rejection', async () => {
     // sendDiagnostics REPLACES the set per URI, and editing doc B

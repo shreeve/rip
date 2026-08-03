@@ -1176,8 +1176,9 @@ class Generator
   #                 blank-line runs, {kind, start, end, text}), relayed
   #                 verbatim when the lexer exposes one; null otherwise.
   #                 Present on failure too — trivia is scan-time fact.
-  #   holes       — tolerant mode only: the zero-width tokens repair minted,
-  #                 [{kind, at}] in insertion order. Empty on a clean parse.
+  # (Repair-minted zero-width tokens surface as zero-width spans in the
+  # stores/mapping rows — the channel every consumer already reads — so
+  # the driver returns no separate hole list.)
 
   # `primitives` (default off) turns on the PrimitiveStore: the occurrence
   # spans a primitive tree value cannot carry itself. Only the TS face reads
@@ -1202,7 +1203,11 @@ class Generator
   #     so the pair drops together);
   #   • a REAL offending token admits exactly one insertion, TERMINATOR — a
   #     statement boundary splits what the user wrote without fabricating
-  #     meaning in front of it; holes never precede real code.
+  #     meaning in front of it; holes never precede real code. When even
+  #     that has no candidate, the token DELETES (panic fallback, the
+  #     classic second half of insertion repair): one lost token still
+  #     leaves the rest of the buffer a parse. EOF is never deleted — a
+  #     state that cannot act on end of input is the genuine dead end.
   # A budget caps the loop; exhaustion falls back to today's hard failure.
   # OFF, every site below is skipped as one unit and the driver is
   # byte-for-byte the strict one.
@@ -1213,7 +1218,6 @@ class Generator
     diagnostics = []
     pendingSymbols = []
     repairBudget = 24
-    holes = []
     # Repairs at end of input anchor where the CURSOR pauses — before any
     # trailing newlines — so a hole's zero-width span is the position the
     # editor's request carries.
@@ -1339,7 +1343,6 @@ class Generator
           lexer.text = ''
           lexer.loc = tokenLoc
           lexer.token = {generated: true, hole: true}
-          holes.push {kind: @tokenNames[inserted], at: atPos}
           action = parseTable[state]?[symbol]
         else if symbol isnt EOF
           # Panic fallback, the classic second half of insertion repair:
@@ -1488,7 +1491,7 @@ class Generator
         stk.push parseTable[stk[stk.length - 2]][stk[stk.length - 1]]
 
       else  # ACCEPT
-        return {sexpr: vals[vals.length - 1], stores: {nodes, roles, primitives, nodeIds}, diagnostics, trivia: lexer.trivia ?? null, holes}
+        return {sexpr: vals[vals.length - 1], stores: {nodes, roles, primitives, nodeIds}, diagnostics, trivia: lexer.trivia ?? null}
 
 # ==============================================================================
 # Exports

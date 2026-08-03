@@ -38,7 +38,8 @@
 // today's spell it `finding S3` / `finding M-2`, which is the convention to
 // keep.
 import { test, expect } from 'bun:test';
-import { readFileSync, readdirSync, lstatSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
+import { execSync } from 'child_process';
 import { join, relative, sep } from 'path';
 
 const ROOT = join(import.meta.dir, '../..');
@@ -53,14 +54,16 @@ const LEDGER = join('test', 'audit', 'FINDINGS.md');   // sep-correct: compared 
 // citing this one as precedent, without its own lifetime argument, would be.
 const HANDOFF = 'HANDOFF.md';
 const RUNNER = join('test', 'audit', 'runner.js');
-// `.rip` is the editor's generated mirror — untracked scratch that holds
-// compiled faces of whatever happened to be open, so scanning it makes this
-// gate's verdict depend on whether VS Code was running. `.claude` is the
-// same class: agent-session state (settings, git worktrees holding whole
-// checkouts of OTHER branches), so scanning it makes the verdict depend on
-// whether a Claude session was running and what its branch contained.
-const SKIP = new Set(['node_modules', '.git', '.rip', '.claude', 'dist', 'build', 'coverage', '.vscode-test']);
-const TEXT = /\.(js|mjs|cjs|md|json|rip|ts|tsx)$/;
+// The sweep walks GIT-TRACKED files only, so its verdict is a function of
+// the repository rather than the checkout's scratch state. The directory
+// skip-list this replaces kept growing the same lesson case by case: the
+// editor's `.rip` mirror made the verdict depend on whether VS Code was
+// running, `.claude` on whether an agent session was, untracked `misc/`
+// notes on what was jotted locally — every one untracked, which is the
+// actual boundary. Tracked-only also means a citation added WITH a new
+// file fails the moment the file is staged, which is the earliest a gate
+// can catch it.
+const TEXT = /\.(js|mjs|cjs|md|json|rip|ts|tsx|yml|yaml|sh)$/;
 
 // The banned form. `finding` and `#<n>` may be separated by a comment
 // continuation (`\n  // `, `\n * `, `\n # `) because that is how this repo
@@ -69,30 +72,30 @@ const TEXT = /\.(js|mjs|cjs|md|json|rip|ts|tsx)$/;
 // gate.
 const CITE = /findings?[ \t]*(?:\r?\n[ \t]*(?:\/\/|#|\*)?[ \t]*)?#[0-9]+/gi;
 
-// lstat, not stat: a symlinked directory is not descended, so a symlink cycle
-// anywhere under ROOT cannot recurse this whole-repo walk into a stack blowout.
-const walk = (dir, acc = []) => {
-  for (const name of readdirSync(dir)) {
-    if (SKIP.has(name)) continue;
-    const p = join(dir, name);
-    const st = lstatSync(p);
-    if (st.isDirectory()) walk(p, acc);
-    else if (st.isFile() && TEXT.test(name)) acc.push(p);
-  }
-  return acc;
-};
+// `git ls-files -z` (NUL-delimited: filenames are data, not lines). A path
+// tracked but deleted from the working tree still lists, so existence
+// filters — the sweep reads bytes, and a ghost entry would throw. Text
+// files by extension, plus everything under bin/ — launchers are
+// extension-less by convention and are exactly as permanent as any other
+// tracked code.
+const trackedFiles = () =>
+  execSync('git ls-files -z', { cwd: ROOT }).toString().split('\0')
+    .filter((rel) => rel && (TEXT.test(rel) || rel.startsWith('bin/')))
+    .map((rel) => join(ROOT, rel))
+    .filter((p) => existsSync(p));
 
 const lineOf = (text, index) => text.slice(0, index).split('\n').length;
 
 test('finding IDs stay inside the ledger — nothing outside it cites one', () => {
-  const files = walk(ROOT);
+  const files = trackedFiles();
   const rels = new Set(files.map((f) => relative(ROOT, f)));
 
-  // Not vacuous, and specific: name the trees this rule is about, so a SKIP
-  // entry that swallows a whole subtree fails here instead of quietly
+  // Not vacuous, and specific: name the trees this rule is about, so a
+  // filter that swallows a whole subtree fails here instead of quietly
   // shrinking the sweep. (A bare count cannot tell 700 files from 700 of the
-  // wrong files.)
-  for (const probe of ['src/emitter.js', 'packages/vscode/src/server.js', RUNNER, LEDGER]) {
+  // wrong files.) `bin/rip` holds the extension-less launchers in scope,
+  // and the workflow yml holds the new extensions in.
+  for (const probe of ['src/emitter.js', 'packages/vscode/src/server.js', RUNNER, LEDGER, 'bin/rip', '.github/workflows/test.yml']) {
     expect(rels.has(probe.split('/').join(sep)), `the walk never reached ${probe}`).toBe(true);
   }
 
@@ -136,10 +139,15 @@ test('every gate the ledger names resolves — a renamed gate cannot rot in the 
     expect(runner.includes(`'${name}'`), `runner.js no longer mentions the '${name}' invariant`).toBe(true);
   }
 
-  const testFiles = new Set(walk(join(ROOT, 'test')).concat(walk(join(ROOT, 'packages')))
-    .filter((f) => f.endsWith('.test.js'))
-    .map((f) => f.split(sep).pop().replace(/\.test\.js$/, '')));
-  const auditFiles = new Set(readdirSync(join(ROOT, 'test', 'audit')));
+  const tracked = trackedFiles();
+  const testFiles = new Set(tracked
+    .map((f) => relative(ROOT, f))
+    .filter((rel) => (rel.startsWith(`test${sep}`) || rel.startsWith(`packages${sep}`)) && rel.endsWith('.test.js'))
+    .map((rel) => rel.split(sep).pop().replace(/\.test\.js$/, '')));
+  const auditFiles = new Set(tracked
+    .map((f) => relative(ROOT, f))
+    .filter((rel) => rel.startsWith(join('test', 'audit') + sep))
+    .map((rel) => rel.split(sep)[2]));
   const known = new Set([...dims, ...invariants, ...testFiles, ...auditFiles]);
 
   // A table row's LAST cell is its Gate. Inside it, a backticked token is a

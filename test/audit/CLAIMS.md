@@ -78,7 +78,7 @@ What that costs is FALSIFIABILITY, not coverage. 10-modules.rip imports across e
 | a literal-union prop keeps its union at the use site rather than widening to its base type | 25-components.rip:Ribbon | 25-components.errors.rip:Tint |
 | a generic component's constraint violation rejects at the use site | 25-components.rip:Palette | 25-components.errors.rip:Palettes |
 | ref-cell nullability: a non-nullable cell rejects, an Element-or-null cell accepts any tag | 25-components.rip:Anchors | 25-components.errors.rip:Shell |
-| a render-head typo beyond `if` (unless, switch) rejects at the head line, on the NAME | 13-components.rip:Roster | 13-components.errors.rip:Heads |
+| a render-head typo beyond `if` (unless, switch, for, `=`) rejects at the head line, on the NAME | 13-components.rip:Roster | 13-components.errors.rip:Heads |
 | a wrong-typed write to component state inside a method rejects, while the legal write types | 25-components.rip:Ledger | 25-components.errors.rip:Books |
 | array-typed reactive state keeps its ELEMENT type through the cell — `string[] := [...]` rejects a number element and types a read | 25-components.rip:ledgerHead | 25-components.errors.rip:Books |
 | a forwarded element ref — a child `ref:` into a `<=>` bound parent cell — checks end to end | 25-components.rip:Cuff | 25-components.errors.rip:Liner |
