@@ -150,6 +150,13 @@
         "dayjs": "1.11.20",
       },
     },
+    "packages/tray": {
+      "name": "@rip-lang/tray",
+      "version": "4.0.0",
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
+      },
+    },
     "packages/ui": {
       "name": "@rip-lang/ui",
       "version": "0.0.0",
@@ -233,6 +240,8 @@
     "@rip-lang/testing": ["@rip-lang/testing@workspace:packages/testing"],
 
     "@rip-lang/time": ["@rip-lang/time@workspace:packages/time"],
+
+    "@rip-lang/tray": ["@rip-lang/tray@workspace:packages/tray"],
 
     "@rip-lang/ui": ["@rip-lang/ui@workspace:packages/ui"],
 

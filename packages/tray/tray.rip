@@ -1,0 +1,254 @@
+#!/usr/bin/env rip
+
+fail = (message) -> throw Error.new message
+
+validateObject = (value, at) ->
+  fail "#{at} must be an object" unless value? and typeof value is 'object' and not Array.isArray(value)
+  value
+
+rejectUnknown = (value, allowed, at) ->
+  validateObject value, at
+  fail "unknown #{at} key #{JSON.stringify(key)}" for key of value when not allowed.includes(key)
+
+validateTitle = (title, at) ->
+  fail "#{at} title must be a non-empty string" unless typeof title is 'string' and title.length
+  title
+
+validateIcon = (icon, at) ->
+  fail "#{at} icon must be an SF Symbol name or null" unless not icon? or (typeof icon is 'string' and icon.length)
+  icon or null
+
+validateId = (id, at) ->
+  fail "#{at} id must be a non-empty string" unless typeof id is 'string' and id.length
+  id
+
+enabled = (value, at) ->
+  value ??= true
+  fail "#{at} enabled must be Boolean" unless typeof value is 'boolean'
+  value
+
+export label = (title, options = {}) ->
+  rejectUnknown options, ['icon', 'subtitle'], 'label'
+  validateTitle title, 'label'
+  validateIcon options.icon, 'label'
+  fail 'label subtitle must be a string or null' unless not options.subtitle? or typeof options.subtitle is 'string'
+  { kind: 'label', title, icon: options.icon or null, subtitle: options.subtitle or null }
+
+export separator = -> { kind: 'separator' }
+
+callbackItem = (kind, title, options, extra = []) ->
+  rejectUnknown options, ['id', 'run', 'icon', 'enabled', ...extra], kind
+  validateTitle title, kind
+  validateId options.id, kind
+  validateIcon options.icon, kind
+  fail "#{kind} run must be a function" unless typeof options.run is 'function'
+  { kind, title, id: options.id, icon: options.icon or null, enabled: enabled(options.enabled, kind), _run: options.run }
+
+export action = (title, options = {}) -> callbackItem 'action', title, options
+
+export toggle = (title, options = {}) ->
+  item = callbackItem 'toggle', title, options, ['value']
+  fail 'toggle value must be Boolean' unless typeof options.value is 'boolean'
+  { ...item, value: options.value }
+
+export directory = (title, options = {}) ->
+  item = callbackItem 'directory', title, options, ['prompt']
+  fail 'directory prompt must be a string or null' unless not options.prompt? or typeof options.prompt is 'string'
+  { ...item, prompt: options.prompt or null }
+
+export link = (title, url, options = {}) ->
+  rejectUnknown options, ['id', 'icon', 'enabled'], 'link'
+  validateTitle title, 'link'
+  validateIcon options.icon, 'link'
+  id = options.id or url
+  validateId id, 'link'
+  fail 'link url must be a non-empty string' unless typeof url is 'string' and url.length
+  { kind: 'link', title, id, url, icon: options.icon or null, enabled: enabled(options.enabled, 'link') }
+
+export submenu = (title, items, options = {}) ->
+  rejectUnknown options, ['id', 'icon', 'enabled'], 'submenu'
+  validateTitle title, 'submenu'
+  validateIcon options.icon, 'submenu'
+  fail 'submenu items must be an array' unless Array.isArray items
+  { kind: 'submenu', title, id: options.id or title, icon: options.icon or null, enabled: enabled(options.enabled, 'submenu'), items }
+
+export quit = (title = 'Quit', options = {}) ->
+  rejectUnknown options, ['icon'], 'quit'
+  validateTitle title, 'quit'
+  validateIcon options.icon, 'quit'
+  { kind: 'quit', title, icon: options.icon or null }
+
+export tray = (options = {}) ->
+  rejectUnknown options, ['title', 'icon', 'tooltip', 'refresh', 'menu'], 'tray'
+  validateTitle options.title, 'tray'
+  validateIcon options.icon, 'tray'
+  fail 'tray tooltip must be a string or null' unless not options.tooltip? or typeof options.tooltip is 'string'
+  refresh = options.refresh ?? 2
+  fail 'tray refresh must be zero or a positive number of seconds' unless typeof refresh is 'number' and Number.isFinite(refresh) and refresh >= 0
+  fail 'tray menu must be a function' unless typeof options.menu is 'function'
+  { title: options.title, icon: options.icon or null, tooltip: options.tooltip or null, refresh, menu: options.menu }
+
+normalizeItems = (items, actions, at = 'menu') ->
+  fail "#{at} must return an array" unless Array.isArray items
+  items.map (item, index) ->
+    here = "#{at}[#{index}]"
+    validateObject item, here
+    switch item.kind
+      when 'separator'
+        rejectUnknown item, ['kind'], here
+        { kind: 'separator' }
+      when 'label'
+        rejectUnknown item, ['kind', 'title', 'icon', 'subtitle'], here
+        label item.title, { icon: item.icon, subtitle: item.subtitle }
+      when 'link'
+        rejectUnknown item, ['kind', 'title', 'id', 'url', 'icon', 'enabled'], here
+        link item.title, item.url, { id: item.id, icon: item.icon, enabled: item.enabled }
+      when 'submenu'
+        rejectUnknown item, ['kind', 'title', 'id', 'icon', 'enabled', 'items'], here
+        normalized = submenu item.title, normalizeItems(item.items, actions, "#{here}.items"), { id: item.id, icon: item.icon, enabled: item.enabled }
+        normalized
+      when 'action', 'toggle', 'directory'
+        allowed = ['kind', 'title', 'id', 'icon', 'enabled', '_run']
+        allowed.push 'value' if item.kind is 'toggle'
+        allowed.push 'prompt' if item.kind is 'directory'
+        rejectUnknown item, allowed, here
+        validateId item.id, here
+        fail "duplicate tray action id #{JSON.stringify(item.id)}" if actions.has(item.id)
+        fail "#{here} callback is missing" unless typeof item._run is 'function'
+        actions.set item.id, item._run
+        copy = { kind: item.kind, title: item.title, id: item.id, icon: item.icon, enabled: item.enabled }
+        copy.value = item.value if item.kind is 'toggle'
+        copy.prompt = item.prompt if item.kind is 'directory'
+        copy
+      when 'quit'
+        rejectUnknown item, ['kind', 'title', 'icon'], here
+        quit item.title, { icon: item.icon }
+      else
+        fail "unknown #{here} kind #{JSON.stringify(item.kind)}"
+
+export snapshot = (definition) ->
+  definition = tray definition
+  actions = Map.new()
+  items = definition.menu!
+  {
+    tray:
+      title: definition.title
+      icon: definition.icon
+      tooltip: definition.tooltip
+      items: normalizeItems(items, actions)
+    actions
+  }
+
+write = (value) -> process.stdout.write JSON.stringify(value) + '\n'
+
+export serve = (definition) ->
+  currentActions = Map.new()
+  publishing = false
+
+  publish = ->
+    return if publishing
+    publishing = true
+    try
+      result = snapshot! definition
+      currentActions = result.actions
+      write { type: 'render', tray: result.tray }
+    catch error
+      write { type: 'error', message: error?.message or String(error) }
+    finally
+      publishing = false
+
+  publish!
+  timer = null
+  if definition.refresh > 0
+    timer = setInterval (-> publish!), definition.refresh * 1000
+
+  decoder = TextDecoder.new()
+  buffer = ''
+  try
+    for chunk as! Bun.stdin.stream()
+      buffer += decoder.decode chunk, { stream: true }
+      while (end = buffer.indexOf('\n')) >= 0
+        line = buffer.slice(0, end)
+        buffer = buffer.slice(end + 1)
+        continue unless line.trim()
+        try
+          message = JSON.parse line
+          fail 'tray host message must be an action' unless message?.type is 'action'
+          validateId message.id, 'tray host action'
+          callback = currentActions.get message.id
+          fail "unknown tray action #{JSON.stringify(message.id)}" unless callback?
+          callback! message.value
+          publish!
+        catch error
+          write { type: 'error', message: error?.message or String(error) }
+  finally
+    clearInterval timer if timer?
+
+# Imported, this file is the reusable tray framework. Run directly, the same
+# file is the Rip Apps tray backed only by the public `rip app`/`rip edge` CLI.
+ripApps = ->
+  rip = process.env.RIP_TRAY_RIP or 'rip'
+
+  command = (args) ->
+    proc = Bun.spawn [rip, ...args], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }
+    out = Response.new(proc.stdout).text()
+    err = Response.new(proc.stderr).text()
+    code = await proc.exited
+    out = await out
+    err = await err
+    throw Error.new(err.trim() or "rip #{args.join(' ')} exited #{code}") unless code is 0
+    out
+
+  json = (...args) -> JSON.parse command! args
+  capitalize = (text) -> text[0].toUpperCase() + text.slice(1)
+
+  openLog = (app) ->
+    log = json! 'app', 'logs', app.name, '--lines', '1', '--json'
+    result = Bun.spawnSync ['open', log.path], { stdout: 'ignore', stderr: 'pipe' }
+    throw Error.new(result.stderr.toString().trim() or "cannot open #{log.path}") unless result.exitCode is 0
+
+  edgeMenu = (edge) ->
+    items = [
+      label "#{capitalize(edge.state)} · #{if edge.managed then 'Rip-owned' else if edge.state is 'running' then 'external' else 'not running'}",
+        icon: if edge.state is 'running' then 'checkmark.circle.fill' else 'circle'
+    ]
+    if edge.state is 'running'
+      items.push action 'Reload', id: 'edge.reload', icon: 'arrow.clockwise', enabled: edge.managed, run: -> json! 'edge', 'reload', '--json'
+      items.push action 'Stop', id: 'edge.stop', icon: 'stop.fill', enabled: edge.managed, run: -> json! 'edge', 'stop', '--json'
+    else
+      items.push action 'Start', id: 'edge.start', icon: 'play.fill', run: -> json! 'edge', 'start', '--json'
+    submenu 'Edge', items, id: 'edge', icon: 'network'
+
+  appMenu = (app) ->
+    running = app.state is 'running'
+    items = [label app.root, subtitle: app.state]
+    items.push link 'Open', app.url, id: "#{app.id}.open", icon: 'safari' if running and app.url?
+    items.push action 'Start', id: "#{app.id}.start", icon: 'play.fill', enabled: not running, run: -> json! 'app', 'start', app.id, '--json'
+    items.push action 'Stop', id: "#{app.id}.stop", icon: 'stop.fill', enabled: running, run: -> json! 'app', 'stop', app.id, '--json'
+    items.push action 'Restart', id: "#{app.id}.restart", icon: 'arrow.clockwise', enabled: running, run: -> json! 'app', 'restart', app.id, '--json'
+    items.push action 'Open Log', id: "#{app.id}.logs", icon: 'doc.text', run: -> openLog! app
+    submenu app.name, items, id: app.id, icon: if running then 'circle.fill' else 'circle'
+
+  definition = tray
+    title: 'Rip'
+    icon: 'bolt.horizontal.circle'
+    tooltip: 'Rip Apps'
+    refresh: 2
+    menu: ->
+      edge = json! 'edge', 'status', '--json'
+      apps = json! 'app', 'status', '--json'
+      items = [edgeMenu(edge), separator()]
+      if apps.length
+        items.push appMenu(app) for app in apps
+      else
+        items.push label 'No remembered apps', subtitle: 'Use Add App… or rip app add'
+      items.push separator()
+      items.push directory 'Add App…', id: 'apps.add', icon: 'plus', prompt: 'Add', run: (path) -> json! 'app', 'add', path, '--json'
+      items.push action 'Refresh', id: 'tray.refresh', icon: 'arrow.clockwise', run: -> null
+      items.push separator()
+      items.push quit 'Quit Rip', icon: 'power'
+      items
+
+  serve! definition
+
+ripApps! if import.meta.main

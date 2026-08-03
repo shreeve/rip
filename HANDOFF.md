@@ -14,35 +14,38 @@ live-verified facts only.
 
 **Branch: `main`, synchronized with `origin/main`.**
 
-The current tip makes authored Rip consistently use its own call and
-construction vocabulary. Packages, package tests, examples, and the parser
-generator use dammit for awaited calls, `.new` for construction, and `.new!`
-for awaited construction. Written `await` remains only for promise values
-already in hand. A syntax-aware toolchain gate enforces those boundaries while
-the language fixtures continue to exercise every accepted spelling.
+The current tip carries the local Rip appliance and its first native client:
 
-Live verification for that commit:
+- `rip app` remembers and supervises Rip projects through the per-user agent.
+- `rip edge` owns or observes the shared Caddy + Janus edge.
+- Inline `try expression finally expression` is grammar-owned and available to
+  authored Rip, with every editor/print surface pinned.
+- `@rip-lang/tray` builds native macOS menu-bar apps whose complete menus and
+  callbacks are authored in Rip. The reusable SwiftUI host only renders the
+  strict Rip protocol and returns actions.
+- `rip-tray provider.rip --name NAME --identifier ID --output PATH` creates an
+  independently named, ad-hoc-signed `.app`. The package's executable
+  `tray.rip` mode is the Rip Apps client for `rip app` and `rip edge`.
 
-- `bun run test` — 6,122 passed, 35 extended-tier skips.
-- `bun run test:all` — all 21 lanes passed, 8,334 tests total.
-- `bun run parser` — regenerated `src/parser.js` byte-identically.
-- Emission comparison — 78 of 84 changed Rip files byte-identical; the other
-  six differ only by redundant parentheses around member-qualified constructor
-  targets.
+Live verification for the tray commit:
+
+- `bun run test` — 6,128 passed, 35 extended-tier skips.
+- `bun run test:all` — all 22 lanes passed, 8,357 tests total; the new
+  `packages/tray` lane ran 10 tests.
+- The Swift package built on macOS and its protocol executable passed four
+  native checks.
+- `packages/tray/dist/Rip.app` was built, its plist and ad-hoc signature were
+  verified, and the app launched its embedded Rip provider successfully. The
+  build directory is ignored.
 - `packages/browser-tests` remains the documented CI-only Playwright lane.
 - `git diff --check` — passed.
-- Commit pushed to `origin/main`.
 
-## Next server-appliance work
+## Next tray work
 
-The proposed macOS Rip menu-bar product is not implemented. The recommended
-next boundary is a persistent per-user Rip Agent, supervised by launchd, which
-owns the shared Caddy + Janus edge and remembered Rip app manager processes.
-Both a future `rip edge` / `rip app` CLI and the menu-bar UI should use one
-private local control protocol rather than implementing process supervision
-twice. A purpose-built baseline Caddyfile is also needed; Janus's repository
-root Caddyfile is a development and acceptance fixture and must not ship as the
-machine default.
+The framework and Rip Apps tray are usable now. Product follow-ups are native
+launch-at-login control, a dedicated log window, and visual polish. Those
+features should extend the same Rip-owned menu protocol; Rip Server and the
+SwiftUI host must not grow competing lifecycle logic.
 
 ## Working agreements
 
