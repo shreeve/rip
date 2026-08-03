@@ -95,6 +95,50 @@ describe('TS face: a lowering that reorders same-named reads keeps them apart', 
   });
 });
 
+// Rendered type text can carry tokens the EMITTER inserted — the async
+// return's `Promise<...>` wrap, an augmentation's `interface Head<T>`
+// scaffolding. An inserted token that shares a spelling with a later
+// source token must not claim that token's span: the author's own
+// occurrence keeps its row, and every source token before the shared
+// spelling keeps its own too (greedy first-match lost all of them).
+describe('TS face: an inserted type token cannot steal a source occurrence', () => {
+  const compileTS = (src) => {
+    const r = parser.parse(src, { primitives: true });
+    expect(r.diagnostics).toEqual([]);
+    const { code, mappings } = emit(r, { source: src, face: 'ts' });
+    return { code, rows: mappings };
+  };
+  const exactRowAt = (rows, at, name) => rows.find((m) =>
+    m.mappingKind === 'exact' && m.sourceStart === at && m.sourceEnd === at + name.length);
+
+  test('async wrap: an annotation naming Promise non-leading keeps every token', () => {
+    const src = 'def fetchMap(url: string): Map<string, Promise<number>>\n  await url\n';
+    const { code, rows } = compileTS(src);
+    const annotation = src.indexOf('Map<');
+    for (const name of ['Map', 'string', 'Promise', 'number']) {
+      const at = src.indexOf(name, annotation);
+      const row = exactRowAt(rows, at, name);
+      expect(row, `annotation ${name} owns an exact row`).toBeDefined();
+      expect(code.slice(row.generatedStart, row.generatedEnd)).toBe(name);
+    }
+    // The author's Promise maps to its own occurrence INSIDE the wrap,
+    // never to the wrapper token the emitter inserted before it.
+    const wrapper = code.indexOf('Promise');
+    const authors = exactRowAt(rows, src.indexOf('Promise'), 'Promise');
+    expect(authors.generatedStart).toBeGreaterThan(wrapper);
+  });
+
+  test('augmentation: a member annotation naming the head\'s type parameter keeps its own T', () => {
+    const src = 'Array::second: () => T = -> @[1]\n';
+    const { code, rows } = compileTS(src);
+    const row = exactRowAt(rows, src.indexOf('T'), 'T');
+    expect(row, 'the annotation T owns an exact row').toBeDefined();
+    // The interface head's `<T>` is inserted scaffolding; the author's
+    // T is the member's return type.
+    expect(code.slice(row.generatedStart - 3, row.generatedEnd)).toBe('=> T');
+  });
+});
+
 // A gate's route path erases its `@app.data` prefix and keeps only the LAST
 // segment, as the CONTENT of a string literal — so the path is nowhere verbatim
 // in the face and its cover cannot place anything inside it. The route name and

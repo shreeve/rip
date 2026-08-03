@@ -10241,15 +10241,32 @@ class Emitter {
     }
     const sourceTokens = typeIdentifierTokens(source.slice(row.sourceStart, row.sourceEnd), row.sourceStart);
     const generatedTokens = typeIdentifierTokens(text);
+    const n = sourceTokens.length;
+    const m = generatedTokens.length;
+    const aligned = n === m && sourceTokens.every((s, i) => s.value === generatedTokens[i].value);
+    let still = null;
+    if (!aligned) {
+      still = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+      for (let i = n - 1;i >= 0; i--) {
+        for (let j = m - 1;j >= 0; j--) {
+          still[i][j] = sourceTokens[i].value === generatedTokens[j].value ? still[i + 1][j + 1] + 1 : Math.max(still[i][j + 1], still[i + 1][j]);
+        }
+      }
+    }
     let sourceAt = 0;
     let generatedAt = 0;
-    for (const token of generatedTokens) {
+    for (let j = 0;j < m; j++) {
+      const token = generatedTokens[j];
       this.b.emit(text.slice(generatedAt, token.start));
-      const match = sourceTokens.findIndex((s, i) => i >= sourceAt && s.value === token.value);
-      if (match >= 0) {
-        const s = sourceTokens[match];
+      if (still !== null) {
+        while (sourceAt < n && sourceTokens[sourceAt].value !== token.value && still[sourceAt + 1][j] === still[sourceAt][j])
+          sourceAt++;
+      }
+      const pair = sourceAt < n && sourceTokens[sourceAt].value === token.value && (still === null || still[sourceAt][j + 1] < still[sourceAt][j]);
+      if (pair) {
+        const s = sourceTokens[sourceAt];
         this.b.markSpan(id, "identifier", s.start, s.end, () => this.noteNameSpan(token.value));
-        sourceAt = match + 1;
+        sourceAt++;
       } else {
         this.noteNameSpan(token.value);
       }

@@ -1628,15 +1628,51 @@ class Emitter {
       source.slice(row.sourceStart, row.sourceEnd), row.sourceStart,
     );
     const generatedTokens = typeIdentifierTokens(text);
+    const n = sourceTokens.length;
+    const m = generatedTokens.length;
+    // The streams differ only where the emitter INSERTED tokens (the
+    // async Promise wrap, an augmentation's interface head) or dropped
+    // some. Greedy first-match let an inserted token steal a later
+    // source occurrence's span — the author's `Promise` marking the
+    // wrapper while every annotation token before it fell to the
+    // cover. So the pairing is an alignment, not a search: `still[i][j]`
+    // counts how many source tokens an in-order pairing can still match
+    // from sourceTokens[i:] against generatedTokens[j:], and the walk
+    // marks a generated token only when pairing it NOW is the only way
+    // to keep that count. A duplicate that could pair either way is
+    // treated as the insertion, because insertions are prefix-shaped —
+    // the author's own bytes are always the later occurrence. The
+    // identity case (no insertions — almost every annotation) skips
+    // the table entirely.
+    const aligned = n === m && sourceTokens.every((s, i) => s.value === generatedTokens[i].value);
+    let still = null;
+    if (!aligned) {
+      still = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+      for (let i = n - 1; i >= 0; i--) {
+        for (let j = m - 1; j >= 0; j--) {
+          still[i][j] = sourceTokens[i].value === generatedTokens[j].value
+            ? still[i + 1][j + 1] + 1
+            : Math.max(still[i][j + 1], still[i + 1][j]);
+        }
+      }
+    }
     let sourceAt = 0;
     let generatedAt = 0;
-    for (const token of generatedTokens) {
+    for (let j = 0; j < m; j++) {
+      const token = generatedTokens[j];
       this.b.emit(text.slice(generatedAt, token.start));
-      const match = sourceTokens.findIndex((s, i) => i >= sourceAt && s.value === token.value);
-      if (match >= 0) {
-        const s = sourceTokens[match];
+      if (still !== null) {
+        // Source tokens the generated text no longer carries fall away
+        // (to the enclosing cover row, as before).
+        while (sourceAt < n && sourceTokens[sourceAt].value !== token.value &&
+               still[sourceAt + 1][j] === still[sourceAt][j]) sourceAt++;
+      }
+      const pair = sourceAt < n && sourceTokens[sourceAt].value === token.value &&
+        (still === null || still[sourceAt][j + 1] < still[sourceAt][j]);
+      if (pair) {
+        const s = sourceTokens[sourceAt];
         this.b.markSpan(id, 'identifier', s.start, s.end, () => this.noteNameSpan(token.value));
-        sourceAt = match + 1;
+        sourceAt++;
       } else {
         this.noteNameSpan(token.value);
       }
