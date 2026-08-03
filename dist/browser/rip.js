@@ -10250,9 +10250,10 @@ class Emitter {
       this.classDecls.push([start, this.b.offset]);
       return;
     }
-    const spec = this.importSpecOf(value);
-    if (spec !== null)
-      this.importedRefs.push([start, this.b.offset, value, spec]);
+    const imported = this.importSpecOf(value);
+    if (imported !== null) {
+      this.importedRefs.push([start, this.b.offset, imported.importedName, imported.specifier]);
+    }
   }
   withDeclaredName(fn) {
     const prev = this.declaringName;
@@ -11516,8 +11517,21 @@ class Emitter {
       if (typeof source !== "string")
         continue;
       const specifier = source.replace(/^['"`]|['"`]$/g, "");
-      for (const name of Emitter.importedNames([node]))
-        specs.set(name, specifier);
+      for (const spec of node.slice(1, -1)) {
+        if (spec === "{}")
+          continue;
+        if (typeof spec === "string") {
+          specs.set(spec, { specifier, importedName: "default" });
+        } else if (spec[0] === "*") {
+          specs.set(spec[1], { specifier, importedName: "*" });
+        } else {
+          for (const name of spec) {
+            const importedName = isNode4(name) ? name[0] : name;
+            const localName = isNode4(name) ? name[1] : name;
+            specs.set(localName, { specifier, importedName });
+          }
+        }
+      }
     }
     return specs;
   }

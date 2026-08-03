@@ -1296,9 +1296,10 @@ class Emitter {
     return false;
   }
 
-  // The module `name` was imported from, or null when `name` is not an
-  // import here. Same walk as isEnumName, same reason: an inner binding
-  // that re-uses the spelling is not the import.
+  // The module `name` was imported from and its original exported name,
+  // or null when `name` is not an import here. Same walk as isEnumName,
+  // same reason: an inner binding that re-uses the spelling is not the
+  // import.
   importSpecOf(name) {
     for (let i = this.rframes.length - 1; i >= 0; i--) {
       const f = this.rframes[i];
@@ -1531,8 +1532,10 @@ class Emitter {
     if (this.isEnumName(value)) { this.enums.push([start, this.b.offset]); return; }
     if (this.isReactiveName(value) && !this.isComputedName(value)) { this.mutables.push([start, this.b.offset]); return; }
     if (this.isClassName(value)) { this.classDecls.push([start, this.b.offset]); return; }
-    const spec = this.importSpecOf(value);
-    if (spec !== null) this.importedRefs.push([start, this.b.offset, value, spec]);
+    const imported = this.importSpecOf(value);
+    if (imported !== null) {
+      this.importedRefs.push([start, this.b.offset, imported.importedName, imported.specifier]);
+    }
   }
 
   // A name being DECLARED is not a reference to whatever else holds that
@@ -3539,10 +3542,10 @@ class Emitter {
   }
 
   // Names an import statement binds in module scope.
-  // Each imported local name paired with the module it came from. The
-  // token corrections are computed from ONE file's compile, so an
-  // imported name's KIND is unknowable here — what is knowable, and all
-  // the editor needs, is which module to ask.
+  // Each imported local name paired with the module and original name it
+  // came from. The token corrections are computed from ONE file's compile,
+  // so an imported name's KIND is unknowable here — what is knowable, and
+  // all the editor needs, is which module and exported name to ask.
   static importedSpecs(stmts) {
     const specs = new Map();
     for (const node of stmts) {
@@ -3550,7 +3553,20 @@ class Emitter {
       const source = node[node.length - 1];
       if (typeof source !== 'string') continue;
       const specifier = source.replace(/^['"`]|['"`]$/g, '');
-      for (const name of Emitter.importedNames([node])) specs.set(name, specifier);
+      for (const spec of node.slice(1, -1)) {
+        if (spec === '{}') continue;
+        if (typeof spec === 'string') {
+          specs.set(spec, { specifier, importedName: 'default' });
+        } else if (spec[0] === '*') {
+          specs.set(spec[1], { specifier, importedName: '*' });
+        } else {
+          for (const name of spec) {
+            const importedName = isNode(name) ? name[0] : name;
+            const localName = isNode(name) ? name[1] : name;
+            specs.set(localName, { specifier, importedName });
+          }
+        }
+      }
     }
     return specs;
   }

@@ -274,10 +274,10 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // initializer, and a forward reference splits the two — the editor
     // repaints the construct the author declared. TS face only.
     classDecls: emitted.classDecls,
-    // Generated spans of every reference to an IMPORTED name, each with
-    // the module it came from. One file's compile cannot know an imported
-    // name's kind — the editor resolves the specifier and asks the
-    // declaring module. TS face only; empty otherwise.
+    // Generated spans of every reference to an IMPORTED binding, each with
+    // its original exported name and module. One file's compile cannot
+    // know an imported name's kind — the editor resolves the specifier and
+    // asks the declaring module. TS face only; empty otherwise.
     importedRefs: emitted.importedRefs,
     // Emitted module-specifier spans, recorded at emission — the
     // browser module loader splices resolved specifiers by offset.

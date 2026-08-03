@@ -154,6 +154,15 @@ describe('scratch captures leave no trace in the real emission', () => {
     // The state's spans: declaration and the computed's read — no third.
     expect(faced.mutables.map(([s, e]) => faced.code.slice(s, e))).toEqual(['count', 'count']);
   });
+
+  test('import reference metadata keeps the original name behind an alias', () => {
+    const faced = ts('import { Color as Shade } from "./colors.rip"\nx = Shade.red\n');
+    expect(faced.importedRefs.map(([start, end, importedName, specifier]) => ({
+      localText: faced.code.slice(start, end), importedName, specifier,
+    }))).toEqual([
+      { localText: 'Shade', importedName: 'Color', specifier: './colors.rip' },
+    ]);
+  });
 });
 
 // ── 2/3. emission pins per surface ───────────────────────────────────
