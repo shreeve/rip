@@ -9,7 +9,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { identifierRunAt } from '../../../src/lexer.js';
+
+// The lexer rides the same dual-path resolution as the server's
+// compiler load: `../../../src/` in-repo, `../compiler/src/` in the
+// staged .vsix (scripts/package.js). A static relative import knows
+// only the repo layout — installed, it reaches OUTSIDE the extension
+// directory and the server dies at import time, which is a dead editor
+// with no diagnostics at all.
+const { identifierRunAt } = await (async () => {
+  const candidates = [
+    new URL('../../../src/lexer.js', import.meta.url),   // in-repo
+    new URL('../compiler/src/lexer.js', import.meta.url), // staged vsix
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(fileURLToPath(candidate))) return import(candidate.href);
+  }
+  throw new Error('rip lexer not found (looked for ../../../src/lexer.js and ../compiler/src/lexer.js)');
+})();
 
 const stripJsonComments = (text) =>
   text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');

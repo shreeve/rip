@@ -130,6 +130,7 @@ let mirrorRootIsFallback = false; // temp-dir mirror root (workspace unwritable/
 let mirrorRootReady = false;     // lazily created on first materialization
 let clientSupportsWatchers = false;
 let clientSupportsConfiguration = false;
+let clientInitialized = false;   // the initialize handshake has COMPLETED (onInitialized)
 let cacheIdentity = null;        // compiler build + server build (cache keying)
 
 // rip document uri → per-buffer state.
@@ -475,6 +476,15 @@ const TSGO_CLIENT_CAPABILITIES = {
 async function tsgoConfigurationRequest(params) {
   const items = params?.items ?? [];
   if (!clientSupportsConfiguration) return items.map(() => null);
+  // The handshake window: tsgo boots INSIDE this server's own
+  // initialize handler and asks for configuration immediately, but the
+  // editor's languageclient installs its workspace/configuration
+  // handler only once the handshake completes — a forward before then
+  // bounces with "Unhandled method". Answer tsgo's boot-time asks with
+  // nulls directly (its own defaults, the same answer the bounce
+  // produced), and save the forward — and the failure log — for
+  // requests the editor can actually serve.
+  if (!clientInitialized) return items.map(() => null);
   try {
     return await connection.workspace.getConfiguration(
       items.map((item) => ({
@@ -1226,6 +1236,7 @@ connection.onInitialize(async (params) => {
 });
 
 connection.onInitialized(async () => {
+  clientInitialized = true;
   if (clientSupportsWatchers) {
     connection.client.register(DidChangeWatchedFilesNotification.type, {
       watchers: [{ globPattern: '**/*.rip' }, { globPattern: '**/tsconfig.json' }, { globPattern: '**/package.json' }],
