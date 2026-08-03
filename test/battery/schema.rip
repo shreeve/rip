@@ -2410,6 +2410,14 @@ type ":mixin emits field-type alias; host Data intersects mixins", '''
   }
   interface MixinSchema<Out> {
     toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof Out>(...keys: K[]): Schema<Pick<Out, K>, Pick<Out, K>>;
+    omit<K extends keyof Out>(...keys: K[]): Schema<Omit<Out, K>, Omit<Out, K>>;
+    partial(): Schema<Partial<Out>, Partial<Out>>;
+    required<K extends keyof Out>(...keys: K[]): Schema<Omit<Out, K> & Required<Pick<Out, K>>, Omit<Out, K> & Required<Pick<Out, K>>>;
+    extend<U>(other: Schema<U, any> | MixinSchema<U>): Schema<Out & U, Out & U>;
+  }
+  interface Schema<Out, In = unknown> {
+    extend<U>(other: MixinSchema<U>): Schema<In & U, In & U>;
   }
   interface SchemaQuery<T, Data = Record<string, unknown>> {
     all(): Promise<T[]>;
