@@ -7745,7 +7745,7 @@ var parserInstance = {
     }
   },
   parse(input, { primitives: wantPrimitives = false, tolerant = false } = {}) {
-    let action, allowedAll, at, atPos, base, carriedPrimitives, end, expected, first, got, inserted, last, len, loc, locs, message, node, nodeId, ownerNodeId, primitiveLocs, q, r, recordFirst, row, sem, span, start, state, stk, vals;
+    let action, allowedAll, at, atPos, base, carriedPrimitives, end, expected, first, got, guardKey, inserted, last, len, loc, locs, message, node, nodeId, ownerNodeId, primitiveLocs, q, r, recordFirst, row, sem, span, start, state, stk, vals;
     [stk, vals, locs, primitiveLocs] = [[0], [null], [null], [[]]];
     let parseTable = this.parseTable, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, holes = [], inputEnd = input.length;
     if (tolerant)
@@ -7800,13 +7800,17 @@ var parserInstance = {
         if (symbol === this.symbolIds.INDENT || symbol === this.symbolIds.OUTDENT) {
           recordFirst();
           repairBudget--;
+          repairedHere.clear();
           symbol = null;
           continue;
         }
         allowedAll = symbol === EOF || lexer.token?.generated;
+        guardKey = function(id) {
+          return stk.length * 2097152 + state * 1024 + id;
+        };
         inserted = null;
         for (let id of this.repairTable[state] ?? []) {
-          if (repairedHere.has(state * 1024 + id))
+          if (repairedHere.has(guardKey(id)))
             continue;
           if (allowedAll || id === this.symbolIds.TERMINATOR) {
             inserted = id;
@@ -7816,7 +7820,7 @@ var parserInstance = {
         if (inserted != null) {
           recordFirst(inserted);
           repairBudget--;
-          repairedHere.add(state * 1024 + inserted);
+          repairedHere.add(guardKey(inserted));
           pendingSymbols.unshift({ symbol, loc: tokenLoc, text: lexer.text, token: lexer.token });
           symbol = inserted;
           tokenLoc = { start: atPos, end: atPos };
@@ -7825,6 +7829,12 @@ var parserInstance = {
           lexer.token = { generated: true, hole: true };
           holes.push({ kind: this.tokenNames[inserted], at: atPos });
           action = parseTable[state]?.[symbol];
+        } else if (symbol !== EOF) {
+          recordFirst();
+          repairBudget--;
+          repairedHere.clear();
+          symbol = null;
+          continue;
         }
       }
       if (action == null) {

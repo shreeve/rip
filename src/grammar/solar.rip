@@ -1224,7 +1224,12 @@ class Generator
     # REAL token was consumed. An insertion that brings the parser back to a
     # configuration it already repaired is not progress (a TERMINATOR at a
     # statement boundary reduces straight back to the same state); the next
-    # candidate takes over. Cleared on every genuine consumption.
+    # candidate takes over. Cleared on every genuine consumption — a
+    # DELETION included: eating a real token changes what remains to be
+    # parsed exactly as shifting one does, and a guard that survived it
+    # left the EOF state's candidates spent before the buffer's real
+    # repair was ever tried (a class-body `def m(` died this way — the
+    # deleted OUTDENT was the last consumption the guard ever saw).
     repairedHere = new Set
 
     # NodeStore/RoleStore accumulation. nodeIds is the
@@ -1301,21 +1306,31 @@ class Generator
           # Rule: unexpected block scaffolding deletes.
           recordFirst()
           repairBudget--
+          repairedHere.clear()
           symbol = null
           continue
         # Candidates come from the generated repairTable; a real offending
         # token narrows them to the statement boundary.
+        #
+        # The guard's key carries the STACK DEPTH alongside (state,
+        # candidate): an insertion that reduced the stack made progress
+        # even when the automaton returns to the same state id — two
+        # nested blocks each owe a closer from one state, and a key
+        # blind to depth spends the candidate on the first block and
+        # starves the second. Only a repeat at the SAME depth is the
+        # loop the guard exists to stop.
         allowedAll = symbol is EOF or lexer.token?.generated
+        guardKey = (id) -> stk.length * 0x200000 + state * 1024 + id
         inserted = null
         for id in (@repairTable[state] ?? [])
-          continue if repairedHere.has(state * 1024 + id)
+          continue if repairedHere.has guardKey(id)
           if allowedAll or id is @symbolIds.TERMINATOR
             inserted = id
             break
         if inserted?
           recordFirst(inserted)
           repairBudget--
-          repairedHere.add(state * 1024 + inserted)
+          repairedHere.add guardKey(inserted)
           pendingSymbols.unshift {symbol, loc: tokenLoc, text: lexer.text, token: lexer.token}
           symbol = inserted
           tokenLoc = {start: atPos, end: atPos}
@@ -1324,6 +1339,19 @@ class Generator
           lexer.token = {generated: true, hole: true}
           holes.push {kind: @tokenNames[inserted], at: atPos}
           action = parseTable[state]?[symbol]
+        else if symbol isnt EOF
+          # Panic fallback, the classic second half of insertion repair:
+          # no candidate remains for this configuration and the offending
+          # token is real, so the token deletes. One lost token still
+          # leaves the rest of the buffer a parse; a driver that stops
+          # here leaves it nothing. Bounded by the same budget as every
+          # other repair, and EOF is never deleted — a state that cannot
+          # act on end of input is the genuine dead end below.
+          recordFirst()
+          repairBudget--
+          repairedHere.clear()
+          symbol = null
+          continue
 
       unless action?
         # +p > 2 excludes the internal error token (id 2) from user-facing

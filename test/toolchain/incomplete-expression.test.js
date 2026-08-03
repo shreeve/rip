@@ -21,11 +21,49 @@
 // then compiles and round-trips to tsgo. Without it every answer here
 // races that refresh; awaiting the republication means each answer is the
 // server's settled one.
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { openSession } from '../support/lsp-session.js';
 import { describeExtended } from '../support/extended.js';
+import { compile } from '../../src/compile.js';
+
+// The REPAIR DRIVER's compile-level gates — no server, no debounce. These
+// shapes died at the parser before the driver learned two generic
+// lessons: a deletion is progress (the guard must clear), and a repair
+// guard blind to stack depth spends a candidate on the first of two
+// nested blocks and starves the second.
+describe('tolerant repair at the parser level', () => {
+  const tolerant = (src) => compile(src, { runtimeDelivery: 'none', tolerant: true, face: 'ts' });
+
+  test('a dangling if/unless header keeps a face — the condition still parses', () => {
+    for (const [src, kept] of [['x = 1\nif x\n', 'x;'], ['unless ready\n', 'ready;']]) {
+      const r = tolerant(src);
+      expect(r.parseDiagnostics.length).toBeGreaterThan(0);   // tolerance is never acceptance
+      expect(r.code).toContain(kept);
+    }
+  });
+
+  test('typing a new class method keeps the class\'s face', () => {
+    for (const src of ['class A\n  m: (\n', 'class A\n  m: (x,\n']) {
+      const r = tolerant(src);
+      expect(r.parseDiagnostics.length).toBeGreaterThan(0);
+      expect(r.code).toContain('class A');
+    }
+  });
+
+  test('a class-body `def` rejects exactly as its complete program does', () => {
+    // `def` is not a class-member form in rip, complete or not — the
+    // tolerant compile must not invent a face for a program no
+    // completion makes valid, and the strict twin fixes the message.
+    let strict = null;
+    let tol = null;
+    try { compile('class A\n  def m()\n    1\n', { runtimeDelivery: 'none' }); } catch (e) { strict = e.message; }
+    try { tolerant('class A\n  def m(\n'); } catch (e) { tol = e.message; }
+    expect(strict).toContain('unsupported class member');
+    expect(tol).toContain('unsupported class member');
+  });
+});
 
 describeExtended('completion and signature help on an incomplete expression', () => {
   test('member completion at a bare dot serves the member list (fresh and mid-edit)', async () => {
