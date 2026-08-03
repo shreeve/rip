@@ -52,6 +52,67 @@ describe('tolerant repair at the parser level', () => {
     }
   });
 
+  test('a trailing dot repairs at near-constant cost, however deep the statement nesting', () => {
+    // One incompleteness, one hole: the error state's own repairTable
+    // candidate (PROPERTY at a trailing dot) is tried BEFORE the
+    // scaffolding-delete rule. Deleting first flattened the block
+    // structure and re-fabricated it level by level (~5 repairs per
+    // nesting level), so a single trailing dot inside
+    // class/method/if/callback/if nesting exhausted the 24-repair
+    // budget at depth 5 and the face died at the exact keystroke
+    // tolerance exists for — with the recorded rejection degrading to
+    // an unhinted 'Unexpected OUTDENT' along the way.
+    const depth5 = 'class A\n  m: ->\n    if x\n      y = (z) ->\n        if w\n          z.';
+    const r = tolerant(depth5);
+    expect(r.parseDiagnostics.length).toBeGreaterThan(0);   // tolerance is never acceptance
+    expect(r.parseDiagnostics[0].expected).toContain('PROPERTY'); // the what-to-type hint survives nesting
+    expect(r.code).toContain('class A');
+  });
+
+  test('a deleted real token leaves its marker even when the lexer already complained', () => {
+    // The first-rejection rule is the PARSER's own: a lexer diagnostic
+    // (here the unclosed call) must not suppress the record of a panic
+    // deletion — the user's second '.' is eaten mid-buffer, and without
+    // its own diagnostic the deletion is invisible exactly where the
+    // buffer needs the marker.
+    const r = tolerant('a . . b\nadd(1, ');
+    expect(r.parseDiagnostics.some((d) => /unclosed '\('/.test(d.message))).toBe(true);
+    expect(r.parseDiagnostics.some((d) => /Unexpected '\.'/.test(d.message) && d.start === 4)).toBe(true);
+  });
+
+  test('a half-typed schema member keeps the schema\'s face — the line is the repair unit', () => {
+    // Typing a schema method passes through `greet: ` and `greet: str`,
+    // shapes schema validation rejects loudly. A strict compile still
+    // throws; the TOLERANT one records the rejection and drops the
+    // line, so the rest of the schema keeps serving its face for the
+    // whole keystroke run between ':' and a completed '->'.
+    for (const src of [
+      'User = schema :model\n  name! string\n  greet: \n',
+      'User = schema :model\n  name! string\n  greet: str\n',
+    ]) {
+      const r = tolerant(src);
+      expect(r.parseDiagnostics.length).toBeGreaterThan(0);   // tolerance is never acceptance
+      expect(r.code).toContain('name');                        // the schema survives the keystroke
+      expect(() => compile(src, { runtimeDelivery: 'none' })).toThrow(/greet/); // strict stays loud
+    }
+  });
+
+  test('keyword-continuation dead ends stay dead — the accepted limit, pinned', () => {
+    // Buffers pausing where the only legal continuation is a keyword
+    // outside the fabricable alphabet (FROM after an import list, a
+    // name/'=' after 'export', ':' in a ternary) still hard-fail the
+    // tolerant parse, and the editor rides the last-good face for those
+    // keystrokes. Keywords are excluded from fabrication on principle
+    // (solar.rip: a fabricated keyword invents MEANING, not
+    // scaffolding); the upgrade path, should these shapes ever earn
+    // repair, is the grammar declaring its own fabricable tokens — the
+    // genericity boundary. This pin records the limit as chosen, not
+    // overlooked.
+    for (const src of ['import {a,\n', 'export \n', 'x = a ? \n']) {
+      expect(() => tolerant(src)).toThrow(/./);
+    }
+  });
+
   test('a class-body `def` rejects exactly as its complete program does', () => {
     // `def` is not a class-member form in rip, complete or not — the
     // tolerant compile must not invent a face for a program no

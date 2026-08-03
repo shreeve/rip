@@ -662,11 +662,11 @@ var symWordAt = (tokens, i, keywordOk = false) => {
     return w;
   return null;
 };
-function rewriteSchema(tokens, mintId, text, fail) {
+function rewriteSchema(tokens, mintId, text, fail, tolerate = null) {
   if (text.indexOf("schema") === -1)
     return;
   const out = [];
-  const config = { defaultMaxString: null };
+  const config = { defaultMaxString: null, tolerate };
   let depth = 0;
   let i = 0;
   while (i < tokens.length) {
@@ -876,7 +876,8 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
   ] : [tk]);
   const descriptor = parseSchemaBody(kind, kindTok, bodyTokens, {
     schemaStart: schemaTok.start,
-    defaultMaxString: config.defaultMaxString
+    defaultMaxString: config.defaultMaxString,
+    tolerate: config.tolerate ?? null
   }, fail);
   if (adapterTokens)
     descriptor.adapterTokens = adapterTokens;
@@ -1053,6 +1054,14 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     return;
   }
   if (first.kind === "PROPERTY") {
+    if (ctx.tolerate) {
+      try {
+        parseCallableLine(kind, first, line, entries, fail);
+      } catch (err) {
+        ctx.tolerate(err);
+      }
+      return;
+    }
     parseCallableLine(kind, first, line, entries, fail);
     return;
   }
@@ -6185,7 +6194,13 @@ ${baseline}`).join(`
   tagParams(tokens);
   tagDynamicKeys(tokens);
   tagVoidMarkers(tokens);
-  rewriteSchema(tokens, mintId, text, fail);
+  rewriteSchema(tokens, mintId, text, fail, tolerant ? (err) => lexDiagnostics.push({
+    message: err.reason ?? String(err.message),
+    start: err.start ?? 0,
+    end: err.end ?? err.start ?? 0,
+    expected: [],
+    got: ""
+  }) : null);
   rewriteTypes(tokens, mintId, text, fail);
   for (const t of tokens) {
     if (t.kind === "RESERVED") {
@@ -7767,7 +7782,7 @@ var parserInstance = {
       while (inputEnd > 0 && (input[inputEnd - 1] === `
 ` || input[inputEnd - 1] === "\r"))
         inputEnd--;
-    let repairedHere = new Set, nodes = [], roles = [], primitives = [], nodeIds = new WeakMap, nextNodeId = 1, lexer = Object.create(this.lexer), sharedState = { ctx: {} };
+    let repairedHere = new Set, parserRecorded = false, nodes = [], roles = [], primitives = [], nodeIds = new WeakMap, nextNodeId = 1, lexer = Object.create(this.lexer), sharedState = { ctx: {} };
     const _ref4 = this.ctx;
     for (let k in _ref4) {
       if (!Object.hasOwn(_ref4, k))
@@ -7803,8 +7818,9 @@ var parserInstance = {
       if (action == null && tolerant && repairBudget > 0) {
         atPos = symbol === EOF ? inputEnd : tokenLoc?.start ?? inputEnd;
         recordFirst = (wanted = null) => {
-          if (diagnostics.length !== 0)
+          if (parserRecorded)
             return;
+          parserRecorded = true;
           got = symbol === EOF ? "end of input" : `'${this.tokenNames[symbol] || symbol}'`;
           expected = wanted != null ? [this.tokenNames[wanted] || wanted] : [];
           message = `Unexpected ${got}`;
@@ -7812,13 +7828,6 @@ var parserInstance = {
             message += ` — expected ${expected.join(", ")}`;
           return diagnostics.push({ message, start: atPos, end: tokenLoc?.end ?? atPos, expected, got });
         };
-        if (symbol === this.symbolIds.INDENT || symbol === this.symbolIds.OUTDENT) {
-          recordFirst();
-          repairBudget--;
-          repairedHere.clear();
-          symbol = null;
-          continue;
-        }
         allowedAll = symbol === EOF || lexer.token?.generated;
         guardKey = function(id) {
           return `${stk.length}:${state}:${id}`;

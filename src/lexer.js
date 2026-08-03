@@ -3749,7 +3749,12 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // syntax, so rewriteTypes must never see them. Typed callable
   // params inside captured bodies still collapse — the emit-time
   // sub-parse runs rewriteTypes as its first tail pass.
-  rewriteSchema(tokens, mintId, text, fail);
+  rewriteSchema(tokens, mintId, text, fail, tolerant
+    ? (err) => lexDiagnostics.push({
+        message: err.reason ?? String(err.message), start: err.start ?? 0,
+        end: err.end ?? err.start ?? 0, expected: [], got: '',
+      })
+    : null);
   rewriteTypes(tokens, mintId, text, fail);
   // Reserved words are legal inside type runs (absorbed above); one
   // surviving in VALUE position is the original loud rejection.

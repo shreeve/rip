@@ -1208,10 +1208,13 @@ class Generator
   # bound it:
   #   • the FIRST rejection is always recorded — a repaired parse still
   #     reports the buffer broken; recovery is never acceptance;
-  #   • unexpected INDENT/OUTDENT deletes rather than inserts — block
-  #     scaffolding the rewriter minted around an incomplete construct
-  #     cannot be satisfied, only flattened (both halves reach this branch,
-  #     so the pair drops together);
+  #   • unexpected INDENT/OUTDENT tries the state's own hole candidates
+  #     FIRST (scaffolding is generated, so the full fabricable alphabet
+  #     applies — a hole at the incompleteness lets the pending
+  #     scaffolding tail shift normally), and DELETES when no candidate
+  #     remains — block scaffolding the rewriter minted around an
+  #     incomplete construct is never worth fabricating real code to
+  #     satisfy;
   #   • a REAL offending token admits exactly one insertion, TERMINATOR — a
   #     statement boundary splits what the user wrote without fabricating
   #     meaning in front of it; holes never precede real code. When even
@@ -1246,6 +1249,10 @@ class Generator
     # repair was ever tried (a class-body `def m(` died this way — the
     # deleted OUTDENT was the last consumption the guard ever saw).
     repairedHere = new Set
+    # Whether the PARSER has recorded its first rejection (recordFirst).
+    # Deliberately separate from the diagnostics array, which the
+    # tolerant lexer seeds before the loop starts.
+    parserRecorded = false
 
     # NodeStore/RoleStore accumulation. nodeIds is the
     # node → nodeId side map: dense ids from 1, stable for this
@@ -1311,21 +1318,30 @@ class Generator
         # this says the same, in the same words, so the two paths cannot
         # describe one buffer differently.
         recordFirst = (wanted = null) =>
-          return unless diagnostics.length is 0
+          # The gate is the PARSER's own first rejection — never the shared
+          # array's length: the tolerant lexer pushes its diagnostics
+          # before the loop starts, and gating on the array let any lexer
+          # complaint (even one later in the buffer) suppress the record
+          # of a panic-deleted real token, leaving the deletion invisible
+          # at its own position.
+          return if parserRecorded
+          parserRecorded = true
           got = if symbol is EOF then 'end of input' else "'#{@tokenNames[symbol] or symbol}'"
           expected = if wanted? then [@tokenNames[wanted] or wanted] else []
           message = "Unexpected #{got}"
           message += " — expected #{expected.join(', ')}" if expected.length
           diagnostics.push {message, start: atPos, end: tokenLoc?.end ?? atPos, expected, got}
-        if symbol is @symbolIds.INDENT or symbol is @symbolIds.OUTDENT
-          # Rule: unexpected block scaffolding deletes.
-          recordFirst()
-          repairBudget--
-          repairedHere.clear()
-          symbol = null
-          continue
         # Candidates come from the generated repairTable; a real offending
-        # token narrows them to the statement boundary.
+        # token narrows them to the statement boundary. Block scaffolding
+        # (INDENT/OUTDENT) reaches the candidates like any generated
+        # token: at a trailing dot the pending OUTDENT is not the problem
+        # — the unfinished member access is — and the state's own hole
+        # candidate (PROPERTY) makes the whole scaffolding tail shift
+        # normally at one repair. Deleting the scaffolding FIRST flattened
+        # the block structure and re-fabricated it level by level (~5
+        # repairs per nesting level), so one incompleteness at statement
+        # depth 5 exhausted the budget and killed the face the repair
+        # exists to keep.
         #
         # The guard's key carries the STACK DEPTH alongside (state,
         # candidate): an insertion that reduced the stack made progress
@@ -1357,8 +1373,9 @@ class Generator
           action = parseTable[state]?[symbol]
         else if symbol isnt EOF
           # Panic fallback, the classic second half of insertion repair:
-          # no candidate remains for this configuration and the offending
-          # token is real, so the token deletes. One lost token still
+          # no candidate remains for this configuration, so the token
+          # deletes — unexpected block scaffolding lands here too, once
+          # its hole candidates are spent. One lost token still
           # leaves the rest of the buffer a parse; a driver that stops
           # here leaves it nothing. Bounded by the same budget as every
           # other repair, and EOF is never deleted — a state that cannot
