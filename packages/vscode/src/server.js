@@ -1340,7 +1340,10 @@ async function refresh(document) {
     // last good one. The rejections the compile carried instead of
     // throwing publish below — tolerance is never acceptance. Disk-file
     // closure compiles stay strict: a mirror is a statement about a
-    // file at rest, not a keystroke in flight.
+    // file at rest, not a keystroke in flight. Recovery is token-level:
+    // end of input INSIDE a token (an unterminated string, heredoc,
+    // heregex, or open `#{`) still throws, and the catch below rides
+    // those keystrokes out on the last good face.
     result = compile(text, { path: document.uri, runtimeDelivery: 'inline', face: 'ts', pins, strict: state.strict, tolerant: true });
   } catch (err) {
     if (err?.name !== 'CompileError') throw err;

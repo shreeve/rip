@@ -3739,7 +3739,7 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = false;
       continue;
     }
-    if (t.word === "is" && atomEnd && j - 2 >= from && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY") && (tokens[j - 2].kind === "=>" || tokens[j - 2].value === "asserts")) {
+    if (t.word === "is" && atomEnd && j - 2 >= from && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY") && (tokens[j - 2].kind === "=>" || tokens[j - 2].value === "asserts" || tokens[j - 2].kind === ":" && tokens[j - 3]?.kind === "CALL_END")) {
       atomEnd = false;
       continue;
     }
@@ -3756,7 +3756,7 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = true;
       continue;
     }
-    if ((kd === "-" || kd === "+") && tokens[j + 1]?.value === "readonly" && enclosing() === "{" && memberRowStart(tokens, j, from)) {
+    if ((kd === "-" || kd === "+") && tokens[j + 1]?.value === "readonly" && (tokens[j + 2]?.kind === "[" || tokens[j + 2]?.kind === "INDEX_START") && enclosing() === "{" && memberRowStart(tokens, j, from)) {
       atomEnd = false;
       continue;
     }
@@ -3802,7 +3802,7 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = TYPE_ATOM_ENDERS.has(kd);
       continue;
     }
-    fail(`code expression ('${t.value}') in a type body — types erase and cannot execute`, t.start);
+    fail(`code expression ('${t.word ?? t.value}') in a type body — types erase and cannot execute`, t.start);
   }
   if (angle > 0) {
     fail("unclosed '<' in a type body — the generic never closes", openAngle.start);

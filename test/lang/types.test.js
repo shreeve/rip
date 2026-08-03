@@ -1074,6 +1074,13 @@ describe('structured-type validation', () => {
     // same refusal.
     expect(() => tokenize('type Bad = { x: -readonly [name in host] }'))
       .toThrow(/code expression \('-'\) in a type body/);
+    // The modifier is only ever directly before the mapped row's `[`:
+    // a signed `readonly` with no bracket after it is not TS, and the
+    // member-row position alone must not admit it.
+    expect(() => tokenize('type Bad = { -readonly x: number }'))
+      .toThrow(/code expression \('-'\) in a type body/);
+    expect(() => tokenize('type Bad = { +readonly x: number }'))
+      .toThrow(/code expression \('\+'\) in a type body/);
   });
 
   test('method shorthand is admitted in an inline literal, not at every paren', () => {
@@ -1117,6 +1124,12 @@ describe('structured-type validation', () => {
       'type Gd =\n  check: (value: unknown) => value is string\nz = 1',
       'type Gd2 = { check: (value: unknown) => asserts value is string }\nz = 1',
       'isStr: ((v: unknown) => v is string) = ((v) -> typeof v == \'string\')\nz = 1',
+      // The method shorthand's return position is the other place TS
+      // puts a predicate: `check(v: unknown): v is string`.
+      'type Gd3 = { check(v: unknown): v is string }\nz = 1',
+      'type Gd3 =\n  check(v: unknown): v is string\nz = 1',
+      'type Gd4 = { check(v: unknown): asserts v is string }\nz = 1',
+      'interface Gd5\n  check(v: unknown): v is string\nz = 1',
     ]) {
       expect(parser.parse(ok).diagnostics).toEqual([]);
     }
@@ -1125,11 +1138,16 @@ describe('structured-type validation', () => {
     // type body is still executable code.
     expect(tokenize('x = a is b').tokens.some((t) => t.kind === 'COMPARE' && t.value === '==')).toBe(true);
     expect(() => tokenize('type Bad = { a: (1 == 2) }')).toThrow(/code expression \('=='\) in a type body/);
-    // `is` is the predicate operator only between a parameter name and its
-    // type, after the arrow or after `asserts`. Anywhere else it is rip's
-    // comparison and stays code-shaped.
-    expect(() => tokenize('type Bad = { a: string is number }')).toThrow(/code expression \('=='\) in a type body/);
-    expect(() => tokenize('type Bad = { a: number is 3 }')).toThrow(/code expression \('=='\) in a type body/);
+    // `is` is the predicate operator only between a parameter name and
+    // its type, in return position (after the arrow, after `asserts`,
+    // or after a method shorthand's `):`). Anywhere else it is rip's
+    // comparison and stays code-shaped — and the rejection quotes the
+    // word the user wrote, not the operator it rewrites to.
+    expect(() => tokenize('type Bad = { a: string is number }')).toThrow(/code expression \('is'\) in a type body/);
+    expect(() => tokenize('type Bad = { a: number is 3 }')).toThrow(/code expression \('is'\) in a type body/);
+    // A member VALUE's colon is not a shorthand's return colon: no
+    // CALL_END precedes it, so the predicate stays refused there.
+    expect(() => tokenize('type Bad = { a: { b: c is string } }')).toThrow(/code expression \('is'\) in a type body/);
   });
 });
 

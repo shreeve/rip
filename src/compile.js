@@ -124,7 +124,13 @@ const diagnosticError = (file, path, d) => {
 // acceptance: a recovered compile always carries at least one
 // diagnostic, and errors recovery cannot repair still throw. The
 // mechanism lives in the lexer's synthetic closers and the generated
-// driver's repair table (solar.rip).
+// driver's repair table (solar.rip). The boundary is the TOKEN level:
+// recovery synthesizes whole tokens (closers, holes), so end of input
+// INSIDE a token — an unterminated string, heredoc, heregex, or an
+// open `#{` interpolation — still throws. There is no half-token to
+// fabricate, and inventing a closing quote would change what every
+// byte after it means; the editor rides out those keystrokes on the
+// last good face instead.
 export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false } = {}) {
   // One stable identifying error for a non-string source — without
   // it, malformed input fails in whichever subsystem dereferences it

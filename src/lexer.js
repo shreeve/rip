@@ -472,12 +472,16 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     // spelling beside it. The token arrived rewritten (`is` aliases to
     // COMPARE '=='); in type text it is TypeScript's predicate operator,
     // and it reads as the word the user wrote. Admitted by the whole
-    // shape — the parameter name between the arrow (or `asserts`) and
-    // `is` — because that is the only place TS puts one, and `atomEnd`
-    // alone would admit `string is number` anywhere a type completed.
+    // shape — the parameter name between the arrow (or `asserts`, or a
+    // method shorthand's return `:`) and `is` — because return position
+    // is the only place TS puts one, and `atomEnd` alone would admit
+    // `string is number` anywhere a type completed. The shorthand's `:`
+    // identifies itself by the CALL_END before it: no other colon in a
+    // type body follows a parameter list's close.
     if (t.word === 'is' && atomEnd && j - 2 >= from &&
         (tokens[j - 1].kind === 'IDENTIFIER' || tokens[j - 1].kind === 'PROPERTY') &&
-        (tokens[j - 2].kind === '=>' || tokens[j - 2].value === 'asserts')) {
+        (tokens[j - 2].kind === '=>' || tokens[j - 2].value === 'asserts' ||
+        (tokens[j - 2].kind === ':'  && tokens[j - 3]?.kind === 'CALL_END'))) {
       atomEnd = false; continue;
     }
     // A mapped type's `in`: `{ [K in keyof T]: T[K] }`. Admitted by
@@ -502,9 +506,12 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     if (t.value === '?' && atomEnd && tokens[j + 1]?.kind === ':') { atomEnd = false; continue; }
     if (kd === '-' && tokens[j + 1]?.kind === 'NUMBER' && !atomEnd) { j++; atomEnd = true; continue; }
     // A mapped type's modifier prefix: `{ -readonly [K in keyof T]: … }`.
-    // Only directly inside braces at a member row, where `readonly` is
-    // the modifier rather than a tuple's.
+    // Only directly inside braces at a member row AND directly before
+    // the mapped row's `[` — the one position TS allows the modifier.
+    // Without the bracket check, `{ -readonly x: T }` (no mapped row,
+    // not TS) would slip through as a type.
     if ((kd === '-' || kd === '+') && tokens[j + 1]?.value === 'readonly' &&
+        (tokens[j + 2]?.kind === '[' || tokens[j + 2]?.kind === 'INDEX_START') &&
         enclosing() === '{' && memberRowStart(tokens, j, from)) {
       atomEnd = false; continue;
     }
@@ -549,8 +556,10 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = TYPE_ATOM_ENDERS.has(kd);
       continue;
     }
+    // Aliased tokens (`is`, `and`, `or`, …) arrive rewritten to their
+    // operator value; the rejection quotes the word the user typed.
     fail(
-      `code expression ('${t.value}') in a type body — types erase and cannot execute`,
+      `code expression ('${t.word ?? t.value}') in a type body — types erase and cannot execute`,
       t.start,
     );
   }
