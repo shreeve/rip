@@ -5173,6 +5173,16 @@ var IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, "g")
 function identifierRuns(text) {
   return text.match(IDENT_RUN_RE) ?? [];
 }
+function identifierRunAt(text, start) {
+  if (typeof text !== "string" || !Number.isInteger(start) || start < 0 || start >= text.length)
+    return null;
+  if (!IDENT_START.test(text[start]))
+    return null;
+  let end = start + 1;
+  while (end < text.length && IDENT_PART.test(text[end]))
+    end++;
+  return { value: text.slice(start, end), start, end };
+}
 function symbolNameEnd(text, start) {
   let end = start;
   while (end < text.length && IDENT_PART.test(text[end]))
@@ -9337,12 +9347,14 @@ var typeIdentifierTokens = (text, base = 0) => {
         i++;
       continue;
     }
-    if (/[A-Za-z_$]/.test(ch)) {
-      let j = i + 1;
-      while (j < text.length && /[\w$]/.test(text[j]))
-        j++;
-      out.push({ value: text.slice(i, j), start: base + i, end: base + j });
-      i = j;
+    const identifier = identifierRunAt(text, i);
+    if (identifier !== null) {
+      out.push({
+        value: identifier.value,
+        start: base + identifier.start,
+        end: base + identifier.end
+      });
+      i = identifier.end;
       continue;
     }
     i++;

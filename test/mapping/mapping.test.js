@@ -42,6 +42,9 @@ describe('TS face: a primitive read owns its own exact row', () => {
     ['x: number = 5', 'number', 0],                            // annotation type name
     ['type ID = string\n', 'ID', 0],                           // type-declaration internals
     ['type ID = string\n', 'string', 0],
+    ['type Ω = Ξ\nx: Ω = 1\n', 'Ω', 0],                        // Unicode type declaration
+    ['type Ω = Ξ\nx: Ω = 1\n', 'Ξ', 0],
+    ['type Ω = Ξ\nx: Ω = 1\n', 'Ω', 1],                        // Unicode annotation
     ['nums = [1]\nd = (n * 2 for n in nums)', 'nums', 1],      // comprehension source
     ['Alpha = schema :shape\n  units!  number\n', 'units', 0], // inside a collapsed schema body
   ])('%p resolves %p occurrence %i at its own bytes', (src, name, occurrence) => {

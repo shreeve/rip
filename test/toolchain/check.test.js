@@ -132,6 +132,16 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  test('an unresolved Unicode type name maps to its exact identifier span', () => {
+    const dir = workspace({ 'unicode.rip': 'type Ω = Ξ\nx: Ω = 1\n' });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.map((d) => [d.code, d.line, d.column, d.endColumn])).toEqual([
+        [2304, 1, 10, 11],
+      ]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
   test('the match operator and its regex-index sugar publish nothing', () => {
     // `text =~ /re/` lowers to `(_ = toMatchable(text).match(re))`, and the
     // face's prelude types toMatchable `(v: any) => string` — RULED: the

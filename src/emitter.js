@@ -24,7 +24,7 @@ import { CodeBuilder } from './builder.js';
 import { descriptorSegments, behaviorObjectText, paramNamesOf, splitTopLevelByComma } from './schema.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './schema-types.js';
 import { Parser } from './parser.js';
-import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, isIdentifierName } from './lexer.js';
+import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, identifierRunAt, isIdentifierName } from './lexer.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader } from './typetext.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom-vocab.js';
 import {
@@ -78,11 +78,14 @@ const typeIdentifierTokens = (text, base = 0) => {
       while (i < text.length && text[i] !== '\n') i++;
       continue;
     }
-    if (/[A-Za-z_$]/.test(ch)) {
-      let j = i + 1;
-      while (j < text.length && /[\w$]/.test(text[j])) j++;
-      out.push({ value: text.slice(i, j), start: base + i, end: base + j });
-      i = j;
+    const identifier = identifierRunAt(text, i);
+    if (identifier !== null) {
+      out.push({
+        value: identifier.value,
+        start: base + identifier.start,
+        end: base + identifier.end,
+      });
+      i = identifier.end;
       continue;
     }
     i++;
