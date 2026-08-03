@@ -2554,6 +2554,12 @@ function ripSemanticTokens(ctx, data) {
 
 connection.languages.semanticTokens.on(async (params) => {
   await tsgoReady;
+  // Tokens settle like hover does, but for a harsher reason: the editor
+  // CACHES a token answer and only re-asks on an edit or a server-pushed
+  // refresh (we push none). An answer from before the first compile is
+  // `{data: []}`, and identifiers have no TextMate fallback — the file
+  // would sit uncolored until something else forces a re-request.
+  await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return { data: [] };
   const result = await tsgoRequest('textDocument/semanticTokens/full', {
@@ -2565,6 +2571,8 @@ connection.languages.semanticTokens.on(async (params) => {
 
 connection.languages.semanticTokens.onRange(async (params) => {
   await tsgoReady;
+  // Same settle as the full request: a range answer is cached the same way.
+  await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return { data: [] };
   // Hoisting reorders: a Rip range's tokens live at SCATTERED generated
