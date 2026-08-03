@@ -492,11 +492,16 @@ Control commands find the canonical manager for the project:
 
 ```bash
 rip server status [project]
+rip server stop [project]
 rip server hold [project]
 rip server release [project]
 rip server migrate [models] --dir migrations
 rip server recover <operation-id>
 ```
+
+`status` prints the manager's machine-readable JSON state. `stop` asks the
+canonical manager to drain its workers, deregister from Janus, remove its local
+control artifacts, and exit cleanly.
 
 `release` prepares one coherent API/App snapshot, exposes it, sends one
 full-reload ding, and then clears hold.

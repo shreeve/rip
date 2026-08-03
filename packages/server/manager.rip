@@ -19,7 +19,7 @@ READY_MS = positiveEnv 'RIP_BOOT_DEADLINE_MS', 30000
 REGISTER_409_MS = positiveEnv 'RIP_REGISTER_409_MS', 30000
 
 parseArgs = (argv) ->
-  command = if ['browse', 'status', 'hold', 'release', 'migrate', 'recover'].includes(argv[0]) then argv[0] else 'start'
+  command = if ['browse', 'status', 'stop', 'hold', 'release', 'migrate', 'recover'].includes(argv[0]) then argv[0] else 'start'
   args: any = { command, entry: null, migrationEntry: null, migrationDir: 'migrations', operationId: null, name: null, hosts: [], control: process.env.JANUS_CONTROL or null, workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, untilRestart: false, accessMode: 'pretty', accessPicture: null, accessExplicit: false, startupFlags: [] }
   i = if command is 'start' then 0 else 1
   while i < argv.length
@@ -81,7 +81,7 @@ parseArgs = (argv) ->
         args.concurrency = parseInt text
         abort 'rip-server: --concurrency must be an integer greater than zero' unless Number.isFinite(args.concurrency) and args.concurrency > 0 and String(args.concurrency) is text
       when '--help', '-h'
-        p 'usage: rip server [project] [options] | rip server browse <directory> [--host HOST] [--until-restart] | rip server migrate [migration-entry] [--dir DIR] [--id 32hex] | rip server recover <operation-id>'
+        p 'usage: rip server [project] [options] | rip server <status|stop|hold|release> [project] | rip server browse <directory> [--host HOST] [--until-restart] | rip server migrate [migration-entry] [--dir DIR] [--id 32hex] | rip server recover <operation-id>'
         exit 0
       else
         if value.startsWith '--access-log='
@@ -677,6 +677,15 @@ managerRequest = (socket, method, path) ->
   options = { method, unix: socket }
   fetch "http://manager#{path}", options
 
+waitManagerStopped = (socket) ->
+  loop
+    sleep! 10
+    try
+      response = await managerRequest socket, 'GET', '/status'
+      await response.text()
+    catch
+      return
+
 export main = (argv) ->
   args = parseArgs argv
   if args.command is 'browse'
@@ -701,6 +710,7 @@ export main = (argv) ->
     response = fetch! "http://manager/#{args.command}", options
     body = response.text!
     abort "rip-server: #{args.command} failed (#{response.status}): #{body}" unless response.ok
+    await waitManagerStopped managerPath if args.command is 'stop'
     p body
     return
   serve = null
@@ -798,7 +808,7 @@ export main = (argv) ->
     body
 
   status = ->
-    { name: args.name, root: project.root, operation, workers: workers.length, watch: args.watch, migration: (if migration? then { id: migration.id, phase: migration.phase, outcome: migration.outcome } else null) }
+    { name: args.name, root: project.root, operation, stopping, workers: workers.length, watch: args.watch, migration: (if migration? then { id: migration.id, phase: migration.phase, outcome: migration.outcome } else null) }
 
   managerOutput = (text) ->
     stream = if args.accessMode is 'raw' then process.stderr else process.stdout
@@ -871,6 +881,15 @@ export main = (argv) ->
       fetch: (request) ->
         path = new URL(request.url).pathname
         return Response.json(status()) if request.method is 'GET' and path is '/status'
+        if request.method is 'POST' and path is '/stop'
+          unless stopping
+            setTimeout (->
+              stop().catch (error) ->
+                warn "rip-server: stop cleanup failed: #{String(error)}"
+                process.exitCode = 1
+            ), 0
+          return Response.json({ ...status(), stopping: true }, { status: 202 })
+        return Response.json({ error: 'manager is stopping' }, { status: 409 }) if stopping
         if request.method is 'POST' and path is '/hold'
           return Response.json({ error: "cannot hold while #{operation}" }, { status: 409 }) unless operation is 'Active'
           operation = 'Held'
@@ -1372,17 +1391,12 @@ export main = (argv) ->
       clearTimeout apiTimer if apiTimer?
       appWatcher?.close()
       apiWatcher?.close()
-      try managerControl?.stop true
-      try unlinkSync managerPath if managerOwned
       try migrationChild?.kill('SIGTERM')
       try await operationPromise if operationPromise?
       await appChain
       await apiChain
       try await heartbeatTask if heartbeatTask?
       try doorbell?.stop true
-      try managerControl?.stop true
-      try unlinkSync managerPath if managerOwned
-      try unlinkSync managerOwner if managerOwned
       accessStop = null
       try accessStop = accessClient?.stop()
       try
@@ -1395,6 +1409,9 @@ export main = (argv) ->
       allWorkers = [...workers, ...bootingWorkers]
       await Promise.all allWorkers.map (worker) -> stopWorker worker.proc
       await Promise.allSettled [...workerPumps]
+      try managerControl?.stop true
+      try unlinkSync managerPath if managerOwned
+      try unlinkSync managerOwner if managerOwned
       finish! status
       status
     stopTask
