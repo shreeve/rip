@@ -422,6 +422,36 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
     });
   }, 30000);
 
+  // The wrapper road is under the same territory doctrine as the stub
+  // walk: writes stay inside `.rip/`. An out-of-workspace document is the
+  // shape that once escaped it — nearestTsconfig only stopped at the
+  // anchor when the walk PASSED THROUGH it, so a dir outside the
+  // workspace climbed to the filesystem root, found whatever
+  // tsconfig.json it met, and the '..'-prefixed rel walked the wrapper
+  // write out of the mirror — able to create or overwrite tsconfig.json
+  // and the host floor in directories the extension does not own.
+  test('territory: opening a .rip OUTSIDE the workspace writes nothing anywhere — and still serves', async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-outside-'));
+    const USER_TSCONFIG = '{\n  "compilerOptions": { "strict": true }\n}\n';
+    try {
+      // A user project ABOVE the workspace: its own tsconfig, its own file.
+      fs.writeFileSync(path.join(outside, 'tsconfig.json'), USER_TSCONFIG);
+      fs.writeFileSync(path.join(outside, 'lonely.rip'), 'x = 1\nconsole.log x\n');
+      fs.mkdirSync(path.join(outside, 'ws'));
+      await inSession(path.join(outside, 'ws'), async (api) => {
+        await api.openUri('file://' + path.join(outside, 'lonely.rip'), 'x = 1\nconsole.log x\n');
+        await api.sleep(800); // give a wrong wrapper write time to land
+        // The user's tsconfig survives byte-identical, their dir gains
+        // nothing, and the workspace's .rip/ holds only the mirror root.
+        expect(fs.readFileSync(path.join(outside, 'tsconfig.json'), 'utf8')).toBe(USER_TSCONFIG);
+        expect(fs.readdirSync(outside).sort()).toEqual(['lonely.rip', 'tsconfig.json', 'ws']);
+        const dotRip = path.join(outside, 'ws', '.rip');
+        if (fs.existsSync(dotRip)) expect(fs.readdirSync(dotRip)).toEqual(['editor']);
+        expect(fs.existsSync(path.join(outside, 'ws', 'tsconfig.json'))).toBe(false);
+      });
+    } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+  }, 30000);
+
   test('candidacy is eager, confined, and declaration-only: startup stubs the workspace inside .rip/ and registers nothing', async () => {
     await inWorkspace({ 'util.rip': UTIL, 'docs/readme.md': '# hands off\n' }, async (api) => {
       await api.untilLog(/auto-import stubs:/);

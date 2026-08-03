@@ -322,6 +322,13 @@ function ensureProjectWrapper(fsPath) {
   const owner = nearestTsconfig(path.dirname(fsPath), workspaceRoot);
   if (owner === null || path.dirname(owner) === workspaceRoot) return [];
   const rel = path.relative(workspaceRoot, path.dirname(owner));
+  // TERRITORY, belt and braces: a rel that is empty, absolute, or
+  // '..'-shaped would walk the wrapper write out of the mirror root —
+  // nearestTsconfig's anchor bound makes this unreachable today, but a
+  // wrapper is a WRITE, and no future rel construction gets to escape
+  // `.rip/editor` by accident. (The doctrine the disk-layer hygiene
+  // gates enforce: writes stay inside `.rip/`.)
+  if (rel === '' || path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) return [];
   if (wrapperDirs.has(rel)) return [];
   let written;
   try {
