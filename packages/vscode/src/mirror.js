@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { identifierRunAt } from '../../../src/lexer.js';
 
 const stripJsonComments = (text) =>
   text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
@@ -574,7 +575,84 @@ export function buildStubFaces(files, read) {
 // The roles whose recorded span is TYPE TEXT — where an import type's
 // specifier lives, since it belongs to no import node.
 const TYPE_TEXT_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declaration']);
-const IMPORT_TYPE = /\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
+
+const skipTypeTrivia = (text, from) => {
+  let i = from;
+  for (;;) {
+    while (i < text.length && /\s/u.test(text[i])) i++;
+    if (text[i] === '#') {
+      const end = text.indexOf('\n', i + 1);
+      i = end < 0 ? text.length : end + 1;
+      continue;
+    }
+    if (text.startsWith('//', i)) {
+      const end = text.indexOf('\n', i + 2);
+      i = end < 0 ? text.length : end + 1;
+      continue;
+    }
+    if (text.startsWith('/*', i)) {
+      const end = text.indexOf('*/', i + 2);
+      i = end < 0 ? text.length : end + 2;
+      continue;
+    }
+    return i;
+  }
+};
+
+const quotedTypeText = (text, start) => {
+  const quote = text[start];
+  let i = start + 1;
+  while (i < text.length) {
+    if (text[i] === '\\') { i += 2; continue; }
+    if (text[i] === quote) return { value: text.slice(start + 1, i), end: i + 1 };
+    i++;
+  }
+  return null;
+};
+
+// Static module specifiers in authored type text. Literal and comment
+// contents are data, and a property named `import` is not an import type.
+// Identifier recognition comes from the lexer vocabulary so a larger
+// Unicode name ending in `import` cannot be split into a false keyword.
+export function typeImportSpecifiers(text) {
+  const specs = [];
+  let i = 0;
+  let lastCode = '';
+  while (i < text.length) {
+    if (text[i] === '#' || text.startsWith('//', i) || text.startsWith('/*', i)) {
+      i = skipTypeTrivia(text, i);
+      continue;
+    }
+    if (text[i] === "'" || text[i] === '"' || text[i] === '`') {
+      const literal = quotedTypeText(text, i);
+      i = literal?.end ?? text.length;
+      lastCode = text[i - 1] ?? lastCode;
+      continue;
+    }
+    const identifier = identifierRunAt(text, i);
+    if (identifier === null) {
+      if (!/\s/u.test(text[i])) lastCode = text[i];
+      i++;
+      continue;
+    }
+    const precededByDot = lastCode === '.';
+    i = identifier.end;
+    lastCode = identifier.value.at(-1);
+    if (precededByDot || identifier.value !== 'import') continue;
+    let at = skipTypeTrivia(text, i);
+    if (text[at] !== '(') continue;
+    at = skipTypeTrivia(text, at + 1);
+    if (text[at] !== "'" && text[at] !== '"') continue;
+    const literal = quotedTypeText(text, at);
+    if (literal === null) continue;
+    at = skipTypeTrivia(text, literal.end);
+    if (text[at] !== ')') continue;
+    specs.push(literal.value);
+    i = at + 1;
+    lastCode = ')';
+  }
+  return specs;
+}
 
 // The relative .rip import targets of a compiled file, as absolute paths
 // — the closure edges. Read from the compiler's OWN stores (never
@@ -615,7 +693,7 @@ export function ripImportsOf(stores, sourceText, fromDir) {
   }
   for (const r of stores.roles) {
     if (!TYPE_TEXT_ROLES.has(r.role) || typeof r.sourceStart !== 'number') continue;
-    for (const m of sourceText.slice(r.sourceStart, r.sourceEnd).matchAll(IMPORT_TYPE)) addSpec(m[2]);
+    for (const spec of typeImportSpecifiers(sourceText.slice(r.sourceStart, r.sourceEnd))) addSpec(spec);
   }
   return targets;
 }
