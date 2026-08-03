@@ -1,58 +1,64 @@
-// Every explicit test.skip call is an acceptance-contract exception. Keep the
-// complete set visible in one reviewed inventory so a new dormant test cannot
-// enter through an otherwise-green suite. Conditional describe.skipIf gates
-// are a different class: test:all's preflight makes their missing tool a hard
-// failure before the package suite starts.
-import { expect, test } from 'bun:test';
+// A skipped package contract still leaves its test lane green. Keep every
+// unconditional deferral in one reviewed inventory so adding, renaming, or
+// reactivating one is an explicit change rather than quiet coverage drift.
+// Capability-dependent skips are not deferrals and do not enter this set.
+import { describe, expect, test } from 'bun:test';
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 const ROOT = join(import.meta.dir, '../..');
-const CODE = /\.(cjs|js|mjs|rip|ts|tsx)$/;
-// The pattern and expected call spellings avoid writing the matched token
-// contiguously, so the tracked-file sweep can include this file without
-// inventorying its own assertions.
-const SKIP_CALL = /\btest\.skip[ \t]*\(/g;
+const SOURCE_FILE = /\.(?:cjs|js|mjs|rip|ts|tsx)$/;
+const UNCONDITIONAL_SKIP = /\b(test|it|describe)\.skip\([\t \r\n]*(?:'((?:\\.|[^'\\\r\n])*)'|"((?:\\.|[^"\\\r\n])*)"|`((?:\\.|[^`\\\r\n])*)`)/g;
 
-const trackedCode = () =>
-  execSync('git ls-files -z', { cwd: ROOT }).toString().split('\0')
-    .filter((rel) => rel && CODE.test(rel))
-    .map((rel) => join(ROOT, rel))
-    .filter((path) => existsSync(path));
+const APPROVED = [
+  {
+    file: 'packages/app/test/types.test.js',
+    kind: 'test',
+    title: 'app package TypeScript faces and declarations are valid (deferred: package .d.ts removed until typing pass)',
+  },
+  {
+    file: 'packages/ui/test/types.test.js',
+    kind: 'test',
+    title: 'email package TypeScript faces and declarations are valid (deferred: package .d.ts removed until typing pass)',
+  },
+];
 
-const inventory = () => {
-  const calls = [];
-  for (const file of trackedCode()) {
-    const source = readFileSync(file, 'utf8');
-    for (const match of source.matchAll(SKIP_CALL)) {
-      const lineEnd = source.indexOf('\n', match.index);
-      calls.push({
-        file: relative(ROOT, file).split(sep).join('/'),
-        call: source.slice(match.index, lineEnd < 0 ? source.length : lineEnd).trim(),
-      });
+export function unconditionalSkips(source) {
+  return [...source.matchAll(UNCONDITIONAL_SKIP)].map((match) => ({
+    kind: match[1],
+    title: match[2] ?? match[3] ?? match[4],
+  }));
+}
+
+// Tracked files are the contract. Editor mirrors, package-local scratch files,
+// and other untracked state cannot turn this repository gate red or green.
+const packageSources = () =>
+  execSync('git ls-files -z -- packages', { cwd: ROOT }).toString().split('\0')
+    .filter((file) => file && SOURCE_FILE.test(file))
+    .map((file) => join(ROOT, file))
+    .filter((file) => existsSync(file));
+
+describe('intentional package test deferrals', () => {
+  test('the scanner distinguishes unconditional skips from capability conditions', () => {
+    expect(unconditionalSkips("test.skip('fixed deferral', () => {})")).toEqual([
+      { kind: 'test', title: 'fixed deferral' },
+    ]);
+    expect(unconditionalSkips('prefix(); describe.skip("suite deferral", () => {})')).toEqual([
+      { kind: 'describe', title: 'suite deferral' },
+    ]);
+    expect(unconditionalSkips("test.skip(browserName !== 'chromium', 'conditional')")).toEqual([]);
+    expect(unconditionalSkips("describe.skipIf(!toolAvailable)('conditional', () => {})")).toEqual([]);
+  });
+
+  test('the repository carries exactly the reviewed deferrals', () => {
+    const found = [];
+    for (const file of packageSources()) {
+      for (const skip of unconditionalSkips(readFileSync(file, 'utf8'))) {
+        found.push({ file: relative(ROOT, file).split(sep).join('/'), ...skip });
+      }
     }
-  }
-  return calls.sort((a, b) => a.file.localeCompare(b.file) || a.call.localeCompare(b.call));
-};
-
-test('every explicit test skip is named in the intentional inventory', () => {
-  expect(inventory()).toEqual([
-    {
-      file: 'packages/app/test/types.test.js',
-      call: "test." + "skip('app package TypeScript faces and declarations are valid (deferred: package .d.ts removed until typing pass)', () => {",
-    },
-    {
-      file: 'packages/browser-tests/tests/app.spec.mjs',
-      call: "test." + "skip(browserName !== 'chromium', 'script-parse metadata arrives over CDP');",
-    },
-    {
-      file: 'packages/ui/test/types.test.js',
-      call: "test." + "skip('email package TypeScript faces and declarations are valid (deferred: package .d.ts removed until typing pass)', () => {",
-    },
-    {
-      file: 'test/support/extended.js',
-      call: "test." + "skip('SKIPPED: extended tier (`bun run test:all` runs it; CI always does)', () => {});",
-    },
-  ]);
+    found.sort((a, b) => a.file.localeCompare(b.file) || a.title.localeCompare(b.title));
+    expect(found).toEqual(APPROVED);
+  });
 });
