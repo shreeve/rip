@@ -1910,29 +1910,56 @@ class Emitter {
     if (this.ts) this.b.tsOnly(() => this.b.emit(`: any${suffix}`));
   }
 
-  // Capture an expression's emitted text without touching the real
-  // output: the builder swaps for a scratch CodeBuilder over the same
-  // stores, so marks, mapping rows and TS-only regions recorded during
-  // the capture die with it. Callers must pre-check the node against a
-  // mint-free shape (identifier / plain member spine) — an emission
-  // that drew from the shared temp allocator would advance counters
-  // the real output also draws from, desyncing the TS face from the
-  // JS emission byte-for-byte.
-  capturedExprText(node) {
+  // Capture an emission's text without touching the real output. The
+  // builder swaps for a scratch CodeBuilder over the same stores, so
+  // marks, mapping rows and TS-only regions recorded during the capture
+  // die with it. The rest of what an emission can leave behind is
+  // rolled back here, not preconditioned away:
+  //
+  //   The temp allocator is snapshotted and restored. Captures run in
+  //   the TS emission only, so a captured mint (a `for…of` iterable's
+  //   un-memoized `_ref`) would advance counters the JS emission never
+  //   advances, and every later minting site would drift one name
+  //   apart between the faces — the strip gate's byte-equality broken
+  //   by a builder the output never sees. Chain temps stay memoized
+  //   per node ACROSS the capture on purpose: a captured body is one
+  //   the real pass has already emitted, and both must see one name.
+  //
+  //   The append-only record channels (the token corrections,
+  //   pinnables, vocabulary, spans) record into throwaway arrays: a
+  //   capture's generated offsets are scratch-relative, and its source
+  //   facts duplicate what the real emission of the same nodes already
+  //   recorded — either way the entry describes bytes the real face
+  //   does not hold.
+  //
+  // Every capture emits in expression position, so the wrap lives
+  // here. `source` stays a per-site choice — emitted text consults
+  // `this.b.source` behind null guards (annotation slices, schema
+  // sub-parse, span scans), so each site keeps the value its captured
+  // bytes were shaped under.
+  capturedExprText(fn, { source = null } = {}) {
     const prevB = this.b;
-    this.b = new CodeBuilder(this.stores, { source: prevB.source });
+    this.b = new CodeBuilder(this.stores, { source });
+    const { n, used } = this.temps;
+    this.temps.used = new Set(used);
+    const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'importedRefs',
+      'vocabulary', 'silences', 'memberDecls', 'importSpans', 'pendingTypeDecls'];
+    const saved = {};
+    for (const k of channels) { saved[k] = this[k]; this[k] = []; }
     try {
-      this.withExpression(() => this.expr(node));
+      this.withExpression(fn);
       return this.b.code;
     } finally {
       this.b = prevB;
+      Object.assign(this.temps, { n, used });
+      for (const k of channels) this[k] = saved[k];
     }
   }
 
   // A node `typeof` can take: an identifier or a plain `.` member
   // spine over one — the entity-name grammar of a `typeof` query.
   // Optional chains, calls, indexing and every computed shape fall
-  // outside (and would also break the capture's mint-free guarantee).
+  // outside.
   static isTypeofPathNode(x) {
     if (typeof x === 'string') return isIdentifierName(x);
     return isNode(x) && x[0] === '.' && x.length === 3 && typeof x[2] === 'string' &&
@@ -1973,7 +2000,7 @@ class Emitter {
     const leaves = new Set();
     Emitter.collectLeafNames(iter, leaves);
     for (const n of leaves) if (unsafeNames.has(n)) return null;
-    const text = this.capturedExprText(iter);
+    const text = this.capturedExprText(() => this.expr(iter), { source: this.b.source });
     if (!/^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(text)) return null;
     const root = text.split('.', 1)[0];
     if (!resolvableRoots.has(root) && !this.scopes.some((s) => s.has(root))) return null;
@@ -7967,23 +7994,21 @@ class Emitter {
           this.mark(m.node, 'value', () => this.withExpression(() => this.computedBody(m.node, m.value, ind + 2)));
           this.b.emit(')');
         });
-        // The same body a second time, into a scratch builder, for the
-        // face's behavior object: emitted from HERE because the
+        // The same body a second time, through capturedExprText, for
+        // the face's behavior object: emitted from HERE because the
         // component's frames are live only here, so the copy lowers
-        // member reads exactly as the real one does. The scratch
-        // builder holds its own rows and its own primitive claims, and
-        // temps memoize per node — nothing the real emission produces
-        // moves. An ANNOTATED computed is skipped: its declaration is
-        // the author's, not the body's.
+        // member reads exactly as the real one does. The capture's
+        // rollback is load-bearing, not hygiene — a body is arbitrary
+        // code, so the copy can mint loop temps and walk the
+        // declare-in-place scan, and everything it consumes or records
+        // must be returned before the real emission continues. An
+        // ANNOTATED computed is skipped: its declaration is the
+        // author's, not the body's.
         if (behavior === null || tsInfo === null) return;
         const tm = tsInfo.members.find((x) => x.node === m.node && x.kind === 'computed');
         if (tm === undefined || tm.annotation != null) return;
-        const saved = this.b;
-        this.b = new CodeBuilder(this.stores, { source: null });
-        try {
-          this.withExpression(() => this.computedBody(m.node, m.value, 0));
-          computedBodies.push({ name: m.name, code: this.b.code, block: isBlock(m.value) && m.value.length > 2 });
-        } finally { this.b = saved; }
+        const code = this.capturedExprText(() => this.computedBody(m.node, m.value, 0));
+        computedBodies.push({ name: m.name, code, block: isBlock(m.value) && m.value.length > 2 });
       };
       const emitGate = (gate, index) => {
         initLine(gate.node, () => {

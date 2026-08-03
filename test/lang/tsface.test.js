@@ -110,6 +110,52 @@ describe('the strip gate: TS face minus recorded regions === JS mode, byte-for-b
   });
 });
 
+// ── 1b. captures leave no trace ──────────────────────────────────────
+//
+// The TS face re-emits certain bodies into a scratch builder (a
+// component computed's copy for the behavior object). The capture runs
+// in the TS emission ONLY, so anything it consumes from shared state —
+// a temp name, a channel entry — exists in one face and not the other.
+// These gates hold the two leak classes the capture must roll back.
+
+describe('scratch captures leave no trace in the real emission', () => {
+  test('a computed body minting loop temps does not desync later temps between faces', () => {
+    // The computed's `for…of` mints an un-memoized `_ref` for its
+    // iterable. Un-rolled-back, the mint runs only under the TS face,
+    // so the LATER minting site (`tally`) drifts one name apart
+    // between the faces and the strip gate breaks.
+    const src = 'getData = -> {a: 1, b: 2}\n\nCart = component\n' +
+      '  total ~= do ->\n    sum = 0\n    for k, v of getData()\n      sum += v\n    sum\n' +
+      '\ndef tally(rows)\n  out = 0\n  for k, v of rows()\n    out += v\n  out\n';
+    const faced = ts(src);
+    const plain = js(src);
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
+    // Not vacuous: the later site really re-mints the first free name.
+    expect(plain.code).toContain('_ref1 = rows()');
+    expect(faced.code).toContain('_ref1 = rows()');
+  });
+
+  test('token-correction spans all slice to their own name in the emitted face', () => {
+    // A captured body that reads a state/enum/class/imported name
+    // reaches noteNameSpan with the scratch builder installed;
+    // un-shadowed, the channel keeps a scratch-relative span that
+    // slices to arbitrary bytes of the real face.
+    const src = 'count := 0\n\nCounter = component\n  double ~= count * 2\n';
+    const faced = ts(src);
+    const name = /^[$_A-Za-z][$\w]*$/;
+    for (const channel of ['mutables', 'enums', 'classDecls']) {
+      for (const [start, end] of faced[channel]) {
+        expect(faced.code.slice(start, end)).toMatch(name);
+      }
+    }
+    for (const [start, end, refName] of faced.importedRefs) {
+      expect(faced.code.slice(start, end)).toBe(refName);
+    }
+    // The state's spans: declaration and the computed's read — no third.
+    expect(faced.mutables.map(([s, e]) => faced.code.slice(s, e))).toEqual(['count', 'count']);
+  });
+});
+
 // ── 2/3. emission pins per surface ───────────────────────────────────
 
 describe('TS-face emission pins', () => {

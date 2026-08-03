@@ -10425,14 +10425,36 @@ class Emitter {
     if (this.ts)
       this.b.tsOnly(() => this.b.emit(`: any${suffix}`));
   }
-  capturedExprText(node) {
+  capturedExprText(fn, { source = null } = {}) {
     const prevB = this.b;
-    this.b = new CodeBuilder(this.stores, { source: prevB.source });
+    this.b = new CodeBuilder(this.stores, { source });
+    const { n, used } = this.temps;
+    this.temps.used = new Set(used);
+    const channels = [
+      "pinnables",
+      "mutables",
+      "enums",
+      "classDecls",
+      "importedRefs",
+      "vocabulary",
+      "silences",
+      "memberDecls",
+      "importSpans",
+      "pendingTypeDecls"
+    ];
+    const saved = {};
+    for (const k of channels) {
+      saved[k] = this[k];
+      this[k] = [];
+    }
     try {
-      this.withExpression(() => this.expr(node));
+      this.withExpression(fn);
       return this.b.code;
     } finally {
       this.b = prevB;
+      Object.assign(this.temps, { n, used });
+      for (const k of channels)
+        this[k] = saved[k];
     }
   }
   static isTypeofPathNode(x) {
@@ -10448,7 +10470,7 @@ class Emitter {
     for (const n of leaves)
       if (unsafeNames.has(n))
         return null;
-    const text = this.capturedExprText(iter);
+    const text = this.capturedExprText(() => this.expr(iter), { source: this.b.source });
     if (!/^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(text))
       return null;
     const root = text.split(".", 1)[0];
@@ -14979,14 +15001,8 @@ ${pad ?? ""}`);
         const tm = tsInfo.members.find((x) => x.node === m.node && x.kind === "computed");
         if (tm === undefined || tm.annotation != null)
           return;
-        const saved = this.b;
-        this.b = new CodeBuilder(this.stores, { source: null });
-        try {
-          this.withExpression(() => this.computedBody(m.node, m.value, 0));
-          computedBodies.push({ name: m.name, code: this.b.code, block: isBlock2(m.value) && m.value.length > 2 });
-        } finally {
-          this.b = saved;
-        }
+        const code = this.capturedExprText(() => this.computedBody(m.node, m.value, 0));
+        computedBodies.push({ name: m.name, code, block: isBlock2(m.value) && m.value.length > 2 });
       };
       const emitGate = (gate, index) => {
         initLine(gate.node, () => {
