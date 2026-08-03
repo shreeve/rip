@@ -1353,7 +1353,11 @@ const RIP_KEYWORDS = new Set(['type', 'interface', 'class', 'enum', 'def', 'comp
 // boundWords) — `symbol = :alpha` is ordinary corpus code, and a
 // spelling-keyed excuse would silently absorb its use-site the day a
 // regression dropped it; a bound spelling's occurrences must be in the
-// population or hold a reviewed positional excuse.
+// population or hold a reviewed positional excuse. They stand down the
+// same way in PROPERTY and OBJECT-KEY position (`Array.from`,
+// `scores.get`, `{ number: … }`): a keyword spelling after a dot is a
+// property read — the mask's own doctrine — and its use-site is the
+// population's to watch, never a spelling excuse's to absorb.
 const NEVER_TOKENED_WORDS = new Set([
   'if', 'then', 'else', 'unless', 'while', 'until', 'when', 'for', 'of', 'in',
   'is', 'isnt', 'and', 'or', 'not', 'own', 'by', 'do', 'loop', 'try', 'catch',
@@ -1464,7 +1468,33 @@ function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNam
     }
     // Excluded — which excuse?
     excludedCount++;
-    if ((NEVER_TOKENED_WORDS.has(name) || PRIMITIVE_TYPE_WORDS.has(name)) && !boundWords.has(name)) continue;
+    // The word-set tiers also STAND DOWN in PROPERTY and OBJECT-KEY
+    // position: "a keyword spelling after a dot is a property read" is
+    // the mask's own recorded doctrine, and the same word as `.get` or
+    // `{ number: … }` is a real member the population watches — a
+    // spelling-keyed excuse there would silently absorb its use-site
+    // the day a regression dropped it, exactly the bound-name hole one
+    // clause up. Property: after `.`/`::` (a trailing-dot continuation
+    // included). Key: `{ word:` / `, word:` — the literal shapes only,
+    // so a class member row (`constructor: (…) ->`) keeps its excuse.
+    const standsAsProperty = (() => {
+      let j = index - 1;
+      while (j >= 0 && /\s/.test(masked[j])) j--;
+      // ONE dot: the last dot of a spread/rest (`{ ...super() }`,
+      // `[string, ...number[]]`) or a range is not property access.
+      return (masked[j] === '.' && masked[j - 1] !== '.') ||
+             (masked[j] === ':' && masked[j - 1] === ':');
+    })();
+    const standsAsKey = (() => {
+      let a = index + name.length;
+      while (/[ \t]/.test(masked[a] ?? '')) a++;
+      if (masked[a] !== ':' || masked[a + 1] === ':') return false;
+      let b = index - 1;
+      while (b >= 0 && /[ \t]/.test(masked[b])) b--;
+      return masked[b] === '{' || masked[b] === ',';
+    })();
+    if ((NEVER_TOKENED_WORDS.has(name) || PRIMITIVE_TYPE_WORDS.has(name)) &&
+        !boundWords.has(name) && !standsAsProperty && !standsAsKey) continue;
     if (spans.some(([s, e]) => index >= s && index < e)) continue;
     if (src.slice(Math.max(0, index - 7), index) === 'import.') continue; // `import.meta` — a meta-property, no symbol
     const { line, character } = posOf(index);

@@ -153,6 +153,11 @@ const ROWS = [
   // instance's (the walker's boundary doctrine rides in with it).
   ['class S\n  constructor: (name: string) ->\n    @label = name\n    @sync = =>\n      @dirty = false',
     'declare class S {\n  label: any;\n  sync: any;\n  dirty: any;\n  constructor(name: string);\n}\nexport {};\n'],
+  // The annotation rides whichever assignment carries it: an arrow's
+  // earlier unannotated write must not cost a later annotated direct
+  // assignment its type — in the .d.ts exactly as in the face.
+  ['class U\n  constructor: () ->\n    @go = =>\n      @n = 1\n    @n: number = 2',
+    'declare class U {\n  go: any;\n  n: number;\n}\nexport {};\n'],
   // An UNTYPED promotion declares its field as well — the face
   // declares it bare and lets constructor inference type it; the
   // declaration file cannot, so `any`.

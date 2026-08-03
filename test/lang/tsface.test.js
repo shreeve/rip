@@ -188,6 +188,11 @@ describe('TS-face emission pins', () => {
     const both = ts('class T\n  constructor: () ->\n    @go = =>\n      @n = 1\n    @n = 2\n');
     expect(both.code).toContain('\n  n;\n');
     expect(both.code).not.toContain('n: any');
+    // And the author's ANNOTATION rides whichever assignment carries
+    // it: an arrow's earlier unannotated write must not cost a later
+    // annotated one its type on the declaration.
+    const late = ts('class U\n  constructor: () ->\n    @go = =>\n      @n = 1\n    @n: number = 2\n');
+    expect(late.code).toContain('\n  n: number;\n');
   });
 
   test('bare typed forward: the annotation reaches the hoist line with the definite-assignment assertion', () => {

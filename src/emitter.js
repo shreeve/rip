@@ -160,6 +160,13 @@ export function atParamField(p) {
 // inference does not descend into arrows, so a bare declaration for
 // one is an implicit `any` (TS7008 under noImplicitAny) instead of an
 // inferred type — the declaring emission spells the `any` explicitly.
+//
+// `nodes` carries EVERY assignment of the name, in source order, because
+// the author's annotation can ride any one of them — `@n = 1` inside an
+// arrow and `@n: number | null = 2` directly after each declare the same
+// field, and a declaration built from the first-seen node alone dropped
+// whichever annotation arrived later. This walk has no store access, so
+// it cannot ask which node carries one; the consumers can, and scan.
 export function ctorAtFields(body) {
   const out = [];
   const seen = new Map();
@@ -181,13 +188,16 @@ export function ctorAtFields(body) {
       const name = n[1][2];
       const prior = seen.get(name);
       if (prior === undefined) {
-        const entry = { name, node: n, viaArrow: inArrow };
+        const entry = { name, node: n, nodes: [n], viaArrow: inArrow };
         seen.set(name, entry);
         out.push(entry);
-      } else if (prior.viaArrow && !inArrow) {
-        // A direct assignment supplies the inference an arrow's
-        // cannot, wherever it sits — the field is not arrow-only.
-        prior.viaArrow = false;
+      } else {
+        prior.nodes.push(n);
+        if (prior.viaArrow && !inArrow) {
+          // A direct assignment supplies the inference an arrow's
+          // cannot, wherever it sits — the field is not arrow-only.
+          prior.viaArrow = false;
+        }
       }
     }
     for (const el of n.slice(1)) walk(el, inArrow || h === '=>');
@@ -12253,7 +12263,11 @@ class Emitter {
       for (const at of ctorAtFields(ctorBody)) {
         if (declared.has(at.name)) continue;
         declared.add(at.name);
-        const text = this.annotationText(at.node) ?? (at.viaArrow ? 'any' : null);
+        // The annotation can ride ANY of the field's assignments — the
+        // first one that resolves wins, so ordering against an arrow's
+        // earlier unannotated write cannot drop it.
+        const annotated = at.nodes.map((n) => this.annotationText(n)).find((t) => t != null) ?? null;
+        const text = annotated ?? (at.viaArrow ? 'any' : null);
         this.b.tsOnly(() => this.b.emit(`${pad}${at.name}${text ? `: ${text}` : ''};\n`));
       }
     }

@@ -241,7 +241,9 @@ export function emitDeclarations({ sexpr, stores, source }) {
             for (const at of ctorAtFields(value[2])) {
               if (declared.has(at.name)) continue;
               declared.add(at.name);
-              const annotation = roleType(at.node, 'annotation');
+              // Any of the field's assignments can carry the author's
+              // annotation — scan them all, exactly as the TS face does.
+              const annotation = at.nodes.map((n) => roleType(n, 'annotation')).find((t) => t != null) ?? null;
               members.push(`${at.name}: ${annotation ?? 'any'};`);
             }
             if (params.some(paramTyped)) members.push(`constructor${rendered(() => renderParams(params, isOptionalParam))};`);

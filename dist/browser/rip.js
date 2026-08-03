@@ -9416,11 +9416,14 @@ function ctorAtFields(body) {
       const name = n[1][2];
       const prior = seen.get(name);
       if (prior === undefined) {
-        const entry = { name, node: n, viaArrow: inArrow };
+        const entry = { name, node: n, nodes: [n], viaArrow: inArrow };
         seen.set(name, entry);
         out.push(entry);
-      } else if (prior.viaArrow && !inArrow) {
-        prior.viaArrow = false;
+      } else {
+        prior.nodes.push(n);
+        if (prior.viaArrow && !inArrow) {
+          prior.viaArrow = false;
+        }
       }
     }
     for (const el of n.slice(1))
@@ -18377,7 +18380,8 @@ ${this.replayPad}}` : " }");
         if (declared.has(at.name))
           continue;
         declared.add(at.name);
-        const text = this.annotationText(at.node) ?? (at.viaArrow ? "any" : null);
+        const annotated = at.nodes.map((n) => this.annotationText(n)).find((t) => t != null) ?? null;
+        const text = annotated ?? (at.viaArrow ? "any" : null);
         this.b.tsOnly(() => this.b.emit(`${pad}${at.name}${text ? `: ${text}` : ""};
 `));
       }
@@ -20546,7 +20550,7 @@ function emitDeclarations({ sexpr, stores, source }) {
               if (declared.has(at.name))
                 continue;
               declared.add(at.name);
-              const annotation = roleType(at.node, "annotation");
+              const annotation = at.nodes.map((n) => roleType(n, "annotation")).find((t) => t != null) ?? null;
               members.push(`${at.name}: ${annotation ?? "any"};`);
             }
             if (params.some(paramTyped))
