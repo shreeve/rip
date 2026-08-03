@@ -1218,7 +1218,9 @@ class TwinOracle {
 // due, the mapping carries each source occurrence to its face position, and
 // the real server (session.semanticTokens) says what was delivered at the
 // source position — an occurrence that is due one and got none is a drop,
-// and the contract gates the population's drift at zero. The face is the
+// and every occurrence OUTSIDE the population must hold an excuse: the
+// contract gates unexplained exclusions and stale excuses at zero
+// (`token.delivery.explained` / `.excused`). The face is the
 // classified-position oracle here; no twin, rip-native covered.
 //
 // Faces live in ONE shared dir named `<base>.rip.ts`, so a cross-file import
