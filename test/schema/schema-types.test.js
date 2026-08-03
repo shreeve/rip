@@ -61,12 +61,20 @@ describe('schema declarations: the per-kind shapes', () => {
     expect(d).toContain('type T = { createdAt: Date };');
     expect(d).toContain('declare const T: MixinSchema<T>;');
     expect(d).toContain('type U = { name: string } & T;');
-    // The surface is one method, because that is the one that answers: a
-    // mixin is not instantiable, and `parse`/`safe`/`ok` are absent here
-    // so the checker refuses them instead of the runtime throwing.
+    // Two rules, both the runtime's. The parse surface is ABSENT — a
+    // mixin is not instantiable (`parse` throws, `safe` fails, `ok` is
+    // false), so the checker refuses those instead of the runtime
+    // throwing. The projection algebra is PRESENT — `__schemaDerive`
+    // refuses only :union and :enum, and a mixin derivation is a plain
+    // instantiable :shape — so pick/omit/partial/required/extend answer,
+    // and the merged Schema declaration lets `extend` take a mixin.
     expect(d).toContain('interface MixinSchema<Out> {');
     expect(d).toContain('  toJSONSchema(): Record<string, unknown>;');
-    expect(d).not.toMatch(/interface MixinSchema<Out> \{[^}]*parse/);
+    expect(d).toContain('  pick<K extends keyof Out>(...keys: K[]): Schema<Pick<Out, K>, Pick<Out, K>>;');
+    expect(d).toContain('  partial(): Schema<Partial<Out>, Partial<Out>>;');
+    expect(d).toContain('  extend<U>(other: Schema<U, any> | MixinSchema<U>): Schema<Out & U, Out & U>;');
+    expect(d).toContain('  extend<U>(other: MixinSchema<U>): Schema<In & U, In & U>;');
+    expect(d).not.toMatch(/interface MixinSchema<Out> \{[^}]*\bparse\(/);
   });
 
   test('the mixin tier emits only where a :mixin exists', () => {
@@ -211,8 +219,11 @@ describe('schema type story on the TS face', () => {
     expect(f.code).toContain('{tag: "scope", name: "live", fn: (function(this: MQuery) {');
     expect(f.code).toContain('{tag: "defaultScope", name: "defaultScope", fn: (function(this: MQuery) {');
     // ensure predicates are called UNBOUND — no this-param, honestly; their
-    // one parameter IS the data, which is what the annotation states
-    expect(f.code).toMatch(/\{tag: "ensure",[^}]*fn: \(function\(m: MData\)/);
+    // one parameter is the data as BOTH validation paths hand it over:
+    // declared fields plus Partial<> of the runtime-managed columns,
+    // because the create path runs ensures before id/timestamps exist.
+    expect(f.code).toMatch(/\{tag: "ensure",[^}]*fn: \(function\(m: MEnsure\)/);
+    expect(f.code).toContain('type MEnsure = { name: string } & Partial<{ id: number }>;');
   });
 
   test('a defaultScope with no named scopes types `this` as the inline SchemaQuery', () => {

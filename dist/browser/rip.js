@@ -158,6 +158,14 @@ var VALIDATION_INTRINSICS = [
 var MIXIN_INTRINSICS = [
   "interface MixinSchema<Out> {",
   "  toJSONSchema(): Record<string, unknown>;",
+  "  pick<K extends keyof Out>(...keys: K[]): Schema<Pick<Out, K>, Pick<Out, K>>;",
+  "  omit<K extends keyof Out>(...keys: K[]): Schema<Omit<Out, K>, Omit<Out, K>>;",
+  "  partial(): Schema<Partial<Out>, Partial<Out>>;",
+  "  required<K extends keyof Out>(...keys: K[]): Schema<Omit<Out, K> & Required<Pick<Out, K>>, Omit<Out, K> & Required<Pick<Out, K>>>;",
+  "  extend<U>(other: Schema<U, any> | MixinSchema<U>): Schema<Out & U, Out & U>;",
+  "}",
+  "interface Schema<Out, In = unknown> {",
+  "  extend<U>(other: MixinSchema<U>): Schema<In & U, In & U>;",
   "}"
 ];
 var MODEL_INTRINSICS = [
@@ -257,7 +265,7 @@ function isModuleShaped(programSexpr, isModuleImport) {
 }
 var behaviorName = (name) => `__${name}__behavior`;
 var fieldType = (entry, known) => {
-  const nullable = entry.constraints?.default === null ? " | null" : "";
+  const nullable = entry.constraints?.default === null && !entry.modifiers?.includes("!") ? " | null" : "";
   if (entry.typeName === "literal-union" && entry.literals?.length) {
     return entry.literals.map((l) => JSON.stringify(l)).join(" | ") + nullable;
   }
@@ -426,14 +434,17 @@ function schemaTypeStory(decl, byName, known) {
       `savedChanges: Map<string, [unknown, unknown]>`,
       `toJSON(): ${dataName}`
     ];
+    const ensureName = `${name}Ensure`;
+    const hasEnsures = ensureIdx.length > 0;
     const linesFor = (face) => [
       `type ${dataName} = ${dataType} & ${braced(modelImplicitProps(descriptor))};`,
       `type ${createName} = ${intersect(braced(modelCreateProps(descriptor, known)), mixinRefs(descriptor, byName))};`,
+      ...hasEnsures ? [`type ${ensureName} = ${dataType} & Partial<${braced(modelImplicitProps(descriptor))}>;`] : [],
       `type ${name} = ${dataName} & ${braced(instanceExtras(face))};`
     ];
     const aliasLines = linesFor(false);
     const faceAliasLines = linesFor(true);
-    const typeNames = [dataName, createName, name];
+    const typeNames = [dataName, createName, ...hasEnsures ? [ensureName] : [], name];
     let constType = `ModelSchema<${name}, ${dataName}, number, ${createName}>`;
     if (scopeNames.length) {
       const scopeSigs = scopeNames.map((s) => `${s}(...args: any[]): ${queryName}`);
@@ -454,7 +465,7 @@ function schemaTypeStory(decl, byName, known) {
       thisTypes: thisTypes2,
       typeNames,
       behaviorName: bname,
-      ensureTypes: ensuresOf(dataName)
+      ensureTypes: ensuresOf(ensureName)
     };
   }
   const thisTypes = new Map;
@@ -519,8 +530,10 @@ function buildSchemaTypeStory(programSexpr) {
     }
     const defaultTypes = new Map;
     d.descriptor.entries.forEach((e, i) => {
-      if (e.tag === "field" && e.constraints?.default !== undefined)
-        defaultTypes.set(i, fieldType(e, known));
+      if (e.tag !== "field" || e.constraints?.default === undefined)
+        return;
+      const admits = e.typeName === "date" || e.typeName === "datetime" ? " | string" : "";
+      defaultTypes.set(i, fieldType(e, known) + admits);
     });
     stories.push({ decl: d, ...story, defaultTypes });
   }
