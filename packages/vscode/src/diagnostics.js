@@ -88,11 +88,23 @@ export function mapTsDiagnostic(good, d) {
       if (!row || row.mappingKind !== 'exact') return null;
     }
   }
+  // Type-cycle diagnostics (TS2502/TS7022) born in a lowering name the
+  // lowering's own vocabulary — a mutually-recursive computed pair
+  // draws "'value' is referenced…" from the reactive container the
+  // author never wrote. The projection anchors those rows at the
+  // member's source name, so when the mapped span IS a single
+  // identifier, the message requotes it: same claim, author's words.
+  // A cycle in the user's own bytes requotes its own name — identity.
+  let message = d.message;
+  if (d.code === 2502 || d.code === 7022) {
+    const spanText = good.source.slice(span[0], span[1]);
+    if (/^[A-Za-z_$][\w$]*$/.test(spanText)) message = message.replace(/^'[^']*'/, `'${spanText}'`);
+  }
   return {
     severity: d.severity ?? 1,
     code: d.code,
     source: 'rip/ts',
-    message: d.message,
+    message,
     ...(tags.length ? { tags } : {}),
     range: {
       start: offsetToPosition(good.srcLineStarts, span[0]),

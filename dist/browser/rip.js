@@ -9240,18 +9240,21 @@ function instanceTypeLines(info, selfType) {
       const declared = info.roleText(m.func, "returnType");
       const base = declared ?? (m.isVoid ? "void" : "any");
       const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push(`${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};`);
+      lines.push({ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};` });
       continue;
     }
-    lines.push(`${m.kind === "readonly" ? "readonly " : ""}${m.name}${segmentsText(memberTypeSegments(m, ": "))};`);
+    lines.push({
+      text: `${m.kind === "readonly" ? "readonly " : ""}${m.name}${segmentsText(memberTypeSegments(m, ": "))};`,
+      ...isBehaviorProjected(m) ? { node: m.nameNode, role: m.nameRole } : {}
+    });
   }
   if (!hasChildren)
-    lines.push("children?: any;");
+    lines.push({ text: "children?: any;" });
   if (info.extendsTag !== null)
-    lines.push(`rest: ${containerType("Record<string, any>")};`);
-  lines.push(`mount(target?: any): ${selfType};`);
-  lines.push("unmount(options?: { removeDOM?: boolean }): void;");
-  lines.push("emit(name: string, detail?: any): void;");
+    lines.push({ text: `rest: ${containerType("Record<string, any>")};` });
+  lines.push({ text: `mount(target?: any): ${selfType};` });
+  lines.push({ text: "unmount(options?: { removeDOM?: boolean }): void;" });
+  lines.push({ text: "emit(name: string, detail?: any): void;" });
   return lines;
 }
 
@@ -10632,13 +10635,17 @@ class Emitter {
       this.b.emit(`
 ` + pad);
       this.mark(compNode, "$self", () => {
-        const lines = [
-          `${exported ? "export " : ""}interface ${name}${typeParams ?? ""} {`,
-          ...instanceTypeLines(info, `${name}${selfArgs}`).map((l) => `  ${l}`),
-          "}"
-        ];
-        this.b.emit(lines.join(`
-` + pad));
+        this.b.emit(`${exported ? "export " : ""}interface ${name}${typeParams ?? ""} {`);
+        for (const l of instanceTypeLines(info, `${name}${selfArgs}`)) {
+          this.b.emit(`
+` + pad + "  ");
+          if (l.node !== undefined)
+            this.mark(l.node, l.role, () => this.b.emit(l.text));
+          else
+            this.b.emit(l.text);
+        }
+        this.b.emit(`
+` + pad + "}");
       });
     });
     const bodies = info.computedBodies ?? [];
@@ -20549,7 +20556,7 @@ function emitDeclarations({ sexpr, stores, source }) {
     const self = `${name}${selfArgsOf(typeParams)}`;
     lines.push(`${exp}interface ${name}${typeParams} {`);
     for (const l of rendered(() => instanceTypeLines(info, self)))
-      lines.push(`  ${l}`);
+      lines.push(`  ${l.text}`);
     lines.push("}");
     lines.push(`${exp}declare let ${name}: {`);
     if (gated) {

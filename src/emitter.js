@@ -2225,12 +2225,17 @@ class Emitter {
     this.b.tsOnly(() => {
       this.b.emit('\n' + pad);
       this.mark(compNode, '$self', () => {
-        const lines = [
-          `${exported ? 'export ' : ''}interface ${name}${typeParams ?? ''} {`,
-          ...instanceTypeLines(info, `${name}${selfArgs}`).map((l) => `  ${l}`),
-          '}',
-        ];
-        this.b.emit(lines.join('\n' + pad));
+        this.b.emit(`${exported ? 'export ' : ''}interface ${name}${typeParams ?? ''} {`);
+        // Lines carrying a node (behavior-projected computeds) mark
+        // their own row nested inside the $self cover, so a diagnostic
+        // born in the projection anchors at the member the author
+        // wrote rather than across the whole component.
+        for (const l of instanceTypeLines(info, `${name}${selfArgs}`)) {
+          this.b.emit('\n' + pad + '  ');
+          if (l.node !== undefined) this.mark(l.node, l.role, () => this.b.emit(l.text));
+          else this.b.emit(l.text);
+        }
+        this.b.emit('\n' + pad + '}');
       });
     });
     // The behavior object the computed members' types read through,

@@ -349,7 +349,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     const typeParams = typeParamsOf(stmt);
     const self = `${name}${selfArgsOf(typeParams)}`;
     lines.push(`${exp}interface ${name}${typeParams} {`);
-    for (const l of rendered(() => instanceTypeLines(info, self))) lines.push(`  ${l}`);
+    for (const l of rendered(() => instanceTypeLines(info, self))) lines.push(`  ${l.text}`);
     lines.push('}');
     lines.push(`${exp}declare let ${name}: {`);
     if (gated) {

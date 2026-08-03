@@ -601,6 +601,14 @@ export const propsTypeText = (info) => segmentsText(propsTypeSegments(info));
 // call never draws TS2339), then the __Component API the runtime
 // provides (mount returns the instance; static mount mirrors it on
 // the constructor type).
+// Each line is { text, node?, role? }. Behavior-projected computeds
+// carry their member's name node: their ReturnType<> projection is
+// where a type-level cycle surfaces (mutually-recursive computeds draw
+// TS2502 on the container's `value`), and an unanchored line would
+// cover-map that diagnostic across the whole component instead of the
+// computed the author wrote. Every other line stays unanchored — the
+// companion's enclosing $self mark serves it, and a second source row
+// per member would compete with the class declare road's for hover.
 export function instanceTypeLines(info, selfType) {
   const lines = [];
   let hasChildren = false;
@@ -610,15 +618,18 @@ export function instanceTypeLines(info, selfType) {
       const declared = info.roleText(m.func, 'returnType');
       const base = declared ?? (m.isVoid ? 'void' : 'any');
       const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push(`${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};`);
+      lines.push({ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};` });
       continue;
     }
-    lines.push(`${m.kind === 'readonly' ? 'readonly ' : ''}${m.name}${segmentsText(memberTypeSegments(m, ': '))};`);
+    lines.push({
+      text: `${m.kind === 'readonly' ? 'readonly ' : ''}${m.name}${segmentsText(memberTypeSegments(m, ': '))};`,
+      ...(isBehaviorProjected(m) ? { node: m.nameNode, role: m.nameRole } : {}),
+    });
   }
-  if (!hasChildren) lines.push('children?: any;');
-  if (info.extendsTag !== null) lines.push(`rest: ${containerType('Record<string, any>')};`);
-  lines.push(`mount(target?: any): ${selfType};`);
-  lines.push('unmount(options?: { removeDOM?: boolean }): void;');
-  lines.push('emit(name: string, detail?: any): void;');
+  if (!hasChildren) lines.push({ text: 'children?: any;' });
+  if (info.extendsTag !== null) lines.push({ text: `rest: ${containerType('Record<string, any>')};` });
+  lines.push({ text: `mount(target?: any): ${selfType};` });
+  lines.push({ text: 'unmount(options?: { removeDOM?: boolean }): void;' });
+  lines.push({ text: 'emit(name: string, detail?: any): void;' });
   return lines;
 }

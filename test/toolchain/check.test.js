@@ -409,6 +409,35 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // Mutually-recursive computeds deserve their error — the pattern
+  // recurses forever on read — but the error must be usable: TS detects
+  // the cycle in the companion interface's behavior projection and
+  // names the reactive container's `value` across the whole component
+  // span. The projection's anchored rows and the mapper's requote turn
+  // that into one diagnostic PER computed, at the member the author
+  // wrote, quoting the member's own name.
+  test('a computed cycle anchors at each involved computed with its own name, not the whole component', () => {
+    const dir = workspace({
+      'cycle.rip': [
+        'Badge = component',
+        '  loop1 ~= @loop2 + 1',
+        '  loop2 ~= @loop1 + 1',
+        '  render',
+        '    div "{@loop1}"',
+        'console.log Badge',
+      ].join('\n') + '\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.map((d) => [d.code, d.line, d.column, d.endColumn])).toEqual([
+        [2502, 2, 3, 8],
+        [2502, 3, 3, 8],
+      ]);
+      expect(diags[0].message).toContain("'loop1' is referenced");
+      expect(diags[1].message).toContain("'loop2' is referenced");
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // The default-satisfies relation follows the runtime's ORDER of
   // operations, not just its vocabulary. Dates are the one exception
   // that earns an admission: `_coerceDates` runs AFTER `_applyDefaults`,
