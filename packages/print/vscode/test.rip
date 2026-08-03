@@ -23,11 +23,16 @@ console.log "\nManifest"
 
 test "identity, entry, and engine pins", ->
   eq pkg.name, 'print'
+  eq pkg.version, '4.0.0'
   eq pkg.publisher, 'rip-lang'
   eq pkg.displayName, 'Rip Print'
   eq pkg.main, './src/extension.js'
   eq pkg.engines, { vscode: '^1.80.0' }
   eq pkg.repository, { type: 'git', url: 'https://github.com/shreeve/rip.git', directory: 'packages/print/vscode' }
+
+test "install commands delegate to the shared extension installer", ->
+  eq pkg.scripts['install-vscode'], 'bun ../../../scripts/install-ext.mjs print vscode'
+  eq pkg.scripts['install-cursor'], 'bun ../../../scripts/install-ext.mjs print cursor'
 
 test "highlight.js is an exact pin and the only dependency", ->
   eq pkg.dependencies, { 'highlight.js': '11.11.1' }
