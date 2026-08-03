@@ -32,7 +32,7 @@ const cleanStates = () => ({
   fails: 0,
   el: { problems: [] },
   hp: { gap: 0, snapChanged: 0, violations: [], silentLeaks: 0, ruledDiverging: 0 },
-  tk: { missing: [], badType: [], badReadonly: [], survDrops: [], popDrift: [], facesAvailable: true },
+  tk: { missing: [], badType: [], badReadonly: [], survDrops: [], unexplained: [], exclusionDrift: [], facesAvailable: true },
 });
 const allRan = () => true;
 
@@ -111,7 +111,8 @@ describe('the audit contract judges in both directions', () => {
       'token.type.enum': (s) => { s.tk.badType = [{ want: { type: 'enum' } }]; },
       'token.readonly': (s) => { s.tk.badReadonly = [{}]; },
       'token.delivery.use-site': (s) => { s.tk.survDrops = [{ name: 'x', count: 1 }]; },
-      'token.delivery.population': (s) => { s.tk.popDrift = [{ file: 'x.rip', pinned: 10, now: 9 }]; },
+      'token.delivery.explained': (s) => { s.tk.unexplained = [{ file: 'x.rip', line: 1, character: 0, name: 'x' }]; },
+      'token.delivery.excused': (s) => { s.tk.exclusionDrift = [{ file: 'x.rip', key: '1:0:x' }]; },
     };
     expect(Object.keys(fire).sort()).toEqual(CONTRACT.map((c) => c.name).sort());
     for (const [name, seed] of Object.entries(fire)) {

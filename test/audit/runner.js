@@ -281,14 +281,24 @@ const ERRD = path.join(CORPUS, 'errors');
 //     gates divergences through the contract's `hover.ruled`, as the
 //     silence gauge does through `hover.silence`.
 const HOVERS = path.join(HERE, 'hover-pins.json');
-// The use-site POPULATION pins — per-fixture counts of positions where a
-// token is due (survival's denominator), reviewed-edit disciplined like
-// hover-pins. The population is defined by the instrument's own inputs, so
-// without a pin a regression that makes positions unclassifiable shrinks
-// the gauge silently instead of failing it. A corpus edit moves a count on
-// purpose; the paste-ready block the drift report prints is the reviewed
-// edit.
-const SURVIVAL_PINS = path.join(HERE, 'survival-pins.json');
+// The use-site EXCLUSION memberships — the reviewed tier of the survival
+// excuses (`file → { "line:character:name": reason }`). Source-anchored
+// excuses (keywords, primitive type names, specifier clauses) derive in
+// faceSurvival; this file holds the rest: positions whose excuse depends
+// on what the compiler did (a name lowered into a string, a member read
+// on an `any` receiver, a rip-native lowering with nothing to tokenize).
+// Membership is positional and reviewed like hover-pins: an occurrence
+// that leaves the population lands in `unexplained` (red) until a human
+// writes its reason here, and an entry whose position no longer needs an
+// excuse drifts (red) until removed. Between the two, the population
+// cannot shrink silently — the count pin this file replaced could say a
+// number moved; this says which position, and demands the why.
+const SURVIVAL_EXCLUSIONS = path.join(HERE, 'survival-exclusions.json');
+// Absent or unparsable file = NOTHING excused: every reviewed-tier
+// exclusion goes unexplained and the contract reds — the safe direction.
+const SURVIVAL_EXCUSED = (() => {
+  try { return JSON.parse(fs.readFileSync(SURVIVAL_EXCLUSIONS, 'utf8')); } catch { return null; }
+})();
 // The Diagnostics Audit's pinned expectations — ADDITIVE per error pair, for
 // exactly the diagnostics no honest twin line can spell (a lowering's second
 // publish). Rows the twin CAN judge stay derived; a pin that duplicates a
@@ -1308,7 +1318,79 @@ const FACE_IDENT = /^[A-Za-z_$][\w$]*$/;
 // one on a real face token (`if`/`else` on a ternary's operands), and the
 // same-bytes test in the population below is what rejects those.
 const RIP_KEYWORDS = new Set(['type', 'interface', 'class', 'enum', 'def', 'component', 'schema', 'render', 'extends', 'implements', 'import', 'export', 'namespace', 'module']);
-function faceSurvival(src, code, mappings, faceDecoded, serverTokens) {
+
+// ── the exclusion excuses: every occurrence OUTSIDE the population must
+// hold one, or the run is red (`token.delivery.explained`). The population
+// is defined by the instrument's own inputs (an exact row, a face token,
+// verbatim bytes), so a compiler regression makes positions vanish from it
+// rather than fail it; the excuses are what turn each vanishing into a
+// checkable claim. Two tiers, split by what the claim leans on:
+//
+//   SOURCE-ANCHORED (derived here, no review): word keywords and TS
+//   primitive-type names — spellings no TypeScript implementation issues
+//   an identifier token for — and import/export specifier clauses, which
+//   tsgo declines to tokenize on hand-written .ts exactly as it does
+//   here. The source cannot change under a compiler edit, so these
+//   excuses cannot absorb a regression.
+//
+//   REVIEWED MEMBERSHIP (survival-exclusions.json): everything whose
+//   excuse depends on what the COMPILER DID — a name lowered into a
+//   string (an element tag, a symbol literal), a member read whose
+//   receiver types `any`, a rip-native position with no tokenizable
+//   lowering. A predicate here would validate against the face, i.e.
+//   against the machinery under audit, and a regression that strings-out
+//   real identifiers would excuse itself. Named positions instead: a
+//   migration arrives as an entry nobody reviewed, and reds.
+//
+// The set is word-shaped things `keep()` passes (length >= 2, not in
+// RIP_KEYWORDS) that are keywords to TypeScript or rip: value keywords,
+// operators and their rip aliases (`is`/`isnt`/`and`/`or`/`not`/…),
+// statement heads, and modifier/type-operator words. A user BINDING named
+// one of these is pathological rip and not in the corpus's charter.
+const NEVER_TOKENED_WORDS = new Set([
+  'if', 'then', 'else', 'unless', 'while', 'until', 'when', 'for', 'of', 'in',
+  'is', 'isnt', 'and', 'or', 'not', 'own', 'by', 'do', 'loop', 'try', 'catch',
+  'finally', 'throw', 'switch', 'case', 'default', 'return', 'break', 'continue',
+  'new', 'typeof', 'instanceof', 'delete', 'await', 'yield', 'this', 'super',
+  'true', 'false', 'null', 'undefined', 'yes', 'no', 'on', 'off', 'async',
+  'from', 'as', 'static', 'get', 'set', 'readonly', 'declare', 'abstract',
+  'satisfies', 'keyof', 'infer', 'asserts', 'unique', 'void', 'let', 'const',
+  'var', 'function', 'debugger', 'constructor', 'out',
+]);
+// Primitive TYPE names: keywords in type position, where every corpus
+// occurrence sits (an annotation's `string` is `KeywordTypeNode`, not an
+// identifier — tsgo issues no token for it on hand-written .ts either).
+const PRIMITIVE_TYPE_WORDS = new Set([
+  'string', 'number', 'boolean', 'object', 'symbol', 'bigint', 'any', 'unknown', 'never',
+]);
+
+// Import/export SPECIFIER clauses, as source spans. Only clause forms are
+// excused — `import …` statements whole (every name in one is a specifier
+// or a binding tsgo declines to tokenize), `export { … }` / `export * …`
+// clauses through their balanced braces (they span lines in this corpus).
+// `export`-prefixed DECLARATIONS (`export add = …`) are deliberately NOT
+// spanned: their names are ordinary population members, and an excuse
+// covering them could silently absorb a dropped token.
+function specifierSpans(src) {
+  const spans = [];
+  const re = /^[ \t]*(import\b|export[ \t]*(\{|\*))/gm;
+  let m;
+  while ((m = re.exec(src))) {
+    let depth = 0;
+    let end = src.length;
+    for (let j = m.index; j < src.length; j++) {
+      const ch = src[j];
+      if (ch === '{') depth++;
+      else if (ch === '}') depth--;
+      else if (ch === '\n' && depth <= 0) { end = j; break; }
+    }
+    spans.push([m.index, end]);
+    re.lastIndex = end;
+  }
+  return spans;
+}
+
+function faceSurvival(src, code, mappings, faceDecoded, serverTokens, excused = {}) {
   const genStarts = lineStartsOf(code);
   const srcStarts = lineStartsOf(src);
   const keep = (nm) => FACE_IDENT.test(nm) && nm.length >= 2 && !RIP_KEYWORDS.has(nm);
@@ -1340,23 +1422,56 @@ function faceSurvival(src, code, mappings, faceDecoded, serverTokens) {
   // position carries one. Everything else is a position no TypeScript
   // implementation classifies — the name lowered to a string, or it is an
   // import specifier, which tsgo declines to tokenize on hand-written .ts just
-  // as it does here.
+  // as it does here. But an exclusion is never FREE: the population is
+  // defined by the instrument's own inputs, so a regression that makes a
+  // position unclassifiable shrinks the gauge instead of failing it. Every
+  // excluded occurrence must therefore hold an excuse — a source-anchored
+  // one derived here, or a reviewed entry in survival-exclusions.json —
+  // and `unexplained` collects the ones that hold neither.
+  //
+  // The lookbehind keeps the census out of numeric literals: `0xff` and
+  // `1_000_000` otherwise yield `xff` and `_000_000` — "occurrences" that
+  // are not identifiers and would each demand a nonsense excuse.
   let survived = 0;
   const missed = [];
-  for (const m of codeMask(src).matchAll(/[A-Za-z_$][\w$]*/g)) {
+  const unexplained = [];
+  let excludedCount = 0;
+  const spans = specifierSpans(src);
+  const excusedSeen = new Set();
+  const posOf = (off) => {
+    const line = src.slice(0, off).split('\n').length;
+    return { line, character: off - (src.lastIndexOf('\n', off - 1) + 1) };
+  };
+  for (const m of codeMask(src).matchAll(/(?<![\w$])[A-Za-z_$][\w$]*/g)) {
     if (!keep(m[0])) continue;
     const g = sourceOffsetToGeneratedExact(mappings, m.index, src, code);
-    if (g === null || !faceTokenAt.has(g)) continue;
     // VERBATIM, the mapping audit's own rule: the face must hold the same bytes.
     // A keyword whose lowering lands it on some other identifier (`if`/`else`
     // reaching a ternary's operands) resolves to a real face token without ever
     // being that token's name, and the server is right not to ship one. Testing
     // the bytes rejects those without a keyword denylist, which would need
     // curating forever and erodes as it ages.
-    if (code.slice(g, g + m[0].length) !== m[0]) continue;
-    if (deliveredAt.has(m.index)) survived++;
-    else missed.push({ name: m[0], offset: m.index });
+    if (g !== null && faceTokenAt.has(g) && code.slice(g, g + m[0].length) === m[0]) {
+      if (deliveredAt.has(m.index)) survived++;
+      else missed.push({ name: m[0], offset: m.index });
+      continue;
+    }
+    // Excluded — which excuse?
+    excludedCount++;
+    if (NEVER_TOKENED_WORDS.has(m[0]) || PRIMITIVE_TYPE_WORDS.has(m[0])) continue;
+    if (spans.some(([s, e]) => m.index >= s && m.index < e)) continue;
+    if (src.slice(Math.max(0, m.index - 7), m.index) === 'import.') continue; // `import.meta` — a meta-property, no symbol
+    const { line, character } = posOf(m.index);
+    const key = `${line}:${character}:${m[0]}`;
+    if (excused[key] !== undefined) { excusedSeen.add(key); continue; }
+    const nl = src.indexOf('\n', m.index);
+    unexplained.push({ line, character, name: m[0], text: src.slice(src.lastIndexOf('\n', m.index - 1) + 1, nl === -1 ? src.length : nl).trim() });
   }
+  // The other direction: a reviewed entry whose position is no longer an
+  // excluded occurrence — the position now serves, the fixture moved under
+  // it, or the name left. A stale excuse is a hole the NEXT migration can
+  // hide in, so it goes out the way a rotted hover pin does.
+  const exclusionDrift = Object.keys(excused).filter((k) => !excusedSeen.has(k));
 
   // A server token whose NAME tsgo classifies nowhere: the two oracles disagree
   // about what an identifier is, and the gauge is untrustworthy until they do.
@@ -1378,7 +1493,10 @@ function faceSurvival(src, code, mappings, faceDecoded, serverTokens) {
 
   const byName = new Map();
   for (const d of missed) byName.set(d.name, (byName.get(d.name) ?? 0) + 1);
-  return { survived, dropCount: missed.length, drops: [...byName].map(([name, count]) => ({ name, count })), unclassified };
+  return {
+    survived, dropCount: missed.length, drops: [...byName].map(([name, count]) => ({ name, count })),
+    unclassified, excludedCount, unexplained, exclusionDrift,
+  };
 }
 
 // The declaration to poll for READINESS: one whose hover cannot legitimately be
@@ -1569,7 +1687,9 @@ const MAP_RESERVED = new Set([
 // them.
 function* identReads(src) {
   const masked = codeMask(src);
-  const re = /[A-Za-z_$][\w$]*/g;
+  // The lookbehind keeps the scan out of numeric literals — `0xff` and
+  // `1_000_000` otherwise yield `xff` and `_000_000` as "reads".
+  const re = /(?<![\w$])[A-Za-z_$][\w$]*/g;
   let m;
   while ((m = re.exec(masked))) {
     if (MAP_RESERVED.has(m[0])) continue;
@@ -3624,7 +3744,7 @@ if (RUN_HOVER || RUN_TOKENS) {
       const { code } = FACES.get(f);
       // probe.tokens is the REAL server's delivered output — the survival oracle.
       const { mappings: faceMappings } = FACES.get(f);
-      survival = faceSurvival(src, code, faceMappings, dec, probe.tokens);
+      survival = faceSurvival(src, code, faceMappings, dec, probe.tokens, SURVIVAL_EXCUSED?.[f] ?? {});
     }
 
     return {
@@ -4025,15 +4145,15 @@ if (RUN_TOKENS) {
     // tokens whose name tsgo never classifies (the sanity check; must be 0, or
     // the server and face oracles disagree and the gauge is untrustworthy).
     const survDrops = []; let survSurvived = 0, survUnclassified = 0;
-    // Population integrity: each fixture's denominator (survived + dropped)
-    // against its reviewed pin. Drift in EITHER direction is red — a shrink
-    // is the regression this pin exists to catch, a growth is a corpus edit
-    // whose new count needs its review. A fixture with survival but no pin
-    // drifts too (`pinned: null`), so a new fixture cannot enter unwatched.
-    let survivalPins = null;
-    try { survivalPins = JSON.parse(fs.readFileSync(SURVIVAL_PINS, 'utf8')); } catch { /* absent: every fixture drifts */ }
-    const popDrift = [];
-    const popNow = {};
+    // Exclusion integrity, both directions: `survUnexplained` holds the
+    // occurrences outside the population that no excuse claims (a hole —
+    // the regression the excuses exist to catch), `survExcuseDrift` the
+    // reviewed entries whose position no longer needs one (a stale excuse
+    // the next migration could hide in). Fixtures the walk never probed
+    // still owe their file entries a verdict, so those drift wholesale.
+    const survUnexplained = []; const survExcuseDrift = [];
+    let survExcluded = 0;
+    const survProbed = new Set();
     let probed = 0;
     const tskip = fixtures.length - PROBES.size;
     // Each invariant reports against the rows it ACTUALLY asserted — a
@@ -4092,10 +4212,10 @@ if (RUN_TOKENS) {
         survSurvived += survival.survived;
         survUnclassified += survival.unclassified;
         for (const d of survival.drops) survDrops.push({ ...d, file: f });
-        const population = survival.survived + survival.dropCount;
-        popNow[f] = population;
-        const pinned = survivalPins?.[f] ?? null;
-        if (pinned !== population) popDrift.push({ file: f, pinned, now: population });
+        survExcluded += survival.excludedCount;
+        survProbed.add(f);
+        for (const u of survival.unexplained) survUnexplained.push({ ...u, file: f });
+        for (const key of survival.exclusionDrift) survExcuseDrift.push({ file: f, key, reason: SURVIVAL_EXCUSED?.[f]?.[key] });
       }
       for (const d of decls) {
         // `String::titleCase = …` extends an EXISTING prototype: the
@@ -4202,15 +4322,20 @@ if (RUN_TOKENS) {
       irow('use-site', dropTotal, survSurvived + dropTotal,
         dropTotal ? 'tokens TypeScript classifies at a use site that the server never ships'
                   : 'every use-site token TypeScript classifies reaches the editor', 'drop');
-      // A pin with no fixture left is stale — the fixture was deleted or
-      // renamed, and the pin must follow it out (a dangling pin is a count
-      // nobody can ever match again).
-      for (const f of Object.keys(survivalPins ?? {})) {
-        if (!(f in popNow)) popDrift.push({ file: f, pinned: survivalPins[f], now: null });
+      // A file entry for a fixture the walk never probed is stale — the
+      // fixture was deleted or renamed, and its excuses must follow it out.
+      for (const f of Object.keys(SURVIVAL_EXCUSED ?? {})) {
+        if (survProbed.has(f)) continue;
+        for (const key of Object.keys(SURVIVAL_EXCUSED[f])) {
+          survExcuseDrift.push({ file: f, key, reason: SURVIVAL_EXCUSED[f][key] });
+        }
       }
-      irow('population', popDrift.length, Object.keys(popNow).length,
-        popDrift.length ? 'fixture populations diverging from survival-pins.json'
-                        : 'every fixture\'s use-site population matches its reviewed pin', 'drift');
+      irow('explained', survUnexplained.length, survExcluded,
+        survUnexplained.length ? 'excluded use-site positions no excuse claims — holes, not a smaller gauge'
+                               : 'every excluded use-site position holds its excuse — a keyword, a specifier, or a reviewed entry', 'hole');
+      irow('excused', survExcuseDrift.length, Object.values(SURVIVAL_EXCUSED ?? {}).reduce((n, o) => n + Object.keys(o).length, 0),
+        survExcuseDrift.length ? 'reviewed exclusions whose position no longer needs one (survival-exclusions.json)'
+                               : 'every reviewed exclusion still excludes an excluded position', 'stale');
       // Silent guard (surfaces only on failure): count-based uses the server's
       // tokens directly, so `delivered ⊆ classified` holds by construction —
       // EXCEPT if this standalone FaceOracle's tsgo drifts from the server's.
@@ -4223,13 +4348,23 @@ if (RUN_TOKENS) {
     // four entirely on a run where tsgo never settled.
     flushIrows();
     if (driftNote) console.log(`    ${pad('  ↳ drift', 12)} ${red(`${driftNote} unclassified`)}   ${dim('the server shipped a name tsgo never tokenizes — the reference drifted, distrust the use-site count')}`);
-    if (popDrift.length) {
-      console.log(`\n    ${bold('Use-site populations diverging from survival-pins.json')} ${dim('(verify each shift is a reviewed corpus edit, then paste the block below)')}`);
-      for (const d of popDrift) {
-        console.log(`      ${red('✗')} ${pad(d.file, NAME_W)} ${dim('pin')} ${green(String(d.pinned ?? '(unpinned)'))} ${dim('now')} ${yellow(String(d.now ?? '(fixture gone)'))}`);
+    if (survUnexplained.length) {
+      console.log(`\n    ${bold('Excluded use-site positions no excuse claims')} ${dim('(each is a hole until reviewed — write its reason into survival-exclusions.json, or fix the compiler)')}`);
+      for (const u of survUnexplained) {
+        console.log(`      ${red('✗')} ${pad(`${u.file}:${u.line}:${u.character}`, NAME_W)} ${bold(u.name)}  ${dim(u.text.slice(0, 60))}`);
       }
-      console.log(`\n    ${dim('paste-ready survival-pins.json:')}`);
-      console.log('    ' + JSON.stringify(popNow, null, 2).split('\n').join('\n    '));
+      // Paste-ready ENTRIES, not a paste-ready file: the reason is the
+      // review, so it ships as a hole the editor forces a human to fill.
+      console.log(`\n    ${dim('entry stubs for survival-exclusions.json (fill each reason):')}`);
+      for (const u of survUnexplained) {
+        console.log(`      ${dim(`"${u.line}:${u.character}:${u.name}": "??? — why is no token due here",`)}`);
+      }
+    }
+    if (survExcuseDrift.length) {
+      console.log(`\n    ${bold('Reviewed exclusions whose position no longer needs one')} ${dim('(the position now serves, moved, or left — remove or re-measure each entry)')}`);
+      for (const d of survExcuseDrift) {
+        console.log(`      ${red('✗')} ${pad(d.file, NAME_W)} ${dim(d.key)}  ${dim(d.reason ?? '')}`);
+      }
     }
 
     show(missing, 'No token — the name gets no semantic color', () => {});
@@ -4308,7 +4443,7 @@ if (RUN_TOKENS) {
       for (const r of unasserted) out(`      ${dim('•')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text}) → ${fmt(r.got)}`)}`);
     }
 
-    tk = { probed, missing, badType, badReadonly, survSurvived, survDrops, survUnclassified, popDrift, facesAvailable };
+    tk = { probed, missing, badType, badReadonly, survSurvived, survDrops, survUnclassified, unexplained: survUnexplained, exclusionDrift: survExcuseDrift, facesAvailable };
   }
 }
 

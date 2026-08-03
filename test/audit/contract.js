@@ -240,14 +240,32 @@ export const CONTRACT = [
     // occurrence enters only where the mapping resolves exactly AND the face
     // carries a tsgo token with the same bytes — so a compiler regression that
     // makes positions unclassifiable SHRINKS the gauge instead of failing it,
-    // and `use-site` above greens on the survivors. The pin holds the
-    // denominator still: every fixture's population is a reviewed count
-    // (survival-pins.json, the hover-pins discipline), so a shrink is a red to
-    // explain, not a silence.
-    name: 'token.delivery.population', lane: 'token',
-    property: "each fixture's use-site population matches its reviewed pin — the gauge's denominator cannot silently shrink",
+    // and `use-site` above greens on the survivors. So exclusion is an
+    // obligation, not a default: every occurrence outside the population
+    // must hold an excuse — source-anchored (a keyword, a primitive type
+    // name, a specifier clause — spellings the source fixes and no
+    // compiler edit can move) or a reviewed entry in
+    // survival-exclusions.json for the exclusions only the compiler's own
+    // behavior explains (a name lowered into a string, an `any` receiver's
+    // member). A regression's vanished position holds neither and reds
+    // here, named, the run it happens.
+    name: 'token.delivery.explained', lane: 'token',
+    property: 'every use-site position is served or excused — an exclusion no excuse claims is a hole, not a smaller gauge',
     skip: (s) => !s.tk.facesAvailable,
-    red: (s) => (s.tk.popDrift ?? []).length > 0,
+    red: (s) => (s.tk.unexplained ?? []).length > 0,
+  },
+  {
+    // The reviewed tier's own hygiene, and the migration guard: excuses
+    // validate against what the compiler DID, so a regression that swells a
+    // reviewed category (stringing-out real identifiers, say) would excuse
+    // itself if membership were derived. It is pinned instead — a migrated
+    // position arrives as an entry nobody wrote and reds above; an entry
+    // whose position no longer needs excusing rots here, like a hover pin
+    // the fixture moved under.
+    name: 'token.delivery.excused', lane: 'token',
+    property: 'every reviewed exclusion still excludes an excluded position — stale excuses leave with what they excused',
+    skip: (s) => !s.tk.facesAvailable,
+    red: (s) => (s.tk.exclusionDrift ?? []).length > 0,
   },
   {
     name: 'token.readonly', lane: 'token',
