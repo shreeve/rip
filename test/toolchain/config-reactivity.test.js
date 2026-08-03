@@ -216,9 +216,13 @@ describeExtended('the config surface is reactive', () => {
       s.touch('package.json', pkg({ strict: true }));
 
       // Strict refuses the floor: the free name stops resolving, and the
-      // diagnostic points the user at @types/bun.
-      const after = s.codes(await s.diagnostics('app.rip', { timeout: 15000 }));
-      expect(after.some((c) => UNRESOLVED_BUN.includes(c))).toBe(true);
+      // diagnostic points the user at @types/bun. The re-govern lands in
+      // WAVES (the watched-file forward, an early re-pull, the
+      // regenerated floor, the real re-pull), so wait for the STATE —
+      // accepting whichever wave publishes first read a pre-re-govern
+      // snapshot as the answer on a slow machine.
+      await s.diagnosticsUntil('app.rip',
+        (d) => s.codes(d).some((c) => UNRESOLVED_BUN.includes(c)), { timeout: 15000 });
     } finally { await s.close(); }
   }, 90_000);
 
@@ -242,13 +246,20 @@ describeExtended('the config surface is reactive', () => {
 
       s.forget('pkg/mod.rip');
       s.touch('pkg/tsconfig.json', nested(true));
-      expect(s.codes(await s.diagnostics('pkg/mod.rip', { timeout: 15000 }))).toContain(2322);
+      // State-based, both flips: the re-govern lands in waves, and the
+      // first wave's publication can predate the wrapper regeneration.
+      await s.diagnosticsUntil('pkg/mod.rip',
+        (d) => s.codes(d).includes(2322), { timeout: 15000 });
 
       // And it reverses — a fix that only ever ADDED diagnostics would
-      // pass the flip above and still strand the project.
+      // pass the flip above and still strand the project. (The clean
+      // state is only reachable THROUGH the re-govern here — the doc
+      // carries 2322 until the wrapper reverts — so waiting for [] is
+      // not a vacuous absence wait.)
       s.forget('pkg/mod.rip');
       s.touch('pkg/tsconfig.json', nested(false));
-      expect(s.codes(await s.diagnostics('pkg/mod.rip', { timeout: 15000 }))).toEqual([]);
+      await s.diagnosticsUntil('pkg/mod.rip',
+        (d) => s.codes(d).length === 0, { timeout: 15000 });
     } finally { await s.close(); }
   }, 120_000);
 });

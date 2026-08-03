@@ -102,6 +102,13 @@ export const expectLinearDoubling = ({ prepare, run, sizes, bound = 3.4, exponen
     verdict = scalingVerdict({ sizes, costs, bound, exponentBound });
     return verdict.ok;
   };
-  const ok = measure() || measure();
+  // A third attempt in CI only: hosted runners suffer CPU-steal and GC
+  // pauses that can inflate even a min-of-5 at the largest size (every
+  // sample of an expensive size sits in the same noisy window — seen
+  // live: 6.95/13.01/53.19, first pair 1.87, exponent 1.47, backstop
+  // tripped by one spiked endpoint). A REAL regression is deterministic
+  // — quadratic ratios at every pair, every attempt — so retries cost
+  // the gate nothing; noise passing on the third try costs only time.
+  const ok = measure() || measure() || (process.env.CI ? measure() : false);
   expect(ok, verdict.message).toBe(true);
 };

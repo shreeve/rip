@@ -179,6 +179,35 @@ export async function openSession(files) {
       return diags.get(u) ?? [];
     },
 
+    // Wait until `pred(payload)` holds for `name`, reading every NEW
+    // publication as it lands. For callers asserting a STATE the server
+    // must reach — a config re-govern that lands in waves (watched-file
+    // forward, an early re-pull, the regenerated floor, the real
+    // re-pull) — where `diagnostics()` would accept whichever wave
+    // published first and read a pre-re-govern snapshot as the answer
+    // (a slow machine turns that race into a red). The deadline still
+    // THROWS, quoting the last payload seen: a state never reached is a
+    // failure with evidence, not a vacuous pass.
+    async diagnosticsUntil(name, pred, { timeout = 15000, every = 25 } = {}) {
+      const u = uri(name);
+      const deadline = Date.now() + timeout;
+      for (;;) {
+        const payload = diags.get(u);
+        if (payload !== undefined && (pubs.get(u) ?? 0) > 0 && pred(payload)) {
+          seen.set(u, pubs.get(u) ?? 0);
+          return payload;
+        }
+        if (Date.now() >= deadline) {
+          throw new Error(
+            `diagnosticsUntil(${name}): condition never held within ${timeout / 1000}s — ` +
+            `last publication carried codes [${(payload ?? []).map((d) => d.code).join(', ')}]` +
+            (payload === undefined ? ' (no publication at all)' : ''),
+          );
+        }
+        await sleep(every);
+      }
+    },
+
     // An EDIT to an open document (didChange). Distinct from touch(): this
     // is the user typing, and it drives the server's refresh() for that
     // document — which in turn re-pulls diagnostics for every OTHER open
