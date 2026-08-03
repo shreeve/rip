@@ -5,7 +5,7 @@
 // settled text above the incompleteness has a cover row as its only
 // mapping; file-wide suppression traded it for silence.
 import { describe, test, expect } from 'bun:test';
-import { mapTsDiagnostic } from '../src/diagnostics.js';
+import { applyRipDirectives, mapTsDiagnostic } from '../src/diagnostics.js';
 import { Mappings } from '../../../src/stores.js';
 
 // One-line texts keep positions arithmetic: offset === character.
@@ -43,4 +43,22 @@ describe('the recovered-face gate is scoped to the incompleteness', () => {
   test('a complete buffer never enters the gate: the cover row publishes', () => {
     expect(mapTsDiagnostic(good([], [cover(0)]), tsError(2))).not.toBeNull();
   });
+});
+
+test('identical mapped manifestations collapse before directive handling', () => {
+  const mapped = [
+    {
+      code: 7006, severity: 1, message: "Parameter 'item' implicitly has an 'any' type.",
+      range: { start: { line: 58, character: 10 }, end: { line: 58, character: 14 } },
+    },
+    {
+      code: 7006, severity: 1, message: "Parameter 'item' implicitly has an 'any' type.",
+      range: { start: { line: 58, character: 10 }, end: { line: 58, character: 14 } },
+    },
+    {
+      code: 7006, severity: 1, message: "Parameter 'other' implicitly has an 'any' type.",
+      range: { start: { line: 58, character: 10 }, end: { line: 58, character: 15 } },
+    },
+  ];
+  expect(applyRipDirectives({ source: '' }, mapped)).toEqual([mapped[0], mapped[2]]);
 });

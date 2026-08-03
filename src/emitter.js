@@ -2251,7 +2251,7 @@ class Emitter {
     // the face-only const (TS2451 on the component head) while the JS
     // runs fine. Loud and positioned beats a checker error blamed on
     // the wrong construct.
-    if (this.scopes[0]?.has(info.behavior)) {
+    if (this.scopes[0]?.has(info.behavior) || this.moduleBound?.has(info.behavior)) {
       throw this.positionedError(compNode,
         `emitter: the module binds '${info.behavior}', the face-only name this component's ` +
         'computed types read through — rename the binding');
@@ -4569,7 +4569,7 @@ class Emitter {
     // worst kind of divergence. Rejected loudly here, the
     // `__schema`-shadow precedent; every minted TYPE name is already
     // guarded the same way (buildSchemaTypeStory).
-    if (this.scopes[0]?.has(story.behaviorName)) {
+    if (this.scopes[0]?.has(story.behaviorName) || this.moduleBound?.has(story.behaviorName)) {
       throw this.positionedError(schemaNode,
         `emitter: the module binds '${story.behaviorName}', the face-only name this schema's ` +
         'callable types read through — rename the binding');
@@ -13625,11 +13625,7 @@ class Emitter {
   // argument, then open `.match(`. No narrowing rides here, because
   // `toMatchable` always answers a string — RULED (2026-08-03): the
   // coercion carries no multi-line guard; `^`/`$` across newlines are
-  // the regex's own /m business, exactly as in hand-written JS. (The
-  // guard's history: v3 returned null for multi-line receivers under a
-  // `=> string` annotation — a lie; a branch then threw instead —
-  // honest, but it broke every main-legal program grepping decoded
-  // file bytes. Standard semantics need no chaperone.)
+  // the regex's own /m business, exactly as in hand-written JS.
   matchReceiverClose() {
     this.b.emit(')');
     this.b.emit('.match(');
@@ -14503,6 +14499,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   for (const { name } of ambient) emitter.temps.used.add(name);
   const aliasUsed = runtimeAliasBindings(emitter, trees);
   for (const { name } of ambient) aliasUsed.add(name);
+  const bindingNames = [...aliasUsed];
   // Runtime names spelled only by generated output get one module-level
   // alias minted against every source binding. The default alias is the
   // public runtime name, preserving bytes and source-spelled references;
@@ -14752,7 +14749,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

@@ -37,7 +37,7 @@
 // `/` is in the divides-after set for the chained-`//` case: the second
 // byte of rip's floor division (and a slash right after a blanked
 // regex) is the operator continuing, never a regex opener.
-const REGEX_DIVIDES_AFTER = /[\w$)\]/]/;
+const REGEX_DIVIDES_AFTER = /[\w$)\]/'"`]/;
 const REGEX_FOLLOWS_WORD = new Set([
   'return', 'yield', 'await', 'typeof', 'instanceof', 'delete', 'void', 'new',
   'in', 'of', 'case', 'do', 'else', 'then', 'when', 'and', 'or', 'not', 'is',
@@ -73,7 +73,11 @@ export function codeMask(src) {
     const top = stack[stack.length - 1];
     if (top && top.brace === 0) {                              // inside a string LITERAL
       if (c === '\\') { out.push(' '); if (i + 1 < src.length) { out.push(' '); i++; } continue; }
-      if (src.startsWith(top.delim, i)) { stack.pop(); out.push(top.delim); i += top.delim.length - 1; continue; }
+      if (src.startsWith(top.delim, i)) {
+        stack.pop(); out.push(top.delim); i += top.delim.length - 1;
+        lastCode = top.delim[0]; lastWord = '';
+        continue;
+      }
       if (top.interp && c === '#' && src[i + 1] === '{') { top.brace = 1; out.push(' ', ' '); i++; continue; }
       out.push(c === '\n' ? '\n' : ' ');                       // literal content — blank, keep newlines
       continue;
@@ -159,4 +163,26 @@ export function codeMask(src) {
     if (!/\s/.test(c)) lastCode = c;
   }
   return out.join('');
+}
+
+// Static import and re-export clauses are source vocabulary, not use
+// sites. Token kinds distinguish them from dynamic import calls and
+// object keys; the masked text keeps strings and comments from changing
+// brace depth while preserving every token offset.
+export function specifierSpans(masked, tokens) {
+  const spans = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.kind !== 'IMPORT' && !(t.kind === 'EXPORT' && (tokens[i + 1]?.kind === '{' || tokens[i + 1]?.kind === 'EXPORT_ALL'))) continue;
+    let depth = 0;
+    let end = masked.length;
+    for (let j = t.start; j < masked.length; j++) {
+      const ch = masked[j];
+      if (ch === '{') depth++;
+      else if (ch === '}') depth--;
+      else if (ch === '\n' && depth <= 0) { end = j; break; }
+    }
+    spans.push([t.start, end]);
+  }
+  return spans;
 }

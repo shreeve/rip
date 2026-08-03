@@ -338,6 +338,7 @@ if (compiled.size > 0) {
           const r = compile(entry.source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: entry.cfg.strict, pins });
           entry.good.code = r.code;
           entry.good.mappings = r.mappings;
+          entry.good.echoSpans = r.echoSpans ?? [];
           entry.good.genLineStarts = lineStartsOf(r.code);
           fs.writeFileSync(entry.mirrorPath, r.code);
         }

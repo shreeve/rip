@@ -156,7 +156,12 @@ const symWordAt = (tokens, i, keywordOk = false) => {
 // is the repair unit — a half-typed callable member (`greet: `, the
 // keystroke run between ':' and a completed '->') records and drops,
 // and the rest of the schema keeps its face. Strict compiles pass null
-// and every rejection throws exactly as before.
+// and every rejection throws.
+export function carrySchemaRejection(err, tolerate) {
+  if (typeof err?.start !== 'number') throw err;
+  tolerate(err);
+}
+
 export function rewriteSchema(tokens, mintId, text, fail, tolerate = null) {
   // Cheap probe first: files without the word `schema` skip the walk's
   // per-token checks entirely (they still pay one indexOf).
@@ -585,7 +590,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     // `entries` mutates only on a successful parse.
     if (ctx.tolerate) {
       try { parseCallableLine(kind, first, line, entries, fail); }
-      catch (err) { ctx.tolerate(err); }
+      catch (err) { carrySchemaRejection(err, ctx.tolerate); }
       return;
     }
     parseCallableLine(kind, first, line, entries, fail);

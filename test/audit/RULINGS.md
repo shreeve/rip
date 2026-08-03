@@ -57,7 +57,7 @@ Measured 2026-07-23 over 13-components (the `ruled` gauge, hover-pins.json's `po
 
 ## Schema
 
-Measured 2026-07-23 over 14-schema's spellings (the `ruled` gauge, hover-pins.json's `positions`). The schema body is wholesale silent today — every in-body position serves null, which IS the ruled interim — so the null pins are green while the minted-kind targets stay unserved; no finding holds them, the component-name-at-use-site precedent. The declaration and companion-type rows serve truthful answers and pin as measured, the `:mixin` declaration included — its spelling is the one row here carried as a PROPOSAL rather than a settled ruling.
+Measured 2026-07-23 over 14-schema's spellings (the `ruled` gauge, hover-pins.json's `positions`). The schema body is wholesale silent today — every in-body position serves null, which IS the ruled interim — so the null pins are green while the minted-kind targets stay unserved; no finding holds them, the component-name-at-use-site precedent. The declaration and companion-type rows serve truthful answers and pin as measured, including the settled `:mixin` declaration ruling.
 
 | position | ruling (target) | interim |
 | --- | --- | --- |

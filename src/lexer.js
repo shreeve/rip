@@ -811,11 +811,10 @@ const collectTypeRun = (tokens, j, opts, fail) => {
       continue;
     }
 
-    // A word alias keeps its WORD inside a type run: the rewrite is
-    // the value sub-language's, and `is` is TypeScript's own predicate
-    // operator here. The declaration path renders these parts through
-    // tidyType, so the operator reaching them ships `v == string`.
-    parts.push(t.word ?? t.value); end = t.end; j++;
+    // `is` is TypeScript's predicate operator in its admitted type
+    // position. Every other alias keeps its token value: boolean words
+    // therefore render as TypeScript's `true`/`false` literal types.
+    parts.push(t.word === 'is' ? t.word : t.value); end = t.end; j++;
   }
 
   // A run can only end with `<` still open at end-of-input or a
@@ -3154,13 +3153,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
           // its UNARY reading and rejects at the parser.
           push('NEW_TARGET', 'new', start, pos);
         } else {
-          // The alias rewrite belongs to the VALUE sub-language. Type
-          // text is a different one — TypeScript owns `is` there, as
-          // the predicate operator — so the source word rides along
-          // and every type-text path renders it instead of the
-          // operator (collectTypeRun's parts, and the vocabulary
-          // floor). Without it the rewrite reaches the type and the
-          // shipped declaration carries `v == string`.
+          // Type text owns the `is` predicate spelling; the source word
+          // rides with rewritten tokens so collectTypeRun can preserve
+          // it only in the admitted predicate position.
           push(kind, value, start, pos, { word });
         }
       } else if ((word === 'offer' || word === 'accept') && insideComponentBody()) {

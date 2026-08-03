@@ -246,9 +246,9 @@ import { promisify } from 'node:util';
 import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.js';
 import { compile } from '../../src/compile.js';
 import { readProjectConfig } from '../../src/config.js';
-import { codeMask } from './mask.js';
+import { codeMask, specifierSpans } from './mask.js';
 import { Parser } from '../../src/parser.js';
-import { makeParserLexer, tokenize, ALIASES } from '../../src/lexer.js';
+import { makeParserLexer, tokenize, ALIASES, identifierRuns, isIdentifierName } from '../../src/lexer.js';
 import { renderTypeDecl } from '../../src/typetext.js';
 import { judge } from './contract.js';
 import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, generatedSpanToSource, offsetToPosition } from '../../packages/vscode/src/translate.js';
@@ -485,7 +485,7 @@ const AUDITS = [
          + 'row (no mechanical re-pin — the run prints paste-ready rows instead): `decls`\n'
          + 'sections hold the declaration baselines, `positions` sections the\n'
          + 'RULINGS-governed IN-BODY positions (render-DSL words, member declarations,\n'
-         + 'gate spellings) — the `ruled` gauge, red by agreement while their findings are open',
+         + 'gate spellings) — the gated `ruled` population; stale keys and an empty population fail too',
   },
   {
     key: 'token', flag: '--token', name: 'Token Audit',
@@ -1289,14 +1289,9 @@ class FaceOracle {
 }
 
 // FACE-SURVIVAL for one fixture — POSITION-KEYED, occurrence by occurrence.
-//
-// This was count-based once, when a dropped token's source position really was
-// unrecoverable: past a byte divergence every cover row collapsed both map
-// directions to its start. The emitTypeText alignment fix retired that — an
-// emitter-inserted type token no longer steals a source token's span — so an
-// exact source→face correspondence exists at every genuine identifier, and the
-// population can finally ask the sharp question: is THIS occurrence due a
-// token, and did the server ship one HERE?
+// Every genuine identifier has an exact source→face correspondence, so
+// the population asks whether this occurrence is due a token and whether
+// the server shipped one here.
 //   · faceTokenAt   FACE offsets where tsgo classified a kept identifier —
 //                    where a token is DUE. Position, never name: a name reaches
 //                    the face in many places that are not identifiers at all
@@ -1308,16 +1303,15 @@ class FaceOracle {
 //     face position holding a token, with the same bytes at both ends —
 //     the verbatim rule that rejects a lowering landing a keyword on some
 //     other identifier without a curated denylist.
-//   An occurrence in the population with no delivered token is a drop; the
-//   contract gates the per-fixture population against survival-pins.json in
-//   both directions, so growth and shrinkage each demand a reviewed pin.
+//   An occurrence in the population with no delivered token is a drop.
+//   Every excluded occurrence needs a source-derived or reviewed reason,
+//   and stale reviewed reasons fail through token.delivery.excused.
 //
 // A silent DRIFT guard rides along: `delivered ⊆ classified` holds by
 // construction (the server derives its tokens from tsgo classifying the same
 // face), so it is near-tautological — its only teeth are catching THIS
 // standalone FaceOracle's tsgo drifting from the server's. `unclassified`
 // counts violators; it surfaces only if nonzero, never as an always-ok line.
-const FACE_IDENT = /^[A-Za-z_$][\w$]*$/;
 
 // rip DECLARATION keywords whose spelling is ALSO a common property name, so a
 // source-word count cannot tell the keyword from the identifier (`type X =` vs
@@ -1384,29 +1378,10 @@ const PRIMITIVE_TYPE_WORDS = new Set([
 // `export`-prefixed DECLARATIONS (`export add = …`) are deliberately NOT
 // spanned: their names are ordinary population members, and an excuse
 // covering them could silently absorb a dropped token.
-function specifierSpans(src) {
-  const spans = [];
-  const re = /^[ \t]*(import\b|export[ \t]*(\{|\*))/gm;
-  let m;
-  while ((m = re.exec(src))) {
-    let depth = 0;
-    let end = src.length;
-    for (let j = m.index; j < src.length; j++) {
-      const ch = src[j];
-      if (ch === '{') depth++;
-      else if (ch === '}') depth--;
-      else if (ch === '\n' && depth <= 0) { end = j; break; }
-    }
-    spans.push([m.index, end]);
-    re.lastIndex = end;
-  }
-  return spans;
-}
-
-function faceSurvival(src, code, mappings, faceDecoded, serverTokens, excused = {}) {
+function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNames, excused = {}) {
   const genStarts = lineStartsOf(code);
   const srcStarts = lineStartsOf(src);
-  const keep = (nm) => FACE_IDENT.test(nm) && nm.length >= 2 && !RIP_KEYWORDS.has(nm);
+  const keep = (nm) => isIdentifierName(nm) && nm.length >= 2 && !RIP_KEYWORDS.has(nm);
 
   // WHERE tsgo classified a token, as FACE offsets. Position, never name: the
   // population below asks whether a token is due at THIS occurrence, and only a
@@ -1454,7 +1429,8 @@ function faceSurvival(src, code, mappings, faceDecoded, serverTokens, excused = 
   // span reaching past the string into real code — the excuse tier is
   // exactly where a regression would hide.
   const masked = codeMask(src);
-  const spans = specifierSpans(masked);
+  const sourceTokens = tokenize(src).tokens;
+  const spans = specifierSpans(masked, sourceTokens);
   // Spellings this fixture BINDS as values (`symbol = :alpha` is
   // ordinary corpus code): the word-set excuse tiers STAND DOWN for
   // them. Keyed by spelling alone, those tiers would auto-excuse a
@@ -1462,38 +1438,40 @@ function faceSurvival(src, code, mappings, faceDecoded, serverTokens, excused = 
   // population — the one blind spot the per-position excuse design was
   // built to close. With the spelling bound here, every occurrence of
   // it must be in the population or hold a reviewed positional excuse.
-  const boundWords = new Set(
-    [...masked.matchAll(/^[ \t]*([A-Za-z_$][\w$]*)[ \t]*(?::=|~=|=(?![=>~!]))/gm)].map((m) => m[1]),
-  );
+  const boundWords = new Set(bindingNames);
   const excusedSeen = new Set();
   const posOf = (off) => {
     const line = src.slice(0, off).split('\n').length;
     return { line, character: off - (src.lastIndexOf('\n', off - 1) + 1) };
   };
-  for (const m of masked.matchAll(/(?<![\w$])[A-Za-z_$][\w$]*/g)) {
-    if (!keep(m[0])) continue;
-    const g = sourceOffsetToGeneratedExact(mappings, m.index, src, code);
+  let occurrenceFrom = 0;
+  for (const name of identifierRuns(masked)) {
+    const index = masked.indexOf(name, occurrenceFrom);
+    occurrenceFrom = index + name.length;
+    if (!keep(name)) continue;
+    if (index > 0 && /[\d_]/.test(masked[index - 1])) continue;
+    const g = sourceOffsetToGeneratedExact(mappings, index, src, code);
     // VERBATIM, the mapping audit's own rule: the face must hold the same bytes.
     // A keyword whose lowering lands it on some other identifier (`if`/`else`
     // reaching a ternary's operands) resolves to a real face token without ever
     // being that token's name, and the server is right not to ship one. Testing
     // the bytes rejects those without a keyword denylist, which would need
     // curating forever and erodes as it ages.
-    if (g !== null && faceTokenAt.has(g) && code.slice(g, g + m[0].length) === m[0]) {
-      if (deliveredAt.has(m.index)) survived++;
-      else missed.push({ name: m[0], offset: m.index });
+    if (g !== null && faceTokenAt.has(g) && code.slice(g, g + name.length) === name) {
+      if (deliveredAt.has(index)) survived++;
+      else missed.push({ name, offset: index });
       continue;
     }
     // Excluded — which excuse?
     excludedCount++;
-    if ((NEVER_TOKENED_WORDS.has(m[0]) || PRIMITIVE_TYPE_WORDS.has(m[0])) && !boundWords.has(m[0])) continue;
-    if (spans.some(([s, e]) => m.index >= s && m.index < e)) continue;
-    if (src.slice(Math.max(0, m.index - 7), m.index) === 'import.') continue; // `import.meta` — a meta-property, no symbol
-    const { line, character } = posOf(m.index);
-    const key = `${line}:${character}:${m[0]}`;
+    if ((NEVER_TOKENED_WORDS.has(name) || PRIMITIVE_TYPE_WORDS.has(name)) && !boundWords.has(name)) continue;
+    if (spans.some(([s, e]) => index >= s && index < e)) continue;
+    if (src.slice(Math.max(0, index - 7), index) === 'import.') continue; // `import.meta` — a meta-property, no symbol
+    const { line, character } = posOf(index);
+    const key = `${line}:${character}:${name}`;
     if (excused[key] !== undefined) { excusedSeen.add(key); continue; }
-    const nl = src.indexOf('\n', m.index);
-    unexplained.push({ line, character, name: m[0], text: src.slice(src.lastIndexOf('\n', m.index - 1) + 1, nl === -1 ? src.length : nl).trim() });
+    const nl = src.indexOf('\n', index);
+    unexplained.push({ line, character, name, text: src.slice(src.lastIndexOf('\n', index - 1) + 1, nl === -1 ? src.length : nl).trim() });
   }
   // The other direction: a reviewed entry whose position is no longer an
   // excluded occurrence — the position now serves, the fixture moved under
@@ -3075,7 +3053,8 @@ if (RUN_MAP) {
   // not assumed: it rests on the compiler keeping synthetic rows zero-width on
   // the source side, and if that ever changed a flagged read could fall inside
   // an exact row and the split would silently misreport. Surface the drift.
-  if (census !== totFlag + byLuck) {
+  const decompositionDrift = census === totFlag + byLuck ? 0 : 1;
+  if (decompositionDrift) {
     console.log(`    ${red('✗')} ${dim(`census decomposition off: ${census} ≠ ${totFlag} broken + ${byLuck} by-luck — a flagged read sits in an exact row (a compiler-invariant regression, not a corpus change)`)}`);
   }
 
@@ -3239,7 +3218,7 @@ if (RUN_MAP) {
 
   // Exactly what the combined-totals line reads — no dead fields carried on the
   // signal object (perFile, byLuck, skips, walked were all retained for nothing).
-  mp = { totReads, totFlag, unplaced, mistext, missing, census, drifted: driftRows.length, badExclusions: undeclared.length + unused.length,
+  mp = { totReads, totFlag, unplaced, mistext, missing, census, decompositionDrift, drifted: driftRows.length, badExclusions: undeclared.length + unused.length,
          synthetic: rootTotal(byRootRole.synthetic), rewrite: rootTotal(byRootRole.rewrite) };
 
   // No calibration runs here, and that is deliberate: trusting the instrument is
@@ -3654,6 +3633,7 @@ const PROBES = new Map();   // file → { decls, hovers, tokens, tmap }
 // The pin file, loaded once for the probe pass, the coverage gate, and the
 // comparison alike (see HOVERS above for the shape and discipline).
 const hoverPins = fs.existsSync(HOVERS) ? JSON.parse(fs.readFileSync(HOVERS, 'utf8')) : {};
+const staleHoverPinKeys = Object.keys(hoverPins).filter((f) => !fixtures.includes(f));
 const declPinsOf = (f) => hoverPins[f]?.decls ?? [];
 const positionPinsOf = (f) => hoverPins[f]?.positions ?? [];
 let hskip = 0;
@@ -3698,8 +3678,8 @@ if (RUN_HOVER || RUN_TOKENS) {
       const full = fixPath(f);
       if (!await compiles(full)) continue;   // a fixture with no face has nothing to survive
       try {
-        const { code, mappings } = compile(fs.readFileSync(full, 'utf8'), { path: full, runtimeDelivery: 'inline', face: 'ts' });
-        FACES.set(f, { code, mappings });
+        const { code, mappings, bindingNames } = compile(fs.readFileSync(full, 'utf8'), { path: full, runtimeDelivery: 'inline', face: 'ts' });
+        FACES.set(f, { code, mappings, bindingNames });
         fs.writeFileSync(path.join(FACE_DIR, f.replace(/\.rip$/, '.rip.ts')), code);
       } catch (e) {
         // compiles() (subprocess `bin/rip --ts`) passed but the in-process
@@ -3781,8 +3761,8 @@ if (RUN_HOVER || RUN_TOKENS) {
       const dec = await faces[lane].faceTokens(f);
       const { code } = FACES.get(f);
       // probe.tokens is the REAL server's delivered output — the survival oracle.
-      const { mappings: faceMappings } = FACES.get(f);
-      survival = faceSurvival(src, code, faceMappings, dec, probe.tokens, SURVIVAL_EXCUSED?.[f] ?? {});
+      const { mappings: faceMappings, bindingNames } = FACES.get(f);
+      survival = faceSurvival(src, code, faceMappings, dec, probe.tokens, bindingNames, SURVIVAL_EXCUSED?.[f] ?? {});
     }
 
     return {
@@ -4109,6 +4089,8 @@ if (RUN_HOVER) {
     pfrac('ruled', ruledRows.length - ruledDiverging.length, ruledRows.length,
       `RULINGS-governed in-body positions serve their pin${ruledDiverging.length ? ' — gated: hover.ruled' : ''}`);
   }
+  for (const f of staleHoverPinKeys) console.log(`    ${red('✗')} ${dim(`${f}: hover-pins.json entry with no fixture`)}`);
+  if (ruledRows.length === 0) console.log(`    ${red('✗')} ${dim('ruled 0/0 — hover.ruled has no pinned positions to judge')}`);
 
   {
     const VW = Math.max(...prows.filter(Boolean).map((r) => r.text.length));
@@ -4174,6 +4156,7 @@ if (RUN_HOVER) {
   hp = {
     probed, gap: tally.gap, snapChanged: snapChanged.length, violations,
     silentLeaks: silentLeaks.length, ruledDiverging: ruledDiverging.length,
+    stalePinKeys: staleHoverPinKeys, ruledPopulation: ruledRows.length,
   };
 }
 
@@ -4440,11 +4423,9 @@ if (RUN_TOKENS) {
       console.log(`        ${dim('expected')} ${green(want)} ${dim(`— a \`${r.want.form}\` binding is ${r.want.readonly ? 'immutable' : 'WRITABLE'} in rip`)}`);
       console.log(`        ${dim('actual  ')} ${yellow(fmt(r.got))}`);
     });
-    // Use-site drops, kept apart from the regression sections above because
-    // they are a different KIND of failure (delivery, not classification) —
-    // but no longer expected: the population gates against survival-pins.json,
-    // so anything printed here is a regression the contract has already
-    // reddened. The name lists are long by nature, so each fixture's names
+    // Use-site drops stay apart from classification failures because they
+    // are a delivery failure. Anything printed here is a regression the
+    // contract has already reddened. The name lists are long by nature, so each fixture's names
     // WRAP with a hanging indent aligned under the fixture column (adapting
     // to terminal width) — every name visible by default, never soft-wrapped
     // into a jumble.
@@ -4461,10 +4442,10 @@ if (RUN_TOKENS) {
         const ranked = [...byFile].map(([file, entries]) => [file, tally(entries)]).sort((a, b) => b[1] - a[1]);
         const total = ranked.reduce((n, [, c]) => n + c, 0);
         const top = ranked.slice(0, 3).map(([f, c]) => `${f} (${c})`).join(', ');
-        out(`\n    ${bold(title)} ${dim(`— a delivery regression, gated: token.delivery.population · ${total} across ${ranked.length} file${ranked.length === 1 ? '' : 's'}, heaviest in ${top}; -v names them`)}`);
+        out(`\n    ${bold(title)} ${dim(`— a delivery regression, gated: token.delivery.use-site · ${total} across ${ranked.length} file${ranked.length === 1 ? '' : 's'}, heaviest in ${top}; -v names them`)}`);
         return;
       }
-      console.log(`\n    ${bold(title)} ${dim('— a delivery regression, gated: token.delivery.population')}`);
+      console.log(`\n    ${bold(title)} ${dim('— a delivery regression, gated: token.delivery.use-site')}`);
       for (const [file, entries] of byFile) {
         // filename stays plain (the terminal linkifies it) and full — never
         // dimmed and never stripped of `.rip`, so the click target survives.
@@ -4668,7 +4649,7 @@ if (el) totalLine('Diagnostics', `${el.asserted} asserted over ${el.files} files
   ? green('every code and position as TypeScript says')
   : red(`${el.problems.length} violation${el.problems.length === 1 ? '' : 's'}`)
     + (() => {
-        const kinds = ['shape', 'missing', 'position', 'stray', 'orphan'].map((k) => [k, el.problems.filter((p) => p.kind === k).length]).filter(([, n]) => n);
+        const kinds = ['shape', 'missing', 'position', 'stray', 'orphan', 'stale-pin'].map((k) => [k, el.problems.filter((p) => p.kind === k).length]).filter(([, n]) => n);
         // A single category is the whole count — `2 violations (2 position)`
         // splits one number into itself. Name the kind instead.
         return kinds.length === 1 ? dim(` — all ${kinds[0][0]}`) : dim(` (${kinds.map(([k, n]) => `${n} ${k}`).join(', ')})`);

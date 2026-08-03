@@ -307,7 +307,19 @@ const parserInstance = {
       if (typeof token !== "number")
         token = this.symbolIds[token] || token;
       return token;
-    }, symbol = null, tokenLoc = null, rv = {};
+    }, symbol = null, tokenLoc = null, rv = {}, expectedForState = () => {
+      expected = [];
+      const _ref5 = parseTable[state];
+      for (let p in _ref5) {
+        if (!Object.hasOwn(_ref5, p))
+          continue;
+        if (this.tokenNames[p] && +p > 2) {
+          if (!expected.includes(this.tokenNames[p]))
+            expected.push(this.tokenNames[p]);
+        }
+      }
+      return expected;
+    };
     while (!0) {
       state = stk[stk.length - 1];
       if (symbol == null)
@@ -330,7 +342,7 @@ const parserInstance = {
             return;
           parserRecorded = !0;
           got = symbol === EOF ? "end of input" : `'${this.tokenNames[symbol] || symbol}'`;
-          expected = wanted != null ? [this.tokenNames[wanted] || wanted] : [];
+          expected = wanted != null ? [this.tokenNames[wanted] || wanted] : expectedForState();
           message = `Unexpected ${got}`;
           if (expected.length)
             message += ` \u2014 expected ${expected.join(", ")}`;
@@ -363,22 +375,14 @@ const parserInstance = {
         } else if (symbol !== EOF) {
           recordFirst();
           repairBudget--;
-          repairedHere.clear();
+          if (!lexer.token?.hole)
+            repairedHere.clear();
           symbol = null;
           continue;
         }
       }
       if (action == null) {
-        expected = [];
-        const _ref5 = parseTable[state];
-        for (let p in _ref5) {
-          if (!Object.hasOwn(_ref5, p))
-            continue;
-          if (this.tokenNames[p] && +p > 2) {
-            if (!expected.includes(this.tokenNames[p]))
-              expected.push(this.tokenNames[p]);
-          }
-        }
+        expected = expectedForState();
         got = symbol === EOF ? "end of input" : `'${this.tokenNames[symbol] || symbol}'`;
         start = tokenLoc?.start ?? 0;
         end = tokenLoc?.end ?? start;

@@ -662,6 +662,11 @@ var symWordAt = (tokens, i, keywordOk = false) => {
     return w;
   return null;
 };
+function carrySchemaRejection(err, tolerate) {
+  if (typeof err?.start !== "number")
+    throw err;
+  tolerate(err);
+}
 function rewriteSchema(tokens, mintId, text, fail, tolerate = null) {
   if (text.indexOf("schema") === -1)
     return;
@@ -1058,7 +1063,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
       try {
         parseCallableLine(kind, first, line, entries, fail);
       } catch (err) {
-        ctx.tolerate(err);
+        carrySchemaRejection(err, ctx.tolerate);
       }
       return;
     }
@@ -4101,7 +4106,7 @@ var collectTypeRun = (tokens, j, opts, fail) => {
         j++;
         continue;
       }
-      parts.push(t.word ?? t.value);
+      parts.push(t.word === "is" ? t.word : t.value);
       end = t.end;
       j++;
     }
@@ -5165,6 +5170,9 @@ function isIdentifierName(value) {
   return true;
 }
 var IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, "g");
+function identifierRuns(text) {
+  return text.match(IDENT_RUN_RE) ?? [];
+}
 function symbolNameEnd(text, start) {
   let end = start;
   while (end < text.length && IDENT_PART.test(text[end]))
@@ -7809,7 +7817,19 @@ var parserInstance = {
       if (typeof token !== "number")
         token = this.symbolIds[token] || token;
       return token;
-    }, symbol = null, tokenLoc = null, rv = {};
+    }, symbol = null, tokenLoc = null, rv = {}, expectedForState = () => {
+      expected = [];
+      const _ref5 = parseTable[state];
+      for (let p in _ref5) {
+        if (!Object.hasOwn(_ref5, p))
+          continue;
+        if (this.tokenNames[p] && +p > 2) {
+          if (!expected.includes(this.tokenNames[p]))
+            expected.push(this.tokenNames[p]);
+        }
+      }
+      return expected;
+    };
     while (true) {
       state = stk[stk.length - 1];
       if (symbol == null)
@@ -7832,7 +7852,7 @@ var parserInstance = {
             return;
           parserRecorded = true;
           got = symbol === EOF ? "end of input" : `'${this.tokenNames[symbol] || symbol}'`;
-          expected = wanted != null ? [this.tokenNames[wanted] || wanted] : [];
+          expected = wanted != null ? [this.tokenNames[wanted] || wanted] : expectedForState();
           message = `Unexpected ${got}`;
           if (expected.length)
             message += ` — expected ${expected.join(", ")}`;
@@ -7865,22 +7885,14 @@ var parserInstance = {
         } else if (symbol !== EOF) {
           recordFirst();
           repairBudget--;
-          repairedHere.clear();
+          if (!lexer.token?.hole)
+            repairedHere.clear();
           symbol = null;
           continue;
         }
       }
       if (action == null) {
-        expected = [];
-        const _ref5 = parseTable[state];
-        for (let p in _ref5) {
-          if (!Object.hasOwn(_ref5, p))
-            continue;
-          if (this.tokenNames[p] && +p > 2) {
-            if (!expected.includes(this.tokenNames[p]))
-              expected.push(this.tokenNames[p]);
-          }
-        }
+        expected = expectedForState();
         got = symbol === EOF ? "end of input" : `'${this.tokenNames[symbol] || symbol}'`;
         start = tokenLoc?.start ?? 0;
         end = tokenLoc?.end ?? start;
@@ -8490,6 +8502,12 @@ var normalizeTypeText = (raw) => {
       while (i < raw.length && raw[i] !== `
 `)
         i++;
+      continue;
+    }
+    const word = identifierRuns(raw.slice(i))[0];
+    if (word && raw.startsWith(word, i)) {
+      out += { yes: "true", on: "true", no: "false", off: "false" }[word] ?? word;
+      i += word.length;
       continue;
     }
     if (ch === "{") {
@@ -10678,7 +10696,7 @@ class Emitter {
     const bodies = info.computedBodies ?? [];
     if (info.behavior === null || bodies.length === 0)
       return;
-    if (this.scopes[0]?.has(info.behavior)) {
+    if (this.scopes[0]?.has(info.behavior) || this.moduleBound?.has(info.behavior)) {
       throw this.positionedError(compNode, `emitter: the module binds '${info.behavior}', the face-only name this component's ` + "computed types read through — rename the binding");
     }
     const selfType = `${name}${anyArgsOf(typeParams)}`;
@@ -12238,7 +12256,7 @@ class Emitter {
     const text = behaviorObjectText(schemaNode[1], story.decl.name, fns, story.thisTypes);
     if (text === null)
       return;
-    if (this.scopes[0]?.has(story.behaviorName)) {
+    if (this.scopes[0]?.has(story.behaviorName) || this.moduleBound?.has(story.behaviorName)) {
       throw this.positionedError(schemaNode, `emitter: the module binds '${story.behaviorName}', the face-only name this schema's ` + "callable types read through — rename the binding");
     }
     const id = this.stores.idOf(schemaNode);
@@ -20088,6 +20106,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   const aliasUsed = runtimeAliasBindings(emitter, trees);
   for (const { name } of ambient)
     aliasUsed.add(name);
+  const bindingNames = [...aliasUsed];
   for (const rt of RUNTIME_TABLE) {
     for (const name of rt.generatedNames ?? []) {
       emitter.runtimeAliases.set(name, Emitter.mintName(name, aliasUsed));
@@ -20281,7 +20300,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -20869,6 +20888,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     memberDecls: emitted.memberDecls ?? [],
     runtimes: emitted.runtimes,
     bindings: emitted.bindings,
+    bindingNames: emitted.bindingNames,
     replResultName: emitted.replResultName,
     replImportResolver: emitted.replImportResolver,
     tsRegions: emitted.tsRegions,

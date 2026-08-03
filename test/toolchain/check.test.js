@@ -447,6 +447,10 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   test('one error in a twice-emitted body publishes once — the echo copy is silent', () => {
     const dir = workspace({
       'comp.rip': [
+        "items = ['a', 'b']",
+        'def useItems()',
+        "  items.join('-')",
+        '',
         'Badge = component',
         "  x := 'a'",
         '  sum ~= ->',
@@ -467,12 +471,30 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // The component error reports from the REAL _init copy, exactly
       // mapped at the offending line — and only from it.
       expect(diags.filter((d) => d.file === 'comp.rip')
-        .map((d) => [d.code, d.line, d.column, d.endColumn])).toEqual([[2322, 5, 5, 10]]);
+        .map((d) => [d.code, d.line, d.column, d.endColumn])).toEqual([[2322, 9, 5, 10]]);
       // The schema callable's real (descriptor) copy carries no interior
       // marks either, so its one report cover-maps onto the head — but
       // it is ONE report, not the pre-echo pair.
       expect(diags.filter((d) => d.file === 'sch.rip')
         .map((d) => [d.code, d.line])).toEqual([[2363, 1]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('repeated face manifestations publish one identical source diagnostic', () => {
+    const dir = workspace({
+      'list.rip': [
+        'List = component',
+        '  render',
+        '    ul',
+        '      for item in missingList',
+        '        li item',
+      ].join('\n') + '\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.map((d) => [d.code, d.line, d.column, d.message])).toEqual([
+        [2304, 4, 19, "Cannot find name 'missingList'."],
+      ]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 

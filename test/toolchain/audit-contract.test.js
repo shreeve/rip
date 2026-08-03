@@ -28,11 +28,11 @@ const withRed = (name, why) => withoutReds().map((c) => (c.name === name ? { ...
 // one case would leak into the next.
 const cleanStates = () => ({
   gr: { unallocated: 0, badExclusions: 0, negatives: { kindBad: 0, vocabUnfalsified: 0, claimsBroken: 0, cellsMissing: 0, staleMints: 0, headsUnseen: 0, badSpellingExclusions: 0, claimsBadParks: 0, splitDividers: 0 } },
-  mp: { missing: 0, drifted: 0, census: 0, badExclusions: 0 },
+  mp: { missing: 0, drifted: 0, census: 0, decompositionDrift: 0, badExclusions: 0 },
   fails: 0,
   el: { problems: [] },
-  hp: { gap: 0, snapChanged: 0, violations: [], silentLeaks: 0, ruledDiverging: 0 },
-  tk: { missing: [], badType: [], badReadonly: [], survDrops: [], unexplained: [], exclusionDrift: [], facesAvailable: true },
+  hp: { gap: 0, snapChanged: 0, violations: [], silentLeaks: 0, ruledDiverging: 0, stalePinKeys: [], ruledPopulation: 1 },
+  tk: { missing: [], badType: [], badReadonly: [], survDrops: [], survUnclassified: 0, unexplained: [], exclusionDrift: [], facesAvailable: true },
 });
 const allRan = () => true;
 
@@ -97,6 +97,7 @@ describe('the audit contract judges in both directions', () => {
       'mapping.identity': (s) => { s.mp.drifted = 1; },
       'mapping.spans': (s) => { s.mp.missing = 1; },
       'mapping.census': (s) => { s.mp.census = 1; },
+      'mapping.decomposition': (s) => { s.mp.decompositionDrift = 1; },
       'mapping.exclusions': (s) => { s.mp.badExclusions = 1; },
       'type.dimensions': (s) => { s.fails = 1; },
       'diagnostics.codes': (s) => { s.el.problems = [{ kind: 'missing' }]; },
@@ -106,11 +107,14 @@ describe('the audit contract judges in both directions', () => {
       'hover.parity': (s) => { s.hp.gap = 1; },
       'hover.silence': (s) => { s.hp.silentLeaks = 1; },
       'hover.ruled': (s) => { s.hp.ruledDiverging = 1; },
+      'hover.pins': (s) => { s.hp.stalePinKeys = ['gone.rip']; },
+      'hover.ruled.population': (s) => { s.hp.ruledPopulation = 0; },
       'token.delivery': (s) => { s.tk.missing = [{}]; },
       'token.type': (s) => { s.tk.badType = [{ want: { type: 'variable' } }]; },
       'token.type.enum': (s) => { s.tk.badType = [{ want: { type: 'enum' } }]; },
       'token.readonly': (s) => { s.tk.badReadonly = [{}]; },
       'token.delivery.use-site': (s) => { s.tk.survDrops = [{ name: 'x', count: 1 }]; },
+      'token.delivery.oracle': (s) => { s.tk.survUnclassified = 1; },
       'token.delivery.explained': (s) => { s.tk.unexplained = [{ file: 'x.rip', line: 1, character: 0, name: 'x' }]; },
       'token.delivery.excused': (s) => { s.tk.exclusionDrift = [{ file: 'x.rip', key: '1:0:x' }]; },
     };

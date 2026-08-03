@@ -1283,6 +1283,11 @@ class Generator
     symbol = null
     tokenLoc = null
     rv = {}
+    expectedForState = =>
+      expected = []
+      for own p of parseTable[state] when @tokenNames[p] and +p > 2
+        expected.push @tokenNames[p] unless expected.includes @tokenNames[p]
+      expected
 
     loop
       state = stk[stk.length - 1]
@@ -1327,7 +1332,7 @@ class Generator
           return if parserRecorded
           parserRecorded = true
           got = if symbol is EOF then 'end of input' else "'#{@tokenNames[symbol] or symbol}'"
-          expected = if wanted? then [@tokenNames[wanted] or wanted] else []
+          expected = if wanted? then [@tokenNames[wanted] or wanted] else expectedForState()
           message = "Unexpected #{got}"
           message += " — expected #{expected.join(', ')}" if expected.length
           diagnostics.push {message, start: atPos, end: tokenLoc?.end ?? atPos, expected, got}
@@ -1382,7 +1387,7 @@ class Generator
           # act on end of input is the genuine dead end below.
           recordFirst()
           repairBudget--
-          repairedHere.clear()
+          repairedHere.clear() unless lexer.token?.hole
           symbol = null
           continue
 
@@ -1391,9 +1396,7 @@ class Generator
         # expectations. The list dedups: a display override can render
         # a minted kind as a glyph another terminal already spells
         # (OPT_MARKER and the existence `?` both display as `?`).
-        expected = []
-        for own p of parseTable[state] when @tokenNames[p] and +p > 2
-          expected.push @tokenNames[p] unless expected.includes @tokenNames[p]
+        expected = expectedForState()
         got = if symbol is EOF then 'end of input' else "'#{@tokenNames[symbol] or symbol}'"
         start = tokenLoc?.start ?? 0
         end   = tokenLoc?.end ?? start

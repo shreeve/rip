@@ -241,6 +241,10 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // class / def / enum — the REPL's `.vars` data and the ambient
     // seed for its next line. Unconditional on every compile.
     bindings: emitted.bindings,
+    // Every binding in every emitted scope, including parameters and
+    // destructuring names. Audit populations use this inventory to make
+    // spelling-based exclusions stand down without re-parsing bindings.
+    bindingNames: emitted.bindingNames,
     // repl mode's minted result slot — the name the final expression,
     // assignment, or declaration echo landed in; null when nothing
     // captured (or when repl mode is off).
