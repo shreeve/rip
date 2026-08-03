@@ -22,7 +22,7 @@ throw new Error('@rip-lang/print is a CLI, not a library; run print.rip (rip-pri
 VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
 
 # ==============================================================================
-# Markdown rendering (single-file mode; matches static.rip styling exactly)
+# Markdown rendering (single-file mode; shared with vscode/src/printer.js)
 # ==============================================================================
 
 def escMdHtml(s)
@@ -34,7 +34,7 @@ def renderSingleMarkdown(filePath, forceDark = false)
   name = escMdHtml basename(filePath)
 
   # Force-dark override: apply dark values at :root and drop the media query.
-  # Otherwise: use the exact styling from static.rip (light + prefers-color-scheme).
+  # Otherwise: use the shared light + prefers-color-scheme styling.
   rootVars = if forceDark
     ':root { --bg: #0a0a0c; --text: #e4e4e7; --muted: #71717a; --link: #60a5fa; --code-bg: #1e1e22; --border: #2a2a2e; --pre-bg: #161618; }'
   else

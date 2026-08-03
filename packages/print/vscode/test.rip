@@ -145,7 +145,7 @@ test '<script type="text/rip"> inside HTML re-highlights as Rip', ->
 
 console.log "\nMarkdown mode"
 
-test "renders a markdown document with the static.rip styling", ->
+test "renders a markdown document with the shared print styling", ->
   html = generateMarkdownHtml 'notes.md', '# Title\n\nSome *markdown* with `code`.\n'
   ok html.includes('<title>notes.md</title>')
   ok html.includes('<body><h1>Title</h1>')
