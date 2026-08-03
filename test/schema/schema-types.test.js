@@ -347,6 +347,23 @@ describe('schema type-name collisions reject loudly on the typed artifacts', () 
     expect(() => compile('type Extra = {k: number}\nS = schema :shape\n  a! string').declarations).not.toThrow();
   });
 
+  // `${name}Ensure` joined the reserved family (`${name}Data`,
+  // `${name}Create`, `${name}Query`) when @ensure grew its own alias —
+  // a deliberate per-schema namespace reservation, breaking for a
+  // main-era `type OrderEnsure`. The collision positions on the USER
+  // declaration — the offender the user can rename — matching the
+  // intrinsic-collision path, not on the schema that innocently emits.
+  test('the Ensure alias reservation rejects positioned on the user declaration', () => {
+    const src = 'type OrderEnsure = { note: string }\nOrder = schema :model\n  total! number\n  @ensure "positive", (m) -> m.total > 0\n';
+    let caught = null;
+    try { compile(src, { runtimeDelivery: 'none', face: 'ts' }); } catch (e) { caught = e; }
+    expect(caught).toBeInstanceOf(CompileError);
+    expect(caught.message).toMatch(/emits the type name 'OrderEnsure', which collides with the type declaration 'OrderEnsure'/);
+    expect(caught.line).toBe(1); // the user's line, not the schema's
+    // Without @ensure entries no alias emits and the name is free.
+    expect(() => compile('type OrderEnsure = { note: string }\nOrder = schema :model\n  total! number\n').declarations).not.toThrow();
+  });
+
   // The USER-vs-INTRINSIC direction:
   // when the story emits the intrinsic block, a user declaration
   // naming an EMITTED intrinsic would duplicate (aliases) or silently

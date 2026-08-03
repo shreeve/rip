@@ -66,6 +66,13 @@ export class CodeBuilder {
     // the strip gate's transform. JS-mode emission records none.
     this.tsRegions = [];
     this.tsDepth = 0;
+    // Face-ECHO generated spans: TS-only text that re-carries a body
+    // the real lowering already emitted (the behavior objects the
+    // companion types read through). A type error inside an echo is a
+    // second report of an error the real copy publishes at a better
+    // position — the diagnostic mapper consults these spans to keep
+    // one claim from squiggling twice.
+    this.echoSpans = [];
   }
 
   // Emit fn()'s output as a TS-ONLY region. Mapping rows recorded
@@ -80,6 +87,16 @@ export class CodeBuilder {
     if (this.tsDepth === 0 && this.length > start) {
       this.tsRegions.push([start, this.length]);
     }
+  }
+
+  // Emit fn()'s output as a face ECHO (see echoSpans). Orthogonal to
+  // tsOnly on purpose — the echo property is about diagnostics, the
+  // region property about stripping — though every current echo is
+  // also TS-only.
+  echo(fn) {
+    const start = this.length;
+    fn();
+    if (this.length > start) this.echoSpans.push([start, this.length]);
   }
 
   get currentMark() {

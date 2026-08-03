@@ -525,7 +525,7 @@ function buildSchemaTypeStory(programSexpr) {
       owners.set(t, `schema '${d.name}'`);
       const user = userTypes.get(t);
       if (user !== undefined) {
-        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which collides with ${user.what} — ` + `the schema's types and the user declaration would merge or duplicate; rename one`, d.descriptor.start ?? null);
+        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which collides with ${user.what} — ` + `the schema's types and the user declaration would merge or duplicate; rename one`, null, user.node);
       }
     }
     const defaultTypes = new Map;
@@ -662,11 +662,11 @@ var symWordAt = (tokens, i, keywordOk = false) => {
     return w;
   return null;
 };
-function rewriteSchema(tokens, mintId, text, fail) {
+function rewriteSchema(tokens, mintId, text, fail, tolerate = null) {
   if (text.indexOf("schema") === -1)
     return;
   const out = [];
-  const config = { defaultMaxString: null };
+  const config = { defaultMaxString: null, tolerate };
   let depth = 0;
   let i = 0;
   while (i < tokens.length) {
@@ -876,7 +876,8 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
   ] : [tk]);
   const descriptor = parseSchemaBody(kind, kindTok, bodyTokens, {
     schemaStart: schemaTok.start,
-    defaultMaxString: config.defaultMaxString
+    defaultMaxString: config.defaultMaxString,
+    tolerate: config.tolerate ?? null
   }, fail);
   if (adapterTokens)
     descriptor.adapterTokens = adapterTokens;
@@ -1053,6 +1054,14 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     return;
   }
   if (first.kind === "PROPERTY") {
+    if (ctx.tolerate) {
+      try {
+        parseCallableLine(kind, first, line, entries, fail);
+      } catch (err) {
+        ctx.tolerate(err);
+      }
+      return;
+    }
     parseCallableLine(kind, first, line, entries, fail);
     return;
   }
@@ -3646,6 +3655,7 @@ var TYPE_VOCAB = new Set([
   "BOOL",
   "NULL",
   "UNDEFINED",
+  "THIS",
   ".",
   ",",
   ":",
@@ -3679,6 +3689,7 @@ var TYPE_ATOM_ENDERS = new Set([
   "BOOL",
   "NULL",
   "UNDEFINED",
+  "THIS",
   ")",
   "PARAM_END",
   "]",
@@ -3752,7 +3763,7 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = false;
       continue;
     }
-    if (t.word === "is" && atomEnd && j - 2 >= from && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY") && (tokens[j - 2].kind === "=>" || tokens[j - 2].value === "asserts" || tokens[j - 2].kind === ":" && tokens[j - 3]?.kind === "CALL_END")) {
+    if (t.word === "is" && atomEnd && j - 2 >= from && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY" || tokens[j - 1].kind === "THIS") && (tokens[j - 2].kind === "=>" || tokens[j - 2].value === "asserts" || tokens[j - 2].kind === ":" && tokens[j - 3]?.kind === "CALL_END")) {
       atomEnd = false;
       continue;
     }
@@ -3771,6 +3782,10 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     }
     if ((kd === "-" || kd === "+") && tokens[j + 1]?.value === "readonly" && (tokens[j + 2]?.kind === "[" || tokens[j + 2]?.kind === "INDEX_START") && enclosing() === "{" && memberRowStart(tokens, j, from)) {
       atomEnd = false;
+      continue;
+    }
+    if ((kd === "-" || kd === "+") && tokens[j + 1]?.value === "?" && tokens[j + 2]?.kind === ":" && enclosing() === "{" && (tokens[j - 1]?.kind === "]" || tokens[j - 1]?.kind === "INDEX_END")) {
+      atomEnd = true;
       continue;
     }
     if (kd === "=" && angle > 0) {
@@ -5996,6 +6011,12 @@ ${baseline}`).join(`
           pos++;
           continue;
         }
+        const beforePrev = tokens[tokens.length - 2] ?? null;
+        if (prev && (prev.kind === "-" || prev.kind === "+") && !prev.spaced && (beforePrev?.kind === "]" || beforePrev?.kind === "INDEX_END") && text[pos + 1] === ":") {
+          push("?", "?", pos, pos + 1);
+          pos++;
+          continue;
+        }
         fail("unspaced '?' needs a value before it (postfix existence) — write ' ? ' for a ternary", pos);
       }
       scanTernary++;
@@ -6183,7 +6204,13 @@ ${baseline}`).join(`
   tagParams(tokens);
   tagDynamicKeys(tokens);
   tagVoidMarkers(tokens);
-  rewriteSchema(tokens, mintId, text, fail);
+  rewriteSchema(tokens, mintId, text, fail, tolerant ? (err) => lexDiagnostics.push({
+    message: err.reason ?? String(err.message),
+    start: err.start ?? 0,
+    end: err.end ?? err.start ?? 0,
+    expected: [],
+    got: ""
+  }) : null);
   rewriteTypes(tokens, mintId, text, fail);
   for (const t of tokens) {
     if (t.kind === "RESERVED") {
@@ -7765,7 +7792,7 @@ var parserInstance = {
       while (inputEnd > 0 && (input[inputEnd - 1] === `
 ` || input[inputEnd - 1] === "\r"))
         inputEnd--;
-    let repairedHere = new Set, nodes = [], roles = [], primitives = [], nodeIds = new WeakMap, nextNodeId = 1, lexer = Object.create(this.lexer), sharedState = { ctx: {} };
+    let repairedHere = new Set, parserRecorded = false, nodes = [], roles = [], primitives = [], nodeIds = new WeakMap, nextNodeId = 1, lexer = Object.create(this.lexer), sharedState = { ctx: {} };
     const _ref4 = this.ctx;
     for (let k in _ref4) {
       if (!Object.hasOwn(_ref4, k))
@@ -7801,8 +7828,9 @@ var parserInstance = {
       if (action == null && tolerant && repairBudget > 0) {
         atPos = symbol === EOF ? inputEnd : tokenLoc?.start ?? inputEnd;
         recordFirst = (wanted = null) => {
-          if (diagnostics.length !== 0)
+          if (parserRecorded)
             return;
+          parserRecorded = true;
           got = symbol === EOF ? "end of input" : `'${this.tokenNames[symbol] || symbol}'`;
           expected = wanted != null ? [this.tokenNames[wanted] || wanted] : [];
           message = `Unexpected ${got}`;
@@ -7810,13 +7838,6 @@ var parserInstance = {
             message += ` — expected ${expected.join(", ")}`;
           return diagnostics.push({ message, start: atPos, end: tokenLoc?.end ?? atPos, expected, got });
         };
-        if (symbol === this.symbolIds.INDENT || symbol === this.symbolIds.OUTDENT) {
-          recordFirst();
-          repairBudget--;
-          repairedHere.clear();
-          symbol = null;
-          continue;
-        }
         allowedAll = symbol === EOF || lexer.token?.generated;
         guardKey = function(id) {
           return `${stk.length}:${state}:${id}`;
@@ -8201,6 +8222,7 @@ class CodeBuilder {
     this.exactRanges = new Map;
     this.tsRegions = [];
     this.tsDepth = 0;
+    this.echoSpans = [];
   }
   tsOnly(fn) {
     const start = this.length;
@@ -8210,6 +8232,12 @@ class CodeBuilder {
     if (this.tsDepth === 0 && this.length > start) {
       this.tsRegions.push([start, this.length]);
     }
+  }
+  echo(fn) {
+    const start = this.length;
+    fn();
+    if (this.length > start)
+      this.echoSpans.push([start, this.length]);
   }
   get currentMark() {
     return this.markStack[this.markStack.length - 1] ?? null;
@@ -10650,8 +10678,11 @@ class Emitter {
     const bodies = info.computedBodies ?? [];
     if (info.behavior === null || bodies.length === 0)
       return;
+    if (this.scopes[0]?.has(info.behavior)) {
+      throw this.positionedError(compNode, `emitter: the module binds '${info.behavior}', the face-only name this component's ` + "computed types read through — rename the binding");
+    }
     const selfType = `${name}${anyArgsOf(typeParams)}`;
-    this.b.tsOnly(() => {
+    this.b.tsOnly(() => this.b.echo(() => {
       this.b.emit(`
 ` + pad);
       this.mark(compNode, "$self", () => {
@@ -10661,7 +10692,7 @@ class Emitter {
         });
         this.b.emit(" };");
       });
-    });
+    }));
   }
   static TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
   collectTsDirectives(sexpr, trivia, source) {
@@ -12207,15 +12238,18 @@ class Emitter {
     const text = behaviorObjectText(schemaNode[1], story.decl.name, fns, story.thisTypes);
     if (text === null)
       return;
+    if (this.scopes[0]?.has(story.behaviorName)) {
+      throw this.positionedError(schemaNode, `emitter: the module binds '${story.behaviorName}', the face-only name this schema's ` + "callable types read through — rename the binding");
+    }
     const id = this.stores.idOf(schemaNode);
-    this.b.tsOnly(() => {
+    this.b.tsOnly(() => this.b.echo(() => {
       this.b.emit(`
 ` + "  ".repeat(this.ind));
       if (id !== null)
         this.b.mark(id, "$self", () => this.b.emit(text));
       else
         this.b.emit(text);
-    });
+    }));
   }
   replSlot() {
     if (this.replResultName === null) {
@@ -19370,16 +19404,15 @@ ${"  ".repeat(ind)}`);
       this.b.emit("])");
     });
   }
-  matchReceiverClose(multiline) {
-    this.b.emit(multiline ? ", true)" : ")");
+  matchReceiverClose() {
+    this.b.emit(")");
     this.b.emit(".match(");
   }
   regexIndex(node, obj, regex, capture) {
-    const multiline = /^\/(?:[^\\/]|\\.)*\/[a-z]*m[a-z]*$/.test(regex);
     this.mark(node, "$self", () => {
       this.b.emit(`((_ = ${this.runtimeName("toMatchable")}(`);
       this.mark(node, "object", () => this.expr(obj));
-      this.matchReceiverClose(multiline);
+      this.matchReceiverClose();
       this.mark(node, "key", () => this.b.emit(regex));
       this.b.emit(")) && _[");
       if (capture === null)
@@ -19415,11 +19448,10 @@ ${"  ".repeat(ind)}`);
       throw this.positionedError(node, "emitter: `=~` does not chain — `a =~ b =~ c` would match the first match RESULT against the second pattern (parenthesize: `(a =~ b) =~ c`, or split the matches)");
     }
     const r = node[2];
-    const multiline = typeof r === "string" && /^\/(?:[^\\/]|\\.)*\/[a-z]*m[a-z]*$/.test(r);
     this.mark(node, "$self", () => {
       this.b.emit(`(_ = ${this.runtimeName("toMatchable")}(`);
       this.mark(node, "left", () => this.expr(node[1]));
-      this.matchReceiverClose(multiline);
+      this.matchReceiverClose();
       this.mark(node, "right", () => this.expr(r));
       this.b.emit("))");
     });
@@ -19679,7 +19711,7 @@ var RUNTIME_TABLE = [
       raise: "(a: any, b?: any) => never",
       rand: "(a?: number, b?: number) => number",
       sleep: "(ms: number) => Promise<void>",
-      toMatchable: "(v: any, allowNewlines?: boolean) => string",
+      toMatchable: "(v: any) => string",
       todo: "(msg?: string) => never",
       warn: "(...args: any[]) => void",
       zip: "(...arrays: any[][]) => any[][]"
@@ -20249,7 +20281,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -20840,6 +20872,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     replResultName: emitted.replResultName,
     replImportResolver: emitted.replImportResolver,
     tsRegions: emitted.tsRegions,
+    echoSpans: emitted.echoSpans ?? [],
     pinnables: emitted.pinnables,
     mutables: emitted.mutables,
     enums: emitted.enums,
@@ -21007,34 +21040,28 @@ var todo = (msg) => {
 };
 var warn = console.warn;
 var zip = (...a) => a[0].map((_, i) => a.map((b) => b[i]));
-var toMatchable = (v, allowNewlines) => {
-  const s = (() => {
-    if (typeof v === "string")
-      return v;
-    if (v == null)
-      return "";
-    if (typeof v === "number" || typeof v === "bigint" || typeof v === "boolean")
-      return String(v);
-    if (typeof v === "symbol")
-      return v.description || "";
-    if (v instanceof Uint8Array || v instanceof ArrayBuffer) {
-      return new TextDecoder().decode(v instanceof Uint8Array ? v : new Uint8Array(v));
-    }
-    if (Array.isArray(v))
-      return v.join(",");
-    if (typeof v.toString === "function" && v.toString !== Object.prototype.toString) {
-      try {
-        return v.toString();
-      } catch {
-        return "";
-      }
-    }
+var toMatchable = (v) => {
+  if (typeof v === "string")
+    return v;
+  if (v == null)
     return "";
-  })();
-  if (!allowNewlines && /[\n\r]/.test(s)) {
-    throw new TypeError("match receiver spans lines — add the /m flag to match across them");
+  if (typeof v === "number" || typeof v === "bigint" || typeof v === "boolean")
+    return String(v);
+  if (typeof v === "symbol")
+    return v.description || "";
+  if (v instanceof Uint8Array || v instanceof ArrayBuffer) {
+    return new TextDecoder().decode(v instanceof Uint8Array ? v : new Uint8Array(v));
   }
-  return s;
+  if (Array.isArray(v))
+    return v.join(",");
+  if (typeof v.toString === "function" && v.toString !== Object.prototype.toString) {
+    try {
+      return v.toString();
+    } catch {
+      return "";
+    }
+  }
+  return "";
 };
 
 // src/runtime/schema.js

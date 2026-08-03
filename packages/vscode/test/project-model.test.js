@@ -422,6 +422,92 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
     });
   }, 30000);
 
+  // Wrappers are per-SESSION memory over per-WORKSPACE disk, and the two
+  // must reconverge on a warm start: a nested project whose faces arrive
+  // from CACHE never takes the compile road where the wrapper was
+  // ensured, so wrapperDirs stayed empty, the root config regenerated
+  // without its exclusions (two owners for every nested face), and a
+  // mid-session edit to the nested tsconfig matched nothing in the
+  // watcher. Disk truth is the assertion: the exclusion and the wrapper
+  // must survive the cached road exactly as the compiled road left them.
+  test('warm restart: a nested project\'s wrapper and the root exclusion survive a cached closure', async () => {
+    const NESTED_APP = 'import { answer } from "./pkg/util.rip"\nk = answer\nconsole.log k\n';
+    const ws = makeWorkspace({
+      'pkg/tsconfig.json': JSON.stringify({ compilerOptions: { strict: true } }, null, 2) + '\n',
+      'pkg/util.rip': UTIL,
+    });
+    const wrapperAt = path.join(ws, '.rip', 'editor', 'pkg', 'tsconfig.json');
+    const rootExclude = () => JSON.parse(fs.readFileSync(path.join(ws, '.rip', 'editor', 'tsconfig.json'), 'utf8')).exclude ?? [];
+    try {
+      await inSession(ws, async (api) => {
+        await api.open('app.rip', NESTED_APP);
+        await api.poll(() => fs.existsSync(wrapperAt), 'wrapper written on the compile road');
+        expect(rootExclude()).toContain('pkg/**');
+      });
+      // The cache is warm now. The second session reaches every nested
+      // face by cache-hit — and must land on the same disk truth.
+      await inSession(ws, async (api) => {
+        await api.open('app.rip', NESTED_APP);
+        await api.sleep(600); // let the cached closure settle
+        expect(fs.existsSync(wrapperAt), 'wrapper survives the cached road').toBe(true);
+        expect(rootExclude()).toContain('pkg/**');
+      });
+    } finally { fs.rmSync(ws, { recursive: true, force: true }); }
+  }, 60000);
+
+  test('warm restart: a wrapper whose project lost its tsconfig while the server was down is swept', async () => {
+    const NESTED_APP = 'import { answer } from "./pkg/util.rip"\nk = answer\nconsole.log k\n';
+    const ws = makeWorkspace({
+      'pkg/tsconfig.json': JSON.stringify({ compilerOptions: { strict: true } }, null, 2) + '\n',
+      'pkg/util.rip': UTIL,
+    });
+    const wrapperAt = path.join(ws, '.rip', 'editor', 'pkg', 'tsconfig.json');
+    try {
+      await inSession(ws, async (api) => {
+        await api.open('app.rip', NESTED_APP);
+        await api.poll(() => fs.existsSync(wrapperAt), 'wrapper written');
+      });
+      // The project dissolves while the server is down: its tsconfig
+      // goes, the source stays. A stale wrapper left behind would keep
+      // claiming the subtree's faces with a config extending nothing.
+      fs.rmSync(path.join(ws, 'pkg', 'tsconfig.json'));
+      await inSession(ws, async (api) => {
+        await api.open('app.rip', NESTED_APP);
+        await api.poll(() => !fs.existsSync(wrapperAt), 'stale wrapper swept');
+      });
+    } finally { fs.rmSync(ws, { recursive: true, force: true }); }
+  }, 60000);
+
+  // The wrapper road is under the same territory doctrine as the stub
+  // walk: writes stay inside `.rip/`. An out-of-workspace document is the
+  // shape that once escaped it — nearestTsconfig only stopped at the
+  // anchor when the walk PASSED THROUGH it, so a dir outside the
+  // workspace climbed to the filesystem root, found whatever
+  // tsconfig.json it met, and the '..'-prefixed rel walked the wrapper
+  // write out of the mirror — able to create or overwrite tsconfig.json
+  // and the host floor in directories the extension does not own.
+  test('territory: opening a .rip OUTSIDE the workspace writes nothing anywhere — and still serves', async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-outside-'));
+    const USER_TSCONFIG = '{\n  "compilerOptions": { "strict": true }\n}\n';
+    try {
+      // A user project ABOVE the workspace: its own tsconfig, its own file.
+      fs.writeFileSync(path.join(outside, 'tsconfig.json'), USER_TSCONFIG);
+      fs.writeFileSync(path.join(outside, 'lonely.rip'), 'x = 1\nconsole.log x\n');
+      fs.mkdirSync(path.join(outside, 'ws'));
+      await inSession(path.join(outside, 'ws'), async (api) => {
+        await api.openUri('file://' + path.join(outside, 'lonely.rip'), 'x = 1\nconsole.log x\n');
+        await api.sleep(800); // give a wrong wrapper write time to land
+        // The user's tsconfig survives byte-identical, their dir gains
+        // nothing, and the workspace's .rip/ holds only the mirror root.
+        expect(fs.readFileSync(path.join(outside, 'tsconfig.json'), 'utf8')).toBe(USER_TSCONFIG);
+        expect(fs.readdirSync(outside).sort()).toEqual(['lonely.rip', 'tsconfig.json', 'ws']);
+        const dotRip = path.join(outside, 'ws', '.rip');
+        if (fs.existsSync(dotRip)) expect(fs.readdirSync(dotRip)).toEqual(['editor']);
+        expect(fs.existsSync(path.join(outside, 'ws', 'tsconfig.json'))).toBe(false);
+      });
+    } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+  }, 30000);
+
   test('candidacy is eager, confined, and declaration-only: startup stubs the workspace inside .rip/ and registers nothing', async () => {
     await inWorkspace({ 'util.rip': UTIL, 'docs/readme.md': '# hands off\n' }, async (api) => {
       await api.untilLog(/auto-import stubs:/);

@@ -2246,8 +2246,18 @@ class Emitter {
     // spelling.
     const bodies = info.computedBodies ?? [];
     if (info.behavior === null || bodies.length === 0) return;
+    // The schema behavior const's guard, for the component spelling: a
+    // user module binding of the minted `__X__computed` name redeclares
+    // the face-only const (TS2451 on the component head) while the JS
+    // runs fine. Loud and positioned beats a checker error blamed on
+    // the wrong construct.
+    if (this.scopes[0]?.has(info.behavior)) {
+      throw this.positionedError(compNode,
+        `emitter: the module binds '${info.behavior}', the face-only name this component's ` +
+        'computed types read through — rename the binding');
+    }
     const selfType = `${name}${anyArgsOf(typeParams)}`;
-    this.b.tsOnly(() => {
+    this.b.tsOnly(() => this.b.echo(() => {
       this.b.emit('\n' + pad);
       this.mark(compNode, '$self', () => {
         this.b.emit(`const ${info.behavior} = {`);
@@ -2261,7 +2271,7 @@ class Emitter {
         });
         this.b.emit(' };');
       });
-    });
+    }));
   }
 
   // ── TS directive comments ───────────────────────────────────
@@ -4553,12 +4563,23 @@ class Emitter {
     if (story === null || fns === undefined) return;
     const text = behaviorObjectText(schemaNode[1], story.decl.name, fns, story.thisTypes);
     if (text === null) return;
+    // The behavior const's name is face-only but not invisible: a user
+    // module binding of the same spelling redeclares it in the TS face
+    // (TS2451 blamed on the schema head) while the JS runs fine — the
+    // worst kind of divergence. Rejected loudly here, the
+    // `__schema`-shadow precedent; every minted TYPE name is already
+    // guarded the same way (buildSchemaTypeStory).
+    if (this.scopes[0]?.has(story.behaviorName)) {
+      throw this.positionedError(schemaNode,
+        `emitter: the module binds '${story.behaviorName}', the face-only name this schema's ` +
+        'callable types read through — rename the binding');
+    }
     const id = this.stores.idOf(schemaNode);
-    this.b.tsOnly(() => {
+    this.b.tsOnly(() => this.b.echo(() => {
       this.b.emit('\n' + '  '.repeat(this.ind));
       if (id !== null) this.b.mark(id, '$self', () => this.b.emit(text));
       else this.b.emit(text);
-    });
+    }));
   }
 
   // repl mode's result slot, minted against the used-name registry on
@@ -13601,18 +13622,16 @@ class Emitter {
   }
 
   // The seam both match lowerings share: close `toMatchable(`'s
-  // arguments, then open `.match(`. No narrowing rides here, because
-  // `toMatchable` cannot answer null: the multi-line receiver it used
-  // to coerce to null now THROWS, which is what that null was always
-  // for — it existed only so the following `.match` would blow up
-  // rather than anchor wrong. Throwing at the coercion says the same
-  // thing sooner and in the user's vocabulary, and it makes the
-  // helper's `=> string` annotation true rather than asserted around.
-  // v3 ships the same annotation over a runtime that really does
-  // return null, which is the lie this row ruled out — the difference
-  // is which side was changed to meet the other.
-  matchReceiverClose(multiline) {
-    this.b.emit(multiline ? ', true)' : ')');
+  // argument, then open `.match(`. No narrowing rides here, because
+  // `toMatchable` always answers a string — RULED (2026-08-03): the
+  // coercion carries no multi-line guard; `^`/`$` across newlines are
+  // the regex's own /m business, exactly as in hand-written JS. (The
+  // guard's history: v3 returned null for multi-line receivers under a
+  // `=> string` annotation — a lie; a branch then threw instead —
+  // honest, but it broke every main-legal program grepping decoded
+  // file bytes. Standard semantics need no chaperone.)
+  matchReceiverClose() {
+    this.b.emit(')');
     this.b.emit('.match(');
   }
 
@@ -13621,13 +13640,12 @@ class Emitter {
   // `((_ = toMatchable(text).match(/re/)) && _[n])`, sharing the
   // last-match binding with `=~`. The outer parens keep the whole
   // guard one operand (`not x[/re/]` negates the READ, not the
-  // assignment). A literal /m flag admits multi-line receivers.
+  // assignment).
   regexIndex(node, obj, regex, capture) {
-    const multiline = /^\/(?:[^\\/]|\\.)*\/[a-z]*m[a-z]*$/.test(regex);
     this.mark(node, '$self', () => {
       this.b.emit(`((_ = ${this.runtimeName('toMatchable')}(`);
       this.mark(node, 'object', () => this.expr(obj));
-      this.matchReceiverClose(multiline);
+      this.matchReceiverClose();
       this.mark(node, 'key', () => this.b.emit(regex));
       this.b.emit(')) && _[');
       if (capture === null) this.b.emit('0');
@@ -13664,19 +13682,18 @@ class Emitter {
   // ["=~", left, right] — the match operator: `text =~ /re/` emits
   // `(_ = toMatchable(text).match(/re/))` — the match array or null,
   // with `_` (the last-match binding, hoisted at the scope) holding
-  // it for later reads (`_[1]`). A literal /m flag allows multi-line
-  // receivers. Deliberately NON-chaining: `a =~ b =~ c` would match
-  // the first RESULT against the second pattern — reject loudly.
+  // it for later reads (`_[1]`). Deliberately NON-chaining: `a =~ b
+  // =~ c` would match the first RESULT against the second pattern —
+  // reject loudly.
   matchOp(node) {
     if (isNode(node[1]) && node[1][0] === '=~' && !node[1].parenthesized) {
       throw this.positionedError(node, 'emitter: `=~` does not chain — `a =~ b =~ c` would match the first match RESULT against the second pattern (parenthesize: `(a =~ b) =~ c`, or split the matches)');
     }
     const r = node[2];
-    const multiline = typeof r === 'string' && /^\/(?:[^\\/]|\\.)*\/[a-z]*m[a-z]*$/.test(r);
     this.mark(node, '$self', () => {
       this.b.emit(`(_ = ${this.runtimeName('toMatchable')}(`);
       this.mark(node, 'left', () => this.expr(node[1]));
-      this.matchReceiverClose(multiline);
+      this.matchReceiverClose();
       this.mark(node, 'right', () => this.expr(r));
       this.b.emit('))');
     });
@@ -14063,7 +14080,7 @@ const RUNTIME_TABLE = [
       raise: '(a: any, b?: any) => never',
       rand: '(a?: number, b?: number) => number',
       sleep: '(ms: number) => Promise<void>',
-      toMatchable: '(v: any, allowNewlines?: boolean) => string',
+      toMatchable: '(v: any) => string',
       todo: '(msg?: string) => never',
       warn: '(...args: any[]) => void',
       zip: '(...arrays: any[][]) => any[][]',
@@ -14735,7 +14752,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

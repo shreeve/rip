@@ -54,7 +54,7 @@ const REGION_SHAPES = [
   /^!?: \S/u,                                             // annotation `: T` / forward `!: T`
   /^satisfies \S/u,                                       // a schema field default's value enforcement: `v satisfies T`
   /^<\S/su,                                               // a type ARGUMENT list: an annotated reactive's `__state<T>(v)`, and a generic `def`'s own `<T>` parameters
-  /^!$/u,                                                 // the match lowering's assertion on its own toMatchable receiver
+  /^!$/u,                                                 // a component prop assertion's bare `!` (state fallbacks like `props.label!`)
   /^[()]$/u,                                              // arrow-param / cast parens
   /^as\s+\S/u,                                            // the cast's `as T` spelling
   /^this: \S/u,                                           // schema callable `this` param 
@@ -276,12 +276,12 @@ describe('TS-face emission pins', () => {
   // parameter and scoped to it: an IDENTIFIER catch keeps `unknown`,
   // which the author governs the ordinary ways. Both tries carry the
   // branch separately, so both are pinned; stripping restores the JS.
-  // The match lowering narrows its OWN receiver rather than softening the
-  // helper it calls. Both halves are pinned together because either alone
-  // is satisfiable the wrong way: annotate `toMatchable` as `=> string`
-  // and the assertion becomes unnecessary, which is the fix the finding
-  // ruled out — it would make the prelude lie about a helper that really
-  // answers null on the multi-line path, where the null IS the loud throw.
+  // The match lowering carries no narrowing at all — RULED (2026-08-03):
+  // toMatchable is pure coercion, `(v: any) => string`, so the face and
+  // the JS twin are the same bare call. The liveness probes below keep
+  // the annotation honest against the runtime it describes: soften the
+  // helper back toward v3's null answer and `=> string` becomes a lie
+  // no byte pin would catch.
   test('the match seam needs no assertion, because the helper cannot answer null', () => {
     const src = "text = 'abc'\nfound = text =~ /b+/\nnth = text[/(b)/, 1]\n";
     const code = ts(src).code;
@@ -291,14 +291,15 @@ describe('TS-face emission pins', () => {
     expect(code).toContain('toMatchable(text).match(/(b)/)');
     expect(js(src).code).toContain('toMatchable(text).match(/b+/)');
     const withPrelude = compile(src, { runtimeDelivery: 'inline', face: 'ts' }).code;
-    expect(withPrelude).toContain('toMatchable: (v: any, allowNewlines?: boolean) => string');
-    // LIVENESS — the pair that keeps the signature from being a lie.
-    // `=> string` is honest only because the multi-line receiver THROWS
-    // instead of answering null; soften the runtime back and the
-    // annotation above becomes the false claim this row ruled out, with
-    // every byte pin still green. v3 ships that exact lie.
-    expect(() => toMatchable('one\ntwo')).toThrow(/\/m/);
-    expect(toMatchable('one\ntwo', true)).toBe('one\ntwo');
+    expect(withPrelude).toContain('toMatchable: (v: any) => string');
+    // LIVENESS — the trio that keeps the signature from being a lie.
+    // `=> string` is honest only because the runtime answers a string
+    // for EVERY receiver (RULED 2026-08-03: pure coercion, never null,
+    // never a throw); soften it back toward v3's null and the
+    // annotation above becomes a false claim with every byte pin still
+    // green.
+    expect(toMatchable('one\ntwo')).toBe('one\ntwo');
+    expect(toMatchable(null)).toBe('');
     expect(toMatchable('plain')).toBe('plain');
   });
 
@@ -1090,6 +1091,27 @@ describe('TS-face negatives', () => {
     const r = ts('f = (...xs: number) -> xs\n');
     expect(r.code).toContain('...xs: number');
     expect(() => js('f = (...xs: number) -> xs\n').declarations).toThrow(/rest parameter's annotation/);
+  });
+
+  // The minted behavior VALUE names (`__X__behavior`, `__X__computed`)
+  // are face-only but not invisible: a user module binding of the same
+  // spelling used to redeclare the const in the TS face — TS2451 blamed
+  // on the schema/component head — while the JS ran fine. The emitter
+  // now rejects the collision loudly and POSITIONED, the
+  // `__schema`-shadow precedent; every minted TYPE name was already
+  // guarded (buildSchemaTypeStory).
+  test('a user binding of a minted behavior-const name rejects loudly in the TS face', () => {
+    const schemaSrc = '__Event__behavior = 5\nEvent = schema :model\n  name! string\n  shout: -> @name\n';
+    const compSrc = '__Badge__computed = 7\nBadge = component\n  x := 1\n  sum ~= @x + 1\n  render\n    div "#{@sum}"\n';
+    expect(() => ts(schemaSrc)).toThrow(/module binds '__Event__behavior'.*rename the binding/);
+    expect(() => ts(compSrc)).toThrow(/module binds '__Badge__computed'.*rename the binding/);
+    // JS mode emits no behavior const — no collision exists, both run.
+    expect(js(schemaSrc).code).toContain('__Event__behavior = 5');
+    expect(js(compSrc).code).toContain('__Badge__computed = 7');
+    // The spelling is reserved only where a behavior const actually
+    // prints: beside a schema with no callables it is an ordinary name.
+    expect(ts('__Plain__behavior = 5\nPlain = schema\n  name! string\n').code)
+      .toContain('__Plain__behavior = 5');
   });
 });
 

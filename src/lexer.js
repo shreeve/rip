@@ -366,13 +366,17 @@ const ALIAS_STOPS = new Set([
 // interface members). Names and qualified names, literal types,
 // generics, unions/intersections, function-type arrows, grouping
 // parens, tuple/structural brackets and braces, conditional-type
-// tokens, `typeof`, and block layout. Code-shaped tokens — calls
-// (CALL_START), `new`, `await`, arithmetic/logical operators,
-// assignments inside bodies — are NOT in the vocabulary and reject
-// loudly.
+// tokens, `typeof`, and block layout. `this` is TYPE vocabulary
+// (RULED 2026-08-03): TypeScript's polymorphic `this` type —
+// `chain(): this`, `isFoo(): this is Foo` — is a type atom like any
+// name; where a position disallows it, the checker says so. Code-shaped
+// tokens — calls (CALL_START), `new`, `await`, arithmetic/logical
+// operators, assignments inside bodies — are NOT in the vocabulary and
+// reject loudly (`this.foo()` still rejects: the CALL is the code
+// shape, not the word).
 const TYPE_VOCAB = new Set([
   'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'BOOL',
-  'NULL', 'UNDEFINED',
+  'NULL', 'UNDEFINED', 'THIS',
   '.', ',', ':', '?', 'TERNARY', '...', '|', '&', '=>', 'EXTENDS',
   '(', ')', 'PARAM_START', 'PARAM_END', '[', ']', 'INDEX_START',
   'INDEX_END', '{', '}',
@@ -396,7 +400,7 @@ const TYPE_VOCAB = new Set([
 // vocabulary (a nested call still rejects).
 const TYPE_ATOM_ENDERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'BOOL',
-  'NULL', 'UNDEFINED', ')', 'PARAM_END', ']', 'INDEX_END', '}',
+  'NULL', 'UNDEFINED', 'THIS', ')', 'PARAM_END', ']', 'INDEX_END', '}',
 ]);
 // Does tokens[at] begin a MEMBER ROW of a type body? True at a layout
 // boundary (a block body's rows), after `{` or a comma (an inline
@@ -472,14 +476,16 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     // spelling beside it. The token arrived rewritten (`is` aliases to
     // COMPARE '=='); in type text it is TypeScript's predicate operator,
     // and it reads as the word the user wrote. Admitted by the whole
-    // shape — the parameter name between the arrow (or `asserts`, or a
-    // method shorthand's return `:`) and `is` — because return position
+    // shape — the parameter name (or `this`, TS's other predicate
+    // subject) between the arrow (or `asserts`, or a method shorthand's
+    // return `:`) and `is` — because return position
     // is the only place TS puts one, and `atomEnd` alone would admit
     // `string is number` anywhere a type completed. The shorthand's `:`
     // identifies itself by the CALL_END before it: no other colon in a
     // type body follows a parameter list's close.
     if (t.word === 'is' && atomEnd && j - 2 >= from &&
-        (tokens[j - 1].kind === 'IDENTIFIER' || tokens[j - 1].kind === 'PROPERTY') &&
+        (tokens[j - 1].kind === 'IDENTIFIER' || tokens[j - 1].kind === 'PROPERTY' ||
+         tokens[j - 1].kind === 'THIS') &&
         (tokens[j - 2].kind === '=>' || tokens[j - 2].value === 'asserts' ||
         (tokens[j - 2].kind === ':'  && tokens[j - 3]?.kind === 'CALL_END'))) {
       atomEnd = false; continue;
@@ -514,6 +520,15 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
         (tokens[j + 2]?.kind === '[' || tokens[j + 2]?.kind === 'INDEX_START') &&
         enclosing() === '{' && memberRowStart(tokens, j, from)) {
       atomEnd = false; continue;
+    }
+    // The optionality half: `[K in keyof T]-?: T[K]` / `+?` — the
+    // modifier rides AFTER the mapped row's `]`, directly before the
+    // member's `?:`. Completing the atom here lets the ordinary
+    // optional-member rule admit the `?` that follows.
+    if ((kd === '-' || kd === '+') && tokens[j + 1]?.value === '?' &&
+        tokens[j + 2]?.kind === ':' && enclosing() === '{' &&
+        (tokens[j - 1]?.kind === ']' || tokens[j - 1]?.kind === 'INDEX_END')) {
+      atomEnd = true; continue;
     }
     if (kd === '=' && angle > 0) { atomEnd = false; continue; }
     if ((enclosing() === '{' || (opts.methods && enclosing() === undefined)) &&
@@ -3438,6 +3453,21 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
           pos++;
           continue;
         }
+        // A mapped type's optionality MODIFIER: `]-?:` / `]+?:` — the
+        // spelling behind TS's own Required<T>. The `?` rides the
+        // `-`/`+` directly after the mapped row's `]`, with the member
+        // `:` right behind it; nothing value-shaped ever scans this
+        // sequence (it failed the ternary rejection below before this
+        // carve-out existed), so the plain token is safe to emit and
+        // the type vocabulary judges the rest.
+        const beforePrev = tokens[tokens.length - 2] ?? null;
+        if (prev && (prev.kind === '-' || prev.kind === '+') && !prev.spaced &&
+            (beforePrev?.kind === ']' || beforePrev?.kind === 'INDEX_END') &&
+            text[pos + 1] === ':') {
+          push('?', '?', pos, pos + 1);
+          pos++;
+          continue;
+        }
         fail("unspaced '?' needs a value before it (postfix existence) — write ' ? ' for a ternary", pos);
       }
       scanTernary++;
@@ -3743,7 +3773,12 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // syntax, so rewriteTypes must never see them. Typed callable
   // params inside captured bodies still collapse — the emit-time
   // sub-parse runs rewriteTypes as its first tail pass.
-  rewriteSchema(tokens, mintId, text, fail);
+  rewriteSchema(tokens, mintId, text, fail, tolerant
+    ? (err) => lexDiagnostics.push({
+        message: err.reason ?? String(err.message), start: err.start ?? 0,
+        end: err.end ?? err.start ?? 0, expected: [], got: '',
+      })
+    : null);
   rewriteTypes(tokens, mintId, text, fail);
   // Reserved words are legal inside type runs (absorbed above); one
   // surviving in VALUE position is the original loud rejection.

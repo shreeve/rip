@@ -182,7 +182,15 @@ const posix = (p) => p.split(path.sep).join('/');
 // (inclusive). Null when the walk reaches the anchor without finding
 // one, which is the ordinary case: most directories are governed by the
 // workspace root's config and need no wrapper of their own.
+//
+// The anchor BOUNDS the walk, it is not merely a stop the walk may pass
+// through: a dir OUTSIDE the anchor answers null immediately. Without
+// that, an out-of-workspace document climbed to the filesystem root,
+// adopted whatever tsconfig.json it met on the way, and the resulting
+// '..'-shaped rel carried the wrapper write out of the mirror — into
+// directories the extension does not own.
 export function nearestTsconfig(dir, anchor) {
+  if (dir !== anchor && !dir.startsWith(anchor + path.sep)) return null;
   for (let d = dir; ; d = path.dirname(d)) {
     const candidate = path.join(d, 'tsconfig.json');
     if (fs.existsSync(candidate)) return candidate;

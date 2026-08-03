@@ -290,7 +290,7 @@ const parserInstance = {
       while (inputEnd > 0 && (input[inputEnd - 1] === `
 ` || input[inputEnd - 1] === "\r"))
         inputEnd--;
-    let repairedHere = new Set, nodes = [], roles = [], primitives = [], nodeIds = new WeakMap, nextNodeId = 1, lexer = Object.create(this.lexer), sharedState = { ctx: {} };
+    let repairedHere = new Set, parserRecorded = !1, nodes = [], roles = [], primitives = [], nodeIds = new WeakMap, nextNodeId = 1, lexer = Object.create(this.lexer), sharedState = { ctx: {} };
     const _ref4 = this.ctx;
     for (let k in _ref4) {
       if (!Object.hasOwn(_ref4, k))
@@ -326,8 +326,9 @@ const parserInstance = {
       if (action == null && tolerant && repairBudget > 0) {
         atPos = symbol === EOF ? inputEnd : tokenLoc?.start ?? inputEnd;
         recordFirst = (wanted = null) => {
-          if (diagnostics.length !== 0)
+          if (parserRecorded)
             return;
+          parserRecorded = !0;
           got = symbol === EOF ? "end of input" : `'${this.tokenNames[symbol] || symbol}'`;
           expected = wanted != null ? [this.tokenNames[wanted] || wanted] : [];
           message = `Unexpected ${got}`;
@@ -335,13 +336,6 @@ const parserInstance = {
             message += ` \u2014 expected ${expected.join(", ")}`;
           return diagnostics.push({ message, start: atPos, end: tokenLoc?.end ?? atPos, expected, got });
         };
-        if (symbol === this.symbolIds.INDENT || symbol === this.symbolIds.OUTDENT) {
-          recordFirst();
-          repairBudget--;
-          repairedHere.clear();
-          symbol = null;
-          continue;
-        }
         allowedAll = symbol === EOF || lexer.token?.generated;
         guardKey = function(id) {
           return `${stk.length}:${state}:${id}`;

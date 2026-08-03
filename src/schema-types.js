@@ -687,10 +687,15 @@ export function buildSchemaTypeStory(programSexpr) {
       owners.set(t, `schema '${d.name}'`);
       const user = userTypes.get(t);
       if (user !== undefined) {
+        // Positioned on the USER declaration — the offender the user
+        // can rename — like the intrinsic-collision path above. The
+        // reserved family is `${name}Data` / `${name}Create` /
+        // `${name}Ensure` / `${name}Query` beside the schema's own
+        // name: a deliberate per-schema namespace reservation.
         throw new SchemaTypeError(
           `schema '${d.name}' emits the type name '${t}', which collides with ${user.what} — ` +
           `the schema's types and the user declaration would merge or duplicate; rename one`,
-          d.descriptor.start ?? null);
+          null, user.node);
       }
     }
     // A field's `[default]` is a bare JS value in the runtime

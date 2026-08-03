@@ -196,6 +196,7 @@ while (queue.length) {
     source, cfg,
     good: {
       source, code: result.code, mappings: result.mappings,
+      echoSpans: result.echoSpans ?? [],
       srcLineStarts, genLineStarts: lineStartsOf(result.code),
       strict: cfg.strict === true,
     },

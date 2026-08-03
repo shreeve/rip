@@ -322,6 +322,13 @@ function ensureProjectWrapper(fsPath) {
   const owner = nearestTsconfig(path.dirname(fsPath), workspaceRoot);
   if (owner === null || path.dirname(owner) === workspaceRoot) return [];
   const rel = path.relative(workspaceRoot, path.dirname(owner));
+  // TERRITORY, belt and braces: a rel that is empty, absolute, or
+  // '..'-shaped would walk the wrapper write out of the mirror root —
+  // nearestTsconfig's anchor bound makes this unreachable today, but a
+  // wrapper is a WRITE, and no future rel construction gets to escape
+  // `.rip/editor` by accident. (The doctrine the disk-layer hygiene
+  // gates enforce: writes stay inside `.rip/`.)
+  if (rel === '' || path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) return [];
   if (wrapperDirs.has(rel)) return [];
   let written;
   try {
@@ -693,6 +700,12 @@ function materializeClosure(seeds) {
     const entry = cacheManifest.entries[file];
     if (entry && entry.sourceHash === sourceHash && mirrorIntact(file, entry)) {
       cached++;
+      // The cached road reconverges on the compile road's disk truth:
+      // wrapperDirs is per-SESSION memory over per-WORKSPACE disk, and a
+      // warm session that reached every nested face by cache hit never
+      // ensured a wrapper — the root config then regenerated without its
+      // exclusions and every nested face had two owners.
+      touched.push(...ensureProjectWrapper(file));
       queue.push(...entry.imports);
       continue;
     }
@@ -948,7 +961,10 @@ async function workspaceRipFiles() {
     if (depth > 32) continue;
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-    for (const entry of entries) {
+    // Sorted, so the walk order — and therefore WHICH files make the cap
+    // in an over-cap workspace — is a property of the tree, not of
+    // readdir's platform-dependent ordering.
+    for (const entry of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
       if (entry.isDirectory()) {
         if (entry.name.startsWith('.') || STUB_WALK_SKIP.has(entry.name)) continue;
         queue.push([path.join(dir, entry.name), depth + 1]);
@@ -957,6 +973,14 @@ async function workspaceRipFiles() {
       }
     }
     if (++seen % 25 === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  // No silent caps: a truncated walk must say so, or the missing
+  // candidates read as "the workspace was covered" to whoever debugs an
+  // auto-import that never offers.
+  if (files.length >= STUB_FILE_CAP) {
+    connection.console.log(
+      `[rip] auto-import stub walk capped at ${STUB_FILE_CAP} .rip files — the rest gain candidacy when opened or imported`,
+    );
   }
   return files;
 }
@@ -1090,14 +1114,45 @@ async function revalidateCache() {
       try { mirrorFromDisk(file, source); recompiled++; }
       catch { failedQuietly(file); }
     }
+    // Fresh or recompiled, the file's project needs its wrapper THIS
+    // session: wrapperDirs starts empty on every start, and the root
+    // config's exclusions are rebuilt from it.
+    ensureProjectWrapper(file);
     materializedMirrors.set(file, { sourceHash });
     // Keep the message loop responsive over large closures.
     if (++processed % 50 === 0) await new Promise((resolve) => setImmediate(resolve));
   }
+  // With wrapperDirs repopulated from every cached member, disk and
+  // memory reconcile in the other direction too: a wrapper left by a
+  // previous session whose project no longer earns one (its tsconfig
+  // deleted while the server was down, or its members gone from the
+  // cache) would keep claiming the subtree's faces with a config
+  // extending nothing. Nothing else removes wrapper files — the orphan
+  // sweep is faces-only by design.
+  sweepStaleWrappers();
   const ms = Math.round(performance.now() - t0);
   connection.console.log(
     `[rip] project cache: ${fresh} face(s) fresh, ${recompiled} recompiled, ${removed} removed in ${ms} ms`,
   );
+}
+
+// Remove generated wrapper files (tsconfig + host floor) in mirror
+// subdirectories that no current wrapper claims. Wrapper-file-only: the
+// faces beside them belong to the manifest and the orphan sweep.
+function sweepStaleWrappers() {
+  if (!mirrorRoot || mirrorRootIsFallback || !mirrorRootReady) return;
+  const removed = [];
+  for (const cfg of walkFiles(mirrorRoot, 'tsconfig.json')) {
+    const dir = path.dirname(cfg);
+    if (dir === mirrorRoot) continue; // the root config is not a wrapper
+    if (wrapperDirs.has(path.relative(mirrorRoot, dir))) continue;
+    for (const name of ['tsconfig.json', HOST_FLOOR_NAME]) {
+      try { fs.rmSync(path.join(dir, name)); removed.push(path.join(dir, name)); } catch { /* absent */ }
+    }
+  }
+  if (removed.length) {
+    connection.console.log(`[rip] stale wrapper sweep: ${removed.length} generated file(s) from projects no session member claims`);
+  }
 }
 
 function failedQuietly(file) {
@@ -1401,6 +1456,10 @@ async function refresh(document) {
     // answers in the author's vocabulary rather than the container the
     // face declares (see `memberDeclKind`).
     memberDecls: result.memberDecls ?? [],
+    // Generated spans of face-echo text (the behavior objects) — the
+    // diagnostic mapper drops non-exact-mapped diagnostics born there,
+    // the real copy's report being the one honest squiggle.
+    echoSpans: result.echoSpans ?? [],
     srcLineStarts,
     genLineStarts: lineStartsOf(result.code),
     strict: state.strict === true, // rides the compile it governed
