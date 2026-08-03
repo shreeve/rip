@@ -90,7 +90,7 @@ let settle = function(risky: () => string) {
 
 console.log(settle(() => 'delivered'), settle(() => { throw new Error('nope') }))
 
-// ── try as an expression: inline, and inline with a catch ──
+// ── try as an expression: inline, inline with a catch, and the two together ──
 
 let live = (() => { try { return JSON.parse('{"live":true}') as { live: boolean } } catch {} })()
 let backed: { live: boolean } = (() => { try { return JSON.parse('broken') } catch (e) { return { live: false } } })()
@@ -136,4 +136,5 @@ let reject = function(code: number) {
 let demand = function(value: string | null) { return value ?? (() => { throw new Error('missing value') })() }
 
 let held = (() => { try { return reject(503) } catch (caught) { return caught } })()
+
 console.log('held:', held, 'demand:', demand('present'))
