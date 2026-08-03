@@ -6,7 +6,7 @@
 > responses, validated input, safe hot reload, and disposable Bun workers
 > behind Caddy and Janus**
 
-Rip Server has two faces that share one contract:
+Rip Server has four surfaces that share one contract:
 
 - `@rip-lang/server` is the framework API source imports: routes, response
   helpers, `read()` validation, schemas, middleware, sessions, and request
@@ -14,6 +14,9 @@ Rip Server has two faces that share one contract:
 - `rip server` is the manager for one project: it registers with Janus,
   publishes browser-App coordination files, watches source, prepares API
   generations, and supervises worker processes.
+- `rip app` remembers projects and controls their managers through the private
+  per-user Rip Agent.
+- `rip edge` observes or controls the one shared Caddy+Janus edge.
 
 Caddy and [Janus](https://github.com/shreeve/janus) form the public edge. They
 own HTTP and TLS, host and tenant admission, static and App files, cache
@@ -61,6 +64,21 @@ rip server . --host hello.ripdev.io --control /run/janus/control.sock
 directory in the selected project or its parents. One invocation creates one
 manager. Many managers may register independent servers behind the same
 Caddy+Janus process.
+
+For a remembered, supervised project:
+
+```bash
+rip edge start --caddy /path/to/janus-enabled-caddy
+rip app add . --name hello --host hello.ripdev.io
+rip app start hello
+rip app open hello
+```
+
+The packaged edge baseline binds `ripdev.io` and `*.ripdev.io` on loopback
+HTTPS using the real, publicly trusted development-only certificate and key
+included with this package. Both names resolve only to `127.0.0.1`.
+`rip edge status` also observes an already-running external edge, but Rip will
+not stop or reload a process it does not own.
 
 ## The Shape of a Server
 
@@ -506,6 +524,38 @@ control artifacts, and exit cleanly.
 `release` prepares one coherent API/App snapshot, exposes it, sends one
 full-reload ding, and then clears hold.
 
+## Per-User App and Edge Control
+
+The Rip Agent is private process machinery shared by both public CLIs. It
+auto-starts on demand, stores one durable app catalog, captures manager and
+edge logs, and adopts healthy managers after an agent restart.
+
+```bash
+rip app list
+rip app add [project] [--name NAME] [--host HOST]
+rip app start <app>
+rip app stop <app>
+rip app restart <app>
+rip app status [app] [--json]
+rip app open <app>
+rip app logs <app> [--lines N] [--follow]
+
+rip edge status [--json]
+rip edge start [--caddy PATH] [--config PATH]
+rip edge stop
+rip edge reload
+```
+
+An app selector may be its stable id, unique name, or canonical root. Removal
+rejects while the app is running. Starting requires a reachable Janus control
+plane. Stopping the edge rejects while an app manager is still running.
+
+`rip edge start` finds Caddy through `--caddy`, the remembered configuration,
+`JANUS_CADDY`, or `PATH`, in that order, and verifies that the binary contains
+Janus before starting it. `--config` selects another Caddyfile; the packaged
+baseline is the default. An external reachable edge is observable but never
+silently adopted as a Rip-owned process.
+
 Migration is explicit. It never runs because the server started, a file
 changed, or a worker booted. Coordinated migration enters Maintenance, drains
 workers, runs the database-only child, records a durable outcome, and either
@@ -696,6 +746,7 @@ bun run test:operations
 bun run test:manager-boundary
 bun run test:middleware
 bun run test:monitor
+bun run test:appliance
 bun run test:janus
 ```
 

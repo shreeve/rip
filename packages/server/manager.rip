@@ -750,7 +750,7 @@ export main = (argv) ->
     body
 
   status = ->
-    { name: args.name, root: project.root, operation, stopping, workers: workers.length, watch: args.watch, migration: (if migration? then { id: migration.id, phase: migration.phase, outcome: migration.outcome } else null) }
+    { name: args.name, root: project.root, hosts, site, operation, stopping, workers: workers.length, watch: args.watch, migration: (if migration? then { id: migration.id, phase: migration.phase, outcome: migration.outcome } else null) }
 
   managerOutput = (text) ->
     stream = if args.accessMode is 'raw' then process.stderr else process.stdout

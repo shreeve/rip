@@ -28,7 +28,15 @@ retain completed history.
       cannot accumulate overlapping requests.
 - [ ] Pin one concurrency policy independent of environment-named modes.
 
-## 3. Remove obsolete project usage
+## 3. Finish the per-user appliance
+
+- [ ] Register the Rip Agent as a macOS LaunchAgent so desired edge and app
+      state reconciles immediately at login, before the first CLI request.
+- [ ] Build the native SwiftUI menu-bar client over the private agent protocol.
+- [ ] Add a signed/notarized distribution pipeline for the menu app, agent,
+      Janus-enabled Caddy binary, and local edge assets.
+
+## 4. Remove obsolete project usage
 
 - [ ] Remove Cart's worker route for authored `app/styles.css`; Janus serves
       it from the App root.
@@ -37,7 +45,7 @@ retain completed history.
 - [ ] Update Cart, Pulse, ROADMAP, AGENTS, package metadata, and server docs to
       state only the final architecture.
 
-## 4. Certify and land
+## 5. Certify and land
 
 - [ ] Run every `test:*` script, including released-Janus verification.
 - [ ] Run `bun run test:all` at the repository root.

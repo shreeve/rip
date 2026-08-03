@@ -317,6 +317,8 @@ test! 'stop command gracefully deregisters and exits the canonical manager', ->
     eq JSON.parse(await stopped.out),
       name: 'project'
       root: realpathSync(project)
+      hosts: ['stop.example.test']
+      site: null
       operation: 'Active'
       stopping: true
       workers: 0

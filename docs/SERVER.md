@@ -34,6 +34,8 @@ that serves its static files and routes its API requests.
 
 - **Rip Server** is the package and the `rip server` command.
 - A **Rip server** is one running project, such as Medlabs.
+- The **Rip Agent** is the per-user supervisor behind `rip app` and
+  `rip edge`. It remembers projects and owns processes that Rip starts.
 - The **manager** is the one long-running control process for that server.
 - The **API** is dynamic server-side source executed by workers.
 - A **worker** is a disposable process that executes API request handlers.
@@ -50,6 +52,48 @@ that serves its static files and routes its API requests.
 
 One `rip server` invocation launches one manager. That manager may supervise
 zero, one, or many workers for its API. It does not manage another Rip server.
+
+## Appliance Control
+
+`rip app` and `rip edge` are clients of one private Rip Agent. The first
+command starts the agent when necessary. Its durable catalog lives under the
+user's application-state directory; its owner record and HTTP-over-Unix
+control socket live in a private `0700` runtime directory. Neither interface
+listens on TCP.
+
+The agent owns machine-level orchestration, not request serving:
+
+```text
+rip app / rip edge
+        │
+        ▼
+private Rip Agent socket
+├── remembered project catalog
+├── desired app state + manager process supervision
+├── app and edge log files
+└── one optional Rip-owned Caddy + Janus process
+```
+
+An app catalog record carries a stable id, display/manager name, canonical
+project root, host claims, and manager startup policy. Starting an app first
+requires a reachable Janus control plane, then launches the ordinary
+`rip server` manager. Agent restart does not restart a healthy manager: the
+replacement agent adopts it through the same canonical manager socket and
+owner record. A manager that exits while its desired state is running is
+restarted with bounded exponential delay.
+
+The edge boundary distinguishes observation from ownership. `rip edge status`
+may report any reachable Janus edge. `stop` and `reload` reject unless Rip
+started that Caddy process. The packaged local Caddyfile binds HTTPS on
+loopback for `ripdev.io` and `*.ripdev.io`, whose DNS resolves only to
+loopback, and uses the real, publicly trusted development-only certificate and
+key shipped beside it. A custom Caddyfile and Janus-enabled Caddy binary may be
+selected at start.
+
+The private protocol exposes app list/add/remove,
+start/stop/restart/status/logs, and edge start/stop/reload/status. It is the
+single control boundary for terminal and graphical clients; process ownership
+does not move into a client.
 
 ## Shared Edge
 

@@ -1,0 +1,92 @@
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { homedir, platform, tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+export secureDirectory = (path, label) ->
+  try
+    mkdirSync path, { recursive: true, mode: 0o700 }
+  catch error
+    throw error unless error?.code is 'EEXIST'
+  info = lstatSync path
+  abort "#{label}: unsafe path (not a directory): #{path}" unless info.isDirectory() and not info.isSymbolicLink()
+  if typeof process.getuid is 'function'
+    abort "#{label}: unsafe ownership at #{path}" unless info.uid is process.getuid()
+  mode = info.mode & 0o777
+  abort "#{label}: unsafe permissions at #{path}: expected 0700" unless mode is 0o700
+  path
+
+export agentPaths = (label = 'rip-agent') ->
+  uid = if typeof process.getuid is 'function' then process.getuid() else 'user'
+  stateRoot = process.env.RIP_AGENT_HOME or if platform() is 'darwin' then join(homedir(), 'Library', 'Application Support', 'Rip') else join(process.env.XDG_STATE_HOME or join(homedir(), '.local', 'state'), 'rip')
+  runtimeRoot = process.env.RIP_AGENT_RUNTIME or join(tmpdir(), "rip-agent-#{uid}")
+  secureDirectory stateRoot, label
+  secureDirectory runtimeRoot, label
+  {
+    stateRoot
+    runtimeRoot
+    state: join(stateRoot, 'agent.json')
+    agentLog: join(stateRoot, 'agent.log')
+    socket: join(runtimeRoot, 'agent.sock')
+    owner: join(runtimeRoot, 'agent.json')
+    edgeAdmin: join(runtimeRoot, 'caddy-admin.sock')
+    edgeControl: join(runtimeRoot, 'janus.sock')
+    edgePid: join(runtimeRoot, 'caddy.pid')
+    edgeLog: join(stateRoot, 'edge.log')
+    appLogs: join(stateRoot, 'apps')
+  }
+
+export loaderArg = (label = 'rip-agent') ->
+  preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
+  abort "#{label}: the Rip loader is missing" unless preload?
+  preload
+
+agentFetch = (paths, method, path, body = null, timeout = 60000) ->
+  options = { method, unix: paths.socket, signal: AbortSignal.timeout(timeout) }
+  if body?
+    options.body = JSON.stringify body
+    options.headers = { 'content-type': 'application/json' }
+  fetch "http://agent#{path}", options
+
+agentDiagnostic = (paths) ->
+  return '' unless existsSync paths.agentLog
+  text = readFileSync paths.agentLog, 'utf8'
+  lines = text.trim().split '\n'
+  lines.slice(-8).join '\n'
+
+export ensureAgent = (label) ->
+  paths = agentPaths label
+  try
+    response = agentFetch! paths, 'GET', '/1.0', null, 1000
+    return paths if response.ok
+  log = openSync paths.agentLog, 'a', 0o600
+  try
+    child = spawn process.execPath, [loaderArg(label), join(import.meta.dir, 'agent.rip')],
+      detached: true
+      stdio: ['ignore', log, log]
+      env: process.env
+    child.unref()
+  finally
+    closeSync log
+  deadline = Date.now() + 5000
+  loop
+    try
+      response = agentFetch! paths, 'GET', '/1.0', null, 1000
+      return paths if response.ok
+    break if Date.now() >= deadline
+    sleep! 20
+  diagnostic = agentDiagnostic paths
+  suffix = if diagnostic then "\n#{diagnostic}" else " — see #{paths.agentLog}"
+  abort "#{label}: Rip Agent did not start#{suffix}"
+
+export requestAgent = (label, method, path, body = null) ->
+  paths = ensureAgent! label
+  response = agentFetch! paths, method, path, body
+  text = response.text!
+  unless response.ok
+    detail = try JSON.parse(text).error catch then text
+    abort "#{label}: #{detail or "agent request failed (#{response.status})"}"
+  return null unless text
+  try JSON.parse(text) catch then text
+
+export printJson = (value) -> console.log JSON.stringify(value, null, 2)
