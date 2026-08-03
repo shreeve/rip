@@ -442,13 +442,13 @@ ${fileSections}
 }
 
 // ============================================================================
-// Single-markdown-file mode: render the document via Bun, wrap in static.rip CSS
+// Single-markdown-file mode: render the document via Bun with shared print CSS
 // ============================================================================
 
 /**
  * Render a single markdown file into a standalone HTML document by shelling out
- * to `bun -e` (Bun.markdown.html). The CSS template matches misc/server-v4-discarded
- * /serving/static.rip's renderMarkdown exactly.
+ * to `bun -e` (Bun.markdown.html). Its styling contract matches
+ * renderSingleMarkdown in packages/print/print.rip.
  *
  * Returns null on any failure (bun not on PATH, non-zero exit, empty stdout,
  * or thrown error), so callers can gracefully fall back to generatePrintHtml.
