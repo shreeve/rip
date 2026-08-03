@@ -28,6 +28,7 @@
 
     {"comment": "=== SCHEMA BLOCKS (`Name = schema [:kind]` + indented body) ==="},
     { "include": "#schema-block" },
+    { "include": "#schema-inline" },
 
     {"comment": "=== HEREDOCS (before regular strings — triple quotes first) ==="},
     {
@@ -214,6 +215,20 @@
       "endCaptures": { "0": { "name": "storage.type.function.rip" } },
       "name": "meta.function.rip",
       "patterns": [{ "include": "#function_params" }]
+    },
+    {
+      "comment": "A binding annotated with a FUNCTION TYPE: `doubler: (n: number) => string = (n) => String(n * 2)`. The method rule below would take this — it sees a name, a colon, a parameter list and an arrow — and its end lands on that arrow, which here belongs to the TYPE, not to a body. The tail `string = (n) => …` was then re-read as a fresh definition, so the RETURN TYPE was scoped as the name of a function called `string`. The lookahead is what tells the two apart: a function type is followed by its return type and then an `=`, where a method's arrow is followed by its body. A thin-arrow method (`plain: (n) -> n * 2`) and an unannotated fat-arrow (`cb: (n) => n * 2`) both fail it and fall through untouched.",
+      "begin": "([a-zA-Z_$][\\w$]*)\\s*(:)(?=\\s*\\([^()]*\\)\\s*=>[^=]*=(?![>=]))",
+      "beginCaptures": {
+        "1": { "name": "variable.other.readwrite.rip" },
+        "2": { "name": "keyword.operator.type-annotation.rip" }
+      },
+      "end": "(=)(?![>=])",
+      "endCaptures": {
+        "1": { "name": "keyword.operator.assignment.rip" }
+      },
+      "contentName": "meta.type.rip",
+      "patterns": [{ "include": "#type_expression" }]
     },
     {
       "comment": "`constructor` is the declaration keyword, not a method name a class chose — TS files it under storage.type for that reason, and it reads in the keyword color rather than the function one. Must precede the general method rule below, which would otherwise claim it as an ordinary name.",
@@ -492,6 +507,25 @@
         "6": { "name": "keyword.operator.expression.in.rip" },
         "7": { "name": "keyword.operator.expression.of.rip" },
         "8": { "name": "keyword.operator.expression.as.rip" }
+      }
+    },
+
+    {"comment": "=== META-PROPERTIES (import.meta, new.target) — before KEYWORDS and the member rule, which would otherwise take a piece each ==="},
+    {
+      "comment": "`import.meta` and `new.target` are single language constructs, not a keyword followed by a property lookup — there is no object named `import` to read `meta` from. Matched whole so the tail reads as the language-provided property it is, the scope TS gives it too; left to the member-access rule it came out as an ordinary property, indistinguishable from `.url` beside it.",
+      "match": "\\b(import)(\\.)(meta)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "punctuation.accessor.rip" },
+        "3": { "name": "support.variable.property.importmeta.rip" }
+      }
+    },
+    {
+      "match": "\\b(new)(\\.)(target)\\b",
+      "captures": {
+        "1": { "name": "keyword.operator.new.rip" },
+        "2": { "name": "punctuation.accessor.rip" },
+        "3": { "name": "support.variable.property.target.rip" }
       }
     },
 
@@ -1139,6 +1173,50 @@
       ]
     },
 
+    "schema-inline": {
+      "comment": "The inline `;` body spelling: `Tiny = schema; note string; count number`, kind optional (`schema :shape; a string`). It declares exactly what the indented form does — the same `{tag: \"field\", …}` entries — but the block rule's begin demands end-of-line after `schema`, so this spelling opened no context at all and the keyword, every field name and every marker went unscoped. The entry patterns below mirror the block's three, minus the `^` anchor, since here the entries share the line with the head.",
+      "begin": "\\b(schema)\\b[ \\t]*(:[a-z][A-Za-z0-9_]*)?[ \\t]*(?=;)",
+      "beginCaptures": {
+        "1": { "name": "storage.type.schema.rip" },
+        "2": { "name": "storage.modifier.schema.rip" }
+      },
+      "end": "$",
+      "patterns": [
+        {
+          "comment": "Entry with a model-reference type: `; author? User`",
+          "match": "(;)[ \\t]*([a-z]\\w*)((?:[!?])+)?[ \\t]+([A-Z]\\w*)(\\[\\])?",
+          "captures": {
+            "1": { "name": "punctuation.separator.rip" },
+            "2": { "name": "variable.other.property.rip" },
+            "3": { "name": "keyword.operator.modifier.rip" },
+            "4": { "name": "entity.name.type.rip" },
+            "5": { "name": "punctuation.definition.array.rip" }
+          }
+        },
+        {
+          "comment": "Entry with a primitive type: `; note string`, `; tags string[]`",
+          "match": "(;)[ \\t]*([a-z]\\w*)((?:[!?])+)?[ \\t]+([a-z]\\w*)(\\[\\])?",
+          "captures": {
+            "1": { "name": "punctuation.separator.rip" },
+            "2": { "name": "variable.other.property.rip" },
+            "3": { "name": "keyword.operator.modifier.rip" },
+            "4": { "name": "support.type.rip" },
+            "5": { "name": "punctuation.definition.array.rip" }
+          }
+        },
+        {
+          "comment": "Entry whose type is not a bare name — the inline twin of the block's fallback; the type falls through to $self.",
+          "match": "(;)[ \\t]*([a-z]\\w*)((?:[!?])+)?",
+          "captures": {
+            "1": { "name": "punctuation.separator.rip" },
+            "2": { "name": "variable.other.property.rip" },
+            "3": { "name": "keyword.operator.modifier.rip" }
+          }
+        },
+        { "include": "$self" }
+      ]
+    },
+
     "schema-block": {
       "comment": "Inline schema declaration: a `... = schema [:kind]` head ending the line opens an indented block. The body runs until a line dedents back to column 0 (the next top-level statement); non-schema tokens (constraints, expression bodies, strings) fall through to $self. `schema` is the declaration keyword and takes storage.type with `class` and the rest; the `:kind` that follows says WHICH flavor is being declared, chosen from the closed set in src/schema.js, so it is a modifier on the declaration — the role `extends` and `abstract` play — and reads in their color rather than the keyword's. It only looks like a `:name` symbol literal; it is not one.",
       "begin": "\\b(schema)\\b[ \\t]*(:[a-z][A-Za-z0-9_]*)?[ \\t]*$",
@@ -1159,8 +1237,8 @@
     "schema-directives": {
       "patterns": [
         {
-          "comment": "Relationship directives carry a model name: @belongs_to User, @has_many Order",
-          "match": "(@(?:belongs_to|belongsTo|has_many|hasMany|has_one|hasOne))\\s+([A-Z]\\w*)",
+          "comment": "Directives that carry a SCHEMA name: the relationship set (@belongs_to User, @has_many Order) and @mixin, whose argument is the schema being folded in (@mixin Stamped). Without the name captured here the directive word alone was scoped and the schema it names fell through with nothing.",
+          "match": "(@(?:belongs_to|belongsTo|has_many|hasMany|has_one|hasOne|mixin))\\s+([A-Z]\\w*)",
           "captures": {
             "1": { "name": "entity.name.function.decorator.rip" },
             "2": { "name": "entity.name.type.rip" }
@@ -1215,16 +1293,34 @@
     },
 
     "schema-entry-key": {
-      "comment": "Hook / method / computed entries: `name: -> @` (method), `name: ~> @x` (lazy), `name: !> @x` (eager). The body falls through to $self.",
-      "match": "^(\\s*)([a-z]\\w*)(\\s*)(:)(?=\\s*[-~!]>)",
-      "captures": {
-        "2": { "name": "entity.name.function.rip" },
-        "4": { "name": "punctuation.separator.key-value.rip" }
-      }
+      "comment": "Hook / method / computed entries. The ARROW decides what the name is, so the two cases are matched apart. `name: -> @` is a method — the emitted type gives it `(...args: any[]) => …` and it is read as `cart.describe()`. `name: ~> @x` (lazy) and `name: !> @x` (eager) are DERIVED VALUES — the type gives them `readonly total: ReturnType<…>` and `subtotal: ReturnType<…>`, they are read as `cart.total`, and tsgo classifies them `property`. One lookahead over `[-~!]>` gave all three the function scope, which was right for the method and wrong for the other two. The body falls through to $self.",
+      "patterns": [
+        {
+          "match": "^(\\s*)([a-z]\\w*)(\\s*)(:)(?=\\s*->)",
+          "captures": {
+            "2": { "name": "entity.name.function.rip" },
+            "4": { "name": "punctuation.separator.key-value.rip" }
+          }
+        },
+        {
+          "match": "^(\\s*)([a-z]\\w*)(\\s*)(:)(?=\\s*[~!]>)",
+          "captures": {
+            "2": { "name": "variable.other.property.rip" },
+            "4": { "name": "punctuation.separator.key-value.rip" }
+          }
+        }
+      ]
     },
 
     "schema-field": {
       "patterns": [
+        {
+          "comment": "A union's constituent: a schema name alone on its line, under `schema :union`. It is a reference to another schema, so it reads as a type name — the same scope `home? Addr` gives the model it points at. Nothing claimed it before, because every other entry rule needs a lowercase field name first.",
+          "match": "^(\\s*)([A-Z]\\w*)(?=\\s*$)",
+          "captures": {
+            "2": { "name": "entity.name.type.rip" }
+          }
+        },
         {
           "comment": "Field with a model-reference type: items! OrderItem[], author? User",
           "match": "^(\\s*)([a-z]\\w*)((?:[!?])+)?\\s+([A-Z]\\w*)(\\[\\])?",
@@ -1243,6 +1339,23 @@
             "3": { "name": "keyword.operator.modifier.rip" },
             "4": { "name": "support.type.rip" },
             "5": { "name": "punctuation.definition.array.rip" }
+          }
+        },
+        {
+          "comment": "A coercer type: `celsius! ~number`, `taken! ~datetime`, `scores! ~number[]`, `contact! ~:email`. The `~` marks coercion — matched here so the general BITWISE-NOT rule cannot claim it, which is a different operator wearing the same character. The name after it is the coercer, and it is a name from a registry rather than a language primitive: `number` only ever looked right because it happens to also be a built-in, while `datetime` beside it got no scope at all. A `~:name` spelling stops at the tilde and lets the symbol rule take the rest, which is the registered-coercer spelling and already reads as one.",
+          "match": "(~)(?:([a-z]\\w*)(\\[\\])?|(?=:))",
+          "captures": {
+            "1": { "name": "keyword.operator.coercion.rip" },
+            "2": { "name": "support.type.rip" },
+            "3": { "name": "punctuation.definition.array.rip" }
+          }
+        },
+        {
+          "comment": "Field whose type is not a bare name: a literal (`kind! 'email'`, `tier! 'basic' | 'pro'`), a coercer (`celsius! ~number`, `contact! ~:email`), or a derivation (`id! -> it.Id`). Both patterns above need an identifier after the name to fire at all, so every one of these fell through — the name left unscoped, or, when it carried a `!`, claimed by the dammit-CALL rule and painted a function, which read `tier!` as an awaited call in the middle of a schema. Only the name and its marker are taken here; the type falls through to $self, which already scopes strings, arrows and symbols. A method entry (`describe: ->`) is untouched because its name is followed by `:`, never by whitespace.",
+          "match": "^(\\s*)([a-z]\\w*)((?:[!?])+)?(?=\\s+\\S)",
+          "captures": {
+            "2": { "name": "variable.other.property.rip" },
+            "3": { "name": "keyword.operator.modifier.rip" }
           }
         }
       ]
