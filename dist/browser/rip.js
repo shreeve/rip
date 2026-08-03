@@ -7760,7 +7760,7 @@ var parserInstance = {
   parse(input, { primitives: wantPrimitives = false, tolerant = false } = {}) {
     let action, allowedAll, at, atPos, base, carriedPrimitives, end, expected, first, got, guardKey, inserted, last, len, loc, locs, message, node, nodeId, ownerNodeId, primitiveLocs, q, r, recordFirst, row, sem, span, start, state, stk, vals;
     [stk, vals, locs, primitiveLocs] = [[0], [null], [null], [[]]];
-    let parseTable = this.parseTable, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, holes = [], inputEnd = input.length;
+    let parseTable = this.parseTable, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, inputEnd = input.length;
     if (tolerant)
       while (inputEnd > 0 && (input[inputEnd - 1] === `
 ` || input[inputEnd - 1] === "\r"))
@@ -7840,7 +7840,6 @@ var parserInstance = {
           lexer.text = "";
           lexer.loc = tokenLoc;
           lexer.token = { generated: true, hole: true };
-          holes.push({ kind: this.tokenNames[inserted], at: atPos });
           action = parseTable[state]?.[symbol];
         } else if (symbol !== EOF) {
           recordFirst();
@@ -7955,7 +7954,7 @@ var parserInstance = {
           primitiveLocs.push(carriedPrimitives);
         stk.push(parseTable[stk[stk.length - 2]][stk[stk.length - 1]]);
       } else
-        return { sexpr: vals[vals.length - 1], stores: { nodes, roles, primitives, nodeIds }, diagnostics, trivia: lexer.trivia ?? null, holes };
+        return { sexpr: vals[vals.length - 1], stores: { nodes, roles, primitives, nodeIds }, diagnostics, trivia: lexer.trivia ?? null };
     }
   },
   ctx: {}
@@ -21009,31 +21008,33 @@ var todo = (msg) => {
 var warn = console.warn;
 var zip = (...a) => a[0].map((_, i) => a.map((b) => b[i]));
 var toMatchable = (v, allowNewlines) => {
-  if (typeof v === "string") {
-    if (!allowNewlines && /[\n\r]/.test(v)) {
-      throw new TypeError("match receiver spans lines — add the /m flag to match across them");
-    }
-    return v;
-  }
-  if (v == null)
-    return "";
-  if (typeof v === "number" || typeof v === "bigint" || typeof v === "boolean")
-    return String(v);
-  if (typeof v === "symbol")
-    return v.description || "";
-  if (v instanceof Uint8Array || v instanceof ArrayBuffer) {
-    return new TextDecoder().decode(v instanceof Uint8Array ? v : new Uint8Array(v));
-  }
-  if (Array.isArray(v))
-    return v.join(",");
-  if (typeof v.toString === "function" && v.toString !== Object.prototype.toString) {
-    try {
-      return v.toString();
-    } catch {
+  const s = (() => {
+    if (typeof v === "string")
+      return v;
+    if (v == null)
       return "";
+    if (typeof v === "number" || typeof v === "bigint" || typeof v === "boolean")
+      return String(v);
+    if (typeof v === "symbol")
+      return v.description || "";
+    if (v instanceof Uint8Array || v instanceof ArrayBuffer) {
+      return new TextDecoder().decode(v instanceof Uint8Array ? v : new Uint8Array(v));
     }
+    if (Array.isArray(v))
+      return v.join(",");
+    if (typeof v.toString === "function" && v.toString !== Object.prototype.toString) {
+      try {
+        return v.toString();
+      } catch {
+        return "";
+      }
+    }
+    return "";
+  })();
+  if (!allowNewlines && /[\n\r]/.test(s)) {
+    throw new TypeError("match receiver spans lines — add the /m flag to match across them");
   }
-  return "";
+  return s;
 };
 
 // src/runtime/schema.js
