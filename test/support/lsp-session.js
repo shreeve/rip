@@ -150,10 +150,20 @@ export async function openSession(files) {
       const want = (seen.get(u) ?? 0) + 1;
       const deadline = Date.now() + timeout;
       while ((pubs.get(u) ?? 0) < want && Date.now() < deadline) await sleep(every);
-      if (!diags.has(u)) {
+      // Short at deadline THROWS in both shapes — never-published and
+      // never-REpublished alike. Returning the previous payload on a
+      // timed-out newer-publication wait would let an absence assertion
+      // pass vacuously against a server that stopped republishing: the
+      // stale [] reads exactly like a fresh silence. A caller that wants
+      // a from-scratch wait forgets first (forget()).
+      if ((pubs.get(u) ?? 0) < want) {
         throw new Error(
-          `no diagnostics publication for ${name} within ${timeout / 1000}s — ` +
-          'the server never (re)published. An empty result is NOT the same as silence.',
+          diags.has(u)
+            ? `no NEW diagnostics publication for ${name} within ${timeout / 1000}s — ` +
+              `waiting for publication #${want}, the server is still at #${pubs.get(u) ?? 0}. ` +
+              'A stale payload is NOT an answer; forget() first if this wait should start over.'
+            : `no diagnostics publication for ${name} within ${timeout / 1000}s — ` +
+              'the server never (re)published. An empty result is NOT the same as silence.',
         );
       }
       // Then let a burst finish: return once the count has held still for
