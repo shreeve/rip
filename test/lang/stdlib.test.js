@@ -3,10 +3,7 @@
 // RULED (2026-08-03): it coerces every reasonable receiver to a string
 // and matching is exactly JavaScript's — always a string, never a
 // null, never a throw. Multi-line semantics are the regex's own
-// business (`^`/`$` cross lines only under /m, as everywhere in JS);
-// the guard that once refused multi-line receivers intercepted
-// standard regex behavior to teach standard regex behavior, and broke
-// every main-legal program that greps decoded file bytes.
+// business (`^`/`$` cross lines only under /m, as everywhere in JS).
 import { describe, expect, test } from 'bun:test';
 import { toMatchable } from '../../src/runtime/stdlib.js';
 
@@ -39,8 +36,7 @@ describe('multi-line receivers coerce like any other — the regex decides what 
 
   // The behavior the coercion feeds: matching IS JavaScript's. An
   // anchor-free grep finds its text across lines; an anchored pattern
-  // needs /m to cross them — standard regex literacy, not rip's to
-  // intercept.
+  // needs /m to cross them.
   test('matching over the coercion behaves exactly like hand-written JS', () => {
     const text = toMatchable(new TextEncoder().encode('name: app\nversion: 2\n'));
     expect(text.match(/version: \d/)?.[0]).toBe('version: 2');

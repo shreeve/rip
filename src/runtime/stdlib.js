@@ -72,10 +72,8 @@ const zip = (...a) => a[0].map((_, i) => a.map((b) => b[i]));
 // a string to match against, and matching is EXACTLY JavaScript's —
 // always a string, never a null, never a throw. RULED (2026-08-03):
 // multi-line semantics are the regex's own business (`^`/`$` cross
-// lines only under /m, as everywhere in JS); a guard here once refused
-// multi-line receivers without /m, which intercepted standard regex
-// behavior to teach standard regex behavior — and broke every
-// main-legal program that greps decoded file bytes.
+// lines only under /m, as everywhere in JS). Decoded file bytes and
+// every other multi-line receiver follow that same rule.
 const toMatchable = (v) => {
   if (typeof v === 'string') return v;
   if (v == null) return '';

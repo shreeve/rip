@@ -80,6 +80,19 @@ describe('tolerant repair at the parser level', () => {
     expect(r.parseDiagnostics.some((d) => /Unexpected '\.'/.test(d.message) && d.start === 4)).toBe(true);
   });
 
+  test('a stray-indented line consumes real input once and keeps the surrounding face', () => {
+    for (const src of [
+      'x = 1\n  y = 2\n',
+      'x = 1\n  y = 2\nz = 3\n',
+      'class A\n  m: ->\n    1\nx = 1\n  y\n',
+    ]) {
+      const r = tolerant(src);
+      expect(r.code).toContain('x = 1');
+      expect(r.parseDiagnostics.some((d) =>
+        /Unexpected 'INDENT'/.test(d.message) && d.expected.includes('TERMINATOR'))).toBe(true);
+    }
+  });
+
   test('a half-typed schema member keeps the schema\'s face — the line is the repair unit', () => {
     // Typing a schema method passes through `greet: ` and `greet: str`,
     // shapes schema validation rejects loudly. A strict compile still
@@ -92,7 +105,7 @@ describe('tolerant repair at the parser level', () => {
     ]) {
       const r = tolerant(src);
       expect(r.parseDiagnostics.length).toBeGreaterThan(0);   // tolerance is never acceptance
-      expect(r.code).toContain('name');                        // the schema survives the keystroke
+      expect(r.code).toContain('{tag: "field", name: "name"'); // the completed field survives the keystroke
       expect(() => compile(src, { runtimeDelivery: 'none' })).toThrow(/greet/); // strict stays loud
     }
   });
@@ -109,7 +122,7 @@ describe('tolerant repair at the parser level', () => {
     // genericity boundary. This pin records the limit as chosen, not
     // overlooked.
     for (const src of ['import {a,\n', 'export \n', 'x = a ? \n']) {
-      expect(() => tolerant(src)).toThrow(/./);
+      expect(() => tolerant(src)).toThrow(/Unexpected|unclosed/);
     }
   });
 

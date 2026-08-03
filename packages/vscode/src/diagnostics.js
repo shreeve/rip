@@ -155,16 +155,12 @@ export function ripDirectiveLines(good) {
 }
 
 export function applyRipDirectives(good, mapped) {
-  // IDENTICAL mapped diagnostics collapse to one before anything else:
-  // a lowering can spell one source construct at several face positions
-  // (a render `for` declares its loop parameter in both the reconcile
-  // callback and the keyed extractor), and each publishes the same code
-  // with the same message at the same mapped source range. One source
-  // position, one claim, one squiggle — the duplicate tells the user
-  // nothing and double-charges an @ts-expect-error's governed line.
+  // A lowering can manifest one source error at several face positions.
+  // Once mapping collapses them to the same code, severity, range, and
+  // message, one source claim owns one squiggle and one directive charge.
   const seen = new Set();
   mapped = mapped.filter((m) => {
-    const key = `${m.code} ${m.severity} ${m.range.start.line}:${m.range.start.character}-${m.range.end.line}:${m.range.end.character} ${m.message}`;
+    const key = `${m.code}\0${m.severity}\0${m.range.start.line}:${m.range.start.character}-${m.range.end.line}:${m.range.end.character}\0${m.message}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

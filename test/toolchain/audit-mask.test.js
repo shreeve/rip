@@ -11,7 +11,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { codeMask } from '../audit/mask.js';
+import { codeMask, specifierSpans } from '../audit/mask.js';
+import { tokenize } from '../../src/lexer.js';
 
 const names = (src) => codeMask(src).match(/[A-Za-z_$][\w$]*/g) ?? [];
 
@@ -37,6 +38,7 @@ describe('codeMask: what counts as code', () => {
     ['division by a variable', 'total = a / b / c\n', ['total', 'a', 'b', 'c']],
     ['division after a paren', 'half = (x + 1) / 2\n', ['half', 'x']],
     ['division after an index', 'arr = items[0] / 2\n', ['arr', 'items']],
+    ['division after a closed string', "ratio = 'a' / n + m / 2\n", ['ratio', 'n', 'm']],
     // A keyword SPELLING after a dot is a property read — a value — so
     // the `/` after it is division. Without the dot bit, `/ parts /`
     // blanks as a regex and `parts` vanishes from every population the
@@ -102,4 +104,19 @@ describe('codeMask: offsets never move', () => {
       }
     }
   });
+});
+
+test('specifier spans cover only static import and re-export clauses', () => {
+  const rows = [
+    ['import { value } from "./x.rip"\n', true],
+    ['export { value } from "./x.rip"\n', true],
+    ['export * from "./x.rip"\n', true],
+    ['import("./x.rip").then (mod) -> use mod\n', false],
+    ['obj =\n  import: themeName\n', false],
+    ['doc = """#{import("./x.rip").name}"""\n', false],
+  ];
+  for (const [src, covered] of rows) {
+    const spans = specifierSpans(codeMask(src), tokenize(src).tokens);
+    expect(spans.length > 0, src).toBe(covered);
+  }
 });

@@ -153,6 +153,11 @@ export const CONTRACT = [
     red: (s) => s.mp.census > 0,
   },
   {
+    name: 'mapping.decomposition', lane: 'map',
+    property: 'the mapping census equals the broken-today and by-luck populations it reports',
+    red: (s) => (s.mp.decompositionDrift ?? 0) > 0,
+  },
+  {
     name: 'type.dimensions', lane: 'main',
     property: 'every dimension check passes — compiles, verdict, runtime, twin, strict',
     red: (s) => s.fails > 0,
@@ -206,6 +211,16 @@ export const CONTRACT = [
     red: (s) => s.hp.ruledDiverging > 0,
   },
   {
+    name: 'hover.pins', lane: 'hover',
+    property: 'every hover-pins.json key names a live corpus fixture',
+    red: (s) => (s.hp.stalePinKeys ?? []).length > 0,
+  },
+  {
+    name: 'hover.ruled.population', lane: 'hover',
+    property: 'the ruled-hover gate carries at least one pinned position',
+    red: (s) => (s.hp.ruledPopulation ?? 0) === 0,
+  },
+  {
     name: 'token.delivery', lane: 'token',
     property: 'the server delivers a semantic token for every probed declaration',
     red: (s) => s.tk.missing.length > 0,
@@ -235,6 +250,12 @@ export const CONTRACT = [
     property: 'the server delivers a semantic token at every use site TypeScript classifies one',
     skip: (s) => !s.tk.facesAvailable,
     red: (s) => (s.tk.survDrops ?? []).reduce((n, d) => n + d.count, 0) > 0,
+  },
+  {
+    name: 'token.delivery.oracle', lane: 'token',
+    property: 'the standalone face oracle and editor server classify the same use-site population',
+    skip: (s) => !s.tk.facesAvailable,
+    red: (s) => (s.tk.survUnclassified ?? 0) > 0,
   },
   {
     // The use-site population is defined by the instrument's own inputs — an

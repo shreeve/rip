@@ -295,9 +295,8 @@ describe('TS-face emission pins', () => {
     // LIVENESS — the trio that keeps the signature from being a lie.
     // `=> string` is honest only because the runtime answers a string
     // for EVERY receiver (RULED 2026-08-03: pure coercion, never null,
-    // never a throw); soften it back toward v3's null and the
-    // annotation above becomes a false claim with every byte pin still
-    // green.
+    // never a throw); any nullable implementation would make the
+    // annotation above a false claim while byte pins stayed green.
     expect(toMatchable('one\ntwo')).toBe('one\ntwo');
     expect(toMatchable(null)).toBe('');
     expect(toMatchable('plain')).toBe('plain');
@@ -1093,18 +1092,27 @@ describe('TS-face negatives', () => {
     expect(() => js('f = (...xs: number) -> xs\n').declarations).toThrow(/rest parameter's annotation/);
   });
 
+  test('boolean word aliases render as TypeScript literal types', () => {
+    expect(ts('f = (x: yes, y: off) -> x\ntype Flags = on | no\n').code)
+      .toContain('function(x: true, y: false)');
+    expect(ts('type Flags = on | no\n').code).toContain('type Flags = true | false;');
+    expect(js('f = (x: yes) -> x\n').declarations).toContain('declare function f(x: true)');
+  });
+
   // The minted behavior VALUE names (`__X__behavior`, `__X__computed`)
   // are face-only but not invisible: a user module binding of the same
-  // spelling used to redeclare the const in the TS face — TS2451 blamed
-  // on the schema/component head — while the JS ran fine. The emitter
-  // now rejects the collision loudly and POSITIONED, the
-  // `__schema`-shadow precedent; every minted TYPE name was already
-  // guarded (buildSchemaTypeStory).
+  // spelling would redeclare the const in the TS face while the JS runs
+  // fine. The emitter rejects the collision loudly and positioned, the
+  // same rule buildSchemaTypeStory applies to minted type names.
   test('a user binding of a minted behavior-const name rejects loudly in the TS face', () => {
     const schemaSrc = '__Event__behavior = 5\nEvent = schema :model\n  name! string\n  shout: -> @name\n';
     const compSrc = '__Badge__computed = 7\nBadge = component\n  x := 1\n  sum ~= @x + 1\n  render\n    div "#{@sum}"\n';
     expect(() => ts(schemaSrc)).toThrow(/module binds '__Event__behavior'.*rename the binding/);
     expect(() => ts(compSrc)).toThrow(/module binds '__Badge__computed'.*rename the binding/);
+    expect(() => ts('def __Event__behavior()\n  1\n' + schemaSrc.slice(schemaSrc.indexOf('Event ='))))
+      .toThrow(/module binds '__Event__behavior'.*rename the binding/);
+    expect(() => ts('class __Badge__computed\n' + compSrc.slice(compSrc.indexOf('Badge ='))))
+      .toThrow(/module binds '__Badge__computed'.*rename the binding/);
     // JS mode emits no behavior const — no collision exists, both run.
     expect(js(schemaSrc).code).toContain('__Event__behavior = 5');
     expect(js(compSrc).code).toContain('__Badge__computed = 7');
