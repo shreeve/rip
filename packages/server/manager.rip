@@ -1,9 +1,10 @@
-import { closeSync, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { rash } from '@rip-lang/app/rash'
 import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
+import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
 
 positiveEnv = (name, fallback) ->
   text = process.env[name] or String(fallback)
@@ -144,36 +145,6 @@ generate = (entry, artifact, reportPath, taskId) ->
   diagnostic = await stderrText
   throw Error.new(diagnostic.trim() or "generation #{taskId} exited #{code}") unless code is 0
   JSON.parse readFileSync(reportPath, 'utf8')
-
-resolveProject = (input) ->
-  if input?
-    given = resolve input
-    abort "rip-server: project not found: #{input}" unless existsSync given
-    path = realpathSync given
-    unless statSync(path).isDirectory()
-      root = dirname path
-      return { root, entry: path, appRoot: (if existsSync(join(root, 'app')) then join(root, 'app') else null) }
-    starts = [path]
-  else
-    starts = []
-    at = realpathSync process.cwd()
-    loop
-      starts.push at
-      parent = dirname at
-      break if parent is at
-      at = parent
-  for root in starts
-    entry = null
-    for name in ['app.rip', 'index.rip']
-      candidate = join root, name
-      if existsSync candidate
-        entry = realpathSync candidate
-        break
-    appRoot = join root, 'app'
-    return { root, entry, appRoot: (if existsSync(appRoot) then realpathSync(appRoot) else null) } if entry? or existsSync(appRoot)
-  if input?
-    abort "rip-server: #{input} has no API entry or app/ directory"
-  abort 'rip-server: no App — pass a project, or create app.rip, index.rip, or app/ here or above'
 
 isRecord = (value) ->
   value? and typeof value is 'object' and not Array.isArray(value)
@@ -656,35 +627,6 @@ stopWorker = (proc) ->
 killWorker = (proc) ->
   proc.kill 'SIGKILL' unless proc.exitCode?
   await proc.exited
-
-managerRuntime = (root) ->
-  abort 'rip-server: manager control requires a POSIX user identity' unless typeof process.getuid is 'function'
-  uid = process.getuid()
-  key = Bun.CryptoHasher.new('sha256').update(root).digest('hex').slice 0, 16
-  directory = join tmpdir(), "rip-managers-#{uid}"
-  try
-    mkdirSync directory, { mode: 0o700 }
-  catch error
-    throw error unless error?.code is 'EEXIST'
-  info = lstatSync directory
-  abort "rip-server: unsafe manager runtime path (not a directory): #{directory}" unless info.isDirectory() and not info.isSymbolicLink()
-  abort "rip-server: unsafe manager runtime ownership at #{directory}" unless info.uid is uid
-  mode = info.mode & 0o777
-  abort "rip-server: unsafe manager runtime permissions at #{directory}: expected 0700" unless mode is 0o700
-  { socket: join(directory, "#{key}.sock"), owner: join(directory, "#{key}.json") }
-
-managerRequest = (socket, method, path) ->
-  options = { method, unix: socket }
-  fetch "http://manager#{path}", options
-
-waitManagerStopped = (socket) ->
-  loop
-    sleep! 10
-    try
-      response = managerRequest! socket, 'GET', '/status'
-      response.text!
-    catch
-      return
 
 export main = (argv) ->
   args = parseArgs argv
