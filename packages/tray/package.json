@@ -19,6 +19,7 @@
   "files": [
     "tray.rip",
     "build.rip",
+    "assets",
     "macos",
     "README.md"
   ],

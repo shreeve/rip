@@ -1,6 +1,6 @@
 #!/usr/bin/env rip
 
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve } from 'node:path'
 
 HELP = '''
@@ -86,6 +86,8 @@ export build = (options) ->
     copyFileSync options.provider, join(resources, 'Tray.rip')
     copyFileSync join(import.meta.dir, 'tray.rip'), join(trayModule, 'tray.rip')
     copyFileSync join(import.meta.dir, 'package.json'), join(trayModule, 'package.json')
+    cpSync join(import.meta.dir, 'assets'), join(resources, 'assets'), { recursive: true }
+    cpSync join(import.meta.dir, 'assets'), join(trayModule, 'assets'), { recursive: true }
     copyFileSync options.icon, join(resources, 'AppIcon.icns') if options.icon?
     iconEntry = if options.icon? then '<key>CFBundleIconFile</key><string>AppIcon</string>' else ''
     plist = """<?xml version="1.0" encoding="UTF-8"?>

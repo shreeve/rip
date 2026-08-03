@@ -12,10 +12,10 @@ struct RipTrayHost: App {
 
   var body: some Scene {
     MenuBarExtra {
-      TrayMenu(provider: provider)
+      TrayPanel(provider: provider)
     } label: {
       TrayStatusLabel(provider: provider)
     }
-    .menuBarExtraStyle(.menu)
+    .menuBarExtraStyle(.window)
   }
 }

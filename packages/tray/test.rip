@@ -1,5 +1,5 @@
 import { test, eq, ok, throws } from '@rip-lang/testing'
-import { action, directory, label, link, quit, separator, snapshot, submenu, toggle, tray } from '@rip-lang/tray'
+import { action, directory, label, link, quit, separator, snapshot, submenu, svg, svgFile, toggle, tray } from '@rip-lang/tray'
 import { optionsFor } from './build.rip'
 import * as mod from '@rip-lang/tray'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -9,12 +9,15 @@ import { tmpdir } from 'node:os'
 console.log '\nPackage'
 
 test 'exports the complete Rip-authored tray vocabulary', ->
-  eq Object.keys(mod).sort(), ['action', 'directory', 'label', 'link', 'quit', 'separator', 'serve', 'snapshot', 'submenu', 'toggle', 'tray']
+  eq Object.keys(mod).sort(), ['action', 'directory', 'label', 'link', 'quit', 'separator', 'serve', 'snapshot', 'submenu', 'svg', 'svgFile', 'toggle', 'tray']
 
 test 'has no runtime dependencies and keeps the native host in the package', ->
   pkg = JSON.parse readFileSync("#{import.meta.dir}/package.json", 'utf8')
   eq pkg.dependencies, undefined
   eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  ok pkg.files.includes 'assets'
+  ok existsSync "#{import.meta.dir}/assets/rip-color.svg"
+  ok existsSync "#{import.meta.dir}/assets/rip-template.svg"
   ok readFileSync("#{import.meta.dir}/macos/Package.swift", 'utf8').includes('RipTrayHost')
 
 test 'the macOS host is generic and contains no Rip Apps policy', ->
@@ -22,7 +25,8 @@ test 'the macOS host is generic and contains no Rip Apps policy', ->
   source = readFileSync "#{import.meta.dir}/macos/Sources/RipTrayHost/RipTrayHost.swift", 'utf8'
   ok manifest.includes '.macOS(.v13)'
   ok source.includes 'MenuBarExtra'
-  ok source.includes 'TrayMenu(provider: provider)'
+  ok source.includes 'TrayPanel(provider: provider)'
+  ok source.includes '.menuBarExtraStyle(.window)'
   ok not /rip app|rip edge|Caddy|Janus/.test(source)
 
 test 'the native host builds and exercises its protocol on macOS', ->
@@ -33,7 +37,7 @@ test 'the native host builds and exercises its protocol on macOS', ->
   eq build.exitCode, 0, build.stderr.toString() or build.stdout.toString()
   check = Bun.spawnSync ['swift', 'run', '--package-path', 'macos', 'tray-kit-check'], { cwd: import.meta.dir, stdout: 'pipe', stderr: 'pipe' }
   eq check.exitCode, 0, check.stderr.toString() or check.stdout.toString()
-  ok check.stdout.toString().includes '4 checks passed'
+  ok check.stdout.toString().includes '9 checks passed'
 
 test 'the builder derives an independent app destination and bundle identity', ->
   options = optionsFor [
@@ -73,6 +77,7 @@ test! 'a Rip menu becomes a callback-free native tray document', ->
   eq result.tray,
     title: 'Fixture'
     icon: 'bolt'
+    logo: null
     tooltip: 'Fixture tray'
     items: [
       { kind: 'label', title: 'Ready', icon: 'checkmark.circle', subtitle: 'All systems go' }
@@ -96,6 +101,17 @@ test! 'a Rip menu becomes a callback-free native tray document', ->
   eq toggled, false
   eq picked, '/tmp/project'
 
+test 'SVG icons are explicit, template-aware, and file-backed', ->
+  source = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><path d="M0 0h8v8H0z"/></svg>'
+  eq svg(source), { kind: 'svg', source, template: true }
+  eq svg(source, template: false), { kind: 'svg', source, template: false }
+  file = svgFile "#{import.meta.dir}/assets/rip-color.svg", template: false
+  eq file.kind, 'svg'
+  eq file.template, false
+  ok file.source.includes '<svg'
+  throws (-> svg ''), 'source must be a non-empty string'
+  throws (-> svg source, template: 'yes'), 'template must be Boolean'
+
 test! 'duplicate action ids reject loudly across nested menus', ->
   definition = tray
     title: 'Duplicate'
@@ -115,6 +131,7 @@ test 'invalid definitions and items reject at their owning boundary', ->
   throws (-> tray title: 'Bad', refresh: -1, menu: -> []), 'refresh must be'
   throws (-> action 'Bad', id: 'bad'), 'run must be a function'
   throws (-> toggle 'Bad', id: 'bad', value: 'yes', run: -> null), 'value must be Boolean'
+  throws (-> label 'Bad', icon: { kind: 'png', source: 'x', template: true }), 'icon kind must be svg'
 
 test! 'snapshot revalidates a raw definition instead of trusting its caller', ->
   error = null

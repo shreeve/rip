@@ -1,14 +1,14 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="assets/rip-color.svg" alt="Rip" width="50" />
 
 # Rip Tray - @rip-lang/tray
 
 > **Pure-Rip macOS menu-bar apps rendered by one small reusable SwiftUI host**
 
-A tray app is an ordinary `.rip` program. It computes its own title, SF
-Symbol, menu tree, state, and callbacks with the full Rip language — functions,
-loops, conditions, imports, processes, and reactive data included. There is no
+A tray app is an ordinary `.rip` program. It computes its own title, icon,
+panel, state, and callbacks with the full Rip language — functions, loops,
+conditions, imports, processes, and reactive data included. There is no
 manifest format, YAML schema, JSON configuration, or second template language.
-The native host knows only how to render menu items and return user actions.
+The native host knows only how to render the panel and return user actions.
 
 **Runtime:** not browser-safe — providers use Bun processes and the native host
 uses SwiftUI/AppKit. One `.rip` library plus one reusable Swift host.
@@ -24,13 +24,17 @@ Create `example.rip`:
 ```coffee
 #!/usr/bin/env rip
 
-import { action, label, quit, separator, serve, tray } from '@rip-lang/tray'
+import { action, label, quit, separator, serve, svg, tray } from '@rip-lang/tray'
 
 count = 0
 
 app = tray
   title: 'Example'
-  icon: 'star.circle'
+  icon: svg '''
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+      <path d="M12 2 15 9l7 .6-5.3 4.7 1.6 7.2L12 17.8l-6.3 3.7 1.6-7.2L2 9.6 9 9z"/>
+    </svg>
+    '''
   refresh: 0
   menu: -> [
     label "Count: #{count}", icon: 'number.circle'
@@ -73,9 +77,11 @@ icon and `--force` when intentionally replacing that exact destination.
 
 - **Pure Rip authoring** — the complete application is one `.rip` program
 - **One native host** — SwiftUI's `MenuBarExtra` renders any tray provider
-- **Full menu vocabulary** — labels, separators, actions, toggles, links,
+- **Apple-style panel** — a rounded native popover with a branded header,
+  section cards, status rows, and a scrollable body
+- **Full panel vocabulary** — labels, separators, actions, toggles, links,
   submenus, directory pickers, and Quit
-- **Native icons** — the tray and every item may name an SF Symbol
+- **Native and custom icons** — SF Symbols plus inline or file-backed SVGs
 - **Live callbacks** — one persistent Rip process retains closures and state
 - **Computed menus** — ordinary Rip loops and conditions build each render
 - **Automatic refresh** — a provider chooses its own interval or disables it
@@ -87,24 +93,24 @@ icon and `--force` when intentionally replacing that exact destination.
 ```text
 your tray.rip
 ├── owns state, data, commands, and callbacks
-├── computes a complete menu tree
+├── computes a complete panel tree
 └── serves the tree through @rip-lang/tray
                 │
                 │ private render/action protocol
                 ▼
 generic SwiftUI host
 ├── MenuBarExtra status item
-├── native labels, icons, menus, and pickers
+├── native popover, labels, icons, controls, and pickers
 └── sends each click back to its Rip callback
 ```
 
 The provider sends a complete render whenever it starts, refreshes, or handles
-an action. Each render atomically replaces the native menu and callback table.
+an action. Each render atomically replaces the native panel and callback table.
 Stable action IDs preserve identity; duplicates reject before the menu reaches
 SwiftUI. Standard output is reserved for the private newline-delimited
 transport, while provider diagnostics use standard error.
 
-## Menu Vocabulary
+## Panel Vocabulary
 
 Every constructor returns an ordinary Rip object, so items compose naturally
 in arrays, comprehensions, and helper functions.
@@ -120,9 +126,41 @@ in arrays, comprehensions, and helper functions.
 | `directory title, id:, run:, ...` | Directory picker passing the selected path |
 | `quit title, ...` | Terminates the native host |
 
-Common options are `icon:` (an SF Symbol name) and `enabled:`. Callback items
-require a stable `id:` and `run:` function. A directory callback receives the
-selected path; a toggle callback receives the requested Boolean value.
+Common options are `icon:` and `enabled:`. Callback items require a stable
+`id:` and `run:` function. A directory callback receives the selected path; a
+toggle callback receives the requested Boolean value.
+
+## Icons
+
+A string remains the compact spelling for an SF Symbol:
+
+```coffee
+icon: 'bolt.horizontal.circle'
+```
+
+Inline SVG keeps a complete tray app in one `.rip` file. SVGs use macOS
+template rendering by default: their color is replaced by the system's current
+menu-bar foreground, so they follow light mode, dark mode, selection, and
+accessibility contrast automatically.
+
+```coffee
+icon: svg '''
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">...</svg>
+  '''
+```
+
+Preserve authored colors explicitly when an image belongs inside the panel:
+
+```coffee
+logo: svg COLOR_LOGO, template: false
+```
+
+`logo:` supplies the larger panel-header image and falls back to `icon:` when
+omitted. `svgFile './logo.svg'` reads a file relative to the provider's working
+directory. Prefer inline SVG when building a self-contained `.app`, since the
+builder cannot infer arbitrary files read by provider code. This package ships
+[`rip-color.svg`](assets/rip-color.svg) and
+[`rip-template.svg`](assets/rip-template.svg) as ready-to-use Rip artwork.
 
 ## Rip Apps Tray
 
@@ -149,9 +187,10 @@ provider when it is not passed as the host's first argument.
 
 `TrayKit` is the reusable Swift package. `rip-tray-host` is its minimal
 executable: an accessory application with no Dock icon and one SwiftUI
-`MenuBarExtra`. The host resolves and launches `rip`, decodes the provider's
-menu, renders it, presents native directory panels and URLs, and returns action
-messages. It contains no knowledge of Rip Server or the included provider.
+`MenuBarExtra` using the native window presentation. The host resolves and
+launches `rip`, decodes the provider's panel, renders it, presents native
+directory pickers and URLs, and returns action messages. It contains no
+knowledge of Rip Server or the included provider.
 
 The built application still locates the machine's `rip` executable at runtime;
 `~/.bun/rip` and `~/.bun/bin/rip` are checked automatically. Run
@@ -167,7 +206,8 @@ bun run test
 bun run test:swift
 ```
 
-The Rip suite pins the public vocabulary, normalization, strict validation,
-callback dispatch, stateful rerendering, and compilation of the included app.
-The Swift check pins protocol decoding and executable/provider discovery; a
-normal Swift build compiles both the reusable library and menu-bar host.
+The Rip suite pins the public vocabulary, SVG modes, normalization, strict
+validation, callback dispatch, stateful rerendering, and compilation of the
+included app. The Swift check pins protocol decoding, native SVG rendering,
+and executable/provider discovery; a normal Swift build compiles both the
+reusable library and menu-bar host.

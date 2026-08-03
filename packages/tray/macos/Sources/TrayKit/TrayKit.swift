@@ -3,15 +3,80 @@ import Combine
 import Foundation
 import SwiftUI
 
+public enum TrayIcon: Codable, Equatable, Sendable {
+  case symbol(String)
+  case svg(source: String, template: Bool)
+
+  private struct SVG: Codable {
+    let kind: String
+    let source: String
+    let template: Bool
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    if let name = try? container.decode(String.self) {
+      guard !name.isEmpty else { throw TrayHostError("SF Symbol name must not be empty") }
+      self = .symbol(name)
+      return
+    }
+    let svg = try container.decode(SVG.self)
+    guard svg.kind == "svg" else { throw TrayHostError("unknown tray icon kind \(svg.kind)") }
+    guard !svg.source.isEmpty else { throw TrayHostError("SVG icon source must not be empty") }
+    self = .svg(source: svg.source, template: svg.template)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    switch self {
+    case .symbol(let name):
+      try container.encode(name)
+    case .svg(let source, let template):
+      try container.encode(SVG(kind: "svg", source: source, template: template))
+    }
+  }
+
+  public var usesTemplateRendering: Bool {
+    switch self {
+    case .symbol: true
+    case .svg(_, let template): template
+    }
+  }
+
+  public func nativeImage(accessibilityDescription: String? = nil) throws -> NSImage {
+    switch self {
+    case .symbol(let name):
+      guard let image = NSImage(systemSymbolName: name, accessibilityDescription: accessibilityDescription) else {
+        throw TrayHostError("unknown SF Symbol \(name)")
+      }
+      return image
+    case .svg(let source, let template):
+      guard let image = NSImage(data: Data(source.utf8)) else {
+        throw TrayHostError("invalid SVG icon")
+      }
+      image.isTemplate = template
+      return image
+    }
+  }
+}
+
 public struct TrayDefinition: Codable, Equatable, Sendable {
   public let title: String
-  public let icon: String?
+  public let icon: TrayIcon?
+  public let logo: TrayIcon?
   public let tooltip: String?
   public let items: [TrayItem]
 
-  public init(title: String, icon: String? = nil, tooltip: String? = nil, items: [TrayItem] = []) {
+  public init(
+    title: String,
+    icon: TrayIcon? = nil,
+    logo: TrayIcon? = nil,
+    tooltip: String? = nil,
+    items: [TrayItem] = []
+  ) {
     self.title = title
     self.icon = icon
+    self.logo = logo
     self.tooltip = tooltip
     self.items = items
   }
@@ -21,7 +86,7 @@ public struct TrayItem: Codable, Equatable, Sendable {
   public let kind: String
   public let title: String?
   public let id: String?
-  public let icon: String?
+  public let icon: TrayIcon?
   public let subtitle: String?
   public let url: String?
   public let prompt: String?
@@ -89,7 +154,7 @@ struct TrayHostError: LocalizedError {
 
 @MainActor
 public final class TrayProvider: ObservableObject {
-  @Published public private(set) var tray = TrayDefinition(title: "Rip", icon: "bolt.horizontal.circle")
+  @Published public private(set) var tray = TrayDefinition(title: "Rip", icon: .symbol("bolt.horizontal.circle"))
   @Published public private(set) var error: String?
 
   private var process: Process?
@@ -188,6 +253,7 @@ public final class TrayProvider: ObservableObject {
         switch envelope.type {
         case "render":
           guard let tray = envelope.tray else { throw TrayHostError("render message has no tray") }
+          try tray.validateIcons()
           self.tray = tray
           error = nil
         case "error":
@@ -233,12 +299,16 @@ public struct TrayStatusLabel: View {
   }
 
   public var body: some View {
-    Label(provider.tray.title, systemImage: provider.tray.icon ?? "circle")
-      .help(provider.tray.tooltip ?? provider.tray.title)
+    Label {
+      Text(provider.tray.title)
+    } icon: {
+      TrayIconView(icon: provider.tray.icon ?? .symbol("circle"), size: 18)
+    }
+    .help(provider.tray.tooltip ?? provider.tray.title)
   }
 }
 
-public struct TrayMenu: View {
+public struct TrayPanel: View {
   @ObservedObject private var provider: TrayProvider
 
   public init(provider: TrayProvider) {
@@ -246,15 +316,42 @@ public struct TrayMenu: View {
   }
 
   public var body: some View {
-    if let error = provider.error {
-      Text(error).disabled(true)
+    VStack(spacing: 0) {
+      HStack(spacing: 12) {
+        if let logo = provider.tray.logo ?? provider.tray.icon {
+          TrayIconView(icon: logo, size: 38)
+        }
+        VStack(alignment: .leading, spacing: 2) {
+          Text(provider.tray.title).font(.title2.weight(.semibold))
+          if let tooltip = provider.tray.tooltip {
+            Text(tooltip).font(.subheadline).foregroundStyle(.secondary)
+          }
+        }
+        Spacer()
+      }
+      .padding(16)
+
       Divider()
+
+      ScrollView {
+        VStack(alignment: .leading, spacing: 12) {
+          if let error = provider.error {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+              .foregroundStyle(.red)
+              .font(.callout)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          TrayPanelItems(items: provider.tray.items, provider: provider)
+        }
+        .padding(12)
+      }
+      .frame(maxHeight: 520)
     }
-    TrayItems(items: provider.tray.items, provider: provider)
+    .frame(width: 360)
   }
 }
 
-private struct TrayItems: View {
+private struct TrayPanelItems: View {
   let items: [TrayItem]
   @ObservedObject var provider: TrayProvider
 
@@ -263,30 +360,76 @@ private struct TrayItems: View {
       switch item.kind {
       case "separator":
         Divider()
-      case "label":
-        ItemLabel(item: item).disabled(true)
       case "submenu":
-        Menu {
-          TrayItems(items: item.items ?? [], provider: provider)
-        } label: {
+        VStack(alignment: .leading, spacing: 7) {
           ItemLabel(item: item)
+            .font(.headline)
+            .foregroundStyle(item.enabled ?? true ? .primary : .secondary)
+          VStack(spacing: 2) {
+            TrayPanelItems(items: item.items ?? [], provider: provider)
+          }
+          .padding(6)
+          .background(.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
         }
         .disabled(!(item.enabled ?? true))
+      case "label":
+        PanelLabelRow(item: item)
       case "toggle":
         Toggle(isOn: Binding(
           get: { item.value ?? false },
           set: { _ in provider.perform(item) }
         )) {
-          ItemLabel(item: item)
+          PanelLabelRow(item: item)
         }
+        .toggleStyle(.switch)
         .disabled(!(item.enabled ?? true))
       case "action", "directory", "link", "quit":
-        Button { provider.perform(item) } label: { ItemLabel(item: item) }
-          .disabled(!(item.enabled ?? true))
+        Button { provider.perform(item) } label: {
+          PanelLabelRow(item: item)
+        }
+        .buttonStyle(TrayPanelButtonStyle())
+        .disabled(!(item.enabled ?? true))
       default:
-        Text("Unsupported item: \(item.kind)").disabled(true)
+        Label("Unsupported item: \(item.kind)", systemImage: "questionmark.circle")
+          .foregroundStyle(.secondary)
       }
     }
+  }
+}
+
+private struct PanelLabelRow: View {
+  let item: TrayItem
+
+  var body: some View {
+    HStack(spacing: 10) {
+      if let icon = item.icon {
+        ZStack {
+          Circle().fill(.primary.opacity(0.08))
+          TrayIconView(icon: icon, size: 17)
+        }
+        .frame(width: 30, height: 30)
+      }
+      VStack(alignment: .leading, spacing: 1) {
+        Text(item.title ?? "")
+        if let subtitle = item.subtitle {
+          Text(subtitle).font(.caption).foregroundStyle(.secondary)
+        }
+      }
+      Spacer(minLength: 8)
+    }
+    .contentShape(Rectangle())
+    .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+  }
+}
+
+private struct TrayPanelButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .padding(.horizontal, 5)
+      .background(
+        configuration.isPressed ? Color.accentColor.opacity(0.16) : Color.clear,
+        in: RoundedRectangle(cornerRadius: 7)
+      )
   }
 }
 
@@ -295,11 +438,47 @@ private struct ItemLabel: View {
 
   var body: some View {
     if let icon = item.icon {
-      Label(item.title ?? "", systemImage: icon)
+      Label {
+        Text(item.title ?? "")
+      } icon: {
+        TrayIconView(icon: icon, size: 16)
+      }
         .help(item.subtitle ?? "")
     } else {
       Text(item.title ?? "")
         .help(item.subtitle ?? "")
+    }
+  }
+}
+
+private struct TrayIconView: View {
+  let icon: TrayIcon
+  let size: CGFloat
+
+  var body: some View {
+    if let image = try? icon.nativeImage() {
+      Image(nsImage: image)
+        .resizable()
+        .renderingMode(icon.usesTemplateRendering ? .template : .original)
+        .scaledToFit()
+        .frame(width: size, height: size)
+    }
+  }
+}
+
+private extension TrayDefinition {
+  func validateIcons() throws {
+    if let icon { _ = try icon.nativeImage(accessibilityDescription: title) }
+    if let logo { _ = try logo.nativeImage(accessibilityDescription: title) }
+    try items.validateIcons()
+  }
+}
+
+private extension Array where Element == TrayItem {
+  func validateIcons() throws {
+    for item in self {
+      if let icon = item.icon { _ = try icon.nativeImage(accessibilityDescription: item.title) }
+      try (item.items ?? []).validateIcons()
     }
   }
 }

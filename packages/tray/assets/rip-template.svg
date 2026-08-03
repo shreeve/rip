@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Rip">
+  <path fill="#000" fill-rule="evenodd" d="M8 6h22c13 0 21 7 21 18 0 8-4 14-12 17l13 17-17-5-10-11h-5v13L8 58V6Zm12 11v15h9c6 0 9-2 9-8 0-5-3-7-9-7h-9Z"/>
+  <path fill="#000" d="M3 51c13-8 25-7 37-2 9 4 16 6 22 1-5 10-16 14-28 10-12-4-21-12-31-9Z"/>
+</svg>

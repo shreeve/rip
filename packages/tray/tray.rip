@@ -1,5 +1,8 @@
 #!/usr/bin/env rip
 
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 fail = (message) -> throw Error.new message
 
 validateObject = (value, at) ->
@@ -15,8 +18,14 @@ validateTitle = (title, at) ->
   title
 
 validateIcon = (icon, at) ->
-  fail "#{at} icon must be an SF Symbol name or null" unless not icon? or (typeof icon is 'string' and icon.length)
-  icon or null
+  return null unless icon?
+  return icon if typeof icon is 'string' and icon.length
+  validateObject icon, "#{at} icon"
+  rejectUnknown icon, ['kind', 'source', 'template'], "#{at} icon"
+  fail "#{at} icon kind must be svg" unless icon.kind is 'svg'
+  fail "#{at} SVG source must be a non-empty string" unless typeof icon.source is 'string' and icon.source.length
+  fail "#{at} SVG template must be Boolean" unless typeof icon.template is 'boolean'
+  { kind: 'svg', source: icon.source, template: icon.template }
 
 validateId = (id, at) ->
   fail "#{at} id must be a non-empty string" unless typeof id is 'string' and id.length
@@ -27,12 +36,23 @@ enabled = (value, at) ->
   fail "#{at} enabled must be Boolean" unless typeof value is 'boolean'
   value
 
+export svg = (source, options = {}) ->
+  rejectUnknown options, ['template'], 'svg'
+  fail 'svg source must be a non-empty string' unless typeof source is 'string' and source.length
+  template = options.template ?? true
+  fail 'svg template must be Boolean' unless typeof template is 'boolean'
+  { kind: 'svg', source, template }
+
+export svgFile = (path, options = {}) ->
+  fail 'svgFile path must be a non-empty string' unless typeof path is 'string' and path.length
+  svg readFileSync(resolve(path), 'utf8'), options
+
 export label = (title, options = {}) ->
   rejectUnknown options, ['icon', 'subtitle'], 'label'
   validateTitle title, 'label'
-  validateIcon options.icon, 'label'
+  icon = validateIcon options.icon, 'label'
   fail 'label subtitle must be a string or null' unless not options.subtitle? or typeof options.subtitle is 'string'
-  { kind: 'label', title, icon: options.icon or null, subtitle: options.subtitle or null }
+  { kind: 'label', title, icon, subtitle: options.subtitle or null }
 
 export separator = -> { kind: 'separator' }
 
@@ -40,9 +60,9 @@ callbackItem = (kind, title, options, extra = []) ->
   rejectUnknown options, ['id', 'run', 'icon', 'enabled', ...extra], kind
   validateTitle title, kind
   validateId options.id, kind
-  validateIcon options.icon, kind
+  icon = validateIcon options.icon, kind
   fail "#{kind} run must be a function" unless typeof options.run is 'function'
-  { kind, title, id: options.id, icon: options.icon or null, enabled: enabled(options.enabled, kind), _run: options.run }
+  { kind, title, id: options.id, icon, enabled: enabled(options.enabled, kind), _run: options.run }
 
 export action = (title, options = {}) -> callbackItem 'action', title, options
 
@@ -59,34 +79,35 @@ export directory = (title, options = {}) ->
 export link = (title, url, options = {}) ->
   rejectUnknown options, ['id', 'icon', 'enabled'], 'link'
   validateTitle title, 'link'
-  validateIcon options.icon, 'link'
+  icon = validateIcon options.icon, 'link'
   id = options.id or url
   validateId id, 'link'
   fail 'link url must be a non-empty string' unless typeof url is 'string' and url.length
-  { kind: 'link', title, id, url, icon: options.icon or null, enabled: enabled(options.enabled, 'link') }
+  { kind: 'link', title, id, url, icon, enabled: enabled(options.enabled, 'link') }
 
 export submenu = (title, items, options = {}) ->
   rejectUnknown options, ['id', 'icon', 'enabled'], 'submenu'
   validateTitle title, 'submenu'
-  validateIcon options.icon, 'submenu'
+  icon = validateIcon options.icon, 'submenu'
   fail 'submenu items must be an array' unless Array.isArray items
-  { kind: 'submenu', title, id: options.id or title, icon: options.icon or null, enabled: enabled(options.enabled, 'submenu'), items }
+  { kind: 'submenu', title, id: options.id or title, icon, enabled: enabled(options.enabled, 'submenu'), items }
 
 export quit = (title = 'Quit', options = {}) ->
   rejectUnknown options, ['icon'], 'quit'
   validateTitle title, 'quit'
-  validateIcon options.icon, 'quit'
-  { kind: 'quit', title, icon: options.icon or null }
+  icon = validateIcon options.icon, 'quit'
+  { kind: 'quit', title, icon }
 
 export tray = (options = {}) ->
-  rejectUnknown options, ['title', 'icon', 'tooltip', 'refresh', 'menu'], 'tray'
+  rejectUnknown options, ['title', 'icon', 'logo', 'tooltip', 'refresh', 'menu'], 'tray'
   validateTitle options.title, 'tray'
-  validateIcon options.icon, 'tray'
+  icon = validateIcon options.icon, 'tray'
+  logo = validateIcon options.logo, 'tray logo'
   fail 'tray tooltip must be a string or null' unless not options.tooltip? or typeof options.tooltip is 'string'
   refresh = options.refresh ?? 2
   fail 'tray refresh must be zero or a positive number of seconds' unless typeof refresh is 'number' and Number.isFinite(refresh) and refresh >= 0
   fail 'tray menu must be a function' unless typeof options.menu is 'function'
-  { title: options.title, icon: options.icon or null, tooltip: options.tooltip or null, refresh, menu: options.menu }
+  { title: options.title, icon, logo, tooltip: options.tooltip or null, refresh, menu: options.menu }
 
 normalizeItems = (items, actions, at = 'menu') ->
   fail "#{at} must return an array" unless Array.isArray items
@@ -134,6 +155,7 @@ export snapshot = (definition) ->
     tray:
       title: definition.title
       icon: definition.icon
+      logo: definition.logo
       tooltip: definition.tooltip
       items: normalizeItems(items, actions)
     actions
@@ -231,7 +253,8 @@ ripApps = ->
 
   definition = tray
     title: 'Rip'
-    icon: 'bolt.horizontal.circle'
+    icon: svgFile "#{import.meta.dir}/assets/rip-template.svg"
+    logo: svgFile "#{import.meta.dir}/assets/rip-color.svg", template: false
     tooltip: 'Rip Apps'
     refresh: 2
     menu: ->
