@@ -37,9 +37,11 @@
 //     'ctx'` on the author's own lines, naming variables that are in scope
 //     where they were written. It lost 7 real ones.
 //   · the case it genuinely wins — a forward-referenced class, which the
-//     probe declines post-#41 and silently misses — has a population of ZERO
-//     here: no class- or component-valued first write exists in the corpus
-//     or in packages/.
+//     probe declines and silently misses (the probe refuses class/
+//     component-valued first writes so it never pins its own manufactured
+//     symbol: TS2304 on legal code; gated in `check` and `pins`) — has a
+//     population of ZERO here: no class- or component-valued first write
+//     exists in the corpus or in packages/.
 //
 // That last number is the whole trade, and it is the one most likely to
 // change: rip's component story is what would make forward-referenced
