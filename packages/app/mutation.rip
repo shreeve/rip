@@ -56,8 +56,7 @@ export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onS
     # rather than floating unhandled.
     try
       _succeeded.value = true
-      onSuccess = opts.onSuccess
-      onSuccess! r if onSuccess?
+      opts.onSuccess?!(r)
       r
     finally
       _pending.value = false if me is generation

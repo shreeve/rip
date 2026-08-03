@@ -2252,7 +2252,7 @@ const UNFINISHED = new Set([
 // DAMMIT is callable: `f!(1, 2)` calls (and awaits) f. DYNAMIC_IMPORT
 // exists only when a '(' or '!(' follows (the lexer mints it from that
 // lookahead), so `import(url)` and `import!(url)` are real calls.
-const CALLABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', 'NUMBER', 'STRING', ']', 'INDEX_END', 'SUPER', 'DAMMIT', 'DYNAMIC_IMPORT']);
+const CALLABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', 'NUMBER', 'STRING', ']', 'INDEX_END', 'SUPER', 'DAMMIT', 'PRESENCE', 'DYNAMIC_IMPORT']);
 
 // Token kinds after which an unspaced '[' indexes rather than opening an
 // array literal (the scan-time rule: !prev.spaced && INDEXABLE.has(prev)).
@@ -3407,7 +3407,8 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // Spaced '?' is the ternary operator. Unspaced: '?(' and '?['
       // are the optional call/index (the dotless '?.' spelling), '?!'
       // directly after a value-ending token is the postfix presence
-      // check (`a?!` → `a ? true : undefined` — the Houdini operator),
+      // check when bare (`a?!` → `a ? true : undefined`) and optional
+      // dammit when followed by arguments (`f?!(x)` → `await f?.(x)`),
       // and a '?' directly after a value-ending token is the postfix
       // existence check (`a?` → `a != null`) — real tokens and nodes.
       // A juxta argument after that existence token (`f? x`) is an
@@ -4072,12 +4073,12 @@ export function implicitBlocks(tokens, mintId) {
 // call so the comprehension wraps it. Inserted CALL_START/CALL_END are
 // generated zero-width tokens anchored at the argument extent's edges,
 // so call spans stay honest.
-// Postfix existence `?` is callable the same way DAMMIT is: a spaced
-// argument after `f?` opens an implicit optional call (`f? x` → the
-// same shape as `f?(x)`). Bare `f?` (no juxta arg) stays existence —
-// the grammar's `Value ?` vs `Value ? Arguments` split, with CALL_START
-// above `?` in precedence, owns that fork.
-const IMPLICIT_FUNC = new Set(['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS', 'DAMMIT', '?']);
+// Postfix existence `?` and optional dammit `?!` are callable the same
+// way DAMMIT is: a spaced argument after either opens an implicit call
+// (`f? x` is optional; `f?! x` also awaits). Without an argument the
+// tokens keep their postfix operations: existence for `?`, presence for
+// `?!`. The grammar productions own both forks.
+const IMPLICIT_FUNC = new Set(['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS', 'DAMMIT', '?', 'PRESENCE']);
 const IMPLICIT_CALL_STARTERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_START', 'REGEX', 'HEREGEX_START', 'SYMBOL', 'MAP_START',
   'PARAM_START', 'IF', 'TRY', 'SWITCH', 'CLASS', 'THIS', 'SUPER',

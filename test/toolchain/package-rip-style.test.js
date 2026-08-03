@@ -39,7 +39,7 @@ test('package Rip sources use dammit for calls and await only stored promises', 
     );
 
     for (const node of result.stores.nodes) {
-      if (node.semanticKind === 'await') {
+      if (node.semanticKind === 'await' && source.slice(node.sourceStart, node.sourceStart + 5) === 'await') {
         const value = role(node.nodeId, 'value');
         const child = byId.get(value?.childNodeId);
         let callShaped = ['call', 'dynimport', 'optcall'].includes(child?.semanticKind);

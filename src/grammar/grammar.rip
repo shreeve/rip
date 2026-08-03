@@ -1030,6 +1030,9 @@ grammar =
     # reducing bare existence (`f?` alone still lowers to `f != null`).
     o 'Value ES6_OPTIONAL_CALL Arguments', '["optcall", 1, ...3]', 'optcall: _, callee, ...args'
     o 'Value ? Arguments', '["optcall", 1, ...3]', 'optcall: _, callee, ...args'
+    # Optional dammit (`f?!(args)` / `f?! args`) awaits the optional
+    # call itself. Bare `value?!` remains the postfix presence check.
+    o 'Value PRESENCE Arguments', '["await", ["optcall", 1, ...3]]'
     # Dynamic import: `import(url)` is a call node whose callee is the
     # token's own value; `import!(url)` is its awaited form (a real
     # await node — no hidden channels).

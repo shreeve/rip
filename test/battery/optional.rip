@@ -86,6 +86,16 @@ test "optional call juxta multi", "fn = (a, b) -> a + b\nfn? 3, 4", 7
 code "optional call juxta gen", "fn? 42", "fn?.(42)"
 code "optional call juxta multi gen", "fn? 3, 4", "fn?.(3, 4)"
 
+# Optional dammit awaits the optional call, in parenthesized and juxta
+# forms. It never calls a missing function, and bare `?!` remains the
+# presence operator.
+code "optional dammit paren gen", "fn?!(42)", "await fn?.(42)"
+code "optional dammit juxta gen", "fn?! 42", "await fn?.(42)"
+test "optional dammit awaits a present function", "fn = (x) -> Promise.resolve(x * 2)\nfn?!(21)", 42
+test "optional dammit skips a missing function", "fn = null\nfn?!(21)", undefined
+test "optional dammit juxta awaits", "fn = (x) -> Promise.resolve(x + 1)\nfn?! 41", 42
+code "bare presence stays presence", "fn?!", "(fn ? true : undefined)"
+
 # Juxta shares implicit-call argument extent: `or` is absorbed into the
 # arg. Call parens keep the binary outside the call.
 code "optional call juxta or binds into arg", "fn? a or b", "fn?.(a || b)"
