@@ -1456,6 +1456,10 @@ async function refresh(document) {
     // answers in the author's vocabulary rather than the container the
     // face declares (see `memberDeclKind`).
     memberDecls: result.memberDecls ?? [],
+    // Generated spans of face-echo text (the behavior objects) — the
+    // diagnostic mapper drops non-exact-mapped diagnostics born there,
+    // the real copy's report being the one honest squiggle.
+    echoSpans: result.echoSpans ?? [],
     srcLineStarts,
     genLineStarts: lineStartsOf(result.code),
     strict: state.strict === true, // rides the compile it governed

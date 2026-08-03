@@ -437,6 +437,45 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // The face emits computed/schema-callable bodies TWICE — the real
+  // lowering, then the behavior object the companion types read
+  // through. One mistake, one squiggle: the behavior copy is a face
+  // ECHO (builder.echoSpans), and the mapper drops a non-exact-mapped
+  // diagnostic born inside it — the real copy publishes the same claim
+  // at its own position. Without the echo rule each error below
+  // reported twice, the duplicate cover-mapped across the whole head.
+  test('one error in a twice-emitted body publishes once — the echo copy is silent', () => {
+    const dir = workspace({
+      'comp.rip': [
+        'Badge = component',
+        "  x := 'a'",
+        '  sum ~= ->',
+        '    total = 0',
+        '    total += @x',
+        '    total',
+        '  render',
+        '    div "#{@sum}"',
+      ].join('\n') + '\n',
+      'sch.rip': [
+        'Event = schema :model',
+        '  name! string',
+        '  shout: -> @name.length * "oops"',
+      ].join('\n') + '\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      // The component error reports from the REAL _init copy, exactly
+      // mapped at the offending line — and only from it.
+      expect(diags.filter((d) => d.file === 'comp.rip')
+        .map((d) => [d.code, d.line, d.column, d.endColumn])).toEqual([[2322, 5, 5, 10]]);
+      // The schema callable's real (descriptor) copy carries no interior
+      // marks either, so its one report cover-maps onto the head — but
+      // it is ONE report, not the pre-echo pair.
+      expect(diags.filter((d) => d.file === 'sch.rip')
+        .map((d) => [d.code, d.line])).toEqual([[2363, 1]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // The default-satisfies relation follows the runtime's ORDER of
   // operations, not just its vocabulary. Dates are the one exception
   // that earns an admission: `_coerceDates` runs AFTER `_applyDefaults`,

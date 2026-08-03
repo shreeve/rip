@@ -251,6 +251,11 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // program has no import (or repl mode is off).
     replImportResolver: emitted.replImportResolver,
     tsRegions: emitted.tsRegions,
+    // Generated spans of face-ECHO text: TS-only re-carries of bodies
+    // the real lowering already emitted (the behavior objects). The
+    // diagnostic mapper drops a non-exact-mapped diagnostic born here —
+    // the real copy publishes the same claim at its own position.
+    echoSpans: emitted.echoSpans ?? [],
     pinnables: emitted.pinnables,
     // Generated spans of `:=` state names — writable in rip, `const` in the
     // face. The editor clears TypeScript's `readonly` token modifier on these.

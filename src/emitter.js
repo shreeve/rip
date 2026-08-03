@@ -2247,7 +2247,7 @@ class Emitter {
     const bodies = info.computedBodies ?? [];
     if (info.behavior === null || bodies.length === 0) return;
     const selfType = `${name}${anyArgsOf(typeParams)}`;
-    this.b.tsOnly(() => {
+    this.b.tsOnly(() => this.b.echo(() => {
       this.b.emit('\n' + pad);
       this.mark(compNode, '$self', () => {
         this.b.emit(`const ${info.behavior} = {`);
@@ -2261,7 +2261,7 @@ class Emitter {
         });
         this.b.emit(' };');
       });
-    });
+    }));
   }
 
   // ── TS directive comments ───────────────────────────────────
@@ -4554,11 +4554,11 @@ class Emitter {
     const text = behaviorObjectText(schemaNode[1], story.decl.name, fns, story.thisTypes);
     if (text === null) return;
     const id = this.stores.idOf(schemaNode);
-    this.b.tsOnly(() => {
+    this.b.tsOnly(() => this.b.echo(() => {
       this.b.emit('\n' + '  '.repeat(this.ind));
       if (id !== null) this.b.mark(id, '$self', () => this.b.emit(text));
       else this.b.emit(text);
-    });
+    }));
   }
 
   // repl mode's result slot, minted against the used-name registry on
@@ -14731,7 +14731,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

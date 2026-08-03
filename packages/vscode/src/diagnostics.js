@@ -64,6 +64,18 @@ export function mapTsDiagnostic(good, d) {
     const row = good.mappings.bestAtGenerated(s);
     if (!row || row.mappingKind !== 'exact') return null;
   }
+  // A diagnostic born inside a face ECHO (a behavior object re-carrying
+  // a body the real lowering already emitted) is a SECOND report of an
+  // error the real copy publishes — and the echo's interior carries no
+  // marks, so its report cover-maps onto the whole component/schema
+  // head. Drop it unless it maps exactly (an anchored row — the
+  // projection's own member-name anchor — is the echo's one first-class
+  // diagnostic surface, and the reason the echo exists).
+  if (good.echoSpans?.length > 0 &&
+      good.echoSpans.some(([a, b]) => s >= a && s < b)) {
+    const row = good.mappings.bestAtGenerated(s);
+    if (!row || row.mappingKind !== 'exact') return null;
+  }
   // A RECOVERED face (tolerant compile of an incomplete buffer) holds
   // bytes the user never typed: the synthetic closers and the zero-width
   // holes repair minted. TypeScript reads those as ordinary text and

@@ -8203,6 +8203,7 @@ class CodeBuilder {
     this.exactRanges = new Map;
     this.tsRegions = [];
     this.tsDepth = 0;
+    this.echoSpans = [];
   }
   tsOnly(fn) {
     const start = this.length;
@@ -8212,6 +8213,12 @@ class CodeBuilder {
     if (this.tsDepth === 0 && this.length > start) {
       this.tsRegions.push([start, this.length]);
     }
+  }
+  echo(fn) {
+    const start = this.length;
+    fn();
+    if (this.length > start)
+      this.echoSpans.push([start, this.length]);
   }
   get currentMark() {
     return this.markStack[this.markStack.length - 1] ?? null;
@@ -10653,7 +10660,7 @@ class Emitter {
     if (info.behavior === null || bodies.length === 0)
       return;
     const selfType = `${name}${anyArgsOf(typeParams)}`;
-    this.b.tsOnly(() => {
+    this.b.tsOnly(() => this.b.echo(() => {
       this.b.emit(`
 ` + pad);
       this.mark(compNode, "$self", () => {
@@ -10663,7 +10670,7 @@ class Emitter {
         });
         this.b.emit(" };");
       });
-    });
+    }));
   }
   static TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
   collectTsDirectives(sexpr, trivia, source) {
@@ -12210,14 +12217,14 @@ class Emitter {
     if (text === null)
       return;
     const id = this.stores.idOf(schemaNode);
-    this.b.tsOnly(() => {
+    this.b.tsOnly(() => this.b.echo(() => {
       this.b.emit(`
 ` + "  ".repeat(this.ind));
       if (id !== null)
         this.b.mark(id, "$self", () => this.b.emit(text));
       else
         this.b.emit(text);
-    });
+    }));
   }
   replSlot() {
     if (this.replResultName === null) {
@@ -20249,7 +20256,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -20840,6 +20847,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     replResultName: emitted.replResultName,
     replImportResolver: emitted.replImportResolver,
     tsRegions: emitted.tsRegions,
+    echoSpans: emitted.echoSpans ?? [],
     pinnables: emitted.pinnables,
     mutables: emitted.mutables,
     enums: emitted.enums,
