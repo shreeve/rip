@@ -7806,7 +7806,7 @@ var parserInstance = {
         }
         allowedAll = symbol === EOF || lexer.token?.generated;
         guardKey = function(id) {
-          return stk.length * 2097152 + state * 1024 + id;
+          return `${stk.length}:${state}:${id}`;
         };
         inserted = null;
         for (let id of this.repairTable[state] ?? []) {

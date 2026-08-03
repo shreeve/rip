@@ -1318,9 +1318,11 @@ class Generator
         # nested blocks each owe a closer from one state, and a key
         # blind to depth spends the candidate on the first block and
         # starves the second. Only a repeat at the SAME depth is the
-        # loop the guard exists to stop.
+        # loop the guard exists to stop. A string key: the path runs at
+        # most repairBudget times a parse, and packed integers would
+        # smuggle in capacity limits no grammar promises to respect.
         allowedAll = symbol is EOF or lexer.token?.generated
-        guardKey = (id) -> stk.length * 0x200000 + state * 1024 + id
+        guardKey = (id) -> "#{stk.length}:#{state}:#{id}"
         inserted = null
         for id in (@repairTable[state] ?? [])
           continue if repairedHere.has guardKey(id)
