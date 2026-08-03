@@ -13325,26 +13325,14 @@ class Emitter {
         });
         return;
       }
-      if (isRubyNew(node[0][1])) {
-        this.mark(node, '$self', () => {
-          this.b.emit('await new ');
-          this.mark(node[0], '$self', () => {
-            this.mark(node[0], 'target', () => this.rubyNewTarget(node[0][1]));
-          });
-          this.mark(node, 'args', () => {
-            this.b.emit('(');
-            node.slice(1).forEach((arg, i) => {
-              if (i > 0) this.b.emit(', ');
-              this.callArg(arg);
-            });
-            this.b.emit(')');
-          });
-        });
-        return;
-      }
+      const target = node[0][1];
+      const constructing = isRubyNew(target);
       this.mark(node, '$self', () => {
-        this.b.emit('await ');
-        this.mark(node[0], '$self', () => this.head(node[0], 'target', node[0][1]));
+        this.b.emit(constructing ? 'await new ' : 'await ');
+        this.mark(node[0], '$self', () => {
+          if (constructing) this.mark(node[0], 'target', () => this.rubyNewTarget(target));
+          else this.head(node[0], 'target', target);
+        });
         this.mark(node, 'args', () => {
           this.b.emit('(');
           node.slice(1).forEach((arg, i) => {
