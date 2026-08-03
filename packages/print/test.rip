@@ -307,11 +307,12 @@ test! "-d force-darkens the document and drops the media query", ->
 
 console.log "\nShared grammar"
 
-test! "word arrays and symbol literals highlight", ->
+test! "word arrays, symbols, Houdini, and maybe dammit highlight", ->
   # These two behaviors exist only in the shared grammar: the declared
   # divergence from v3, whose embedded copy left %w[] and :symbols plain.
   dir = scratch()
-  write dir, 'gram.rip', 'tags = %w[alpha beta]\nkind = :friendly\n'
+  write dir, 'gram.rip', 'tags = %w[alpha beta]\nkind = :friendly\npresent = value?!\nresult = callback?!()\n'
   { html } = serve! ['gram.rip'], dir
   ok html.includes('<span class="hljs-string">%w[alpha beta]</span>')
   ok html.includes('<span class="hljs-symbol">:friendly</span>')
+  eq html.match(/<span class="hljs-operator">\?!<\/span>/g).length, 2

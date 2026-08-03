@@ -103,7 +103,7 @@ test "walkDir skips dotfiles, skip-dirs, and binary extensions; sorted result", 
 
 console.log "\nHTML generation"
 
-RIP_SRC =! 'tags = %w[alpha beta]\nkind = :friendly\ndef greet(name)\n  "hi #{name}"\n'
+RIP_SRC =! 'tags = %w[alpha beta]\nkind = :friendly\npresent = value?!\nresult = callback?!()\ndef greet(name)\n  "hi #{name}"\n'
 
 test "two files: TOC, headers, nav, line numbers, theme switcher, print button", ->
   html = generatePrintHtml [
@@ -134,10 +134,11 @@ test "bypass strips the leading comment block", ->
   html = generatePrintHtml [{ file: 'a.rip', code: '# top comment\n\nx = 1\n' }], { bypass: true }
   ok not html.includes('top comment')
 
-test "the shared grammar highlights word arrays and symbol literals", ->
+test "the shared grammar highlights word arrays, symbols, Houdini, and maybe dammit", ->
   html = generatePrintHtml [{ file: 'gram.rip', code: RIP_SRC }]
   ok html.includes('<span class="hljs-string">%w[alpha beta]</span>')
   ok html.includes('<span class="hljs-symbol">:friendly</span>')
+  eq html.match(/<span class="hljs-operator">\?!<\/span>/g).length, 2
   ok html.includes('<span class="hljs-keyword">def</span>')
 
 test '<script type="text/rip"> inside HTML re-highlights as Rip', ->

@@ -680,6 +680,7 @@
     {"comment": "=== SPECIAL OPERATORS (before general operators) ==="},
     { "match": "::",              "name": "keyword.operator.prototype.rip" },
     { "match": "!\\?",            "name": "keyword.operator.otherwise.rip" },
+    { "comment": "Maybe dammit: arguments make `?!` an optional awaited call. Empty/parenthesized calls have `(`; juxta arguments begin on the same line with a value starter. This rule precedes bare presence, which owns every remaining `?!`.", "match": "\\?!(?=(?:[ \\t]*\\(|[ \\t]+(?:[a-zA-Z_$@0-9\\\"'/:\\[{]|\\*\\{)))", "name": "keyword.control.await.rip" },
     { "match": "\\?!",            "name": "keyword.operator.presence.rip" },
     { "match": "\\?\\?",          "name": "keyword.operator.nullish.rip" },
     { "match": "\\?\\.(?![0-9])", "name": "keyword.operator.optional-chaining.rip" },

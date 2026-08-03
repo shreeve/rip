@@ -3407,7 +3407,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // Spaced '?' is the ternary operator. Unspaced: '?(' and '?['
       // are the optional call/index (the dotless '?.' spelling), '?!'
       // directly after a value-ending token is the postfix presence
-      // check when bare (`a?!` → `a ? true : undefined`) and optional
+      // check when bare (`a?!` → `a ? true : undefined`) and maybe
       // dammit when followed by arguments (`f?!(x)` → `await f?.(x)`),
       // and a '?' directly after a value-ending token is the postfix
       // existence check (`a?` → `a != null`) — real tokens and nodes.
@@ -4073,7 +4073,7 @@ export function implicitBlocks(tokens, mintId) {
 // call so the comprehension wraps it. Inserted CALL_START/CALL_END are
 // generated zero-width tokens anchored at the argument extent's edges,
 // so call spans stay honest.
-// Postfix existence `?` and optional dammit `?!` are callable the same
+// Postfix existence `?` and maybe dammit `?!` are callable the same
 // way DAMMIT is: a spaced argument after either opens an implicit call
 // (`f? x` is optional; `f?! x` also awaits). Without an argument the
 // tokens keep their postfix operations: existence for `?`, presence for

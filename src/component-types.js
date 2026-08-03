@@ -64,7 +64,7 @@ const memberTarget = (t) => {
 const awaitsIn = (x) => {
   if (!isNode(x)) return false;
   const h = x[0];
-  if (h === 'await' || h === 'dammit!') return true;
+  if (h === 'await' || h === 'dammit!' || h === 'dammit?') return true;
   if (h === 'for-as' && x[3] === true) return true;
   if (h === '->' || h === '=>' || h === 'def' || h === 'void-def' || h === 'class') return false;
   return x.some(awaitsIn);

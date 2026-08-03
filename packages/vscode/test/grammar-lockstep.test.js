@@ -30,6 +30,12 @@ const flagRule = renderBlock.patterns.find((p) =>
   typeof p.match === 'string' && p.match.includes('disabled|'));
 const symbolRule = grammar.patterns.find((p) =>
   p.name === 'constant.other.symbol.rip');
+const maybeDammitRule = grammar.patterns.find((p) =>
+  p.name === 'keyword.control.await.rip' && p.match?.startsWith('\\?!'));
+const presenceRule = grammar.patterns.find((p) =>
+  p.name === 'keyword.operator.presence.rip');
+const vimSyntax = readFileSync(
+  path.resolve(import.meta.dir, '..', '..', 'vim', 'syntax', 'rip.vim'), 'utf8');
 
 describe('own-line bare-flag lockstep (grammar ⇄ compiler)', () => {
   test('the grammar alternation is BOOLEAN_ATTRS minus `loop`', () => {
@@ -70,5 +76,33 @@ describe('symbol-literal lockstep (grammar ⇄ compiler)', () => {
       expect(compile(name, { runtimeDelivery: 'none' }).code)
         .toContain(`Symbol.for("${name.slice(1)}")`);
     }
+  });
+});
+
+describe('Houdini / maybe dammit lockstep (editor grammars ⇄ compiler)', () => {
+  const maybeRe = new RegExp(maybeDammitRule.match);
+  const presenceRe = new RegExp(presenceRule.match);
+
+  test('TextMate gives argument-bearing ?! await scope and leaves bare ?! as presence', () => {
+    for (const source of ['?!()', '?!(arg)', '?! arg', '?! 42', '?! {ok: true}', '?! [1]']) {
+      expect(source.match(maybeRe)?.[0]).toBe('?!');
+    }
+    for (const source of ['?!', '?! ?? fallback', '?! + 1', '?!\nnext']) {
+      expect(maybeRe.test(source)).toBe(false);
+      expect(source.match(presenceRe)?.[0]).toBe('?!');
+    }
+  });
+
+  test('the TextMate split agrees with emitted meaning', () => {
+    expect(compile('fn?!', { runtimeDelivery: 'none' }).code)
+      .toBe('(fn ? true : undefined);');
+    expect(compile('fn?!()', { runtimeDelivery: 'none' }).code)
+      .toBe('await fn?.();');
+    expect(compile('fn?! arg', { runtimeDelivery: 'none' }).code)
+      .toBe('await fn?.(arg);');
+  });
+
+  test('Vim recognizes ?! as one special operator token', () => {
+    expect(vimSyntax).toContain('syn match  ripOperator      /!?\\|?!\\|??\\|?\\./');
   });
 });

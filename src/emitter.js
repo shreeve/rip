@@ -6232,7 +6232,7 @@ class Emitter {
   static containsAwait(sexpr) {
     if (!isNode(sexpr)) return false;
     const head = sexpr[0];
-    if (head === 'await' || head === 'dammit!') return true;
+    if (head === 'await' || head === 'dammit!' || head === 'dammit?') return true;
     // An awaited for-as (`for await x as it`) is an await by
     // construction — its flag slot, not a nested node, carries it.
     if (head === 'for-as' && sexpr[3] === true) return true;
@@ -6293,6 +6293,7 @@ class Emitter {
     // unary tier: they group in head position (`(await f()).x`) but
     // bind tighter than any binary as operands (`await f() + 1`, bare).
     if ((x[0] === 'await' || x[0] === 'dammit!') && x.length === 2) return 'unary';
+    if (x[0] === 'dammit?') return 'unary';
     // A call whose CALLEE is dammit emits `await callee(...)` — the
     // await surrounds the invocation, so the call sits in the unary
     // tier exactly like a spelled await: grouped in head position
@@ -6332,7 +6333,8 @@ class Emitter {
     if (context === 'operand' || context === 'return') {
       if (tier === 'unary') {
         return !(child[0] === '!' || child[0] === 'typeof' || child[0] === 'await' ||
-          child[0] === 'dammit!' || (isNode(child[0]) && child[0][0] === 'dammit!'));
+          child[0] === 'dammit!' || child[0] === 'dammit?' ||
+          (isNode(child[0]) && child[0][0] === 'dammit!'));
       }
       // A return value is an operand position EXCEPT for yield: `return
       // yield 1` is valid JS and needs no grouping.
@@ -6510,6 +6512,7 @@ class Emitter {
     if (head === 'presence' && node.length === 2 && this.lockedHead(node, 'presence')) return this.presence(node);
     if (head === 'await' && node.length === 2) return this.awaitExpr(node);
     if (head === 'dammit!' && node.length === 2) return this.dammit(node);
+    if (head === 'dammit?') return this.maybeDammit(node);
     if ((head === 'yield' || head === 'yield-from') && node.length <= 2) return this.yieldExpr(node);
     if (head === 'class') return this.classExpr(node);
     // A reactive declaration lowers to a `const` declaration, which has
@@ -7382,7 +7385,7 @@ class Emitter {
   static findRenderControl(n) {
     if (!isNode(n)) return null;
     const head = n[0];
-    if (head === 'await' || head === 'dammit!' || head === 'yield' || head === 'yield-from') return n;
+    if (head === 'await' || head === 'dammit!' || head === 'dammit?' || head === 'yield' || head === 'yield-from') return n;
     if (head === 'for-as' && n[3] === true) return n;
     if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return null;
     for (const el of n) {
@@ -11555,7 +11558,8 @@ class Emitter {
     // unaries parse OUTSIDE the power and never reach this slot.
     const l = inner[1];
     const bareUnaryLeft = isNode(l) && (l[0] === '!' || l[0] === 'typeof' || l[0] === 'await' ||
-      l[0] === 'dammit!' || (isNode(l[0]) && l[0][0] === 'dammit!'));
+      l[0] === 'dammit!' || l[0] === 'dammit?' ||
+      (isNode(l[0]) && l[0][0] === 'dammit!'));
     if (inner[0] === '**' && bareUnaryLeft) {
       this.b.emit('(');
       this.operand(inner, 'left', l);
@@ -13890,6 +13894,25 @@ class Emitter {
       this.b.emit('await ');
       this.head(node, 'target', node[1]);
       this.b.emit('()');
+    });
+  }
+
+  // ["dammit?", callee, ...args] — optional call plus await.
+  // Arguments are part of the construct even when empty: bare `value?!`
+  // is the distinct Houdini/presence operator.
+  maybeDammit(node) {
+    this.mark(node, '$self', () => {
+      this.b.emit('await ');
+      this.head(node, 'callee', node[1]);
+      this.mark(node, 'operator', () => this.b.emit('?.'));
+      this.mark(node, 'args', () => {
+        this.b.emit('(');
+        node.slice(2).forEach((arg, i) => {
+          if (i > 0) this.b.emit(', ');
+          this.expr(arg);
+        });
+        this.b.emit(')');
+      });
     });
   }
 

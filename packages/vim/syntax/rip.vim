@@ -112,8 +112,9 @@ syn match  ripOperator      /===\|!==\|>>>\|\.\.\./
 " Compound assignment (longest alternatives first within alternation)
 syn match  ripOperator      />>>=\|\*\*=\|\/\/=\|%%=\|&&=\|||=\|??=\|<<=\|>>=\|+=\|-=\|\*=\|\/=\|%=\|&=\||=\|\^=/
 
-" Special
-syn match  ripOperator      /!?\|??\|?\./
+" Special. `?!` is one token: bare Houdini/presence, or maybe dammit
+" when call arguments follow.
+syn match  ripOperator      /!?\|?!\|??\|?\./
 
 " Method assignment (x .= trim()), merge assignment (*>obj = {…}),
 " existence assignment (a ?= 5)

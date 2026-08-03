@@ -14,17 +14,16 @@ live-verified facts only.
 
 **Branch: `main`, synchronized with `origin/main`.**
 
-The current tip is `982c878` (`Add graceful Rip server stop control`). Rip
-Server now exposes `rip server stop [project]` through the canonical manager's
-private control socket. The command waits for the manager to drain workers,
-deregister from Janus, remove its control artifacts, and exit, so a subsequent
-start cannot race the prior shutdown. Manager status JSON now includes the
-`stopping` lifecycle field.
+The current tip makes maybe dammit a first-class language construct. Bare
+`fn?!` remains Houdini/presence; `fn?!()`, `fn?!(arg)`, and `fn?! arg` are
+optional calls whose results are awaited. The compiler records a mapped
+`dammit?` node, and the TextMate, highlight.js, Rip Print, and Vim surfaces
+recognize the shared spelling.
 
 Live verification for that commit:
 
-- `bun run test:manager-boundary` from `packages/server` — 12 passed.
-- `bun run test` from `packages/server` — all 85 package tests passed.
+- `bun run test:all` — all 21 lanes passed, 8,334 tests total.
+- `packages/browser-tests` remains the documented CI-only Playwright lane.
 - `git diff --check` — passed.
 - Commit pushed to `origin/main`.
 

@@ -136,6 +136,10 @@ test "two-way bind and dammit", ->
   ok hl('value <=> name').includes span('operator', '&lt;=&gt;')
   ok hl('fetchData!').includes span('operator', '!')
 
+test "Houdini and maybe dammit each highlight ?! as one operator", ->
+  out = hl 'present = value?!\nempty = callback?!()\nresult = callback?! arg'
+  eq out.match(/<span class="hljs-operator">\?!<\/span>/g).length, 3
+
 test "map literal sigil highlights and boosts auto-detection", ->
   ok hl('m = *{a: 1}').includes span('operator', '*') + '{'
   # relevance 5 on *{ makes bare map-literal code auto-detect as Rip

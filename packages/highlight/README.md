@@ -37,7 +37,7 @@ html = hljs.highlight('tags = %w[alpha beta]', { language: 'rip' }).value
   **symbol literals** (`:name`, `:domain.name`, `:kebab-name`)
 - **Rip operators** — reactive (`:=`, `~=`, `~>`), two-way bind
   (`<=>`), method/merge/readonly assignment (`.=`, `*>`, `=!`),
-  prototype `::`, dammit `!`, tagged-template `$`
+  prototype `::`, dammit `!`, Houdini/maybe dammit `?!`, tagged-template `$`
 - **Regexes, heregexes, numbers, comments** — including hex numbers
   and block comments
 
