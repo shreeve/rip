@@ -13325,6 +13325,23 @@ class Emitter {
         });
         return;
       }
+      if (isRubyNew(node[0][1])) {
+        this.mark(node, '$self', () => {
+          this.b.emit('await new ');
+          this.mark(node[0], '$self', () => {
+            this.mark(node[0], 'target', () => this.rubyNewTarget(node[0][1]));
+          });
+          this.mark(node, 'args', () => {
+            this.b.emit('(');
+            node.slice(1).forEach((arg, i) => {
+              if (i > 0) this.b.emit(', ');
+              this.callArg(arg);
+            });
+            this.b.emit(')');
+          });
+        });
+        return;
+      }
       this.mark(node, '$self', () => {
         this.b.emit('await ');
         this.mark(node[0], '$self', () => this.head(node[0], 'target', node[0][1]));
@@ -13344,22 +13361,9 @@ class Emitter {
     // `X.new` property read stays a read). A non-primary constructor
     // expression groups so the `new` binds to it whole.
     if (isNode(node[0]) && node[0][0] === '.' && node[0].length === 3 && node[0][2] === 'new') {
-      const ctor = node[0][1];
       this.mark(node, '$self', () => {
         this.b.emit('new ');
-        this.mark(node[0], 'object', () => {
-          // Any non-name constructor expression groups: `new` consumes
-          // the FIRST argument list it reaches, so a call in the
-          // constructor position (`getClass().new(x)`) must
-          // parenthesize or `new` would construct the getter.
-          if (isNode(ctor)) {
-            this.b.emit('(');
-            this.expr(ctor);
-            // A soaking target cannot be constructed THROUGH here any
-            // more than under `new` — same seal, same reason.
-            this.b.emit(Emitter.optionalGuard(ctor) ? ' ?? undefined)' : ')');
-          } else this.expr(ctor);
-        });
+        this.rubyNewTarget(node[0]);
         this.mark(node, 'args', () => {
           this.b.emit('(');
           node.slice(1).forEach((arg, i) => {
@@ -13372,6 +13376,23 @@ class Emitter {
       return;
     }
     this.chain(node);
+  }
+
+  rubyNewTarget(member) {
+    const ctor = member[1];
+    this.mark(member, 'object', () => {
+      // Any non-name constructor expression groups: `new` consumes
+      // the FIRST argument list it reaches, so a call in the
+      // constructor position (`getClass().new(x)`) must
+      // parenthesize or `new` would construct the getter.
+      if (isNode(ctor)) {
+        this.b.emit('(');
+        this.expr(ctor);
+        // A soaking target cannot be constructed THROUGH here any
+        // more than under `new` — same seal, same reason.
+        this.b.emit(Emitter.optionalGuard(ctor) ? ' ?? undefined)' : ')');
+      } else this.expr(ctor);
+    });
   }
 
   // The true-modulo helper, inlined per site (like the range helper —
@@ -13869,6 +13890,14 @@ class Emitter {
 
   // ["dammit!", target] standing alone: call-plus-await with no args.
   dammit(node) {
+    if (isRubyNew(node[1])) {
+      this.mark(node, '$self', () => {
+        this.b.emit('await new ');
+        this.mark(node, 'target', () => this.rubyNewTarget(node[1]));
+        this.b.emit('()');
+      });
+      return;
+    }
     this.mark(node, '$self', () => {
       this.b.emit('await ');
       this.head(node, 'target', node[1]);
