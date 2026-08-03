@@ -69,8 +69,11 @@ const TEXT = /\.(js|mjs|cjs|md|json|rip|ts|tsx|yml|yaml|sh)$/;
 // continuation (`\n  // `, `\n * `, `\n # `) because that is how this repo
 // wraps prose. Spelled as a character class rather than with a literal example
 // so this file — which the sweep reads like any other — never trips its own
-// gate.
-const CITE = /findings?[ \t]*(?:\r?\n[ \t]*(?:\/\/|#|\*)?[ \t]*)?#[0-9]+/gi;
+// gate. The `post-`/`pre-`/`per-` prefixed spellings are the paraphrase a
+// real citation actually wore once (`post-` + row number in pins.js), so
+// the sweep names them too; a fully determined paraphrase still evades,
+// as the header concedes.
+const CITE = /(?:findings?[ \t]*(?:\r?\n[ \t]*(?:\/\/|#|\*)?[ \t]*)?|(?:post|pre|per)-)#[0-9]+/gi;
 
 // `git ls-files -z` (NUL-delimited: filenames are data, not lines). A path
 // tracked but deleted from the working tree still lists, so existence

@@ -34,7 +34,10 @@
 // byte), so continuing the run on it welds `ok` and `not` into one word and no
 // keyword is ever recognized past the first one on a line. The preceding SOURCE
 // byte is what bounds a run, and it is in hand at every position.
-const REGEX_DIVIDES_AFTER = /[\w$)\]]/;
+// `/` is in the divides-after set for the chained-`//` case: the second
+// byte of rip's floor division (and a slash right after a blanked
+// regex) is the operator continuing, never a regex opener.
+const REGEX_DIVIDES_AFTER = /[\w$)\]/]/;
 const REGEX_FOLLOWS_WORD = new Set([
   'return', 'yield', 'await', 'typeof', 'instanceof', 'delete', 'void', 'new',
   'in', 'of', 'case', 'do', 'else', 'then', 'when', 'and', 'or', 'not', 'is',
@@ -96,8 +99,23 @@ export function codeMask(src) {
       while (k < src.length && /[a-z]/.test(src[k])) { out.push(' '); k++; }   // flags
       i = k - 1; lastCode = '/'; lastWord = ''; continue;
     }
+    // Value position (regex legal): after a non-value byte, after a
+    // true keyword — or the IMPLICIT-CALL argument shape, the space
+    // sensitivity the real lexer uses: a spaced-then-unspaced slash
+    // after an identifier/property is a regex ARGUMENT (`str.is
+    // /^[A-Z]+$/i` lexes as a call), where the spaced-both-sides
+    // spelling stays division (`total.of / parts`). The word must
+    // start with a letter — after a NUMBER the lexer never reads an
+    // implicit call.
+    // `=` excluded (`/=` compound), `/` excluded (the floor-division
+    // operator's second byte — an "empty regex" spells no read anyway).
+    const implicitRegexArg = /^[A-Za-z_$]/.test(lastWord) &&
+      /[^\S\n]/.test(src[i - 1] ?? '') &&
+      src[i + 1] !== undefined && !/[\s=/]/.test(src[i + 1]);
     if (!stack.length && c === '/' &&
-        (!REGEX_DIVIDES_AFTER.test(lastCode) || (REGEX_FOLLOWS_WORD.has(lastWord) && !lastWordDotted))) {
+        (!REGEX_DIVIDES_AFTER.test(lastCode) ||
+         (REGEX_FOLLOWS_WORD.has(lastWord) && !lastWordDotted) ||
+         implicitRegexArg)) {
       // Commit only if a close on the SAME line exists — otherwise this `/` is
       // division (or a stray) and the bytes after it stay code.
       let k = i + 1, inClass = false, end = -1;
@@ -127,7 +145,15 @@ export function codeMask(src) {
     out.push(c);
     if (/[\w$]/.test(c)) {
       const continues = /[\w$]/.test(src[i - 1] ?? '');
-      if (!continues) lastWordDotted = src[i - 1] === '.';
+      // Dotted also via `::`/`?::` (prototype access is property
+      // access) and via a TRAILING-DOT continuation — the word sits at
+      // a fresh line but the last significant byte was the dot, so the
+      // compiler reads a property there too.
+      if (!continues) {
+        lastWordDotted = src[i - 1] === '.' ||
+          (src[i - 1] === ':' && src[i - 2] === ':') ||
+          (/\s/.test(src[i - 1] ?? '') && lastCode === '.');
+      }
       lastWord = continues ? lastWord + c : c;
     } else if (!/\s/.test(c)) lastWord = '';
     if (!/\s/.test(c)) lastCode = c;

@@ -44,6 +44,24 @@ describe('codeMask: what counts as code', () => {
     ['division after a property spelled `of`', 'share = total.of / parts / 2\n', ['share', 'total', 'of', 'parts']],
     ['division after a property spelled `in`', 'q = p.in / r / 2\n', ['q', 'p', 'in', 'r']],
     ['division after a property spelled `is`', 'w = v.is / u / 2\n', ['w', 'v', 'is', 'u']],
+    // Property access has three more spellings the dot bit must cover,
+    // or `/ parts /` blanks as a regex and the operand vanishes —
+    // prototype access, its optional form, and a trailing-dot
+    // continuation, where the word starts a fresh line but the last
+    // significant byte was the dot.
+    ['division after a `::` property spelled `of`', 'share = Totals::of / parts / 2\n', ['share', 'Totals', 'of', 'parts']],
+    ['division after a `?::` property spelled `of`', 'share = t?::of / parts / 2\n', ['share', 't', 'of', 'parts']],
+    ['division after a trailing-dot continuation', 'share = total.\n  of / parts / 2\n', ['share', 'total', 'of', 'parts']],
+    // Floor division: the second `/` continues the operator; neither
+    // slash opens a regex and no operand is lost.
+    ['chained floor division', 'x = a // b + c // d\n', ['x', 'a', 'b', 'c', 'd']],
+    // The dot-guard's CONVERSE: a spaced-then-unspaced slash after an
+    // identifier/property is a regex ARGUMENT (the implicit call the
+    // real lexer reads), even when the property spells a keyword — its
+    // pattern letters must blank, or they enter the census as phantom
+    // reads. The spaced-both-sides spelling above stays division.
+    ['an implicit-call regex after a dotted keyword', 'ok = str.is /^[A-Z]+$/i\nnext = 1\n', ['ok', 'str', 'is', 'next']],
+    ['an implicit-call regex after a plain identifier', 'ok = match /^\\d+$/\nnext = 1\n', ['ok', 'match', 'next']],
     // The same spelling UNDOTTED keeps its keyword reading: a regex
     // after `of` still masks (both polarities, or the fix overcorrects).
     ['a regex after a genuine `of`', 'for k of /ab/.exec(s)\n  k\n', ['for', 'k', 'of', 'exec', 's', 'k']],

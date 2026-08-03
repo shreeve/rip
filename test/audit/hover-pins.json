@@ -77,7 +77,7 @@
         "token": "class",
         "expect": null,
         "rule": "attr/prop name (intrinsic)",
-        "why": "the prop's type is the target; today serves the cover's `this`"
+        "why": "the prop's type is the target; interim silence, served — the cover-`this` leak closed with the render-DSL finding"
       },
       {
         "line": 19,
@@ -93,7 +93,7 @@
         "token": "value",
         "expect": null,
         "rule": "bind target (intrinsic)",
-        "why": "today serves the cover's `this`"
+        "why": "interim silence, served — the cover-`this` leak closed with the render-DSL finding"
       },
       {
         "line": 36,
@@ -125,7 +125,7 @@
         "token": "input",
         "expect": null,
         "rule": "element tag",
-        "why": "intrinsic-element target; today serves the cover's `this`"
+        "why": "intrinsic-element target; interim silence, served — the cover-`this` leak closed"
       },
       {
         "line": 48,
@@ -133,7 +133,7 @@
         "token": "ref",
         "expect": null,
         "rule": "ref word",
-        "why": "typed-channel target; interim silence — today serves the cover's `this` (render-DSL finding)"
+        "why": "typed-channel target; interim silence, served — the cover-`this` leak closed with the render-DSL finding"
       },
       {
         "line": 48,
@@ -141,7 +141,7 @@
         "token": "inputEl",
         "expect": null,
         "rule": "name after ref:",
-        "why": "target is the state binding's type; today serves the cover's `this`"
+        "why": "target is the state binding's type; interim silence, served — the cover-`this` leak closed"
       },
       {
         "line": 50,
@@ -149,7 +149,7 @@
         "token": "click",
         "expect": null,
         "rule": "event word",
-        "why": "handler-signature target; today serves the cover's `this`"
+        "why": "handler-signature target; interim silence, served — the cover-`this` leak closed"
       },
       {
         "line": 51,
@@ -165,7 +165,7 @@
         "token": "key",
         "expect": null,
         "rule": "key: in a render loop",
-        "why": "today serves a minted scaffold local (`_elN`)"
+        "why": "interim silence, served — the minted scaffold local (`_elN`) no longer leaks"
       },
       {
         "line": 61,
@@ -173,7 +173,7 @@
         "token": "slot",
         "expect": null,
         "rule": "slot",
-        "why": "today serves the cover's `this`"
+        "why": "interim silence, served — the cover-`this` leak closed with the render-DSL finding"
       },
       {
         "line": 70,
@@ -181,7 +181,7 @@
         "token": "div",
         "expect": null,
         "rule": "element tag",
-        "why": "intrinsic-element target; today serves the cover's `this`"
+        "why": "intrinsic-element target; interim silence, served — the cover-`this` leak closed"
       },
       {
         "line": 71,
@@ -205,7 +205,7 @@
         "token": "value",
         "expect": null,
         "rule": "bind target (component)",
-        "why": "today serves the minted `__bind_value__` slot"
+        "why": "interim silence, served — the minted `__bind_value__` slot no longer leaks"
       },
       {
         "line": 73,
@@ -213,7 +213,7 @@
         "token": "text",
         "expect": null,
         "rule": "name in a bind",
-        "why": "VALUE-type target; today serves the whole bind cover's `__bind_value__`"
+        "why": "VALUE-type target; interim silence, served — the bind cover's `__bind_value__` no longer leaks"
       },
       {
         "line": 105,
@@ -261,7 +261,7 @@
         "token": "params",
         "expect": null,
         "rule": "gate key params",
-        "why": "plain-inferred target; today serves the minted key-fn's own param"
+        "why": "plain-inferred target; interim silence, served — the minted key-fn's param no longer leaks"
       },
       {
         "line": 107,
@@ -269,7 +269,7 @@
         "token": "id",
         "expect": null,
         "rule": "gate key params",
-        "why": "plain-inferred target; today serves bare `any` off the minted param"
+        "why": "plain-inferred target; interim silence, served — the minted param's bare `any` no longer leaks"
       },
       {
         "line": 108,

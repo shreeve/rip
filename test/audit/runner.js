@@ -1,7 +1,10 @@
-// The audit — a PROGRESS GAUGE (not a pass/fail gate): a
-// categorized scoreboard over the fixtures. Each fixture is scored on
-// independent dimensions, and every failure is categorized so the
-// number tells you WHERE the type story stands.
+// The audit — a categorized scoreboard over the fixtures AND a
+// pass/fail gate: each fixture is scored on independent dimensions,
+// every failure is categorized so the number tells you WHERE the type
+// story stands, and the CONTRACT at the end judges the invariant rows
+// (contract.js) — a red row is exit 1. Gauges that are not yet
+// invariants print without gating; the contract is the authority on
+// which is which.
 //
 //   bun run audit                  # EVERY lane, bottom-up: grammar → map → type → diagnostics → hover + token
 //   bun run audit --grammar        # the Grammar Audit ONLY (parser only)
@@ -1351,8 +1354,12 @@ const RIP_KEYWORDS = new Set(['type', 'interface', 'class', 'enum', 'def', 'comp
 // The set is word-shaped things `keep()` passes (length >= 2, not in
 // RIP_KEYWORDS) that are keywords to TypeScript or rip: value keywords,
 // operators and their rip aliases (`is`/`isnt`/`and`/`or`/`not`/…),
-// statement heads, and modifier/type-operator words. A user BINDING named
-// one of these is pathological rip and not in the corpus's charter.
+// statement heads, and modifier/type-operator words. Both word-set tiers
+// STAND DOWN for a spelling the fixture BINDS as a value (faceSurvival's
+// boundWords) — `symbol = :alpha` is ordinary corpus code, and a
+// spelling-keyed excuse would silently absorb its use-site the day a
+// regression dropped it; a bound spelling's occurrences must be in the
+// population or hold a reviewed positional excuse.
 const NEVER_TOKENED_WORDS = new Set([
   'if', 'then', 'else', 'unless', 'while', 'until', 'when', 'for', 'of', 'in',
   'is', 'isnt', 'and', 'or', 'not', 'own', 'by', 'do', 'loop', 'try', 'catch',
@@ -1442,13 +1449,28 @@ function faceSurvival(src, code, mappings, faceDecoded, serverTokens, excused = 
   const missed = [];
   const unexplained = [];
   let excludedCount = 0;
-  const spans = specifierSpans(src);
+  // Spans derive from the MASKED source, same as the occurrence scan:
+  // an `export {`-shaped line inside a heredoc must not mint an excuse
+  // span reaching past the string into real code — the excuse tier is
+  // exactly where a regression would hide.
+  const masked = codeMask(src);
+  const spans = specifierSpans(masked);
+  // Spellings this fixture BINDS as values (`symbol = :alpha` is
+  // ordinary corpus code): the word-set excuse tiers STAND DOWN for
+  // them. Keyed by spelling alone, those tiers would auto-excuse a
+  // bound name's use-site the day a regression drops it from the
+  // population — the one blind spot the per-position excuse design was
+  // built to close. With the spelling bound here, every occurrence of
+  // it must be in the population or hold a reviewed positional excuse.
+  const boundWords = new Set(
+    [...masked.matchAll(/^[ \t]*([A-Za-z_$][\w$]*)[ \t]*(?::=|~=|=(?![=>~!]))/gm)].map((m) => m[1]),
+  );
   const excusedSeen = new Set();
   const posOf = (off) => {
     const line = src.slice(0, off).split('\n').length;
     return { line, character: off - (src.lastIndexOf('\n', off - 1) + 1) };
   };
-  for (const m of codeMask(src).matchAll(/(?<![\w$])[A-Za-z_$][\w$]*/g)) {
+  for (const m of masked.matchAll(/(?<![\w$])[A-Za-z_$][\w$]*/g)) {
     if (!keep(m[0])) continue;
     const g = sourceOffsetToGeneratedExact(mappings, m.index, src, code);
     // VERBATIM, the mapping audit's own rule: the face must hold the same bytes.
@@ -1464,7 +1486,7 @@ function faceSurvival(src, code, mappings, faceDecoded, serverTokens, excused = 
     }
     // Excluded — which excuse?
     excludedCount++;
-    if (NEVER_TOKENED_WORDS.has(m[0]) || PRIMITIVE_TYPE_WORDS.has(m[0])) continue;
+    if ((NEVER_TOKENED_WORDS.has(m[0]) || PRIMITIVE_TYPE_WORDS.has(m[0])) && !boundWords.has(m[0])) continue;
     if (spans.some(([s, e]) => m.index >= s && m.index < e)) continue;
     if (src.slice(Math.max(0, m.index - 7), m.index) === 'import.') continue; // `import.meta` — a meta-property, no symbol
     const { line, character } = posOf(m.index);
@@ -3465,9 +3487,13 @@ if (RUN_ERRORS) {
   const errorPins = fs.existsSync(ERROR_PINS) ? JSON.parse(fs.readFileSync(ERROR_PINS, 'utf8')) : {};
   // A pin file entry naming no fixture is a key that rotted — the fixture
   // renamed or retired under it — and its pinned negatives are asserted
-  // nowhere from that moment. Loud, like the orphaned-twin check below.
-  for (const k of Object.keys(errorPins)) {
-    if (!errorFixtures.includes(k)) console.log(`    ${red('✗')} ${pad(k, ERR_NAME_W)} ${red('error-pins.json entry with no fixture — its pinned negatives are asserted nowhere')}`);
+  // nowhere from that moment. Loud AND gated: the row rides el.problems
+  // (kind 'stale-pin' reds diagnostics.codes), because a fixture-and-twin
+  // paired rename dodges the orphaned-twin check below and a printed ✗
+  // the exit code never sees is a red in name only.
+  const stalePinKeys = Object.keys(errorPins).filter((k) => !errorFixtures.includes(k));
+  for (const k of stalePinKeys) {
+    console.log(`    ${red('✗')} ${pad(k, ERR_NAME_W)} ${red('error-pins.json entry with no fixture — its pinned negatives are asserted nowhere')}`);
   }
 
   const laneRows = await lanes(errorFixtures, async (f, _i, lane) => {
@@ -3616,7 +3642,11 @@ if (RUN_ERRORS) {
   el = {
     files: laneRows.length,
     asserted: laneRows.reduce((n, r) => n + r.expected.length, 0),
-    problems: [...laneRows.flatMap((r) => r.problems.map((p) => ({ ...p, file: r.name }))), ...orphanTwins.map((o) => ({ kind: 'orphan', note: `${o}: twin with no fixture`, file: o }))],
+    problems: [
+      ...laneRows.flatMap((r) => r.problems.map((p) => ({ ...p, file: r.name }))),
+      ...orphanTwins.map((o) => ({ kind: 'orphan', note: `${o}: twin with no fixture`, file: o })),
+      ...stalePinKeys.map((k) => ({ kind: 'stale-pin', note: `${k}: error-pins.json entry with no fixture`, file: k })),
+    ],
   };
 }
 
@@ -4056,6 +4086,14 @@ if (RUN_HOVER) {
   // contract's `hover.silence` — a leak is an exit code, not a fraction.
   const silentRows = [...PROBES].flatMap(([file, p]) => (p.silent ?? []).map((s) => ({ file, ...s })));
   const silentLeaks = silentRows.filter((s) => s.hover !== null);
+  // The population is derived (bare `~>` lines at column 0), so a corpus
+  // edit can empty it and 0/0 would judge green while asserting nothing
+  // — the stateUses precedent: a zero population is loud, never a
+  // silent pass.
+  if (RUN_HOVER && silentRows.length === 0) {
+    await abort('The Hover Audit found no ruled-silent bare `~>` positions to judge',
+      ['hover.silence gates a population derived from column-0 `~>` lines, and the corpus must carry at least one (grammar/12-reactive.rip held them last)']);
+  }
   if (silentRows.length) {
     pfrac('silence', silentRows.length - silentLeaks.length, silentRows.length,
       `ruled-silent bare ~> positions serve null${silentLeaks.length ? ' — gated: hover.silence' : ''}`);

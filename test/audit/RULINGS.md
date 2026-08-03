@@ -23,35 +23,35 @@ The declaration hovers here have an honest interim that is not silence: the plai
 | `~=` name at its declaration | `(computed) doubled: number` | `const doubled: number` — twin agrees, no pin |
 | `=!` name at its declaration | `(readonly) limit: 100` — the literal type stands: a readonly binding is a const, and const infers the literal, TS's own convention | `const limit: 100` — twin agrees, no pin |
 | named `~>` at its declaration | `(effect) logger: () => void` — the disposer is the binding's value | `const logger: () => void` — twin agrees, no pin |
-| bare `~>` operator | silence — punctuation is silent, permanently | today serves the runtime's `__effect` signature, a machinery leak; the open bare-effect finding (FINDINGS.md) holds it |
+| bare `~>` operator | silence — punctuation is silent, permanently | served: null, the ruled silence — the bare-effect finding closed (the server once leaked the runtime's `__effect` signature here) and the contract's hover.silence now gates any leak at zero; the gate is the record |
 | the `?` opt marker on a reactive binding | silence | — |
 | an IMPORTED reactive name at a read | the cell's own type — the importer holds the CELL, and `.value` is the contract. Reactivity is module-scoped by construction: `collectReactiveNames` builds the deref set from the declaring scope's OWN names, so an importer emits the binding verbatim; and the cell's primitive-coercion protocol has exactly one beneficiary — a consumer holding a raw cell, since in-module reads compile to `.value` and never coerce. Both mechanisms already lean this way. The alternative (reactivity metadata crossing the module boundary so importers deref) is the ruling this forecloses, not a default | served — the face names the cell, which is what the importer holds. v3 emits the same bare binding and answers `(alias) const count: any` at the read; v4's cell type is the truthful one of the two. **Accepted limit:** arithmetic on the bare cell RUNS (the coercion protocol) and cannot type-check — TypeScript requires an operand to BE number-ish, not to be coercible, so no cell-type spelling admits it. `.value` satisfies both halves |
 
 ## Components / render
 
-Measured 2026-07-23 over 13-components (the `ruled` gauge, hover-pins.json's `positions`), re-measured 2026-07-30 at the member declarations, where 25-components carries the generic spelling — a component's type parameters ride into the containing type the answer names, which 13-components has no component to show. One finding holds the red pins: the render-DSL finding (positions with no user symbol serve minted scaffold — the cover's `this`, `_elN` locals, the `__bind_value__` slot, the gate key-fn's params).
+Measured 2026-07-23 over 13-components (the `ruled` gauge, hover-pins.json's `positions`), re-measured 2026-07-30 at the member declarations, where 25-components carries the generic spelling — a component's type parameters ride into the containing type the answer names, which 13-components has no component to show. The render-DSL finding closed: at every position with no user symbol the editor now DECLINES — the null pins measure green and the contract's hover.ruled gates them (the machinery the cover once leaked — the cover's `this`, `_elN` locals, the `__bind_value__` slot, the gate key-fn's params — is what the decline replaced). The typed-channel TARGETS below stay unserved; the null interim is what is pinned.
 
 **A declaration speaks the author's vocabulary; a consumer's read speaks the container's.** A member declared `people := []` is an array where the author wrote it, and the editor answers value-first there. That is not a claim the container is a fiction — a consumer holding an instance really does write `inst.people.value`, and at THAT position the container is the honest answer and passes through untouched. The two resolve to the same face symbol, so the compiler records which is which (`memberDecls`, src/emitter.js). The value-first half is served; the minted kind label is the open half of every member row below.
 
 | position | ruling (target) | interim |
 | --- | --- | --- |
-| `ref` in `input ref: inputEl` | `ref — writes <ElementType> into inputEl` (the user's own binding name) | null pin — today the cover's `this`; the render-DSL finding |
-| the name after `ref:` | the state binding, `<ElementType> \| null` | null pin — today the cover's `this`; the render-DSL finding |
-| `key:` in a render loop | `key: string \| number — row identity` | null pin — today a minted scaffold local; the render-DSL finding |
-| `slot` | `slot — the component's children`, typed where expressible | null pin — today the cover's `this`; the render-DSL finding |
-| element tag (`div`, `input`) | intrinsic element hover, TSX-style | null pin — today the cover's `this`; the render-DSL finding |
-| attr name on an intrinsic (`class:`) | the prop's type | null pin — today the cover's `this`; the render-DSL finding |
+| `ref` in `input ref: inputEl` | `ref — writes <ElementType> into inputEl` (the user's own binding name) | null pin — served (the editor declines; the machinery leak closed with the render-DSL finding); gated: hover.ruled |
+| the name after `ref:` | the state binding, `<ElementType> \| null` | null pin — served (the editor declines; the machinery leak closed with the render-DSL finding); gated: hover.ruled |
+| `key:` in a render loop | `key: string \| number — row identity` | null pin — served (the minted scaffold local no longer leaks); gated: hover.ruled |
+| `slot` | `slot — the component's children`, typed where expressible | null pin — served (the editor declines; the machinery leak closed with the render-DSL finding); gated: hover.ruled |
+| element tag (`div`, `input`) | intrinsic element hover, TSX-style | null pin — served (the editor declines; the machinery leak closed with the render-DSL finding); gated: hover.ruled |
+| attr name on an intrinsic (`class:`) | the prop's type | null pin — served (the editor declines; the machinery leak closed with the render-DSL finding); gated: hover.ruled |
 | prop name at a component use (`label:`) | the prop's type | pinned as measured — the props surface's declared type; the bind-slot arm rides the union by design |
-| event word (`click`) | the handler signature, event type included | null pin — today the cover's `this`; the render-DSL finding |
-| bind target (`value` in `value <=> count`) | `value <=> — two-way bind, <prop type>` | null pin — today the minted `__bind_value__` slot; the render-DSL finding |
-| the name in a bind (`count`) | its VALUE type — never the wrapper | null pin — today the bind cover's `__bind_value__`; the render-DSL finding |
+| event word (`click`) | the handler signature, event type included | null pin — served (the editor declines; the machinery leak closed with the render-DSL finding); gated: hover.ruled |
+| bind target (`value` in `value <=> count`) | `value <=> — two-way bind, <prop type>` | null pin — served (the `__bind_value__` slot no longer leaks); gated: hover.ruled |
+| the name in a bind (`count`) | its VALUE type — never the wrapper | null pin — served (the bind cover's `__bind_value__` no longer leaks); gated: hover.ruled |
 | render loop variable at a read | plain inferred type | pinnable, unpinned — see the note below the tables |
 | member reads in branch/loop bodies (the factory's `ctx` is minted — no source position carries it) | plain inferred type | pinnable, unpinned — see the note below the tables |
 | member declaration (state, readonly, prop, ref cell) | minted kind, value-first — `(state) people: string[]` | pinned as measured — `(property) Roster.people: string[]`, the value half served; the minted kind is the open half |
 | member declaration (computed, unannotated) | the same — `(computed) shade: string` | pinned null — the face types an unannotated computed through the lowering's behavior object, so every spelling of its value type names machinery, which is never a stand-in; the computed-projection finding |
 | gate target name (`stats <~ …`) | minted kind, value-first — the kind label undecided | pinned as measured — the value half served; the kind label is the open half |
 | gate operator `<~` and `@app.data` path segments | silence | pinned null — green, measured 2026-07-23 |
-| gate key (`params.id` / `@query.tab`) | plain inferred type | null pin — today the minted key-fn's own param; the render-DSL finding |
+| gate key (`params.id` / `@query.tab`) | plain inferred type | null pin — served (the minted key-fn's param no longer leaks); gated: hover.ruled |
 | component name at a use site | the component's signature (props) | pinned null — green, measured 2026-07-23; the pin asserts the interim |
 | `offer` / `accept` | **PARKED** — model not settled; minimal grammar coverage, no pin | no pin |
 
@@ -62,7 +62,7 @@ Measured 2026-07-23 over 14-schema's spellings (the `ruled` gauge, hover-pins.js
 | position | ruling (target) | interim |
 | --- | --- | --- |
 | schema name at declaration | type-first: structure leads, value nature noted after | pinned as measured (`decls`) — the value-first `let Person: Schema<Person, Person>` is truthful short of the target, the reactive doctrine |
-| schema name at declaration (`:mixin`) | `MixinSchema<Stamped>` — user vocabulary, and no more surface than the runtime serves. A mixin is not instantiable: driven against the runtime 2026-07-30, `parse()` throws, `safe()` always fails, `ok()` is always false, and `toJSONSchema()` is the ONE method that works — so the interface carries that alone. `Schema<Stamped, Stamped>` would promise a parse surface the runtime refuses, which is the reason this row stayed open; the type parameter names the shape the mixin contributes | served — the pin asserts `let Stamped: MixinSchema<Stamped>` |
+| schema name at declaration (`:mixin`) | `MixinSchema<Stamped>` — user vocabulary, and no more surface than the runtime serves. A mixin is not instantiable: driven against the runtime 2026-08-03, `parse()` throws, `safe()` always fails, `ok()` is always false — so the interface carries NO parse surface. What it does carry is what answers: `toJSONSchema()` and the projection algebra — `pick`/`omit`/`partial`/`required`/`extend` — since `__schemaDerive` refuses only `:union` and `:enum` (the interface stopped promising less than it serves, 476133e). `Schema<Stamped, Stamped>` would promise the parse surface the runtime refuses, which is the reason this row stayed open; the type parameter names the shape the mixin contributes | served — the pin asserts `let Stamped: MixinSchema<Stamped>` |
 | field name (`name! string`) | `(field) name: string`, required/optional visible | pinned null — green, measured 2026-07-23 |
 | field type word | the type, same as an annotation | pinnable, unpinned — see the note below the tables |
 | `!` / `?` markers | silence — punctuation is silent, permanently | pinned null — green, measured 2026-07-23 |
