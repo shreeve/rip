@@ -2246,6 +2246,16 @@ class Emitter {
     // spelling.
     const bodies = info.computedBodies ?? [];
     if (info.behavior === null || bodies.length === 0) return;
+    // The schema behavior const's guard, for the component spelling: a
+    // user module binding of the minted `__X__computed` name redeclares
+    // the face-only const (TS2451 on the component head) while the JS
+    // runs fine. Loud and positioned beats a checker error blamed on
+    // the wrong construct.
+    if (this.scopes[0]?.has(info.behavior)) {
+      throw this.positionedError(compNode,
+        `emitter: the module binds '${info.behavior}', the face-only name this component's ` +
+        'computed types read through — rename the binding');
+    }
     const selfType = `${name}${anyArgsOf(typeParams)}`;
     this.b.tsOnly(() => this.b.echo(() => {
       this.b.emit('\n' + pad);
@@ -4553,6 +4563,17 @@ class Emitter {
     if (story === null || fns === undefined) return;
     const text = behaviorObjectText(schemaNode[1], story.decl.name, fns, story.thisTypes);
     if (text === null) return;
+    // The behavior const's name is face-only but not invisible: a user
+    // module binding of the same spelling redeclares it in the TS face
+    // (TS2451 blamed on the schema head) while the JS runs fine — the
+    // worst kind of divergence. Rejected loudly here, the
+    // `__schema`-shadow precedent; every minted TYPE name is already
+    // guarded the same way (buildSchemaTypeStory).
+    if (this.scopes[0]?.has(story.behaviorName)) {
+      throw this.positionedError(schemaNode,
+        `emitter: the module binds '${story.behaviorName}', the face-only name this schema's ` +
+        'callable types read through — rename the binding');
+    }
     const id = this.stores.idOf(schemaNode);
     this.b.tsOnly(() => this.b.echo(() => {
       this.b.emit('\n' + '  '.repeat(this.ind));

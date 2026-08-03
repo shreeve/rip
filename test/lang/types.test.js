@@ -1048,6 +1048,12 @@ describe('structured-type validation', () => {
       'type F<T> =\n  { [K in keyof T]?: T[K] }\nz = 1',
       'type G<T> = Array<{ [K in keyof T]: T[K] }>\nz = 1',
       'type H<T> = { a: number, [K in keyof T]: T[K] }\nz = 1',
+      // The optionality modifiers — `-?` is the spelling behind TS's
+      // own Required<T>. The scanner carves the `?` out of the ternary
+      // rejection only in this exact `]-?:` shape.
+      'type I<T> = { [K in keyof T]-?: T[K] }\nz = 1',
+      'type J<T> = { [K in keyof T]+?: T[K] }\nz = 1',
+      'type K<T> = { -readonly [K in keyof T]-?: T[K] }\nz = 1',
     ]) {
       expect(parser.parse(ok).diagnostics).toEqual([]);
     }

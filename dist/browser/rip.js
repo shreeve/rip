@@ -525,7 +525,7 @@ function buildSchemaTypeStory(programSexpr) {
       owners.set(t, `schema '${d.name}'`);
       const user = userTypes.get(t);
       if (user !== undefined) {
-        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which collides with ${user.what} — ` + `the schema's types and the user declaration would merge or duplicate; rename one`, d.descriptor.start ?? null);
+        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which collides with ${user.what} — ` + `the schema's types and the user declaration would merge or duplicate; rename one`, null, user.node);
       }
     }
     const defaultTypes = new Map;
@@ -3784,6 +3784,10 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = false;
       continue;
     }
+    if ((kd === "-" || kd === "+") && tokens[j + 1]?.value === "?" && tokens[j + 2]?.kind === ":" && enclosing() === "{" && (tokens[j - 1]?.kind === "]" || tokens[j - 1]?.kind === "INDEX_END")) {
+      atomEnd = true;
+      continue;
+    }
     if (kd === "=" && angle > 0) {
       atomEnd = false;
       continue;
@@ -6003,6 +6007,12 @@ ${baseline}`).join(`
             pos++;
             continue;
           }
+          push("?", "?", pos, pos + 1);
+          pos++;
+          continue;
+        }
+        const beforePrev = tokens[tokens.length - 2] ?? null;
+        if (prev && (prev.kind === "-" || prev.kind === "+") && !prev.spaced && (beforePrev?.kind === "]" || beforePrev?.kind === "INDEX_END") && text[pos + 1] === ":") {
           push("?", "?", pos, pos + 1);
           pos++;
           continue;
@@ -10668,6 +10678,9 @@ class Emitter {
     const bodies = info.computedBodies ?? [];
     if (info.behavior === null || bodies.length === 0)
       return;
+    if (this.scopes[0]?.has(info.behavior)) {
+      throw this.positionedError(compNode, `emitter: the module binds '${info.behavior}', the face-only name this component's ` + "computed types read through — rename the binding");
+    }
     const selfType = `${name}${anyArgsOf(typeParams)}`;
     this.b.tsOnly(() => this.b.echo(() => {
       this.b.emit(`
@@ -12225,6 +12238,9 @@ class Emitter {
     const text = behaviorObjectText(schemaNode[1], story.decl.name, fns, story.thisTypes);
     if (text === null)
       return;
+    if (this.scopes[0]?.has(story.behaviorName)) {
+      throw this.positionedError(schemaNode, `emitter: the module binds '${story.behaviorName}', the face-only name this schema's ` + "callable types read through — rename the binding");
+    }
     const id = this.stores.idOf(schemaNode);
     this.b.tsOnly(() => this.b.echo(() => {
       this.b.emit(`

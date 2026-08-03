@@ -521,6 +521,15 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
         enclosing() === '{' && memberRowStart(tokens, j, from)) {
       atomEnd = false; continue;
     }
+    // The optionality half: `[K in keyof T]-?: T[K]` / `+?` — the
+    // modifier rides AFTER the mapped row's `]`, directly before the
+    // member's `?:`. Completing the atom here lets the ordinary
+    // optional-member rule admit the `?` that follows.
+    if ((kd === '-' || kd === '+') && tokens[j + 1]?.value === '?' &&
+        tokens[j + 2]?.kind === ':' && enclosing() === '{' &&
+        (tokens[j - 1]?.kind === ']' || tokens[j - 1]?.kind === 'INDEX_END')) {
+      atomEnd = true; continue;
+    }
     if (kd === '=' && angle > 0) { atomEnd = false; continue; }
     if ((enclosing() === '{' || (opts.methods && enclosing() === undefined)) &&
         kd === 'CALL_START') {
@@ -3440,6 +3449,21 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
             pos++;
             continue;
           }
+          push('?', '?', pos, pos + 1);
+          pos++;
+          continue;
+        }
+        // A mapped type's optionality MODIFIER: `]-?:` / `]+?:` — the
+        // spelling behind TS's own Required<T>. The `?` rides the
+        // `-`/`+` directly after the mapped row's `]`, with the member
+        // `:` right behind it; nothing value-shaped ever scans this
+        // sequence (it failed the ternary rejection below before this
+        // carve-out existed), so the plain token is safe to emit and
+        // the type vocabulary judges the rest.
+        const beforePrev = tokens[tokens.length - 2] ?? null;
+        if (prev && (prev.kind === '-' || prev.kind === '+') && !prev.spaced &&
+            (beforePrev?.kind === ']' || beforePrev?.kind === 'INDEX_END') &&
+            text[pos + 1] === ':') {
           push('?', '?', pos, pos + 1);
           pos++;
           continue;

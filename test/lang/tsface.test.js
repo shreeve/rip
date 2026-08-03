@@ -1092,6 +1092,27 @@ describe('TS-face negatives', () => {
     expect(r.code).toContain('...xs: number');
     expect(() => js('f = (...xs: number) -> xs\n').declarations).toThrow(/rest parameter's annotation/);
   });
+
+  // The minted behavior VALUE names (`__X__behavior`, `__X__computed`)
+  // are face-only but not invisible: a user module binding of the same
+  // spelling used to redeclare the const in the TS face — TS2451 blamed
+  // on the schema/component head — while the JS ran fine. The emitter
+  // now rejects the collision loudly and POSITIONED, the
+  // `__schema`-shadow precedent; every minted TYPE name was already
+  // guarded (buildSchemaTypeStory).
+  test('a user binding of a minted behavior-const name rejects loudly in the TS face', () => {
+    const schemaSrc = '__Event__behavior = 5\nEvent = schema :model\n  name! string\n  shout: -> @name\n';
+    const compSrc = '__Badge__computed = 7\nBadge = component\n  x := 1\n  sum ~= @x + 1\n  render\n    div "#{@sum}"\n';
+    expect(() => ts(schemaSrc)).toThrow(/module binds '__Event__behavior'.*rename the binding/);
+    expect(() => ts(compSrc)).toThrow(/module binds '__Badge__computed'.*rename the binding/);
+    // JS mode emits no behavior const — no collision exists, both run.
+    expect(js(schemaSrc).code).toContain('__Event__behavior = 5');
+    expect(js(compSrc).code).toContain('__Badge__computed = 7');
+    // The spelling is reserved only where a behavior const actually
+    // prints: beside a schema with no callables it is an ordinary name.
+    expect(ts('__Plain__behavior = 5\nPlain = schema\n  name! string\n').code)
+      .toContain('__Plain__behavior = 5');
+  });
 });
 
 // ── Types-gaps wave: type declarations in LOWERED value bodies ──────
