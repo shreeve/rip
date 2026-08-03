@@ -550,7 +550,15 @@ describeExtended('a stub maintains itself', () => {
     'package.json': '{}\n',
   };
 
-  test('editing an unopened .rip replaces the stub with the full face', async () => {
+  // This test once pinned the OPPOSITE: the edit compiled the full face,
+  // because the watcher's membership test asked the DISK (the stub's own
+  // mirror made every stubbed file read as in-closure). That contradicted
+  // the server's demand-driven doctrine — the program grows by imports
+  // and opens, never by disk churn — and made a branch switch N
+  // synchronous compiles of files nobody asked for. The ruling: closure
+  // membership is the bookkeeping; a stub-backed bystander re-derives
+  // its STUB, a one-file scan.
+  test('editing an unopened .rip re-derives the stub in place — never a full compile', async () => {
     const s = await openSession(SOLO);
     try {
       s.open('app.rip');
@@ -558,12 +566,16 @@ describeExtended('a stub maintains itself', () => {
       expect(await awaitStub(s, 'solo.rip')).toContain('export declare const solo: any;');
 
       s.touch('solo.rip', 'export solo = (): number -> 2\nexport extra = (): number -> 3\n');
-      const face = await awaitState(
-        () => { const t = mirrorText(s, 'solo.rip'); return t?.includes('return 2') ? t : null; },
-        'the stub was never replaced by a compiled face',
+      // Candidacy tracks the disk: the new export arrives…
+      const after = await awaitState(
+        () => { const t = mirrorText(s, 'solo.rip'); return t?.includes('extra') ? t : null; },
+        'the stub was never re-derived',
       );
-      expect(face).not.toContain('declare const solo');   // a real compile, not a stub
-      expect(face).toContain('return 2');
+      // …and the mirror is STILL a declaration-only stub, in no
+      // bookkeeping collection — not a compiled face.
+      expect(after).toContain('export declare const solo: any;');
+      expect(after).toContain('export declare const extra: any;');
+      expect(after).not.toContain('return 2');
       expect(await candidatesAt(s, { line: 1, col: 10 })).toContain('solo');
     } finally { await s.close(); }
   }, 90_000);

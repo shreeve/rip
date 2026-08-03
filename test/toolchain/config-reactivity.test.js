@@ -221,4 +221,34 @@ describeExtended('the config surface is reactive', () => {
       expect(after.some((c) => UNRESOLVED_BUN.includes(c))).toBe(true);
     } finally { await s.close(); }
   }, 90_000);
+
+  test('a NESTED project\'s tsconfig re-governs its open files mid-session — no restart', async () => {
+    // The nested config is matched through the chain its WRAPPER records
+    // (a per-project set — the shared root set is cleared and refilled
+    // by its own builder, which is exactly how nested configs went
+    // unwatched). The same trigger regenerates every wrapper, so the
+    // flip reaches tsgo as wrapper Changed events and the open doc's
+    // diagnostics re-pull under the new posture.
+    const nested = (on) => JSON.stringify({ compilerOptions: { strictNullChecks: on } }, null, 2) + '\n';
+    const s = await openSession({
+      'pkg/tsconfig.json': nested(false),
+      'pkg/mod.rip': 'x: number = null\nconsole.log x\n',
+      'package.json': pkg(null),
+    });
+    try {
+      s.open('pkg/mod.rip');
+      // strictNullChecks off: null is assignable, the doc is clean.
+      expect(s.codes(await s.diagnostics('pkg/mod.rip'))).toEqual([]);
+
+      s.forget('pkg/mod.rip');
+      s.touch('pkg/tsconfig.json', nested(true));
+      expect(s.codes(await s.diagnostics('pkg/mod.rip', { timeout: 15000 }))).toContain(2322);
+
+      // And it reverses — a fix that only ever ADDED diagnostics would
+      // pass the flip above and still strand the project.
+      s.forget('pkg/mod.rip');
+      s.touch('pkg/tsconfig.json', nested(false));
+      expect(s.codes(await s.diagnostics('pkg/mod.rip', { timeout: 15000 }))).toEqual([]);
+    } finally { await s.close(); }
+  }, 120_000);
 });

@@ -273,18 +273,45 @@ const userConfigChain = new Set();
 function generatedMirror() {
   return buildGeneratedMirror({
     workspaceRoot, mirrorRootIsFallback, chain: userConfigChain,
-    excludeDirs: [...wrapperDirs],
+    excludeDirs: [...wrapperDirs.keys()],
     onUnresolved: (spec) =>
       connection.console.log(`[rip] tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
   });
 }
 
 // Workspace-relative dirs that own a nested `tsconfig.json` and have a
-// generated wrapper mirroring them. tsgo assigns each face to its
-// NEAREST config, so these partition the mirror by project inside the
-// one tree and the one session; the root config excludes them so no face
-// has two owners.
-const wrapperDirs = new Set();
+// generated wrapper mirroring them, each with its OWN source tsconfig
+// and resolved extends chain. tsgo assigns each face to its NEAREST
+// config, so these partition the mirror by project inside the one tree
+// and the one session; the root config excludes them so no face has two
+// owners. The chain is per-project — never the shared root set, whose
+// builder clears and refills it — so the watcher can match a mid-session
+// edit to a nested config (or any member of its chain) to the one
+// wrapper it re-governs.
+const wrapperDirs = new Map(); // rel → { sourceTsconfig, chain: Set }
+
+// Build and write one project wrapper (tsconfig + host floor) from its
+// source config, recording its chain. Returns the wrapper paths written.
+// Shared by first generation and by the watcher's re-govern — the same
+// files, the same builder, whichever event asks.
+function writeProjectWrapper(rel, sourceTsconfig) {
+  const wrapperDir = path.join(mirrorRoot, rel);
+  const chain = new Set();
+  const wrapper = projectWrapper({
+    wrapperDir, sourceTsconfig, chain,
+    onUnresolved: (spec) =>
+      connection.console.log(`[rip] ${rel}: tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
+  });
+  wrapperDirs.set(rel, { sourceTsconfig, chain });
+  fs.mkdirSync(wrapperDir, { recursive: true });
+  const written = [];
+  for (const [name, text] of [['tsconfig.json', JSON.stringify(wrapper.tsconfig, null, 2)], [HOST_FLOOR_NAME, wrapper.hostFloorDts]]) {
+    const at = path.join(wrapperDir, name);
+    ensureOwnedFile(at, text);
+    written.push(at);
+  }
+  return written;
+}
 
 // Give `fsPath`'s owning project its wrapper, if it has one and does not
 // yet. Returns the mirror paths written — a new wrapper also rewrites the
@@ -296,26 +323,13 @@ function ensureProjectWrapper(fsPath) {
   if (owner === null || path.dirname(owner) === workspaceRoot) return [];
   const rel = path.relative(workspaceRoot, path.dirname(owner));
   if (wrapperDirs.has(rel)) return [];
-  wrapperDirs.add(rel);
-  const wrapperDir = path.join(mirrorRoot, rel);
-  let wrapper;
+  let written;
   try {
-    wrapper = projectWrapper({
-      wrapperDir, sourceTsconfig: owner, chain: userConfigChain,
-      onUnresolved: (spec) =>
-        connection.console.log(`[rip] ${rel}: tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
-    });
+    written = writeProjectWrapper(rel, owner);
   } catch (err) {
     wrapperDirs.delete(rel);
     connection.console.error(`[rip] wrapper for ${rel} not generated (${err.message}) — its files keep the root config`);
     return [];
-  }
-  fs.mkdirSync(wrapperDir, { recursive: true });
-  const written = [];
-  for (const [name, text] of [['tsconfig.json', JSON.stringify(wrapper.tsconfig, null, 2)], [HOST_FLOOR_NAME, wrapper.hostFloorDts]]) {
-    const at = path.join(wrapperDir, name);
-    ensureOwnedFile(at, text);
-    written.push(at);
   }
   writeGeneratedTsconfig();
   written.push(path.join(mirrorRoot, 'tsconfig.json'));
@@ -784,6 +798,14 @@ async function pruneClosure() {
   let scanned = 0;
   for (const { file, mirrorPath } of maybeStub) {
     const stub = stubTextFor(file);
+    // Ownership re-checked in the SAME synchronous turn as the write —
+    // wantsStub's discipline, spelled out because the mirror exists
+    // here by construction. The yields on this loop let a refresh or a
+    // watcher event re-materialize the file mid-prune (the list above
+    // was decided before any of them ran), and a stale stub must never
+    // clobber a face the bookkeeping has since reclaimed.
+    if (documents.get('file://' + file) || materializedMirrors.has(file) ||
+        cacheManifest.entries[file] !== undefined) continue;
     let kept = false;
     if (stub !== null) {
       try { writeMirror(mirrorPath, stub); restubbed.push(mirrorPath); kept = true; }
@@ -880,20 +902,20 @@ function sweepOrphanMirrors() {
 //     unraised. Unregistered, the first real import edge compiles the
 //     true face straight over the stub's bytes.
 //
-// Maintenance needs no code of its own: an edit to an unopened `.rip`
-// takes the watcher's in-closure branch (the mirror exists on disk) and
-// re-materializes the full face; a delete removes the mirror.
+// Maintenance follows the same registration line: an edit to an
+// unopened CLOSURE member (bookkeeping-tracked) re-materializes the
+// full face through the watcher; an edit to a stub-backed bystander
+// re-derives the STUB in place — a one-file scan, never a compile — so
+// workspace churn maintains candidacy without growing the program. A
+// delete removes the mirror either way.
 //
-// RECORDED LIMIT, and the reason there is no re-stub after a prune: a file
-// that JOINS the closure is registered like any other member, so when it
-// later leaves — its importer closed, its import line removed — pruning
-// deletes its mirror and it stops being a candidate until the next
-// session. Restoring it would mean writing a mirror back inside
-// `pruneClosure`, which is exactly what the disk-layer hygiene gates in
-// `packages/vscode/test/project-model.test.js` forbid: they assert the
-// mirror is GONE, and the closure shrinking to the open buffers is a
-// design invariant older than this feature. Widening candidacy is not
-// worth quietly reversing it.
+// A file that LEAVES the closure — its importer closed, its import line
+// removed — is re-stubbed by `pruneClosure` in the same pass that
+// deregisters it: overwritten in place (a delete-then-recreate opens a
+// window where tsgo drops the candidate), face one moment, stub the
+// next, continuously present and continuously a candidate. The stub
+// lands in neither bookkeeping collection, so the closure is exactly as
+// small as the prune made it.
 //
 // The cap bounds tsgo's memory, which is what the closure exists to hold.
 // Measured against the pinned tsgo over this repo's corpus, replicated:
@@ -1250,7 +1272,13 @@ async function repullDiagnostics(uri) {
     const m = mapTsDiagnostic(good, d);
     if (m) mapped.push(m);
   }
-  connection.sendDiagnostics({ uri, diagnostics: applyRipDirectives(good, mapped) });
+  // rip's own parse rejections ride in front here exactly as in the
+  // refresh publish: sendDiagnostics REPLACES the set per URI, and a
+  // tolerant compile satisfies every guard above (lastGood.source IS
+  // the incomplete buffer text) — so a re-pull without the prefix
+  // would wipe the incompleteness squiggle from a buffer that is
+  // still incomplete.
+  connection.sendDiagnostics({ uri, diagnostics: [...ripParseDiagnostics(good), ...applyRipDirectives(good, mapped)] });
 }
 
 function repullOpenDocuments(exceptUri = null) {
@@ -1395,14 +1423,25 @@ async function refresh(document) {
       const imports = ripImportsOf(result.stores, text, path.dirname(fsPath));
       const previous = state.imports ?? [];
       state.imports = imports;
-      cacheManifest.entries[fsPath] = {
-        sourceHash: hashText(text), codeHash: hashText(result.code), imports,
-        // An open buffer answers importers from its own last-good compile;
-        // the entry has to carry the names too, or closing this buffer
-        // leaves importers uncorrected until the file next changes.
-        enumNames: enumNamesOf(result),
-      };
-      scheduleManifestSave();
+      // The entry describes the bytes ON DISK, so it is gated exactly as
+      // the mirror write above: a RECOVERED face's codeHash would name
+      // holed bytes the mirror does not hold, and its sourceHash would
+      // persist a keystroke in flight — mirrorIntact would then fail for
+      // a mirror that is perfectly good. During incompleteness the
+      // previous entry stands, describing the last good face the disk
+      // still serves. (The closure work below still runs: a tolerant
+      // face's imports are real, and completion inside the incomplete
+      // buffer needs them materialized.)
+      if (good.parseDiagnostics.length === 0) {
+        cacheManifest.entries[fsPath] = {
+          sourceHash: hashText(text), codeHash: hashText(result.code), imports,
+          // An open buffer answers importers from its own last-good compile;
+          // the entry has to carry the names too, or closing this buffer
+          // leaves importers uncorrected until the file next changes.
+          enumNames: enumNamesOf(result),
+        };
+        scheduleManifestSave();
+      }
       const wrapperFiles = ensureProjectWrapper(fsPath);
       if (wrapperFiles.length && tsgo) {
         tsgo.client.notify('workspace/didChangeWatchedFiles', {
@@ -1638,10 +1677,12 @@ documents.onDidClose(({ document }) => {
 // (renames arrive as delete+create pairs) — a created file some importer
 // was waiting on (pendingImports) pulls its subtree into the program; a
 // change to a materialized file recompiles it; anything outside the
-// closure is ignored (demand-driven — the program never grows from
-// unrelated workspace churn). A workspace tsconfig.json change
-// regenerates the mirror config. Everything forwards to tsgo as
-// mirror-file events (tsgo invalidates on didChangeWatchedFiles), then every open document's
+// closure at most refreshes its auto-import STUB, a one-file scan
+// (demand-driven — the program never grows and nothing compiles from
+// unrelated workspace churn). A tsconfig.json change — the workspace's,
+// a chain member's, or a nested project's — regenerates the mirror
+// configs. Everything forwards to tsgo as mirror-file events (tsgo
+// invalidates on didChangeWatchedFiles), then every open document's
 // diagnostics re-pull.
 connection.onDidChangeWatchedFiles(async ({ changes }) => {
   if (!compile || !mirrorRoot) return;
@@ -1654,10 +1695,16 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
     try { fsPath = fileURLToPath(change.uri); } catch { continue; }
     if (fsPath.startsWith(mirrorRoot + path.sep)) continue; // our own writes
     if (path.basename(fsPath) === 'tsconfig.json') {
-      // The workspace's own tsconfig, or any tsconfig.json in its
-      // resolved extends chain, re-governs. (Chain members not named
-      // tsconfig.json are outside the watch glob — recorded limitation.)
-      if (workspaceRoot && (fsPath === path.join(workspaceRoot, 'tsconfig.json') || userConfigChain.has(fsPath))) {
+      // The workspace's own tsconfig, any tsconfig.json in its resolved
+      // extends chain, or a NESTED project's config (or chain member) —
+      // each re-governs. Nested configs match through the per-project
+      // chains; the shared root set never holds them, its builder
+      // clears and refills it. (Chain members not named tsconfig.json
+      // are outside the watch glob — recorded limitation.)
+      const nested = [...wrapperDirs.values()].some(
+        (m) => fsPath === m.sourceTsconfig || m.chain.has(fsPath),
+      );
+      if (workspaceRoot && (fsPath === path.join(workspaceRoot, 'tsconfig.json') || userConfigChain.has(fsPath) || nested)) {
         configChanged = true;
         forward.push({ uri: change.uri, type: change.type }); // tsgo re-reads the extends chain
       }
@@ -1686,29 +1733,57 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
     if (!fsPath.endsWith('.rip')) continue;
     if (documents.get(change.uri)) continue; // open buffers own their mirrors
     const mirrorPath = mirrorPathOf(change.uri);
+    // Closure membership is the BOOKKEEPING, never the disk: every real
+    // face is manifest-tracked (revalidateCache seeds materializedMirrors
+    // from the manifest; the orphan sweep removes anything unmanifested),
+    // so a mirror on disk outside these three sets is an auto-import
+    // STUB. Asking the disk instead made every stubbed workspace file
+    // pass as in-closure, and any bystander churn — a branch switch — a
+    // chain of synchronous full compiles.
+    const inClosure = materializedMirrors.has(fsPath) || pendingImports.has(fsPath) ||
+      cacheManifest.entries[fsPath] !== undefined;
     if (change.type === FileChangeType.Deleted) {
       materializedMirrors.delete(fsPath);
       faceCache.delete(fsPath);
       delete cacheManifest.entries[fsPath];
       scheduleManifestSave();
       // Importers that still name it get their TS2307 back; if the file
-      // returns, the Created event pulls it back into the program.
-      pendingImports.add(fsPath);
+      // returns, the Created event pulls it back into the program. A
+      // stub-only file has no importers by construction, so it joins no
+      // pending set — a mass delete must not grow one.
+      if (inClosure) pendingImports.add(fsPath);
       try {
         fs.rmSync(mirrorPath);
         forward.push({ uri: 'file://' + mirrorPath, type: FileChangeType.Deleted });
       } catch { /* no mirror to remove */ }
     } else {
-      const inClosure = materializedMirrors.has(fsPath) || pendingImports.has(fsPath) || fs.existsSync(mirrorPath);
       if (!inClosure) {
-        // Outside the closure and with no mirror at all: a `.rip` CREATED
-        // this session. The startup pass never saw it, and a file you just
-        // wrote is exactly the one you are about to want to import, so it
-        // gets its stub now. Backgrounded; a no-op for anything already
-        // spoken for.
-        populateAutoImportStubs([fsPath]).catch(
-          (err) => connection.console.error(`[rip] auto-import stub for a new file failed: ${err.stack ?? err}`),
-        );
+        if (!fs.existsSync(mirrorPath)) {
+          // No mirror at all: a `.rip` CREATED this session. The startup
+          // pass never saw it, and a file you just wrote is exactly the
+          // one you are about to want to import, so it gets its stub now.
+          // Backgrounded; a no-op for anything already spoken for.
+          populateAutoImportStubs([fsPath]).catch(
+            (err) => connection.console.error(`[rip] auto-import stub for a new file failed: ${err.stack ?? err}`),
+          );
+          continue;
+        }
+        // A STUB-backed bystander changed: re-derive the declaration-only
+        // stub in place — a one-file scan, never a compile of its
+        // transitive closure. The demand-driven invariant holds: the
+        // program grows by imports and opens, not by disk churn. A file
+        // that stopped exporting loses its stub (a stub with no
+        // candidates is pure cost — the population pass's own rule).
+        try {
+          const text = stubTextFor(fsPath);
+          if (text === null) {
+            fs.rmSync(mirrorPath);
+            forward.push({ uri: 'file://' + mirrorPath, type: FileChangeType.Deleted });
+          } else {
+            writeMirror(mirrorPath, text);
+            forward.push({ uri: 'file://' + mirrorPath, type: FileChangeType.Changed });
+          }
+        } catch { /* candidacy only — never fatal */ }
         continue;
       }
       const existed = fs.existsSync(mirrorPath);
@@ -1725,6 +1800,10 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
             : (p === mirrorPath && existed ? FileChangeType.Changed : FileChangeType.Created),
         });
       }
+      // Never two compiles back-to-back without yielding: an event
+      // batch touching N closure members must not block the message
+      // loop for N materializations.
+      await new Promise((resolve) => setImmediate(resolve));
     }
   }
   if (configChanged && mirrorRootReady) {
@@ -1736,6 +1815,20 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
     writeGeneratedTsconfig();
     forward.push({ uri: 'file://' + path.join(mirrorRoot, 'tsconfig.json'), type: FileChangeType.Changed });
     forward.push({ uri: 'file://' + path.join(mirrorRoot, HOST_FLOOR_NAME), type: FileChangeType.Changed });
+    // Every project wrapper regenerates on the same trigger: a nested
+    // tsconfig edit re-governs its own wrapper, and a package.json edit
+    // can flip any project's host floor (rip.strict is read per
+    // project). Config events are rare and the writes are idempotent,
+    // so regenerating all of them beats attributing the edit to one.
+    for (const [rel, meta] of wrapperDirs) {
+      try {
+        for (const p of writeProjectWrapper(rel, meta.sourceTsconfig)) {
+          forward.push({ uri: 'file://' + p, type: FileChangeType.Changed });
+        }
+      } catch (err) {
+        connection.console.error(`[rip] wrapper for ${rel} not regenerated (${err.message}) — it keeps its previous config`);
+      }
+    }
   }
   if (refreshAllForConfig) {
     // A package.json#rip edit re-governs every open doc's presentation

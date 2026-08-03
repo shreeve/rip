@@ -22,6 +22,8 @@
 // races that refresh; awaiting the republication means each answer is the
 // server's settled one.
 import { expect, test } from 'bun:test';
+import fs from 'node:fs';
+import path from 'node:path';
 import { openSession } from '../support/lsp-session.js';
 import { describeExtended } from '../support/extended.js';
 
@@ -257,6 +259,77 @@ describeExtended('completion and signature help on an incomplete expression', ()
       // The stale answer was the global scope — a thousand-odd names. Any
       // list that large is the wrong one however many members it contains.
       expect(labels.length, 'the receiver\'s members, not the global scope').toBeLessThan(100);
+    } finally { await s.close(); }
+  }, 90_000);
+
+  test('a cross-file re-pull cannot wipe an incomplete buffer\'s own rejection', async () => {
+    // sendDiagnostics REPLACES the set per URI, and editing doc B
+    // re-pulls every OTHER open doc (repullOpenDocuments) — the only
+    // path into repullDiagnostics. A tolerant lastGood satisfies every
+    // repull guard (its source IS the incomplete buffer text), so a
+    // repull publish that dropped the rip prefix would wipe A's
+    // incompleteness squiggle while A is still incomplete.
+    const s = await openSession({
+      'a.rip': 'items: number[] = [1, 2, 3]\nx = items.\n',
+      'b.rip': 'y = 1\nconsole.log y\n',
+      'package.json': '{}\n',
+    });
+    try {
+      s.open('a.rip');
+      const before = await s.diagnostics('a.rip');
+      expect(before.some((d) => /Unexpected end of input/.test(d.message ?? ''))).toBe(true);
+      s.open('b.rip');
+      await s.diagnostics('b.rip');
+      // The trigger must be a didChange on another OPEN doc — a
+      // watched-file touch never reaches the re-pull.
+      s.forget('a.rip');
+      s.change('b.rip', 'y = 2\nconsole.log y\n');
+      const after = await s.diagnostics('a.rip');
+      expect(after.some((d) => /Unexpected end of input/.test(d.message ?? ''))).toBe(true);
+    } finally { await s.close(); }
+  }, 90_000);
+
+  test('a tolerant refresh never records a manifest entry for the holed face', async () => {
+    // The mirror keeps the last good face during incompleteness — and the
+    // manifest entry must describe THOSE bytes. An entry taken from the
+    // recovered face names a codeHash the disk does not hold and persists
+    // a keystroke in flight as sourceHash, so mirrorIntact would fail
+    // for a perfectly good mirror.
+    const s = await openSession({
+      'app.rip': 'items: number[] = [1, 2, 3]\nx = items\n',
+      'package.json': '{}\n',
+    });
+    try {
+      s.open('app.rip');
+      await s.diagnostics('app.rip');
+      const manifestAt = path.join(s.dir, '.rip', 'editor', '.cache.json');
+      const mirrorAt = path.join(s.dir, '.rip', 'editor', 'app.rip.ts');
+      // The clean compile's entry lands after the debounced save — wait
+      // for the state, not an interval.
+      let cleanEntry = null;
+      for (let i = 0; i < 200 && cleanEntry === null; i++) {
+        try {
+          const m = JSON.parse(fs.readFileSync(manifestAt, 'utf8'));
+          const key = Object.keys(m.entries).find((k) => k.endsWith('app.rip'));
+          if (key) cleanEntry = JSON.stringify(m.entries[key]);
+        } catch { /* not saved yet */ }
+        if (cleanEntry === null) await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(cleanEntry, 'the clean compile recorded its entry').not.toBeNull();
+      const cleanMirror = fs.readFileSync(mirrorAt, 'utf8');
+
+      s.forget('app.rip');
+      s.change('app.rip', 'items: number[] = [1, 2, 3]\nx = items.\n');
+      const broken = await s.diagnostics('app.rip');
+      expect(broken.some((d) => /Unexpected end of input/.test(d.message ?? ''))).toBe(true);
+      // Past the save debounce (500ms): anything the tolerant refresh
+      // scheduled would be on disk by now. A bounded wait is the only
+      // way to assert an absence of change.
+      await new Promise((r) => setTimeout(r, 900));
+      const m = JSON.parse(fs.readFileSync(manifestAt, 'utf8'));
+      const key = Object.keys(m.entries).find((k) => k.endsWith('app.rip'));
+      expect(JSON.stringify(m.entries[key])).toBe(cleanEntry);
+      expect(fs.readFileSync(mirrorAt, 'utf8')).toBe(cleanMirror);
     } finally { await s.close(); }
   }, 90_000);
 });

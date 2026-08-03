@@ -75,9 +75,18 @@ export function mapTsDiagnostic(good, d) {
   // rejection at the true position, so the cover-mapped one is a
   // duplicate in the wrong place. Exactly-mapped errors still publish —
   // those are about the user's own bytes and survive the incompleteness.
+  //
+  // SCOPED to where minted bytes can exist: repair mints holes at the
+  // incompleteness and closers after it, never before, so a cover span
+  // that ends before the EARLIEST rejection is about settled text —
+  // a real error on the user's own bytes, whose cover row is its only
+  // mapping. File-wide suppression traded those for silence.
   if ((good.parseDiagnostics?.length ?? 0) > 0) {
-    const row = good.mappings.bestAtGenerated(s);
-    if (!row || row.mappingKind !== 'exact') return null;
+    const from = Math.min(...good.parseDiagnostics.map((p) => p.start));
+    if (span[1] >= from) {
+      const row = good.mappings.bestAtGenerated(s);
+      if (!row || row.mappingKind !== 'exact') return null;
+    }
   }
   return {
     severity: d.severity ?? 1,
