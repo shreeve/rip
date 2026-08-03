@@ -1029,6 +1029,161 @@ describe('structured-type validation', () => {
     expect(tokens[0].kind).toBe('TYPE_DECL');
     expect(tokens[0].value).toBe('interface P\n  m(x: number): void');
   });
+
+  // The three admissions below each let a token through that the
+  // vocabulary floor otherwise reads as executable, so each is stated
+  // in BOTH polarities. The corpus census cannot stand in for this: it
+  // records that a KIND is claimed, so it goes green on a mapped type
+  // compiling and stays green however wide the admission is drawn —
+  // an unconditional `in` passes it. What the admission must not
+  // swallow is only assertable here.
+
+  test('a mapped type is admitted by its whole shape, not by its `in`', () => {
+    for (const ok of [
+      'type A<T> = { [K in keyof T]: T[K] }\nz = 1',
+      'type B<T> = { readonly [K in keyof T]: T[K] }\nz = 1',
+      'type C<T> = { readonly [K in keyof T]?: T[K] }\nz = 1',
+      'type D<T> = { -readonly [K in keyof T]: T[K] }\nz = 1',
+      'type E<T> = { +readonly [K in keyof T]: T[K] }\nz = 1',
+      'type F<T> =\n  { [K in keyof T]?: T[K] }\nz = 1',
+      'type G<T> = Array<{ [K in keyof T]: T[K] }>\nz = 1',
+      'type H<T> = { a: number, [K in keyof T]: T[K] }\nz = 1',
+      // The optionality modifiers — `-?` is the spelling behind TS's
+      // own Required<T>. The scanner carves the `?` out of the ternary
+      // rejection only in this exact `]-?:` shape.
+      'type I<T> = { [K in keyof T]-?: T[K] }\nz = 1',
+      'type J<T> = { [K in keyof T]+?: T[K] }\nz = 1',
+      'type K<T> = { -readonly [K in keyof T]-?: T[K] }\nz = 1',
+    ]) {
+      expect(parser.parse(ok).diagnostics).toEqual([]);
+    }
+    // `in` is the membership operator everywhere else, INCLUDING the
+    // positions that put the same three tokens in a row: a tuple, an
+    // indexed access, and a member whose value merely begins with
+    // `readonly`. Each of these compiles the day the admission is
+    // widened to a bracket depth or a token shape, which is how it was
+    // drawn twice before it was drawn right.
+    for (const bad of [
+      'type Bad = [name in host]',
+      'type Bad = Host[name in host]',
+      'type Bad = { x: [name in host] }',
+      'type Bad = { x: readonly [name in host] }',
+      'type Bad = { x: (name in host) }',
+      'type Bad = { has: name in host }',
+      'type Bad = name in host',
+      'type Bad = { [K in keyof Host]: Host[K] } in registry',
+    ]) {
+      expect(() => tokenize(bad)).toThrow(/code expression \('in'\) in a type body/);
+    }
+    // A modifier sign outside a member row is refused at the sign,
+    // before the `in` is ever reached — a different token blamed, the
+    // same refusal.
+    expect(() => tokenize('type Bad = { x: -readonly [name in host] }'))
+      .toThrow(/code expression \('-'\) in a type body/);
+    // The modifier is only ever directly before the mapped row's `[`:
+    // a signed `readonly` with no bracket after it is not TS, and the
+    // member-row position alone must not admit it.
+    expect(() => tokenize('type Bad = { -readonly x: number }'))
+      .toThrow(/code expression \('-'\) in a type body/);
+    expect(() => tokenize('type Bad = { +readonly x: number }'))
+      .toThrow(/code expression \('\+'\) in a type body/);
+  });
+
+  test('method shorthand is admitted in an inline literal, not at every paren', () => {
+    for (const ok of [
+      'type G = { greet(n: number): string }\nz = 1',
+      'type G = { times: number, greet(n: number): string }\nz = 1',
+      'type G = { a: { b: number, m(q: string): number } }\nz = 1',
+      'type F = { (v: number): string }\nz = 1',
+      // A member row inside an admitted parameter list is still a member
+      // row — the shorthand nests, as it does in TypeScript.
+      'type H = { m(e: { name(): string }): void }\nz = 1',
+      'interface H2\n  m(e: { name(): string }): void\nz = 1',
+    ]) {
+      expect(parser.parse(ok).diagnostics).toEqual([]);
+    }
+    // A call is still executable wherever it is not a member row. The
+    // two generic/tuple cases are the ones a comma-only rule gets
+    // wrong: `,` separates type arguments and tuple elements there, not
+    // members, so the paren must still read as code.
+    for (const bad of [
+      'type Bad = foo(1)',
+      'type Bad = { a: foo(1) }',
+      'type Bad = { a: Map<string, foo(1)> }',
+      'type Bad = { a: [string, foo(1)] }',
+      'type Bad = { m(a: foo(1)): string }',
+      // Nesting admits member ROWS, never bare calls: a call one object
+      // deep inside a parameter list is still executable.
+      'type Bad = { m(a: { b: foo(1) }): string }',
+    ]) {
+      expect(() => tokenize(bad)).toThrow(/code expression \('\('\) in a type body/);
+    }
+    // A member row that opens a parameter list must close it with a
+    // return annotation — the shorthand's own shape, in both layouts.
+    expect(() => tokenize('type Bad = { m(a: number) }')).toThrow(/needs a return type/);
+    expect(() => tokenize('interface Bad\n  m(a: number)\nz = 1')).toThrow(/needs a return type/);
+  });
+
+  test('`is` reads as TypeScript\'s predicate in type text and as rip\'s comparison outside it', () => {
+    for (const ok of [
+      'type Gd = { check: (value: unknown) => value is string }\nz = 1',
+      'type Gd =\n  check: (value: unknown) => value is string\nz = 1',
+      'type Gd2 = { check: (value: unknown) => asserts value is string }\nz = 1',
+      'isStr: ((v: unknown) => v is string) = ((v) -> typeof v == \'string\')\nz = 1',
+      // The method shorthand's return position is the other place TS
+      // puts a predicate: `check(v: unknown): v is string`.
+      'type Gd3 = { check(v: unknown): v is string }\nz = 1',
+      'type Gd3 =\n  check(v: unknown): v is string\nz = 1',
+      'type Gd4 = { check(v: unknown): asserts v is string }\nz = 1',
+      'interface Gd5\n  check(v: unknown): v is string\nz = 1',
+    ]) {
+      expect(parser.parse(ok).diagnostics).toEqual([]);
+    }
+    // The rewrite is the VALUE sub-language's and still runs there —
+    // `is` lowers to a comparison, and a genuine `==` written inside a
+    // type body is still executable code.
+    expect(tokenize('x = a is b').tokens.some((t) => t.kind === 'COMPARE' && t.value === '==')).toBe(true);
+    expect(() => tokenize('type Bad = { a: (1 == 2) }')).toThrow(/code expression \('=='\) in a type body/);
+    // `is` is the predicate operator only between a parameter name and
+    // its type, in return position (after the arrow, after `asserts`,
+    // or after a method shorthand's `):`). Anywhere else it is rip's
+    // comparison and stays code-shaped — and the rejection quotes the
+    // word the user wrote, not the operator it rewrites to.
+    expect(() => tokenize('type Bad = { a: string is number }')).toThrow(/code expression \('is'\) in a type body/);
+    expect(() => tokenize('type Bad = { a: number is 3 }')).toThrow(/code expression \('is'\) in a type body/);
+    // A member VALUE's colon is not a shorthand's return colon: no
+    // CALL_END precedes it, so the predicate stays refused there.
+    expect(() => tokenize('type Bad = { a: { b: c is string } }')).toThrow(/code expression \('is'\) in a type body/);
+  });
+
+  // RULED (2026-08-03): `this` is type vocabulary. TypeScript's
+  // polymorphic `this` type — the fluent return, the `this is Foo`
+  // predicate subject, the `asserts this` spelling — is admitted in
+  // type/interface bodies the way any type atom is; the class-annotation
+  // road (`bump: (): this ->`) already conceded the concept. What stays
+  // rejected is the CODE shape rooted at the word: a call or member
+  // access on `this` is execution, and types erase.
+  test('`this` is a type atom in type bodies — the polymorphic type and the predicate subject', () => {
+    for (const ok of [
+      'interface Fluent\n  chain(): this\nz = 1',
+      'interface Guard\n  isFoo(): this is Guard\nz = 1',
+      'interface Guard2\n  check(): asserts this is Guard2\nz = 1',
+      'interface Maybe\n  maybe(): this | null\nz = 1',
+      'type Fluent2 =\n  chain(): this\nz = 1',
+      'type Boxed = { wrap: () => Array<this> }\nz = 1',
+    ]) {
+      expect(parser.parse(ok).diagnostics).toEqual([]);
+    }
+    // The code shape stays loud — the call is the rejection, not the
+    // word: `foo`'s unspaced `(` scans CALL_START, which is not type
+    // vocabulary. (`this()` alone reads as THIS + a grouping-paren pair
+    // — vocabulary-shaped junk TEXT, which stays opaque for the checker
+    // to diagnose, the `'T: U'` precedent.)
+    expect(() => tokenize('interface Bad\n  a: this.foo()\nz = 1')).toThrow(/in a type body/);
+    // `this` outside the predicate's subject slot buys `is` nothing:
+    // between two completed atoms it is still rip's comparison.
+    expect(() => tokenize('type Bad = { a: string is this }')).toThrow(/code expression \('is'\) in a type body/);
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════

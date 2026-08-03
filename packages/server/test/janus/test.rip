@@ -40,7 +40,7 @@ waitFor = (name, fn, timeout = 8000) ->
 edgeFetch = (port, path, headers = {}) ->
   fetch "http://127.0.0.1:#{port}#{path}", { headers: { host: 'integration.test', ...headers } }
 
-test! 'released Janus carries registration, files, sendfile, reload, and deregistration', ->
+test! 'released Janus carries registration, public-file isolation, sendfile, reload, and deregistration', ->
   CADDY = releasedCaddy!
   info = Bun.spawnSync [CADDY, 'build-info']
   build = info.stdout.toString()
@@ -55,8 +55,13 @@ test! 'released Janus carries registration, files, sendfile, reload, and deregis
   symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'server'), 'dir'
   privateFile = join project, 'private.txt'
   writeFileSync privateFile, 'authorized bytes'
+  mkdirSync join(project, 'data')
+  writeFileSync join(project, 'serve.rip'), "# serve-config-secret\nexport default {}\n"
+  writeFileSync join(project, 'package.json'), '{"type":"module","privateMarker":"package-metadata-secret"}\n'
+  writeFileSync join(project, 'data', 'app.sqlite'), 'database-file-secret'
   writeFileSync join(project, 'app', 'styles.css'), "body { color: navy; }\n"
   writeFileSync join(project, 'index.rip'), """
+  # api-source-secret
   import { get, start } from '@rip-lang/server'
 
   get '/api/version' -> { version: 'one' }
@@ -153,7 +158,8 @@ test! 'released Janus carries registration, files, sendfile, reload, and deregis
 
     shell = await edgeFetch port, '/'
     eq shell.status, 200
-    ok (await shell.text()).includes('<div id="app"></div>')
+    shellBody = await shell.text()
+    ok shellBody.includes('<div id="app"></div>')
     bundle = await edgeFetch port, '/bundle.json'
     eq bundle.status, 200
     etag = bundle.headers.get 'etag'
@@ -162,6 +168,22 @@ test! 'released Janus carries registration, files, sendfile, reload, and deregis
     css = await edgeFetch port, '/styles.css'
     eq css.status, 200
     eq (await css.text()).trim(), 'body { color: navy; }'
+
+    for [path, secret] in [
+      ['/index.rip', 'api-source-secret']
+      ['/serve.rip', 'serve-config-secret']
+      ['/package.json', 'package-metadata-secret']
+      ['/data/app.sqlite', 'database-file-secret']
+      ['/private.txt', 'authorized bytes']
+    ]
+      response = await edgeFetch port, path
+      body = await response.text()
+      # A configured SPA may answer an unknown path with its shell. Exact
+      # shell bytes are still isolation: the requested authored file did not
+      # reach the response.
+      isolated = response.status is 404 or (response.status is 200 and body is shellBody)
+      eq [path, isolated], [path, true]
+      ok not body.includes(secret), "#{path} leaked its authored bytes"
 
     sent = await edgeFetch port, '/api/send'
     eq sent.status, 200

@@ -34,3 +34,29 @@ function Wrong() {
 }
 const wrongMount = Gated.mount()
 const wrongConstruct = new Gated({})
+
+function Member() {
+  const wrongPlain: string = 42
+  const wrongState: number = 'oops'
+  const wrongComputed: string = 7 * 3
+  const wrongConst: number = 'nope'
+  let ok = 0
+
+  const bump = () => {
+    ok = 'later'
+  }
+
+  return <div>{ok}</div>
+}
+
+function Heads() {
+  return <div>
+    {
+    !missingUnless && <span>u</span>}
+    {
+    missingSwitch === 1 && <span>s</span>}
+    {
+    missingList.map((item) => <span>{item}</span>)}
+    {
+    missingExpr}
+  </div> }

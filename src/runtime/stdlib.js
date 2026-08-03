@@ -69,12 +69,13 @@ const todo = (msg) => { throw new Error(msg || 'Not implemented'); };
 const warn = console.warn;
 const zip = (...a) => a[0].map((_, i) => a.map((b) => b[i]));
 // The match operator's receiver coercion: anything reasonable becomes
-// a string to match against. A multi-line string matches only under
-// /m (anchors mislead across embedded newlines otherwise) — without
-// it the coercion yields null and the match throws loudly rather
-// than anchoring wrong.
-const toMatchable = (v, allowNewlines) => {
-  if (typeof v === 'string') return !allowNewlines && /[\n\r]/.test(v) ? null : v;
+// a string to match against, and matching is EXACTLY JavaScript's —
+// always a string, never a null, never a throw. RULED (2026-08-03):
+// multi-line semantics are the regex's own business (`^`/`$` cross
+// lines only under /m, as everywhere in JS). Decoded file bytes and
+// every other multi-line receiver follow that same rule.
+const toMatchable = (v) => {
+  if (typeof v === 'string') return v;
   if (v == null) return '';
   if (typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean') return String(v);
   if (typeof v === 'symbol') return v.description || '';

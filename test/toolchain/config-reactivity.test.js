@@ -164,7 +164,7 @@ describeExtended('the config surface is reactive', () => {
       s.touch('package.json', JSON.stringify({ devDependencies: { '@types/bun': '0.0.0' } }, null, 2) + '\n');
 
       // Real types govern now: the member typo surfaces, no reload.
-      expect(s.codes(await s.diagnostics('app.rip', { tries: 150 }))).toContain(2339);
+      expect(s.codes(await s.diagnostics('app.rip', { timeout: 15000 }))).toContain(2339);
     } finally { await s.close(); }
   }, 90_000);
 
@@ -216,9 +216,50 @@ describeExtended('the config surface is reactive', () => {
       s.touch('package.json', pkg({ strict: true }));
 
       // Strict refuses the floor: the free name stops resolving, and the
-      // diagnostic points the user at @types/bun.
-      const after = s.codes(await s.diagnostics('app.rip', { tries: 150 }));
-      expect(after.some((c) => UNRESOLVED_BUN.includes(c))).toBe(true);
+      // diagnostic points the user at @types/bun. The re-govern lands in
+      // WAVES (the watched-file forward, an early re-pull, the
+      // regenerated floor, the real re-pull), so wait for the STATE —
+      // accepting whichever wave publishes first read a pre-re-govern
+      // snapshot as the answer on a slow machine.
+      await s.diagnosticsUntil('app.rip',
+        (d) => s.codes(d).some((c) => UNRESOLVED_BUN.includes(c)), { timeout: 15000 });
     } finally { await s.close(); }
   }, 90_000);
+
+  test('a NESTED project\'s tsconfig re-governs its open files mid-session — no restart', async () => {
+    // The nested config is matched through the chain its WRAPPER records
+    // (a per-project set — the shared root set is cleared and refilled
+    // by its own builder, which is exactly how nested configs went
+    // unwatched). The same trigger regenerates every wrapper, so the
+    // flip reaches tsgo as wrapper Changed events and the open doc's
+    // diagnostics re-pull under the new posture.
+    const nested = (on) => JSON.stringify({ compilerOptions: { strictNullChecks: on } }, null, 2) + '\n';
+    const s = await openSession({
+      'pkg/tsconfig.json': nested(false),
+      'pkg/mod.rip': 'x: number = null\nconsole.log x\n',
+      'package.json': pkg(null),
+    });
+    try {
+      s.open('pkg/mod.rip');
+      // strictNullChecks off: null is assignable, the doc is clean.
+      expect(s.codes(await s.diagnostics('pkg/mod.rip'))).toEqual([]);
+
+      s.forget('pkg/mod.rip');
+      s.touch('pkg/tsconfig.json', nested(true));
+      // State-based, both flips: the re-govern lands in waves, and the
+      // first wave's publication can predate the wrapper regeneration.
+      await s.diagnosticsUntil('pkg/mod.rip',
+        (d) => s.codes(d).includes(2322), { timeout: 15000 });
+
+      // And it reverses — a fix that only ever ADDED diagnostics would
+      // pass the flip above and still strand the project. (The clean
+      // state is only reachable THROUGH the re-govern here — the doc
+      // carries 2322 until the wrapper reverts — so waiting for [] is
+      // not a vacuous absence wait.)
+      s.forget('pkg/mod.rip');
+      s.touch('pkg/tsconfig.json', nested(false));
+      await s.diagnosticsUntil('pkg/mod.rip',
+        (d) => s.codes(d).length === 0, { timeout: 15000 });
+    } finally { await s.close(); }
+  }, 120_000);
 });

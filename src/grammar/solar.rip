@@ -133,6 +133,11 @@ class Generator
 
     # Semantic side table: ruleId → {kind, roles: [{name, grammarRef, childSlot, spread}]}
     @semantics = {}
+    # Source primitive occurrences carried by each rule's output, expressed
+    # as RHS grammar refs in output order. The runtime uses this table to
+    # preserve token spans through primitive-valued list plumbing without
+    # putting metadata on tree nodes.
+    @primitiveRefs = {}
     # Rules compiled as self-accumulators (ruleId → true): left-recursive
     # list rules whose action template spreads the rule's own position-1
     # value first ('[...1, 3]' with symbols[0] = lhs). They MUTATE the
@@ -157,6 +162,7 @@ class Generator
       @timing 'buildLRAutomaton' , => @buildLRAutomaton()     # Build LR(0) automaton
       @timing 'computeLookaheads', => @computeLookaheads()    # Compute FIRST/FOLLOW and assign lookaheads
       @timing 'buildParseTable'  , => @buildParseTable()      # Build parse table with default actions
+      @timing 'buildRepairTable' , => @buildRepairTable()     # Compute per-state tolerant-repair candidates
 
   # ============================================================================
   # Helper Functions
@@ -228,6 +234,33 @@ class Generator
 
         ruleId = @rules.length + 1
         pattern = symbols.join(' ').trim()
+
+        # Every flat construction/pass-through rule states which RHS values
+        # survive in its output. At runtime their primitive occurrence rows
+        # follow the value through list accumulators and spread copies.
+        # `carried` is deliberately not named `refs`: the executable-action
+        # branch below assigns a `refs` in THIS scope, and an inner function
+        # assigning the same name shares it rather than shadowing it — the
+        # recursion would then clobber its own caller's accumulator and keep
+        # only the last nested array's refs.
+        refsOf = (els) ->
+          carried = []
+          for el in els
+            carried.push el.grammarRef if el.grammarRef?
+            carried.push ...(refsOf el.elements) if el.elements?
+          carried
+        if typeof action is 'number'
+          @primitiveRefs[ruleId] = [action]
+        else if typeof action is 'string' and (els = @_templateElements action, true)?
+          @primitiveRefs[ruleId] = refsOf els
+        else if typeof action is 'string'
+          # Executable actions are rare (parenthetical identity/flagging). A
+          # referenced RHS value is the only source value they can carry; keep
+          # each referenced position once in first-appearance order.
+          refs = (parseInt(m[1], 10) for m in action.matchAll /\$(\d+)/g)
+          @primitiveRefs[ruleId] = refs.filter (ref, i) -> refs.indexOf(ref) is i
+        else
+          @primitiveRefs[ruleId] = []
 
         # Semantic annotation → side table entry (validated; never alters
         # output). A '~ reason' annotation is the coverage opt-out: the rule is
@@ -953,6 +986,105 @@ class Generator
     solution
 
   # ============================================================================
+  # Tolerant-Repair Table
+  # ============================================================================
+  #
+  # The tolerant driver (parse below) repairs an interrupted buffer by
+  # INSERTING a zero-width token at the error point and letting the ordinary
+  # shift/reduce machinery continue. Which token to insert is knowledge about
+  # the grammar, so it is computed HERE, from the automaton — never guessed at
+  # runtime from an ad-hoc list.
+  #
+  # The candidate alphabet is the FABRICABLE set — the only tokens the driver
+  # may mint from nothing, declared with the reason each qualifies:
+  #
+  #   PROPERTY, IDENTIFIER — the HOLES. Their semantic value is a plain
+  #     string the tree carries verbatim, so an empty value emits ZERO bytes
+  #     and the face shows exactly the incomplete spelling (`items.;`,
+  #     `add(1, )`) TypeScript's own tolerant parser is built to serve on.
+  #   TERMINATOR, INDENT, OUTDENT — pure STRUCTURE. They fabricate
+  #     boundaries, never meaning; the lexer itself synthesizes all three.
+  #
+  # Everything else is excluded on principle: fabricating a literal, keyword,
+  # or operator invents program meaning the user did not type, and the face
+  # would then carry phantom semantics every downstream surface believes.
+  #
+  # The preference rule, stated once: PREFER THE REPAIR THAT KEEPS THE
+  # CONSTRUCT UNDER THE CURSOR ALIVE. A hole gives the cursor's own
+  # construct a zero-width anchor the editor can resolve into (member
+  # completion needs the access, signature help needs the argument slot);
+  # a structural token merely advances past it. Hence holes rank above
+  # structure even when structure is CHEAPER — the trailing-comma call is
+  # the proof (`add(1,` + a bare closer is the shortest repair and destroys
+  # the argument slot activeParameter is computed from). Within a class,
+  # rank by the minimal number of further fabrications the insertion
+  # commits to (computed from the item set via min-yield costs), then by
+  # token id for determinism.
+
+  # Minimal fabricated-terminal yield per symbol: terminals cost 1,
+  # a nonterminal the cheapest of its rules, ε rules 0. Fixpoint.
+  _computeInsertCosts!: ->
+    @insertCosts = {}
+    costOf = (sym) =>
+      return 0 if sym is '' or sym is undefined
+      if @nonterminals[sym] then (@insertCosts[sym] ?? Infinity) else 1
+    changed = true
+    while changed
+      changed = false
+      for rule in @rules
+        total = 0
+        total += costOf s for s in rule.symbols
+        if total < (@insertCosts[rule.lhs] ?? Infinity)
+          @insertCosts[rule.lhs] = total
+          changed = true
+    @_symbolCost = costOf
+
+  # How many MORE fabrications does inserting terminal `a` commit to at
+  # this state? Min over the state's items that `a` advances: the rest of
+  # that item's own production. (For `a` reached through a nonterminal's
+  # FIRST set this is a lower-bound estimate — the ranking heuristic, not
+  # a completion proof; the driver's budget is the proof's substitute.)
+  _repairCostAt: (itemSet, name) ->
+    best = Infinity
+    for item as itemSet.items
+      beta = item.rule.symbols[item.dot..]
+      continue if beta.length is 0 or beta[0] is ''
+      head = beta[0]
+      rest = 0
+      rest += @_symbolCost s for s in beta[1..]
+      if head is name
+        best = Math.min best, rest
+      else if @nonterminals[head]?.firsts.has name
+        best = Math.min best, (@_symbolCost(head) - 1) + rest
+    best
+
+  # THE GENERICITY BOUNDARY, RULED (2026-08-03): Solar may give special
+  # repair treatment to CONVENTIONALLY-NAMED tokens — the fabricable
+  # alphabet below, and the driver's INDENT/OUTDENT deletion rule —
+  # provided every name is looked up in the grammar's own symbol table
+  # and degrades to a no-op when the grammar does not declare it. The
+  # mechanism is generic; the names are a convention a grammar opts
+  # into by using them. No rule may ASSUME a token exists, and none may
+  # encode what a token means beyond the repair role named here. If
+  # Solar ever serves a second grammar, the upgrade path is for the
+  # GRAMMAR to declare its own scaffolding/fabricable tokens and for
+  # this list to become that declaration's default.
+  buildRepairTable!: ->
+    @_computeInsertCosts()
+    fabricable = [['PROPERTY', 0], ['IDENTIFIER', 0], ['TERMINATOR', 1], ['INDENT', 1], ['OUTDENT', 1]]
+    @repairTable = {}
+    for itemSet, k in @states
+      row = @parseTable[k]
+      candidates = []
+      for [name, cls] in fabricable
+        id = @symbolIds[name]
+        continue unless id? and row[id]?
+        candidates.push {id, cls, cost: @_repairCostAt(itemSet, name)}
+      continue if candidates.length is 0
+      candidates.sort (a, b) -> (a.cls - b.cls) or (a.cost - b.cost) or (a.id - b.id)
+      @repairTable[k] = (c.id for c in candidates)
+
+  # ============================================================================
   # Code Generation
   # ============================================================================
 
@@ -997,8 +1129,10 @@ class Generator
       symbolIds: #{JSON.stringify @symbolIds},
       tokenNames: #{JSON.stringify(@tokenNames).replace /"([0-9]+)":/g, "$1:"},
       semantics: #{JSON.stringify @semantics},
+      primitiveRefs: #{JSON.stringify @primitiveRefs},
       accumulators: #{JSON.stringify @accumulators},
       parseTable: #{tableCode},
+      repairTable: #{JSON.stringify @repairTable},
       ruleTable: #{JSON.stringify @ruleTable},
       ruleNames: #{JSON.stringify @_ruleNames()},
       ruleActions: #{@ruleActions},
@@ -1041,7 +1175,7 @@ class Generator
   #
   # Returns {sexpr, stores, diagnostics, trivia}:
   #   sexpr       — the s-expression AST, or null when parsing failed
-  #   stores      — {nodes, roles, nodeIds}: plain NodeStore/RoleStore row
+  #   stores      — {nodes, roles, primitives, nodeIds}: plain side-table row
   #                 arrays populated at reduce time, plus the node → nodeId
   #                 WeakMap (the side map — how downstream consumers
   #                 join tree arrays to rows; it serializes to nothing).
@@ -1053,18 +1187,79 @@ class Generator
   #                 blank-line runs, {kind, start, end, text}), relayed
   #                 verbatim when the lexer exposes one; null otherwise.
   #                 Present on failure too — trivia is scan-time fact.
+  # (Repair-minted zero-width tokens surface as zero-width spans in the
+  # stores/mapping rows — the channel every consumer already reads — so
+  # the driver returns no separate hole list.)
 
-  parse: (input) ->
-    [stk, vals, locs] = [[0], [null], [null]]
+  # `primitives` (default off) turns on the PrimitiveStore: the occurrence
+  # spans a primitive tree value cannot carry itself. Only the TS face reads
+  # them, and tracking costs a per-token allocation and a per-reduce splice,
+  # so the shipping JS compile does not pay for a side table it never queries.
+  # OFF, every primitiveLocs site below is skipped as one unit — the stack
+  # stays parallel to `vals` because none of it runs, not because it is kept
+  # in step.
+  # `tolerant` (default off) turns on INSERTION/DELETION REPAIR for the
+  # editor's face compile: an error whose offending token is end-of-input or
+  # lexer-minted structure repairs from the generated repairTable — the
+  # per-state candidate list computed from the automaton at generation time
+  # (see buildRepairTable for the fabricable alphabet and the preference
+  # rule) — and the ordinary machinery keeps building the tree, so stores
+  # and mapping rows populate the normal way. Three stated runtime rules
+  # bound it:
+  #   • the FIRST rejection is always recorded — a repaired parse still
+  #     reports the buffer broken; recovery is never acceptance;
+  #   • unexpected INDENT/OUTDENT tries the state's own hole candidates
+  #     FIRST (scaffolding is generated, so the full fabricable alphabet
+  #     applies — a hole at the incompleteness lets the pending
+  #     scaffolding tail shift normally), and DELETES when no candidate
+  #     remains — block scaffolding the rewriter minted around an
+  #     incomplete construct is never worth fabricating real code to
+  #     satisfy;
+  #   • a REAL offending token admits exactly one insertion, TERMINATOR — a
+  #     statement boundary splits what the user wrote without fabricating
+  #     meaning in front of it; holes never precede real code. When even
+  #     that has no candidate, the token DELETES (panic fallback, the
+  #     classic second half of insertion repair): one lost token still
+  #     leaves the rest of the buffer a parse. EOF is never deleted — a
+  #     state that cannot act on end of input is the genuine dead end.
+  # A budget caps the loop; exhaustion falls back to today's hard failure.
+  # OFF, every site below is skipped as one unit and the driver is
+  # byte-for-byte the strict one.
+  parse: (input, {primitives: wantPrimitives = false, tolerant = false} = {}) ->
+    [stk, vals, locs, primitiveLocs] = [[0], [null], [null], [[]]]
     parseTable = @parseTable
     EOF = 1
     diagnostics = []
+    pendingSymbols = []
+    repairBudget = 24
+    # Repairs at end of input anchor where the CURSOR pauses — before any
+    # trailing newlines — so a hole's zero-width span is the position the
+    # editor's request carries.
+    inputEnd = input.length
+    if tolerant
+      inputEnd-- while inputEnd > 0 and (input[inputEnd - 1] is '\n' or input[inputEnd - 1] is '\r')
+    # Progress guard: (state, candidate) pairs already tried since the last
+    # REAL token was consumed. An insertion that brings the parser back to a
+    # configuration it already repaired is not progress (a TERMINATOR at a
+    # statement boundary reduces straight back to the same state); the next
+    # candidate takes over. Cleared on every genuine consumption — a
+    # DELETION included: eating a real token changes what remains to be
+    # parsed exactly as shifting one does, and a guard that survived it
+    # left the EOF state's candidates spent before the buffer's real
+    # repair was ever tried (a class-body `def m(` died this way — the
+    # deleted OUTDENT was the last consumption the guard ever saw).
+    repairedHere = new Set
+    # Whether the PARSER has recorded its first rejection (recordFirst).
+    # Deliberately separate from the diagnostics array, which the
+    # tolerant lexer seeds before the loop starts.
+    parserRecorded = false
 
     # NodeStore/RoleStore accumulation. nodeIds is the
     # node → nodeId side map: dense ids from 1, stable for this
     # parse; the node itself carries nothing.
     nodes = []
     roles = []
+    primitives = []
     nodeIds = new WeakMap
     nextNodeId = 1
 
@@ -1073,6 +1268,11 @@ class Generator
     sharedState.ctx[k] = v for own k, v of @ctx
 
     lexer.setInput input, sharedState.ctx
+    # A tolerant lexer records its own rejections (synthetic closers for
+    # unclosed brackets) instead of throwing; they are this parse's
+    # diagnostics as much as the driver's own.
+    if tolerant and Array.isArray lexer.lexDiagnostics
+      diagnostics.push ...lexer.lexDiagnostics
     [sharedState.ctx.lexer, sharedState.ctx.parser] = [lexer, this]
 
     lex = =>
@@ -1083,27 +1283,120 @@ class Generator
     symbol = null
     tokenLoc = null
     rv = {}
+    expectedForState = =>
+      expected = []
+      for own p of parseTable[state] when @tokenNames[p] and +p > 2
+        expected.push @tokenNames[p] unless expected.includes @tokenNames[p]
+      expected
 
     loop
       state = stk[stk.length - 1]
       if not symbol?
-        symbol = lex()
-        # EOF carries a zero-width span at end of input; lexers stop
-        # updating .loc once exhausted.
-        tokenLoc = if symbol is EOF
-          {start: input.length, end: input.length}
+        if pendingSymbols.length > 0
+          # A repair re-queued the offending token behind its insertion;
+          # restore it exactly as the lexer presented it.
+          q = pendingSymbols.shift()
+          symbol = q.symbol
+          tokenLoc = q.loc
+          lexer.text = q.text
+          lexer.loc = q.loc
+          lexer.token = q.token
         else
-          lexer.loc ?? null
+          symbol = lex()
+          # EOF carries a zero-width span at end of input; lexers stop
+          # updating .loc once exhausted.
+          tokenLoc = if symbol is EOF
+            {start: input.length, end: input.length}
+          else
+            lexer.loc ?? null
       action = parseTable[state]?[symbol]
+
+      if not action? and tolerant and repairBudget > 0
+        atPos = if symbol is EOF then inputEnd else (tokenLoc?.start ?? inputEnd)
+        # Recovery never silences the rejection it papers over: the first
+        # error is recorded whenever a repair actually fires.
+        # The repair knows WHICH token it is about to fabricate, and that
+        # is the useful half of the message: "expected PROPERTY" tells the
+        # reader what to type, where "end of input" only reports what the
+        # parser experienced — and at a trailing dot the reader is not at
+        # the end of anything. The strict driver below already says both;
+        # this says the same, in the same words, so the two paths cannot
+        # describe one buffer differently.
+        recordFirst = (wanted = null) =>
+          # The gate is the PARSER's own first rejection — never the shared
+          # array's length: the tolerant lexer pushes its diagnostics
+          # before the loop starts, and gating on the array let any lexer
+          # complaint (even one later in the buffer) suppress the record
+          # of a panic-deleted real token, leaving the deletion invisible
+          # at its own position.
+          return if parserRecorded
+          parserRecorded = true
+          got = if symbol is EOF then 'end of input' else "'#{@tokenNames[symbol] or symbol}'"
+          expected = if wanted? then [@tokenNames[wanted] or wanted] else expectedForState()
+          message = "Unexpected #{got}"
+          message += " — expected #{expected.join(', ')}" if expected.length
+          diagnostics.push {message, start: atPos, end: tokenLoc?.end ?? atPos, expected, got}
+        # Candidates come from the generated repairTable; a real offending
+        # token narrows them to the statement boundary. Block scaffolding
+        # (INDENT/OUTDENT) reaches the candidates like any generated
+        # token: at a trailing dot the pending OUTDENT is not the problem
+        # — the unfinished member access is — and the state's own hole
+        # candidate (PROPERTY) makes the whole scaffolding tail shift
+        # normally at one repair. Deleting the scaffolding FIRST flattened
+        # the block structure and re-fabricated it level by level (~5
+        # repairs per nesting level), so one incompleteness at statement
+        # depth 5 exhausted the budget and killed the face the repair
+        # exists to keep.
+        #
+        # The guard's key carries the STACK DEPTH alongside (state,
+        # candidate): an insertion that reduced the stack made progress
+        # even when the automaton returns to the same state id — two
+        # nested blocks each owe a closer from one state, and a key
+        # blind to depth spends the candidate on the first block and
+        # starves the second. Only a repeat at the SAME depth is the
+        # loop the guard exists to stop. A string key: the path runs at
+        # most repairBudget times a parse, and packed integers would
+        # smuggle in capacity limits no grammar promises to respect.
+        allowedAll = symbol is EOF or lexer.token?.generated
+        guardKey = (id) -> "#{stk.length}:#{state}:#{id}"
+        inserted = null
+        for id in (@repairTable[state] ?? [])
+          continue if repairedHere.has guardKey(id)
+          if allowedAll or id is @symbolIds.TERMINATOR
+            inserted = id
+            break
+        if inserted?
+          recordFirst(inserted)
+          repairBudget--
+          repairedHere.add guardKey(inserted)
+          pendingSymbols.unshift {symbol, loc: tokenLoc, text: lexer.text, token: lexer.token}
+          symbol = inserted
+          tokenLoc = {start: atPos, end: atPos}
+          lexer.text = ''
+          lexer.loc = tokenLoc
+          lexer.token = {generated: true, hole: true}
+          action = parseTable[state]?[symbol]
+        else if symbol isnt EOF
+          # Panic fallback, the classic second half of insertion repair:
+          # no candidate remains for this configuration, so the token
+          # deletes — unexpected block scaffolding lands here too, once
+          # its hole candidates are spent. One lost token still
+          # leaves the rest of the buffer a parse; a driver that stops
+          # here leaves it nothing. Bounded by the same budget as every
+          # other repair, and EOF is never deleted — a state that cannot
+          # act on end of input is the genuine dead end below.
+          recordFirst()
+          repairBudget--
+          repairedHere.clear() unless lexer.token?.hole
+          symbol = null
+          continue
 
       unless action?
         # +p > 2 excludes the internal error token (id 2) from user-facing
         # expectations. The list dedups: a display override can render
         # a minted kind as a glyph another terminal already spells
         # (OPT_MARKER and the existence `?` both display as `?`).
-        expected = []
-        for own p of parseTable[state] when @tokenNames[p] and +p > 2
-          expected.push @tokenNames[p] unless expected.includes @tokenNames[p]
+        expected = expectedForState()
         got = if symbol is EOF then 'end of input' else "'#{@tokenNames[symbol] or symbol}'"
         start = tokenLoc?.start ?? 0
         end   = tokenLoc?.end ?? start
@@ -1113,9 +1406,17 @@ class Generator
         return {sexpr: null, stores: null, diagnostics, trivia: lexer.trivia ?? null}
 
       if action > 0  # SHIFT or GOTO
+        repairedHere.clear() if tolerant and not lexer.token?.hole
         stk.push symbol, action
         vals.push lexer.text
         locs.push (lexer.loc ?? null)
+        if wantPrimitives
+          primitiveLocs.push if Array.isArray lexer.text?.primitiveSpans
+            lexer.text.primitiveSpans
+          else if lexer.loc?
+            [{value: lexer.text, sourceStart: lexer.loc.start, sourceEnd: lexer.loc.end}]
+          else
+            []
         symbol = null
 
       else if action < 0  # REDUCE
@@ -1141,6 +1442,15 @@ class Generator
 
         r = @ruleActions.call rv, -action, vals, locs, sharedState.ctx
         rv.$ = r if r?
+
+        # Primitive spans follow only RHS values the action carries. This is
+        # the occurrence identity a primitive string cannot hold itself; it
+        # survives accumulator mutation and spread-copying as side-table data.
+        base = vals.length - len
+        carriedPrimitives = []
+        if wantPrimitives
+          for ref in @primitiveRefs[-action]
+            carriedPrimitives.push ...(primitiveLocs[base + ref - 1] ?? [])
 
         # A reduction that CONSTRUCTED a node (a fresh array) registers it:
         # NodeStore row always, RoleStore rows when the rule is annotated.
@@ -1186,18 +1496,33 @@ class Generator
                 # Literal-sourced role: statically-known value, no span.
                 roles.push {nodeId, role: part.name, grammarRef: null, childSlot: part.childSlot, literal: part.literal, fileId: 0}
 
+        # A primitive occurrence belongs to the FIRST constructed node that
+        # carries it. Ancestors recover it by source containment, so the row is
+        # stored once instead of being copied at every tree depth. Once every
+        # carried occurrence has an owner, no descendant list needs to flow
+        # farther up the reduction stack; direct terminals continue until the
+        # first node-producing reduction claims them.
+        if wantPrimitives and Array.isArray(node) and nodeIds.has(node)
+          ownerNodeId = nodeIds.get node
+          for p in carriedPrimitives when not p.ownerNodeId?
+            p.ownerNodeId = ownerNodeId
+            primitives.push {nodeId: ownerNodeId, value: p.value, sourceStart: p.sourceStart, sourceEnd: p.sourceEnd, fileId: 0}
+          carriedPrimitives = []
+
         if len
           stk.length  -= len * 2
           vals.length -= len
           locs.length -= len
+          primitiveLocs.length -= len if wantPrimitives
 
         stk.push @ruleTable[(-action) * 2]
         vals.push rv.$
         locs.push span
+        primitiveLocs.push carriedPrimitives if wantPrimitives
         stk.push parseTable[stk[stk.length - 2]][stk[stk.length - 1]]
 
       else  # ACCEPT
-        return {sexpr: vals[vals.length - 1], stores: {nodes, roles, nodeIds}, diagnostics, trivia: lexer.trivia ?? null}
+        return {sexpr: vals[vals.length - 1], stores: {nodes, roles, primitives, nodeIds}, diagnostics, trivia: lexer.trivia ?? null}
 
 # ==============================================================================
 # Exports

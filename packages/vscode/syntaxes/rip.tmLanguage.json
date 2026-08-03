@@ -28,6 +28,7 @@
 
     {"comment": "=== SCHEMA BLOCKS (`Name = schema [:kind]` + indented body) ==="},
     { "include": "#schema-block" },
+    { "include": "#schema-inline" },
 
     {"comment": "=== HEREDOCS (before regular strings — triple quotes first) ==="},
     {
@@ -93,24 +94,28 @@
     {"comment": "=== HEREGEX and REGEX ==="},
     {
       "begin": "///",
-      "end": "(///)[gimsuy]*",
+      "end": "(///)([gimsuy]*)",
       "name": "string.regexp.multiline.rip",
       "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.rip" } },
-      "endCaptures": { "1": { "name": "punctuation.definition.string.end.rip" } },
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.string.end.rip" },
+        "2": { "name": "keyword.other.rip" }
+      },
       "patterns": [
-        { "include": "#interpolated_rip" },
-        { "match": "\\\\.", "name": "constant.character.escape.backslash.rip" },
-        { "match": "#.*$", "name": "comment.line.number-sign.rip" }
+        { "include": "#regexp-heregex" }
       ]
     },
     {
       "begin": "(?<![\\w$])(/)(?=(?![/*+?])([^/\\\\]|\\\\.)*?/[gimsuy]*(?!\\s*[\\w$/(]))",
       "beginCaptures": { "1": { "name": "punctuation.definition.string.begin.rip" } },
-      "end": "(/)[gimsuy]*",
-      "endCaptures": { "1": { "name": "punctuation.definition.string.end.rip" } },
+      "end": "(/)([gimsuy]*)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.string.end.rip" },
+        "2": { "name": "keyword.other.rip" }
+      },
       "name": "string.regexp.rip",
       "patterns": [
-        { "match": "\\\\.", "name": "constant.character.escape.backslash.rip" }
+        { "include": "#regexp" }
       ]
     },
 
@@ -173,35 +178,38 @@
       ]
     },
     {
-      "match": "\\b(class)\\s+(\\w+(?:\\.\\w*)*)(?:\\s+(extends)\\s+(\\w+(?:\\.\\w*)*))?",
+      "comment": "The name is OPTIONAL: `Blank = class` and `Grown = class extends Marker` are classes too, and requiring a name left the keyword unscoped in the first and made `extends` the class's own name in the second. `(?!extends\\b)` is what keeps the name slot from swallowing the inheritance word. A `@`-named inner class (`class @Box`) matches the keyword alone and leaves `@Box` to the receiver rule, which already reads the `@` as `this` and the name as the property it becomes. `(?!\\s*:)` keeps the keyword out of `class: 'wide'`, where `class` is an object key or a render attribute rather than a declaration.",
+      "match": "\\b(class)\\b(?!\\s*:)(?:\\s+(?!extends\\b)(\\w+(?:\\.\\w*)*))?(?:\\s+(extends)\\s+(\\w+(?:\\.\\w*)*))?",
       "name": "meta.class.rip",
       "captures": {
         "1": { "name": "storage.type.class.rip" },
         "2": { "name": "entity.name.type.class.rip" },
-        "3": { "name": "keyword.control.inheritance.rip" },
+        "3": { "name": "storage.modifier.extends.rip" },
         "4": { "name": "entity.other.inherited-class.rip" }
       }
     },
 
     {"comment": "=== FUNCTION DEFINITIONS ==="},
     {
-      "comment": "def name(...) or def name!(...)",
-      "begin": "\\b(def)\\s+([a-zA-Z_$]\\w*[!?]?)",
+      "comment": "def name(...) or def name!(...). The bang is NOT part of the name — `def announce!` defines `announce`, and the call site spells it without one; what the bang changes is the definition, suppressing the implicit return so the def is void. So it takes storage.modifier, the scope `readonly` and `abstract` already carry, and reads in a different color from the name it is not part of. Only `!` is admitted: `def ask?` does not parse.",
+      "begin": "\\b(def)\\s+([a-zA-Z_$]\\w*)(!)?",
       "beginCaptures": {
         "1": { "name": "storage.type.function.rip" },
-        "2": { "name": "entity.name.function.rip" }
+        "2": { "name": "entity.name.function.rip" },
+        "3": { "name": "storage.modifier.rip" }
       },
       "end": "(?=$|[=-]>|\\n)",
       "name": "meta.function.rip",
       "patterns": [{ "include": "#function_params" }, { "include": "$self" }]
     },
     {
-      "comment": "name = (...) -> or name = ->",
-      "begin": "((@)?[a-zA-Z_$][\\w$]*)\\s*(=)\\s*(?=(\\([^()]*\\)\\s*)?[=-]>)",
+      "comment": "name = (...) -> or name = ->. A bang BEFORE the `=` is the void marker, not await: `describe! = ->` emits `function(): void { …; return; }`, suppressing the implicit return exactly as `def announce!` does — so it takes storage.modifier here, while the same character after a callee (`fetchIt!`) is the await call. Position is what tells them apart, and matching the bang here is what keeps the await rule from claiming it.",
+      "begin": "((@)?[a-zA-Z_$][\\w$]*)(!)?\\s*(=)\\s*(?=(\\([^()]*\\)\\s*)?[=-]>)",
       "beginCaptures": {
         "1": { "name": "entity.name.function.rip" },
-        "2": { "name": "variable.other.readwrite.instance.rip" },
-        "3": { "name": "keyword.operator.assignment.rip" }
+        "2": { "name": "variable.language.this.rip" },
+        "3": { "name": "storage.modifier.rip" },
+        "4": { "name": "keyword.operator.assignment.rip" }
       },
       "end": "[=-]>",
       "endCaptures": { "0": { "name": "storage.type.function.rip" } },
@@ -209,12 +217,39 @@
       "patterns": [{ "include": "#function_params" }]
     },
     {
-      "comment": "name: (...) -> or name: -> (method in object/class)",
-      "begin": "((@)?[a-zA-Z_$][\\w$]*)\\s*(:)\\s*(?=(\\([^()]*\\)\\s*)?[=-]>)",
+      "comment": "A binding annotated with a FUNCTION TYPE: `doubler: (n: number) => string = (n) => String(n * 2)`. The method rule below would take this — it sees a name, a colon, a parameter list and an arrow — and its end lands on that arrow, which here belongs to the TYPE, not to a body. The tail `string = (n) => …` was then re-read as a fresh definition, so the RETURN TYPE was scoped as the name of a function called `string`. The lookahead is what tells the two apart: a function type is followed by its return type and then an `=`, where a method's arrow is followed by its body. A thin-arrow method (`plain: (n) -> n * 2`) and an unannotated fat-arrow (`cb: (n) => n * 2`) both fail it and fall through untouched.",
+      "begin": "([a-zA-Z_$][\\w$]*)\\s*(:)(?=\\s*\\([^()]*\\)\\s*=>[^=]*=(?![>=]))",
+      "beginCaptures": {
+        "1": { "name": "variable.other.readwrite.rip" },
+        "2": { "name": "keyword.operator.type-annotation.rip" }
+      },
+      "end": "(=)(?![>=])",
+      "endCaptures": {
+        "1": { "name": "keyword.operator.assignment.rip" }
+      },
+      "contentName": "meta.type.rip",
+      "patterns": [{ "include": "#type_expression" }]
+    },
+    {
+      "comment": "`constructor` is the declaration keyword, not a method name a class chose — TS files it under storage.type for that reason, and it reads in the keyword color rather than the function one. Must precede the general method rule below, which would otherwise claim it as an ordinary name.",
+      "begin": "\\b(constructor)\\s*(:)\\s*(?=(\\([^()]*\\)\\s*)?[=-]>)",
+      "beginCaptures": {
+        "1": { "name": "storage.type.rip" },
+        "2": { "name": "keyword.operator.assignment.rip" }
+      },
+      "end": "[=-]>",
+      "endCaptures": { "0": { "name": "storage.type.function.rip" } },
+      "name": "meta.function.rip",
+      "patterns": [{ "include": "#function_params" }]
+    },
+    {
+      "comment": "name: (...) -> or name: -> (method in object/class). The bang before the colon is the same void marker the assignment form above carries — `spoken!: ->` emits a method that ends in a bare `return`.",
+      "begin": "((@)?[a-zA-Z_$][\\w$]*)(!)?\\s*(:)\\s*(?=(\\([^()]*\\)\\s*)?[=-]>)",
       "beginCaptures": {
         "1": { "name": "entity.name.function.rip" },
-        "2": { "name": "variable.other.readwrite.instance.rip" },
-        "3": { "name": "keyword.operator.assignment.rip" }
+        "2": { "name": "variable.language.this.rip" },
+        "3": { "name": "storage.modifier.rip" },
+        "4": { "name": "keyword.operator.assignment.rip" }
       },
       "end": "[=-]>",
       "endCaptures": { "0": { "name": "storage.type.function.rip" } },
@@ -232,7 +267,8 @@
 
     {"comment": "=== CONSTRUCTOR: new and .new() ==="},
     {
-      "match": "(new)\\s+(?:(?:(class)\\s+(\\w+(?:\\.\\w*)*)?)|(\\w+(?:\\.\\w*)*))",
+      "comment": "`super`, `this` and a second `new` are not the name of the thing being constructed, so `new super.Box`, `new this` and `new new Hatch` decline this rule here and are matched again one word along. Without the guard the whole spine reads as a constructed name: `super` comes out looking like a function, and in `new new Hatch` the inner `new` takes the name's place while `Hatch` — the actual name — is left with no scope at all.",
+      "match": "(new)\\s+(?:(?:(class)\\s+(\\w+(?:\\.\\w*)*)?)|(?!(?:super|this|new)\\b)(\\w+(?:\\.\\w*)*))",
       "name": "meta.class.instance.constructor.rip",
       "captures": {
         "1": { "name": "keyword.operator.new.rip" },
@@ -258,23 +294,26 @@
     { "match": "\\b(NaN|Infinity)\\b",  "name": "constant.language.rip" },
     { "match": "\\b(this)\\b",          "name": "variable.language.this.rip" },
 
-    {"comment": "=== INSTANCE VARIABLES (@name) ==="},
+    {"comment": "=== INSTANCE MEMBERS (@name — `this.name` with the receiver elided) ==="},
     {
+      "comment": "`@` is not a sigil that makes a name — it IS the receiver: `@name` compiles to `this.name`, bare `@` to `this`, `@'data-x'` to `this[\"data-x\"]`. So the `@` reads as `this` does, and the name after it reads as the property it is, which makes `@name` and `this.name` render alike because they are the same thing written twice.",
       "match": "(@)([a-zA-Z_$]\\w*)?",
       "name": "variable.other.readwrite.instance.rip",
       "captures": {
-        "1": { "name": "punctuation.definition.variable.rip" }
+        "1": { "name": "variable.language.this.rip" },
+        "2": { "name": "variable.other.object.property.rip" }
       }
     },
 
     {"comment": "=== COMPONENT DEFINITIONS (export Name = component extends tag) ==="},
     {
+      "comment": "`component` is a DECLARATION keyword, not control flow — it introduces a named thing with members and a render block, the role `class`, `interface`, `enum`, `type` and `def` all play, and every one of those sits in storage.type here. The name it declares is already scoped like a class name, so filing the declaring word under control flow was the odd half of that pair. TS has no `component`, so internal consistency governs.",
       "match": "\\b(export\\s+)?([A-Z]\\w*)\\s*(=)\\s*(component)(?:\\s+(extends)\\s+([a-z]\\w*))?\\b",
       "captures": {
         "1": { "name": "keyword.control.rip" },
         "2": { "name": "entity.name.type.class.rip" },
         "3": { "name": "keyword.operator.assignment.rip" },
-        "4": { "name": "keyword.control.rip" },
+        "4": { "name": "storage.type.component.rip" },
         "5": { "name": "storage.modifier.extends.rip" },
         "6": { "name": "entity.name.tag.rip" }
       }
@@ -283,10 +322,15 @@
       "comment": "Fallback for generic components: scopes 'component extends tag' when the full definition rule doesn't match (due to <...> type params).",
       "match": "\\b(component)\\s+(extends)\\s+([a-z]\\w*)\\b",
       "captures": {
-        "1": { "name": "keyword.control.rip" },
+        "1": { "name": "storage.type.component.rip" },
         "2": { "name": "storage.modifier.extends.rip" },
         "3": { "name": "entity.name.tag.rip" }
       }
+    },
+    {
+      "comment": "Any remaining `component` — a spelling neither rule above matched. Without it the word falls to the KEYWORDS alternation and reverts to control flow, so the two rules above would disagree with the fallback about what kind of word this is.",
+      "match": "\\b(component)\\b",
+      "name": "storage.type.component.rip"
     },
 
     {"comment": "=== $ SIGIL DATA ATTRIBUTES ==="},
@@ -300,7 +344,7 @@
 
     {"comment": "=== RENDER BLOCK (context-aware tag/component/attribute highlighting) ==="},
     {
-      "comment": "Captures render keyword + indentation. HTML tags, components, and attributes are only highlighted inside this context. The block ends when a non-blank line is not indented deeper than render.",
+      "comment": "Captures render keyword + indentation. HTML tags, components, and attributes are only highlighted inside this context. The block ends when a non-blank line is not indented deeper than render. This capture is what the editor actually shows for `render` — it matches at line start and out-ranks the keyword rule below, so the two must agree on the scope. `render` stays in control rather than joining the declaration keywords: it introduces a BLOCK, which is what `try`, `do` and `loop` do, and reading it apart from `component` matters more than filing it with the thing it is a member of — a declaration color would make the section header and the declaration of the whole component indistinguishable.",
       "begin": "^([ \\t]*)(render)[ \\t]*(?:#.*)?$",
       "beginCaptures": {
         "2": { "name": "keyword.control.rip" }
@@ -308,8 +352,8 @@
       "end": "^(?!\\1[ \\t]|[ \\t]*$)",
       "patterns": [
         {
-          "comment": "HTML/SVG tag names. Mirrors TEMPLATE_TAGS in src/components.js.",
-          "begin": "^[ \\t]+(a|abbr|address|animate|animateMotion|animateTransform|area|article|aside|audio|b|base|bdi|bdo|blockquote|body|br|button|canvas|caption|circle|cite|clipPath|code|col|colgroup|data|datalist|dd|defs|del|desc|details|dfn|dialog|div|dl|dt|ellipse|em|embed|feBlend|feColorMatrix|feComponentTransfer|feComposite|feConvolveMatrix|feDiffuseLighting|feDisplacementMap|feDistantLight|feDropShadow|feFlood|feFuncA|feFuncB|feFuncG|feFuncR|feGaussianBlur|feImage|feMerge|feMergeNode|feMorphology|feOffset|fePointLight|feSpecularLighting|feSpotLight|feTile|feTurbulence|fieldset|figcaption|figure|filter|footer|foreignObject|form|g|h1|h2|h3|h4|h5|h6|head|header|hr|html|i|iframe|image|img|input|ins|kbd|label|legend|li|line|linearGradient|link|main|map|mark|marker|mask|math|menu|meta|metadata|meter|mpath|nav|noscript|object|ol|optgroup|option|output|p|param|path|pattern|picture|polygon|polyline|portal|pre|progress|q|radialGradient|rect|rp|rt|ruby|s|samp|script|section|select|set|slot|small|source|span|stop|strong|style|sub|summary|sup|svg|symbol|table|tbody|td|template|text|textPath|textarea|tfoot|th|thead|time|title|tr|track|tspan|u|ul|var|video|view|wbr)\\b(?!\\s*[=:]|\\s*\\()",
+          "comment": "HTML/SVG tag names, at the head of an indented line OR inline after `then`/`else` — `when 'open' then span 'Open'` puts a tag mid-line, and a line-start anchor alone could never reach it. The keywords are matched by LOOKBEHIND so they keep their own scope. Safe inside the render body because a bare word in child position IS a tag there: rendering a value is spelled `= expr`, so `then a` is the anchor element, not a variable named a. Mirrors TEMPLATE_TAGS in src/dom-vocab.js, MINUS `slot`: `slot` is in that vocabulary as an element name, but inside a render body the emitter intercepts it before the tag path (`headStr === 'slot'` → renderSlot) and lowers it to the children projection, never a createElement — so the element spelling is unreachable here and the tag color would name a category the compiler never uses. It falls through to the keyword rule instead, reading like its siblings `offer` and `accept`.",
+          "begin": "(?:^[ \\t]+|(?<=\\bthen\\s)|(?<=\\belse\\s))(a|abbr|address|animate|animateMotion|animateTransform|area|article|aside|audio|b|base|bdi|bdo|blockquote|body|br|button|canvas|caption|circle|cite|clipPath|code|col|colgroup|data|datalist|dd|defs|del|desc|details|dfn|dialog|div|dl|dt|ellipse|em|embed|feBlend|feColorMatrix|feComponentTransfer|feComposite|feConvolveMatrix|feDiffuseLighting|feDisplacementMap|feDistantLight|feDropShadow|feFlood|feFuncA|feFuncB|feFuncG|feFuncR|feGaussianBlur|feImage|feMerge|feMergeNode|feMorphology|feOffset|fePointLight|feSpecularLighting|feSpotLight|feTile|feTurbulence|fieldset|figcaption|figure|filter|footer|foreignObject|form|g|h1|h2|h3|h4|h5|h6|head|header|hr|html|i|iframe|image|img|input|ins|kbd|label|legend|li|line|linearGradient|link|main|map|mark|marker|mask|math|menu|meta|metadata|meter|mpath|nav|noscript|object|ol|optgroup|option|output|p|param|path|pattern|picture|polygon|polyline|portal|pre|progress|q|radialGradient|rect|rp|rt|ruby|s|samp|script|section|select|set|small|source|span|stop|strong|style|sub|summary|sup|svg|symbol|table|tbody|td|template|text|textPath|textarea|tfoot|th|thead|time|title|tr|track|tspan|u|ul|var|video|view|wbr)\\b(?!\\s*[=:]|\\s*\\()",
           "beginCaptures": {
             "1": { "name": "entity.name.tag.rip" }
           },
@@ -377,6 +421,33 @@
 
     {"comment": "=== IMPORT STATEMENTS (before keywords so imported names get scoped) ==="},
     {
+      "comment": "Named exports: export { a, b as c }. The twin of the named-import rule below, and load-bearing for the same reason the import one is: without it the `as` in an export list is loose, and the cast rule downstream would read `as c` as a cast and paint the exported name as a type.",
+      "begin": "\\b(export)\\s*(\\{)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "punctuation.definition.modules.begin.rip" }
+      },
+      "end": "(\\})",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.modules.end.rip" }
+      },
+      "patterns": [
+        {
+          "comment": "`default` is the keyword, not a name being bound — `export { palette as default }` and `import { default as d }`, both as TS scopes them.",
+          "match": "\\b(default)\\b",
+          "name": "keyword.control.rip"
+        },
+        {
+          "match": "\\b(as)\\b",
+          "name": "keyword.control.rip"
+        },
+        {
+          "match": "\\b([a-zA-Z_$]\\w*)\\b",
+          "name": "variable.other.readwrite.alias.rip"
+        }
+      ]
+    },
+    {
       "comment": "Named imports: import { a, b as c } from 'path'",
       "begin": "\\b(import)\\s*(\\{)",
       "beginCaptures": {
@@ -389,6 +460,11 @@
       },
       "patterns": [
         {
+          "comment": "`default` is the keyword, not a name being bound — `export { palette as default }` and `import { default as d }`, both as TS scopes them.",
+          "match": "\\b(default)\\b",
+          "name": "keyword.control.rip"
+        },
+        {
           "match": "\\b(as)\\b",
           "name": "keyword.control.rip"
         },
@@ -399,13 +475,14 @@
       ]
     },
     {
-      "comment": "Namespace import: import * as name from 'path'",
-      "match": "\\b(import)\\s+(\\*)\\s+(as)\\s+([a-zA-Z_$]\\w*)",
+      "comment": "Namespace import: import * as name from 'path', and the default-plus-namespace spelling `import combo, * as whole from 'path'`. The leading binding is optional but must be matched when present — the `as` of an unmatched one is loose, and the cast rule downstream would read `as whole` as a cast and paint the namespace as a type.",
+      "match": "\\b(import)\\s+(?:([a-zA-Z_$]\\w*)\\s*,\\s*)?(\\*)\\s+(as)\\s+([a-zA-Z_$]\\w*)",
       "captures": {
         "1": { "name": "keyword.control.rip" },
-        "2": { "name": "constant.language.import-export-all.rip" },
-        "3": { "name": "keyword.control.rip" },
-        "4": { "name": "variable.other.readwrite.alias.rip" }
+        "2": { "name": "variable.other.readwrite.alias.rip" },
+        "3": { "name": "constant.language.import-export-all.rip" },
+        "4": { "name": "keyword.control.rip" },
+        "5": { "name": "variable.other.readwrite.alias.rip" }
       }
     },
     {
@@ -419,18 +496,77 @@
 
     {"comment": "=== FOR-LOOP VARIABLES (for item in array / for key, value of object) ==="},
     {
-      "match": "\\b(for)\\s+([a-zA-Z_$]\\w*)(?:\\s*,\\s*([a-zA-Z_$]\\w*))?\\s+(in|of|as)\\b",
+      "comment": "`in`, `of` and `as` are the iteration OPERATOR here, not the loop keyword — the same scope they carry standing alone, and the same split TS makes (`for` control, the iteration word operator). All three fill one slot and differ only in what they walk: `in` values, `of` keys, `as` the iterator protocol (`as!` is `for await … as`). They are named for rip's spelling, which is inverted from JS: rip's `in` walks values (JS `of`) and rip's `of` walks keys (JS `in`). Only the for-loop `as` is scoped here — an import alias or a cast is claimed by its own rule. `await` and `own` are matched because they SIT BETWEEN `for` and the loop variable: unmatched, they take the variable's place and the iteration word is never reached, which is how `for await b as feed()` kept a control-scoped `as` while a plain `for b as feed()` did not. Both stay control-scoped, as TS scopes the `await` of `for await`.",
+      "match": "\\b(for)\\s+(?:(await)\\s+)?(?:(own)\\s+)?([a-zA-Z_$]\\w*)(?:\\s*,\\s*([a-zA-Z_$]\\w*))?\\s+(?:(in)|(of)|(as))\\b",
       "captures": {
         "1": { "name": "keyword.control.rip" },
-        "2": { "name": "variable.other.constant.rip" },
-        "3": { "name": "variable.other.constant.rip" },
-        "4": { "name": "keyword.control.rip" }
+        "2": { "name": "keyword.control.rip" },
+        "3": { "name": "keyword.control.rip" },
+        "4": { "name": "variable.other.constant.rip" },
+        "5": { "name": "variable.other.constant.rip" },
+        "6": { "name": "keyword.operator.expression.in.rip" },
+        "7": { "name": "keyword.operator.expression.of.rip" },
+        "8": { "name": "keyword.operator.expression.as.rip" }
+      }
+    },
+
+    {"comment": "=== META-PROPERTIES (import.meta, new.target) — before KEYWORDS and the member rule, which would otherwise take a piece each ==="},
+    {
+      "comment": "`import.meta` and `new.target` are single language constructs, not a keyword followed by a property lookup — there is no object named `import` to read `meta` from. Matched whole so the tail reads as the language-provided property it is, the scope TS gives it too; left to the member-access rule it came out as an ordinary property, indistinguishable from `.url` beside it.",
+      "match": "\\b(import)(\\.)(meta)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "punctuation.accessor.rip" },
+        "3": { "name": "support.variable.property.importmeta.rip" }
+      }
+    },
+    {
+      "match": "\\b(new)(\\.)(target)\\b",
+      "captures": {
+        "1": { "name": "keyword.operator.new.rip" },
+        "2": { "name": "punctuation.accessor.rip" },
+        "3": { "name": "support.variable.property.target.rip" }
+      }
+    },
+
+    {"comment": "=== CAST (`x as T`) — before KEYWORDS, which would otherwise claim the bare `as` ==="},
+    {
+      "comment": "The cast's type is consumed WHOLE by this one match and scoped through the capture, rather than opened as a begin/end context. A context would have to know which `}` closes it, and a TextMate end pattern cannot count brace depth — that is how `try f() as { live: boolean } catch e then …` ran past its own type and painted the trailing `catch` as a type name. Balancing the type inside the match instead (three levels, as the annotation lookahead does) means the cast ends where its type ends, and the code after it is never inside a type. A for-loop's `as` is claimed earlier by the for rule, which starts at `for`; an import alias by the import rule, which starts at `import`; both out-rank this by position.",
+      "match": "\\b(as)\\s+((?:\\{(?:[^{}]|\\{(?:[^{}]|\\{[^{}]*\\})*\\})*\\}|\\[(?:[^\\[\\]]|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\])*\\]|\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)|[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*(?:<(?:[^<>]|<[^<>]*>)*>)?(?:\\[\\])*)(?:\\s*[|&]\\s*(?:\\{(?:[^{}]|\\{(?:[^{}]|\\{[^{}]*\\})*\\})*\\}|\\[(?:[^\\[\\]]|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\])*\\]|\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)|[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*(?:<(?:[^<>]|<[^<>]*>)*>)?(?:\\[\\])*)|\\s*\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)(?=\\s*=>)|\\s*=>\\s*(?:\\{(?:[^{}]|\\{(?:[^{}]|\\{[^{}]*\\})*\\})*\\}|\\[(?:[^\\[\\]]|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\])*\\]|\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)|[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*(?:<(?:[^<>]|<[^<>]*>)*>)?(?:\\[\\])*))*)",
+      "captures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "meta.type.rip", "patterns": [{ "include": "#type_expression" }] }
       }
     },
 
     {"comment": "=== KEYWORDS ==="},
     {
-      "match": "\\b(return|throw|break|continue|switch|when|then|if|else|unless|for|in|of|by|as|while|until|loop|do|try|catch|finally|yield|await|import|export|from|default|delete|typeof|instanceof|new|super|debugger|use|own|component|render|offer|accept|slot|it|is|isnt|and|or|not)\\b",
+      "comment": "expression operators — keyword.operator, never keyword.control: typeof/instanceof/delete/in/of match TS's taxonomy (and its colors). The wordy spellings take the scope of the symbol they lower to, so `is` reads like `===` and `and` like `&&`. for-loop in/of never reaches here (the for rule above owns them), and the constructor rule owns `new Foo` — this bare `new` keeps the same scope it carries there.",
+      "match": "\\b(?:(typeof)|(instanceof)|(delete)|(in)|(of)|(is|isnt)|(and|or|not)|(new))\\b",
+      "captures": {
+        "1": { "name": "keyword.operator.expression.typeof.rip" },
+        "2": { "name": "keyword.operator.expression.instanceof.rip" },
+        "3": { "name": "keyword.operator.expression.delete.rip" },
+        "4": { "name": "keyword.operator.expression.in.rip" },
+        "5": { "name": "keyword.operator.expression.of.rip" },
+        "6": { "name": "keyword.operator.comparison.rip" },
+        "7": { "name": "keyword.operator.logical.rip" },
+        "8": { "name": "keyword.operator.new.rip" }
+      }
+    },
+    {
+      "comment": "keyword.other in TS's taxonomy — a statement, but not control flow",
+      "match": "\\b(debugger)\\b",
+      "name": "keyword.other.debugger.rip"
+    },
+    {
+      "comment": "a receiver, not control flow — the same variable.language family as `this` above",
+      "match": "\\b(super)\\b",
+      "name": "variable.language.super.rip"
+    },
+    {
+      "comment": "`offer`/`accept` sit beside `export`/`import` on purpose: they are the same construct across a different boundary. `export theme := 'dark'` emits `export const theme = __state(…)` and `offer theme := 'dark'` emits the state plus `setContext(…)` — each prefixes a declaration to also publish it — while `accept theme` receives one through `getContext(…)` exactly as an import receives one from a module. Filing them as declaration keywords would say they declare the way `component` does, when what they actually do is carry a binding across a boundary.",
+      "match": "\\b(return|throw|break|continue|switch|when|then|if|else|unless|for|by|as|while|until|loop|do|try|catch|finally|yield|await|import|export|offer|accept|render|slot|from|default|use|own|it)\\b",
       "name": "keyword.control.rip"
     },
     {
@@ -456,8 +592,8 @@
       }
     },
     {
-      "comment": "Return type annotation: ): Type. The type-start lookahead keeps `): value` object/ternary tails out (single-colon era).",
-      "begin": "(?<=\\))\\s*(:)(?![:=])(?=\\s*(?:\\b(?:number|string|boolean|void|any|never|unknown|object|symbol|bigint|null|undefined|typeof|keyof|readonly|infer)\\b|[A-Z]\\w*\\b(?!\\s*[.(])|[{(\\[]))",
+      "comment": "Return type annotation: ): Type. The type-start lookahead keeps `): value` object/ternary tails out (single-colon era). A type PREDICATE opens with a lowercase name — `value is string`, `asserts value is string`, `asserts value` — which that lookahead read as a value tail, so the type context never opened and the predicate's own `is` fell to the value sub-language's rule, where rip rewrites `is` to `==`. Admitting the predicate shape is what puts it back in the type sub-language; the corpus states the split at 11-types.rip's predicate section.",
+      "begin": "(?<=\\))\\s*(:)(?![:=])(?=\\s*(?:\\b(?:number|string|boolean|void|any|never|unknown|object|symbol|bigint|null|undefined|typeof|keyof|readonly|infer)\\b|[A-Z]\\w*\\b(?!\\s*[.(])|[{(\\[]|(?:asserts\\s+[a-zA-Z_$][\\w$]*(?:\\s+is\\b)?|[a-zA-Z_$][\\w$]*\\s+is\\b)))",
       "beginCaptures": {
         "1": { "name": "keyword.operator.type-annotation.rip" }
       },
@@ -469,7 +605,7 @@
       "comment": "Typed constant: name: Type =! (lookahead for =! to scope as constant; =! is itself enough to disambiguate from an object key)",
       "begin": "(?:(@)([a-zA-Z_$]\\w*)|([a-zA-Z_$]\\w*))\\s*(:)(?![:=])(?=.*=!)",
       "beginCaptures": {
-        "1": { "name": "punctuation.definition.variable.rip" },
+        "1": { "name": "variable.language.this.rip" },
         "2": { "name": "variable.other.constant.rip" },
         "3": { "name": "variable.other.constant.rip" },
         "4": { "name": "keyword.operator.type-annotation.rip" }
@@ -479,11 +615,11 @@
       "patterns": [{ "include": "#type_expression" }]
     },
     {
-      "comment": "Type annotation: name: Type or @name: Type. In the single-colon era this is ambiguous with an object key, so the type-start lookahead only fires when the colon is followed by a built-in type keyword or a PascalCase type name that is NOT a member access or call (so `x: Math.max(a, b)` and `x: User.find()` stay value expressions, not types).",
-      "begin": "(?:(@)([a-zA-Z_$]\\w*)|([a-zA-Z_$]\\w*))\\s*(:)(?![:=])(?=\\s*(?:\\b(?:number|string|boolean|void|any|never|unknown|object|symbol|bigint|null|undefined|typeof|keyof|readonly|infer)\\b|[A-Z]\\w*\\b(?!\\s*[.(])))",
+      "comment": "Type annotation: name: Type or @name: Type. In the single-colon era this is ambiguous with an object key, so the type-start lookahead only fires when the colon is followed by a built-in type keyword or a PascalCase type name that is NOT a member access or call (so `x: Math.max(a, b)` and `x: User.find()` stay value expressions, not types). A type may also OPEN with a bracket — an object type, a tuple, a parenthesized type — and there the first token tells us nothing, so the bracketed span is balanced through (three levels, as TS's own grammar does) and admitted only when an `=` follows it: `opts: { a?: string } | null = null` is a binding with a type, while `nested = { inner: { a: 1 } }` has no `=` after `{ a: 1 }` and stays the object literal it is. Only type-continuation characters may sit between that bracket and the `=`, so a later `=` on the same line (a second default in an argument list) cannot reach back and turn an object value into a type.",
+      "begin": "(?:(@)([a-zA-Z_$]\\w*)|([a-zA-Z_$]\\w*))\\s*(:)(?![:=])(?=\\s*(?:\\b(?:number|string|boolean|void|any|never|unknown|object|symbol|bigint|null|undefined|typeof|keyof|readonly|infer)\\b|[A-Z]\\w*\\b(?!\\s*[.(])|(?:\\{(?:[^{}]|\\{(?:[^{}]|\\{[^{}]*\\})*\\})*\\}|\\[(?:[^\\[\\]]|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\])*\\]|\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\))[\\w\\s|&<>,\\[\\]().?'\"-]*=(?![>=])))",
       "beginCaptures": {
-        "1": { "name": "punctuation.definition.variable.rip" },
-        "2": { "name": "variable.other.readwrite.instance.rip" },
+        "1": { "name": "variable.language.this.rip" },
+        "2": { "name": "variable.other.object.property.rip" },
         "3": { "name": "variable.other.readwrite.rip" },
         "4": { "name": "keyword.operator.type-annotation.rip" }
       },
@@ -547,7 +683,7 @@
     { "match": "\\?!",            "name": "keyword.operator.presence.rip" },
     { "match": "\\?\\?",          "name": "keyword.operator.nullish.rip" },
     { "match": "\\?\\.(?![0-9])", "name": "keyword.operator.optional-chaining.rip" },
-    { "match": "(?<=[a-zA-Z0-9_$)])!(?![=?])", "name": "keyword.operator.dammit.rip" },
+    { "comment": "The dammit bang IS await — `fetchIt!` is `await fetchIt()`, `new Ticket!(7)` is `await new Ticket(7)`, `as!` is `for await … as` — so it reads in the control family, the same color the word `await` carries here and in TS. (The def-site bang is a different operator: `def announce!` suppresses the implicit return, and takes storage.modifier above.)", "match": "(?<=[a-zA-Z0-9_$)])!(?![=?])", "name": "keyword.control.await.rip" },
 
     {"comment": "=== REGEX MATCH (before comparison) ==="},
     { "match": "=~", "name": "keyword.operator.regex-match.rip" },
@@ -558,8 +694,8 @@
     {"comment": "=== COMPUTED / REACTIVE OPERATORS (before comparison and bitwise) ==="},
     { "match": "[~!]>|<~", "name": "keyword.operator.assignment.reactive.rip" },
 
-    {"comment": "=== COMPARISON (before assignment to prevent == matching =) ==="},
-    { "match": "===|!==|==|!=|<=|>=", "name": "keyword.operator.comparison.rip" },
+    {"comment": "=== COMPARISON / RELATIONAL (before assignment to prevent == matching =); equality is comparison, ordering is relational, as TS splits them ==="},
+    { "match": "(===|!==|==|!=)|(<=|>=)", "captures": { "1": { "name": "keyword.operator.comparison.rip" }, "2": { "name": "keyword.operator.relational.rip" } } },
 
     {"comment": "=== WORD ARRAYS %w[...] (paired delimiters nest; symmetric repeat) ==="},
     { "begin": "%w\\[", "end": "\\]", "name": "string.quoted.other.word-array.rip" },
@@ -601,8 +737,8 @@
     { "match": ">>>|>>|<<", "name": "keyword.operator.bitwise.shift.rip" },
     { "match": "[&|^~]",    "name": "keyword.operator.bitwise.rip" },
 
-    {"comment": "=== COMPARISON (< > after bitwise shifts to prevent <<= matching) ==="},
-    { "match": "[<>]", "name": "keyword.operator.comparison.rip" },
+    {"comment": "=== RELATIONAL (< > after bitwise shifts to prevent <<= matching) ==="},
+    { "match": "[<>]", "name": "keyword.operator.relational.rip" },
 
     {"comment": "=== RANGE AND SPREAD ==="},
     { "match": "\\.\\.\\.", "name": "keyword.operator.splat.rip" },
@@ -612,10 +748,11 @@
     { "match": "\\?", "name": "keyword.operator.existential.rip" },
 
     {"comment": "=== NUMBERS ==="},
-    { "match": "\\b0x[0-9a-fA-F](?:_?[0-9a-fA-F])*n?\\b", "name": "constant.numeric.hex.rip" },
-    { "match": "\\b0o[0-7](?:_?[0-7])*n?\\b",               "name": "constant.numeric.octal.rip" },
-    { "match": "\\b0b[01](?:_?[01])*n?\\b",                  "name": "constant.numeric.binary.rip" },
-    { "match": "\\b\\d[\\d_]*(?:\\.[\\d][\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?n?\\b", "name": "constant.numeric.decimal.rip" },
+    {"comment": "The bigint `n` is a SUFFIX, not a digit: it says what kind of number this is, so it carries storage.type and reads in the keyword color against the literal's own — as TS scopes it, in every base. Swallowed into the number (`n?` with no capture) it was invisible."},
+    { "match": "\\b0x[0-9a-fA-F](?:_?[0-9a-fA-F])*(n)?\\b", "name": "constant.numeric.hex.rip", "captures": { "1": { "name": "storage.type.numeric.bigint.rip" } } },
+    { "match": "\\b0o[0-7](?:_?[0-7])*(n)?\\b",               "name": "constant.numeric.octal.rip", "captures": { "1": { "name": "storage.type.numeric.bigint.rip" } } },
+    { "match": "\\b0b[01](?:_?[01])*(n)?\\b",                  "name": "constant.numeric.binary.rip", "captures": { "1": { "name": "storage.type.numeric.bigint.rip" } } },
+    { "match": "\\b\\d[\\d_]*(?:\\.[\\d][\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?(n)?\\b", "name": "constant.numeric.decimal.rip", "captures": { "1": { "name": "storage.type.numeric.bigint.rip" } } },
 
     {"comment": "=== METHOD CALLS (.method()) ==="},
     {
@@ -637,7 +774,7 @@
       "match": "\\b([a-zA-Z_$]\\w*)(!)(?!=)",
       "captures": {
         "1": { "name": "entity.name.function.rip" },
-        "2": { "name": "keyword.operator.dammit.rip" }
+        "2": { "name": "keyword.control.await.rip" }
       }
     },
 
@@ -662,6 +799,128 @@
   ],
 
   "repository": {
+    "regex-character-class": {
+      "comment": "Inside a regex body, a backslash sequence is not one thing: the class shorthands and `.` are character classes, \\123/\\xNN/\\uNNNN are numeric literals, \\cX is a control character, and only what is left is a plain escape. Ordered longest-claim-first, so the catch-all escape sees only what the three above it did not want. Regex syntax settles each of these outright — no context is being guessed at. These end in `.regexp`, not `.rip`: regex internals are their own scope vocabulary that themes key on directly (TypeScript's grammar ends them the same way, not in `.ts`), and a `.rip` ending would miss the theme rule and paint the wrong color.",
+      "patterns": [
+        { "match": "\\\\[wWsSdDtrnvf]|\\.", "name": "constant.other.character-class.regexp" },
+        { "match": "\\\\([0-7]{3}|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4})", "name": "constant.character.numeric.regexp" },
+        { "match": "\\\\c[A-Z]", "name": "constant.character.control.regexp" },
+        { "match": "\\\\.", "name": "constant.character.escape.backslash.regexp" }
+      ]
+    },
+    "regexp-operators": {
+      "comment": "The leaf constructs of a regex body — no nesting, so both flavors share them verbatim.",
+      "patterns": [
+        { "match": "\\\\[bB]|\\^|\\$", "name": "keyword.control.anchor.regexp" },
+        {
+          "match": "\\\\[1-9]\\d*|\\\\k<([a-zA-Z_$][\\w$]*)>",
+          "captures": {
+            "0": { "name": "keyword.other.back-reference.regexp" },
+            "1": { "name": "variable.other.regexp" }
+          }
+        },
+        { "match": "[?+*]|\\{(\\d+,\\d+|\\d+,|,\\d+|\\d+)\\}\\??", "name": "keyword.operator.quantifier.regexp" },
+        { "match": "\\|", "name": "keyword.operator.or.regexp" }
+      ]
+    },
+    "regexp-character-class-set": {
+      "comment": "`[…]`. Its body holds ranges and class shorthands only — never groups — so it needs no flavor of its own.",
+      "begin": "(\\[)(\\^)?",
+      "end": "(\\])",
+      "name": "constant.other.character-class.set.regexp",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.character-class.regexp" },
+        "2": { "name": "keyword.operator.negation.regexp" }
+      },
+      "endCaptures": { "1": { "name": "punctuation.definition.character-class.regexp" } },
+      "patterns": [
+        {
+          "name": "constant.other.character-class.range.regexp",
+          "match": "(?:.|(\\\\(?:[0-7]{3}|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}))|(\\\\c[A-Z])|(\\\\.))\\-(?:[^\\]\\\\]|(\\\\(?:[0-7]{3}|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}))|(\\\\c[A-Z])|(\\\\.))",
+          "captures": {
+            "1": { "name": "constant.character.numeric.regexp" },
+            "2": { "name": "constant.character.control.regexp" },
+            "3": { "name": "constant.character.escape.backslash.regexp" },
+            "4": { "name": "constant.character.numeric.regexp" },
+            "5": { "name": "constant.character.control.regexp" },
+            "6": { "name": "constant.character.escape.backslash.regexp" }
+          }
+        },
+        { "include": "#regex-character-class" }
+      ]
+    },
+    "regexp": {
+      "comment": "A plain `/…/` body. Groups recurse into THIS entry, so `#` stays a literal throughout — only a heregex reads `#` as a comment.",
+      "patterns": [
+        { "include": "#regexp-operators" },
+        {
+          "name": "meta.group.assertion.regexp",
+          "begin": "(\\()((\\?=)|(\\?!)|(\\?<=)|(\\?<!))",
+          "end": "(\\))",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.group.regexp" },
+            "2": { "name": "punctuation.definition.group.assertion.regexp" },
+            "3": { "name": "meta.assertion.look-ahead.regexp" },
+            "4": { "name": "meta.assertion.negative-look-ahead.regexp" },
+            "5": { "name": "meta.assertion.look-behind.regexp" },
+            "6": { "name": "meta.assertion.negative-look-behind.regexp" }
+          },
+          "endCaptures": { "1": { "name": "punctuation.definition.group.regexp" } },
+          "patterns": [{ "include": "#regexp" }]
+        },
+        {
+          "name": "meta.group.regexp",
+          "begin": "\\((?:(\\?:)|(?:\\?<([a-zA-Z_$][\\w$]*)>))?",
+          "end": "\\)",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.group.regexp" },
+            "1": { "name": "punctuation.definition.group.no-capture.regexp" },
+            "2": { "name": "variable.other.regexp" }
+          },
+          "endCaptures": { "0": { "name": "punctuation.definition.group.regexp" } },
+          "patterns": [{ "include": "#regexp" }]
+        },
+        { "include": "#regexp-character-class-set" },
+        { "include": "#regex-character-class" }
+      ]
+    },
+    "regexp-heregex": {
+      "comment": "A `///…///` body: interpolation and `#` comments run THROUGHOUT it, nested groups included, so its groups recurse here rather than into #regexp. Interpolation is claimed before the comment (`#{` is not a comment), and the comment before regex structure, so a `(` or `[` inside a comment cannot open a group that swallows the rest of the pattern.",
+      "patterns": [
+        { "include": "#interpolated_rip" },
+        { "match": "#.*$", "name": "comment.line.number-sign.rip" },
+        { "include": "#regexp-operators" },
+        {
+          "name": "meta.group.assertion.regexp",
+          "begin": "(\\()((\\?=)|(\\?!)|(\\?<=)|(\\?<!))",
+          "end": "(\\))",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.group.regexp" },
+            "2": { "name": "punctuation.definition.group.assertion.regexp" },
+            "3": { "name": "meta.assertion.look-ahead.regexp" },
+            "4": { "name": "meta.assertion.negative-look-ahead.regexp" },
+            "5": { "name": "meta.assertion.look-behind.regexp" },
+            "6": { "name": "meta.assertion.negative-look-behind.regexp" }
+          },
+          "endCaptures": { "1": { "name": "punctuation.definition.group.regexp" } },
+          "patterns": [{ "include": "#regexp-heregex" }]
+        },
+        {
+          "name": "meta.group.regexp",
+          "begin": "\\((?:(\\?:)|(?:\\?<([a-zA-Z_$][\\w$]*)>))?",
+          "end": "\\)",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.group.regexp" },
+            "1": { "name": "punctuation.definition.group.no-capture.regexp" },
+            "2": { "name": "variable.other.regexp" }
+          },
+          "endCaptures": { "0": { "name": "punctuation.definition.group.regexp" } },
+          "patterns": [{ "include": "#regexp-heregex" }]
+        },
+        { "include": "#regexp-character-class-set" },
+        { "include": "#regex-character-class" }
+      ]
+    },
     "render-prop-class": {
       "comment": "CSS class shorthand (.className) used inside any render-block tag/component context.",
       "match": "(\\.)(\\w[\\w-]*)",
@@ -721,8 +980,8 @@
           "patterns": [{ "include": "#type_expression" }]
         },
         {
-          "comment": "Built-in types",
-          "match": "\\b(number|string|boolean|void|any|never|unknown|object|symbol|bigint|null|undefined)\\b",
+          "comment": "Built-in types. `true` and `false` belong here for the same reason `null` and `undefined` do: in a type position they name a type, not a value — `type Yes = true` is the boolean literal type, which TS also files under support.type. Without them they fall to the lowercase catch-all at the end of this list and read as a type-PARAMETER name. This list is the type-context copy; the top-level one governs value positions and must never learn these, or `flag = true` would stop being a constant.",
+          "match": "\\b(number|string|boolean|void|any|never|unknown|object|symbol|bigint|null|undefined|true|false)\\b",
           "name": "support.type.primitive.rip"
         },
         {
@@ -751,6 +1010,11 @@
           "name": "keyword.operator.expression.in.rip"
         },
         {
+          "comment": "asserts — the assertion predicate's head (`asserts value is string`). TS files it under keyword.operator.type, a shade apart from the `is` below it, and claimed here before the lowercase catch-all reads it as a parameter name.",
+          "match": "\\b(asserts)\\b",
+          "name": "keyword.operator.type.asserts.rip"
+        },
+        {
           "comment": "is — type predicates (x is Foo)",
           "match": "\\b(is)\\b",
           "name": "keyword.operator.expression.is.rip"
@@ -759,6 +1023,15 @@
           "comment": "readonly — array/tuple/mapped type modifier",
           "match": "\\b(readonly)\\b",
           "name": "storage.modifier.rip"
+        },
+        {
+          "comment": "A constructor type, `(abstract new () => T)`: keywords here, and claimed before the lowercase catch-all below would read them as parameter names.",
+          "match": "\\b(abstract)\\b",
+          "name": "storage.modifier.rip"
+        },
+        {
+          "match": "\\b(new)\\b",
+          "name": "keyword.control.new.rip"
         },
         {
           "comment": "Type names (PascalCase)",
@@ -875,7 +1148,7 @@
               "comment": "Type annotation inside params: person: string or title?: string. Single-colon era: the type-start lookahead also admits `{`/`(`/`[` so inline object, function, and tuple/array param types work (e.g. opts: { host: string }, cb: (n: number) => void), while a default object value like `(x = {a: 1})` is unaffected because it has no `name:` before the brace.",
               "begin": "(?:(@)([a-zA-Z_$]\\w*)|([a-zA-Z_$]\\w*))(\\?)?\\s*(:)(?![:=])(?=\\s*(?:\\b(?:number|string|boolean|void|any|never|unknown|object|symbol|bigint|null|undefined|typeof|keyof|readonly|infer)\\b|[A-Z]\\w*\\b(?!\\s*[.(])|[{(\\[]))",
               "beginCaptures": {
-                "1": { "name": "punctuation.definition.variable.rip" },
+                "1": { "name": "variable.language.this.rip" },
                 "2": { "name": "variable.parameter.rip" },
                 "3": { "name": "variable.parameter.rip" },
                 "4": { "name": "keyword.operator.type.optional.rip" },
@@ -886,9 +1159,10 @@
               "patterns": [{ "include": "#type_expression" }]
             },
             {
+              "comment": "A constructor's `@owner` is two facts at once — the receiver and the parameter it binds — so the `@` reads as `this` and the name keeps the parameter color.",
               "match": "(@)?([a-zA-Z_$][\\w$]*)(\\.\\.\\.)?",
               "captures": {
-                "1": { "name": "variable.other.readwrite.instance.rip" },
+                "1": { "name": "variable.language.this.rip" },
                 "2": { "name": "variable.parameter.rip" },
                 "3": { "name": "keyword.operator.splat.rip" }
               }
@@ -899,12 +1173,56 @@
       ]
     },
 
+    "schema-inline": {
+      "comment": "The inline `;` body spelling: `Tiny = schema; note string; count number`, kind optional (`schema :shape; a string`). It declares exactly what the indented form does — the same `{tag: \"field\", …}` entries — but the block rule's begin demands end-of-line after `schema`, so this spelling opened no context at all and the keyword, every field name and every marker went unscoped. The entry patterns below mirror the block's three, minus the `^` anchor, since here the entries share the line with the head.",
+      "begin": "\\b(schema)\\b[ \\t]*(:[a-z][A-Za-z0-9_]*)?[ \\t]*(?=;)",
+      "beginCaptures": {
+        "1": { "name": "storage.type.schema.rip" },
+        "2": { "name": "storage.modifier.schema.rip" }
+      },
+      "end": "$",
+      "patterns": [
+        {
+          "comment": "Entry with a model-reference type: `; author? User`",
+          "match": "(;)[ \\t]*([a-z]\\w*)((?:[!?])+)?[ \\t]+([A-Z]\\w*)(\\[\\])?",
+          "captures": {
+            "1": { "name": "punctuation.separator.rip" },
+            "2": { "name": "variable.other.property.rip" },
+            "3": { "name": "keyword.operator.modifier.rip" },
+            "4": { "name": "entity.name.type.rip" },
+            "5": { "name": "punctuation.definition.array.rip" }
+          }
+        },
+        {
+          "comment": "Entry with a primitive type: `; note string`, `; tags string[]`",
+          "match": "(;)[ \\t]*([a-z]\\w*)((?:[!?])+)?[ \\t]+([a-z]\\w*)(\\[\\])?",
+          "captures": {
+            "1": { "name": "punctuation.separator.rip" },
+            "2": { "name": "variable.other.property.rip" },
+            "3": { "name": "keyword.operator.modifier.rip" },
+            "4": { "name": "support.type.rip" },
+            "5": { "name": "punctuation.definition.array.rip" }
+          }
+        },
+        {
+          "comment": "Entry whose type is not a bare name — the inline twin of the block's fallback; the type falls through to $self.",
+          "match": "(;)[ \\t]*([a-z]\\w*)((?:[!?])+)?",
+          "captures": {
+            "1": { "name": "punctuation.separator.rip" },
+            "2": { "name": "variable.other.property.rip" },
+            "3": { "name": "keyword.operator.modifier.rip" }
+          }
+        },
+        { "include": "$self" }
+      ]
+    },
+
     "schema-block": {
-      "comment": "Inline schema declaration: a `... = schema [:kind]` head ending the line opens an indented block. The body runs until a line dedents back to column 0 (the next top-level statement); non-schema tokens (constraints, expression bodies, strings) fall through to $self.",
+      "comment": "Inline schema declaration: a `... = schema [:kind]` head ending the line opens an indented block. The body runs until a line dedents back to column 0 (the next top-level statement); non-schema tokens (constraints, expression bodies, strings) fall through to $self. `schema` is the declaration keyword and takes storage.type with `class` and the rest; the `:kind` that follows says WHICH flavor is being declared, chosen from the closed set in src/schema.js, so it is a modifier on the declaration — the role `extends` and `abstract` play — and reads in their color rather than the keyword's. It only looks like a `:name` symbol literal; it is not one.",
       "begin": "\\b(schema)\\b[ \\t]*(:[a-z][A-Za-z0-9_]*)?[ \\t]*$",
       "beginCaptures": {
-        "1": { "name": "keyword.control.schema.rip" },
-        "2": { "name": "storage.type.schema.rip" }
+        "1": { "name": "storage.type.schema.rip" },
+        "2": { "name": "storage.modifier.schema.rip" }
       },
       "end": "^(?=\\S)",
       "patterns": [
@@ -919,8 +1237,8 @@
     "schema-directives": {
       "patterns": [
         {
-          "comment": "Relationship directives carry a model name: @belongs_to User, @has_many Order",
-          "match": "(@(?:belongs_to|belongsTo|has_many|hasMany|has_one|hasOne))\\s+([A-Z]\\w*)",
+          "comment": "Directives that carry a SCHEMA name: the relationship set (@belongs_to User, @has_many Order) and @mixin, whose argument is the schema being folded in (@mixin Stamped). Without the name captured here the directive word alone was scoped and the schema it names fell through with nothing.",
+          "match": "(@(?:belongs_to|belongsTo|has_many|hasMany|has_one|hasOne|mixin))\\s+([A-Z]\\w*)",
           "captures": {
             "1": { "name": "entity.name.function.decorator.rip" },
             "2": { "name": "entity.name.type.rip" }
@@ -975,16 +1293,34 @@
     },
 
     "schema-entry-key": {
-      "comment": "Hook / method / computed entries: `name: -> @` (method), `name: ~> @x` (lazy), `name: !> @x` (eager). The body falls through to $self.",
-      "match": "^(\\s*)([a-z]\\w*)(\\s*)(:)(?=\\s*[-~!]>)",
-      "captures": {
-        "2": { "name": "entity.name.function.rip" },
-        "4": { "name": "punctuation.separator.key-value.rip" }
-      }
+      "comment": "Hook / method / computed entries. The ARROW decides what the name is, so the two cases are matched apart. `name: -> @` is a method — the emitted type gives it `(...args: any[]) => …` and it is read as `cart.describe()`. `name: ~> @x` (lazy) and `name: !> @x` (eager) are DERIVED VALUES — the type gives them `readonly total: ReturnType<…>` and `subtotal: ReturnType<…>`, they are read as `cart.total`, and tsgo classifies them `property`. One lookahead over `[-~!]>` gave all three the function scope, which was right for the method and wrong for the other two. The body falls through to $self.",
+      "patterns": [
+        {
+          "match": "^(\\s*)([a-z]\\w*)(\\s*)(:)(?=\\s*->)",
+          "captures": {
+            "2": { "name": "entity.name.function.rip" },
+            "4": { "name": "punctuation.separator.key-value.rip" }
+          }
+        },
+        {
+          "match": "^(\\s*)([a-z]\\w*)(\\s*)(:)(?=\\s*[~!]>)",
+          "captures": {
+            "2": { "name": "variable.other.property.rip" },
+            "4": { "name": "punctuation.separator.key-value.rip" }
+          }
+        }
+      ]
     },
 
     "schema-field": {
       "patterns": [
+        {
+          "comment": "A union's constituent: a schema name alone on its line, under `schema :union`. It is a reference to another schema, so it reads as a type name — the same scope `home? Addr` gives the model it points at. Nothing claimed it before, because every other entry rule needs a lowercase field name first.",
+          "match": "^(\\s*)([A-Z]\\w*)(?=\\s*$)",
+          "captures": {
+            "2": { "name": "entity.name.type.rip" }
+          }
+        },
         {
           "comment": "Field with a model-reference type: items! OrderItem[], author? User",
           "match": "^(\\s*)([a-z]\\w*)((?:[!?])+)?\\s+([A-Z]\\w*)(\\[\\])?",
@@ -1003,6 +1339,23 @@
             "3": { "name": "keyword.operator.modifier.rip" },
             "4": { "name": "support.type.rip" },
             "5": { "name": "punctuation.definition.array.rip" }
+          }
+        },
+        {
+          "comment": "A coercer type: `celsius! ~number`, `taken! ~datetime`, `scores! ~number[]`, `contact! ~:email`. The `~` marks coercion — matched here so the general BITWISE-NOT rule cannot claim it, which is a different operator wearing the same character. The name after it is the coercer, and it is a name from a registry rather than a language primitive: `number` only ever looked right because it happens to also be a built-in, while `datetime` beside it got no scope at all. A `~:name` spelling stops at the tilde and lets the symbol rule take the rest, which is the registered-coercer spelling and already reads as one.",
+          "match": "(~)(?:([a-z]\\w*)(\\[\\])?|(?=:))",
+          "captures": {
+            "1": { "name": "keyword.operator.coercion.rip" },
+            "2": { "name": "support.type.rip" },
+            "3": { "name": "punctuation.definition.array.rip" }
+          }
+        },
+        {
+          "comment": "Field whose type is not a bare name: a literal (`kind! 'email'`, `tier! 'basic' | 'pro'`), a coercer (`celsius! ~number`, `contact! ~:email`), or a derivation (`id! -> it.Id`). Both patterns above need an identifier after the name to fire at all, so every one of these fell through — the name left unscoped, or, when it carried a `!`, claimed by the dammit-CALL rule and painted a function, which read `tier!` as an awaited call in the middle of a schema. Only the name and its marker are taken here; the type falls through to $self, which already scopes strings, arrows and symbols. A method entry (`describe: ->`) is untouched because its name is followed by `:`, never by whitespace.",
+          "match": "^(\\s*)([a-z]\\w*)((?:[!?])+)?(?=\\s+\\S)",
+          "captures": {
+            "2": { "name": "variable.other.property.rip" },
+            "3": { "name": "keyword.operator.modifier.rip" }
           }
         }
       ]

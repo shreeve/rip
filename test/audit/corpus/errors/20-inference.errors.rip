@@ -1,4 +1,4 @@
-# 20-inference.errors.rip — intentional negatives, each asserted by the Diagnostics Lane (bun run audit --diagnostics).
+# 20-inference.errors.rip — intentional negatives, each asserted by the Diagnostics Audit (bun run audit --diagnostics).
 # @ts-nocheck
 
 counts = [1, 2, 3]
@@ -26,3 +26,8 @@ wrongReturn: string = scale(2)
 wrongBranch: number = verdict
 wrongHoisted: number = describe()
 wrongDestructured = introduceAll({ name: 'Ada', years: 'old' })
+
+{ json: media } = { json: 'app/json' }
+def mediaType()
+  media
+wrongPatternHoisted: number = mediaType()

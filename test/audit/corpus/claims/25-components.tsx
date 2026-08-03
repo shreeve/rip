@@ -86,3 +86,45 @@ function Cuff() {
 
 console.log('use sites:', typeof Prompt, typeof Ribbon, typeof Palette, typeof Stage)
 console.log('refs:', typeof Anchors, typeof Sleeve, typeof Cuff)
+
+// ── A method's write to a field checks against its declared type, and an array field keeps its element type ──
+
+class Ledger {
+  entries: string[] = ['open']
+  status = 'idle'
+
+  post(note: string) {
+    this.status = note
+    this.entries = [note]
+  }
+}
+
+const ledger = new Ledger()
+const ledgerHead: string = ledger.entries[0]
+const ledgerStatus: string = ledger.status
+
+console.log('state:', ledgerHead, ledgerStatus)
+
+// ── Member kinds through an instance: a mutable field, a readonly field, a plain field, and a getter typed from what its body reads ──
+
+class Meter {
+  labels = ['idle']
+  readonly cap = 3
+  note = 'flat'
+
+  get width() { return this.labels.length }
+
+  get span() {
+    const base = this.labels.length
+    return base + this.cap
+  }
+}
+
+const meter = new Meter()
+const meterWidth: number = meter.width
+const meterSpan: number = meter.span
+const meterLabel: string = meter.labels[0]
+const meterCap: number = meter.cap
+const meterNote: string = meter.note
+
+console.log('members:', meterWidth, meterSpan, meterLabel, meterCap, meterNote)

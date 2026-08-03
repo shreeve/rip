@@ -45,9 +45,15 @@ export async function openSession(files) {
     fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
   }
 
+  const logs = [];
   const client = new LspClient('bun', [SERVER, '--stdio'], {
     cwd: path.join(ROOT, 'packages/vscode'),
     onNotification: (m, p) => {
+      // The server's own log stream. It is where a brokered surface says
+      // WHY it declined — a dropped code action names itself and its
+      // reason — so a test that only sees the empty result cannot tell a
+      // refusal from an absence.
+      if (m === 'window/logMessage') { logs.push(p.message ?? ''); return; }
       if (m !== 'textDocument/publishDiagnostics') return;
       diags.set(p.uri, p.diagnostics);
       pubs.set(p.uri, (pubs.get(p.uri) ?? 0) + 1);
@@ -91,6 +97,14 @@ export async function openSession(files) {
     dir,
     uri,
 
+    // A raw LSP request, for surfaces with no helper of their own yet. The
+    // helpers above exist because their surfaces need POLLING; anything that
+    // answers once and correctly can go straight through here.
+    request: (method, params) => client.request(method, params),
+
+    // Everything the server has logged so far, oldest first.
+    logs: () => [...logs],
+
     // The globs the server registered a file-watcher for. Real editors send
     // didChangeWatchedFiles for these and nothing else.
     //
@@ -127,15 +141,29 @@ export async function openSession(files) {
     // settle-sleep between a config change and reading the PREVIOUS
     // answer as if it were the response — and a fixed sleep is a bet
     // that the server is faster than whatever else the machine is doing.
-    async diagnostics(name, { settle = 600, tries = 80, every = 100 } = {}) {
+    // The deadline is MILLISECONDS, not tries×every. Poll granularity and how
+    // long a caller is willing to wait are independent, and tying them means a
+    // change to `every` silently rescales every caller's timeout — a re-govern
+    // that needs 15s gets 3.75s and reports the server never answered.
+    async diagnostics(name, { settle = 150, timeout = 8000, every = 25 } = {}) {
       const u = uri(name);
       const want = (seen.get(u) ?? 0) + 1;
-      const deadline = Date.now() + tries * every;
+      const deadline = Date.now() + timeout;
       while ((pubs.get(u) ?? 0) < want && Date.now() < deadline) await sleep(every);
-      if (!diags.has(u)) {
+      // Short at deadline THROWS in both shapes — never-published and
+      // never-REpublished alike. Returning the previous payload on a
+      // timed-out newer-publication wait would let an absence assertion
+      // pass vacuously against a server that stopped republishing: the
+      // stale [] reads exactly like a fresh silence. A caller that wants
+      // a from-scratch wait forgets first (forget()).
+      if ((pubs.get(u) ?? 0) < want) {
         throw new Error(
-          `no diagnostics publication for ${name} within ${(tries * every) / 1000}s — ` +
-          'the server never (re)published. An empty result is NOT the same as silence.',
+          diags.has(u)
+            ? `no NEW diagnostics publication for ${name} within ${timeout / 1000}s — ` +
+              `waiting for publication #${want}, the server is still at #${pubs.get(u) ?? 0}. ` +
+              'A stale payload is NOT an answer; forget() first if this wait should start over.'
+            : `no diagnostics publication for ${name} within ${timeout / 1000}s — ` +
+              'the server never (re)published. An empty result is NOT the same as silence.',
         );
       }
       // Then let a burst finish: return once the count has held still for
@@ -151,6 +179,35 @@ export async function openSession(files) {
       return diags.get(u) ?? [];
     },
 
+    // Wait until `pred(payload)` holds for `name`, reading every NEW
+    // publication as it lands. For callers asserting a STATE the server
+    // must reach — a config re-govern that lands in waves (watched-file
+    // forward, an early re-pull, the regenerated floor, the real
+    // re-pull) — where `diagnostics()` would accept whichever wave
+    // published first and read a pre-re-govern snapshot as the answer
+    // (a slow machine turns that race into a red). The deadline still
+    // THROWS, quoting the last payload seen: a state never reached is a
+    // failure with evidence, not a vacuous pass.
+    async diagnosticsUntil(name, pred, { timeout = 15000, every = 25 } = {}) {
+      const u = uri(name);
+      const deadline = Date.now() + timeout;
+      for (;;) {
+        const payload = diags.get(u);
+        if (payload !== undefined && (pubs.get(u) ?? 0) > 0 && pred(payload)) {
+          seen.set(u, pubs.get(u) ?? 0);
+          return payload;
+        }
+        if (Date.now() >= deadline) {
+          throw new Error(
+            `diagnosticsUntil(${name}): condition never held within ${timeout / 1000}s — ` +
+            `last publication carried codes [${(payload ?? []).map((d) => d.code).join(', ')}]` +
+            (payload === undefined ? ' (no publication at all)' : ''),
+          );
+        }
+        await sleep(every);
+      }
+    },
+
     // An EDIT to an open document (didChange). Distinct from touch(): this
     // is the user typing, and it drives the server's refresh() for that
     // document — which in turn re-pulls diagnostics for every OTHER open
@@ -164,6 +221,28 @@ export async function openSession(files) {
         textDocument: { uri: uri(name), version: versions.get(name) },
         contentChanges: [{ text }],
       });
+    },
+
+    // THE ARRIVAL PROBE — an edit and a request in the SAME TICK, with no
+    // publication barrier between them.
+    //
+    // Every other read here waits for diagnostics first, and that barrier is
+    // correct: it is what makes those assertions about what a FACE CONTAINS.
+    // But it also makes them structurally blind to whether the answer
+    // ARRIVES, because the server coalesces didChange for 100ms and a
+    // barriered test always asks after the coalescing window. An editor never
+    // waits — the popup fires on the keystroke — so a surface that answers
+    // from the previous text is invisible to the whole suite. Four gaps in the
+    // incomplete-expression work were found by hand for exactly this reason,
+    // and one of them (completion serving the global scope after a member dot
+    // was retyped) was the original symptom surviving inside the debounce.
+    //
+    // Do not add a sleep, a diagnostics() call, or any other settling step to
+    // a test that uses this. Doing so restores the barrier under another name
+    // and the assertion passes against the bug it exists to catch.
+    async askWhileTyping(name, text, method, params = {}) {
+      this.change(name, text);
+      return client.request(method, { textDocument: { uri: uri(name) }, ...params });
     },
 
     // Forget what was published, so the next `diagnostics()` waits for a
@@ -190,6 +269,16 @@ export async function openSession(files) {
       });
     },
 
+    // A file DELETED from disk, announced exactly as VS Code's watcher
+    // would. The counterpart to touch(): the document is never opened,
+    // and only the watcher tells the server it is gone.
+    remove(name) {
+      try { fs.rmSync(path.join(dir, name)); } catch { /* already gone */ }
+      client.notify('workspace/didChangeWatchedFiles', {
+        changes: [{ uri: uri(name), type: 3 /* Deleted */ }],
+      });
+    },
+
     // Completion labels at a position.
     //
     // A completion issued while tsgo is still building the program answers
@@ -212,6 +301,71 @@ export async function openSession(files) {
       return labels;
     },
 
+    // The completion ITEM for one label, resolved. An auto-import's inserted
+    // line arrives only through `completionItem/resolve` — the server
+    // advertises `additionalTextEdits` as a resolve property, so the first
+    // response carries the label and nothing to apply. A test that asserts
+    // what LANDS IN THE BUFFER has to take this second step; asking only the
+    // first answers what was offered, which is a different claim.
+    // Polls for the same reason completions() does.
+    async completionItem(name, line, character, label, { tries = 20, every = 300 } = {}) {
+      for (let i = 0; i < tries; i++) {
+        const r = await client.request('textDocument/completion', {
+          textDocument: { uri: uri(name) }, position: { line, character },
+        }).catch(() => null);
+        const items = Array.isArray(r) ? r : (r?.items ?? []);
+        const hit = items.find((it) => it.label === label);
+        if (hit) return await client.request('completionItem/resolve', hit).catch(() => null);
+        if (items.length) return null;   // live list, name absent — a real answer
+        await sleep(every);
+      }
+      return null;
+    },
+
+    // Signature help at a position. Polls for a LIVE (non-null) answer the
+    // same way completions() polls for a non-empty list, and for the same
+    // reason: a request issued while tsgo is still building answers null,
+    // which would silently satisfy any "help is absent" assertion. A null
+    // after the full wait is returned as-is — that is a real answer, and a
+    // test asserting it must first have proven the surface live at a
+    // position that answers (the liveness-pair discipline).
+    async signatureHelp(name, line, character, { tries = 20, every = 300 } = {}) {
+      for (let i = 0; i < tries; i++) {
+        const r = await client.request('textDocument/signatureHelp', {
+          textDocument: { uri: uri(name) }, position: { line, character },
+        }).catch(() => null);
+        if (r?.signatures?.length) return r;
+        await sleep(every);
+      }
+      return null;
+    },
+
+    // Go-to-definition targets at a position, as `name.rip:line` strings
+    // relative to the session dir — what the editor would navigate to.
+    // Polls for a non-empty answer for the same reason completions() polls
+    // for a non-empty list: a request issued while tsgo is still building
+    // answers EMPTY, and an empty answer is exactly what a broken mirror
+    // produces, so the two must not be confusable. An empty result after
+    // the full wait is returned as-is — a caller asserting it must have
+    // proven the surface live somewhere that answers.
+    async definitions(name, line, character, { tries = 20, every = 300 } = {}) {
+      let targets = [];
+      for (let i = 0; i < tries; i++) {
+        const r = await client.request('textDocument/definition', {
+          textDocument: { uri: uri(name) }, position: { line, character },
+        }).catch(() => null);
+        const items = Array.isArray(r) ? r : (r ? [r] : []);
+        targets = items.map((it) => {
+          const target = it.uri ?? it.targetUri;
+          const range = it.range ?? it.targetSelectionRange ?? it.targetRange;
+          return path.relative(dir, fileURLToPath(target)) + ':' + range.start.line;
+        });
+        if (targets.length) return targets;
+        await sleep(every);
+      }
+      return targets;
+    },
+
     // Semantic tokens for an open doc, decoded against the server's own legend
     // into absolute rows on .rip source. Throws when the server advertised no
     // legend: an empty token list would satisfy any "modifier is absent"
@@ -230,6 +384,30 @@ export async function openSession(files) {
         await sleep(every);
       }
       return [];
+    },
+
+    // Hover text at a .rip position, as the editor renders it — the fenced
+    // signature with the markdown stripped. Polls for the same reason tokens
+    // do: the answer rides an async program build, and a request issued while
+    // tsgo is still building answers null. Returns null when the position
+    // genuinely serves nothing, so a caller asserting SILENCE gets a real
+    // answer rather than a timing artifact — the two are indistinguishable
+    // without the poll, which is why one exists here.
+    async hover(name, line, character, { tries = 20, every = 300 } = {}) {
+      let last = null;
+      for (let i = 0; i < tries; i++) {
+        const r = await client.request('textDocument/hover', {
+          textDocument: { uri: uri(name) }, position: { line, character },
+        }).catch(() => null);
+        const value = r?.contents?.value;
+        if (typeof value === 'string' && value.trim()) {
+          last = value;
+          const fence = /```(?:typescript|ts)\n([^]*?)\n?```/.exec(value);
+          if (fence) return fence[1].replace(/\s+/g, ' ').trim();
+        }
+        await sleep(every);
+      }
+      return last;
     },
 
     async close() {

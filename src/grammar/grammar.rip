@@ -79,7 +79,13 @@ grammar =
   # ============================================================================
 
   Import: [
-    o 'IMPORT String'                                                               , '["import", "{}", 2]'   , 'import: _, spec, source'
+    # A SIDE-EFFECT import carries no clause, and none is minted for it: the
+    # node has a source and nothing else. Spelling it `["import", "{}", …]`
+    # made it indistinguishable from `import {} from …` two rows down, and
+    # the emitter wrote the empty-clause form for both — so TypeScript saw a
+    # named list waiting to be filled and offered to add to it, where it
+    # leaves a real side-effect import alone.
+    o 'IMPORT String'                                                               , '["import", 2]'         , 'import: _, source'
     o 'IMPORT ImportDefaultSpecifier FROM String'                                   , '["import", 2, 4]'      , 'import: _, spec, source'
     o 'IMPORT ImportNamespaceSpecifier FROM String'                                 , '["import", 2, 4]'      , 'import: _, spec, source'
     o 'IMPORT { } FROM String'                                                      , '["import", "{}", 5]'   , 'import: _, spec, source'
@@ -636,11 +642,18 @@ grammar =
     o '@'   , '"this"'
   ]
 
+  # No object role: the `@` spelling has no object to name, and a
+  # literal-sourced role records a SPAN-LESS row over the emitted
+  # `this`, which reads as synthetic and shadows the member's own
+  # cover. Without it the emitted `this.name` maps through that cover
+  # to `@name` — so a diagnostic anchored at the lowering's `this`
+  # (every wrong-typed `@name = v` write) reaches the source instead
+  # of dropping in transit.
   ThisProperty: [
-    o '@ Property', '[".", "this", 2]', 'member: operator, object, property'
+    o '@ Property', '[".", "this", 2]', 'member: operator, _, property'
     # Static string-named member: `@"data-src" = v` in a class body;
     # anywhere else the read is this["data-src"].
-    o '@ STRING'  , '[".", "this", 2]', 'member: operator, object, property'
+    o '@ STRING'  , '[".", "this", 2]', 'member: operator, _, property'
   ]
 
   # ============================================================================

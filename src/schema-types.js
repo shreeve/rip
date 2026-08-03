@@ -123,9 +123,10 @@ export const INTRINSIC_FIELD_TYPES = {
 export const VALIDATION_INTRINSIC_NAMES = new Set([
   'SchemaIssue', 'SchemaSafeResult', 'ArraySchema', 'Schema',
 ]);
+export const MIXIN_INTRINSIC_NAMES = new Set(['MixinSchema']);
 export const MODEL_INTRINSIC_NAMES = new Set(['SchemaQuery', 'ModelSchema']);
 export const SCHEMA_INTRINSIC_NAMES = new Set([
-  ...VALIDATION_INTRINSIC_NAMES, ...MODEL_INTRINSIC_NAMES,
+  ...VALIDATION_INTRINSIC_NAMES, ...MIXIN_INTRINSIC_NAMES, ...MODEL_INTRINSIC_NAMES,
 ]);
 
 const VALIDATION_INTRINSICS = [
@@ -159,6 +160,34 @@ const VALIDATION_INTRINSICS = [
   '  partial(): Schema<Partial<In>, Partial<In>>;',
   '  required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;',
   '  extend<U>(other: Schema<U>): Schema<In & U, In & U>;',
+  '}',
+];
+
+// The mixin tier — emitted only where a `:mixin` exists, the persistence
+// tier's rule. A `:mixin` is NOT instantiable: driven against
+// src/runtime/schema.js (2026-08-03), `parse` throws, `safe` always
+// fails, `ok` is always false — so the parse surface stays absent and
+// the checker refuses what the runtime would throw on. The projection
+// algebra is a different story: `__schemaDerive` refuses only `:union`
+// and `:enum`, and a derivation from a mixin is a plain `:shape`,
+// instantiable like any other — so pick/omit/partial/required/extend
+// answer here, each returning `Schema` over the projected shape.
+// `Out` names the shape the mixin contributes — the companion alias
+// other schemas intersect — rather than anything callable. The second
+// declaration MERGES into `Schema` (TS interface merging), adding the
+// mixin-argument overload of `extend` only where the tier exists —
+// the runtime's `extend()` refuses only `:union`.
+const MIXIN_INTRINSICS = [
+  'interface MixinSchema<Out> {',
+  '  toJSONSchema(): Record<string, unknown>;',
+  '  pick<K extends keyof Out>(...keys: K[]): Schema<Pick<Out, K>, Pick<Out, K>>;',
+  '  omit<K extends keyof Out>(...keys: K[]): Schema<Omit<Out, K>, Omit<Out, K>>;',
+  '  partial(): Schema<Partial<Out>, Partial<Out>>;',
+  '  required<K extends keyof Out>(...keys: K[]): Schema<Omit<Out, K> & Required<Pick<Out, K>>, Omit<Out, K> & Required<Pick<Out, K>>>;',
+  '  extend<U>(other: Schema<U, any> | MixinSchema<U>): Schema<Out & U, Out & U>;',
+  '}',
+  'interface Schema<Out, In = unknown> {',
+  '  extend<U>(other: MixinSchema<U>): Schema<In & U, In & U>;',
   '}',
 ];
 
@@ -201,8 +230,11 @@ const MODEL_INTRINSICS = [
   '}',
 ];
 
-export const schemaIntrinsicLines = (withModel) =>
-  withModel ? [...VALIDATION_INTRINSICS, ...MODEL_INTRINSICS] : [...VALIDATION_INTRINSICS];
+export const schemaIntrinsicLines = (withModel, withMixin = false) => [
+  ...VALIDATION_INTRINSICS,
+  ...(withMixin ? MIXIN_INTRINSICS : []),
+  ...(withModel ? MODEL_INTRINSICS : []),
+];
 
 // ── collection ───────────────────────────────────────────────────────
 
@@ -284,19 +316,36 @@ export function isModuleShaped(programSexpr, isModuleImport) {
   return false;
 }
 
+// The face-only behavior object's name for a schema: one module-local
+// const carrying the same compiled callable bodies the descriptor
+// does, so `ReturnType<typeof …>` can read what each returns.
+export const behaviorName = (name) => `__${name}__behavior`;
+
 // ── field/property rendering ─────────────────────────────────────────
 
 // A field entry's TS type: literal unions verbatim, the intrinsic
 // vocabulary through the table, a SAME-MODULE schema name as itself
 // (its alias exists), anything else `unknown` — never an unresolved
 // identifier in a shipped artifact.
+//
+// A `[null]` default widens the type: the runtime substitutes it when
+// the input is absent OR null (_applyDefaults), so `invite? string,
+// [null]` parses to `invite: null` and a bare `string` would be a lie
+// about the value every default-taking parse produces. NOT under `!`:
+// a required field rejects the substituted null on every parse
+// (_validate runs after _applyDefaults), so the null never survives
+// to a parsed value — widening there would promise one anyway. The
+// default-satisfies relation keeps the unwidened type, so a `[null]`
+// default on a required field publishes at the literal instead of
+// landing as a runtime error on every default-taking parse.
 export const fieldType = (entry, known) => {
+  const nullable = entry.constraints?.default === null && !entry.modifiers?.includes('!') ? ' | null' : '';
   if (entry.typeName === 'literal-union' && entry.literals?.length) {
-    return entry.literals.map((l) => JSON.stringify(l)).join(' | ');
+    return entry.literals.map((l) => JSON.stringify(l)).join(' | ') + nullable;
   }
   let base = INTRINSIC_FIELD_TYPES[entry.typeName] ??
     (known && known.has(entry.typeName) ? entry.typeName : 'unknown');
-  return entry.array ? `${base}[]` : base;
+  return (entry.array ? `${base}[]` : base) + nullable;
 };
 
 const fieldProps = (descriptor, known) => {
@@ -400,9 +449,9 @@ const braced = (props) => (props.length ? `{ ${props.join('; ')} }` : '{}');
 // One schema's type story:
 //   aliasLines — the `type …` lines (may be empty for a kind that
 //                needs none beyond the const)
-//   constType  — the declared type of the binding, or null when the
-//                binding deliberately stays untyped (:mixin — its
-//                runtime value is not a user surface)
+//   constType  — the declared type of the binding (every kind casts;
+//                :mixin's is MixinSchema — the parse surface absent,
+//                the projection algebra present)
 //   thisTypes  — entry index → the callable's `this` type ()
 //   typeNames  — every type name these lines bind (collision fodder)
 export function schemaTypeStory(decl, byName, known) {
@@ -451,7 +500,7 @@ export function schemaTypeStory(decl, byName, known) {
   if (kind === 'mixin') {
     return {
       aliasLines: [`type ${name} = ${intersect(braced(fieldProps(descriptor, known)), mixinRefs(descriptor, byName))};`],
-      constType: null,
+      constType: `MixinSchema<${name}>`,
       thisTypes: new Map(),
       typeNames: [name],
     };
@@ -461,19 +510,41 @@ export function schemaTypeStory(decl, byName, known) {
   // derived (`!>`) own props, computed (`~>`) readonly getters, and
   // methods live on the instance, never the projectable data shape.
   const dataType = intersect(braced(fieldProps(descriptor, known)), mixinRefs(descriptor, byName));
+  // A callable's OUTPUT is derived, not declared: the face emits the
+  // behavior object beside the binding (behaviorObjectText) carrying
+  // the same compiled bodies the descriptor does, and each member
+  // reads `ReturnType<typeof …>` so tsgo infers what the body
+  // returns. The SHIPPED declarations cannot: the behavior object is
+  // a module-local value with no place in a `.d.ts`, so the dts road
+  // keeps `unknown` — the consumer surface stays where it was.
+  const bname = behaviorName(name);
   const derived = [];
   const computed = [];
   const methods = [];
   const instanceIdx = []; // entries whose `this` is the instance
   const scopeIdx = [];    // entries whose `this` is the query builder
+  const ensureIdx = [];   // `@ensure` predicates — their param IS the data
+  const out = (e, face) => (face ? `ReturnType<typeof ${bname}.${e.name}>` : 'unknown');
+  const member = (e, face) =>
+    e.tag === 'derived' ? `${e.name}: ${out(e, face)}`
+      : e.tag === 'computed' ? `readonly ${e.name}: ${out(e, face)}`
+        : `${e.name}: (...args: any[]) => ${out(e, face)}`;
   descriptor.entries.forEach((e, i) => {
-    if (e.tag === 'derived') { derived.push(`${e.name}: unknown`); instanceIdx.push(i); }
-    else if (e.tag === 'computed') { computed.push(`readonly ${e.name}: unknown`); instanceIdx.push(i); }
-    else if (e.tag === 'method') { methods.push(`${e.name}: (...args: any[]) => unknown`); instanceIdx.push(i); }
+    if (e.tag === 'derived') { derived.push(e); instanceIdx.push(i); }
+    else if (e.tag === 'computed') { computed.push(e); instanceIdx.push(i); }
+    else if (e.tag === 'method') { methods.push(e); instanceIdx.push(i); }
     else if (e.tag === 'hook') instanceIdx.push(i);
     else if (e.tag === 'scope' || e.tag === 'defaultScope') scopeIdx.push(i);
+    else if (e.tag === 'ensure') ensureIdx.push(i);
   });
-  const behavior = [...derived, ...computed, ...methods];
+  // An `@ensure` predicate runs on the typed, defaulted DATA
+  // (_applyEnsures passes it straight through), so its one parameter
+  // types as the data shape — the only annotation the DSL leaves no
+  // room for the author to write.
+  const ensuresOf = (dataName) => new Map(ensureIdx.map((i) => [i, dataName]));
+  const behaviorEntries = [...derived, ...computed, ...methods];
+  const behaviorFor = (face) => behaviorEntries.map((e) => member(e, face));
+  const behavior = behaviorFor(false);
 
   if (kind === 'model') {
     const dataName = `${name}Data`;
@@ -482,8 +553,8 @@ export function schemaTypeStory(decl, byName, known) {
     const scopeNames = descriptor.entries.filter((e) => e.tag === 'scope').map((e) => e.name);
     const queryName = `${name}Query`;
     const queryType = scopeNames.length ? queryName : `SchemaQuery<${name}, ${dataName}>`;
-    const instanceExtras = [
-      ...behavior,
+    const instanceExtras = (face) => [
+      ...behaviorFor(face),
       ...relationAccessors(descriptor, known),
       `save(): Promise<${name}>`,
       `destroy(opts?: { hard?: boolean }): Promise<${name}>`,
@@ -494,23 +565,38 @@ export function schemaTypeStory(decl, byName, known) {
       `savedChanges: Map<string, [unknown, unknown]>`,
       `toJSON(): ${dataName}`,
     ];
-    const aliasLines = [
+    // The ensure predicate's shape is its OWN alias, not ${dataName}:
+    // ensures run on BOTH validation paths, and the create path hands
+    // them input-derived data where the runtime-managed columns (id,
+    // FKs, timestamps) do not exist yet — only the existing-row path
+    // passes a row that has them. `Partial<>` over exactly those
+    // columns is the honest union of the two paths; typing them
+    // non-optional blessed `m.id.toFixed()` in a predicate the create
+    // path then crashed.
+    const ensureName = `${name}Ensure`;
+    const hasEnsures = ensureIdx.length > 0;
+    const linesFor = (face) => [
       `type ${dataName} = ${dataType} & ${braced(modelImplicitProps(descriptor))};`,
       `type ${createName} = ${intersect(braced(modelCreateProps(descriptor, known)), mixinRefs(descriptor, byName))};`,
-      `type ${name} = ${dataName} & ${braced(instanceExtras)};`,
+      ...(hasEnsures ? [`type ${ensureName} = ${dataType} & Partial<${braced(modelImplicitProps(descriptor))}>;`] : []),
+      `type ${name} = ${dataName} & ${braced(instanceExtras(face))};`,
     ];
-    const typeNames = [dataName, createName, name];
+    const aliasLines = linesFor(false);
+    const faceAliasLines = linesFor(true);
+    const typeNames = [dataName, createName, ...(hasEnsures ? [ensureName] : []), name];
     let constType = `ModelSchema<${name}, ${dataName}, number, ${createName}>`;
     if (scopeNames.length) {
       const scopeSigs = scopeNames.map((s) => `${s}(...args: any[]): ${queryName}`);
       aliasLines.push(`type ${queryName} = SchemaQuery<${name}, ${dataName}> & ${braced(scopeSigs)};`);
+      faceAliasLines.push(`type ${queryName} = SchemaQuery<${name}, ${dataName}> & ${braced(scopeSigs)};`);
       typeNames.push(queryName);
       constType += ` & ${braced(scopeSigs)}`;
     }
     const thisTypes = new Map();
     for (const i of instanceIdx) thisTypes.set(i, name);
     for (const i of scopeIdx) thisTypes.set(i, queryType);
-    return { aliasLines, constType, thisTypes, typeNames };
+    return { aliasLines, faceAliasLines, constType, thisTypes, typeNames, behaviorName: bname,
+             ensureTypes: ensuresOf(ensureName) };
   }
 
   // :input / :shape — collapse to one bare name when instance === data.
@@ -518,14 +604,18 @@ export function schemaTypeStory(decl, byName, known) {
   for (const i of instanceIdx) thisTypes.set(i, name);
   if (behavior.length) {
     const dataName = `${name}Data`;
+    const linesFor = (face) => [
+      `type ${dataName} = ${dataType};`,
+      `type ${name} = ${dataName} & ${braced(behaviorFor(face))};`,
+    ];
     return {
-      aliasLines: [
-        `type ${dataName} = ${dataType};`,
-        `type ${name} = ${dataName} & ${braced(behavior)};`,
-      ],
+      aliasLines: linesFor(false),
+      faceAliasLines: linesFor(true),
       constType: `Schema<${name}, ${dataName}>`,
       thisTypes,
       typeNames: [dataName, name],
+      behaviorName: bname,
+      ensureTypes: ensuresOf(dataName),
     };
   }
   return {
@@ -533,6 +623,7 @@ export function schemaTypeStory(decl, byName, known) {
     constType: `Schema<${name}, ${name}>`,
     thisTypes,
     typeNames: [name],
+    ensureTypes: ensuresOf(name),
   };
 }
 
@@ -552,6 +643,7 @@ export function buildSchemaTypeStory(programSexpr) {
   const byName = new Map(decls.map((d) => [d.name, d]));
   const userTypes = collectUserTypeNames(programSexpr);
   const withModel = decls.some((d) => d.descriptor.kind === 'model');
+  const withMixin = decls.some((d) => d.descriptor.kind === 'mixin');
 
   // The user-vs-intrinsic direction: the module is about to EMIT the
   // intrinsic block, so a user type/interface/class/enum name in the
@@ -562,13 +654,14 @@ export function buildSchemaTypeStory(programSexpr) {
   // can rename).
   for (const [name, user] of userTypes) {
     const emitted = VALIDATION_INTRINSIC_NAMES.has(name) ||
+      (withMixin && MIXIN_INTRINSIC_NAMES.has(name)) ||
       (withModel && MODEL_INTRINSIC_NAMES.has(name));
     if (emitted) {
       throw new SchemaTypeError(
         `${user.what} collides with the schema intrinsic declarations this module emits ` +
         `(a schema declaration is present${MODEL_INTRINSIC_NAMES.has(name) ? ', and a :model brings the persistence tier' : ''}) — ` +
         `rename it; the emitted intrinsic vocabulary here is ` +
-        `${[...VALIDATION_INTRINSIC_NAMES, ...(withModel ? MODEL_INTRINSIC_NAMES : [])].join(', ')}`,
+        `${[...VALIDATION_INTRINSIC_NAMES, ...(withMixin ? MIXIN_INTRINSIC_NAMES : []), ...(withModel ? MODEL_INTRINSIC_NAMES : [])].join(', ')}`,
         null, user.node);
     }
   }
@@ -594,17 +687,41 @@ export function buildSchemaTypeStory(programSexpr) {
       owners.set(t, `schema '${d.name}'`);
       const user = userTypes.get(t);
       if (user !== undefined) {
+        // Positioned on the USER declaration — the offender the user
+        // can rename — like the intrinsic-collision path above. The
+        // reserved family is `${name}Data` / `${name}Create` /
+        // `${name}Ensure` / `${name}Query` beside the schema's own
+        // name: a deliberate per-schema namespace reservation.
         throw new SchemaTypeError(
           `schema '${d.name}' emits the type name '${t}', which collides with ${user.what} — ` +
           `the schema's types and the user declaration would merge or duplicate; rename one`,
-          d.descriptor.start ?? null);
+          null, user.node);
       }
     }
-    stories.push({ decl: d, ...story });
+    // A field's `[default]` is a bare JS value in the runtime
+    // descriptor, related to the field's declared type by nothing the
+    // checker can see — so the face states the relation: entry index →
+    // the type the default has to satisfy. Kind-independent, because
+    // every kind that has fields validates their defaults the same
+    // way. The transform half stays runtime-only: relating a
+    // transform's RETURN to the field needs its INPUT related to the
+    // row shape, and `it` is the declared `any` boundary.
+    const defaultTypes = new Map();
+    d.descriptor.entries.forEach((e, i) => {
+      if (e.tag !== 'field' || e.constraints?.default === undefined) return;
+      // Dates are the one ordering exception: `_coerceDates` runs
+      // AFTER `_applyDefaults`, so an ISO-string default becomes a
+      // real Date on every parse — the satisfies admits the string
+      // spelling the runtime deliberately serves. (`~` coercions run
+      // before defaults, so no other type earns this.)
+      const admits = e.typeName === 'date' || e.typeName === 'datetime' ? ' | string' : '';
+      defaultTypes.set(i, fieldType(e, known) + admits);
+    });
+    stories.push({ decl: d, ...story, defaultTypes });
   }
   return {
     stories,
-    intrinsicLines: schemaIntrinsicLines(withModel),
+    intrinsicLines: schemaIntrinsicLines(withModel, withMixin),
     withModel,
   };
 }

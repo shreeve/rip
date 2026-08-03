@@ -23,7 +23,6 @@ let shifted = ten << 2 >> 1 >>> 0
 console.log('bits:', masked, merged, toggled, inverted, shifted)
 
 // ── Comparison and logic: symbolic and word spellings ──
-// The match operator =~ is PARKED: its emission publishes TS2531 on every use (FINDINGS.md).
 
 let bigger = ten > three
 let looser = ten >= 10 && three <= 3
@@ -35,6 +34,16 @@ let either = false || 'fallback'
 let sized = ten > three ? 'ten' : 'three'
 
 console.log('compare:', bigger, looser, same, differ, negated, both, either, sized)
+
+// ── The match operator =~: the match array or null, with `_` bound to the last match ──
+
+let subject = 'rip 42 lang'
+let digits = subject.match(/(\d+)/)?.[1] ?? null
+let report = 'one\ntwo'
+let spanned = report.match(/^two$/m)?.[0] ?? null
+let missed = subject.match(/zzz/)
+
+console.log('match:', digits, spanned, missed)
 
 // ── Relations and unary words: in, of, instanceof, typeof, delete ──
 
@@ -70,8 +79,9 @@ let maybeList: number[] | null = [5, 6]
 let first = maybeList?.[0]
 let scale: ((n: number) => number) | null = function(n: number) { return n * 2 }
 let scaled = scale?.(21) ?? 42
+let called = scale?.(21)
 
-console.log('presence:', chosen, exists, hostname, present, retries, first, scaled)
+console.log('presence:', chosen, exists, hostname, present, retries, first, scaled, called)
 
 // ── Invocation: explicit parens, the implicit spelling, do, dammit, tagged ──
 

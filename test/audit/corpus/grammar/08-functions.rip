@@ -86,7 +86,7 @@ def endpoints([head, ...tail]: number[])
 
 console.log('patterns:', introduce({ name: 'Grace', age: 85 }), endpoints([3, 4, 5]))
 
-# ── promoted params: @-props assign straight to the instance ──
+# ── promoted params: @-props assign straight to the instance, with the field declared beside the promotion (Badge) and left to it (Crate) ──
 
 class Badge
   owner: string
@@ -94,8 +94,14 @@ class Badge
   constructor: (@owner: string, @level: number = 1) ->
   describe: -> "#{@owner} at level #{@level}"
 
+class Crate
+  constructor: (@holder: string, @weight: number = 1) ->
+  manifest: -> "#{@holder} carries #{@weight}"
+
 badge = new Badge('ada')
+crate = new Crate('grace', 3)
 console.log('badge:', badge.describe())
+console.log('crate:', crate.manifest(), crate.holder, crate.weight)
 
 # ── return: bare, valued, and the indented-object payload ──
 

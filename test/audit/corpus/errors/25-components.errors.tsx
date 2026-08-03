@@ -50,3 +50,25 @@ function Shell() {
     </div>
   )
 }
+
+function Books() {
+  const entries: string[] = ['open', 'shut']
+  let status = 'idle'
+
+  const post = () => {
+    status = 4
+  }
+
+  return <div />
+}
+
+class Gauge {
+  labels = ['idle']
+  readonly cap = 3
+
+  get width() { return this.labels.length }
+}
+
+const gauge = new Gauge()
+const wrongWidth: string = gauge.width
+gauge.cap = 4

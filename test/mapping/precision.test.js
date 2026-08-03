@@ -78,7 +78,11 @@ const FLOORS = {
   'mixed.rip': 31,
   'parens.rip': 38,
   'unicode.rip': 12,
-  'voidmarker.rip': 83,
+  // A void-marked assignment (`flush! = ->`) declares in place on the
+  // same Tier 1 rule as a plain one, so its five straight-line names
+  // left the hoist line; `wipe` keeps its hoist (it is written inside a
+  // chained assignment, never a statement of its own).
+  'voidmarker.rip': 78,
   'while.rip': 31,
   'enum.rip': 74,
   'schema.rip': 31,

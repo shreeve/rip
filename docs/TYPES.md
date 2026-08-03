@@ -228,8 +228,9 @@ diagnostics for matching paths while keeping those files in the
 TypeScript program so imports continue to resolve.
 
 Configuration changes refresh open editor documents without a window
-reload. The headless checker and its `checkAll` coverage policy remain
-roadmap work.
+reload. `rip check [paths...]` applies the same project configuration,
+materializes the same TypeScript faces and import closure, and translates
+diagnostics through the same mapping seam without starting an editor.
 
 ## Correctness gates
 

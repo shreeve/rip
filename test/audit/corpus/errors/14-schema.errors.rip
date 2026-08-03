@@ -1,9 +1,10 @@
-# 14-schema.errors.rip — intentional negatives asserted by the Diagnostics Lane; the wrongGetter row is pinned (error-pins.json) while the callable-unknown finding is open.
+# 14-schema.errors.rip — intentional negatives asserted by the Diagnostics Audit; the wrong-typed default is pinned (error-pins.json) because zod states the same wrongness with a different code.
 # @ts-nocheck
 
 Person = schema
   name!  string
   tag!   'a' | 'b'
+  rank   number, ['high']
 
 Cart = schema :shape
   items! number[]
@@ -20,4 +21,4 @@ wrongLiteral: Person = { name: 'ok', tag: 'c' }
 wrongRead = Person.parse({ name: 'x', tag: 'a' }).nope
 wrongEnum: Color = 'mauve'
 wrongConstruct = new Person()
-wrongGetter: number = Cart.parse({ items: [3] }).total
+wrongGetter: string = Cart.parse({ items: [3] }).total

@@ -56,11 +56,31 @@ describe('schema declarations: the per-kind shapes', () => {
     expect(d).toContain('declare const B: Schema<B, B>;');
   });
 
-  test(':mixin — a fields type only, no const (its runtime value is not a user surface)', () => {
+  test(':mixin — a fields type AND a binding typed by what the runtime actually serves', () => {
     const d = dts('T = schema :mixin\n  createdAt! datetime\nU = schema :shape\n  name! string\n  @mixin T');
     expect(d).toContain('type T = { createdAt: Date };');
-    expect(d).not.toContain('declare const T');
+    expect(d).toContain('declare const T: MixinSchema<T>;');
     expect(d).toContain('type U = { name: string } & T;');
+    // Two rules, both the runtime's. The parse surface is ABSENT — a
+    // mixin is not instantiable (`parse` throws, `safe` fails, `ok` is
+    // false), so the checker refuses those instead of the runtime
+    // throwing. The projection algebra is PRESENT — `__schemaDerive`
+    // refuses only :union and :enum, and a mixin derivation is a plain
+    // instantiable :shape — so pick/omit/partial/required/extend answer,
+    // and the merged Schema declaration lets `extend` take a mixin.
+    expect(d).toContain('interface MixinSchema<Out> {');
+    expect(d).toContain('  toJSONSchema(): Record<string, unknown>;');
+    expect(d).toContain('  pick<K extends keyof Out>(...keys: K[]): Schema<Pick<Out, K>, Pick<Out, K>>;');
+    expect(d).toContain('  partial(): Schema<Partial<Out>, Partial<Out>>;');
+    expect(d).toContain('  extend<U>(other: Schema<U, any> | MixinSchema<U>): Schema<Out & U, Out & U>;');
+    expect(d).toContain('  extend<U>(other: MixinSchema<U>): Schema<In & U, In & U>;');
+    expect(d).not.toMatch(/interface MixinSchema<Out> \{[^}]*\bparse\(/);
+  });
+
+  test('the mixin tier emits only where a :mixin exists', () => {
+    // The persistence tier's rule. Without it, every schema file in every
+    // project carries an interface it has no use for.
+    expect(dts('B = schema :shape\n  x! number')).not.toContain('MixinSchema');
   });
 
   test(':enum — bare members narrow (`data is`), valued members answer boolean (the runtime accepts names too)', () => {
@@ -198,8 +218,12 @@ describe('schema type story on the TS face', () => {
     // query `this` for scope/defaultScope (the alias exists — a named scope does)
     expect(f.code).toContain('{tag: "scope", name: "live", fn: (function(this: MQuery) {');
     expect(f.code).toContain('{tag: "defaultScope", name: "defaultScope", fn: (function(this: MQuery) {');
-    // ensure predicates are called UNBOUND — no this-param, honestly
-    expect(f.code).toMatch(/\{tag: "ensure",[^}]*fn: \(function\(m\)/);
+    // ensure predicates are called UNBOUND — no this-param, honestly; their
+    // one parameter is the data as BOTH validation paths hand it over:
+    // declared fields plus Partial<> of the runtime-managed columns,
+    // because the create path runs ensures before id/timestamps exist.
+    expect(f.code).toMatch(/\{tag: "ensure",[^}]*fn: \(function\(m: MEnsure\)/);
+    expect(f.code).toContain('type MEnsure = { name: string } & Partial<{ id: number }>;');
   });
 
   test('a defaultScope with no named scopes types `this` as the inline SchemaQuery', () => {
@@ -224,10 +248,15 @@ describe('schema type story on the TS face', () => {
     expect(f.code).toContain('fn: (function(this: A, p) {');
   });
 
-  test(':mixin bindings carry NO cast (no user-facing runtime type exists)', () => {
+  test(':mixin bindings cast like every other kind — to what a mixin actually serves', () => {
     const f = face('T = schema :mixin\n  a! string');
     expect(f.code).toContain('type T = { a: string };');
-    expect(f.code).not.toContain('as unknown as');
+    // On the BINDING's own line — the row this closes is that the mixin
+    // binding was the one kind left uncast, falling to `__SchemaDef`, the
+    // schema runtime's own class, at a user declaration.
+    const binding = f.code.split('\n').find((l) => l.startsWith('let T = __schema('));
+    expect(binding).toBeDefined();
+    expect(binding).toContain('as unknown as MixinSchema<T>;');
   });
 
   test('anonymous and function-local schemas decline the story (recorded boundary)', () => {
@@ -316,6 +345,23 @@ describe('schema type-name collisions reject loudly on the typed artifacts', () 
 
   test('non-colliding programs never trip the check', () => {
     expect(() => compile('type Extra = {k: number}\nS = schema :shape\n  a! string').declarations).not.toThrow();
+  });
+
+  // `${name}Ensure` joined the reserved family (`${name}Data`,
+  // `${name}Create`, `${name}Query`) when @ensure grew its own alias —
+  // a deliberate per-schema namespace reservation, breaking for a
+  // main-era `type OrderEnsure`. The collision positions on the USER
+  // declaration — the offender the user can rename — matching the
+  // intrinsic-collision path, not on the schema that innocently emits.
+  test('the Ensure alias reservation rejects positioned on the user declaration', () => {
+    const src = 'type OrderEnsure = { note: string }\nOrder = schema :model\n  total! number\n  @ensure "positive", (m) -> m.total > 0\n';
+    let caught = null;
+    try { compile(src, { runtimeDelivery: 'none', face: 'ts' }); } catch (e) { caught = e; }
+    expect(caught).toBeInstanceOf(CompileError);
+    expect(caught.message).toMatch(/emits the type name 'OrderEnsure', which collides with the type declaration 'OrderEnsure'/);
+    expect(caught.line).toBe(1); // the user's line, not the schema's
+    // Without @ensure entries no alias emits and the name is free.
+    expect(() => compile('type OrderEnsure = { note: string }\nOrder = schema :model\n  total! number\n').declarations).not.toThrow();
   });
 
   // The USER-vs-INTRINSIC direction:

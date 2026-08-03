@@ -349,7 +349,7 @@ const CAST_STOPS = new Set([
   '+', '-', 'MATH', '**', 'SHIFT', 'COMPARE', '&&', '||', '??', '^',
   'RELATION', 'TERNARY', '?', 'PRESENCE', ':', '?.', 'DAMMIT', 'EXTENDS',
   'IF', 'UNLESS', 'ELSE', 'THEN', 'WHILE', 'UNTIL', 'LOOP', 'FOR',
-  'WHEN', 'BY', 'SWITCH', 'RETURN', 'THROW',
+  'WHEN', 'BY', 'SWITCH', 'RETURN', 'THROW', 'CATCH',
 ]);
 
 // Statement-clause keywords that end a TYPE ALIAS's right-hand run at
@@ -366,13 +366,17 @@ const ALIAS_STOPS = new Set([
 // interface members). Names and qualified names, literal types,
 // generics, unions/intersections, function-type arrows, grouping
 // parens, tuple/structural brackets and braces, conditional-type
-// tokens, `typeof`, and block layout. Code-shaped tokens — calls
-// (CALL_START), `new`, `await`, arithmetic/logical operators,
-// assignments inside bodies — are NOT in the vocabulary and reject
-// loudly.
+// tokens, `typeof`, and block layout. `this` is TYPE vocabulary
+// (RULED 2026-08-03): TypeScript's polymorphic `this` type —
+// `chain(): this`, `isFoo(): this is Foo` — is a type atom like any
+// name; where a position disallows it, the checker says so. Code-shaped
+// tokens — calls (CALL_START), `new`, `await`, arithmetic/logical
+// operators, assignments inside bodies — are NOT in the vocabulary and
+// reject loudly (`this.foo()` still rejects: the CALL is the code
+// shape, not the word).
 const TYPE_VOCAB = new Set([
   'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'BOOL',
-  'NULL', 'UNDEFINED',
+  'NULL', 'UNDEFINED', 'THIS',
   '.', ',', ':', '?', 'TERNARY', '...', '|', '&', '=>', 'EXTENDS',
   '(', ')', 'PARAM_START', 'PARAM_END', '[', ']', 'INDEX_START',
   'INDEX_END', '{', '}',
@@ -396,15 +400,58 @@ const TYPE_VOCAB = new Set([
 // vocabulary (a nested call still rejects).
 const TYPE_ATOM_ENDERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'BOOL',
-  'NULL', 'UNDEFINED', ')', 'PARAM_END', ']', 'INDEX_END', '}',
+  'NULL', 'UNDEFINED', 'THIS', ')', 'PARAM_END', ']', 'INDEX_END', '}',
 ]);
+// Does tokens[at] begin a MEMBER ROW of a type body? True at a layout
+// boundary (a block body's rows), after `{` or a comma (an inline
+// literal's), and after a member modifier. Shared by the two member
+// shapes the floor admits: a method shorthand's name, and a mapped
+// type's `[`. The CALLER supplies the enclosing group, because a comma
+// separates members only inside braces — inside `<…>` or `[…]` it
+// separates type arguments and tuple elements, and reading one as a
+// member row misreports a genuine call there.
+const MEMBER_ROW_OPENERS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', '{', ',']);
+const memberRowStart = (tokens, at, from) => {
+  if (at - 1 < from) return true;
+  const before = tokens[at - 1];
+  // A member modifier is transparent — the row starts at the modifier,
+  // so keep walking left. `readonly` has to be walked through rather
+  // than merely accepted: it also prefixes a TUPLE type, and
+  // `{ x: readonly [name in host] }` is a member whose VALUE happens
+  // to begin with it, not a mapped-type row.
+  if (before.value === 'readonly' ||
+      ((before.kind === '-' || before.kind === '+') && tokens[at].value === 'readonly')) {
+    return memberRowStart(tokens, at - 1, from);
+  }
+  return MEMBER_ROW_OPENERS.has(before.kind);
+};
+
+// Bracket kinds by the group they open, innermost-last. Only kinds the
+// vocabulary itself carries: a CALL_START/CALL_END pair reaches the floor
+// solely through the method-shorthand branch, which pushes and pops its
+// own group, so listing them here would double-count that pair.
+const GROUP_OPENERS = new Map([
+  ['{', '{'], ['[', '['], ['INDEX_START', '['],
+  ['(', '('], ['PARAM_START', '('],
+]);
+const GROUP_CLOSERS = new Set(['}', ']', 'INDEX_END', ')', 'PARAM_END']);
+
 const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
   let angle = 0;
+  // The open groups, innermost last. `enclosing()` is the group a
+  // token sits directly inside — what tells a member separator from a
+  // type-argument or tuple separator.
+  const groups = [];
+  const enclosing = (up = 0) => groups[groups.length - 1 - up];
   let openAngle = null; // outermost unmatched '<'
   let atomEnd = false;  // the previous token completed a type atom
-  let methodClose = -1; // index of the CALL_END closing an accepted method list
+  // Indices of the CALL_ENDs closing accepted method lists, innermost
+  // last. A STACK, not a scalar: a parameter's own object type can carry
+  // a member row of its own, and TypeScript nests these freely.
+  const methodCloses = [];
   const closeAngles = (t, n) => {
     angle -= n;
+    for (let k = 0; k < n; k++) groups.pop();
     if (angle < 0) {
       fail(`unbalanced '${t.value}' in a type body — the line is not a type`, t.start);
     }
@@ -417,6 +464,7 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     if (kd === 'COMPARE' && t.value === '<') {
       if (angle === 0) openAngle = t;
       angle++;
+      groups.push('<');
       atomEnd = false;
       continue;
     }
@@ -424,6 +472,38 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     if (kd === 'SHIFT' && t.value === '>>') { closeAngles(t, 2); atomEnd = true; continue; }
     if (kd === 'SHIFT' && t.value === '>>>') { closeAngles(t, 3); atomEnd = true; continue; }
     if (kd === 'UNARY' && t.value === 'typeof') { atomEnd = false; continue; }
+    // A type predicate: `(v: unknown) => v is string`, and the `asserts`
+    // spelling beside it. The token arrived rewritten (`is` aliases to
+    // COMPARE '=='); in type text it is TypeScript's predicate operator,
+    // and it reads as the word the user wrote. Admitted by the whole
+    // shape — the parameter name (or `this`, TS's other predicate
+    // subject) between the arrow (or `asserts`, or a method shorthand's
+    // return `:`) and `is` — because return position
+    // is the only place TS puts one, and `atomEnd` alone would admit
+    // `string is number` anywhere a type completed. The shorthand's `:`
+    // identifies itself by the CALL_END before it: no other colon in a
+    // type body follows a parameter list's close.
+    if (t.word === 'is' && atomEnd && j - 2 >= from &&
+        (tokens[j - 1].kind === 'IDENTIFIER' || tokens[j - 1].kind === 'PROPERTY' ||
+         tokens[j - 1].kind === 'THIS') &&
+        (tokens[j - 2].kind === '=>' || tokens[j - 2].value === 'asserts' ||
+        (tokens[j - 2].kind === ':'  && tokens[j - 3]?.kind === 'CALL_END'))) {
+      atomEnd = false; continue;
+    }
+    // A mapped type's `in`: `{ [K in keyof T]: T[K] }`. Admitted by
+    // the whole shape — a `[` OPENING A MEMBER ROW inside braces, then
+    // the parameter name, then `in`. The bracket alone does not
+    // identify it: `[name in host]` (a tuple) and `Host[name in host]`
+    // (an indexed access) put the same three tokens in a row and are
+    // membership expressions no TS grammar allows there, so what
+    // separates a mapped type is where its `[` sits.
+    if (kd === 'RELATION' && t.value === 'in' &&
+        enclosing() === '[' && enclosing(1) === '{' && j - 2 >= from &&
+        (tokens[j - 2].kind === '[' || tokens[j - 2].kind === 'INDEX_START') &&
+        (tokens[j - 1].kind === 'IDENTIFIER' || tokens[j - 1].kind === 'PROPERTY') &&
+        memberRowStart(tokens, j - 2, from)) {
+      atomEnd = false; continue;
+    }
     // Optional-member marker: `name?: T` — the `?`
     // rides between a completed atom (the member name) and its `:`,
     // whatever kind the scanner gave it (PRESENCE/TERNARY). The same
@@ -431,11 +511,35 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     // (`m(x?: number): void`). Any other `?` stays code-shaped.
     if (t.value === '?' && atomEnd && tokens[j + 1]?.kind === ':') { atomEnd = false; continue; }
     if (kd === '-' && tokens[j + 1]?.kind === 'NUMBER' && !atomEnd) { j++; atomEnd = true; continue; }
+    // A mapped type's modifier prefix: `{ -readonly [K in keyof T]: … }`.
+    // Only directly inside braces at a member row AND directly before
+    // the mapped row's `[` — the one position TS allows the modifier.
+    // Without the bracket check, `{ -readonly x: T }` (no mapped row,
+    // not TS) would slip through as a type.
+    if ((kd === '-' || kd === '+') && tokens[j + 1]?.value === 'readonly' &&
+        (tokens[j + 2]?.kind === '[' || tokens[j + 2]?.kind === 'INDEX_START') &&
+        enclosing() === '{' && memberRowStart(tokens, j, from)) {
+      atomEnd = false; continue;
+    }
+    // The optionality half: `[K in keyof T]-?: T[K]` / `+?` — the
+    // modifier rides AFTER the mapped row's `]`, directly before the
+    // member's `?:`. Completing the atom here lets the ordinary
+    // optional-member rule admit the `?` that follows.
+    if ((kd === '-' || kd === '+') && tokens[j + 1]?.value === '?' &&
+        tokens[j + 2]?.kind === ':' && enclosing() === '{' &&
+        (tokens[j - 1]?.kind === ']' || tokens[j - 1]?.kind === 'INDEX_END')) {
+      atomEnd = true; continue;
+    }
     if (kd === '=' && angle > 0) { atomEnd = false; continue; }
-    if (opts.methods && kd === 'CALL_START' && methodClose === -1) {
+    if ((enclosing() === '{' || (opts.methods && enclosing() === undefined)) &&
+        kd === 'CALL_START') {
       const name = tokens[j - 1];
-      const memberStart = j - 2 < from ||
-        tokens[j - 2].kind === 'TERMINATOR' || tokens[j - 2].kind === 'INDENT' || tokens[j - 2].kind === 'OUTDENT';
+      // The shorthand is the same member in either layout — block
+      // rows and an inline literal's — so both admit it. The inline
+      // call signature `{ (v: number): string }` already compiles,
+      // which is what makes the named member's rejection the check's
+      // reach rather than the sub-language's scope.
+      const memberStart = memberRowStart(tokens, j - 1, from);
       if (name && (name.kind === 'IDENTIFIER' || name.kind === 'PROPERTY') && memberStart) {
         let d = 1;
         let k = j + 1;
@@ -445,7 +549,8 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
           k++;
         }
         if (d === 0 && tokens[k]?.kind === ':') {
-          methodClose = k - 1;
+          methodCloses.push(k - 1);
+          groups.push('(');
           atomEnd = false;
           continue;
         }
@@ -457,10 +562,19 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
         }
       }
     }
-    if (kd === 'CALL_END' && j === methodClose) { methodClose = -1; atomEnd = true; continue; }
-    if (TYPE_VOCAB.has(kd)) { atomEnd = TYPE_ATOM_ENDERS.has(kd); continue; }
+    if (kd === 'CALL_END' && j === methodCloses[methodCloses.length - 1]) {
+      methodCloses.pop(); groups.pop(); atomEnd = true; continue;
+    }
+    if (TYPE_VOCAB.has(kd)) {
+      if (GROUP_OPENERS.has(kd)) groups.push(GROUP_OPENERS.get(kd));
+      else if (GROUP_CLOSERS.has(kd)) groups.pop();
+      atomEnd = TYPE_ATOM_ENDERS.has(kd);
+      continue;
+    }
+    // Aliased tokens (`is`, `and`, `or`, …) arrive rewritten to their
+    // operator value; the rejection quotes the word the user typed.
     fail(
-      `code expression ('${t.value}') in a type body — types erase and cannot execute`,
+      `code expression ('${t.word ?? t.value}') in a type body — types erase and cannot execute`,
       t.start,
     );
   }
@@ -697,7 +811,10 @@ const collectTypeRun = (tokens, j, opts, fail) => {
       continue;
     }
 
-    parts.push(t.value); end = t.end; j++;
+    // `is` is TypeScript's predicate operator in its admitted type
+    // position. Every other alias keeps its token value: boolean words
+    // therefore render as TypeScript's `true`/`false` literal types.
+    parts.push(t.word === 'is' ? t.word : t.value); end = t.end; j++;
   }
 
   // A run can only end with `<` still open at end-of-input or a
@@ -2167,6 +2284,13 @@ const IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, 'g
 export function identifierRuns(text) {
   return text.match(IDENT_RUN_RE) ?? [];
 }
+export function identifierRunAt(text, start) {
+  if (typeof text !== 'string' || !Number.isInteger(start) || start < 0 || start >= text.length) return null;
+  if (!IDENT_START.test(text[start])) return null;
+  let end = start + 1;
+  while (end < text.length && IDENT_PART.test(text[end])) end++;
+  return { value: text.slice(start, end), start, end };
+}
 function symbolNameEnd(text, start) {
   let end = start;
   while (end < text.length && IDENT_PART.test(text[end])) end++;
@@ -2192,13 +2316,18 @@ const REGEX_FLAGS_RE = /^\w*/;
 const VALID_FLAGS_RE = /^(?!.*(.).*\1)[gimsuy]*$/;
 const NOT_REGEX = new Set([...INDEXABLE, '++', '--']);
 
-export function tokenize(text, path = '<anonymous>') {
+export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) {
   // The RIP_COUNT_OPS flag re-reads per call (and resets the count) so
   // a COUNT-ratio gate measures exactly one tokenize run.
   syncOpsFlag();
   const source = new SourceFile(text, path);
   const tokens = [];
   const trivia = [];
+  // Tolerant-mode lexer diagnostics — rejections recorded instead of
+  // thrown, same {message, start, end} shape the parser's diagnostics
+  // carry; the tolerant parse merges them into its own list. Empty
+  // (and never appended to) when `tolerant` is off.
+  const lexDiagnostics = [];
   // Indentation is a LITERAL PREFIX, not a width: each entry is the
   // exact whitespace string opening that block. A nested block's prefix
   // must string-extend the enclosing block's; a dedent must return to
@@ -3031,7 +3160,10 @@ export function tokenize(text, path = '<anonymous>') {
           // its UNARY reading and rejects at the parser.
           push('NEW_TARGET', 'new', start, pos);
         } else {
-          push(kind, value, start, pos);
+          // Type text owns the `is` predicate spelling; the source word
+          // rides with rewritten tokens so collectTypeRun can preserve
+          // it only in the admitted predicate position.
+          push(kind, value, start, pos, { word });
         }
       } else if ((word === 'offer' || word === 'accept') && insideComponentBody()) {
         push(word === 'offer' ? 'OFFER' : 'ACCEPT', word, start, pos);
@@ -3323,6 +3455,21 @@ export function tokenize(text, path = '<anonymous>') {
           pos++;
           continue;
         }
+        // A mapped type's optionality MODIFIER: `]-?:` / `]+?:` — the
+        // spelling behind TS's own Required<T>. The `?` rides the
+        // `-`/`+` directly after the mapped row's `]`, with the member
+        // `:` right behind it; nothing value-shaped ever scans this
+        // sequence (it failed the ternary rejection below before this
+        // carve-out existed), so the plain token is safe to emit and
+        // the type vocabulary judges the rest.
+        const beforePrev = tokens[tokens.length - 2] ?? null;
+        if (prev && (prev.kind === '-' || prev.kind === '+') && !prev.spaced &&
+            (beforePrev?.kind === ']' || beforePrev?.kind === 'INDEX_END') &&
+            text[pos + 1] === ':') {
+          push('?', '?', pos, pos + 1);
+          pos++;
+          continue;
+        }
         fail("unspaced '?' needs a value before it (postfix existence) — write ' ? ' for a ternary", pos);
       }
       scanTernary++;
@@ -3520,9 +3667,81 @@ export function tokenize(text, path = '<anonymous>') {
   // glyph and span, so the caret lands on the bracket to fix, not at
   // end of input.
   if (parens.length > 0) {
-    const open = parens[0];
-    const glyph = { call: '(', group: '(', index: '[', array: '[', object: '{', interp: '#{' }[open.kind] ?? open.kind;
-    failOpenAtEnd(`unclosed '${glyph}' — never closed by end of input`, open.at, open.at + glyph.length);
+    // In tolerant mode, an open bracket at end of input synthesizes the
+    // closer its frame implies — innermost first, each recorded as a
+    // diagnostic — instead of rejecting the whole scan. The OUTDENT loop
+    // below is this exact move for blocks; brackets extend it. Interp
+    // frames keep the throw (the scan is suspended inside a string
+    // literal there; resuming it is the string scanner's business).
+    const tolerable = tolerant && parens.every((f) => f.kind !== 'interp');
+    if (!tolerable) {
+      const open = parens[0];
+      const glyph = { call: '(', group: '(', index: '[', array: '[', object: '{', interp: '#{' }[open.kind] ?? open.kind;
+      failOpenAtEnd(`unclosed '${glyph}' — never closed by end of input`, open.at, open.at + glyph.length);
+    }
+    // Everything synthesized here anchors where the CURSOR pauses — past
+    // trailing intraline whitespace, before trailing newlines — so a
+    // hole's zero-width row IS the position a completion or signature
+    // request carries, and every closer sits at or after the content it
+    // closes (a closer anchored earlier would put the hole outside its
+    // own frame's role span, where no claim can reach it).
+    let cursorEnd = text.length;
+    while (cursorEnd > 0 && (text[cursorEnd - 1] === '\n' || text[cursorEnd - 1] === '\r')) cursorEnd--;
+    while (parens.length > 0) {
+      const frame = parens[parens.length - 1];
+      const glyph = { call: '(', group: '(', index: '[', array: '[', object: '{' }[frame.kind] ?? frame.kind;
+      lexDiagnostics.push({
+        message: `unclosed '${glyph}' — never closed by end of input`,
+        start: frame.at, end: frame.at + glyph.length, expected: [], got: 'end of input',
+      });
+      const closerKind =
+        frame.kind === 'call' ? 'CALL_END' :
+        frame.kind === 'group' ? ')' :
+        frame.kind === 'index' ? 'INDEX_END' :
+        frame.kind === 'array' ? ']' :
+        frame.pick ? 'PICK_END' : '}';
+      closeBracket();
+      // A synthetic closer directly after a comma would let the grammar's
+      // trailing-comma tolerance swallow the in-progress argument slot —
+      // and the emitted face would drop the comma, losing the position
+      // signature help's activeParameter is computed from. A zero-width
+      // IDENTIFIER hole keeps the slot.
+      //
+      // The SAME slot has to be kept when the bracket is still EMPTY —
+      // `add(` and `items[`, the first keystroke of every call and every
+      // index. A closer straight after the opener emits `add()`, a
+      // complete zero-argument call with no position between the
+      // parens, so the cursor resolves to nothing and signature help
+      // answers null. Only `call` and `index` qualify: an empty
+      // IDENTIFIER is a legal argument and a legal subscript, where in
+      // an object literal it would fabricate a property name and in an
+      // array an element the user has not typed.
+      // The probe reaches PAST the structure tokens closeBracket just
+      // minted: a multiline call's trailing comma sits behind the
+      // OUTDENT that closed its argument block, and the slot must be
+      // kept INSIDE that block — the hole splices before the structure,
+      // where a real argument would sit — or the face completes the
+      // call without the position activeParameter is computed from.
+      // Single-line streams have no trailing structure, so the splice
+      // degenerates to the plain append.
+      let at = tokens.length;
+      while (at > 0 && (tokens[at - 1].kind === 'OUTDENT' || tokens[at - 1].kind === 'INDENT' ||
+                        tokens[at - 1].kind === 'TERMINATOR')) at--;
+      const tail = tokens[at - 1]?.kind;
+      const emptySlot =
+        (frame.kind === 'call' && tail === 'CALL_START') ||
+        (frame.kind === 'index' && tail === 'INDEX_START');
+      if (tail === ',' || emptySlot) {
+        const hole = {
+          id: nextId++,
+          kind: 'IDENTIFIER', value: '', start: cursorEnd, end: cursorEnd,
+          spaced: false, newLine: false, generated: true, origin: null,
+        };
+        pendingOrigin.push(hole);
+        tokens.splice(at, 0, hole);
+      }
+      synth(closerKind, cursorEnd);
+    }
   }
 
   // Close any open blocks at end of input, anchored at the end of the
@@ -3556,7 +3775,12 @@ export function tokenize(text, path = '<anonymous>') {
   // syntax, so rewriteTypes must never see them. Typed callable
   // params inside captured bodies still collapse — the emit-time
   // sub-parse runs rewriteTypes as its first tail pass.
-  rewriteSchema(tokens, mintId, text, fail);
+  rewriteSchema(tokens, mintId, text, fail, tolerant
+    ? (err) => lexDiagnostics.push({
+        message: err.reason ?? String(err.message), start: err.start ?? 0,
+        end: err.end ?? err.start ?? 0, expected: [], got: '',
+      })
+    : null);
   rewriteTypes(tokens, mintId, text, fail);
   // Reserved words are legal inside type runs (absorbed above); one
   // surviving in VALUE position is the original loud rejection.
@@ -3582,7 +3806,7 @@ export function tokenize(text, path = '<anonymous>') {
   applyInsertionPass(tokens, implicitCalls, mintId);
   insertArrowCommas(tokens);
 
-  return { tokens, trivia, source };
+  return { tokens, trivia, source, lexDiagnostics };
 }
 
 // The insertion-pass runner — the ONE place the pipeline mutates the
@@ -4459,16 +4683,18 @@ export function tagPostfixConditionals(tokens) {
 //   setInput(input) then lex() → kind (falsy at EOF), exposing .text and
 //   .loc = {start, end} after each lex(). A FRESH loc object is allocated
 //   per token — the parser stores loc references on its location stack.
-export function makeParserLexer(path = '<anonymous>') {
+export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {}) {
   return {
     setInput(input) {
-      const tape = tokenize(input, path);
+      const tape = tokenize(input, path, { tolerant });
       this.tokens = tape.tokens;
       this.trivia = tape.trivia;
       this.source = tape.source;
+      this.lexDiagnostics = tape.lexDiagnostics ?? [];
       this.index = 0;
       this.text = '';
       this.loc = null;
+      this.token = null;
     },
     lex() {
       const t = this.tokens[this.index];
@@ -4476,6 +4702,7 @@ export function makeParserLexer(path = '<anonymous>') {
       this.index++;
       this.text = t.value;
       this.loc = { start: t.start, end: t.end };
+      this.token = t;
       return t.kind;
     },
   };

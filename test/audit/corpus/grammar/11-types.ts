@@ -179,6 +179,17 @@ let counts: Counts = { hits: 3 }
 
 console.log('operators:', hostKey, frozen[0], locked.id, hostName, counts.hits)
 
+// ── mapped types ──
+
+type Copy<T> = { [K in keyof T]: T[K] }
+
+type Optional<T> = { [K in keyof T]?: T[K] }
+
+let copied: Copy<Host> = { name: 'edge', port: 80 }
+let optional: Optional<Host> = {}
+
+console.log('mapped:', copied.name, Object.keys(optional).length)
+
 // ── tuples: named members, an optional tail, a rest element ──
 
 type Entry = [first: string, second: number]
@@ -209,15 +220,21 @@ let branch: Branch = { label: 'root', kids: [{ label: 'leaf', kids: [] }] }
 
 console.log('recursive:', branch.label, branch.kids.length, branch.kids[0].label)
 
-// ── a call signature: the callable object type ──
+// ── a call signature: the callable object type, and its named sibling ──
 
 type Formatter = { (value: number): string }
+type Greeter = { greet(name: string): string, times: number }
 
 let formatter: Formatter = (value) => '#' + String(value)
+let greeter: Greeter = { greet: (name) => 'hi ' + name, times: 2 }
 
-console.log('callable:', formatter(5))
+console.log('callable:', formatter(5), greeter.greet('ada'), greeter.times)
 
 // ── narrowing annotations: the type predicate and the assertion ──
+
+type Guard = { check: (value: unknown) => value is string }
+
+let guard: Guard = { check: (value) => typeof value === 'string' }
 
 function looksText(value: unknown): value is string {
   return typeof value === 'string'
@@ -229,7 +246,7 @@ function mustText(value: unknown): asserts value is string {
   }
 }
 
-console.log('predicate:', looksText('a'), looksText(1), typeof mustText)
+console.log('predicate:', looksText('a'), looksText(1), typeof mustText, guard.check('a'))
 
 // ── `this` as a return type: the method that returns its receiver ──
 
@@ -252,3 +269,9 @@ let maker: (abstract new () => Shaped) = class {
 }
 
 console.log('abstract:', typeof maker)
+
+// ── an import type ──
+
+let parcel: import('./10-modules-lib').Parcel = { size: 2 }
+
+console.log('import type:', parcel.size)

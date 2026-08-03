@@ -17,6 +17,7 @@ import { makeParserLexer, tokenize } from '../../src/lexer.js';
 import { emit, stripFace } from '../../src/emitter.js';
 import { compile as fullCompile } from '../../src/compile.js';
 import { Mappings } from '../../src/stores.js';
+import { carrySchemaRejection } from '../../src/schema.js';
 
 parser.lexer = makeParserLexer();
 
@@ -257,6 +258,15 @@ describe('schema runtime: the validation pipeline', () => {
 // ════════════════════════════════════════════════════════════════════
 
 describe('schema DSL: loud rejections', () => {
+  test('tolerant schema recovery carries positioned rejections and propagates compiler faults', () => {
+    const carried = [];
+    const rejection = Object.assign(new Error('half-typed callable'), { start: 12, end: 18 });
+    carrySchemaRejection(rejection, (err) => carried.push(err));
+    expect(carried).toEqual([rejection]);
+    expect(() => carrySchemaRejection(new TypeError('compiler fault'), () => {}))
+      .toThrow(TypeError);
+  });
+
   test('the persistence spellings stay :model-only on the other kinds (the completed matrix)', () => {
     lexFails('S = schema :shape\n  a! string, {was: "b"}', /persistence metadata.*:model\/:mixin-only/);
     lexFails('S = schema :shape\n  a! string @unique', /persistence metadata.*:model\/:mixin-only/);

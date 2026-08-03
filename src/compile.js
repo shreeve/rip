@@ -116,7 +116,22 @@ const diagnosticError = (file, path, d) => {
 // final top-level expression statement lands in a MINTED result slot
 // (reported as `replResultName`; null when nothing captured), and
 // top-level static imports lower to awaited dynamic imports.
-export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, foldProjections = false, ambientBindings = null, repl = false } = {}) {
+// `tolerant: true` (off by default) is the EDITOR's face compile: an
+// incomplete buffer — an open bracket at end of input, a trailing
+// member dot — still compiles, with zero-width holes at the
+// incompleteness, and the rejections that would have thrown are
+// returned as `parseDiagnostics` instead. Tolerance is never
+// acceptance: a recovered compile always carries at least one
+// diagnostic, and errors recovery cannot repair still throw. The
+// mechanism lives in the lexer's synthetic closers and the generated
+// driver's repair table (solar.rip). The boundary is the TOKEN level:
+// recovery synthesizes whole tokens (closers, holes), so end of input
+// INSIDE a token — an unterminated string, heredoc, heregex, or an
+// open `#{` interpolation — still throws. There is no half-token to
+// fabricate, and inventing a closing quote would change what every
+// byte after it means; the editor rides out those keystrokes on the
+// last good face instead.
+export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false } = {}) {
   // One stable identifying error for a non-string source — without
   // it, malformed input fails in whichever subsystem dereferences it
   // first, with an incidental TypeError.
@@ -144,11 +159,14 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
   }
 
   const parser = Parser();
-  parser.lexer = makeParserLexer(path);
+  parser.lexer = makeParserLexer(path, { tolerant });
 
   let result;
   try {
-    result = parser.parse(parseSource);
+    // Primitive occurrence spans are read only by the TS face (they give a
+    // primitive identifier read its own exact mapping row); the shipping JS
+    // emission never queries them, so it does not pay to record them.
+    result = parser.parse(parseSource, { primitives: face === 'ts', tolerant });
   } catch (err) {
     // Lexer rejections carry offset spans; anything else is a bug, not
     // a diagnostic — let it propagate.
@@ -156,7 +174,7 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     throw positioned(file, path, err.reason ?? err.message, err.start, err.end);
   }
 
-  if (result.diagnostics.length > 0) {
+  if (result.diagnostics.length > 0 && !(tolerant && result.sexpr != null)) {
     throw diagnosticError(file, path, result.diagnostics[0]);
   }
 
@@ -191,16 +209,42 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
   const map = toSourceMap(emitted, { source, sourcePath: path, file: `${path}.js` });
   let declarations = null;
   return {
+    // The parse/lex rejections a tolerant compile carried through
+    // instead of throwing — empty on a clean parse, and always empty
+    // when `tolerant` is off (a strict compile throws on the first).
+    parseDiagnostics: result.diagnostics,
     code: emitted.code,
     map,
     stores: emitted.stores,
     mappings: new Mappings(emitted.mappings),
+    // Source spans the compiler consumed as its OWN vocabulary — words that are
+    // syntax in their position and reach no face entity, each tagged with the
+    // kind that says why. TS face only; empty otherwise.
+    vocabulary: emitted.vocabulary ?? [],
+    // Source spans the EDITOR stays silent about. Distinct from
+    // `vocabulary` on purpose: these are real reads that DO reach a face
+    // entity and stay in the mapping population — a ref cell's name, a
+    // bind's right-hand name — silent only because at that position they
+    // are a channel's target, which the container the lowering wrote
+    // through does not honestly describe. TS face only; empty otherwise.
+    silences: emitted.silences ?? [],
+    // Component member DECLARATION name spans, each flagged `projected`
+    // where the face types the member through the lowering's behavior
+    // object. A declaration is the author's own vocabulary; a consumer
+    // holding an instance reads the container the face declares, and both
+    // resolve to the same face symbol — so the editor cannot tell them
+    // apart without this. TS face only; empty otherwise.
+    memberDecls: emitted.memberDecls ?? [],
     runtimes: emitted.runtimes,
     // The program's top-level binding inventory: [{name, kind}] with
     // kind plain / state / computed / effect / readonly / import /
     // class / def / enum — the REPL's `.vars` data and the ambient
     // seed for its next line. Unconditional on every compile.
     bindings: emitted.bindings,
+    // Every binding in every emitted scope, including parameters and
+    // destructuring names. Audit populations use this inventory to make
+    // spelling-based exclusions stand down without re-parsing bindings.
+    bindingNames: emitted.bindingNames,
     // repl mode's minted result slot — the name the final expression,
     // assignment, or declaration echo landed in; null when nothing
     // captured (or when repl mode is off).
@@ -211,10 +255,30 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // program has no import (or repl mode is off).
     replImportResolver: emitted.replImportResolver,
     tsRegions: emitted.tsRegions,
+    // Generated spans of face-ECHO text: TS-only re-carries of bodies
+    // the real lowering already emitted (the behavior objects). The
+    // diagnostic mapper drops a non-exact-mapped diagnostic born here —
+    // the real copy publishes the same claim at its own position.
+    echoSpans: emitted.echoSpans ?? [],
     pinnables: emitted.pinnables,
     // Generated spans of `:=` state names — writable in rip, `const` in the
     // face. The editor clears TypeScript's `readonly` token modifier on these.
     mutables: emitted.mutables,
+    // Generated spans of every ENUM name occurrence. The face's const
+    // object and its companion type alias share the name, so the symbols
+    // merge and tsgo colors every position `type`; the editor repaints
+    // the construct the author declared. TS face only; empty otherwise.
+    enums: emitted.enums,
+    // Generated spans of a HOISTED class-expression binding's declaration
+    // name. TypeScript classifies a binding from its declaration's
+    // initializer, and a forward reference splits the two — the editor
+    // repaints the construct the author declared. TS face only.
+    classDecls: emitted.classDecls,
+    // Generated spans of every reference to an IMPORTED binding, each with
+    // its original exported name and module. One file's compile cannot
+    // know an imported name's kind — the editor resolves the specifier and
+    // asks the declaring module. TS face only; empty otherwise.
+    importedRefs: emitted.importedRefs,
     // Emitted module-specifier spans, recorded at emission — the
     // browser module loader splices resolved specifiers by offset.
     imports: emitted.imports,

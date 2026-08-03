@@ -1,7 +1,6 @@
 # 07-exceptions.rip — exception handling: every try shape, catch binding, and throw position.
 
 # ── try/catch: the classic block pair, an identifier binding ──
-# The pattern bindings (catch {message}, catch [first]) are PARKED — the lowering's minted binding stays unknown, so destructuring publishes on every use (FINDINGS.md).
 
 parseConfig = (raw: string) ->
   try
@@ -11,6 +10,25 @@ parseConfig = (raw: string) ->
     null
 
 console.log('config:', parseConfig('{"port":8080}'), parseConfig('not json'))
+
+# ── pattern catch bindings: the object kind in a statement try, the array kind in a value try — separate emissions, each with its own branch ──
+
+summarize = (raw: string) ->
+  parsed = false
+  try
+    JSON.parse(raw)
+    parsed = true
+  catch {message}
+    console.log('reason held:', message.length > 0)
+  parsed
+
+firstFault = ->
+  try
+    throw ['too short', 'no digits']
+  catch [first]
+    first
+
+console.log('summarize:', summarize('nope'), 'firstFault:', firstFault())
 
 # ── a handler-less try: the block alone, errors swallowed ──
 
@@ -55,12 +73,37 @@ settle = (risky: () => string) ->
 
 console.log(settle(-> 'delivered'), settle(-> throw new Error('nope')))
 
-# ── try as an expression: inline, and inline with a catch ──
+# ── try as an expression: inline, inline with a catch, and the two together ──
 
 live = try JSON.parse('{"live":true}') as { live: boolean }
 backed: { live: boolean } = try JSON.parse('broken') catch e then { live: false }
+cast = try JSON.parse('broken') as { live: boolean } catch e then { live: false }
 
-console.log('live:', live, 'backed:', backed)
+console.log('live:', live, 'backed:', backed, 'cast:', cast)
+
+# ── try with a STATEMENT body: `return` is a statement, not an expression, so each of these four is its own production ──
+
+earlyExit = (n: number): number ->
+  try return n
+  0
+
+exitGuarded = (n: number): number ->
+  try return n catch then return 0
+  0
+
+exitClosing = (n: number): number ->
+  try return n
+  finally
+    console.log('closing')
+
+exitBoth = (n: number): number ->
+  try return n
+  catch
+    return 0
+  finally
+    console.log('both')
+
+console.log('statement try:', earlyExit(1), exitGuarded(2), exitClosing(3), exitBoth(4))
 
 # ── throw: the indented-object payload, and the expression position ──
 
@@ -72,4 +115,5 @@ reject = (code: number) ->
 demand = (value: string | null) -> value ?? throw new Error('missing value')
 
 held = try reject(503) catch caught then caught
+
 console.log('held:', held, 'demand:', demand('present'))

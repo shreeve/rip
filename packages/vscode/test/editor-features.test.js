@@ -360,8 +360,13 @@ describe.skipIf(!tsgoAvailable)('completions', () => {
     await inWorkspace({}, async (api) => {
       const GOOD = 'msg = "hi"\nk = msg.sub\n';
       await api.open('app.rip', GOOD);
-      // Break the parse by INSERTING a line at file start.
-      await api.change('app.rip', 'oops = (\n' + GOOD);
+      // Break the compile by INSERTING a line at file start. The breakage
+      // must be one the TOLERANT face compile cannot recover — a
+      // newline-broken string can never be completed by more input — or
+      // the buffer compiles, the face is CURRENT, and the staleness
+      // protocol this test guards never engages (an unclosed bracket no
+      // longer qualifies: tolerance closes it).
+      await api.change('app.rip', 'oops = "broken\n' + GOOD);
       expect(api.diagnostics('app.rip')[0].source).toBe('rip');
 
       // The inserted (changed) line has no aligned twin: null.
@@ -540,6 +545,30 @@ describe.skipIf(!tsgoAvailable)('semantic tokens', () => {
         const key = `${t.line}:${t.character}:${t.length}`;
         expect(seen.has(key)).toBe(false);
         seen.add(key);
+      }
+    });
+  }, 30000);
+
+  test('an aliased imported enum receives the direct import token correction', async () => {
+    await inWorkspace({
+      'colors.rip': 'export enum Color\n  red = 0\n',
+    }, async (api) => {
+      const cases = {
+        direct: ['import { Color } from "./colors.rip"', 'x = Color.red', 'Color'],
+        aliased: ['import { Color as Shade } from "./colors.rip"', 'x = Shade.red', 'Shade'],
+      };
+      for (const [file, [clause, use, name]] of Object.entries(cases)) {
+        await api.open(`${file}.rip`, `${clause}\n${use}\n`);
+        const result = await api.semanticTokens(`${file}.rip`);
+        const tokens = decodeTokens(result.data, api.capabilities.semanticTokensProvider.legend);
+        expect(tokens).toContainEqual({
+          line: 1,
+          character: 4,
+          length: name.length,
+          type: 'enum',
+          modifiers: [],
+          modifierBits: 0,
+        });
       }
     });
   }, 30000);
@@ -805,6 +834,51 @@ describe.skipIf(!tsgoAvailable)('rename', () => {
 describe.skipIf(!tsgoAvailable)('source.* code actions', () => {
   const WHOLE_DOC = { start: { line: 0, character: 0 }, end: { line: 99, character: 0 } };
 
+  // The tolerant face made READ surfaces work on an incomplete buffer,
+  // and the first cut of the edit guard refused the whole FILE whenever
+  // one existed — which silently removed every quick fix for as long as
+  // the user was mid-expression, the editor's most-used edit surface,
+  // for an incompleteness that cannot reach the edit. An import inserted
+  // at offset 0 is settled text; the unclosed call three lines below it
+  // is not. The boundary is positional, so both halves are asserted in
+  // one session: offered before the incompleteness, refused at it.
+  test('a quick fix before an incomplete expression still applies; one at it is refused', async () => {
+    await inWorkspace({ 'zed.rip': 'export zz = 1\n' }, async (api) => {
+      const SRC = "console.log 'x'\nv = zz\nr = zz(1,\n";
+      await api.open('app.rip', SRC);
+      // An incomplete buffer publishes TWICE: rip's own rejection lands first,
+      // ahead of the tsgo pull so it survives tsgo being dead, and the mapped TS
+      // set follows. `open()` resolves on the first, so the 2304 the quick fix
+      // is keyed to is not there yet — poll for it rather than reading whichever
+      // publication happened to arrive.
+      let diags = [];
+      for (let i = 0; i < 60; i++) {
+        diags = api.diagnostics('app.rip');
+        if (diags.some((d) => d.code === 2304)) break;
+        await api.sleep(100);
+      }
+      expect(diags.some((d) => /unclosed '\('/.test(d.message ?? ''))).toBe(true);
+      expect(diags.some((d) => d.code === 2304), 'the unresolved name is reported').toBe(true);
+
+      const at = { start: { line: 1, character: 4 }, end: { line: 1, character: 4 } };
+      const actions = await api.codeAction('app.rip', at, diags.filter((d) => d.code === 2304));
+      const add = (actions ?? []).find((a) => /Add import/.test(a.title ?? ''));
+      expect(add, 'the import quick fix survives an incompleteness below it').toBeTruthy();
+
+      // And it lands where it should — at the top, not beside the hole.
+      const edits = add.edit.changes[api.uriOf('app.rip')];
+      expect(edits).toHaveLength(1);
+      expect(edits[0].range.start.line).toBe(0);
+      expect(edits[0].newText).toContain("from './zed.rip'");
+
+      // Rename is the reference for the other half: it refuses outright
+      // on a recovered face, and must keep refusing.
+      const renamed = await api.rename('app.rip', 1, 4, 'zzz')
+        .catch((e) => ({ error: String(e.message ?? e) }));
+      expect(JSON.stringify(renamed)).toMatch(/does not compile|error/i);
+    });
+  }, 30000);
+
   test('organize imports drops the unused import and keeps the survivor in the USER\'s spelling', async () => {
     await inWorkspace({ 'util.rip': UTIL, 'zed.rip': 'export zz = 1\n' }, async (api) => {
       // zz is unused; the kept import spells with DOUBLE quotes and no
@@ -1040,4 +1114,83 @@ describe.skipIf(!tsgoAvailable)('code actions', () => {
       expect(edits[0].newText).toBe(', shout');
     });
   }, 30000);
+
+  // THE SPAN. A quickfix is keyed to its diagnostic's range: tsgo looks for
+  // its own diagnostic where it is told to, and answers NOTHING when none
+  // sits there. Mapping the request with the lenient source→generated
+  // flavor lands on the innermost cover row's start, which turns a
+  // four-byte name into the whole statement — so a name inside a call
+  // argument list got zero fixes while the identical name alone got one.
+  // The exact flavor is the rule translate.js already states for anything
+  // that identifies or MUTATES a symbol; a code action mutates.
+  test('a name buried in a call argument list still gets its quickfix', async () => {
+    await inWorkspace({ 'util.rip': UTIL }, async (api) => {
+      await api.open('app.rip', [
+        'import { answer } from "./util.rip"',
+        "console.log('n:', answer, Math.max(1, 2), shout, answer + 1)",
+        '',
+      ].join('\n'));
+      const missing = api.diagnostics('app.rip').find((d) => d.code === 2304);
+      expect(missing, 'the unresolved name is reported').toBeDefined();
+      const actions = await api.codeAction('app.rip', missing.range, [missing]);
+      expect(actions.some((a) => /import/i.test(a.title)), 'a fix survives the span mapping').toBe(true);
+    });
+  }, 30000);
+
+  // EVERY IMPORT SPELLING takes an added name. The face's clause is not
+  // always the author's — `import { }` emits as `import {}` (the space is
+  // not carried) and a bare `import './x.rip'` grows minted braces nobody
+  // wrote — so tsgo rewrites bytes the user has never seen and the verbatim
+  // check refuses. Driven before the fix: those two offered ZERO fixes
+  // where the other two offered one each.
+  //
+  // The two that CAN map keep their minimal edit; only the two that cannot
+  // widen to a whole-line rewrite. That asymmetry is asserted, because a
+  // fix that widened everything would pass this suite while needlessly
+  // rewriting lines the user did not ask to have rewritten.
+  const SPELLINGS = [
+    // A whole-line rewrite replaces the line INCLUDING its newline, so the
+    // expected text carries one; a clause-only edit does not.
+    ["import { } from './util.rip'", "import { shout } from './util.rip'\n", 'whole line'],
+    ["import {} from './util.rip'", '{ shout }', 'clause only'],
+    ["import { answer } from './util.rip'", ', shout', 'clause only'],
+    // A SIDE-EFFECT import is left ALONE, and the name arrives on a new line —
+    // TypeScript's own answer, and the reason the grammar had to distinguish
+    // the two forms. While `import './x.rip'` and `import {} from './x.rip'`
+    // shared a parse tree, the emitter wrote the empty-clause form for both,
+    // tsgo saw a named list waiting to be filled, and the fix rewrote a
+    // statement the author never asked to change.
+    ["import './util.rip'", "import { shout } from './util.rip'\n", 'new line'],
+  ];
+  for (const [spelling, expected, shape] of SPELLINGS) {
+    test(`\`${spelling}\` takes an added name (${shape})`, async () => {
+      await inWorkspace({ 'util.rip': UTIL }, async (api) => {
+        await api.open('app.rip', `${spelling}\nk = shout('x')\n`);
+        const missing = api.diagnostics('app.rip').find((d) => d.code === 2304);
+        expect(missing, 'the unresolved name is reported').toBeDefined();
+        const actions = await api.codeAction('app.rip', missing.range, [missing]);
+        const fix = actions.find((a) => /^Update import|^Add import/i.test(a.title));
+        expect(fix, 'the add-to-existing-import fix is offered').toBeDefined();
+        const edits = fix.edit.changes[api.uriOf('app.rip')];
+        expect(edits).toHaveLength(1);
+        // WHICH LINE the edit touches is the claim. The import under test is
+        // line 0; a clause the name can join is edited there, and a
+        // side-effect import must not be — its name arrives below it,
+        // leaving the statement the author wrote intact. Asserting only the
+        // text would pass either way, since both spell the same line.
+        if (shape === 'new line') {
+          expect(edits[0].range.start.line, 'the side-effect import is untouched').toBeGreaterThan(0);
+        } else {
+          expect(edits[0].range.start.line, 'the existing clause is edited in place').toBe(0);
+        }
+        // Rip spelling throughout: the author's single quotes survive, and
+        // no semicolon is minted. `.rip.ts` is the mirror's extension and
+        // must never reach the buffer.
+        expect(edits[0].newText).toBe(expected);
+        expect(edits[0].newText).not.toContain('.rip.ts');
+        expect(edits[0].newText).not.toContain(';');
+        expect(edits[0].newText).not.toContain('"');
+      });
+    }, 30000);
+  }
 });

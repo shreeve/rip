@@ -64,11 +64,59 @@ export function mapTsDiagnostic(good, d) {
     const row = good.mappings.bestAtGenerated(s);
     if (!row || row.mappingKind !== 'exact') return null;
   }
+  // A diagnostic born inside a face ECHO (a behavior object re-carrying
+  // a body the real lowering already emitted) is a SECOND report of an
+  // error the real copy publishes — and the echo's interior carries no
+  // marks, so its report cover-maps onto the whole component/schema
+  // head. Drop it unless it maps exactly (an anchored row — the
+  // projection's own member-name anchor — is the echo's one first-class
+  // diagnostic surface, and the reason the echo exists).
+  if (good.echoSpans?.length > 0 &&
+      good.echoSpans.some(([a, b]) => s >= a && s < b)) {
+    const row = good.mappings.bestAtGenerated(s);
+    if (!row || row.mappingKind !== 'exact') return null;
+  }
+  // A RECOVERED face (tolerant compile of an incomplete buffer) holds
+  // bytes the user never typed: the synthetic closers and the zero-width
+  // holes repair minted. TypeScript reads those as ordinary text and
+  // reports on them — `items.` becomes `items.;`, and TS1003 "Identifier
+  // expected" lands on the synthesized `;`. Such a span maps to no exact
+  // row, so the cover fallback below paints the whole enclosing
+  // construct: the import statement three lines up turns red for an
+  // error about a byte rip invented. Rip already publishes its OWN
+  // rejection at the true position, so the cover-mapped one is a
+  // duplicate in the wrong place. Exactly-mapped errors still publish —
+  // those are about the user's own bytes and survive the incompleteness.
+  //
+  // SCOPED to where minted bytes can exist: repair mints holes at the
+  // incompleteness and closers after it, never before, so a cover span
+  // that ends before the EARLIEST rejection is about settled text —
+  // a real error on the user's own bytes, whose cover row is its only
+  // mapping. File-wide suppression traded those for silence.
+  if ((good.parseDiagnostics?.length ?? 0) > 0) {
+    const from = Math.min(...good.parseDiagnostics.map((p) => p.start));
+    if (span[1] >= from) {
+      const row = good.mappings.bestAtGenerated(s);
+      if (!row || row.mappingKind !== 'exact') return null;
+    }
+  }
+  // Type-cycle diagnostics (TS2502/TS7022) born in a lowering name the
+  // lowering's own vocabulary — a mutually-recursive computed pair
+  // draws "'value' is referenced…" from the reactive container the
+  // author never wrote. The projection anchors those rows at the
+  // member's source name, so when the mapped span IS a single
+  // identifier, the message requotes it: same claim, author's words.
+  // A cycle in the user's own bytes requotes its own name — identity.
+  let message = d.message;
+  if (d.code === 2502 || d.code === 7022) {
+    const spanText = good.source.slice(span[0], span[1]);
+    if (/^[A-Za-z_$][\w$]*$/.test(spanText)) message = message.replace(/^'[^']*'/, `'${spanText}'`);
+  }
   return {
     severity: d.severity ?? 1,
     code: d.code,
     source: 'rip/ts',
-    message: d.message,
+    message,
     ...(tags.length ? { tags } : {}),
     range: {
       start: offsetToPosition(good.srcLineStarts, span[0]),
@@ -107,6 +155,16 @@ export function ripDirectiveLines(good) {
 }
 
 export function applyRipDirectives(good, mapped) {
+  // A lowering can manifest one source error at several face positions.
+  // Once mapping collapses them to the same code, severity, range, and
+  // message, one source claim owns one squiggle and one directive charge.
+  const seen = new Set();
+  mapped = mapped.filter((m) => {
+    const key = `${m.code}\0${m.severity}\0${m.range.start.line}:${m.range.start.character}-${m.range.end.line}:${m.range.end.character}\0${m.message}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   const directives = ripDirectiveLines(good);
   if (directives.length === 0) return mapped;
   const is2578 = (m) => String(m.code) === '2578';

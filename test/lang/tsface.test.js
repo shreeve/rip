@@ -27,6 +27,7 @@ import { describe, test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { compile, CompileError } from '../../src/compile.js';
+import { toMatchable } from '../../src/runtime/stdlib.js';
 import { stripFace } from '../../src/emitter.js';
 
 const corpusDir = join(import.meta.dir, '../corpus');
@@ -51,18 +52,21 @@ const MARKER = '\nexport {};\n';
 const ID = String.raw`[$_\p{ID_Start}][$\u200c\u200d\p{ID_Continue}]*`;
 const REGION_SHAPES = [
   /^!?: \S/u,                                             // annotation `: T` / forward `!: T`
+  /^satisfies \S/u,                                       // a schema field default's value enforcement: `v satisfies T`
+  /^<\S/su,                                               // a type ARGUMENT list: an annotated reactive's `__state<T>(v)`, and a generic `def`'s own `<T>` parameters
+  /^!$/u,                                                 // a component prop assertion's bare `!` (state fallbacks like `props.label!`)
   /^[()]$/u,                                              // arrow-param / cast parens
   /^as\s+\S/u,                                            // the cast's `as T` spelling
   /^this: \S/u,                                           // schema callable `this` param 
   /^export \{\};$/u,                                      // module marker
   new RegExp(String.raw`^declare (static |readonly )?${ID}: \S`, 'su'), // component member declare / static-mount narrowing / =! readonly 
+  new RegExp(String.raw`^${ID}(: \S[^;]*)?;$`, 'su'),      // the field a promoted param or a constructor-body `@x =` declares (bare when the assignment's own inference is the honest type)
   /^\[key: `_\$\{string\}`\]: any;$/u,                    // the component slot-namespace index signature (M12-E)
   /^constructor\(props\??: \{ .*\{ super\(props\); \}$/su, // the component props ctor (M12-E)
   /^as any\)?$/u,                                          // scaffold/handler quieting casts (M12-E)
   /^\) as any$/u,                                          // handler cast's TS-only close (arrow-safe grouping)
-  /^satisfies \S/u,                                        // reactive value enforcement: `v satisfies T`
-  /^\($/u,                                                 // computed-lambda wrap opener for `) satisfies () => T`
-  /^\) satisfies \(\) => \S/su,                            // computed return enforcement
+  new RegExp(String.raw`^${ID} = __computed\(\(\) => __${ID}__computed\.${ID}\.call\(this as any\)\);$`, 'su'), // an unannotated computed's INFERRED position — a field with no type node, so quickinfo prints the resolved type instead of echoing a projection
+  new RegExp(String.raw`^const __${ID}__(behavior|computed) = \{`, 'su'), // the behavior objects (schema callable / component computed return types)
   new RegExp(String.raw`^(export )?type ${ID}`, 'u'),      // alias / enum companion / schema alias
   new RegExp(String.raw`^(export )?interface ${ID}`, 'u'), // interface / schema intrinsic block
   new RegExp(String.raw`^function ${ID}\(.*\): [^;]+;$`, 'su'), // overload signature
@@ -106,11 +110,89 @@ describe('the strip gate: TS face minus recorded regions === JS mode, byte-for-b
   });
 });
 
+// ── 1b. captures leave no trace ──────────────────────────────────────
+//
+// The TS face re-emits certain bodies into a scratch builder (a
+// component computed's copy for the behavior object). The capture runs
+// in the TS emission ONLY, so anything it consumes from shared state —
+// a temp name, a channel entry — exists in one face and not the other.
+// These gates hold the two leak classes the capture must roll back.
+
+describe('scratch captures leave no trace in the real emission', () => {
+  test('a computed body minting loop temps does not desync later temps between faces', () => {
+    // The computed's `for…of` mints an un-memoized `_ref` for its
+    // iterable. Un-rolled-back, the mint runs only under the TS face,
+    // so the LATER minting site (`tally`) drifts one name apart
+    // between the faces and the strip gate breaks.
+    const src = 'getData = -> {a: 1, b: 2}\n\nCart = component\n' +
+      '  total ~= do ->\n    sum = 0\n    for k, v of getData()\n      sum += v\n    sum\n' +
+      '\ndef tally(rows)\n  out = 0\n  for k, v of rows()\n    out += v\n  out\n';
+    const faced = ts(src);
+    const plain = js(src);
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
+    // Not vacuous: the later site really re-mints the first free name.
+    expect(plain.code).toContain('_ref1 = rows()');
+    expect(faced.code).toContain('_ref1 = rows()');
+  });
+
+  test('token-correction spans all slice to their own name in the emitted face', () => {
+    // A captured body that reads a state/enum/class/imported name
+    // reaches noteNameSpan with the scratch builder installed;
+    // un-shadowed, the channel keeps a scratch-relative span that
+    // slices to arbitrary bytes of the real face.
+    const src = 'count := 0\n\nCounter = component\n  double ~= count * 2\n';
+    const faced = ts(src);
+    const name = /^[$_A-Za-z][$\w]*$/;
+    for (const channel of ['mutables', 'enums', 'classDecls']) {
+      for (const [start, end] of faced[channel]) {
+        expect(faced.code.slice(start, end)).toMatch(name);
+      }
+    }
+    for (const [start, end, refName] of faced.importedRefs) {
+      expect(faced.code.slice(start, end)).toBe(refName);
+    }
+    // The state's spans: declaration and the computed's read — no third.
+    expect(faced.mutables.map(([s, e]) => faced.code.slice(s, e))).toEqual(['count', 'count']);
+  });
+
+  test('import reference metadata keeps the original name behind an alias', () => {
+    const faced = ts('import { Color as Shade } from "./colors.rip"\nx = Shade.red\n');
+    expect(faced.importedRefs.map(([start, end, importedName, specifier]) => ({
+      localText: faced.code.slice(start, end), importedName, specifier,
+    }))).toEqual([
+      { localText: 'Shade', importedName: 'Color', specifier: './colors.rip' },
+    ]);
+  });
+});
+
 // ── 2/3. emission pins per surface ───────────────────────────────────
 
 describe('TS-face emission pins', () => {
   test('typed declaration: the hoist line carries the annotation; the assignment stays bare', () => {
     expect(ts('x: number = 5\nx = 7\n').code).toBe('let x: number = 5;\nx = 7;' + MARKER);
+  });
+
+  test('a ctor field only a bound arrow assigns spells its any; a directly-assigned one stays bare', () => {
+    // TypeScript's constructor inference reads direct assignments but
+    // never descends into arrows — a bare declaration for an
+    // arrow-only field is an implicit any (TS7008 under
+    // noImplicitAny) on generated-only bytes no source position
+    // answers for. The direct field keeps the inference, which is the
+    // honest type.
+    const faced = ts('class S\n  constructor: (name: string) ->\n    @label = name\n    @sync = =>\n      @dirty = false\n');
+    expect(faced.code).toContain('\n  label;\n');
+    expect(faced.code).toContain('\n  sync;\n');
+    expect(faced.code).toContain('\n  dirty: any;\n');
+    // A direct assignment ANYWHERE in the body supplies the
+    // inference — the arrow's earlier write does not force the any.
+    const both = ts('class T\n  constructor: () ->\n    @go = =>\n      @n = 1\n    @n = 2\n');
+    expect(both.code).toContain('\n  n;\n');
+    expect(both.code).not.toContain('n: any');
+    // And the author's ANNOTATION rides whichever assignment carries
+    // it: an arrow's earlier unannotated write must not cost a later
+    // annotated one its type on the declaration.
+    const late = ts('class U\n  constructor: () ->\n    @go = =>\n      @n = 1\n    @n: number = 2\n');
+    expect(late.code).toContain('\n  n: number;\n');
   });
 
   test('bare typed forward: the annotation reaches the hoist line with the definite-assignment assertion', () => {
@@ -202,6 +284,70 @@ describe('TS-face emission pins', () => {
       .toBe('let p = function({a, b}: {a: number, b: string}) {\n  return a;\n};' + MARKER);
   });
 
+  // The destructure is the LOWERING's own statement — no seam exists
+  // where an author could narrow, so TypeScript's `unknown` catch type
+  // would publish on legal rip. The annotation is minted with the
+  // parameter and scoped to it: an IDENTIFIER catch keeps `unknown`,
+  // which the author governs the ordinary ways. Both tries carry the
+  // branch separately, so both are pinned; stripping restores the JS.
+  // The match lowering carries no narrowing at all — RULED (2026-08-03):
+  // toMatchable is pure coercion, `(v: any) => string`, so the face and
+  // the JS twin are the same bare call. The liveness probes below keep
+  // the annotation honest against the runtime it describes: soften the
+  // helper back toward v3's null answer and `=> string` becomes a lie
+  // no byte pin would catch.
+  test('the match seam needs no assertion, because the helper cannot answer null', () => {
+    const src = "text = 'abc'\nfound = text =~ /b+/\nnth = text[/(b)/, 1]\n";
+    const code = ts(src).code;
+    // No narrowing anywhere: the receiver is a string by the helper's
+    // own contract, so the face and the JS twin are the same call.
+    expect(code).toContain('toMatchable(text).match(/b+/)');
+    expect(code).toContain('toMatchable(text).match(/(b)/)');
+    expect(js(src).code).toContain('toMatchable(text).match(/b+/)');
+    const withPrelude = compile(src, { runtimeDelivery: 'inline', face: 'ts' }).code;
+    expect(withPrelude).toContain('toMatchable: (v: any) => string');
+    // LIVENESS — the trio that keeps the signature from being a lie.
+    // `=> string` is honest only because the runtime answers a string
+    // for EVERY receiver (RULED 2026-08-03: pure coercion, never null,
+    // never a throw); any nullable implementation would make the
+    // annotation above a false claim while byte pins stayed green.
+    expect(toMatchable('one\ntwo')).toBe('one\ntwo');
+    expect(toMatchable(null)).toBe('');
+    expect(toMatchable('plain')).toBe('plain');
+  });
+
+  // The injected runtime's face type is an ASSERTION on the IIFE's
+  // value, so its members are the runtime's OWN property names — never
+  // the aliases the destructure mints when a user binding collides.
+  // Key them by the local and the pattern reads a property the asserted
+  // type does not declare: every name in the unit types as an error,
+  // invisibly, because the injection's synthetic mapping swallows the
+  // TS2339 that would say so. The liveness pair is the same program
+  // without the shadow.
+  test('the injected runtime asserts its own property names, not the minted aliases', () => {
+    const shadowed = compile("__state = 'mine'\ncount := 1\nconsole.log(__state, count)\n",
+      { runtimeDelivery: 'inline', face: 'ts' }).code;
+    expect(shadowed).toContain('{ __state: __state_,');                 // the alias is minted
+    expect(shadowed).toContain('as { __state: <T>(value: T');           // and the assertion still keys by the NAME
+    expect(shadowed).not.toContain('as { __state_:');
+    const plain = compile("count := 1\nconsole.log(count)\n",
+      { runtimeDelivery: 'inline', face: 'ts' }).code;
+    expect(plain).toContain('as { __state: <T>(value: T');
+  });
+
+  test('catch patterns: the minted parameter carries a face-only `any`, in the statement try and the value try alike', () => {
+    const stmt = 'try\n  f()\ncatch {message}\n  message\n';
+    const value = 'v = try\n  f()\ncatch [first]\n  first\n';
+    expect(ts(stmt).code).toContain('} catch (_err: any) {');
+    expect(ts(value).code).toContain('} catch (_err: any) {');
+    for (const src of [stmt, value]) {
+      const r = ts(src);
+      expect(stripFace(r.code, r.tsRegions)).toBe(js(src).code);
+    }
+    // The identifier spelling mints nothing and gains nothing.
+    expect(ts('try\n  f()\ncatch e\n  e\n').code).toContain('} catch (e) {');
+  });
+
   test('single typed arrow param gains TS-only parens (TS requires them; stripping restores the bare name)', () => {
     const r = ts('g = (v: number) => v\n');
     expect(r.code).toBe('let g = (v: number) => v;' + MARKER);
@@ -222,7 +368,10 @@ describe('TS-face emission pins', () => {
 
   test('void definitions annotate `: void` (async: Promise<void>) under the voidMarker', () => {
     expect(ts('def save!(x)\n  x\n').code).toBe('function save(x): void {\n  x;\n  return;\n}' + MARKER);
-    expect(ts('tick! = (x) =>\n  x\n').code).toBe('let tick;\n\ntick = (x): void => {\n  x;\n  return;\n};' + MARKER);
+    // The binding declares in place, so the annotation sits on an
+    // INITIALIZED declaration — the span a semantic token and a hover
+    // are both read at carries the function value.
+    expect(ts('tick! = (x) =>\n  x\n').code).toBe('let tick = (x): void => {\n  x;\n  return;\n};' + MARKER);
     expect(ts('def flush!(x)\n  await x\n').code)
       .toBe('async function flush(x): Promise<void> {\n  await x;\n  return;\n}' + MARKER);
   });
@@ -296,10 +445,12 @@ describe('TS-face emission pins', () => {
 
   test('reactive containers type as the branded { value: T; read(): T } (computed readonly); readonly/effect handles as T', () => {
     const code = ts('count: number := 0\ntotal: number ~= count * 2\nro: string =! "s"\nh: Function ~> console.log(count)\n').code;
-    // Annotated reactives also ENFORCE the value via face-only
-    // `satisfies`.
-    expect(code).toContain('const count: { value: number; read(): number } = __state(0 satisfies number);');
-    expect(code).toContain('const total: { readonly value: number; read(): number } = __computed((() => (count.value * 2)) satisfies () => number);');
+    // Annotated reactives also ENFORCE the value, via a face-only
+    // explicit TYPE ARGUMENT — which checks the initializer and
+    // simultaneously makes the call's return type the annotated
+    // container, so a wrong value publishes once rather than twice.
+    expect(code).toContain('const count: { value: number; read(): number } = __state<number>(0);');
+    expect(code).toContain('const total: { readonly value: number; read(): number } = __computed<number>(() => (count.value * 2));');
     expect(code).toContain('const ro: string = "s";');
     expect(code).toContain('const h: Function = __effect(() => { console.log(count.value); });');
   });
@@ -701,7 +852,10 @@ describe('TS-face mapping rows (the same mark protocol)', () => {
     const at = r.code.indexOf(': number') + 3; // inside `number` in the hoist line
     const row = r.mappings.bestAtGenerated(at);
     expect(row).not.toBeNull();
-    expect(src.slice(row.sourceStart, row.sourceEnd)).toBe(': number');
+    // The type NAME carries its own exact row inside the annotation's cover,
+    // so the innermost row at a position inside `number` is `number` itself —
+    // the answer a hover there should give, not the whole `: number` span.
+    expect(src.slice(row.sourceStart, row.sourceEnd)).toBe('number');
   });
 });
 
@@ -950,6 +1104,36 @@ describe('TS-face negatives', () => {
     const r = ts('f = (...xs: number) -> xs\n');
     expect(r.code).toContain('...xs: number');
     expect(() => js('f = (...xs: number) -> xs\n').declarations).toThrow(/rest parameter's annotation/);
+  });
+
+  test('boolean word aliases render as TypeScript literal types', () => {
+    expect(ts('f = (x: yes, y: off) -> x\ntype Flags = on | no\n').code)
+      .toContain('function(x: true, y: false)');
+    expect(ts('type Flags = on | no\n').code).toContain('type Flags = true | false;');
+    expect(js('f = (x: yes) -> x\n').declarations).toContain('declare function f(x: true)');
+  });
+
+  // The minted behavior VALUE names (`__X__behavior`, `__X__computed`)
+  // are face-only but not invisible: a user module binding of the same
+  // spelling would redeclare the const in the TS face while the JS runs
+  // fine. The emitter rejects the collision loudly and positioned, the
+  // same rule buildSchemaTypeStory applies to minted type names.
+  test('a user binding of a minted behavior-const name rejects loudly in the TS face', () => {
+    const schemaSrc = '__Event__behavior = 5\nEvent = schema :model\n  name! string\n  shout: -> @name\n';
+    const compSrc = '__Badge__computed = 7\nBadge = component\n  x := 1\n  sum ~= @x + 1\n  render\n    div "#{@sum}"\n';
+    expect(() => ts(schemaSrc)).toThrow(/module binds '__Event__behavior'.*rename the binding/);
+    expect(() => ts(compSrc)).toThrow(/module binds '__Badge__computed'.*rename the binding/);
+    expect(() => ts('def __Event__behavior()\n  1\n' + schemaSrc.slice(schemaSrc.indexOf('Event ='))))
+      .toThrow(/module binds '__Event__behavior'.*rename the binding/);
+    expect(() => ts('class __Badge__computed\n' + compSrc.slice(compSrc.indexOf('Badge ='))))
+      .toThrow(/module binds '__Badge__computed'.*rename the binding/);
+    // JS mode emits no behavior const — no collision exists, both run.
+    expect(js(schemaSrc).code).toContain('__Event__behavior = 5');
+    expect(js(compSrc).code).toContain('__Badge__computed = 7');
+    // The spelling is reserved only where a behavior const actually
+    // prints: beside a schema with no callables it is an ordinary name.
+    expect(ts('__Plain__behavior = 5\nPlain = schema\n  name! string\n').code)
+      .toContain('__Plain__behavior = 5');
   });
 });
 

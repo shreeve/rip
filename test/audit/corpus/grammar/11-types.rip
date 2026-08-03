@@ -173,6 +173,18 @@ counts: Counts = { hits: 3 }
 
 console.log('operators:', hostKey, frozen[0], locked.id, hostName, counts.hits)
 
+# ── mapped types: `in` between `[` and `]`, the one position TS grammar puts it ──
+
+type Copy<T> = { [K in keyof T]: T[K] }
+
+type Optional<T> =
+  { [K in keyof T]?: T[K] }
+
+copied: Copy<Host> = { name: 'edge', port: 80 }
+optional: Optional<Host> = {}
+
+console.log('mapped:', copied.name, Object.keys(optional).length)
+
 # ── tuples: named members, an optional tail, a rest element ──
 
 type Entry = [first: string, second: number]
@@ -203,16 +215,22 @@ branch: Branch = { label: 'root', kids: [{ label: 'leaf', kids: [] }] }
 
 console.log('recursive:', branch.label, branch.kids.length, branch.kids[0].label)
 
-# ── a call signature: the callable object type ──
-# Its sibling, a NAMED method member, compiles only in an indented body (the interfaces above) and never in an inline one, so the two spellings live apart in this file (FINDINGS.md).
+# ── a call signature: the callable object type, and its named sibling ──
 
 type Formatter = { (value: number): string }
+type Greeter = { greet(name: string): string, times: number }
 
 formatter: Formatter = (value) -> '#' + String(value)
+greeter: Greeter = { greet: ((name) -> 'hi ' + name), times: 2 }
 
-console.log('callable:', formatter(5))
+console.log('callable:', formatter(5), greeter.greet('ada'), greeter.times)
 
 # ── narrowing annotations: the type predicate and the assertion ──
+# The predicate in a TYPE BODY as well as in a def's return: `is` is TypeScript's operator there, and rip's `is`→`==` rewrite belongs to the value sub-language alone.
+
+type Guard = { check: (value: unknown) => value is string }
+
+guard: Guard = { check: ((value) -> typeof value == 'string') }
 
 def looksText(value: unknown): value is string
   typeof value == 'string'
@@ -221,7 +239,7 @@ def mustText(value: unknown): asserts value is string
   if typeof value != 'string'
     throw new Error('not text')
 
-console.log('predicate:', looksText('a'), looksText(1), typeof mustText)
+console.log('predicate:', looksText('a'), looksText(1), typeof mustText, guard.check('a'))
 
 # ── `this` as a return type: the method that returns its receiver ──
 
@@ -241,3 +259,9 @@ maker: (abstract new () => Shaped) = class
   id: number = 3
 
 console.log('abstract:', typeof maker)
+
+# ── an import type ──
+
+parcel: import('./10-modules-lib.rip').Parcel = { size: 2 }
+
+console.log('import type:', parcel.size)

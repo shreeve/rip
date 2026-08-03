@@ -23,7 +23,10 @@
 //      files contributes NOTHING to startup or the mirror tree.
 //   8. PERSISTENT CACHE: a restart revalidates by source hash and
 //      recompiles only what changed while the server was down; a
-//      compiler-hash mismatch purges the whole tree.
+//      build-identity mismatch purges the whole tree. The identity spans
+//      the compiler tree AND the server's own, because the manifest
+//      records both the faces the compiler built and the closure edge
+//      lists the server derived.
 //
 // Same availability guard as the other live suites: dependencies absent →
 // skip; the package's `bun run test` preflight turns a missing tsgo into a
@@ -32,6 +35,7 @@ import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { typeImportSpecifiers } from '../src/mirror.js';
 
 let tsgoAvailable = false;
 try {
@@ -175,8 +179,8 @@ async function inWorkspace(files, fn) {
   }
 }
 
-// Count the .rip mirrors materialized in a workspace's tree.
-const mirrorCount = (ws) => {
+// The .rip mirrors present in a workspace's tree.
+const mirrorPaths = (ws) => {
   const out = [];
   const walk = (dir) => {
     let entries;
@@ -187,11 +191,36 @@ const mirrorCount = (ws) => {
     }
   };
   walk(path.join(ws, '.rip', 'editor'));
-  return out.length;
+  return out;
 };
+const mirrorCount = (ws) => mirrorPaths(ws).length;
+
+// A mirror is a declaration-only auto-import stub when every line it
+// carries is one, and a COMPILED FACE otherwise. The distinction is what
+// the scaling and cache-purge pins are actually about: candidacy is
+// workspace-wide, compiling is not.
+const STUB_LINE = /^(export (declare const [A-Za-z_$][\w$]*: any;|type [A-Za-z_$][\w$]* = any;|default _default;|\{\};)|declare const _default: any;)$/;
+const isStub = (text) => text.split('\n').filter(Boolean).every((l) => STUB_LINE.test(l));
+const faceCount = (ws) => mirrorPaths(ws).filter((p) => !isStub(fs.readFileSync(p, 'utf8'))).length;
 
 const UTIL = 'export answer = 42\n';
+
 const APP = 'import { answer } from "./util.rip"\nbad = answer.toUpperCase()\n';
+
+test('type import discovery skips literal, comment, property, and identifier bodies', () => {
+  const text = [
+    `import('./real.rip').Thing`,
+    `import /* before */ ( /* argument */ "../other.rip" /* close */ ).Other`,
+    `"import('./string-ghost.rip')"`,
+    `'import("./single-ghost.rip")'`,
+    `unknown /* import('./comment-ghost.rip') */`,
+    `unknown # import('./hash-ghost.rip')\n | known`,
+    `Ωimport('./identifier-ghost.rip')`,
+    `namespace.import('./property-ghost.rip')`,
+    `namespace. /* gap */ import('./spaced-property-ghost.rip')`,
+  ].join(' | ');
+  expect(typeImportSpecifiers(text)).toEqual(['./real.rip', '../other.rip']);
+});
 
 describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
   test('an unopened dependency materializes on demand and serves', async () => {
@@ -264,6 +293,30 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
     });
   }, 30000);
 
+  test('type-text literals that resemble imports do not enter the closure', async () => {
+    const files = {
+      'real.rip': 'export interface Thing\n  value: number\n',
+      'ghost.rip': 'export ghost = 42\n',
+    };
+    await inWorkspace(files, async (api) => {
+      const source = [
+        `actual: import('./real.rip').Thing = { value: 1 }`,
+        `label: "import('./ghost.rip')" = "import('./ghost.rip')"`,
+        '',
+      ].join('\n');
+      await api.open('app.rip', source);
+      await api.poll(
+        () => fs.existsSync(path.join(api.ws, '.rip', 'editor', 'real.rip.ts')),
+        'real import type materialized',
+      );
+      const realMirror = path.join(api.ws, '.rip', 'editor', 'real.rip.ts');
+      const ghostMirror = path.join(api.ws, '.rip', 'editor', 'ghost.rip.ts');
+      expect(isStub(fs.readFileSync(realMirror, 'utf8'))).toBe(false);
+      expect(isStub(fs.readFileSync(ghostMirror, 'utf8'))).toBe(true);
+      expect(faceCount(api.ws)).toBe(2); // app + the syntactic import type
+    });
+  }, 30000);
+
   test('a workspace tsconfig change mid-session re-governs open buffers', async () => {
     const noDom = JSON.stringify({ compilerOptions: { target: 'es2023', module: 'esnext', lib: ['es2023'] } });
     const withDom = JSON.stringify({ compilerOptions: { target: 'es2023', module: 'esnext', lib: ['es2023', 'dom'] } });
@@ -277,10 +330,12 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
     });
   }, 30000);
 
-  test('demand-driven: only the import closure materializes, however large the workspace', async () => {
+  test('demand-driven: only the import closure COMPILES, however large the workspace', async () => {
     // 200 unrelated .rip files + a 3-file chain: app → a → b. The
-    // program is the chain; the 200 contribute nothing (the scaling
-    // posture: startup work follows the closure, not the workspace).
+    // compiled program is the chain; the 200 are auto-import candidates
+    // and cost a source scan and a declaration line each (the scaling
+    // posture: startup COMPILE work follows the closure, not the
+    // workspace — candidacy is what follows the workspace).
     const files = {
       'chain/a.rip': 'import { b } from "./b.rip"\nexport a = b + 1\n',
       'chain/b.rip': 'export b = 41\n',
@@ -293,15 +348,17 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
       expect(api.codes('app.rip')).not.toContain(2307);
       expect(api.codes('app.rip')).toContain(2339); // the type crossed BOTH hops
 
-      // The structural pin: the mirror tree holds exactly the closure —
-      // app + a + b — never the 200 bystanders.
-      expect(mirrorCount(api.ws)).toBe(3);
+      // The structural pin: exactly the closure — app + a + b — holds a
+      // compiled face. The 200 bystanders are in the tree, and in tsgo's
+      // program, as stubs only; nothing compiled them.
+      await api.poll(() => mirrorCount(api.ws) === 203, 'every workspace .rip has a mirror');
+      expect(faceCount(api.ws)).toBe(3);
       const line = api.logs.find((l) => /closure of app\.rip: 2 compiled/.test(l));
       expect(line).toBeDefined();
     });
   }, 30000);
 
-  test('persistent cache: a restart recompiles only what changed; a compiler-hash mismatch purges', async () => {
+  test('persistent cache: a restart recompiles only what changed; a build-identity mismatch purges', async () => {
     const ws = makeWorkspace({
       'a.rip': 'import { b } from "./b.rip"\nexport a = b + 1\n',
       'b.rip': 'export b = 41\n',
@@ -333,14 +390,22 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
         expect(api.logs.some((l) => /closure of app\.rip: [1-9]\d* compiled/.test(l))).toBe(false);
       });
 
-      // A DIFFERENT COMPILER recorded the cache → the whole tree purges
-      // (every face was produced by a build that no longer exists here).
+      // A DIFFERENT BUILD recorded the cache → the whole tree purges. The
+      // key spans the compiler tree AND the server's own: every face was
+      // produced by a compiler that no longer exists here, and every
+      // recorded import list by a closure walk that may no longer agree
+      // about which spellings are edges.
       const manifestPath = path.join(ws, '.rip', 'editor', '.cache.json');
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-      manifest.compilerHash = 'stale-compiler-build';
+      expect(manifest.cacheIdentity).toBeTruthy();     // the key is recorded under its own name
+      manifest.cacheIdentity = 'stale-build';
       fs.writeFileSync(manifestPath, JSON.stringify(manifest));
       await inSession(ws, async (api) => {
-        expect(mirrorCount(ws)).toBe(0); // purged at load, before any open
+        // Purged at load, before any open. Counted as FACES: stub
+        // population refills the tree behind the purge, and a stub carries
+        // no face from any build — it is derived from the source it sits
+        // beside, every session.
+        expect(faceCount(ws)).toBe(0);
         await api.open('app.rip', APP2);
         await api.change('app.rip', APP2 + '\n');
         expect(api.codes('app.rip')).toContain(2339); // and rebuilt on demand
@@ -358,6 +423,17 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
 describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
   const mirrorFileOf = (ws, rel) => path.join(ws, '.rip', 'editor', rel + '.ts');
 
+  // What a PRUNE must remove is the compiled face, not every byte. A
+  // workspace `.rip` is stubbed into the program at startup (the gate
+  // below), so demanding an empty path after a prune would demand a state
+  // stricter than the file's own starting one — the same file, untouched all
+  // session, carries a stub. The closure invariant is that no compiled face
+  // outlives its last importer.
+  const noCompiledFace = (ws, name) => {
+    const at = mirrorFileOf(ws, name);
+    return !fs.existsSync(at) || isStub(fs.readFileSync(at, 'utf8'));
+  };
+
   test('user territory: a pre-existing .rip/.gitignore survives byte-identical; ours lives in editor/', async () => {
     const USER_GITIGNORE = '# user-owned rules\neditor/\n!keep-me\n';
     await inWorkspace({ '.rip/.gitignore': USER_GITIGNORE, 'util.rip': UTIL }, async (api) => {
@@ -367,11 +443,136 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
     });
   }, 30000);
 
-  test('lazy creation: a session that never opens a .rip document leaves the workspace untouched', async () => {
-    await inWorkspace({ 'util.rip': UTIL }, async (api) => {
+  // The disk doctrine, RULED not drifted: faces are lazy, candidacy is
+  // eager. The expensive thing — compiled faces, tsgo program growth —
+  // stays demand-driven through the open-buffer closure. The cheap
+  // thing — scan-derived name stubs — is written for the whole
+  // workspace at startup, because a candidate written late is no
+  // candidate at all (tsgo offers imports only from files it already
+  // holds). The gates below enforce the ruling's sharp edges rather
+  // than ratifying whatever startup does: writes confined to `.rip/`,
+  // stub bytes declaration-only (a scan, never a compile), stubs
+  // registered nowhere.
+  test('territory: a workspace with no .rip source is never written to', async () => {
+    await inWorkspace({ 'notes.md': '# nothing to mirror\n' }, async (api) => {
       // initialize + revalidation ran (the session helper waited for the
-      // cache log); nothing was opened — no .rip/ tree may exist.
+      // cache log), and stub population runs right behind it.
+      await api.sleep(1500);
       expect(fs.existsSync(path.join(api.ws, '.rip'))).toBe(false);
+    });
+  }, 30000);
+
+  // Wrappers are per-SESSION memory over per-WORKSPACE disk, and the two
+  // must reconverge on a warm start: a nested project whose faces arrive
+  // from CACHE never takes the compile road where the wrapper was
+  // ensured, so wrapperDirs stayed empty, the root config regenerated
+  // without its exclusions (two owners for every nested face), and a
+  // mid-session edit to the nested tsconfig matched nothing in the
+  // watcher. Disk truth is the assertion: the exclusion and the wrapper
+  // must survive the cached road exactly as the compiled road left them.
+  test('warm restart: a nested project\'s wrapper and the root exclusion survive a cached closure', async () => {
+    const NESTED_APP = 'import { answer } from "./pkg/util.rip"\nk = answer\nconsole.log k\n';
+    const ws = makeWorkspace({
+      'pkg/tsconfig.json': JSON.stringify({ compilerOptions: { strict: true } }, null, 2) + '\n',
+      'pkg/util.rip': UTIL,
+    });
+    const wrapperAt = path.join(ws, '.rip', 'editor', 'pkg', 'tsconfig.json');
+    const rootExclude = () => JSON.parse(fs.readFileSync(path.join(ws, '.rip', 'editor', 'tsconfig.json'), 'utf8')).exclude ?? [];
+    try {
+      await inSession(ws, async (api) => {
+        await api.open('app.rip', NESTED_APP);
+        await api.poll(() => fs.existsSync(wrapperAt), 'wrapper written on the compile road');
+        expect(rootExclude()).toContain('pkg/**');
+      });
+      // The cache is warm now. The second session reaches every nested
+      // face by cache-hit — and must land on the same disk truth.
+      await inSession(ws, async (api) => {
+        await api.open('app.rip', NESTED_APP);
+        await api.sleep(600); // let the cached closure settle
+        expect(fs.existsSync(wrapperAt), 'wrapper survives the cached road').toBe(true);
+        expect(rootExclude()).toContain('pkg/**');
+      });
+    } finally { fs.rmSync(ws, { recursive: true, force: true }); }
+  }, 60000);
+
+  test('warm restart: a wrapper whose project lost its tsconfig while the server was down is swept', async () => {
+    const NESTED_APP = 'import { answer } from "./pkg/util.rip"\nk = answer\nconsole.log k\n';
+    const ws = makeWorkspace({
+      'pkg/tsconfig.json': JSON.stringify({ compilerOptions: { strict: true } }, null, 2) + '\n',
+      'pkg/util.rip': UTIL,
+    });
+    const wrapperAt = path.join(ws, '.rip', 'editor', 'pkg', 'tsconfig.json');
+    try {
+      await inSession(ws, async (api) => {
+        await api.open('app.rip', NESTED_APP);
+        await api.poll(() => fs.existsSync(wrapperAt), 'wrapper written');
+      });
+      // The project dissolves while the server is down: its tsconfig
+      // goes, the source stays. A stale wrapper left behind would keep
+      // claiming the subtree's faces with a config extending nothing.
+      fs.rmSync(path.join(ws, 'pkg', 'tsconfig.json'));
+      await inSession(ws, async (api) => {
+        await api.open('app.rip', NESTED_APP);
+        await api.poll(() => !fs.existsSync(wrapperAt), 'stale wrapper swept');
+      });
+    } finally { fs.rmSync(ws, { recursive: true, force: true }); }
+  }, 60000);
+
+  // The wrapper road is under the same territory doctrine as the stub
+  // walk: writes stay inside `.rip/`. An out-of-workspace document is the
+  // shape that once escaped it — nearestTsconfig only stopped at the
+  // anchor when the walk PASSED THROUGH it, so a dir outside the
+  // workspace climbed to the filesystem root, found whatever
+  // tsconfig.json it met, and the '..'-prefixed rel walked the wrapper
+  // write out of the mirror — able to create or overwrite tsconfig.json
+  // and the host floor in directories the extension does not own.
+  test('territory: opening a .rip OUTSIDE the workspace writes nothing anywhere — and still serves', async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-outside-'));
+    const USER_TSCONFIG = '{\n  "compilerOptions": { "strict": true }\n}\n';
+    try {
+      // A user project ABOVE the workspace: its own tsconfig, its own file.
+      fs.writeFileSync(path.join(outside, 'tsconfig.json'), USER_TSCONFIG);
+      fs.writeFileSync(path.join(outside, 'lonely.rip'), 'x = 1\nconsole.log x\n');
+      fs.mkdirSync(path.join(outside, 'ws'));
+      await inSession(path.join(outside, 'ws'), async (api) => {
+        await api.openUri('file://' + path.join(outside, 'lonely.rip'), 'x = 1\nconsole.log x\n');
+        await api.sleep(800); // give a wrong wrapper write time to land
+        // The user's tsconfig survives byte-identical, their dir gains
+        // nothing, and the workspace's .rip/ holds only the mirror root.
+        expect(fs.readFileSync(path.join(outside, 'tsconfig.json'), 'utf8')).toBe(USER_TSCONFIG);
+        expect(fs.readdirSync(outside).sort()).toEqual(['lonely.rip', 'tsconfig.json', 'ws']);
+        const dotRip = path.join(outside, 'ws', '.rip');
+        if (fs.existsSync(dotRip)) expect(fs.readdirSync(dotRip)).toEqual(['editor']);
+        expect(fs.existsSync(path.join(outside, 'ws', 'tsconfig.json'))).toBe(false);
+      });
+    } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+  }, 30000);
+
+  test('candidacy is eager, confined, and declaration-only: startup stubs the workspace inside .rip/ and registers nothing', async () => {
+    await inWorkspace({ 'util.rip': UTIL, 'docs/readme.md': '# hands off\n' }, async (api) => {
+      await api.untilLog(/auto-import stubs:/);
+      // Territory: startup wrote inside `.rip/` and NOWHERE else — the
+      // user's tree holds exactly the fixture afterward.
+      const outside = [];
+      const walk = (dir) => {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (e.name === '.rip') continue;
+          if (e.isDirectory()) walk(path.join(dir, e.name));
+          else outside.push(path.relative(api.ws, path.join(dir, e.name)));
+        }
+      };
+      walk(api.ws);
+      expect(outside.sort()).toEqual(['docs/readme.md', 'util.rip']);
+      // Scan, never a compile: every line of the stub is a declaration —
+      // one compiled statement in these bytes and startup cost what the
+      // demand-driven closure exists to refuse.
+      const stub = fs.readFileSync(mirrorFileOf(api.ws, 'util.rip'), 'utf8');
+      expect(stub).toContain('export declare const answer: any;');
+      expect(isStub(stub)).toBe(true);
+      // Registered nowhere: the manifest that `pruneClosure` and
+      // `materializeClosure` both read has never heard of it, which is
+      // what lets the real face land over it later.
+      expect(fs.existsSync(path.join(api.ws, '.rip', 'editor', '.cache.json'))).toBe(false);
     });
   }, 30000);
 
@@ -384,7 +585,7 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
 
       api.close('app.rip');
       await api.poll(() => !fs.existsSync(mirrorFileOf(api.ws, 'app.rip')), 'closed buffer mirror pruned');
-      await api.poll(() => !fs.existsSync(mirrorFileOf(api.ws, 'util.rip')), 'exclusive import pruned');
+      await api.poll(() => noCompiledFace(api.ws, 'util.rip'), 'exclusive import pruned');
     });
   }, 30000);
 
@@ -395,7 +596,7 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
       expect(fs.existsSync(mirrorFileOf(api.ws, 'util.rip'))).toBe(true);
 
       await api.change('app.rip', 'k = 1\n'); // the import line is gone
-      await api.poll(() => !fs.existsSync(mirrorFileOf(api.ws, 'util.rip')), 'orphaned import pruned');
+      await api.poll(() => noCompiledFace(api.ws, 'util.rip'), 'orphaned import pruned');
       expect(fs.existsSync(mirrorFileOf(api.ws, 'app.rip'))).toBe(true); // the open buffer stays
     });
   }, 30000);
@@ -411,10 +612,10 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
       api.close('one.rip');
       await api.poll(() => !fs.existsSync(mirrorFileOf(api.ws, 'one.rip')), 'closed importer mirror pruned');
       await api.sleep(500); // give a wrong prune time to happen
-      expect(fs.existsSync(mirrorFileOf(api.ws, 'util.rip'))).toBe(true); // two.rip still imports it
+      expect(noCompiledFace(api.ws, 'util.rip')).toBe(false); // two.rip still imports it: the real face, not a stub
 
       api.close('two.rip');
-      await api.poll(() => !fs.existsSync(mirrorFileOf(api.ws, 'util.rip')), 'last importer gone → pruned');
+      await api.poll(() => noCompiledFace(api.ws, 'util.rip'), 'last importer gone → pruned');
     });
   }, 30000);
 

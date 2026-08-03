@@ -30,7 +30,7 @@ const INVENTORY = [
   { sig: "? 'await (async () => { throw ' : '(() => { throw '", count: 1,
     site: 'value-position throw',
     policy: 'await rides the async form; yield/return/bare break/continue reject via rejectYieldInIIFE' },
-  { sig: "this.b.emit('() => ');", count: 1,
+  { sig: "this.b.emit('(() => ');", count: 1,
     site: "computed ('~=') lowering",
     policy: 'the computed body rejects both yield and await with its own positioned errors (computeds evaluate synchronously)' },
   { sig: "this.b.emit('(() => { ');", count: 1,
@@ -102,7 +102,10 @@ const INVENTORY = [
   { sig: 'static MEMBER_IN = "((k, c) =>', count: 1,
     site: 'single-read membership helper',
     policy: 'emitter-owned helper receives source operands as evaluated call arguments; no source body or control transfer is embedded' },
-  { sig: 'builder.emit(` = (() => {\\n${unit.body}', count: 1,
+  { sig: "`${i > 0 ? ',' : ''} ${n}: function (this: ${selfType})", count: 1,
+    site: 'schema/component behavior object member (face only)',
+    policy: 'TS-only: re-states a body already emitted through computedBody, whose await/yield rejections govern both, and the region strips out of generated JavaScript' },
+  { sig: 'builder.emit(`(() => {\\n${unit.body}', count: 1,
     site: 'inline runtime unit wrapper',
     policy: 'wraps repository runtime text, not a source expression; the runtime unit has its own authored function contexts' },
 ];
@@ -218,14 +221,13 @@ const generated = (literal, count, policy) => ({ literal, count, kind: 'generate
 const excluded = (literal, count, reason) => ({ literal, count, kind: 'excluded', reason });
 
 const LITERAL_CLASSIFICATION = [
-  generated("'(() => '", 2, 'effect bodies reject yield and carry await on the async spelling'),
+  generated("'(() => '", 3, "effect bodies reject yield and carry await on the async spelling; the computed ('~=') lowering rejects both"),
   generated("'(() => { '", 4, 'value lowerings reject captured control; class fields reject await and yield'),
   generated("'(() => { throw '", 1, 'value throw rejects captured control'),
   generated("'(() => {\\n'", 2, 'comprehensions reject captured control'),
   generated("'((n, d) => { n = +n; d = +d; return (n % d + d) % d; })'", 1, 'helper receives evaluated operands as parameters'),
   generated("'((s, e) => Array.from({length: Math.abs(e - s) + 1}, (_, i) => s + (i * (s <= e ? 1 : -1))))'", 1, 'range helper receives evaluated endpoints as parameters'),
   generated("'((s, e) => Array.from({length: Math.max(0, Math.abs(e - s))}, (_, i) => s + (i * (s <= e ? 1 : -1))))'", 1, 'range helper receives evaluated endpoints as parameters'),
-  generated("'() => '", 1, 'computed body rejects await and yield'),
   generated("'(async () => '", 2, 'effect bodies carry source await on the async spelling'),
   generated("'await (async () => { '", 3, 'value lowerings carry source await and reject captured control'),
   generated("'await (async () => { throw '", 1, 'value throw carries source await and rejects captured control'),
@@ -236,7 +238,7 @@ const LITERAL_CLASSIFICATION = [
   excluded("'function*'", 1, 'source generator-function emission'),
   excluded("'=>'", 1, 'source fat-arrow emission'),
   generated(`"((k, c) => Array.isArray(c) || typeof c === 'string' ? c.includes(k) : k in c)"`, 1, 'helper receives evaluated operands as parameters'),
-  generated("` = (() => {\\n${…}\\nreturn { ${…} };\\n})();\\n`", 1, 'repository runtime text is wrapped, not a source expression'),
+  generated("`(() => {\\n${…}\\nreturn { ${…} };\\n})()`", 1, 'repository runtime text is wrapped, not a source expression'),
   generated("` = ${…}(() => `", 1, 'component computed body rejects await and yield'),
   generated("`((${…}) => ({`", 1, 'pick defaults reject await and yield before capture'),
   generated("`((${…}) => ${…} == null ? undefined : ({`", 1, 'optional pick defaults reject await and yield before capture'),
@@ -244,9 +246,9 @@ const LITERAL_CLASSIFICATION = [
   generated("') => { '", 1, 'binding write-back listener arrow tail; targets are covered by findRenderControl'),
   generated("`) => ${…}(() => (`", 1, 'child-component listener arrow tail; handler control is validated before emission'),
   generated("`) => ${…}(() => `", 1, 'element listener arrow tail; handler control is validated before emission'),
-  generated("`(this._refCleanups ??= []).push(() => ${…}(this.${…}, ${…}))`", 1, 'emitter-owned ref cleanup'),
+  generated("`(this._refCleanups ??= []).push(() => ${…}(this.`", 1, 'emitter-owned ref cleanup; the ref NAME emits after it, through the primitive channel that gives the read its own source span'),
   excluded("`) as (e: ${…}) => unknown`", 1, 'TypeScript function type (the typed event-handler cast), erased from generated JavaScript'),
-  excluded("`) satisfies () => ${…}`", 1, 'TypeScript function type, erased from generated JavaScript'),
+  excluded("`${…} ${…}: function (this: ${…}) ${…}`", 1, 'the face behavior object re-states a computed body already emitted through computedBody, whose await/yield rejections govern both; a TypeScript-only region, erased from generated JavaScript'),
   generated("`${…}  if (${…}._t) { ${…}(${…}._first, ${…}._t, 'leave', () => ${…}.d(true)); }\\n`", 1, 'emitter-owned transition callback'),
   generated("`${…}(() => { `", 1, 'render control is rejected before updater emission'),
   generated("`${…}(() => `", 1, 'emitter-owned render batch window'),
@@ -302,6 +304,9 @@ describe('generated-scope inventory', () => {
       }
     }
     expect(unknown).toEqual([]);
-    expect(categories).toEqual({ diagnostic: 36, semantic: 20, type: 25 });
+    // semantic 21: ctorAtFields' arrow-boundary propagation compares a
+    // node head against '=>' — whose `this` an assignment describes,
+    // not an emission of one.
+    expect(categories).toEqual({ diagnostic: 36, semantic: 21, type: 25 });
   });
 });

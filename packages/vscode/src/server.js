@@ -61,22 +61,25 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startTsgo } from './tsgo.js';
 import { buildProbe, parseProbeHover } from './pins.js';
-import { hashText, hashTree } from './hash.js';
+import { hashText, cacheIdentityOf } from './hash.js';
 import {
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, generatedSpanToSource,
   generatedEditSpanToSource, generatedInsertionToSource, insertionAboveAttachedDirectives,
-  isNocheckDirectiveRow, wholeImportLinesEdit, exactSpanMapper,
+  isNocheckDirectiveRow, wholeImportLinesEdit, importLineSpanEdit, exactSpanMapper,
   staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
+  noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
   SUPPRESSED_TS_CODES,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
-import { generatedMirror as buildGeneratedMirror, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
-// hashTree over the compiler tree (recursive — nested runtime/ fragments
-// included) is the cache key's compiler identity.
+// The cache key spans the compiler tree AND this server's own tree
+// (recursive — nested runtime/ fragments included): the manifest caches
+// faces the compiler built and closure edge lists THIS code derived, so
+// either tree changing has to purge it.
 async function loadCompiler() {
   const candidates = [
     new URL('../../../src/compile.js', import.meta.url),   // in-repo
@@ -84,7 +87,10 @@ async function loadCompiler() {
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(fileURLToPath(candidate))) {
-      compilerHash = hashTree(path.dirname(fileURLToPath(candidate)));
+      cacheIdentity = cacheIdentityOf(
+        path.dirname(fileURLToPath(candidate)),
+        path.dirname(fileURLToPath(import.meta.url)),
+      );
       return (await import(candidate.href)).compile;
     }
   }
@@ -124,7 +130,8 @@ let mirrorRootIsFallback = false; // temp-dir mirror root (workspace unwritable/
 let mirrorRootReady = false;     // lazily created on first materialization
 let clientSupportsWatchers = false;
 let clientSupportsConfiguration = false;
-let compilerHash = null;         // the compiler build's identity (cache keying)
+let clientInitialized = false;   // the initialize handshake has COMPLETED (onInitialized)
+let cacheIdentity = null;        // compiler build + server build (cache keying)
 
 // rip document uri → per-buffer state.
 const states = new Map();
@@ -138,8 +145,12 @@ const pendingImports = new Set();
 
 // The persistent face cache manifest (.cache.json at the mirror root):
 // absolute source path → { sourceHash, imports }. Valid only under the
-// manifest's recorded compilerHash — a compiler upgrade purges the tree.
-let cacheManifest = { compilerHash: null, entries: {} };
+// manifest's recorded cacheIdentity — a compiler OR server upgrade purges
+// the tree. The field is deliberately not the old `compilerHash` name:
+// a manifest written before the key widened carries no cacheIdentity,
+// mismatches on read, and purges — which is exactly right, since its
+// edge lists were derived by the narrower rule.
+let cacheManifest = { cacheIdentity: null, entries: {} };
 let manifestDirty = false;
 let manifestTimer = null;
 
@@ -225,29 +236,30 @@ function* walkFiles(dir, suffix) {
 }
 
 // Load the persistent cache: a manifest recorded under a DIFFERENT
-// compiler build invalidates the whole tree (every cached face was
-// produced by a compiler that no longer exists here). Read-only unless
-// a purge is due — a fresh session creates nothing.
+// build invalidates the whole tree — every cached face was produced by
+// a compiler that no longer exists here, and every recorded import list
+// by a closure walk that may no longer agree. Read-only unless a purge
+// is due — a fresh session creates nothing.
 function loadCache() {
   if (!mirrorRoot) {
-    cacheManifest = { compilerHash, entries: {} };
+    cacheManifest = { cacheIdentity, entries: {} };
     return;
   }
   try {
     const loaded = JSON.parse(fs.readFileSync(manifestPath(), 'utf8'));
-    if (loaded?.compilerHash === compilerHash && loaded.entries) {
+    if (loaded?.cacheIdentity === cacheIdentity && loaded.entries) {
       cacheManifest = loaded;
       return;
     }
-    // A manifest from another compiler build: purge the tree it keyed.
+    // A manifest from another build: purge the tree it keyed.
     for (const mirror of walkFiles(mirrorRoot, '.rip.ts')) {
       try { fs.rmSync(mirror); } catch { /* best effort */ }
     }
-    cacheManifest = { compilerHash, entries: {} };
+    cacheManifest = { cacheIdentity, entries: {} };
     scheduleManifestSave();
     return;
   } catch { /* absent or unreadable: start fresh, create nothing */ }
-  cacheManifest = { compilerHash, entries: {} };
+  cacheManifest = { cacheIdentity, entries: {} };
 }
 
 // JSONC → parseable JSON (comments stripped).
@@ -262,9 +274,75 @@ const userConfigChain = new Set();
 function generatedMirror() {
   return buildGeneratedMirror({
     workspaceRoot, mirrorRootIsFallback, chain: userConfigChain,
+    excludeDirs: [...wrapperDirs.keys()],
     onUnresolved: (spec) =>
       connection.console.log(`[rip] tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
   });
+}
+
+// Workspace-relative dirs that own a nested `tsconfig.json` and have a
+// generated wrapper mirroring them, each with its OWN source tsconfig
+// and resolved extends chain. tsgo assigns each face to its NEAREST
+// config, so these partition the mirror by project inside the one tree
+// and the one session; the root config excludes them so no face has two
+// owners. The chain is per-project — never the shared root set, whose
+// builder clears and refills it — so the watcher can match a mid-session
+// edit to a nested config (or any member of its chain) to the one
+// wrapper it re-governs.
+const wrapperDirs = new Map(); // rel → { sourceTsconfig, chain: Set }
+
+// Build and write one project wrapper (tsconfig + host floor) from its
+// source config, recording its chain. Returns the wrapper paths written.
+// Shared by first generation and by the watcher's re-govern — the same
+// files, the same builder, whichever event asks.
+function writeProjectWrapper(rel, sourceTsconfig) {
+  const wrapperDir = path.join(mirrorRoot, rel);
+  const chain = new Set();
+  const wrapper = projectWrapper({
+    wrapperDir, sourceTsconfig, chain,
+    onUnresolved: (spec) =>
+      connection.console.log(`[rip] ${rel}: tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
+  });
+  wrapperDirs.set(rel, { sourceTsconfig, chain });
+  fs.mkdirSync(wrapperDir, { recursive: true });
+  const written = [];
+  for (const [name, text] of [['tsconfig.json', JSON.stringify(wrapper.tsconfig, null, 2)], [HOST_FLOOR_NAME, wrapper.hostFloorDts]]) {
+    const at = path.join(wrapperDir, name);
+    ensureOwnedFile(at, text);
+    written.push(at);
+  }
+  return written;
+}
+
+// Give `fsPath`'s owning project its wrapper, if it has one and does not
+// yet. Returns the mirror paths written — a new wrapper also rewrites the
+// ROOT config (its exclusions grew), so callers forward all of them to
+// tsgo or the new project's files stay in the root's program.
+function ensureProjectWrapper(fsPath) {
+  if (mirrorRootIsFallback || !workspaceRoot || !mirrorRootReady) return [];
+  const owner = nearestTsconfig(path.dirname(fsPath), workspaceRoot);
+  if (owner === null || path.dirname(owner) === workspaceRoot) return [];
+  const rel = path.relative(workspaceRoot, path.dirname(owner));
+  // TERRITORY, belt and braces: a rel that is empty, absolute, or
+  // '..'-shaped would walk the wrapper write out of the mirror root —
+  // nearestTsconfig's anchor bound makes this unreachable today, but a
+  // wrapper is a WRITE, and no future rel construction gets to escape
+  // `.rip/editor` by accident. (The doctrine the disk-layer hygiene
+  // gates enforce: writes stay inside `.rip/`.)
+  if (rel === '' || path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) return [];
+  if (wrapperDirs.has(rel)) return [];
+  let written;
+  try {
+    written = writeProjectWrapper(rel, owner);
+  } catch (err) {
+    wrapperDirs.delete(rel);
+    connection.console.error(`[rip] wrapper for ${rel} not generated (${err.message}) — its files keep the root config`);
+    return [];
+  }
+  writeGeneratedTsconfig();
+  written.push(path.join(mirrorRoot, 'tsconfig.json'));
+  connection.console.log(`[rip] per-project tsconfig: ${rel} now extends its own config`);
+  return written;
 }
 
 // Idempotent: an unchanged file never rewrites (no spurious mtime for
@@ -398,6 +476,15 @@ const TSGO_CLIENT_CAPABILITIES = {
 async function tsgoConfigurationRequest(params) {
   const items = params?.items ?? [];
   if (!clientSupportsConfiguration) return items.map(() => null);
+  // The handshake window: tsgo boots INSIDE this server's own
+  // initialize handler and asks for configuration immediately, but the
+  // editor's languageclient installs its workspace/configuration
+  // handler only once the handshake completes — a forward before then
+  // bounces with "Unhandled method". Answer tsgo's boot-time asks with
+  // nulls directly (its own defaults, the same answer the bounce
+  // produced), and save the forward — and the failure log — for
+  // requests the editor can actually serve.
+  if (!clientInitialized) return items.map(() => null);
   try {
     return await connection.workspace.getConfiguration(
       items.map((item) => ({
@@ -473,6 +560,8 @@ function stateOf(uri) {
       lastCompletion: null,  // tsgo's raw items from the newest completion (resolve reads them)
       hoverEnrich: new Map(), // version-keyed evolving-any enrichment memo
       refreshTimer: null,
+      refreshRun: null,      // the debounced refresh body, so a flush runs THE SAME one
+      settling: null,        // resolves when the owed refresh has finished; null when nothing is owed
       pinCache: new Map(),   // Tier 3 pins: `${name}@${valueHash}` → type text | null (probed-and-rejected)
       probing: false,        // one probe round in flight per document
     };
@@ -553,6 +642,10 @@ function sourcePathOfMirror(mirrorFsPath) {
 // mirror can never pass revalidation). A compile failure leaves the
 // previous mirror in place (the last-compiled face serves — the
 // the staleness posture at project scale).
+// The enum names a compile declares, read off the binding inventory.
+const enumNamesOf = (result) =>
+  (result.bindings ?? []).filter((b) => b.kind === 'enum').map((b) => b.name);
+
 function mirrorFromDisk(fsPath, source) {
   faceCache.delete(fsPath);
   const result = compile(source, { path: fsPath, runtimeDelivery: 'inline', face: 'ts' });
@@ -560,7 +653,15 @@ function mirrorFromDisk(fsPath, source) {
   warnOnMirrorCollision(mirrorPath, fsPath);
   writeMirror(mirrorPath, result.code);
   const imports = ripImportsOf(result.stores, source, path.dirname(fsPath));
-  cacheManifest.entries[fsPath] = { sourceHash: hashText(source), codeHash: hashText(result.code), imports };
+  cacheManifest.entries[fsPath] = {
+    sourceHash: hashText(source), codeHash: hashText(result.code), imports,
+    // The names this module declares as enums — what an IMPORTER needs to
+    // color its own uses, and the one fact it cannot compute for itself.
+    // Cheap to carry (names, no spans) and invalidated with the entry; a
+    // manifest written before this field existed is purged wholesale by
+    // the cacheIdentity key, which a server change already moves.
+    enumNames: enumNamesOf(result),
+  };
   scheduleManifestSave();
   return { mirrorPath, imports };
 }
@@ -609,16 +710,33 @@ function materializeClosure(seeds) {
     const entry = cacheManifest.entries[file];
     if (entry && entry.sourceHash === sourceHash && mirrorIntact(file, entry)) {
       cached++;
+      // The cached road reconverges on the compile road's disk truth:
+      // wrapperDirs is per-SESSION memory over per-WORKSPACE disk, and a
+      // warm session that reached every nested face by cache hit never
+      // ensured a wrapper — the root config then regenerated without its
+      // exclusions and every nested face had two owners.
+      touched.push(...ensureProjectWrapper(file));
       queue.push(...entry.imports);
       continue;
     }
     try {
+      // Before the face is written, so the project it belongs to already
+      // exists when tsgo reads it.
+      touched.push(...ensureProjectWrapper(file));
       const { mirrorPath, imports } = mirrorFromDisk(file, source);
       compiled++;
       touched.push(mirrorPath);
       queue.push(...imports);
     } catch {
       failed++; // CompileError: the last-compiled mirror (if any) keeps serving
+      // A file with NO cache entry has no last-compiled face, so the only
+      // bytes on disk are its auto-import stub — which would answer `any`
+      // for every use and swallow the unresolved-module error the importer
+      // is owed. Candidacy must never buy silence: take the stub out.
+      if (!cacheManifest.entries[file]) {
+        const stale = mirrorPathOf('file://' + file);
+        try { fs.rmSync(stale); touched.push(stale); } catch { /* nothing there */ }
+      }
     }
   }
   return { compiled, cached, failed, touched };
@@ -654,11 +772,26 @@ function computeActiveClosure() {
 async function pruneClosure() {
   const active = computeActiveClosure();
   const removed = [];
+  // Mirrors overwritten with a stub rather than removed: the file left the
+  // CLOSURE but not the workspace, so its names stay auto-importable.
+  const restubbed = [];
+  // Decided here, WRITTEN below. The stub needs the file read and scanned,
+  // and doing that inside drop() put one synchronous read+scan+write on the
+  // message loop per pruned file — the cost the population pass yields
+  // against every 10 files, and a wide prune (closing a buffer whose
+  // closure is large) is exactly when there are many. Only the cheap tests
+  // run here; the work runs in a loop that can yield.
+  const maybeStub = [];
   const drop = (file) => {
     materializedMirrors.delete(file);
     faceCache.delete(file);
     delete cacheManifest.entries[file];
     const mirrorPath = mirrorPathOf('file://' + file);
+    if (workspaceRoot && file.startsWith(workspaceRoot + path.sep)
+        && fs.existsSync(mirrorPath) && fs.existsSync(file)) {
+      maybeStub.push({ file, mirrorPath });
+      return;
+    }
     try {
       fs.rmSync(mirrorPath);
       removed.push(mirrorPath);
@@ -673,13 +806,60 @@ async function pruneClosure() {
   for (const file of [...pendingImports]) {
     if (!active.has(file)) pendingImports.delete(file);
   }
-  if (!removed.length) return;
+  // A workspace source that still exports something keeps a
+  // declaration-only stub IN PLACE OF its compiled face — overwritten,
+  // never removed and rewritten. The distinction is the whole fix: any
+  // sequence that deletes the mirror first opens a window where the path
+  // does not exist, and tsgo drops the file from its auto-import index when
+  // it reads during that window. Driven, and the window is small enough to
+  // be a race rather than a rule — a 400 ms gap between the delete and the
+  // rewrite restored the candidate, 0 ms did not, which is exactly the
+  // shape of fix that works on this machine and fails on a slower one.
+  // Overwriting has no window: the file is a face, then it is a stub, and
+  // it is continuously present. Yields on the population pass's cadence,
+  // and finishes BEFORE the notify below, which is what the ordering needs.
+  let scanned = 0;
+  for (const { file, mirrorPath } of maybeStub) {
+    const stub = stubTextFor(file);
+    // Ownership re-checked in the SAME synchronous turn as the write —
+    // wantsStub's discipline, spelled out because the mirror exists
+    // here by construction. The yields on this loop let a refresh or a
+    // watcher event re-materialize the file mid-prune (the list above
+    // was decided before any of them ran), and a stale stub must never
+    // clobber a face the bookkeeping has since reclaimed.
+    if (documents.get('file://' + file) || materializedMirrors.has(file) ||
+        cacheManifest.entries[file] !== undefined) continue;
+    let kept = false;
+    if (stub !== null) {
+      try { writeMirror(mirrorPath, stub); restubbed.push(mirrorPath); kept = true; }
+      catch { /* candidacy is never worth a broken tree */ }
+    }
+    if (!kept) {
+      try { fs.rmSync(mirrorPath); removed.push(mirrorPath); } catch { /* already gone */ }
+    }
+    if (++scanned % 10 === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  if (!removed.length && !restubbed.length) return;
   scheduleManifestSave();
-  connection.console.log(`[rip] closure pruned: ${removed.length} mirror(s) left the program`);
+  connection.console.log(`[rip] closure pruned: ${removed.length + restubbed.length} mirror(s) left the program${restubbed.length ? ` (${restubbed.length} kept as auto-import stubs)` : ''}`);
+  // Re-stubbing does not undo the prune: the compiled FACE is gone and stays
+  // gone, and the stub sits in neither bookkeeping collection, so the closure
+  // is exactly as small as the prune made it. What it buys is candidacy —
+  // without it, accepting an import and then removing it takes that file out
+  // of auto-import for the rest of the session, curable only by a restart
+  // nobody would guess at. Any removed import does it.
+  //
+  // Two kinds of change, one batch. A removed mirror is Deleted; a mirror
+  // that became a stub is Changed — the file never left, so nothing has to
+  // be re-added to tsgo's index, which is what the delete-then-recreate
+  // sequences were fighting.
   await tsgoReady;
-  if (tsgo) {
+  if (tsgo && (removed.length || restubbed.length)) {
     tsgo.client.notify('workspace/didChangeWatchedFiles', {
-      changes: removed.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Deleted })),
+      changes: [
+        ...removed.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Deleted })),
+        ...restubbed.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Changed })),
+      ],
     });
   }
   repullOpenDocuments();
@@ -722,6 +902,201 @@ function sweepOrphanMirrors() {
   }
 }
 
+// ---- auto-import candidacy: the whole workspace, as stubs.
+//
+// The doctrine, RULED: faces are lazy, candidacy is eager. The
+// demand-driven closure keeps everything expensive — compiled faces,
+// tsgo program growth — behind an open buffer's demand; candidacy is
+// the one eager act, because a candidate written late is no candidate
+// at all. Its writes stay inside `.rip/editor`, its bytes come from a
+// scan and never a compile, and the disk-layer hygiene gates
+// (project-model.test.js) enforce exactly those edges.
+//
+// A candidate is offered only from tsgo's PROGRAM, and the program is the
+// open buffers' mirror closure — so a workspace `.rip` nothing has opened
+// or imported is not offered, which defeats auto-import's headline case.
+// Every such file therefore gets a declaration-only mirror: its exported
+// NAMES and nothing else, built from a source scan (mirror.js) rather
+// than a compile, because compiling the workspace is ~99% of the cost and
+// buys candidacy nothing — a stub and a full face yield the same
+// completion item and the same import edit.
+//
+// BYTES ONLY. A stub is written to disk and announced to tsgo, and is
+// deliberately absent from `materializedMirrors` and
+// `cacheManifest.entries`. Two things follow, and both are the point:
+//
+//   - `pruneClosure` iterates exactly those two collections, so a stub is
+//     invisible to it and survives with no exemption and no change there.
+//   - `materializeClosure` short-circuits on a REGISTERED mirror, so a
+//     registered stub would shadow the real face forever — hover
+//     answering `() => any`, go-to-definition empty, real type errors
+//     unraised. Unregistered, the first real import edge compiles the
+//     true face straight over the stub's bytes.
+//
+// Maintenance follows the same registration line: an edit to an
+// unopened CLOSURE member (bookkeeping-tracked) re-materializes the
+// full face through the watcher; an edit to a stub-backed bystander
+// re-derives the STUB in place — a one-file scan, never a compile — so
+// workspace churn maintains candidacy without growing the program. A
+// delete removes the mirror either way.
+//
+// A file that LEAVES the closure — its importer closed, its import line
+// removed — is re-stubbed by `pruneClosure` in the same pass that
+// deregisters it: overwritten in place (a delete-then-recreate opens a
+// window where tsgo drops the candidate), face one moment, stub the
+// next, continuously present and continuously a candidate. The stub
+// lands in neither bookkeeping collection, so the closure is exactly as
+// small as the prune made it.
+//
+// The cap bounds tsgo's memory, which is what the closure exists to hold.
+// Measured against the pinned tsgo over this repo's corpus, replicated:
+// 279 stubs cost +12.7 MiB of tsgo RSS, 1116 cost +36.7 MiB — sublinear,
+// with a marginal ~25 KiB per stub, so the cap is worth roughly +130 MiB
+// at its limit. Full faces for the same 279 files cost +147 MiB, which is
+// the cost the demand-driven closure was built to refuse.
+const STUB_FILE_CAP = 5000;
+const STUB_WALK_SKIP = new Set(['node_modules']);
+
+// Every `.rip` under the workspace, minus the trees no source lives in.
+// Dot-directories are skipped, which is also what keeps the walk out of
+// our own mirror root (.rip/editor). Yields between directories: this
+// runs on the message loop, and a wide workspace must not cost a
+// keystroke.
+async function workspaceRipFiles() {
+  const files = [];
+  const queue = [[workspaceRoot, 0]];
+  let seen = 0;
+  while (queue.length && files.length < STUB_FILE_CAP) {
+    const [dir, depth] = queue.pop();
+    if (depth > 32) continue;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    // Sorted, so the walk order — and therefore WHICH files make the cap
+    // in an over-cap workspace — is a property of the tree, not of
+    // readdir's platform-dependent ordering.
+    for (const entry of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.isDirectory()) {
+        if (entry.name.startsWith('.') || STUB_WALK_SKIP.has(entry.name)) continue;
+        queue.push([path.join(dir, entry.name), depth + 1]);
+      } else if (entry.name.endsWith('.rip')) {
+        files.push(path.join(dir, entry.name));
+      }
+    }
+    if (++seen % 25 === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  // No silent caps: a truncated walk must say so, or the missing
+  // candidates read as "the workspace was covered" to whoever debugs an
+  // auto-import that never offers.
+  if (files.length >= STUB_FILE_CAP) {
+    connection.console.log(
+      `[rip] auto-import stub walk capped at ${STUB_FILE_CAP} .rip files — the rest gain candidacy when opened or imported`,
+    );
+  }
+  return files;
+}
+
+// A file wants a stub only when nothing better already speaks for it. The
+// on-disk check is the load-bearing one: a real face must never be
+// overwritten by a stub, whoever wrote it.
+function wantsStub(file) {
+  if (documents.get('file://' + file)) return false;      // an open buffer owns its mirror
+  if (materializedMirrors.has(file)) return false;        // the closure owns it
+  if (cacheManifest.entries[file]) return false;
+  return !fs.existsSync(mirrorPathOf('file://' + file));
+}
+
+// One file's stub text, synchronously — the prune's re-stub path, which
+// must finish before its own notify goes out. Null when the file cannot be
+// read or exports nothing (no candidate to keep alive, so no mirror).
+//
+// The STAR TARGETS are scanned too, and that is not an optimization. A
+// barrel's `export * from './x.rip'` names live in the target, and
+// stubFacesFromScans resolves them by looking the target up in the map it
+// was handed — so a map of one file resolves nothing and the barrel comes
+// back carrying only the names it writes itself. The population pass never
+// sees this because it scans the whole workspace at once; only this path
+// builds a stub in isolation. Driven: a barrel re-stubbed after its import
+// was removed lost every pass-through name, so accepting an auto-import
+// through a barrel and then deleting it took that barrel out of candidacy
+// while the direct file stayed.
+function stubTextFor(file) {
+  const scans = new Map();
+  const queue = [file];
+  const seen = new Set();
+  while (queue.length) {
+    const at = queue.pop();
+    if (seen.has(at)) continue;                       // a star cycle closes here
+    seen.add(at);
+    let source;
+    try { source = fs.readFileSync(at, 'utf8'); } catch { continue; }
+    const scan = scanExportNames(source);
+    scans.set(at, scan);
+    for (const spec of scan.stars) {
+      if (spec.endsWith('.rip')) queue.push(path.resolve(path.dirname(at), spec));
+    }
+  }
+  const scan = scans.get(file);
+  if (!scan) return null;
+  if (!scan.values.length && !scan.types.length && !scan.stars.length && !scan.hasDefault) return null;
+  return stubFacesFromScans(scans).get(file) ?? null;
+}
+
+// Populate stubs for `candidates` (default: the whole workspace).
+// Backgrounded by every caller — candidacy is never allowed in front of a
+// diagnostic — and yields in SMALL batches, which is not a tuning knob but
+// a measured one: the pass runs on the message loop at the same moment
+// the first document is being refreshed, and over this repo's corpus the
+// batch size is the difference between +19 ms and +6 ms on the first
+// diagnostics (150 ms baseline). Coarse batches are cheaper for the pass
+// and more expensive for the user.
+async function populateAutoImportStubs(candidates = null) {
+  if (!compile || !workspaceRoot || mirrorRootIsFallback) return;
+  const t0 = performance.now();
+  const scans = new Map();
+  let read = 0;
+  for (const file of candidates ?? await workspaceRipFiles()) {
+    if (!wantsStub(file)) continue;
+    let source;
+    try { source = fs.readFileSync(file, 'utf8'); } catch { continue; }
+    scans.set(file, scanExportNames(source));
+    if (++read % 10 === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  // A file that exports NOTHING offers no candidate, so its stub is pure
+  // cost: bytes, a program entry, and a mirror where a reader expects none.
+  // It also matters on the re-stub path — a closed buffer that exports
+  // nothing must not acquire a mirror it never had.
+  for (const [file, scan] of [...scans]) {
+    if (!scan.values.length && !scan.types.length && !scan.stars.length && !scan.hasDefault) scans.delete(file);
+  }
+  if (!scans.size) return;
+  ensureMirrorRoot();   // deferred to here: a workspace with no .rip stays untouched
+  const written = [];
+  let done = 0;
+  for (const [file, text] of stubFacesFromScans(scans)) {
+    // Re-checked at the write, not only at the scan: the awaits above let
+    // a refresh materialize the real face in between, and the check and
+    // the write together are one synchronous turn.
+    if (!wantsStub(file)) continue;
+    try {
+      writeMirror(mirrorPathOf('file://' + file), text);
+      written.push(mirrorPathOf('file://' + file));
+    } catch { /* candidacy only — never fatal */ }
+    if (++done % 10 === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  if (!written.length) return;
+  connection.console.log(
+    `[rip] auto-import stubs: ${written.length} declaration-only mirror(s) in ${Math.round(performance.now() - t0)} ms`,
+  );
+  // tsgo does not notice a bare mid-session disk write. The Created batch
+  // is what puts these files in its program — driven, and decisive.
+  await tsgoReady;
+  if (tsgo) {
+    tsgo.client.notify('workspace/didChangeWatchedFiles', {
+      changes: written.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Created })),
+    });
+  }
+}
+
 // Startup: reconcile the persisted tree. Every cached entry revalidates
 // against the disk (source-hash compare AND mirror-byte verification —
 // recompile what changed while the server was down and anything a crash
@@ -749,14 +1124,45 @@ async function revalidateCache() {
       try { mirrorFromDisk(file, source); recompiled++; }
       catch { failedQuietly(file); }
     }
+    // Fresh or recompiled, the file's project needs its wrapper THIS
+    // session: wrapperDirs starts empty on every start, and the root
+    // config's exclusions are rebuilt from it.
+    ensureProjectWrapper(file);
     materializedMirrors.set(file, { sourceHash });
     // Keep the message loop responsive over large closures.
     if (++processed % 50 === 0) await new Promise((resolve) => setImmediate(resolve));
   }
+  // With wrapperDirs repopulated from every cached member, disk and
+  // memory reconcile in the other direction too: a wrapper left by a
+  // previous session whose project no longer earns one (its tsconfig
+  // deleted while the server was down, or its members gone from the
+  // cache) would keep claiming the subtree's faces with a config
+  // extending nothing. Nothing else removes wrapper files — the orphan
+  // sweep is faces-only by design.
+  sweepStaleWrappers();
   const ms = Math.round(performance.now() - t0);
   connection.console.log(
     `[rip] project cache: ${fresh} face(s) fresh, ${recompiled} recompiled, ${removed} removed in ${ms} ms`,
   );
+}
+
+// Remove generated wrapper files (tsconfig + host floor) in mirror
+// subdirectories that no current wrapper claims. Wrapper-file-only: the
+// faces beside them belong to the manifest and the orphan sweep.
+function sweepStaleWrappers() {
+  if (!mirrorRoot || mirrorRootIsFallback || !mirrorRootReady) return;
+  const removed = [];
+  for (const cfg of walkFiles(mirrorRoot, 'tsconfig.json')) {
+    const dir = path.dirname(cfg);
+    if (dir === mirrorRoot) continue; // the root config is not a wrapper
+    if (wrapperDirs.has(path.relative(mirrorRoot, dir))) continue;
+    for (const name of ['tsconfig.json', HOST_FLOOR_NAME]) {
+      try { fs.rmSync(path.join(dir, name)); removed.push(path.join(dir, name)); } catch { /* absent */ }
+    }
+  }
+  if (removed.length) {
+    connection.console.log(`[rip] stale wrapper sweep: ${removed.length} generated file(s) from projects no session member claims`);
+  }
 }
 
 function failedQuietly(file) {
@@ -830,6 +1236,7 @@ connection.onInitialize(async (params) => {
 });
 
 connection.onInitialized(async () => {
+  clientInitialized = true;
   if (clientSupportsWatchers) {
     connection.client.register(DidChangeWatchedFilesNotification.type, {
       watchers: [{ globPattern: '**/*.rip' }, { globPattern: '**/tsconfig.json' }, { globPattern: '**/package.json' }],
@@ -840,6 +1247,13 @@ connection.onInitialized(async () => {
   );
   await revalidateCache();
   repullOpenDocuments();
+  // Auto-import candidacy, and deliberately NOT awaited: it is a
+  // background convenience that must never sit in front of the first
+  // diagnostics. It runs AFTER revalidateCache so the orphan sweep — which
+  // deletes every manifest-less mirror, stubs included — has already run.
+  populateAutoImportStubs().catch(
+    (err) => connection.console.error(`[rip] auto-import stub population failed: ${err.stack ?? err}`),
+  );
 });
 
 const cleanupFallbackRoot = () => {
@@ -884,6 +1298,22 @@ function compileErrorDiagnostic(err, text, lineStarts) {
   };
 }
 
+// The rejections a TOLERANT compile carried instead of throwing, as LSP
+// diagnostics. Source-positioned already (parse and lex diagnostics are
+// offsets into the .rip text), so no face mapping is involved — which is
+// what lets them publish with tsgo dead or mid-restart.
+function ripParseDiagnostics(good) {
+  return (good.parseDiagnostics ?? []).map((d) => ({
+    severity: 1,
+    source: 'rip',
+    message: d.message,
+    range: {
+      start: offsetToPosition(good.srcLineStarts, d.start),
+      end: offsetToPosition(good.srcLineStarts, d.end),
+    },
+  }));
+}
+
 // mapTsDiagnostic / ripDirectiveLines / applyRipDirectives — the
 // diagnostic-mapping core — live in diagnostics.js (shared with the
 // batch `rip check`).
@@ -916,7 +1346,13 @@ async function repullDiagnostics(uri) {
     const m = mapTsDiagnostic(good, d);
     if (m) mapped.push(m);
   }
-  connection.sendDiagnostics({ uri, diagnostics: applyRipDirectives(good, mapped) });
+  // rip's own parse rejections ride in front here exactly as in the
+  // refresh publish: sendDiagnostics REPLACES the set per URI, and a
+  // tolerant compile satisfies every guard above (lastGood.source IS
+  // the incomplete buffer text) — so a re-pull without the prefix
+  // would wipe the incompleteness squiggle from a buffer that is
+  // still incomplete.
+  connection.sendDiagnostics({ uri, diagnostics: [...ripParseDiagnostics(good), ...applyRipDirectives(good, mapped)] });
 }
 
 function repullOpenDocuments(exceptUri = null) {
@@ -971,7 +1407,18 @@ async function refresh(document) {
     for (const [key, type] of state.pinCache) {
       if (type !== null) (pins ??= new Map()).set(key, type);
     }
-    result = compile(text, { path: document.uri, runtimeDelivery: 'inline', face: 'ts', pins, strict: state.strict });
+    // The OPEN BUFFER's face compile is tolerant: an incomplete buffer
+    // (a trailing dot, an open call) still yields a CURRENT face, with
+    // zero-width holes at the incompleteness, so completion and
+    // signature help map into the buffer being typed rather than the
+    // last good one. The rejections the compile carried instead of
+    // throwing publish below — tolerance is never acceptance. Disk-file
+    // closure compiles stay strict: a mirror is a statement about a
+    // file at rest, not a keystroke in flight. Parser holes and schema
+    // callable lines are recovery units. Other positioned rejections,
+    // including incomplete token bodies and schema directives, reach the
+    // catch below and ride the last good face.
+    result = compile(text, { path: document.uri, runtimeDelivery: 'inline', face: 'ts', pins, strict: state.strict, tolerant: true });
   } catch (err) {
     if (err?.name !== 'CompileError') throw err;
     // staleness: lastGood (and the overlay/mirror) stay as they are.
@@ -988,10 +1435,42 @@ async function refresh(document) {
     mappings: result.mappings,
     stores: result.stores,
     trivia: result.trivia,
+    // Parse/lex rejections the tolerant compile carried through —
+    // published beside the mapped TS diagnostics, so an incomplete
+    // buffer still says it is incomplete.
+    parseDiagnostics: result.parseDiagnostics ?? [],
     // Generated spans of `:=` state names — writable in rip though the face
     // binds their cell `const`. Semantic tokens clear TypeScript's `readonly`
     // on exactly these.
     mutables: result.mutables,
+    // Generated spans of every enum-name occurrence. The face's const
+    // object and its companion type alias merge into one symbol tsgo
+    // classifies `type`; the token names the construct the author
+    // declared.
+    enums: result.enums,
+    // Hoisted class-expression bindings whose declaration lost its
+    // initializer to the hoist split (see ripSemanticTokens).
+    classDecls: result.classDecls ?? [],
+    // The enum names this module declares — read by IMPORTERS, which
+    // cannot compute it from their own compile. An open buffer answers
+    // from here; a disk file from its manifest entry.
+    enumNames: enumNamesOf(result),
+    // Generated spans of references to imported names, each with its
+    // module — the editor resolves the specifier and asks that module
+    // what kind the name is (see ripSemanticTokens).
+    importedRefs: result.importedRefs ?? [],
+    dir: (() => { try { return path.dirname(fileURLToPath(document.uri)); } catch { return null; } })(),
+    // SOURCE spans the lowering owns whole — hover declines there rather
+    // than describing the machinery the face put in their place.
+    silent: noUserSymbolSpans(result),
+    // SOURCE spans of component member declaration names — where a hover
+    // answers in the author's vocabulary rather than the container the
+    // face declares (see `memberDeclKind`).
+    memberDecls: result.memberDecls ?? [],
+    // Generated spans of face-echo text (the behavior objects) — the
+    // diagnostic mapper drops non-exact-mapped diagnostics born there,
+    // the real copy's report being the one honest squiggle.
+    echoSpans: result.echoSpans ?? [],
     srcLineStarts,
     genLineStarts: lineStartsOf(result.code),
     strict: state.strict === true, // rides the compile it governed
@@ -1001,11 +1480,17 @@ async function refresh(document) {
   // tree (unopened importers resolve against it) and what this file
   // serves from after its buffer closes. The open buffer's overlay
   // below takes precedence over these bytes while the doc is open.
-  try {
-    warnOnMirrorCollision(state.mirrorPath, document.uri);
-    writeMirror(state.mirrorPath, result.code);
-  } catch (err) {
-    connection.console.error(`[rip] mirror write failed: ${err.message}`);
+  // A RECOVERED face never lands here: the mirror is what IMPORTERS
+  // resolve against, and a face with holes is a keystroke in flight,
+  // not a statement about the module — during incompleteness the disk
+  // keeps the last good face, exactly as it did when the compile threw.
+  if (good.parseDiagnostics.length === 0) {
+    try {
+      warnOnMirrorCollision(state.mirrorPath, document.uri);
+      writeMirror(state.mirrorPath, result.code);
+    } catch (err) {
+      connection.console.error(`[rip] mirror write failed: ${err.message}`);
+    }
   }
 
   // The demand-driven closure: this buffer's .rip imports (from the
@@ -1019,8 +1504,31 @@ async function refresh(document) {
       const imports = ripImportsOf(result.stores, text, path.dirname(fsPath));
       const previous = state.imports ?? [];
       state.imports = imports;
-      cacheManifest.entries[fsPath] = { sourceHash: hashText(text), codeHash: hashText(result.code), imports };
-      scheduleManifestSave();
+      // The entry describes the bytes ON DISK, so it is gated exactly as
+      // the mirror write above: a RECOVERED face's codeHash would name
+      // holed bytes the mirror does not hold, and its sourceHash would
+      // persist a keystroke in flight — mirrorIntact would then fail for
+      // a mirror that is perfectly good. During incompleteness the
+      // previous entry stands, describing the last good face the disk
+      // still serves. (The closure work below still runs: a tolerant
+      // face's imports are real, and completion inside the incomplete
+      // buffer needs them materialized.)
+      if (good.parseDiagnostics.length === 0) {
+        cacheManifest.entries[fsPath] = {
+          sourceHash: hashText(text), codeHash: hashText(result.code), imports,
+          // An open buffer answers importers from its own last-good compile;
+          // the entry has to carry the names too, or closing this buffer
+          // leaves importers uncorrected until the file next changes.
+          enumNames: enumNamesOf(result),
+        };
+        scheduleManifestSave();
+      }
+      const wrapperFiles = ensureProjectWrapper(fsPath);
+      if (wrapperFiles.length && tsgo) {
+        tsgo.client.notify('workspace/didChangeWatchedFiles', {
+          changes: wrapperFiles.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Changed })),
+        });
+      }
       const { compiled, cached, failed } = materializeClosure(imports);
       if (compiled || cached || failed) {
         connection.console.log(
@@ -1035,9 +1543,10 @@ async function refresh(document) {
 
   await tsgoReady;
   if (!tsgo) {
-    // No TS server: Rip parse diagnostics alone (none — the buffer compiled).
+    // No TS server: Rip's own diagnostics alone — empty on a clean
+    // compile, the carried rejections on a tolerant one.
     state.lastGood = good;
-    connection.sendDiagnostics({ uri: document.uri, diagnostics: [] });
+    connection.sendDiagnostics({ uri: document.uri, diagnostics: ripParseDiagnostics(good) });
     return;
   }
 
@@ -1059,6 +1568,14 @@ async function refresh(document) {
   // before any subsequent hover, so a hover can never pair the new
   // mapping table with the previous virtual-doc text.
   state.lastGood = good;
+
+  // An INCOMPLETE buffer's own rejections publish NOW, ahead of the TS
+  // pull — they depend on nothing but the compile, so they must not wait
+  // on (or die with) tsgo. The pull below re-publishes them merged with
+  // the mapped TS set.
+  if (good.parseDiagnostics.length > 0) {
+    connection.sendDiagnostics({ uri: document.uri, diagnostics: ripParseDiagnostics(good) });
+  }
 
   // rip.noCheck: the file stays in the program — imports resolve,
   // exported types flow to typed consumers — but its OWN diagnostics
@@ -1091,7 +1608,13 @@ async function refresh(document) {
       connection.console.log(`[rip] dropped unmappable TS diagnostic ${d.code}: ${d.message}`);
     }
   }
-  connection.sendDiagnostics({ uri: document.uri, diagnostics: applyRipDirectives(state.lastGood, mapped) });
+  // rip's own parse rejections ride in front of the mapped TS set — a
+  // tolerant compile carried them instead of throwing, and the buffer
+  // must still read as incomplete.
+  connection.sendDiagnostics({
+    uri: document.uri,
+    diagnostics: [...ripParseDiagnostics(state.lastGood), ...applyRipDirectives(state.lastGood, mapped)],
+  });
 
   // This buffer's new face can change what OTHER open buffers see
   // (cross-file type flow); their diagnostics re-pull without recompiling.
@@ -1156,9 +1679,50 @@ function scheduleRefresh(document) {
   const state = stateOf(document.uri);
   // Keystroke coalescing; compiles are fast but tsgo round-trips add up.
   clearTimeout(state.refreshTimer);
-  state.refreshTimer = setTimeout(() => {
-    refresh(document).catch((err) => connection.console.error(`[rip] refresh failed: ${err.stack ?? err}`));
-  }, 100);
+  // The pending work is made AWAITABLE, because a debounce is invisible
+  // to a request that arrives inside it: completion and signature help
+  // answer from `lastGood`, and for 100ms after a keystroke that is the
+  // face of the PREVIOUS text. Retyping a member dot is the case that
+  // shows it — the buffer without the dot compiles clean, so `lastGood`
+  // has plain statement context there and the popup serves the whole
+  // global scope instead of the receiver's members. Recompiling locally
+  // would not fix it: tsgo holds the face text, so an answer has to come
+  // from a face tsgo has actually been given. Hence flush-and-await
+  // rather than compile-on-demand.
+  //
+  // The body is held so a FLUSH can run the very same one. Clearing the
+  // timer and running a separate refresh would strand this promise
+  // unresolved, and a second request already awaiting it would never be
+  // answered — one flusher and one waiter is the ordinary case, because
+  // an editor fires completion and signature help on the same keystroke.
+  let done;
+  const settled = new Promise((resolve) => { done = resolve; });
+  state.refreshRun = async () => {
+    state.refreshTimer = null;
+    try { await refresh(document); }
+    catch (err) { connection.console.error(`[rip] refresh failed: ${err.stack ?? err}`); }
+    finally { if (state.settling === settled) state.settling = null; done(); }
+  };
+  state.refreshTimer = setTimeout(() => state.refreshRun(), 100);
+  state.settling = settled;
+}
+
+// Await whatever refresh this document owes before reading its face.
+// A request that arrives with the buffer already settled pays nothing:
+// no timer, no pending refresh, and `lastGood` is current by definition.
+async function settleDocument(uri) {
+  const state = states.get(uri);
+  if (!state) return;
+  // Two ways to be behind: the debounce has not fired (flush it — the user
+  // has stopped typing long enough to ask a question), or it fired and the
+  // refresh is still in flight. Both end at the SAME promise, so any number
+  // of concurrent requests share one refresh and all of them are answered.
+  if (state.refreshTimer) {
+    clearTimeout(state.refreshTimer);
+    state.refreshTimer = null;
+    state.refreshRun?.();
+  }
+  if (state.settling) await state.settling;
 }
 
 documents.onDidChangeContent(({ document }) => scheduleRefresh(document));
@@ -1194,10 +1758,12 @@ documents.onDidClose(({ document }) => {
 // (renames arrive as delete+create pairs) — a created file some importer
 // was waiting on (pendingImports) pulls its subtree into the program; a
 // change to a materialized file recompiles it; anything outside the
-// closure is ignored (demand-driven — the program never grows from
-// unrelated workspace churn). A workspace tsconfig.json change
-// regenerates the mirror config. Everything forwards to tsgo as
-// mirror-file events (tsgo invalidates on didChangeWatchedFiles), then every open document's
+// closure at most refreshes its auto-import STUB, a one-file scan
+// (demand-driven — the program never grows and nothing compiles from
+// unrelated workspace churn). A tsconfig.json change — the workspace's,
+// a chain member's, or a nested project's — regenerates the mirror
+// configs. Everything forwards to tsgo as mirror-file events (tsgo
+// invalidates on didChangeWatchedFiles), then every open document's
 // diagnostics re-pull.
 connection.onDidChangeWatchedFiles(async ({ changes }) => {
   if (!compile || !mirrorRoot) return;
@@ -1210,10 +1776,16 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
     try { fsPath = fileURLToPath(change.uri); } catch { continue; }
     if (fsPath.startsWith(mirrorRoot + path.sep)) continue; // our own writes
     if (path.basename(fsPath) === 'tsconfig.json') {
-      // The workspace's own tsconfig, or any tsconfig.json in its
-      // resolved extends chain, re-governs. (Chain members not named
-      // tsconfig.json are outside the watch glob — recorded limitation.)
-      if (workspaceRoot && (fsPath === path.join(workspaceRoot, 'tsconfig.json') || userConfigChain.has(fsPath))) {
+      // The workspace's own tsconfig, any tsconfig.json in its resolved
+      // extends chain, or a NESTED project's config (or chain member) —
+      // each re-governs. Nested configs match through the per-project
+      // chains; the shared root set never holds them, its builder
+      // clears and refills it. (Chain members not named tsconfig.json
+      // are outside the watch glob — recorded limitation.)
+      const nested = [...wrapperDirs.values()].some(
+        (m) => fsPath === m.sourceTsconfig || m.chain.has(fsPath),
+      );
+      if (workspaceRoot && (fsPath === path.join(workspaceRoot, 'tsconfig.json') || userConfigChain.has(fsPath) || nested)) {
         configChanged = true;
         forward.push({ uri: change.uri, type: change.type }); // tsgo re-reads the extends chain
       }
@@ -1242,30 +1814,77 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
     if (!fsPath.endsWith('.rip')) continue;
     if (documents.get(change.uri)) continue; // open buffers own their mirrors
     const mirrorPath = mirrorPathOf(change.uri);
+    // Closure membership is the BOOKKEEPING, never the disk: every real
+    // face is manifest-tracked (revalidateCache seeds materializedMirrors
+    // from the manifest; the orphan sweep removes anything unmanifested),
+    // so a mirror on disk outside these three sets is an auto-import
+    // STUB. Asking the disk instead made every stubbed workspace file
+    // pass as in-closure, and any bystander churn — a branch switch — a
+    // chain of synchronous full compiles.
+    const inClosure = materializedMirrors.has(fsPath) || pendingImports.has(fsPath) ||
+      cacheManifest.entries[fsPath] !== undefined;
     if (change.type === FileChangeType.Deleted) {
       materializedMirrors.delete(fsPath);
       faceCache.delete(fsPath);
       delete cacheManifest.entries[fsPath];
       scheduleManifestSave();
       // Importers that still name it get their TS2307 back; if the file
-      // returns, the Created event pulls it back into the program.
-      pendingImports.add(fsPath);
+      // returns, the Created event pulls it back into the program. A
+      // stub-only file has no importers by construction, so it joins no
+      // pending set — a mass delete must not grow one.
+      if (inClosure) pendingImports.add(fsPath);
       try {
         fs.rmSync(mirrorPath);
         forward.push({ uri: 'file://' + mirrorPath, type: FileChangeType.Deleted });
       } catch { /* no mirror to remove */ }
     } else {
-      const inClosure = materializedMirrors.has(fsPath) || pendingImports.has(fsPath) || fs.existsSync(mirrorPath);
-      if (!inClosure) continue;
+      if (!inClosure) {
+        if (!fs.existsSync(mirrorPath)) {
+          // No mirror at all: a `.rip` CREATED this session. The startup
+          // pass never saw it, and a file you just wrote is exactly the
+          // one you are about to want to import, so it gets its stub now.
+          // Backgrounded; a no-op for anything already spoken for.
+          populateAutoImportStubs([fsPath]).catch(
+            (err) => connection.console.error(`[rip] auto-import stub for a new file failed: ${err.stack ?? err}`),
+          );
+          continue;
+        }
+        // A STUB-backed bystander changed: re-derive the declaration-only
+        // stub in place — a one-file scan, never a compile of its
+        // transitive closure. The demand-driven invariant holds: the
+        // program grows by imports and opens, not by disk churn. A file
+        // that stopped exporting loses its stub (a stub with no
+        // candidates is pure cost — the population pass's own rule).
+        try {
+          const text = stubTextFor(fsPath);
+          if (text === null) {
+            fs.rmSync(mirrorPath);
+            forward.push({ uri: 'file://' + mirrorPath, type: FileChangeType.Deleted });
+          } else {
+            writeMirror(mirrorPath, text);
+            forward.push({ uri: 'file://' + mirrorPath, type: FileChangeType.Changed });
+          }
+        } catch { /* candidacy only — never fatal */ }
+        continue;
+      }
       const existed = fs.existsSync(mirrorPath);
       materializedMirrors.delete(fsPath); // force the re-read/recompile
       const { touched } = materializeClosure([fsPath]);
       for (const p of touched) {
+        // A path materialization TOUCHED can also be one it removed — a
+        // compile failure takes out the auto-import stub that would
+        // otherwise answer `any` in the real face's place — so the event
+        // follows what is on disk now.
         forward.push({
           uri: 'file://' + p,
-          type: p === mirrorPath && existed ? FileChangeType.Changed : FileChangeType.Created,
+          type: !fs.existsSync(p) ? FileChangeType.Deleted
+            : (p === mirrorPath && existed ? FileChangeType.Changed : FileChangeType.Created),
         });
       }
+      // Never two compiles back-to-back without yielding: an event
+      // batch touching N closure members must not block the message
+      // loop for N materializations.
+      await new Promise((resolve) => setImmediate(resolve));
     }
   }
   if (configChanged && mirrorRootReady) {
@@ -1277,6 +1896,20 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
     writeGeneratedTsconfig();
     forward.push({ uri: 'file://' + path.join(mirrorRoot, 'tsconfig.json'), type: FileChangeType.Changed });
     forward.push({ uri: 'file://' + path.join(mirrorRoot, HOST_FLOOR_NAME), type: FileChangeType.Changed });
+    // Every project wrapper regenerates on the same trigger: a nested
+    // tsconfig edit re-governs its own wrapper, and a package.json edit
+    // can flip any project's host floor (rip.strict is read per
+    // project). Config events are rare and the writes are idempotent,
+    // so regenerating all of them beats attributing the edit to one.
+    for (const [rel, meta] of wrapperDirs) {
+      try {
+        for (const p of writeProjectWrapper(rel, meta.sourceTsconfig)) {
+          forward.push({ uri: 'file://' + p, type: FileChangeType.Changed });
+        }
+      } catch (err) {
+        connection.console.error(`[rip] wrapper for ${rel} not regenerated (${err.message}) — it keeps its previous config`);
+      }
+    }
   }
   if (refreshAllForConfig) {
     // A package.json#rip edit re-governs every open doc's presentation
@@ -1526,7 +2159,14 @@ function reorderUnionHover(ctx, contents) {
 // type and the hover shows it back; whether it is a GOOD annotation is the
 // author's business. The editor's job is to be honest about what the source
 // says, not to second-guess it.
-function presentReactiveCellHover(contents) {
+// A component MEMBER declaration takes the same presentation for the same
+// reason — the author declared `people := []` and reads it as an array —
+// but only AT ITS DECLARATION. `atMemberDecl` says the request landed
+// there; at every other position the member's container is real (a
+// consumer holding an instance writes `inst.people.value`) and passes
+// through untouched. The two positions resolve to the same face symbol,
+// so the compiler's own record is what tells them apart.
+function presentReactiveCellHover(contents, atMemberDecl = false) {
   const value = contents?.value;
   if (typeof value !== 'string') return null;
   const fence = /(```(?:typescript|ts)\n)([^]*?)(\n?```)/.exec(value);
@@ -1534,14 +2174,23 @@ function presentReactiveCellHover(contents) {
   // tsgo renders object types with internal line breaks / run-on
   // spaces and a trailing `;` — normalize before matching.
   const flat = fence[2].replace(/\s+/g, ' ').trim();
-  const m = /^(const|let) ([A-Za-z_$][\w$]*): \{ (readonly )?value: (.+); read\(\): (.+?);? \}$/.exec(flat);
+  // The member arm's qualifier is whatever TypeScript prints before the
+  // final dot, NOT an identifier: a GENERIC component's containing type
+  // arrives with its parameter list (`Palette<TShade extends string>`),
+  // and anything narrower silently leaves the container standing on every
+  // generic component. The greedy run cannot swallow the type, which is
+  // anchored behind `: { … value: `.
+  const m = /^(?:(const|let) ([A-Za-z_$][\w$]*)|\(property\) ((?:.+\.)?[A-Za-z_$][\w$]*)): \{ (readonly )?value: (.+); read\(\): (.+?);? \}$/.exec(flat);
   if (!m) return null;
-  const [, , name, ro, t, readT] = m;
+  const [, , plain, qualified, ro, t, readT] = m;
+  const member = qualified !== undefined;
+  if (member && !atMemberDecl) return null;
   // depth guard: the `;` split above is greedy on `t` — verify T and
   // read()'s return agree after the same normalization (the brand
   // shape), else pass through.
   if (t.trim() !== readT.trim()) return null;
-  const reworded = value.replace(fence[0], `${fence[1]}${ro ? 'const' : 'let'} ${name}: ${t.trim()}${fence[3]}`);
+  const head = member ? `(property) ${qualified}` : `${ro ? 'const' : 'let'} ${plain}`;
+  const reworded = value.replace(fence[0], `${fence[1]}${head}: ${t.trim()}${fence[3]}`);
   return { ...contents, value: reworded };
 }
 
@@ -1583,8 +2232,18 @@ async function enrichEvolvingAnyHover(ctx, hover) {
 
 connection.onHover(async (params) => {
   await tsgoReady;
+  // Position-identifying surfaces (definition, references) survive a stale
+  // face because staleOffsetMap re-aligns coordinates. A TYPE cannot be
+  // re-aligned: change a binding's annotation and hover inside the debounce
+  // and the old type is simply the wrong answer. So hover settles too.
+  await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx || ctx.genPosition === null) return null;
+  // A position the lowering owns whole answers nothing. tsgo would
+  // describe the minted symbol its own emission put there — truthfully,
+  // and about something the user never wrote.
+  if (inNoUserSymbolSpan(ctx.good.silent ?? [], ctx.offset)) return null;
+  const memberDecl = memberDeclKind(ctx.good.memberDecls ?? [], ctx.offset);
 
   const hover = await tsgoRequest('textDocument/hover', {
     textDocument: { uri: ctx.state.tsUri },
@@ -1594,7 +2253,7 @@ connection.onHover(async (params) => {
 
   let contents = (await enrichEvolvingAnyHover(ctx, hover)) ?? hover.contents;
   contents = reorderUnionHover(ctx, contents) ?? contents;
-  contents = presentReactiveCellHover(contents) ?? contents;
+  contents = presentReactiveCellHover(contents, memberDecl === 'value') ?? contents;
 
   // The response range travels the reverse path: generated → last-good
   // source → current buffer. If it does not survive both hops intact,
@@ -1712,6 +2371,14 @@ function faceEditToSourceEdit(face, edit) {
       if (whole) ({ span, newText } = whole);
     }
   }
+  // Either path may have refused an edit that is really a change to ONE
+  // import statement — the face's clause is not always the author's, so the
+  // bytes tsgo rewrites can be generated-only. Widen to a whole-line rewrite
+  // of that statement: a span the user CAN see, carrying the same guards.
+  if (!span) {
+    const widened = importLineSpanEdit(face, s, e, edit.newText);
+    if (widened) ({ span, newText } = widened);
+  }
   if (!span) return null;
   return {
     range: {
@@ -1770,6 +2437,10 @@ function ripCompletionItem(ctx, raw, index) {
 
 connection.onCompletion(async (params) => {
   await tsgoReady;
+  // The buffer being typed is the whole point of these two
+  // surfaces, so they wait for it rather than answering about the
+  // text of 100ms ago.
+  await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return null;
   const genCursor = ctx.genCursor ?? ctx.genExact;
@@ -1822,6 +2493,10 @@ connection.onCompletionResolve(async (item) => {
 // overload list itself).
 connection.onSignatureHelp(async (params) => {
   await tsgoReady;
+  // The buffer being typed is the whole point of these two
+  // surfaces, so they wait for it rather than answering about the
+  // text of 100ms ago.
+  await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return null;
   const genCursor = ctx.genCursor ?? ctx.genExact;
@@ -1862,6 +2537,22 @@ connection.onSignatureHelp(async (params) => {
 // generated span of each state name (`mutables`), and the bit is cleared there
 // and nowhere else — `=!`, `~=` and `~>` also emit `const` and really ARE
 // immutable, so they keep it.
+// Does the module `specifier` names, resolved from `fromDir`, declare
+// `name` as an enum? An OPEN buffer answers from its own last-good
+// compile; a disk file from its manifest entry, which the closure fills
+// as it materializes and which is invalidated with the file's source
+// hash. Unknown (not in the closure, or unreadable) answers no — a
+// missing correction leaves TypeScript's own answer, which is the
+// conservative direction.
+function declaresEnum(fromDir, specifier, name) {
+  if (fromDir === null || !specifier.endsWith('.rip')) return false;
+  if (!specifier.startsWith('./') && !specifier.startsWith('../')) return false;
+  const abs = path.resolve(fromDir, specifier);
+  const open = states.get('file://' + abs);
+  if (open?.lastGood?.enumNames) return open.lastGood.enumNames.includes(name);
+  return (cacheManifest.entries[abs]?.enumNames ?? []).includes(name);
+}
+
 function ripSemanticTokens(ctx, data) {
   const mapSpan = exactSpanMapper(ctx.good.mappings);
   const roIndex = semanticTokensLegend?.tokenModifiers?.indexOf('readonly') ?? -1;
@@ -1871,6 +2562,29 @@ function ripSemanticTokens(ctx, data) {
   // than a scan of every span for every token on a surface that fires on each
   // edit.
   const mutableStarts = new Set((ctx.good.mutables ?? []).map(([s]) => s));
+  // Same keying, the other correction: an enum name's TYPE, not a
+  // modifier bit. -1 when the client's legend omits `enum`, and then the
+  // rewrite is skipped rather than pointed at some other type's index.
+  const enumType = semanticTokensLegend?.tokenTypes?.indexOf('enum') ?? -1;
+  const enumStarts = new Set((ctx.good.enums ?? []).map(([s]) => s));
+  // The third correction of the same shape: TypeScript classifies a binding
+  // from its DECLARATION's initializer, so `let Shape = class {…}` colors
+  // `class` on its own and reports nothing here — but a forward reference
+  // splits the declaration from the class expression, and `let Box;` is a
+  // variable as far as tsgo can see. -1 when the client's legend omits
+  // `class`, and then the rewrite is skipped rather than pointed at some
+  // other type's index, exactly as the enum correction does.
+  const classType = semanticTokensLegend?.tokenTypes?.indexOf('class') ?? -1;
+  const classStarts = new Set((ctx.good.classDecls ?? []).map(([s]) => s));
+  // An IMPORTED enum carries the same merged-symbol `type` classification
+  // its declaration does, and the importing file's compile cannot know
+  // that — the kind lives in the declaring module. The compiler reports
+  // which references are imports and from where; the module answers.
+  // Only `./`-relative `.rip` specifiers resolve, matching the closure's
+  // own rule (mirror.js): a package import is TypeScript's to classify.
+  for (const [genStart, , importedName, specifier] of (ctx.good.importedRefs ?? [])) {
+    if (declaresEnum(ctx.good.dir, specifier, importedName)) enumStarts.add(genStart);
+  }
   const tokens = new Map(); // start → { start, length, type, modifiers }
   let line = 0, char = 0;
   for (let i = 0; i + 4 < data.length; i += 5) {
@@ -1889,12 +2603,23 @@ function ripSemanticTokens(ctx, data) {
     // of the same name would put the bit straight back.
     let modifiers = data[i + 4];
     if (roBit && mutableStarts.has(genStart)) modifiers &= ~roBit;
+    // An enum name carries the merged symbol's `readonly` too, off the
+    // `const` object half. The construct is a declaration, not a
+    // binding whose mutability is at issue, so the corrected token
+    // drops it with the type — TypeScript's own enum tokens carry
+    // neither.
+    let type = data[i + 3];
+    if (enumType >= 0 && enumStarts.has(genStart)) {
+      type = enumType;
+      modifiers &= ~roBit;
+    }
+    if (classType >= 0 && classStarts.has(genStart)) type = classType;
     const key = curStart * 0x100000 + length;
     const existing = tokens.get(key);
-    if (existing && existing.type === data[i + 3]) {
+    if (existing && existing.type === type) {
       existing.modifiers |= modifiers;
     } else if (!existing) {
-      tokens.set(key, { start: curStart, length, type: data[i + 3], modifiers });
+      tokens.set(key, { start: curStart, length, type, modifiers });
     }
   }
   const builder = new SemanticTokensBuilder();
@@ -1907,6 +2632,12 @@ function ripSemanticTokens(ctx, data) {
 
 connection.languages.semanticTokens.on(async (params) => {
   await tsgoReady;
+  // Tokens settle like hover does, but for a harsher reason: the editor
+  // CACHES a token answer and only re-asks on an edit or a server-pushed
+  // refresh (we push none). An answer from before the first compile is
+  // `{data: []}`, and identifiers have no TextMate fallback — the file
+  // would sit uncolored until something else forces a re-request.
+  await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return { data: [] };
   const result = await tsgoRequest('textDocument/semanticTokens/full', {
@@ -1918,6 +2649,8 @@ connection.languages.semanticTokens.on(async (params) => {
 
 connection.languages.semanticTokens.onRange(async (params) => {
   await tsgoReady;
+  // Same settle as the full request: a range answer is cached the same way.
+  await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return { data: [] };
   // Hoisting reorders: a Rip range's tokens live at SCATTERED generated
@@ -2123,7 +2856,29 @@ connection.onWorkspaceSymbol(async (params) => {
 // generated manifestations of the IDENTICAL source span, so their
 // mapped edits coincide — coincident spans with identical newText
 // collapse to one edit, and any remaining overlap refuses loudly.
-function mapWorkspaceEditToRip(edit) {
+// Strictly-before, on LSP positions.
+const beforePosition = (a, b) => a.line < b.line || (a.line === b.line && a.character < b.character);
+
+// The earliest point a tolerant compile marked incomplete, as an LSP
+// position — or null when the face is a clean compile. Everything from
+// here to end of buffer is what the user is still typing; everything
+// before it is settled text an edit may touch.
+function earliestIncompleteness(face) {
+  let at = null;
+  for (const d of face.parseDiagnostics ?? []) {
+    if (at === null || d.start < at) at = d.start;
+  }
+  return at === null ? null : offsetToPosition(face.srcLineStarts, at);
+}
+
+// `atomic` (the default) is the RENAME contract: every participating
+// buffer must be settled, because a rename is one refactor spread across
+// files and a partial apply is worse than none — a buffer mid-keystroke
+// cannot promise its occurrences are the ones the user means. A quick fix
+// is the opposite shape: one local insertion, whose only requirement is
+// that its OWN span is settled text, so it passes `atomic: false` and is
+// judged positionally.
+function mapWorkspaceEditToRip(edit, { atomic = true } = {}) {
   const byUri = new Map(); // tsUri → TextEdit[]
   for (const [uri, edits] of Object.entries(edit?.changes ?? {})) {
     byUri.set(uri, edits);
@@ -2138,14 +2893,27 @@ function mapWorkspaceEditToRip(edit) {
   const changes = {};
   for (const [uri, edits] of byUri) {
     const open = stateByTsUri(uri);
-    let face, ripUri;
+    let face, ripUri, incompleteFrom = null;
     if (open) {
       const document = documents.get(open.uri);
       if (!document || document.getText() !== open.state.lastGood.source) {
         return { failure: `${open.uri.split('/').pop()} has unapplied changes that do not compile — fix it and retry` };
       }
+      if (atomic && open.state.lastGood.parseDiagnostics?.length > 0) {
+        return { failure: `${open.uri.split('/').pop()} does not compile — fix it and retry` };
+      }
       face = open.state.lastGood;
       ripUri = open.uri;
+      // A RECOVERED face (tolerant compile of an incomplete buffer) takes
+      // edits BEFORE its incompleteness and refuses them at or after it.
+      // The hole is a keystroke in flight, so an edit landing on or past
+      // one commits the workspace to a text the user is mid-way through
+      // changing. Refusing the whole FILE is what this used to do, and it
+      // takes the editor's most-used edit surface with it: an import
+      // inserted at offset 0 cannot be affected by an unclosed call three
+      // lines below, yet the auto-import quick fix silently disappeared
+      // for as long as the buffer was mid-expression.
+      incompleteFrom = earliestIncompleteness(face);
     } else {
       let fsPath = null;
       if (uri.startsWith('file://')) {
@@ -2178,6 +2946,9 @@ function mapWorkspaceEditToRip(edit) {
       const srcEdit = faceEditToSourceEdit(face, e);
       if (!srcEdit) {
         return { failure: `an edit in ${ripUri.split('/').pop()} lands on generated-only bytes with no Rip source` };
+      }
+      if (incompleteFrom !== null && !beforePosition(srcEdit.range.end, incompleteFrom)) {
+        return { failure: `an edit in ${ripUri.split('/').pop()} lands on an incomplete expression — finish it and retry` };
       }
       mapped.push(srcEdit);
     }
@@ -2238,7 +3009,7 @@ connection.onRenameRequest(async (params) => {
   };
   const ctx = requestContext(params);
   if (!ctx) refuse('the position does not map to the compiled document');
-  if (ctx.currentText !== ctx.good.source) {
+  if (ctx.currentText !== ctx.good.source || ctx.good.parseDiagnostics?.length > 0) {
     refuse('the buffer does not compile — fix the parse error and retry');
   }
   if (ctx.genExactPosition === null) refuse('the position does not map to the compiled document');
@@ -2264,11 +3035,24 @@ connection.onCodeAction(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
   if (!ctx) return null;
+  // The EXACT mapping, not the lenient one. A quick fix is keyed to a
+  // diagnostic's SPAN: tsgo looks for its own diagnostic at the range it is
+  // handed, and answers nothing when none sits there. The lenient flavor
+  // falls back to the innermost cover row's start, which turns a four-byte
+  // identifier into the whole statement — driven on 10-modules.rip, where
+  // `host` (13:47) arrived as a 36-byte range and tsgo returned ZERO
+  // actions where the TS twin offers four. Exact spans put all four back.
+  //
+  // This is the same rule translate.js states for definition, references
+  // and rename: anything that identifies or MUTATES a symbol takes the
+  // strict flavor, because a cover row's start is a different construct.
+  // A code action mutates, and was reading from the wrong list.
   const toGen = (position, exclusiveEnd) => {
     const cur = positionToOffset(ctx.curLineStarts, ctx.currentText.length, position);
     const offset = ctx.align.toGood(cur, { exclusiveEnd });
     if (offset === null) return null;
-    return sourceOffsetToGenerated(ctx.good.mappings, offset) ?? sourceCursorToGenerated(ctx.good.mappings, offset);
+    return sourceOffsetToGeneratedExact(ctx.good.mappings, offset, ctx.good.source, ctx.good.code)
+      ?? sourceCursorToGenerated(ctx.good.mappings, offset);
   };
   // A pure source.* ask (VS Code's organize-imports command, fix-all
   // on save) is document-scoped by nature: the face's whole range
@@ -2315,7 +3099,7 @@ connection.onCodeAction(async (params) => {
   for (const action of result) {
     if (action.kind && !action.kind.startsWith('quickfix') && !action.kind.startsWith('source.')) continue;
     if (!action.edit) continue; // command-only actions execute inside tsgo — not brokered
-    const { changes, failure } = mapWorkspaceEditToRip(action.edit);
+    const { changes, failure } = mapWorkspaceEditToRip(action.edit, { atomic: false });
     if (failure) {
       connection.console.log(`[rip] code action '${action.title}' dropped: ${failure}`);
       continue;

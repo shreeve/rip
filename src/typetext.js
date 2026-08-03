@@ -19,6 +19,8 @@
 // prefix); dts wraps them as DtsError ("declaration emission: …") and
 // the TS face as a positioned emitter diagnostic ("emitter: …").
 
+import { identifierRuns } from './lexer.js';
+
 export class TypeTextError extends Error {
   constructor(message) {
     super(message);
@@ -102,6 +104,12 @@ export const normalizeTypeText = (raw) => {
     }
     if (ch === '#') {
       while (i < raw.length && raw[i] !== '\n') i++;
+      continue;
+    }
+    const word = identifierRuns(raw.slice(i))[0];
+    if (word && raw.startsWith(word, i)) {
+      out += ({ yes: 'true', on: 'true', no: 'false', off: 'false' })[word] ?? word;
+      i += word.length;
       continue;
     }
     if (ch === '{') { brace++; out += ch; i++; continue; }

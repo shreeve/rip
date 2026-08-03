@@ -45,7 +45,7 @@ module.exports = function(hljs) {
     'DocumentFragment', 'MutationObserver', 'ResizeObserver',
     'IntersectionObserver',
     // Rip stdlib
-    'p', 'pp', 'abort', 'assert', 'exit', 'kind', 'noop',
+    'p', 'pp', 'pj', 'pr', 'abort', 'assert', 'exit', 'kind', 'noop',
     'raise', 'rand', 'sleep', 'todo', 'warn', 'zip',
   ];
 
@@ -117,7 +117,7 @@ module.exports = function(hljs) {
       { begin: /0x[0-9a-fA-F](?:_?[0-9a-fA-F])*n?/ },
       { begin: /0o[0-7](?:_?[0-7])*n?/ },
       { begin: /0b[01](?:_?[01])*n?/ },
-      { begin: /\d[\d_]*(?:\.[\d][\d_]*)?(?:[eE][+-]?\d+)?n?/ },
+      { begin: /\d[\d_]*(?:\.[\d][\d_]*)?(?:[eE][+-]?\d[\d_]*)?n?/ },
     ],
     relevance: 0,
   };
@@ -127,10 +127,10 @@ module.exports = function(hljs) {
     begin: /@[a-zA-Z_$][\w$]*/,
   };
 
-  // :name → Symbol.for("name")
+  // :name / :domain.name / :kebab-name → Symbol.for("…")
   const SYMBOL_LIT = {
     className: 'symbol',
-    match: /(?<![\w$]):[a-zA-Z_$][\w$]*/,
+    match: /(?<![\w$]):[a-zA-Z_$][\w$]*(?:[.-][a-zA-Z_$][\w$]*)*/,
   };
 
   const SIGIL_ATTR = {

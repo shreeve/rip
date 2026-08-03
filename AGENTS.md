@@ -389,7 +389,16 @@ alters surface syntax updates ALL THREE in the same change.
  one exit code. CI runs this, always. COMPLETION CLAIMS run against
  `bun run test:all`, not the fast loop. The ONE suite it does not
  carry is `packages/browser-tests` — it needs installed Playwright
- browsers, and CI runs it as its own job.
+ browsers, and CI runs it as its own job. `packages/server` needs
+ `xcaddy` on PATH — `go install
+ github.com/caddyserver/xcaddy/cmd/xcaddy@latest`, PLUS
+ `$(go env GOPATH)/bin` on PATH, which it is not by default: without
+ that the lane fails exactly as it does uninstalled. Its janus lane
+ builds Caddy from the PUBLISHED Janus module and rejects a local
+ module replacement; the binary is cached after the first build.
+ `JANUS_CADDY=<path>` supplies a janus-enabled binary instead.
+ Without either, the lane is fail-fast at `janus` and the six
+ directories sorted after it do not run.
 - `bun run test` FROM a package (`packages/vscode`, `packages/server`,
  `packages/app`, …) — that package's own suite, and the inner loop
  for work on that package; the root fast loop excludes `packages/**`

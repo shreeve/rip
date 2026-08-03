@@ -34,8 +34,6 @@ retain completed history.
       it from the App root.
 - [ ] Move Cart migration and seed setup out of worker import into an explicit
       one-off command.
-- [ ] Add a negative integration test proving API source, configuration,
-      package metadata, and database files are not publicly addressable.
 - [ ] Update Cart, Pulse, ROADMAP, AGENTS, package metadata, and server docs to
       state only the final architecture.
 

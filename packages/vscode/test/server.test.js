@@ -77,12 +77,15 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       });
       expect((await wait()).diagnostics).toEqual([]);
 
-      // Break the parse by INSERTING a line at file start: every
-      // construct shifts down one line.
+      // Break the compile by INSERTING a line at file start: every
+      // construct shifts down one line. The breakage must be one the
+      // TOLERANT face compile cannot recover — a newline-broken string
+      // can never be completed by more input — or the buffer compiles
+      // and the staleness protocol under test never engages.
       wait = nextDiagnostics(published);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 2 },
-        contentChanges: [{ text: 'oops = (\n' + GOOD }],
+        contentChanges: [{ text: 'oops = "broken\n' + GOOD }],
       });
       const broken = await wait();
       expect(broken.diagnostics).toHaveLength(1);
@@ -121,16 +124,19 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       expect(children.length).toBeGreaterThan(0);
       for (const pid of children) process.kill(Number(pid), 'SIGKILL');
 
-      // Parse diagnostics never depend on tsgo: a broken edit still
-      // publishes, promptly.
+      // Rip's own diagnostics never depend on tsgo: an incomplete edit
+      // still publishes its rejection, promptly. (The tolerant compile
+      // carries the rejection through and the server publishes it at
+      // compile time; once the restart-once policy revives tsgo, mapped
+      // TS diagnostics may ride the SAME publish — so the assertion is
+      // presence of the rip rejection, not an exact count.)
       wait = nextDiagnostics(published);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 2 },
         contentChanges: [{ text: GOOD + 'oops = (\n' }],
       });
       const broken = await wait();
-      expect(broken.diagnostics).toHaveLength(1);
-      expect(broken.diagnostics[0].source).toBe('rip');
+      expect(broken.diagnostics.some((d) => d.source === 'rip' && /unclosed '\('/.test(d.message))).toBe(true);
 
       // A valid edit after the crash: the restart-once policy brings
       // TS diagnostics back (the bad call maps onto .rip source again).
@@ -500,28 +506,47 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
         textDocument: { uri, languageId: 'rip', version: 1, text: fixture },
       });
       const { diagnostics } = await wait();
-      // Exactly the planted violation — nothing else (the member
-      // declares remove the TS2339 noise class; the minted `_init`
-      // param's unused hint drops with the exact-span rendering rule).
-      expect(diagnostics).toHaveLength(1);
-      expect(diagnostics[0].code).toBe(2339);
-      expect(diagnostics[0].range.start.line).toBe(11);
-      expect(diagnostics[0].range.start.character).toBe(14); // `toUpperCase` in source
-      // Member hovers answer the container conventions.
+      // The planted violation, and one honest hint on the user's OWN
+      // unused handler parameter — nothing minted. The member declares
+      // remove the TS2339 noise class; the minted `_init` param's unused
+      // hint still drops, because a tagged diagnostic ships only over an
+      // EXACT span and a minted name has none. `e` reaches the editor for
+      // the same reason it should: it is the user's own name, declared and
+      // never read, and the occurrence-span fix gave that read a span of
+      // its own. Asserted as an exact list, so a minted name arriving here
+      // is a failure rather than a silent third row.
+      expect(diagnostics.map((d) => [d.code, d.severity, d.range.start.line, d.range.start.character]))
+        .toEqual([
+          [2339, 1, 11, 14],   // `toUpperCase` on a number — the plant
+          [6133, 4, 6, 13],    // `e`, the user's own unused parameter, faded
+        ]);
+      expect(fixture.split('\n')[6][13]).toBe('e');   // the hint really lands on the user's name
+      // A member's DECLARATION answers value-first — the author wrote
+      // `count := 0` and reads it as a number (RULINGS.md, Components /
+      // render). Unannotated members with literal initializers infer
+      // their syntactic type, so the value here is `number`, not `any`.
       const state = await hoverAt(client, 3, 3);
-      expect(state.contents.value).toContain('count');
-      // Unannotated members with literal initializers infer their
-      // syntactic type  — was `value: any`.
-      expect(state.contents.value).toContain('value: number');
+      expect(state.contents.value).toContain('(property) Card.count: number');
+      expect(state.contents.value).not.toContain('read()');
       const typedProp = await hoverAt(client, 1, 4);
-      expect(typedProp.contents.value).toContain('value: string');
+      expect(typedProp.contents.value).toContain('(property) Card.title: string');
+      // An unannotated computed answers value-first like every other
+      // member kind. Its face type once read through the lowering's
+      // behavior object, so nothing spellable for it was in the author's
+      // vocabulary and the ruled interim was silence; the face now types
+      // it from an INFERRED position — a declaration with no type node,
+      // which TypeScript prints resolved — so the projection is gone and
+      // so is the reason to decline. `count * 2` is number.
       const computed = await hoverAt(client, 4, 3);
-      expect(computed.contents.value).toContain('readonly value');
-      // A member READ inside a render block hovers the same container
-      // (the write-site question never arises — members are
-      // declared class properties, typed at every site).
+      expect(computed.contents.value).toContain('(property) Card.total: number');
+      expect(computed.contents.value).not.toContain('__Card__computed');
+      expect(computed.contents.value).not.toContain('read()');
+      // A member READ inside a render block is the CONSUMER position and
+      // keeps the container: `@title.value` is real there, and the
+      // declaration's vocabulary is not the reader's.
       const renderRead = await hoverAt(client, 10, 9);
       expect(renderRead.contents.value).toContain('value: string');
+      expect(renderRead.contents.value).toContain('read()');
       // The accept member is the honest cross-component boundary: the
       // offered container's type is not knowable statically — any.
       const accepted = await hoverAt(client, 5, 10);
@@ -634,8 +659,9 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       });
       // Was TS2300 ×4 + TS2717 ×2 through the duplicate children keys.
       expect((await wait()).diagnostics).toEqual([]);
+      // A declaration answers value-first, `children` like any other prop.
       const hover = await hoverAt(client, 1, 4);
-      expect(hover.contents.value).toContain('value: string');
+      expect(hover.contents.value).toContain('(property) Child.children: string');
     } finally {
       await client.stop();
     }
