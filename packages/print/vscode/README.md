@@ -48,11 +48,19 @@ bun run sync                     # regenerate lib/hljs-rip.js from packages/high
 bun run package                  # produces print-x.y.z.vsix
 ```
 
-Install into **VS Code** or **Cursor**:
+Install from the repository root:
 
 ```bash
-code --install-extension print-x.y.z.vsix --force
-cursor --install-extension print-x.y.z.vsix --force
+bun run ext print vscode
+bun run ext print cursor
+bun run ext print both
+```
+
+Or, from this directory:
+
+```bash
+bun run install-vscode
+bun run install-cursor
 ```
 
 ## Test

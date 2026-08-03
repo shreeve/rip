@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
-// Shared VS Code extension installer (the repo grows more
-// extensions than one — "Rip Print" is next).
+// Shared VS Code extension installer for the repository's editor extensions.
 //
 //   bun run ext <name> <editor>
 //   e.g.  bun run ext rip cursor | bun run ext rip vscode | bun run ext rip both
@@ -14,7 +13,7 @@
 //
 // The registry maps PRODUCT names to package directories — never
 // directory names, so `rip` → packages/vscode never collides with the
-// editor name. A future extension registers itself by adding one line.
+// editor name. An extension registers itself by adding one line.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,7 +26,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // ── The registry ────────────────────────────────────────────────────
 const EXTENSIONS = {
   rip: 'packages/vscode',
-  // print: 'packages/print/vscode',   ← the shape of the next entry
+  print: 'packages/print/vscode',
 };
 
 // Editor CLIs: PATH name + the app-bundle fallbacks worth checking.
@@ -64,7 +63,7 @@ function usage() {
   console.log(`  Editors: ${[...Object.keys(EDITORS), 'both'].join(' | ')}`);
   console.log('');
   console.log('  Examples: bun run ext rip cursor');
-  console.log('            bun run ext rip both');
+  console.log('            bun run ext print both');
 }
 
 function findEditorCli(editorName) {

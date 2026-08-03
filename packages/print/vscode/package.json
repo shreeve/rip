@@ -61,7 +61,9 @@
   "scripts": {
     "sync": "rip sync.rip",
     "test": "rip test.rip",
-    "package": "npx @vscode/vsce package"
+    "package": "npx @vscode/vsce package",
+    "install-vscode": "bun ../../../scripts/install-ext.mjs print vscode",
+    "install-cursor": "bun ../../../scripts/install-ext.mjs print cursor"
   },
   "dependencies": {
     "highlight.js": "11.11.1"

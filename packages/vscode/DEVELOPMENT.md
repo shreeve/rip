@@ -50,7 +50,7 @@ bun run ext rip cursor     # from the repo root: rip vscode | rip both
 # equivalently, from this package: bun run install-cursor / install-vscode
 ```
 
-Install logic is SHARED across the repo's extensions (`scripts/install-ext.mjs` at the root): the registry there maps PRODUCT names to package dirs (`rip` → `packages/vscode`; names are by product, never by directory). A future extension (e.g. `print`) registers itself by adding one registry line and keeping its own `package` script; its per-package `install-*` scripts are one-line delegates to the shared installer. Bare `bun run ext` prints the menu. `bun run package` here still builds the .vsix alone.
+Install logic is SHARED across the repo's extensions (`scripts/install-ext.mjs` at the root): the registry there maps PRODUCT names to package dirs (`rip` → `packages/vscode`, `print` → `packages/print/vscode`; names are by product, never by directory). Each extension keeps its own `package` script; its per-package `install-*` scripts are one-line delegates to the shared installer. Bare `bun run ext` prints the menu. `bun run package` here still builds the .vsix alone.
 
 The staged package embeds the compiler from the repository's `src/` (version lockstep, the settled rule) and carries its own TypeScript — never the workspace's.
 
