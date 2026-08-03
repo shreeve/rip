@@ -179,18 +179,6 @@ schema behavior.
 
 ## Type and editor directions
 
-### Headless checking
-
-Provide a CLI that runs the editor-face/TypeScript pipeline without an
-editor:
-
-```text
-Rip source → TS face → TypeScript diagnostics → Rip mappings
-```
-
-The command must share configuration, mapping, and diagnostic
-translation with the extension.
-
 ### Bare optional parameters under strict checking
 
 An untyped optional parameter emits the valid TypeScript spelling

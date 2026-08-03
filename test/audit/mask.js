@@ -3,6 +3,8 @@
 // nothing there is reachable from a test, and this function now decides which
 // bytes count as reads for a gated contract invariant.
 
+import { identifierRunAt } from '../../src/lexer.js';
+
 // Whole-source code mask for the occurrence scan: blank STRING-LITERAL bytes
 // but KEEP `#{…}` interpolation expressions (a read inside an interpolation is
 // real code), track string state ACROSS lines (a multi-line template's body
@@ -37,7 +39,7 @@
 // `/` is in the divides-after set for the chained-`//` case: the second
 // byte of rip's floor division (and a slash right after a blanked
 // regex) is the operator continuing, never a regex opener.
-const REGEX_DIVIDES_AFTER = /[\w$)\]/'"`]/;
+const REGEX_DIVIDES_AFTER = /[0-9)\]/'"`]/;
 const REGEX_FOLLOWS_WORD = new Set([
   'return', 'yield', 'await', 'typeof', 'instanceof', 'delete', 'void', 'new',
   'in', 'of', 'case', 'do', 'else', 'then', 'when', 'and', 'or', 'not', 'is',
@@ -113,11 +115,11 @@ export function codeMask(src) {
     // implicit call.
     // `=` excluded (`/=` compound), `/` excluded (the floor-division
     // operator's second byte — an "empty regex" spells no read anyway).
-    const implicitRegexArg = /^[A-Za-z_$]/.test(lastWord) &&
+    const implicitRegexArg = lastWord !== '' &&
       /[^\S\n]/.test(src[i - 1] ?? '') &&
       src[i + 1] !== undefined && !/[\s=/]/.test(src[i + 1]);
     if (!stack.length && c === '/' &&
-        (!REGEX_DIVIDES_AFTER.test(lastCode) ||
+        (!(lastWord || REGEX_DIVIDES_AFTER.test(lastCode)) ||
          (REGEX_FOLLOWS_WORD.has(lastWord) && !lastWordDotted) ||
          implicitRegexArg)) {
       // Commit only if a close on the SAME line exists — otherwise this `/` is
@@ -146,20 +148,23 @@ export function codeMask(src) {
       lastCode = c;
       continue;
     }
-    out.push(c);
-    if (/[\w$]/.test(c)) {
-      const continues = /[\w$]/.test(src[i - 1] ?? '');
+    const identifier = identifierRunAt(src, i);
+    if (identifier !== null) {
       // Dotted also via `::`/`?::` (prototype access is property
       // access) and via a TRAILING-DOT continuation — the word sits at
       // a fresh line but the last significant byte was the dot, so the
       // compiler reads a property there too.
-      if (!continues) {
-        lastWordDotted = src[i - 1] === '.' ||
-          (src[i - 1] === ':' && src[i - 2] === ':') ||
-          (/\s/.test(src[i - 1] ?? '') && lastCode === '.');
-      }
-      lastWord = continues ? lastWord + c : c;
-    } else if (!/\s/.test(c)) lastWord = '';
+      lastWordDotted = src[i - 1] === '.' ||
+        (src[i - 1] === ':' && src[i - 2] === ':') ||
+        (/\s/.test(src[i - 1] ?? '') && lastCode === '.');
+      out.push(identifier.value);
+      lastWord = identifier.value;
+      lastCode = identifier.value.at(-1);
+      i = identifier.end - 1;
+      continue;
+    }
+    out.push(c);
+    if (!/\s/.test(c)) lastWord = '';
     if (!/\s/.test(c)) lastCode = c;
   }
   return out.join('');

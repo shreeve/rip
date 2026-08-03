@@ -2571,8 +2571,8 @@ function ripSemanticTokens(ctx, data) {
   // which references are imports and from where; the module answers.
   // Only `./`-relative `.rip` specifiers resolve, matching the closure's
   // own rule (mirror.js): a package import is TypeScript's to classify.
-  for (const [genStart, , name, specifier] of (ctx.good.importedRefs ?? [])) {
-    if (declaresEnum(ctx.good.dir, specifier, name)) enumStarts.add(genStart);
+  for (const [genStart, , importedName, specifier] of (ctx.good.importedRefs ?? [])) {
+    if (declaresEnum(ctx.good.dir, specifier, importedName)) enumStarts.add(genStart);
   }
   const tokens = new Map(); // start → { start, length, type, modifiers }
   let line = 0, char = 0;

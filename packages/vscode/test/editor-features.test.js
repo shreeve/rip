@@ -549,6 +549,30 @@ describe.skipIf(!tsgoAvailable)('semantic tokens', () => {
     });
   }, 30000);
 
+  test('an aliased imported enum receives the direct import token correction', async () => {
+    await inWorkspace({
+      'colors.rip': 'export enum Color\n  red = 0\n',
+    }, async (api) => {
+      const cases = {
+        direct: ['import { Color } from "./colors.rip"', 'x = Color.red', 'Color'],
+        aliased: ['import { Color as Shade } from "./colors.rip"', 'x = Shade.red', 'Shade'],
+      };
+      for (const [file, [clause, use, name]] of Object.entries(cases)) {
+        await api.open(`${file}.rip`, `${clause}\n${use}\n`);
+        const result = await api.semanticTokens(`${file}.rip`);
+        const tokens = decodeTokens(result.data, api.capabilities.semanticTokensProvider.legend);
+        expect(tokens).toContainEqual({
+          line: 1,
+          character: 4,
+          length: name.length,
+          type: 'enum',
+          modifiers: [],
+          modifierBits: 0,
+        });
+      }
+    });
+  }, 30000);
+
   test('range requests answer exactly the requested Rip range', async () => {
     await inWorkspace({}, async (api) => {
       await api.open('app.rip', SRC);

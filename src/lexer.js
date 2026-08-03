@@ -2284,6 +2284,13 @@ const IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, 'g
 export function identifierRuns(text) {
   return text.match(IDENT_RUN_RE) ?? [];
 }
+export function identifierRunAt(text, start) {
+  if (typeof text !== 'string' || !Number.isInteger(start) || start < 0 || start >= text.length) return null;
+  if (!IDENT_START.test(text[start])) return null;
+  let end = start + 1;
+  while (end < text.length && IDENT_PART.test(text[end])) end++;
+  return { value: text.slice(start, end), start, end };
+}
 function symbolNameEnd(text, start) {
   let end = start;
   while (end < text.length && IDENT_PART.test(text[end])) end++;

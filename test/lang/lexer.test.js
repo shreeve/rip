@@ -2,13 +2,18 @@
 // synthetic-token conventions, trivia retention, and
 // call-paren disambiguation.
 import { describe, test, expect } from 'bun:test';
-import { tokenize, makeParserLexer } from '../../src/lexer.js';
+import { tokenize, makeParserLexer, identifierRunAt } from '../../src/lexer.js';
 
 const kinds = (text) => tokenize(text).tokens.map(t => t.kind);
 const values = (text) => tokenize(text).tokens.map(t => t.value);
 const spans = (text) => tokenize(text).tokens.map(t => [t.kind, t.start, t.end]);
 
 describe('token spans', () => {
+  test('identifierRunAt uses the lexer vocabulary and UTF-16 offsets', () => {
+    expect(identifierRunAt('x + Ωmega', 4)).toEqual({ value: 'Ωmega', start: 4, end: 9 });
+    expect(identifierRunAt('x + Ωmega', 2)).toBeNull();
+  });
+
   test('simple expression spans', () => {
     expect(spans('x = y + 1')).toEqual([
       ['IDENTIFIER', 0, 1],

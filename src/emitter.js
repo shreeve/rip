@@ -24,7 +24,7 @@ import { CodeBuilder } from './builder.js';
 import { descriptorSegments, behaviorObjectText, paramNamesOf, splitTopLevelByComma } from './schema.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './schema-types.js';
 import { Parser } from './parser.js';
-import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, isIdentifierName } from './lexer.js';
+import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, identifierRunAt, isIdentifierName } from './lexer.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader } from './typetext.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom-vocab.js';
 import {
@@ -78,11 +78,14 @@ const typeIdentifierTokens = (text, base = 0) => {
       while (i < text.length && text[i] !== '\n') i++;
       continue;
     }
-    if (/[A-Za-z_$]/.test(ch)) {
-      let j = i + 1;
-      while (j < text.length && /[\w$]/.test(text[j])) j++;
-      out.push({ value: text.slice(i, j), start: base + i, end: base + j });
-      i = j;
+    const identifier = identifierRunAt(text, i);
+    if (identifier !== null) {
+      out.push({
+        value: identifier.value,
+        start: base + identifier.start,
+        end: base + identifier.end,
+      });
+      i = identifier.end;
       continue;
     }
     i++;
@@ -1293,9 +1296,10 @@ class Emitter {
     return false;
   }
 
-  // The module `name` was imported from, or null when `name` is not an
-  // import here. Same walk as isEnumName, same reason: an inner binding
-  // that re-uses the spelling is not the import.
+  // The module `name` was imported from and its original exported name,
+  // or null when `name` is not an import here. Same walk as isEnumName,
+  // same reason: an inner binding that re-uses the spelling is not the
+  // import.
   importSpecOf(name) {
     for (let i = this.rframes.length - 1; i >= 0; i--) {
       const f = this.rframes[i];
@@ -1528,8 +1532,10 @@ class Emitter {
     if (this.isEnumName(value)) { this.enums.push([start, this.b.offset]); return; }
     if (this.isReactiveName(value) && !this.isComputedName(value)) { this.mutables.push([start, this.b.offset]); return; }
     if (this.isClassName(value)) { this.classDecls.push([start, this.b.offset]); return; }
-    const spec = this.importSpecOf(value);
-    if (spec !== null) this.importedRefs.push([start, this.b.offset, value, spec]);
+    const imported = this.importSpecOf(value);
+    if (imported !== null) {
+      this.importedRefs.push([start, this.b.offset, imported.importedName, imported.specifier]);
+    }
   }
 
   // A name being DECLARED is not a reference to whatever else holds that
@@ -3536,10 +3542,10 @@ class Emitter {
   }
 
   // Names an import statement binds in module scope.
-  // Each imported local name paired with the module it came from. The
-  // token corrections are computed from ONE file's compile, so an
-  // imported name's KIND is unknowable here — what is knowable, and all
-  // the editor needs, is which module to ask.
+  // Each imported local name paired with the module and original name it
+  // came from. The token corrections are computed from ONE file's compile,
+  // so an imported name's KIND is unknowable here — what is knowable, and
+  // all the editor needs, is which module and exported name to ask.
   static importedSpecs(stmts) {
     const specs = new Map();
     for (const node of stmts) {
@@ -3547,7 +3553,20 @@ class Emitter {
       const source = node[node.length - 1];
       if (typeof source !== 'string') continue;
       const specifier = source.replace(/^['"`]|['"`]$/g, '');
-      for (const name of Emitter.importedNames([node])) specs.set(name, specifier);
+      for (const spec of node.slice(1, -1)) {
+        if (spec === '{}') continue;
+        if (typeof spec === 'string') {
+          specs.set(spec, { specifier, importedName: 'default' });
+        } else if (spec[0] === '*') {
+          specs.set(spec[1], { specifier, importedName: '*' });
+        } else {
+          for (const name of spec) {
+            const importedName = isNode(name) ? name[0] : name;
+            const localName = isNode(name) ? name[1] : name;
+            specs.set(localName, { specifier, importedName });
+          }
+        }
+      }
     }
     return specs;
   }

@@ -12,9 +12,9 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { codeMask, specifierSpans } from '../audit/mask.js';
-import { tokenize } from '../../src/lexer.js';
+import { identifierRuns, tokenize } from '../../src/lexer.js';
 
-const names = (src) => codeMask(src).match(/[A-Za-z_$][\w$]*/g) ?? [];
+const names = (src) => identifierRuns(codeMask(src));
 
 describe('codeMask: what counts as code', () => {
   test.each([
@@ -36,6 +36,7 @@ describe('codeMask: what counts as code', () => {
       ['ok', 'not', 'test', 'v', 'next']],
     // Division must survive all three value positions, or real reads vanish.
     ['division by a variable', 'total = a / b / c\n', ['total', 'a', 'b', 'c']],
+    ['division after a Unicode identifier', 'π / value / other\n', ['π', 'value', 'other']],
     ['division after a paren', 'half = (x + 1) / 2\n', ['half', 'x']],
     ['division after an index', 'arr = items[0] / 2\n', ['arr', 'items']],
     ['division after a closed string', "ratio = 'a' / n + m / 2\n", ['ratio', 'n', 'm']],

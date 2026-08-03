@@ -35,6 +35,7 @@ import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { typeImportSpecifiers } from '../src/mirror.js';
 
 let tsgoAvailable = false;
 try {
@@ -206,6 +207,21 @@ const UTIL = 'export answer = 42\n';
 
 const APP = 'import { answer } from "./util.rip"\nbad = answer.toUpperCase()\n';
 
+test('type import discovery skips literal, comment, property, and identifier bodies', () => {
+  const text = [
+    `import('./real.rip').Thing`,
+    `import /* before */ ( /* argument */ "../other.rip" /* close */ ).Other`,
+    `"import('./string-ghost.rip')"`,
+    `'import("./single-ghost.rip")'`,
+    `unknown /* import('./comment-ghost.rip') */`,
+    `unknown # import('./hash-ghost.rip')\n | known`,
+    `Ωimport('./identifier-ghost.rip')`,
+    `namespace.import('./property-ghost.rip')`,
+    `namespace. /* gap */ import('./spaced-property-ghost.rip')`,
+  ].join(' | ');
+  expect(typeImportSpecifiers(text)).toEqual(['./real.rip', '../other.rip']);
+});
+
 describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
   test('an unopened dependency materializes on demand and serves', async () => {
     await inWorkspace({ 'util.rip': UTIL }, async (api) => {
@@ -274,6 +290,30 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
       await api.change('app.rip', src + '\n');
       expect(api.codes('app.rip')).not.toContain(2307); // the plain .ts file resolves
       expect(api.codes('app.rip')).toContain(2339);     // and its types flow
+    });
+  }, 30000);
+
+  test('type-text literals that resemble imports do not enter the closure', async () => {
+    const files = {
+      'real.rip': 'export interface Thing\n  value: number\n',
+      'ghost.rip': 'export ghost = 42\n',
+    };
+    await inWorkspace(files, async (api) => {
+      const source = [
+        `actual: import('./real.rip').Thing = { value: 1 }`,
+        `label: "import('./ghost.rip')" = "import('./ghost.rip')"`,
+        '',
+      ].join('\n');
+      await api.open('app.rip', source);
+      await api.poll(
+        () => fs.existsSync(path.join(api.ws, '.rip', 'editor', 'real.rip.ts')),
+        'real import type materialized',
+      );
+      const realMirror = path.join(api.ws, '.rip', 'editor', 'real.rip.ts');
+      const ghostMirror = path.join(api.ws, '.rip', 'editor', 'ghost.rip.ts');
+      expect(isStub(fs.readFileSync(realMirror, 'utf8'))).toBe(false);
+      expect(isStub(fs.readFileSync(ghostMirror, 'utf8'))).toBe(true);
+      expect(faceCount(api.ws)).toBe(2); // app + the syntactic import type
     });
   }, 30000);
 

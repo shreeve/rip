@@ -24,6 +24,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { compile } from './compile.js';
 import { readProjectConfig } from './config.js';
+import { identifierRunAt } from './lexer.js';
 import { startTsgo } from '../packages/vscode/src/tsgo.js';
 import { buildProbe, parseProbeHover } from '../packages/vscode/src/pins.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from '../packages/vscode/src/diagnostics.js';
@@ -373,8 +374,8 @@ if (compiled.size > 0) {
           endCharacter = ep.character;
         } else {
           const lineText = g.source.split('\n')[sp.line] ?? '';
-          const idm = /^[A-Za-z_$][\w$]*/.exec(lineText.slice(sp.character));
-          endCharacter = sp.character + (idm ? idm[0].length : 1);
+          const identifier = identifierRunAt(lineText, sp.character);
+          endCharacter = identifier?.end ?? sp.character + 1;
         }
         return { file: target.fsPath, line: sp.line, character: sp.character, endCharacter, message: ri.message };
       };
