@@ -82,11 +82,11 @@ jobs:
   #
   # Pinned to macOS: the audit's oracle baselines hold there, and on
   # ubuntu the same commit deterministically breaks three invariants
-  # (hover.parity, token.delivery.*) — the editor surface types dynamic
-  # `.rip` imports as `any` on Linux, a platform divergence in the
-  # tsgo/mirror lane that is its own open defect. Gating on the baseline
-  # platform keeps this job's red meaning "this change broke the
-  # contract"; the Linux divergence is tracked separately.
+  # (hover.parity, token.delivery.*) — after a closure prune, the editor
+  # surface types dynamic `.rip` imports as `any` on Linux and never
+  # settles. Gating on the baseline platform keeps this job's red
+  # meaning "this change broke the contract"; the Linux divergence is an
+  # open row in test/audit/FINDINGS.md, and its fix unpins this job.
   audit:
     runs-on: macos-latest
     # Healthy ~2 minutes: a ~30s audit behind two frozen installs.
