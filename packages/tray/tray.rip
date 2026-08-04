@@ -257,6 +257,7 @@ ripApps = ->
   definition = tray
     title: 'Rip'
     icon: svgFile "#{import.meta.dir}/assets/rip-template.svg"
+    logo: svgFile "#{import.meta.dir}/assets/rip-color.svg", template: false
     tooltip: 'Rip Apps'
     refresh: 2
     menu: ->

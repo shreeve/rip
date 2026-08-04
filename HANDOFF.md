@@ -33,8 +33,9 @@ The current tip carries the local Rip appliance and its native client:
   `template: false` preserves full color. A separate `logo:` can brand the
   panel header.
 - `packages/tray/assets` carries the full-color Rip logo and compact monochrome
-  menu-bar mark. The built-in Rip Apps tray keeps one menu-bar mark and one
-  plain-text Rip heading in its panel.
+  menu-bar mark. The built-in Rip Apps tray renders the monochrome mark at the
+  visually verified 24-point menu-bar size and the small full-color wordmark
+  at the panel's upper-left; the panel's upper-right stays empty.
 - `rip-tray provider.rip --name NAME --identifier ID --output PATH` creates an
   independently named, ad-hoc-signed `.app`. The package's executable
   `tray.rip` mode is the Rip Apps client for `rip app` and `rip edge`.

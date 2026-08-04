@@ -320,11 +320,13 @@ public struct TrayPanel: View {
   public var body: some View {
     VStack(spacing: 0) {
       HStack(spacing: 10) {
-        Text(provider.tray.title).font(.headline)
-        Spacer()
         if let logo = provider.tray.logo {
           TrayIconView(icon: logo, size: 30)
+            .accessibilityLabel(Text(provider.tray.title))
+        } else {
+          Text(provider.tray.title).font(.headline)
         }
+        Spacer()
       }
       .padding(.horizontal, 16)
       .padding(.vertical, 12)
