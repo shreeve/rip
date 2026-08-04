@@ -1351,3 +1351,32 @@ describe('soak prototype access', () => {
       .toThrow(/soak form cannot carry the annotation/);
   });
 });
+
+// A top-level `globalThis.NAME ??= expr` DECLARES the global (the
+// spelling says "install unless someone already did" — DSL vocabulary,
+// stamp's sh/ok/run). The type rides a module-level alias because inside
+// `declare global` the bare name resolves to the global being declared
+// (TS2502, driven against real tsc). Plain `=` and non-top-level `??=`
+// deliberately declare nothing: overwrites (fetch mocks) and lifecycle
+// installs (an app's guarded __ripApp, deleted on destroy) are not
+// vocabulary.
+describe('globalThis ??= declares the global', () => {
+  test('top-level ??= emits the declare-global block, typed through the alias', () => {
+    const src = 'sh = (cmd: string): string -> cmd\nglobalThis.sh ??= sh\nexport ping = 1\n';
+    const r = ts(src);
+    expect(r.code).toContain('type __ripGlobal_sh = typeof sh;');
+    expect(r.code).toContain('declare global {\n  var sh: __ripGlobal_sh;\n}');
+    expect(r.globalDecls).toEqual(['sh']);
+    expect(stripFace(r.code, r.tsRegions)).toBe(js(src).code);
+  });
+
+  test('non-identifier initializers declare `any`; `=` and nested `??=` declare nothing', () => {
+    const src = 'globalThis.seed ??= null\nglobalThis.late = 1\nf = -> globalThis.inner ??= 2\nconsole.log f\n';
+    const r = ts(src);
+    expect(r.code).toContain('var seed: any;');
+    expect(r.code).not.toContain('var late');
+    expect(r.code).not.toContain('var inner');
+    expect(r.globalDecls).toEqual(['seed']);
+    expect(stripFace(r.code, r.tsRegions)).toBe(js(src).code);
+  });
+});

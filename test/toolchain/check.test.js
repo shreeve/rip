@@ -714,6 +714,48 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // A top-level `globalThis.NAME ??= expr` DECLARES the global: the
+  // spelling says "install unless someone already did", which is a
+  // declaration in runtime clothes — stamp's sh/ok/run vocabulary is the
+  // resident pattern ("handlers import nothing"). The declaration is
+  // scoped to the declaring PACKAGE (its own program in the mirror), and
+  // reaches importers the way the runtime does — importing the module
+  // runs the installer. A non-importing neighbor keeps its TS2304, which
+  // is the typo protection ambient-everywhere would have spent.
+  test('a top-level `globalThis.NAME ??=` declares the global, scoped to its package', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ workspaces: ['packages/*'] }),
+      'packages/vocab/package.json': JSON.stringify({ name: '@t/vocab' }),
+      'packages/vocab/vocab.rip': [
+        'sh = (cmd: string): string -> cmd',
+        'globalThis.sh ??= sh',
+        'export ping = 1',
+      ].join('\n') + '\n',
+      'packages/vocab/handler.rip': [
+        'out = sh("ls")',        // resolves: same package, declared vocabulary
+        'bad = shh("ls")',       // typo protection survives: cannot-find still fires
+        'console.log out, bad',
+      ].join('\n') + '\n',
+      'packages/other/package.json': JSON.stringify({ name: '@t/other' }),
+      'packages/other/other.rip': [
+        'oops = sh("ls")',       // different package, no import: the global does NOT reach
+        'console.log oops',
+      ].join('\n') + '\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const names = diags.map((d) => [d.file, /'([^']+)'/.exec(d.message)?.[1]]);
+      // vocab's own package: `sh` resolves everywhere; only the typo reports.
+      expect(names.filter(([f]) => f.includes('vocab'))).toEqual([
+        [path.join('packages', 'vocab', 'handler.rip'), 'shh'],
+      ]);
+      // the non-importing neighbor: `sh` is not its vocabulary.
+      expect(names.filter(([f]) => f.includes('other'))).toEqual([
+        [path.join('packages', 'other', 'other.rip'), 'sh'],
+      ]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // Config is per FILE (nearest package.json), so a strict consumer's
   // check still hides its gradual DEPENDENCIES' diagnostics — and a
   // summary that says "set `rip.strict` in package.json" after the user

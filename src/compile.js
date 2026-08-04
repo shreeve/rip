@@ -260,6 +260,7 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // diagnostic mapper drops a non-exact-mapped diagnostic born here —
     // the real copy publishes the same claim at its own position.
     echoSpans: emitted.echoSpans ?? [],
+    globalDecls: emitted.globalDecls ?? [],
     pinnables: emitted.pinnables,
     // Generated spans of `:=` state names — writable in rip, `const` in the
     // face. The editor clears TypeScript's `readonly` token modifier on these.

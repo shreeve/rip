@@ -14958,6 +14958,53 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     emitter.rframes.pop();
     emitter.scopes.pop();
   }
+  // A top-level `globalThis.NAME ??= expr` DECLARES the global. The
+  // spelling is the boundary: `??=` says "install unless someone already
+  // did", which is a declaration wearing runtime clothes — DSL vocabulary
+  // like stamp's `sh`/`ok`/`run`, whose handlers import nothing by
+  // design. Plain `=` stays meaningless here on purpose (a test
+  // overwriting `globalThis.fetch` must not redeclare the host's fetch),
+  // and a non-top-level install is lifecycle state, not vocabulary (an
+  // app's guarded `__ripApp`, deleted on destroy, must not be declared
+  // ever-present). An identifier initializer declares `typeof` it — the
+  // module binding is lexically visible inside `declare global` — and
+  // any other initializer declares `any`. The block is TS-only, so the
+  // strip gate holds byte identity; `declare global` requires module
+  // shape, which the marker below guarantees for bare files.
+  const globalDecls = [];
+  if (face === 'ts' && isNode(parseResult.sexpr) && parseResult.sexpr[0] === 'program') {
+    const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+    for (const stmt of parseResult.sexpr.slice(1)) {
+      if (!isNode(stmt) || stmt[0] !== '??=' || stmt.length !== 3) continue;
+      const target = stmt[1];
+      if (!isNode(target) || target[0] !== '.' || target[1] !== 'globalThis') continue;
+      if (typeof target[2] !== 'string' || !IDENT.test(target[2])) continue;
+      // Keyword literals are identifier-shaped in the sexpr (`??= null`
+      // seeds ui's focus tracker) but are not typeof-able values.
+      const RESERVED = new Set(['null', 'undefined', 'true', 'false', 'this']);
+      const v = stmt[2];
+      globalDecls.push({
+        name: target[2],
+        anchor: typeof v === 'string' && IDENT.test(v) && !RESERVED.has(v) ? v : null,
+      });
+    }
+    if (globalDecls.length) {
+      // The type rides a MODULE-LEVEL alias: inside `declare global` the
+      // bare name resolves to the global being declared (TS2502,
+      // driven), so `typeof sh` must be taken where `sh` still means the
+      // module binding and carried in by alias.
+      builder.tsOnly(() => {
+        for (const g of globalDecls) {
+          if (g.anchor !== null) builder.emit(`\ntype __ripGlobal_${g.name} = typeof ${g.anchor};`);
+        }
+        builder.emit('\ndeclare global {');
+        for (const g of globalDecls) {
+          builder.emit(`\n  var ${g.name}: ${g.anchor === null ? 'any' : `__ripGlobal_${g.name}`};`);
+        }
+        builder.emit('\n}\n');
+      });
+    }
+  }
   // The module marker: the loader runs every .rip file as a Bun
   // ES module, so a face whose own syntax carries no import/export
   // must not present as a global SCRIPT — script-ness misrepresents
@@ -14994,7 +15041,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

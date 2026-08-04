@@ -20448,6 +20448,43 @@ return { ${unit.names.join(", ")} };
     emitter.rframes.pop();
     emitter.scopes.pop();
   }
+  const globalDecls = [];
+  if (face === "ts" && isNode4(parseResult.sexpr) && parseResult.sexpr[0] === "program") {
+    const IDENT2 = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+    for (const stmt of parseResult.sexpr.slice(1)) {
+      if (!isNode4(stmt) || stmt[0] !== "??=" || stmt.length !== 3)
+        continue;
+      const target = stmt[1];
+      if (!isNode4(target) || target[0] !== "." || target[1] !== "globalThis")
+        continue;
+      if (typeof target[2] !== "string" || !IDENT2.test(target[2]))
+        continue;
+      const RESERVED = new Set(["null", "undefined", "true", "false", "this"]);
+      const v = stmt[2];
+      globalDecls.push({
+        name: target[2],
+        anchor: typeof v === "string" && IDENT2.test(v) && !RESERVED.has(v) ? v : null
+      });
+    }
+    if (globalDecls.length) {
+      builder.tsOnly(() => {
+        for (const g of globalDecls) {
+          if (g.anchor !== null)
+            builder.emit(`
+type __ripGlobal_${g.name} = typeof ${g.anchor};`);
+        }
+        builder.emit(`
+declare global {`);
+        for (const g of globalDecls) {
+          builder.emit(`
+  var ${g.name}: ${g.anchor === null ? "any" : `__ripGlobal_${g.name}`};`);
+        }
+        builder.emit(`
+}
+`);
+      });
+    }
+  }
   if (face === "ts" && !isModuleShaped(parseResult.sexpr, (s) => emitter.isModuleImport(s))) {
     builder.tsOnly(() => builder.emit(`
 export {};
@@ -20472,7 +20509,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -21079,6 +21116,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     replImportResolver: emitted.replImportResolver,
     tsRegions: emitted.tsRegions,
     echoSpans: emitted.echoSpans ?? [],
+    globalDecls: emitted.globalDecls ?? [],
     pinnables: emitted.pinnables,
     mutables: emitted.mutables,
     enums: emitted.enums,

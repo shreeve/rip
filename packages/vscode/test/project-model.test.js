@@ -277,6 +277,29 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
     });
   }, 30000);
 
+  // A package declaring vocabulary (`globalThis.NAME ??=` at top level)
+  // resolves it package-wide in the editor — through the auto boundary
+  // and, before anything compiles, through the stub's any-typed twin.
+  // The neighbor outside the package keeps its cannot-find: the boundary
+  // is the typo protection.
+  test('declared globals resolve package-wide in the editor; the neighbor keeps its cannot-find', async () => {
+    await inWorkspace({
+      'vocab/package.json': JSON.stringify({ name: '@t/vocab' }),
+      'vocab/vocab.rip': 'sh = (cmd: string): string -> cmd\nglobalThis.sh ??= sh\nexport ping = 1\n',
+      'vocab/handler.rip': 'out = sh("ls")\nbad = shh("ls")\nconsole.log out, bad\n',
+    }, async (api) => {
+      // Cold open: vocab.rip is UNOPENED — a stub carries the declaration.
+      await api.open('vocab/handler.rip', 'out = sh("ls")\nbad = shh("ls")\nconsole.log out, bad\n');
+      await api.until('vocab/handler.rip', (codes) => {
+        const cannotFinds = codes.filter((c) => [2304, 2552].includes(c));
+        return cannotFinds.length === 1;   // exactly the typo — `sh` resolved
+      });
+      // Outside the package: the vocabulary does not reach.
+      await api.open('other.rip', 'oops = sh("ls")\nconsole.log oops\n');
+      await api.until('other.rip', (codes) => codes.some((c) => [2304, 2552].includes(c)));
+    });
+  }, 30000);
+
   test('cross-file readiness: hover crosses the file boundary onto .rip source', async () => {
     await inWorkspace({ 'util.rip': INFERRED_UTIL }, async (api) => {
       await api.open('app.rip', APP);

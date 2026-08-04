@@ -335,7 +335,8 @@ function writeProjectWrapper(rel, sourceTsconfig) {
   const wrapperDir = path.join(mirrorRoot, rel);
   const chain = new Set();
   const wrapper = projectWrapper({
-    wrapperDir, sourceTsconfig, workspaceRoot, mirrorRoot, chain,
+    wrapperDir, sourceTsconfig, sourceDir: sourceTsconfig === null ? path.join(workspaceRoot, rel) : null,
+    workspaceRoot, mirrorRoot, chain,
     onUnresolved: (spec) =>
       connection.console.log(`[rip] ${rel}: tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
   });
@@ -354,6 +355,40 @@ function writeProjectWrapper(rel, sourceTsconfig) {
 // yet. Returns the mirror paths written — a new wrapper also rewrites the
 // ROOT config (its exclusions grew), so callers forward all of them to
 // tsgo or the new project's files stay in the root's program.
+// The AUTO BOUNDARY: a package that DECLARES globals (`globalThis.NAME
+// ??=` at top level) becomes its own program without owning a tsconfig,
+// so its vocabulary stays package-scoped — reaching importers the way the
+// runtime does, and leaving a non-importing neighbor its cannot-find. A
+// nested tsconfig outranks it (that wrapper already partitions), and the
+// workspace root has no narrower scope to give. Idempotent; returns every
+// mirror path the ensure wrote — the wrapper files plus the regenerated
+// root config, whose exclusions grew — for the caller to forward to tsgo.
+function ensureAutoBoundary(fsPath) {
+  if (mirrorRootIsFallback || !workspaceRoot || !mirrorRootReady) return [];
+  const owner = nearestTsconfig(path.dirname(fsPath), workspaceRoot);
+  if (owner !== null && path.dirname(owner) !== workspaceRoot) return [];
+  let dir = path.dirname(fsPath);
+  let pkgDir = null;
+  for (;;) {
+    if (fs.existsSync(path.join(dir, 'package.json'))) { pkgDir = dir; break; }
+    if (dir === workspaceRoot || path.dirname(dir) === dir) break;
+    dir = path.dirname(dir);
+  }
+  if (pkgDir === null || pkgDir === workspaceRoot) return [];
+  const rel = path.relative(workspaceRoot, pkgDir);
+  if (rel === '' || path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) return [];
+  if (wrapperDirs.has(rel)) return [];
+  let written;
+  try { written = writeProjectWrapper(rel, null); } catch (err) {
+    connection.console.error(`[rip] auto boundary for ${rel} failed: ${err.message}`);
+    return [];
+  }
+  writeGeneratedTsconfig();
+  written.push(path.join(mirrorRoot, 'tsconfig.json'), path.join(mirrorRoot, HOST_FLOOR_NAME));
+  connection.console.log(`[rip] ${rel}: declares globals — the package becomes its own program`);
+  return written;
+}
+
 function ensureProjectWrapper(fsPath) {
   if (mirrorRootIsFallback || !workspaceRoot || !mirrorRootReady) return [];
   const owner = nearestTsconfig(path.dirname(fsPath), workspaceRoot);
@@ -799,6 +834,16 @@ function mirrorFromDisk(fsPath, source) {
   const mirrorPath = mirrorPathOf('file://' + fsPath);
   warnOnMirrorCollision(mirrorPath, fsPath);
   writeMirror(mirrorPath, result.code);
+  // A dependency that DECLARES globals gets its boundary the moment its
+  // face materializes — the closure pass may be the first to see it.
+  if (result.globalDecls?.length) {
+    const bw = ensureAutoBoundary(fsPath);
+    if (bw.length && tsgo) {
+      tsgo.client.notify('workspace/didChangeWatchedFiles', {
+        changes: bw.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Changed })),
+      });
+    }
+  }
   const imports = ripImportsOf(result.stores, source, path.dirname(fsPath));
   cacheManifest.entries[fsPath] = {
     sourceHash: hashText(source), codeHash: hashText(result.code), imports,
@@ -1184,7 +1229,7 @@ function stubTextFor(file) {
   }
   const scan = scans.get(file);
   if (!scan) return null;
-  if (!scan.values.length && !scan.types.length && !scan.stars.length && !scan.hasDefault) return null;
+  if (!scan.values.length && !scan.types.length && !scan.stars.length && !scan.hasDefault && !scan.globals?.length) return null;
   return stubFacesFromScans(scans).get(file) ?? null;
 }
 
@@ -1213,10 +1258,17 @@ async function populateAutoImportStubs(candidates = null) {
   // It also matters on the re-stub path — a closed buffer that exports
   // nothing must not acquire a mirror it never had.
   for (const [file, scan] of [...scans]) {
-    if (!scan.values.length && !scan.types.length && !scan.stars.length && !scan.hasDefault) scans.delete(file);
+    if (!scan.values.length && !scan.types.length && !scan.stars.length && !scan.hasDefault && !scan.globals?.length) scans.delete(file);
   }
   if (!scans.size) return;
   ensureMirrorRoot();   // deferred to here: a workspace with no .rip stays untouched
+  // Declared vocabulary discovered at SCAN time: the boundary must exist
+  // before tsgo first assigns these files to a program, or a cold-open
+  // handler lands in the root program where its globals miss (or leak).
+  const configWritten = new Set();
+  for (const [file, scan] of scans) {
+    if (scan.globals?.length) for (const w of ensureAutoBoundary(file)) configWritten.add(w);
+  }
   const written = [];
   let done = 0;
   for (const [file, text] of stubFacesFromScans(scans)) {
@@ -1230,16 +1282,20 @@ async function populateAutoImportStubs(candidates = null) {
     } catch { /* candidacy only — never fatal */ }
     if (++done % 10 === 0) await new Promise((resolve) => setImmediate(resolve));
   }
-  if (!written.length) return;
+  if (!written.length && !configWritten.size) return;
   connection.console.log(
     `[rip] auto-import stubs: ${written.length} declaration-only mirror(s) in ${Math.round(performance.now() - t0)} ms`,
   );
   // tsgo does not notice a bare mid-session disk write. The Created batch
-  // is what puts these files in its program — driven, and decisive.
+  // is what puts these files in its program — driven, and decisive. The
+  // auto-boundary's config writes ride along as Changed.
   await tsgoReady;
   if (tsgo) {
     tsgo.client.notify('workspace/didChangeWatchedFiles', {
-      changes: written.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Created })),
+      changes: [
+        ...written.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Created })),
+        ...[...configWritten].map((p) => ({ uri: 'file://' + p, type: FileChangeType.Changed })),
+      ],
     });
   }
 }
@@ -1704,6 +1760,7 @@ async function refresh(document) {
         scheduleManifestSave();
       }
       const wrapperFiles = ensureProjectWrapper(fsPath);
+      if (result.globalDecls?.length) wrapperFiles.push(...ensureAutoBoundary(fsPath));
       if (wrapperFiles.length && tsgo) {
         tsgo.client.notify('workspace/didChangeWatchedFiles', {
           changes: wrapperFiles.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Changed })),

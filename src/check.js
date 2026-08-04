@@ -341,8 +341,31 @@ if (compiled.size > 0) {
       wrapperRels.add(path.relative(workspaceRoot, path.dirname(owner)));
     }
   }
+  // A package that DECLARES globals (`globalThis.NAME ??=` at top level)
+  // becomes its own program — the AUTO BOUNDARY. Its vocabulary stays
+  // package-scoped and reaches importers the way the runtime does (an
+  // import runs the installer); a non-importing neighbor keeps its
+  // cannot-find. Anchored at the nearest package.json; a declarer already
+  // inside a tsconfig-wrapped project needs nothing more, and a declarer
+  // at the workspace root has no narrower scope to give it.
+  const globalDeclRels = new Set();
+  if (!mirrorRootIsFallback) {
+    for (const [fsPath, entry] of compiled) {
+      if (!entry.result.globalDecls?.length) continue;
+      let dir = path.dirname(fsPath);
+      let pkgDir = null;
+      for (;;) {
+        if (fs.existsSync(path.join(dir, 'package.json'))) { pkgDir = dir; break; }
+        if (dir === workspaceRoot || path.dirname(dir) === dir) break;
+        dir = path.dirname(dir);
+      }
+      if (pkgDir === null || pkgDir === workspaceRoot) continue;
+      const rel = path.relative(workspaceRoot, pkgDir);
+      if (![...wrapperRels].some((w) => rel === w || rel.startsWith(w + path.sep))) globalDeclRels.add(rel);
+    }
+  }
   const mirror = generatedMirror({
-    workspaceRoot, mirrorRootIsFallback, excludeDirs: [...wrapperRels],
+    workspaceRoot, mirrorRootIsFallback, excludeDirs: [...wrapperRels, ...globalDeclRels],
   });
   fs.writeFileSync(path.join(mirrorRoot, 'tsconfig.json'), JSON.stringify(mirror.tsconfig, null, 2));
   fs.writeFileSync(path.join(mirrorRoot, HOST_FLOOR_NAME), mirror.hostFloorDts);
@@ -350,6 +373,16 @@ if (compiled.size > 0) {
     const wrapperDir = path.join(mirrorRoot, rel);
     const wrapper = projectWrapper({
       wrapperDir, sourceTsconfig: path.join(workspaceRoot, rel, 'tsconfig.json'),
+      workspaceRoot, mirrorRoot,
+    });
+    fs.mkdirSync(wrapperDir, { recursive: true });
+    fs.writeFileSync(path.join(wrapperDir, 'tsconfig.json'), JSON.stringify(wrapper.tsconfig, null, 2));
+    fs.writeFileSync(path.join(wrapperDir, HOST_FLOOR_NAME), wrapper.hostFloorDts);
+  }
+  for (const rel of globalDeclRels) {
+    const wrapperDir = path.join(mirrorRoot, rel);
+    const wrapper = projectWrapper({
+      wrapperDir, sourceTsconfig: null, sourceDir: path.join(workspaceRoot, rel),
       workspaceRoot, mirrorRoot,
     });
     fs.mkdirSync(wrapperDir, { recursive: true });

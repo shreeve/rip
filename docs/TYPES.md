@@ -191,6 +191,21 @@ It produces:
 
 The face and declaration paths consume the same model.
 
+## Declared globals
+
+A top-level `globalThis.NAME ??= expr` declares the global. The `??=`
+spelling says "install unless someone already did" — DSL vocabulary,
+like stamp's `sh`/`ok`/`run` — and the face emits the typed declaration
+for it: `typeof` the initializer when it is an identifier, `any`
+otherwise. Plain `=` and non-top-level installs declare nothing on
+purpose: a test overwriting `globalThis.fetch` and an app's guarded,
+destroy-cleared lifecycle globals are not vocabulary.
+
+The declaring package becomes its own program in the mirror (an
+automatic project boundary), so the vocabulary stays package-scoped and
+reaches importers the way the runtime does — importing the module runs
+the installer. A non-importing neighbor keeps its cannot-find.
+
 ## Editor pipeline
 
 The VS Code/Cursor extension:

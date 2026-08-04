@@ -294,13 +294,20 @@ export function nearestTsconfig(dir, anchor) {
 // emitted per project, from that project's own gate answers: a nested
 // project's strictness and installed types govern whether ITS files see
 // it, which a single workspace-root floor could never express.
-export function projectWrapper({ wrapperDir, sourceTsconfig, workspaceRoot = null, mirrorRoot = null, chain = new Set(), onUnresolved }) {
-  const sourceDir = path.dirname(sourceTsconfig);
+// `sourceTsconfig: null` (with `sourceDir` given) is the AUTO-BOUNDARY
+// form: a package that declares globals becomes its own program so its
+// vocabulary stays package-scoped, without owning a tsconfig — the
+// wrapper anchors on the workspace root's config instead (or the same
+// defaults the mirror root uses when there is none).
+export function projectWrapper({ wrapperDir, sourceTsconfig, sourceDir: sourceDirIn = null, workspaceRoot = null, mirrorRoot = null, chain = new Set(), onUnresolved }) {
+  const sourceDir = sourceDirIn ?? path.dirname(sourceTsconfig);
+  const rootConfig = workspaceRoot ? path.join(workspaceRoot, 'tsconfig.json') : null;
+  const anchor = sourceTsconfig ?? (rootConfig && fs.existsSync(rootConfig) ? rootConfig : null);
   const overrides = {
     noImplicitAny: true,
     noEmit: true,
     allowImportingTsExtensions: true,
-    ...nullPosture(sourceDir, sourceTsconfig),
+    ...nullPosture(sourceDir, anchor),
     rootDirs: ['.', posix(path.relative(wrapperDir, sourceDir))],
   };
   // The same bare-specifier map the mirror root carries, rebased through
@@ -312,16 +319,18 @@ export function projectWrapper({ wrapperDir, sourceTsconfig, workspaceRoot = nul
     if (Object.keys(ripPaths).length) overrides.paths = ripPaths;
   }
   chain.clear();
-  const setsTypes = chainSetsTypes(sourceTsconfig, chain, onUnresolved);
+  const setsTypes = anchor !== null && chainSetsTypes(anchor, chain, onUnresolved);
   if (!setsTypes) overrides.types = ['*'];
   const reachUp = posix(path.relative(wrapperDir, sourceDir));
+  const tsconfig = {
+    compilerOptions: overrides,
+    include: ['**/*.ts', `${reachUp}/**/*.d.ts`],
+    exclude: ['node_modules', `${reachUp}/**/node_modules`],
+  };
+  if (anchor !== null) tsconfig.extends = posix(path.relative(wrapperDir, anchor));
+  else Object.assign(overrides, { target: 'esnext', module: 'esnext', lib: ['esnext', 'dom'] });
   return {
-    tsconfig: {
-      extends: posix(path.relative(wrapperDir, sourceTsconfig)),
-      compilerOptions: overrides,
-      include: ['**/*.ts', `${reachUp}/**/*.d.ts`],
-      exclude: ['node_modules', `${reachUp}/**/node_modules`],
-    },
+    tsconfig,
     hostFloorDts: hostFloorDts(sourceDir, { userSetsTypes: setsTypes }),
   };
 }
@@ -448,6 +457,7 @@ export function scanExportNames(source) {
   const values = new Set();
   const types = new Set();
   const stars = [];
+  const globals = new Set();   // top-level `globalThis.NAME ??=` — declared vocabulary
   let hasDefault = false;
   const lines = source.split('\n');
   let inBlockString = false;
@@ -459,6 +469,11 @@ export function scanExportNames(source) {
     const wasInBlockString = inBlockString;
     if (fences % 2) inBlockString = !inBlockString;
     if (wasInBlockString) continue;
+    // A top-level `globalThis.NAME ??=` DECLARES the global (the compiler
+    // emits the typed declaration in the real face); the stub carries an
+    // `any`-typed twin so the name resolves before anything compiles.
+    const g = /^globalThis\.([A-Za-z_$][A-Za-z0-9_$]*)\s*\?\?=/.exec(lines[i]);
+    if (g) { globals.add(g[1]); continue; }
     if (!/^export\b/.test(lines[i])) continue;   // exports are top-level: column 0
     let rest = lines[i].slice('export'.length).trim();
 
@@ -549,7 +564,7 @@ export function scanExportNames(source) {
     types.add(name);
     if (schema[1] === 'model') { types.add(name + 'Data'); types.add(name + 'Create'); }
   }
-  return { values: [...values], types: [...types], stars, hasDefault };
+  return { values: [...values], types: [...types], stars, hasDefault, globals: [...globals] };
 }
 
 // The stub text for one file's exported names. Every name is `any`: the
@@ -560,11 +575,18 @@ export function scanExportNames(source) {
 // `defaultName` is the local the default export binds, and it is the name
 // the editor OFFERS the default under — see defaultLocalName below, where
 // every constraint on it is recorded.
-export function stubFace({ values = [], types = [], hasDefault = false, defaultName = '_default' } = {}) {
+export function stubFace({ values = [], types = [], hasDefault = false, defaultName = '_default', globals = [] } = {}) {
   const lines = [];
   for (const name of types) lines.push(`export type ${name} = any;`);
   for (const name of values) lines.push(`export declare const ${name}: any;`);
   if (hasDefault) lines.push(`declare const ${defaultName}: any;`, `export default ${defaultName};`);
+  // Declared vocabulary rides the stub as `any` — resolution before the
+  // real face's typed declaration materializes over it.
+  if (globals.length) {
+    lines.push('declare global {');
+    for (const name of globals) lines.push(`  var ${name}: any;`);
+    lines.push('}');
+  }
   lines.push('export {};');   // a module even when it exports nothing
   return lines.join('\n') + '\n';
 }
@@ -655,6 +677,7 @@ export function stubFacesFromScans(scans) {
     const t = [...types.get(file)];
     faces.set(file, stubFace({
       values: v, types: t, hasDefault: scan.hasDefault,
+      globals: scan.globals ?? [],
       defaultName: defaultLocalName(file, new Set([...v, ...t])),
     }));
   }
