@@ -84,7 +84,7 @@ not stop or reload a process it does not own.
 
 ```text
 Caddy + Janus
-├── serves ───────────────► public/, app/, static/generated/
+├── serves ───────────────► public/, app/, dist/
 ├── terminates ───────────► Hub WebSockets
 └── proxies /api ─────────► private worker sockets
 
@@ -92,7 +92,7 @@ one Rip server
 ├── manager
 │   ├── registration + heartbeats
 │   ├── generation + worker supervision
-│   ├── generated App publication
+│   ├── dist App publication
 │   └── watch dings + local control
 ├── API source ───────────► disposable worker processes
 └── App source + assets ──► served directly by Janus
@@ -100,9 +100,9 @@ one Rip server
 
 Three project shapes use the same model:
 
-- **Full:** API workers plus `app/` and generated App files.
+- **Full:** API workers plus `app/` and dist App files.
 - **API-only:** API workers with no browser App.
-- **App-only:** `app/` and generated files with no API workers.
+- **App-only:** `app/` and dist files with no API workers.
 
 ## Site Files and Ownership
 
@@ -119,7 +119,7 @@ project/
 │   ├── index.html                optional SPA shell
 │   ├── routes/[id].rip           live Rip modules
 │   └── styles.css
-└── static/generated/             manager-owned publication
+└── dist/                         manager-owned publication
     ├── @rip/rip.js
     ├── bundle.json
     └── manifest.json             watch publication artifact
@@ -127,13 +127,13 @@ project/
 
 The paths on disk are not public directory prefixes. Janus searches the
 registered roots in order and appends the request path to each one. A typical
-tenant registration searches `static/generated`, then
+tenant registration searches `dist`, then
 `sites/{site}/public`, then `sites/common/public`, then `app`. Consequently:
 
 **Root names are never exposed.** An App member's id is its path relative to
 `app/`, which is also its normal public URL without the leading slash.
 
-- `static/generated/bundle.json` is requested as `/bundle.json`;
+- `dist/bundle.json` is requested as `/bundle.json`;
 - `sites/cheetos/public/logo.svg` overrides
   `sites/common/public/logo.svg` for `/logo.svg`;
 - `app/routes/[id].rip` has the bag id `routes/[id].rip` and is fetched from
@@ -142,8 +142,8 @@ tenant registration searches `static/generated`, then
   missing script, stylesheet, image, or module.
 
 `serve.rip` makes the host or tenant rule, root order, API prefixes, cache
-policy, and shell explicit. Without it, ordinary projects discover the
-generated root plus existing `public/` and `app/` roots. The project root and
+policy, and shell explicit. Without it, ordinary projects discover `dist/`
+plus existing `public/` and `app/` roots. The project root and
 `api/` are never implicitly public.
 
 The three owners have deliberately narrow jobs:
@@ -471,7 +471,7 @@ an existing `Content-Encoding` remains authoritative.
 ## Browser App and Development Feed
 
 An `app/` directory is the browser App. The manager assembles its `.rip`
-module graph into `static/generated/bundle.json`; while watching, it also
+module graph into `dist/bundle.json`; while watching, it also
 publishes `manifest.json`.
 
 Janus serves:
@@ -555,18 +555,18 @@ directory indexes for that root when browse is enabled in Caddy. The flag does
 not configure themes or renderers; those remain process-wide Janus
 configuration and are never exposed through Rip.
 
-The manager normally prepends its own `static/generated` root with
+The manager normally prepends its own `dist` root with
 `cache: 'revalidate'`. It resolves
 every declared path against the project directory and rejects unknown keys,
 missing roots, malformed browse values, missing shells, malformed templates,
 overlapping API prefixes, and invalid hosts. `shell` may be omitted only when
 every declared root is browsable, `proxyFirst` is empty, and the manager has no
 API upstreams. That terminal browse-only policy is registered exactly as
-declared, without generated or conventional roots. With `files` declared, the
+declared, without the dist or conventional roots. With `files` declared, the
 project root is public only when its path is listed explicitly.
 
-Without a `files` declaration, conventional discovery registers the generated
-root plus `public/` and `app/` when present. The project directory is never an
+Without a `files` declaration, conventional discovery registers `dist/` plus
+`public/` and `app/` when present. The project directory is never an
 implicit public root.
 
 Janus receives one atomic registration containing identity, site or hosts,
@@ -842,7 +842,7 @@ The focused fixtures test one server capability at a time:
 bun run test:framework
 bun run test:hello-api
 bun run test:workers
-bun run test:hello-app
+bun run test:hello
 bun run test:reloads
 bun run test:operations
 bun run test:manager-boundary

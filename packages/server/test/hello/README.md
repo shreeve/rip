@@ -1,4 +1,4 @@
-# hello-app
+# hello
 
 Minimal browser-App-only shape:
 

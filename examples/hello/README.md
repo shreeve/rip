@@ -27,7 +27,7 @@ conventional `app/` root, and default manifest categories.
 
 - [ ] Open `https://hello.ripdev.io/`.
 - [ ] `index.html` loads from the authored App root.
-- [ ] `rip.js` and `bundle.json` load from the generated root.
+- [ ] `rip.js` and `bundle.json` load from `dist/`.
 - [ ] `bundle.json` contains the four manifest members listed below.
 - [ ] `/images/rip.png` loads as an ordinary static asset but is absent from
       the manifest.

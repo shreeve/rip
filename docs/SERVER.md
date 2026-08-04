@@ -19,10 +19,10 @@ medlabs server
 │   └── worker(s) ◄─ manager supervises and hot reloads
 ├── static
 │   ├── site-specific
-│   ├── common
-│   └── generated
-│       ├── bundle.json
-│       └── manifest.json
+│   └── common
+├── dist
+│   ├── bundle.json
+│   └── manifest.json
 └── app
     └── source and assets ◄── manager watches and dings on changes
 ```
@@ -42,11 +42,11 @@ that serves its static files and routes its API requests.
 - A **generation process** is a short-lived child that builds and validates one
   candidate API artifact, then exits.
 - A **browse registration** is a files-only Janus registration created by
-  `rip server browse`; it has no manager, workers, App, or generated roots.
+  `rip server browse`; it has no manager, workers, App, or dist root.
 - The **App** is the client application source and assets under `app/`, served
   directly by Caddy and Janus. While watching is enabled, the manager watches
   this tree and dings changed files.
-- **Static** contains site-specific files, common files, and manager-generated
+- **Dist** is the manager-owned App publication directory containing
   coordination files such as `bundle.json` and `manifest.json`.
 - **Caddy + Janus** is the shared edge for zero or more Rip servers.
 
@@ -239,9 +239,9 @@ meaning to either.
 ```text
 authored App bag ───────────────────────────► Janus serves current files
        │
-       └── manager snapshots and validates ─► static/generated
-                                                ├── bundle.json
-                                                └── manifest.json (watch only)
+       └── manager snapshots and validates ─► dist
+                                               ├── bundle.json
+                                               └── manifest.json (watch only)
                                                         │
                                                         └── Hub dings (watch only)
 ```
@@ -320,7 +320,7 @@ app/styles.css       → styles.css       → /styles.css
 ```
 
 The server entry (`app.rip` or `index.rip` at the project root), API source,
-ordinary public assets, package sources, and generated files are outside this
+ordinary public assets, package sources, and dist files are outside this
 bag. App-only changes do not replace API workers, and API-only changes do not
 automatically mutate the browser App.
 
@@ -502,14 +502,14 @@ match. A root may contain the trusted `{site}` selected from the hostname:
 
 ```text
 public/<uri>
-generated/<uri>
+dist/<uri>
 sites/{site}/public/<uri>
 sites/common/public/<uri>
 app/<uri>
 ```
 
 The order is policy. In this example, a tenant file overrides the common file,
-while `public` and `generated` take priority over both. Another server may
+while `public` and `dist` take priority over both. Another server may
 choose a different order. A root object may set `cache` to exactly `never`,
 `revalidate`, or `forever`; omission means `revalidate`. It may independently
 set strict Boolean `browse: true`; when the Caddy site admits browse, Janus may
@@ -520,21 +520,21 @@ Browse admission, themes, renderers, and renderer limits remain cold Janus
 configuration. Rip can select a root for browsing but cannot supply any
 renderer or theme command.
 
-When `serve.rip` declares `files`, those roots plus the manager's generated
-root are normally registered; the project root is public only when the
-declaration lists it explicitly. One terminal policy omits the generated root:
+When `serve.rip` declares `files`, those roots plus the manager's `dist/` root
+are normally registered; the project root is public only when the declaration
+lists it explicitly. One terminal policy omits the `dist/` root:
 if every declared root has `browse: true`, `proxyFirst` is empty, no shell is
 declared, and the project has no API upstreams, the manager registers exactly
 those roots. Any other policy requires the SPA shell.
 
-Without a `files` declaration, conventional discovery registers the generated
-root plus `public/` and `app/` when present. The project directory is never an
+Without a `files` declaration, conventional discovery registers `dist/` plus
+`public/` and `app/` when present. The project directory is never an
 implicit public root.
 
 Registered roots are mounted at the URL root; their filesystem names are not
 part of public or App identity. In particular, `app/routes/home.rip` has the
 bag id `routes/home.rip` and is served as `/routes/home.rip`. The same rule
-holds for `public/`, `static/generated/`, and `sites/{site}/public/`: only the
+holds for `public/`, `dist/`, and `sites/{site}/public/`: only the
 path relative to the selected root is exposed.
 
 The SPA shell is a separate HTML-only fallback, commonly `app/index.html`. It
@@ -680,7 +680,7 @@ The same model permits three useful shapes.
 ### Full server
 
 ```text
-manager + API workers + App + static/generated files
+manager + API workers + App + dist files
 ```
 
 ### API-only server
@@ -689,16 +689,16 @@ manager + API workers + App + static/generated files
 manager + API workers
 ```
 
-There is no App or generated App state. Janus routes the configured API
+There is no App or dist App state. Janus routes the configured API
 surface to workers.
 
 ### App-only server
 
 ```text
-manager + App + static/generated files
+manager + App + dist files
 ```
 
-There are no API workers. The manager maintains registration, generated
+There are no API workers. The manager maintains registration, dist publication
 files, watch dings when enabled, and heartbeats; Caddy and Janus serve
 every public request.
 

@@ -149,9 +149,9 @@ test! 'hold fences App publication, API replacement, and dings', ->
     eq ((unixFetch!('/version', fresh)).json!), { version: 'held-change' }
     eq dings.length, 1
     eq dings[0].ding.kind, 'epoch'
-    generated = join project, 'static', 'generated'
-    bundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
-    manifest = JSON.parse readFileSync(join(generated, 'manifest.json'), 'utf8')
+    dist = join project, 'dist'
+    bundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    manifest = JSON.parse readFileSync(join(dist, 'manifest.json'), 'utf8')
     eq bundle.check, manifest.check
     eq bundle.modules['routes/index.rip'], "export changed = true\n"
 

@@ -24,7 +24,6 @@
 	}
 }
 
-# TLS makes these standard HTTPS listeners on port 443.
 ripdev.io, *.ripdev.io {
 	tls {$RIP_EDGE_CERT} {$RIP_EDGE_KEY}
 	janus

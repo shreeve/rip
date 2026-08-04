@@ -74,13 +74,13 @@ test! 'App publication rehashes only watcher-reported manifest files', ->
   finally
     rmSync dir, { recursive: true, force: true }
 
-test! 'App-only manager publishes a finite generated surface with no workers', ->
-  dir = mkdtempSync join(tmpdir(), 'rip-hello-app-')
+test! 'App-only manager publishes a finite dist surface with no workers', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-')
   project = join dir, 'project'
   cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
   project = realpathSync project
-  mkdirSync join(project, 'static', 'generated'), { recursive: true }
-  writeFileSync join(project, 'static', 'generated', 'manifest.json'), '{"stale":true}'
+  mkdirSync join(project, 'dist'), { recursive: true }
+  writeFileSync join(project, 'dist', 'manifest.json'), '{"stale":true}'
   controlSocket = join dir, 'janus.sock'
   registration = null
   deleted = false
@@ -99,7 +99,7 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
       Response.new('Not Found', { status: 404 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--name', 'hello-app', '--host', 'hello-app.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--name', 'hello', '--host', 'hello.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'inherit'
@@ -108,17 +108,17 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
     eq registration.upstreams, []
     eq registration.files.proxy_first, []
     eq registration.files.roots, [
-      { path: join(project, 'static', 'generated'), cache: 'revalidate' }
+      { path: join(project, 'dist'), cache: 'revalidate' }
       { path: join(project, 'app'), cache: 'never' }
     ]
-    eq registration.files.shell, join(project, 'static', 'generated', 'index.html')
+    eq registration.files.shell, join(project, 'dist', 'index.html')
 
-    generated = join project, 'static', 'generated'
-    ok existsSync(join(generated, 'bundle.json'))
-    ok existsSync(join(generated, '@rip', 'rip.js'))
-    ok existsSync(join(generated, 'index.html'))
-    ok not existsSync(join(generated, 'manifest.json'))
-    bundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
+    dist = join project, 'dist'
+    ok existsSync(join(dist, 'bundle.json'))
+    ok existsSync(join(dist, '@rip', 'rip.js'))
+    ok existsSync(join(dist, 'index.html'))
+    ok not existsSync(join(dist, 'manifest.json'))
+    bundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
     eq bundle.files.map((entry) -> entry.id), ['routes/index.rip', 'styles.css', 'template.html']
     eq Object.keys(bundle.modules).filter((id) -> bundle.files.some((entry) -> entry.id is id)), ['routes/index.rip']
     eq bundle.check, check(bundle.files)
@@ -156,7 +156,7 @@ test! 'authored App shell is registered without generating a replacement', ->
       stderr: 'inherit'
     waitFor! -> registration?
     eq registration.files.shell, join(project, 'app', 'index.html')
-    ok not existsSync(join(project, 'static', 'generated', 'index.html'))
+    ok not existsSync(join(project, 'dist', 'index.html'))
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143
   finally
@@ -203,9 +203,9 @@ test! 'watch publication commits one shared inventory then batches per-file ding
       stdout: 'ignore'
       stderr: 'inherit'
     waitFor! -> registration?
-    generated = join project, 'static', 'generated'
-    bundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
-    manifest = JSON.parse readFileSync(join(generated, 'manifest.json'), 'utf8')
+    dist = join project, 'dist'
+    bundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    manifest = JSON.parse readFileSync(join(dist, 'manifest.json'), 'utf8')
     eq manifest.check, bundle.check
     eq manifest.files, bundle.files
 
@@ -216,8 +216,8 @@ test! 'watch publication commits one shared inventory then batches per-file ding
     eq batches[0][0]['@'], ['/hub']
     eq batches[0][0].ding.id, 'styles.css'
 
-    nextBundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
-    nextManifest = JSON.parse readFileSync(join(generated, 'manifest.json'), 'utf8')
+    nextBundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    nextManifest = JSON.parse readFileSync(join(dist, 'manifest.json'), 'utf8')
     eq nextManifest.check, nextBundle.check
     eq nextManifest.files, nextBundle.files
     ok nextManifest.check isnt manifest.check

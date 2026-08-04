@@ -88,7 +88,7 @@ test! 'manager loads and normalizes the app-local declaration before registering
     ok not ('hosts' of registration.body)
     eq registration.body.files,
       roots: [
-        { path: join(realpathSync(project), 'static', 'generated'), cache: 'revalidate' }
+        { path: join(realpathSync(project), 'dist'), cache: 'revalidate' }
         { path: join(realpathSync(project), 'sites/{site}/public'), cache: 'revalidate', browse: true }
         { path: join(realpathSync(project), 'sites/common/public'), cache: 'forever' }
         { path: join(realpathSync(project), 'app'), cache: 'never' }
@@ -170,7 +170,7 @@ test! 'serve.rip selects a custom App root and manifest membership', ->
         calls.find (call) -> call.method is 'POST' and call.path is '/1.0/apps'
     catch error
       throw Error.new "#{error.message}; calls=#{JSON.stringify(calls)}"
-    bundle = JSON.parse readFileSync(join(project, 'static', 'generated', 'bundle.json'), 'utf8')
+    bundle = JSON.parse readFileSync(join(project, 'dist', 'bundle.json'), 'utf8')
     eq bundle.files.map((entry) -> entry.id), ['index.html', 'routes/index.rip']
     eq Object.keys(bundle.modules).filter((id) -> bundle.files.some((entry) -> entry.id is id)), ['routes/index.rip']
     process.kill 'SIGTERM'

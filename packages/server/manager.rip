@@ -638,10 +638,10 @@ buildAppDocuments = (project, includeManifest) ->
   appDocuments! project, graph, includeManifest
 
 commitAppDocuments = (project, documents) ->
-  generated = join project.root, 'static', 'generated'
-  mkdirSync generated, { recursive: true }
-  writeAtomic join(generated, 'bundle.json'), documents.bundle
-  manifestPath = join generated, 'manifest.json'
+  dist = join project.root, 'dist'
+  mkdirSync dist, { recursive: true }
+  writeAtomic join(dist, 'bundle.json'), documents.bundle
+  manifestPath = join dist, 'manifest.json'
   if documents.manifest?
     writeAtomic manifestPath, documents.manifest
   else
@@ -654,8 +654,8 @@ writeAppDocuments = (project, includeManifest) ->
 
 publishApp = (project, name, includeManifest, documents = undefined, declaredShell = null) ->
   return null unless project.appRoot?
-  generated = join project.root, 'static', 'generated'
-  mkdirSync join(generated, '@rip'), { recursive: true }
+  dist = join project.root, 'dist'
+  mkdirSync join(dist, '@rip'), { recursive: true }
   graph = null
   if documents is undefined
     graph = writeAppDocuments! project, includeManifest
@@ -663,16 +663,16 @@ publishApp = (project, name, includeManifest, documents = undefined, declaredShe
     commitAppDocuments project, documents
     graph = documents.graph
   else unless includeManifest
-    manifestPath = join generated, 'manifest.json'
+    manifestPath = join dist, 'manifest.json'
     unlinkSync manifestPath if existsSync manifestPath
   runtime = join(loaderDir(), '..', 'dist', 'browser', 'rip.js')
   abort "rip-server: browser runtime missing at #{runtime}" unless existsSync runtime
-  copyFileSync runtime, join(generated, '@rip', 'rip.js')
+  copyFileSync runtime, join(dist, '@rip', 'rip.js')
 
   authoredShell = join project.appRoot, 'index.html'
   shell = declaredShell or authoredShell
   unless declaredShell? or existsSync authoredShell
-    shell = join generated, 'index.html'
+    shell = join dist, 'index.html'
     writeAtomic shell, """
     <!doctype html>
     <meta charset="utf-8">
@@ -686,27 +686,27 @@ publishApp = (project, name, includeManifest, documents = undefined, declaredShe
     """
 
   roots = [
-    { path: generated, cache: 'revalidate' }
+    { path: dist, cache: 'revalidate' }
     { path: project.appRoot, cache: 'never' }
   ]
   { files: { roots, proxy_first: (if project.entry? then ['/api'] else []), shell }, graph }
 
 registrationFiles = (project, declared, publication) ->
-  generated = join project.root, 'static', 'generated'
+  dist = join project.root, 'dist'
   try
-    mkdirSync generated, { recursive: true }
-    invalidServe "generated root is not a directory: #{generated}" unless statSync(generated).isDirectory()
+    mkdirSync dist, { recursive: true }
+    invalidServe "dist root is not a directory: #{dist}" unless statSync(dist).isDirectory()
   catch error
-    invalidServe "generated root is not writable at #{generated}: #{error?.message or error}"
+    invalidServe "dist root is not writable at #{dist}: #{error?.message or error}"
   if declared?
     terminal = not declared.shell? and declared.proxy_first.length is 0 and declared.roots.every (root) -> root.browse is true
     return declared if terminal
     files =
-      roots: [{ path: generated, cache: 'revalidate' }, ...declared.roots]
+      roots: [{ path: dist, cache: 'revalidate' }, ...declared.roots]
       proxy_first: declared.proxy_first
     files.shell = declared.shell if declared.shell?
     return files
-  roots = [{ path: generated, cache: 'revalidate' }]
+  roots = [{ path: dist, cache: 'revalidate' }]
   publicRoot = join project.root, 'public'
   roots.push { path: publicRoot, cache: 'revalidate' } if existsSync(publicRoot) and statSync(publicRoot).isDirectory()
   roots.push { path: project.appRoot, cache: 'never' } if project.appRoot?
@@ -1179,7 +1179,7 @@ export main = (argv) ->
     apiWatcher = watch project.root, { recursive: true }, (event, filename) ->
       return unless operation is 'Active'
       rel = String(filename or '')
-      return if rel.startsWith('static/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
+      return if rel.startsWith('dist/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
       path = resolve project.root, rel
       return if project.appRoot? and (path is project.appRoot or path.startsWith("#{project.appRoot}/"))
       return unless path is project.entry or apiInputs.has path

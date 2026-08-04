@@ -40,6 +40,11 @@ Tip `129c35b0` carries the coherent Rip App publication protocol:
   Invalid UTF-8 Rip source and all bundle assembly/validation failures preserve
   the last good generation. Starting with watch disabled removes a stale
   generated manifest and opens no development feed.
+- `dist/` is the manager-owned App publication root. It carries `@rip/rip.js`,
+  `bundle.json`, the watch-only `manifest.json`, and a generated shell when the
+  App does not author one. Janus mounts `dist/` at the URL root, and the API
+  watcher excludes it. Every runnable example ignores its runtime `dist/`
+  tree; Hello, Cart, and Pulse have each been live-verified against that path.
 - `serve.rip` may select `app.root` and classify App membership through
   `app.manifest.update`, `.css`, and `.reload` globs. The defaults are
   `app/` plus `**/*.rip`, `**/*.css`, and `**/*.html`; omitted categories keep
