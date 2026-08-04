@@ -264,6 +264,12 @@ use-before-assignment checking for typed forwards. `noCheck` suppresses
 diagnostics for matching paths while keeping those files in the
 TypeScript program so imports continue to resolve.
 
+A nested package that sets `rip.strict` becomes its own program in the
+mirror (the same automatic boundary a globals-declaring package gets):
+host floors and null posture are per-program, so the package's own
+strictness governs them — an unresolvable `bun:sqlite` is a complaint
+there, not a floored `any`.
+
 Configuration changes refresh open editor documents without a window
 reload. `rip check [paths...]` applies the same project configuration,
 materializes the same TypeScript faces and import closure, and translates

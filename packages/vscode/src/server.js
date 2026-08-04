@@ -385,7 +385,7 @@ function ensureAutoBoundary(fsPath) {
   }
   writeGeneratedTsconfig();
   written.push(path.join(mirrorRoot, 'tsconfig.json'), path.join(mirrorRoot, HOST_FLOOR_NAME));
-  connection.console.log(`[rip] ${rel}: declares globals — the package becomes its own program`);
+  connection.console.log(`[rip] ${rel}: the package becomes its own program (declared globals or rip.strict)`);
   return written;
 }
 
@@ -1760,7 +1760,11 @@ async function refresh(document) {
         scheduleManifestSave();
       }
       const wrapperFiles = ensureProjectWrapper(fsPath);
-      if (result.globalDecls?.length) wrapperFiles.push(...ensureAutoBoundary(fsPath));
+      // Globals-declaring or nested-strict: either way the package needs
+      // its own program (floors and null posture are per-program).
+      if (result.globalDecls?.length || (state.strict === true && state.configDir && state.configDir !== workspaceRoot)) {
+        wrapperFiles.push(...ensureAutoBoundary(fsPath));
+      }
       if (wrapperFiles.length && tsgo) {
         tsgo.client.notify('workspace/didChangeWatchedFiles', {
           changes: wrapperFiles.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Changed })),

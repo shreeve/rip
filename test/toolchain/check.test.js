@@ -756,6 +756,28 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // A nested package that sets `rip.strict` becomes its own program, the
+  // same auto boundary a globals-declaring package gets — floors are
+  // per-PROGRAM, so without it the root program's floor kept answering
+  // `any` for a package that asked for complaints. Driven: Philip flipped
+  // packages/ai strict and `bun:sqlite` stayed unsquiggled.
+  test('a nested rip.strict package refuses the floors: its own program, its own posture', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ workspaces: ['packages/*'] }),
+      'packages/lib/package.json': JSON.stringify({ name: '@t/lib', rip: { strict: true } }),
+      'packages/lib/lib.rip': "import { Database } from 'bun:sqlite'\nconsole.log Database\n",
+      'packages/loose/package.json': JSON.stringify({ name: '@t/loose' }),
+      'packages/loose/loose.rip': "import { Database } from 'bun:sqlite'\nconsole.log Database\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      // The strict package: floor refused, the defect publishes.
+      expect(diags.filter((d) => d.file.includes('lib')).map((d) => d.code)).toContain(2307);
+      // The gradual sibling: floored `any`, still quiet.
+      expect(diags.filter((d) => d.file.includes('loose'))).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // Config is per FILE (nearest package.json), so a strict consumer's
   // check still hides its gradual DEPENDENCIES' diagnostics — and a
   // summary that says "set `rip.strict` in package.json" after the user
@@ -1671,6 +1693,23 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     try {
       fs.writeFileSync(path.join(dir, 'app.rip'), 'x: unknown = import.meta.nosuchfield\nconsole.log x\n');
       expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toEqual([2339]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // Bun's builtin MODULES ride the floor too: `import { Database } from
+  // 'bun:sqlite'` is ordinary Bun code, and without installed host types
+  // the import is a cannot-find DEFECT on a module that demonstrably
+  // exists at runtime. One wildcard shorthand (`declare module "bun:*"`)
+  // floors them as `any`, with the floor's own gates: installed types
+  // outrank it, and strict refuses it — the defect returns until the
+  // project declares real host types.
+  test('bun:* builtin modules ride the host floor: `any` under gradual, the defect under strict', () => {
+    const dir = freshProject({ withTypes: false });
+    try {
+      fs.writeFileSync(path.join(dir, 'app.rip'), "import { Database } from 'bun:sqlite'\ndb = new Database(':memory:')\nconsole.log db\n");
+      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'fresh', rip: { strict: true } }));
+      expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toContain(2307);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 

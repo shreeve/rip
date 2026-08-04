@@ -341,31 +341,33 @@ if (compiled.size > 0) {
       wrapperRels.add(path.relative(workspaceRoot, path.dirname(owner)));
     }
   }
-  // A package that DECLARES globals (`globalThis.NAME ??=` at top level)
-  // becomes its own program — the AUTO BOUNDARY. Its vocabulary stays
-  // package-scoped and reaches importers the way the runtime does (an
-  // import runs the installer); a non-importing neighbor keeps its
-  // cannot-find. Anchored at the nearest package.json; a declarer already
-  // inside a tsconfig-wrapped project needs nothing more, and a declarer
-  // at the workspace root has no narrower scope to give it.
-  const globalDeclRels = new Set();
+  // The AUTO BOUNDARY: a package becomes its own program when it DECLARES
+  // globals (`globalThis.NAME ??=` — the vocabulary stays package-scoped,
+  // reaching importers the way the runtime does) or when it sets
+  // `rip.strict` (floors and null posture are per-PROGRAM, so a strict
+  // package inside the root program kept getting the gradual floor's
+  // `any`s — driven by `bun:sqlite` staying unsquiggled in a strict
+  // package). A package already inside a tsconfig-wrapped project needs
+  // nothing more; the workspace root has no narrower scope to give.
+  const autoBoundaryRels = new Set();
   if (!mirrorRootIsFallback) {
     for (const [fsPath, entry] of compiled) {
-      if (!entry.result.globalDecls?.length) continue;
-      let dir = path.dirname(fsPath);
       let pkgDir = null;
-      for (;;) {
-        if (fs.existsSync(path.join(dir, 'package.json'))) { pkgDir = dir; break; }
-        if (dir === workspaceRoot || path.dirname(dir) === dir) break;
-        dir = path.dirname(dir);
+      if (entry.cfg.strict === true && entry.cfg._configDir && entry.cfg._configDir !== workspaceRoot) {
+        pkgDir = entry.cfg._configDir;
+      } else if (entry.result.globalDecls?.length) {
+        for (let dir = path.dirname(fsPath); ; dir = path.dirname(dir)) {
+          if (fs.existsSync(path.join(dir, 'package.json'))) { pkgDir = dir; break; }
+          if (dir === workspaceRoot || path.dirname(dir) === dir) break;
+        }
       }
-      if (pkgDir === null || pkgDir === workspaceRoot) continue;
+      if (pkgDir === null || pkgDir === workspaceRoot || !pkgDir.startsWith(workspaceRoot + path.sep)) continue;
       const rel = path.relative(workspaceRoot, pkgDir);
-      if (![...wrapperRels].some((w) => rel === w || rel.startsWith(w + path.sep))) globalDeclRels.add(rel);
+      if (![...wrapperRels].some((w) => rel === w || rel.startsWith(w + path.sep))) autoBoundaryRels.add(rel);
     }
   }
   const mirror = generatedMirror({
-    workspaceRoot, mirrorRootIsFallback, excludeDirs: [...wrapperRels, ...globalDeclRels],
+    workspaceRoot, mirrorRootIsFallback, excludeDirs: [...wrapperRels, ...autoBoundaryRels],
   });
   fs.writeFileSync(path.join(mirrorRoot, 'tsconfig.json'), JSON.stringify(mirror.tsconfig, null, 2));
   fs.writeFileSync(path.join(mirrorRoot, HOST_FLOOR_NAME), mirror.hostFloorDts);
@@ -379,7 +381,7 @@ if (compiled.size > 0) {
     fs.writeFileSync(path.join(wrapperDir, 'tsconfig.json'), JSON.stringify(wrapper.tsconfig, null, 2));
     fs.writeFileSync(path.join(wrapperDir, HOST_FLOOR_NAME), wrapper.hostFloorDts);
   }
-  for (const rel of globalDeclRels) {
+  for (const rel of autoBoundaryRels) {
     const wrapperDir = path.join(mirrorRoot, rel);
     const wrapper = projectWrapper({
       wrapperDir, sourceTsconfig: null, sourceDir: path.join(workspaceRoot, rel),
