@@ -13,10 +13,12 @@ Janus serves every public byte.
 
 ## Publication checklist
 
-- One filesystem walk reads every `app/**/*.{rip,css,html}` member once into
-  an ephemeral in-memory snapshot. Each id is the member's path relative to
-  `app/`, so the disk file `app/routes/index.rip` is `routes/index.rip` in the
-  bundle, manifest, ding, and Workspace.
+- Initial publication and ambiguous directory events walk every member selected
+  by `serve.rip` `app.manifest` into an ephemeral in-memory snapshot. Ordinary
+  file events reread and rehash only the exact watcher-reported ids. The
+  conventional policy selects `app/**/*.{rip,css,html}`. Each id is relative
+  to the App root, so the disk file `app/routes/index.rip` is
+  `routes/index.rip` in the bundle, manifest, ding, and Workspace.
 - Each entry receives one six-character content rash. The wire field is
   `hash`; its value is that rash.
 - Entries sort by `id`. The App check is

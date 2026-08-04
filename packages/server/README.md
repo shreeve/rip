@@ -152,8 +152,8 @@ The three owners have deliberately narrow jobs:
   talk to S3 and return a normal response. A route serving a private local file
   may use `@send`; the worker selects the file and Janus performs the actual
   `X-Sendfile` transfer, including validators, ranges, and content type.
-- **The manager publishes App identity.** It snapshots
-  `app/**/*.{rip,css,html}`, assigns each member a six-character content
+- **The manager publishes App identity.** It snapshots the configured App
+  manifest (by default `app/**/*.{rip,css,html}`), assigns each member a six-character content
   `hash`, and identifies it relative to the App root (`routes/home.rip`, not
   `app/routes/home.rip`). It writes a deterministic `bundle.json` and—while
   watching—a matching `manifest.json`. The bundle carries the complete
@@ -485,9 +485,9 @@ Janus serves:
 Workers serve API routes only. The manager writes files and publishes control
 state but is never on the client data path.
 
-The default development bag is the disk set `app/**/*.{rip,css,html}`. Its ids
-are relative to `app/`, so a change to `app/routes/home.rip` produces a tiny
-ding naming `{id: "routes/home.rip", hash}`:
+The conventional development manifest selects `app/**/*.{rip,css,html}`. Its
+ids are relative to the App root, so a change to `app/routes/home.rip`
+produces a tiny ding naming `{id: "routes/home.rip", hash}`:
 
 - `.rip` → fetch and apply the latest module
 - `.css` → fetch latest bytes and update the existing stylesheet URL
@@ -510,6 +510,12 @@ policy:
 ```coffee
 export default
   name: 'medlabs'
+  app:
+    root: 'app'
+    manifest:
+      update: ['**/*.rip']
+      css: ['**/*.css']
+      reload: ['**/*.html']
   sites:
     host: '{site}.medlabs.health'
     dir: 'sites'
@@ -528,6 +534,17 @@ export default
 
 Exact-host servers use `hosts` instead of `sites`. `hosts` and `sites` are
 mutually exclusive.
+
+`app.root` selects the browser App directory relative to the project.
+`app.manifest` classifies authored files by client apply verdict. The block
+shown above is the complete default; omitting `app`, `manifest`, or one of its
+categories retains the corresponding default. An explicit empty category
+disables it. Patterns are relative globs and each category accepts only its
+owned suffix (`.rip`, `.css`, or `.html`). Dot-prefixed path segments remain
+outside the manifest. Bun still observes the entire App root recursively.
+Nonmatching asset-file events do no publication work, and matching file events
+reread and rehash only the exact App-relative paths reported by the watcher.
+Directory and pathless events fall back to a full membership reconciliation.
 
 Each root has optional `cache` policy: `never`, `revalidate`, or `forever`.
 Omission means `revalidate`. The manager emits the normalized policy on every

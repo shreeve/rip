@@ -40,6 +40,14 @@ Tip `129c35b0` carries the coherent Rip App publication protocol:
   Invalid UTF-8 Rip source and all bundle assembly/validation failures preserve
   the last good generation. Starting with watch disabled removes a stale
   generated manifest and opens no development feed.
+- `serve.rip` may select `app.root` and classify App membership through
+  `app.manifest.update`, `.css`, and `.reload` globs. The defaults are
+  `app/` plus `**/*.rip`, `**/*.css`, and `**/*.html`; omitted categories keep
+  their defaults and `[]` disables one explicitly. The recursive watcher
+  observes the complete configured root but filters nonmatching asset-file
+  events before publication work. Matching file events contribute exact ids to
+  a debounced dirty set and only those members are reread and rehashed;
+  directory and pathless events request a complete reconciliation.
 - Dings remain identity-only hints. Latest fetched bytes win, owner tokens
   fence stale requests, delete hashes fence newer passports, compilation
   precedes Rip passport commit, and the apply vocabulary remains
@@ -53,11 +61,11 @@ Tip `129c35b0` carries the coherent Rip App publication protocol:
 
 ## Verification
 
-- `bun run test:all` — all 22 lanes passed, 8,365 tests total.
+- `bun run test:all` — all 22 lanes passed, 8,369 tests total.
 - Root fast suite — 6,131 passed, 35 extended-tier skips.
 - `packages/app` — package, Workspace/feed, and apply suites passed.
-- `packages/server` — all 88 package tests passed, including real published
-  Janus integration.
+- `packages/server` — all 92 package tests passed, including real published
+  Janus integration and the exact-dirty-path watcher pin.
 - Browser bundle regeneration under Bun 1.3.14 is byte-identical to the
   committed artifact.
 - `packages/browser-tests` remains the documented CI-only Playwright lane.

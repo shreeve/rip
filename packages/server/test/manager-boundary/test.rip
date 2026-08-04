@@ -1,5 +1,5 @@
 import { test, eq, ok } from '@rip-lang/testing'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -132,6 +132,69 @@ test! 'shell-less all-browsable declaration registers exactly its declared roots
   finally
     try process?.kill 'SIGKILL'
     await process.exited if process?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'serve.rip selects a custom App root and manifest membership', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-app-manifest-')
+  project = join dir, 'project'
+  mkdirSync join(project, 'client', 'routes'), { recursive: true }
+  mkdirSync join(project, 'client', 'styles'), { recursive: true }
+  writeFileSync join(project, 'client', 'index.html'), '<!doctype html><div id="app"></div>'
+  writeFileSync join(project, 'client', 'routes', 'index.rip'), "export Index = component\n  render\n    h1 'Selected'\n"
+  writeFileSync join(project, 'client', 'ignored.rip'), "export Ignored = 1\n"
+  writeFileSync join(project, 'client', 'styles', 'site.css'), 'body { color: navy; }'
+  writeFileSync join(project, 'serve.rip'), """
+  export default
+    hosts: ['manifest.example.test']
+    app:
+      root: 'client'
+      manifest:
+        update: ['routes/**/*.rip']
+        css: []
+    files:
+      roots: [{ path: 'client', cache: 'never' }]
+      shell: 'client/index.html'
+  """
+  calls = []
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, calls
+  process = null
+  try
+    launched = run project, [project, '--control', controlSocket, '--no-watch', '--access-log=off']
+    process = launched.proc
+    sleep! 100
+    throw Error.new(await launched.err) if process.exitCode?
+    try
+      waitFor! 'custom App registration', ->
+        calls.find (call) -> call.method is 'POST' and call.path is '/1.0/apps'
+    catch error
+      throw Error.new "#{error.message}; calls=#{JSON.stringify(calls)}"
+    bundle = JSON.parse readFileSync(join(project, 'static', 'generated', 'bundle.json'), 'utf8')
+    eq bundle.files.map((entry) -> entry.id), ['index.html', 'routes/index.rip']
+    eq Object.keys(bundle.modules).filter((id) -> bundle.files.some((entry) -> entry.id is id)), ['routes/index.rip']
+    process.kill 'SIGTERM'
+    eq await process.exited, 143
+  finally
+    try process?.kill 'SIGKILL'
+    await process.exited if process?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'serve.rip rejects a manifest pattern assigned to the wrong apply kind', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-invalid-manifest-')
+  project = join dir, 'project'
+  mkdirSync join(project, 'app'), { recursive: true }
+  writeFileSync join(project, 'serve.rip'), "export default { app: { manifest: { css: ['**/*.rip'] } } }\n"
+  calls = []
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, calls
+  try
+    { proc, err } = run project, [project, '--control', controlSocket, '--no-watch', '--access-log=off']
+    eq await proc.exited, 1
+    ok (await err).includes('serve.rip app.manifest.css[0] must select .css files')
+    ok not calls.some((call) -> call.path is '/1.0/apps')
+  finally
     control.stop true
     rmSync dir, { recursive: true, force: true }
 

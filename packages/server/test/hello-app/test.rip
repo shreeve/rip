@@ -2,7 +2,8 @@ import { test, eq, ok } from '@rip-lang/testing'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { check } from '@rip-lang/app/rash'
+import { check, rash } from '@rip-lang/app/rash'
+import { appEventPublication, appManifestKind, updateAppModules } from '../../manager.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 SERVER = join(import.meta.dir, '..', '..', 'server.rip')
@@ -14,6 +15,64 @@ waitFor = (fn, timeout = 5000) ->
     return value if value
     throw Error.new('App publication test timed out') if Date.now() >= deadline
     sleep! 10
+
+test! 'App watcher reports manifest files and reconciles directory ambiguity', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-app-watch-filter-')
+  try
+    mkdirSync join(dir, 'assets')
+    graph = { directories: ['assets', 'removed'] }
+    manifest =
+      update: ['routes/**/*.rip']
+      css: ['styles/**/*.css']
+      reload: ['**/*.html']
+    eq appManifestKind(manifest, 'routes/index.rip'), 'update'
+    eq appManifestKind(manifest, 'other/index.rip'), null
+    eq appManifestKind(manifest, 'styles/site.css'), 'css'
+    eq appManifestKind(manifest, 'index.html'), 'reload'
+    eq appEventPublication(dir, graph, manifest, 'routes/index.rip'), 'routes/index.rip'
+    eq appEventPublication(dir, graph, manifest, 'other/index.rip'), null
+    eq appEventPublication(dir, graph, manifest, 'styles/site.css'), 'styles/site.css'
+    eq appEventPublication(dir, graph, manifest, 'index.html'), 'index.html'
+    eq appEventPublication(dir, graph, manifest, 'images/hero.png'), null
+    eq appEventPublication(dir, graph, manifest, 'fonts/body.woff2'), null
+    eq appEventPublication(dir, graph, manifest, '.cache/probe.rip'), null
+    eq appEventPublication(dir, graph, manifest, 'assets'), '*'
+    eq appEventPublication(dir, graph, manifest, 'removed'), '*'
+    eq appEventPublication(dir, graph, manifest, null), '*'
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test! 'App publication rehashes only watcher-reported manifest files', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-app-dirty-files-')
+  try
+    mkdirSync join(dir, 'routes')
+    route = "export Index = component\n  render\n    h1 'Stable'\n"
+    css = 'body { color: navy; }\n'
+    routePath = join dir, 'routes', 'index.rip'
+    cssPath = join dir, 'styles.css'
+    writeFileSync routePath, route
+    writeFileSync cssPath, css
+    routeEntry = { id: 'routes/index.rip', hash: rash(Buffer.from(route)) }
+    cssEntry = { id: 'styles.css', hash: rash(Buffer.from(css)) }
+    graph =
+      modules: { 'routes/index.rip': route }
+      moduleFiles: { 'routes/index.rip': routePath }
+      entries: [routeEntry, cssEntry]
+      directories: ['routes']
+      check: check([routeEntry, cssEntry])
+    manifest =
+      update: ['**/*.rip']
+      css: ['**/*.css']
+      reload: ['**/*.html']
+    writeFileSync routePath, Buffer.from([0xff])
+    writeFileSync cssPath, 'body { color: green; }\n'
+    result = updateAppModules dir, manifest, graph, ['styles.css']
+    eq result.changed, ['styles.css']
+    eq result.graph.modules['routes/index.rip'], route
+    eq result.graph.entries.find((entry) -> entry.id is 'routes/index.rip'), routeEntry
+    ok result.graph.entries.find((entry) -> entry.id is 'styles.css').hash isnt cssEntry.hash
+  finally
+    rmSync dir, { recursive: true, force: true }
 
 test! 'App-only manager publishes a finite generated surface with no workers', ->
   dir = mkdtempSync join(tmpdir(), 'rip-hello-app-')
@@ -110,6 +169,15 @@ test! 'watch publication commits one shared inventory then batches per-file ding
   dir = mkdtempSync join(tmpdir(), 'rip-hello-watch-')
   project = join dir, 'project'
   cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
+  writeFileSync join(project, 'serve.rip'), """
+  export default
+    app:
+      root: 'app'
+      manifest:
+        update: ['**/*.rip']
+        css: ['**/*.css']
+        reload: ['**/*.html']
+  """
   project = realpathSync project
   controlSocket = join dir, 'janus.sock'
   registration = null

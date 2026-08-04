@@ -31,10 +31,11 @@ export resolveProject = (input, label = 'rip-server') ->
         entry = realpathSync candidate
         break
     appRoot = join root, 'app'
-    return { root, entry, appRoot: (if existsSync(appRoot) then realpathSync(appRoot) else null) } if entry? or existsSync(appRoot)
+    serve = join root, 'serve.rip'
+    return { root, entry, appRoot: (if existsSync(appRoot) then realpathSync(appRoot) else null) } if entry? or existsSync(appRoot) or existsSync(serve)
   if input?
-    abort "#{label}: #{input} has no API entry or app/ directory"
-  abort "#{label}: no App — pass a project, or create app.rip, index.rip, or app/ here or above"
+    abort "#{label}: #{input} has no API entry, app/ directory, or serve.rip"
+  abort "#{label}: no App — pass a project, or create app.rip, index.rip, app/, or serve.rip here or above"
 
 export managerRuntime = (root, label = 'rip-server') ->
   abort "#{label}: manager control requires a POSIX user identity" unless typeof process.getuid is 'function'

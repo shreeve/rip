@@ -187,6 +187,48 @@ pathTemplate = (value, at) ->
     invalidServe "#{at} must use {site} as a complete path segment" unless segments.includes '{site}'
   { value, dynamic: count is 1 }
 
+defaultAppManifest = ->
+  update: ['**/*.rip']
+  css: ['**/*.css']
+  reload: ['**/*.html']
+
+normalizeAppManifest = (raw) ->
+  raw = {} unless raw?
+  rejectUnknown raw, ['update', 'css', 'reload'], 'serve.rip app.manifest'
+  defaults = defaultAppManifest()
+  suffixes = { update: '.rip', css: '.css', reload: '.html' }
+  manifest = {}
+  for kind in ['update', 'css', 'reload']
+    values = raw[kind] ?? defaults[kind]
+    invalidServe "serve.rip app.manifest.#{kind} must be an array" unless Array.isArray values
+    seen = Set.new()
+    manifest[kind] = values.map (value, i) ->
+      at = "serve.rip app.manifest.#{kind}[#{i}]"
+      pattern = needString value, at
+      invalidServe "#{at} must be relative to the App root" if pattern.startsWith '/'
+      invalidServe "#{at} must use / path separators" if pattern.includes '\\'
+      segments = pattern.split '/'
+      invalidServe "#{at} must be a clean relative glob" if segments.some (part) -> not part or part is '.' or part is '..' or part.startsWith '.'
+      invalidServe "#{at} must select #{suffixes[kind]} files" unless pattern.endsWith suffixes[kind]
+      invalidServe "#{at} duplicates #{JSON.stringify(pattern)}" if seen.has pattern
+      try
+        Bun.Glob.new pattern
+      catch error
+        invalidServe "#{at} is not a valid glob: #{error?.message or error}"
+      seen.add pattern
+      pattern
+  manifest
+
+export appManifestKind = (manifest, id) ->
+  return null unless typeof id is 'string' and id.length > 0
+  id = id.replaceAll '\\', '/'
+  segments = id.split '/'
+  return null if segments.some (segment) -> not segment or segment is '.' or segment is '..' or segment.startsWith '.'
+  for kind in ['update', 'css', 'reload']
+    for pattern in manifest[kind]
+      return kind if Bun.Glob.new(pattern).match id
+  null
+
 requireDir = (path, at) ->
   invalidServe "#{at} directory not found: #{path}" unless existsSync path
   invalidServe "#{at} is not a directory: #{path}" unless statSync(path).isDirectory()
@@ -196,7 +238,7 @@ requireFile = (path, at) ->
   invalidServe "#{at} is not a file: #{path}" unless statSync(path).isFile()
 
 normalizeServeConfig = (raw, appDir) ->
-  rejectUnknown raw, ['name', 'hosts', 'sites', 'files'], 'serve.rip'
+  rejectUnknown raw, ['name', 'hosts', 'sites', 'files', 'app'], 'serve.rip'
   out = {}
   out.name = needString(raw.name, 'serve.rip name') if raw.name?
   if raw.hosts?
@@ -271,6 +313,13 @@ normalizeServeConfig = (raw, appDir) ->
       invalidServe 'serve.rip files.shell is required unless every root is browsable and proxyFirst is empty' unless allBrowsable and normalizedProxy.length is 0
     out.files = { roots: normalizedRoots, proxy_first: normalizedProxy }
     out.files.shell = shell if shell?
+  if raw.app?
+    rejectUnknown raw.app, ['root', 'manifest'], 'serve.rip app'
+    rootValue = pathTemplate(raw.app.root ?? 'app', 'serve.rip app.root')
+    invalidServe 'serve.rip app.root cannot contain a template' if rootValue.dynamic
+    root = resolve appDir, rootValue.value
+    requireDir root, 'serve.rip app.root'
+    out.app = { root, manifest: normalizeAppManifest(raw.app.manifest) }
   invalidServe 'serve.rip sites requires files' if out.site? and not out.files?
   out
 
@@ -487,21 +536,37 @@ writeAtomic = (path, text) ->
 escapeHtml = (value) ->
   String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
 
-appModules = (appRoot) ->
+export appEventPublication = (appRoot, graph, manifest, filename) ->
+  return '*' unless filename?
+  id = String(filename).replaceAll '\\', '/'
+  segments = id.split '/'
+  return '*' if not id or segments.some((segment) -> not segment or segment is '.' or segment is '..')
+  return null if segments.some (segment) -> segment.startsWith '.'
+  return id if appManifestKind(manifest, id)?
+  return '*' if graph?.directories?.includes id
+  path = resolve appRoot, id
+  return '*' if existsSync(path) and statSync(path).isDirectory()
+  null
+
+appModules = (appRoot, manifest) ->
   modules = {}
   moduleFiles = {}
   entries = []
+  directories = []
   walk = (directory, prefix) ->
     for entry in readdirSync(directory, { withFileTypes: true })
       continue if entry.name.startsWith '.'
       path = join directory, entry.name
       if entry.isDirectory()
+        directories.push "#{prefix}#{entry.name}"
         walk path, "#{prefix}#{entry.name}/"
-      else if entry.name.endsWith('.rip') or entry.name.endsWith('.css') or entry.name.endsWith('.html')
+      else
         id = "#{prefix}#{entry.name}"
+        kind = appManifestKind manifest, id
+        continue unless kind?
         bytes = readFileSync path
         entries.push { id, hash: rash(bytes) }
-        if entry.name.endsWith '.rip'
+        if kind is 'update'
           try
             modules[id] = TextDecoder.new('utf-8', { fatal: true, ignoreBOM: true }).decode bytes
           catch
@@ -509,14 +574,52 @@ appModules = (appRoot) ->
           moduleFiles[id] = path
   walk appRoot, ''
   entries.sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
-  { modules, moduleFiles, entries, check: check(entries) }
+  { modules, moduleFiles, entries, directories, check: check(entries) }
+
+export updateAppModules = (appRoot, manifest, graph, ids) ->
+  modules = { ...graph.modules }
+  moduleFiles = { ...graph.moduleFiles }
+  entries = Map.new graph.entries.map (entry) -> [entry.id, entry]
+  changed = []
+  for id in [...Set.new(ids)].sort()
+    kind = appManifestKind manifest, id
+    continue unless kind?
+    prior = entries.get id
+    path = resolve appRoot, id
+    bytes = null
+    try
+      bytes = readFileSync path if existsSync(path) and statSync(path).isFile()
+    catch error
+      throw error unless error?.code is 'ENOENT'
+    unless bytes?
+      continue unless prior?
+      entries.delete id
+      delete modules[id]
+      delete moduleFiles[id]
+      changed.push id
+      continue
+    hash = rash bytes
+    continue if prior?.hash is hash
+    entries.set id, { id, hash }
+    if kind is 'update'
+      try
+        modules[id] = TextDecoder.new('utf-8', { fatal: true, ignoreBOM: true }).decode bytes
+      catch
+        throw Error.new "rip-server: App module '#{id}' is not valid UTF-8"
+      moduleFiles[id] = path
+    changed.push id
+  return { graph, changed } unless changed.length
+  nextEntries = [...entries.values()].sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
+  {
+    graph: { modules, moduleFiles, entries: nextEntries, directories: graph.directories, check: check(nextEntries) }
+    changed
+  }
 
 sourceRashes = (paths) ->
   paths.map (path) -> { path, hash: (if existsSync(path) then rash(readFileSync(path)) else null) }
 
-buildAppDocuments = (project, includeManifest) ->
+appDocuments = (project, graph, includeManifest) ->
   { assembleBundle } = import!(join(loaderDir(), 'bundle.js'))
-  graph = appModules project.appRoot
   bundle = assembleBundle
     modules: graph.modules
     moduleFiles: graph.moduleFiles
@@ -529,6 +632,10 @@ buildAppDocuments = (project, includeManifest) ->
     bundle: JSON.stringify(bundle)
     manifest: (if includeManifest then JSON.stringify({ check: graph.check, files: graph.entries }) else null)
   }
+
+buildAppDocuments = (project, includeManifest) ->
+  graph = appModules project.appRoot, project.appManifest
+  appDocuments! project, graph, includeManifest
 
 commitAppDocuments = (project, documents) ->
   generated = join project.root, 'static', 'generated'
@@ -669,6 +776,11 @@ export main = (argv) ->
     serve = loadServeConfig! project.root
   catch error
     abort error?.message or String(error)
+  if serve?.app?
+    project.appRoot = serve.app.root
+    project.appManifest = serve.app.manifest
+  else if project.appRoot?
+    project.appManifest = defaultAppManifest()
   args.name = args.name or serve?.name or basename(project.root).replace(/\.[^.]+$/, '')
   site = serve?.site ?? null
   if site? and args.hosts.length > 0
@@ -701,6 +813,8 @@ export main = (argv) ->
   appGraph = null
   appWatcher = null
   appTimer = null
+  appDirty = Set.new()
+  appReconcile = false
   appChain = Promise.resolve()
   apiWatcher = null
   apiTimer = null
@@ -955,25 +1069,46 @@ export main = (argv) ->
       response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", directives.slice(i, i + 16)
       throw Error.new("Janus ding publish failed (#{response.status})") unless response.ok
 
-  refreshApp = ->
-    next = writeAppDocuments! project, true
+  refreshApp = (batch = { full: true, ids: [] }) ->
+    if batch.full
+      next = writeAppDocuments! project, true
+      changed = null
+    else
+      update = updateAppModules project.appRoot, project.appManifest, appGraph, batch.ids
+      return unless update.changed.length
+      next = update.graph
+      documents = appDocuments! project, next, true
+      commitAppDocuments project, documents
+      changed = Set.new update.changed
     prior = Map.new((appGraph?.entries or []).map((entry) -> [entry.id, entry.hash]))
     current = Map.new(next.entries.map((entry) -> [entry.id, entry.hash]))
     dings = []
     for entry in next.entries
+      continue if changed? and not changed.has entry.id
       dings.push { id: entry.id, hash: entry.hash } unless prior.get(entry.id) is entry.hash
     for entry in appGraph?.entries or []
+      continue if changed? and not changed.has entry.id
       dings.push { id: entry.id, hash: entry.hash, kind: 'delete' } unless current.has entry.id
     appGraph = next
     publishDings! dings
 
   startAppWatcher = ->
     return unless args.watch and project.appRoot?
-    appWatcher = watch project.appRoot, { recursive: true }, ->
+    appWatcher = watch project.appRoot, { recursive: true }, (_event, filename) ->
       return unless operation is 'Active'
+      publication = appEventPublication project.appRoot, appGraph, project.appManifest, filename
+      return unless publication?
+      if publication is '*'
+        appReconcile = true
+      else
+        appDirty.add publication
       clearTimeout appTimer if appTimer?
       appTimer = setTimeout ->
-        next = appChain.then -> refreshApp!
+        batch = { full: appReconcile, ids: [...appDirty] }
+        appReconcile = false
+        appDirty.clear()
+        appTimer = null
+        next = appChain.then -> refreshApp! batch
         appChain = next.catch (error) -> warn "rip-server: App publication failed: #{String(error)}"
       , 50
 
@@ -1044,8 +1179,9 @@ export main = (argv) ->
     apiWatcher = watch project.root, { recursive: true }, (event, filename) ->
       return unless operation is 'Active'
       rel = String(filename or '')
-      return if rel.startsWith('app/') or rel.startsWith('static/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
+      return if rel.startsWith('static/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
       path = resolve project.root, rel
+      return if project.appRoot? and (path is project.appRoot or path.startsWith("#{project.appRoot}/"))
       return unless path is project.entry or apiInputs.has path
       apiEpoch++
       epoch = apiEpoch
@@ -1184,7 +1320,7 @@ export main = (argv) ->
       commitAppDocuments project, documents if documents?
       appGraph = documents.graph if documents?
       apiInputs = Set.new record.inputs
-      appChanged = documents? and appModules(project.appRoot).check isnt documents.graph.check
+      appChanged = documents? and appModules(project.appRoot, project.appManifest).check isnt documents.graph.check
       apiChanged = JSON.stringify(sourceRashes(record.inputs)) isnt JSON.stringify(record.inputRashes)
       operation = 'Activating'
       admissionAttempted = true

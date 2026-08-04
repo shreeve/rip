@@ -1,0 +1,6 @@
+export Index = component
+  render
+    main
+      img src: '/images/rip.png', alt: '', width: 144, height: 144
+      h1 'Hello Rip!'
+      p 'Edit this module, the stylesheet, the shell, or the image and watch what happens.'
