@@ -140,10 +140,12 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
 
       // A valid edit after the crash: the restart-once policy brings
       // TS diagnostics back (the bad call maps onto .rip source again).
+      // The misuse rides an ANNOTATED binding so the revived pipeline has
+      // a diagnostic the gradual gate publishes.
       wait = nextDiagnostics(published);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 3 },
-        contentChanges: [{ text: GOOD + 'bad = count.toUpperCase()\nconsole.log bad\n' }],
+        contentChanges: [{ text: GOOD + 'n: number = 42\nbad = n.toUpperCase()\nconsole.log bad\n' }],
       });
       const recovered = await wait();
       expect(recovered.diagnostics).toHaveLength(1);

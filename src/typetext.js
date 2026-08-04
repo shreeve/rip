@@ -485,7 +485,39 @@ export const renderParam = (p, isOptional) => {
   return renderTarget(p, patternType(p), opt);
 };
 
-export const renderParams = (params, isOptional) => `(${params.map((p) => renderParam(p, isOptional)).join(', ')})`;
+// The indices JS ARITY makes optional: the TRAILING run of bare,
+// unannotated names. In rip — as in JavaScript — calling with fewer
+// arguments is legal and yields `undefined`, and `arguments.length`
+// branching on it is idiomatic, so a parameter the author never annotated
+// was never promised to be required.
+//
+// Trailing because TypeScript rejects a required parameter after an
+// optional one, so the run has to reach the end. Scanning back, a default
+// or a rest is passed OVER — both are already call-site optional, and
+// stopping at one would leave `(a, opts = {})` demanding its first
+// argument. An ANNOTATED parameter stops the scan: the author said
+// something about it, and `x?` is theirs to write.
+//
+// One definition, both signature emitters — the face reads it through
+// `emitParams`, the `.d.ts` through `renderParams` below. It is
+// POSITIONAL, so it cannot ride `optionalReader`'s per-param shape, and
+// letting each emitter work it out separately is precisely how the `?`
+// marker has drifted before, in both directions.
+export const jsArityOptional = (params) => {
+  const out = new Set();
+  for (let i = params.length - 1; i >= 0; i--) {
+    const p = params[i];
+    if (typeof p === 'string') { out.add(i); continue; }
+    if (Array.isArray(p) && (p[0] === 'default' || p[0] === 'rest')) continue;
+    break;
+  }
+  return out;
+};
+
+export const renderParams = (params, isOptional) => {
+  const arity = jsArityOptional(params);
+  return `(${params.map((p, i) => renderParam(p, (q) => isOptional(q) || arity.has(i))).join(', ')})`;
+};
 
 export const paramTyped = (p) =>
   isTypedWrapper(p) ||

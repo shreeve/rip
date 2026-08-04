@@ -55,6 +55,7 @@ const REGION_SHAPES = [
   /^satisfies \S/u,                                       // a schema field default's value enforcement: `v satisfies T`
   /^<\S/su,                                               // a type ARGUMENT list: an annotated reactive's `__state<T>(v)`, and a generic `def`'s own `<T>` parameters
   /^!$/u,                                                 // a component prop assertion's bare `!` (state fallbacks like `props.label!`)
+  /^\?$/u,                                                // JS arity: the `?` on a bare unannotated trailing param
   /^[()]$/u,                                              // arrow-param / cast parens
   /^as\s+\S/u,                                            // the cast's `as T` spelling
   /^this: \S/u,                                           // schema callable `this` param 
@@ -358,7 +359,7 @@ describe('TS-face emission pins', () => {
   test('return types: def, arrow, parameterless def; async wraps as Promise<T> (TS1064)', () => {
     expect(ts('def f(a: number): string\n  String(a)\n').code)
       .toBe('function f(a: number): string {\n  return String(a);\n}' + MARKER);
-    expect(ts('k = (x): number => x + 1\n').code).toBe('let k = (x): number => (x + 1);' + MARKER);
+    expect(ts('k = (x): number => x + 1\n').code).toBe('let k = (x?): number => (x + 1);' + MARKER);
     expect(ts('def go(a: number): number\n  await a\n').code)
       .toBe('async function go(a: number): Promise<number> {\n  return await a;\n}' + MARKER);
     // A user-spelled Promise passes through unwrapped.
@@ -367,13 +368,13 @@ describe('TS-face emission pins', () => {
   });
 
   test('void definitions annotate `: void` (async: Promise<void>) under the voidMarker', () => {
-    expect(ts('def save!(x)\n  x\n').code).toBe('function save(x): void {\n  x;\n  return;\n}' + MARKER);
+    expect(ts('def save!(x)\n  x\n').code).toBe('function save(x?): void {\n  x;\n  return;\n}' + MARKER);
     // The binding declares in place, so the annotation sits on an
     // INITIALIZED declaration — the span a semantic token and a hover
     // are both read at carries the function value.
-    expect(ts('tick! = (x) =>\n  x\n').code).toBe('let tick = (x): void => {\n  x;\n  return;\n};' + MARKER);
+    expect(ts('tick! = (x) =>\n  x\n').code).toBe('let tick = (x?): void => {\n  x;\n  return;\n};' + MARKER);
     expect(ts('def flush!(x)\n  await x\n').code)
-      .toBe('async function flush(x): Promise<void> {\n  await x;\n  return;\n}' + MARKER);
+      .toBe('async function flush(x?): Promise<void> {\n  await x;\n  return;\n}' + MARKER);
   });
 
   test('structured aliases: one-line, generic, block union, block object, wrapped single', () => {
@@ -431,12 +432,72 @@ describe('TS-face emission pins', () => {
 
   test('overload signatures print adjacent to their implementation (TS2391)', () => {
     expect(ts('def f(a: number): string\ndef f(a: string): string\ndef f(a)\n  String(a)\n').code)
-      .toBe('function f(a: number): string;\nfunction f(a: string): string;\nfunction f(a) {\n  return String(a);\n}' + MARKER);
+      .toBe('function f(a: number): string;\nfunction f(a: string): string;\nfunction f(a?) {\n  return String(a);\n}' + MARKER);
   });
 
   test('typed class fields, methods, and void methods', () => {
     expect(ts('class A\n  x: number = 5\n  y: string\n  m: (v: number): number -> v\n  save!: (v) ->\n    v\n').code)
-      .toBe('class A {\n  x: number = 5;\n  y: string;\n  m(v: number): number {\n    return v;\n  }\n  save(v): void {\n    v;\n    return;\n  }\n}' + MARKER);
+      .toBe('class A {\n  x: number = 5;\n  y: string;\n  m(v: number): number {\n    return v;\n  }\n  save(v?): void {\n    v;\n    return;\n  }\n}' + MARKER);
+  });
+
+  test('a field an instance METHOD assigns is declared, wherever the constructor put it', () => {
+    // A constructor that hands its field setup to a helper establishes
+    // those fields just as surely as one that inlines them. Scanning the
+    // constructor alone left them undeclared, and TypeScript reads a
+    // class's properties from its DECLARATIONS — so the assignment and
+    // every later read both published TS2339 on a class that runs
+    // correctly. This repo's own `Time` fills a dozen cached parts in
+    // `_refresh()` and drew 121 diagnostics for it.
+    const src = 'class A\n  constructor: ->\n    @refresh()\n  refresh: ->\n    @count = 1\n  read: -> @count\n';
+    const helper = ts(src);
+    expect(helper.code).toBe(
+      'class A {\n  count;\n  constructor() {\n    this.refresh();\n  }\n  refresh() {\n    return (this.count = 1);\n  }\n  read() {\n    return this.count;\n  }\n}' + MARKER);
+    // TS-only, like the promoted parameter's: a declaration in the JS
+    // twin would REDEFINE the property rather than describe it.
+    expect(stripFace(helper.code, helper.tsRegions)).toBe(js(src).code);
+
+    // One declaration per field, and the CONSTRUCTOR's annotation wins:
+    // two would read to TypeScript as duplicate identifiers.
+    expect(ts('class B\n  constructor: ->\n    @v: string = "s"\n  m: ->\n    @v = "t"\n').code)
+      .toBe('class B {\n  v: string;\n  constructor() {\n    this.v = "s";\n  }\n  m() {\n    return (this.v = "t");\n  }\n}' + MARKER);
+
+    // A STATIC method's `this` is the class, so what it assigns is not
+    // an instance property — `cache` must not declare, `seen` must.
+    expect(ts('class C\n  @make: ->\n    @cache = 1\n  m: ->\n    @seen = 2\n').code)
+      .toBe('class C {\n  seen;\n  static make() {\n    return (this.cache = 1);\n  }\n  m() {\n    return (this.seen = 2);\n  }\n}' + MARKER);
+  });
+
+  test('JS arity: a bare trailing parameter is optional — except where something else types it', () => {
+    // Calling with fewer arguments is legal in rip as in JavaScript, and
+    // `arguments.length` branching on it is idiomatic. Declaring every
+    // unannotated parameter REQUIRED made the face enforce an arity rip
+    // never promised: this repo's own `resolveUrl = (url, env) ->` drew
+    // TS2554 at each one-argument call it was written to accept.
+    expect(ts('def g(url, env)\n  url\n').code)
+      .toBe('function g(url?, env?) {\n  return url;\n}' + MARKER);
+    // A default and a rest are passed OVER — already call-site optional,
+    // and stopping at one would leave `a` demanding its argument.
+    expect(ts('f = (a, opts = {}) ->\n  a\n').code).toContain('function(a?, opts = {})');
+    expect(ts('f = (a, ...rest) ->\n  a\n').code).toContain('function(a?, ...rest)');
+    // An ANNOTATED parameter stops the scan: the author said something, and
+    // `x?` is theirs to write. It MUST stop, too — TypeScript rejects a
+    // required parameter following an optional one.
+    expect(ts('f = (a, b: number) ->\n  a\n').code).toContain('function(a, b: number)');
+    expect(ts('f = (a: number, b) ->\n  a\n').code).toContain('function(a: number, b?)');
+
+    // NOT where the parameter is already typed from elsewhere: marking a
+    // contextual `number` optional widens it to `number | undefined` and
+    // publishes TS18048 on correct code. Argument position…
+    expect(ts('xs = [1]\nm = xs.map (n) -> n * 2\n').code).toContain('xs.map(function(n) {');
+    // …and an annotated binding, which types the parameters from its target.
+    expect(ts('d: (n: number) => string = (n) => String(n)\n').code)
+      .toContain('let d: (n: number) => string = n => String(n);');
+
+    // TS-only throughout: stripping restores the bare JS spelling, including
+    // the parens a lone `x?` needs and JS mode does not write.
+    const lone = ts('f = (x) => x\n');
+    expect(lone.code).toContain('(x?) => x');
+    expect(stripFace(lone.code, lone.tsRegions)).toBe(js('f = (x) => x\n').code);
   });
 
   test('exported typed declarations annotate the const', () => {
@@ -706,7 +767,7 @@ describe('TS directive comments', () => {
   test('a directive above an overload signature follows it to the printed overload row', () => {
     pin(
  'def o(a: number): string\n# @ts-expect-error\ndef o(a: string): string\ndef o(a)\n  String(a)\n',
- 'function o(a: number): string;\n// @ts-expect-error\nfunction o(a: string): string;\nfunction o(a) {\n  return String(a);\n}',
+ 'function o(a: number): string;\n// @ts-expect-error\nfunction o(a: string): string;\nfunction o(a?) {\n  return String(a);\n}',
     );
   });
 

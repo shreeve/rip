@@ -72,6 +72,7 @@ import {
   SUPPRESSED_TS_CODES,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
+import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
 import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
@@ -97,6 +98,37 @@ async function loadCompiler() {
   throw new Error('rip compiler not found (looked for ../../../src/compile.js and ../compiler/src/compile.js)');
 }
 
+// The lexer rides the same dual-path resolution as compile. It backs the
+// declaration-scope gate (scopes.js), which needs TYPE tokens: a text scan
+// cannot tell the annotation `x: T = v` from the object literal `{ x: T }`,
+// and reading the wrong one would gate the wrong declarations. Absent (older
+// staged compiler): no tokenizer, so `checkedLines` stays undefined and
+// mapTsDiagnostic leaves every diagnostic ungated — the pre-gate behaviour,
+// never a silent over-suppression.
+// Fails OPEN. No tokenizer (older staged compiler) or a source the lexer
+// refuses leaves the gate undefined, and an undefined gate publishes
+// everything. Failing CLOSED would be an empty annotation set — which reads
+// as "no declaration is annotated", silencing the entire file, and a silent
+// file is indistinguishable from a clean one.
+function scopeGateFor(source, fsPath, face, typedImports) {
+  if (!tokenize) return undefined;
+  try { return scopeGateOf(tokenize(source, fsPath).tokens, source, face, typedImports); }
+  catch { return undefined; }
+}
+
+async function loadTokenizer() {
+  const candidates = [
+    new URL('../../../src/lexer.js', import.meta.url),
+    new URL('../compiler/src/lexer.js', import.meta.url),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(fileURLToPath(candidate))) {
+      return (await import(candidate.href)).tokenize;
+    }
+  }
+  return null;
+}
+
 // readProjectConfig rides the same dual-path resolution as compile
 // (in-repo src/ or the staged vsix copy). Absent (older staged
 // compiler): a no-op reader — every project non-strict, no throw.
@@ -118,6 +150,7 @@ const documents = new TextDocuments(TextDocument);
 
 let compile = null;
 let readProjectConfig = null;
+let tokenize = null;
 let tsgo = null;
 let tsgoReady = null;
 let tsgoLaunches = 0;
@@ -129,6 +162,7 @@ let mirrorRoot = null;           // where mirrors + the generated tsconfig live
 let mirrorRootIsFallback = false; // temp-dir mirror root (workspace unwritable/absent)
 let mirrorRootReady = false;     // lazily created on first materialization
 let clientSupportsWatchers = false;
+let clientDefinitionLinks = false;
 let clientSupportsConfiguration = false;
 let clientInitialized = false;   // the initialize handshake has COMPLETED (onInitialized)
 let cacheIdentity = null;        // compiler build + server build (cache keying)
@@ -299,7 +333,7 @@ function writeProjectWrapper(rel, sourceTsconfig) {
   const wrapperDir = path.join(mirrorRoot, rel);
   const chain = new Set();
   const wrapper = projectWrapper({
-    wrapperDir, sourceTsconfig, chain,
+    wrapperDir, sourceTsconfig, workspaceRoot, mirrorRoot, chain,
     onUnresolved: (spec) =>
       connection.console.log(`[rip] ${rel}: tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
   });
@@ -594,6 +628,72 @@ function mirrorBytesOf(fsPath) {
   try { return fs.readFileSync(mirrorPathOf('file://' + fsPath), 'utf8'); } catch { return null; }
 }
 
+// One PLAIN face compile per (path, bytes), shared by the three sites that
+// spell the identical compile — the typed-export reader, the mirror writer,
+// and the disk face. On a cold open the gate reads a dependency's typed
+// exports and the closure pass then mirrors the same bytes; without this
+// memo that is two full compiles of every direct dependency (+57% on the
+// average importing file of this repo's packages/, +131 ms on the worst).
+//
+// Holds full results, so it is BOUNDED — recency-evicted well above the
+// widest direct-import fan-out measured here (16). The open buffer's own
+// compile never lands here: it rides pins/tolerant/strict options, which
+// are a different compile. Every consumer receives the SAME result
+// object — nothing mutates compile results today, and a consumer that
+// started annotating them would corrupt its siblings.
+const rawCompileCache = new Map(); // fsPath → { sourceHash, result }, insertion = recency
+const RAW_COMPILE_CAP = 32;
+function rawCompile(fsPath, source, sourceHash) {
+  const hit = rawCompileCache.get(fsPath);
+  if (hit && hit.sourceHash === sourceHash) return hit.result;
+  const result = compile(source, { path: fsPath, runtimeDelivery: 'inline', face: 'ts' });
+  rawCompileCache.delete(fsPath);
+  rawCompileCache.set(fsPath, { sourceHash, result });
+  if (rawCompileCache.size > RAW_COMPILE_CAP) rawCompileCache.delete(rawCompileCache.keys().next().value);
+  return result;
+}
+
+// A dependency's ANNOTATED exports, for the declaration-scope gate: an
+// import of one carries that export's type information into the importer.
+//
+// Deliberately NOT served from faceOf. A face carries a gate, a gate asks
+// its dependencies for this, and `a.rip` ↔ `b.rip` would recur forever.
+// Typed exports are file-local — they ask only what a source says about its
+// own declarations — so this path compiles and answers without ever
+// building a gate, and the cycle cannot form.
+//
+// An OPEN buffer answers over disk, matching every other cross-file answer:
+// the importer must be checked against the dependency the author is looking
+// at, not the one they last saved.
+const typedExportCache = new Map(); // fsPath → { sourceHash, names }
+function typedExportsFor(fsPath) {
+  if (!tokenize) return null;
+  const open = documents.get('file://' + fsPath);
+  let source;
+  if (open) source = open.getText();
+  else { try { source = fs.readFileSync(fsPath, 'utf8'); } catch { return null; } }
+  const sourceHash = hashText(source);
+  const cached = typedExportCache.get(fsPath);
+  if (cached && cached.sourceHash === sourceHash) return cached.names;
+  let names;
+  try {
+    const result = rawCompile(fsPath, source, sourceHash);
+    names = typedExportsOf(tokenize(source, fsPath).tokens, source, result);
+  } catch {
+    names = new Set(); // a source that will not compile types none of its importers
+  }
+  typedExportCache.set(fsPath, { sourceHash, names });
+  return names;
+}
+
+// The local names an import bound to an annotated export, for a compile
+// whose source sits in `dir`. Fails to null, like the gate itself.
+function typedImportsFor(stores, source, dir) {
+  if (!dir) return null;
+  try { return typedImportsOf(stores, source, dir, typedExportsFor); }
+  catch { return null; }
+}
+
 function faceOf(fsPath) {
   let source;
   try { source = fs.readFileSync(fsPath, 'utf8'); } catch { return null; }
@@ -605,13 +705,39 @@ function faceOf(fsPath) {
   faceCache.delete(fsPath);
   let result;
   try {
-    result = compile(source, { path: fsPath, runtimeDelivery: 'inline', face: 'ts' });
+    result = rawCompile(fsPath, source, sourceHash);
   } catch {
     return null; // the mirror serves a LAST-GOOD face this source no longer produces
   }
   if (mirrorBytesOf(fsPath) !== result.code) {
-    connection.console.log(`[rip] cross-file mapping refused for ${fsPath}: mirror bytes drifted from the source's face`);
-    return null;
+    // A mirror this compile cannot reproduce is either corruption or a
+    // PINNED face that outlived its session: an open buffer's refresh
+    // writes its pin-annotated face into the mirror (importers should see
+    // the richer types while the buffer lives), but pins are per-session
+    // probe answers, so after a restart the pin-less compile here can
+    // never match those bytes — and refusing would strand every
+    // cross-file ask into this file until its next edit. Only CLOSED
+    // files reach faceOf, and a closed file's canonical face is exactly
+    // what mirrorFromDisk writes — so re-materialize, tell tsgo, and
+    // serve. A mirror that STILL disagrees after the rewrite is a write
+    // failure or a collision, and that refusal stands: a face that does
+    // not reproduce the mirror describes a different text, and its
+    // positions would lie.
+    try {
+      const { mirrorPath } = mirrorFromDisk(fsPath, source);
+      if (tsgo) {
+        tsgo.client.notify('workspace/didChangeWatchedFiles', {
+          changes: [{ uri: 'file://' + mirrorPath, type: FileChangeType.Changed }],
+        });
+      }
+      connection.console.log(`[rip] mirror for ${fsPath} re-materialized: its bytes had drifted from the source's face`);
+    } catch {
+      return null; // the source no longer compiles; the mirror keeps serving last-good to tsgo
+    }
+    if (mirrorBytesOf(fsPath) !== result.code) {
+      connection.console.log(`[rip] cross-file mapping refused for ${fsPath}: mirror bytes drifted from the source's face`);
+      return null;
+    }
   }
   const face = {
     sourceHash,
@@ -621,6 +747,11 @@ function faceOf(fsPath) {
     stores: result.stores,
     srcLineStarts: lineStartsOf(source),
     genLineStarts: lineStartsOf(result.code),
+    // The declaration-scope gate, computed once per face and cached with it
+    // — the face is keyed by sourceHash, so an edit that changes which
+    // declarations carry annotations rebuilds this alongside the mappings.
+    checkedLines: scopeGateFor(source, fsPath, result,
+      typedImportsFor(result.stores, source, path.dirname(fsPath))),
   };
   faceCache.set(fsPath, face);
   return face;
@@ -648,7 +779,7 @@ const enumNamesOf = (result) =>
 
 function mirrorFromDisk(fsPath, source) {
   faceCache.delete(fsPath);
-  const result = compile(source, { path: fsPath, runtimeDelivery: 'inline', face: 'ts' });
+  const result = rawCompile(fsPath, source, hashText(source));
   const mirrorPath = mirrorPathOf('file://' + fsPath);
   warnOnMirrorCollision(mirrorPath, fsPath);
   writeMirror(mirrorPath, result.code);
@@ -1190,11 +1321,13 @@ let semanticTokensLegend = FALLBACK_LEGEND;
 connection.onInitialize(async (params) => {
   compile = await loadCompiler();
   readProjectConfig = await loadProjectConfigReader();
+  tokenize = await loadTokenizer();
   workspaceRoot = detectWorkspaceRoot(params);
   planMirrorRoot();
   loadCache();
   clientSupportsWatchers = !!params.capabilities?.workspace?.didChangeWatchedFiles?.dynamicRegistration;
   clientSupportsConfiguration = !!params.capabilities?.workspace?.configuration;
+  clientDefinitionLinks = !!params.capabilities?.textDocument?.definition?.linkSupport;
   // Awaited: the advertised trigger characters and semantic-tokens
   // legend are tsgo's own — a made-up legend would mislabel every token.
   const session = await launchTsgo();
@@ -1474,6 +1607,14 @@ async function refresh(document) {
     srcLineStarts,
     genLineStarts: lineStartsOf(result.code),
     strict: state.strict === true, // rides the compile it governed
+    // The declaration-scope gate, over the SAME compile that produced the
+    // face above — so the lines it calls typed are the lines this face
+    // actually carries type information for. `dir` is computed just above;
+    // this reads it back rather than deriving the path a second way.
+    checkedLines: (() => {
+      const dir = (() => { try { return path.dirname(fileURLToPath(document.uri)); } catch { return null; } })();
+      return scopeGateFor(text, document.uri, result, typedImportsFor(result.stores, text, dir));
+    })(),
   };
 
   // The last-compiled face to disk: program membership for the mirror
@@ -1768,6 +1909,7 @@ documents.onDidClose(({ document }) => {
 connection.onDidChangeWatchedFiles(async ({ changes }) => {
   if (!compile || !mirrorRoot) return;
   const forward = [];
+  const ripChanged = new Set(); // closed .rip files this batch touched on disk
   let configChanged = false;
   let refreshAllForConfig = false;
   for (const change of changes) {
@@ -1813,6 +1955,7 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
     }
     if (!fsPath.endsWith('.rip')) continue;
     if (documents.get(change.uri)) continue; // open buffers own their mirrors
+    ripChanged.add(fsPath);
     const mirrorPath = mirrorPathOf(change.uri);
     // Closure membership is the BOOKKEEPING, never the disk: every real
     // face is manifest-tracked (revalidateCache seeds materializedMirrors
@@ -1923,7 +2066,27 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
   if (!forward.length) return;
   await tsgoReady;
   if (tsgo) tsgo.client.notify('workspace/didChangeWatchedFiles', { changes: forward });
-  repullOpenDocuments();
+  // A dependency that changed ON DISK can change an open importer's GATE,
+  // not just its answers: a created file starts carrying typed exports, a
+  // deleted one stops, an edit can add or remove the annotation an import
+  // was riding. The importer's checkedLines live in its lastGood, so a
+  // re-pull through that gate would keep answering from yesterday's
+  // annotations — an importer of a touched file gets a full refresh.
+  // Everyone else re-pulls: their gates never read the changed file.
+  const refreshed = new Set();
+  if (ripChanged.size) {
+    for (const doc of documents.all()) {
+      let docPath;
+      try { docPath = fileURLToPath(doc.uri); } catch { continue; }
+      if (!cacheManifest.entries[docPath]?.imports?.some((p) => ripChanged.has(p))) continue;
+      refreshed.add(doc.uri);
+      refresh(doc).catch((err) => connection.console.error(`[rip] importer refresh failed: ${err.stack ?? err}`));
+    }
+  }
+  for (const uri of states.keys()) {
+    if (refreshed.has(uri)) continue;
+    repullDiagnostics(uri).catch((err) => connection.console.error(`[rip] re-pull failed: ${err.stack ?? err}`));
+  }
 });
 
 // ---- feature-request plumbing. Every feature shares the same
@@ -2266,15 +2429,58 @@ connection.onHover(async (params) => {
   return { contents, ...(range ? { range } : {}) };
 });
 
+// The import/export specifier STRING an offset sits in, as a
+// current-buffer range — quotes included, matching what TypeScript
+// underlines — or null. This is the origin a client underlines for
+// go-to-definition: left to the editor's word pattern, a path like
+// `@rip-lang/http` underlines one segment at a time (words break at `/`,
+// `-`, `.`) where TypeScript underlines the whole string literal. The
+// stores carry the exact span, so a definition answered from inside one
+// names it — as LocationLink's originSelectionRange, which only a
+// linkSupport client is allowed to receive.
+function specifierOriginAt(ctx) {
+  const stores = ctx.good.stores;
+  if (!stores?.nodesByKind) return null;
+  for (const kind of ['import', 'export']) {
+    for (const node of stores.nodesByKind(kind)) {
+      const src = stores.role(node.nodeId, 'source');
+      if (!src || typeof src.sourceStart !== 'number') continue;
+      if (ctx.offset < src.sourceStart || ctx.offset >= src.sourceEnd) continue;
+      return goodRangeToCurrent(ctx, {
+        start: offsetToPosition(ctx.good.srcLineStarts, src.sourceStart),
+        end: offsetToPosition(ctx.good.srcLineStarts, src.sourceEnd),
+      });
+    }
+  }
+  return null;
+}
+
 connection.onDefinition(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
-  if (!ctx || ctx.genExactPosition === null) return null;
+  if (!ctx) return null;
+  // Inside an import specifier the EXACT flavor can refuse honestly: the
+  // face normalizes quote style, so a double-quoted string's bytes have
+  // no verbatim twin. The whole specifier names ONE module — the stores
+  // just said which — so the lenient position cannot land on a wrong
+  // symbol here, and nowhere else is it accepted.
+  const origin = specifierOriginAt(ctx);
+  const position = ctx.genExactPosition ?? (origin ? ctx.genPosition : null);
+  if (position === null) return null;
   const result = await tsgoRequest('textDocument/definition', {
     textDocument: { uri: ctx.state.tsUri },
-    position: ctx.genExactPosition,
+    position,
   }, 'definition');
-  return ripLocations(result);
+  const locations = ripLocations(result);
+  if (clientDefinitionLinks && origin && locations.length) {
+    return locations.map((loc) => ({
+      originSelectionRange: origin,
+      targetUri: loc.uri,
+      targetRange: loc.range,
+      targetSelectionRange: loc.range,
+    }));
+  }
+  return locations;
 });
 
 // Type definition: served exactly like definition (EXACT flavor,

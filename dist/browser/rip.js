@@ -8827,7 +8827,24 @@ var renderParam = (p, isOptional) => {
   }
   return renderTarget(p, patternType(p), opt);
 };
-var renderParams = (params, isOptional) => `(${params.map((p) => renderParam(p, isOptional)).join(", ")})`;
+var jsArityOptional = (params) => {
+  const out = new Set;
+  for (let i = params.length - 1;i >= 0; i--) {
+    const p = params[i];
+    if (typeof p === "string") {
+      out.add(i);
+      continue;
+    }
+    if (Array.isArray(p) && (p[0] === "default" || p[0] === "rest"))
+      continue;
+    break;
+  }
+  return out;
+};
+var renderParams = (params, isOptional) => {
+  const arity = jsArityOptional(params);
+  return `(${params.map((p, i) => renderParam(p, (q) => isOptional(q) || arity.has(i))).join(", ")})`;
+};
 var paramTyped = (p) => isTypedWrapper(p) || isNode2(p) && (p[0] === "default" || p[0] === "rest") && isTypedWrapper(p[1]);
 
 // src/component-types.js
@@ -9403,7 +9420,7 @@ function atParamField(p) {
     return null;
   return { name, typed: isNode4(x) && x[0] === "typed-var" && x.length === 3 ? x : null };
 }
-function ctorAtFields(body) {
+function ctorAtFields(bodies) {
   const out = [];
   const seen = new Map;
   const walk = (n, inArrow) => {
@@ -9429,7 +9446,10 @@ function ctorAtFields(body) {
     for (const el of n.slice(1))
       walk(el, inArrow || h === "=>");
   };
-  walk(body, false);
+  for (const body of bodies) {
+    if (body !== null && body !== undefined)
+      walk(body, false);
+  }
   return out;
 }
 var COMPARISONS = new Set(["<", ">", "<=", ">=", "==", "!="]);
@@ -18331,6 +18351,7 @@ ${this.replayPad}}` : " }");
     const declared = new Set;
     let ctorParams = null;
     let ctorBody = null;
+    const methodBodies = [];
     for (const stmt of stmts) {
       if (!isObject(stmt)) {
         const field = isStaticKey(stmt) ? null : typeof stmt === "string" ? stmt : Emitter.isTypedWrapper(stmt) && typeof stmt[1] === "string" ? stmt[1] : isNode4(stmt) && stmt[0] === "=" && stmt.length === 3 && typeof stmt[1] === "string" ? stmt[1] : null;
@@ -18355,6 +18376,9 @@ ${this.replayPad}}` : " }");
         } else if (!isStaticKey(pair[1]) && typeof mName === "string") {
           declared.add(mName);
         }
+        if (isFunc2(pair[2]) && !isStaticKey(pair[1]) && mName !== "constructor") {
+          methodBodies.push(pair[2][2]);
+        }
         if (isFunc2(pair[2]) && pair[2][0] === "=>" && !isStaticKey(pair[1]) && mName !== "constructor") {
           bound.push(mName);
           firstBound ??= pair;
@@ -18375,8 +18399,8 @@ ${this.replayPad}}` : " }");
 `));
       }
     }
-    if (this.ts && ctorBody !== null) {
-      for (const at of ctorAtFields(ctorBody)) {
+    if (this.ts) {
+      for (const at of ctorAtFields([ctorBody, ...methodBodies])) {
         if (declared.has(at.name))
           continue;
         declared.add(at.name);
@@ -18787,14 +18811,43 @@ ${"  ".repeat(ind)}`);
       }))
     };
   }
-  emitParams(params, firstParamTypeText = null) {
-    Emitter.expansionSplit(params).list.forEach((p, i) => {
+  contextuallyTyped(node) {
+    const id = this.stores.idOf(node);
+    const self = id === null ? null : this.stores.node(id);
+    if (!self || typeof self.sourceStart !== "number")
+      return false;
+    this._argSpans ??= this.stores.roles.filter((r) => r.role === "args" && typeof r.sourceStart === "number").map((r) => [r.sourceStart, r.sourceEnd]);
+    if (this._argSpans.some(([s, e]) => self.sourceStart >= s && self.sourceEnd <= e))
+      return true;
+    this._annotatedValueSpans ??= (() => {
+      const spans = new Set;
+      for (const n of this.stores.nodes) {
+        if (n.semanticKind !== "assign" && n.semanticKind !== "pair")
+          continue;
+        if (!this.stores.role(n.nodeId, "annotation"))
+          continue;
+        const v = this.stores.role(n.nodeId, "value");
+        if (typeof v?.sourceStart === "number")
+          spans.add(`${v.sourceStart}:${v.sourceEnd}`);
+      }
+      return spans;
+    })();
+    return this._annotatedValueSpans.has(`${self.sourceStart}:${self.sourceEnd}`);
+  }
+  emitParams(params, firstParamTypeText = null, jsArity = true) {
+    const list = Emitter.expansionSplit(params).list;
+    const optional = jsArity ? jsArityOptional(list) : new Set;
+    if (firstParamTypeText !== null)
+      optional.delete(0);
+    list.forEach((p, i) => {
       if (atParamName(p) !== null || isNode4(p) && p[0] === "default" && atParamName(p[1]) !== null) {
         throw this.positionedError(isNode4(p) ? p : params, "emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here");
       }
       if (i > 0)
         this.b.emit(", ");
       this.emitParam(p);
+      if (optional.has(i) && this.ts)
+        this.b.tsOnly(() => this.b.emit("?"));
       if (i === 0 && firstParamTypeText !== null && typeof p === "string" && this.ts) {
         this.b.tsOnly(() => this.b.emit(`: ${firstParamTypeText}`));
       }
@@ -18816,13 +18869,14 @@ ${"  ".repeat(ind)}`);
     if (isGen && kind === "=>") {
       throw this.positionedError(node, srcKind === "->" ? "emitter: a generator arrow cannot sit inside a component body — thin arrows lower to fat arrows there to keep `this` on the instance, and JS has no generator arrows (name the generator a method and call it)" : "emitter: fat arrows cannot contain yield (JS has no generator arrows; use ->)");
     }
+    const inArgs = this.ts && this.contextuallyTyped(node);
     this.mark(node, "returnType", () => this.mark(node, "$self", () => {
       if (kind === "->") {
         if (isAsync)
           this.b.emit("async ");
         this.mark(node, "kind", () => this.b.emit(isGen ? "function*" : "function"));
         this.b.emit("(");
-        this.mark(node, "params", () => this.emitParams(params));
+        this.mark(node, "params", () => this.emitParams(params, null, !inArgs));
         this.b.emit(")");
         this.tsReturnAnnotation(node, isAsync, isVoid);
         this.b.emit(" ");
@@ -18830,17 +18884,20 @@ ${"  ".repeat(ind)}`);
       } else {
         if (isAsync)
           this.b.emit("async ");
-        const tsParens = this.ts && params.length === 1 && typeof Emitter.paramCore(params[0]) === "string" && (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, "returnType") !== null || isVoid);
+        const jsArity = this.ts && !inArgs && params.length === 1 && typeof params[0] === "string";
+        const tsParens = this.ts && params.length === 1 && typeof Emitter.paramCore(params[0]) === "string" && (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, "returnType") !== null || isVoid || jsArity);
         this.mark(node, "params", () => {
           if (params.length === 1 && typeof Emitter.paramCore(params[0]) === "string") {
             if (tsParens)
               this.b.tsOnly(() => this.b.emit("("));
             this.emitParam(params[0]);
+            if (jsArity)
+              this.b.tsOnly(() => this.b.emit("?"));
             if (tsParens)
               this.b.tsOnly(() => this.b.emit(")"));
           } else {
             this.b.emit("(");
-            this.emitParams(params);
+            this.emitParams(params, null, !inArgs);
             this.b.emit(")");
           }
         });
@@ -20508,6 +20565,20 @@ function emitDeclarations({ sexpr, stores, source }) {
         }
       }
     }
+    const instanceMethodBodies = [];
+    for (const stmt of stmts) {
+      if (!isNode5(stmt) || stmt[0] !== "object")
+        continue;
+      for (const pair of stmt.slice(1)) {
+        if (pair[0] !== ":" && pair[0] !== "void-pair")
+          continue;
+        if (isStaticKey(pair[1]) || !isFunc3(pair[2]))
+          continue;
+        if (memberName(pair[1]) === "constructor")
+          continue;
+        instanceMethodBodies.push(pair[2][2]);
+      }
+    }
     for (const stmt of stmts) {
       if (isNode5(stmt) && stmt[0] === "object") {
         for (const pair of stmt.slice(1)) {
@@ -20546,7 +20617,7 @@ function emitDeclarations({ sexpr, stores, source }) {
               const plain = typed !== null ? ["typed-var", n, typed[2]] : n;
               return dflt !== null ? ["default", plain, dflt[2]] : plain;
             });
-            for (const at of ctorAtFields(value[2])) {
+            for (const at of ctorAtFields([value[2], ...instanceMethodBodies])) {
               if (declared.has(at.name))
                 continue;
               declared.add(at.name);

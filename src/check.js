@@ -28,8 +28,26 @@ import { identifierRunAt } from './lexer.js';
 import { startTsgo } from '../packages/vscode/src/tsgo.js';
 import { buildProbe, parseProbeHover } from '../packages/vscode/src/pins.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from '../packages/vscode/src/diagnostics.js';
+import { SUPPRESSED_TS_CODES, IMPLICIT_ANY_CODES, MISSING_TYPES_CODES } from '../packages/vscode/src/translate.js';
+import { scopeGateOf, typedExportsOf, typedImportsOf } from '../packages/vscode/src/scopes.js';
+import { tokenize } from './lexer.js';
 import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from '../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../packages/vscode/src/translate.js';
+
+// Fails OPEN, like the editor's: a source the lexer refuses leaves the gate
+// undefined and every diagnostic publishes. An empty annotation set would
+// silence the whole file, and a silent file reads as a clean one.
+const scopeGate = (source, fsPath, face, typedImports) => {
+  try { return scopeGateOf(tokenize(source, fsPath).tokens, source, face, typedImports); }
+  catch { return undefined; }
+};
+
+// A module's ANNOTATED exports — file-local, so a lexer refusal costs this
+// module's importers their cross-file checking and nothing else.
+const moduleTypedExports = (source, fsPath, face) => {
+  try { return typedExportsOf(tokenize(source, fsPath).tokens, source, face); }
+  catch { return new Set(); }
+};
 
 const HELP = `rip check — type-check .rip files headlessly (the tsc --noEmit of rip-land)
 
@@ -124,17 +142,28 @@ function commonAncestor(files) {
   for (; i < first.length; i++) if (!split.every((parts) => parts[i] === first[i])) break;
   return first.slice(0, i).join(path.sep) || path.sep;
 }
+// The workspace root anchors the mirror, and a WORKSPACES root outranks
+// a nearer plain package.json: checking `packages/http` from a monorepo
+// root must land the sibling packages its bare imports resolve to INSIDE
+// the mirror, and stopping at the package's own manifest strands them
+// outside. The walk records the nearest marker as the fallback and keeps
+// climbing for a `workspaces` declaration — bun's own resolution rule.
 function findWorkspaceRoot(files) {
   const base = commonAncestor(files);
+  let nearest = null;
   for (let cur = base; ; ) {
-    for (const marker of ['package.json', 'tsconfig.json', '.git']) {
-      if (fs.existsSync(path.join(cur, marker))) return cur;
+    const pkg = path.join(cur, 'package.json');
+    if (fs.existsSync(pkg)) {
+      try { if (JSON.parse(fs.readFileSync(pkg, 'utf8')).workspaces) return cur; } catch { /* malformed — a marker, not a root */ }
+      nearest ??= cur;
+    } else if (['tsconfig.json', '.git'].some((m) => fs.existsSync(path.join(cur, m)))) {
+      nearest ??= cur;
     }
     const parent = path.dirname(cur);
     if (parent === cur) break;
     cur = parent;
   }
-  return base;
+  return nearest ?? base;
 }
 
 const targets = collectTargets(positionals.length ? positionals : ['.']);
@@ -165,6 +194,17 @@ const parseDiags = [];        // rows for files that failed to compile
 // clean 0 must mean "checked, and clean", never "couldn't check"), mirroring
 // the tsgo-unavailable posture below.
 let incompleteCheck = false;
+// Diagnostics dropped by the gradual posture, counted so the summary can
+// say so. A run that hides hundreds and reports nothing about it reads as
+// "rip's checker is weak" rather than "this project is in gradual mode" —
+// the wrong lesson, and an undiscoverable one.
+//
+// Counted per FAMILY because the remedies differ: one is a mode you can
+// turn on, the other is a package you can install. A single total would
+// point everyone at the wrong one.
+let hiddenAnnotations = 0;
+let hiddenMissingTypes = 0;
+let hiddenScope = 0;
 const seen = new Set();
 const queue = [...targets];
 while (queue.length) {
@@ -194,7 +234,7 @@ while (queue.length) {
     continue;
   }
   compiled.set(fsPath, {
-    source, cfg,
+    source, cfg, result,
     good: {
       source, code: result.code, mappings: result.mappings,
       echoSpans: result.echoSpans ?? [],
@@ -206,6 +246,22 @@ while (queue.length) {
   for (const imp of ripImportsOf(result.stores, source, path.dirname(fsPath))) {
     if (!seen.has(imp)) queue.push(imp);
   }
+}
+
+// The gate runs in a SECOND pass, once the whole closure is compiled: a
+// file's gate depends on which of its imports name an ANNOTATED export, and
+// the queue reaches a dependency after the file importing it as often as
+// before. Typed exports are file-local, so this pass needs no ordering of
+// its own and an import cycle cannot recur through it.
+const typedExports = new Map();
+for (const [fsPath, entry] of compiled) {
+  typedExports.set(fsPath, moduleTypedExports(entry.source, fsPath, entry.result));
+}
+for (const [fsPath, entry] of compiled) {
+  entry.good.checkedLines = scopeGate(
+    entry.source, fsPath, entry.result,
+    typedImportsOf(entry.result.stores, entry.source, path.dirname(fsPath), (p) => typedExports.get(p)),
+  );
 }
 
 // ── materialize the mirror + drive one tsgo session ─────────────────
@@ -265,6 +321,7 @@ if (compiled.size > 0) {
     const wrapperDir = path.join(mirrorRoot, rel);
     const wrapper = projectWrapper({
       wrapperDir, sourceTsconfig: path.join(workspaceRoot, rel, 'tsconfig.json'),
+      workspaceRoot, mirrorRoot,
     });
     fs.mkdirSync(wrapperDir, { recursive: true });
     fs.writeFileSync(path.join(wrapperDir, 'tsconfig.json'), JSON.stringify(wrapper.tsconfig, null, 2));
@@ -405,6 +462,19 @@ if (compiled.size > 0) {
         const mapped = [];
         for (const d of pulled?.items ?? []) {
           const m = mapTsDiagnostic(entry.good, d);
+          // Count only what strict would actually SHOW. The suppression
+          // check runs before the mapping one, so a bare code test also
+          // counts diagnostics that would have been dropped anyway for
+          // having no source span — inflating the number several-fold and
+          // promising the user diagnostics `rip.strict` would never
+          // deliver. Re-map with the strict flag to ask the real question.
+          if (!m && !entry.cfg.strict && mapTsDiagnostic({ ...entry.good, strict: true }, d)) {
+            if (IMPLICIT_ANY_CODES.has(d.code)) hiddenAnnotations++;
+            else if (MISSING_TYPES_CODES.has(d.code)) hiddenMissingTypes++;
+            // Held by the declaration-scope gate: the author annotated
+            // nothing here, so nothing is asked of them.
+            else hiddenScope++;
+          }
           if (!m) continue;
           // The diagnostic carries its own relatedInformation (secondary
           // "declared here" locations), each mapped from its generated
@@ -536,6 +606,20 @@ if (asJson) {
   // Named once, at the end, whatever the run's verdict — a clean run that
   // hid 2,000 diagnostics is exactly the case where saying nothing
   // misleads most.
+  const plural = (n) => (n === 1 ? '' : 's');
+  if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0) console.log('');
+  if (hiddenScope > 0) {
+    console.log(gray(`${hiddenScope} diagnostic${plural(hiddenScope)} hidden `
+      + `(unannotated declarations — annotate one to check it, or set \`rip.strict\`)`));
+  }
+  if (hiddenAnnotations > 0) {
+    console.log(gray(`${hiddenAnnotations} annotation diagnostic${plural(hiddenAnnotations)} hidden `
+      + `(gradual mode — set \`rip.strict\` in package.json to see them)`));
+  }
+  if (hiddenMissingTypes > 0) {
+    console.log(gray(`${hiddenMissingTypes} missing-@types advisor${hiddenMissingTypes === 1 ? 'y' : 'ies'} hidden `
+      + `(the imports are \`any\`; install the @types package to type them)`));
+  }
 }
 
 // Exit: 1 on type errors; 2 when the run could not cover what was asked —

@@ -59,6 +59,42 @@ function monorepo({ rootStrict = false, nestedStrict = true } = {}) {
   return dir;
 }
 
+// A FRESH PROJECT: what a newcomer has after `bun init` plus a .rip
+// file — a tsconfig, and @types/bun installed. `withTypes:false` is the
+// same project before anything is installed, which is the posture the
+// host floor exists for.
+//
+// The source is deliberately ordinary: the idioms rip encourages, not a
+// minimal case. `(opts = {}) ->` is the shape that produced 329 of the
+// 1,657 errors in a survey of packages/ (2026-07-31), and `import.meta.dir`
+// another 143 — between them a fifth of everything a newcomer would see.
+const FRESH = [
+  'greet = (name, opts = {}) ->',
+  "  suffix = opts.suffix ?? ''",
+  '  name + suffix',
+  '',
+  'here = import.meta.dir',
+  "console.log greet('world', { suffix: '!' }), here",
+  '',
+].join('\n');
+
+function freshProject({ withTypes = true } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-fresh-'));
+  fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify({
+    compilerOptions: { target: 'ESNext', module: 'preserve', moduleDetection: 'force', noEmit: true, skipLibCheck: true },
+  }, null, 2));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'fresh', devDependencies: withTypes ? { '@types/bun': 'latest' } : {} }, null, 2));
+  if (withTypes) {
+    const t = path.join(dir, 'node_modules', '@types', 'bun');
+    fs.mkdirSync(t, { recursive: true });
+    fs.writeFileSync(path.join(t, 'package.json'), JSON.stringify({ name: '@types/bun', version: '1.0.0', types: 'index.d.ts' }));
+    fs.writeFileSync(path.join(t, 'index.d.ts'),
+      'declare var Bun: any;\ndeclare var process: any;\ninterface ImportMeta { dir: string; file: string; path: string }\n');
+  }
+  fs.writeFileSync(path.join(dir, 'app.rip'), FRESH);
+  return dir;
+}
+
 function check(dir, args = []) {
   const r = spawnSync('bun', [BIN, 'check', ...args], { cwd: dir, encoding: 'utf8', timeout: 60_000 });
   return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
@@ -363,7 +399,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         'wrongNested = c.nested',
         'wrongDeep = c.deep',
       ].join('\n') + '\n',
-    });
+    }, { strict: true });
     try {
       const diags = JSON.parse(check(dir, ['--json']).stdout);
       expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
@@ -371,6 +407,10 @@ describeExtended('rip check: type diagnostics over the real server', () => {
 
       const neg = JSON.parse(check(negDir, ['--json']).stdout);
       expect(neg.map((d) => [d.code, d.line])).toEqual([
+        // Asserted under rip.strict: a negatives fixture asks for every
+        // diagnostic, and gradual suppresses the implicit-`this` class the
+        // way it suppresses implicit-any — which would hide the two rows
+        // this case exists to prove.
         [2683, 5],   // the `->`'s own untyped `this` — not this class's
         [2683, 7],   // and the arrow under it captures THAT one, not the instance
         [2322, 14],  // `plain` inferred `string`; line 13's write to `wide` stays silent
@@ -521,8 +561,17 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // runs ensures before id/timestamps exist, so the implicit columns
   // type Partial<> and an unguarded `m.id` is refused (TS18048) instead
   // of crashing the first create.
+  //
+  // Both landmines are NULL-assignability facts, so the project spells
+  // `strictNullChecks` in its own tsconfig — which also pins the yield:
+  // gradual supplies `strictNullChecks: false` only to a chain that says
+  // nothing, and an author's own strictness wins (`nullPosture`,
+  // mirror.js). Without it the checker cannot draw the distinction these
+  // contracts ride on, in any mode.
   test('the schema face follows runtime ordering: date defaults admit strings, required [null] publishes, ensures see Partial implicits', () => {
+    const audit = JSON.parse(fs.readFileSync(TSCONFIG, 'utf8'));
     const dir = workspace({
+      'tsconfig.json': JSON.stringify({ ...audit, compilerOptions: { ...audit.compilerOptions, strictNullChecks: true } }),
       'ordering.rip': [
         'Ev = schema :shape',
         '  when! date, ["2024-01-01"]',
@@ -582,6 +631,47 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // A bare workspace specifier (`@rip/util`) is how packages import each
+  // other: a node_modules symlink whose package.json `exports` lands on a
+  // `.rip` file. bun resolves that at runtime; the mirror must resolve it
+  // too — the target joins the closure and the generated tsconfig maps
+  // the bare name onto the mirror face — or every cross-package import in
+  // the workspace publishes TS2307. The check targets a SUBDIRECTORY on
+  // purpose: the workspace root is the nearest ancestor declaring
+  // `workspaces`, not the first package.json above the target, or the
+  // sibling package sits outside the mirror and nothing resolves.
+  // The gate's ACROSS rule rides the same resolution: the ANNOTATED
+  // export carries into the importer, the inferred one stays held.
+  test('a bare workspace .rip specifier resolves; its annotated exports carry, inferred ones stay held', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-ws-'));
+    try {
+      fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
+      fs.mkdirSync(path.join(dir, 'packages', 'app'), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'packages', 'util'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'packages', 'util', 'package.json'),
+        JSON.stringify({ name: '@rip/util', exports: { '.': './util.rip' } }));
+      fs.writeFileSync(path.join(dir, 'packages', 'util', 'util.rip'),
+        'export answer: number = 42\nexport plain = 1\n');
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'app.rip'), [
+        "import { answer, plain } from '@rip/util'",
+        "import * as mod from '@rip/util'",
+        'bad = answer.toUpperCase()',
+        'meh = plain.toUpperCase()',
+        'console.log bad, meh, mod',
+      ].join('\n') + '\n');
+      fs.mkdirSync(path.join(dir, 'node_modules', '@rip'), { recursive: true });
+      fs.symlinkSync(path.join('..', '..', 'packages', 'util'), path.join(dir, 'node_modules', '@rip', 'util'));
+      const diags = JSON.parse(check(dir, ['--json', path.join('packages', 'app')]).stdout);
+      // Resolution: no cannot-find-module anywhere, on any of the three
+      // import spellings (named, named-unannotated, namespace).
+      expect(diags.map((d) => d.code)).not.toContain(2307);
+      // ACROSS: `answer`'s annotation carries — the misuse reports at its
+      // line; `plain` carries nothing and its misuse is held.
+      expect(diags.filter((d) => d.file === path.join('packages', 'app', 'app.rip')).map((d) => [d.code, d.line])).toEqual([[2339, 3]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // A pattern catch mints its binding (`catch (_err) { ({message} = _err); … }`)
   // and annotates it, so the lowering's own destructure never publishes —
   // in EITHER try, statement or value, on EITHER pattern kind. The four
@@ -596,7 +686,15 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // assignment beside the destructure still publishes — so the annotation
   // cannot have been spent on the whole clause. Codes bound to their lines,
   // columns free. Liveness-paired.
-  test('a pattern catch never publishes from its own lowering, and the identifier spelling keeps unknown', () => {
+  // The identifier spelling's `unknown` was deliberate once — the author
+  // can narrow it the ordinary ways, and `catch err: any` is spellable.
+  // The gradual-annotations posture overrides that: `err.message` is the
+  // commonest catch body there is, and requiring a narrowing the author
+  // did not ask for is annotation pressure, which is the one thing this
+  // mode governs. Under `rip.strict` the `unknown` is back — asserted
+  // below, so the ruling is pinned in both directions rather than simply
+  // relaxed.
+  test('a pattern catch never publishes from its own lowering; an identifier catch follows the mode', () => {
     const dir = workspace({
       'catchpat.rip': [
         'try',
@@ -639,8 +737,27 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       const diags = JSON.parse(check(dir, ['--json']).stdout);
       expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
       expect(diags.filter((d) => d.file === 'catchpat.rip')).toEqual([]);
+      // Gradual: the `e.message` read is gone; the planted TS2322 stays,
+      // so the file is still being checked rather than skipped.
       expect(diags.filter((d) => d.file === 'scoped.rip').map((d) => [d.code, d.line]))
-        .toEqual([[18046, 4], [2322, 9]]);
+        .toEqual([[2322, 9]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // The other half of the same ruling: a project that asked for strict is
+  // told about the unnarrowed catch read, exactly as TypeScript would.
+  test('under rip.strict an identifier catch is `unknown` again', () => {
+    const dir = workspace({
+      'scoped.rip': [
+        'try',
+        "  JSON.parse('broken')",
+        'catch e',
+        '  console.log e.message',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.map((d) => [d.code, d.line])).toEqual([[18046, 4]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
@@ -1413,6 +1530,95 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // The inverse posture, so the assertion above is not passing on a
   // hardcoded direction: strict at the root, loose in the nested project.
   // A flat mirror answers the same way in both, which is the whole defect.
+  // THE ACCEPTANCE GATE for permissive mode: what a newcomer writes on
+  // day one reports nothing. Permissive is the DEFAULT, so this is the
+  // first thing anyone experiences; every error here is one they have to
+  // interpret before they have any way to.
+  test('a fresh project checks clean under permissive mode', () => {
+    const dir = freshProject();
+    try {
+      const r = check(dir);
+      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+      expect(r.status).toBe(0);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // The same project BEFORE `bun install` — no @types anywhere. The host
+  // floor is what carries it, and it deactivates the moment the real
+  // types arrive (the case above), so the two gates hold both sides of
+  // that switch.
+  // The floor stops the moment the real types arrive — asserted, because
+  // an index signature that survived an install would make every typo on
+  // `import.meta` legal forever. The read is annotated so the line is
+  // gated ON: what this pins is the FLOOR yielding (a widened ImportMeta
+  // would answer `any` and report nothing even on a checked line), not
+  // where the gate reaches — an ambient global's type does not open the
+  // lines that merely mention it (see scopes.js).
+  test('the floor yields to @types/bun rather than widening it', () => {
+    const dir = freshProject();                       // withTypes: the real declaration governs
+    try {
+      fs.writeFileSync(path.join(dir, 'app.rip'), 'x: unknown = import.meta.nosuchfield\nconsole.log x\n');
+      expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toEqual([2339]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  test('the same project is quiet before anything is installed', () => {
+    const dir = freshProject({ withTypes: false });
+    try {
+      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // An import TypeScript cannot type is `any` — it says so itself, and
+  // says it TWICE: TS7016 for a .js module with no declarations, which
+  // gradual has always suppressed, and TS2580 for a well-known @types
+  // package that is not installed, which it did not. Same situation, same
+  // posture. The binding is `any` either way, so nothing downstream
+  // changes; what changes is whether the advisory is shouted at a project
+  // that did not ask for it.
+  test('a missing @types package is advisory in gradual mode, an error under strict', () => {
+    const files = { 'app.rip': "import { readFileSync } from 'fs'\nconsole.log readFileSync('/x')\n" };
+    const gradual = workspace(files);
+    const strict = workspace(files, { strict: true });
+    try {
+      expect(JSON.parse(check(gradual, ['--json']).stdout)).toEqual([]);
+      // Strict still says it, so the suppression is a MODE, not a deletion.
+      expect(JSON.parse(check(strict, ['--json']).stdout).map((d) => d.code)).toEqual([2580]);
+    } finally {
+      fs.rmSync(gradual, { recursive: true, force: true });
+      fs.rmSync(strict, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  // `noImplicitThis` rides the strict umbrella, and TS2683's own message
+  // is "'this' implicitly has type 'any'" — the same class the 7xxx family
+  // covers, numbered outside it. `@req` in a handler is a receiver the
+  // author never annotated and has no obvious spelling to annotate, so
+  // demanding one is annotation pressure by another route.
+  test("an unannotated `this` is quiet in gradual mode, an error under strict", () => {
+    const files = { 'app.rip': 'handler = -> @req\nconsole.log handler\n' };
+    const gradual = workspace(files);
+    const strict = workspace(files, { strict: true });
+    try {
+      expect(JSON.parse(check(gradual, ['--json']).stdout)).toEqual([]);
+      expect(JSON.parse(check(strict, ['--json']).stdout).map((d) => d.code)).toEqual([2683]);
+    } finally {
+      fs.rmSync(gradual, { recursive: true, force: true });
+      fs.rmSync(strict, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  // The line that must NOT move: a module nothing can resolve stays an
+  // error. Typos, missing dependencies, and rip's own unresolved
+  // workspace packages all live here, and TypeScript's own code is what
+  // separates them from the advisory above.
+  test('an unresolvable module is still an error in gradual mode', () => {
+    const dir = workspace({ 'app.rip': "import { x } from 'totally-not-a-package'\nconsole.log x\n" });
+    try {
+      expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toEqual([2307]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
   test('the polarity inverts with the configs — strict root, loose nested', () => {
     const dir = monorepo({ rootStrict: true, nestedStrict: false });
     try {

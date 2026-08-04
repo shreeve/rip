@@ -203,7 +203,14 @@ const STUB_LINE = /^(export (declare const [A-Za-z_$][\w$]*: any;|type [A-Za-z_$
 const isStub = (text) => text.split('\n').filter(Boolean).every((l) => STUB_LINE.test(l));
 const faceCount = (ws) => mirrorPaths(ws).filter((p) => !isStub(fs.readFileSync(p, 'utf8'))).length;
 
-const UTIL = 'export answer = 42\n';
+// ANNOTATED: the gate's ACROSS rule is what carries a dependency's type
+// into the importer, and it carries annotations, not inference — so the
+// misuse observable these tests share requires the export to be typed.
+const UTIL = 'export answer: number = 42\n';
+
+// The inferred spelling, for the tests whose observable is hover (hover
+// answers whatever the face knows, gate or no gate).
+const INFERRED_UTIL = 'export answer = 42\n';
 
 const APP = 'import { answer } from "./util.rip"\nbad = answer.toUpperCase()\n';
 
@@ -238,7 +245,7 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
     await inWorkspace({ 'util.rip': UTIL }, async (api) => {
       // The OPEN buffer contradicts its disk face: string, not number —
       // so .toUpperCase() is legal and the importer must stay clean.
-      await api.open('util.rip', 'export answer = "s"\n');
+      await api.open('util.rip', 'export answer: string = "s"\n');
       await api.open('app.rip', APP);
       await api.change('app.rip', APP + '\n');
       expect(api.codes('app.rip')).not.toContain(2307);
@@ -271,7 +278,7 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
   }, 30000);
 
   test('cross-file readiness: hover crosses the file boundary onto .rip source', async () => {
-    await inWorkspace({ 'util.rip': UTIL }, async (api) => {
+    await inWorkspace({ 'util.rip': INFERRED_UTIL }, async (api) => {
       await api.open('app.rip', APP);
       await api.change('app.rip', APP + '\n');
       // Hover `answer` inside the importer's use site (line 1, `bad = answer…`).
@@ -337,8 +344,8 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
     // posture: startup COMPILE work follows the closure, not the
     // workspace — candidacy is what follows the workspace).
     const files = {
-      'chain/a.rip': 'import { b } from "./b.rip"\nexport a = b + 1\n',
-      'chain/b.rip': 'export b = 41\n',
+      'chain/a.rip': 'import { b } from "./b.rip"\nexport a: number = b + 1\n',
+      'chain/b.rip': 'export b: number = 41\n',
     };
     for (let i = 0; i < 200; i++) files[`bulk/mod${i}.rip`] = `export value${i} = ${i}\n`;
     await inWorkspace(files, async (api) => {
@@ -346,7 +353,7 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
       await api.open('app.rip', src);
       await api.change('app.rip', src + '\n');
       expect(api.codes('app.rip')).not.toContain(2307);
-      expect(api.codes('app.rip')).toContain(2339); // the type crossed BOTH hops
+      expect(api.codes('app.rip')).toContain(2339); // each hop's annotation crossed
 
       // The structural pin: exactly the closure — app + a + b — holds a
       // compiled face. The 200 bystanders are in the tree, and in tsgo's
@@ -360,8 +367,8 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
 
   test('persistent cache: a restart recompiles only what changed; a build-identity mismatch purges', async () => {
     const ws = makeWorkspace({
-      'a.rip': 'import { b } from "./b.rip"\nexport a = b + 1\n',
-      'b.rip': 'export b = 41\n',
+      'a.rip': 'import { b } from "./b.rip"\nexport a: number = b + 1\n',
+      'b.rip': 'export b: number = 41\n',
     });
     try {
       const APP2 = 'import { a } from "./a.rip"\nbad = a.toUpperCase()\n';
@@ -374,7 +381,7 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
       });
 
       // b.rip changes while the server is DOWN.
-      fs.writeFileSync(path.join(ws, 'b.rip'), 'export b = 43\n');
+      fs.writeFileSync(path.join(ws, 'b.rip'), 'export b: number = 43\n');
 
       // Session 2: revalidation recompiles ONLY b (a is fresh by hash;
       // app never existed on disk — buffer-only, so its entry leaves the
@@ -621,8 +628,8 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
 
   test('crash-partial mirrors: corrupted bytes behind the cache are detected and recompiled', async () => {
     const ws = makeWorkspace({
-      'a.rip': 'import { b } from "./b.rip"\nexport a = b + 1\n',
-      'b.rip': 'export b = 41\n',
+      'a.rip': 'import { b } from "./b.rip"\nexport a: number = b + 1\n',
+      'b.rip': 'export b: number = 41\n',
     });
     try {
       const APP2 = 'import { a } from "./a.rip"\nbad = a.toUpperCase()\n';
@@ -793,9 +800,9 @@ describe.skipIf(!tsgoAvailable)('workspace ambient .d.ts and prototype augmentat
     await inWorkspace({ 'rip-env.d.ts': 'interface String { shout(): string }\n' }, async (api) => {
       await api.open('app.rip', 'String.prototype.shout = -> @toUpperCase() + "!"\nout = "hi".shout()\n');
       await api.until('app.rip', (codes) => !codes.includes(2339));
-      // The d.ts widened one interface, not the checking: a real typo
-      // still reports.
-      await api.change('app.rip', 'bad = "hi".missing()\n');
+      // The d.ts widened one interface, not the checking: on a checked
+      // line (the annotation gates it on), a real typo still reports.
+      await api.change('app.rip', 'bad: string = "hi".missing()\n');
       await api.until('app.rip', (codes) => codes.includes(2339));
     });
   }, 30000);

@@ -113,6 +113,51 @@ export function chainSetsTypes(configPath, chain, onUnresolved, visited = new Se
 // program whole-or-not (one tsconfig include), so a nested project's
 // own package.json cannot govern it per-file the way the diagnostic
 // gate does.
+// Null posture by mode. Gradual rip is stock TypeScript's `strict: false`
+// for nullability: `T | undefined` collapses into `T` rather than demanding
+// a guard on every read the author never annotated. It is the one mode lever
+// that changes TYPES and not just which diagnostics publish — `find()` hovers
+// as `T` here and `T | undefined` under `rip.strict` — which is exactly the
+// bargain a gradual project makes. Unlike `noImplicitAny`, turning this off
+// removes a distinction rather than disabling an inference mechanism, so it
+// cannot strand a binding on a worse type (`noImplicitAny: false` drops
+// unannotated `[]` onto `never[]`, which is why THAT flag stays on).
+const nullPosture = (dir, configPath) => {
+  if (dir && workspaceIsStrict(dir)) return {};
+  // The user's OWN tsconfig wins. rip supplies a default posture; it does
+  // not overrule a `strict` / `strictNullChecks` the author wrote down —
+  // an override that silently beat an explicit setting is the stacking
+  // surprise this whole mode design exists to remove.
+  if (configPath && chainSetsStrictness(configPath)) return {};
+  return { strictNullChecks: false };
+};
+
+// Does the config chain SET strictness (`strict` or `strictNullChecks`)
+// anywhere? Mirrors chainSetsTypes' conservatism: an unreadable or
+// unfollowable link answers TRUE, so an unknown config is never overridden.
+export function chainSetsStrictness(configPath, visited = new Set(), depth = 0) {
+  if (depth > 16 || visited.has(configPath)) return false;
+  visited.add(configPath);
+  let text;
+  try { text = fs.readFileSync(configPath, 'utf8'); } catch { return true; }
+  const stripped = stripJsonComments(text);
+  let parsed;
+  try { parsed = JSON.parse(stripped); } catch {
+    if (/"(strict|strictNullChecks)"\s*:/.test(stripped)) return true;
+    return /"extends"\s*:/.test(stripped);
+  }
+  const co = parsed?.compilerOptions;
+  if (co && (co.strict !== undefined || co.strictNullChecks !== undefined)) return true;
+  if (parsed?.extends === undefined) return false;
+  const bases = Array.isArray(parsed.extends) ? parsed.extends : [parsed.extends];
+  return bases.some((spec) => {
+    if (typeof spec !== 'string') return true;
+    const next = resolveExtends(spec, path.dirname(configPath));
+    if (!next) return true;
+    return chainSetsStrictness(next, visited, depth + 1);
+  });
+}
+
 const workspaceIsStrict = (workspaceRoot) => {
   for (let dir = workspaceRoot; ; dir = path.dirname(dir)) {
     const pkgPath = path.join(dir, 'package.json');
@@ -145,6 +190,26 @@ const workspaceIsStrict = (workspaceRoot) => {
 const HOST_FLOORS = [
   { text: 'declare var process: any;', suppliedBy: ['@types/node', '@types/bun'] },
   { text: 'declare var Bun: any;', suppliedBy: ['@types/bun'] },
+  // `import.meta.dir` and kin are Bun's, and unlike the two above they
+  // are not a global to shadow but an interface to MERGE — declaring a
+  // var would not reach `import.meta.x` at all. Merging is additive, so
+  // when @types/bun is present this entry is absent and the real
+  // declaration governs alone; the gate below is what guarantees that.
+  //
+  // An INDEX SIGNATURE, not an enumeration. Naming the fields means
+  // asserting the shape of an API rip does not own, and it was wrong on
+  // arrival — `dir`, `file` and `path` were listed while `import.meta.main`
+  // was not, so ten call sites in this repo's own packages still failed.
+  // The honest floor says "this host adds properties I cannot enumerate",
+  // which is both truer and complete, and it merges with the real
+  // ImportMeta rather than replacing it (`url` keeps its own type).
+  //
+  // It only exists where @types/bun is ABSENT, so nothing it permits
+  // survives an install — the gate below is what guarantees that.
+  {
+    text: 'interface ImportMeta { [key: string]: any }',
+    suppliedBy: ['@types/bun'],
+  },
 ];
 export const HOST_FLOOR_NAME = 'host-floor.d.ts';
 const ancestorHas = (fromDir, pkgs) => {
@@ -229,14 +294,23 @@ export function nearestTsconfig(dir, anchor) {
 // emitted per project, from that project's own gate answers: a nested
 // project's strictness and installed types govern whether ITS files see
 // it, which a single workspace-root floor could never express.
-export function projectWrapper({ wrapperDir, sourceTsconfig, chain = new Set(), onUnresolved }) {
+export function projectWrapper({ wrapperDir, sourceTsconfig, workspaceRoot = null, mirrorRoot = null, chain = new Set(), onUnresolved }) {
   const sourceDir = path.dirname(sourceTsconfig);
   const overrides = {
     noImplicitAny: true,
     noEmit: true,
     allowImportingTsExtensions: true,
+    ...nullPosture(sourceDir, sourceTsconfig),
     rootDirs: ['.', posix(path.relative(wrapperDir, sourceDir))],
   };
+  // The same bare-specifier map the mirror root carries, rebased through
+  // this wrapper's own reach-up — a nested project's files are governed
+  // by THIS config, and paths are read from the config that declares
+  // them, so the root's map never reaches here on its own.
+  if (workspaceRoot && mirrorRoot) {
+    const ripPaths = workspaceRipPaths(workspaceRoot, path.relative(wrapperDir, mirrorRoot));
+    if (Object.keys(ripPaths).length) overrides.paths = ripPaths;
+  }
   chain.clear();
   const setsTypes = chainSetsTypes(sourceTsconfig, chain, onUnresolved);
   if (!setsTypes) overrides.types = ['*'];
@@ -253,10 +327,13 @@ export function projectWrapper({ wrapperDir, sourceTsconfig, chain = new Set(), 
 }
 
 export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = new Set(), onUnresolved, excludeDirs = [] } = {}) {
+  const rootConfig = !mirrorRootIsFallback && workspaceRoot
+    ? path.join(workspaceRoot, 'tsconfig.json') : null;
   const overrides = {
     noImplicitAny: true,
     noEmit: true,
     allowImportingTsExtensions: true,
+    ...nullPosture(workspaceRoot, rootConfig && fs.existsSync(rootConfig) ? rootConfig : null),
   };
   if (!mirrorRootIsFallback) overrides.rootDirs = ['.', '../..'];
   // Workspace AMBIENT declarations (`rip-env.d.ts` and kin) join the
@@ -272,6 +349,13 @@ export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = n
     include.push('../../**/*.d.ts');
     exclude.push('../../**/node_modules');
   }
+  // Bare workspace `.rip` specifiers resolve by MAP, not by lookup:
+  // node_modules holds the runtime's symlink, whose manifest lands on a
+  // `.rip` file TypeScript will not follow — `paths` points the bare name
+  // straight at the mirror face the closure compiled. `paths` outranks
+  // the node_modules walk, so a mapped name never half-resolves.
+  const ripPaths = mirrorRootIsFallback ? {} : workspaceRipPaths(workspaceRoot);
+  if (Object.keys(ripPaths).length) overrides.paths = ripPaths;
   const floorRoot = mirrorRootIsFallback ? null : workspaceRoot;
   const userConfig = !mirrorRootIsFallback && workspaceRoot
     ? path.join(workspaceRoot, 'tsconfig.json') : null;
@@ -670,6 +754,114 @@ export function typeImportSpecifiers(text) {
   return specs;
 }
 
+// The `.rip` file a package.json manifest serves for `subpath` ('.',
+// './x'), or null. `exports` wins over `main`; an entry may be a string
+// or a conditions object, read in the order bun resolves them at
+// runtime (import → default → first string). Only `.rip` targets
+// answer — everything else is some other toolchain's module and stays
+// on TypeScript's ordinary resolution. Glob subpaths ('./*') are not
+// expanded: a miss withholds resolution, which errs toward the
+// diagnostic (TS2307) rather than a silent wrong file.
+function ripManifestTarget(manifest, subpath) {
+  const pick = (entry) => {
+    if (typeof entry === 'string') return entry;
+    if (entry && typeof entry === 'object') {
+      for (const key of ['import', 'default', ...Object.keys(entry)]) {
+        if (typeof entry[key] === 'string') return entry[key];
+      }
+    }
+    return null;
+  };
+  let target = null;
+  const exp = manifest?.exports;
+  if (typeof exp === 'string') { if (subpath === '.') target = exp; }
+  else if (exp && typeof exp === 'object') {
+    // A conditions-only exports object ({ import: './x.rip' }) IS the
+    // '.' entry; a subpath map nests them one level down.
+    const bySubpath = Object.keys(exp).some((k) => k === '.' || k.startsWith('./'));
+    target = bySubpath ? pick(exp[subpath]) : (subpath === '.' ? pick(exp) : null);
+  } else if (subpath === '.' && typeof manifest?.main === 'string') {
+    target = manifest.main;
+  }
+  return target !== null && target.endsWith('.rip') ? target : null;
+}
+
+// The `.rip` file a BARE specifier lands on, resolved the way bun will
+// at runtime: walk up from `fromDir` to the first node_modules carrying
+// the package, follow its manifest, realpath the target (a workspace
+// package is a symlink — the REAL path is the workspace source, which
+// is what the mirror is keyed by). Null for anything else: builtins,
+// packages that are not installed, targets that are not `.rip`, and
+// targets that stay physically inside node_modules (an installed
+// third-party `.rip` package would mirror under a tree the generated
+// tsconfig excludes — a recorded limit, not an accident).
+export function bareRipSpecifierTarget(spec, fromDir) {
+  if (!spec || spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('#')) return null;
+  if (spec.startsWith('node:') || spec.startsWith('bun:')) return null;
+  const parts = spec.split('/');
+  const pkgName = spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+  if (!pkgName || (spec.startsWith('@') && parts.length < 2)) return null;
+  const subpath = '.' + spec.slice(pkgName.length);
+  for (let dir = fromDir; ; dir = path.dirname(dir)) {
+    const pkgDir = path.join(dir, 'node_modules', pkgName);
+    let manifest = null;
+    try { manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')); } catch { /* keep walking */ }
+    if (manifest) {
+      const target = ripManifestTarget(manifest, subpath);
+      if (target === null) return null;
+      let real;
+      try { real = fs.realpathSync(path.join(pkgDir, target)); } catch { return null; }
+      return real.includes(`${path.sep}node_modules${path.sep}`) ? null : real;
+    }
+    if (path.dirname(dir) === dir) return null;
+  }
+}
+
+// tsconfig `paths` for every workspace package that serves `.rip`:
+// bare-name → mirror face, so tsgo resolves `@rip/util` to the same
+// file the closure compiled. Enumerated from the workspace root's
+// `workspaces` globs (the `<dir>/*` form; a member without a manifest
+// or without `.rip` exports simply contributes nothing). Paths are
+// RELATIVE TO THE CONFIG that carries them — the mirror root's config
+// passes '' for `fromConfigDirToMirrorRoot`; a nested project's wrapper
+// passes its own reach-up.
+export function workspaceRipPaths(workspaceRoot, fromConfigDirToMirrorRoot = '') {
+  const paths = {};
+  if (!workspaceRoot) return paths;
+  let ws;
+  try { ws = JSON.parse(fs.readFileSync(path.join(workspaceRoot, 'package.json'), 'utf8')).workspaces; } catch { return paths; }
+  const globs = Array.isArray(ws) ? ws : Array.isArray(ws?.packages) ? ws.packages : [];
+  const memberDirs = [];
+  for (const glob of globs) {
+    if (typeof glob !== 'string') continue;
+    if (glob.endsWith('/*')) {
+      const parent = path.join(workspaceRoot, glob.slice(0, -2));
+      let entries;
+      try { entries = fs.readdirSync(parent, { withFileTypes: true }); } catch { continue; }
+      for (const e of entries) if (e.isDirectory()) memberDirs.push(path.join(parent, e.name));
+    } else {
+      memberDirs.push(path.join(workspaceRoot, glob));
+    }
+  }
+  for (const dir of memberDirs) {
+    let manifest;
+    try { manifest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); } catch { continue; }
+    if (typeof manifest?.name !== 'string') continue;
+    const subpaths = ['.'];
+    if (manifest.exports && typeof manifest.exports === 'object') {
+      for (const k of Object.keys(manifest.exports)) if (k.startsWith('./')) subpaths.push(k);
+    }
+    for (const sub of subpaths) {
+      const target = ripManifestTarget(manifest, sub);
+      if (target === null) continue;
+      const face = path.relative(workspaceRoot, path.resolve(dir, target)) + '.ts';
+      const name = sub === '.' ? manifest.name : manifest.name + sub.slice(1);
+      paths[name] = [posix(path.join(fromConfigDirToMirrorRoot, face))];
+    }
+  }
+  return paths;
+}
+
 // The relative .rip import targets of a compiled file, as absolute paths
 // — the closure edges. Read from the compiler's OWN stores (never
 // scanned from generated text — the never-list): import/export nodes
@@ -686,9 +878,17 @@ export function ripImportsOf(stores, sourceText, fromDir) {
   const seen = new Set();
   const targets = [];
   const addSpec = (spec) => {
-    if (!spec.endsWith('.rip')) return;
-    if (!spec.startsWith('./') && !spec.startsWith('../')) return;
-    const abs = path.resolve(fromDir, spec);
+    // A bare specifier resolves through node_modules — the workspace
+    // package edge (bareRipSpecifierTarget above); a relative one by the
+    // filesystem. Same set, two resolutions, absolute paths either way.
+    let abs;
+    if (spec.startsWith('./') || spec.startsWith('../')) {
+      if (!spec.endsWith('.rip')) return;
+      abs = path.resolve(fromDir, spec);
+    } else {
+      abs = bareRipSpecifierTarget(spec, fromDir);
+      if (abs === null) return;
+    }
     if (seen.has(abs)) return;   // one edge per module, however many spellings name it
     seen.add(abs);
     targets.push(abs);

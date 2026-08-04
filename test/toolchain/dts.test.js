@@ -81,11 +81,11 @@ const ROWS = [
   // the void-marker family declares `: void`
   ['def save!(x: number)\n  x', 'declare function save(x: number): void;\nexport {};\n'],
   ['def tick!\n  1', 'declare function tick(): void;\nexport {};\n'],
-  ['save! = (x) -> x', 'declare function save(x: any): void;\nexport {};\n'],
+  ['save! = (x) -> x', 'declare function save(x?: any): void;\nexport {};\n'],
   ['export save! = (x: number) -> x', 'export declare function save(x: number): void;\n'],
   // an explicit return type on a void def wins (the rule; the marker
   // still suppresses the implicit return at runtime)
-  ['def typed!(x): Number\n  bump(x)', 'declare function typed(x: any): Number;\nexport {};\n'],
+  ['def typed!(x): Number\n  bump(x)', 'declare function typed(x?: any): Number;\nexport {};\n'],
   // bodiless overload signatures
   ['def f(a: number): string\ndef f(a)\n  a', 'declare function f(a: number): string;\nexport {};\n'],
   [

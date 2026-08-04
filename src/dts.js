@@ -192,6 +192,21 @@ export function emitDeclarations({ sexpr, stores, source }) {
         }
       }
     }
+    // Instance method bodies, for the `@field = …` walk below. A field a
+    // helper establishes is the class's just as surely as one the
+    // constructor inlines, and the declaration must say so or a consumer
+    // publishes TS2339 cross-module on a property the runtime really has.
+    // Statics are excluded — their `this` is the class.
+    const instanceMethodBodies = [];
+    for (const stmt of stmts) {
+      if (!isNode(stmt) || stmt[0] !== 'object') continue;
+      for (const pair of stmt.slice(1)) {
+        if (pair[0] !== ':' && pair[0] !== 'void-pair') continue;
+        if (isStaticKey(pair[1]) || !isFunc(pair[2])) continue;
+        if (memberName(pair[1]) === 'constructor') continue;
+        instanceMethodBodies.push(pair[2][2]);
+      }
+    }
     for (const stmt of stmts) {
       if (isNode(stmt) && stmt[0] === 'object') {
         for (const pair of stmt.slice(1)) {
@@ -238,7 +253,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
             // author's annotation when there is one; `any` otherwise —
             // a declaration file cannot repeat the constructor
             // inference the face relies on.
-            for (const at of ctorAtFields(value[2])) {
+            for (const at of ctorAtFields([value[2], ...instanceMethodBodies])) {
               if (declared.has(at.name)) continue;
               declared.add(at.name);
               // Any of the field's assignments can carry the author's

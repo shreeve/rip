@@ -208,6 +208,28 @@ hashes. It is never committed or shipped.
 Synthetic generated ranges do not receive fabricated Rip positions.
 Diagnostics without an honest source mapping are dropped.
 
+## Diagnostic publishing
+
+Every mode checks the same always-on program; modes differ in which
+diagnostics publish.
+
+Gradual — the default — publishes a diagnostic only where type
+information reaches its mapped source line: an annotation in the
+declaration's header, the compiler's own types (schemas, components),
+flow along assignment, or an import of a typed export (annotated `.rip`
+exports, relative `.ts` modules, and bare workspace `.rip` packages).
+Inference alone never publishes — `answer = 42` misused as a string is
+held until someone writes a type — which keeps the rule statable: you
+get diagnostics where type information reaches, and an annotation is how
+you ask for more. The gate lives in `packages/vscode/src/scopes.js`,
+shared verbatim by the editor and `rip check`, and it fails OPEN: a
+source the lexer refuses publishes everything.
+
+Names and modules that do not resolve, and definition cycles, publish
+in every mode — defects no annotation answers. Gradual also supplies
+`strictNullChecks: false`, yielding to any strictness the project's own
+tsconfig chain sets.
+
 ## Project configuration
 
 The nearest `package.json` is the project boundary. Its `rip` object
@@ -258,6 +280,7 @@ diagnostics through the same mapping seam without starting an editor.
 | schema type rendering | `src/schema-types.js` |
 | component type rendering | `src/component-types.js` |
 | editor broker | `packages/vscode/src/` |
+| diagnostic gate | `packages/vscode/src/scopes.js` |
 | type gates | `test/lang/`, `test/toolchain/`, `test/audit/` |
 
 Open type/editor work is tracked in [ROADMAP.md](ROADMAP.md).
