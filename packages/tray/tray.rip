@@ -269,7 +269,7 @@ ripApps = ->
       items.push directory 'Add App…', id: 'apps.add', icon: 'plus', prompt: 'Add', run: (path) -> json! 'app', 'add', path, '--json'
       items.push action 'Refresh', id: 'tray.refresh', icon: 'arrow.clockwise', run: -> null
       items.push separator()
-      items.push quit 'Quit Rip', icon: 'power'
+      items.push quit 'Quit', icon: 'power'
       items
 
   serve! definition
