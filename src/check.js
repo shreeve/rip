@@ -32,7 +32,7 @@ import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } 
 import { SUPPRESSED_TS_CODES, IMPLICIT_ANY_CODES, MISSING_TYPES_CODES } from '../packages/vscode/src/translate.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from '../packages/vscode/src/scopes.js';
 import { tokenize } from './lexer.js';
-import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from '../packages/vscode/src/mirror.js';
+import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, linkNestedNodeModules, declaredButUninstalled } from '../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../packages/vscode/src/translate.js';
 
 // Fails OPEN, like the editor's: a source the lexer refuses leaves the gate
@@ -234,6 +234,8 @@ const missingTypeNames = new Set();
 // the right package.json. The home project ('.') stays unnamed.
 const hiddenScopeDirs = new Set();
 const hiddenAnnotationDirs = new Set();
+let hiddenUninstalled = 0;
+const hiddenUninstalledDirs = new Set();   // where `bun install` answers
 const seen = new Set();
 const queue = [...targets];
 while (queue.length) {
@@ -269,6 +271,7 @@ while (queue.length) {
       echoSpans: result.echoSpans ?? [],
       srcLineStarts, genLineStarts: lineStartsOf(result.code),
       strict: cfg.strict === true,
+      dir: path.dirname(fsPath),
     },
     pinnables: result.pinnables ?? [],
   });
@@ -325,6 +328,7 @@ if (compiled.size > 0) {
     // them whenever the path carries a space or non-ASCII char.
     entry.mirrorUri = pathToFileURL(mirrorPath).href;
     fs.mkdirSync(path.dirname(mirrorPath), { recursive: true });
+    if (!mirrorRootIsFallback) linkNestedNodeModules(workspaceRoot, mirrorRoot, fsPath);
     fs.writeFileSync(mirrorPath, entry.good.code);
   }
   // Per-project wrappers: one generated tsconfig at each mirrored dir whose
@@ -539,7 +543,10 @@ if (compiled.size > 0) {
             // "set `rip.strict`" right after the user did exactly that
             // reads as broken unless it names whose package.json is meant.
             const proj = path.relative(process.cwd(), entry.cfg._configDir ?? path.dirname(fsPath)) || '.';
-            if (IMPLICIT_ANY_CODES.has(d.code)) { hiddenAnnotations++; hiddenAnnotationDirs.add(proj); }
+            const uninstalledAt = d.code === 2307
+              ? declaredButUninstalled(/Cannot find module '([^']+)'/.exec(d.message)?.[1], path.dirname(fsPath)) : null;
+            if (uninstalledAt) { hiddenUninstalled++; hiddenUninstalledDirs.add(path.relative(process.cwd(), uninstalledAt) || '.'); }
+            else if (IMPLICIT_ANY_CODES.has(d.code)) { hiddenAnnotations++; hiddenAnnotationDirs.add(proj); }
             else if (MISSING_TYPES_CODES.has(d.code)) {
               hiddenMissingTypes++;
               const name = /Cannot find name '([^']+)'/.exec(d.message)?.[1];
@@ -692,7 +699,7 @@ if (asJson) {
     if (!named.length) return '';
     return ` (${named.slice(0, 3).join(', ')}${named.length > 3 ? ` and ${named.length - 3} more` : ''})`;
   };
-  if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0) console.log('');
+  if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0 || hiddenUninstalled > 0) console.log('');
   if (hiddenScope > 0) {
     console.log(gray(`${hiddenScope} diagnostic${plural(hiddenScope)} hidden in unannotated code${inProjects(hiddenScopeDirs)} `
       + `— annotate a declaration to check its scope, or set \`rip.strict\` in package.json`));
@@ -700,6 +707,12 @@ if (asJson) {
   if (hiddenAnnotations > 0) {
     console.log(gray(`${hiddenAnnotations} annotation diagnostic${plural(hiddenAnnotations)} hidden${inProjects(hiddenAnnotationDirs)} `
       + `— set \`rip.strict\` in package.json to see where annotations are missing`));
+  }
+  if (hiddenUninstalled > 0) {
+    const dirs = [...hiddenUninstalledDirs].sort();
+    const shown = dirs.slice(0, 3).join(', ') + (dirs.length > 3 ? ` and ${dirs.length - 3} more` : '');
+    console.log(gray(`${hiddenUninstalled} uninstalled-dependency import${plural(hiddenUninstalled)} hidden `
+      + `— run \`bun install\` in ${shown}`));
   }
   if (hiddenMissingTypes > 0) {
     const names = [...missingTypeNames].sort();

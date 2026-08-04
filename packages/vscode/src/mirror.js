@@ -250,7 +250,7 @@ export function projectWrapper({ wrapperDir, sourceTsconfig, sourceDir: sourceDi
   const tsconfig = {
     compilerOptions: overrides,
     include: ['**/*.ts', `${reachUp}/**/*.d.ts`],
-    exclude: ['node_modules', `${reachUp}/**/node_modules`],
+    exclude: ['**/node_modules', `${reachUp}/**/node_modules`],
   };
   if (anchor !== null) tsconfig.extends = posix(path.relative(wrapperDir, anchor));
   else Object.assign(overrides, { target: 'esnext', module: 'esnext', lib: ['esnext', 'dom'] });
@@ -275,7 +275,7 @@ export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = n
   const include = ['**/*.ts'];
   // A wrapped subtree belongs to ITS config; without the exclusion two
   // configs claim the same faces in tsgo's discovery order.
-  const exclude = ['node_modules', ...excludeDirs.map((d) => `${posix(d)}/**`)];
+  const exclude = ['**/node_modules', ...excludeDirs.map((d) => `${posix(d)}/**`)];
   if (!mirrorRootIsFallback) {
     include.push('../../**/*.d.ts');
     exclude.push('../../**/node_modules');
@@ -311,6 +311,50 @@ export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = n
     },
     hostFloorDts: hostFloorDts(floorRoot),
   };
+}
+
+// A bare specifier DECLARED in a governing package.json but not
+// installed anywhere on the ancestor chain — the manifest's stated
+// intent, not a typo. Returns the declaring dir (for the install
+// remedy), or null. Gradual holds these 2307s; strict publishes them.
+export function declaredButUninstalled(spec, fromDir) {
+  if (!spec || !fromDir || spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('#')) return null;
+  if (spec.startsWith('node:') || spec.startsWith('bun:')) return null;
+  const parts = spec.split('/');
+  const pkgName = spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+  if (!pkgName || (spec.startsWith('@') && parts.length < 2)) return null;
+  let declaringDir = null;
+  for (let dir = fromDir; ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, 'node_modules', pkgName))) return null;   // installed: resolution's problem, not ours
+    if (declaringDir === null && fs.existsSync(path.join(dir, 'package.json'))) {
+      try {
+        const m = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+        for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+          if (m?.[field]?.[pkgName] !== undefined) { declaringDir = dir; break; }
+        }
+      } catch { /* unreadable manifest declares nothing */ }
+    }
+    if (path.dirname(dir) === dir) return declaringDir;
+  }
+}
+
+// A face's module walk lives in the MIRROR tree, so a nested source
+// install (a quarantined bench dir's own node_modules) was invisible to
+// it — bun resolves those at runtime. Every source dir on the file's
+// ancestor chain that carries node_modules gets a symlink twin in the
+// mirror; the workspace root needs none (the walk exits the mirror into
+// it). Best-effort: a failed link leaves the 2307 standing.
+export function linkNestedNodeModules(workspaceRoot, mirrorRoot, fsPath) {
+  if (!workspaceRoot || !mirrorRoot || !fsPath.startsWith(workspaceRoot + path.sep)) return;
+  for (let dir = path.dirname(fsPath); dir !== workspaceRoot && dir.startsWith(workspaceRoot + path.sep); dir = path.dirname(dir)) {
+    const srcNm = path.join(dir, 'node_modules');
+    if (!fs.existsSync(srcNm)) continue;
+    const at = path.join(mirrorRoot, path.relative(workspaceRoot, dir), 'node_modules');
+    try {
+      fs.mkdirSync(path.dirname(at), { recursive: true });
+      if (!fs.lstatSync(at, { throwIfNoEntry: false })) fs.symlinkSync(srcNm, at);
+    } catch { /* best-effort */ }
+  }
 }
 
 // Workspace files keep their relative structure (imports between mirrors

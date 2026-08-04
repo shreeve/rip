@@ -756,6 +756,64 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // A NESTED node_modules resolves through the mirror the way bun
+  // resolves it at runtime: the face's ancestor walk lives in the mirror
+  // tree, so a source-tree install (a quarantined bench dir with its own
+  // manifest) was invisible — bun ran the imports that tsgo called
+  // cannot-finds. The mirror plants a node_modules symlink at each dir
+  // whose source twin has one.
+  test('a nested source-tree node_modules resolves through the mirror', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ workspaces: ['packages/*'] }),
+      'packages/csvish/package.json': JSON.stringify({ name: '@t/csvish' }),
+      'packages/csvish/bench/package.json': JSON.stringify({ name: 'bench', dependencies: { fakelib: '1.0.0' } }),
+      'packages/csvish/bench/node_modules/fakelib/package.json': JSON.stringify({ name: 'fakelib', version: '1.0.0', types: 'index.d.ts', main: 'index.js' }),
+      'packages/csvish/bench/node_modules/fakelib/index.d.ts': 'export declare function parse(s: string): string[];\n',
+      'packages/csvish/bench/node_modules/fakelib/index.js': 'export const parse = (s) => s.split(",");\n',
+      'packages/csvish/bench/compare.rip': [
+        "import { parse } from 'fakelib'",       // resolves through the nested install
+        "import { nope } from 'nolib'",          // liveness: a genuinely-missing module still 2307s
+        "rows: string[] = parse('a,b')",
+        'console.log rows, nope',
+      ].join('\n') + '\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const cannotFinds = diags.filter((d) => d.code === 2307).map((d) => /'([^']+)'/.exec(d.message)?.[1]);
+      expect(cannotFinds).toEqual(['nolib']);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // Installation pressure is annotation pressure's cousin: a bare import
+  // DECLARED in the governing package.json but not installed is the
+  // manifest's stated intent, not a typo — gradual holds its 2307 and
+  // the summary names the install dir; strict publishes it (complaints
+  // mode, like the floors). Undeclared-and-uninstalled stays a published
+  // defect everywhere. Keeps `rip check` green on a fresh clone whose
+  // optional dirs (a quarantined bench) were never installed.
+  test('a declared-but-uninstalled import is held in gradual with the install remedy; strict and undeclared publish', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ workspaces: ['packages/*'] }),
+      'packages/q/package.json': JSON.stringify({ name: '@t/q' }),
+      'packages/q/bench/package.json': JSON.stringify({ name: 'q-bench', dependencies: { fakelib: '1.0.0' } }),
+      'packages/q/bench/compare.rip': [
+        "import { parse } from 'fakelib'",   // declared, not installed → held, advised
+        "import { nope } from 'nolib'",      // undeclared → the defect publishes
+        'console.log parse, nope',
+      ].join('\n') + '\n',
+      'packages/r/package.json': JSON.stringify({ name: '@t/r', rip: { strict: true }, dependencies: { fakelib: '1.0.0' } }),
+      'packages/r/app.rip': "import { parse } from 'fakelib'\nconsole.log parse\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const modOf = (d) => /'([^']+)'/.exec(d.message)?.[1];
+      expect(diags.filter((d) => d.file.includes('q')).map(modOf)).toEqual(['nolib']);
+      expect(diags.filter((d) => d.file.includes(path.join('r', 'app'))).map(modOf)).toEqual(['fakelib']);
+      const text = check(dir).stdout;
+      expect(text).toMatch(/1 uninstalled-dependency import hidden — run `bun install` in packages\/q\/bench/);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // A nested package that sets `rip.strict` becomes its own program, the
   // same auto boundary a globals-declaring package gets — floors are
   // per-PROGRAM, so without it the root program's floor kept answering

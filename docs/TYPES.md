@@ -241,9 +241,13 @@ shared verbatim by the editor and `rip check`, and it fails OPEN: a
 source the lexer refuses publishes everything.
 
 Names and modules that do not resolve, and definition cycles, publish
-in every mode — defects no annotation answers. Gradual also supplies
-`strictNullChecks: false`, yielding to any strictness the project's own
-tsconfig chain sets.
+in every mode — defects no annotation answers. One exception spells the
+difference between a typo and stated intent: a bare import DECLARED in
+the governing package.json but not installed is held under gradual
+(`rip check` counts it with the install remedy), while strict publishes
+it; undeclared-and-uninstalled stays a defect everywhere. Gradual also
+supplies `strictNullChecks: false`, yielding to any strictness the
+project's own tsconfig chain sets.
 
 ## Project configuration
 

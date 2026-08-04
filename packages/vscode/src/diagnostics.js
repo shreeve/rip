@@ -14,6 +14,7 @@ import {
   SUPPRESSED_TS_CODES, diagnosticTagsFor,
 } from './translate.js';
 import { ALWAYS_REPORTED_CODES } from './scopes.js';
+import { declaredButUninstalled } from './mirror.js';
 
 // A CompileError → { reason, start, end } in SOURCE offsets: the first
 // message line with its `path:line:col:` prefix stripped (the excerpt
@@ -47,6 +48,14 @@ export function compileErrorInfo(err, textLength) {
 // related location itself rather than routing it through here.
 export function mapTsDiagnostic(good, d) {
   if (!good.strict && SUPPRESSED_TS_CODES.has(d.code)) return null;
+  // Installation pressure: a bare import the governing manifest declares
+  // but nobody installed. Gradual holds it (the CLI counts it with the
+  // install remedy); strict publishes. `good.dir` is the source file's
+  // own dir — absent (older callers) leaves the defect published.
+  if (!good.strict && d.code === 2307 && good.dir) {
+    const spec = /Cannot find module '([^']+)'/.exec(d.message)?.[1];
+    if (spec && declaredButUninstalled(spec, good.dir)) return null;
+  }
   const s = positionToOffset(good.genLineStarts, good.code.length, d.range.start);
   const e = positionToOffset(good.genLineStarts, good.code.length, d.range.end);
   const span = generatedSpanToSource(good.mappings, s, e);

@@ -73,7 +73,7 @@ import {
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
-import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -830,6 +830,7 @@ const enumNamesOf = (result) =>
 
 function mirrorFromDisk(fsPath, source) {
   faceCache.delete(fsPath);
+  if (!mirrorRootIsFallback) linkNestedNodeModules(workspaceRoot, mirrorRoot, fsPath);
   const result = rawCompile(fsPath, source, hashText(source));
   const mirrorPath = mirrorPathOf('file://' + fsPath);
   warnOnMirrorCollision(mirrorPath, fsPath);
@@ -1723,6 +1724,7 @@ async function refresh(document) {
   if (good.parseDiagnostics.length === 0) {
     try {
       warnOnMirrorCollision(state.mirrorPath, document.uri);
+      if (!mirrorRootIsFallback) { try { linkNestedNodeModules(workspaceRoot, mirrorRoot, fileURLToPath(document.uri)); } catch { /* non-file uri */ } }
       writeMirror(state.mirrorPath, result.code);
     } catch (err) {
       connection.console.error(`[rip] mirror write failed: ${err.message}`);
