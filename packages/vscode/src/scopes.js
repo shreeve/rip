@@ -66,7 +66,7 @@ import { bareRipSpecifierTarget } from './mirror.js';
 // The cannot-find family: a name or module that does not exist. 2552 is 2304
 // with a spelling suggestion attached ("Cannot find name 'error'. Did you
 // mean 'err'?"): the same defect wearing a different code, and the reason to
-// enumerate rather than eyeball. The family is spelled across six codes
+// enumerate rather than eyeball. The family is spelled across many codes
 // because TypeScript varies the ADVICE, not the defect: a bare miss (2304), a
 // spelling suggestion (2552), and two "change your target library" forms
 // (2583 for ES built-ins, 2584 for DOM globals) are one diagnostic wearing
@@ -74,19 +74,35 @@ import { bareRipSpecifierTarget } from './mirror.js';
 // driving the real checker over `doc = document.title`, after 2304 and 2552
 // had both looked sufficient.
 //
+// The same defect spelled at the MODULE BOUNDARY: importing a member the
+// module does not export (2305, and 2724 with a suggestion), a default
+// import from a module with no default (2613), and a named import that
+// should have been the default (2614). A consumer typo-ing an import name
+// wrote a name that does not exist — found by driving a real consumer over
+// a workspace package, where 2305 was the one silent member of the family.
+//
 // The definition cycle (2502): a computed that reads itself, directly or
 // through others, recurses forever the first time anyone reads it. An
 // annotation would break TypeScript's INFERENCE cycle and so silence the
 // code — while leaving the runtime cycle exactly where it was. A diagnostic
 // an annotation silences without fixing belongs outside the gate.
+//
+// The import write (2632): assigning to an imported binding is a runtime
+// TypeError under ESM — the bundler refuses it too — and no annotation in
+// either module changes that.
 export const ALWAYS_REPORTED_CODES = new Set([
   2304, // cannot find name
+  2305, // module has no exported member
   2307, // cannot find module
   2502, // referenced directly or indirectly in its own definition
   2503, // cannot find namespace
   2552, // cannot find name — did you mean 'Y'?
   2583, // cannot find name — change your target library (ES built-in)
   2584, // cannot find name — change your target library (DOM global)
+  2613, // module has no default export
+  2614, // module has no exported member — did you mean a default import?
+  2632, // cannot assign to an import
+  2724, // module has no exported member — did you mean 'Y'?
 ]);
 
 // offset → 0-based line, over one pass of the source. Every pass here works
@@ -433,7 +449,11 @@ function linesMentioning(tokens, source, bindings) {
 export function exportedNamesOf(stores, source) {
   const names = [];
   if (!stores?.nodes) return names;
-  const DECLS = new Set(['assign', 'def', 'class', 'component', 'typedvar']);
+  // Every declaring form an export can wrap, the reactive ones included —
+  // `export count: number := 0` binds `count` exactly as `=` would, and
+  // leaving `state`/`computed`/`readonly` out silently dropped annotated
+  // reactive exports from every importer's gate.
+  const DECLS = new Set(['assign', 'state', 'computed', 'readonly', 'def', 'class', 'component', 'typedvar']);
   for (const node of stores.nodesByKind('export')) {
     const spec = stores.role(node.nodeId, 'spec');
     if (typeof spec?.sourceStart !== 'number') continue;

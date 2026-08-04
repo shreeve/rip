@@ -21,7 +21,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { cacheIdentityOf } from '../packages/vscode/src/hash.js';
 import { compile } from './compile.js';
 import { readProjectConfig } from './config.js';
 import { identifierRunAt } from './lexer.js';
@@ -62,6 +63,10 @@ Options:
   --keep-mirror            Keep the generated TS mirror (.rip/check) after the
                            run instead of removing it — for inspecting the
                            exact TypeScript tsgo type-checked
+  --build                  Print the build identity (a content hash over the
+                           compiler and editor-server trees) and exit — the
+                           editor logs the same hash in its ready line, so a
+                           mismatch means the installed extension is stale
   -h, --help               Show this help
 
 Exit status is 0 when no error-severity diagnostic survives, 1 otherwise.
@@ -74,10 +79,24 @@ const fail = (message, code = 2) => { console.error(message); process.exit(code)
 // ── argument parsing ────────────────────────────────────────────────
 const argv = process.argv.slice(2);
 if (argv.includes('-h') || argv.includes('--help')) { console.log(HELP); process.exit(0); }
+// The build identity, printed and exited on before anything else: the same
+// content hash over the same two trees (compiler + editor server) the
+// editor computes for its cache key and logs in its ready line. When the
+// two hashes differ, the installed extension is running different code
+// than this CLI — the skew behind "the editor and rip check disagree".
+if (argv.includes('--build')) {
+  const compilerDir = path.dirname(fileURLToPath(import.meta.url));
+  const serverDir = path.join(compilerDir, '..', 'packages', 'vscode', 'src');
+  const tilde = (p) => (p.startsWith(os.homedir() + path.sep) ? '~' + p.slice(os.homedir().length) : p);
+  console.log(`rip check build ${cacheIdentityOf(compilerDir, serverDir)}`);
+  console.log(`  compiler  ${tilde(compilerDir)}`);
+  console.log(`  server    ${tilde(serverDir)}`);
+  process.exit(0);
+}
 const asJson = argv.includes('--json');
 const showFrames = !argv.includes('--no-frame') && !asJson;
 const keepMirror = argv.includes('--keep-mirror');
-const KNOWN = new Set(['--json', '--no-frame', '--keep-mirror']);
+const KNOWN = new Set(['--json', '--no-frame', '--keep-mirror', '--build']);
 const positionals = argv.filter((a) => !a.startsWith('-'));
 const unknownFlags = argv.filter((a) => a.startsWith('-') && !KNOWN.has(a));
 if (unknownFlags.length) fail(`rip check: unknown option${unknownFlags.length === 1 ? '' : 's'}: ${unknownFlags.join(', ')}\n\nRun 'rip check --help' for usage.`);
@@ -205,6 +224,16 @@ let incompleteCheck = false;
 let hiddenAnnotations = 0;
 let hiddenMissingTypes = 0;
 let hiddenScope = 0;
+// The NAMES the missing-types advisories are about (`describe`, `require`
+// …) — TypeScript's own message carries each one, and a summary that says
+// "install the @types package" without a noun sends the user hunting
+// through their imports for which declaration is absent.
+const missingTypeNames = new Set();
+// The PROJECTS the hidden diagnostics belong to (config-dir, cwd-relative),
+// per family — named in the summary so the `rip.strict` remedy points at
+// the right package.json. The home project ('.') stays unnamed.
+const hiddenScopeDirs = new Set();
+const hiddenAnnotationDirs = new Set();
 const seen = new Set();
 const queue = [...targets];
 while (queue.length) {
@@ -469,11 +498,21 @@ if (compiled.size > 0) {
           // promising the user diagnostics `rip.strict` would never
           // deliver. Re-map with the strict flag to ask the real question.
           if (!m && !entry.cfg.strict && mapTsDiagnostic({ ...entry.good, strict: true }, d)) {
-            if (IMPLICIT_ANY_CODES.has(d.code)) hiddenAnnotations++;
-            else if (MISSING_TYPES_CODES.has(d.code)) hiddenMissingTypes++;
+            // Which PROJECT the hidden diagnostic belongs to — config is
+            // per file, so a strict consumer's check still hides its
+            // gradual dependencies' diagnostics, and a summary that says
+            // "set `rip.strict`" right after the user did exactly that
+            // reads as broken unless it names whose package.json is meant.
+            const proj = path.relative(process.cwd(), entry.cfg._configDir ?? path.dirname(fsPath)) || '.';
+            if (IMPLICIT_ANY_CODES.has(d.code)) { hiddenAnnotations++; hiddenAnnotationDirs.add(proj); }
+            else if (MISSING_TYPES_CODES.has(d.code)) {
+              hiddenMissingTypes++;
+              const name = /Cannot find name '([^']+)'/.exec(d.message)?.[1];
+              if (name) missingTypeNames.add(name);
+            }
             // Held by the declaration-scope gate: the author annotated
             // nothing here, so nothing is asked of them.
-            else hiddenScope++;
+            else { hiddenScope++; hiddenScopeDirs.add(proj); }
           }
           if (!m) continue;
           // The diagnostic carries its own relatedInformation (secondary
@@ -605,20 +644,35 @@ if (asJson) {
   }
   // Named once, at the end, whatever the run's verdict — a clean run that
   // hid 2,000 diagnostics is exactly the case where saying nothing
-  // misleads most.
+  // misleads most. Three lines because the remedies differ — annotate a
+  // declaration, flip the mode, install declarations — and the strict
+  // remedy is SPELLED IDENTICALLY on both lines that offer it: a summary
+  // wording one lever two ways reads as two levers.
   const plural = (n) => (n === 1 ? '' : 's');
+  // The projects a family's hidden diagnostics live in, minus the home
+  // project — "set `rip.strict`" must point at the right package.json when
+  // the hiding happens in a dependency the target does not govern.
+  const inProjects = (dirs) => {
+    const named = [...dirs].filter((d) => d !== '.').sort();
+    if (!named.length) return '';
+    return ` (${named.slice(0, 3).join(', ')}${named.length > 3 ? ` and ${named.length - 3} more` : ''})`;
+  };
   if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0) console.log('');
   if (hiddenScope > 0) {
-    console.log(gray(`${hiddenScope} diagnostic${plural(hiddenScope)} hidden `
-      + `(unannotated declarations — annotate one to check it, or set \`rip.strict\`)`));
+    console.log(gray(`${hiddenScope} diagnostic${plural(hiddenScope)} hidden in unannotated code${inProjects(hiddenScopeDirs)} `
+      + `— annotate a declaration to check its scope, or set \`rip.strict\` in package.json`));
   }
   if (hiddenAnnotations > 0) {
-    console.log(gray(`${hiddenAnnotations} annotation diagnostic${plural(hiddenAnnotations)} hidden `
-      + `(gradual mode — set \`rip.strict\` in package.json to see them)`));
+    console.log(gray(`${hiddenAnnotations} annotation diagnostic${plural(hiddenAnnotations)} hidden${inProjects(hiddenAnnotationDirs)} `
+      + `— set \`rip.strict\` in package.json to see where annotations are missing`));
   }
   if (hiddenMissingTypes > 0) {
-    console.log(gray(`${hiddenMissingTypes} missing-@types advisor${hiddenMissingTypes === 1 ? 'y' : 'ies'} hidden `
-      + `(the imports are \`any\`; install the @types package to type them)`));
+    const names = [...missingTypeNames].sort();
+    const shown = names.slice(0, 4).map((n) => `\`${n}\``).join(', ');
+    const more = names.length > 4 ? ` and ${names.length - 4} more` : '';
+    const about = names.length ? ` — no declarations for ${shown}${more}` : '';
+    console.log(gray(`${hiddenMissingTypes} missing-types advisor${hiddenMissingTypes === 1 ? 'y' : 'ies'} hidden`
+      + `${about} (try \`bun add -d @types/bun\`)`));
   }
 }
 

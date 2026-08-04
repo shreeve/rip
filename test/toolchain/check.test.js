@@ -117,6 +117,16 @@ describe('rip check: usage surface (no server)', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
+  // The build hash makes CLI-vs-editor skew diagnosable at a glance: the
+  // editor logs the same identity in its ready line, computed over the
+  // same two trees (compiler + server) by content, so an installed
+  // extension and a worktree CLI agree exactly when their code does.
+  test('--build prints the build identity and exits 0', () => {
+    const r = spawnSync('bun', [BIN, 'check', '--build'], { encoding: 'utf8' });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/^rip check build [0-9a-f]+\n  compiler  .+\n  server    .+\n$/);
+  });
+
   test('an unknown flag exits 2', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-flag-'));
     try {
@@ -658,7 +668,8 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         "import * as mod from '@rip/util'",
         'bad = answer.toUpperCase()',
         'meh = plain.toUpperCase()',
-        'console.log bad, meh, mod',
+        "import { nosuch } from '@rip/util'",   // a member that does not exist
+        'console.log bad, meh, mod, nosuch',
       ].join('\n') + '\n');
       fs.mkdirSync(path.join(dir, 'node_modules', '@rip'), { recursive: true });
       fs.symlinkSync(path.join('..', '..', 'packages', 'util'), path.join(dir, 'node_modules', '@rip', 'util'));
@@ -667,8 +678,67 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // import spellings (named, named-unannotated, namespace).
       expect(diags.map((d) => d.code)).not.toContain(2307);
       // ACROSS: `answer`'s annotation carries — the misuse reports at its
-      // line; `plain` carries nothing and its misuse is held.
-      expect(diags.filter((d) => d.file === path.join('packages', 'app', 'app.rip')).map((d) => [d.code, d.line])).toEqual([[2339, 3]]);
+      // line; `plain` carries nothing and its misuse is held. Importing a
+      // member the module does not export is a NAME that does not exist —
+      // the cannot-find family spelled at the module boundary — and
+      // publishes whatever is annotated.
+      expect(diags.filter((d) => d.file === path.join('packages', 'app', 'app.rip')).map((d) => [d.code, d.line])).toEqual([[2339, 3], [2305, 5]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // The hidden-diagnostics summary is the mode's ledger: three lines,
+  // one per family, because the remedies differ — annotate a
+  // declaration, flip `rip.strict`, install declarations. The lines
+  // spell the strict remedy IDENTICALLY (a summary that words the same
+  // lever two ways reads as two levers), and the missing-types advisory
+  // NAMES the declarations it is about — "install the @types package"
+  // with no noun sends the user hunting through their own imports.
+  test('the hidden-diagnostics summary: consistent remedies, and the missing declarations are named', () => {
+    const dir = workspace({
+      'app.rip': [
+        'n = 42',
+        'bad = n.toUpperCase()',      // real error, held → scope family
+        'def shout(msg)',             // implicitly-any parameter → annotation family
+        '  msg',
+        "describe 'adds', ->",        // known-typings globals, no types installed —
+        '  console.log bad, shout',
+        "fsMod = require('fs')",      // …each advisory names ITS missing declaration
+        'console.log fsMod',
+      ].join('\n') + '\n',
+    });
+    try {
+      const out = check(dir).stdout;
+      expect(out).toMatch(/\d+ diagnostics? hidden in unannotated code — annotate a declaration to check its scope, or set `rip\.strict` in package\.json/);
+      expect(out).toMatch(/\d+ annotation diagnostics? hidden — set `rip\.strict` in package\.json to see where annotations are missing/);
+      expect(out).toMatch(/\d+ missing-types advisor(y|ies) hidden — no declarations for `describe`, `require` \(try `bun add -d @types\/bun`\)/);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // Config is per FILE (nearest package.json), so a strict consumer's
+  // check still hides its gradual DEPENDENCIES' diagnostics — and a
+  // summary that says "set `rip.strict` in package.json" after the user
+  // just did exactly that reads as broken. The lines name the projects
+  // the hidden diagnostics belong to, so the remedy points at the right
+  // package.json; the home project ('.') alone stays unnamed.
+  test('hidden-diagnostics summary names the gradual projects when the target itself is strict', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ workspaces: ['packages/*'] }),   // anchor the mirror at the monorepo root
+      'packages/app/package.json': JSON.stringify({ rip: { strict: true } }),
+      'packages/app/app.rip': "import { x } from '../util/util.rip'\nconsole.log x\n",
+      'packages/util/package.json': JSON.stringify({}),
+      'packages/util/util.rip': [
+        'y = 42',
+        'bad = y.toUpperCase()',      // held → scope family, charged to packages/util
+        'def shout(msg)',             // implicitly-any parameter → annotation family
+        '  msg',
+        'export x = 1',
+        'console.log bad, shout',
+      ].join('\n') + '\n',
+    });
+    try {
+      const out = check(dir, [path.join('packages', 'app')]).stdout;
+      expect(out).toMatch(/\d+ diagnostics? hidden in unannotated code \(packages\/util\) — annotate a declaration/);
+      expect(out).toMatch(/\d+ annotation diagnostics? hidden \(packages\/util\) — set `rip\.strict`/);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 

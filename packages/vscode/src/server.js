@@ -88,8 +88,9 @@ async function loadCompiler() {
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(fileURLToPath(candidate))) {
+      compilerDir = path.dirname(fileURLToPath(candidate));
       cacheIdentity = cacheIdentityOf(
-        path.dirname(fileURLToPath(candidate)),
+        compilerDir,
         path.dirname(fileURLToPath(import.meta.url)),
       );
       return (await import(candidate.href)).compile;
@@ -166,6 +167,7 @@ let clientDefinitionLinks = false;
 let clientSupportsConfiguration = false;
 let clientInitialized = false;   // the initialize handshake has COMPLETED (onInitialized)
 let cacheIdentity = null;        // compiler build + server build (cache keying)
+let compilerDir = null;          // where the compiler resolved from (in-repo vs staged) — the ready log names it
 
 // rip document uri → per-buffer state.
 const states = new Map();
@@ -1389,9 +1391,19 @@ connection.onInitialized(async () => {
       watchers: [{ globPattern: '**/*.rip' }, { globPattern: '**/tsconfig.json' }, { globPattern: '**/package.json' }],
     });
   }
-  connection.console.log(
-    `[rip] ready (workspace: ${workspaceRoot ?? 'none'}, mirror root: ${mirrorRoot}${mirrorRootIsFallback ? ' [fallback]' : ''})`,
-  );
+  // The build hash is `rip check --build`'s twin — same content hash over
+  // the same two trees — so one glance at this block against that output
+  // says whether the installed extension matches the checkout it serves.
+  // One aligned line per fact: the single-line form wrapped illegibly the
+  // moment real paths landed in it. Paths shorten to `~`, and the mirror
+  // prints workspace-relative when it lives inside the workspace.
+  const tilde = (p) => (p && p.startsWith(os.homedir() + path.sep) ? '~' + p.slice(os.homedir().length) : p);
+  const mirrorShown = workspaceRoot && mirrorRoot.startsWith(workspaceRoot + path.sep)
+    ? path.relative(workspaceRoot, mirrorRoot) : tilde(mirrorRoot);
+  connection.console.log(`[rip] ready (build ${cacheIdentity ?? 'unknown'})`);
+  connection.console.log(`[rip]   compiler:  ${tilde(compilerDir) ?? 'unresolved'}`);
+  connection.console.log(`[rip]   workspace: ${tilde(workspaceRoot) ?? 'none'}`);
+  connection.console.log(`[rip]   mirror:    ${mirrorShown}${mirrorRootIsFallback ? ' [fallback]' : ''}`);
   await revalidateCache();
   repullOpenDocuments();
   // Auto-import candidacy, and deliberately NOT awaited: it is a

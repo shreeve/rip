@@ -32,7 +32,11 @@ beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'rip-reactive-import-'));
   writeFileSync(join(dir, 'package.json'), '{"name":"reactive-import-fixture"}');
   writeFileSync(join(dir, 'tsconfig.json'), readFileSync(TSCONFIG, 'utf8'));
-  writeFileSync(join(dir, 'store.rip'), 'export count := 0\nexport bump = -> count += 1\n');
+  // ANNOTATED: the checker assertions below ride the gate's ACROSS rule —
+  // an importer's cell misuse publishes because the export carries a type.
+  // The cell CONTRACT is annotation-blind (erasure), so the runtime and
+  // hover tests read the same either way.
+  writeFileSync(join(dir, 'store.rip'), 'export count: number := 0\nexport bump = -> count += 1\n');
 });
 afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
 
