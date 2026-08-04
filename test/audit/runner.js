@@ -1382,7 +1382,14 @@ const PRIMITIVE_TYPE_WORDS = new Set([
 // `export`-prefixed DECLARATIONS (`export add = …`) are deliberately NOT
 // spanned: their names are ordinary population members, and an excuse
 // covering them could silently absorb a dropped token.
-function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNames, excused = {}) {
+function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNames, excused = {}, attrNames = []) {
+  // Render ATTRIBUTE names, as face offsets from the compiler's own
+  // channel: the server SUPPRESSES their tokens by ruling — a plain prop
+  // must read like its two-way-bound neighbor, whose minted key cannot
+  // map — so these positions leave the population with the compiler's
+  // span as their excuse. The suppression itself is held by the
+  // semantic-tokens gate, not re-gauged here.
+  const attrStarts = new Set(attrNames.map(([s]) => s));
   const genStarts = lineStartsOf(code);
   const srcStarts = lineStartsOf(src);
   const keep = (nm) => isIdentifierName(nm) && nm.length >= 2 && !RIP_KEYWORDS.has(nm);
@@ -1455,6 +1462,11 @@ function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNam
     if (!keep(name)) continue;
     if (index > 0 && /[\d_]/.test(masked[index - 1])) continue;
     const g = sourceOffsetToGeneratedExact(mappings, index, src, code);
+    // A render attribute name: the face classifies the ctor-object key,
+    // and the server suppresses the token by ruling. Excluded with the
+    // compiler's own span as the derived excuse — before the population
+    // test, or every suppressed prop reads as a delivery regression.
+    if (g !== null && attrStarts.has(g)) { excludedCount++; continue; }
     // VERBATIM, the mapping audit's own rule: the face must hold the same bytes.
     // A keyword whose lowering lands it on some other identifier (`if`/`else`
     // reaching a ternary's operands) resolves to a real face token without ever
@@ -3708,8 +3720,8 @@ if (RUN_HOVER || RUN_TOKENS) {
       const full = fixPath(f);
       if (!await compiles(full)) continue;   // a fixture with no face has nothing to survive
       try {
-        const { code, mappings, bindingNames } = compile(fs.readFileSync(full, 'utf8'), { path: full, runtimeDelivery: 'inline', face: 'ts' });
-        FACES.set(f, { code, mappings, bindingNames });
+        const { code, mappings, bindingNames, attrNames } = compile(fs.readFileSync(full, 'utf8'), { path: full, runtimeDelivery: 'inline', face: 'ts' });
+        FACES.set(f, { code, mappings, bindingNames, attrNames });
         fs.writeFileSync(path.join(FACE_DIR, f.replace(/\.rip$/, '.rip.ts')), code);
       } catch (e) {
         // compiles() (subprocess `bin/rip --ts`) passed but the in-process
@@ -3791,8 +3803,8 @@ if (RUN_HOVER || RUN_TOKENS) {
       const dec = await faces[lane].faceTokens(f);
       const { code } = FACES.get(f);
       // probe.tokens is the REAL server's delivered output — the survival oracle.
-      const { mappings: faceMappings, bindingNames } = FACES.get(f);
-      survival = faceSurvival(src, code, faceMappings, dec, probe.tokens, bindingNames, SURVIVAL_EXCUSED?.[f] ?? {});
+      const { mappings: faceMappings, bindingNames, attrNames } = FACES.get(f);
+      survival = faceSurvival(src, code, faceMappings, dec, probe.tokens, bindingNames, SURVIVAL_EXCUSED?.[f] ?? {}, attrNames ?? []);
     }
 
     return {
@@ -4403,7 +4415,7 @@ if (RUN_TOKENS) {
       }
       irow('explained', survUnexplained.length, survExcluded,
         survUnexplained.length ? 'excluded use-site positions no excuse claims — holes, not a smaller gauge'
-                               : 'every excluded use-site position holds its excuse — a keyword, a specifier, or a reviewed entry', 'hole');
+                               : 'every excluded use-site position holds its excuse — a keyword, a specifier, an attribute name (suppressed by ruling), or a reviewed entry', 'hole');
       irow('excused', survExcuseDrift.length, Object.values(SURVIVAL_EXCUSED ?? {}).reduce((n, o) => n + Object.keys(o).length, 0),
         survExcuseDrift.length ? 'reviewed exclusions whose position no longer needs one (survival-exclusions.json)'
                                : 'every reviewed exclusion still excludes an excluded position', 'stale');
