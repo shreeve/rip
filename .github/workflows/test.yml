@@ -79,11 +79,6 @@ jobs:
   # test/audit, judged by its exit code. Parallel to `test` so its
   # verdict stands on its own — a contract break names itself instead of
   # sitting behind (or in front of) the suite's report.
-  #
-  # On ubuntu deliberately: tsgo natively watches the disk only on
-  # macOS, so linux is the platform that proves the server SENDS every
-  # mirror event it owes instead of being rescued by FSEvents — the
-  # masking that once hid a dropped notification from every macOS run.
   audit:
     runs-on: ubuntu-latest
     # Healthy ~2 minutes: a ~30s audit behind two frozen installs.

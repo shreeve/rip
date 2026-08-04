@@ -2257,9 +2257,8 @@ if (RUN_GRAMMAR) {
     if (n && !VERBOSE) out(`    ${dim('·')} ${dim(`${n} claims fixtures parsed — no coverage, judged under Corpus claims; -v lists them`)}`);
   }
   const uncovered = denom.filter((i) => !seen.has(i));
-  // Grouped by LHS construct: the unit a fixture author thinks in. (The M3
-  // manifest's ownership grouping retired with the manifest, once every
-  // production was exercised and allocation had no decisions left to record.)
+  // Grouped by LHS construct: the unit a fixture author thinks in.
+  // Placement of a new production's fixture is CORPUS.md's Placement rule.
   const groupOf = (prod) => prod.split(' → ')[0];
   const groups = new Map();
   for (const i of uncovered) {
