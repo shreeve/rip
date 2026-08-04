@@ -322,7 +322,7 @@ public struct TrayPanel: View {
       HStack(spacing: 10) {
         Text(provider.tray.title).font(.headline)
         Spacer()
-        if let logo = provider.tray.logo ?? provider.tray.icon {
+        if let logo = provider.tray.logo {
           TrayIconView(icon: logo, size: 30)
         }
       }

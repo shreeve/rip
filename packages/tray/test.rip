@@ -30,6 +30,8 @@ test 'the macOS host is generic and contains no Rip Apps policy', ->
   ok source.includes '.menuBarExtraStyle(.window)'
   ok kit.includes 'PanelGroupRow(item: item, provider: provider)'
   ok kit.includes 'PanelCompactControl(item: control, provider: provider)'
+  ok kit.includes 'if let logo = provider.tray.logo {'
+  ok not kit.includes 'provider.tray.logo ?? provider.tray.icon'
   ok not /rip app|rip edge|Caddy|Janus/.test(source)
 
 test 'the native host builds and exercises its protocol on macOS', ->

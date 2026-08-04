@@ -155,10 +155,11 @@ Preserve authored colors explicitly when an image belongs inside the panel:
 logo: svg COLOR_LOGO, template: false
 ```
 
-`logo:` supplies the larger panel-header image and falls back to `icon:` when
-omitted. `svgFile './logo.svg'` reads a file relative to the provider's working
-directory. Prefer inline SVG when building a self-contained `.app`, since the
-builder cannot infer arbitrary files read by provider code. This package ships
+`logo:` supplies an optional larger panel-header image; omitting it keeps the
+header text-only. `svgFile './logo.svg'` reads a file relative to the provider's
+working directory. Prefer inline SVG when building a self-contained `.app`,
+since the builder cannot infer arbitrary files read by provider code. This
+package ships
 [`rip-color.svg`](assets/rip-color.svg) and
 [`rip-template.svg`](assets/rip-template.svg) as ready-to-use Rip artwork.
 
