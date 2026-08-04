@@ -85,15 +85,15 @@ test "rejects malformed and directory-shaped component paths", ->
 
 test "accepts CSS bag paths (S12 soft-apply sheets)", ->
   ws = createWorkspace()
-  ws.write 'app/styles.css', ':root { --x: 1 }'
-  eq ws.read('app/styles.css'), ':root { --x: 1 }'
-  eq ws.exists('app/styles.css'), true
+  ws.write 'styles.css', ':root { --x: 1 }'
+  eq ws.read('styles.css'), ':root { --x: 1 }'
+  eq ws.exists('styles.css'), true
 
 test "accepts HTML bag paths (shell reload)", ->
   ws = createWorkspace()
-  ws.write 'app/index.html', '<!doctype html><title>x</title>'
-  eq ws.read('app/index.html'), '<!doctype html><title>x</title>'
-  eq ws.exists('app/index.html'), true
+  ws.write 'index.html', '<!doctype html><title>x</title>'
+  eq ws.read('index.html'), '<!doctype html><title>x</title>'
+  eq ws.exists('index.html'), true
 
 test "rejects non-string paths and content", ->
   ws = createWorkspace()
@@ -549,10 +549,10 @@ test "connectFeed validates its workspace and rejects a sealed one", ->
 
 test! "a ding fetches the module and mutates the passport", ->
   ws = createWorkspace()
-  ws.populate [{ id: 'app/routes/index.rip', path: 'app/routes/index.rip', hash: srcHash('v1'), source: 'v1' }]
+  ws.populate [{ id: 'routes/index.rip', path: 'routes/index.rip', hash: srcHash('v1'), source: 'v1' }]
   v2hash = srcHash('v2')
   { feed, calls, requests, sockets, reports } = openFeed ws,
-    '/manifest.json': JSON.stringify { files: [{ id: 'app/routes/index.rip', hash: srcHash('v1') }] }
+    '/manifest.json': JSON.stringify { files: [{ id: 'routes/index.rip', hash: srcHash('v1') }] }
     '/routes/index.rip': 'v2'
   s = sockets[0]
   eq s.url, 'ws://test/hub'
@@ -560,10 +560,10 @@ test! "a ding fetches the module and mutates the passport", ->
   settle!
   ok feed.connected()
   eq s.sent, [JSON.stringify { '+': ['/hub'] }]
-  s.onmessage { data: JSON.stringify { ding: { id: 'app/routes/index.rip', hash: v2hash } } }
+  s.onmessage { data: JSON.stringify { ding: { id: 'routes/index.rip', hash: v2hash } } }
   settle!
-  eq ws.passport('app/routes/index.rip').hash, v2hash
-  eq ws.read('app/routes/index.rip'), 'v2'
+  eq ws.passport('routes/index.rip').hash, v2hash
+  eq ws.read('routes/index.rip'), 'v2'
   ok calls.includes('/routes/index.rip')
   eq requests.find((r) -> r.url is '/routes/index.rip').opts.cache, 'no-store'
   eq requests.find((r) -> r.url is '/manifest.json').opts.cache, 'no-cache'
@@ -663,9 +663,9 @@ test! "a ding for an unknown id births the passport at its id path", ->
     '/new.rip': 'fresh'
   sockets[0].onopen()
   settle!
-  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'app/new.rip', hash: '111111' } } }
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'new.rip', hash: '111111' } } }
   settle!
-  eq ws.passport('app/new.rip'), { id: 'app/new.rip', path: 'app/new.rip', hash: srcHash('fresh'), source: 'fresh', compiled: undefined }
+  eq ws.passport('new.rip'), { id: 'new.rip', path: 'new.rip', hash: srcHash('fresh'), source: 'fresh', compiled: undefined }
   feed.close()
 
 test! "a delete ding removes the passport without a fetch when hash matches", ->
@@ -752,17 +752,17 @@ test! "a module miss resyncs from the manifest, which never deletes local mints"
 
 test! "the default module URL percent-encodes the id's segments", ->
   ws = createWorkspace()
-  ws.populate [{ id: 'app/50%.rip', path: 'app/50%.rip', hash: srcHash('v1'), source: 'v1' }]
+  ws.populate [{ id: '50%.rip', path: '50%.rip', hash: srcHash('v1'), source: 'v1' }]
   { feed, calls, sockets, reports } = openFeed ws,
     '/manifest.json': emptyManifest
     '/50%25.rip': 'v2'
   sockets[0].onopen()
   settle!
-  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'app/50%.rip', hash: '222222' } } }
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: '50%.rip', hash: '222222' } } }
   settle!
   ok calls.includes('/50%25.rip'), "the fetch uses the encoded mounted URL: #{JSON.stringify calls}"
-  eq ws.passport('app/50%.rip').hash, srcHash('v2')
-  eq ws.read('app/50%.rip'), 'v2'
+  eq ws.passport('50%.rip').hash, srcHash('v2')
+  eq ws.read('50%.rip'), 'v2'
   eq reports, []
   feed.close()
 

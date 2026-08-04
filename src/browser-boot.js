@@ -142,8 +142,8 @@ export async function bootApp(opts = {}) {
   // are a new application and reject loudly through the claim. Watch
   // mode owns the debug transition with a full reload.
   const debug = opts.debug === true;
-  const appPaths = Object.keys(bundle.modules ?? {}).filter(path => path.startsWith(`${appEntry.root}/`)).sort();
-  const fingerprint = `${debug}:${JSON.stringify(appPaths.map(path => [path, bundle.modules[path]]))}`;
+  const appPackagePaths = Object.keys(bundle.modules ?? {}).filter(path => path.startsWith(`${appEntry.root}/`)).sort();
+  const fingerprint = `${debug}:${JSON.stringify(appPackagePaths.map(path => [path, bundle.modules[path]]))}`;
   let graph = bootGraphs.get(fingerprint);
   if (!graph) {
     const files = new Map();
@@ -208,13 +208,14 @@ export async function bootApp(opts = {}) {
     bag.populate(records);
   }
 
-  // Application modules (the app/ store tree) compile up front:
+  // Project modules (App files plus any synthetic schema projections) compile
+  // up front. Package modules compile through their importing project module:
   // launch's renderer requires every navigable module already compiled,
   // and a page fails its boot loudly at its own position instead of
   // failing its first navigation.
   const compiled = {};
   for (const path of Object.keys(bundle.modules ?? {})) {
-    if (path.startsWith('app/')) {
+    if (path.endsWith('.rip') && !path.startsWith('@rip-lang/')) {
       compiled[path] = { ...(await loader.import(path)) };
     }
   }
@@ -388,7 +389,6 @@ export async function bootApp(opts = {}) {
     }
   };
   const unwatch = bag.watch((_event, path) => {
-    if (!path.startsWith('app/')) return;
     // CSS/HTML handled in door.set — never queue a Rip update.
     if (isNonRipBag(path)) return;
     pending.add(path);

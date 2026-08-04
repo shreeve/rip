@@ -11,13 +11,13 @@ test "createApply validates its options", ->
   throws (-> createApply {}), 'requires renderer.remountDirty'
   throws (-> createApply { renderer: remountDirty: -> 'narrow' }), 'requires an escape remount'
 
-test! "absorb ignores empty or non-app paths", ->
+test! "absorb ignores empty sets and non-App file types", ->
   calls = []
   apply = createApply
     renderer: remountDirty: (paths) -> calls.push ['narrow', paths]; 'narrow'
     escape: (paths) -> calls.push ['escape', paths]
   eq apply.absorb!([]), 'ignore'
-  eq apply.absorb!(['api/x.rip']), 'ignore'
+  eq apply.absorb!(['notes.txt']), 'ignore'
   eq calls, []
 
 test! "absorb reports css for CSS-only dirty sets (never reload)", ->
@@ -25,8 +25,8 @@ test! "absorb reports css for CSS-only dirty sets (never reload)", ->
   apply = createApply
     renderer: remountDirty: (paths) -> calls.push ['narrow', paths]; 'narrow'
     escape: (paths) -> calls.push ['escape', paths]
-  eq apply.absorb!(['app/styles.css']), 'css'
-  eq apply.absorb!(['app/styles.css', 'app/theme.css']), 'css'
+  eq apply.absorb!(['styles.css']), 'css'
+  eq apply.absorb!(['styles.css', 'theme.css']), 'css'
   eq calls, []
 
 test! "absorb reports reload for HTML dirty sets", ->
@@ -34,8 +34,8 @@ test! "absorb reports reload for HTML dirty sets", ->
   apply = createApply
     renderer: remountDirty: (paths) -> calls.push ['narrow', paths]; 'narrow'
     escape: (paths) -> calls.push ['escape', paths]
-  eq apply.absorb!(['app/index.html']), 'reload'
-  eq apply.absorb!(['app/index.html', 'app/styles.css']), 'reload'
+  eq apply.absorb!(['index.html']), 'reload'
+  eq apply.absorb!(['index.html', 'styles.css']), 'reload'
   eq calls, []
 
 test! "absorb reports update when the renderer accepts a narrow remount", ->
@@ -45,7 +45,7 @@ test! "absorb reports update when the renderer accepts a narrow remount", ->
     renderer: remountDirty: -> 'narrow'
     escape: (paths) -> escaped.push paths
     report: (...args) -> logs.push args.join ' '
-  eq apply.absorb!(['app/routes/index.rip']), 'update'
+  eq apply.absorb!(['routes/index.rip']), 'update'
   eq escaped, []
   eq (logs.some (l) -> l.includes('— update')), true
 
@@ -55,8 +55,8 @@ test! "absorb reports update after whole-launch remount for stash edits", ->
     renderer: remountDirty: -> 'escape'
     escape: (paths) -> escaped.push paths
     report: ->
-  eq apply.absorb!(['app/stash.rip']), 'update'
-  eq escaped, [['app/stash.rip']]
+  eq apply.absorb!(['stash.rip']), 'update'
+  eq escaped, [['stash.rip']]
 
 test! "absorb falls back to update when narrow throws", ->
   escaped = []
@@ -64,5 +64,5 @@ test! "absorb falls back to update when narrow throws", ->
     renderer: remountDirty: -> throw Error.new 'boom'
     escape: (paths) -> escaped.push paths
     report: ->
-  eq apply.absorb!(['app/routes/cart.rip']), 'update'
-  eq escaped, [['app/routes/cart.rip']]
+  eq apply.absorb!(['routes/cart.rip']), 'update'
+  eq escaped, [['routes/cart.rip']]

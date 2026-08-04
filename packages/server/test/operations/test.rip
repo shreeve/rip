@@ -153,7 +153,7 @@ test! 'hold fences App publication, API replacement, and dings', ->
     bundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
     manifest = JSON.parse readFileSync(join(generated, 'manifest.json'), 'utf8')
     eq bundle.rash, manifest.rash
-    eq bundle.modules['app/routes/index.rip'], "export changed = true\n"
+    eq bundle.modules['routes/index.rip'], "export changed = true\n"
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143

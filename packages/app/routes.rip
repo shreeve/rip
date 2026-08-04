@@ -1,6 +1,6 @@
 # Route manifest — pure file-to-URL routing with no browser dependency.
 #
-# Route files live under the route root (`app/routes` in the store
+# Route files live under the route root (`routes` in the store
 # vocabulary) and map to URL patterns by a filesystem convention:
 #
 #   index.rip            /
@@ -174,7 +174,7 @@ layoutChain = (rel, layouts) ->
     chain.push layouts.get(dir) if layouts.has dir
   chain
 
-export def buildRoutes(files: string[], root: string = 'app/routes'): RouteManifest
+export def buildRoutes(files: string[], root: string = 'routes'): RouteManifest
   unless Array.isArray files
     throw TypeError.new 'Rip App: buildRoutes expects an array of file paths'
   root = validRoot root

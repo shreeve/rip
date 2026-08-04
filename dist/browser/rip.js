@@ -24298,10 +24298,15 @@ function createModuleLoader({ components: registry, packages = {}, debug = false
     const hint = spec.endsWith(".rip") ? "" : ` — did you mean '${spec}.rip'?`;
     if (spec.startsWith("./") || spec.startsWith("../")) {
       const joined = joinPath(from, spec);
-      if (!joined || !inBundle(joined)) {
-        throw new Error(`rip: '${from}' imports '${spec}', which is not in the bundle${hint}`);
+      if (joined && inBundle(joined))
+        return { path: joined };
+      if (!from.startsWith("@rip-lang/")) {
+        const physical = joinPath(`app/${from}`, spec);
+        const mounted = physical?.startsWith("app/") ? physical.slice("app/".length) : physical;
+        if (mounted && inBundle(mounted))
+          return { path: mounted };
       }
-      return { path: joined };
+      throw new Error(`rip: '${from}' imports '${spec}', which is not in the bundle${hint}`);
     }
     const bare = spec.match(/^@rip-lang\/([\w-]+)(?:\/(.+))?$/);
     if (bare) {
@@ -24472,8 +24477,8 @@ async function bootApp(opts = {}) {
     throw new Error(`rip: the bundle carries no '${APP_PACKAGE}' package — assemble the application with its packages`);
   }
   const debug = opts.debug === true;
-  const appPaths = Object.keys(bundle.modules ?? {}).filter((path) => path.startsWith(`${appEntry.root}/`)).sort();
-  const fingerprint = `${debug}:${JSON.stringify(appPaths.map((path) => [path, bundle.modules[path]]))}`;
+  const appPackagePaths = Object.keys(bundle.modules ?? {}).filter((path) => path.startsWith(`${appEntry.root}/`)).sort();
+  const fingerprint = `${debug}:${JSON.stringify(appPackagePaths.map((path) => [path, bundle.modules[path]]))}`;
   let graph = bootGraphs.get(fingerprint);
   if (!graph) {
     const files2 = new Map;
@@ -24527,7 +24532,7 @@ async function bootApp(opts = {}) {
   }
   const compiled = {};
   for (const path of Object.keys(bundle.modules ?? {})) {
-    if (path.startsWith("app/")) {
+    if (path.endsWith(".rip") && !path.startsWith("@rip-lang/")) {
       compiled[path] = { ...await loader.import(path) };
     }
   }
@@ -24695,8 +24700,6 @@ async function bootApp(opts = {}) {
     }
   };
   const unwatch = bag.watch((_event, path) => {
-    if (!path.startsWith("app/"))
-      return;
     if (isNonRipBag(path))
       return;
     pending.add(path);

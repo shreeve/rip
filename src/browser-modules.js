@@ -5,8 +5,7 @@
 // URL. Resolution order for a specifier:
 //
 //   './x.rip', '../y.rip'   another bundle module, relative to here
-//                           (including projection overlays such as
-//                           `../api/models.rip` → `api/models.rip`)
+//                           (including project-root projection overlays)
 //   '@rip-lang/<name>/…'    a bundled package module (store path = import
 //                           spelling) or a package entry from the
 //                           packages table — only packages the bundle
@@ -121,10 +120,20 @@ export function createModuleLoader({ components: registry, packages = {}, debug 
     const hint = spec.endsWith('.rip') ? '' : ` — did you mean '${spec}.rip'?`;
     if (spec.startsWith('./') || spec.startsWith('../')) {
       const joined = joinPath(from, spec);
-      if (!joined || !inBundle(joined)) {
-        throw new Error(`rip: '${from}' imports '${spec}', which is not in the bundle${hint}`);
+      if (joined && inBundle(joined)) return { path: joined };
+
+      // App identities are relative to the public App root, while authored
+      // imports are relative to their physical project path under app/. An
+      // import that climbs out of that mount (for a shippable API schema
+      // projection, for example) resolves against the hidden physical mount
+      // without putting `app/` back into any bundle or Workspace identity.
+      if (!from.startsWith('@rip-lang/')) {
+        const physical = joinPath(`app/${from}`, spec);
+        const mounted = physical?.startsWith('app/') ? physical.slice('app/'.length) : physical;
+        if (mounted && inBundle(mounted)) return { path: mounted };
       }
-      return { path: joined };
+
+      throw new Error(`rip: '${from}' imports '${spec}', which is not in the bundle${hint}`);
     }
     // Store paths use the author-facing package spelling. A specifier
     // that is already an exact bag key resolves as itself; otherwise

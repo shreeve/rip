@@ -1,20 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 import { buildRoutes, parseQuery } from '@rip-lang/app';
 
-const manifest = files => buildRoutes(files.map(f => `app/routes/${f}`));
+const manifest = files => buildRoutes(files.map(f => `routes/${f}`));
 const patterns = m => m.routes.map(r => r.pattern);
 
 describe('route patterns', () => {
   test('index.rip is the root route', () => {
     const m = manifest(['index.rip']);
     expect(patterns(m)).toEqual(['/']);
-    expect(m.match('/').route.file).toBe('app/routes/index.rip');
+    expect(m.match('/').route.file).toBe('routes/index.rip');
   });
 
   test('static files map to their path', () => {
     const m = manifest(['about.rip', 'users/list.rip']);
-    expect(m.match('/about').route.file).toBe('app/routes/about.rip');
-    expect(m.match('/users/list').route.file).toBe('app/routes/users/list.rip');
+    expect(m.match('/about').route.file).toBe('routes/about.rip');
+    expect(m.match('/users/list').route.file).toBe('routes/users/list.rip');
     expect(m.match('/nope')).toBeNull();
   });
 
@@ -160,15 +160,15 @@ describe('catch-all segments', () => {
 
   test('an optional route outranks a catch-all sibling', () => {
     const m = manifest(['docs/[[x]].rip', 'docs/[...rest].rip']);
-    expect(m.match('/docs/a').route.file).toBe('app/routes/docs/[[x]].rip');
-    expect(m.match('/docs/a/b').route.file).toBe('app/routes/docs/[...rest].rip');
+    expect(m.match('/docs/a').route.file).toBe('routes/docs/[[x]].rip');
+    expect(m.match('/docs/a/b').route.file).toBe('routes/docs/[...rest].rip');
   });
 });
 
 describe('route groups', () => {
   test('(group) segments vanish from the URL', () => {
     const m = manifest(['(app)/orders.rip']);
-    expect(m.match('/orders').route.file).toBe('app/routes/(app)/orders.rip');
+    expect(m.match('/orders').route.file).toBe('routes/(app)/orders.rip');
   });
 
   test('nested groups all vanish', () => {
@@ -178,7 +178,7 @@ describe('route groups', () => {
 
   test('a group directory contributes its layout', () => {
     const m = manifest(['(app)/_layout.rip', '(app)/orders.rip']);
-    expect(m.match('/orders').route.layouts).toEqual(['app/routes/(app)/_layout.rip']);
+    expect(m.match('/orders').route.layouts).toEqual(['routes/(app)/_layout.rip']);
   });
 
   test('a route file named as a group rejects', () => {
@@ -207,15 +207,15 @@ describe('underscore exclusion', () => {
 describe('layout chains', () => {
   test('the root layout wraps every route', () => {
     const m = manifest(['_layout.rip', 'index.rip', 'admin/users.rip']);
-    expect(m.match('/').route.layouts).toEqual(['app/routes/_layout.rip']);
-    expect(m.match('/admin/users').route.layouts).toEqual(['app/routes/_layout.rip']);
+    expect(m.match('/').route.layouts).toEqual(['routes/_layout.rip']);
+    expect(m.match('/admin/users').route.layouts).toEqual(['routes/_layout.rip']);
   });
 
   test('nested layouts chain outermost first', () => {
     const m = manifest(['_layout.rip', 'admin/_layout.rip', 'admin/users.rip']);
     expect(m.match('/admin/users').route.layouts).toEqual([
-      'app/routes/_layout.rip',
-      'app/routes/admin/_layout.rip',
+      'routes/_layout.rip',
+      'routes/admin/_layout.rip',
     ]);
   });
 
@@ -228,20 +228,20 @@ describe('layout chains', () => {
 describe('precedence', () => {
   test('static beats dynamic beats catch-all', () => {
     const m = manifest(['users/[id].rip', 'users/list.rip', '[...rest].rip']);
-    expect(m.match('/users/list').route.file).toBe('app/routes/users/list.rip');
-    expect(m.match('/users/42').route.file).toBe('app/routes/users/[id].rip');
-    expect(m.match('/anything/else').route.file).toBe('app/routes/[...rest].rip');
+    expect(m.match('/users/list').route.file).toBe('routes/users/list.rip');
+    expect(m.match('/users/42').route.file).toBe('routes/users/[id].rip');
+    expect(m.match('/anything/else').route.file).toBe('routes/[...rest].rip');
   });
 
   test('fewer dynamic segments win', () => {
     const m = manifest(['[x]/[y].rip', 'a/[y].rip']);
-    expect(m.match('/a/z').route.file).toBe('app/routes/a/[y].rip');
+    expect(m.match('/a/z').route.file).toBe('routes/a/[y].rip');
   });
 
   test('precedence is decided per segment, left to right', () => {
     const m = manifest(['a/[x].rip', '[y]/b.rip']);
-    expect(m.match('/a/b').route.file).toBe('app/routes/a/[x].rip');
-    expect(m.match('/c/b').route.file).toBe('app/routes/[y]/b.rip');
+    expect(m.match('/a/b').route.file).toBe('routes/a/[x].rip');
+    expect(m.match('/c/b').route.file).toBe('routes/[y]/b.rip');
   });
 
   test('pattern order is deterministic regardless of input order', () => {
@@ -270,7 +270,7 @@ describe('manifest contract', () => {
   });
 
   test('files outside the root are ignored', () => {
-    const m = buildRoutes(['app/routes/index.rip', 'app/stash.rip', '_lib/x/y.rip']);
+    const m = buildRoutes(['routes/index.rip', 'stash.rip', '_lib/x/y.rip']);
     expect(patterns(m)).toEqual(['/']);
   });
 
@@ -289,7 +289,7 @@ describe('manifest contract', () => {
   });
 
   test('a non-.rip file under the root rejects', () => {
-    expect(() => buildRoutes(['app/routes/readme.md'])).toThrow(TypeError);
+    expect(() => buildRoutes(['routes/readme.md'])).toThrow(TypeError);
   });
 
   test('an invalid root rejects', () => {
@@ -299,14 +299,14 @@ describe('manifest contract', () => {
   });
 
   test('malformed route file paths reject', () => {
-    expect(() => buildRoutes(['app/routes/a//b.rip'])).toThrow(TypeError);
-    expect(() => buildRoutes(['app/routes/../x.rip'])).toThrow(TypeError);
-    expect(() => buildRoutes(['app/routes/.rip'])).toThrow(TypeError);
-    expect(() => buildRoutes(['app/routes/a\\b.rip'])).toThrow(TypeError);
+    expect(() => buildRoutes(['routes/a//b.rip'])).toThrow(TypeError);
+    expect(() => buildRoutes(['routes/../x.rip'])).toThrow(TypeError);
+    expect(() => buildRoutes(['routes/.rip'])).toThrow(TypeError);
+    expect(() => buildRoutes(['routes/a\\b.rip'])).toThrow(TypeError);
   });
 
   test('non-source files under a _ directory are ignored, not errors', () => {
-    const m = buildRoutes(['app/routes/_assets/logo.png', 'app/routes/index.rip']);
+    const m = buildRoutes(['routes/_assets/logo.png', 'routes/index.rip']);
     expect(patterns(m)).toEqual(['/']);
   });
 

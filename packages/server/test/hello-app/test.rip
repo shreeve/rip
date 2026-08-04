@@ -58,8 +58,8 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
     ok existsSync(join(generated, 'index.html'))
     ok not existsSync(join(generated, 'manifest.json'))
     bundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
-    eq bundle.files.map((entry) -> entry.id), ['app/routes/index.rip', 'app/styles.css', 'app/template.html']
-    eq Object.keys(bundle.modules).filter((id) -> id.startsWith('app/')), ['app/routes/index.rip']
+    eq bundle.files.map((entry) -> entry.id), ['routes/index.rip', 'styles.css', 'template.html']
+    eq Object.keys(bundle.modules).filter((id) -> bundle.files.some((entry) -> entry.id is id)), ['routes/index.rip']
     inventory = JSON.stringify bundle.files.map (entry) -> [entry.id, entry.hash]
     eq bundle.rash, rash(TextEncoder.new().encode(inventory))
 
@@ -145,7 +145,7 @@ test! 'watch publication commits one shared inventory then batches per-file ding
     waitFor! -> batches.length > 0
     eq batches[0].length, 1
     eq batches[0][0]['@'], ['/hub']
-    eq batches[0][0].ding.id, 'app/styles.css'
+    eq batches[0][0].ding.id, 'styles.css'
 
     nextBundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
     nextManifest = JSON.parse readFileSync(join(generated, 'manifest.json'), 'utf8')
@@ -160,7 +160,7 @@ test! 'watch publication commits one shared inventory then batches per-file ding
     unlinkSync join(project, 'app', 'template.html')
     waitFor! -> batches.length is 2
     eq batches[1].length, 1
-    eq batches[1][0].ding, { id: 'app/template.html', hash: manifest.files.find((entry) -> entry.id is 'app/template.html').hash, kind: 'delete' }
+    eq batches[1][0].ding, { id: 'template.html', hash: manifest.files.find((entry) -> entry.id is 'template.html').hash, kind: 'delete' }
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143

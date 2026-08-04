@@ -507,7 +507,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     # escape the renderer may be stopped (no lastRoute), but a stash
     # edit must still request escape so the next good generation recovers.
     for path in paths
-      return 'escape' if path is 'app/stash.rip' or path.startsWith 'app/stash/'
+      return 'escape' if path is 'stash.rip' or path.startsWith 'stash/'
     info = router.current
     return 'noop' unless info?.route?.file and lastRoute?
     dirty = Set.new paths
@@ -518,7 +518,7 @@ export def createRenderer(opts: RendererOpts): Renderer
       if dirty.has file
         firstDirty = index
         break
-    # A dirty module not in the chain (shared child under app/) still
+    # A dirty module not in the chain (a shared App child) still
     # remounts the page — Vue script remount floor for that leaf.
     firstDirty = chain.length - 1 if firstDirty < 0
     forceFrom = firstDirty

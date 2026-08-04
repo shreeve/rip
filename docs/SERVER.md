@@ -308,9 +308,11 @@ Without a `files` declaration, conventional discovery registers the generated
 root plus `public/` and `app/` when present. The project directory is never an
 implicit public root.
 
-Registered roots are mounted at the URL root. In particular, conventional
-`app/` paths and bag ids retain their `app/` prefix internally, but their
-public URLs do not: `app/routes/home.rip` is served as `/routes/home.rip`.
+Registered roots are mounted at the URL root; their filesystem names are not
+part of public or App identity. In particular, `app/routes/home.rip` has the
+bag id `routes/home.rip` and is served as `/routes/home.rip`. The same rule
+holds for `public/`, `static/generated/`, and `sites/{site}/public/`: only the
+path relative to the selected root is exposed.
 
 The SPA shell is a separate HTML-only fallback, commonly `app/index.html`. It
 is not an unconditional final file candidate: a missing script, stylesheet,
@@ -557,8 +559,8 @@ cheap. This policy remains the same when watching is disabled.
 
 ### 4. Live Rip source
 
-Files such as `app/routes/home.rip` are latest-wins App bag members. With the
-conventional `app/` file root, that member's ordinary public URL is
+Files such as `routes/home.rip` are latest-wins App bag members, named relative
+to the physical `app/` root. That member's ordinary public URL is
 `/routes/home.rip`. A browser whose current hash differs from a ding fetches
 the file with
 `cache: "no-store"`, computes `rash` from the bytes actually received, and
@@ -600,8 +602,8 @@ that context; a filesystem ding does not.
 
 ### 7. Images, fonts, video, and other referenced assets
 
-These files are outside the default `app/**/*.{rip,css,html}` bag and therefore
-receive no ding. Choose one policy:
+These files are outside the default disk membership
+`app/**/*.{rip,css,html}` and therefore receive no ding. Choose one policy:
 
 - Content-versioned URL and `immutable` for bytes that never change at that
   URL.

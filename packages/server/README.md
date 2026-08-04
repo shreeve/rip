@@ -130,13 +130,14 @@ registered roots in order and appends the request path to each one. A typical
 tenant registration searches `static/generated`, then
 `sites/{site}/public`, then `sites/common/public`, then `app`. Consequently:
 
-**The `app/` prefix belongs to the disk path and bag id, not the public URL.**
+**Root names are never exposed.** An App member's id is its path relative to
+`app/`, which is also its normal public URL without the leading slash.
 
 - `static/generated/bundle.json` is requested as `/bundle.json`;
 - `sites/cheetos/public/logo.svg` overrides
   `sites/common/public/logo.svg` for `/logo.svg`;
-- the bag id `app/routes/[id].rip` is fetched from `/routes/[id].rip` with the
-  conventional `app/` root; and
+- `app/routes/[id].rip` has the bag id `routes/[id].rip` and is fetched from
+  `/routes/[id].rip`; and
 - `app/index.html` is an HTML-navigation fallback, not a response for a
   missing script, stylesheet, image, or module.
 
@@ -153,10 +154,11 @@ The three owners have deliberately narrow jobs:
   `X-Sendfile` transfer, including validators, ranges, and content type.
 - **The manager publishes App identity.** It snapshots
   `app/**/*.{rip,css,html}`, assigns each member a six-character content
-  `hash`, writes a deterministic `bundle.json`, and—while watching—a matching
-  `manifest.json`. The bundle carries the complete inventory plus Rip module
-  source needed for first paint; the manifest carries the inventory without
-  source bodies.
+  `hash`, and identifies it relative to the App root (`routes/home.rip`, not
+  `app/routes/home.rip`). It writes a deterministic `bundle.json` and—while
+  watching—a matching `manifest.json`. The bundle carries the complete
+  inventory plus Rip module source needed for first paint; the manifest
+  carries the inventory without source bodies.
 - **Caddy and Janus serve bytes.** They terminate HTTPS, select the trusted
   tenant, search file roots, proxy configured API prefixes, serve the SPA
   shell, and provide ordinary HTTP cache behavior.
@@ -483,8 +485,9 @@ Janus serves:
 Workers serve API routes only. The manager writes files and publishes control
 state but is never on the client data path.
 
-The default development bag is `app/**/*.{rip,css,html}`. A change produces a
-tiny `{id,hash}` ding:
+The default development bag is the disk set `app/**/*.{rip,css,html}`. Its ids
+are relative to `app/`, so a change to `app/routes/home.rip` produces a tiny
+ding naming `{id: "routes/home.rip", hash}`:
 
 - `.rip` → fetch and apply the latest module
 - `.css` → fetch latest bytes and update the existing stylesheet URL

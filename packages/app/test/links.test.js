@@ -9,10 +9,10 @@ import {
 import { __Component } from '../../../src/runtime/components.js';
 
 const FILES = [
-  'app/routes/index.rip',
-  'app/routes/users/index.rip',
-  'app/routes/users/[id].rip',
-  'app/routes/about.rip',
+  'routes/index.rip',
+  'routes/users/index.rip',
+  'routes/users/[id].rip',
+  'routes/about.rip',
 ];
 
 const fakeAdapter = (initial = '/') => {
@@ -233,7 +233,7 @@ describe('preloadLinks', () => {
     expect(calls).toEqual([]);
     await Bun.sleep(SETTLED);
     expect(calls.length).toBe(1);
-    expect(calls[0].route.file).toBe('app/routes/users/[id].rip');
+    expect(calls[0].route.file).toBe('routes/users/[id].rip');
     expect(calls[0].params).toEqual({ id: '7' });
     expect(calls[0].query).toEqual({ tab: 'queue' });
   });
@@ -243,7 +243,7 @@ describe('preloadLinks', () => {
     host.fire('focusin', { target: anchor('/about') });
     await Bun.sleep(SETTLED);
     expect(calls.length).toBe(1);
-    expect(calls[0].route.file).toBe('app/routes/about.rip');
+    expect(calls[0].route.file).toBe('routes/about.rip');
   });
 
   test('brushing past never fires', async () => {
@@ -334,12 +334,12 @@ describe('launch link wiring', () => {
 
   const bundle = () => ({
     modules: {
-      'app/routes/index.rip': 'export Home = component',
-      'app/routes/about.rip': 'export About = component',
+      'routes/index.rip': 'export Home = component',
+      'routes/about.rip': 'export About = component',
     },
     compiled: {
-      'app/routes/index.rip': { Home },
-      'app/routes/about.rip': { About },
+      'routes/index.rip': { Home },
+      'routes/about.rip': { About },
     },
   });
 

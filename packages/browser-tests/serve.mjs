@@ -11,19 +11,19 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
 
 const MODULES = {
-  'app/stash.rip': [
+  'stash.rip': [
     "import { source } from '@rip-lang/app'",
     'export stash = {',
     "  user: source fetch: -> (await fetch('/user.json')).json()",
     '}',
   ].join('\n'),
-  'app/routes/index.rip': [
+  'routes/index.rip': [
     'export Home = component',
     '  render',
     '    h1#title "home"',
     '    a href: "/profile", "profile"',
   ].join('\n'),
-  'app/routes/profile.rip': [
+  'routes/profile.rip': [
     'export Profile = component',
     '  user <~ @app.data.user',
     '  render',
@@ -47,10 +47,10 @@ const wsRoute = title => [
   `    h1#title "${title}"`,
 ].join('\n');
 
-const wsModules = { 'app/routes/index.rip': wsRoute('workspace home') };
+const wsModules = { 'routes/index.rip': wsRoute('workspace home') };
 const wsHashes = new Map();
 const ripHash = text => createHash('sha256').update(text).digest('base64url').slice(0, 6).replaceAll('-', '_');
-wsHashes.set('app/routes/index.rip', ripHash(wsModules['app/routes/index.rip']));
+wsHashes.set('routes/index.rip', ripHash(wsModules['routes/index.rip']));
 let wsBundleText = null;
 let wsBundleTag = null;
 const rebuildWsBundle = () => {
@@ -101,7 +101,7 @@ Bun.serve({
       });
     }
     if (pathname.startsWith('/') && pathname.endsWith('.rip')) {
-      const id = `app${pathname}`;
+      const id = pathname.slice(1);
       const body = wsModules[id];
       if (body === undefined) return new Response('unknown module', { status: 404 });
       return new Response(body, { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });

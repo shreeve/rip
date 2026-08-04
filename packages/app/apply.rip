@@ -35,12 +35,9 @@ export def createApply(opts: ApplyOpts): Apply
   absorb = (paths) ->
     unless Array.isArray(paths) and paths.length > 0
       return 'ignore'
-    appPaths = (p for p in paths when typeof p is 'string' and p.startsWith 'app/')
-    return 'ignore' unless appPaths.length > 0
-
-    css = (p for p in appPaths when p.endsWith '.css')
-    html = (p for p in appPaths when p.endsWith '.html')
-    rip = (p for p in appPaths when not p.endsWith('.css') and not p.endsWith('.html'))
+    css = (p for p in paths when typeof p is 'string' and p.endsWith '.css')
+    html = (p for p in paths when typeof p is 'string' and p.endsWith '.html')
+    rip = (p for p in paths when typeof p is 'string' and p.endsWith '.rip')
 
     # Soft paths: door already adopted; absorb only names the verdict.
     # *.css is always css — never reload.

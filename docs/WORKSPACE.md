@@ -72,7 +72,7 @@ forever and “CSP later” are **rejected** as M0 rewrites.
 |---|---|
 | **Q6** | **M0 and M1 are independent exits.** M1 (the dev door) may land first under `RIP_WORKSPACE=1` with dev-mode in-browser compile; M0 (signed cells, CSP without `unsafe-eval`) gates **production populate** only and is unweakened. D6 reads: the dev door never leaks into production — flag off is unchanged and production has no Hub. |
 | **Q7** | **The bag subsumes the app's component store.** The Workspace implements the `ComponentsStore` interface (`packages/app/components.rip`) as its app-facing view — path-keyed through the path→id map, passports underneath. `launch()` accepts an injected components store; flag off, it creates its own store exactly as today (D1). When the Workspace earns the default, `createComponents` retires and the bag is the only store. Two live stores of browser code never coexist. |
-| **Q8** | **Module freshness is latest-wins.** The default client **bag** is membership `app/**/*.{rip,css,html}` (ids = birth paths). A ding carries `{id,hash}` where `hash = rash(bytes)`; it is a hint, not an address. The client fetches the ordinary latest URL with `cache: no-store`, computes the actual hash from received bytes, and uses an owner token so an older completion cannot overwrite a newer apply. Client verdicts are **`reload` \| `css` \| `update` \| `ignore`**. There is no App `409`, historical representation URL, or Rip hash implementation in Janus. |
+| **Q8** | **Module freshness is latest-wins.** The default client **bag** is disk membership `app/**/*.{rip,css,html}`. Ids are birth paths relative to the App root (`routes/home.rip`, never `app/routes/home.rip`) and map directly to ordinary public URLs (`/routes/home.rip`). A ding carries `{id,hash}` where `hash = rash(bytes)`; it is a hint, not an address. The client fetches the ordinary latest URL with `cache: no-store`, computes the actual hash from received bytes, and uses an owner token so an older completion cannot overwrite a newer apply. Client verdicts are **`reload` \| `css` \| `update` \| `ignore`**. There is no App `409`, historical representation URL, or Rip hash implementation in Janus. |
 | **Q9** | **Package shape confirmed.** `packages/workspace` and `packages/refresh` stay separate browser-side packages while experimental (kill switch #2); `packages/server` keeps only the muscles. If the Workspace earns the default, its merge destination is `packages/app`, never `packages/server`. |
 
 ### Ruling 2026-07-29 (Q10)
@@ -406,7 +406,7 @@ Probe 0 observables (honesty bar, not a protocol):
 |---|---|
 | D1 | A plain boot without the `workspace` option → non-Workspace launch path unchanged |
 | D2 | Disk change → Hub ding with `{id,hash}` as a freshness hint (no body) |
-| D3 | Client strips the bag's `app/` id prefix, fetches the latest module bytes at the ordinary root URL with `cache: no-store`, and computes `rash(bytes)` |
+| D3 | Client adds the normal leading slash to the root-relative id, fetches the latest module bytes with `cache: no-store`, and computes `rash(bytes)` |
 | D4 | `Workspace.set` mutates the passport only after compile/activation succeeds (hash/source advance) |
 | D5 | UI shows a visible change attributable to that mutation |
 | D6 | Seal / no-Hub path still holds for production populate (M0) |

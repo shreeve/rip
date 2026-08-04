@@ -162,12 +162,17 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
     ok shellBody.includes('<div id="app"></div>')
     bundle = edgeFetch! port, '/bundle.json'
     eq bundle.status, 200
+    bundleDocument = JSON.parse bundle.text!
+    eq bundleDocument.files.map((entry) -> entry.id), ['routes/index.rip', 'styles.css']
     etag = bundle.headers.get 'etag'
     ok etag?.startsWith('W/"')
     eq (edgeFetch!(port, '/bundle.json', { 'if-none-match': etag })).status, 304
     css = edgeFetch! port, '/styles.css'
     eq css.status, 200
     eq (css.text!).trim(), 'body { color: navy; }'
+    route = edgeFetch! port, '/routes/index.rip'
+    eq route.status, 200
+    ok (route.text!).includes "h1 'Reload one'"
 
     for [path, secret] in [
       ['/index.rip', 'api-source-secret']
@@ -175,6 +180,7 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
       ['/package.json', 'package-metadata-secret']
       ['/data/app.sqlite', 'database-file-secret']
       ['/private.txt', 'authorized bytes']
+      ['/app/routes/index.rip', 'Reload one']
     ]
       response = edgeFetch! port, path
       body = response.text!

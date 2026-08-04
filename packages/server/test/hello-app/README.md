@@ -14,7 +14,9 @@ Janus serves every public byte.
 ## Publication checklist
 
 - One filesystem walk reads every `app/**/*.{rip,css,html}` member once into
-  an ephemeral in-memory snapshot.
+  an ephemeral in-memory snapshot. Each id is the member's path relative to
+  `app/`, so the disk file `app/routes/index.rip` is `routes/index.rip` in the
+  bundle, manifest, ding, and Workspace.
 - Each entry receives one six-character content rash. The existing wire field
   remains `hash`; its value is that rash.
 - Entries sort by `id`. The bag rash is
