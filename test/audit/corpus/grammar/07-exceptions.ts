@@ -98,6 +98,14 @@ let cast = (() => { try { return JSON.parse('broken') as { live: boolean } } cat
 
 console.log('live:', live, 'backed:', backed, 'cast:', cast)
 
+// ── inline finalizers: a one-line finally on an expression try, alone and beneath a catch ──
+
+let trail: string[] = []
+let opened: { open: boolean } = (() => { try { return JSON.parse('{"open":true}') } finally { trail.push('opened') } })()
+let settled: { open: boolean } = (() => { try { return JSON.parse('broken') } catch (e) { return { open: false } } finally { trail.push('settled') } })()
+
+console.log('opened:', opened, 'settled:', settled, 'trail:', trail)
+
 let earlyExit = function(n: number): number {
   try {
     return n

@@ -53,6 +53,7 @@ Allocation principles: a production belongs to the construct it CARRIES, not its
 | Loop                     | 06-loops        |
 | Try                      | 07-exceptions   |
 | Catch                    | 07-exceptions   |
+| Finalizer                | 07-exceptions   |
 | Throw                    | 07-exceptions   |
 | Def                      | 08-functions    |
 | Code                     | 08-functions    |
