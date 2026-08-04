@@ -1,6 +1,6 @@
 export default
   name: 'hello'
-  hosts: ['hello.ripdev.io']
+  hosts: ['hello.ripdev.io'] # the edge owns standard HTTPS on port 443
   app:
     root: 'app'             # default
     manifest:               # default

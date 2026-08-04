@@ -1,0 +1,31 @@
+{
+	admin unix/{$RIP_EDGE_ADMIN}
+	persist_config off
+	auto_https disable_redirects
+	default_bind 127.0.0.1
+	skip_install_trust
+
+	janus {
+		control internal {$RIP_EDGE_CONTROL}
+		ping
+		cache {
+			ttl 1s
+			ttl_max 10s
+			max_body 256kb
+			max_bytes 64mb
+			max_app_share 50
+		}
+		hub {
+			mode direct
+			origin same
+		}
+		files
+		browse
+	}
+}
+
+# TLS makes these standard HTTPS listeners on port 443.
+ripdev.io, *.ripdev.io {
+	tls {$RIP_EDGE_CERT} {$RIP_EDGE_KEY}
+	janus
+}
