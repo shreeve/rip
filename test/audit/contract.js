@@ -2,11 +2,13 @@
 // agreement.
 //
 // The audit is a scoreboard, and most of what it prints is a GAUGE: a queue
-// whose non-zero size is work remaining, not a regression. Uncovered
-// productions, unclaimed census kinds, ruled-uncarried claims rows, the mapping
-// census, the token member and use-site clauses — every one of those is
-// expected non-zero today and says so in its own line. None of them appear
-// below, and that is the point: a gauge that gated would fail forever.
+// whose non-zero size is work remaining, not a regression. Unclaimed census
+// kinds, ruled-uncarried claims rows, the dark-spelling queue — every one of
+// those is expected non-zero today and says so in its own line. None of them
+// appear below, and that is the point: a gauge that gated would fail forever.
+// A gauge whose queue DRAINS graduates: grammar coverage, the mapping census,
+// and the token use-site clause each gated at zero the day their queue hit
+// the bottom, because from that day a nonzero count is a regression.
 //
 // What DOES gate is an INVARIANT: a property that holds, or else something
 // broke. Each row below names one, states it as the property (never as its
@@ -43,9 +45,15 @@ export const CONTRACT = [
     red: (s) => (s.gr.unparsed ?? 0) > 0,
   },
   {
-    name: 'grammar.allocation', lane: 'grammar',
-    property: 'every construct and production the grammar defines is allocated by the manifest',
-    red: (s) => s.gr.unallocated > 0,
+    // Graduated from the queue the day the corpus drained it (every production
+    // exercised) and the M3 manifest retired with its purpose served. From
+    // that day a new production's forcing function is this invariant: the
+    // fixture itself, not an ownership row. A production no fixture can carry
+    // YET takes a `redBecause` on this row while its finding is open; one no
+    // fixture should EVER reduce is a ruled row in the gate's exclusion table.
+    name: 'grammar.coverage', lane: 'grammar',
+    property: 'every production the parser defines is reduced by a fixture or excluded by ruling',
+    red: (s) => s.gr.uncovered > 0,
   },
   {
     name: 'grammar.exclusions', lane: 'grammar',

@@ -3,9 +3,9 @@
 # Three independent jobs. `test` is the verdict: every suite test:all
 # carries, plus the byte gates — healthy in ~4 minutes. `audit` is the
 # corpus audit's contract (test/audit/runner.js), its own job so a
-# grammar change that owes an ownership decision paints the push that
-# made it — the audit deliberately stays outside test:all (see
-# test/audit/ROADMAP.md), so nothing else watches its exit code.
+# grammar change whose production no fixture reduces paints the push
+# that made it — the audit deliberately stays outside test:all, so
+# nothing else watches its exit code.
 # `browser` is the real-browser certification, isolated because its
 # slow part is not ours: `playwright install --with-deps` runs an apt
 # install the browser cache cannot cover, and a throttled Ubuntu mirror
