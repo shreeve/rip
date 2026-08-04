@@ -349,7 +349,7 @@ const CAST_STOPS = new Set([
   '+', '-', 'MATH', '**', 'SHIFT', 'COMPARE', '&&', '||', '??', '^',
   'RELATION', 'TERNARY', '?', 'PRESENCE', ':', '?.', 'DAMMIT', 'EXTENDS',
   'IF', 'UNLESS', 'ELSE', 'THEN', 'WHILE', 'UNTIL', 'LOOP', 'FOR',
-  'WHEN', 'BY', 'SWITCH', 'RETURN', 'THROW', 'CATCH',
+  'WHEN', 'BY', 'SWITCH', 'RETURN', 'THROW', 'CATCH', 'FINALLY',
 ]);
 
 // Statement-clause keywords that end a TYPE ALIAS's right-hand run at

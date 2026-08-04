@@ -56,6 +56,15 @@ test "inline statement try finally expression", '''
 
 code "inline try finally emission", "try fsyncSync(directory) finally closeSync(directory)", "try { fsyncSync(directory); } finally { closeSync(directory); }"
 
+# A cast on the try body ends at the finally keyword — the clause is code, never type text.
+test "cast body keeps its inline finally", '''
+  log = []
+  value = try JSON.parse('{"ok":true}') as { ok: boolean } finally log.push('cleanup')
+  [value.ok, log]
+  ''', [true, ['cleanup']]
+
+code "cast stops before an inline finally", "x = try readConfig() as { ok: boolean } finally closeSync(directory)", "let x = (() => { try { return readConfig(); } finally { closeSync(directory); } })();"
+
 # Catch with destructuring
 test "catch with pattern", "result = try\n  throw {code: 404}\ncatch {code}\n  code\nresult", 404
 
