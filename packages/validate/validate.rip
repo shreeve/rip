@@ -26,7 +26,7 @@
 
 import { registerCoercer } from '../../src/runtime/schema.js'
 
-fail = (message) -> throw new Error "Rip Validate: #{message}"
+fail = (message) -> throw Error.new "Rip Validate: #{message}"
 
 # ==============================================================================
 # Utilities
@@ -239,9 +239,9 @@ BUILTIN =
     for part in cleaned.split ' '
       return null unless part[/^([1-9]\d{0,14})$/]
       nums.push parseInt(_[1])
-    Array.from(new Set(nums)).sort (a, b) -> a - b
+    Array.from(Set.new(nums)).sort (a, b) -> a - b
 
-RAW = new Set ['array', 'hash', 'json']
+RAW = Set.new ['array', 'hash', 'json']
 NAME = /^\w+$/
 
 # ==============================================================================
@@ -249,9 +249,9 @@ NAME = /^\w+$/
 # ==============================================================================
 
 # A Map keeps hostile names like '__proto__' inert data keys.
-registry = new Map()
+registry = Map.new()
 
-SYNC_ONLY = new Set ['[object AsyncFunction]', '[object GeneratorFunction]', '[object AsyncGeneratorFunction]']
+SYNC_ONLY = Set.new ['[object AsyncFunction]', '[object GeneratorFunction]', '[object AsyncGeneratorFunction]']
 
 # Every definition lands in BOTH vocabularies: the validator registry
 # and the `~:name` schema-coercer table. The coercer registers first,

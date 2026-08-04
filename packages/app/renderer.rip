@@ -33,7 +33,7 @@ export type RendererOpts =
 
 failureFor = (path: string, file: string, error: any, message: string | null = null): GateFailure ->
   text = message ?? error?.message ?? String(error)
-  failure: any = new Error text
+  failure: any = Error.new text
   failure.name = 'GateFailure'
   failure.status = error?.status ?? error?.response?.status ?? 500
   failure.path = path
@@ -44,7 +44,7 @@ failureFor = (path: string, file: string, error: any, message: string | null = n
 componentFrom = (components, file) ->
   module = components.getCompiled file
   unless module? and typeof module is 'object'
-    throw new Error "Rip App: no precompiled component module for '#{file}'"
+    throw Error.new "Rip App: no precompiled component module for '#{file}'"
   isComponent = (value) ->
     typeof value is 'function' and typeof value.prototype?.mount is 'function'
   return module.default if isComponent module.default
@@ -54,23 +54,23 @@ componentFrom = (components, file) ->
     if isComponent value
       found.push value
   unless found.length is 1
-    throw new Error "Rip App: precompiled module '#{file}' must export exactly one component class"
+    throw Error.new "Rip App: precompiled module '#{file}' must export exactly one component class"
   found[0]
 
 export def createRenderer(opts: RendererOpts): Renderer
   unless opts? and typeof opts is 'object'
-    throw new TypeError 'Rip App: createRenderer expects an options object'
+    throw TypeError.new 'Rip App: createRenderer expects an options object'
   { router, app, components, target, onError } = opts
   unless router? and typeof router is 'object'
-    throw new TypeError 'Rip App: createRenderer requires a router object'
+    throw TypeError.new 'Rip App: createRenderer requires a router object'
   unless app?.data?
-    throw new TypeError 'Rip App: createRenderer requires app.data'
+    throw TypeError.new 'Rip App: createRenderer requires app.data'
   unless components? and typeof components.getCompiled is 'function'
-    throw new TypeError 'Rip App: createRenderer requires a component registry'
+    throw TypeError.new 'Rip App: createRenderer requires a component registry'
   unless target? and typeof target.appendChild is 'function'
-    throw new TypeError 'Rip App: createRenderer requires a target with appendChild()'
+    throw TypeError.new 'Rip App: createRenderer requires a target with appendChild()'
   if onError? and typeof onError isnt 'function'
-    throw new TypeError 'Rip App: createRenderer onError must be a function'
+    throw TypeError.new 'Rip App: createRenderer onError must be a function'
 
   instances = []
   current = null
@@ -99,7 +99,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     null
 
   gateFailure = (path: string, file: string, message: string, error: any = null): GateFailure ->
-    cause = error ?? new Error(message)
+    cause = error ?? Error.new(message)
     failureFor path, file, cause, message
 
   # A staying navigation may keep its mounted page only while every
@@ -124,7 +124,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     false
 
   gateJobs = (entries, params, query) ->
-    jobs = new Map()
+    jobs = Map.new()
     for entry, entryIndex in entries
       gates = entry.cls.__gates
       entry.bindings = []
@@ -163,7 +163,7 @@ export def createRenderer(opts: RendererOpts): Renderer
 
   ensureGates = (entries, params, query, mine) ->
     jobs = gateJobs entries, params, query
-    results = await Promise.allSettled (job.cell.ensure() for job in jobs)
+    results = Promise.allSettled! (job.cell.ensure() for job in jobs)
     return false if mine isnt generation
     # Failures are collected, not thrown mid-scan: the SHALLOWEST failing
     # entry decides the boundary, and every entry below it still gets its
@@ -364,12 +364,12 @@ export def createRenderer(opts: RendererOpts): Renderer
   performMount = (info, mine) ->
     route = info?.route
     unless route?.file
-      throw new Error 'Rip App: renderer route state requires route.file'
+      throw Error.new 'Rip App: renderer route state requires route.file'
     params = info.params ?? {}
     query = info.query ?? {}
     layoutFiles = info.layouts ?? []
     unless Array.isArray layoutFiles
-      throw new Error 'Rip App: renderer route state layouts must be an array'
+      throw Error.new 'Rip App: renderer route state layouts must be an array'
 
     # Staying navigation: same page, same params, same layout chain,
     # only the query moved — the mounted instance keeps its identity and
@@ -381,7 +381,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     if not forcedFrom? and current? and lastRoute? and route.file is lastRoute.file
       if sameChain([...layoutFiles, route.file], mountedFiles) and shallowEqual(params, lastRoute.params)
         unless shallowEqual(query, lastRoute.query) or queryKeyedRetargets(mountedEntries, params, query)
-          await current.load params, query if typeof current.load is 'function'
+          current.load! params, query if typeof current.load is 'function'
           return null if mine isnt generation
           lastRoute = { file: route.file, params, query }
           return current
@@ -417,7 +417,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     fresh = entries.slice firstNew
 
     try
-      ready = await ensureGates fresh, params, query, mine
+      ready = ensureGates! fresh, params, query, mine
       return null unless ready
     catch caught
       failure: any = caught
@@ -444,7 +444,7 @@ export def createRenderer(opts: RendererOpts): Renderer
         entry.instance = instance
         instance.mount? mountPoint
         if instance._state is 'failed'
-          throw new Error "Rip App: component '#{entry.file}' failed during mount"
+          throw Error.new "Rip App: component '#{entry.file}' failed during mount"
         if firstNew + index < entries.length - 1
           mountPoint = layoutMountPoint instance, mountPoint
       if mine isnt generation
@@ -507,10 +507,10 @@ export def createRenderer(opts: RendererOpts): Renderer
     # escape the renderer may be stopped (no lastRoute), but a stash
     # edit must still request escape so the next good generation recovers.
     for path in paths
-      return 'escape' if path is 'app/stash.rip' or path.startsWith 'app/stash/'
+      return 'escape' if path is 'stash.rip' or path.startsWith 'stash/'
     info = router.current
     return 'noop' unless info?.route?.file and lastRoute?
-    dirty = new Set paths
+    dirty = Set.new paths
     layoutFiles = info.layouts ?? info.route.layouts ?? []
     chain = [...layoutFiles, info.route.file]
     firstDirty = -1
@@ -518,7 +518,7 @@ export def createRenderer(opts: RendererOpts): Renderer
       if dirty.has file
         firstDirty = index
         break
-    # A dirty module not in the chain (shared child under app/) still
+    # A dirty module not in the chain (a shared App child) still
     # remounts the page — Vue script remount floor for that leaf.
     firstDirty = chain.length - 1 if firstDirty < 0
     forceFrom = firstDirty

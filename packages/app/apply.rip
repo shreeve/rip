@@ -25,22 +25,19 @@ export type ApplyOpts =
 
 export def createApply(opts: ApplyOpts): Apply
   unless opts? and typeof opts is 'object'
-    throw new TypeError 'Rip App: createApply expects an options object'
+    throw TypeError.new 'Rip App: createApply expects an options object'
   unless typeof opts.renderer?.remountDirty is 'function'
-    throw new TypeError 'Rip App: createApply requires renderer.remountDirty'
+    throw TypeError.new 'Rip App: createApply requires renderer.remountDirty'
   unless typeof opts.escape is 'function'
-    throw new TypeError 'Rip App: createApply requires an escape remount'
+    throw TypeError.new 'Rip App: createApply requires an escape remount'
   report = opts.report ?? (...args) -> console.log ...args
 
   absorb = (paths) ->
     unless Array.isArray(paths) and paths.length > 0
       return 'ignore'
-    appPaths = (p for p in paths when typeof p is 'string' and p.startsWith 'app/')
-    return 'ignore' unless appPaths.length > 0
-
-    css = (p for p in appPaths when p.endsWith '.css')
-    html = (p for p in appPaths when p.endsWith '.html')
-    rip = (p for p in appPaths when not p.endsWith('.css') and not p.endsWith('.html'))
+    css = (p for p in paths when typeof p is 'string' and p.endsWith '.css')
+    html = (p for p in paths when typeof p is 'string' and p.endsWith '.html')
+    rip = (p for p in paths when typeof p is 'string' and p.endsWith '.rip')
 
     # Soft paths: door already adopted; absorb only names the verdict.
     # *.css is always css — never reload.

@@ -77,8 +77,8 @@ class NonTerminal
     @name     = name    # nonterminal name
     @rules    = []      # rules that define this nonterminal
     @nullable = false   # true if one of the rules can produce no tokens (ε)
-    @firsts   = new Set # FIRST set: terminals that can start this nonterminal
-    @follows  = new Set # FOLLOW set: terminals that can follow this nonterminal
+    @firsts   = Set.new() # FIRST set: terminals that can start this nonterminal
+    @follows  = Set.new() # FOLLOW set: terminals that can follow this nonterminal
 
 # Rule: one possible match for a nonterminal (Expr → Expr + Term)
 class Rule
@@ -87,7 +87,7 @@ class Rule
     @lhs        = lhs     # nonterminal this rule defines (left-hand side)
     @symbols    = symbols # array of symbols to match ["Expr", "+", "Expr"]
     @nullable   = false   # true if this rule can produce no tokens (ε)
-    @firsts     = new Set # FIRST set: terminals that can start this rule
+    @firsts     = Set.new() # FIRST set: terminals that can start this rule
     @precedence = 0       # operator precedence for conflict resolution
 
 # LR Item: A rule with a dot position and lookaheads (Expr → Expr • + Term)
@@ -96,16 +96,16 @@ class Item
     @rule       = rule                      # the rule this item is based on
     @dot        = dot                       # position of the dot in the rule
     @id         = "#{@rule.id}:#{@dot}"     # compact unique ID
-    @lookaheads = new Set(lookaheads or []) # lookahead tokens (if any)
+    @lookaheads = Set.new(lookaheads or []) # lookahead tokens (if any)
     @nextSymbol = @rule.symbols[@dot]       # symbol after dot (if any)
 
 # LR State: A set of items with transitions to other states
 class State
   constructor: (...items) ->
     @id           = null           # state number (assigned later)
-    @items        = new Set(items) # kernel and closure items
-    @transitions  = new Map        # symbol → next state
-    @reductions   = new Set        # items that trigger a reduction
+    @items        = Set.new(items) # kernel and closure items
+    @transitions  = Map.new()        # symbol → next state
+    @reductions   = Set.new()        # items that trigger a reduction
     @hasShifts    = false          # if this state has shift actions
     @hasConflicts = false          # has shift/reduce or reduce/reduce conflicts
 
@@ -151,10 +151,10 @@ class Generator
     @optedOutConstructors = []
 
     # Initialize symbol table with special symbols
-    @symbolTable = new Map
-    @symbolTable.set "$accept", new NonTerminal "$accept", 0
-    @symbolTable.set "$end"   , new Terminal    "$end"   , 1
-    @symbolTable.set "error"  , new Terminal    "error"  , 2
+    @symbolTable = Map.new()
+    @symbolTable.set "$accept", NonTerminal.new "$accept", 0
+    @symbolTable.set "$end"   , Terminal.new    "$end"   , 1
+    @symbolTable.set "error"  , Terminal.new    "error"  , 2
 
     # Build parser
     @timing '💥 Total time', =>
@@ -196,7 +196,7 @@ class Generator
     # fail loudly.
     if @unannotatedConstructors.length > 0
       list = @unannotatedConstructors.map((r) -> "  • #{r}").join('\n')
-      throw new Error "annotation coverage: #{@unannotatedConstructors.length} constructor rule(s) lack annotations (annotate, or opt out with '~ reason'):\n#{list}"
+      throw Error.new "annotation coverage: #{@unannotatedConstructors.length} constructor rule(s) lack annotations (annotate, or opt out with '~ reason'):\n#{list}"
 
   _processOperators!: (ops) ->
     for precedence, i in ops
@@ -216,7 +216,7 @@ class Generator
       # Use existing symbol or create a new one
       unless symbol = @symbolTable.get(name)
         id = symbolId++
-        symbol = if grammar[name] then new NonTerminal(name, id) else new Terminal(name, id)
+        symbol = if grammar[name] then NonTerminal.new(name, id) else Terminal.new(name, id)
         @symbolTable.set name, symbol
       @symbolIds[name] = symbol.id
 
@@ -270,13 +270,13 @@ class Generator
         # they require an annotated rule (a node with a semantic kind).
         if annotation? and annotation.trim().startsWith('~')
           reason = annotation.trim()[1..].trim()
-          throw new Error "coverage opt-out for (#{lhs} → #{pattern or 'ε'}) requires a reason: '~ <why>'" unless reason
-          throw new Error "Grammar error in '#{lhs}': pattern label '[#{labels[0].name}]' requires an annotated rule, not a coverage opt-out" if labels.length > 0
+          throw Error.new "coverage opt-out for (#{lhs} → #{pattern or 'ε'}) requires a reason: '~ <why>'" unless reason
+          throw Error.new "Grammar error in '#{lhs}': pattern label '[#{labels[0].name}]' requires an annotated rule, not a coverage opt-out" if labels.length > 0
           @optedOutConstructors.push "#{lhs} → #{pattern or 'ε'} (#{reason})"
         else if annotation?
           @semantics[ruleId] = @_parseAnnotation annotation, action, symbols, lhs, pattern, labels
         else
-          throw new Error "Grammar error in '#{lhs}': pattern label '[#{labels[0].name}]' requires an annotated rule — the label's role records on the rule's node" if labels.length > 0
+          throw Error.new "Grammar error in '#{lhs}': pattern label '[#{labels[0].name}]' requires an annotated rule — the label's role records on the rule's node" if labels.length > 0
           if typeof action is 'string' and @_templateElements(action)?
             @unannotatedConstructors.push "#{lhs} → #{pattern or 'ε'}"
 
@@ -287,7 +287,7 @@ class Generator
           actionGroups[action]?.push(label) or actionGroups[action] = [label]
 
         # Create rule
-        rule = new Rule lhs, symbols, ruleId
+        rule = Rule.new lhs, symbols, ruleId
 
         # Set precedence
         @_assignPrecedence rule, precedence
@@ -319,19 +319,19 @@ class Generator
       options    = null
       for extra in handle[2..] when extra?
         if typeof extra is 'string'
-          throw new Error "Grammar error in '#{lhs}': multiple annotation strings on one rule" if annotation?
+          throw Error.new "Grammar error in '#{lhs}': multiple annotation strings on one rule" if annotation?
           annotation = extra
         else if typeof extra is 'object'
-          throw new Error "Grammar error in '#{lhs}': multiple options objects on one rule" if options?
+          throw Error.new "Grammar error in '#{lhs}': multiple options objects on one rule" if options?
           options = extra
         else
-          throw new Error "Grammar error in '#{lhs}': unexpected rule argument '#{extra}'"
+          throw Error.new "Grammar error in '#{lhs}': unexpected rule argument '#{extra}'"
 
       [symbols, action, annotation, options, labels]
     else
       [symbols, labels] = @_parseLabels handle.trim(), lhs
       if labels.length > 0
-        throw new Error "Grammar error in '#{lhs}': pattern label '[#{labels[0].name}]' requires an annotated rule — the label's role records on the rule's node"
+        throw Error.new "Grammar error in '#{lhs}': pattern label '[#{labels[0].name}]' requires an annotated rule — the label's role records on the rule's node"
       [symbols, null, null, null, []]
 
   # ============================================================================
@@ -356,7 +356,7 @@ class Generator
   # _parseAnnotation, where the template is known.
   _parseLabels: (pattern, lhs) ->
     failLabel = (msg) ->
-      throw new Error "Grammar error in '#{lhs}': #{msg}"
+      throw Error.new "Grammar error in '#{lhs}': #{msg}"
     ident = /^[A-Za-z$][\w$-]*$|^_[\w$-]+$/
     symbols = []
     labels  = []
@@ -476,7 +476,7 @@ class Generator
   _parseAnnotation: (annotation, action, symbols, lhs, pattern, labels = []) ->
     ruleDesc = "#{lhs} → #{pattern or 'ε'}"
     fail = (msg) ->
-      throw new Error "Annotation error (#{ruleDesc}): #{msg}"
+      throw Error.new "Annotation error (#{ruleDesc}): #{msg}"
 
     ident = /^[A-Za-z$][\w$-]*$|^_[\w$-]+$/
 
@@ -507,7 +507,7 @@ class Generator
     # CARRIED position — an element with a tree slot, named in the
     # annotation string — rejects.
     applyLabels = (roles, seen) =>
-      carriedRefs = new Set(el.grammarRef for el in templateRefs)
+      carriedRefs = Set.new(el.grammarRef for el in templateRefs)
       for label in labels
         if carriedRefs.has label.position
           fail "pattern label '[#{label.name}]' sits on '#{symbols[label.position - 1]}' (position #{label.position}), which the template carries — name it in the annotation string"
@@ -519,14 +519,14 @@ class Generator
     unless colon >= 0
       fail "template has #{elements.length} element(s); annotation must be 'kind: part, ...' naming each one" unless elements.length is 0
       roles = []
-      applyLabels roles, new Set
+      applyLabels roles, Set.new()
       return {kind, roles}
 
     parts = annotation[colon + 1..].split(',').map (s) -> s.trim()
     fail "kind-only annotation takes no parts; template has no elements" if elements.length is 0
     fail "template has #{elements.length} element(s) but annotation names #{parts.length} part(s) — every element needs one" unless elements.length is parts.length
 
-    seen = new Set
+    seen = Set.new()
     roles = []
     for el, i in elements
       raw    = parts[i]
@@ -568,7 +568,7 @@ class Generator
   # only they have the literal key, so a null value is never ambiguous
   # with "not literal".
   _literalValue: (t) ->
-    new Function("return (#{t});")()
+    Function.new("return (#{t});")()
 
   # Compile an action template into the JS body of its ruleActions case.
   _compileAction: (action, symbols, lhs, ruleId) ->
@@ -648,20 +648,20 @@ class Generator
 
     for own name, display of @displays
       unless @symbolIds[name]? and not @nonterminals[name]
-        throw new Error "Grammar error: displays['#{name}'] does not name a terminal in the grammar."
+        throw Error.new "Grammar error: displays['#{name}'] does not name a terminal in the grammar."
 
     for own name, id of @symbolIds when id >= 2
       unless @nonterminals[name]
         @tokenNames[id] = @displays[name] ?? name
 
   _augmentGrammar!: (grammar) ->
-    throw new Error "Grammar error: no rules defined." if @rules.length is 0
+    throw Error.new "Grammar error: no rules defined." if @rules.length is 0
 
     @start = grammar.start or @rules[0].lhs
     unless @nonterminals[@start]
-      throw new Error "Grammar error: no start symbol '#{@start}' defined."
+      throw Error.new "Grammar error: no start symbol '#{@start}' defined."
 
-    acceptRule = new Rule "$accept", [@start, "$end"], 0
+    acceptRule = Rule.new "$accept", [@start, "$end"], 0
     @rules.push acceptRule
     @acceptRuleIndex = @rules.length - 1
 
@@ -674,13 +674,13 @@ class Generator
   # ============================================================================
 
   buildLRAutomaton!: ->
-    acceptItem = new Item @rules[@acceptRuleIndex]
-    firstState = @_closure new State(acceptItem)
+    acceptItem = Item.new @rules[@acceptRuleIndex]
+    firstState = @_closure State.new(acceptItem)
     firstState.id = 0
     firstState.signature = "#{acceptItem.rule.id}.#{acceptItem.dot}"
 
     states = [firstState]
-    stateMap = new Map # kernel signature -> state index
+    stateMap = Map.new() # kernel signature -> state index
     stateMap.set firstState.signature, 0
 
     # Build automaton by exploring all transitions
@@ -689,7 +689,7 @@ class Generator
       itemSet = states[marked++]
 
       # Single pass: group items by nextSymbol
-      symbolItems = new Map
+      symbolItems = Map.new()
       for item as itemSet.items when item.nextSymbol and item.nextSymbol isnt '$end'
         items = symbolItems.get(item.nextSymbol)
         unless items
@@ -705,13 +705,13 @@ class Generator
 
   # Compute closure of an LR item set (lookaheads assigned later using FOLLOW sets)
   _closure: (itemSet) ->
-    closureSet = new State
-    workingSet = new Set itemSet.items
-    itemCores  = new Map # item.id -> item
+    closureSet = State.new()
+    workingSet = Set.new itemSet.items
+    itemCores  = Map.new() # item.id -> item
 
     # Process all items
     while workingSet.size > 0
-      newItems = new Set
+      newItems = Set.new()
 
       # Only process item cores we haven't yet seen
       for item as workingSet when !itemCores.has(item.id)
@@ -736,7 +736,7 @@ class Generator
           nt = @nonterminals[nextSymbol]
           for rule in nt.rules
             # Create [B → •γ] with empty lookaheads (filled from FOLLOW sets later)
-            newItem = new Item rule
+            newItem = Item.new rule
             newItems.add(newItem) unless itemCores.has(newItem.id)
 
       workingSet = newItems
@@ -745,11 +745,11 @@ class Generator
 
   # Compute GOTO(state, symbol) - transitions from one state to another
   _goto: (itemSet, symbol) ->
-    gotoSet = new State
+    gotoSet = State.new()
 
     for item as itemSet.items when item.nextSymbol is symbol
       # Create advanced item (lookaheads will be set from FOLLOW sets later)
-      newItem = new Item item.rule, null, item.dot + 1
+      newItem = Item.new item.rule, null, item.dot + 1
       gotoSet.items.add newItem
 
     if gotoSet.items.size is 0 then gotoSet else @_closure gotoSet
@@ -831,13 +831,13 @@ class Generator
         changed = true if nt.firsts.size > oldSize
 
   _computeFirst: (symbols) ->
-    return new Set if symbols is ''
+    return Set.new() if symbols is ''
     return @_computeFirstOfSequence symbols if Array.isArray symbols
-    return new Set([symbols]) unless @nonterminals[symbols]
+    return Set.new([symbols]) unless @nonterminals[symbols]
     @nonterminals[symbols].firsts
 
   _computeFirstOfSequence: (symbols) ->
-    firsts = new Set
+    firsts = Set.new()
     for symbol in symbols
       if @nonterminals[symbol]
         @nonterminals[symbol].firsts.forEach (s) => firsts.add s
@@ -1248,7 +1248,7 @@ class Generator
     # left the EOF state's candidates spent before the buffer's real
     # repair was ever tried (a class-body `def m(` died this way — the
     # deleted OUTDENT was the last consumption the guard ever saw).
-    repairedHere = new Set
+    repairedHere = Set.new()
     # Whether the PARSER has recorded its first rejection (recordFirst).
     # Deliberately separate from the diagnostics array, which the
     # tolerant lexer seeds before the loop starts.
@@ -1260,7 +1260,7 @@ class Generator
     nodes = []
     roles = []
     primitives = []
-    nodeIds = new WeakMap
+    nodeIds = WeakMap.new()
     nextNodeId = 1
 
     lexer = Object.create @lexer
@@ -1482,7 +1482,7 @@ class Generator
                 # Annotated refs address real matched symbols, whose locs
                 # the lexer protocol guarantees; a hole is a protocol
                 # violation, never a position to default.
-                throw new Error "parse: missing loc for grammarRef #{part.grammarRef} of rule #{-action} — lexer protocol violation" unless loc?
+                throw Error.new "parse: missing loc for grammarRef #{part.grammarRef} of rule #{-action} — lexer protocol violation" unless loc?
                 row = {nodeId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: loc.start, sourceEnd: loc.end, childNodeId: null, fileId: 0}
                 if part.spread
                   # Spread span covers the spliced children's full extent
@@ -1634,13 +1634,13 @@ if isRunAsScript
       else if grammarFile.endsWith('.json')
         JSON.parse fs.readFileSync(grammarFile, 'utf8')
       else
-        throw new Error "Unsupported format. Use .js, .ts, .json, or .rip"
+        throw Error.new "Unsupported format. Use .js, .ts, .json, or .rip"
 
       unless grammar
-        throw new Error "Failed to load grammar"
+        throw Error.new "Failed to load grammar"
 
       # Generate parser
-      generator = new Generator grammar, {...options, verbose: true}
+      generator = Generator.new grammar, {...options, verbose: true}
 
       if options.info
         showStats generator

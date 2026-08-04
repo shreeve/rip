@@ -4,10 +4,10 @@ VALID_ELEMENT_NAME =! /^(?:__root|[A-Za-z][A-Za-z0-9:_-]*)$/
 VALID_ATTRIBUTE_NAME =! /^[^\s"'/>=]+$/
 
 validateInsertion = (parent: Node, child: Node) ->
-  throw new Error 'email DOM cannot insert a node into itself' if child is parent
+  throw Error.new 'email DOM cannot insert a node into itself' if child is parent
   cursor: Node | null = parent
   while cursor
-    throw new Error 'email DOM cannot insert an ancestor into its descendant' if cursor is child
+    throw Error.new 'email DOM cannot insert an ancestor into its descendant' if cursor is child
     cursor = cursor.parentNode
 
 export class Node
@@ -36,7 +36,7 @@ export class Node
   insertBefore: (child: Node, reference: Node | null): Node ->
     return @appendChild(child) unless reference
     unless reference.parentNode is this
-      throw new Error 'email DOM insertBefore reference is not a child of this node'
+      throw Error.new 'email DOM insertBefore reference is not a child of this node'
     return child if child is reference
     validateInsertion this, child
     if child instanceof Fragment
@@ -47,7 +47,7 @@ export class Node
     child.remove() if child.parentNode
     index = @childNodes.indexOf reference
     unless index >= 0
-      throw new Error 'email DOM insertBefore reference is not a child of this node'
+      throw Error.new 'email DOM insertBefore reference is not a child of this node'
 
     previous = reference._previous
     previous._next = child if previous
@@ -103,17 +103,17 @@ Object.defineProperty Node.prototype, 'textContent',
 export class Element extends Node
   nodeType: number = 1
   tag: string = ''
-  attributes: Map<string, string> = new Map()
+  attributes: Map<string, string> = Map.new()
   style: Record<string, any> = {}
   _innerHTML: string | null = null
 
   constructor: (tag: string) ->
     super()
-    throw new Error "email DOM invalid element name '#{tag}'" unless VALID_ELEMENT_NAME.test tag
+    throw Error.new "email DOM invalid element name '#{tag}'" unless VALID_ELEMENT_NAME.test tag
     @tag = tag
 
   setAttribute!: (key: string, value: any) ->
-    throw new Error "email DOM invalid attribute name '#{key}'" unless VALID_ATTRIBUTE_NAME.test key
+    throw Error.new "email DOM invalid attribute name '#{key}'" unless VALID_ATTRIBUTE_NAME.test key
     if value is null or value is undefined or value is false
       @removeAttribute key
       return
@@ -245,16 +245,16 @@ export class Document
   createComment: (value: any): Comment -> Comment.new String(value)
   createDocumentFragment: (): Fragment -> Fragment.new()
 
-VOID_TAGS: Set<string> =! new Set %w[area base br col embed hr img input link meta source track wbr]
-BOOLEAN_ATTRIBUTES: Set<string> =! new Set [
+VOID_TAGS: Set<string> =! Set.new %w[area base br col embed hr img input link meta source track wbr]
+BOOLEAN_ATTRIBUTES: Set<string> =! Set.new [
   'allowfullscreen', 'async', 'autofocus', 'autoplay', 'checked', 'controls',
   'default', 'defer', 'disabled', 'formnovalidate', 'hidden', 'inert', 'ismap',
   'itemscope', 'loop', 'multiple', 'muted', 'nomodule', 'novalidate', 'open',
   'playsinline', 'readonly', 'required', 'reversed', 'selected'
 ]
-BLOCK_TAGS: Set<string> =! new Set %w[p div td li dt dd blockquote figcaption address]
-HEADING_TAGS: Set<string> =! new Set %w[h1 h2 h3 h4 h5 h6]
-SKIP_TEXT_TAGS: Set<string> =! new Set %w[style script head]
+BLOCK_TAGS: Set<string> =! Set.new %w[p div td li dt dd blockquote figcaption address]
+HEADING_TAGS: Set<string> =! Set.new %w[h1 h2 h3 h4 h5 h6]
+SKIP_TEXT_TAGS: Set<string> =! Set.new %w[style script head]
 
 escapeText = (value: any): string ->
   String(value)
@@ -302,7 +302,7 @@ export serialize = (node: Node): string ->
   if node instanceof Comment
     return '' if node.data is '' or node.data is 'if' or node.data is 'for' or node.data is 'unknown'
     if node.data.includes('--') or node.data.endsWith('-')
-      throw new Error 'email DOM invalid comment data — comments cannot contain "--" or end with "-"'
+      throw Error.new 'email DOM invalid comment data — comments cannot contain "--" or end with "-"'
     return "<!--#{node.data}-->"
 
   return serializeChildren(node) if node instanceof Fragment
@@ -311,8 +311,8 @@ export serialize = (node: Node): string ->
     return serializeChildren(node) if node.tag is '__root'
     attributes = serializeAttributes node
     if VOID_TAGS.has node.tag
-      throw new Error "email DOM void element '#{node.tag}' cannot have innerHTML" if node._innerHTML?
-      throw new Error "email DOM void element '#{node.tag}' cannot contain children" if node.childNodes.length
+      throw Error.new "email DOM void element '#{node.tag}' cannot have innerHTML" if node._innerHTML?
+      throw Error.new "email DOM void element '#{node.tag}' cannot contain children" if node.childNodes.length
       return "<#{node.tag}#{attributes} />"
     return "<#{node.tag}#{attributes}>#{node._innerHTML}</#{node.tag}>" if node._innerHTML?
     return "<#{node.tag}#{attributes}>#{serializeChildren(node)}</#{node.tag}>"

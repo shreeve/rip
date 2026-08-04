@@ -1,7 +1,7 @@
 # 13-components.rip — the component vocabulary: definition, typed props, render, binds, events, refs, keys, slot, gates, offer/accept.
 
 # ── Definition + typed props + render structure ──
-# The TSX twin covers the JSX-analogous surface only (ROADMAP.md, Oracles); gates, offer/accept, and the `<=>` channel have no honest TSX spelling and are absent from it.
+# The TSX twin covers the JSX-analogous surface only (CORPUS.md, Oracles); gates, offer/accept, and the `<=>` channel have no honest TSX spelling and are absent from it.
 
 export Badge = component
   @label: string

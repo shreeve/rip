@@ -51,6 +51,11 @@ test "control flow, declarations, and word operators", ->
   ok hl('class Foo extends Bar').includes span('keyword', 'class')
   ok hl('User = schema :model').includes span('keyword', 'schema')
 
+test "inline try/finally keeps both clause words as control keywords", ->
+  out = hl 'try fsyncSync(directory) finally closeSync(directory)'
+  ok out.includes span('keyword', 'try')
+  ok out.includes span('keyword', 'finally')
+
 test "def highlights with its function name", ->
   out = hl 'def greet(name)\n  name\n'
   ok out.includes span('keyword', 'def')
@@ -135,6 +140,10 @@ test "reactive and assignment operators", ->
 test "two-way bind and dammit", ->
   ok hl('value <=> name').includes span('operator', '&lt;=&gt;')
   ok hl('fetchData!').includes span('operator', '!')
+
+test "Houdini and maybe dammit each highlight ?! as one operator", ->
+  out = hl 'present = value?!\nempty = callback?!()\nresult = callback?! arg'
+  eq out.match(/<span class="hljs-operator">\?!<\/span>/g).length, 3
 
 test "map literal sigil highlights and boosts auto-detection", ->
   ok hl('m = *{a: 1}').includes span('operator', '*') + '{'

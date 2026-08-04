@@ -38,13 +38,13 @@ describe('createModuleLoader', () => {
   test('loads a module graph with relative imports and shared instances', async () => {
     const loader = createModuleLoader({
       components: registryOf({
-        'app/util.rip': 'export tally = { count: 0 }\nexport bump = -> tally.count += 1',
-        'app/routes/a.rip': "import { bump } from '../util.rip'\nbump()\nexport A = 1",
-        'app/routes/b.rip': "import { bump, tally } from '../util.rip'\nbump()\nexport total = -> tally.count",
+        'util.rip': 'export tally = { count: 0 }\nexport bump = -> tally.count += 1',
+        'routes/a.rip': "import { bump } from '../util.rip'\nbump()\nexport A = 1",
+        'routes/b.rip': "import { bump, tally } from '../util.rip'\nbump()\nexport total = -> tally.count",
       }),
     });
-    await loader.import('app/routes/a.rip');
-    const b = await loader.import('app/routes/b.rip');
+    await loader.import('routes/a.rip');
+    const b = await loader.import('routes/b.rip');
     expect(b.total()).toBe(2);
   });
 
@@ -52,11 +52,11 @@ describe('createModuleLoader', () => {
     const loader = createModuleLoader({
       components: registryOf({
         '@rip-lang/demo/index.rip': 'export greet = (name) -> "hi #{name}"',
-        'app/routes/page.rip': "import { greet } from '@rip-lang/demo'\nexport message = greet 'rip'",
+        'routes/page.rip': "import { greet } from '@rip-lang/demo'\nexport message = greet 'rip'",
       }),
       packages: { '@rip-lang/demo': { root: '@rip-lang/demo', entry: 'index.rip' } },
     });
-    const page = await loader.import('app/routes/page.rip');
+    const page = await loader.import('routes/page.rip');
     expect(page.message).toBe('hi rip');
   });
 
@@ -77,59 +77,59 @@ describe('createModuleLoader', () => {
   test('unknown bare and server-only imports reject naming the importer', async () => {
     const loader = createModuleLoader({
       components: registryOf({
-        'app/routes/bad.rip': "import { x } from 'left-pad'",
-        'app/routes/worse.rip': "import { readFileSync } from 'node:fs'",
-        'app/routes/missing.rip': "import { y } from '@rip-lang/nope'",
+        'routes/bad.rip': "import { x } from 'left-pad'",
+        'routes/worse.rip': "import { readFileSync } from 'node:fs'",
+        'routes/missing.rip': "import { y } from '@rip-lang/nope'",
       }),
     });
-    await expect(loader.import('app/routes/bad.rip')).rejects.toThrow(/'app\/routes\/bad.rip' imports 'left-pad'/);
-    await expect(loader.import('app/routes/worse.rip')).rejects.toThrow(/never travel to the browser/);
-    await expect(loader.import('app/routes/missing.rip')).rejects.toThrow(/no such package/);
+    await expect(loader.import('routes/bad.rip')).rejects.toThrow(/'routes\/bad.rip' imports 'left-pad'/);
+    await expect(loader.import('routes/worse.rip')).rejects.toThrow(/never travel to the browser/);
+    await expect(loader.import('routes/missing.rip')).rejects.toThrow(/no such package/);
   });
 
   test('a missing relative module and an import cycle reject loudly', async () => {
     const loader = createModuleLoader({
       components: registryOf({
-        'app/routes/a.rip': "import { b } from './b.rip'\nexport a = 1",
-        'app/routes/b.rip': "import { a } from './a.rip'\nexport b = 2",
-        'app/routes/lost.rip': "import { gone } from './gone.rip'",
+        'routes/a.rip': "import { b } from './b.rip'\nexport a = 1",
+        'routes/b.rip': "import { a } from './a.rip'\nexport b = 2",
+        'routes/lost.rip': "import { gone } from './gone.rip'",
       }),
     });
-    await expect(loader.import('app/routes/lost.rip')).rejects.toThrow(/not in the bundle/);
-    await expect(loader.import('app/routes/a.rip')).rejects.toThrow(/cycle/);
+    await expect(loader.import('routes/lost.rip')).rejects.toThrow(/not in the bundle/);
+    await expect(loader.import('routes/a.rip')).rejects.toThrow(/cycle/);
   });
 
   test('loaded namespaces land in the registry for the renderer', async () => {
-    const registry = registryOf({ 'app/routes/page.rip': 'export Page = 42' });
+    const registry = registryOf({ 'routes/page.rip': 'export Page = 42' });
     const loader = createModuleLoader({ components: registry });
-    await loader.import('app/routes/page.rip');
-    expect(registry.getCompiled('app/routes/page.rip').Page).toBe(42);
+    await loader.import('routes/page.rip');
+    expect(registry.getCompiled('routes/page.rip').Page).toBe(42);
   });
 
   test('invalidation is transitive through importers', async () => {
     const registry = registryOf({
-      'app/util.rip': "export tag = 'one'",
-      'app/routes/page.rip': "import { tag } from '../util.rip'\nexport Page = -> tag",
+      'util.rip': "export tag = 'one'",
+      'routes/page.rip': "import { tag } from '../util.rip'\nexport Page = -> tag",
     });
     const loader = createModuleLoader({ components: registry });
-    const first = await loader.import('app/routes/page.rip');
+    const first = await loader.import('routes/page.rip');
     expect(first.Page()).toBe('one');
-    registry.write('app/util.rip', "export tag = 'two'");
-    loader.invalidate('app/util.rip');
-    const second = await loader.import('app/routes/page.rip');
+    registry.write('util.rip', "export tag = 'two'");
+    loader.invalidate('util.rip');
+    const second = await loader.import('routes/page.rip');
     expect(second.Page()).toBe('two');
-    expect(registry.getCompiled('app/routes/page.rip').Page()).toBe('two');
+    expect(registry.getCompiled('routes/page.rip').Page()).toBe('two');
   });
 
   test('a debug loader appends inline source maps without disturbing the module', async () => {
     const loader = createModuleLoader({
       components: registryOf({
-        'app/util.rip': 'export base = 2',
-        'app/routes/page.rip': "import { base } from '../util.rip'\nexport Page = base + 40",
+        'util.rip': 'export base = 2',
+        'routes/page.rip': "import { base } from '../util.rip'\nexport Page = base + 40",
       }),
       debug: true,
     });
-    const page = await loader.import('app/routes/page.rip');
+    const page = await loader.import('routes/page.rip');
     expect(page.Page).toBe(42);
   });
 });
@@ -138,7 +138,7 @@ describe('assembleBundle', () => {
   test('collects browser-safe packages and rejects the rest', () => {
     const bundle = assembleBundle({
       modules: {
-        'app/routes/index.rip': "import { check } from '@rip-lang/validate'\nexport ok = check('a@b.co', 'email')",
+        'routes/index.rip': "import { check } from '@rip-lang/validate'\nexport ok = check('a@b.co', 'email')",
       },
       packagesDir: resolve(root, 'packages'),
     });
@@ -147,11 +147,11 @@ describe('assembleBundle', () => {
     // Runnable verb files (root test.rip etc.) are dev-only, never bundled.
     expect(bundle.modules['@rip-lang/validate/test.rip']).toBeUndefined();
     expect(() => assembleBundle({
-      modules: { 'app/routes/index.rip': "import { x } from '@rip-lang/nope'" },
+      modules: { 'routes/index.rip': "import { x } from '@rip-lang/nope'" },
       packagesDir: resolve(root, 'packages'),
     })).toThrow(/not a known package/);
     expect(() => assembleBundle({
-      modules: { 'app/routes/index.rip': "import { s } from 'node:fs'" },
+      modules: { 'routes/index.rip': "import { s } from 'node:fs'" },
       packagesDir: resolve(root, 'packages'),
     })).toThrow(/stay on the server/);
   });
@@ -171,7 +171,7 @@ describe('assembleBundle', () => {
         writeFileSync(join(dir, name, 'index.rip'), 'export ok = 1');
       }
       expect(() => assembleBundle({
-        modules: { 'app/routes/index.rip': "import { x } from '@rip-lang/serveronly'" },
+        modules: { 'routes/index.rip': "import { x } from '@rip-lang/serveronly'" },
         packagesDir: dir,
       })).toThrow(/'@rip-lang\/serveronly', which does not declare browser safety/);
     } finally {
@@ -179,10 +179,17 @@ describe('assembleBundle', () => {
     }
   });
 
+  test('a root-relative App id cannot collide with a browser package module', () => {
+    expect(() => assembleBundle({
+      modules: { '@rip-lang/app/index.rip': 'export page = 1' },
+      packagesDir: resolve(root, 'packages'),
+    })).toThrow(/App module '@rip-lang\/app\/index.rip' collides with browser package '@rip-lang\/app'/);
+  });
+
   test('end to end: assembled validate package loads in the browser graph', async () => {
     const bundle = assembleBundle({
       modules: {
-        'app/routes/page.rip': "import { check } from '@rip-lang/validate'\nexport ok = check('2024-02-29', 'date')",
+        'routes/page.rip': "import { check } from '@rip-lang/validate'\nexport ok = check('2024-02-29', 'date')",
       },
       packagesDir: resolve(root, 'packages'),
     });
@@ -190,7 +197,7 @@ describe('assembleBundle', () => {
       components: registryOf(bundle.modules),
       packages: bundle.packages,
     });
-    const page = await loader.import('app/routes/page.rip');
+    const page = await loader.import('routes/page.rip');
     expect(page.ok).toBe('2024-02-29');
   });
 });
@@ -199,12 +206,12 @@ describe('package graph reconciliation', () => {
   test('concurrent imports of a shared dependency never read as a cycle', async () => {
     const loader = createModuleLoader({
       components: registryOf({
-        'app/shared.rip': 'export hits = { n: 0 }\nhits.n += 1',
-        'app/routes/a.rip': "import { hits } from '../shared.rip'\nexport a = -> hits.n",
-        'app/routes/b.rip': "import { hits } from '../shared.rip'\nexport b = -> hits.n",
+        'shared.rip': 'export hits = { n: 0 }\nhits.n += 1',
+        'routes/a.rip': "import { hits } from '../shared.rip'\nexport a = -> hits.n",
+        'routes/b.rip': "import { hits } from '../shared.rip'\nexport b = -> hits.n",
       }),
     });
-    const [a, b] = await Promise.all([loader.import('app/routes/a.rip'), loader.import('app/routes/b.rip')]);
+    const [a, b] = await Promise.all([loader.import('routes/a.rip'), loader.import('routes/b.rip')]);
     expect(a.a()).toBe(1);
     expect(b.b()).toBe(1);
   });
@@ -214,21 +221,21 @@ describe('package graph reconciliation', () => {
       components: registryOf({
         '@rip-lang/demo/util.rip': 'export u = 1',
         '@rip-lang/demo/deep.rip': 'export d = 2',
-        'app/routes/p.rip': "import { u } from '@rip-lang/demo/util.rip'\nimport { d } from '@rip-lang/demo/tools'\nexport sum = u + d",
+        'routes/p.rip': "import { u } from '@rip-lang/demo/util.rip'\nimport { d } from '@rip-lang/demo/tools'\nexport sum = u + d",
       }),
       packages: {
         '@rip-lang/demo': { root: '@rip-lang/demo', entry: 'index.rip', exports: { './tools': 'deep.rip' } },
       },
     });
-    const page = await loader.import('app/routes/p.rip');
+    const page = await loader.import('routes/p.rip');
     expect(page.sum).toBe(3);
   });
 
   test('multi-span splicing: delivery imports and user imports in one module', async () => {
     const loader = createModuleLoader({
       components: registryOf({
-        'app/base.rip': 'export base = 2',
-        'app/routes/heavy.rip': [
+        'base.rip': 'export base = 2',
+        'routes/heavy.rip': [
           "import { base } from '../base.rip'",
           'count := base * 10',
           'double ~= count * 2',
@@ -237,30 +244,30 @@ describe('package graph reconciliation', () => {
         ].join('\n'),
       }),
     });
-    const heavy = await loader.import('app/routes/heavy.rip');
+    const heavy = await loader.import('routes/heavy.rip');
     expect(heavy.read()).toEqual({ doubled: 40, parsed: 1 });
   });
 
   test('traversal and extensionless imports reject with the importer voiced', async () => {
     const loader = createModuleLoader({
       components: registryOf({
-        'app/routes/t.rip': "import { s } from '@rip-lang/demo/../../secret.rip'",
-        'app/routes/e.rip': "import { x } from './x'",
-        'app/routes/x.rip': 'export x = 1',
+        'routes/t.rip': "import { s } from '@rip-lang/demo/../../secret.rip'",
+        'routes/e.rip': "import { x } from './x'",
+        'routes/x.rip': 'export x = 1',
       }),
     });
-    await expect(loader.import('app/routes/t.rip')).rejects.toThrow(/'app\/routes\/t.rip' imports/);
-    await expect(loader.import('app/routes/e.rip')).rejects.toThrow(/did you mean '\.\/x\.rip'/);
+    await expect(loader.import('routes/t.rip')).rejects.toThrow(/'routes\/t.rip' imports/);
+    await expect(loader.import('routes/e.rip')).rejects.toThrow(/did you mean '\.\/x\.rip'/);
   });
 
   test('a :model schema rejects at assembly, named honestly', () => {
     expect(() => assembleBundle({
-      modules: { 'app/routes/m.rip': 'U = schema :model\n  name! string' },
+      modules: { 'routes/m.rip': 'U = schema :model\n  name! string' },
       packagesDir: resolve(root, 'packages'),
     })).toThrow(/persistence is server-only/);
   });
 
-  test('cross-boundary Public projections overlay at the natural path', () => {
+  test('cross-boundary Public projections resolve through the hidden physical App mount', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'rip-proj-'));
     try {
       mkdirSync(join(dir, 'app'));
@@ -277,16 +284,22 @@ export UserPublic = User.pick("id", "firstName")
       const typesPath = join(dir, 'app', 'types.rip');
       const typesSrc = readFileSync(typesPath, 'utf8');
       const bundle = assembleBundle({
-        modules: { 'app/types.rip': typesSrc },
-        moduleFiles: { 'app/types.rip': typesPath },
+        modules: { 'types.rip': typesSrc },
+        moduleFiles: { 'types.rip': typesPath },
         appDir: dir,
         packagesDir: resolve(root, 'packages'),
       });
       expect(bundle.modules['api/models.rip']).toMatch(/export UserPublic = __schema/);
       expect(bundle.modules['api/models.rip']).not.toMatch(/kind:\s*"model"/);
-      // Author spelling stays — relative join lands on the overlay.
-      expect(bundle.modules['app/types.rip']).toBe(typesSrc);
-      expect(bundle.modules['app/types.rip']).toContain("from '../api/models.rip'");
+      // Author spelling stays while every public App identity is root-relative.
+      expect(bundle.modules['types.rip']).toBe(typesSrc);
+      expect(bundle.modules['types.rip']).toContain("from '../api/models.rip'");
+      const loader = createModuleLoader({
+        components: registryOf(bundle.modules),
+        packages: bundle.packages,
+      });
+      const types = await loader.import('types.rip');
+      expect(types.User).toBeDefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -301,8 +314,8 @@ export UserPublic = User.pick("id", "firstName")
       const typesPath = join(dir, 'app', 'types.rip');
       writeFileSync(typesPath, "export { User } from '../api/models.rip'\n");
       expect(() => assembleBundle({
-        modules: { 'app/types.rip': readFileSync(typesPath, 'utf8') },
-        moduleFiles: { 'app/types.rip': typesPath },
+        modules: { 'types.rip': readFileSync(typesPath, 'utf8') },
+        moduleFiles: { 'types.rip': typesPath },
         appDir: dir,
         packagesDir: resolve(root, 'packages'),
       })).toThrow(/:model/);
@@ -329,7 +342,7 @@ export UserPublic = User.pick("id", "firstName")
       }
       writeFileSync(join(dir, 'demo', 'deep.rip'), 'export d = 2');
       const bundle = assembleBundle({
-        modules: { 'app/routes/p.rip': "import { d } from '@rip-lang/demo/tools'" },
+        modules: { 'routes/p.rip': "import { d } from '@rip-lang/demo/tools'" },
         packagesDir: dir,
       });
       expect(bundle.packages['@rip-lang/demo'].exports['./tools']).toBe('deep.rip');

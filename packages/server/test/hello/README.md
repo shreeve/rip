@@ -1,4 +1,4 @@
-# hello-app
+# hello
 
 Minimal browser-App-only shape:
 
@@ -13,14 +13,18 @@ Janus serves every public byte.
 
 ## Publication checklist
 
-- One filesystem walk reads every `app/**/*.{rip,css,html}` member once into
-  an ephemeral in-memory snapshot.
-- Each entry receives one six-character content rash. The existing wire field
-  remains `hash`; its value is that rash.
-- Entries sort by `id`. The bag rash is
+- Initial publication and ambiguous directory events walk every member selected
+  by `serve.rip` `app.manifest` into an ephemeral in-memory snapshot. Ordinary
+  file events reread and rehash only the exact watcher-reported ids. The
+  conventional policy selects `app/**/*.{rip,css,html}`. Each id is relative
+  to the App root, so the disk file `app/routes/index.rip` is
+  `routes/index.rip` in the bundle, manifest, ding, and Workspace.
+- Each entry receives one six-character content rash. The wire field is
+  `hash`; its value is that rash.
+- Entries sort by `id`. The App check is
   `rash(JSON.stringify(entries.map(({id, hash}) => [id, hash])))`.
 - `bundle.json` and `manifest.json` enumerate the same complete inventory and
-  carry the same top-level `rash`.
+  carry the same top-level `check`.
 - The bundle retains the browser's `modules` and `packages` boot ABI and carries
   selected content, initially every `.rip` source. The manifest carries no file
   content.
@@ -31,5 +35,5 @@ Janus serves every public byte.
   commits the bundle first and the manifest second using atomic renames.
 - Unchanged bytes are not rewritten. The manager retains committed metadata,
   not a permanent in-memory copy of App source.
-- The shared rash is App identity. Janus independently supplies each file's
-  weak mtime/size ETag and conditional HTTP behavior.
+- The shared check is App inventory identity. Janus independently supplies
+  each file's weak mtime/size ETag and conditional HTTP behavior.

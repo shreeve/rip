@@ -13,18 +13,18 @@ import { registerEmailTailwindRoot } from '../tailwind/tailwind.rip'
 safeCssString = (value: unknown, name: string): string ->
   text = String value
   if /[<>'"\\\r\n]/.test text
-    throw new Error "email Font received unsafe #{name}"
+    throw Error.new "email Font received unsafe #{name}"
   text
 
 safeCssIdentifier = (value: unknown, name: string): string ->
   text = String value
   unless /^[A-Za-z0-9_-]+$/.test text
-    throw new Error "email Font received unsafe #{name}"
+    throw Error.new "email Font received unsafe #{name}"
   text
 
 safeFontWeight = (value: unknown): number ->
   unless typeof value is 'number' and Number.isFinite(value) and 1 <= value <= 1000
-    throw new Error 'email Font received invalid fontWeight'
+    throw Error.new 'email Font received invalid fontWeight'
   value
 
 unsafeUrlText = (value: string): boolean ->

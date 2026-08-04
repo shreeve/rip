@@ -9,11 +9,12 @@ import { createWorkspace } from '../workspace.rip'
 import * as mod from '../workspace.rip'
 import { connectFeed } from '../feed.rip'
 import * as feedMod from '../feed.rip'
-import { rash } from '../rash.rip'
+import { rash, check } from '../rash.rip'
 import { readFileSync } from 'fs'
 
-bytes = (s) -> new TextEncoder().encode s
+bytes = (s) -> TextEncoder.new().encode s
 srcHash = (s) -> rash bytes(s)
+manifest = (files) -> JSON.stringify { check: check(files), files }
 
 SRC_APP = 'export App = component'
 SRC_HI  = 'export Hi = component'
@@ -60,8 +61,12 @@ test "rash accepts byte views and rejects text", ->
   data = bytes 'abc'
   eq rash(data), 'ungWv4'
   eq rash(data.buffer), 'ungWv4'
-  eq rash(new DataView(data.buffer)), 'ungWv4'
+  eq rash(DataView.new(data.buffer)), 'ungWv4'
   throws (-> rash('abc')), 'expects bytes'
+
+test "check hashes the deterministic sorted inventory representation", ->
+  files = [{ id: 'a.rip', hash: 'AAAAAA' }, { id: 'styles.css', hash: 'BBBBBB' }]
+  eq check(files), rash(bytes(JSON.stringify([['a.rip', 'AAAAAA'], ['styles.css', 'BBBBBB']])))
 
 # ==[ Store view: ComponentsStore parity ]==
 
@@ -85,15 +90,15 @@ test "rejects malformed and directory-shaped component paths", ->
 
 test "accepts CSS bag paths (S12 soft-apply sheets)", ->
   ws = createWorkspace()
-  ws.write 'app/styles.css', ':root { --x: 1 }'
-  eq ws.read('app/styles.css'), ':root { --x: 1 }'
-  eq ws.exists('app/styles.css'), true
+  ws.write 'styles.css', ':root { --x: 1 }'
+  eq ws.read('styles.css'), ':root { --x: 1 }'
+  eq ws.exists('styles.css'), true
 
 test "accepts HTML bag paths (shell reload)", ->
   ws = createWorkspace()
-  ws.write 'app/index.html', '<!doctype html><title>x</title>'
-  eq ws.read('app/index.html'), '<!doctype html><title>x</title>'
-  eq ws.exists('app/index.html'), true
+  ws.write 'index.html', '<!doctype html><title>x</title>'
+  eq ws.read('index.html'), '<!doctype html><title>x</title>'
+  eq ws.exists('index.html'), true
 
 test "rejects non-string paths and content", ->
   ws = createWorkspace()
@@ -182,7 +187,7 @@ test "a throwing watcher never silences the rest", ->
   original = console.error
   console.error = ->
   try
-    ws.watch -> throw new Error 'boom'
+    ws.watch -> throw Error.new 'boom'
     ws.watch (event, path) -> seen.push [event, path]
     ws.write 'a.rip', 'x'
   finally
@@ -222,6 +227,16 @@ test "populate carries compiled passports", ->
   module = { App: {} }
   ws.populate [{ id: 'c1', path: 'app.rip', hash: srcHash('src'), source: 'src', compiled: module }]
   ok ws.getCompiled('app.rip') is module
+
+test "populate admits identity-only CSS and HTML passports but Rip requires source", ->
+  ws = createWorkspace()
+  ws.populate [
+    { id: 'styles.css', path: 'styles.css', hash: srcHash('css') }
+    { id: 'index.html', path: 'index.html', hash: srcHash('html') }
+  ]
+  eq ws.passport('styles.css').source, undefined
+  eq ws.passport('index.html').source, undefined
+  throws (-> createWorkspace().populate([{ id: 'app.rip', path: 'app.rip', hash: srcHash('rip') }])), 'requires source'
 
 test "populate is birth: a second populate rejects", ->
   { ws } = seeded()
@@ -474,8 +489,8 @@ console.log "\nFeed"
 # Two macrotask turns flush every microtask chain a ding apply spawns
 # (fetch → text → set).
 settle = ->
-  await new Promise (resolve) -> setTimeout resolve, 0
-  await new Promise (resolve) -> setTimeout resolve, 0
+  Promise.new! (resolve) -> setTimeout resolve, 0
+  Promise.new! (resolve) -> setTimeout resolve, 0
   return
 
 # A socket factory whose sockets are driven by hand: tests fire onopen /
@@ -511,7 +526,7 @@ fakeFetch = (routes) ->
     calls.push url
     requests.push { url, opts }
     body = routes[url]
-    body = await body() if typeof body is 'function'
+    body = body! if typeof body is 'function'
     if body isnt undefined
       encoded = bytes body
       {
@@ -521,10 +536,10 @@ fakeFetch = (routes) ->
         json: (-> JSON.parse(body))
       }
     else
-      { ok: false, status: 404, arrayBuffer: (-> new ArrayBuffer(0)), json: (-> null) }
+      { ok: false, status: 404, arrayBuffer: (-> ArrayBuffer.new(0)), json: (-> null) }
   { fn, calls, requests }
 
-emptyManifest = JSON.stringify { files: [] }
+emptyManifest = manifest []
 
 openFeed = (ws, routes, extra = {}) ->
   { fn, calls, requests } = fakeFetch routes
@@ -549,21 +564,21 @@ test "connectFeed validates its workspace and rejects a sealed one", ->
 
 test! "a ding fetches the module and mutates the passport", ->
   ws = createWorkspace()
-  ws.populate [{ id: 'app/routes/index.rip', path: 'app/routes/index.rip', hash: srcHash('v1'), source: 'v1' }]
+  ws.populate [{ id: 'routes/index.rip', path: 'routes/index.rip', hash: srcHash('v1'), source: 'v1' }]
   v2hash = srcHash('v2')
   { feed, calls, requests, sockets, reports } = openFeed ws,
-    '/manifest.json': JSON.stringify { files: [{ id: 'app/routes/index.rip', hash: srcHash('v1') }] }
+    '/manifest.json': manifest [{ id: 'routes/index.rip', hash: srcHash('v1') }]
     '/routes/index.rip': 'v2'
   s = sockets[0]
   eq s.url, 'ws://test/hub'
   s.onopen()
-  await settle()
+  settle!
   ok feed.connected()
   eq s.sent, [JSON.stringify { '+': ['/hub'] }]
-  s.onmessage { data: JSON.stringify { ding: { id: 'app/routes/index.rip', hash: v2hash } } }
-  await settle()
-  eq ws.passport('app/routes/index.rip').hash, v2hash
-  eq ws.read('app/routes/index.rip'), 'v2'
+  s.onmessage { data: JSON.stringify { ding: { id: 'routes/index.rip', hash: v2hash } } }
+  settle!
+  eq ws.passport('routes/index.rip').hash, v2hash
+  eq ws.read('routes/index.rip'), 'v2'
   ok calls.includes('/routes/index.rip')
   eq requests.find((r) -> r.url is '/routes/index.rip').opts.cache, 'no-store'
   eq requests.find((r) -> r.url is '/manifest.json').opts.cache, 'no-cache'
@@ -575,13 +590,13 @@ test! "a ding and a manifest entry fetch plain module URLs", ->
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', hash: srcHash('v1'), source: 'v1' }]
   { feed, calls, sockets } = openFeed ws,
-    '/manifest.json': JSON.stringify { files: [{ id: 'b.rip', hash: srcHash('bb') }] }
+    '/manifest.json': manifest [{ id: 'b.rip', hash: srcHash('bb') }]
     '/a.rip': 'v2'
     '/b.rip': 'bb'
   sockets[0].onopen()
-  await settle()
+  settle!
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', hash: srcHash('v2') } } }
-  await settle()
+  settle!
   eq ws.read('a.rip'), 'v2'
   eq ws.read('b.rip'), 'bb'
   ok calls.includes('/a.rip'), "the ding fetch uses the plain path: #{JSON.stringify calls}"
@@ -594,10 +609,10 @@ test! "a ding whose hash the bag already holds skips the network", ->
   ws.populate [{ id: 'a.rip', path: 'a.rip', hash, source: 'v3' }]
   { feed, calls, sockets } = openFeed ws, { '/manifest.json': emptyManifest }
   sockets[0].onopen()
-  await settle()
+  settle!
   before = calls.length
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', hash } } }
-  await settle()
+  settle!
   eq calls.length, before
   eq ws.passport('a.rip').hash, hash
   feed.close()
@@ -607,32 +622,46 @@ test! "a manifest entry whose hash the bag already holds skips the network", ->
   hash = srcHash('held')
   ws.populate [{ id: 'a.rip', path: 'a.rip', hash, source: 'held' }]
   { feed, calls, sockets } = openFeed ws,
-    { '/manifest.json': JSON.stringify { files: [{ id: 'a.rip', hash }] } }
+    { '/manifest.json': manifest [{ id: 'a.rip', hash }] }
   sockets[0].onopen()
-  await settle()
+  settle!
   eq calls.filter((u) -> u isnt '/manifest.json').length, 0
   eq ws.passport('a.rip').hash, hash
   eq ws.read('a.rip'), 'held'
   feed.close()
 
+test! "a manifest with a mismatched check rejects before applying entries", ->
+  ws = createWorkspace()
+  ws.populate [{ id: 'a.rip', path: 'a.rip', hash: srcHash('v1'), source: 'v1' }]
+  routes =
+    '/manifest.json': JSON.stringify { check: 'AAAAAA', files: [{ id: 'a.rip', hash: srcHash('v2') }] }
+    '/a.rip': 'v2'
+  { feed, calls, sockets, reports } = openFeed ws, routes
+  sockets[0].onopen()
+  settle!
+  eq ws.read('a.rip'), 'v1'
+  eq calls.includes('/a.rip'), false
+  ok reports.some((args) -> String(args[0]).includes('manifest check does not match')), 'the bad check is loud'
+  feed.close()
+
 test! "a want retires only when the manifest MOVES without naming it — retirement needs evidence", ->
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', hash: srcHash('v1'), source: 'v1' }]
-  routes = { '/manifest.json': JSON.stringify { files: [{ id: 'a.rip', hash: srcHash('v1') }] } }
+  routes = { '/manifest.json': manifest [{ id: 'a.rip', hash: srcHash('v1') }] }
   { feed, calls, sockets, reports } = openFeed ws, routes
   sockets[0].onopen()
-  await settle()
+  settle!
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'gone.rip', hash: '222222' } } }
-  await settle()
+  settle!
   ok reports.some((args) -> String(args[0]).includes('module fetch missed')), 'the miss is loud'
   base = calls.filter((u) -> u is '/manifest.json').length
-  await new Promise (resolve) -> setTimeout resolve, 30
+  Promise.new! (resolve) -> setTimeout resolve, 30
   ok calls.filter((u) -> u is '/manifest.json').length > base, 'an unchanged manifest keeps the retry alive'
-  routes['/manifest.json'] = JSON.stringify { files: [{ id: 'a.rip', hash: srcHash('v2') }] }
+  routes['/manifest.json'] = manifest [{ id: 'a.rip', hash: srcHash('v2') }]
   routes['/a.rip'] = 'v2'
-  await new Promise (resolve) -> setTimeout resolve, 30
+  Promise.new! (resolve) -> setTimeout resolve, 30
   polls = calls.filter((u) -> u is '/manifest.json').length
-  await new Promise (resolve) -> setTimeout resolve, 30
+  Promise.new! (resolve) -> setTimeout resolve, 30
   eq calls.filter((u) -> u is '/manifest.json').length, polls, 'the moved manifest retires the want and stops the re-poll'
   eq ws.passport('gone.rip'), undefined
   eq ws.passport('a.rip').hash, srcHash('v2')
@@ -641,16 +670,16 @@ test! "a want retires only when the manifest MOVES without naming it — retirem
 test! "a want for a brand-new id survives a held-back manifest — the direct module retry heals it", ->
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', hash: srcHash('v1'), source: 'v1' }]
-  routes = { '/manifest.json': JSON.stringify { files: [{ id: 'a.rip', hash: srcHash('v1') }] } }
+  routes = { '/manifest.json': manifest [{ id: 'a.rip', hash: srcHash('v1') }] }
   { feed, sockets, reports } = openFeed ws, routes
   sockets[0].onopen()
-  await settle()
+  settle!
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'new.rip', hash: 'feedfa' } } }
-  await settle()
+  settle!
   eq ws.passport('new.rip'), undefined
   ok reports.some((args) -> String(args[0]).includes('module fetch missed')), 'the miss is loud'
   routes['/new.rip'] = 'born'
-  await new Promise (resolve) -> setTimeout resolve, 50
+  Promise.new! (resolve) -> setTimeout resolve, 50
   eq ws.passport('new.rip').hash, srcHash('born')
   eq ws.passport('new.rip').path, 'new.rip'
   eq ws.read('new.rip'), 'born'
@@ -662,10 +691,10 @@ test! "a ding for an unknown id births the passport at its id path", ->
     '/manifest.json': emptyManifest
     '/new.rip': 'fresh'
   sockets[0].onopen()
-  await settle()
-  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'app/new.rip', hash: '111111' } } }
-  await settle()
-  eq ws.passport('app/new.rip'), { id: 'app/new.rip', path: 'app/new.rip', hash: srcHash('fresh'), source: 'fresh', compiled: undefined }
+  settle!
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'new.rip', hash: '111111' } } }
+  settle!
+  eq ws.passport('new.rip'), { id: 'new.rip', path: 'new.rip', hash: srcHash('fresh'), source: 'fresh', compiled: undefined }
   feed.close()
 
 test! "a delete ding removes the passport without a fetch when hash matches", ->
@@ -674,10 +703,10 @@ test! "a delete ding removes the passport without a fetch when hash matches", ->
   ws.populate [{ id: 'a.rip', path: 'a.rip', hash, source: 'v1' }]
   { feed, calls, sockets } = openFeed ws, { '/manifest.json': emptyManifest }
   sockets[0].onopen()
-  await settle()
+  settle!
   before = calls.length
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', hash, kind: 'delete' } } }
-  await settle()
+  settle!
   eq ws.passport('a.rip'), undefined
   eq calls.length, before
   feed.close()
@@ -688,9 +717,9 @@ test! "a delete ding with the wrong hash is ignored", ->
   ws.populate [{ id: 'a.rip', path: 'a.rip', hash, source: 'v1' }]
   { feed, sockets } = openFeed ws, { '/manifest.json': emptyManifest }
   sockets[0].onopen()
-  await settle()
+  settle!
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', hash: '777777', kind: 'delete' } } }
-  await settle()
+  settle!
   eq ws.passport('a.rip').hash, hash
   feed.close()
 
@@ -700,15 +729,15 @@ test! "malformed frames and dings are reported and the feed survives", ->
     '/manifest.json': emptyManifest
     '/ok.rip': 'good'
   sockets[0].onopen()
-  await settle()
+  settle!
   sockets[0].onmessage { data: 'not json' }
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 5 } } }
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip' } } }
-  await settle()
+  settle!
   eq reports.length, 3
   ok reports.some((args) -> String(args[0]).includes('malformed ding')), 'missing hash is loud'
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'ok.rip', hash: '111111' } } }
-  await settle()
+  settle!
   eq ws.read('ok.rip'), 'good'
   feed.close()
 
@@ -719,14 +748,14 @@ test! "an array frame applies every ding object and ignores foreign events", ->
     '/a.rip': 'aa'
     '/b.rip': 'bb'
   sockets[0].onopen()
-  await settle()
+  settle!
   frame = [
     { ding: { id: 'a.rip', hash: '111111' } }
     { chat: 'hello' }
     { ding: { id: 'b.rip', hash: '222222' } }
   ]
   sockets[0].onmessage { data: JSON.stringify frame }
-  await settle()
+  settle!
   eq ws.read('a.rip'), 'aa'
   eq ws.read('b.rip'), 'bb'
   feed.close()
@@ -736,15 +765,15 @@ test! "a module miss resyncs from the manifest, which never deletes local mints"
   ws.populate [{ id: 'a.rip', path: 'a.rip', hash: srcHash('v1'), source: 'v1' }]
   ws.write 'local.rip', 'mine'
   routes =
-    '/manifest.json': JSON.stringify { files: [{ id: 'a.rip', hash: '444444' }] }
+    '/manifest.json': manifest [{ id: 'a.rip', hash: '444444' }]
     '/a.rip': 'v4'
   { feed, sockets, reports } = openFeed ws, routes
   sockets[0].onopen()
-  await settle()
+  settle!
   eq ws.passport('a.rip').hash, srcHash('v4')
   delete routes['/a.rip']
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', hash: '999999' } } }
-  await settle()
+  settle!
   eq ws.passport('a.rip').hash, srcHash('v4')
   eq ws.read('local.rip'), 'mine'
   ok reports.some (args) -> String(args[0]).includes('module fetch missed')
@@ -752,17 +781,17 @@ test! "a module miss resyncs from the manifest, which never deletes local mints"
 
 test! "the default module URL percent-encodes the id's segments", ->
   ws = createWorkspace()
-  ws.populate [{ id: 'app/50%.rip', path: 'app/50%.rip', hash: srcHash('v1'), source: 'v1' }]
+  ws.populate [{ id: '50%.rip', path: '50%.rip', hash: srcHash('v1'), source: 'v1' }]
   { feed, calls, sockets, reports } = openFeed ws,
     '/manifest.json': emptyManifest
     '/50%25.rip': 'v2'
   sockets[0].onopen()
-  await settle()
-  sockets[0].onmessage { data: JSON.stringify { ding: { id: 'app/50%.rip', hash: '222222' } } }
-  await settle()
+  settle!
+  sockets[0].onmessage { data: JSON.stringify { ding: { id: '50%.rip', hash: '222222' } } }
+  settle!
   ok calls.includes('/50%25.rip'), "the fetch uses the encoded mounted URL: #{JSON.stringify calls}"
-  eq ws.passport('app/50%.rip').hash, srcHash('v2')
-  eq ws.read('app/50%.rip'), 'v2'
+  eq ws.passport('50%.rip').hash, srcHash('v2')
+  eq ws.read('50%.rip'), 'v2'
   eq reports, []
   feed.close()
 
@@ -772,12 +801,12 @@ test! "a failed open-resync retries with backoff until the feed heals", ->
   routes = {}
   { feed, sockets, reports } = openFeed ws, routes
   sockets[0].onopen()
-  await settle()
+  settle!
   ok reports.some((args) -> String(args[0]).includes('manifest fetch failed')), 'the miss is loud'
   eq ws.passport('a.rip').hash, srcHash('v1')
-  routes['/manifest.json'] = JSON.stringify { files: [{ id: 'a.rip', hash: '222222' }] }
+  routes['/manifest.json'] = manifest [{ id: 'a.rip', hash: '222222' }]
   routes['/a.rip'] = 'v2'
-  await new Promise (resolve) -> setTimeout resolve, 50
+  Promise.new! (resolve) -> setTimeout resolve, 50
   eq ws.passport('a.rip').hash, srcHash('v2')
   eq ws.read('a.rip'), 'v2'
   feed.close()
@@ -785,18 +814,18 @@ test! "a failed open-resync retries with backoff until the feed heals", ->
 test! "a dinged hash the module route does not yet serve is retried until it appears — never silently dropped", ->
   ws = createWorkspace()
   ws.populate [{ id: 'a.rip', path: 'a.rip', hash: srcHash('v1'), source: 'v1' }]
-  routes = { '/manifest.json': JSON.stringify { files: [{ id: 'a.rip', hash: srcHash('v1') }] } }
+  routes = { '/manifest.json': manifest [{ id: 'a.rip', hash: srcHash('v1') }] }
   { feed, sockets, reports } = openFeed ws, routes
   sockets[0].onopen()
-  await settle()
+  settle!
   v2 = srcHash('v2')
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', hash: v2 } } }
-  await settle()
+  settle!
   eq ws.passport('a.rip').hash, srcHash('v1')
   ok reports.some((args) -> String(args[0]).includes('module fetch missed')), 'the miss is loud'
-  routes['/manifest.json'] = JSON.stringify { files: [{ id: 'a.rip', hash: v2 }] }
+  routes['/manifest.json'] = manifest [{ id: 'a.rip', hash: v2 }]
   routes['/a.rip'] = 'v2'
-  await new Promise (resolve) -> setTimeout resolve, 50
+  Promise.new! (resolve) -> setTimeout resolve, 50
   eq ws.passport('a.rip').hash, v2
   feed.close()
 
@@ -807,9 +836,9 @@ test! "response bytes determine the applied hash, not the ding hint", ->
     '/manifest.json': emptyManifest
     '/a.rip': 'actual bytes'
   sockets[0].onopen()
-  await settle()
+  settle!
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', hash: 'AAAAAA' } } }
-  await settle()
+  settle!
   eq ws.read('a.rip'), 'actual bytes'
   eq ws.passport('a.rip').hash, srcHash('actual bytes')
   feed.close()
@@ -824,19 +853,19 @@ test! "a stale out-of-order response cannot overwrite newer ownership", ->
     '/a.rip': ->
       turn += 1
       value = if turn is 1 then 'stale bytes' else 'newest bytes'
-      await new Promise (resolve) -> releases.push -> resolve value
+      Promise.new! (resolve) -> releases.push -> resolve value
   { feed, sockets } = openFeed ws, routes
   sockets[0].onopen()
-  await settle()
+  settle!
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', hash: 'AAAAAA' } } }
-  await settle()
+  settle!
   sockets[0].onmessage { data: JSON.stringify { ding: { id: 'a.rip', hash: 'BBBBBB' } } }
-  await settle()
+  settle!
   releases[1]()
-  await settle()
+  settle!
   eq ws.read('a.rip'), 'newest bytes'
   releases[0]()
-  await settle()
+  settle!
   eq ws.read('a.rip'), 'newest bytes'
   eq ws.passport('a.rip').hash, srcHash('newest bytes')
   feed.close()
@@ -846,10 +875,10 @@ test! "an epoch ding invokes the reload policy — never the module path, never 
   epochs = []
   { feed, calls, sockets, reports } = openFeed ws, { '/manifest.json': emptyManifest }, { onEpoch: (d) -> epochs.push d }
   sockets[0].onopen()
-  await settle()
+  settle!
   before = calls.length
   sockets[0].onmessage { data: JSON.stringify { ding: { kind: 'epoch', epoch: 7 } } }
-  await settle()
+  settle!
   eq epochs, [{ kind: 'epoch', epoch: 7 }]
   eq calls.length, before
   eq reports, []
@@ -859,17 +888,17 @@ test! "a dropped socket reconnects with backoff and resyncs; close() stops it", 
   ws = createWorkspace()
   { feed, calls, sockets } = openFeed ws, { '/manifest.json': emptyManifest }
   sockets[0].onopen()
-  await settle()
+  settle!
   manifestFetches = -> calls.filter((u) -> u is '/manifest.json').length
   eq manifestFetches(), 1
   sockets[0].onclose()
   eq feed.connected(), false
-  await new Promise (resolve) -> setTimeout resolve, 20
+  Promise.new! (resolve) -> setTimeout resolve, 20
   eq sockets.length, 2
   sockets[1].onopen()
-  await settle()
+  settle!
   ok feed.connected()
   eq manifestFetches(), 2
   feed.close()
-  await new Promise (resolve) -> setTimeout resolve, 20
+  Promise.new! (resolve) -> setTimeout resolve, 20
   eq sockets.length, 2                       # closed: no further reconnect

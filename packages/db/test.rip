@@ -22,7 +22,7 @@ import * as mig from '../../src/migrate.js'
 
 caught = (promise) -> promise.then((-> null), ((e) -> e))
 trap = (fn) ->
-  new Promise (resolve) ->
+  Promise.new (resolve) ->
     try
       r = fn()
       if r?.then? then r.then((-> resolve null), resolve) else resolve null
@@ -77,7 +77,7 @@ hangingFetch = ->
   seen = { signal: null }
   fetchFn = (url, init) ->
     seen.signal = init?.signal ?? null
-    new Promise (->)
+    Promise.new (->)
   fetchFn.seen = seen
   fetchFn
 
@@ -136,7 +136,7 @@ sqlDouble = (rules = []) ->
   fetchFn.calls = calls
   fetchFn
 
-hostDouble = ({ present = new Set(), dirs = new Set(), sizes = {}, tarEntries = ['schema.sql', 'load.sql'], staged = ['schema.sql', 'load.sql'] } = {}) ->
+hostDouble = ({ present = Set.new(), dirs = Set.new(), sizes = {}, tarEntries = ['schema.sql', 'load.sql'], staged = ['schema.sql', 'load.sql'] } = {}) ->
   log = []
   fs =
     exists: (p) -> present.has p
@@ -153,7 +153,7 @@ hostDouble = ({ present = new Set(), dirs = new Set(), sizes = {}, tarEntries = 
     d = "/tmp/ripdb-#{n++}"
     for e in staged then present.add "#{d}/#{e}"
     d
-  { present, log, deps: (sql) -> { sql, fs, tar, tmp: tmpFn, now: (-> new Date(2026, 6, 14, 1, 2, 3)), join: (a, b) -> "#{a}/#{b}", log: (m) -> log.push m } }
+  { present, log, deps: (sql) -> { sql, fs, tar, tmp: tmpFn, now: (-> Date.new(2026, 6, 14, 1, 2, 3)), join: (a, b) -> "#{a}/#{b}", log: (m) -> log.push m } }
 
 fakeSql = (rules = []) ->
   (query) ->
@@ -436,9 +436,9 @@ test! "begin pins a session, carries it per statement, and drops it on commit", 
     '/sql/sessions/new': { json: { sessionId: 'sess-1' } }
     '/sql': { json: { columns: [], data: [], rowCount: 0 } }
   }
-  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!
   tx.query! 'INSERT INTO u VALUES (?)', ['x']
-  tx.commit!()
+  tx.commit!
   bodies = fetch.calls.filter((c) -> c.url.endsWith('/sql')).map (c) -> c.body
   eq bodies[0], { sql: 'BEGIN', sessionId: 'sess-1' }
   eq bodies[1], { sql: 'INSERT INTO u VALUES (?)', params: ['x'], sessionId: 'sess-1' }
@@ -450,8 +450,8 @@ test! "rollback issues ROLLBACK and still drops the session", ->
     '/sql/sessions/new': { json: { sessionId: 'sess-2' } }
     '/sql': { json: { columns: [], data: [], rowCount: 0 } }
   }
-  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
-  tx.rollback!()
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!
+  tx.rollback!
   ok fetch.calls.some (c) -> c.body?.sql is 'ROLLBACK'
   ok fetch.calls.some (c) -> c.method is 'DELETE'
 
@@ -461,24 +461,24 @@ test! "a failed session drop never masks the transaction outcome", ->
     '/sql': { json: { columns: [], data: [], rowCount: 0 } }
     '/sql/sessions/sess-3': { status: 500, json: { error: 'gone' } }
   }
-  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
-  tx.commit!()
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!
+  tx.commit!
 
 test! "a failed COMMIT still drops the session", ->
   fetch = bySql { COMMIT: { ok: false, json: { ok: false, error: 'conflict', errorCode: 'SERIALIZATION' } } }
-  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
-  err = trap! (-> tx.commit!())
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!
+  err = trap! (-> tx.commit!)
   ok /conflict/.test err.message
   ok fetch.wasDropped()
 
 test! "a session response missing its id refuses to run a fake transaction", ->
   fetch = fetchDouble { '/sql/sessions/new': { json: {} }, '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
-  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).begin!())
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).begin!)
   ok /session id/i.test err.message
 
 test! "a failed BEGIN drops the orphaned session", ->
   fetch = bySql { BEGIN: { ok: false, json: { ok: false, error: 'begin failed', errorCode: 'X' } } }
-  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).begin!())
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).begin!)
   ok /begin failed/.test err.message
   ok fetch.wasDropped()
 
@@ -500,7 +500,7 @@ test! "a harbor SQL error becomes a QueryError with code and details", ->
   eq err.sql, 'SELECT * FRM u'
 
 test! "a network failure surfaces as a DbError, not a raw fetch throw", ->
-  fetch = (-> throw new TypeError('fetch failed'))
+  fetch = (-> throw TypeError.new('fetch failed'))
   err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query! 'SELECT 1')
   ok isDbError err
   ok /unreachable|connect|fetch/i.test err.message
@@ -523,7 +523,7 @@ test! "a hung harbor rejects with a TIMEOUT ConnectionError at the deadline", ->
 
 test! "a caller signal aborts the in-flight request with ABORTED", ->
   fetch = hangingFetch()
-  controller = new AbortController()
+  controller = AbortController.new()
   pending = harborAdapter({ url: 'http://h', fetch, timeoutMs: 0 }).query 'SELECT 1', [], { signal: controller.signal }
   controller.abort()
   err = caught! pending
@@ -533,7 +533,7 @@ test! "a caller signal aborts the in-flight request with ABORTED", ->
 
 test! "an already-aborted signal never reaches a hung harbor for long", ->
   fetch = hangingFetch()
-  controller = new AbortController()
+  controller = AbortController.new()
   controller.abort()
   err = trap! (-> harborAdapter({ url: 'http://h', fetch, timeoutMs: 0 }).query! 'SELECT 1', [], { signal: controller.signal })
   eq err.code, 'ABORTED'
@@ -547,9 +547,9 @@ test! "a transaction statement honors the caller signal too", ->
     if sql is 'BEGIN'
       return Promise.resolve { ok: true, status: 200, json: (-> { columns: [], data: [], rowCount: 0 }) }
     seen.signal = init?.signal ?? null
-    new Promise (->)
-  tx = harborAdapter!({ url: 'http://h', fetch, timeoutMs: 0 }).begin!()
-  controller = new AbortController()
+    Promise.new (->)
+  tx = harborAdapter!({ url: 'http://h', fetch, timeoutMs: 0 }).begin!
+  controller = AbortController.new()
   pending = tx.query 'SELECT 1', [], { signal: controller.signal }
   controller.abort()
   err = caught! pending
@@ -579,9 +579,9 @@ test "the adapter implements query + begin with capabilities (no introspect)", -
   ok not ('introspect' of adapter)
 
 test "the error types form a hierarchy under DbError", ->
-  ok new QueryError('x') instanceof DbError
-  ok isDbError new DbError('x')
-  eq isDbError(new Error('x')), false
+  ok QueryError.new('x') instanceof DbError
+  ok isDbError DbError.new('x')
+  eq isDbError(Error.new('x')), false
 
 # ==[ 3. Temporal ]=============================================================
 
@@ -645,32 +645,32 @@ test! "decode is keyed by duckdbType alone — lossless never gates it", ->
 
 test! "a transaction statement decodes through the same seam", ->
   fetch = harborFetch [{ name: 'ts', duckdbType: 'TIMESTAMP', lossless: true }], [['2024-03-15T10:30:00']]
-  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!
   { data } = tx.query! 'SELECT ts FROM t'
-  tx.commit!()
+  tx.commit!
   ok data[0][0] instanceof Date
   eq data[0][0].getTime(), UTC
 
 p "\nTemporal — write path"
 
 test! "a Date param becomes ISO-Z; other scalars are untouched", ->
-  eq posted!([new Date(UTC), 'hello', 42, null]), ['2024-03-15T10:30:00.000Z', 'hello', 42, null]
+  eq posted!([Date.new(UTC), 'hello', 42, null]), ['2024-03-15T10:30:00.000Z', 'hello', 42, null]
 
 test! "a Date nested in array or plain object is normalized", ->
-  eq posted!([[new Date(0)], { at: new Date(0) }]), [['1970-01-01T00:00:00.000Z'], { at: '1970-01-01T00:00:00.000Z' }]
+  eq posted!([[Date.new(0)], { at: Date.new(0) }]), [['1970-01-01T00:00:00.000Z'], { at: '1970-01-01T00:00:00.000Z' }]
 
 test! "an Invalid Date param throws loudly", ->
   fetch = harborFetch [], []
   adapter = harborAdapter { url: 'http://h', fetch }
-  err = trap! (-> adapter.query! 'INSERT INTO t VALUES (?)', [new Date('nope')])
+  err = trap! (-> adapter.query! 'INSERT INTO t VALUES (?)', [Date.new('nope')])
   ok err instanceof TypeError
   ok /Invalid Date/.test err.message
 
 test! "a transaction statement encodes through the same seam", ->
   fetch = harborFetch [], []
-  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
-  tx.query! 'INSERT INTO t VALUES (?)', [new Date(UTC)]
-  tx.commit!()
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!
+  tx.query! 'INSERT INTO t VALUES (?)', [Date.new(UTC)]
+  tx.commit!
   insert = fetch.calls.find (c) -> c.body?.sql?.startsWith 'INSERT'
   eq insert.body.params, ['2024-03-15T10:30:00.000Z']
 
@@ -745,13 +745,13 @@ test! "a returning callback commits and yields its value", ->
 
 test! "a throwing callback rolls back and rethrows", ->
   adapter = fakeAdapter []
-  err = trap! (-> createClient(adapter).transaction! (-> throw new Error('boom')))
+  err = trap! (-> createClient(adapter).transaction! (-> throw Error.new('boom')))
   ok /boom/.test err.message
   eq adapter.state.committed, false
   eq adapter.state.rolledBack, true
 
 test! "a failed statement inside the transaction rolls back", ->
-  adapter = fakeAdapter [Object.assign(new Error('constraint'), {})]
+  adapter = fakeAdapter [Object.assign(Error.new('constraint'), {})]
   err = trap! (-> createClient(adapter).transaction! (tx) -> tx.query! 'INSERT ...')
   ok /constraint/.test err.message
   eq adapter.state.rolledBack, true
@@ -768,8 +768,8 @@ test! "a failed COMMIT propagates and does not trigger rollback", ->
     begin: ->
       Promise.resolve
         query: (-> Promise.resolve { columns: [], data: [], rowCount: 0 })
-        commit: (-> throw new Error('COMMIT conflict'))
-        rollback: (-> state.rolledBack = true; throw new Error('ROLLBACK on dead session'))
+        commit: (-> throw Error.new('COMMIT conflict'))
+        rollback: (-> state.rolledBack = true; throw Error.new('ROLLBACK on dead session'))
   err = trap! (-> createClient(adapter).transaction! (-> 'ok'))
   ok /COMMIT conflict/.test err.message
   eq state.rolledBack, false
@@ -781,8 +781,8 @@ test! "a throwing rollback never masks the original callback error", ->
       Promise.resolve
         query: (-> Promise.resolve { columns: [], data: [], rowCount: 0 })
         commit: (->)
-        rollback: (-> throw new Error('rollback also failed'))
-  err = trap! (-> createClient(adapter).transaction! (-> throw new Error('the real cause')))
+        rollback: (-> throw Error.new('rollback also failed'))
+  err = trap! (-> createClient(adapter).transaction! (-> throw Error.new('the real cause')))
   ok /the real cause/.test err.message
 
 test! "a nested transaction joins the outer one — no second begin", ->
@@ -805,15 +805,15 @@ p "\nClient — cancellation"
 
 test! "an already-aborted signal rejects before the query runs", ->
   adapter = fakeAdapter [{ columns: [], data: [], rowCount: 0 }]
-  controller = new AbortController()
+  controller = AbortController.new()
   controller.abort()
   err = trap! (-> createClient(adapter).query! 'SELECT 1', [], { signal: controller.signal })
   ok err instanceof CancelledError
   eq adapter.log.length, 0
 
 test! "an abort while in flight rejects with CancelledError", ->
-  controller = new AbortController()
-  adapter = { query: (-> new Promise (->)), capabilities: {} }
+  controller = AbortController.new()
+  adapter = { query: (-> Promise.new (->)), capabilities: {} }
   pending = createClient(adapter).query 'SELECT pg_sleep(10)', [], { signal: controller.signal }
   controller.abort()
   err = caught! pending
@@ -822,9 +822,9 @@ test! "an abort while in flight rejects with CancelledError", ->
 test! "an abort mid-flight hands the signal to the adapter", ->
   seen = { signal: null }
   adapter =
-    query: (sql, params, opts) -> seen.signal = opts?.signal ?? null; new Promise (->)
+    query: (sql, params, opts) -> seen.signal = opts?.signal ?? null; Promise.new (->)
     capabilities: {}
-  controller = new AbortController()
+  controller = AbortController.new()
   pending = createClient(adapter).query 'SELECT pg_sleep(10)', [], { signal: controller.signal }
   controller.abort()
   err = caught! pending
@@ -834,8 +834,8 @@ test! "an abort mid-flight hands the signal to the adapter", ->
 
 test! "over the harbor adapter, cancellation aborts the underlying fetch", ->
   fetchSignal = null
-  fetch = (url, init) -> fetchSignal = init?.signal ?? null; new Promise (->)
-  controller = new AbortController()
+  fetch = (url, init) -> fetchSignal = init?.signal ?? null; Promise.new (->)
+  controller = AbortController.new()
   pending = createClient(harborAdapter { url: 'http://h', fetch }).query 'SELECT 1', [], { signal: controller.signal }
   controller.abort()
   err = caught! pending
@@ -844,7 +844,7 @@ test! "over the harbor adapter, cancellation aborts the underlying fetch", ->
 
 test! "a completed query is unaffected by a later abort", ->
   adapter = fakeAdapter [{ columns: [{ name: 'n' }], data: [[1]], rowCount: 1 }]
-  controller = new AbortController()
+  controller = AbortController.new()
   result = createClient!(adapter).query! 'SELECT 1', [], { signal: controller.signal }
   controller.abort()
   eq result.rowCount, 1
@@ -856,7 +856,7 @@ test "createClient requires an adapter with a query method", ->
   throws (-> createClient {}), 'adapter'
 
 test "CancelledError is a DbError with code ABORTED", ->
-  err = new CancelledError('x')
+  err = CancelledError.new('x')
   ok err instanceof Error
   ok err instanceof DbError
   ok isDbError err
@@ -886,7 +886,7 @@ test "safeFileStem: sanitizes and never empties", ->
   eq safeFileStem('ok.name-1'), 'ok.name-1'
 
 test "stamp: YYYYMMDD-HHMMSS from an injected date", ->
-  eq stamp(new Date(2026, 6, 14, 9, 5, 3)), '20260714-090503'
+  eq stamp(Date.new(2026, 6, 14, 9, 5, 3)), '20260714-090503'
 
 test "humanSize: unit thresholds", ->
   eq humanSize(512), '512 B'
@@ -924,7 +924,7 @@ test! "a harbor error envelope becomes a QueryError with the code", ->
   ok /boom/.test err.message
 
 test! "a transport failure is a ConnectionError naming the harbor", ->
-  fetch = (-> throw new Error('ECONNREFUSED'))
+  fetch = (-> throw Error.new('ECONNREFUSED'))
   sql = makeSql { url: 'http://h', fetch }
   err = trap! (-> sql! 'SELECT 1')
   ok err instanceof ConnectionError
@@ -955,7 +955,7 @@ test! "auto-names archive, EXPORTs, and tars", ->
   ok h.log.some (l) -> l.startsWith 'tar.create shop-20260714-010203.tar.gz'
 
 test! "refuses to overwrite an existing archive", ->
-  h = hostDouble { present: new Set(['out.tar.gz']) }
+  h = hostDouble { present: Set.new(['out.tar.gz']) }
   err = trap! (-> dump 'out.tar.gz', h.deps(makeSql { url: 'http://h', fetch: sqlDouble() }))
   ok /refusing to overwrite/.test err.message
 
@@ -970,7 +970,7 @@ test! "fails loudly when harbor wrote its EXPORT elsewhere", ->
 
 test! "cleans the staging dir even when EXPORT fails", ->
   h = hostDouble()
-  sql = (-> throw new Error('could not reach harbor at http://h'))
+  sql = (-> throw Error.new('could not reach harbor at http://h'))
   err = trap! (-> dump 'out.tar.gz', h.deps(sql))
   ok /could not reach harbor/.test err.message
   ok h.log.some (l) -> l.startsWith 'rm /tmp/ripdb-'
@@ -978,17 +978,17 @@ test! "cleans the staging dir even when EXPORT fails", ->
 p "\nCLI — load"
 
 test! "extracts and IMPORTs into an empty database", ->
-  h = hostDouble { present: new Set(['snap.tar.gz']) }
+  h = hostDouble { present: Set.new(['snap.tar.gz']) }
   sql = makeSql { url: 'http://h', fetch: sqlDouble [[/count/, { ok: true, data: [[0]] }]] }
   eq load!('snap.tar.gz', h.deps(sql)), 'loaded snap.tar.gz'
 
 test! "refuses when the target database is not empty", ->
-  h = hostDouble { present: new Set(['snap.tar.gz']) }
+  h = hostDouble { present: Set.new(['snap.tar.gz']) }
   err = trap! (-> load 'snap.tar.gz', h.deps(makeSql { url: 'http://h', fetch: sqlDouble [[/count/, { ok: true, data: [[2]] }]] }))
   ok /not empty/.test err.message
 
 test! "rejects an archive containing a traversal path", ->
-  h = hostDouble { present: new Set(['evil.tar.gz']), tarEntries: ['schema.sql', '../../etc/passwd'] }
+  h = hostDouble { present: Set.new(['evil.tar.gz']), tarEntries: ['schema.sql', '../../etc/passwd'] }
   err = trap! (-> load 'evil.tar.gz', h.deps(makeSql { url: 'http://h', fetch: sqlDouble [[/count/, { ok: true, data: [[0]] }]] }))
   ok /unsafe path in archive: \.\.\/\.\.\/etc\/passwd/.test err.message
 
@@ -998,7 +998,7 @@ test! "rejects a missing archive", ->
 
 p "\nCLI — checkpoint"
 
-clock = (-> new Date(2026, 0, 1, 0, 0, 0))
+clock = (-> Date.new(2026, 0, 1, 0, 0, 0))
 
 test! "plain CHECKPOINT reports completion with elapsed time", ->
   fetch = sqlDouble [[/CHECKPOINT/, { ok: true }]]
@@ -1038,7 +1038,7 @@ test! "a 200 body without ok:true is not reachable", ->
   ok /not reachable/.test err.message
 
 test! "a transport failure is caught and reported as not-reachable", ->
-  err = trap! (-> assertReachable 'http://harbor:9494', { fetch: (-> throw new TypeError('connection refused')) })
+  err = trap! (-> assertReachable 'http://harbor:9494', { fetch: (-> throw TypeError.new('connection refused')) })
   ok /not reachable/.test err.message
 
 test! "a trailing slash is trimmed from the resolved url", ->
@@ -1281,26 +1281,26 @@ test "harborAdapter implements query + begin + capabilities, not introspect", ->
   ok not ('introspect' of a)
 
 test "the error taxonomy is one hierarchy under DbError", ->
-  ok new QueryError('x') instanceof db.DbError
-  ok new ConnectionError('x') instanceof db.DbError
-  ok new CancelledError('x') instanceof db.DbError
-  ok db.isDbError new QueryError('x')
-  ok db.isDbError new CancelledError('x')
-  eq db.isDbError(new Error('x')), false
+  ok QueryError.new('x') instanceof db.DbError
+  ok ConnectionError.new('x') instanceof db.DbError
+  ok CancelledError.new('x') instanceof db.DbError
+  ok db.isDbError QueryError.new('x')
+  ok db.isDbError CancelledError.new('x')
+  eq db.isDbError(Error.new('x')), false
 
 p "\nCertification — concurrency and failure"
 
 test! "two transactions each pin their own harbor session", ->
   fetch = harborFetchCert()
   adapter = harborAdapter { url: 'http://h', fetch }
-  [txA, txB] = await Promise.all [adapter.begin!(), adapter.begin!()]
+  [txA, txB] = Promise.all! [adapter.begin!, adapter.begin!]
   txA.query! 'INSERT INTO a VALUES (1)'
   txB.query! 'INSERT INTO b VALUES (2)'
   sidA = fetch.calls.find((c) -> c.sql is 'INSERT INTO a VALUES (1)').sessionId
   sidB = fetch.calls.find((c) -> c.sql is 'INSERT INTO b VALUES (2)').sessionId
   ok sidA isnt sidB
-  txA.commit!()
-  txB.rollback!()
+  txA.commit!
+  txB.rollback!
   eq fetch.calls.filter((c) -> c.method is 'DELETE').length, 2
 
 test! "a 5xx during a query is a retryable ConnectionError", ->
@@ -1317,13 +1317,13 @@ test! "an engine error is a QueryError carrying code and sql", ->
   eq err.sql, 'SELECT bad'
 
 test! "a transport failure surfaces as a typed DbError", ->
-  fetch = (-> throw new TypeError('ECONNREFUSED'))
+  fetch = (-> throw TypeError.new('ECONNREFUSED'))
   err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query! 'SELECT 1')
   ok db.isDbError err
 
 test! "an in-flight cancellation rejects with CancelledError", ->
-  controller = new AbortController()
-  adapter = { query: (-> new Promise (->)), capabilities: {} }
+  controller = AbortController.new()
+  adapter = { query: (-> Promise.new (->)), capabilities: {} }
   pending = createClient(adapter).query 'SELECT pg_sleep(9)', [], { signal: controller.signal }
   controller.abort()
   err = caught! pending
@@ -1432,7 +1432,7 @@ test! "a throwing transaction rolls back and still drops the session", ->
     try
       __schemaTransaction! ->
         User.create! { name: 'Ada' }
-        throw new Error 'boom'
+        throw Error.new 'boom'
     catch
       threw = true
     {
@@ -1455,7 +1455,7 @@ test! "include() loads a has_many relation with one IN query", ->
     users = User.where({}).includes('orders').all!
     counts = []
     for u in users
-      counts.push (u.orders!()).length
+      counts.push (u.orders!).length
     {
       counts
       orderQuery: sqls().find (s) -> s.startsWith 'SELECT * FROM "orders"'
@@ -1537,7 +1537,7 @@ test! "afterRollback fires when the transaction throws", ->
     try
       __schemaTransaction! ->
         User.create! { name: 'Ada' }
-        throw new Error 'boom'
+        throw Error.new 'boom'
     catch
       null
     { fired, rolledBack: fetch.calls.some (c) -> c.sql is 'ROLLBACK' }

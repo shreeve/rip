@@ -1,0 +1,42 @@
+#!/usr/bin/env rip
+
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+
+command = process.argv[2]
+
+if command is 'list-modules'
+  p 'janus'
+  exit 0
+
+if command in ['reload']
+  exit 0
+
+if command is 'stop'
+  pidfile = join dirname(process.env.RIP_EDGE_CONTROL), 'caddy.pid'
+  abort "fake caddy: missing pidfile #{pidfile}" unless existsSync pidfile
+  process.kill parseInt(readFileSync(pidfile, 'utf8')), 'SIGTERM'
+  exit 0
+
+abort "fake caddy: unexpected command #{command}" unless command is 'run'
+
+pidIndex = process.argv.indexOf '--pidfile'
+abort 'fake caddy: run requires --pidfile' if pidIndex < 0
+pidfile = process.argv[pidIndex + 1]
+writeFileSync pidfile, String(process.pid)
+
+server = Bun.serve
+  unix: process.env.RIP_EDGE_CONTROL
+  fetch: (request) ->
+    url = URL.new request.url
+    if request.method is 'GET' and url.pathname is '/1.0'
+      return Response.json { type: 'janus', api_version: '1.0' }
+    Response.new null, { status: 204 }
+
+shutdown = ->
+  server.stop true
+  try unlinkSync pidfile
+  exit 0
+
+process.on 'SIGINT', shutdown
+process.on 'SIGTERM', shutdown

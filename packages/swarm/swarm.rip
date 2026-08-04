@@ -174,7 +174,7 @@ export swarm! = (opts = {}) ->
 
   context = {}
   if kind(opts.setup) is 'function'
-    result = await opts.setup()
+    result = opts.setup!
     context = result if result? and typeof result is 'object'
   context.safe = dosafe
 
@@ -191,7 +191,7 @@ export swarm! = (opts = {}) ->
 
   # resolve paths: each worker thread runs THIS file as its entry (the
   # worker block at the bottom), so there is no separate bootstrap file
-  workerPath = new URL(import.meta.url).pathname
+  workerPath = URL.new(import.meta.url).pathname
   scriptPath = resolve(process.argv[1] or '')
 
   # Workers must compile .rip imports themselves: a worker thread gets
@@ -235,7 +235,7 @@ export swarm! = (opts = {}) ->
   # create workers and dispatch tasks
   allWorkers = []
 
-  await new Promise (resolveAll) ->
+  Promise.new! (resolveAll) ->
 
     finished = false
     checkDone! = ->
@@ -261,7 +261,7 @@ export swarm! = (opts = {}) ->
     spawnWorker! = (slot) ->
       info[slot] ?= 0
 
-      w = new Worker(workerPath, { workerData: { scriptPath, context }, preload: [loaderPath] })
+      w = Worker.new(workerPath, { workerData: { scriptPath, context }, preload: [loaderPath] })
       allWorkers.push(w)
 
       w.on 'message', (msg) ->
@@ -438,7 +438,7 @@ if not isMainThread and workerData?.scriptPath?
     switch msg.type
       when 'task'
         try
-          await perform(msg.taskPath, workerData.context)
+          perform!(msg.taskPath, workerData.context)
           parentPort.postMessage { type: 'done', taskPath: msg.taskPath }
         catch err
           parentPort.postMessage { type: 'failed', taskPath: msg.taskPath, error: err.message }

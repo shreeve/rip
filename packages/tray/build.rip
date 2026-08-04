@@ -1,0 +1,127 @@
+#!/usr/bin/env rip
+
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { basename, extname, join, resolve } from 'node:path'
+
+HELP = '''
+  usage: rip-tray <provider.rip> [options]
+
+  Options:
+    --name NAME              Application and menu-bar process name
+    --identifier ID          macOS bundle identifier
+    --output PATH            Output directory or explicit .app path
+    --icon FILE.icns         Bundle icon
+    --force                  Replace the exact destination app
+
+  The provider owns the menu. The generic SwiftUI host is shared by every app.
+  '''
+
+xml = (value) -> String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+fail = (message) -> throw Error.new message
+
+run = (command, args, cwd = import.meta.dir) ->
+  result = Bun.spawnSync [command, ...args], { cwd, stdout: 'pipe', stderr: 'pipe' }
+  unless result.exitCode is 0
+    detail = result.stderr.toString().trim() or result.stdout.toString().trim()
+    fail "#{basename(command)} #{args.join(' ')} failed#{if detail then ":\n#{detail}" else ''}"
+  result.stdout.toString()
+
+export optionsFor = (argv, cwd = process.cwd()) ->
+  args = [...argv]
+  return { help: true } if args.length is 0 or args[0] in ['-h', '--help', 'help']
+  providerInput = args.shift()
+  fail 'provider must be a .rip file' unless extname(providerInput) is '.rip'
+  provider = resolve cwd, providerInput
+  fail "provider not found: #{providerInput}" unless existsSync(provider) and statSync(provider).isFile()
+  provider = realpathSync provider
+  inferred = basename(provider, '.rip')
+  name = inferred[0].toUpperCase() + inferred.slice(1)
+  identifier = null
+  output = resolve cwd, 'dist'
+  icon = null
+  force = false
+  take = (flag) ->
+    fail "#{flag} requires a value" unless args.length
+    args.shift()
+  while args.length
+    value = args.shift()
+    switch value
+      when '--name' then name = take value
+      when '--identifier' then identifier = take value
+      when '--output' then output = resolve cwd, take(value)
+      when '--icon' then icon = resolve cwd, take(value)
+      when '--force' then force = true
+      else fail "unknown option #{JSON.stringify(value)}"
+  fail 'name must not be empty or contain a slash' unless name and not name.includes('/')
+  slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '')
+  fail 'name must contain a letter or number' unless slug
+  identifier or= "io.ripdev.tray.#{slug}"
+  fail 'identifier must use dot-separated bundle-safe labels' unless /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test identifier
+  if icon?
+    fail 'icon must be an existing .icns file' unless extname(icon) is '.icns' and existsSync(icon) and statSync(icon).isFile()
+    icon = realpathSync icon
+  target = if extname(output) is '.app' then output else join(output, "#{name}.app")
+  { help: false, provider, name, identifier, target, icon, force }
+
+export build = (options) ->
+  fail 'rip-tray builds macOS applications only' unless process.platform is 'darwin'
+  fail "destination exists (pass --force to replace it): #{options.target}" if existsSync(options.target) and not options.force
+  run 'swift', ['build', '-c', 'release', '--product', 'rip-tray-host'], join(import.meta.dir, 'macos')
+  host = join(import.meta.dir, 'macos', '.build', 'release', 'rip-tray-host')
+  fail "Swift build produced no host at #{host}" unless existsSync host
+
+  parent = resolve options.target, '..'
+  mkdirSync parent, { recursive: true }
+  stageRoot = mkdtempSync join(parent, '.rip-tray-')
+  app = join stageRoot, basename(options.target)
+  contents = join app, 'Contents'
+  macos = join contents, 'MacOS'
+  resources = join contents, 'Resources'
+  trayModule = join resources, 'node_modules', '@rip-lang', 'tray'
+  try
+    mkdirSync macos, { recursive: true }
+    mkdirSync trayModule, { recursive: true }
+    copyFileSync host, join(macos, 'rip-tray-host')
+    chmodSync join(macos, 'rip-tray-host'), 0o755
+    copyFileSync options.provider, join(resources, 'Tray.rip')
+    copyFileSync join(import.meta.dir, 'tray.rip'), join(trayModule, 'tray.rip')
+    copyFileSync join(import.meta.dir, 'package.json'), join(trayModule, 'package.json')
+    cpSync join(import.meta.dir, 'assets'), join(resources, 'assets'), { recursive: true }
+    cpSync join(import.meta.dir, 'assets'), join(trayModule, 'assets'), { recursive: true }
+    copyFileSync options.icon, join(resources, 'AppIcon.icns') if options.icon?
+    iconEntry = if options.icon? then '<key>CFBundleIconFile</key><string>AppIcon</string>' else ''
+    plist = """<?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0"><dict>
+        <key>CFBundleDevelopmentRegion</key><string>en</string>
+        <key>CFBundleExecutable</key><string>rip-tray-host</string>
+        <key>CFBundleIdentifier</key><string>#{xml options.identifier}</string>
+        <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+        <key>CFBundleName</key><string>#{xml options.name}</string>
+        <key>CFBundlePackageType</key><string>APPL</string>
+        <key>CFBundleShortVersionString</key><string>4.0.0</string>
+        <key>CFBundleVersion</key><string>1</string>
+        <key>LSMinimumSystemVersion</key><string>13.0</string>
+        <key>LSUIElement</key><true/>
+        #{iconEntry}
+      </dict></plist>
+      """
+    writeFileSync join(contents, 'Info.plist'), plist
+    run '/usr/bin/codesign', ['--force', '--sign', '-', app]
+    rmSync options.target, { recursive: true, force: true } if options.force and existsSync(options.target)
+    renameSync app, options.target
+  finally
+    rmSync stageRoot, { recursive: true, force: true }
+  options.target
+
+if import.meta.main
+  try
+    options = optionsFor process.argv.slice(2)
+    if options.help
+      console.log HELP
+    else
+      target = build! options
+      console.log "Built #{target}"
+  catch error
+    console.error "rip-tray: #{error?.message or String(error)}"
+    exit 1

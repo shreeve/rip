@@ -86,6 +86,90 @@ test "optional call juxta multi", "fn = (a, b) -> a + b\nfn? 3, 4", 7
 code "optional call juxta gen", "fn? 42", "fn?.(42)"
 code "optional call juxta multi gen", "fn? 3, 4", "fn?.(3, 4)"
 
+# Maybe dammit awaits an optional call. Arguments disambiguate it from
+# bare Houdini/presence, so a zero-argument call keeps its empty parens.
+code "maybe dammit empty parens gen", "fn?!()", "await fn?.()"
+code "maybe dammit paren gen", "fn?!(42)", "await fn?.(42)"
+code "maybe dammit juxta gen", "fn?! 42", "await fn?.(42)"
+code "maybe dammit juxta multi gen", "fn?! 3, 4", "await fn?.(3, 4)"
+
+test "maybe dammit empty parens calls and awaits", "fn = -> Promise.resolve(42)\nfn?!()", 42
+test "maybe dammit empty parens skips a missing function", "fn = null\nfn?!()", undefined
+test "maybe dammit awaits a present function", "fn = (x) -> Promise.resolve(x * 2)\nfn?!(21)", 42
+test "maybe dammit also awaits a synchronous result", "fn = (x) -> x * 2\nfn?!(21)", 42
+test "maybe dammit skips a missing function", "fn = null\nfn?!(21)", undefined
+test "maybe dammit juxta awaits", "fn = (x) -> Promise.resolve(x + 1)\nfn?! 41", 42
+test "maybe dammit juxta accepts multiple arguments", "fn = (a, b) -> Promise.resolve(a + b)\nfn?! 20, 22", 42
+
+test 'maybe dammit does not evaluate arguments when the function is missing', '''
+  calls = 0
+  argument = ->
+    calls++
+    42
+  fn = null
+  value = fn?!(argument())
+  [value, calls]
+''', [undefined, 0]
+
+test 'maybe dammit preserves a method receiver', '''
+  obj = {base: 40}
+  obj.add = (n) -> Promise.resolve(@base + n)
+  obj.add?!(2)
+''', 42
+
+test 'maybe dammit evaluates a computed receiver once', '''
+  calls = 0
+  make = ->
+    calls++
+    {run: (x) -> Promise.resolve(x)}
+  value = make().run?!(42)
+  [value, calls]
+''', [42, 1]
+
+test 'maybe dammit rejection follows normal try/catch', '''
+  do ->
+    fn = -> Promise.reject Error.new('boom')
+    try fn?!()
+    catch e then e.message
+''', 'boom'
+
+test 'maybe dammit only skips nullish callees', '''
+  do ->
+    fn = false
+    try
+      fn?!()
+      false
+    catch e
+      e instanceof TypeError
+''', true
+
+test 'maybe dammit result continues through a member chain', '''
+  fn = -> Promise.resolve({answer: 42})
+  fn?!().answer
+''', 42
+
+test 'maybe dammit missing result composes with nullish fallback', '''
+  fn = null
+  fn?!() ?? 42
+''', 42
+
+# Without call arguments, the same token is always Houdini/presence.
+code "bare presence stays presence", "fn?!", "(fn ? true : undefined)"
+code "bare presence before nullish stays presence", "fn?! ?? fallback", "(fn ? true : undefined) ?? fallback"
+code "bare presence in an array stays presence", "[fn?!, other]", "[(fn ? true : undefined), other]"
+code "line end closes bare presence", "fn?!\nnext = 1", "(fn ? true : undefined);\nlet next = 1;"
+
+# Juxta shares implicit-call argument extent for maybe dammit too. Call
+# parens keep a following binary outside the optional awaited call.
+code "maybe dammit juxta or binds into arg", "fn?! a or b", "await fn?.(a || b)"
+code "maybe dammit paren or stays outside", "fn?!(a) or b", "await fn?.(a) || b;"
+
+fail 'render attributes reject maybe dammit but keep bare presence legal', '''
+  A = component
+    render
+      div title: fn?!()
+''', 'render body evaluates synchronously'
+
 # Juxta shares implicit-call argument extent: `or` is absorbed into the
 # arg. Call parens keep the binary outside the call.
 code "optional call juxta or binds into arg", "fn? a or b", "fn?.(a || b)"

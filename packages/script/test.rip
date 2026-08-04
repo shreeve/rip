@@ -29,7 +29,7 @@ withChat = (fn, opts = {}) ->
   chat = Script.spawn! 'bash', ['--noprofile', '--norc'],
     { line: '\n', live: false, slow: 5, ...opts }
   try
-    await fn(chat)
+    fn!(chat)
   finally
     chat.disconnect()
 
@@ -42,7 +42,7 @@ captureStdout = (fn) ->
     buf += chunk
     true
   try
-    await fn()
+    fn!
   finally
     process.stdout.write = orig
   buf

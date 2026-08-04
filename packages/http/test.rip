@@ -12,7 +12,7 @@ import { readFileSync } from 'fs'
 # ==[ Fixture server ]==
 
 hits     = []          # every request the fixture saw: { method, path, search }
-counters = new Map()   # per-key attempt counts for flaky endpoints
+counters = Map.new()   # per-key attempt counts for flaky endpoints
 
 caught    = (promise) -> promise.then((-> null), ((e) -> e))
 countHits = (path, search) ->
@@ -21,7 +21,7 @@ countHits = (path, search) ->
 server = Bun.serve
   port: 0
   fetch: (req) ->
-    url  = new URL(req.url)
+    url  = URL.new(req.url)
     body = req.text!
     hits.push { method: req.method, path: url.pathname, search: url.search }
 
@@ -35,7 +35,7 @@ server = Bun.serve
 
     if url.pathname.startsWith('/status/')
       status = Number(url.pathname.slice('/status/'.length))
-      return new Response("status #{status}", { status })
+      return Response.new("status #{status}", { status })
 
     # Fails with 500 the first `fails` times per key, then succeeds.
     if url.pathname is '/flaky'
@@ -43,7 +43,7 @@ server = Bun.serve
       fails   = Number(url.searchParams.get('fails'))
       attempt = (counters.get(key) ?? 0) + 1
       counters.set(key, attempt)
-      return new Response('boom', { status: 500 }) if attempt <= fails
+      return Response.new('boom', { status: 500 }) if attempt <= fails
       return Response.json({ attempts: attempt })
 
     # 503 with a Retry-After header once per key, then succeeds.
@@ -52,18 +52,18 @@ server = Bun.serve
       attempt = (counters.get(key) ?? 0) + 1
       counters.set(key, attempt)
       if attempt is 1
-        value = url.searchParams.get('format') is 'date' ? new Date(Date.now() - 1000).toUTCString() : '0'
-        return new Response('wait', { status: 503, headers: { 'Retry-After': value } })
+        value = url.searchParams.get('format') is 'date' ? Date.new(Date.now() - 1000).toUTCString() : '0'
+        return Response.new('wait', { status: 503, headers: { 'Retry-After': value } })
       return Response.json({ attempts: attempt })
 
     if url.pathname is '/slow'
       Bun.sleep! 300
-      return new Response('slow-ok')
+      return Response.new('slow-ok')
 
     if url.pathname is '/redirect'
-      return new Response(null, { status: 302, headers: { Location: '/echo' } })
+      return Response.new(null, { status: 302, headers: { Location: '/echo' } })
 
-    new Response('ok')
+    Response.new('ok')
 
 base = "http://localhost:#{server.port}"
 
@@ -93,7 +93,7 @@ test "declares browser safety and earns it", ->
 console.log "\nURL building"
 
 test! "an absolute URL requests as-is with GET by default", ->
-  res = await http("#{base}/echo")
+  res = http!("#{base}/echo")
   data = res.json!
   eq data.method, 'GET'
   eq data.path, '/echo'
@@ -108,7 +108,7 @@ test! "a prefixUrl subpath is preserved, not root-relativized", ->
   eq api.get!('/echo').json!.path, '/api/echo'
 
 test! "a relative path with no prefixUrl rejects with an invalid-URL error", ->
-  err = await caught(http.get('/echo'))
+  err = caught!(http.get('/echo'))
   ok err instanceof TypeError
 
 test! "object searchParams stringify values and drop null/undefined", ->
@@ -120,7 +120,7 @@ test! "string searchParams overlay the input URL query, set-style", ->
   eq res.json!.search, '?x=1&a=2'
 
 test! "URLSearchParams are applied set-style", ->
-  sp = new URLSearchParams()
+  sp = URLSearchParams.new()
   sp.set('page', '3')
   res = http.get!("#{base}/echo", { searchParams: sp })
   eq res.json!.search, '?page=3'
@@ -131,7 +131,7 @@ console.log "\nMethods"
 
 test! "every shortcut sends its method", ->
   for [shortcut, method] in [['get', 'GET'], ['post', 'POST'], ['put', 'PUT'], ['patch', 'PATCH'], ['del', 'DELETE']]
-    res = await http[shortcut]("#{base}/echo")
+    res = http[shortcut].call! http, "#{base}/echo"
     eq res.json!.method, method
 
 test! "head sends HEAD and yields an empty body", ->
@@ -141,7 +141,7 @@ test! "head sends HEAD and yields an empty body", ->
   eq hits[-1], { method: 'HEAD', path: '/echo', search: '' }
 
 test! "a lowercase method option is uppercased", ->
-  res = await http("#{base}/echo", { method: 'post' })
+  res = http!("#{base}/echo", { method: 'post' })
   eq res.json!.method, 'POST'
 
 test! "fetch options pass through (redirect: manual)", ->
@@ -183,7 +183,7 @@ test! "json wins over body when both are given", ->
 console.log "\nError throwing"
 
 test! "a non-2xx response throws HTTPError carrying response, request, and options", ->
-  err = await caught(http.get("#{base}/status/404"))
+  err = caught!(http.get("#{base}/status/404"))
   ok err instanceof HTTPError
   eq err.name, 'HTTPError'
   eq err.message, 'Request failed with status 404'
@@ -198,11 +198,11 @@ test! "throwHttpErrors: false returns the error response", ->
   eq res.status, 500
 
 test! "a 404 is not a retryable status", ->
-  await caught(http.get("#{base}/status/404?once"))
+  caught!(http.get("#{base}/status/404?once"))
   eq countHits('/status/404', '?once'), 1
 
 test! "beforeError hooks transform the error; undefined keeps it", ->
-  err = await caught(http.get("#{base}/status/404", {
+  err = caught!(http.get("#{base}/status/404", {
     hooks:
       beforeError: [
         ((e) -> e.customMessage = "API #{e.response.status}"; e)
@@ -219,7 +219,7 @@ console.log "\nRetries"
 fast = { limit: 2, delay: -> 1 }
 
 test! "a retryable status on a GET retries up to the limit, then throws", ->
-  err = await caught(http.get("#{base}/flaky?key=exhaust&fails=10", { retry: fast }))
+  err = caught!(http.get("#{base}/flaky?key=exhaust&fails=10", { retry: fast }))
   ok err instanceof HTTPError
   eq err.response.status, 500
   eq counters.get('exhaust'), 3   # 1 try + 2 retries
@@ -229,7 +229,7 @@ test! "a GET that recovers within the limit succeeds", ->
   eq res.json!.attempts, 3
 
 test! "POST is not retried by default", ->
-  err = await caught(http.post("#{base}/flaky?key=post&fails=1", { retry: fast }))
+  err = caught!(http.post("#{base}/flaky?key=post&fails=1", { retry: fast }))
   ok err instanceof HTTPError
   eq counters.get('post'), 1
 
@@ -239,18 +239,18 @@ test! "custom retry methods make POST retryable", ->
 
 test! "retry: 0 and retry: false disable retries", ->
   for [key, retry] in [['zero', 0], ['off', false]]
-    err = await caught(http.get("#{base}/flaky?key=#{key}&fails=1", { retry }))
+    err = caught!(http.get("#{base}/flaky?key=#{key}&fails=1", { retry }))
     ok err instanceof HTTPError
     eq counters.get(key), 1
 
 test! "a number retry option is the limit (default backoff applies)", ->
-  err = await caught(http.get("#{base}/flaky?key=one&fails=10", { retry: 1 }))
+  err = caught!(http.get("#{base}/flaky?key=one&fails=10", { retry: 1 }))
   ok err instanceof HTTPError
   eq counters.get('one'), 2
 
 test! "a custom delay receives the attempt number", ->
   attempts = []
-  await caught(http.get("#{base}/flaky?key=delays&fails=10", {
+  caught!(http.get("#{base}/flaky?key=delays&fails=10", {
     retry: { limit: 2, delay: (n) -> attempts.push(n); 1 }
   }))
   eq attempts, [1, 2]
@@ -268,12 +268,12 @@ test! "Retry-After as an HTTP date is honored", ->
   ok Date.now() - started < 250
 
 test! "network errors retry then rethrow the original error", ->
-  probe = Bun.serve({ port: 0, fetch: -> new Response('x') })
+  probe = Bun.serve({ port: 0, fetch: -> Response.new('x') })
   closed = probe.port
   probe.stop(true)
 
   seen = []
-  err = await caught(http.get("http://127.0.0.1:#{closed}/x", {
+  err = caught!(http.get("http://127.0.0.1:#{closed}/x", {
     retry: fast
     hooks: { beforeRetry: [({ error, retryCount }) -> seen.push({ retryCount, hasError: error isnt null }); return] }
   }))
@@ -299,7 +299,7 @@ test! "beforeRetry for a status retry carries error: null and the request", ->
 console.log "\nTimeout and abort"
 
 test! "a timeout throws TimeoutError with the request attached", ->
-  err = await caught(http.get("#{base}/slow", { timeout: 40 }))
+  err = caught!(http.get("#{base}/slow", { timeout: 40 }))
   ok err instanceof TimeoutError
   eq err.name, 'TimeoutError'
   eq err.message, 'Request timed out'
@@ -312,7 +312,7 @@ test! "timeout: false lets a slow response finish", ->
   eq res.text!, 'slow-ok'
 
 test! "a caller abort surfaces as AbortError, not TimeoutError", ->
-  ctrl = new AbortController()
+  ctrl = AbortController.new()
   pending = caught(http.get("#{base}/slow", { signal: ctrl.signal }))
   setTimeout (-> ctrl.abort()), 20
   err = await pending
@@ -320,7 +320,7 @@ test! "a caller abort surfaces as AbortError, not TimeoutError", ->
   ok not (err instanceof TimeoutError)
 
 test! "a caller abort with timeout disabled still aborts", ->
-  ctrl = new AbortController()
+  ctrl = AbortController.new()
   pending = caught(http.get("#{base}/slow", { timeout: false, signal: ctrl.signal }))
   setTimeout (-> ctrl.abort()), 20
   err = await pending
@@ -338,14 +338,14 @@ test! "beforeRequest can mutate the request headers", ->
 
 test! "beforeRequest can replace the request", ->
   res = http.get!("#{base}/echo", {
-    hooks: { beforeRequest: [(req) -> new Request("#{base}/echo?swapped=1", req)] }
+    hooks: { beforeRequest: [(req) -> Request.new("#{base}/echo?swapped=1", req)] }
   })
   eq res.json!.search, '?swapped=1'
 
 test! "beforeRequest returning a Response short-circuits the fetch", ->
   before = hits.length
   res = http.get!("#{base}/echo", {
-    hooks: { beforeRequest: [-> new Response('shortcut', { status: 203 })] }
+    hooks: { beforeRequest: [-> Response.new('shortcut', { status: 203 })] }
   })
   eq res.status, 203
   eq res.text!, 'shortcut'
@@ -357,7 +357,7 @@ test! "afterResponse can replace the response, averting throw and retry", ->
     hooks:
       afterResponse: [(req, opts, r) ->
         args.push([req.constructor.name, opts.method, r.status])
-        r.status is 500 ? new Response('fixed') : undefined
+        r.status is 500 ? Response.new('fixed') : undefined
       ]
   })
   eq res.status, 200

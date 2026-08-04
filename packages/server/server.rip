@@ -58,7 +58,7 @@ export resetGlobals = ->
   _composeEpoch++
 
 # AsyncLocalStorage for request context (enables sync read() in handlers)
-export requestContext: AsyncLocalStorage<{ env?: any, data: any }> = new AsyncLocalStorage()
+export requestContext: AsyncLocalStorage<{ env?: any, data: any }> = AsyncLocalStorage.new()
 
 # ==============================================================================
 # Router: Pattern Compiler
@@ -91,7 +91,7 @@ compilePattern = (path) ->
   # A pattern with no captures and no wildcard matches exactly one path
   # (modulo the /?$ trailing slash) — eligible for the static-path Map.
   staticPath = if keys.length is 0 and not wildcard then path else null
-  { regex: new RegExp("^#{regex}/?$"), keys, staticPath }
+  { regex: RegExp.new("^#{regex}/?$"), keys, staticPath }
 
 # ==============================================================================
 # Router: Route Matching
@@ -107,14 +107,14 @@ compilePattern = (path) ->
 # table); anything else takes the full walk. Route registration drops the
 # index; resetGlobals does too.
 
-INDEXED_METHODS =! new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])
+INDEXED_METHODS =! Set.new(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])
 
 routeBucket = (method) ->
   return null unless INDEXED_METHODS.has(method)
-  _routeIndex ?= new Map()
+  _routeIndex ?= Map.new()
   bucket = _routeIndex.get(method)
   return bucket if bucket?
-  bucket = { statics: new Map(), dynamics: [] }
+  bucket = { statics: Map.new(), dynamics: [] }
   for route, order in _routes
     continue unless route.method is method or route.method is 'ALL'
     if route.staticPath?
@@ -134,7 +134,7 @@ decodeParam = (raw) ->
   try
     decodeURIComponent(raw)
   catch
-    throw Object.assign(new Error('malformed percent-encoding in path'), { status: 400 })
+    throw Object.assign(Error.new('malformed percent-encoding in path'), { status: 400 })
 
 matchOne = (route, pathname) ->
   match = pathname.match route.regex
@@ -243,9 +243,9 @@ CtxProto =
     if @_out?
       @_out.set('Content-Type', ctype) if ctype?
       for k, v of headers then @_out.set(k, v)
-      return new Response data, { status, headers: @_out }
+      return Response.new data, { status, headers: @_out }
     h = if ctype? then { 'Content-Type': ctype, ...headers } else headers
-    new Response data, { status, headers: h }
+    Response.new data, { status, headers: h }
 
   json: (data, status = 200, headers = {}) ->
     @_respond JSON.stringify(data), status, headers, 'application/json'
@@ -257,21 +257,21 @@ CtxProto =
     @_respond str, status, headers, 'text/html; charset=UTF-8'
 
   redirect: (location, status = 302) ->
-    new Response null, { status, headers: { Location: String(location) } }
+    Response.new null, { status, headers: { Location: String(location) } }
 
   body: (data, status = 200, headers = {}) ->
     @_respond data, status, headers, null
 
   send: (path, type) ->
-    out = (@_out ?= new Headers())
+    out = (@_out ?= Headers.new())
     out.set 'X-Sendfile', resolve(path)
     out.set 'Content-Type', type if type?
     out.set 'Cache-Control', 'no-cache' unless out.has 'Cache-Control'
-    new Response null, { status: 200, headers: out }
+    Response.new null, { status: 200, headers: out }
 
   header: (name, value, opts: { append?: boolean } = {}) ->
     if value?
-      out = (@_out ?= new Headers())
+      out = (@_out ?= Headers.new())
       if opts.append then out.append(name, value) else out.set(name, value)
       return
     @_out?.get(name) ?? null
@@ -284,7 +284,7 @@ CtxProto =
   # A directive that does not parse throws: a cache instruction the framework
   # failed to read is a bug, never a preference to guess at.
   cache: (duration) ->
-    out = (@_out ?= new Headers())
+    out = (@_out ?= Headers.new())
 
     if duration is 0 or duration is false or duration is 'off' or duration is 'no-store'
       out.set 'Cache-Control', 'no-store'
@@ -307,16 +307,16 @@ CtxProto =
         seconds = parseInt(duration, 10)
 
     unless seconds > 0
-      throw new TypeError "cache() takes a duration (10, '36m', '2 hours'), 'forever', or a never-store form (0, false, 'off', 'no-store'); got #{JSON.stringify(duration)}"
+      throw TypeError.new "cache() takes a duration (10, '36m', '2 hours'), 'forever', or a never-store form (0, false, 'off', 'no-store'); got #{JSON.stringify(duration)}"
 
     out.set 'Cache-Control', "public, max-age=#{seconds}"
-    out.set 'Expires', new Date(Date.now() + seconds * 1000).toUTCString()
+    out.set 'Expires', Date.new(Date.now() + seconds * 1000).toUTCString()
     return
 
 # fetch() passes its already-parsed url + normalized pathname through so the
 # request is parsed exactly once; the defaults keep direct calls working.
 createContext = (req, params = {}, url = null, pathname = null) ->
-  url ?= new URL(req.url)
+  url ?= URL.new(req.url)
   pathname ?= posix.normalize(url.pathname)
   r = Object.create(CtxReqProto)
   r.raw = req
@@ -401,7 +401,7 @@ smart = (fn) ->
       return c[type](result)
     return c.text(String(result)) if typeof result in ['number', 'boolean']
     if result is null or result is undefined
-      return new Response(null, { status: 204 })
+      return Response.new(null, { status: 204 })
     result
 
 # ==============================================================================
@@ -416,13 +416,13 @@ smart = (fn) ->
 withInput = (schema, fn) ->
   (c) ->
     if c._bodyInvalid
-      err = new Error 'Invalid JSON body'
+      err = Error.new 'Invalid JSON body'
       err.status = 400
       err.issues = [{ field: '', error: 'json', message: 'request body is not valid JSON' }]
       throw err
     r = schema.safeAsync! (c._body ?? {})
     unless r.ok
-      err = new Error 'Validation failed'
+      err = Error.new 'Validation failed'
       err.status = 400
       err.issues = r.errors
       throw err
@@ -430,7 +430,7 @@ withInput = (schema, fn) ->
     if fn.length > 0 then fn.call!(c, c) else fn.call!(c)
 
 addRoute = (method, path, ...handlers) ->
-  throw new TypeError("#{method} requires an absolute path") unless typeof path is 'string' and path.startsWith('/')
+  throw TypeError.new("#{method} requires an absolute path") unless typeof path is 'string' and path.startsWith('/')
   # Route options: a leading plain-object slot carries route metadata.
   # `input: SomeSchema` wires schema validation + the OpenAPI contract:
   #
@@ -440,7 +440,7 @@ addRoute = (method, path, ...handlers) ->
   if handlers.length > 1 and handlers[0]? and typeof handlers[0] is 'object'
     opts = handlers[0]
     handlers = handlers.slice(1)
-  throw new TypeError("#{method} #{path} requires a handler") unless handlers.length and handlers.every((handler) -> typeof handler is 'function')
+  throw TypeError.new("#{method} #{path} requires a handler") unless handlers.length and handlers.every((handler) -> typeof handler is 'function')
   _routeIndex = null
   fullPath = "#{_prefix}#{path}"
   if fullPath.includes(':') and fullPath.endsWith('?')
@@ -543,7 +543,7 @@ compileMiddlewarePattern = (path) ->
   path = path.replace /\/+$/, ''
   source = liftParams(path, false)
   source = source.replace /(?<![\\*])\*(?!\*)/g, '.*'
-  new RegExp("^#{source}(?:/|$)")
+  RegExp.new("^#{source}(?:/|$)")
 
 export use = (pathOrMw, mw = null) ->
   _composeEpoch++
@@ -552,7 +552,7 @@ export use = (pathOrMw, mw = null) ->
   else if typeof pathOrMw is 'string' and pathOrMw.startsWith('/') and typeof mw is 'function'
     _middlewares.push { fn: mw, regex: compileMiddlewarePattern(pathOrMw), path: pathOrMw }
   else
-    throw new TypeError 'use() takes a middleware function or an absolute path and middleware function'
+    throw TypeError.new 'use() takes a middleware function or an absolute path and middleware function'
 
 export prefix = (base, fn) ->
   old = _prefix
@@ -580,7 +580,7 @@ export after: (fn: RouteHandler) => void = (fn) ->
 # ==============================================================================
 
 dispatchRequest = (req) ->
-  url = new URL(req.url)
+  url = URL.new(req.url)
   pathname = posix.normalize(url.pathname)
   method = req.method
 
@@ -589,14 +589,14 @@ dispatchRequest = (req) ->
     match = matchRoute((if method is 'HEAD' then 'GET' else method), pathname)
   catch err
     { status, error } = errorEnvelope(err)
-    return new Response JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
+    return Response.new JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
 
   unless match
     c = createContext(req, {}, url, pathname)
     if _notFoundHandler?
       data = c.req.query()
       return requestContext.run! { env: c, data }, -> _notFoundHandler.call!(c, c)
-    return new Response('Not Found', { status: 404 })
+    return Response.new('Not Found', { status: 404 })
 
   c = createContext(req, match.params, url, pathname)
 
@@ -616,7 +616,7 @@ dispatchRequest = (req) ->
         # surface that as {body: text}. A real form clearing its only
         # field (`subscribe=`) contains '=' and parses normally.
         rawBody = c.req.text!
-        data = Object.fromEntries(new URLSearchParams(rawBody))
+        data = Object.fromEntries(URLSearchParams.new(rawBody))
         keys = Object.keys(data)
         data = { body: keys[0] } if keys.length is 1 and not rawBody.includes('=')
       else if ct =~ /form-data/i
@@ -640,14 +640,14 @@ dispatchRequest = (req) ->
 invokeMiddleware = (request) ->
   last = -1
   invoke = (index, currentRequest) ->
-    throw new Error('middleware called next() more than once') if index <= last
+    throw Error.new('middleware called next() more than once') if index <= last
     last = index
     if index < _middlewares.length
       entry = _middlewares[index]
-      path = posix.normalize(new URL(currentRequest.url).pathname)
+      path = posix.normalize(URL.new(currentRequest.url).pathname)
       return invoke!(index + 1, currentRequest) if entry.regex? and not entry.regex.test(path)
       return entry.fn currentRequest, (nextRequest = currentRequest) ->
-        throw new TypeError('middleware next() replacement must be a Request') unless nextRequest instanceof Request
+        throw TypeError.new('middleware next() replacement must be a Request') unless nextRequest instanceof Request
         if nextRequest isnt currentRequest
           nextRequest[SESSION] = currentRequest[SESSION] if currentRequest[SESSION]?
           nextRequest[key] = currentRequest[key] for key in Object.keys(currentRequest)
@@ -657,16 +657,16 @@ invokeMiddleware = (request) ->
 
 export fetch = (request) ->
   try
-    response = await invokeMiddleware request
-    throw new TypeError('middleware chain returned no Response') unless response instanceof Response
+    response = invokeMiddleware! request
+    throw TypeError.new('middleware chain returned no Response') unless response instanceof Response
     if request.method is 'HEAD'
-      new Response null, { status: response.status, statusText: response.statusText, headers: response.headers }
+      Response.new null, { status: response.status, statusText: response.statusText, headers: response.headers }
     else
       response
   catch err
     console.warn 'Request error:', err if not err?.status or err.status >= 500
     { status, error } = errorEnvelope(err)
-    new Response JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
+    Response.new JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
 
 # Each route's filter chain is cached on the route object.
 composedChain = (route) ->
@@ -688,7 +688,7 @@ runHandler = (c, route) ->
   try
     chain = composedChain(route)
     chain!(c)
-    applyMark(c._response or new Response('', { status: 204 }))
+    applyMark(c._response or Response.new('', { status: 204 }))
   catch err
     console.warn 'Request error:', err if not err?.status or err.status >= 500
     res = if _errorHandler?
@@ -696,7 +696,7 @@ runHandler = (c, route) ->
     else
       # Same masked JSON envelope smart() emits: 5xx internals never leak.
       masked = errorEnvelope(err)
-      new Response JSON.stringify({ error: masked.error }), { status: masked.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
+      Response.new JSON.stringify({ error: masked.error }), { status: masked.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
     applyMark(res)
 
 # ==============================================================================
@@ -705,7 +705,7 @@ runHandler = (c, route) ->
 
 export start = ->
   unless process.env.APP_ARTIFACT? and process.env.SOCKET_PATH?
-    throw new Error 'start() requires the Rip worker runtime — run the application with `rip server`'
+    throw Error.new 'start() requires the Rip worker runtime — run the application with `rip server`'
   globalThis.__ripHandler = fetch
   fetch
 
@@ -737,36 +737,36 @@ export mark = -> requestContext.getStore()?.env?.mark or null
 # Enables read() to work against a synthetic payload while preserving
 # all @ variables from the parent request (e.g., @token).
 export subrequest = (data, fn) ->
-  store = requestContext.getStore() or throw new Error 'no context for subrequest()'
+  store = requestContext.getStore() or throw Error.new 'no context for subrequest()'
   requestContext.run! { env: store.env, data }, ->
     fn.call!(store.env)
 
 # Session proxy — access session.foo anywhere (via AsyncLocalStorage)
-export session = new Proxy {},
+export session = Proxy.new {},
   get: (_, key) ->
     requestContext.getStore()?.env?.session?[key]
   set: (_, key, value) ->
-    ctx = requestContext.getStore()?.env or throw new Error 'session is only available during a request'
+    ctx = requestContext.getStore()?.env or throw Error.new 'session is only available during a request'
     ctx.session ?= {}
     ctx.session[key] = value
     true
   deleteProperty: (_, key) ->
-    ctx = requestContext.getStore()?.env or throw new Error 'session is only available during a request'
+    ctx = requestContext.getStore()?.env or throw Error.new 'session is only available during a request'
     delete ctx.session[key] if ctx.session?
     true
 
 # Env proxy — access env.FOO anywhere (shortcut for process.env)
-export env = new Proxy {}, get: (_, key) -> process.env[String(key)]
+export env = Proxy.new {}, get: (_, key) -> process.env[String(key)]
 
 # ==============================================================================
 # Error Helpers — Halt request with an HTTP error
 # ==============================================================================
 
 export error = (message = 'Bad request', status = 400) ->
-  throw Object.assign(new Error(message), { status })
+  throw Object.assign(Error.new(message), { status })
 
 export notice = (message = 'Something went wrong', status = 400) ->
-  throw Object.assign(new Error(message), { status, notice: message })
+  throw Object.assign(Error.new(message), { status, notice: message })
 
 export bail = ->
   store = requestContext.getStore()
@@ -776,7 +776,7 @@ export bail = ->
   # 401, not 403: bail is the no/invalid-session case (missing credentials),
   # which is "(re)authenticate" — and it just cleared the session. 403
   # (authenticated-but-refused) stays with `error! '…', 403`.
-  throw Object.assign(new Error('Unauthorized'), { status: 401 })
+  throw Object.assign(Error.new('Unauthorized'), { status: 401 })
 
 # ==============================================================================
 # Utility Functions
@@ -797,12 +797,12 @@ export { isBlank, toName, toPhone, formatMoney, registerValidator, getValidator,
 # ==============================================================================
 
 export read = (name?: string, type?: string | RegExp | any[] | Record<string, any>, miss?: any) ->
-  store = requestContext.getStore() or throw new Error 'no context for read()'
+  store = requestContext.getStore() or throw Error.new 'no context for read()'
 
   # missing value helper
   done = (must = false) ->
     return miss() if typeof miss is 'function'
-    throw Object.assign(new Error("Missing required field: #{name}"), { status: 400 }) if must
+    throw Object.assign(Error.new("Missing required field: #{name}"), { status: 400 }) if must
     return miss ?? null
 
   # get value from store — supports dotted paths for nested JSON bodies,

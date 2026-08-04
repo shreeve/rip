@@ -24,7 +24,7 @@ REPEAT_MS = 3000
 
 browserHost = ->
   unless typeof document isnt 'undefined' and typeof document.addEventListener is 'function'
-    throw new Error 'Rip App: link listeners require a browser or an injected host'
+    throw Error.new 'Rip App: link listeners require a browser or an injected host'
   listen: (type, fn, opts = null) ->
     document.addEventListener type, fn, opts ?? false
     -> document.removeEventListener type, fn, opts ?? false
@@ -36,7 +36,7 @@ anchorFrom = (node) ->
 
 export def interceptClicks(router: any, host: LinkHost = null): () => void
   unless router? and typeof router.claims is 'function' and typeof router.push is 'function'
-    throw new TypeError 'Rip App: interceptClicks requires a router'
+    throw TypeError.new 'Rip App: interceptClicks requires a router'
   host: any = host ?? browserHost()
 
   onClick = (event) ->
@@ -60,9 +60,9 @@ export def interceptClicks(router: any, host: LinkHost = null): () => void
 
 export def preloadLinks(router: any, renderer: any, host: LinkHost = null): () => void
   unless router? and typeof router.claims is 'function'
-    throw new TypeError 'Rip App: preloadLinks requires a router'
+    throw TypeError.new 'Rip App: preloadLinks requires a router'
   unless renderer? and typeof renderer.preload is 'function'
-    throw new TypeError 'Rip App: preloadLinks requires a renderer with preload()'
+    throw TypeError.new 'Rip App: preloadLinks requires a renderer with preload()'
   host: any = host ?? browserHost()
 
   settleTimer: any = null

@@ -36,6 +36,10 @@ Usage:
                                      manager behind Janus
   rip server browse <directory>      Publish one directory through Janus browse
                                      (run 'rip server --help' for the flags)
+  rip app <verb> [args...]           Remember and control Rip applications
+                                     (list | add | start | stop | status | logs)
+  rip edge <verb> [args...]          Control the shared Caddy + Janus edge
+                                     (status | start | stop | reload)
   rip test [args...]                 Run \`bun test\` with the .rip loader preloaded
                                      (default --timeout 15000; extra args pass through)
   rip <name> [args...]               Run rip-<name>: sibling of this executable, repo
@@ -145,6 +149,18 @@ if (args[0] === 'test') {
   const hasTimeout = rest.some((a) => a === '--timeout' || a.startsWith('--timeout='));
   const testArgs = hasTimeout ? rest : ['--timeout', '15000', ...rest];
   const r = spawnSync('bun', [`--preload=${loaderPath}`, 'test', ...testArgs], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  process.exit(r.status ?? 1);
+}
+
+// `rip app` and `rip edge` are the two appliance clients shipped by
+// @rip-lang/server. They are core surfaces, so dispatch is independent of the
+// caller's cwd and of package-manager bin-link installation.
+if (args[0] === 'app' || args[0] === 'edge') {
+  const applianceCliPath = join(dirname(fileURLToPath(import.meta.url)), `../packages/server/${args[0]}.rip`);
+  const r = spawnSync('bun', [`--preload=${loaderPath}`, applianceCliPath, ...args.slice(1)], {
     stdio: 'inherit',
     env: process.env,
   });

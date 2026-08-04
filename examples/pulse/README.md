@@ -17,9 +17,10 @@ here is wired into CI.
 | `app/mood.rip` | `MoodBadge`, the mood → label leaf. **This is the file the live demo edits.** |
 | `app/routes/index.rip` | The page: post form + the status list through `MoodBadge` |
 
-The `app/` directory is the browser app; its disk paths are the bundle's
-store paths (`app/routes/index.rip` is the `/` route, `app/stash.rip` the
-stash contract). Route files live under `app/routes/`.
+The `app/` directory is the browser app. Bundle, manifest, ding, and Workspace
+paths are relative to that root: `routes/index.rip` is the `/` route and
+`stash.rip` is the stash contract. Route files live on disk under
+`app/routes/`.
 
 ## The API
 

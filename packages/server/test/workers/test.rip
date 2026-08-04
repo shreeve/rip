@@ -13,9 +13,9 @@ generate = (entry, artifact, result, task) ->
     stdin: 'ignore'
     stdout: 'ignore'
     stderr: 'pipe'
-  diagnostic = new Response(proc.stderr).text()
+  diagnostic = Response.new(proc.stderr).text()
   code = await proc.exited
-  throw new Error(await diagnostic) unless code is 0
+  throw Error.new(await diagnostic) unless code is 0
 
 unixFetch = (path, socket) ->
   options = { unix: socket }
@@ -24,9 +24,9 @@ unixFetch = (path, socket) ->
 waitFor = (fn, timeout = 5000) ->
   deadline = Date.now() + timeout
   loop
-    value = await fn()
+    value = fn!
     return value if value
-    throw new Error('worker test timed out') if Date.now() >= deadline
+    throw Error.new('worker test timed out') if Date.now() >= deadline
     sleep! 10
 
 buildWorker = (dir, appEntry) ->
@@ -57,23 +57,23 @@ test! 'capacity bounces, shutdown marks, and admitted work completes', ->
     built = buildWorker! dir, join(import.meta.dir, 'index.rip')
     socket = join dir, 'worker.sock'
     proc = spawnWorker built, socket, { WORKER_CONCURRENCY: '1' }
-    await waitFor ->
-      try (await unixFetch('/ready', socket)).status is 200
+    waitFor! ->
+      try (unixFetch!('/ready', socket)).status is 200
       catch then false
 
     slow = unixFetch '/slow', socket
-    busy = await waitFor ->
+    busy = waitFor! ->
       try
-        response = await unixFetch '/hello', socket
+        response = unixFetch! '/hello', socket
         if response.headers.get('rip-worker-busy') is '1' then response else null
       catch then null
     eq busy.status, 503
     eq busy.headers.get('retry-after'), '0'
 
     proc.kill 'SIGTERM'
-    draining = await waitFor ->
+    draining = waitFor! ->
       try
-        response = await unixFetch '/hello', socket
+        response = unixFetch! '/hello', socket
         if response.headers.get('rip-worker-draining') is '1' then response else null
       catch then null
     eq draining.status, 503
@@ -91,13 +91,13 @@ test! 'boot failure is reported before bounded nonzero exit', ->
     built = buildWorker! dir, join(import.meta.dir, 'failed.rip')
     socket = join dir, 'worker.sock'
     proc = spawnWorker built, socket
-    failed = await waitFor ->
+    failed = waitFor! ->
       try
-        response = await unixFetch '/ready', socket
+        response = unixFetch! '/ready', socket
         if response.headers.get('rip-boot-failed') is '1' then response else null
       catch then null
     eq failed.status, 503
-    ok (await failed.text()).includes('no start! handoff')
+    ok (failed.text!).includes('no start! handoff')
     eq (await proc.exited), 1
   finally
     try proc?.kill('SIGKILL')
@@ -126,44 +126,44 @@ test! 'manager configures a pool and replaces a crashed worker', ->
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
-      url = new URL request.url
+      url = URL.new request.url
       if request.method is 'POST' and url.pathname is '/1.0/apps'
-        registration = await request.json()
+        registration = request.json!
         return Response.json({ id: 'workers-registration' }, { status: 201 })
       if request.method is 'PUT' and url.pathname is '/1.0/apps/workers-registration/upstreams'
-        body = await request.json()
+        body = request.json!
         updates.push body.upstreams
-        return new Response(null, { status: 204 })
+        return Response.new(null, { status: 204 })
       if request.method is 'POST' and url.pathname is '/1.0/apps/workers-registration/heartbeat'
-        return new Response(null, { status: 204 })
+        return Response.new(null, { status: 204 })
       if request.method is 'DELETE' and url.pathname is '/1.0/apps/workers-registration'
         deleted = true
-        return new Response(null, { status: 204 })
-      new Response('Not Found', { status: 404 })
+        return Response.new(null, { status: 204 })
+      Response.new('Not Found', { status: 404 })
   proc = null
   try
     proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--name', 'workers', '--host', 'workers.test', '--workers', '2', '--concurrency', '3', '--no-watch', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'ignore'
-    await waitFor -> registration?
+    waitFor! -> registration?
     eq registration.upstreams.length, 2
 
     first = registration.upstreams[0].path
     slow = [unixFetch('/slow', first), unixFetch('/slow', first), unixFetch('/slow', first)]
-    busy = await waitFor ->
+    busy = waitFor! ->
       try
-        response = await unixFetch '/hello', first
+        response = unixFetch! '/hello', first
         if response.headers.get('rip-worker-busy') is '1' then response else null
       catch then null
     eq busy.status, 503
-    await Promise.all slow
+    Promise.all! slow
 
-    try await unixFetch '/crash', first
-    replacement = await waitFor ->
+    try unixFetch! '/crash', first
+    replacement = waitFor! ->
       updates.find (list) -> list.length is 2 and list.every((item) -> item.path isnt first)
     eq replacement.length, 2
-    response = await unixFetch '/hello', replacement[0].path
+    response = unixFetch! '/hello', replacement[0].path
     eq response.status, 200
 
     proc.kill 'SIGTERM'
@@ -183,13 +183,13 @@ test! 'manager replaces one startup crash before publishing readiness', ->
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
-      url = new URL request.url
+      url = URL.new request.url
       if request.method is 'POST' and url.pathname is '/1.0/apps'
-        registration = await request.json()
+        registration = request.json!
         return Response.json({ id: 'startup-registration' }, { status: 201 })
       if request.method is 'DELETE' and url.pathname is '/1.0/apps/startup-registration'
-        return new Response(null, { status: 204 })
-      new Response(null, { status: 204 })
+        return Response.new(null, { status: 204 })
+      Response.new(null, { status: 204 })
   proc = null
   try
     proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--host', 'startup.test', '--workers', '1', '--no-watch', '--control', controlSocket, '--access-log=off'],
@@ -197,11 +197,11 @@ test! 'manager replaces one startup crash before publishing readiness', ->
       stdout: 'ignore'
       stderr: 'ignore'
       env: { ...process.env, RIP_TEST_CRASH_ONCE: join(dir, 'crashed') }
-    await waitFor -> registration?
+    waitFor! -> registration?
     eq registration.upstreams.length, 1
     ok registration.upstreams[0].path.endsWith('worker-2.sock')
-    response = await unixFetch '/hello', registration.upstreams[0].path
-    eq (await response.json()), { message: 'recovered' }
+    response = unixFetch! '/hello', registration.upstreams[0].path
+    eq (response.json!), { message: 'recovered' }
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143
   finally
@@ -218,8 +218,8 @@ test! 'manager kills workers that miss the readiness deadline', ->
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
-      registered = true if request.method is 'POST' and new URL(request.url).pathname is '/1.0/apps'
-      new Response('unexpected', { status: 500 })
+      registered = true if request.method is 'POST' and URL.new(request.url).pathname is '/1.0/apps'
+      Response.new('unexpected', { status: 500 })
   proc = null
   try
     proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--host', 'hanging.test', '--workers', '1', '--no-watch', '--control', controlSocket, '--access-log=off'],
@@ -242,12 +242,12 @@ test! 'hung handler recycles the worker after its drain bound', ->
     built = buildWorker! dir, join(import.meta.dir, 'index.rip')
     socket = join dir, 'worker.sock'
     proc = spawnWorker built, socket, { RIP_HANDLER_DEADLINE_MS: '50', RIP_DRAIN_DEADLINE_MS: '100' }
-    await waitFor ->
-      try (await unixFetch('/ready', socket)).status is 200
+    waitFor! ->
+      try (unixFetch!('/ready', socket)).status is 200
       catch then false
     hung = unixFetch('/hang', socket).catch(-> null)
-    await waitFor ->
-      try (await unixFetch('/hello', socket)).headers.get('rip-worker-busy') is '1'
+    waitFor! ->
+      try (unixFetch!('/hello', socket)).headers.get('rip-worker-busy') is '1'
       catch then false
     eq (await proc.exited), 0
     await hung
@@ -270,9 +270,9 @@ test! 'worker exits when its manager process disappears', ->
       stderr: 'inherit'
     eq (await parent.exited), 0
     childPid = JSON.parse(readFileSync(report, 'utf8')).pid
-    gone = await waitFor ->
+    gone = waitFor! ->
       try
-        await unixFetch '/ready', socket
+        unixFetch! '/ready', socket
         false
       catch then true
     ok gone

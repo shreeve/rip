@@ -282,7 +282,9 @@ alters surface syntax updates ALL THREE in the same change.
   curly-brace JS style. Read nearby `.rip` for the local dialect
   before writing new code.
 - **Workspace vocabulary (door / apply):** bag = **membership** (default
-  `app/**/*.{rip,css,html}`); bag unit = **module** (path-keyed);
+  disk set `app/**/*.{rip,css,html}`); bag ids and paths are relative to the
+  App root (`routes/home.rip`, never `app/routes/home.rip`); bag unit =
+  **module** (path-keyed);
   in-memory record = **passport**; swappable component identity =
   **component definition**. Not “cell.” Hub dings `{ id, hash }` only —
   no apply kind on the wire. Client apply verdicts:

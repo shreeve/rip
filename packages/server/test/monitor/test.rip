@@ -10,7 +10,7 @@ import {
   writeAccessOutput
 } from '../../monitor.rip'
 
-encoder = new TextEncoder
+encoder = TextEncoder.new()
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 SERVER = join(import.meta.dir, '..', '..', 'server.rip')
 ENTRY = join(import.meta.dir, '..', 'hello-api', 'index.rip')
@@ -60,7 +60,7 @@ waitFor = (fn, timeout = 2000) ->
   loop
     value = fn()
     return value if value
-    throw new Error('monitor test timed out') if Date.now() >= deadline
+    throw Error.new('monitor test timed out') if Date.now() >= deadline
     sleep! 5
 
 memorySink = (writes, opts = {}) ->
@@ -304,29 +304,29 @@ test! 'scale keeps a fixed three-character significand and free-form units', ->
 test! 'framer accepts split LF records and rejects CRLF, malformed, or oversized input', ->
   lines = []
   errors = []
-  framer = new AccessFramer ((line) -> lines.push line), ((error) -> errors.push error)
-  bytes = new Uint8Array [...helloLine(), ...accessLine()]
+  framer = AccessFramer.new ((line) -> lines.push line), ((error) -> errors.push error)
+  bytes = Uint8Array.new [...helloLine(), ...accessLine()]
   framer.feed bytes.slice(0, 5)
   framer.feed bytes.slice(5)
   framer.finish()
   eq lines.map((line) -> line.record.type), ['hello', 'access']
   eq errors, []
 
-  crlf = new AccessFramer (->), ((error) -> errors.push error)
-  crlf.feed encoder.encode("#{new TextDecoder().decode(helloLine()).trim()}\r\n")
+  crlf = AccessFramer.new (->), ((error) -> errors.push error)
+  crlf.feed encoder.encode("#{TextDecoder.new().decode(helloLine()).trim()}\r\n")
   eq errors.length, 1
   ok errors.at(-1).message.includes 'CRLF'
 
-  malformed = new AccessFramer (->), ((error) -> errors.push error)
-  malformed.feed new Uint8Array [0xff, 0x0a]
+  malformed = AccessFramer.new (->), ((error) -> errors.push error)
+  malformed.feed Uint8Array.new [0xff, 0x0a]
   eq errors.length, 2
 
-  oversized = new AccessFramer (->), ((error) -> errors.push error)
+  oversized = AccessFramer.new (->), ((error) -> errors.push error)
   oversized.feed encoder.encode('x'.repeat(8193))
   eq errors.length, 3
   ok errors.at(-1).message.includes '8192'
 
-  partial = new AccessFramer (->), ((error) -> errors.push error)
+  partial = AccessFramer.new (->), ((error) -> errors.push error)
   partial.feed encoder.encode('{"v":1}')
   partial.finish()
   eq errors.length, 4
@@ -344,7 +344,7 @@ test! 'bounded output waits for callbacks and reports stream errors', ->
 
   broken =
     write: (_chunk, callback) ->
-      error = Object.assign(new Error('closed'), { code: 'EPIPE' })
+      error = Object.assign(Error.new('closed'), { code: 'EPIPE' })
       queueMicrotask -> callback error
       true
   failed = null
@@ -367,26 +367,26 @@ test! 'access client subscribes by app id and preserves raw NDJSON bytes', ->
     write: (_chunk, callback) ->
       callback()
       true
-  client = new AccessClient {
+  client = AccessClient.new {
     mode: 'raw'
     control: { unix: '/tmp/janus.sock' }
     stdout
     stderr
     fetch: (url, options) ->
       requested = { url, options }
-      body = new ReadableStream
+      body = ReadableStream.new
         start: (controller) ->
           source = controller
           controller.enqueue helloLine()
           options.signal.addEventListener 'abort', -> controller.close()
-      new Response body, { status: 200 }
+      Response.new body, { status: 200 }
   }
   task = client.move 'cart-abc123'
-  await waitFor -> stdout.chunks.length > 0
+  waitFor! -> stdout.chunks.length > 0
   eq requested.url, 'http://janus/1.0/apps/cart-abc123/access?after=0'
   eq requested.options.unix, '/tmp/janus.sock'
-  eq new TextDecoder().decode(stdout.chunks[0]), new TextDecoder().decode(helloLine())
-  await client.stop()
+  eq TextDecoder.new().decode(stdout.chunks[0]), TextDecoder.new().decode(helloLine())
+  client.stop!
   await task
 
 test! 'pretty client validates records and renders only access events', ->
@@ -397,23 +397,23 @@ test! 'pretty client validates records and renders only access events', ->
       callback()
       true
   fetches = 0
-  pretty = new AccessClient {
+  pretty = AccessClient.new {
     mode: 'pretty'
     picture: '{method} {path}'
     stdout
     control: { base: 'http://janus' }
     fetch: (_url, options) ->
       fetches++
-      body = new ReadableStream
+      body = ReadableStream.new
         start: (controller) ->
-          controller.enqueue new Uint8Array [...helloLine(), ...accessLine(sequence: '1')]
+          controller.enqueue Uint8Array.new [...helloLine(), ...accessLine(sequence: '1')]
           options.signal.addEventListener 'abort', -> controller.close()
-      new Response body
+      Response.new body
   }
   task = pretty.move 'cart-abc123'
-  await waitFor -> stdout.text.length > 0
+  waitFor! -> stdout.text.length > 0
   eq stdout.text, "GET /api/items\n"
-  await pretty.stop()
+  pretty.stop!
   await task
   eq fetches, 1
 
@@ -425,7 +425,7 @@ test! 'stream heads never regress below an observed high-water mark', ->
       callback()
       true
   fetches = 0
-  client = new AccessClient {
+  client = AccessClient.new {
     mode: 'pretty'
     picture: '{method}'
     stderr
@@ -433,18 +433,18 @@ test! 'stream heads never regress below an observed high-water mark', ->
     sleep: -> null
     fetch: (_url, options) ->
       fetches++
-      body = new ReadableStream
+      body = ReadableStream.new
         start: (controller) ->
           if fetches is 1
-            controller.enqueue new Uint8Array [...helloLine(), ...heartbeatLine('2'), ...heartbeatLine('1')]
+            controller.enqueue Uint8Array.new [...helloLine(), ...heartbeatLine('2'), ...heartbeatLine('1')]
             controller.close()
           else
             options.signal.addEventListener 'abort', -> controller.close()
-      new Response body
+      Response.new body
   }
   task = client.move 'cart-abc123'
-  await waitFor -> stderr.text.includes 'heartbeat head regressed'
-  await client.stop()
+  waitFor! -> stderr.text.includes 'heartbeat head regressed'
+  client.stop!
   await task
 
 test! 'the framer bounds retained and copied bytes for an attacker-sized chunk', ->
@@ -452,13 +452,13 @@ test! 'the framer bounds retained and copied bytes for an attacker-sized chunk',
   errors = []
   attackBytes = 16 * 1024 * 1024
   hello = helloLine()
-  chunk = new Uint8Array(hello.length + attackBytes)
+  chunk = Uint8Array.new(hello.length + attackBytes)
   chunk.set hello
   chunk.fill 120, hello.length
   Bun.gc true
   memoryBefore = process.memoryUsage().arrayBuffers
   peakGrowth = 0
-  framer = new AccessFramer ((line) -> lines.push(line.record.type)), ((error) ->
+  framer = AccessFramer.new ((line) -> lines.push(line.record.type)), ((error) ->
     peakGrowth = process.memoryUsage().arrayBuffers - memoryBefore
     errors.push error.message
   )
@@ -475,23 +475,23 @@ test! 'registration generations abort and move exactly one live subscription', -
   seen = []
   sink = memorySink []
   fetcher = (url, options) ->
-    appId = decodeURIComponent(new URL(url).pathname.split('/')[3])
+    appId = decodeURIComponent(URL.new(url).pathname.split('/')[3])
     seen.push appId
     appName = appId.slice(0, appId.lastIndexOf('-'))
-    body = new ReadableStream
+    body = ReadableStream.new
       start: (controller) ->
         controller.enqueue encoder.encode("#{JSON.stringify({
           v: 1, type: 'hello', app_id: appId, app_name: appName,
           after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192
         })}\n")
         options.signal.addEventListener 'abort', (-> controller.close()), { once: true }
-    new Response body
-  client = new AccessClient { mode: 'pretty', control: { base: 'http://janus' }, stdout: sink, stderr: sink, fetch: fetcher, sample: -> 0 }
+    Response.new body
+  client = AccessClient.new { mode: 'pretty', control: { base: 'http://janus' }, stdout: sink, stderr: sink, fetch: fetcher, sample: -> 0 }
   client.move 'generation-aaaaaa'
-  await waitFor -> seen.includes('generation-aaaaaa')
+  waitFor! -> seen.includes('generation-aaaaaa')
   client.move 'generation-bbbbbb'
-  await waitFor -> seen.includes('generation-bbbbbb')
-  await client.stop()
+  waitFor! -> seen.includes('generation-bbbbbb')
+  client.stop!
   eq seen.filter((id) -> id is 'generation-aaaaaa').length, 1
   eq seen.filter((id) -> id is 'generation-bbbbbb').length, 1
 
@@ -512,10 +512,10 @@ test! 'a blocked old output completes before a replacement generation starts', -
     once: -> null
   calls = []
   fetcher = (url, options) ->
-    appId = decodeURIComponent(new URL(url).pathname.split('/')[3])
+    appId = decodeURIComponent(URL.new(url).pathname.split('/')[3])
     calls.push appId
     appName = appId.slice(0, appId.lastIndexOf('-'))
-    new Response(new ReadableStream
+    Response.new(ReadableStream.new
       start: (controller) ->
         controller.enqueue encoder.encode("#{JSON.stringify({
           v: 1, type: 'hello', app_id: appId, app_name: appName,
@@ -523,19 +523,19 @@ test! 'a blocked old output completes before a replacement generation starts', -
         })}\n")
         options.signal.addEventListener 'abort', (-> controller.close()), { once: true }
     )
-  client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: sink, stderr: memorySink([]), fetch: fetcher }
+  client = AccessClient.new { mode: 'raw', control: { base: 'http://janus' }, stdout: sink, stderr: memorySink([]), fetch: fetcher }
   client.move 'old-aaaaaa'
-  await waitFor -> writes.length is 1
+  waitFor! -> writes.length is 1
   replacement = client.move 'new-bbbbbb'
   sleep! 20
   eq calls, ['old-aaaaaa']
   eq writes, ['old-aaaaaa']
   callbacks.shift()()
-  await waitFor -> writes.length is 2
+  waitFor! -> writes.length is 2
   eq calls, ['old-aaaaaa', 'new-bbbbbb']
   eq maxActive, 1
   callbacks.shift()()
-  await client.stop()
+  client.stop!
   await replacement
 
 test! 'an aborted old generation keeps its blocked terminal output failure', ->
@@ -547,10 +547,10 @@ test! 'an aborted old generation keeps its blocked terminal output failure', ->
     once: -> null
   calls = []
   fetcher = (url, options) ->
-    appId = decodeURIComponent(new URL(url).pathname.split('/')[3])
+    appId = decodeURIComponent(URL.new(url).pathname.split('/')[3])
     calls.push appId
     appName = appId.slice(0, appId.lastIndexOf('-'))
-    new Response(new ReadableStream
+    Response.new(ReadableStream.new
       start: (controller) ->
         controller.enqueue encoder.encode("#{JSON.stringify({
           v: 1, type: 'hello', app_id: appId, app_name: appName,
@@ -558,11 +558,11 @@ test! 'an aborted old generation keeps its blocked terminal output failure', ->
         })}\n")
         options.signal.addEventListener 'abort', (-> controller.close()), { once: true }
     )
-  client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: sink, stderr: memorySink([]), fetch: fetcher }
+  client = AccessClient.new { mode: 'raw', control: { base: 'http://janus' }, stdout: sink, stderr: memorySink([]), fetch: fetcher }
   client.move 'old-aaaaaa'
-  await waitFor -> callback?
+  waitFor! -> callback?
   replacement = client.move 'new-bbbbbb'
-  failure = Object.assign(new Error('old output failed'), { code: 'EPIPE' })
+  failure = Object.assign(Error.new('old output failed'), { code: 'EPIPE' })
   callback failure
   caught = null
   try
@@ -575,27 +575,27 @@ test! 'an aborted old generation keeps its blocked terminal output failure', ->
 test! 'a stale generation resolving after move cannot write or reconnect', ->
   output = []
   oldGate: any = {}
-  oldGate.promise = new Promise (resolve) -> oldGate.open = resolve
+  oldGate.promise = Promise.new (resolve) -> oldGate.open = resolve
   calls = []
   fetcher = (url, options) ->
-    appId = decodeURIComponent(new URL(url).pathname.split('/')[3])
+    appId = decodeURIComponent(URL.new(url).pathname.split('/')[3])
     calls.push appId
     return oldGate.promise if appId is 'old-aaaaaa'
-    body = new ReadableStream
+    body = ReadableStream.new
       start: (controller) ->
         controller.enqueue encoder.encode("#{JSON.stringify({
           v: 1, type: 'hello', app_id: 'new-bbbbbb', app_name: 'new',
           after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192
         })}\n")
         options.signal.addEventListener 'abort', (-> controller.close()), { once: true }
-    new Response body
-  client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(output), stderr: memorySink([]), fetch: fetcher, sample: -> 0 }
+    Response.new body
+  client = AccessClient.new { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(output), stderr: memorySink([]), fetch: fetcher, sample: -> 0 }
   client.move 'old-aaaaaa'
-  await waitFor -> calls.includes('old-aaaaaa')
+  waitFor! -> calls.includes('old-aaaaaa')
   client.move 'new-bbbbbb'
   sleep! 20
   eq calls, ['old-aaaaaa']
-  oldGate.open new Response(new ReadableStream({ start: (controller) ->
+  oldGate.open Response.new(ReadableStream.new({ start: (controller) ->
     controller.enqueue encoder.encode("#{JSON.stringify({
       v: 1, type: 'hello', app_id: 'old-aaaaaa', app_name: 'old',
       after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192
@@ -603,8 +603,8 @@ test! 'a stale generation resolving after move cannot write or reconnect', ->
     controller.enqueue accessLine(app_id: 'old-aaaaaa', app_name: 'old', sequence: '1')
     controller.close()
   }))
-  await waitFor -> calls.includes('new-bbbbbb') and output.length is 1
-  await client.stop()
+  waitFor! -> calls.includes('new-bbbbbb') and output.length is 1
+  client.stop!
   text = Buffer.concat(output).toString()
   ok text.includes('new-bbbbbb')
   ok not text.includes('old-aaaaaa')
@@ -620,14 +620,14 @@ test! 'valid records before malformed input in one chunk are consumed first', ->
   fetcher = (_url, options) ->
     calls++
     if calls is 1
-      bytes = new Uint8Array(hello.length + event.length + malformed.length)
+      bytes = Uint8Array.new(hello.length + event.length + malformed.length)
       bytes.set hello
       bytes.set event, hello.length
       bytes.set malformed, hello.length + event.length
-      return new Response(new ReadableStream({ start: (controller) -> controller.enqueue(bytes); controller.close() }))
-    new Promise (_resolve, reject) ->
+      return Response.new(ReadableStream.new({ start: (controller) -> controller.enqueue(bytes); controller.close() }))
+    Promise.new (_resolve, reject) ->
       options.signal.addEventListener 'abort', (-> reject(options.signal.reason)), { once: true }
-  client = new AccessClient
+  client = AccessClient.new
     mode: 'raw'
     control: { base: 'http://janus' }
     stdout: memorySink(stdout)
@@ -635,8 +635,8 @@ test! 'valid records before malformed input in one chunk are consumed first', ->
     fetch: fetcher
     sample: -> 0
   client.move 'cart-abc123'
-  await waitFor -> calls >= 2
-  await client.stop()
+  waitFor! -> calls >= 2
+  client.stop!
   eq Buffer.concat(stdout), Buffer.concat([Buffer.from(hello), Buffer.from(event)])
   ok Buffer.concat(stderr).toString().includes('reconnecting')
 
@@ -648,16 +648,16 @@ test! 'no_replay is exactly one immediate required post-hello transition', ->
     fetcher = (_url, options) ->
       calls++
       if calls is 1
-        return new Response(new ReadableStream({ start: (controller) ->
+        return Response.new(ReadableStream.new({ start: (controller) ->
           controller.enqueue encoder.encode("#{JSON.stringify(item)}\n") for item in records
           controller.close()
         }))
-      new Promise (_resolve, reject) ->
+      Promise.new (_resolve, reject) ->
         options.signal.addEventListener 'abort', (-> reject(options.signal.reason)), { once: true }
-    client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(stdout), stderr: memorySink(stderr), fetch: fetcher, sample: -> 0 }
+    client = AccessClient.new { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(stdout), stderr: memorySink(stderr), fetch: fetcher, sample: -> 0 }
     client.move 'cart-abc123'
-    await waitFor -> calls >= 2
-    await client.stop()
+    waitFor! -> calls >= 2
+    client.stop!
     { stdout: Buffer.concat(stdout).toString(), stderr: Buffer.concat(stderr).toString() }
   hello0 = { v: 1, type: 'hello', app_id: 'cart-abc123', app_name: 'cart', after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192 }
   heartbeat0 = { v: 1, type: 'heartbeat', app_id: 'cart-abc123', head: '0', timestamp: '2026-08-01T14:16:15Z' }
@@ -691,16 +691,16 @@ test! 'overflow gaps advance the cursor with diagnostic-before-raw ordering', ->
   fetcher = (_url, options) ->
     calls++
     if calls is 1
-      return new Response(new ReadableStream({ start: (controller) ->
+      return Response.new(ReadableStream.new({ start: (controller) ->
         controller.enqueue encoder.encode("#{JSON.stringify(item)}\n") for item in records
         controller.close()
       }))
-    new Promise (_resolve, reject) ->
+    Promise.new (_resolve, reject) ->
       options.signal.addEventListener 'abort', (-> reject(options.signal.reason)), { once: true }
-  client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: sink('out'), stderr: sink('err'), fetch: fetcher, sample: -> 0 }
+  client = AccessClient.new { mode: 'raw', control: { base: 'http://janus' }, stdout: sink('out'), stderr: sink('err'), fetch: fetcher, sample: -> 0 }
   client.move 'cart-abc123'
-  await waitFor -> calls >= 2
-  await client.stop()
+  waitFor! -> calls >= 2
+  client.stop!
   gapDiagnostic = events.findIndex((event) -> event.includes('access gap 2..4'))
   gapRaw = events.findIndex((event) -> event.startsWith('out:') and event.includes('"type":"gap"'))
   ok 0 <= gapDiagnostic < gapRaw, 'gap diagnostic completes before exact raw gap output'
@@ -714,7 +714,7 @@ test! 'closed is consumed and reconnects without waiting for peer EOF', ->
   fetcher = (_url, options) ->
     calls++
     if calls is 1
-      return new Response(new ReadableStream
+      return Response.new(ReadableStream.new
         start: (controller) ->
           controller.enqueue helloLine()
           controller.enqueue encoder.encode("#{JSON.stringify({
@@ -723,12 +723,12 @@ test! 'closed is consumed and reconnects without waiting for peer EOF', ->
           })}\n")
         cancel: -> canceled = true
       )
-    new Promise (_resolve, reject) ->
+    Promise.new (_resolve, reject) ->
       options.signal.addEventListener 'abort', (-> reject(options.signal.reason)), { once: true }
-  client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(stdout), stderr: memorySink([]), fetch: fetcher, sample: -> 0 }
+  client = AccessClient.new { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(stdout), stderr: memorySink([]), fetch: fetcher, sample: -> 0 }
   client.move 'cart-abc123'
-  await waitFor -> calls >= 2
-  await client.stop()
+  waitFor! -> calls >= 2
+  client.stop!
   ok canceled, 'the still-open first body was canceled'
   ok Buffer.concat(stdout).toString().includes('"type":"closed"')
 
@@ -738,28 +738,28 @@ test! 'backoff doubles with full jitter and resets only after a valid hello', ->
   fetcher = (_url, options) ->
     calls++
     if calls is 2
-      body = new ReadableStream({ start: (controller) ->
+      body = ReadableStream.new({ start: (controller) ->
         controller.enqueue encoder.encode("#{JSON.stringify({
           v: 1, type: 'hello', app_id: 'other-aaaaaa', app_name: 'other',
           after: '0', head: '0', heartbeat_seconds: 15, max_line_bytes: 8192
         })}\n")
         controller.close()
       })
-      return new Response body
-    return new Response('no', { status: 500 }) if calls <= 8
+      return Response.new body
+    return Response.new('no', { status: 500 }) if calls <= 8
     if calls is 9
-      body = new ReadableStream({ start: (controller) ->
+      body = ReadableStream.new({ start: (controller) ->
         controller.enqueue helloLine()
         controller.close()
       })
-      return new Response body
-    new Promise (_resolve, reject) ->
+      return Response.new body
+    Promise.new (_resolve, reject) ->
       options.signal.addEventListener 'abort', (-> reject(options.signal.reason)), { once: true }
   sleep = (ms, _signal) -> delays.push ms
-  client = new AccessClient { mode: 'pretty', control: { base: 'http://janus' }, stdout: memorySink([]), stderr: memorySink([]), fetch: fetcher, sample: -> 0.5, sleep }
+  client = AccessClient.new { mode: 'pretty', control: { base: 'http://janus' }, stdout: memorySink([]), stderr: memorySink([]), fetch: fetcher, sample: -> 0.5, sleep }
   client.move 'cart-abc123'
-  await waitFor -> delays.length is 9
-  await client.stop()
+  waitFor! -> delays.length is 9
+  client.stop!
   eq delays, [50, 100, 200, 400, 800, 1600, 2500, 2500, 50]
 
 test! 'raw partial EPIPE is terminal and never reconnects', ->
@@ -769,18 +769,18 @@ test! 'raw partial EPIPE is terminal and never reconnects', ->
     errorAt: (count, bytes) ->
       return null unless count is 2
       writes[writes.length - 1] = bytes.subarray(0, Math.floor(bytes.length / 2))
-      Object.assign(new Error('broken pipe'), { code: 'EPIPE' })
+      Object.assign(Error.new('broken pipe'), { code: 'EPIPE' })
   fetcher = ->
     calls++
-    new Response(new ReadableStream({ start: (controller) ->
+    Response.new(ReadableStream.new({ start: (controller) ->
       controller.enqueue helloLine()
       controller.enqueue accessLine(sequence: '1')
       controller.close()
     }))
-  client = new AccessClient { mode: 'raw', control: { base: 'http://janus' }, stdout: broken, stderr: memorySink([]), fetch: fetcher, sample: -> 0 }
+  client = AccessClient.new { mode: 'raw', control: { base: 'http://janus' }, stdout: broken, stderr: memorySink([]), fetch: fetcher, sample: -> 0 }
   caught = null
   try
-    await client.move('cart-abc123')
+    client.move!('cart-abc123')
   catch error
     caught = error
   ok caught?.accessOutput, 'partial stdout failure is terminal output'
@@ -793,17 +793,17 @@ test! 'pretty ANSI wraps the complete picture only on color TTYs', ->
   try
     delete process.env.NO_COLOR
     color = []
-    client = new AccessClient { mode: 'pretty', picture: '{method:>5}', stdout: memorySink(color, { isTTY: true }), stderr: memorySink([]), control: {} }
-    await client.consume(line)
+    client = AccessClient.new { mode: 'pretty', picture: '{method:>5}', stdout: memorySink(color, { isTTY: true }), stderr: memorySink([]), control: {} }
+    client.consume!(line)
     eq Buffer.concat(color).toString(), '\x1b[36m  GET\x1b[0m\n'
     mono = []
-    client = new AccessClient { mode: 'pretty', picture: '{method:>5}', stdout: memorySink(mono), stderr: memorySink([]), control: {} }
-    await client.consume(line)
+    client = AccessClient.new { mode: 'pretty', picture: '{method:>5}', stdout: memorySink(mono), stderr: memorySink([]), control: {} }
+    client.consume!(line)
     eq Buffer.concat(mono).toString(), '  GET\n'
     process.env.NO_COLOR = '1'
     noColor = []
-    client = new AccessClient { mode: 'pretty', picture: '{method}', stdout: memorySink(noColor, { isTTY: true }), stderr: memorySink([]), control: {} }
-    await client.consume(line)
+    client = AccessClient.new { mode: 'pretty', picture: '{method}', stdout: memorySink(noColor, { isTTY: true }), stderr: memorySink([]), control: {} }
+    client.consume!(line)
     eq Buffer.concat(noColor).toString(), 'GET\n'
   finally
     if prior? then process.env.NO_COLOR = prior else delete process.env.NO_COLOR
@@ -811,9 +811,9 @@ test! 'pretty ANSI wraps the complete picture only on color TTYs', ->
 test! 'output pumping drains high volume under destination backpressure', ->
   chunks = 256
   bytes = 8192
-  readable = new ReadableStream
+  readable = ReadableStream.new
     start: (controller) ->
-      controller.enqueue new Uint8Array(bytes).fill(i % 251) for i in [0...chunks]
+      controller.enqueue Uint8Array.new(bytes).fill(i % 251) for i in [0...chunks]
       controller.close()
   total = 0
   destination =
@@ -824,16 +824,16 @@ test! 'output pumping drains high volume under destination backpressure', ->
       ), 0
       false
     once: -> null
-  await pumpAccessOutput readable, destination
+  pumpAccessOutput! readable, destination
   eq total, chunks * bytes
 
 test! 'backpressured output removes every temporary error listener', ->
-  sink = new EventEmitter()
+  sink = EventEmitter.new()
   sink.write = (_chunk, callback) ->
     queueMicrotask -> callback()
     false
   for _i in [0...1000]
-    await writeAccessOutput sink, 'x'
+    writeAccessOutput! sink, 'x'
     eq sink.listenerCount('error'), 0
 
 test! 'foreground flags reject invalid modes and pictures before startup', ->
@@ -859,36 +859,36 @@ test! 'foreground raw stdout is pure NDJSON and off opens no subscription', ->
     control = Bun.serve
       unix: socket
       fetch: (request) ->
-        url = new URL request.url
+        url = URL.new request.url
         if request.method is 'POST' and url.pathname is '/1.0/apps'
           registered = true
           return Response.json({ id: 'cart-abc123' }, { status: 201 })
         if request.method is 'GET' and url.pathname is '/1.0/apps/cart-abc123/access'
           accessCount++
-          body = new ReadableStream
+          body = ReadableStream.new
             start: (controller) ->
               accessSource = controller
-              controller.enqueue new Uint8Array [...helloLine(), ...accessLine(sequence: '1')]
-          return new Response body
+              controller.enqueue Uint8Array.new [...helloLine(), ...accessLine(sequence: '1')]
+          return Response.new body
         if request.method is 'POST' and url.pathname is '/1.0/apps/cart-abc123/heartbeat'
-          return new Response(null, { status: 204 })
+          return Response.new(null, { status: 204 })
         if request.method is 'DELETE' and url.pathname is '/1.0/apps/cart-abc123'
           try accessSource?.close()
-          return new Response(null, { status: 204 })
-        new Response('Not Found', { status: 404 })
+          return Response.new(null, { status: 204 })
+        Response.new('Not Found', { status: 404 })
     proc = null
     try
       proc = Bun.spawn [process.execPath, PRELOAD, SERVER, ENTRY, '--name', 'cart', '--host', 'cart.test', '--control', socket, "--access-log=#{mode}"],
         stdin: 'ignore'
         stdout: 'pipe'
         stderr: 'pipe'
-      output = new Response(proc.stdout).text()
-      diagnostic = new Response(proc.stderr).text()
+      output = Response.new(proc.stdout).text()
+      diagnostic = Response.new(proc.stderr).text()
       if mode is 'raw'
-        await waitFor -> accessCount is 1
+        waitFor! -> accessCount is 1
         sleep! 25
       else
-        await waitFor -> registered
+        waitFor! -> registered
         sleep! 25
       signal = if mode is 'off' then 'SIGINT' else 'SIGTERM'
       proc.kill signal
@@ -903,7 +903,7 @@ test! 'foreground raw stdout is pure NDJSON and off opens no subscription', ->
       rmSync dir, { recursive: true, force: true }
 
   raw = run! 'raw'
-  eq raw.output, new TextDecoder().decode(new Uint8Array([...helloLine(), ...accessLine(sequence: '1')]))
+  eq raw.output, TextDecoder.new().decode(Uint8Array.new([...helloLine(), ...accessLine(sequence: '1')]))
   eq raw.accessCount, 1
   ok raw.diagnostic.includes 'rip-server: https://cart.test/'
 

@@ -25,6 +25,6 @@ export Orders = component
               tr
                 td
                   a href: "/orders/#{order.id}", "##{order.id}"
-                td (new Date(order.createdAt)).toLocaleString()
+                td (Date.new(order.createdAt)).toLocaleString()
                 td "#{order.items.reduce(((sum, i) -> sum + i.quantity), 0)}"
                 td "#{formatPrice(order.total)}"

@@ -63,6 +63,25 @@ describe('dammit tokenization: the explicit DAMMIT token', () => {
   });
 });
 
+describe('maybe dammit disambiguation', () => {
+  test('the shared ?! token becomes a call only when arguments follow', () => {
+    expect(tokenize('fn?!').tokens.map((t) => t.kind)).toEqual(['IDENTIFIER', 'PRESENCE']);
+    expect(tokenize('fn?!()').tokens.map((t) => t.kind)).toEqual(['IDENTIFIER', 'PRESENCE', 'CALL_START', 'CALL_END']);
+    expect(tokenize('fn?! arg').tokens.map((t) => t.kind)).toEqual(['IDENTIFIER', 'PRESENCE', 'CALL_START', 'IDENTIFIER', 'CALL_END']);
+  });
+
+  test('bare ?! is presence; empty, parenthesized, and juxta args are maybe dammit', () => {
+    expect(parser.parse('x = fn?!').sexpr)
+      .toEqual(['program', ['=', 'x', ['presence', 'fn']]]);
+    expect(parser.parse('x = fn?!()').sexpr)
+      .toEqual(['program', ['=', 'x', ['dammit?', 'fn']]]);
+    expect(parser.parse('x = fn?!(arg)').sexpr)
+      .toEqual(['program', ['=', 'x', ['dammit?', 'fn', 'arg']]]);
+    expect(parser.parse('x = fn?! arg').sexpr)
+      .toEqual(['program', ['=', 'x', ['dammit?', 'fn', 'arg']]]);
+  });
+});
+
 describe('async behavior through the module loader', () => {
   const rows = [
     // [source, expected default export]
@@ -104,7 +123,7 @@ describe('composition matrix: async constructs in HEAD positions (eval-pinned)',
   });
 });
 
-describe('dammit mapping surface', () => {
+describe('dammit mapping surfaces', () => {
   const compileFull = (src) => {
     const r = parser.parse(src);
     expect(r.diagnostics).toEqual([]);
@@ -145,6 +164,41 @@ describe('dammit mapping surface', () => {
     const scaffold = mappings.bestAtGenerated(code.indexOf('await '));
     expect(scaffold).not.toBeNull();
     expect(scaffold.mappingKind).not.toBe('exact');
+  });
+
+  test('maybe dammit owns its full source span and callee/operator/args roles', () => {
+    const src = 'x = fn?!(arg)';
+    const { code, mappings, stores } = compileFull(src);
+    const [maybe] = stores.nodesByKind('maybe-dammit');
+    expect(maybe).toBeDefined();
+    expect([maybe.sourceStart, maybe.sourceEnd]).toEqual([4, 13]);
+    expect(stores.nodesByKind('presence')).toEqual([]);
+
+    const [callee] = mappings.of(maybe.nodeId, 'callee');
+    expect(src.slice(callee.sourceStart, callee.sourceEnd)).toBe('fn');
+    expect(code.slice(callee.generatedStart, callee.generatedEnd)).toBe('fn');
+    expect(callee.mappingKind).toBe('exact');
+
+    // TWO manifestations of the operator, in generated order: the
+    // awaiting keyword rides the role first (TS80007's landing — the
+    // `?!` is this spelling's await operator), then the `?.` the call
+    // lowers through. Both are covers onto the same token.
+    const opRows = mappings.of(maybe.nodeId, 'operator');
+    expect(opRows).toHaveLength(2);
+    for (const [row, gen] of [[opRows[0], 'await'], [opRows[1], '?.']]) {
+      expect(src.slice(row.sourceStart, row.sourceEnd)).toBe('?!');
+      expect(code.slice(row.generatedStart, row.generatedEnd)).toBe(gen);
+      expect(row.mappingKind).toBe('cover');
+    }
+
+    const [args] = mappings.of(maybe.nodeId, 'args');
+    expect(src.slice(args.sourceStart, args.sourceEnd)).toBe('(arg)');
+    expect(code.slice(args.generatedStart, args.generatedEnd)).toBe('(arg)');
+    expect(args.mappingKind).toBe('exact');
+
+    const scaffold = mappings.bestAtGenerated(code.indexOf('await '));
+    expect(scaffold).not.toBeNull();
+    expect(scaffold.mappingKind).toBe('cover');
   });
 });
 

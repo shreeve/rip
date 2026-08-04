@@ -497,8 +497,19 @@ const TSGO_CLIENT_CAPABILITIES = {
       formats: ['relative'],
     },
   },
-  workspace: { configuration: true, didChangeWatchedFiles: {}, symbol: {} },
+  workspace: { configuration: true, didChangeWatchedFiles: {}, symbol: {}, diagnostics: { refreshSupport: true } },
 };
+
+// The broker publishes only what it pulls, so it must accept tsgo's
+// one channel for saying "my answers changed, ask again" — without
+// this handler a program-wide recomputation that lands after the
+// triggering batch's pulls would never publish. (Today's tsgo does
+// not send it; the diagnostic pulls' generous timeout carries the
+// config-flip path until it does.)
+function tsgoDiagnosticRefreshRequest() {
+  repullOpenDocuments();
+  return null;
+}
 
 // tsgo drives preference-sensitive behavior off workspace/configuration
 // answers. The broker FORWARDS tsgo's asks to the editor when the
@@ -546,7 +557,10 @@ function launchTsgo() {
   }
   tsgoReady = startTsgo(rootDir, {
     clientCapabilities: TSGO_CLIENT_CAPABILITIES,
-    serverRequests: { 'workspace/configuration': tsgoConfigurationRequest },
+    serverRequests: {
+      'workspace/configuration': tsgoConfigurationRequest,
+      'workspace/diagnostic/refresh': tsgoDiagnosticRefreshRequest,
+    },
   }).then(
     (session) => {
       tsgo = session;
@@ -1468,7 +1482,13 @@ async function repullDiagnostics(uri) {
   if (documents.get(uri)?.getText() !== good.source) return;
   let pulled;
   try {
-    pulled = await tsgo.client.request('textDocument/diagnostic', { textDocument: { uri: state.tsUri } });
+    // A generous cap, not the default: this pull is issued ONCE per
+    // trigger and abandoned on timeout, so a cap shorter than tsgo's
+    // worst rebuild (a config flip re-governing the program on a loaded
+    // machine) loses the publication forever — nothing re-pulls until
+    // the next user action. A late answer is still safe: the staleness
+    // guards below discard it if the buffer moved on.
+    pulled = await tsgo.client.request('textDocument/diagnostic', { textDocument: { uri: state.tsUri } }, { timeoutMs: 60000 });
   } catch (err) {
     connection.console.error(`[rip] diagnostic re-pull failed: ${err.message}`);
     return;
@@ -1584,6 +1604,13 @@ async function refresh(document) {
     // Hoisted class-expression bindings whose declaration lost its
     // initializer to the hoist split (see ripSemanticTokens).
     classDecls: result.classDecls ?? [],
+    // Render-loop binding names — parameters in the face's block factory,
+    // loop variables in the source (see ripSemanticTokens).
+    loopVars: result.loopVars ?? [],
+    // Render attribute names — prop keys of component calls, whose
+    // semantic tokens are suppressed so every attribute reads through the
+    // TextMate attribute scope (see ripSemanticTokens).
+    attrNames: result.attrNames ?? [],
     // The enum names this module declares — read by IMPORTERS, which
     // cannot compute it from their own compile. An open buffer answers
     // from here; a disk file from its manifest entry.
@@ -1670,7 +1697,23 @@ async function refresh(document) {
           changes: wrapperFiles.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Changed })),
         });
       }
-      const { compiled, cached, failed } = materializeClosure(imports);
+      const { compiled, cached, failed, touched } = materializeClosure(imports);
+      // Every mirror this materialization wrote is forwarded NOW, the same
+      // way the watcher-event path forwards its own touched list: tsgo's
+      // program otherwise keeps the bytes it last knew for these files —
+      // after a prune, the auto-import stub, whose exports all answer `any`.
+      // The event is owed here by contract: this server advertises
+      // didChangeWatchedFiles to tsgo, and tsgo's own disk watching is
+      // darwin-only in practice, so an unforwarded write is invisible on
+      // linux while FSEvents quietly covers the same gap on macOS.
+      if (touched.length && tsgo) {
+        tsgo.client.notify('workspace/didChangeWatchedFiles', {
+          changes: touched.map((p) => ({
+            uri: 'file://' + p,
+            type: fs.existsSync(p) ? FileChangeType.Changed : FileChangeType.Deleted,
+          })),
+        });
+      }
       if (compiled || cached || failed) {
         connection.console.log(
           `[rip] closure of ${path.basename(fsPath)}: ${compiled} compiled, ${cached} cached, ${failed} failed`,
@@ -1732,7 +1775,10 @@ async function refresh(document) {
   const versionAtRequest = document.version;
   let pulled;
   try {
-    pulled = await tsgo.client.request('textDocument/diagnostic', { textDocument: { uri: state.tsUri } });
+    // Same cap as the re-pull: one shot per refresh, abandoned on
+    // timeout, so the cap must outlast tsgo's worst rebuild; the
+    // version guard below discards a stale answer.
+    pulled = await tsgo.client.request('textDocument/diagnostic', { textDocument: { uri: state.tsUri } }, { timeoutMs: 60000 });
   } catch (err) {
     connection.console.error(`[rip] diagnostic pull failed: ${err.message}`);
     return;
@@ -2782,6 +2828,24 @@ function ripSemanticTokens(ctx, data) {
   // other type's index, exactly as the enum correction does.
   const classType = semanticTokensLegend?.tokenTypes?.indexOf('class') ?? -1;
   const classStarts = new Set((ctx.good.classDecls ?? []).map(([s]) => s));
+  // The fourth correction of the same shape: a render loop's body lowers
+  // to a block-function factory, so its item/index binding genuinely IS a
+  // parameter in the face — the factory header, the keyed callback, every
+  // read — and tsgo classifies each occurrence so. The author declared a
+  // loop variable. The compiler reports each occurrence's span, so a
+  // handler's own `(e) ->` parameter — a parameter in the source too — is
+  // never touched: the correction is the span, not a rule over the block.
+  const variableType = semanticTokensLegend?.tokenTypes?.indexOf('variable') ?? -1;
+  const loopStarts = new Set((ctx.good.loopVars ?? []).map(([s]) => s));
+  // The one correction that DROPS instead of retyping: a render attribute
+  // name's token is suppressed, so a plain prop (whose `property` maps
+  // exactly and would forward) reads like its two-way-bound neighbor
+  // (whose minted key cannot map and already drops) — every attribute
+  // falls back to the TextMate attribute scope, the one fact all of them
+  // share. Never the reverse: no token is invented at the bind's span,
+  // and the drop is keyed by the compiler's span, so a property inside an
+  // attribute's VALUE keeps its own.
+  const attrStarts = new Set((ctx.good.attrNames ?? []).map(([s]) => s));
   // An IMPORTED enum carries the same merged-symbol `type` classification
   // its declaration does, and the importing file's compile cannot know
   // that — the kind lives in the declaring module. The compiler reports
@@ -2798,6 +2862,7 @@ function ripSemanticTokens(ctx, data) {
     char = data[i] === 0 ? char + data[i + 1] : data[i + 1];
     const length = data[i + 2];
     const genStart = positionToOffset(ctx.good.genLineStarts, ctx.good.code.length, { line, character: char });
+    if (attrStarts.has(genStart)) continue;
     const srcStart = mapSpan(genStart, genStart + length)
       ?? generatedEditSpanToSource(ctx.good.mappings, genStart, genStart + length, ctx.good.source, ctx.good.code)?.[0]
       ?? null;
@@ -2820,6 +2885,7 @@ function ripSemanticTokens(ctx, data) {
       modifiers &= ~roBit;
     }
     if (classType >= 0 && classStarts.has(genStart)) type = classType;
+    if (variableType >= 0 && loopStarts.has(genStart)) type = variableType;
     const key = curStart * 0x100000 + length;
     const existing = tokens.get(key);
     if (existing && existing.type === type) {

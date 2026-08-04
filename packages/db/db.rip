@@ -122,7 +122,7 @@ decodeTemporal = (value, kind) ->
   # `T` date/time separator, a bare `±HHMM` offset -> `±HH:MM`.
   iso = value.replace(' ', 'T').replace(/([+-]\d{2})(\d{2})$/, '$1:$2')
   iso = "#{iso}Z" if kind is 'utc' and not HAS_ZONE.test(iso)
-  date = new Date(iso)
+  date = Date.new(iso)
   if Number.isNaN(date.getTime()) then value else date
 
 # Decode every temporal cell of a result in one pass. Fast path: when
@@ -140,7 +140,7 @@ isPlainObject = (v) ->
 
 encodeParam = (v) ->
   if v instanceof Date
-    throw new TypeError 'db: cannot bind an Invalid Date as a query parameter' if Number.isNaN v.getTime()
+    throw TypeError.new 'db: cannot bind an Invalid Date as a query parameter' if Number.isNaN v.getTime()
     return v.toISOString()
   return v.map(encodeParam) if Array.isArray v
   if isPlainObject v
@@ -155,7 +155,7 @@ encodeParams = (params) -> params.map encodeParam
 # reason the moment it fires, even when the injected fetch ignores its
 # signal — a hung socket can never outlive the deadline.
 abortable = (signal, promise) ->
-  new Promise (resolve, reject) ->
+  Promise.new (resolve, reject) ->
     onAbort = -> reject signal.reason
     signal.addEventListener 'abort', onAbort, { once: true }
     settle = (fn) ->
@@ -184,7 +184,7 @@ export def harborAdapter(opts = {})
   # caller's signal (when given) is relayed in — either aborts the
   # in-flight fetch for real, not just the caller's promise.
   post = (path, body, sql = null, signal = null) ->
-    ctrl = new AbortController()
+    ctrl = AbortController.new()
     timedOut = false
     timer = null
     if timeoutMs > 0
@@ -211,13 +211,13 @@ export def harborAdapter(opts = {})
         # a retry loop catches the family; `code` tells them apart.
         error = null
         if timedOut
-          error = new ConnectionError "db: harbor at #{base} timed out after #{timeoutMs}ms"
+          error = ConnectionError.new "db: harbor at #{base} timed out after #{timeoutMs}ms"
           error.code = 'TIMEOUT'
         else if signal?.aborted
-          error = new ConnectionError 'db: harbor request aborted by the caller'
+          error = ConnectionError.new 'db: harbor request aborted by the caller'
           error.code = 'ABORTED'
         else
-          error = new ConnectionError "db: harbor at #{base} is unreachable: #{detail.message}"
+          error = ConnectionError.new "db: harbor at #{base} is unreachable: #{detail.message}"
         error.cause = cause
         throw error
       data = {}
@@ -233,14 +233,14 @@ export def harborAdapter(opts = {})
         # (a ConnectionError) — so a caller's retry loop keyed on
         # ConnectionError catches a 5xx during a query.
         error = if data.errorCode?
-          e = new QueryError message
+          e = QueryError.new message
           e.code = data.errorCode
           e.details = data.errorDetails if data.errorDetails?
           e
         else if not response.ok
-          new ConnectionError message
+          ConnectionError.new message
         else
-          new QueryError message
+          QueryError.new message
         error.sql = sql if sql?
         error.httpStatus = response.status
         throw error
@@ -271,7 +271,7 @@ export def harborAdapter(opts = {})
     sessionId = session.sessionId
     # No session id means no isolation — refuse loudly rather than run
     # BEGIN/COMMIT as independent autocommit statements on the pool.
-    throw new DbError 'db: harbor returned no session id for the transaction' unless sessionId?
+    throw DbError.new 'db: harbor returned no session id for the transaction' unless sessionId?
     run = (sql, params = null, opts = {}) ->
       body = if params?.length then { sql, params: encodeParams(params), sessionId } else { sql, sessionId }
       toResult post! '/sql', body, sql, opts?.signal
@@ -281,7 +281,7 @@ export def harborAdapter(opts = {})
       # The same deadline applies — a hung harbor must not wedge the
       # finally block of a COMMIT that already timed out.
       try
-        ctrl = new AbortController()
+        ctrl = AbortController.new()
         timer = if timeoutMs > 0 then setTimeout (-> ctrl.abort()), timeoutMs else null
         try
           abortable! ctrl.signal, fetchFn "#{base}/sql/sessions/#{sessionId}",
@@ -342,7 +342,7 @@ export def harborAdapter(opts = {})
 # than left to finish on its own.
 
 fail = (message) ->
-  throw new Error(if String(message).startsWith('db:') then message else "db: #{message}")
+  throw Error.new(if String(message).startsWith('db:') then message else "db: #{message}")
 
 # The adapter's `{ columns, data }` → row objects. Each adapter column
 # is a `{ name, type }` object (harbor's shape), so a row array keys by
@@ -365,9 +365,9 @@ materialize = (result) ->
 raceAbort = (signal, run) ->
   return run() unless signal?
   if signal.aborted
-    return Promise.reject(new CancelledError 'db: query cancelled before dispatch')
-  new Promise (resolve, reject) ->
-    onAbort = -> reject(new CancelledError 'db: query cancelled')
+    return Promise.reject(CancelledError.new 'db: query cancelled before dispatch')
+  Promise.new (resolve, reject) ->
+    onAbort = -> reject(CancelledError.new 'db: query cancelled')
     signal.addEventListener 'abort', onAbort, { once: true }
     settle = (fn) ->
       (value) ->
@@ -478,21 +478,21 @@ export def connect(urlOrOpts = null, opts = {})
 # exposes rows/one/value; those names are too common as locals to also
 # export at module scope.)
 export def query(sql, params = null, opts = {})
-  defaultPair!().client.query! sql, params, opts
+  defaultPair!.client.query! sql, params, opts
 
 export def findAll(sql, params = null, opts = {})
-  defaultPair!().client.rows! sql, params, opts
+  defaultPair!.client.rows! sql, params, opts
 
 export def findOne(sql, params = null, opts = {})
-  defaultPair!().client.one! sql, params, opts
+  defaultPair!.client.one! sql, params, opts
 
 export def transaction(fn)
-  defaultPair!().client.transaction! fn
+  defaultPair!.client.transaction! fn
 
 # Raw adapter begin (session + BEGIN) — what schema.transaction uses under
 # the hood. App code usually wants `transaction(fn)` instead.
 export def begin(opts = {})
-  adapter = defaultPair!().adapter
+  adapter = defaultPair!.adapter
   fail 'this adapter does not support transactions' unless typeof adapter.begin is 'function'
   adapter.begin! opts
 
@@ -505,7 +505,7 @@ export def materializeAll(result)
   (materialize result).rows
 
 badRequest = (message) ->
-  err = new QueryError "db: #{message}"
+  err = QueryError.new "db: #{message}"
   err.code = 'BAD_REQUEST'
   throw err
 
@@ -656,7 +656,7 @@ class QueryBuilder
     findAll! sql, @_params
 
   _clone: ->
-    b = new QueryBuilder(@table, @database)
+    b = QueryBuilder.new(@table, @database)
     b._wheres = [...@_wheres]
     b._params = [...@_params]
     b._order = @_order
@@ -690,7 +690,7 @@ export Model = (table, databaseOrOpts = null) ->
   badRequest 'Model pk must be a non-empty string' unless typeof pk is 'string' and pk.length > 0
   tableName = if database then "#{ident database}.#{ident table}" else ident(table)
   pkCol = ident pk
-  _qb = -> new QueryBuilder(table, database)
+  _qb = -> QueryBuilder.new(table, database)
 
   find: (id) ->
     findOne! "SELECT * FROM #{tableName} WHERE #{pkCol} = ?", [id]
@@ -775,7 +775,7 @@ PROBE_TIMEOUT_MS =! 5000
 # body, a transport failure, or a timeout) reads as not reachable. The
 # timeout keeps a half-open TCP from hanging boot indefinitely.
 reachable = (url, fetchFn) ->
-  ctrl = new AbortController()
+  ctrl = AbortController.new()
   timer = setTimeout (-> ctrl.abort()), PROBE_TIMEOUT_MS
   try
     res = fetchFn! "#{url}/ready", { signal: ctrl.signal }
@@ -793,7 +793,7 @@ export def assertReachable(url = null, opts = {})
   fetchFn = opts.fetch ?? fetch
   resolved = resolveUrl url
   return 'running' if reachable!(resolved, fetchFn)
-  throw new Error "harbor not reachable at #{resolved} — start your duckdb-harbor instance and try again"
+  throw Error.new "harbor not reachable at #{resolved} — start your duckdb-harbor instance and try again"
 
 export def ensureRunning(url = null, opts = {})
   assertReachable url, opts
@@ -807,7 +807,7 @@ export def ping(opts = {})
   url = resolveUrl o.url
   fetchFn = o.fetch ?? fetch
   unless reachable!(url, fetchFn)
-    throw new ConnectionError "db: harbor not reachable at #{url}"
+    throw ConnectionError.new "db: harbor not reachable at #{url}"
   sql = makeSql
     url: url
     token: o.token
@@ -823,7 +823,7 @@ export def ping(opts = {})
 # A SQL single-quoted string literal, doubling embedded quotes. A NUL
 # byte is rejected — it does not survive HTTP-as-text transport.
 export sqlString = (s) ->
-  throw new Error 'db: path contains NUL byte' if s.includes '\0'
+  throw Error.new 'db: path contains NUL byte' if s.includes '\0'
   "'" + s.replaceAll("'", "''") + "'"
 
 # A filesystem-safe stem for an auto-named archive.
@@ -883,7 +883,7 @@ export assertEmptyDatabase = (sql) ->
   '''
   n = Number(r?.data?[0]?[0] ?? 0)
   if n isnt 0
-    throw new Error "target database is not empty (#{n} user table/view(s) across all schemas). Drop them first or load into a fresh harbor instance."
+    throw Error.new "target database is not empty (#{n} user table/view(s) across all schemas). Drop them first or load into a fresh harbor instance."
 
 # ── commands ──────────────────────────────────────────────────────────
 #
@@ -904,8 +904,8 @@ export dump = (arg, deps) ->
       name = "#{safeFileStem currentDatabase! sql}-#{stamp now()}.tar.gz"
       archive = if isDir then deps.join(archive, name) else name
     else if not /\.(tar\.gz|tgz)$/i.test archive
-      throw new Error "archive path must end in .tar.gz or .tgz (got '#{archive}'). Pass an existing directory to drop an auto-named archive into it, or omit the path to write into the current directory."
-    throw new Error "refusing to overwrite existing file: #{archive} (use a different name or rm it first)" if fs.exists archive
+      throw Error.new "archive path must end in .tar.gz or .tgz (got '#{archive}'). Pass an existing directory to drop an auto-named archive into it, or omit the path to write into the current directory."
+    throw Error.new "refusing to overwrite existing file: #{archive} (use a different name or rm it first)" if fs.exists archive
     sql! "EXPORT DATABASE #{sqlString staging} (FORMAT CSV)"
     assertExportDir fs, staging
     tar.create archive, staging
@@ -917,13 +917,13 @@ export dump = (arg, deps) ->
 # extract, IMPORT DATABASE.
 export load = (arg, deps) ->
   { sql, fs, tar } = deps
-  throw new Error 'usage: rip-db load ARCHIVE.tar.gz' unless arg
-  throw new Error "no such file: #{arg}" unless fs.exists arg
+  throw Error.new 'usage: rip-db load ARCHIVE.tar.gz' unless arg
+  throw Error.new "no such file: #{arg}" unless fs.exists arg
   staging = deps.tmp()
   try
     assertEmptyDatabase! sql
     for entry in tar.list arg when unsafeTarPath entry
-      throw new Error "unsafe path in archive: #{entry}"
+      throw Error.new "unsafe path in archive: #{entry}"
     tar.extract arg, staging
     assertExportDir fs, staging
     sql! "IMPORT DATABASE #{sqlString staging}"
@@ -943,7 +943,7 @@ export checkpoint = (force, deps) ->
   catch e
     msg = e?.message or String(e)
     if not force and /transaction/i.test msg
-      throw new Error "#{msg}\n\nOther writers are active. Re-run with --force if you're sure that's OK."
+      throw Error.new "#{msg}\n\nOther writers are active. Re-run with --force if you're sure that's OK."
     throw e
   "#{stmt.toLowerCase()} complete (#{now().getTime() - t0} ms)"
 
@@ -952,7 +952,7 @@ export checkpoint = (force, deps) ->
 # harbor) — fail loudly instead of tarring an empty archive.
 assertExportDir = (fs, dir) ->
   unless fs.exists("#{dir}/schema.sql") and fs.exists("#{dir}/load.sql")
-    throw new Error "expected DuckDB export files (schema.sql + load.sql) not present in #{dir}. If harbor runs on a different host or container, the EXPORT/IMPORT staging directory must be visible to both the script and the server."
+    throw Error.new "expected DuckDB export files (schema.sql + load.sql) not present in #{dir}. If harbor runs on a different host or container, the EXPORT/IMPORT staging directory must be visible to both the script and the server."
 
 # ==[ MCP ]===================================================================
 
@@ -1222,7 +1222,7 @@ if import.meta.main
     r = spawnSync 'tar', args, { encoding: 'utf8', ...opts }
     throw r.error if r.error
     if r.status isnt 0
-      throw new Error "tar #{args.join(' ')} exited #{r.status}: #{(r.stderr or '').trim()}"
+      throw Error.new "tar #{args.join(' ')} exited #{r.status}: #{(r.stderr or '').trim()}"
     r.stdout or ''
 
   makeDeps = ->
@@ -1248,7 +1248,7 @@ if import.meta.main
         d = mkdtempSync join(tmpdir(), 'ripdb-')
         staged.push d
         d
-      now: -> new Date()
+      now: -> Date.new()
       join: join
     }
 
@@ -1284,7 +1284,7 @@ if import.meta.main
         console.log checkpoint!(force, makeDeps())
     else if cmd is 'mcp'
       if args.includes('--help') or args.includes('-h') then process.stdout.write HELP.mcp
-      else startStdio!()
+      else startStdio!
     else
       process.stderr.write "rip-db: unknown subcommand '#{cmd}'\n\n"
       process.stdout.write USAGE

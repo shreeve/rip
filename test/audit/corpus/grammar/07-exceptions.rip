@@ -81,6 +81,17 @@ cast = try JSON.parse('broken') as { live: boolean } catch e then { live: false 
 
 console.log('live:', live, 'backed:', backed, 'cast:', cast)
 
+# ── inline finalizers: a one-line finally on an expression try, alone and beneath a catch ──
+
+trail: string[] = []
+opened: { open: boolean } = try JSON.parse('{"open":true}') finally trail.push('opened')
+settled: { open: boolean } = try JSON.parse('broken')
+catch e
+  { open: false }
+finally trail.push('settled')
+
+console.log('opened:', opened, 'settled:', settled, 'trail:', trail)
+
 # ── try with a STATEMENT body: `return` is a statement, not an expression, so each of these four is its own production ──
 
 earlyExit = (n: number): number ->

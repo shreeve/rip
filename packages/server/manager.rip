@@ -1,9 +1,10 @@
-import { closeSync, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
-import { rash } from '@rip-lang/app/rash'
+import { rash, check } from '@rip-lang/app/rash'
 import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
+import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
 
 positiveEnv = (name, fallback) ->
   text = process.env[name] or String(fallback)
@@ -19,7 +20,7 @@ READY_MS = positiveEnv 'RIP_BOOT_DEADLINE_MS', 30000
 REGISTER_409_MS = positiveEnv 'RIP_REGISTER_409_MS', 30000
 
 parseArgs = (argv) ->
-  command = if ['browse', 'status', 'hold', 'release', 'migrate', 'recover'].includes(argv[0]) then argv[0] else 'start'
+  command = if ['browse', 'status', 'stop', 'hold', 'release', 'migrate', 'recover'].includes(argv[0]) then argv[0] else 'start'
   args: any = { command, entry: null, migrationEntry: null, migrationDir: 'migrations', operationId: null, name: null, hosts: [], control: process.env.JANUS_CONTROL or null, workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, untilRestart: false, accessMode: 'pretty', accessPicture: null, accessExplicit: false, startupFlags: [] }
   i = if command is 'start' then 0 else 1
   while i < argv.length
@@ -81,7 +82,7 @@ parseArgs = (argv) ->
         args.concurrency = parseInt text
         abort 'rip-server: --concurrency must be an integer greater than zero' unless Number.isFinite(args.concurrency) and args.concurrency > 0 and String(args.concurrency) is text
       when '--help', '-h'
-        p 'usage: rip server [project] [options] | rip server browse <directory> [--host HOST] [--until-restart] | rip server migrate [migration-entry] [--dir DIR] [--id 32hex] | rip server recover <operation-id>'
+        p 'usage: rip server [project] [options] | rip server <status|stop|hold|release> [project] | rip server browse <directory> [--host HOST] [--until-restart] | rip server migrate [migration-entry] [--dir DIR] [--id 32hex] | rip server recover <operation-id>'
         exit 0
       else
         if value.startsWith '--access-log='
@@ -139,47 +140,17 @@ generate = (entry, artifact, reportPath, taskId) ->
     stdin: 'ignore'
     stdout: 'ignore'
     stderr: 'pipe'
-  stderrText = new Response(proc.stderr).text()
+  stderrText = Response.new(proc.stderr).text()
   code = await proc.exited
   diagnostic = await stderrText
-  throw new Error(diagnostic.trim() or "generation #{taskId} exited #{code}") unless code is 0
+  throw Error.new(diagnostic.trim() or "generation #{taskId} exited #{code}") unless code is 0
   JSON.parse readFileSync(reportPath, 'utf8')
-
-resolveProject = (input) ->
-  if input?
-    given = resolve input
-    abort "rip-server: project not found: #{input}" unless existsSync given
-    path = realpathSync given
-    unless statSync(path).isDirectory()
-      root = dirname path
-      return { root, entry: path, appRoot: (if existsSync(join(root, 'app')) then join(root, 'app') else null) }
-    starts = [path]
-  else
-    starts = []
-    at = realpathSync process.cwd()
-    loop
-      starts.push at
-      parent = dirname at
-      break if parent is at
-      at = parent
-  for root in starts
-    entry = null
-    for name in ['app.rip', 'index.rip']
-      candidate = join root, name
-      if existsSync candidate
-        entry = realpathSync candidate
-        break
-    appRoot = join root, 'app'
-    return { root, entry, appRoot: (if existsSync(appRoot) then realpathSync(appRoot) else null) } if entry? or existsSync(appRoot)
-  if input?
-    abort "rip-server: #{input} has no API entry or app/ directory"
-  abort 'rip-server: no App — pass a project, or create app.rip, index.rip, or app/ here or above'
 
 isRecord = (value) ->
   value? and typeof value is 'object' and not Array.isArray(value)
 
 invalidServe = (message) ->
-  throw new Error "rip-server: #{message}"
+  throw Error.new "rip-server: #{message}"
 
 rejectUnknown = (value, allowed, at) ->
   invalidServe "#{at} must be an object" unless isRecord value
@@ -216,6 +187,48 @@ pathTemplate = (value, at) ->
     invalidServe "#{at} must use {site} as a complete path segment" unless segments.includes '{site}'
   { value, dynamic: count is 1 }
 
+defaultAppManifest = ->
+  update: ['**/*.rip']
+  css: ['**/*.css']
+  reload: ['**/*.html']
+
+normalizeAppManifest = (raw) ->
+  raw = {} unless raw?
+  rejectUnknown raw, ['update', 'css', 'reload'], 'serve.rip app.manifest'
+  defaults = defaultAppManifest()
+  suffixes = { update: '.rip', css: '.css', reload: '.html' }
+  manifest = {}
+  for kind in ['update', 'css', 'reload']
+    values = raw[kind] ?? defaults[kind]
+    invalidServe "serve.rip app.manifest.#{kind} must be an array" unless Array.isArray values
+    seen = Set.new()
+    manifest[kind] = values.map (value, i) ->
+      at = "serve.rip app.manifest.#{kind}[#{i}]"
+      pattern = needString value, at
+      invalidServe "#{at} must be relative to the App root" if pattern.startsWith '/'
+      invalidServe "#{at} must use / path separators" if pattern.includes '\\'
+      segments = pattern.split '/'
+      invalidServe "#{at} must be a clean relative glob" if segments.some (part) -> not part or part is '.' or part is '..' or part.startsWith '.'
+      invalidServe "#{at} must select #{suffixes[kind]} files" unless pattern.endsWith suffixes[kind]
+      invalidServe "#{at} duplicates #{JSON.stringify(pattern)}" if seen.has pattern
+      try
+        Bun.Glob.new pattern
+      catch error
+        invalidServe "#{at} is not a valid glob: #{error?.message or error}"
+      seen.add pattern
+      pattern
+  manifest
+
+export appManifestKind = (manifest, id) ->
+  return null unless typeof id is 'string' and id.length > 0
+  id = id.replaceAll '\\', '/'
+  segments = id.split '/'
+  return null if segments.some (segment) -> not segment or segment is '.' or segment is '..' or segment.startsWith '.'
+  for kind in ['update', 'css', 'reload']
+    for pattern in manifest[kind]
+      return kind if Bun.Glob.new(pattern).match id
+  null
+
 requireDir = (path, at) ->
   invalidServe "#{at} directory not found: #{path}" unless existsSync path
   invalidServe "#{at} is not a directory: #{path}" unless statSync(path).isDirectory()
@@ -225,7 +238,7 @@ requireFile = (path, at) ->
   invalidServe "#{at} is not a file: #{path}" unless statSync(path).isFile()
 
 normalizeServeConfig = (raw, appDir) ->
-  rejectUnknown raw, ['name', 'hosts', 'sites', 'files'], 'serve.rip'
+  rejectUnknown raw, ['name', 'hosts', 'sites', 'files', 'app'], 'serve.rip'
   out = {}
   out.name = needString(raw.name, 'serve.rip name') if raw.name?
   if raw.hosts?
@@ -300,6 +313,13 @@ normalizeServeConfig = (raw, appDir) ->
       invalidServe 'serve.rip files.shell is required unless every root is browsable and proxyFirst is empty' unless allBrowsable and normalizedProxy.length is 0
     out.files = { roots: normalizedRoots, proxy_first: normalizedProxy }
     out.files.shell = shell if shell?
+  if raw.app?
+    rejectUnknown raw.app, ['root', 'manifest'], 'serve.rip app'
+    rootValue = pathTemplate(raw.app.root ?? 'app', 'serve.rip app.root')
+    invalidServe 'serve.rip app.root cannot contain a template' if rootValue.dynamic
+    root = resolve appDir, rootValue.value
+    requireDir root, 'serve.rip app.root'
+    out.app = { root, manifest: normalizeAppManifest(raw.app.manifest) }
   invalidServe 'serve.rip sites requires files' if out.site? and not out.files?
   out
 
@@ -359,7 +379,7 @@ runBrowse = (args) ->
   loop
     response = controlFetch! args.control, 'POST', '/1.0/apps', bodyFor(host)
     if response.status is 201
-      registration = response.json!()
+      registration = response.json!
       abort 'rip-server: Janus registration returned no app id' unless registration?.id?
       break
     if response.status is 409 and not explicitHost? and retries < 5
@@ -371,7 +391,7 @@ runBrowse = (args) ->
       abort "rip-server: browse host already claimed at the control plane (409): #{host}"
     abort "rip-server: browse registration failed (#{response.status})#{if detail then ": #{detail}" else ''}"
   if earlySignalStatus?
-    try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registration.id}"
+    try controlFetch! args.control, 'DELETE', "/1.0/apps/#{registration.id}"
     process.off 'SIGINT', earlyStop
     process.off 'SIGTERM', earlyStop
     return earlySignalStatus
@@ -390,13 +410,13 @@ runBrowse = (args) ->
       return 0
     output! url
   catch error
-    try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registration.id}"
+    try controlFetch! args.control, 'DELETE', "/1.0/apps/#{registration.id}"
     process.off 'SIGINT', earlyStop
     process.off 'SIGTERM', earlyStop
     warn "rip-server: browse output failure: #{error?.message or error}"
     return 1
   if earlySignalStatus?
-    try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registration.id}"
+    try controlFetch! args.control, 'DELETE', "/1.0/apps/#{registration.id}"
     process.off 'SIGINT', earlyStop
     process.off 'SIGTERM', earlyStop
     return earlySignalStatus
@@ -407,7 +427,7 @@ runBrowse = (args) ->
   heartbeatTask = null
   access = null
   finish = null
-  finished = new Promise (done) -> finish = done
+  finished = Promise.new (done) -> finish = done
   stop = (signal = null, failure = null) ->
     return if stopping
     stopping = true
@@ -415,8 +435,8 @@ runBrowse = (args) ->
     clearInterval heartbeat if heartbeat?
     do ->
       try await heartbeatTask if heartbeatTask?
-      try await access?.stop()
-      try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registration.id}"
+      try access?.stop!
+      try controlFetch! args.control, 'DELETE', "/1.0/apps/#{registration.id}"
       finish! status
     return
   onSigint = -> stop 'SIGINT'
@@ -426,7 +446,7 @@ runBrowse = (args) ->
   process.off 'SIGINT', earlyStop
   process.off 'SIGTERM', earlyStop
   unless args.accessMode is 'off'
-    access = new AccessClient
+    access = AccessClient.new
       mode: args.accessMode
       picture: args.accessPicture
       control: (if args.control.startsWith('http://') or args.control.startsWith('https://') then { base: args.control } else { unix: args.control })
@@ -443,7 +463,7 @@ runBrowse = (args) ->
         if response.status is 404
           fresh = controlFetch! args.control, 'POST', '/1.0/apps', bodyFor(host)
           if fresh.status is 201
-            registration = fresh.json!()
+            registration = fresh.json!
             abort 'rip-server: Janus registration returned no app id' unless registration?.id?
             access?.move(registration.id).catch (error) ->
               unless stopping
@@ -516,52 +536,116 @@ writeAtomic = (path, text) ->
 escapeHtml = (value) ->
   String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
 
-appModules = (appRoot) ->
+export appEventPublication = (appRoot, graph, manifest, filename) ->
+  return '*' unless filename?
+  id = String(filename).replaceAll '\\', '/'
+  segments = id.split '/'
+  return '*' if not id or segments.some((segment) -> not segment or segment is '.' or segment is '..')
+  return null if segments.some (segment) -> segment.startsWith '.'
+  return id if appManifestKind(manifest, id)?
+  return '*' if graph?.directories?.includes id
+  path = resolve appRoot, id
+  return '*' if existsSync(path) and statSync(path).isDirectory()
+  null
+
+appModules = (appRoot, manifest) ->
   modules = {}
   moduleFiles = {}
   entries = []
+  directories = []
   walk = (directory, prefix) ->
     for entry in readdirSync(directory, { withFileTypes: true })
       continue if entry.name.startsWith '.'
       path = join directory, entry.name
       if entry.isDirectory()
+        directories.push "#{prefix}#{entry.name}"
         walk path, "#{prefix}#{entry.name}/"
-      else if entry.name.endsWith('.rip') or entry.name.endsWith('.css') or entry.name.endsWith('.html')
+      else
         id = "#{prefix}#{entry.name}"
+        kind = appManifestKind manifest, id
+        continue unless kind?
         bytes = readFileSync path
         entries.push { id, hash: rash(bytes) }
-        if entry.name.endsWith '.rip'
-          modules[id] = bytes.toString 'utf8'
+        if kind is 'update'
+          try
+            modules[id] = TextDecoder.new('utf-8', { fatal: true, ignoreBOM: true }).decode bytes
+          catch
+            throw Error.new "rip-server: App module '#{id}' is not valid UTF-8"
           moduleFiles[id] = path
-  walk appRoot, 'app/'
+  walk appRoot, ''
   entries.sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
-  inventory = JSON.stringify entries.map (entry) -> [entry.id, entry.hash]
-  { modules, moduleFiles, entries, rash: rash(new TextEncoder().encode(inventory)) }
+  { modules, moduleFiles, entries, directories, check: check(entries) }
+
+export updateAppModules = (appRoot, manifest, graph, ids) ->
+  modules = { ...graph.modules }
+  moduleFiles = { ...graph.moduleFiles }
+  entries = Map.new graph.entries.map (entry) -> [entry.id, entry]
+  changed = []
+  for id in [...Set.new(ids)].sort()
+    kind = appManifestKind manifest, id
+    continue unless kind?
+    prior = entries.get id
+    path = resolve appRoot, id
+    bytes = null
+    try
+      bytes = readFileSync path if existsSync(path) and statSync(path).isFile()
+    catch error
+      throw error unless error?.code is 'ENOENT'
+    unless bytes?
+      continue unless prior?
+      entries.delete id
+      delete modules[id]
+      delete moduleFiles[id]
+      changed.push id
+      continue
+    hash = rash bytes
+    continue if prior?.hash is hash
+    entries.set id, { id, hash }
+    if kind is 'update'
+      try
+        modules[id] = TextDecoder.new('utf-8', { fatal: true, ignoreBOM: true }).decode bytes
+      catch
+        throw Error.new "rip-server: App module '#{id}' is not valid UTF-8"
+      moduleFiles[id] = path
+    changed.push id
+  return { graph, changed } unless changed.length
+  nextEntries = [...entries.values()].sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
+  {
+    graph: { modules, moduleFiles, entries: nextEntries, directories: graph.directories, check: check(nextEntries) }
+    changed
+  }
 
 sourceRashes = (paths) ->
   paths.map (path) -> { path, hash: (if existsSync(path) then rash(readFileSync(path)) else null) }
 
-buildAppDocuments = (project, includeManifest) ->
+appDocuments = (project, graph, includeManifest) ->
   { assembleBundle } = import!(join(loaderDir(), 'bundle.js'))
-  graph = appModules project.appRoot
   bundle = assembleBundle
     modules: graph.modules
     moduleFiles: graph.moduleFiles
     appDir: project.root
     packagesDir: join(loaderDir(), '..', 'packages')
   bundle.files = graph.entries
-  bundle.rash = graph.rash
+  bundle.check = graph.check
   {
     graph
     bundle: JSON.stringify(bundle)
-    manifest: (if includeManifest then JSON.stringify({ rash: graph.rash, files: graph.entries }) else null)
+    manifest: (if includeManifest then JSON.stringify({ check: graph.check, files: graph.entries }) else null)
   }
 
+buildAppDocuments = (project, includeManifest) ->
+  graph = appModules project.appRoot, project.appManifest
+  appDocuments! project, graph, includeManifest
+
 commitAppDocuments = (project, documents) ->
-  generated = join project.root, 'static', 'generated'
-  mkdirSync generated, { recursive: true }
-  writeAtomic join(generated, 'bundle.json'), documents.bundle
-  writeAtomic join(generated, 'manifest.json'), documents.manifest if documents.manifest?
+  dist = join project.root, 'dist'
+  mkdirSync dist, { recursive: true }
+  writeAtomic join(dist, 'bundle.json'), documents.bundle
+  manifestPath = join dist, 'manifest.json'
+  if documents.manifest?
+    writeAtomic manifestPath, documents.manifest
+  else
+    unlinkSync manifestPath if existsSync manifestPath
 
 writeAppDocuments = (project, includeManifest) ->
   documents = buildAppDocuments! project, includeManifest
@@ -570,22 +654,25 @@ writeAppDocuments = (project, includeManifest) ->
 
 publishApp = (project, name, includeManifest, documents = undefined, declaredShell = null) ->
   return null unless project.appRoot?
-  generated = join project.root, 'static', 'generated'
-  mkdirSync join(generated, '@rip'), { recursive: true }
+  dist = join project.root, 'dist'
+  mkdirSync join(dist, '@rip'), { recursive: true }
   graph = null
   if documents is undefined
     graph = writeAppDocuments! project, includeManifest
   else if documents?
     commitAppDocuments project, documents
     graph = documents.graph
+  else unless includeManifest
+    manifestPath = join dist, 'manifest.json'
+    unlinkSync manifestPath if existsSync manifestPath
   runtime = join(loaderDir(), '..', 'dist', 'browser', 'rip.js')
   abort "rip-server: browser runtime missing at #{runtime}" unless existsSync runtime
-  copyFileSync runtime, join(generated, '@rip', 'rip.js')
+  copyFileSync runtime, join(dist, '@rip', 'rip.js')
 
   authoredShell = join project.appRoot, 'index.html'
   shell = declaredShell or authoredShell
   unless declaredShell? or existsSync authoredShell
-    shell = join generated, 'index.html'
+    shell = join dist, 'index.html'
     writeAtomic shell, """
     <!doctype html>
     <meta charset="utf-8">
@@ -599,27 +686,27 @@ publishApp = (project, name, includeManifest, documents = undefined, declaredShe
     """
 
   roots = [
-    { path: generated, cache: 'revalidate' }
+    { path: dist, cache: 'revalidate' }
     { path: project.appRoot, cache: 'never' }
   ]
   { files: { roots, proxy_first: (if project.entry? then ['/api'] else []), shell }, graph }
 
 registrationFiles = (project, declared, publication) ->
-  generated = join project.root, 'static', 'generated'
+  dist = join project.root, 'dist'
   try
-    mkdirSync generated, { recursive: true }
-    invalidServe "generated root is not a directory: #{generated}" unless statSync(generated).isDirectory()
+    mkdirSync dist, { recursive: true }
+    invalidServe "dist root is not a directory: #{dist}" unless statSync(dist).isDirectory()
   catch error
-    invalidServe "generated root is not writable at #{generated}: #{error?.message or error}"
+    invalidServe "dist root is not writable at #{dist}: #{error?.message or error}"
   if declared?
     terminal = not declared.shell? and declared.proxy_first.length is 0 and declared.roots.every (root) -> root.browse is true
     return declared if terminal
     files =
-      roots: [{ path: generated, cache: 'revalidate' }, ...declared.roots]
+      roots: [{ path: dist, cache: 'revalidate' }, ...declared.roots]
       proxy_first: declared.proxy_first
     files.shell = declared.shell if declared.shell?
     return files
-  roots = [{ path: generated, cache: 'revalidate' }]
+  roots = [{ path: dist, cache: 'revalidate' }]
   publicRoot = join project.root, 'public'
   roots.push { path: publicRoot, cache: 'revalidate' } if existsSync(publicRoot) and statSync(publicRoot).isDirectory()
   roots.push { path: project.appRoot, cache: 'never' } if project.appRoot?
@@ -632,24 +719,24 @@ registrationFiles = (project, declared, publication) ->
 waitReady = (proc, socket) ->
   deadline = Date.now() + READY_MS
   loop
-    throw new Error("worker exited with code #{proc.exitCode} before readiness") if proc.exitCode?
+    throw Error.new("worker exited with code #{proc.exitCode} before readiness") if proc.exitCode?
     response = null
     try
       options = { unix: socket }
-      response = await fetch 'http://worker/ready', options
+      response = fetch! 'http://worker/ready', options
     if response?
       return if response.status is 200
       if response.headers.has 'rip-boot-failed'
-        throw new Error(await response.text())
-    throw new Error('worker readiness deadline expired') if Date.now() >= deadline
-    await new Promise (done) -> setTimeout done, 25
+        throw Error.new(response.text!)
+    throw Error.new('worker readiness deadline expired') if Date.now() >= deadline
+    Promise.new! (done) -> setTimeout done, 25
 
 stopWorker = (proc) ->
   return unless proc?
   proc.kill 'SIGTERM' unless proc.exitCode?
   deadline = Date.now() + 5000
   while not proc.exitCode? and Date.now() < deadline
-    await new Promise (done) -> setTimeout done, 10
+    Promise.new! (done) -> setTimeout done, 10
   proc.kill 'SIGKILL' unless proc.exitCode?
   await proc.exited
 
@@ -657,30 +744,10 @@ killWorker = (proc) ->
   proc.kill 'SIGKILL' unless proc.exitCode?
   await proc.exited
 
-managerRuntime = (root) ->
-  abort 'rip-server: manager control requires a POSIX user identity' unless typeof process.getuid is 'function'
-  uid = process.getuid()
-  key = new Bun.CryptoHasher('sha256').update(root).digest('hex').slice 0, 16
-  directory = join tmpdir(), "rip-managers-#{uid}"
-  try
-    mkdirSync directory, { mode: 0o700 }
-  catch error
-    throw error unless error?.code is 'EEXIST'
-  info = lstatSync directory
-  abort "rip-server: unsafe manager runtime path (not a directory): #{directory}" unless info.isDirectory() and not info.isSymbolicLink()
-  abort "rip-server: unsafe manager runtime ownership at #{directory}" unless info.uid is uid
-  mode = info.mode & 0o777
-  abort "rip-server: unsafe manager runtime permissions at #{directory}: expected 0700" unless mode is 0o700
-  { socket: join(directory, "#{key}.sock"), owner: join(directory, "#{key}.json") }
-
-managerRequest = (socket, method, path) ->
-  options = { method, unix: socket }
-  fetch "http://manager#{path}", options
-
 export main = (argv) ->
   args = parseArgs argv
   if args.command is 'browse'
-    process.exitCode = await runBrowse args
+    process.exitCode = runBrowse! args
     return
   project = resolveProject args.entry
   managerRuntimePaths = managerRuntime project.root
@@ -701,6 +768,7 @@ export main = (argv) ->
     response = fetch! "http://manager/#{args.command}", options
     body = response.text!
     abort "rip-server: #{args.command} failed (#{response.status}): #{body}" unless response.ok
+    waitManagerStopped! managerPath if args.command is 'stop'
     p body
     return
   serve = null
@@ -708,6 +776,11 @@ export main = (argv) ->
     serve = loadServeConfig! project.root
   catch error
     abort error?.message or String(error)
+  if serve?.app?
+    project.appRoot = serve.app.root
+    project.appManifest = serve.app.manifest
+  else if project.appRoot?
+    project.appManifest = defaultAppManifest()
   args.name = args.name or serve?.name or basename(project.root).replace(/\.[^.]+$/, '')
   site = serve?.site ?? null
   if site? and args.hosts.length > 0
@@ -740,11 +813,13 @@ export main = (argv) ->
   appGraph = null
   appWatcher = null
   appTimer = null
+  appDirty = Set.new()
+  appReconcile = false
   appChain = Promise.resolve()
   apiWatcher = null
   apiTimer = null
   apiChain = Promise.resolve()
-  apiInputs = new Set
+  apiInputs = Set.new()
   generation = 0
   apiEpoch = 0
   apiSettledEpoch = 0
@@ -756,7 +831,7 @@ export main = (argv) ->
   operation = 'Active'
   operationPromise = null
   operationKey = null
-  operationResults = new Map
+  operationResults = Map.new()
   migrationChild = null
   migration = null
   operationPath = join project.root, '.rip', 'server-operation.json'
@@ -770,16 +845,16 @@ export main = (argv) ->
   heartbeatTask = null
   accessClient = null
   unless args.accessMode is 'off'
-    accessClient = new AccessClient {
+    accessClient = AccessClient.new {
       mode: args.accessMode
       picture: args.accessPicture
       control: (if args.control.startsWith('http://') or args.control.startsWith('https://') then { base: args.control } else { unix: args.control })
     }
-  workerPumps = new Set
+  workerPumps = Set.new()
   finish = null
   stopping = false
   stopTask = null
-  finished = new Promise (done) -> finish = done
+  finished = Promise.new (done) -> finish = done
   updateChain = Promise.resolve()
 
   registration = ->
@@ -798,7 +873,7 @@ export main = (argv) ->
     body
 
   status = ->
-    { name: args.name, root: project.root, operation, workers: workers.length, watch: args.watch, migration: (if migration? then { id: migration.id, phase: migration.phase, outcome: migration.outcome } else null) }
+    { name: args.name, root: project.root, hosts, site, operation, stopping, workers: workers.length, watch: args.watch, migration: (if migration? then { id: migration.id, phase: migration.phase, outcome: migration.outcome } else null) }
 
   managerOutput = (text) ->
     stream = if args.accessMode is 'raw' then process.stderr else process.stdout
@@ -832,7 +907,7 @@ export main = (argv) ->
       operationPromise = do ->
         result = null
         try
-          result = { status: 200, body: await run() }
+          result = { status: 200, body: run! }
         catch error
           result = { status: 409, body: { error: String(error), status: status() } }
         operationResults.set key, result
@@ -869,8 +944,17 @@ export main = (argv) ->
     managerControl = Bun.serve
       unix: managerPath
       fetch: (request) ->
-        path = new URL(request.url).pathname
+        path = URL.new(request.url).pathname
         return Response.json(status()) if request.method is 'GET' and path is '/status'
+        if request.method is 'POST' and path is '/stop'
+          unless stopping
+            setTimeout (->
+              stop().catch (error) ->
+                warn "rip-server: stop cleanup failed: #{String(error)}"
+                process.exitCode = 1
+            ), 0
+          return Response.json({ ...status(), stopping: true }, { status: 202 })
+        return Response.json({ error: 'manager is stopping' }, { status: 409 }) if stopping
         if request.method is 'POST' and path is '/hold'
           return Response.json({ error: "cannot hold while #{operation}" }, { status: 409 }) unless operation is 'Active'
           operation = 'Held'
@@ -878,18 +962,18 @@ export main = (argv) ->
           clearTimeout apiTimer if apiTimer?
           return Response.json status()
         if request.method is 'POST' and path is '/release'
-          try return Response.json(await releaseHold())
+          try return Response.json(releaseHold!)
           catch error then return Response.json({ error: String(error) }, { status: 409 })
         if request.method is 'POST' and path is '/migrate'
-          body = try await request.json() catch then null
+          body = try request.json! catch then null
           return Response.json({ error: 'migrate requires a JSON body' }, { status: 400 }) unless body?
           return Response.json({ error: 'migrate requires exactly 32 lowercase hex characters' }, { status: 400 }) unless typeof body.id is 'string' and /^[a-f0-9]{32}$/.test(body.id)
           return operationResponse! "migrate:#{body.id}", -> runCoordinatedMigration body
         if request.method is 'POST' and path is '/recover'
-          body = try await request.json() catch then null
+          body = try request.json! catch then null
           return Response.json({ error: 'recover requires a valid operation id' }, { status: 400 }) unless typeof body?.id is 'string' and /^[a-f0-9]{32}$/.test(body.id)
           return operationResponse! "recover:#{body.id}", -> recoverMigration body.id
-        new Response('Not Found', { status: 404 })
+        Response.new('Not Found', { status: 404 })
 
   createRegistration = ->
     backoff = 200
@@ -899,32 +983,32 @@ export main = (argv) ->
       detail = response.text!
       if response.status is 201
         body = JSON.parse detail
-        throw new Error('Janus registration returned no app id') unless body?.id?
+        throw Error.new('Janus registration returned no app id') unless body?.id?
         return body.id
       unless response.status is 409
-        throw new Error("Janus registration failed (#{response.status}): #{detail}")
+        throw Error.new("Janus registration failed (#{response.status}): #{detail}")
       conflictDeadline ?= Date.now() + REGISTER_409_MS
       if Date.now() >= conflictDeadline
         claim = if site? then site.host else hosts.join(', ')
-        throw new Error("Janus host claim remained occupied (409): #{claim}")
+        throw Error.new("Janus host claim remained occupied (409): #{claim}")
       sleep! backoff
       backoff = Math.min backoff * 2, 5000
 
   publishUpstreams = (upstreams) ->
-    throw new Error('manager is stopping') if stopping
+    throw Error.new('manager is stopping') if stopping
     return unless appId?
     response = controlFetch! args.control, 'PUT', "/1.0/apps/#{appId}/upstreams", { upstreams }
-    throw new Error("Janus upstream update failed (#{response.status})") unless response.ok
+    throw Error.new("Janus upstream update failed (#{response.status})") unless response.ok
 
   publishWorkers = -> publishUpstreams! registration().upstreams
 
   queuePublish = ->
-    run = updateChain.then -> publishWorkers!()
+    run = updateChain.then -> publishWorkers!
     updateChain = run.catch -> null
     run
 
   spawnReadyWorker = (target = workers) ->
-    throw new Error('manager is stopping') if stopping
+    throw Error.new('manager is stopping') if stopping
     workerSerial++
     socket = join runDir, "worker-#{workerSerial}.sock"
     proc = Bun.spawn [process.execPath, workerArtifact],
@@ -939,7 +1023,7 @@ export main = (argv) ->
     try
       waitReady! proc, socket
     catch error
-      await killWorker proc
+      killWorker! proc
       throw error
     target.push worker
     worker
@@ -947,8 +1031,8 @@ export main = (argv) ->
   bootSlot = (target = workers) ->
     firstError = null
     for attempt in [1..2]
-      throw new Error('manager is stopping') if stopping
-      try return await spawnReadyWorker(target)
+      throw Error.new('manager is stopping') if stopping
+      try return spawnReadyWorker!(target)
       catch error
         firstError ?= error
     throw firstError
@@ -959,20 +1043,20 @@ export main = (argv) ->
       return if stopping
       return unless workers.includes(worker) and not doorbellPublished
       workers = workers.filter (candidate) -> candidate isnt worker
-      try await queuePublish()
+      try queuePublish!
       catch error
         warn "rip-server: cannot remove crashed worker from Janus: #{String(error)}"
       managerOutput! "rip-server: worker exited (#{code}); replacing"
       loop
         return if stopping
         try
-          replacement = await spawnReadyWorker()
+          replacement = spawnReadyWorker!
           monitorWorker replacement
-          await queuePublish()
+          queuePublish!
           return
         catch error
           warn "rip-server: replacement worker failed: #{String(error)}"
-          await new Promise (done) -> setTimeout done, 250
+          Promise.new! (done) -> setTimeout done, 250
     return
 
   publishDings = (dings) ->
@@ -983,27 +1067,48 @@ export main = (argv) ->
     directives = dings.map (ding) -> { '@': ['/hub'], ding }
     for i in [0...directives.length] by 16
       response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", directives.slice(i, i + 16)
-      throw new Error("Janus ding publish failed (#{response.status})") unless response.ok
+      throw Error.new("Janus ding publish failed (#{response.status})") unless response.ok
 
-  refreshApp = ->
-    next = writeAppDocuments! project, true
-    prior = new Map((appGraph?.entries or []).map((entry) -> [entry.id, entry.hash]))
-    current = new Map(next.entries.map((entry) -> [entry.id, entry.hash]))
+  refreshApp = (batch = { full: true, ids: [] }) ->
+    if batch.full
+      next = writeAppDocuments! project, true
+      changed = null
+    else
+      update = updateAppModules project.appRoot, project.appManifest, appGraph, batch.ids
+      return unless update.changed.length
+      next = update.graph
+      documents = appDocuments! project, next, true
+      commitAppDocuments project, documents
+      changed = Set.new update.changed
+    prior = Map.new((appGraph?.entries or []).map((entry) -> [entry.id, entry.hash]))
+    current = Map.new(next.entries.map((entry) -> [entry.id, entry.hash]))
     dings = []
     for entry in next.entries
+      continue if changed? and not changed.has entry.id
       dings.push { id: entry.id, hash: entry.hash } unless prior.get(entry.id) is entry.hash
     for entry in appGraph?.entries or []
+      continue if changed? and not changed.has entry.id
       dings.push { id: entry.id, hash: entry.hash, kind: 'delete' } unless current.has entry.id
     appGraph = next
     publishDings! dings
 
   startAppWatcher = ->
     return unless args.watch and project.appRoot?
-    appWatcher = watch project.appRoot, { recursive: true }, ->
+    appWatcher = watch project.appRoot, { recursive: true }, (_event, filename) ->
       return unless operation is 'Active'
+      publication = appEventPublication project.appRoot, appGraph, project.appManifest, filename
+      return unless publication?
+      if publication is '*'
+        appReconcile = true
+      else
+        appDirty.add publication
       clearTimeout appTimer if appTimer?
       appTimer = setTimeout ->
-        next = appChain.then -> refreshApp!()
+        batch = { full: appReconcile, ids: [...appDirty] }
+        appReconcile = false
+        appDirty.clear()
+        appTimer = null
+        next = appChain.then -> refreshApp! batch
         appChain = next.catch (error) -> warn "rip-server: App publication failed: #{String(error)}"
       , 50
 
@@ -1011,7 +1116,7 @@ export main = (argv) ->
     return bootPromise if bootPromise?
     bootPromise = do ->
       loop
-        throw new Error('no prepared API generation') unless prepared?
+        throw Error.new('no prepared API generation') unless prepared?
         if apiSettledEpoch isnt apiEpoch
           sleep! 10
           continue
@@ -1021,14 +1126,14 @@ export main = (argv) ->
         bootingWorkers = candidateWorkers
         try
           for slot in [0...args.workers]
-            await bootSlot candidateWorkers
+            bootSlot! candidateWorkers
         catch error
-          await Promise.all candidateWorkers.map (worker) -> killWorker worker.proc
+          Promise.all! candidateWorkers.map (worker) -> killWorker worker.proc
           bootingWorkers = []
           continue if candidate isnt prepared or apiSettledEpoch isnt apiEpoch
           throw error
         if candidate isnt prepared or apiSettledEpoch isnt apiEpoch
-          await Promise.all candidateWorkers.map (worker) -> killWorker worker.proc
+          Promise.all! candidateWorkers.map (worker) -> killWorker worker.proc
           bootingWorkers = []
           continue
         workers = candidateWorkers
@@ -1036,7 +1141,7 @@ export main = (argv) ->
         for worker in workers
           monitorWorker worker
         doorbellPublished = false
-        await queuePublish()
+        queuePublish!
         continue if candidate isnt prepared
         prepared = null
         return
@@ -1046,10 +1151,10 @@ export main = (argv) ->
   cutForCandidate = (candidate) ->
     return if stopping or candidate isnt prepared
     doorbellPublished = true
-    await queuePublish()
+    queuePublish!
     old = workers
     workers = []
-    await Promise.all old.map (worker) -> stopWorker worker.proc
+    Promise.all! old.map (worker) -> stopWorker worker.proc
 
   prepareApi = (epoch) ->
     generation++
@@ -1064,18 +1169,19 @@ export main = (argv) ->
     return if epoch isnt apiEpoch or stopping
     candidate = { artifact, inputs: report.inputs, epoch }
     prepared = candidate
-    apiInputs = new Set report.inputs
+    apiInputs = Set.new report.inputs
     cutForCandidate! candidate
     apiSettledEpoch = epoch
-    bootPrepared!() if args.eager
+    bootPrepared! if args.eager
 
   startApiWatcher = ->
     return unless args.watch and project.entry?
     apiWatcher = watch project.root, { recursive: true }, (event, filename) ->
       return unless operation is 'Active'
       rel = String(filename or '')
-      return if rel.startsWith('app/') or rel.startsWith('static/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
+      return if rel.startsWith('dist/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
       path = resolve project.root, rel
+      return if project.appRoot? and (path is project.appRoot or path.startsWith("#{project.appRoot}/"))
       return unless path is project.entry or apiInputs.has path
       apiEpoch++
       epoch = apiEpoch
@@ -1090,15 +1196,15 @@ export main = (argv) ->
     doorbell = Bun.serve
       unix: doorbellPath
       fetch: (request) ->
-        return new Response('Not Found', { status: 404 }) unless request.method is 'GET' and new URL(request.url).pathname is '/ring'
+        return Response.new('Not Found', { status: 404 }) unless request.method is 'GET' and URL.new(request.url).pathname is '/ring'
         try
-          await bootPrepared()
-          new Response(null, { status: 204 })
+          bootPrepared!
+          Response.new(null, { status: 204 })
         catch error
-          new Response(String(error), { status: 503 })
+          Response.new(String(error), { status: 503 })
 
   releaseHold = ->
-    throw new Error("cannot release while #{operation}") unless operation is 'Held'
+    throw Error.new("cannot release while #{operation}") unless operation is 'Held'
     operation = 'Releasing'
     oldWorkers = workers
     oldArtifact = appArtifact
@@ -1113,29 +1219,29 @@ export main = (argv) ->
         report = generate! project.entry, candidateArtifact, join(runDir, "release-#{generation}.json"), "release-#{generation}"
         appArtifact = candidateArtifact
         for slot in [0...args.workers]
-          await bootSlot candidateWorkers
-        apiInputs = new Set report.inputs
+          bootSlot! candidateWorkers
+        apiInputs = Set.new report.inputs
 
       workers = candidateWorkers
-      await queuePublish()
+      queuePublish!
       swapped = true
       commitAppDocuments project, documents if documents?
       appGraph = documents.graph if documents?
       for worker in workers
         monitorWorker worker
       try
-        response = await controlFetch args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/hub'], ding: { kind: 'epoch', epoch: generation } }]
+        response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/hub'], ding: { kind: 'epoch', epoch: generation } }]
         warn "rip-server: release reload ding failed (#{response.status})" unless response.ok
       catch error
         warn "rip-server: release reload ding failed: #{String(error)}"
       operation = 'Active'
-      await Promise.all oldWorkers.map (worker) -> stopWorker worker.proc
+      Promise.all! oldWorkers.map (worker) -> stopWorker worker.proc
       status()
     catch error
-      await Promise.all candidateWorkers.map (worker) -> killWorker worker.proc
+      Promise.all! candidateWorkers.map (worker) -> killWorker worker.proc
       workers = oldWorkers
       appArtifact = oldArtifact
-      try await queuePublish() if swapped
+      try queuePublish! if swapped
       operation = 'Held'
       throw error
 
@@ -1173,9 +1279,9 @@ export main = (argv) ->
       stdin: 'ignore'
       stdout: 'pipe'
       stderr: 'pipe'
-    [stdout, stderr, code] = await Promise.all [
-      new Response(migrationChild.stdout).text()
-      new Response(migrationChild.stderr).text()
+    [stdout, stderr, code] = Promise.all! [
+      Response.new(migrationChild.stdout).text()
+      Response.new(migrationChild.stderr).text()
       migrationChild.exited
     ]
     migrationChild = null
@@ -1185,7 +1291,7 @@ export main = (argv) ->
   epochDing = ->
     return unless args.watch
     response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/hub'], ding: { kind: 'epoch', epoch: generation } }]
-    throw new Error("Janus epoch ding failed (#{response.status})") unless response.ok
+    throw Error.new("Janus epoch ding failed (#{response.status})") unless response.ok
 
   bootArtifact = (artifact) ->
     appArtifact = artifact
@@ -1193,11 +1299,11 @@ export main = (argv) ->
     bootingWorkers = pool
     try
       for slot in [0...args.workers]
-        await bootSlot pool
+        bootSlot! pool
       pool
     catch error
       bootingWorkers = []
-      await Promise.all pool.map (worker) -> killWorker worker.proc
+      Promise.all! pool.map (worker) -> killWorker worker.proc
       throw error
 
   activateMigration = (record) ->
@@ -1213,21 +1319,21 @@ export main = (argv) ->
       documents = readAppCandidate record.appCandidate
       commitAppDocuments project, documents if documents?
       appGraph = documents.graph if documents?
-      apiInputs = new Set record.inputs
-      appChanged = documents? and appModules(project.appRoot).rash isnt documents.graph.rash
+      apiInputs = Set.new record.inputs
+      appChanged = documents? and appModules(project.appRoot, project.appManifest).check isnt documents.graph.check
       apiChanged = JSON.stringify(sourceRashes(record.inputs)) isnt JSON.stringify(record.inputRashes)
       operation = 'Activating'
       admissionAttempted = true
-      await publishUpstreams candidateWorkers.map (worker) -> { path: worker.socket }
+      publishUpstreams! candidateWorkers.map (worker) -> { path: worker.socket }
       workers = candidateWorkers
       bootingWorkers = []
       for worker in workers
         monitorWorker worker
-      epochDing!()
+      epochDing!
       operation = 'Active'
       clearMigration record
       if appChanged
-        next = appChain.then -> refreshApp!()
+        next = appChain.then -> refreshApp!
         appChain = next.catch (error) -> warn "rip-server: post-migration App refresh failed: #{String(error)}"
       if apiChanged
         apiEpoch++
@@ -1236,11 +1342,11 @@ export main = (argv) ->
         apiChain = next.catch (error) -> warn "rip-server: post-migration API refresh failed: #{String(error)}"
       status()
     catch error
-      try await publishUpstreams [] if admissionAttempted
+      try publishUpstreams! [] if admissionAttempted
       operation = 'Maintenance'
       workers = []
       bootingWorkers = []
-      await Promise.all candidateWorkers.map (worker) -> killWorker worker.proc
+      Promise.all! candidateWorkers.map (worker) -> killWorker worker.proc
       record = persistMigration { ...record, phase: 'maintenance', error: String(error) }
       throw error
 
@@ -1253,7 +1359,7 @@ export main = (argv) ->
       restored = bootArtifact! activeArtifact
       operation = 'Restoring'
       admissionAttempted = true
-      await publishUpstreams restored.map (worker) -> { path: worker.socket }
+      publishUpstreams! restored.map (worker) -> { path: worker.socket }
       workers = restored
       bootingWorkers = []
       for worker in workers
@@ -1262,17 +1368,17 @@ export main = (argv) ->
       clearMigration()
       status()
     catch error
-      try await publishUpstreams [] if admissionAttempted
+      try publishUpstreams! [] if admissionAttempted
       operation = 'Maintenance'
       workers = []
       bootingWorkers = []
-      await Promise.all restored.map (worker) -> killWorker worker.proc
+      Promise.all! restored.map (worker) -> killWorker worker.proc
       persistMigration { ...record, phase: 'maintenance', error: String(error) }
       throw error
 
   runCoordinatedMigration = (body) ->
-    throw new Error("cannot migrate while #{operation}") unless operation is 'Held'
-    throw new Error('cannot migrate an App-only project') unless project.entry?
+    throw Error.new("cannot migrate while #{operation}") unless operation is 'Held'
+    throw Error.new('cannot migrate an App-only project') unless project.entry?
     operation = 'Migrating'
     oldWorkers = workers
     record = null
@@ -1312,33 +1418,33 @@ export main = (argv) ->
       workers = []
       doorbellPublished = false
       cut = true
-      await publishUpstreams []
-      await Promise.all oldWorkers.map (worker) -> stopWorker worker.proc
+      publishUpstreams! []
+      Promise.all! oldWorkers.map (worker) -> stopWorker worker.proc
       record = persistMigration { ...record, phase: 'migration-running', outcome: 'unknown' }
       migrationReport = runMigrationChild! body
       record = persistMigration { ...record, phase: 'migration-finished', outcome: migrationReport.outcome, migration: migrationReport }
       if migrationReport.code is 0 and ['committed', 'confirmed-none'].includes(migrationReport.outcome)
-        apiInputs = new Set record.inputs
+        apiInputs = Set.new record.inputs
         return activateMigration! record
       if migrationReport.code isnt 0 and migrationReport.outcome is 'confirmed-none'
         return restoreHeld! record
-      throw new Error(migrationReport.error or migrationReport.output or 'migration outcome is unresolved')
+      throw Error.new(migrationReport.error or migrationReport.output or 'migration outcome is unresolved')
     catch error
       if not cut
         operation = 'Held'
         clearMigration() if record?
       else
         operation = 'Maintenance'
-        await Promise.all oldWorkers.map (worker) -> stopWorker worker.proc
+        Promise.all! oldWorkers.map (worker) -> stopWorker worker.proc
         persistMigration { ...record, phase: 'maintenance', error: String(error) } if record?
-        try await publishUpstreams []
+        try publishUpstreams! []
       throw error
 
   recoverMigration = (id) ->
-    throw new Error("cannot recover while #{operation}") unless operation is 'Maintenance'
+    throw Error.new("cannot recover while #{operation}") unless operation is 'Maintenance'
     record = readOperation operationPath
-    throw new Error('no migration operation requires recovery') unless record?
-    throw new Error("operation id mismatch: want #{record.id}") unless id is record.id
+    throw Error.new('no migration operation requires recovery') unless record?
+    throw Error.new("operation id mismatch: want #{record.id}") unless id is record.id
     activateMigration! persistMigration({ ...record, phase: 'fix-forward', outcome: record.outcome or 'unknown' })
 
   beat = ->
@@ -1349,9 +1455,9 @@ export main = (argv) ->
         response = controlFetch! args.control, 'POST', "/1.0/apps/#{currentId}/heartbeat"
         return if stopping or appId isnt currentId
         if response.status is 404
-          replacementId = createRegistration!()
+          replacementId = createRegistration!
           if stopping
-            try await controlFetch args.control, 'DELETE', "/1.0/apps/#{replacementId}"
+            try controlFetch! args.control, 'DELETE', "/1.0/apps/#{replacementId}"
             return
           appId = replacementId
           moveAccess()
@@ -1372,29 +1478,27 @@ export main = (argv) ->
       clearTimeout apiTimer if apiTimer?
       appWatcher?.close()
       apiWatcher?.close()
-      try managerControl?.stop true
-      try unlinkSync managerPath if managerOwned
       try migrationChild?.kill('SIGTERM')
       try await operationPromise if operationPromise?
       await appChain
       await apiChain
       try await heartbeatTask if heartbeatTask?
       try doorbell?.stop true
-      try managerControl?.stop true
-      try unlinkSync managerPath if managerOwned
-      try unlinkSync managerOwner if managerOwned
       accessStop = null
       try accessStop = accessClient?.stop()
       try
         if appId?
-          response = await controlFetch args.control, 'DELETE', "/1.0/apps/#{appId}"
+          response = controlFetch! args.control, 'DELETE', "/1.0/apps/#{appId}"
           warn "rip-server: Janus deregistration failed (#{response.status})" unless response.ok
       catch error
         warn "rip-server: Janus deregistration failed: #{String(error)}"
       try await accessStop if accessStop?
       allWorkers = [...workers, ...bootingWorkers]
-      await Promise.all allWorkers.map (worker) -> stopWorker worker.proc
-      await Promise.allSettled [...workerPumps]
+      Promise.all! allWorkers.map (worker) -> stopWorker worker.proc
+      Promise.allSettled! [...workerPumps]
+      try managerControl?.stop true
+      try unlinkSync managerPath if managerOwned
+      try unlinkSync managerOwner if managerOwned
       finish! status
       status
     stopTask
@@ -1428,18 +1532,18 @@ export main = (argv) ->
       unless operation is 'Maintenance'
         appArtifact = join runDir, 'app.js'
         report = generate! project.entry, appArtifact, join(runDir, 'app-result.json'), 'app'
-        apiInputs = new Set report.inputs
+        apiInputs = Set.new report.inputs
         for slot in [0...args.workers]
-          await bootSlot()
+          bootSlot!
         startDoorbell()
     startAppWatcher()
     startApiWatcher()
     if stopping
       process.exitCode = await finished
       return
-    registrationId = createRegistration!()
+    registrationId = createRegistration!
     if stopping
-      try await controlFetch args.control, 'DELETE', "/1.0/apps/#{registrationId}"
+      try controlFetch! args.control, 'DELETE', "/1.0/apps/#{registrationId}"
       process.exitCode = await finished
       return
     appId = registrationId
@@ -1456,7 +1560,7 @@ export main = (argv) ->
     process.exitCode = await finished
   catch error
     warn "rip-server: #{String(error)}" unless stopping
-    process.exitCode = await stop 1
+    process.exitCode = stop! 1
   finally
     process.off 'SIGINT', onSigint
     process.off 'SIGTERM', onSigterm

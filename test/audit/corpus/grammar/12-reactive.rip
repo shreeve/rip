@@ -1,7 +1,7 @@
 # 12-reactive.rip — the reactive vocabulary in every form, the export side only.
 
 # ── State (:=): inline, carried, indented; opt-marked; annotated ──
-# Gates (`<~`) live with the component file: a gate exists only in a component body (MANIFEST.md).
+# Gates (`<~`) live with the component file: a gate exists only in a component body.
 
 count := 0
 label: string := 'idle'

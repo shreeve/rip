@@ -3,15 +3,15 @@
 
 asBytes = (value) ->
   return value if value instanceof Uint8Array
-  return new Uint8Array(value) if value instanceof ArrayBuffer
+  return Uint8Array.new(value) if value instanceof ArrayBuffer
   if ArrayBuffer.isView(value)
-    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
-  throw new TypeError 'Rip App: rash expects bytes'
+    return Uint8Array.new(value.buffer, value.byteOffset, value.byteLength)
+  throw TypeError.new 'Rip App: rash expects bytes'
 
 sha256 = (input) ->
   bytes = asBytes input
   if typeof Bun isnt 'undefined' and Bun.CryptoHasher?
-    return new Uint8Array(new Bun.CryptoHasher('sha256').update(bytes).digest())
+    return Uint8Array.new(Bun.CryptoHasher.new('sha256').update(bytes).digest())
 
   K = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5
@@ -24,15 +24,15 @@ sha256 = (input) ->
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
   ]
   bitLen = bytes.length * 8
-  padded = new Uint8Array(((bytes.length + 9 + 63) & ~63))
+  padded = Uint8Array.new(((bytes.length + 9 + 63) & ~63))
   padded.set bytes
   padded[bytes.length] = 0x80
-  view = new DataView(padded.buffer)
+  view = DataView.new(padded.buffer)
   view.setUint32 padded.length - 4, bitLen >>> 0, false
   view.setUint32 padded.length - 8, Math.floor(bitLen / 0x100000000) >>> 0, false
   H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]
   rotr = (x, n) -> (x >>> n) | (x << (32 - n))
-  w = new Uint32Array(64)
+  w = Uint32Array.new(64)
   i = 0
   while i < padded.length
     w[j] = view.getUint32(i + j * 4, false) for j in [0...16]
@@ -65,8 +65,8 @@ sha256 = (input) ->
     H[6] = (H[6] + g) >>> 0
     H[7] = (H[7] + h) >>> 0
     i += 64
-  digest = new Uint8Array(32)
-  out = new DataView(digest.buffer)
+  digest = Uint8Array.new(32)
+  out = DataView.new(digest.buffer)
   out.setUint32(i * 4, H[i], false) for i in [0...8]
   digest
 
@@ -80,3 +80,10 @@ export rash = (value) ->
     alphabet[d[3] >> 2] +
     alphabet[((d[3] & 3) << 4) | (d[4] >> 4)]
   text.replaceAll '-', '_'
+
+# Complete authored-App inventory identity. Callers own structural validation;
+# this function owns the one deterministic byte representation hashed on both
+# sides of the publication protocol.
+export check = (files) ->
+  inventory = JSON.stringify files.map (entry) -> [entry.id, entry.hash]
+  rash TextEncoder.new().encode(inventory)

@@ -48,21 +48,21 @@ class About extends __Component {
 
 const bundle = (extra = {}) => ({
   modules: {
-    'app/routes/index.rip': 'export Home = component',
-    'app/routes/about.rip': 'export About = component',
+    'routes/index.rip': 'export Home = component',
+    'routes/about.rip': 'export About = component',
   },
   compiled: {
-    'app/routes/index.rip': { Home },
-    'app/routes/about.rip': { About },
+    'routes/index.rip': { Home },
+    'routes/about.rip': { About },
   },
   ...extra,
 });
 
 const withStash = module => bundle({
   compiled: {
-    'app/routes/index.rip': { Home },
-    'app/routes/about.rip': { About },
-    'app/stash.rip': module,
+    'routes/index.rip': { Home },
+    'routes/about.rip': { About },
+    'stash.rip': module,
   },
 });
 
@@ -184,7 +184,7 @@ describe('launch', () => {
 
   test('a stash module without stash and a malformed stash reject loudly', () => {
     expect(() => boot({ bundle: withStash({ helpers: 1 }) }))
-      .toThrow(/'app\/stash\.rip' module must export 'stash'/);
+      .toThrow(/'stash\.rip' module must export 'stash'/);
     expect(() => boot({ bundle: withStash({ stash: ['not', 'a', 'stash'] }) }))
       .toThrow(/stash must be a plain object/);
     expect(globalThis.__ripApp).toBeUndefined();
@@ -202,8 +202,8 @@ describe('launch', () => {
   test('writing a new route file rebuilds the manifest', async () => {
     const result = boot();
     expect(result.router.match('/late')).toBeNull();
-    result.components.write('app/routes/late.rip', 'export Late = component');
-    result.components.setCompiled('app/routes/late.rip', { Late: Home });
+    result.components.write('routes/late.rip', 'export Late = component');
+    result.components.setCompiled('routes/late.rip', { Late: Home });
     expect(result.router.match('/late')).not.toBeNull();
   });
 
@@ -218,12 +218,12 @@ describe('launch', () => {
     });
     running.push(result);
     expect(result.components).toBe(store);
-    expect(store.read('app/routes/index.rip')).toBe('export Home = component');
+    expect(store.read('routes/index.rip')).toBe('export Home = component');
     await Bun.sleep(0);
     await Bun.sleep(0);
     expect(host.children.map(child => child.name)).toEqual(['home']);
-    store.write('app/routes/late.rip', 'export Late = component');
-    store.setCompiled('app/routes/late.rip', { Late: Home });
+    store.write('routes/late.rip', 'export Late = component');
+    store.setCompiled('routes/late.rip', { Late: Home });
     expect(result.router.match('/late')).not.toBeNull();
   });
 

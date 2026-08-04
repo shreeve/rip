@@ -17,7 +17,7 @@ export type Mutation<R> =
 
 export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onSuccess?: (r: R) => void, onError?: (e: unknown) => unknown } = {}): Mutation<R>
   unless typeof fn is 'function'
-    throw new TypeError 'Rip App: createMutation expects a function'
+    throw TypeError.new 'Rip App: createMutation expects a function'
   _pending   = __state false
   _succeeded = __state false
   _error     = __state(null as any)
@@ -33,7 +33,7 @@ export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onS
       _error.value = null
     r: R
     try
-      r = await fn(...args)
+      r = fn!(...args)
     catch e
       # Only a request (fn) rejection is a mutation failure. A
       # superseded call must not flip flags or run a callback — the
@@ -43,7 +43,7 @@ export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onS
       return unless me is generation
       _error.value = e
       try
-        if opts.onError then return await opts.onError(e) else throw e
+        if opts.onError then return opts.onError!(e) else throw e
       finally
         _pending.value = false if me is generation
     # fn resolved. A superseded success is dropped silently — its
@@ -56,7 +56,7 @@ export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onS
     # rather than floating unhandled.
     try
       _succeeded.value = true
-      await opts.onSuccess?(r)
+      opts.onSuccess?!(r)
       r
     finally
       _pending.value = false if me is generation

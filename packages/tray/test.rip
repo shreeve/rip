@@ -1,0 +1,201 @@
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import { action, directory, label, link, quit, separator, snapshot, submenu, svg, svgFile, toggle, tray } from '@rip-lang/tray'
+import { optionsFor } from './build.rip'
+import * as mod from '@rip-lang/tray'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+console.log '\nPackage'
+
+test 'exports the complete Rip-authored tray vocabulary', ->
+  eq Object.keys(mod).sort(), ['action', 'directory', 'label', 'link', 'quit', 'separator', 'serve', 'snapshot', 'submenu', 'svg', 'svgFile', 'toggle', 'tray']
+
+test 'has no runtime dependencies and keeps the native host in the package', ->
+  pkg = JSON.parse readFileSync("#{import.meta.dir}/package.json", 'utf8')
+  eq pkg.dependencies, undefined
+  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  ok pkg.files.includes 'assets'
+  ok existsSync "#{import.meta.dir}/assets/rip-color.svg"
+  ok existsSync "#{import.meta.dir}/assets/rip-template.svg"
+  ok readFileSync("#{import.meta.dir}/macos/Package.swift", 'utf8').includes('RipTrayHost')
+
+test 'the macOS host is generic and contains no Rip Apps policy', ->
+  manifest = readFileSync "#{import.meta.dir}/macos/Package.swift", 'utf8'
+  source = readFileSync "#{import.meta.dir}/macos/Sources/RipTrayHost/RipTrayHost.swift", 'utf8'
+  kit = readFileSync "#{import.meta.dir}/macos/Sources/TrayKit/TrayKit.swift", 'utf8'
+  ok manifest.includes '.macOS(.v13)'
+  ok source.includes 'MenuBarExtra'
+  ok source.includes 'TrayPanel(provider: provider)'
+  ok source.includes '.menuBarExtraStyle(.window)'
+  ok kit.includes 'PanelGroupRow('
+  ok kit.includes 'rowHeight: rowHeight(for: item)'
+  ok kit.includes '.frame(minHeight: rowHeight)'
+  ok kit.includes 'panelHeight(defaultRowHeight: rowHeight)'
+  ok kit.includes 'PanelCompactControl(item: control, provider: provider)'
+  ok kit.includes 'items.contains { $0.kind != "separator" && $0.icon != nil }'
+  ok kit.includes 'PanelLeadingIcon(icon: item.icon, reservesSpace: reservesLeadingIconSpace)'
+  ok kit.includes 'if let logo = provider.tray.logo {'
+  ok not kit.includes 'provider.tray.logo ?? provider.tray.icon'
+  ok not /rip app|rip edge|Caddy|Janus/.test(source)
+
+test 'the native host builds and exercises its protocol on macOS', ->
+  if process.platform isnt 'darwin'
+    ok existsSync "#{import.meta.dir}/macos/Sources/TrayKitCheck/main.swift"
+    return
+  build = Bun.spawnSync ['swift', 'build', '--package-path', 'macos'], { cwd: import.meta.dir, stdout: 'pipe', stderr: 'pipe' }
+  eq build.exitCode, 0, build.stderr.toString() or build.stdout.toString()
+  check = Bun.spawnSync ['swift', 'run', '--package-path', 'macos', 'tray-kit-check'], { cwd: import.meta.dir, stdout: 'pipe', stderr: 'pipe' }
+  eq check.exitCode, 0, check.stderr.toString() or check.stdout.toString()
+  ok check.stdout.toString().includes '13 checks passed'
+
+test 'the builder derives an independent app destination and bundle identity', ->
+  options = optionsFor [
+    'tray.rip', '--name', 'Queue Watch', '--identifier', 'io.example.queue-watch',
+    '--output', 'artifacts'
+  ], import.meta.dir
+  eq options.provider, join(import.meta.dir, 'tray.rip')
+  eq options.name, 'Queue Watch'
+  eq options.identifier, 'io.example.queue-watch'
+  eq options.target, join(import.meta.dir, 'artifacts', 'Queue Watch.app')
+  eq options.force, false
+  throws (-> optionsFor(['tray.rip', '--wat'], import.meta.dir)), 'unknown option'
+
+console.log '\nMenu model'
+
+test! 'a Rip menu becomes a callback-free native tray document', ->
+  toggled = null
+  picked = null
+  definition = tray
+    title: 'Fixture'
+    icon: 'bolt'
+    tooltip: 'Fixture tray'
+    rowHeight: 48
+    refresh: 0
+    menu: -> [
+      label 'Ready', icon: 'checkmark.circle', subtitle: 'All systems go'
+      separator()
+      submenu 'Controls', [
+        action 'Run', id: 'run', rowHeight: 56, run: -> 'ran'
+        toggle 'Watch', id: 'watch', value: true, run: (value) -> toggled = value
+        directory 'Add…', id: 'add', prompt: 'Choose a project', run: (path) -> picked = path
+        link 'Open', 'https://example.test/', icon: 'safari'
+      ]
+      quit()
+    ]
+
+  result = snapshot! definition
+  eq result.tray,
+    title: 'Fixture'
+    icon: 'bolt'
+    logo: null
+    tooltip: 'Fixture tray'
+    rowHeight: 48
+    items: [
+      { kind: 'label', title: 'Ready', icon: 'checkmark.circle', subtitle: 'All systems go', rowHeight: null }
+      { kind: 'separator' }
+      {
+        kind: 'submenu', title: 'Controls', id: 'Controls', icon: null, enabled: true, rowHeight: null
+        items: [
+          { kind: 'action', title: 'Run', id: 'run', icon: null, enabled: true, rowHeight: 56 }
+          { kind: 'toggle', title: 'Watch', id: 'watch', icon: null, enabled: true, rowHeight: null, value: true }
+          { kind: 'directory', title: 'Add…', id: 'add', icon: null, enabled: true, rowHeight: null, prompt: 'Choose a project' }
+          { kind: 'link', title: 'Open', id: 'https://example.test/', url: 'https://example.test/', icon: 'safari', enabled: true, rowHeight: null }
+        ]
+      }
+      { kind: 'quit', title: 'Quit', icon: null, rowHeight: null }
+    ]
+  eq result.actions.size, 3
+  watch = result.actions.get 'watch'
+  add = result.actions.get 'add'
+  watch! false
+  add! '/tmp/project'
+  eq toggled, false
+  eq picked, '/tmp/project'
+
+test 'SVG icons are explicit, template-aware, and file-backed', ->
+  source = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><path d="M0 0h8v8H0z"/></svg>'
+  eq svg(source), { kind: 'svg', source, template: true }
+  eq svg(source, template: false), { kind: 'svg', source, template: false }
+  file = svgFile "#{import.meta.dir}/assets/rip-color.svg", template: false
+  eq file.kind, 'svg'
+  eq file.template, false
+  ok file.source.includes '<svg'
+  throws (-> svg ''), 'source must be a non-empty string'
+  throws (-> svg source, template: 'yes'), 'template must be Boolean'
+
+test! 'duplicate action ids reject loudly across nested menus', ->
+  definition = tray
+    title: 'Duplicate'
+    menu: -> [
+      action 'First', id: 'same', run: -> null
+      submenu 'Nested', [action 'Second', id: 'same', run: -> null]
+    ]
+  error = null
+  try
+    snapshot! definition
+  catch value
+    error = value
+  ok error.message.includes('duplicate tray action id "same"')
+
+test 'invalid definitions and items reject at their owning boundary', ->
+  throws (-> tray title: '', menu: -> []), 'tray title must be'
+  throws (-> tray title: 'Bad', refresh: -1, menu: -> []), 'refresh must be'
+  throws (-> tray title: 'Bad', rowHeight: 0, menu: -> []), 'rowHeight must be automatic or a positive number'
+  throws (-> action 'Bad', id: 'bad'), 'run must be a function'
+  throws (-> action 'Bad', id: 'bad', rowHeight: 'compact', run: -> null), 'rowHeight must be automatic or a positive number'
+  throws (-> toggle 'Bad', id: 'bad', value: 'yes', run: -> null), 'value must be Boolean'
+  throws (-> label 'Bad', icon: { kind: 'png', source: 'x', template: true }), 'icon kind must be svg'
+  eq (tray title: 'Auto', rowHeight: 'automatic', menu: -> []).rowHeight, null
+
+test! 'snapshot revalidates a raw definition instead of trusting its caller', ->
+  error = null
+  try
+    snapshot! { title: '', refresh: 0, menu: -> [] }
+  catch value
+    error = value
+  ok error.message.includes 'tray title must be a non-empty string'
+
+console.log '\nProtocol'
+
+test! 'the persistent Rip provider handles an action and publishes the new menu', ->
+  root = mkdtempSync join(tmpdir(), 'rip-tray-protocol-')
+  provider = join root, 'provider.rip'
+  source = '''
+    import { action, label, serve, tray } from '__TRAY__'
+
+    count = 0
+    serve! tray
+      title: 'Wire'
+      refresh: 0
+      menu: -> [
+        label "Count #{count}"
+        action 'Increment', id: 'increment', run: (amount) -> count += amount
+      ]
+    '''
+  writeFileSync provider, source.replace('__TRAY__', join(import.meta.dir, 'tray.rip'))
+  preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
+  try
+    proc = Bun.spawn [process.execPath, preload, provider],
+      cwd: import.meta.dir
+      stdin: 'pipe'
+      stdout: 'pipe'
+      stderr: 'pipe'
+    out = Response.new(proc.stdout).text()
+    err = Response.new(proc.stderr).text()
+    proc.stdin.write JSON.stringify({ type: 'action', id: 'increment', value: 2 }) + '\n'
+    proc.stdin.end()
+    code = await proc.exited
+    out = await out
+    err = await err
+    eq code, 0, err
+    messages = out.trim().split('\n').map JSON.parse
+    eq messages.length, 2
+    eq messages[0].tray.items[0].title, 'Count 0'
+    eq messages[1].tray.items[0].title, 'Count 2'
+  finally
+    rmSync root, { recursive: true, force: true }
+
+test 'the framework and its executable Rip Apps mode compile as one ordinary Rip file', ->
+  result = Bun.spawnSync ['rip', '-c', "#{import.meta.dir}/tray.rip"], { stdout: 'ignore', stderr: 'pipe' }
+  eq result.exitCode, 0, result.stderr.toString()

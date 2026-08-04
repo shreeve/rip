@@ -9,13 +9,16 @@
     "./middleware": "./middleware.rip"
   },
   "bin": {
-    "rip-server": "./server.rip"
+    "rip-server": "./server.rip",
+    "rip-app": "./app.rip",
+    "rip-edge": "./edge.rip"
   },
   "scripts": {
     "test": "rip test/test.rip",
     "test:framework": "rip test/framework/test.rip",
     "test:hello-api": "rip test/hello-api/test.rip",
-    "test:hello-app": "rip test/hello-app/test.rip",
+    "test:hello": "rip test/hello/test.rip",
+    "test:appliance": "rip test/appliance/test.rip",
     "test:janus": "rip test/janus/test.rip",
     "test:manager-boundary": "rip test/manager-boundary/test.rip",
     "test:middleware": "rip test/middleware/test.rip",
@@ -30,6 +33,14 @@
     "worker.rip",
     "generate.rip",
     "manager.rip",
+    "control.rip",
+    "appliance.rip",
+    "agent.rip",
+    "app.rip",
+    "edge.rip",
+    "Caddyfile",
+    "ripdev.io.crt",
+    "ripdev.io.key",
     "monitor.rip",
     "README.md"
   ],

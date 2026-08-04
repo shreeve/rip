@@ -486,6 +486,18 @@ code 'dammit on a member callee awaits the construction', 'x = new X.b!', 'let x
 code 'dammit supplies the construction args', 'x = new X!(a)', 'let x = await new X(a);'
 code 'construction dammit continues the chain', 'x = new X!.b', 'let x = (await new X()).b;'
 
+# Ruby-style construction composes with dammit exactly like prefix
+# construction: the construction itself is awaited, for every class.
+code 'ruby construction dammit with args', 'x = X.new!(a)', 'let x = await new X(a);'
+code 'ruby construction dammit without args', 'x = X.new!', 'let x = await new X();'
+code 'ruby construction dammit accepts an expression constructor', 'x = getClass().new!(a)', 'let x = await new (getClass())(a);'
+
+test 'ruby construction dammit awaits a thenable-returning constructor', '''
+  class Lazy
+    constructor: -> return Promise.resolve(9)
+  Lazy.new!
+''', 9
+
 # A PARENTHESIZED dammit completes inside its parens — the callee is
 # the awaited value, and the construction applies to it.
 code 'parenthesized dammit is the new callee', 'x = new (f!)', 'let x = new (await f())();'

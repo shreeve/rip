@@ -14,14 +14,50 @@
 // turns it on when it arrives with the server).
 //
 // `workspace: true` opens the dev door (docs/WORKSPACE.md, M1): the
-// bag populates from the served manifest, the hub feed dings modules in,
-// and apply chooses reload | css | update | ignore. Off, every path
-// below is byte-identical to the plain boot.
+// bag populates from the self-contained bundle, the manifest reconciles
+// after the Hub opens, and apply chooses reload | css | update | ignore.
+// Off, every path below is byte-identical to the plain boot.
 import { createModuleLoader } from './browser-modules.js';
 
 const APP_PACKAGE = '@rip-lang/app';
 
 const bootGraphs = new Map();
+
+const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const validHash = value => typeof value === 'string' && /^[A-Za-z0-9_]{6}$/.test(value);
+const validFileId = id => {
+  if (typeof id !== 'string' || id.length === 0 || id.startsWith('/') || id.includes('\\')) return false;
+  const segments = id.split('/');
+  if (segments.some(segment => !segment || segment === '.' || segment === '..' || segment.startsWith('.'))) return false;
+  return id.endsWith('.rip') || id.endsWith('.css') || id.endsWith('.html');
+};
+
+const validatePublication = (bundle, app) => {
+  if (!validHash(bundle.check) || !Array.isArray(bundle.files)) {
+    throw new Error('rip: workspace bundle requires a check and a files inventory');
+  }
+  let priorId = null;
+  for (const entry of bundle.files) {
+    if (!isRecord(entry) || !validFileId(entry.id) || !validHash(entry.hash) || (priorId !== null && priorId >= entry.id)) {
+      throw new Error(`rip: workspace bundle has a malformed or unsorted file entry: ${JSON.stringify(entry)}`);
+    }
+    priorId = entry.id;
+  }
+  if (app.check(bundle.files) !== bundle.check) {
+    throw new Error('rip: workspace bundle check does not match its files inventory');
+  }
+  for (const entry of bundle.files) {
+    if (!entry.id.endsWith('.rip')) continue;
+    const source = bundle.modules?.[entry.id];
+    if (typeof source !== 'string') {
+      throw new Error(`rip: workspace bundle is missing authored Rip source '${entry.id}'`);
+    }
+    const actual = app.rash(new TextEncoder().encode(source));
+    if (actual !== entry.hash) {
+      throw new Error(`rip: workspace bundle source '${entry.id}' hashes to ${actual}, not ${entry.hash}`);
+    }
+  }
+};
 
 const browserFetchText = async (url, etag) => {
   const headers = etag ? { 'If-None-Match': etag } : {};
@@ -94,31 +130,13 @@ export async function bootApp(opts = {}) {
   if (opts.fetchText) fetchOpts.fetchText = opts.fetchText;
   if ('bundleStorage' in opts) fetchOpts.storage = opts.bundleStorage;
 
-  // Workspace mode fetches the manifest BEFORE the bundle, and the
-  // manager writes it AFTER the bundle: the only pairing a boot racing
-  // a save can observe is "manifest hash <= bundle bytes", which the
-  // feed's open resync heals forward. The reverse pairing (a manifest
-  // hash over older bundle bytes) would block its own healing on the
-  // bag's hash cursor — the silent-stale class.
   const workspaceMode = opts.workspace === true;
   let manifestUrl = null;
-  let fetchBytes = null;
-  let manifest = null;
   if (workspaceMode) {
-    // Derive from the bundle URL the same way: …/bundle.json → …/manifest.json.
+    // A bundle object still has a conventional resync endpoint. A URL keeps
+    // custom generated roots coherent by deriving its sibling manifest.
     manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl
-      ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf('/') + 1)}manifest.json` : null);
-    if (!manifestUrl) {
-      throw new Error(
-        'rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl',
-      );
-    }
-    fetchBytes = opts.feed?.fetch ?? (url => fetch(url));
-    const res = await fetchBytes(manifestUrl, { cache: 'no-cache' });
-    if (!res.ok) {
-      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
-    }
-    manifest = await res.json();
+      ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf('/') + 1)}manifest.json` : '/manifest.json');
   }
 
   const bundle = opts.bundle ?? await fetchBundle(opts.url, fetchOpts);
@@ -142,8 +160,8 @@ export async function bootApp(opts = {}) {
   // are a new application and reject loudly through the claim. Watch
   // mode owns the debug transition with a full reload.
   const debug = opts.debug === true;
-  const appPaths = Object.keys(bundle.modules ?? {}).filter(path => path.startsWith(`${appEntry.root}/`)).sort();
-  const fingerprint = `${debug}:${JSON.stringify(appPaths.map(path => [path, bundle.modules[path]]))}`;
+  const appPackagePaths = Object.keys(bundle.modules ?? {}).filter(path => path.startsWith(`${appEntry.root}/`)).sort();
+  const fingerprint = `${debug}:${JSON.stringify(appPackagePaths.map(path => [path, bundle.modules[path]]))}`;
   let graph = bootGraphs.get(fingerprint);
   if (!graph) {
     const files = new Map();
@@ -190,31 +208,33 @@ export async function bootApp(opts = {}) {
     // The workspace is part of the app package (docs/WORKSPACE.md, Q9):
     // createWorkspace and connectFeed ride the same module the launch
     // does — one graph, never a second copy.
+    validatePublication(bundle, app);
     bag = app.createWorkspace();
     const records = [];
-    for (const entry of manifest?.files ?? []) {
+    for (const entry of bundle.files) {
       // The id IS the store path (B′ — the birth path is the id).
       const source = (bundle.modules ?? {})[entry.id];
-      // A manifest file the bundle does not carry is skipped here: the
-      // feed's open resync fetches its latest bytes.
-      if (source === undefined) continue;
-      records.push({
+      const record = {
         id: entry.id,
         path: entry.id,
-        hash: app.rash(new TextEncoder().encode(source)),
-        source,
-      });
+        hash: entry.hash,
+      };
+      // CSS and HTML are represented by identity at first paint; their bytes
+      // already arrive through the page. A later ding fetch fills source.
+      if (source !== undefined) record.source = source;
+      records.push(record);
     }
     bag.populate(records);
   }
 
-  // Application modules (the app/ store tree) compile up front:
+  // Project modules (App files plus any synthetic schema projections) compile
+  // up front. Package modules compile through their importing project module:
   // launch's renderer requires every navigable module already compiled,
   // and a page fails its boot loudly at its own position instead of
   // failing its first navigation.
   const compiled = {};
   for (const path of Object.keys(bundle.modules ?? {})) {
-    if (path.startsWith('app/')) {
+    if (path.endsWith('.rip') && !path.startsWith('@rip-lang/')) {
       compiled[path] = { ...(await loader.import(path)) };
     }
   }
@@ -388,7 +408,6 @@ export async function bootApp(opts = {}) {
     }
   };
   const unwatch = bag.watch((_event, path) => {
-    if (!path.startsWith('app/')) return;
     // CSS/HTML handled in door.set — never queue a Rip update.
     if (isNonRipBag(path)) return;
     pending.add(path);
@@ -473,7 +492,12 @@ export async function bootApp(opts = {}) {
       return bag.set({ ...passport, compiled: { ...module } });
     },
   };
-  const feed = app.connectFeed(door, { ...(opts.feed ?? {}), manifestUrl, report });
+  const feed = app.connectFeed(door, {
+    ...(opts.feed ?? {}),
+    manifestUrl,
+    report,
+    initialCheck: bundle.check,
+  });
 
   const destroy = () => {
     if (destroyed) return;

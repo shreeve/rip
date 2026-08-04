@@ -1,5 +1,5 @@
 import { test, eq, ok } from '@rip-lang/testing'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -9,9 +9,9 @@ SERVER = join(import.meta.dir, '..', '..', 'server.rip')
 waitFor = (name, fn, timeout = 7000) ->
   deadline = Date.now() + timeout
   loop
-    value = await fn()
+    value = fn!
     return value if value
-    throw new Error("manager boundary test timed out waiting for #{name}") if Date.now() >= deadline
+    throw Error.new("manager boundary test timed out waiting for #{name}") if Date.now() >= deadline
     sleep! 10
 
 startControl = (socket, calls, handlers: any = {}) ->
@@ -20,8 +20,8 @@ startControl = (socket, calls, handlers: any = {}) ->
   Bun.serve
     unix: socket
     fetch: (request) ->
-      url = new URL request.url
-      body = if request.method in ['POST', 'PUT'] then try await request.json() catch then null else null
+      url = URL.new request.url
+      body = if request.method in ['POST', 'PUT'] then try request.json! catch then null else null
       calls.push { method: request.method, path: url.pathname, body }
       if request.method is 'GET' and url.pathname is '/1.0'
         return Response.json { type: 'janus', api_version: '1.0' }
@@ -32,7 +32,7 @@ startControl = (socket, calls, handlers: any = {}) ->
       if request.method is 'POST' and url.pathname.endsWith('/heartbeat')
         heartbeatSerial++
         return handlers.heartbeat(heartbeatSerial, url.pathname) if handlers.heartbeat?
-      new Response null, { status: 204 }
+      Response.new null, { status: 204 }
 
 run = (cwd, args, env = {}) ->
   proc = Bun.spawn [process.execPath, PRELOAD, SERVER, ...args],
@@ -41,8 +41,8 @@ run = (cwd, args, env = {}) ->
     stdout: 'pipe'
     stderr: 'pipe'
     env: { ...process.env, ...env }
-  out = new Response(proc.stdout).text()
-  err = new Response(proc.stderr).text()
+  out = Response.new(proc.stdout).text()
+  err = Response.new(proc.stderr).text()
   { proc, out, err }
 
 test! 'manager loads and normalizes the app-local declaration before registering', ->
@@ -77,7 +77,7 @@ test! 'manager loads and normalizes the app-local declaration before registering
   process = null
   try
     { proc: process } = run nested, ['--control', controlSocket, '--no-watch', '--access-log=off']
-    registration = await waitFor 'declaration registration', ->
+    registration = waitFor! 'declaration registration', ->
       calls.find (call) -> call.method is 'POST' and call.path is '/1.0/apps'
     eq calls[0].method, 'GET'
     eq registration.body.name, 'declared-app'
@@ -88,7 +88,7 @@ test! 'manager loads and normalizes the app-local declaration before registering
     ok not ('hosts' of registration.body)
     eq registration.body.files,
       roots: [
-        { path: join(realpathSync(project), 'static', 'generated'), cache: 'revalidate' }
+        { path: join(realpathSync(project), 'dist'), cache: 'revalidate' }
         { path: join(realpathSync(project), 'sites/{site}/public'), cache: 'revalidate', browse: true }
         { path: join(realpathSync(project), 'sites/common/public'), cache: 'forever' }
         { path: join(realpathSync(project), 'app'), cache: 'never' }
@@ -121,7 +121,7 @@ test! 'shell-less all-browsable declaration registers exactly its declared roots
   process = null
   try
     { proc: process } = run project, [project, '--control', controlSocket, '--no-watch', '--access-log=off']
-    registration = await waitFor 'browse-policy registration', ->
+    registration = waitFor! 'browse-policy registration', ->
       calls.find (call) -> call.method is 'POST' and call.path is '/1.0/apps'
     eq registration.body.hosts, ['files.example.test']
     eq registration.body.files,
@@ -132,6 +132,69 @@ test! 'shell-less all-browsable declaration registers exactly its declared roots
   finally
     try process?.kill 'SIGKILL'
     await process.exited if process?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'serve.rip selects a custom App root and manifest membership', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-app-manifest-')
+  project = join dir, 'project'
+  mkdirSync join(project, 'client', 'routes'), { recursive: true }
+  mkdirSync join(project, 'client', 'styles'), { recursive: true }
+  writeFileSync join(project, 'client', 'index.html'), '<!doctype html><div id="app"></div>'
+  writeFileSync join(project, 'client', 'routes', 'index.rip'), "export Index = component\n  render\n    h1 'Selected'\n"
+  writeFileSync join(project, 'client', 'ignored.rip'), "export Ignored = 1\n"
+  writeFileSync join(project, 'client', 'styles', 'site.css'), 'body { color: navy; }'
+  writeFileSync join(project, 'serve.rip'), """
+  export default
+    hosts: ['manifest.example.test']
+    app:
+      root: 'client'
+      manifest:
+        update: ['routes/**/*.rip']
+        css: []
+    files:
+      roots: [{ path: 'client', cache: 'never' }]
+      shell: 'client/index.html'
+  """
+  calls = []
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, calls
+  process = null
+  try
+    launched = run project, [project, '--control', controlSocket, '--no-watch', '--access-log=off']
+    process = launched.proc
+    sleep! 100
+    throw Error.new(await launched.err) if process.exitCode?
+    try
+      waitFor! 'custom App registration', ->
+        calls.find (call) -> call.method is 'POST' and call.path is '/1.0/apps'
+    catch error
+      throw Error.new "#{error.message}; calls=#{JSON.stringify(calls)}"
+    bundle = JSON.parse readFileSync(join(project, 'dist', 'bundle.json'), 'utf8')
+    eq bundle.files.map((entry) -> entry.id), ['index.html', 'routes/index.rip']
+    eq Object.keys(bundle.modules).filter((id) -> bundle.files.some((entry) -> entry.id is id)), ['routes/index.rip']
+    process.kill 'SIGTERM'
+    eq await process.exited, 143
+  finally
+    try process?.kill 'SIGKILL'
+    await process.exited if process?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'serve.rip rejects a manifest pattern assigned to the wrong apply kind', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-invalid-manifest-')
+  project = join dir, 'project'
+  mkdirSync join(project, 'app'), { recursive: true }
+  writeFileSync join(project, 'serve.rip'), "export default { app: { manifest: { css: ['**/*.rip'] } } }\n"
+  calls = []
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, calls
+  try
+    { proc, err } = run project, [project, '--control', controlSocket, '--no-watch', '--access-log=off']
+    eq await proc.exited, 1
+    ok (await err).includes('serve.rip app.manifest.css[0] must select .css files')
+    ok not calls.some((call) -> call.path is '/1.0/apps')
+  finally
     control.stop true
     rmSync dir, { recursive: true, force: true }
 
@@ -161,14 +224,14 @@ test! 'manager retries stale registration claims within a bounded window', ->
   controlSocket = join dir, 'janus.sock'
   control = startControl controlSocket, calls,
     register: (attempt) ->
-      return new Response('claimed', { status: 409 }) if attempt <= 2
+      return Response.new('claimed', { status: 409 }) if attempt <= 2
       Response.json({ id: 'registration-live' }, { status: 201 })
   process = null
   try
     launched = run project, [project, '--host', 'retry.example.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
       RIP_REGISTER_409_MS: '1000'
     process = launched.proc
-    await waitFor 'registration retry success', ->
+    waitFor! 'registration retry success', ->
       calls.filter((call) -> call.method is 'POST' and call.path is '/1.0/apps').length is 3
     ok not process.exitCode?
     process.kill 'SIGTERM'
@@ -187,7 +250,7 @@ test! 'manager stops retrying a registration claim after its deadline', ->
   calls = []
   controlSocket = join dir, 'janus.sock'
   control = startControl controlSocket, calls,
-    register: -> new Response('claimed', { status: 409 })
+    register: -> Response.new('claimed', { status: 409 })
   try
     { proc, err } = run project, [project, '--host', 'occupied.example.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
       RIP_REGISTER_409_MS: '100'
@@ -208,17 +271,17 @@ test! 'heartbeat recovery retries a stale replacement claim', ->
   control = startControl controlSocket, calls,
     register: (attempt) ->
       return Response.json({ id: 'registration-old' }, { status: 201 }) if attempt is 1
-      return new Response('claimed', { status: 409 }) if attempt <= 3
+      return Response.new('claimed', { status: 409 }) if attempt <= 3
       Response.json({ id: 'registration-new' }, { status: 201 })
     heartbeat: (attempt) ->
-      if attempt is 1 then new Response(null, { status: 404 }) else new Response(null, { status: 204 })
+      if attempt is 1 then Response.new(null, { status: 404 }) else Response.new(null, { status: 204 })
   process = null
   try
     launched = run project, [project, '--host', 'recover.example.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
       RIP_HEARTBEAT_MS: '25'
       RIP_REGISTER_409_MS: '1000'
     process = launched.proc
-    await waitFor 'heartbeat replacement registration', ->
+    waitFor! 'heartbeat replacement registration', ->
       calls.filter((call) -> call.method is 'POST' and call.path is '/1.0/apps').length is 4
     ok not process.exitCode?
     process.kill 'SIGTERM'
@@ -239,10 +302,10 @@ test! 'manager runtime is private to the current POSIX user', ->
   try
     { proc } = run project, ['status', project], { TMPDIR: runtimeRoot }
     eq await proc.exited, 1
-    runtime = join runtimeRoot, "rip-managers-#{process.getuid!()}"
+    runtime = join runtimeRoot, "rip-managers-#{process.getuid!}"
     info = statSync runtime
     ok info.isDirectory()
-    eq info.uid, process.getuid!()
+    eq info.uid, process.getuid!
     eq info.mode & 0o777, 0o700
   finally
     rmSync dir, { recursive: true, force: true }
@@ -251,7 +314,7 @@ test! 'manager runtime rejects unsafe existing permissions', ->
   dir = mkdtempSync join(tmpdir(), 'rip-manager-runtime-unsafe-')
   project = join dir, 'project'
   runtimeRoot = join dir, 'tmp'
-  runtime = join runtimeRoot, "rip-managers-#{process.getuid!()}"
+  runtime = join runtimeRoot, "rip-managers-#{process.getuid!}"
   mkdirSync join(project, 'app'), { recursive: true }
   mkdirSync runtime, { recursive: true }
   chmodSync runtime, 0o755
@@ -284,6 +347,7 @@ test! 'control commands reject every startup-only option', ->
       ok (await err).includes("status does not accept startup options: #{option[0]}")
     commands = [
       ['status', project]
+      ['stop', project]
       ['hold', project]
       ['release', project]
       ['migrate']
@@ -294,6 +358,40 @@ test! 'control commands reject every startup-only option', ->
       eq await proc.exited, 1
       ok (await err).includes("#{command[0]} does not accept startup options: --watch")
   finally
+    rmSync dir, { recursive: true, force: true }
+
+test! 'stop command gracefully deregisters and exits the canonical manager', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-stop-')
+  project = join dir, 'project'
+  mkdirSync join(project, 'app'), { recursive: true }
+  writeFileSync join(project, 'app', 'index.rip'), "export default -> 'ok'\n"
+  calls = []
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, calls
+  manager = null
+  try
+    { proc: manager } = run project, [project, '--host', 'stop.example.test', '--control', controlSocket, '--no-watch', '--access-log=off']
+    waitFor! 'manager registration before stop', ->
+      calls.some (call) -> call.method is 'POST' and call.path is '/1.0/apps'
+
+    stopped = run project, ['stop', project]
+    eq await stopped.proc.exited, 0
+    eq manager.exitCode, 0
+    eq JSON.parse(await stopped.out),
+      name: 'project'
+      root: realpathSync(project)
+      hosts: ['stop.example.test']
+      site: null
+      operation: 'Active'
+      stopping: true
+      workers: 0
+      watch: false
+      migration: null
+    ok calls.some((call) -> call.method is 'DELETE' and call.path is '/1.0/apps/registration-1')
+  finally
+    try manager?.kill 'SIGKILL'
+    await manager.exited if manager?
+    control.stop true
     rmSync dir, { recursive: true, force: true }
 
 test! 'standalone browse process lease registers one root and prints recovery access', ->
@@ -338,7 +436,7 @@ test! 'standalone browse heartbeat lease deletes on orderly shutdown', ->
   try
     launched = run dir, ['browse', files, '--host', 'live.example.test', '--control', controlSocket, '--access-log=off']
     process = launched.proc
-    await waitFor 'browse heartbeat', (->
+    waitFor! 'browse heartbeat', (->
       calls.some (call) -> call.method is 'POST' and call.path.endsWith('/heartbeat')
     ), 7000
     process.kill 'SIGTERM'

@@ -11,19 +11,19 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
 
 const MODULES = {
-  'app/stash.rip': [
+  'stash.rip': [
     "import { source } from '@rip-lang/app'",
     'export stash = {',
     "  user: source fetch: -> (await fetch('/user.json')).json()",
     '}',
   ].join('\n'),
-  'app/routes/index.rip': [
+  'routes/index.rip': [
     'export Home = component',
     '  render',
     '    h1#title "home"',
     '    a href: "/profile", "profile"',
   ].join('\n'),
-  'app/routes/profile.rip': [
+  'routes/profile.rip': [
     'export Profile = component',
     '  user <~ @app.data.user',
     '  render',
@@ -47,17 +47,26 @@ const wsRoute = title => [
   `    h1#title "${title}"`,
 ].join('\n');
 
-const wsModules = { 'app/routes/index.rip': wsRoute('workspace home') };
+const wsModules = { 'routes/index.rip': wsRoute('workspace home') };
 const wsHashes = new Map();
 const ripHash = text => createHash('sha256').update(text).digest('base64url').slice(0, 6).replaceAll('-', '_');
-wsHashes.set('app/routes/index.rip', ripHash(wsModules['app/routes/index.rip']));
+wsHashes.set('routes/index.rip', ripHash(wsModules['routes/index.rip']));
+const wsInventory = () => [...wsHashes]
+  .map(([id, hash]) => ({ id, hash }))
+  .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+const checkOf = files => ripHash(JSON.stringify(files.map(({ id, hash }) => [id, hash])));
 let wsBundleText = null;
 let wsBundleTag = null;
 const rebuildWsBundle = () => {
-  wsBundleText = JSON.stringify(assembleBundle({
-    modules: wsModules,
-    packagesDir: join(root, 'packages'),
-  }));
+  const files = wsInventory();
+  wsBundleText = JSON.stringify({
+    ...assembleBundle({
+      modules: wsModules,
+      packagesDir: join(root, 'packages'),
+    }),
+    check: checkOf(files),
+    files,
+  });
   wsBundleTag = `"${Bun.hash(wsBundleText).toString(16)}"`;
 };
 rebuildWsBundle();
@@ -95,13 +104,13 @@ Bun.serve({
       return server.upgrade(request) ? undefined : new Response('websocket only', { status: 400 });
     }
     if (pathname === '/manifest.json') {
-      const files = [...wsHashes].map(([id, hash]) => ({ id, hash }));
-      return new Response(JSON.stringify({ files }), {
+      const files = wsInventory();
+      return new Response(JSON.stringify({ check: checkOf(files), files }), {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
       });
     }
     if (pathname.startsWith('/') && pathname.endsWith('.rip')) {
-      const id = `app${pathname}`;
+      const id = pathname.slice(1);
       const body = wsModules[id];
       if (body === undefined) return new Response('unknown module', { status: 404 });
       return new Response(body, { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });

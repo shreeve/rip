@@ -48,55 +48,55 @@ isBagPath = (name) ->
 
 validPath = (path) ->
   unless typeof path is 'string' and path.length > 0
-    throw new TypeError 'Rip Workspace: component path must be a non-empty string'
+    throw TypeError.new 'Rip Workspace: component path must be a non-empty string'
   segments = path.split '/'
   invalidSegment = segments.some (segment) -> not segment or segment is '.' or segment is '..'
   filename = segments[-1]
   fileAsDirectory = segments.slice(0, -1).some (segment) -> isBagPath segment
   if path.includes('\\') or invalidSegment or fileAsDirectory or filename is '.rip' or filename is '.css' or filename is '.html' or not isBagPath(filename)
-    throw new TypeError "Rip Workspace: invalid component path '#{path}'"
+    throw TypeError.new "Rip Workspace: invalid component path '#{path}'"
   path
 
 validContent = (content) ->
   unless typeof content is 'string'
-    throw new TypeError 'Rip Workspace: component source must be a string'
+    throw TypeError.new 'Rip Workspace: component source must be a string'
   content
 
 validDirectory = (dir) ->
   return '' if dir is '' or not dir?
   unless typeof dir is 'string'
-    throw new TypeError 'Rip Workspace: component directory must be a string'
+    throw TypeError.new 'Rip Workspace: component directory must be a string'
   segments = dir.split '/'
   if dir.includes('\\') or segments.some((segment) -> not segment or segment is '.' or segment is '..')
-    throw new TypeError "Rip Workspace: invalid component directory '#{dir}'"
+    throw TypeError.new "Rip Workspace: invalid component directory '#{dir}'"
   dir
 
 validId = (id) ->
   unless typeof id is 'string' and id.length > 0
-    throw new TypeError 'Rip Workspace: passport id must be a non-empty string'
+    throw TypeError.new 'Rip Workspace: passport id must be a non-empty string'
   id
 
 validHash = (hash) ->
   unless typeof hash is 'string' and /^[A-Za-z0-9_]{6}$/.test(hash)
-    throw new TypeError 'Rip Workspace: passport hash must be six Base64URL-folded characters'
+    throw TypeError.new 'Rip Workspace: passport hash must be six Base64URL-folded characters'
   hash
 
 validModule = (module) ->
   unless module? and typeof module is 'object' and not Array.isArray(module)
-    throw new TypeError 'Rip Workspace: compiled component module must be an object'
+    throw TypeError.new 'Rip Workspace: compiled component module must be an object'
   module
 
-hashOf = (text) -> rash new TextEncoder().encode(text)
+hashOf = (text) -> rash TextEncoder.new().encode(text)
 
 export def createWorkspace(): Workspace
-  passports = new Map()
-  pathToId = new Map()
-  watchers = new Set()
+  passports = Map.new()
+  pathToId = Map.new()
+  watchers = Set.new()
   locked = false
 
   guard = (operation) ->
     if locked
-      throw new Error "Rip Workspace: #{operation} on a sealed workspace"
+      throw Error.new "Rip Workspace: #{operation} on a sealed workspace"
     return
 
   notify = (event, path) ->
@@ -115,13 +115,13 @@ export def createWorkspace(): Workspace
   # editor write, not a server file) uses its birth path as its id.
   mintId = (path) ->
     if passports.has path
-      throw new Error "Rip Workspace: cannot mint id '#{path}'; a passport already holds that id"
+      throw Error.new "Rip Workspace: cannot mint id '#{path}'; a passport already holds that id"
     path
 
   claimPath = (path, id) ->
     holder = pathToId.get path
     if holder? and holder isnt id
-      throw new Error "Rip Workspace: path '#{path}' already labels passport '#{holder}'"
+      throw Error.new "Rip Workspace: path '#{path}' already labels passport '#{holder}'"
     return
 
   applySource = (record, content) ->
@@ -188,7 +188,7 @@ export def createWorkspace(): Workspace
     load: (sources) ->
       guard 'load'
       unless sources? and typeof sources is 'object' and not Array.isArray(sources)
-        throw new TypeError 'Rip Workspace: component load expects a source object'
+        throw TypeError.new 'Rip Workspace: component load expects a source object'
       for own path, content of sources
         path = validPath path
         content = validContent content
@@ -201,7 +201,7 @@ export def createWorkspace(): Workspace
 
     watch: (fn) ->
       unless typeof fn is 'function'
-        throw new TypeError 'Rip Workspace: component watch expects a function'
+        throw TypeError.new 'Rip Workspace: component watch expects a function'
       watchers.add fn
       disposed = false
       ->
@@ -219,7 +219,7 @@ export def createWorkspace(): Workspace
       module = validModule module
       record = byPath path
       unless record
-        throw new Error "Rip Workspace: setCompiled for unknown component path '#{path}'"
+        throw Error.new "Rip Workspace: setCompiled for unknown component path '#{path}'"
       passports.set record.id, { ...record, compiled: module }
       return
 
@@ -228,24 +228,27 @@ export def createWorkspace(): Workspace
     populate: (records) ->
       guard 'populate'
       unless Array.isArray records
-        throw new TypeError 'Rip Workspace: populate expects an array of passport records'
+        throw TypeError.new 'Rip Workspace: populate expects an array of passport records'
       if passports.size > 0
-        throw new Error 'Rip Workspace: populate requires an empty workspace; mutate with set'
-      seenIds = new Set()
-      seenPaths = new Set()
+        throw Error.new 'Rip Workspace: populate requires an empty workspace; mutate with set'
+      seenIds = Set.new()
+      seenPaths = Set.new()
       next = []
       for record in records
         unless record? and typeof record is 'object' and not Array.isArray(record)
-          throw new TypeError 'Rip Workspace: populate expects passport records'
+          throw TypeError.new 'Rip Workspace: populate expects passport records'
         id = validId record.id
         path = validPath record.path
         hash = validHash record.hash
-        source = validContent record.source
+        hasSource = record.source isnt undefined
+        unless hasSource or path.endsWith('.css') or path.endsWith('.html')
+          throw Error.new "Rip Workspace: Rip passport '#{id}' requires source during populate"
+        source = if hasSource then validContent(record.source) else undefined
         compiled = if record.compiled? then validModule record.compiled else undefined
         if seenIds.has id
-          throw new Error "Rip Workspace: duplicate passport id '#{id}' in populate"
+          throw Error.new "Rip Workspace: duplicate passport id '#{id}' in populate"
         if seenPaths.has path
-          throw new Error "Rip Workspace: duplicate passport path '#{path}' in populate"
+          throw Error.new "Rip Workspace: duplicate passport path '#{path}' in populate"
         seenIds.add id
         seenPaths.add path
         next.push { id, path, hash, source, compiled }
@@ -257,7 +260,7 @@ export def createWorkspace(): Workspace
     set: (record) ->
       guard 'set'
       unless record? and typeof record is 'object' and not Array.isArray(record)
-        throw new TypeError 'Rip Workspace: set expects a passport record'
+        throw TypeError.new 'Rip Workspace: set expects a passport record'
       id = validId record.id
       hash = validHash record.hash
       current = passports.get id
@@ -267,7 +270,7 @@ export def createWorkspace(): Workspace
         # ding — not an error.
         return false if record.deleted is true
         unless record.path? and record.source?
-          throw new Error "Rip Workspace: set of unknown passport '#{id}' requires a full record (id, path, hash, source)"
+          throw Error.new "Rip Workspace: set of unknown passport '#{id}' requires a full record (id, path, hash, source)"
         path = validPath record.path
         source = validContent record.source
         compiled = if record.compiled? then validModule record.compiled else undefined
@@ -292,7 +295,7 @@ export def createWorkspace(): Workspace
       hasSource = record.source isnt undefined and record.source isnt null
       hasCompiled = record.compiled isnt undefined and record.compiled isnt null
       unless hasSource or hasCompiled or renamed
-        throw new Error "Rip Workspace: set for passport '#{id}' carries nothing to apply (source, compiled, path, or deleted)"
+        throw Error.new "Rip Workspace: set for passport '#{id}' carries nothing to apply (source, compiled, path, or deleted)"
       claimPath newPath, id if renamed
       source = if hasSource then validContent record.source else current.source
       compiled = if hasCompiled
@@ -315,7 +318,7 @@ export def createWorkspace(): Workspace
 
     seal: ->
       if locked
-        throw new Error 'Rip Workspace: workspace is already sealed'
+        throw Error.new 'Rip Workspace: workspace is already sealed'
       locked = true
       return
 
@@ -325,7 +328,7 @@ export def createWorkspace(): Workspace
 
     passport: (pathOrId) ->
       unless typeof pathOrId is 'string' and pathOrId.length > 0
-        throw new TypeError 'Rip Workspace: passport lookup expects a passport id or component path'
+        throw TypeError.new 'Rip Workspace: passport lookup expects a passport id or component path'
       record = passports.get pathOrId
       unless record
         id = pathToId.get pathOrId

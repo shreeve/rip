@@ -6,7 +6,7 @@
 > responses, validated input, safe hot reload, and disposable Bun workers
 > behind Caddy and Janus**
 
-Rip Server has two faces that share one contract:
+Rip Server has four surfaces that share one contract:
 
 - `@rip-lang/server` is the framework API source imports: routes, response
   helpers, `read()` validation, schemas, middleware, sessions, and request
@@ -14,6 +14,9 @@ Rip Server has two faces that share one contract:
 - `rip server` is the manager for one project: it registers with Janus,
   publishes browser-App coordination files, watches source, prepares API
   generations, and supervises worker processes.
+- `rip app` remembers projects and controls their managers through the private
+  per-user Rip Agent.
+- `rip edge` observes or controls the one shared Caddy+Janus edge.
 
 Caddy and [Janus](https://github.com/shreeve/janus) form the public edge. They
 own HTTP and TLS, host and tenant admission, static and App files, cache
@@ -62,11 +65,26 @@ directory in the selected project or its parents. One invocation creates one
 manager. Many managers may register independent servers behind the same
 Caddy+Janus process.
 
+For a remembered, supervised project:
+
+```bash
+rip edge start --caddy /path/to/janus-enabled-caddy
+rip app add . --name hello --host hello.ripdev.io
+rip app start hello
+rip app open hello
+```
+
+The packaged edge baseline binds `ripdev.io` and `*.ripdev.io` on loopback
+HTTPS using the real, publicly trusted development-only certificate and key
+included with this package. Both names resolve only to `127.0.0.1`.
+`rip edge status` also observes an already-running external edge, but Rip will
+not stop or reload a process it does not own.
+
 ## The Shape of a Server
 
 ```text
 Caddy + Janus
-├── serves ───────────────► public/, app/, static/generated/
+├── serves ───────────────► public/, app/, dist/
 ├── terminates ───────────► Hub WebSockets
 └── proxies /api ─────────► private worker sockets
 
@@ -74,7 +92,7 @@ one Rip server
 ├── manager
 │   ├── registration + heartbeats
 │   ├── generation + worker supervision
-│   ├── generated App publication
+│   ├── dist App publication
 │   └── watch dings + local control
 ├── API source ───────────► disposable worker processes
 └── App source + assets ──► served directly by Janus
@@ -82,9 +100,93 @@ one Rip server
 
 Three project shapes use the same model:
 
-- **Full:** API workers plus `app/` and generated App files.
+- **Full:** API workers plus `app/` and dist App files.
 - **API-only:** API workers with no browser App.
-- **App-only:** `app/` and generated files with no API workers.
+- **App-only:** `app/` and dist files with no API workers.
+
+## Site Files and Ownership
+
+A full multi-tenant project may look like this on disk:
+
+```text
+project/
+├── index.rip                     API entry and route registration
+├── api/                          worker source; not implicitly public
+├── sites/
+│   ├── cheetos/public/           files specific to the `cheetos` tenant
+│   └── common/public/            shared fallback files
+├── app/
+│   ├── index.html                optional SPA shell
+│   ├── routes/[id].rip           live Rip modules
+│   └── styles.css
+└── dist/                         manager-owned publication
+    ├── @rip/rip.js
+    ├── bundle.json
+    └── manifest.json             watch publication artifact
+```
+
+The paths on disk are not public directory prefixes. Janus searches the
+registered roots in order and appends the request path to each one. A typical
+tenant registration searches `dist`, then
+`sites/{site}/public`, then `sites/common/public`, then `app`. Consequently:
+
+**Root names are never exposed.** An App member's id is its path relative to
+`app/`, which is also its normal public URL without the leading slash.
+
+- `dist/bundle.json` is requested as `/bundle.json`;
+- `sites/cheetos/public/logo.svg` overrides
+  `sites/common/public/logo.svg` for `/logo.svg`;
+- `app/routes/[id].rip` has the bag id `routes/[id].rip` and is fetched from
+  `/routes/[id].rip`; and
+- `app/index.html` is an HTML-navigation fallback, not a response for a
+  missing script, stylesheet, image, or module.
+
+`serve.rip` makes the host or tenant rule, root order, API prefixes, cache
+policy, and shell explicit. Without it, ordinary projects discover `dist/`
+plus existing `public/` and `app/` roots. The project root and
+`api/` are never implicitly public.
+
+The three owners have deliberately narrow jobs:
+
+- **Workers execute API routes.** A route such as `/api/private/profile` may
+  talk to S3 and return a normal response. A route serving a private local file
+  may use `@send`; the worker selects the file and Janus performs the actual
+  `X-Sendfile` transfer, including validators, ranges, and content type.
+- **The manager publishes App identity.** It snapshots the configured App
+  manifest (by default `app/**/*.{rip,css,html}`), assigns each member a six-character content
+  `hash`, and identifies it relative to the App root (`routes/home.rip`, not
+  `app/routes/home.rip`). It writes a deterministic `bundle.json` and—while
+  watching—a matching `manifest.json`. The bundle carries the complete
+  inventory plus Rip module source needed for first paint; the manifest
+  carries the inventory without source bodies.
+- **Caddy and Janus serve bytes.** They terminate HTTPS, select the trusted
+  tenant, search file roots, proxy configured API prefixes, serve the SPA
+  shell, and provide ordinary HTTP cache behavior.
+
+### Rip hashes and HTTP ETags
+
+These identifiers are intentionally independent:
+
+```text
+authored bytes ──manager──► hash/rash ──Hub ding──► browser Workspace
+file metadata  ──Janus────► weak ETag  ──HTTP──────► browser cache
+```
+
+The manager's `hash` is a content identity (`rash(bytes)`) used to suppress
+no-op changes, describe the manifest, and tell an open browser that a bag
+member may be newer. Janus's weak `W/"mtime-size"` ETag is a cheap transport
+validator used for conditional HTTP requests. Janus neither calculates nor
+compares Rip hashes.
+
+For a real App change, the manager writes the bundle and then the manifest,
+atomically replacing each file, and only then publishes a tiny `{id, hash}`
+ding. The browser treats that hash as a
+freshness hint, fetches the current file at its ordinary URL with
+`cache: "no-store"`, hashes the bytes it actually received, and applies only
+the latest completed fetch. This remains correct if another edit lands between
+the ding and the fetch. Stable generated URLs such as `/bundle.json` and
+`/manifest.json` instead use `Cache-Control: no-cache` plus Janus's ETag, so
+an unchanged revalidation is a cheap `304`.
 
 ## Features
 
@@ -369,7 +471,7 @@ an existing `Content-Encoding` remains authoritative.
 ## Browser App and Development Feed
 
 An `app/` directory is the browser App. The manager assembles its `.rip`
-module graph into `static/generated/bundle.json`; while watching, it also
+module graph into `dist/bundle.json`; while watching, it also
 publishes `manifest.json`.
 
 Janus serves:
@@ -383,8 +485,9 @@ Janus serves:
 Workers serve API routes only. The manager writes files and publishes control
 state but is never on the client data path.
 
-The default development bag is `app/**/*.{rip,css,html}`. A change produces a
-tiny `{id,hash}` ding:
+The conventional development manifest selects `app/**/*.{rip,css,html}`. Its
+ids are relative to the App root, so a change to `app/routes/home.rip`
+produces a tiny ding naming `{id: "routes/home.rip", hash}`:
 
 - `.rip` → fetch and apply the latest module
 - `.css` → fetch latest bytes and update the existing stylesheet URL
@@ -407,6 +510,12 @@ policy:
 ```coffee
 export default
   name: 'medlabs'
+  app:
+    root: 'app'
+    manifest:
+      update: ['**/*.rip']
+      css: ['**/*.css']
+      reload: ['**/*.html']
   sites:
     host: '{site}.medlabs.health'
     dir: 'sites'
@@ -426,6 +535,17 @@ export default
 Exact-host servers use `hosts` instead of `sites`. `hosts` and `sites` are
 mutually exclusive.
 
+`app.root` selects the browser App directory relative to the project.
+`app.manifest` classifies authored files by client apply verdict. The block
+shown above is the complete default; omitting `app`, `manifest`, or one of its
+categories retains the corresponding default. An explicit empty category
+disables it. Patterns are relative globs and each category accepts only its
+owned suffix (`.rip`, `.css`, or `.html`). Dot-prefixed path segments remain
+outside the manifest. Bun still observes the entire App root recursively.
+Nonmatching asset-file events do no publication work, and matching file events
+reread and rehash only the exact App-relative paths reported by the watcher.
+Directory and pathless events fall back to a full membership reconciliation.
+
 Each root has optional `cache` policy: `never`, `revalidate`, or `forever`.
 Omission means `revalidate`. The manager emits the normalized policy on every
 Janus root. MIME detection is independent of cache policy.
@@ -435,18 +555,18 @@ directory indexes for that root when browse is enabled in Caddy. The flag does
 not configure themes or renderers; those remain process-wide Janus
 configuration and are never exposed through Rip.
 
-The manager normally prepends its own `static/generated` root with
+The manager normally prepends its own `dist` root with
 `cache: 'revalidate'`. It resolves
 every declared path against the project directory and rejects unknown keys,
 missing roots, malformed browse values, missing shells, malformed templates,
 overlapping API prefixes, and invalid hosts. `shell` may be omitted only when
 every declared root is browsable, `proxyFirst` is empty, and the manager has no
 API upstreams. That terminal browse-only policy is registered exactly as
-declared, without generated or conventional roots. With `files` declared, the
+declared, without the dist or conventional roots. With `files` declared, the
 project root is public only when its path is listed explicitly.
 
-Without a `files` declaration, conventional discovery registers the generated
-root plus `public/` and `app/` when present. The project directory is never an
+Without a `files` declaration, conventional discovery registers `dist/` plus
+`public/` and `app/` when present. The project directory is never an
 implicit public root.
 
 Janus receives one atomic registration containing identity, site or hosts,
@@ -492,14 +612,51 @@ Control commands find the canonical manager for the project:
 
 ```bash
 rip server status [project]
+rip server stop [project]
 rip server hold [project]
 rip server release [project]
 rip server migrate [models] --dir migrations
 rip server recover <operation-id>
 ```
 
+`status` prints the manager's machine-readable JSON state. `stop` asks the
+canonical manager to drain its workers, deregister from Janus, remove its local
+control artifacts, and exit cleanly.
+
 `release` prepares one coherent API/App snapshot, exposes it, sends one
 full-reload ding, and then clears hold.
+
+## Per-User App and Edge Control
+
+The Rip Agent is private process machinery shared by both public CLIs. It
+auto-starts on demand, stores one durable app catalog, captures manager and
+edge logs, and adopts healthy managers after an agent restart.
+
+```bash
+rip app list
+rip app add [project] [--name NAME] [--host HOST]
+rip app start <app>
+rip app stop <app>
+rip app restart <app>
+rip app status [app] [--json]
+rip app open <app>
+rip app logs <app> [--lines N] [--follow]
+
+rip edge status [--json]
+rip edge start [--caddy PATH] [--config PATH]
+rip edge stop
+rip edge reload
+```
+
+An app selector may be its stable id, unique name, or canonical root. Removal
+rejects while the app is running. Starting requires a reachable Janus control
+plane. Stopping the edge rejects while an app manager is still running.
+
+`rip edge start` finds Caddy through `--caddy`, the remembered configuration,
+`JANUS_CADDY`, or `PATH`, in that order, and verifies that the binary contains
+Janus before starting it. `--config` selects another Caddyfile; the packaged
+baseline is the default. An external reachable edge is observable but never
+silently adopted as a Rip-owned process.
 
 Migration is explicit. It never runs because the server started, a file
 changed, or a worker booted. Coordinated migration enters Maintenance, drains
@@ -685,12 +842,13 @@ The focused fixtures test one server capability at a time:
 bun run test:framework
 bun run test:hello-api
 bun run test:workers
-bun run test:hello-app
+bun run test:hello
 bun run test:reloads
 bun run test:operations
 bun run test:manager-boundary
 bun run test:middleware
 bun run test:monitor
+bun run test:appliance
 bun run test:janus
 ```
 

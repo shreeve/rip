@@ -1,6 +1,6 @@
 # Route manifest — pure file-to-URL routing with no browser dependency.
 #
-# Route files live under the route root (`app/routes` in the store
+# Route files live under the route root (`routes` in the store
 # vocabulary) and map to URL patterns by a filesystem convention:
 #
 #   index.rip            /
@@ -36,7 +36,7 @@ NAME = /^\w+$/
 RANKS = { static: 0, dynamic: 1, optional: 2, catchall: 3 }
 OPTIONAL_LIMIT = 8
 
-fail = (message) -> throw new Error "Rip App: #{message}"
+fail = (message) -> throw Error.new "Rip App: #{message}"
 
 decodeSegment = (segment) ->
   try
@@ -47,10 +47,10 @@ decodeSegment = (segment) ->
 validRoot = (root) ->
   return '' if root is ''
   unless typeof root is 'string'
-    throw new TypeError 'Rip App: route root must be a string'
+    throw TypeError.new 'Rip App: route root must be a string'
   segments = root.split '/'
   if root.includes('\\') or segments.some((segment) -> not segment or segment is '.' or segment is '..')
-    throw new TypeError "Rip App: invalid route root '#{root}'"
+    throw TypeError.new "Rip App: invalid route root '#{root}'"
   root
 
 parseSegment = (segment, rel) ->
@@ -117,7 +117,7 @@ compile = (rel) ->
         expansions = expansions.map (e) -> { shape: e.shape + '/*', display: "#{e.display}/*#{part.name}" }
 
   pattern = '/' if pattern is ''
-  shapes = new Set(expansions.map (e) -> e.shape or '/')
+  shapes = Set.new(expansions.map (e) -> e.shape or '/')
   fail "route '#{rel}' is ambiguous with itself" if shapes.size < expansions.length
   { pattern, parts: kept, ranks, expansions }
 
@@ -174,35 +174,35 @@ layoutChain = (rel, layouts) ->
     chain.push layouts.get(dir) if layouts.has dir
   chain
 
-export def buildRoutes(files: string[], root: string = 'app/routes'): RouteManifest
+export def buildRoutes(files: string[], root: string = 'routes'): RouteManifest
   unless Array.isArray files
-    throw new TypeError 'Rip App: buildRoutes expects an array of file paths'
+    throw TypeError.new 'Rip App: buildRoutes expects an array of file paths'
   root = validRoot root
   prefix = if root then root + '/' else ''
 
-  layouts = new Map()
+  layouts = Map.new()
   entries = []
 
   for file in files
     unless typeof file is 'string'
-      throw new TypeError 'Rip App: route file paths must be strings'
+      throw TypeError.new 'Rip App: route file paths must be strings'
     continue unless file.startsWith(prefix) and file.length > prefix.length
     rel = file.slice prefix.length
     segments = rel.split '/'
     invalid = segments.some (segment) -> not segment or segment is '.' or segment is '..'
     if rel.includes('\\') or invalid or segments[-1] is '.rip'
-      throw new TypeError "Rip App: invalid route file path '#{file}'"
+      throw TypeError.new "Rip App: invalid route file path '#{file}'"
     if segments[-1] is '_layout.rip'
       layouts.set segments.slice(0, -1).join('/'), file
       continue
     continue if segments.some (segment) -> segment.startsWith '_'
     unless rel.endsWith '.rip'
-      throw new TypeError "Rip App: route files must be .rip sources: '#{file}'"
+      throw TypeError.new "Rip App: route files must be .rip sources: '#{file}'"
     entries.push { ...compile(rel), rel, file }
 
   # Ambiguity check runs in rel order so the rejection is deterministic
   # regardless of file enumeration order.
-  seen = new Map()
+  seen = Map.new()
   for entry in [...entries].sort((a, b) -> if a.rel < b.rel then -1 else 1)
     for expansion in entry.expansions
       shape = expansion.shape or '/'
@@ -233,7 +233,7 @@ export def buildRoutes(files: string[], root: string = 'app/routes'): RouteManif
 
   match = (path) ->
     unless typeof path is 'string'
-      throw new TypeError 'Rip App: route match expects a path string'
+      throw TypeError.new 'Rip App: route match expects a path string'
     return null unless path.startsWith '/'
     segments = if path is '/' then [] else path.slice(1).split '/'
     for entry in compiled
@@ -246,5 +246,5 @@ export def buildRoutes(files: string[], root: string = 'app/routes'): RouteManif
 
 export def parseQuery(search: string): Record<string, string>
   unless typeof search is 'string'
-    throw new TypeError 'Rip App: parseQuery expects a query string'
-  Object.fromEntries new URLSearchParams(search)
+    throw TypeError.new 'Rip App: parseQuery expects a query string'
+  Object.fromEntries URLSearchParams.new(search)

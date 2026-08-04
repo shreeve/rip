@@ -1,57 +1,87 @@
 # HANDOFF — session launch document (2026-08-03)
 
-The tracked session launch document (see AGENTS.md, working ledgers):
-read it first when starting a session; rewrite it at session boundaries
-with live-verified facts only.
+The tracked session launch document (see AGENTS.md, working ledgers): read it
+first when starting a session; rewrite it at session boundaries with
+live-verified facts only.
 
 ## Orientation
 
 - Repo: `~/Data/Code/rip` — the live v4 checkout.
 - Commands: `bun run test:all` · `bun run test` · `bun run audit`.
+- Permanent server architecture and App publication protocol:
+  `docs/SERVER.md`.
 
 ## Active branch
 
-**Branch: `close-findings`.** Round-3 review closure is committed at
-`5c8f442`. Three independently reviewed extractions from the retired
-`dragged-over` branch follow it:
+**Branch: `main`, synchronized with `origin/main`.**
 
-- `cabc359` uses the lexer's identifier vocabulary for Unicode-sensitive
-  compiler, checker, mapping-audit, and masking spans.
-- `c226fa2` carries an import reference's original exported name through
-  metadata so direct and aliased semantic-token corrections agree.
-- `e5545e6` discovers import-type closure edges from authored syntax while
-  excluding strings, comments, property access, and larger identifiers.
+Tip `129c35b0` carries the coherent Rip App publication protocol:
 
-The follow-up hygiene pass is also committed:
+- The default authored bag is `app/**/*.{rip,css,html}` with dot-prefixed
+  files and directories excluded. Ids are paths relative to `app/` and map to
+  ordinary root URLs.
+- `rash(bytes)` identifies exact authored file bytes. `check(files)` hashes the
+  deterministic sorted `[id, hash]` inventory and is the complete authored-bag
+  identity. Bundle and manifest now carry `check`, not an aggregate `rash`.
+- `bundle.json` is the self-contained first-paint package. It carries the
+  complete authored inventory plus Rip source, browser packages, resolution
+  metadata, schema projections, and seed data. The browser validates inventory
+  shape/order, recomputes the check, verifies authored Rip source hashes, and
+  populates the Workspace without fetching the manifest.
+- CSS and HTML populate as identity-only passports. The shell and stylesheet
+  links own first-paint delivery; a later advancing fetch supplies source and
+  applies `css` or `reload`.
+- `manifest.json` is watch-only and bodyless. It is fetched after the Hub opens,
+  on reconnect, after misses, and while unresolved wants remain. A matching
+  check skips detailed reconciliation; malformed entries or a mismatched check
+  reject before mutation. Manifest comparison stays additive and never infers
+  deletion from one omission.
+- Publication remains bundle → manifest → dings from one in-memory snapshot.
+  Invalid UTF-8 Rip source and all bundle assembly/validation failures preserve
+  the last good generation. Starting with watch disabled removes a stale
+  generated manifest and opens no development feed.
+- `dist/` is the manager-owned App publication root. It carries `@rip/rip.js`,
+  `bundle.json`, the watch-only `manifest.json`, and a generated shell when the
+  App does not author one. Janus mounts `dist/` at the URL root, and the API
+  watcher excludes it. Every runnable example ignores its runtime `dist/`
+  tree; Hello, Cart, and Pulse have each been live-verified against that path.
+- `serve.rip` may select `app.root` and classify App membership through
+  `app.manifest.update`, `.css`, and `.reload` globs. The defaults are
+  `app/` plus `**/*.rip`, `**/*.css`, and `**/*.html`; omitted categories keep
+  their defaults and `[]` disables one explicitly. The recursive watcher
+  observes the complete configured root but filters nonmatching asset-file
+  events before publication work. Matching file events contribute exact ids to
+  a debounced dirty set and only those members are reread and rehashed;
+  directory and pathless events request a complete reconciliation.
+- Dings remain identity-only hints. Latest fetched bytes win, owner tokens
+  fence stale requests, delete hashes fence newer passports, compilation
+  precedes Rip passport commit, and the apply vocabulary remains
+  `update | css | reload | ignore`.
+- Janus still owns current-byte delivery, HTTP ETags, and Hub transport without
+  calculating or interpreting Rip hashes or checks. App and API lifecycles stay
+  independent.
+- `docs/SERVER.md` now contains the complete end-to-end publication model;
+  `docs/WORKSPACE.md` and `docs/HMR.md` carry only their matching constitutional
+  and apply-specific statements.
 
-- `6d19ed1` documents the shipped headless checker, removes its stale roadmap
-  entry, and restores the permanent architecture links in the README.
-- `1e6a434` certifies through released Janus that API source, `serve.rip`,
-  package metadata, database bytes, and an `X-Sendfile`-only file never escape
-  the registered public roots.
-- `516f341` and `a1355a0` establish and tighten the exact inventory gate for
-  the two unconditional package test deferrals.
+## Verification
 
-There is one checkout and one worktree, at this repository path. The local
-`dragged-over` branch was deleted after its useful changes were reimplemented
-and verified on `close-findings`; no code remains stranded in another
-worktree or branch.
+- `bun run test:all` — all 22 lanes passed, 8,369 tests total.
+- Root fast suite — 6,131 passed, 35 extended-tier skips.
+- `packages/app` — package, Workspace/feed, and apply suites passed.
+- `packages/server` — all 92 package tests passed, including real published
+  Janus integration and the exact-dirty-path watcher pin.
+- Browser bundle regeneration under Bun 1.3.14 is byte-identical to the
+  committed artifact.
+- `packages/browser-tests` remains the documented CI-only Playwright lane.
+- `git diff --check` — passed.
 
-Generated artifacts are current: `src/parser.js` and `dist/browser/rip.js`.
-Corpus regeneration changed no expected-output artifacts.
+## Next work
 
-Live verification:
-
-- `bun run audit` — 34/34 invariants green; every lane passed.
-- `bun run test:all` — 21 lanes, 8,295 tests passed. The documented
-  `packages/browser-tests` lane remains a separate CI job.
-- `bun run test` from `packages/server` — all 84 package tests passed, including
-  the released-Janus isolation test.
-- `bun run corpus-expected` — 0 written, 186 unchanged, 0 removed after
-  the compiler-facing extractions.
-- `bun test test/project-model.test.js` from `packages/vscode` — 29 passed,
-  0 failed after the import-type extraction.
-- `git diff --check` — passed for each extraction and cumulatively.
+The App publication redesign is implemented and documented. State-preserving
+framework refresh remains the separate research/apply track described in
+`docs/HMR.md`; the shipped apply engine still uses its honestly labeled remount
+escape.
 
 ## Working agreements
 

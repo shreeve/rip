@@ -17,7 +17,7 @@ test('a harness ding visibly updates the page without reload, and the hub never 
   const stamp = `door ${Date.now()} ${Math.random().toString(36).slice(2)}`;
   const bumped = await fetch(`${HARNESS}/__test/bump`, {
     method: 'POST',
-    body: JSON.stringify({ id: 'app/routes/index.rip', title: stamp }),
+    body: JSON.stringify({ id: 'routes/index.rip', title: stamp }),
   });
   expect(bumped.ok).toBe(true);
 

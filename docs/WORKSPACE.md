@@ -72,20 +72,22 @@ forever and “CSP later” are **rejected** as M0 rewrites.
 |---|---|
 | **Q6** | **M0 and M1 are independent exits.** M1 (the dev door) may land first under `RIP_WORKSPACE=1` with dev-mode in-browser compile; M0 (signed cells, CSP without `unsafe-eval`) gates **production populate** only and is unweakened. D6 reads: the dev door never leaks into production — flag off is unchanged and production has no Hub. |
 | **Q7** | **The bag subsumes the app's component store.** The Workspace implements the `ComponentsStore` interface (`packages/app/components.rip`) as its app-facing view — path-keyed through the path→id map, passports underneath. `launch()` accepts an injected components store; flag off, it creates its own store exactly as today (D1). When the Workspace earns the default, `createComponents` retires and the bag is the only store. Two live stores of browser code never coexist. |
-| **Q8** | **Module freshness is latest-wins.** The default client **bag** is membership `app/**/*.{rip,css,html}` (ids = birth paths). A ding carries `{id,hash}` where `hash = rash(bytes)`; it is a hint, not an address. The client fetches the ordinary latest URL with `cache: no-store`, computes the actual hash from received bytes, and uses an owner token so an older completion cannot overwrite a newer apply. Client verdicts are **`reload` \| `css` \| `update` \| `ignore`**. There is no App `409`, historical representation URL, or Rip hash implementation in Janus. |
+| **Q8** | **Module freshness is latest-wins.** The default client **bag** is disk membership `app/**/*.{rip,css,html}`. Ids are birth paths relative to the App root (`routes/home.rip`, never `app/routes/home.rip`) and map directly to ordinary public URLs (`/routes/home.rip`). A ding carries `{id,hash}` where `hash = rash(bytes)`; it is a hint, not an address. The client fetches the ordinary latest URL with `cache: no-store`, computes the actual hash from received bytes, and uses an owner token so an older completion cannot overwrite a newer apply. Client verdicts are **`reload` \| `css` \| `update` \| `ignore`**. There is no App `409`, historical representation URL, or Rip hash implementation in Janus. |
 | **Q9** | **Package shape confirmed.** `packages/workspace` and `packages/refresh` stay separate browser-side packages while experimental (kill switch #2); `packages/server` keeps only the muscles. If the Workspace earns the default, its merge destination is `packages/app`, never `packages/server`. |
 
 ### Ruling 2026-07-29 (Q10)
 
 | # | Ruling |
 |---|---|
-| **Q10** | **The Workspace is the default watch door.** Every watching manager publishes stable `bundle.json` / `manifest.json` coordination files, sends dings through Janus, and lets Janus serve authored App bytes directly. Pooled workers are API-only. A watch-off App boots plain and has no development Hub feed. `@rip-lang/app` owns `workspace.rip`, `feed.rip`, `rash`, and browser apply meaning. |
+| **Q10** | **The Workspace is the default watch door.** Every watching manager publishes stable `bundle.json` / `manifest.json` coordination files, sends dings through Janus, and lets Janus serve authored App bytes directly. Pooled workers are API-only. A watch-off App boots plain and has no development Hub feed. `@rip-lang/app` owns `workspace.rip`, `feed.rip`, `rash`, inventory checks, and browser apply meaning. |
 
-The ledger and the bundle are one artifact: first paint fetches the
-ledger (virtual `bundle.json`, each entry carrying its passport) into
-`Workspace.populate`; live mutation fetches a single module generation
-into `Workspace.set`. One record type, two package sizes — per the
-flexible-packaging lock above.
+The first-paint ledger is part of `bundle.json`: its sorted `files` inventory
+and `check` populate the complete Workspace without a manifest fetch. Authored
+Rip entries carry source; CSS and HTML begin as identity-only passports. The
+watch-only `manifest.json` carries the same bodyless inventory shape for
+reconciliation after the Hub opens and reconnects. Live mutation fetches one
+file generation into `Workspace.set`. One record type, flexible package sizes
+— per the packaging lock above.
 
 ### App rails and latest-wins door
 
@@ -95,10 +97,11 @@ flexible-packaging lock above.
 | **Client tree** | `app/` + optional `app/index.html` SPA shell |
 | **API source** | `api/` on disk → app-chosen public prefix (`/api` or `/v1`); SPA fallback never serves that prefix |
 | **Static** | Multi-tenant: `sites/{slug}/public` then `sites/common/public`. Simple apps: `public/` (one fallback per app) |
-| **Serve config** | Optional app-local `serve.rip`; strict `sites` + `files` normalization resolves paths to absolute Janus registration fields. Ordinary apps keep exact `hosts`. |
+| **Serve config** | Optional app-local `serve.rip`; strict `app` + `sites` + `files` normalization resolves the App root, manifest policy, and Janus registration fields. The default manifest is `update: **/*.rip`, `css: **/*.css`, `reload: **/*.html`. Ordinary apps keep exact `hosts`. |
 | **Edge** | Janus resolves `{site}`, tries tenant/common file roots, and proxies `proxyFirst` paths before static lookup. Rip semantics remain in Rip. |
 | **Runtime JS** | Prefer CDN-pinned `rip.js` once the slice lands; until then `/@rip/rip.js` from the checkout is fine |
 | **Hub** | `/hub` for workspace dings (client self-join; Janus direct admission) |
+| **Minimal App** | [`examples/hello/`](../examples/hello/) — browser-only App with explicit manifest defaults and a non-manifest image asset |
 | **Full-shape exemplar** | [`examples/cart/`](../examples/cart/) — multi-route shop (SQLite first, then `@rip-lang/db` / DuckDB) |
 | **Thin door demo** | [`examples/pulse/`](../examples/pulse/) — status board proving the Workspace door |
 
@@ -210,7 +213,7 @@ Honest exits. Do not promote a rung by renaming a weaker behavior.
 
 ### M0 — Populate
 
-- Serve / fetch a ledger (manifest + files).
+- Serve / fetch a bundle carrying the authored `files` ledger and its `check`.
 - Populate the Workspace; Projection-cache hit path works in prod.
 - Seal in production (no post-populate mutation).
 - Happy path **proves** Q1 constraints: signed Projection bindings and
@@ -406,7 +409,7 @@ Probe 0 observables (honesty bar, not a protocol):
 |---|---|
 | D1 | A plain boot without the `workspace` option → non-Workspace launch path unchanged |
 | D2 | Disk change → Hub ding with `{id,hash}` as a freshness hint (no body) |
-| D3 | Client fetches latest module bytes at the ordinary `/app/…` URL with `cache: no-store` and computes `rash(bytes)` |
+| D3 | Client adds the normal leading slash to the root-relative id, fetches the latest module bytes with `cache: no-store`, and computes `rash(bytes)` |
 | D4 | `Workspace.set` mutates the passport only after compile/activation succeeds (hash/source advance) |
 | D5 | UI shows a visible change attributable to that mutation |
 | D6 | Seal / no-Hub path still holds for production populate (M0) |

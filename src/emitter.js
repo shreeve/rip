@@ -429,6 +429,25 @@ class Emitter {
     // hoist changed. Components ride this too: one lowers to a class
     // expression, and a forward-rendered child is ordinary library shape.
     this.classDecls = [];
+    // Generated `[start, end]` spans of a RENDER loop's item/index binding
+    // names, every occurrence. The render path lowers the loop body to a
+    // block-function factory, so in the face the binding genuinely IS a
+    // parameter — the factory header, the keyed callback, every read — and
+    // tsgo classifies it so. The author declared a loop variable; the
+    // editor repaints exactly these spans. A handler's `(e) ->` parameter
+    // is a parameter in the source too and is never recorded — the scope
+    // walk decides, never the spelling.
+    this.loopVars = [];
+    // Generated `[start, end]` spans of RENDER ATTRIBUTE names — a
+    // component call's prop keys, every spelling. A plain key survives
+    // into the ctor object verbatim, so its `property` token maps and
+    // forwards, while a two-way bind's MINTED key (`__bind_value__`)
+    // maps nowhere verbatim and drops — adjacent attributes in two
+    // colors. The ruling suppresses rather than synthesizes: the editor
+    // drops the token on exactly these spans, every attribute falls back
+    // to the TextMate attribute scope, and no token is ever invented at
+    // a span the mapper could not verify. TS face only.
+    this.attrNames = [];
     // Generated spans of every reference to an IMPORTED name, each with
     // the module it came from: `[start, end, name, specifier]`. One
     // file's compile cannot know an imported name's KIND — that lives in
@@ -1323,6 +1342,21 @@ class Emitter {
     return false;
   }
 
+  // Is `name` a RENDER loop's item/index binding here? Same walk as
+  // isEnumName, same reason — and the frame's own set is asked before its
+  // `bound` because a factory frame carries its loop bindings in BOTH: an
+  // inner frame that re-binds the spelling (a handler's parameter) still
+  // answers no before the walk reaches the loop's own frame.
+  isRenderLoopName(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.loopVars !== undefined && f.loopVars.has(name)) return true;
+      if (f.reactive.has(name) || f.bound.has(name)) return false;
+      if (f.members !== undefined && f.members.has(name)) return false;
+    }
+    return false;
+  }
+
   // The module `name` was imported from and its original exported name,
   // or null when `name` is not an import here. Same walk as isEnumName,
   // same reason: an inner binding that re-uses the spelling is not the
@@ -1559,6 +1593,7 @@ class Emitter {
     if (this.isEnumName(value)) { this.enums.push([start, this.b.offset]); return; }
     if (this.isReactiveName(value) && !this.isComputedName(value)) { this.mutables.push([start, this.b.offset]); return; }
     if (this.isClassName(value)) { this.classDecls.push([start, this.b.offset]); return; }
+    if (this.isRenderLoopName(value)) { this.loopVars.push([start, this.b.offset]); return; }
     const imported = this.importSpecOf(value);
     if (imported !== null) {
       this.importedRefs.push([start, this.b.offset, imported.importedName, imported.specifier]);
@@ -2079,7 +2114,7 @@ class Emitter {
     this.b = new CodeBuilder(this.stores, { source });
     const { n, used } = this.temps;
     this.temps.used = new Set(used);
-    const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'importedRefs',
+    const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'loopVars', 'attrNames', 'importedRefs',
       'vocabulary', 'silences', 'memberDecls', 'importSpans', 'pendingTypeDecls'];
     const saved = {};
     for (const k of channels) { saved[k] = this[k]; this[k] = []; }
@@ -6249,7 +6284,7 @@ class Emitter {
   static containsAwait(sexpr) {
     if (!isNode(sexpr)) return false;
     const head = sexpr[0];
-    if (head === 'await' || head === 'dammit!') return true;
+    if (head === 'await' || head === 'dammit!' || head === 'dammit?') return true;
     // An awaited for-as (`for await x as it`) is an await by
     // construction — its flag slot, not a nested node, carries it.
     if (head === 'for-as' && sexpr[3] === true) return true;
@@ -6310,6 +6345,7 @@ class Emitter {
     // unary tier: they group in head position (`(await f()).x`) but
     // bind tighter than any binary as operands (`await f() + 1`, bare).
     if ((x[0] === 'await' || x[0] === 'dammit!') && x.length === 2) return 'unary';
+    if (x[0] === 'dammit?') return 'unary';
     // A call whose CALLEE is dammit emits `await callee(...)` — the
     // await surrounds the invocation, so the call sits in the unary
     // tier exactly like a spelled await: grouped in head position
@@ -6349,7 +6385,8 @@ class Emitter {
     if (context === 'operand' || context === 'return') {
       if (tier === 'unary') {
         return !(child[0] === '!' || child[0] === 'typeof' || child[0] === 'await' ||
-          child[0] === 'dammit!' || (isNode(child[0]) && child[0][0] === 'dammit!'));
+          child[0] === 'dammit!' || child[0] === 'dammit?' ||
+          (isNode(child[0]) && child[0][0] === 'dammit!'));
       }
       // A return value is an operand position EXCEPT for yield: `return
       // yield 1` is valid JS and needs no grouping.
@@ -6527,6 +6564,7 @@ class Emitter {
     if (head === 'presence' && node.length === 2 && this.lockedHead(node, 'presence')) return this.presence(node);
     if (head === 'await' && node.length === 2) return this.awaitExpr(node);
     if (head === 'dammit!' && node.length === 2) return this.dammit(node);
+    if (head === 'dammit?') return this.maybeDammit(node);
     if ((head === 'yield' || head === 'yield-from') && node.length <= 2) return this.yieldExpr(node);
     if (head === 'class') return this.classExpr(node);
     // A reactive declaration lowers to a `const` declaration, which has
@@ -7399,7 +7437,7 @@ class Emitter {
   static findRenderControl(n) {
     if (!isNode(n)) return null;
     const head = n[0];
-    if (head === 'await' || head === 'dammit!' || head === 'yield' || head === 'yield-from') return n;
+    if (head === 'await' || head === 'dammit!' || head === 'dammit?' || head === 'yield' || head === 'yield-from') return n;
     if (head === 'for-as' && n[3] === true) return n;
     if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return null;
     for (const el of n) {
@@ -8501,7 +8539,11 @@ class Emitter {
   withRecordContext(rec, fn) {
     const prevSelf = this.renderSelf;
     this.renderSelf = rec.self;
-    this.rframes.push({ reactive: new Set(), bound: rec.bindings });
+    // A factory record's `bindings` is exactly its loop item/index names
+    // (own plus threaded outer; the class record's is empty), so the same
+    // set feeds both roles: `bound` shadows outer names, `loopVars` marks
+    // the emissions the token correction records (see noteNameSpan).
+    this.rframes.push({ reactive: new Set(), bound: rec.bindings, loopVars: rec.bindings });
     try {
       fn();
     } finally {
@@ -9689,6 +9731,16 @@ class Emitter {
             this.b.emit(inner);
           } else if (i > 0) this.b.emit(', ');
           const emitPair = () => {
+            // Every spelling of the KEY records its generated span into
+            // the attrNames channel (TS face only): the token-suppression
+            // correction is keyed by these spans, so a prop key loses its
+            // `property` token while an object literal inside the VALUE
+            // (emitted by p.fn below) keeps every one of its own.
+            const recordAttr = (fn) => {
+              const start = this.b.offset;
+              fn();
+              if (this.ts) this.attrNames.push([start, this.b.offset]);
+            };
             // A boolean-shorthand key's derived span records a face
             // row (the builder's verbatim comparison makes it EXACT —
             // same bytes), so completions and diagnostics at the
@@ -9697,17 +9749,19 @@ class Emitter {
             // an editor-consumer concern.
             const mid = isNode(markNode) ? this.stores.idOf(markNode) : null;
             if (this.ts && p.span != null && mid !== null) {
-              this.b.markSpan(mid, 'shorthandProp', p.span[0], p.span[1], () => this.b.emit(p.key));
+              recordAttr(() => this.b.markSpan(mid, 'shorthandProp', p.span[0], p.span[1], () => this.b.emit(p.key)));
               this.b.emit(': ');
               p.fn();
               return;
             }
             if (p.key.startsWith('__bind_') && p.key.endsWith('__')) {
-              this.b.emit('__bind_');
-              this.emitRewrittenPrimitive(p.key, p.key.slice(7, -2));
-              this.b.emit('__');
+              recordAttr(() => {
+                this.b.emit('__bind_');
+                this.emitRewrittenPrimitive(p.key, p.key.slice(7, -2));
+                this.b.emit('__');
+              });
             } else {
-              this.emitPrimitive(p.key);
+              recordAttr(() => this.emitPrimitive(p.key));
             }
             this.b.emit(': ');
             p.fn();
@@ -10340,7 +10394,10 @@ class Emitter {
     const prevSlot = R.transitionSlot;
     R.transitionSlot = kind === 'branch' ? { record: rec, el: null } : null;
     R.sink = rec;
-    this.rframes.push({ reactive: new Set(), bound: rec.bindings });
+    // Same double duty as withRecordContext's frame: `bindings` is exactly
+    // the loop item/index names, bound for shadowing, loopVars for the
+    // token correction's recording.
+    this.rframes.push({ reactive: new Set(), bound: rec.bindings, loopVars: rec.bindings });
     try {
       let stmts;
       if (isBlock(part)) {
@@ -10714,12 +10771,22 @@ class Emitter {
         this.b.emit(`, ${indexVar}`);
         if (this.ts) this.b.tsOnly(() => this.b.emit(': number'));
         this.b.emit(') => ');
-        this.withBindings([itemVar, indexVar], () => this.withExpression(() => {
-          const wrap = Emitter.needsGrouping(keyExpr, 'operand') || isObject(keyExpr);
-          if (wrap) this.b.emit('(');
-          this.expr(keyExpr);
-          if (wrap) this.b.emit(')');
-        }));
+        // The keyFn's binding frame carries loopVars too: its body reads
+        // the loop's own variables, and it is the one generated
+        // manifestation of the binding that maps back to the loop HEAD —
+        // without it the token correction reaches every position but the
+        // binding's own.
+        this.rframes.push({ reactive: new Set(), bound: new Set([itemVar, indexVar]), loopVars: new Set([itemVar, indexVar]) });
+        try {
+          this.withExpression(() => {
+            const wrap = Emitter.needsGrouping(keyExpr, 'operand') || isObject(keyExpr);
+            if (wrap) this.b.emit('(');
+            this.expr(keyExpr);
+            if (wrap) this.b.emit(')');
+          });
+        } finally {
+          this.rframes.pop();
+        }
       } else {
         this.b.emit('null');
       }
@@ -11572,7 +11639,8 @@ class Emitter {
     // unaries parse OUTSIDE the power and never reach this slot.
     const l = inner[1];
     const bareUnaryLeft = isNode(l) && (l[0] === '!' || l[0] === 'typeof' || l[0] === 'await' ||
-      l[0] === 'dammit!' || (isNode(l[0]) && l[0][0] === 'dammit!'));
+      l[0] === 'dammit!' || l[0] === 'dammit?' ||
+      (isNode(l[0]) && l[0][0] === 'dammit!'));
     if (inner[0] === '**' && bareUnaryLeft) {
       this.b.emit('(');
       this.operand(inner, 'left', l);
@@ -13416,9 +13484,14 @@ class Emitter {
         });
         return;
       }
+      const target = node[0][1];
+      const constructing = isRubyNew(target);
       this.mark(node, '$self', () => {
-        this.b.emit('await ');
-        this.mark(node[0], '$self', () => this.head(node[0], 'target', node[0][1]));
+        this.b.emit(constructing ? 'await new ' : 'await ');
+        this.mark(node[0], '$self', () => {
+          if (constructing) this.mark(node[0], 'target', () => this.rubyNewTarget(target));
+          else this.head(node[0], 'target', target);
+        });
         this.mark(node, 'args', () => {
           this.b.emit('(');
           node.slice(1).forEach((arg, i) => {
@@ -13435,22 +13508,9 @@ class Emitter {
     // `X.new` property read stays a read). A non-primary constructor
     // expression groups so the `new` binds to it whole.
     if (isNode(node[0]) && node[0][0] === '.' && node[0].length === 3 && node[0][2] === 'new') {
-      const ctor = node[0][1];
       this.mark(node, '$self', () => {
         this.b.emit('new ');
-        this.mark(node[0], 'object', () => {
-          // Any non-name constructor expression groups: `new` consumes
-          // the FIRST argument list it reaches, so a call in the
-          // constructor position (`getClass().new(x)`) must
-          // parenthesize or `new` would construct the getter.
-          if (isNode(ctor)) {
-            this.b.emit('(');
-            this.expr(ctor);
-            // A soaking target cannot be constructed THROUGH here any
-            // more than under `new` — same seal, same reason.
-            this.b.emit(Emitter.optionalGuard(ctor) ? ' ?? undefined)' : ')');
-          } else this.expr(ctor);
-        });
+        this.rubyNewTarget(node[0]);
         this.mark(node, 'args', () => {
           this.b.emit('(');
           node.slice(1).forEach((arg, i) => {
@@ -13463,6 +13523,23 @@ class Emitter {
       return;
     }
     this.chain(node);
+  }
+
+  rubyNewTarget(member) {
+    const ctor = member[1];
+    this.mark(member, 'object', () => {
+      // Any non-name constructor expression groups: `new` consumes
+      // the FIRST argument list it reaches, so a call in the
+      // constructor position (`getClass().new(x)`) must
+      // parenthesize or `new` would construct the getter.
+      if (isNode(ctor)) {
+        this.b.emit('(');
+        this.expr(ctor);
+        // A soaking target cannot be constructed THROUGH here any
+        // more than under `new` — same seal, same reason.
+        this.b.emit(Emitter.optionalGuard(ctor) ? ' ?? undefined)' : ')');
+      } else this.expr(ctor);
+    });
   }
 
   // The true-modulo helper, inlined per site (like the range helper —
@@ -13915,7 +13992,16 @@ class Emitter {
   // values group: `await (a && b)`; calls stay bare).
   awaitExpr(node) {
     this.mark(node, '$self', () => {
-      this.b.emit('await ');
+      // The keyword's own row, off the operator role the grammar labels
+      // on the AWAIT/DAMMIT token: verbatim-exact where the author
+      // spelled `await`, a cover onto the `!` for the sugar spellings.
+      // TS80007 reports on the generated keyword, and this row is what
+      // its position resolves through — without it the innermost row is
+      // the construct-wide cover, and a hint about one character lights
+      // the whole expression. A synthetic await node has no role and
+      // skips the mark (the emitter's mark() conditions on RoleStore).
+      this.mark(node, 'operator', () => this.b.emit('await'));
+      this.b.emit(' ');
       this.operand(node, 'value', node[1]);
     });
   }
@@ -13960,10 +14046,45 @@ class Emitter {
 
   // ["dammit!", target] standing alone: call-plus-await with no args.
   dammit(node) {
+    // The keyword rides the operator role (the labeled DAMMIT token) in
+    // both branches — the same row awaitExpr records, for the same
+    // reason: TS80007's position resolves to the `!`, not the construct.
+    if (isRubyNew(node[1])) {
+      this.mark(node, '$self', () => {
+        this.mark(node, 'operator', () => this.b.emit('await'));
+        this.b.emit(' new ');
+        this.mark(node, 'target', () => this.rubyNewTarget(node[1]));
+        this.b.emit('()');
+      });
+      return;
+    }
     this.mark(node, '$self', () => {
-      this.b.emit('await ');
+      this.mark(node, 'operator', () => this.b.emit('await'));
+      this.b.emit(' ');
       this.head(node, 'target', node[1]);
       this.b.emit('()');
+    });
+  }
+
+  // ["dammit?", callee, ...args] — optional call plus await.
+  // Arguments are part of the construct even when empty: bare `value?!`
+  // is the distinct Houdini/presence operator.
+  maybeDammit(node) {
+    this.mark(node, '$self', () => {
+      // The keyword's row maps to the labeled PRESENCE token — the `?`
+      // is this spelling's awaiting operator, the way `!` is dammit's.
+      this.mark(node, 'operator', () => this.b.emit('await'));
+      this.b.emit(' ');
+      this.head(node, 'callee', node[1]);
+      this.mark(node, 'operator', () => this.b.emit('?.'));
+      this.mark(node, 'args', () => {
+        this.b.emit('(');
+        node.slice(2).forEach((arg, i) => {
+          if (i > 0) this.b.emit(', ');
+          this.expr(arg);
+        });
+        this.b.emit(')');
+      });
     });
   }
 
@@ -14873,7 +14994,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

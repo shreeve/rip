@@ -24,8 +24,8 @@
 // audits. `--serial` is a mode, not a lane, and stays outside the set.
 //
 // The independent audits (the AUDITS table below is the authoritative list —
-// it also carries the Grammar Audit, ROADMAP "M2", and the Diagnostics Audit,
-// ROADMAP "M3", which each document themselves at their sections):
+// it also carries the Grammar Audit and the Diagnostics Audit, which each
+// document themselves at their sections):
 //
 // A · THE TYPE AUDIT — a per-fixture grid over five dimensions:
 //   1 compiles     rip --ts produces a face           (else: compiler-coverage gap)
@@ -189,7 +189,7 @@
 //
 //   No oracle backs the walk on a per-run basis — and it needs none TO RUN.
 //   Trusting the LOGIC, though, is a one-time act: it was validated against the
-//   real editor once (2026-07-17, driven — see ROADMAP.md "M1"), then the
+//   real editor once (2026-07-17, driven), then the
 //   server-driven scaffolds were retired. The audit ships STANDALONE under every
 //   flag; re-validation, if the mapping internals change, recovers that
 //   cross-check from git rather than wiring a server into every run.
@@ -432,9 +432,9 @@ const AUDITS = [
     blurb: 'which grammar productions the fixture corpus exercises, and which it never reduces',
     judge: 'the GRAMMAR\'S OWN RULE LIST — a closed denominator: every production the\n'
          + 'parser can reduce is enumerable, so "exercised by at least one fixture" is\n'
-         + 'checkable in a way no corpus-relative rate ever is. The uncovered list names\n'
-         + 'the productions no fixture reduces — a fixture to write where one is\n'
-         + 'available, an open finding where MANIFEST.md parks it',
+         + 'checkable in a way no corpus-relative rate ever is, and gated at zero\n'
+         + '(grammar.coverage): a new production is red until its fixture lands or a\n'
+         + 'ruling excludes it',
   },
   {
     key: 'map', flag: '--map', name: 'Mapping Audit',
@@ -450,7 +450,7 @@ const AUDITS = [
          + 'drift toward wrong positions surfaces as a rising count. Its blind spot is\n'
          + 'that byte-equality is not identity — a read resolving onto a DIFFERENT\n'
          + 'occurrence of the same name passes both invariants. The logic was driven\n'
-         + 'against the real editor once (ROADMAP.md, M1); nothing re-drives it',
+         + 'against the real editor once (2026-07-17); nothing re-drives it',
   },
   {
     key: 'main', flag: '--type', name: 'Type Audit',
@@ -494,6 +494,27 @@ const AUDITS = [
          + 'twin and no baseline are involved and the check cannot self-confirm',
   },
 ];
+// DECLINED LANES — ruled against, recorded here because this registry is where
+// either would be built, and the reasoning must meet whoever re-proposes one.
+//
+// Spelling invariance (same program, two spellings, same LSP answers — the
+// once-planned "M4"): declined with its motivation closed. The defect it was
+// designed around — a paren-less read resolving through its cover, so hover
+// and definition answered about the wrong symbol — is gated at the compiler by
+// mapping.identity and mapping.census, and the per-surface editor suites drive
+// definition, completion, and rename per buffer. A lane hunting a class with
+// no live specimen is the shape the charter refuses; it becomes worth building
+// the day a symmetry defect appears that the mapping invariants cannot see.
+//
+// Content oracles (hover content at USE sites, completion, signature help,
+// twin-judged corpus-wide — the once-planned "M5"): not owed, not built, and
+// the dark area is real — the hover lane probes declarations only, and the
+// incomplete-expression work closed on per-buffer hand gates instead. Build it
+// when use-site answers start rotting, and carry the one constraint those
+// gates taught: a barriered request proves what a face CONTAINS and is blind
+// to whether the answer ARRIVES (test/toolchain/arrival.test.js holds the
+// counter-shape), so an oracle that settles before it asks inherits exactly
+// that blindness.
 const FLAGS = [
   ['--serial', 'probe one fixture at a time — the control for the concurrent pass'],
   ['--verbose', '-v', 'every list a section summarizes — exclusions, queue members, claims rows, hover divergences, unasserted tokens, and every flagged mapping read'],
@@ -1382,7 +1403,14 @@ const PRIMITIVE_TYPE_WORDS = new Set([
 // `export`-prefixed DECLARATIONS (`export add = …`) are deliberately NOT
 // spanned: their names are ordinary population members, and an excuse
 // covering them could silently absorb a dropped token.
-function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNames, excused = {}) {
+function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNames, excused = {}, attrNames = []) {
+  // Render ATTRIBUTE names, as face offsets from the compiler's own
+  // channel: the server SUPPRESSES their tokens by ruling — a plain prop
+  // must read like its two-way-bound neighbor, whose minted key cannot
+  // map — so these positions leave the population with the compiler's
+  // span as their excuse. The suppression itself is held by the
+  // semantic-tokens gate, not re-gauged here.
+  const attrStarts = new Set(attrNames.map(([s]) => s));
   const genStarts = lineStartsOf(code);
   const srcStarts = lineStartsOf(src);
   const keep = (nm) => isIdentifierName(nm) && nm.length >= 2 && !RIP_KEYWORDS.has(nm);
@@ -1455,6 +1483,11 @@ function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNam
     if (!keep(name)) continue;
     if (index > 0 && /[\d_]/.test(masked[index - 1])) continue;
     const g = sourceOffsetToGeneratedExact(mappings, index, src, code);
+    // A render attribute name: the face classifies the ctor-object key,
+    // and the server suppresses the token by ruling. Excluded with the
+    // compiler's own span as the derived excuse — before the population
+    // test, or every suppressed prop reads as a delivery regression.
+    if (g !== null && attrStarts.has(g)) { excludedCount++; continue; }
     // VERBATIM, the mapping audit's own rule: the face must hold the same bytes.
     // A keyword whose lowering lands it on some other identifier (`if`/`else`
     // reaching a ternary's operands) resolves to a real face token without ever
@@ -2030,7 +2063,7 @@ async function abort(headline, reasons) {
 // face and its verdict), the Diagnostics Audit (each diagnostic's code and
 // position), and last the probe pass driving the slow LSP surfaces (hover,
 // tokens). The Totals at the bottom print in this same order.
-// ── the Grammar Audit (ROADMAP "M2"): which productions the corpus exercises.
+// ── the Grammar Audit: which productions the corpus exercises.
 // Parser only — no compile, no server. Each fixture is parsed with an
 // instrumented Parser whose ctx.onReduce records every rule the parse reduces;
 // the denominator is the generated parser's own ruleNames table (index 0 is
@@ -2071,37 +2104,6 @@ if (RUN_GRAMMAR) {
     ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier has no binding name (the emitter currently passes it through verbatim); the aliased spelling is ImportSpecifier → DEFAULT AS Identifier'],
     ['Root → ε', 'carried only by a vacuous fixture — the empty program is its sole carrier and declares nothing, so it asserts nothing on any dimension; that an empty file compiles and checks clean is guarded in test/toolchain/check.test.js instead'],
   ]);
-  // The M3 manifest: grouping only — the decision record of which corpus file
-  // owns each construct's productions, with per-production overrides for
-  // bridges that carry another family's construct. The MEASUREMENT above and
-  // below is untouched by it. A production the manifest fails to allocate
-  // paints red as UNALLOCATED — a grammar change demands an ownership
-  // decision, never a silent default — and a malformed manifest refuses
-  // rather than degrading. With no manifest (post-M3, once it is deleted),
-  // grouping is by LHS construct: the unit a fixture author thinks in.
-  const MANIFEST = path.join(HERE, 'MANIFEST.md');
-  let owner = null;
-  if (fs.existsSync(MANIFEST)) {
-    owner = { constructs: new Map(), overrides: new Map(), parked: new Set() };
-    let section = null;
-    for (const line of fs.readFileSync(MANIFEST, 'utf8').split('\n')) {
-      if (line.startsWith('## ')) { section = line.slice(3).trim(); continue; }
-      const m = line.match(/^\| (.+?) \| ([^|]+?) \|/);
-      if (!m) continue;
-      // Cells may be pad-aligned by an editor; keys must be trimmed or every
-      // lookup silently misses and the whole queue paints UNALLOCATED.
-      const cell = m[1].trim();
-      if (cell === 'construct' || cell === 'production' || cell.startsWith('---')) continue;
-      const key = cell.replace(/^`|`$/g, '');
-      if (section === 'Constructs') owner.constructs.set(key, m[2].trim());
-      else if (section === 'Overrides') owner.overrides.set(key, m[2].trim());
-      else if (section === 'Parked') owner.parked.add(key);
-    }
-    if (!owner.constructs.size) {
-      console.error(`\n✗ MANIFEST.md exists but its Constructs table parsed empty — fix the manifest (or delete it for construct grouping); refusing to report against a broken allocation.`);
-      process.exit(1);
-    }
-  }
   const denom = [], excludedIdx = [];
   for (let i = 1; i < names.length; i++) {
     if (!names[i]) continue;
@@ -2255,9 +2257,9 @@ if (RUN_GRAMMAR) {
     if (n && !VERBOSE) out(`    ${dim('·')} ${dim(`${n} claims fixtures parsed — no coverage, judged under Corpus claims; -v lists them`)}`);
   }
   const uncovered = denom.filter((i) => !seen.has(i));
-  const groupOf = (prod) => owner
-    ? (owner.overrides.get(prod) ?? owner.constructs.get(prod.split(' → ')[0]) ?? 'UNALLOCATED')
-    : prod.split(' → ')[0];
+  // Grouped by LHS construct: the unit a fixture author thinks in.
+  // Placement of a new production's fixture is CORPUS.md's Placement rule.
+  const groupOf = (prod) => prod.split(' → ')[0];
   const groups = new Map();
   for (const i of uncovered) {
     const g = groupOf(names[i]);
@@ -2266,16 +2268,12 @@ if (RUN_GRAMMAR) {
   }
   out(`\n    ${bold('Coverage')} ${dim(`(exercised = reduced by at least one fixture)`)}`);
   const pct = ((100 * (denom.length - uncovered.length)) / denom.length).toFixed(1);
-  // COLOUR, one rule for every `N / M` in this gate. GREEN when the fraction
-  // is whole — the obligation holds. RED when the shortfall is a contract
-  // violation (a containment construct nothing spells, a wrapped divider):
-  // something broke. Otherwise UNPAINTED, because the shortfall is a QUEUE,
-  // and Totals already fixes what yellow means — `work remains, never because
-  // anything is wrong`. Painting 520 yellow said the achievement was the
-  // problem; the 6 uncovered are the problem, and they are yellow in the
-  // queue below, where a reader can act on them. It also disagreed with
-  // Totals, which paints the same 520 green.
-  console.log(`    ${(uncovered.length ? dim : green)(String(denom.length - uncovered.length))} ${dim('/')} ${dim(String(denom.length))} ${dim(`productions (${pct}%)`)}`);
+  // COLOUR, one rule for every `N / M` in this gate: GREEN when the fraction
+  // is whole — the obligation holds — and RED otherwise, because coverage is
+  // a contract invariant (grammar.coverage): the corpus drained the queue, so
+  // an uncovered production is a regression demanding its fixture, a
+  // `redBecause` while a finding blocks it, or a ruled exclusion.
+  console.log(`    ${(uncovered.length ? red : green)(String(denom.length - uncovered.length))} ${dim('/')} ${dim(String(denom.length))} ${dim(`productions (${pct}%)`)}`);
   if (excludedIdx.length) {
     out(`    ${dim(`${excludedIdx.length} excluded by ruling (unreachable, banned, or coverable only by a fixture that asserts nothing) — netted from the denominator${VERBOSE ? '' : '; -v lists them'}`)}`);
     // A production name is itself most of a line, so its reason goes BENEATH
@@ -2309,36 +2307,17 @@ if (RUN_GRAMMAR) {
     out(`    ${(removable.length ? dim : green)(String(judged.length - removable.length))} ${dim('/')} ${dim(String(judged.length))} ${dim('fixtures reduce a production no other does')}`
       + (removable.length ? `${dim(' · ')}${yellow(`removable at zero coverage loss: ${removable.join(', ')}`)}` : ''));
   }
-  // The queue is the ANSWER to the number above it — which productions the
+  // The list is the ANSWER to the number above it — which productions the
   // corpus does not reach — so it sits under that number rather than behind
-  // the censuses of four other denominators. Its rows split by STANDING,
-  // because the two halves are different kinds of work: a PARKED production is
-  // blocked on an open finding (MANIFEST.md names which), and an AVAILABLE one
-  // is a fixture someone could write this afternoon. So the available half is
-  // always named — it is the actionable half, and a queue that hides what can
-  // be worked behind a flag is a queue nobody works — while the parked half
-  // stays counted, its spellings under -v. Without a manifest there is no park
-  // data to sort by, so the whole queue reports as counts, as before.
+  // the censuses of four other denominators. Every row is a violation
+  // (grammar.coverage gates at zero), so every production is always named:
+  // a red the reader cannot see is a red nobody fixes.
   if (groups.size) {
-    const isParked = (r) => owner?.parked.has(r) ?? false;
-    const parkedN = uncovered.filter((i) => isParked(names[i])).length;
-    const availN = uncovered.length - parkedN;
-    const title = owner ? 'Uncovered, by owning file (MANIFEST.md)' : 'Uncovered, by construct';
-    const standing = owner
-      ? (availN
-        ? `${availN} available to cover, ${parkedN} parked on open findings (FINDINGS.md)${VERBOSE || !parkedN ? '' : '; -v spells the parked ones'}`
-        : `all ${parkedN} parked on open findings (FINDINGS.md)${VERBOSE ? '' : '; -v spells them'}`)
-      : (VERBOSE ? 'every production shown' : 'counts only, -v for every production');
-    out(`\n    ${bold(title)} ${dim(`— ${standing}`)}`);
-    // Files read in wave order; constructs by descending count.
-    const rows = [...groups.entries()].sort(owner ? (a, b) => a[0].localeCompare(b[0]) : (a, b) => b[1].length - a[1].length);
+    out(`\n    ${bold('Uncovered, by construct')} ${red(`— ${uncovered.length} violating grammar.coverage`)}`);
+    const rows = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
     for (const [g, rules] of rows) {
-      const paint = g === 'UNALLOCATED' ? red : yellow;
-      console.log(`      ${pad(g, 24)} ${paint(String(rules.length).padStart(3))}`);
-      for (const r of rules) {
-        if (!(VERBOSE || g === 'UNALLOCATED' || (owner && !isParked(r)))) continue;
-        out(`        ${dim(r)}${isParked(r) ? ' ' + yellow('· parked') : ''}`);
-      }
+      console.log(`      ${pad(g, 24)} ${red(String(rules.length).padStart(3))}`);
+      for (const r of rules) out(`        ${dim(r)}`);
     }
   }
   // ── NEGATIVE COVERAGE — the error lane measured against the positive
@@ -2835,8 +2814,7 @@ if (RUN_GRAMMAR) {
       // alone cannot tell them apart: it is queued (nobody has authored the
       // fixture yet) or it is BLOCKED (a defect makes the shape unable to
       // enter a positive fixture at all — the strict dimension or the verdict
-      // would reject it). The Parked table separates them, the same way
-      // MANIFEST.md parks a production a fixture cannot yet reduce, so the
+      // would reject it). The Parked table separates them, so the
       // queue count means "work available" rather than "work available plus
       // work impossible". Self-policing: a park naming no row is stale, and a
       // park whose row is now CARRIED is stale too — the block cleared, so the
@@ -2943,7 +2921,7 @@ if (RUN_GRAMMAR) {
     out(`\n    ${bold('Comment convention')} ${dim('(a section divider opens and closes on one line — never a reflowed paragraph)')}`);
     for (const [f, ln, body] of ng.splitDividerRows) out(`    ${red('✗')} ${red(`${f}:${ln} divider wraps`)} ${dim(`— join the lines: ${body.slice(0, 60)}…`)}`);
   }
-  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, uncoveredParked: uncovered.filter((i) => owner?.parked.has(names[i])).length, groups: groups.size, groupKind: owner ? 'files' : 'constructs', unallocated: groups.get('UNALLOCATED')?.length ?? 0, excluded: excludedIdx.length, badExclusions: falseExclusions.length + staleExcluded.length, unparsed: fixtureRows.filter((r) => !r.ok).length, negatives: ng };
+  gr = { total: denom.length, covered: denom.length - uncovered.length, uncovered: uncovered.length, excluded: excludedIdx.length, badExclusions: falseExclusions.length + staleExcluded.length, unparsed: fixtureRows.filter((r) => !r.ok).length, negatives: ng };
 }
 
 // ── the Mapping Audit (--map): use-site identifier coverage, from the
@@ -3253,7 +3231,7 @@ if (RUN_MAP) {
 
   // No calibration runs here, and that is deliberate: trusting the instrument is
   // a ONE-TIME act, not a per-run one. The walk's logic was validated against
-  // the real editor once (2026-07-17, driven — see ROADMAP.md "M1"), and the
+  // the real editor once (2026-07-17, driven), and the
   // code doesn't drift on its own. So the audit ships STANDALONE — no server,
   // ever, under any flag. If the mapping internals it reads change (codeMask,
   // the skip list, or translate.js's precise resolver), RE-VALIDATE by
@@ -3402,7 +3380,7 @@ if (RUN_MAIN) {
   fails = totalApplicable - totalPass;
 }
 
-// ── the Diagnostics Audit (--diagnostics; ROADMAP "M3"): fixtures whose
+// ── the Diagnostics Audit (--diagnostics): fixtures whose
 // errors are UNSUPPRESSED, each published diagnostic asserted by code AND
 // position. The verdict dimension can never see a mis-positioned diagnostic —
 // a fixture's `@ts-expect-error` is consumed inside tsgo, on the face, before
@@ -3708,8 +3686,8 @@ if (RUN_HOVER || RUN_TOKENS) {
       const full = fixPath(f);
       if (!await compiles(full)) continue;   // a fixture with no face has nothing to survive
       try {
-        const { code, mappings, bindingNames } = compile(fs.readFileSync(full, 'utf8'), { path: full, runtimeDelivery: 'inline', face: 'ts' });
-        FACES.set(f, { code, mappings, bindingNames });
+        const { code, mappings, bindingNames, attrNames } = compile(fs.readFileSync(full, 'utf8'), { path: full, runtimeDelivery: 'inline', face: 'ts' });
+        FACES.set(f, { code, mappings, bindingNames, attrNames });
         fs.writeFileSync(path.join(FACE_DIR, f.replace(/\.rip$/, '.rip.ts')), code);
       } catch (e) {
         // compiles() (subprocess `bin/rip --ts`) passed but the in-process
@@ -3791,8 +3769,8 @@ if (RUN_HOVER || RUN_TOKENS) {
       const dec = await faces[lane].faceTokens(f);
       const { code } = FACES.get(f);
       // probe.tokens is the REAL server's delivered output — the survival oracle.
-      const { mappings: faceMappings, bindingNames } = FACES.get(f);
-      survival = faceSurvival(src, code, faceMappings, dec, probe.tokens, bindingNames, SURVIVAL_EXCUSED?.[f] ?? {});
+      const { mappings: faceMappings, bindingNames, attrNames } = FACES.get(f);
+      survival = faceSurvival(src, code, faceMappings, dec, probe.tokens, bindingNames, SURVIVAL_EXCUSED?.[f] ?? {}, attrNames ?? []);
     }
 
     return {
@@ -3999,14 +3977,14 @@ if (RUN_HOVER) {
   // Erring here HIDES a gap, so keep it as narrow as the fixtures allow.
   // The reactive clause is LEGACY-SCOPED: 08's React twin approximates
   // reactivity with useState, so its reactive rows have no oracle — but the
-  // M3 reactive twin is plain TS written to BE the oracle (ROADMAP.md,
-  // Oracles; RULINGS.md, Reactive: the twin agrees live, so no pin), and
+  // reactive twin is plain TS written to BE the oracle (CORPUS.md,
+  // Twins; RULINGS.md, Reactive: the twin agrees live, so no pin), and
   // classifying its rows native would silently retire that oracle the run
   // it landed. Component/schema clauses stay corpus-wide: those analogies
   // (TSX/zod) remain approximations in every fixture that carries them.
   // Reactive spellings (`:=`/`~=`/`~>`) are NOT rip-native here: the
   // reactive twin is a deliberate plain-TS oracle (state → let, computed →
-  // const — ROADMAP.md, Oracles), so those declarations are twin-judged.
+  // const — CORPUS.md, Twins), so those declarations are twin-judged.
   const ripNative = (r) => {
     const t = r.text ?? '';
     return /=\s*component\b/.test(t)
@@ -4403,7 +4381,7 @@ if (RUN_TOKENS) {
       }
       irow('explained', survUnexplained.length, survExcluded,
         survUnexplained.length ? 'excluded use-site positions no excuse claims — holes, not a smaller gauge'
-                               : 'every excluded use-site position holds its excuse — a keyword, a specifier, or a reviewed entry', 'hole');
+                               : 'every excluded use-site position holds its excuse — a keyword, a specifier, an attribute name (suppressed by ruling), or a reviewed entry', 'hole');
       irow('excused', survExcuseDrift.length, Object.values(SURVIVAL_EXCUSED ?? {}).reduce((n, o) => n + Object.keys(o).length, 0),
         survExcuseDrift.length ? 'reviewed exclusions whose position no longer needs one (survival-exclusions.json)'
                                : 'every reviewed exclusion still excludes an excluded position', 'stale');
@@ -4581,11 +4559,6 @@ const totalLine = (audit, text) => {
   for (const l of lines.slice(1)) console.log(' '.repeat(4 + TOTAL_W + 2) + l);
 };
 console.log(`\n  ${bold('Totals')}`);
-// The Grammar Audit's coverage number is a gauge, not a regression count:
-// uncovered productions are work remaining — a fixture to write, or a park
-// held by an open finding — so the count paints yellow until the corpus
-// covers the grammar, never red.
-//
 // The gate reports at three DIFFERENT STANDINGS, and a totals line that
 // strings them together with one separator lets none of them be read: a
 // closed-denominator score (520/526), a contractual result (every claimed
@@ -4603,7 +4576,9 @@ if (gr) {
   const broken = [];
   if (gr.unparsed) broken.push(`${s(gr.unparsed, 'fixture')} the parser rejects — the rows say which`);
   if (gr.badExclusions) broken.push(`${s(gr.badExclusions, 'bad exclusion')} — fix the gate's exclusion table`);
-  if (gr.unallocated) broken.push(`${gr.unallocated} UNALLOCATED — the manifest owes an ownership decision`);
+  // Coverage graduated from the queue to an obligation the day the corpus
+  // drained it: an uncovered production demands its fixture or a ruling.
+  if (gr.uncovered) broken.push(`${s(gr.uncovered, 'production')} uncovered — write the fixture, or rule an exclusion`);
   if (n.badSpellingExclusions || n.staleMints) broken.push(s((n.badSpellingExclusions ?? 0) + (n.staleMints ?? 0), 'spelling-census violation'));
   if (n.kindBad) broken.push(s(n.kindBad, 'census violation'));
   if (n.vocabUnfalsified) broken.push(`${n.vocabUnfalsified}/${n.vocabClaimed} vocabulary classes unfalsified`);
@@ -4624,9 +4599,6 @@ if (gr) {
   if (claimsRead && claimsRed) broken.push(`${s(claimsRed, 'claims row')} red`);
   // Queues: yellow because work remains, never because anything is wrong.
   const queues = [];
-  // A queue that is entirely parked is a different report from one that is
-  // waiting to be worked: the number is the same, the standing is not.
-  if (gr.uncovered) queues.push(`${s(gr.uncovered, 'production')} uncovered across ${gr.groups} ${gr.groupKind}${gr.uncoveredParked === gr.uncovered ? ' (all parked)' : gr.uncoveredParked ? ` (${gr.uncoveredParked} parked)` : ''}`);
   if (n.kindQueued) queues.push(`${s(n.kindQueued, 'type kind')} unclaimed${n.kindHeld === n.kindQueued ? ' (all held)' : n.kindHeld ? ` (${n.kindHeld} held)` : ''}`);
   if (n.claimsAbsent) queues.push(`${n.claimsAbsent} claims ruled-uncarried`);
   if (n.darkSpellings) queues.push(`${n.darkSpellings} of ${n.spellings} spellings never written`);
@@ -4749,10 +4721,17 @@ if (tk) {
   // A row's reason is its DETAIL, at 6 — it sat at 8, which is the level for
   // detail-of-detail and left a gap under a section that has no middle tier.
   const reason = (text) => { for (const l of wrapText(text, TERM_W - 6, 0)) console.log(`      ${dim(l)}`); };
-  const { verdicts, failures } = judge({
+  const { verdicts, failures, drift } = judge({
     states: { gr, mp, el, hp, tk, fails },
     ran: (lane) => AUDITS.find((a) => a.key === lane).ran,
   });
+  // STRUCTURAL refusal, not a verdict: a predicate read a field no summary
+  // carries, so its invariant would judge vacuously green from here on. The
+  // field name drifted between this file and contract.js; fix the seam.
+  if (drift.size) {
+    console.error(`\n✗ contract drift: a predicate read ${[...drift].map((d) => `\`${d}\``).join(', ')} and no summary carries it — the invariant would judge vacuously green; realign contract.js with the runner's summaries.`);
+    process.exit(1);
+  }
   const judged = verdicts.filter((v) => v.state !== 'skipped');
   out(`\n  ${bold('Contract')} ${dim(`(${judged.length} invariant${judged.length === 1 ? '' : 's'} judged${verdicts.length - judged.length ? `, ${verdicts.length - judged.length} unjudged — their lane did not run` : ''})`)}`);
   const shown = judged.filter((x) => x.state !== 'green');

@@ -273,7 +273,7 @@ test "the row table: #{rows.length} contracts", ->
   for [type, input, expected] in rows
     got = check input, type
     unless JSON.stringify(got) is JSON.stringify(expected)
-      throw new Error "#{type} #{JSON.stringify(input)}: expected #{JSON.stringify(expected)}, got #{JSON.stringify(got)}"
+      throw Error.new "#{type} #{JSON.stringify(input)}: expected #{JSON.stringify(expected)}, got #{JSON.stringify(got)}"
 
 test "the raw set receives values untouched", ->
   eq check([1, 2], 'array'), [1, 2]
@@ -451,7 +451,7 @@ test "a coercer-name collision rejects the package import, naming the coercer", 
     "import { registerCoercer } from '#{join(import.meta.dir, '..', '..', 'src', 'runtime', 'schema.js')}'"
     "registerCoercer 'money', (v) -> v"
     "try"
-    "  await import('#{join(import.meta.dir, 'validate.rip')}')"
+    "  import!('#{join(import.meta.dir, 'validate.rip')}')"
     "  p 'imported'"
     "catch e"
     '  p "guarded: #{e.message}"'

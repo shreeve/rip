@@ -60,8 +60,8 @@ console.log "\nErrors"
 test "error subclasses carry their own names", ->
   # the one-line `X = class extends DecimalError` style relies on JS
   # name inference reaching @constructor.name — pin it
-  eq new DecimalParseError('x').name, 'DecimalParseError'
-  eq new DecimalInexactError('x').name, 'DecimalInexactError'
+  eq DecimalParseError.new('x').name, 'DecimalParseError'
+  eq DecimalInexactError.new('x').name, 'DecimalInexactError'
   err = try dec('bogus') catch e then e
   eq err.name, 'DecimalParseError'
 

@@ -36,7 +36,7 @@ reload is a fallback, not the default once framework refresh exists.
 ## Current baseline
 
 The Workspace **door** (Layer A) is shipped: watch → `/hub` ding
-`{id,hash}` → latest-wins HTTP `GET /app/…` → compute `rash(bytes)` →
+`{id,hash}` → latest-wins HTTP `GET` at the App root → compute `rash(bytes)` →
 `Workspace.set` → visible update (see [WORKSPACE.md](WORKSPACE.md) Q8). Apply today is the
 labeled whole-launch **remount escape** — not state-preserving refresh.
 Marquee apply (Layer B) is open research against the S-suite; do not
@@ -296,7 +296,7 @@ Aligned with [WORKSPACE.md](WORKSPACE.md) (door wins where this file
 once disagreed):
 
 - **Layer A transport: Workspace door.** Hub ding `{ id, hash }`
-  (no bodies); HTTP carries latest file bytes at the ordinary `/app/…` URL.
+  (no bodies); HTTP carries latest file bytes at the ordinary App-root URL.
   Production has no hub (Q2). SSE body buses and WS-inline update
   payloads are rejected.
 - **API: Rip-native, no `import.meta.hot` shim.** Compiler-owned
@@ -312,9 +312,10 @@ once disagreed):
   by key and orphaned keys are dropped loudly.
 - **Bag unit noun: file** (path-keyed passport). Swappable component
   identity: **component definition** (not “definition cell”).
-- **Dev delivery: manager file pool + bundle.json first paint**; live
-  mutation fetches one file generation. Production remains the
-  deterministic sealed path.
+- **Dev delivery: manager file pool + `bundle.json` first paint.** The bundle's
+  validated `files` + `check` populate the Workspace; the manifest reconciles
+  only after the Hub opens. Live mutation fetches one file generation.
+  Production remains the deterministic sealed path.
 
 ## Architectural constraints
 

@@ -104,7 +104,7 @@ class Scanner
     @pos = 0
 
     if @len > @opts.maxBytes
-      throw new RsxError "input exceeds maxBytes (#{@opts.maxBytes})", 0
+      throw RsxError.new "input exceeds maxBytes (#{@opts.maxBytes})", 0
 
   scan: (handler) ->
     @h = handler
@@ -138,19 +138,19 @@ class Scanner
         return @scanCdata()
       if @xml.startsWith('<!DOCTYPE', @pos) or @xml.startsWith('<!doctype', @pos)
         unless @opts.allowDoctype
-          throw new RsxError 'DOCTYPE declarations are not allowed', @pos
+          throw RsxError.new 'DOCTYPE declarations are not allowed', @pos
         @pos = @xml.indexOf '>', @pos
-        throw new RsxError 'unterminated DOCTYPE', @pos if @pos is -1
+        throw RsxError.new 'unterminated DOCTYPE', @pos if @pos is -1
         @pos += 1
         return
-      throw new RsxError "unexpected '<!' construct", @pos
+      throw RsxError.new "unexpected '<!' construct", @pos
 
     # Processing instructions <? ... ?>
     if next is 63  # '?'
       unless @opts.allowProcessingInstructions
-        throw new RsxError 'processing instructions are not allowed', @pos
+        throw RsxError.new 'processing instructions are not allowed', @pos
       end = @xml.indexOf '?>', @pos + 2
-      throw new RsxError 'unterminated processing instruction', @pos if end is -1
+      throw RsxError.new 'unterminated processing instruction', @pos if end is -1
       @pos = end + 2
       return
 
@@ -163,26 +163,26 @@ class Scanner
 
   scanComment: ->
     end = @xml.indexOf '-->', @pos + 4
-    throw new RsxError 'unterminated comment', @pos if end is -1
+    throw RsxError.new 'unterminated comment', @pos if end is -1
     @pos = end + 3
 
   scanCdata: ->
     start = @pos + 9
     end = @xml.indexOf ']]>', start
-    throw new RsxError 'unterminated CDATA', @pos if end is -1
+    throw RsxError.new 'unterminated CDATA', @pos if end is -1
     @h.cdata @xml.slice(start, end)
     @pos = end + 3
 
   scanEndTag: ->
     end = @xml.indexOf '>', @pos + 2
-    throw new RsxError 'unterminated end tag', @pos if end is -1
+    throw RsxError.new 'unterminated end tag', @pos if end is -1
     name = @xml.slice(@pos + 2, end).trim()
     @h.close name
     @pos = end + 1
 
   scanStartTag: ->
     end = @findStartTagEnd @pos + 1
-    throw new RsxError 'unterminated start tag', @pos if end is -1
+    throw RsxError.new 'unterminated start tag', @pos if end is -1
 
     selfClose = @xml.charCodeAt(end - 1) is 47  # '/'
     inner = @xml.slice(@pos + 1, selfClose ? end - 1 : end)
@@ -210,7 +210,7 @@ class Scanner
   splitNameAndAttrs: (inner) ->
     inner = inner.replace(/^\s+/, '').replace(/\s+$/, '')
     m = inner.match /^([^\s\/>]+)([\s\S]*)$/
-    throw new RsxError "missing tag name", @pos unless m
+    throw RsxError.new "missing tag name", @pos unless m
     [m[1], m[2]]
 
   parseAttributes: (text) ->
@@ -281,7 +281,7 @@ class Builder
     name = @opts.stripNamespaces ? stripNs(qname) : qname
     expected = @nameStack[@nameStack.length - 1]
     unless name is expected
-      throw new RsxError "mismatched close tag: expected </#{expected}>, got </#{name}>"
+      throw RsxError.new "mismatched close tag: expected </#{expected}>, got </#{name}>"
 
     node = @stack.pop()
     @nameStack.pop()
@@ -355,14 +355,14 @@ mergeOpts = (opts) ->
     for own k, v of opts
       out[k] = v
   if Array.isArray out.forceArray
-    out.forceArray = new Set out.forceArray
+    out.forceArray = Set.new out.forceArray
   out
 
 export parse = (xml, opts) ->
-  throw new RsxError 'XML source must be a string' unless typeof xml is 'string'
+  throw RsxError.new 'XML source must be a string' unless typeof xml is 'string'
   options = mergeOpts opts
-  builder = new Builder options
-  scanner = new Scanner xml, options
+  builder = Builder.new options
+  scanner = Scanner.new xml, options
   scanner.scan
     open:  (n, a, s) -> builder.open  n, a, s
     close: (n)       -> builder.close n
@@ -437,7 +437,7 @@ export stringify = (rootName, value, opts = {}) ->
     newline:   opts.newline ?? (opts.indent ? '\n' : '')
     attrsKey:  opts.attrsKey ?? '@attrs'
     textKey:   opts.textKey  ?? '#text'
-    cdata:     if Array.isArray opts.cdata then new Set opts.cdata else opts.cdata
+    cdata:     if Array.isArray opts.cdata then Set.new opts.cdata else opts.cdata
   options.indent = ' '.repeat(options.indent) if typeof options.indent is 'number'
   emitNode rootName, value, options, 0
 

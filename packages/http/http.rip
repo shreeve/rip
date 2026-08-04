@@ -46,20 +46,20 @@ def buildUrl(input, opts = {})
     # If `base` is a site-relative path (e.g. '/api'), resolve it against
     # the page origin so it becomes a valid base URL for `new URL(...)`.
     if origin and typeof base is 'string' and base.startsWith('/')
-      base = new URL(base, origin).href
+      base = URL.new(base, origin).href
     unless base.endsWith('/')
       base += '/'
     path = if typeof input is 'string' and input.startsWith('/') then input.slice(1) else input
-    url = new URL(path, base)
+    url = URL.new(path, base)
   else
-    url = new URL(input)
+    url = URL.new(input)
 
   sp = opts.searchParams
   if sp
     if sp instanceof URLSearchParams
       sp.forEach (v, k) -> url.searchParams.set(k, v)
     else if typeof sp is 'string'
-      new URLSearchParams(sp).forEach (v, k) -> url.searchParams.set(k, v)
+      URLSearchParams.new(sp).forEach (v, k) -> url.searchParams.set(k, v)
     else if typeof sp is 'object'
       for own k, v of sp
         url.searchParams.set(k, String(v)) if v?
@@ -67,9 +67,9 @@ def buildUrl(input, opts = {})
   url
 
 def mergeHeaders(a, b)
-  result = new Headers(a ?? {})
+  result = Headers.new(a ?? {})
   if b
-    h = new Headers(b)
+    h = Headers.new(b)
     h.forEach (v, k) -> result.set(k, v)
   result
 
@@ -102,7 +102,7 @@ def normalizeRetry(retry)
     { limit: RETRY_LIMIT, methods: RETRY_METHODS, statusCodes: RETRY_CODES, backoffLimit: Infinity, delay: null }
 
 def delay(ms)
-  new Promise (resolve) -> setTimeout(resolve, ms)
+  Promise.new (resolve) -> setTimeout(resolve, ms)
 
 def backoff(attempt, cfg)
   if cfg.delay
@@ -116,7 +116,7 @@ def retryDelay(attempt, res, cfg)
   if header
     secs = Number(header)
     if Number.isNaN(secs)
-      Math.max(0, new Date(header).getTime() - Date.now())
+      Math.max(0, Date.new(header).getTime() - Date.now())
     else
       secs * 1000
   else
@@ -167,7 +167,7 @@ def request(input, opts = {})
     keepalive:      opts.keepalive
     signal:         fetchSignal
 
-  req = new Request(url, fetchOpts)
+  req = Request.new(url, fetchOpts)
 
   # Run beforeRequest hooks — may modify the request or short-circuit with a Response
   if hooks.beforeRequest?.length
@@ -193,7 +193,7 @@ def request(input, opts = {})
       # it as a TimeoutError.
       if err?.name is 'AbortError' or err?.name is 'TimeoutError'
         throw err if opts.signal?.aborted
-        throw new TimeoutError(req)
+        throw TimeoutError.new(req)
 
       # Network error — retry if eligible
       if retryCount >= retry.limit or not retry.methods.includes(method)
@@ -226,7 +226,7 @@ def request(input, opts = {})
 
     # Auto-throw on non-2xx
     if throwHttpErrors and not res.ok
-      error = new HTTPError(res, req, opts)
+      error = HTTPError.new(res, req, opts)
       if hooks.beforeError?.length
         for hook in hooks.beforeError
           error = hook!(error) ?? error

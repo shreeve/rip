@@ -26,7 +26,7 @@ DIR_NAMES = ['brew', 'container', 'dataset', 'ensure', 'firewall', 'group', 'inc
 # onto globalThis, which the handlers use). The exec seam is installed per test.
 directives = {}
 for name in DIR_NAMES
-  directives[name] = await import(pathToFileURL(join(import.meta.dir, 'directives', "#{name}.rip")).href)
+  directives[name] = import!(pathToFileURL(join(import.meta.dir, 'directives', "#{name}.rip")).href)
 
 # Install a recording exec for the duration of `fn`, then restore the default.
 # Returns the list of argv arrays the body would have spawned.
@@ -266,7 +266,7 @@ test! "a bare remote `use` is refused — no silent trust-on-first-use", ->
   # execute() drives resolveHandlers, which rejects before any fetch/import.
   threw = false
   try
-    await execute 'plan', parsed, '/tmp'
+    execute! 'plan', parsed, '/tmp'
   catch
     threw = true
   testOk threw
@@ -277,7 +277,7 @@ test! "a remote `use` with a mismatched sha256 pin is refused", ->
   globalThis.fetch = -> Promise.resolve { ok: true, status: 200, text: -> Promise.resolve "export name = 'handler'\n" }
   threw = false
   try
-    await execute 'plan', parsed, '/tmp'
+    execute! 'plan', parsed, '/tmp'
   catch
     threw = true
   finally

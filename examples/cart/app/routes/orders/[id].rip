@@ -8,7 +8,7 @@ export OrderDetails = component
 
   render
     h1 "Order ##{order.id}"
-    p "Placed on #{(new Date(order.createdAt)).toLocaleString()}"
+    p "Placed on #{(Date.new(order.createdAt)).toLocaleString()}"
     div.overflow-auto
       table
         thead

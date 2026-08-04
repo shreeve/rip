@@ -14,7 +14,7 @@ generate = (entry, artifact, report, task) ->
     stdin: 'ignore'
     stdout: 'ignore'
     stderr: 'pipe'
-  diagnostic = new Response(proc.stderr).text()
+  diagnostic = Response.new(proc.stderr).text()
   code = await proc.exited
   eq code, 0, await diagnostic
   JSON.parse readFileSync(report, 'utf8')
@@ -22,9 +22,9 @@ generate = (entry, artifact, report, task) ->
 waitFor = (fn) ->
   deadline = Date.now() + 5000
   loop
-    value = await fn()
+    value = fn!
     return value if value
-    throw new Error('middleware test timed out') if Date.now() >= deadline
+    throw Error.new('middleware test timed out') if Date.now() >= deadline
     sleep! 10
 
 unixFetch = (socket, path, options = {}) ->
@@ -43,11 +43,11 @@ cookieHeader = (jar) ->
   Object.entries(jar).map(([name, value]) -> "#{name}=#{value}").join '; '
 
 responseJson = (response) ->
-  text = await response.text()
+  text = response.text!
   try
     JSON.parse text
   catch
-    throw new Error("expected JSON from #{response.status}: #{text}")
+    throw Error.new("expected JSON from #{response.status}: #{text}")
 
 runMode = (encrypt) ->
   dir = mkdtempSync join(tmpdir(), "rip-middleware-#{if encrypt then 'encrypted' else 'signed'}-")
@@ -66,7 +66,7 @@ runMode = (encrypt) ->
   use csrf secret: 'csrf-secret'
   use '/timed', timeout 1, grace: 1
   use '/once', (request, next) ->
-    await next()
+    next!
     next()
 
   get '/once' -> { reached: true }
@@ -85,7 +85,7 @@ runMode = (encrypt) ->
     sleep! 3000
     { tooLate: true }
 
-  post '/timed/body', (c) -> c.req.raw.text!()
+  post '/timed/body', (c) -> c.req.raw.text!
 
   start!
   """
@@ -99,13 +99,13 @@ runMode = (encrypt) ->
       stdout: 'ignore'
       stderr: 'pipe'
       env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: 'middleware', WORKER_CONCURRENCY: '2' }
-    diagnostic = new Response(proc.stderr).text()
-    await waitFor ->
-      try (await unixFetch(socket, '/ready')).status is 200 catch then false
-    repeated = await unixFetch socket, '/once'
+    diagnostic = Response.new(proc.stderr).text()
+    waitFor! ->
+      try (unixFetch!(socket, '/ready')).status is 200 catch then false
+    repeated = unixFetch! socket, '/once'
     eq repeated.status, 500
 
-    preflight = await unixFetch socket, '/write',
+    preflight = unixFetch! socket, '/write',
       method: 'OPTIONS'
       headers:
         origin: 'https://client.test'
@@ -115,14 +115,14 @@ runMode = (encrypt) ->
     eq preflight.headers.get('access-control-allow-credentials'), 'true'
     eq preflight.headers.get('vary'), 'Origin'
 
-    rejected = await unixFetch socket, '/state', { headers: { origin: 'https://other.test' } }
+    rejected = unixFetch! socket, '/state', { headers: { origin: 'https://other.test' } }
     eq rejected.status, 200
     eq rejected.headers.get('access-control-allow-origin'), null
 
-    first = await unixFetch socket, '/state', { headers: { origin: 'https://client.test' } }
+    first = unixFetch! socket, '/state', { headers: { origin: 'https://client.test' } }
     eq first.status, 200
     eq first.headers.get('access-control-allow-origin'), 'https://client.test'
-    body = await responseJson first
+    body = responseJson! first
     eq body.count, 1
     jar = cookieJar first
     ok jar.session?
@@ -131,49 +131,49 @@ runMode = (encrypt) ->
     ok decodedSession.startsWith(if encrypt then 'e1.' else 's1.')
     ok not decodedSession.includes('count')
 
-    other = await unixFetch socket, '/state'
-    eq (await responseJson(other.clone())).count, 1
+    other = unixFetch! socket, '/state'
+    eq (responseJson!(other.clone())).count, 1
     otherJar = cookieJar other
-    [second, otherSecond] = await Promise.all [
+    [second, otherSecond] = Promise.all! [
       unixFetch socket, '/state', { headers: { cookie: cookieHeader(jar) } }
       unixFetch socket, '/state', { headers: { cookie: cookieHeader(otherJar) } }
     ]
-    eq (await responseJson(second)).count, 2
-    eq (await responseJson(otherSecond)).count, 2
+    eq (responseJson!(second)).count, 2
+    eq (responseJson!(otherSecond)).count, 2
     jar = cookieJar second, jar
 
-    denied = await unixFetch socket, '/write', { method: 'POST', headers: { cookie: cookieHeader(jar) } }
+    denied = unixFetch! socket, '/write', { method: 'POST', headers: { cookie: cookieHeader(jar) } }
     eq denied.status, 403
-    eq await denied.text(), 'CSRF token mismatch'
+    eq denied.text!, 'CSRF token mismatch'
 
-    accepted = await unixFetch socket, '/write',
+    accepted = unixFetch! socket, '/write',
       method: 'POST'
       headers:
         cookie: cookieHeader jar
         'x-csrf-token': body.token
     eq accepted.status, 200
-    eq await responseJson(accepted), { count: 2 }
+    eq responseJson!(accepted), { count: 2 }
 
     broken = { ...jar, session: "#{jar.session}x" }
-    reset = await unixFetch socket, '/state', { headers: { cookie: cookieHeader(broken) } }
-    eq (await responseJson(reset)).count, 1
+    reset = unixFetch! socket, '/state', { headers: { cookie: cookieHeader(broken) } }
+    eq (responseJson!(reset)).count, 1
 
-    aborted = await unixFetch socket, '/timed/abort'
+    aborted = unixFetch! socket, '/timed/abort'
     eq aborted.status, 504
-    eq await aborted.text(), 'Gateway Timeout'
-    eq (await unixFetch(socket, '/ready')).status, 200
+    eq aborted.text!, 'Gateway Timeout'
+    eq (unixFetch!(socket, '/ready')).status, 200
 
-    echoed = await unixFetch socket, '/timed/body',
+    echoed = unixFetch! socket, '/timed/body',
       method: 'POST'
       body: 'streamed once'
       headers:
         cookie: cookieHeader jar
         'x-csrf-token': body.token
-    eq await echoed.text(), 'streamed once'
+    eq echoed.text!, 'streamed once'
 
     unless encrypt
       started = performance.now()
-      ignored = await unixFetch socket, '/timed/ignore'
+      ignored = unixFetch! socket, '/timed/ignore'
       eq ignored.status, 504
       eq ignored.headers.get('connection'), 'close'
       ok performance.now() - started < 1500
@@ -200,50 +200,50 @@ test 'invalid middleware policy rejects during registration', ->
 
 test! 'CORS distinguishes preflight, denied variants, and async predicates', ->
   policy = cors origin: -> Promise.resolve false
-  denied = await policy(new Request('http://worker/state', { headers: { origin: 'https://other.test' } }), -> new Response('ok'))
+  denied = policy!(Request.new('http://worker/state', { headers: { origin: 'https://other.test' } }), -> Response.new('ok'))
   eq denied.status, 200
   eq denied.headers.get('access-control-allow-origin'), null
   eq denied.headers.get('vary'), 'Origin'
-  ordinary = await policy(new Request('http://worker/state', { method: 'OPTIONS' }), -> new Response('ordinary', { status: 209 }))
+  ordinary = policy!(Request.new('http://worker/state', { method: 'OPTIONS' }), -> Response.new('ordinary', { status: 209 }))
   eq ordinary.status, 204
-  eq await ordinary.text(), ''
+  eq ordinary.text!, ''
 
 test! 'htmlJson renders direct iOS navigation and leaves API JSON alone', ->
   json = -> Response.json { unsafe: '<script>', count: 2 }
-  navigation = new Request 'http://worker/state',
+  navigation = Request.new 'http://worker/state',
     headers:
       'user-agent': 'Mozilla/5.0 (iPhone)'
       accept: 'text/html'
       'sec-fetch-dest': 'document'
-  rendered = await htmlJson navigation, json
+  rendered = htmlJson! navigation, json
   eq rendered.headers.get('content-type'), 'text/html; charset=UTF-8'
   eq rendered.headers.get('vary'), 'User-Agent, Accept, Sec-Fetch-Dest'
-  html = await rendered.text()
+  html = rendered.text!
   ok html.includes '&lt;script&gt;'
   ok html.includes '<span class="number">2</span>'
-  api = await htmlJson(new Request('http://worker/state', { headers: { 'user-agent': 'Mozilla/5.0 (iPhone)', accept: 'application/json' } }), json)
+  api = htmlJson!(Request.new('http://worker/state', { headers: { 'user-agent': 'Mozilla/5.0 (iPhone)', accept: 'application/json' } }), json)
   ok api.headers.get('content-type').startsWith 'application/json'
   eq api.headers.get('vary'), 'User-Agent, Accept, Sec-Fetch-Dest'
-  eq await api.json(), { unsafe: '<script>', count: 2 }
-  rejected = await htmlJson(new Request('http://worker/state', { headers: { 'user-agent': 'Mozilla/5.0 (iPhone)', accept: 'application/json, text/html;q=0', 'sec-fetch-dest': 'document' } }), json)
+  eq api.json!, { unsafe: '<script>', count: 2 }
+  rejected = htmlJson!(Request.new('http://worker/state', { headers: { 'user-agent': 'Mozilla/5.0 (iPhone)', accept: 'application/json, text/html;q=0', 'sec-fetch-dest': 'document' } }), json)
   ok rejected.headers.get('content-type').startsWith 'application/json'
   largeText = JSON.stringify({ value: 'x'.repeat(1_000_001) })
-  large = await htmlJson navigation, -> new Response(largeText, { headers: { 'content-type': 'application/json', 'content-length': String(largeText.length) } })
+  large = htmlJson! navigation, -> Response.new(largeText, { headers: { 'content-type': 'application/json', 'content-length': String(largeText.length) } })
   ok large.headers.get('content-type').startsWith 'application/json'
-  stream = new ReadableStream
+  stream = ReadableStream.new
     start: (controller) ->
-      controller.enqueue new TextEncoder().encode(largeText)
+      controller.enqueue TextEncoder.new().encode(largeText)
       controller.close()
-  streamed = await Promise.race [
-    htmlJson navigation, -> new Response(stream, { headers: { 'content-type': 'application/json' } })
-    new Promise((_, reject) -> setTimeout((-> reject(new Error('htmlJson size cancellation blocked'))), 1000))
+  streamed = Promise.race! [
+    htmlJson navigation, -> Response.new(stream, { headers: { 'content-type': 'application/json' } })
+    Promise.new((_, reject) -> setTimeout((-> reject(Error.new('htmlJson size cancellation blocked'))), 1000))
   ]
-  eq (await streamed.text()).length, largeText.length
+  eq (streamed.text!).length, largeText.length
 
 test! 'secureHeaders fills API defaults without overriding application policy', ->
   policy = secureHeaders permissionsPolicy: 'camera=(), microphone=()'
-  response = await policy new Request('http://worker/state'), ->
-    new Response 'ok',
+  response = policy! Request.new('http://worker/state'), ->
+    Response.new 'ok',
       headers:
         'content-security-policy': "default-src 'none'"
         'x-frame-options': 'DENY'
@@ -256,7 +256,7 @@ test! 'secureHeaders fills API defaults without overriding application policy', 
   eq response.headers.get('strict-transport-security'), null
 
   reduced = secureHeaders contentSecurityPolicy: false, frameOptions: false
-  response = await reduced new Request('http://worker/state'), -> new Response 'ok'
+  response = reduced! Request.new('http://worker/state'), -> Response.new 'ok'
   eq response.headers.get('content-security-policy'), null
   eq response.headers.get('x-frame-options'), null
   throws (-> secureHeaders({ referrerPolicy: '   ' })), 'nonempty header value or false'
@@ -264,7 +264,7 @@ test! 'secureHeaders fills API defaults without overriding application policy', 
 
 test! 'prototype-named cookies are data', ->
   policy = csrf secret: 'csrf-secret', cookieName: 'toString'
-  response = await policy(new Request('http://worker/state', { headers: { cookie: 'toString=not-a-token' } }), -> new Response('ok'))
+  response = policy!(Request.new('http://worker/state', { headers: { cookie: 'toString=not-a-token' } }), -> Response.new('ok'))
   eq response.status, 200
   ok response.headers.get('set-cookie').startsWith 'toString='
 

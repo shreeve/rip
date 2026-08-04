@@ -53,9 +53,9 @@ export Item = schema :model
 waitFor = (fn, timeout = 5000) ->
   deadline = Date.now() + timeout
   loop
-    value = await fn()
+    value = fn!
     return value if value
-    throw new Error('operation test timed out') if Date.now() >= deadline
+    throw Error.new('operation test timed out') if Date.now() >= deadline
     sleep! 10
 
 unixFetch = (path, socket) ->
@@ -67,8 +67,8 @@ command = (name, project) ->
     stdin: 'ignore'
     stdout: 'pipe'
     stderr: 'pipe'
-  out = new Response(proc.stdout).text()
-  err = new Response(proc.stderr).text()
+  out = Response.new(proc.stdout).text()
+  err = Response.new(proc.stderr).text()
   code = await proc.exited
   eq code, 0, await err
   JSON.parse await out
@@ -78,7 +78,7 @@ failedCommand = (name, project) ->
     stdin: 'ignore'
     stdout: 'ignore'
     stderr: 'pipe'
-  diagnostic = new Response(proc.stderr).text()
+  diagnostic = Response.new(proc.stderr).text()
   code = await proc.exited
   { code, diagnostic: await diagnostic }
 
@@ -95,24 +95,24 @@ test! 'hold fences App publication, API replacement, and dings', ->
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
-      url = new URL request.url
+      url = URL.new request.url
       if request.method is 'POST' and url.pathname is '/1.0/apps'
-        registration = await request.json()
+        registration = request.json!
         return Response.json({ id: 'operations-registration' }, { status: 201 })
       if request.method is 'PUT'
-        updates.push await request.json()
-        return new Response(null, { status: 204 })
+        updates.push request.json!
+        return Response.new(null, { status: 204 })
       if url.pathname.endsWith('/hub/publish')
-        dings.push ...(await request.json())
+        dings.push ...(request.json!)
         return Response.json({ deliveries: 0 })
-      new Response(null, { status: 204 })
+      Response.new(null, { status: 204 })
   proc = null
   try
     proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'operations.test', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'inherit'
-    await waitFor -> registration?
+    waitFor! -> registration?
     first = registration.upstreams[0].path
     rival = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'operations.test', '--control', controlSocket, '--access-log=off'],
       stdin: 'ignore'
@@ -120,7 +120,7 @@ test! 'hold fences App publication, API replacement, and dings', ->
       stderr: 'ignore'
     eq (await rival.exited), 1
     eq (command!('status', project)).operation, 'Active'
-    eq (await (await unixFetch('/version', first)).json()), { version: 'one' }
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
 
     held = command! 'hold', project
     eq held.operation, 'Held'
@@ -130,7 +130,7 @@ test! 'hold fences App publication, API replacement, and dings', ->
     failed = failedCommand! 'release', project
     eq failed.code, 1
     eq (command!('status', project)).operation, 'Held'
-    eq (await (await unixFetch('/version', first)).json()), { version: 'one' }
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
 
     writeFileSync join(project, 'index.rip'), """
     import { get, start } from '@rip-lang/server'
@@ -140,20 +140,20 @@ test! 'hold fences App publication, API replacement, and dings', ->
     sleep! 300
     eq updates, []
     eq dings, []
-    eq (await (await unixFetch('/version', first)).json()), { version: 'one' }
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
     eq (command!('status', project)).operation, 'Held'
 
     released = command! 'release', project
     eq released.operation, 'Active'
     fresh = updates.at(-1).upstreams[0].path
-    eq (await (await unixFetch('/version', fresh)).json()), { version: 'held-change' }
+    eq ((unixFetch!('/version', fresh)).json!), { version: 'held-change' }
     eq dings.length, 1
     eq dings[0].ding.kind, 'epoch'
-    generated = join project, 'static', 'generated'
-    bundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
-    manifest = JSON.parse readFileSync(join(generated, 'manifest.json'), 'utf8')
-    eq bundle.rash, manifest.rash
-    eq bundle.modules['app/routes/index.rip'], "export changed = true\n"
+    dist = join project, 'dist'
+    bundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    manifest = JSON.parse readFileSync(join(dist, 'manifest.json'), 'utf8')
+    eq bundle.check, manifest.check
+    eq bundle.modules['routes/index.rip'], "export changed = true\n"
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143
@@ -181,17 +181,17 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
-      url = new URL request.url
+      url = URL.new request.url
       if request.method is 'POST' and url.pathname is '/1.0/apps'
-        registration = await request.json()
+        registration = request.json!
         return Response.json({ id: 'migration-registration' }, { status: 201 })
       if request.method is 'PUT'
-        updates.push await request.json()
-        return new Response(null, { status: 204 })
+        updates.push request.json!
+        return Response.new(null, { status: 204 })
       if url.pathname.endsWith('/hub/publish')
-        dings.push ...(await request.json())
+        dings.push ...(request.json!)
         return Response.json({ deliveries: 0 })
-      new Response(null, { status: 204 })
+      Response.new(null, { status: 204 })
 
   diagnostics = []
   startManager = ->
@@ -199,7 +199,7 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'pipe'
-    diagnostics.push new Response(proc.stderr).text()
+    diagnostics.push Response.new(proc.stderr).text()
     proc
 
   operation = (args) ->
@@ -212,7 +212,7 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
   proc = null
   try
     proc = startManager()
-    await waitFor -> registration?
+    waitFor! -> registration?
     command! 'hold', project
     writeFileSync join(project, 'index.rip'), """
     import { get, start } from '@rip-lang/server'
@@ -222,9 +222,9 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
 
     firstId = '11111111111111111111111111111111'
     migrationProc = operation ['migrate', 'models.rip', '--dir', 'migrations', '--id', firstId]
-    migrationError = new Response(migrationProc.stderr).text()
-    await waitFor ->
-      throw new Error("migration exited before cutting admission: #{await migrationError}") if migrationProc.exitCode?
+    migrationError = Response.new(migrationProc.stderr).text()
+    waitFor! ->
+      throw Error.new("migration exited before cutting admission: #{await migrationError}") if migrationProc.exitCode?
       updates.some (update) -> update.upstreams.length is 0
     eq migrationProc.exitCode, null
     writeFileSync join(project, 'index.rip'), """
@@ -234,24 +234,24 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
     start!
     """
     eq (await migrationProc.exited), 0, await migrationError
-    migrated = JSON.parse await new Response(migrationProc.stdout).text()
+    migrated = JSON.parse Response.new(migrationProc.stdout).text!
     eq migrated.operation, 'Active'
-    bell = await waitFor ->
+    bell = waitFor! ->
       update = updates.findLast (candidate) -> candidate.upstreams[0]?.doorbell is true
       update?.upstreams[0]?.path
-    eq (await unixFetch('/ring', bell)).status, 204
-    active = await waitFor ->
+    eq (unixFetch!('/ring', bell)).status, 204
+    active = waitFor! ->
       socket = updates.at(-1)?.upstreams[0]
       socket.path if socket?.path? and not socket.doorbell
-    eq (await (await unixFetch('/version', active)).json()), { version: 'reconciled' }
-    try await unixFetch('/crash', active)
-    replacement = await waitFor ->
+    eq ((unixFetch!('/version', active)).json!), { version: 'reconciled' }
+    try unixFetch!('/crash', active)
+    replacement = waitFor! ->
       socket = updates.at(-1)?.upstreams[0]?.path
       socket if socket? and socket isnt active
-    eq (await (await unixFetch('/version', replacement)).json()), { version: 'reconciled' }
+    eq ((unixFetch!('/version', replacement)).json!), { version: 'reconciled' }
     retry = operation ['migrate', 'models.rip', '--dir', 'migrations', '--id', firstId]
-    eq (await retry.exited), 0, await new Response(retry.stderr).text()
-    eq (JSON.parse(await new Response(retry.stdout).text())).operation, 'Active'
+    eq (await retry.exited), 0, Response.new(retry.stderr).text!
+    eq (JSON.parse(Response.new(retry.stdout).text!)).operation, 'Active'
     eq JSON.parse(readFileSync(join(project, 'db.json'), 'utf8')).history[0].version, '0001'
     eq existsSync(join(project, '.rip', 'server-operation.json')), false
 
@@ -278,7 +278,7 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
     registration = null
     updates = []
     proc = startManager()
-    await waitFor -> registration?
+    waitFor! -> registration?
     eq registration.upstreams, []
     restarted = command! 'status', project
     eq restarted.operation, 'Maintenance'
@@ -289,21 +289,21 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
     eq existsSync(journalPath), true
 
     recoveredProc = operation ['recover', secondId]
-    eq (await recoveredProc.exited), 0, await new Response(recoveredProc.stderr).text()
-    recovered = JSON.parse await new Response(recoveredProc.stdout).text()
+    eq (await recoveredProc.exited), 0, Response.new(recoveredProc.stderr).text!
+    recovered = JSON.parse Response.new(recoveredProc.stdout).text!
     eq recovered.operation, 'Active'
     recoveredSocket = updates.at(-1).upstreams[0].path
-    eq (await (await unixFetch('/version', recoveredSocket)).json()), { version: 'recovered' }
+    eq ((unixFetch!('/version', recoveredSocket)).json!), { version: 'recovered' }
     eq existsSync(journalPath), false
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143
-    output = await diagnostics.at(-1)
+    output = diagnostics.at!(-1)
     ok output.includes("unresolved migration #{secondId}; Maintenance has empty admission")
     proc = null
   finally
     try proc?.kill('SIGTERM')
     await proc.exited if proc?
-    await Promise.all diagnostics
+    Promise.all! diagnostics
     control.stop true
     rmSync dir, { recursive: true, force: true }

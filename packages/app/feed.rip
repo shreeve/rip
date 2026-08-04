@@ -2,7 +2,7 @@
 # Workspace feed — hash hints over Hub, latest bytes over HTTP
 # ==============================================================================
 
-import { rash } from './rash.rip'
+import { rash, check } from './rash.rip'
 
 export type Feed =
   close: () => void
@@ -15,6 +15,7 @@ export type ConnectFeedOpts =
   fetch?: (url: string, opts?: Record<string, unknown>) => Promise<any>
   moduleUrl?: (id: string) => string
   manifestUrl?: string
+  initialCheck?: string
   report?: (...args: any[]) => void
   onEpoch?: (ding: Record<string, unknown>) => void
   backoff?: { min?: number, max?: number }
@@ -24,30 +25,34 @@ FEED_BACKOFF_MAX = 8000
 
 defaultHubUrl = ->
   if typeof location is 'undefined'
-    throw new Error 'Rip Workspace: connectFeed needs a hub URL (no location to derive one from)'
+    throw Error.new 'Rip Workspace: connectFeed needs a hub URL (no location to derive one from)'
   scheme = if location.protocol is 'https:' then 'wss' else 'ws'
   "#{scheme}://#{location.host}/hub"
 
 defaultSocketFactory = ->
   if typeof WebSocket is 'undefined'
-    throw new Error 'Rip Workspace: connectFeed needs a socket factory (no global WebSocket)'
-  (url) -> new WebSocket(url)
+    throw Error.new 'Rip Workspace: connectFeed needs a socket factory (no global WebSocket)'
+  (url) -> WebSocket.new(url)
 
 defaultFetch = ->
   if typeof fetch is 'undefined'
-    throw new Error 'Rip Workspace: connectFeed needs a fetch (no global fetch)'
+    throw Error.new 'Rip Workspace: connectFeed needs a fetch (no global fetch)'
   (url, opts) -> fetch(url, opts)
 
 defaultModuleUrl = (id) ->
-  path = if id.startsWith('app/') then id.slice('app/'.length) else id
-  '/' + path.split('/').map(encodeURIComponent).join('/')
+  '/' + id.split('/').map(encodeURIComponent).join('/')
 validWireHash = (hash) -> typeof hash is 'string' and /^[A-Za-z0-9_]{6}$/.test(hash)
+validFileId = (id) ->
+  return false unless typeof id is 'string' and id.length > 0 and not id.startsWith('/') and not id.includes('\\')
+  segments = id.split '/'
+  return false if segments.some((segment) -> not segment or segment is '.' or segment is '..' or segment.startsWith('.'))
+  id.endsWith('.rip') or id.endsWith('.css') or id.endsWith('.html')
 
 export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
   unless workspace? and typeof workspace.set is 'function' and typeof workspace.passport is 'function' and typeof workspace.sealed is 'function'
-    throw new TypeError 'Rip Workspace: connectFeed expects a workspace'
+    throw TypeError.new 'Rip Workspace: connectFeed expects a workspace'
   if workspace.sealed()
-    throw new Error 'Rip Workspace: connectFeed on a sealed workspace — production has no hub'
+    throw Error.new 'Rip Workspace: connectFeed on a sealed workspace — production has no hub'
 
   hubUrl = opts.hub ?? defaultHubUrl()
   makeSocket = opts.makeSocket ?? defaultSocketFactory()
@@ -69,6 +74,9 @@ export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
   timer = null
   resyncTimer = null
   resyncAttempts = 0
+  lastCheck = opts.initialCheck ?? null
+  unless lastCheck is null or validWireHash(lastCheck)
+    throw TypeError.new 'Rip Workspace: feed initialCheck must be six Base64URL-folded characters'
   wants = {}       # id → { hash, sig }: hint not yet healed
   owners = {}      # id → request/apply owner token
 
@@ -82,9 +90,9 @@ export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
   fetchLatest = (id, owner) ->
     res = fetchBytes! moduleUrl(id), { cache: 'no-store' }
     return { res } unless res.ok
-    bytes = new Uint8Array(res.arrayBuffer!())
+    bytes = Uint8Array.new(res.arrayBuffer!)
     return null unless owns(id, owner)
-    { res, hash: rash(bytes), source: new TextDecoder().decode(bytes) }
+    { res, hash: rash(bytes), source: TextDecoder.new().decode(bytes) }
 
   applyLatest = (id, owner) ->
     result = fetchLatest! id, owner
@@ -121,17 +129,25 @@ export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
       report "[Rip] workspace feed: manifest fetch failed (#{res.status})"
       scheduleResync()
       return
-    manifest = res.json!()
+    manifest = res.json!
     files = manifest?.files
-    unless Array.isArray files
+    unless manifest? and typeof manifest is 'object' and not Array.isArray(manifest) and validWireHash(manifest.check) and Array.isArray(files)
       report '[Rip] workspace feed: malformed manifest:', manifest
       return
-    named = new Set()
+    priorId = null
     for entry in files
-      unless entry? and typeof entry.id is 'string' and validWireHash(entry.hash)
+      unless entry? and typeof entry is 'object' and not Array.isArray(entry) and validFileId(entry.id) and validWireHash(entry.hash) and (priorId is null or priorId < entry.id)
         report '[Rip] workspace feed: malformed manifest entry:', entry
-        clean = false
-        continue
+        return
+      priorId = entry.id
+    unless check(files) is manifest.check
+      report '[Rip] workspace feed: manifest check does not match its files:', manifest
+      return
+    if manifest.check is lastCheck and Object.keys(wants).length is 0
+      resyncAttempts = 0
+      return
+    named = Set.new()
+    for entry in files
       named.add entry.id
       current = workspace.passport entry.id
       continue if current? and current.hash is entry.hash
@@ -163,6 +179,7 @@ export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
           want.sig = sig
       else unless result?.stale
         clean = false
+    lastCheck = manifest.check
     if clean and wantsSatisfied()
       resyncAttempts = 0
     else
@@ -173,7 +190,7 @@ export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
     if ding? and typeof ding is 'object' and ding.kind is 'epoch'
       onEpoch ding
       return
-    unless ding? and typeof ding is 'object' and typeof ding.id is 'string'
+    unless ding? and typeof ding is 'object' and validFileId(ding.id)
       report '[Rip] workspace feed: malformed ding:', ding
       return
     { id, kind, hash } = ding
@@ -192,7 +209,7 @@ export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
     return if result?.stale or result?.ok
     report "[Rip] workspace feed: module fetch missed (#{result?.status}) for '#{id}' — resyncing from the manifest"
     wants[id] = { hash, sig: null }
-    resync!()
+    resync!
     return
 
   handleFrame = (text) ->

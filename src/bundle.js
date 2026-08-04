@@ -14,8 +14,8 @@
 // pattern `import { UserPublic as User } from '../api/models.rip'`).
 // With `moduleFiles` + `appDir`, extractClientProjections overlays the
 // shippable shapes at the natural store path (`api/models.rip`) — the
-// author's relative specifier is unchanged; relative resolution finds
-// the overlay. :model / behavior refuse loudly.
+// author's relative specifier is unchanged; the browser loader resolves
+// it through the hidden physical App mount. :model / behavior refuse loudly.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { compile } from './compile.js';
@@ -69,7 +69,8 @@ const importedBindingNames = (clause) => {
 
 // Overlay shippable projections at the project-relative path of the
 // server file (`api/models.rip`). Importers keep `from '../api/models.rip'`;
-// the loader's relative join lands on that key. Mutates `modules` in place.
+// the loader's hidden-mount resolution lands on that key. Mutates `modules`
+// in place.
 const materializeSharedSchemas = (modules, moduleFiles, appDir) => {
   const absToStore = new Map();
   for (const [store, abs] of Object.entries(moduleFiles)) {
@@ -180,7 +181,11 @@ export function assembleBundle({ modules, packagesDir, data = null, moduleFiles 
     };
     for (const file of ripFilesUnder(root)) {
       const relativePath = file.slice(root.length + 1);
-      bundle.modules[`${name}/${relativePath}`] = readFileSync(file, 'utf8');
+      const key = `${name}/${relativePath}`;
+      if (bundle.modules[key] != null) {
+        throw new Error(`rip: App module '${key}' collides with browser package '${name}'`);
+      }
+      bundle.modules[key] = readFileSync(file, 'utf8');
     }
   };
 

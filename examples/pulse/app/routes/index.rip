@@ -12,7 +12,7 @@ export Home = component
   # only cause a harmless refetch, so the server stays authoritative.
   mounted: ->
     scheme = if location.protocol is 'https:' then 'wss' else 'ws'
-    ws = new WebSocket "#{scheme}://#{location.host}/hub"
+    ws = WebSocket.new "#{scheme}://#{location.host}/hub"
     ws.onopen = -> ws.send JSON.stringify '+': ['/pulse']
     ws.onmessage = (event) ->
       frame = JSON.parse event.data

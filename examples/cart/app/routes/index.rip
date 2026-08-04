@@ -23,7 +23,7 @@ export Products = component
 
   setQuery: (opts: { search?: string, sort?: string }) ->
     next = { ...@router.query, ...opts }
-    params = new URLSearchParams()
+    params = URLSearchParams.new()
     for key, val of next when val
       params.set(key, val)
     queryString = params.toString()

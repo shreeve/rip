@@ -26,7 +26,7 @@ SIGNALS =! Symbol 'rip.app.stash.signals'
 KEYS =! Symbol 'rip.app.stash.keys'
 DEFAULTS =! Symbol 'rip.app.stash.defaults'
 PURGE =! :rip.app.stash.purge
-PROXIES =! new WeakMap()
+PROXIES =! WeakMap.new()
 keysVersion = 0
 
 # One write-version signal across every stash: persistence debounces on
@@ -38,7 +38,7 @@ touchVersion = -> _stashVersion.value++
 signalFor = (target, prop) ->
   signals = target[SIGNALS]
   unless signals
-    signals = new Map()
+    signals = Map.new()
     Object.defineProperty target, SIGNALS, value: signals
   signal = signals.get prop
   unless signal
@@ -93,7 +93,7 @@ writeLiteral = (target, prop, value) ->
   current = raw[prop]
   if _isSourceCell(current) and not _isSourceCell(value)
     if _isSourceFamily current
-      throw new TypeError "Rip App: cannot assign a value to keyed source '#{String(prop)}'; use cellFor(key).write(value)"
+      throw TypeError.new "Rip App: cannot assign a value to keyed source '#{String(prop)}'; use cellFor(key).write(value)"
     current.write if value?[RAW] then value[RAW] else value
     return value
 
@@ -112,7 +112,7 @@ writeLiteral = (target, prop, value) ->
 
 pathParts = (path) ->
   unless typeof path is 'string' and path.length > 0
-    throw new TypeError 'Rip App: stash path must be a non-empty string'
+    throw TypeError.new 'Rip App: stash path must be a non-empty string'
   parts = []
   index = 0
 
@@ -121,7 +121,7 @@ pathParts = (path) ->
     index++ while index < path.length and path[index] isnt '.' and path[index] isnt '/' and path[index] isnt '['
     part = path.slice start, index
     if not part or /\s/.test(part)
-      throw new TypeError "Rip App: malformed stash path '#{path}'"
+      throw TypeError.new "Rip App: malformed stash path '#{path}'"
     parts.push part
 
   while index < path.length
@@ -132,7 +132,7 @@ pathParts = (path) ->
       index++ while index < path.length and path[index] isnt '.' and path[index] isnt '/' and path[index] isnt '['
       part = path.slice start, index
       if not part or /\s/.test(part)
-        throw new TypeError "Rip App: malformed stash path '#{path}'"
+        throw TypeError.new "Rip App: malformed stash path '#{path}'"
       parts.push part
     else if marker is '['
       index++
@@ -142,11 +142,11 @@ pathParts = (path) ->
         start = index
         index++ while index < path.length and path[index] isnt quote
         if index >= path.length or index is start
-          throw new TypeError "Rip App: malformed stash path '#{path}'"
+          throw TypeError.new "Rip App: malformed stash path '#{path}'"
         part = path.slice start, index
         index++
         unless path[index] is ']'
-          throw new TypeError "Rip App: malformed stash path '#{path}'"
+          throw TypeError.new "Rip App: malformed stash path '#{path}'"
         index++
         parts.push part
       else
@@ -154,11 +154,11 @@ pathParts = (path) ->
         index++ while index < path.length and path[index] isnt ']'
         part = path.slice start, index
         unless /^[-+]?\d+$/.test(part) and path[index] is ']'
-          throw new TypeError "Rip App: malformed stash path '#{path}'"
+          throw TypeError.new "Rip App: malformed stash path '#{path}'"
         index++
         parts.push +part
     else
-      throw new TypeError "Rip App: malformed stash path '#{path}'"
+      throw TypeError.new "Rip App: malformed stash path '#{path}'"
 
   parts
 
@@ -192,7 +192,7 @@ writePath = (proxy, path, value) ->
         writeLiteral target, part, (if typeof nextPart is 'number' then [] else {})
         nested = readLiteral target, part
       unless nested? and typeof nested is 'object'
-        throw new TypeError "Rip App: cannot write through non-object stash path segment '#{part}'"
+        throw TypeError.new "Rip App: cannot write through non-object stash path segment '#{part}'"
       target = nested
   value
 
@@ -225,12 +225,12 @@ sourceHandle = (raw, path, key) ->
       cell = value
       break
   unless cell
-    throw new Error "Rip App: source('#{path}') does not resolve to a source key — declare it with source() in app/stash.rip"
+    throw Error.new "Rip App: source('#{path}') does not resolve to a source key — declare it with source() in app/stash.rip"
   if _isSourceFamily cell
-    throw new Error "Rip App: keyed source('#{path}') requires a key — source('#{path}', key)" unless key?
+    throw Error.new "Rip App: keyed source('#{path}') requires a key — source('#{path}', key)" unless key?
     cell = cell.cellFor key
   else if key?
-    throw new Error "Rip App: source('#{path}') is not keyed — drop the key argument"
+    throw Error.new "Rip App: source('#{path}') is not keyed — drop the key argument"
   handle = { refetch: cell.refetch, reset: cell.reset }
   Object.defineProperty handle, 'value',
     get: -> cell.read()
@@ -357,7 +357,7 @@ stashMethod = (proxy, raw, prop) ->
   if prop is 'join'
     return (path, obj) ->
       unless obj? and typeof obj is 'object' and not Array.isArray(obj)
-        throw new TypeError 'Rip App: join expects a plain object'
+        throw TypeError.new 'Rip App: join expects a plain object'
       __batch ->
         target = readPath proxy, path
         unless target? and typeof target is 'object' and not Array.isArray(target)
@@ -403,7 +403,7 @@ stashMethod = (proxy, raw, prop) ->
   if prop is 'reset'
     return ->
       restoreDefaults proxy, raw
-      resetSources raw, new WeakSet()
+      resetSources raw, WeakSet.new()
       raw[PURGE]?()
       return
   if prop is 'source' then return (path, key) -> sourceHandle raw, path, key
@@ -445,15 +445,15 @@ makeProxy = (target) ->
       keysSignal(raw).value
       Reflect.ownKeys raw
 
-  proxy = new Proxy target, handler
+  proxy = Proxy.new target, handler
   PROXIES.set target, proxy
   proxy
 
 export def createStash<D extends Record<string, any>>(data: D = {}): Stash<D>
   unless data? and typeof data is 'object' and not Array.isArray(data)
-    throw new TypeError 'Rip App: createStash expects a plain object'
+    throw TypeError.new 'Rip App: createStash expects a plain object'
   unless Object.getPrototypeOf(data) is Object.prototype or Object.getPrototypeOf(data) is null
-    throw new TypeError 'Rip App: createStash expects a plain object'
+    throw TypeError.new 'Rip App: createStash expects a plain object'
   makeProxy data
 
 export def unwrapStash<D extends Record<string, any>>(stash: Stash<D>): D

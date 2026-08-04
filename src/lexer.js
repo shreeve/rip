@@ -327,7 +327,7 @@ const TYPE_STARTERS = new Set([
 ]);
 
 const RUN_OPENERS = new Set(['(', 'CALL_START', 'PARAM_START', '[', 'INDEX_START', '{', 'PICK_START', 'OPTPICK_START']);
-const RUN_CLOSERS = new Set([')', 'CALL_END', 'PARAM_END', ']', 'INDEX_END', '}', 'PICK_END']);
+export const RUN_CLOSERS = new Set([')', 'CALL_END', 'PARAM_END', ']', 'INDEX_END', '}', 'PICK_END']);
 
 // Depth-0 enders of every type run. `=` ends a typed declaration's or
 // typed default param's annotation — the reactive assign heads (`:=`,
@@ -336,7 +336,7 @@ const RUN_CLOSERS = new Set([')', 'CALL_END', 'PARAM_END', ']', 'INDEX_END', '}'
 // `h: Function ~> body`); `->` is the arrow
 // operator (a function TYPE spells `=>`, which stops only in
 // arrow-return position).
-const RUN_STOPS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', ',', '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN', 'GATE', 'EFFECT', '->']);
+export const RUN_STOPS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', ',', '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN', 'GATE', 'EFFECT', '->']);
 
 // Extra depth-0 stops for the cast's type run: the postfix cast lives
 // inside a larger expression, so any binary/relational/ternary operator
@@ -344,12 +344,18 @@ const RUN_STOPS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', ',', '=', 'COMPOUN
 // type operators, so `x as A | B` reads `x as (A | B)`, as in TS) —
 // and so does any statement-clause keyword: a trailing clause never
 // swallows into the type string, so `y = x as T if c` keeps its
-// guard.
-const CAST_STOPS = new Set([
-  '+', '-', 'MATH', '**', 'SHIFT', 'COMPARE', '&&', '||', '??', '^',
-  'RELATION', 'TERNARY', '?', 'PRESENCE', ':', '?.', 'DAMMIT', 'EXTENDS',
+// guard. Depth-0 range dots are code operators too, both spellings
+// (`[a as T..b]`, `[a as T...b]`); a tuple's `...` rest sits at
+// bracket depth, untouched. Gated against the grammar by
+// test/toolchain/cast-stops.test.js: every terminal the parser can
+// accept after an Expression must stop the run or be a named
+// continuation there.
+export const CAST_STOPS = new Set([
+  '+', '-', 'MATH', '**', 'SHIFT', 'COMPARE', 'MATCH', '&&', '||', '??',
+  '^', 'RELATION', 'TERNARY', '?', 'PRESENCE', ':', '?.', 'DAMMIT',
+  'EXTENDS', '..', '...',
   'IF', 'UNLESS', 'ELSE', 'THEN', 'WHILE', 'UNTIL', 'LOOP', 'FOR',
-  'WHEN', 'BY', 'SWITCH', 'RETURN', 'THROW', 'CATCH',
+  'WHEN', 'BY', 'SWITCH', 'RETURN', 'THROW', 'CATCH', 'FINALLY',
 ]);
 
 // Statement-clause keywords that end a TYPE ALIAS's right-hand run at
@@ -2252,7 +2258,7 @@ const UNFINISHED = new Set([
 // DAMMIT is callable: `f!(1, 2)` calls (and awaits) f. DYNAMIC_IMPORT
 // exists only when a '(' or '!(' follows (the lexer mints it from that
 // lookahead), so `import(url)` and `import!(url)` are real calls.
-const CALLABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', 'NUMBER', 'STRING', ']', 'INDEX_END', 'SUPER', 'DAMMIT', 'DYNAMIC_IMPORT']);
+const CALLABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', 'NUMBER', 'STRING', ']', 'INDEX_END', 'SUPER', 'DAMMIT', 'PRESENCE', 'DYNAMIC_IMPORT']);
 
 // Token kinds after which an unspaced '[' indexes rather than opening an
 // array literal (the scan-time rule: !prev.spaced && INDEXABLE.has(prev)).
@@ -3407,7 +3413,8 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // Spaced '?' is the ternary operator. Unspaced: '?(' and '?['
       // are the optional call/index (the dotless '?.' spelling), '?!'
       // directly after a value-ending token is the postfix presence
-      // check (`a?!` → `a ? true : undefined` — the Houdini operator),
+      // check when bare (`a?!` → `a ? true : undefined`) and maybe
+      // dammit when followed by arguments (`f?!(x)` → `await f?.(x)`),
       // and a '?' directly after a value-ending token is the postfix
       // existence check (`a?` → `a != null`) — real tokens and nodes.
       // A juxta argument after that existence token (`f? x`) is an
@@ -4072,12 +4079,12 @@ export function implicitBlocks(tokens, mintId) {
 // call so the comprehension wraps it. Inserted CALL_START/CALL_END are
 // generated zero-width tokens anchored at the argument extent's edges,
 // so call spans stay honest.
-// Postfix existence `?` is callable the same way DAMMIT is: a spaced
-// argument after `f?` opens an implicit optional call (`f? x` → the
-// same shape as `f?(x)`). Bare `f?` (no juxta arg) stays existence —
-// the grammar's `Value ?` vs `Value ? Arguments` split, with CALL_START
-// above `?` in precedence, owns that fork.
-const IMPLICIT_FUNC = new Set(['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS', 'DAMMIT', '?']);
+// Postfix existence `?` and maybe dammit `?!` are callable the same
+// way DAMMIT is: a spaced argument after either opens an implicit call
+// (`f? x` is optional; `f?! x` also awaits). Without an argument the
+// tokens keep their postfix operations: existence for `?`, presence for
+// `?!`. The grammar productions own both forks.
+const IMPLICIT_FUNC = new Set(['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS', 'DAMMIT', '?', 'PRESENCE']);
 const IMPLICIT_CALL_STARTERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_START', 'REGEX', 'HEREGEX_START', 'SYMBOL', 'MAP_START',
   'PARAM_START', 'IF', 'TRY', 'SWITCH', 'CLASS', 'THIS', 'SUPER',

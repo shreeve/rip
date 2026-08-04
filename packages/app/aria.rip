@@ -47,11 +47,11 @@ export def ownsAnchor(router: any, anchor: any): boolean
 
 browserHost = ->
   unless typeof document isnt 'undefined' and typeof document.querySelectorAll is 'function'
-    throw new Error 'Rip App: ariaCurrent requires a browser or an injected host'
+    throw Error.new 'Rip App: ariaCurrent requires a browser or an injected host'
   anchors: -> Array.from document.querySelectorAll('a[href]')
   observe: (fn) ->
     scheduled = false
-    observer = new MutationObserver ->
+    observer = MutationObserver.new ->
       return if scheduled
       scheduled = true
       requestAnimationFrame ->
@@ -66,9 +66,9 @@ browserHost = ->
 
 export def ariaCurrent(router: any, host: { anchors: () => any[], observe?: (fn: () => void) => () => void } = null): () => void
   unless router? and typeof router.claims is 'function'
-    throw new TypeError 'Rip App: ariaCurrent requires a router'
+    throw TypeError.new 'Rip App: ariaCurrent requires a router'
   host: any = host ?? browserHost()
-  owned = new WeakSet()
+  owned = WeakSet.new()
 
   markCurrent = ->
     current = router.path

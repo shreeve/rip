@@ -10,7 +10,7 @@ Full-featured Vim plugin for the [Rip](https://github.com/shreeve/rip) programmi
 
 - **Syntax highlighting** — keywords, strings, numbers, operators, types, built-ins, comments
 - **String interpolation** — `#{}` and `${}` with nested brace support
-- **Function calls** — `fetch(`, `.json(`, and dammit calls (`name!`)
+- **Function calls** — `fetch(`, `.json(`, dammit (`name!`), and maybe dammit (`name?!()`)
 - **Object keys** — `method:` and `optional?:` highlighting
 - **Assignment variables** — `x = 5` highlights the variable name
 - **Function definitions** — `def name`, `name = ->`, and `name: ->`

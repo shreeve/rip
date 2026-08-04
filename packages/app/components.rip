@@ -15,33 +15,33 @@ export type ComponentsStore =
 
 validPath = (path) ->
   unless typeof path is 'string' and path.length > 0
-    throw new TypeError 'Rip App: component path must be a non-empty string'
+    throw TypeError.new 'Rip App: component path must be a non-empty string'
   segments = path.split '/'
   invalidSegment = segments.some (segment) -> not segment or segment is '.' or segment is '..'
   filename = segments[-1]
   fileAsDirectory = segments.slice(0, -1).some (segment) -> segment.endsWith '.rip'
   if path.includes('\\') or invalidSegment or fileAsDirectory or filename is '.rip' or not filename.endsWith('.rip')
-    throw new TypeError "Rip App: invalid component path '#{path}'"
+    throw TypeError.new "Rip App: invalid component path '#{path}'"
   path
 
 validContent = (content) ->
   unless typeof content is 'string'
-    throw new TypeError 'Rip App: component source must be a string'
+    throw TypeError.new 'Rip App: component source must be a string'
   content
 
 validDirectory = (dir) ->
   return '' if dir is '' or not dir?
   unless typeof dir is 'string'
-    throw new TypeError 'Rip App: component directory must be a string'
+    throw TypeError.new 'Rip App: component directory must be a string'
   segments = dir.split '/'
   if dir.includes('\\') or segments.some((segment) -> not segment or segment is '.' or segment is '..')
-    throw new TypeError "Rip App: invalid component directory '#{dir}'"
+    throw TypeError.new "Rip App: invalid component directory '#{dir}'"
   dir
 
 export def createComponents(): ComponentsStore
-  files = new Map()
-  compiled = new Map()
-  watchers = new Set()
+  files = Map.new()
+  compiled = Map.new()
+  watchers = Set.new()
 
   notify = (event, path) ->
     for watcher in Array.from(watchers)
@@ -94,7 +94,7 @@ export def createComponents(): ComponentsStore
 
     load: (sources) ->
       unless sources? and typeof sources is 'object' and not Array.isArray(sources)
-        throw new TypeError 'Rip App: component load expects a source object'
+        throw TypeError.new 'Rip App: component load expects a source object'
       for own path, content of sources
         path = validPath path
         content = validContent content
@@ -104,7 +104,7 @@ export def createComponents(): ComponentsStore
 
     watch: (fn) ->
       unless typeof fn is 'function'
-        throw new TypeError 'Rip App: component watch expects a function'
+        throw TypeError.new 'Rip App: component watch expects a function'
       watchers.add fn
       disposed = false
       ->
@@ -119,7 +119,7 @@ export def createComponents(): ComponentsStore
     setCompiled: (path, module) ->
       path = validPath path
       unless module? and typeof module is 'object' and not Array.isArray(module)
-        throw new TypeError 'Rip App: compiled component module must be an object'
+        throw TypeError.new 'Rip App: compiled component module must be an object'
       compiled.set path, module
       return
 

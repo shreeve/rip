@@ -1,0 +1,70 @@
+import { existsSync, lstatSync, mkdirSync, realpathSync, statSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+
+# Project identity and private manager discovery are shared by the direct
+# `rip server` surface and the per-user appliance. One canonical root must
+# always select one manager socket, regardless of which client asks.
+
+export resolveProject = (input, label = 'rip-server') ->
+  if input?
+    given = resolve input
+    abort "#{label}: project not found: #{input}" unless existsSync given
+    path = realpathSync given
+    unless statSync(path).isDirectory()
+      root = dirname path
+      return { root, entry: path, appRoot: (if existsSync(join(root, 'app')) then join(root, 'app') else null) }
+    starts = [path]
+  else
+    starts = []
+    at = realpathSync process.cwd()
+    loop
+      starts.push at
+      parent = dirname at
+      break if parent is at
+      at = parent
+  for root in starts
+    entry = null
+    for name in ['app.rip', 'index.rip']
+      candidate = join root, name
+      if existsSync candidate
+        entry = realpathSync candidate
+        break
+    appRoot = join root, 'app'
+    serve = join root, 'serve.rip'
+    return { root, entry, appRoot: (if existsSync(appRoot) then realpathSync(appRoot) else null) } if entry? or existsSync(appRoot) or existsSync(serve)
+  if input?
+    abort "#{label}: #{input} has no API entry, app/ directory, or serve.rip"
+  abort "#{label}: no App — pass a project, or create app.rip, index.rip, app/, or serve.rip here or above"
+
+export managerRuntime = (root, label = 'rip-server') ->
+  abort "#{label}: manager control requires a POSIX user identity" unless typeof process.getuid is 'function'
+  uid = process.getuid()
+  key = Bun.CryptoHasher.new('sha256').update(root).digest('hex').slice 0, 16
+  directory = join tmpdir(), "rip-managers-#{uid}"
+  try
+    mkdirSync directory, { mode: 0o700 }
+  catch error
+    throw error unless error?.code is 'EEXIST'
+  info = lstatSync directory
+  abort "#{label}: unsafe manager runtime path (not a directory): #{directory}" unless info.isDirectory() and not info.isSymbolicLink()
+  abort "#{label}: unsafe manager runtime ownership at #{directory}" unless info.uid is uid
+  mode = info.mode & 0o777
+  abort "#{label}: unsafe manager runtime permissions at #{directory}: expected 0700" unless mode is 0o700
+  { socket: join(directory, "#{key}.sock"), owner: join(directory, "#{key}.json") }
+
+export managerRequest = (socket, method, path, body = null) ->
+  options = { method, unix: socket }
+  if body?
+    options.body = JSON.stringify body
+    options.headers = { 'content-type': 'application/json' }
+  fetch "http://manager#{path}", options
+
+export waitManagerStopped = (socket) ->
+  loop
+    sleep! 10
+    try
+      response = managerRequest! socket, 'GET', '/status'
+      response.text!
+    catch
+      return

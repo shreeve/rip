@@ -88,8 +88,8 @@ serve = (args, cwd = fixtures) ->
     catch
       sleep! 50
   exitCode = await proc.exited
-  stdout = new Response(proc.stdout).text!
-  stderr = new Response(proc.stderr).text!
+  stdout = Response.new(proc.stdout).text!
+  stderr = Response.new(proc.stderr).text!
   { html, headers, stdout, stderr, exitCode }
 
 # ==[ Package surface ]==
@@ -99,7 +99,7 @@ console.log "\nPackage"
 test "a pure CLI: importing the module rejects loudly", ->
   guard = write scratch(), 'guard.rip', [
     'try'
-    "  await import('#{printRip}')"
+    "  import!('#{printRip}')"
     "  p 'no-throw'"
     'catch e'
     '  p "guarded: #{e.message}"'
@@ -207,6 +207,13 @@ test! "a single file gets no TOC and a top-only nav", ->
   ok not html.includes('<div class="toc">')
   ok html.includes('<span class="nav"><a href="#top">&uarr; top</a></span>')
 
+test! "inline try/finally highlights through the shared grammar", ->
+  dir = scratch()
+  write dir, 'inline.rip', 'try fsyncSync(directory) finally closeSync(directory)\n'
+  { html } = serve! ['inline.rip'], dir
+  ok html.includes('<span class="hljs-keyword">try</span>')
+  ok html.includes('<span class="hljs-keyword">finally</span>')
+
 test! "-d selects the dark palette and theme", ->
   { html } = serve! ['-d', 'hello.rip']
   ok html.includes(':root { --bg: #0d1117; --fg: #e6edf3; --hdr: #161b22; --brd: #30363d; --gut: #161b22; --act: #30363d; }')
@@ -307,11 +314,12 @@ test! "-d force-darkens the document and drops the media query", ->
 
 console.log "\nShared grammar"
 
-test! "word arrays and symbol literals highlight", ->
+test! "word arrays, symbols, Houdini, and maybe dammit highlight", ->
   # These two behaviors exist only in the shared grammar: the declared
   # divergence from v3, whose embedded copy left %w[] and :symbols plain.
   dir = scratch()
-  write dir, 'gram.rip', 'tags = %w[alpha beta]\nkind = :friendly\n'
+  write dir, 'gram.rip', 'tags = %w[alpha beta]\nkind = :friendly\npresent = value?!\nresult = callback?!()\n'
   { html } = serve! ['gram.rip'], dir
   ok html.includes('<span class="hljs-string">%w[alpha beta]</span>')
   ok html.includes('<span class="hljs-symbol">:friendly</span>')
+  eq html.match(/<span class="hljs-operator">\?!<\/span>/g).length, 2

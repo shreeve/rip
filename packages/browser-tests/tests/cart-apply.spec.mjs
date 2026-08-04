@@ -50,7 +50,7 @@ test.describe('cart Probe 1 apply', () => {
       expect(frames.length).toBeGreaterThan(0);
       const last = JSON.parse(frames[frames.length - 1]);
       expect(Object.keys(last)).toEqual(['ding']);
-      expect(last.ding.id).toBe('app/routes/index.rip');
+      expect(last.ding.id).toBe('routes/index.rip');
       expect(typeof last.ding.hash).toBe('string');
       expect(frames[frames.length - 1].includes(stamp)).toBe(false);
     } finally {
@@ -115,7 +115,7 @@ test.describe('cart Probe 1 apply', () => {
       const frames = await (await fetch(`${HARNESS}/__test/frames`)).json();
       expect(frames.length).toBeGreaterThan(0);
       const last = JSON.parse(frames[frames.length - 1]);
-      expect(last.ding.id).toBe('app/index.html');
+      expect(last.ding.id).toBe('index.html');
       expect(typeof last.ding.hash).toBe('string');
       expect(last.ding.kind).toBeUndefined();
     } finally {
@@ -154,7 +154,7 @@ test.describe('cart Probe 1 apply', () => {
         return href.startsWith('/styles.css?hash=') && link?.disabled !== true;
       })).toBe(true);
       expect(await page.evaluate(() =>
-        !document.querySelector('style[data-rip-css="app/styles.css"]'))).toBe(true);
+        !document.querySelector('style[data-rip-css="styles.css"]'))).toBe(true);
       expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
       expect(await page.evaluate(() => document.querySelector('nav')?.__layoutSentinel)).toBe('alive');
       await expect(page.locator('nav')).toContainText('Cart (1)');
@@ -163,7 +163,7 @@ test.describe('cart Probe 1 apply', () => {
       expect(frames.length).toBeGreaterThan(0);
       const last = JSON.parse(frames[frames.length - 1]);
       expect(Object.keys(last)).toEqual(['ding']);
-      expect(last.ding.id).toBe('app/styles.css');
+      expect(last.ding.id).toBe('styles.css');
       expect(typeof last.ding.hash).toBe('string');
       expect(last.ding.kind).toBeUndefined();
       expect(frames[frames.length - 1].includes('--rip-s12')).toBe(false);

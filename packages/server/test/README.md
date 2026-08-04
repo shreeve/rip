@@ -9,13 +9,14 @@ Order:
 1. `framework` — public routing, response, validation, and context contract.
 2. `hello-api` — one API artifact, worker, route, and clean shutdown.
 3. `workers` — readiness, concurrency, draining, failure, and recycling.
-4. `hello-app` — one browser App with no API workers.
+4. `hello` — one browser App with no API workers.
 5. `reloads` — App updates and API pool replacement.
 6. `operations` — hold, release, migration, and recovery.
 7. `manager-boundary` — declaration, finite file policy, and standalone browse.
 8. `middleware` — application-owned request policy.
 9. `monitor` — Janus access protocol, framing, formatting, and foreground output.
-10. `janus` — the released Janus data plane and control plane.
+10. `appliance` — the private Rip Agent plus `rip app` / `rip edge` lifecycle.
+11. `janus` — the released Janus data plane and control plane.
 
 Code enters `@rip-lang/server` only when one of these fixtures demonstrates why
 the server, rather than Janus, Caddy, or application code, must own it.
