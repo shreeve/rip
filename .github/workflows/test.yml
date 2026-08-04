@@ -1,12 +1,16 @@
 # CI — the full suite on every push and pull request to main.
 #
-# Two independent jobs. `test` is the verdict: every suite test:all
-# carries, plus the byte gates — healthy in ~4 minutes. `browser` is the
-# real-browser certification, isolated because its slow part is not ours:
-# `playwright install --with-deps` runs an apt install the browser cache
-# cannot cover, and a throttled Ubuntu mirror can stretch it past 20
-# minutes — a stall that must not sit between a green verdict and its
-# report.
+# Three independent jobs. `test` is the verdict: every suite test:all
+# carries, plus the byte gates — healthy in ~4 minutes. `audit` is the
+# corpus audit's contract (test/audit/runner.js), its own job so a
+# grammar change that owes an ownership decision paints the push that
+# made it — the audit deliberately stays outside test:all (see
+# test/audit/ROADMAP.md), so nothing else watches its exit code.
+# `browser` is the real-browser certification, isolated because its
+# slow part is not ours: `playwright install --with-deps` runs an apt
+# install the browser cache cannot cover, and a throttled Ubuntu mirror
+# can stretch it past 20 minutes — a stall that must not sit between a
+# green verdict and its report.
 name: test
 
 on:
@@ -70,6 +74,35 @@ jobs:
         run: |
           bun run browser-bundle
           git diff --exit-code dist/browser
+
+  # The corpus audit: the grammar/mapping/type/hover/token contract over
+  # test/audit, judged by its exit code. Parallel to `test` so its
+  # verdict stands on its own — a contract break names itself instead of
+  # sitting behind (or in front of) the suite's report.
+  audit:
+    runs-on: ubuntu-latest
+    # Healthy ~2 minutes: a ~30s audit behind two frozen installs.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Bun (pinned to match the test job)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install (workspace root — the audit drives this checkout's compiler and tsgo)
+        run: bun install --frozen-lockfile
+
+      # test/audit is not a workspace member: its fixture corpus pins its
+      # own dependencies in its own lockfile, so it installs from its own
+      # directory.
+      - name: Install the fixture corpus (test/audit's own lockfile)
+        working-directory: test/audit
+        run: bun install --frozen-lockfile
+
+      - name: Corpus audit — the contract must hold
+        run: bun run audit
 
   # The one suite test:all does not carry: it needs real browsers, which
   # a local checkout is not required to have. Parallel to `test`, so its
