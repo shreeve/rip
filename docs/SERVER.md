@@ -553,8 +553,10 @@ cheap. This policy remains the same when watching is disabled.
 
 ### 4. Live Rip source
 
-Files such as `/app/routes/home.rip` are latest-wins App bag members. A browser
-whose current hash differs from a ding fetches the file with
+Files such as `app/routes/home.rip` are latest-wins App bag members. With the
+conventional `app/` file root, that member's ordinary public URL is
+`/routes/home.rip`. A browser whose current hash differs from a ding fetches
+the file with
 `cache: "no-store"`, computes `rash` from the bytes actually received, and
 applies that hash and source. The Workspace is already the useful source cache,
 so a second HTTP cache adds no value.

@@ -406,7 +406,7 @@ Probe 0 observables (honesty bar, not a protocol):
 |---|---|
 | D1 | A plain boot without the `workspace` option → non-Workspace launch path unchanged |
 | D2 | Disk change → Hub ding with `{id,hash}` as a freshness hint (no body) |
-| D3 | Client fetches latest module bytes at the ordinary `/app/…` URL with `cache: no-store` and computes `rash(bytes)` |
+| D3 | Client strips the bag's `app/` id prefix, fetches the latest module bytes at the ordinary root URL with `cache: no-store`, and computes `rash(bytes)` |
 | D4 | `Workspace.set` mutates the passport only after compile/activation succeeds (hash/source advance) |
 | D5 | UI shows a visible change attributable to that mutation |
 | D6 | Seal / no-Hub path still holds for production populate (M0) |

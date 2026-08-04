@@ -104,6 +104,86 @@ Three project shapes use the same model:
 - **API-only:** API workers with no browser App.
 - **App-only:** `app/` and generated files with no API workers.
 
+## Site Files and Ownership
+
+A full multi-tenant project may look like this on disk:
+
+```text
+project/
+├── index.rip                     API entry and route registration
+├── api/                          worker source; not implicitly public
+├── sites/
+│   ├── cheetos/public/           files specific to the `cheetos` tenant
+│   └── common/public/            shared fallback files
+├── app/
+│   ├── index.html                optional SPA shell
+│   ├── routes/[id].rip           live Rip modules
+│   └── styles.css
+└── static/generated/             manager-owned publication
+    ├── @rip/rip.js
+    ├── bundle.json
+    └── manifest.json             watch publication artifact
+```
+
+The paths on disk are not public directory prefixes. Janus searches the
+registered roots in order and appends the request path to each one. A typical
+tenant registration searches `static/generated`, then
+`sites/{site}/public`, then `sites/common/public`, then `app`. Consequently:
+
+- `static/generated/bundle.json` is requested as `/bundle.json`;
+- `sites/cheetos/public/logo.svg` overrides
+  `sites/common/public/logo.svg` for `/logo.svg`;
+- the bag id `app/routes/[id].rip` is fetched from `/routes/[id].rip` with the
+  conventional `app/` root; and
+- `app/index.html` is an HTML-navigation fallback, not a response for a
+  missing script, stylesheet, image, or module.
+
+`serve.rip` makes the host or tenant rule, root order, API prefixes, cache
+policy, and shell explicit. Without it, ordinary projects discover the
+generated root plus existing `public/` and `app/` roots. The project root and
+`api/` are never implicitly public.
+
+The three owners have deliberately narrow jobs:
+
+- **Workers execute API routes.** A route such as `/api/private/profile` may
+  talk to S3 and return a normal response. A route serving a private local file
+  may use `@send`; the worker selects the file and Janus performs the actual
+  `X-Sendfile` transfer, including validators, ranges, and content type.
+- **The manager publishes App identity.** It snapshots
+  `app/**/*.{rip,css,html}`, assigns each member a six-character content
+  `hash`, writes a deterministic `bundle.json`, and—while watching—a matching
+  `manifest.json`. The bundle carries the complete inventory plus Rip module
+  source needed for first paint; the manifest carries the inventory without
+  source bodies.
+- **Caddy and Janus serve bytes.** They terminate HTTPS, select the trusted
+  tenant, search file roots, proxy configured API prefixes, serve the SPA
+  shell, and provide ordinary HTTP cache behavior.
+
+### Rip hashes and HTTP ETags
+
+These identifiers are intentionally independent:
+
+```text
+authored bytes ──manager──► hash/rash ──Hub ding──► browser Workspace
+file metadata  ──Janus────► weak ETag  ──HTTP──────► browser cache
+```
+
+The manager's `hash` is a content identity (`rash(bytes)`) used to suppress
+no-op changes, describe the manifest, and tell an open browser that a bag
+member may be newer. Janus's weak `W/"mtime-size"` ETag is a cheap transport
+validator used for conditional HTTP requests. Janus neither calculates nor
+compares Rip hashes.
+
+For a real App change, the manager writes the bundle and then the manifest,
+atomically replacing each file, and only then publishes a tiny `{id, hash}`
+ding. The browser treats that hash as a
+freshness hint, fetches the current file at its ordinary URL with
+`cache: "no-store"`, hashes the bytes it actually received, and applies only
+the latest completed fetch. This remains correct if another edit lands between
+the ding and the fetch. Stable generated URLs such as `/bundle.json` and
+`/manifest.json` instead use `Cache-Control: no-cache` plus Janus's ETag, so
+an unchanged revalidation is a cheap `304`.
+
 ## Features
 
 - **Sinatra-style routes:** `get`, `post`, `put`, `patch`, `del`, and `all`
