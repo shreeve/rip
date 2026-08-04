@@ -32,7 +32,7 @@ import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } 
 import { SUPPRESSED_TS_CODES, IMPLICIT_ANY_CODES, MISSING_TYPES_CODES } from '../packages/vscode/src/translate.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from '../packages/vscode/src/scopes.js';
 import { tokenize } from './lexer.js';
-import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, linkNestedNodeModules, declaredButUninstalled } from '../packages/vscode/src/mirror.js';
+import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, missingModuleRead, linkNestedNodeModules, declaredButUninstalled } from '../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../packages/vscode/src/translate.js';
 
 // Fails OPEN, like the editor's: a source the lexer refuses leaves the gate
@@ -60,9 +60,6 @@ Options:
   --json                   Emit diagnostics as a JSON array instead of the
                            human-readable text report
   --no-frame               Suppress the source code-frame under each error
-  --keep-mirror            Keep the generated TS mirror (.rip/check) after the
-                           run instead of removing it — for inspecting the
-                           exact TypeScript tsgo type-checked
   --build                  Print the build identity (a content hash over the
                            compiler and editor-server trees) and exit — the
                            editor logs the same hash in its ready line, so a
@@ -72,7 +69,11 @@ Options:
 Exit status is 0 when no error-severity diagnostic survives, 1 otherwise.
 Directories are walked for *.rip (node_modules and dot-directories are
 skipped). Config — package.json#rip (strict / noCheck) and the project
-tsconfig — governs exactly as it does in the editor.`;
+tsconfig — governs exactly as it does in the editor. The generated TS
+mirror stays at <root>/.rip/check after the run — the exact TypeScript
+the LAST run type-checked (only the files that run covered), wiped and
+rebuilt at the start of every run; .build inside it names the compiler
+build that wrote it.`;
 
 const fail = (message, code = 2) => { console.error(message); process.exit(code); };
 
@@ -95,27 +96,23 @@ if (argv.includes('--build')) {
 }
 const asJson = argv.includes('--json');
 const showFrames = !argv.includes('--no-frame') && !asJson;
-const keepMirror = argv.includes('--keep-mirror');
-const KNOWN = new Set(['--json', '--no-frame', '--keep-mirror', '--build']);
+const KNOWN = new Set(['--json', '--no-frame', '--build']);
 const positionals = argv.filter((a) => !a.startsWith('-'));
 const unknownFlags = argv.filter((a) => a.startsWith('-') && !KNOWN.has(a));
 if (unknownFlags.length) fail(`rip check: unknown option${unknownFlags.length === 1 ? '' : 's'}: ${unknownFlags.join(', ')}\n\nRun 'rip check --help' for usage.`);
 
-// The generated TS mirror is scratch, not a build product: it is removed
-// when the process exits by ANY path (normal, error, or process.exit) —
-// rmSync in an exit handler runs synchronously, so this reclaims the
-// <root>/.rip/check tree AND the temp fallback without leaving either
-// behind between runs. `--keep-mirror` retains it for inspecting the
-// exact TypeScript tsgo checked.
-let mirrorToClean = null;
-let dotRipDir = null;   // <root>/.rip, pruned if the mirror left it empty
+// The generated TS mirror at <root>/.rip/check is a persistent,
+// regenerable cache — the peer of the editor's .rip/editor, self-
+// gitignored, left in place between runs so the exact TypeScript tsgo
+// checked stays inspectable. Freshness never depends on cleanup: every
+// run wipes and rebuilds the tree before tsgo sees it. Only the temp
+// fallback root — used when the workspace isn't writable — is ours to
+// remove, on ANY exit path: rmSync in an exit handler runs
+// synchronously.
+let fallbackToClean = null;
 process.on('exit', () => {
-  if (keepMirror || mirrorToClean === null) return;
-  try { fs.rmSync(mirrorToClean, { recursive: true, force: true }); } catch { /* best effort */ }
-  // Prune the .rip parent too, but only when now empty — the editor's
-  // .rip/editor may share it, and rmdirSync refuses a non-empty dir, so
-  // this removes .rip only when `rip check` was what created it.
-  if (dotRipDir !== null) { try { fs.rmdirSync(dotRipDir); } catch { /* not empty / shared */ } }
+  if (fallbackToClean === null) return;
+  try { fs.rmSync(fallbackToClean, { recursive: true, force: true }); } catch { /* best effort */ }
 });
 
 // ── target collection ───────────────────────────────────────────────
@@ -193,6 +190,35 @@ if (targets.length === 0) {
 }
 const workspaceRoot = findWorkspaceRoot(targets);
 
+// ── mirror root ─────────────────────────────────────────────────────
+// A dedicated mirror at <root>/.rip/check (peer of the editor's
+// .rip/editor), wiped and rebuilt EVERY run — unconditionally, before
+// anything compiles, so a run whose targets all fail to parse still
+// clears the previous run's faces and the tree always holds exactly
+// what the LAST run checked. `.build` stamps it with the compiler build
+// that wrote it. The wipe is what carries correctness: a since-deleted
+// source's face from an earlier run never lingers in the `**/*.ts`
+// program.
+let mirrorRoot = path.join(workspaceRoot, '.rip', 'check');
+let mirrorRootIsFallback = false;
+try {
+  fs.rmSync(mirrorRoot, { recursive: true, force: true });
+  fs.mkdirSync(mirrorRoot, { recursive: true });
+  fs.writeFileSync(path.join(mirrorRoot, '.gitignore'), '*\n');
+  const compilerDir = path.dirname(fileURLToPath(import.meta.url));
+  fs.writeFileSync(path.join(mirrorRoot, '.build'),
+    cacheIdentityOf(compilerDir, path.join(compilerDir, '..', 'packages', 'vscode', 'src')) + '\n');
+} catch (err) {
+  // Degraded, never silent: the fallback re-roots tsgo outside the
+  // workspace, so per-project wrappers stop applying and @types
+  // resolution changes — the user must know their diagnostics come
+  // from a different posture than the editor's.
+  mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-'));
+  mirrorRootIsFallback = true;
+  fallbackToClean = mirrorRoot;
+  console.error(`rip check: workspace mirror root unavailable (${err.code ?? err.message}) — using a temp fallback (tsconfig/@types fidelity degrades)`);
+}
+
 // ── closure compile (pins-less) ─────────────────────────────────────
 // BFS the target set + its transitive .rip imports. Each source is
 // compiled to its TS face once (with its own rip.strict); a parse
@@ -237,6 +263,7 @@ const hiddenAnnotationDirs = new Set();
 let hiddenUninstalled = 0;
 const hiddenUninstalledDirs = new Set();   // where `bun install` answers
 const seen = new Set();
+const explicitTargets = new Set(targets);
 const queue = [...targets];
 while (queue.length) {
   const fsPath = queue.shift();
@@ -245,8 +272,20 @@ while (queue.length) {
   let source;
   try { source = fs.readFileSync(fsPath, 'utf8'); }
   catch (err) {
-    // Readable at collect time (statSync), not now: a permission flip, a
-    // broken symlink, a race. Never silently drop it — mark the run short.
+    // A QUEUED import whose module does not exist as specified
+    // (missingModuleRead: ENOENT, ENOTDIR, ELOOP…) is not a coverage
+    // gap: a dangling specifier is the IMPORTER's defect, and its
+    // missing face already earns the importer tsgo's TS2307 on the .rip
+    // line (or silence under @ts-nocheck, whose writ covers the file's
+    // imports). Everything else stays loud and marks the run short: an
+    // explicit target is part of what was ASKED to be checked (named on
+    // the command line or found by the walk), and an import that EXISTS
+    // but cannot be read (EACCES) must not skip into a "cannot find
+    // module" that misstates the problem. The editor's closure walk is
+    // broader here — it parks EVERY unreadable import for a later
+    // Created event — because an open-buffer server retries where a
+    // batch gate answers once, loudly.
+    if (!explicitTargets.has(fsPath) && missingModuleRead(err)) continue;
     incompleteCheck = true;
     console.error(`rip check: cannot read ${path.relative(process.cwd(), fsPath)} (${err.code ?? err.message}) — skipped; the run is incomplete`);
     continue;
@@ -300,25 +339,6 @@ for (const [fsPath, entry] of compiled) {
 const tsDiags = [];
 let tsgoUnavailable = false; // tsgo needed but could not start — a run that couldn't type-check
 if (compiled.size > 0) {
-  // A dedicated mirror at <root>/.rip/check (peer of the editor's
-  // .rip/editor), rebuilt from scratch and removed on exit (see the
-  // exit handler above) — scratch, not a build product. The start-of-run
-  // wipe also guards against a stale mirror a killed/`--keep-mirror` run
-  // left behind, so a since-deleted source's face never lingers in the
-  // `**/*.ts` program.
-  let mirrorRoot = path.join(workspaceRoot, '.rip', 'check');
-  let mirrorRootIsFallback = false;
-  try {
-    fs.rmSync(mirrorRoot, { recursive: true, force: true });
-    fs.mkdirSync(mirrorRoot, { recursive: true });
-    fs.writeFileSync(path.join(mirrorRoot, '.gitignore'), '*\n');
-  } catch {
-    mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-'));
-    mirrorRootIsFallback = true;
-  }
-  mirrorToClean = mirrorRoot;
-  if (!mirrorRootIsFallback) dotRipDir = path.join(workspaceRoot, '.rip');
-  if (keepMirror) console.error(`rip check: keeping TS mirror at ${mirrorRoot}`);
   for (const [fsPath, entry] of compiled) {
     const rel = mirrorRelForFsPath(fsPath, mirrorRootIsFallback ? null : workspaceRoot);
     const mirrorPath = path.join(mirrorRoot, rel) + '.ts';

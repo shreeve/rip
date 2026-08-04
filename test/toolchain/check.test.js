@@ -100,6 +100,22 @@ function check(dir, args = []) {
   return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
 }
 
+// Mode-000 `file` for the duration of fn(). Returns false WITHOUT running
+// fn on root/owner-override filesystems where the file stays readable
+// anyway — callers bail, the scenario cannot exist there. The restore
+// lives here so no failure path leaves an unreadable file for the
+// caller's cleanup rmSync to trip on.
+function withUnreadable(file, fn) {
+  fs.chmodSync(file, 0o000);
+  try {
+    try { fs.readFileSync(file, 'utf8'); return false; } catch { /* unreadable, as intended */ }
+    fn();
+    return true;
+  } finally {
+    try { fs.chmodSync(file, 0o644); } catch { /* gone with the fixture */ }
+  }
+}
+
 describe('rip check: usage surface (no server)', () => {
   test('--help prints usage and exits 0', () => {
     const r = spawnSync('bun', [BIN, 'check', '--help'], { encoding: 'utf8' });
@@ -1629,27 +1645,61 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  // The generated TS mirror is scratch, removed on exit by default so a
-  // repeatedly-run check never litters .rip/check — retained only under
-  // --keep-mirror, for inspecting the exact TypeScript tsgo checked.
-  test('the TS mirror is removed after a run, kept only with --keep-mirror', () => {
+  // The generated TS mirror is a persistent, regenerable cache (the peer
+  // of the editor's .rip/editor): it stays at .rip/check after the run so
+  // the exact TypeScript tsgo checked is inspectable, is self-gitignored,
+  // and freshness comes from the start-of-run wipe — a stale face from an
+  // earlier run never survives into the next program.
+  test('the TS mirror persists after a run and is rebuilt fresh each run', () => {
     const dir = workspace({ 'a.rip': 'x: number = 0\nconsole.log x\n' });
     try {
-      const dotRip = path.join(dir, '.rip');
-      const mirror = path.join(dotRip, 'check');
+      const mirror = path.join(dir, '.rip', 'check');
       check(dir);
-      // The whole .rip parent goes when the check created it (nothing
-      // else lives there) — not just .rip/check.
-      expect(fs.existsSync(dotRip)).toBe(false);
-      const r = check(dir, ['--keep-mirror']);
-      expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(true);  // the face is retained
-      expect(r.stderr).toContain('keeping TS mirror');
+      expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(true);           // the face is retained
+      expect(fs.readFileSync(path.join(mirror, '.gitignore'), 'utf8')).toBe('*\n'); // and git never sees it
+      expect(fs.readFileSync(path.join(mirror, '.build'), 'utf8').trim()).not.toBe(''); // stamped with the build that wrote it
+      // A face whose source no longer exists is wiped by the next run,
+      // not trusted from the cache.
+      fs.writeFileSync(path.join(mirror, 'deleted.rip.ts'), 'const ghost: number = 0;\n');
+      check(dir);
+      expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(true);
+      expect(fs.existsSync(path.join(mirror, 'deleted.rip.ts'))).toBe(false);
+      // The wipe is unconditional: a run whose only target fails to PARSE
+      // still clears the previous run's faces, so the tree never shows a
+      // face for source that no longer compiles.
+      fs.writeFileSync(path.join(dir, 'a.rip'), 'x = (\n');
+      const r = check(dir);
+      expect(r.status).toBe(1);                                          // the parse error still reports
+      expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(false);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  // The .rip parent is pruned only when empty: a coexisting editor mirror
-  // (.rip/editor) must survive a batch check.
-  test('a coexisting .rip/editor is preserved (only the empty parent is pruned)', () => {
+  // An unwritable workspace still checks — rerouted to a temp mirror,
+  // LOUDLY (fidelity degrades: per-project wrappers and @types resolution
+  // change), and the temp root is removed by the exit handler.
+  test('an unwritable workspace falls back to a temp mirror, loudly, and cleans it up', () => {
+    const dir = workspace({ 'a.rip': 'x: number = 0\nconsole.log x\n' });
+    try {
+      fs.chmodSync(dir, 0o555);
+      let writable = false;
+      try { fs.mkdirSync(path.join(dir, '.probe')); writable = true; fs.rmdirSync(path.join(dir, '.probe')); } catch { /* expected EACCES */ }
+      if (writable) return; // root / owner-override filesystem can't exercise this path
+      const before = new Set(fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('rip-check-')));
+      const r = check(dir);
+      expect(r.stderr).toContain('temp fallback');                       // degraded, never silent
+      expect(r.status).toBe(0);                                          // the clean file still checks clean
+      expect(fs.existsSync(path.join(dir, '.rip'))).toBe(false);         // nothing forced into the workspace
+      const leaked = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('rip-check-') && !before.has(n));
+      expect(leaked).toEqual([]);                                        // the exit handler reclaimed the temp root
+    } finally {
+      try { fs.chmodSync(dir, 0o755); } catch { /* restore for cleanup */ }
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  // A coexisting editor mirror (.rip/editor) must survive a batch check:
+  // the two mirrors share the .rip parent but own disjoint subtrees.
+  test('a coexisting .rip/editor is preserved', () => {
     const dir = workspace({ 'a.rip': 'x: number = 0\nconsole.log x\n' });
     try {
       const editorDir = path.join(dir, '.rip', 'editor');
@@ -1657,29 +1707,91 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       fs.writeFileSync(path.join(editorDir, 'marker'), 'keep me\n');
       check(dir);
       expect(fs.existsSync(path.join(editorDir, 'marker'))).toBe(true);          // editor mirror untouched
-      expect(fs.existsSync(path.join(dir, '.rip', 'check'))).toBe(false);        // batch mirror cleaned
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  // Coverage short of what was asked never exits 0: a file readable at
-  // collect time but not at read time is skipped loudly (exit 2, a stderr
-  // note), and a clean sibling does NOT rescue the exit code into a false 0.
+  // A dangling import is the IMPORTER's defect, not a coverage gap: the
+  // absent module never marks the run incomplete — tsgo's TS2307 on the
+  // importing line is the report, matching the editor's closure walk.
+  test('a dangling .rip import earns TS2307 on the importer, not an incomplete run', () => {
+    const dir = workspace({ 'a.rip': "p: import('./gone.rip').T = 5\nconsole.log p\n" });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('TS2307');
+      expect(r.stdout).toContain('a.rip:1');
+      expect(r.stderr).not.toContain('incomplete');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // @ts-nocheck's writ covers the file's imports too: a nocheck'd importer
+  // with a dangling import checks clean and SILENT — the corpus's own
+  // errors fixtures dangle an import on purpose, and a default `rip check`
+  // over a repo containing them must not be permanently "incomplete".
+  test('a dangling import under @ts-nocheck stays silent (exit 0)', () => {
+    const dir = workspace({ 'a.rip': "# @ts-nocheck\np: import('./gone.rip').T = 5\nconsole.log p\n" });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('No type errors');
+      expect(r.stderr).not.toContain('incomplete');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // ENOENT is not the only "module does not exist as specified" errno: a
+  // specifier whose path walks THROUGH a file (./lib.rip/T.rip, ENOTDIR)
+  // is the same importer-side defect and gets the same report — TS2307 on
+  // the importer, never a permanently incomplete run.
+  test('a specifier through a file (ENOTDIR) is a TS2307, not an incomplete run', () => {
+    const dir = workspace({
+      'a.rip': "p: import('./lib.rip/T.rip').T = 5\nconsole.log p\n",
+      'lib.rip': 'export x = 1\n',
+    });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('TS2307');
+      expect(r.stderr).not.toContain('incomplete');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // An import that EXISTS but cannot be read is a real coverage gap: the
+  // run stays loud (the incomplete note beside whatever tsgo says about
+  // the missing face), never a bare "cannot find module" that misstates
+  // the problem. The exit is 1, not 2 — an error-severity diagnostic
+  // outranks the incomplete posture in the exit-code ladder.
+  test('an unreadable (existing) import still marks the run incomplete', () => {
+    const dir = workspace({
+      'a.rip': "p: import('./locked.rip').T = 5\nconsole.log p\n",
+      'locked.rip': 'export helper = 42\n',
+    });
+    try {
+      const exercised = withUnreadable(path.join(dir, 'locked.rip'), () => {
+        // a.rip is the explicit target; locked.rip is reached only as its import.
+        const r = check(dir, [path.join(dir, 'a.rip')]);
+        expect(r.stderr).toContain('locked.rip (EACCES)');
+        expect(r.stderr).toContain('the run is incomplete');
+        expect(r.status).toBe(1); // tsgo's TS2307 on the missing face outranks exit 2
+      });
+      if (!exercised) return; // root / owner-override filesystem can't exercise this path
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // Coverage short of what was asked never exits 0: an explicit target —
+  // named on the command line or swept up by the directory walk — that
+  // cannot be read is skipped loudly (exit 2, a stderr note), and a clean
+  // sibling does NOT rescue the exit code into a false 0.
   test('an unreadable file leaves the run incomplete (exit 2, no false clean)', () => {
     const dir = workspace({ 'ok.rip': 'x: number = 1\nconsole.log x\n', 'locked.rip': 'y: number = 2\nconsole.log y\n' });
-    const locked = path.join(dir, 'locked.rip');
     try {
-      fs.chmodSync(locked, 0o000);
-      let readable = false;
-      try { fs.readFileSync(locked, 'utf8'); readable = true; } catch { /* expected EACCES */ }
-      if (readable) return; // root / owner-override filesystem can't exercise this path
-      const r = check(dir);
-      expect(r.status).toBe(2);                          // incomplete coverage → never 0
-      expect(r.stderr).toContain('the run is incomplete');
-      expect(r.stdout).not.toContain('No type errors');  // ok.rip is clean, but the run isn't
-    } finally {
-      try { fs.chmodSync(locked, 0o644); } catch { /* already restored */ }
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+      const exercised = withUnreadable(path.join(dir, 'locked.rip'), () => {
+        const r = check(dir);
+        expect(r.status).toBe(2);                          // incomplete coverage → never 0
+        expect(r.stderr).toContain('the run is incomplete');
+        expect(r.stdout).not.toContain('No type errors');  // ok.rip is clean, but the run isn't
+      });
+      if (!exercised) return; // root / owner-override filesystem can't exercise this path
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
   // tsgo emits relatedInformation locations as canonical (percent-encoded)
