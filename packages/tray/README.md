@@ -138,6 +138,10 @@ A string remains the compact spelling for an SF Symbol:
 icon: 'bolt.horizontal.circle'
 ```
 
+Leading icons align as one sibling-group column. If any row in a group supplies
+`icon:`, every row reserves that column; when no row supplies one, the column
+disappears completely.
+
 Inline SVG keeps a complete tray app in one `.rip` file. SVGs use macOS
 template rendering by default: their color is replaced by the system's current
 menu-bar foreground, so they follow light mode, dark mode, selection, and

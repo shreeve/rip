@@ -31,7 +31,8 @@ The current tip carries the local Rip appliance and its native client:
 - Tray icons accept SF Symbol strings, inline `svg` values, and file-backed
   `svgFile` values. SVGs are adaptive macOS template images by default;
   `template: false` preserves full color. A separate `logo:` can brand the
-  panel header.
+  panel header. A sibling group reserves one shared leading-icon column when
+  any row has an icon and no column when none do.
 - `packages/tray/assets` carries the full-color Rip logo and compact monochrome
   menu-bar mark. The built-in Rip Apps tray renders the monochrome mark at the
   visually verified 24-point menu-bar size and the small full-color wordmark

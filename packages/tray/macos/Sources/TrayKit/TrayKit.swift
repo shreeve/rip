@@ -357,19 +357,23 @@ private struct TrayPanelItems: View {
   let items: [TrayItem]
   @ObservedObject var provider: TrayProvider
 
+  private var reservesLeadingIconSpace: Bool {
+    items.contains { $0.kind != "separator" && $0.icon != nil }
+  }
+
   var body: some View {
     ForEach(Array(items.enumerated()), id: \.offset) { _, item in
       switch item.kind {
       case "separator":
         Divider().padding(.horizontal, 12).padding(.vertical, 5)
       case "submenu":
-        PanelGroupRow(item: item, provider: provider)
+        PanelGroupRow(item: item, provider: provider, reservesLeadingIconSpace: reservesLeadingIconSpace)
       case "label":
-        PanelInformationRow(item: item)
+        PanelInformationRow(item: item, reservesLeadingIconSpace: reservesLeadingIconSpace)
       case "toggle":
-        PanelToggleRow(item: item, provider: provider)
+        PanelToggleRow(item: item, provider: provider, reservesLeadingIconSpace: reservesLeadingIconSpace)
       case "action", "directory", "link", "quit":
-        PanelActionRow(item: item, provider: provider)
+        PanelActionRow(item: item, provider: provider, reservesLeadingIconSpace: reservesLeadingIconSpace)
       default:
         Label("Unsupported item: \(item.kind)", systemImage: "questionmark.circle")
           .foregroundStyle(.secondary)
@@ -383,6 +387,7 @@ private struct TrayPanelItems: View {
 private struct PanelGroupRow: View {
   let item: TrayItem
   @ObservedObject var provider: TrayProvider
+  let reservesLeadingIconSpace: Bool
 
   private var details: [TrayItem] {
     (item.items ?? []).filter { $0.kind == "label" }
@@ -399,7 +404,7 @@ private struct PanelGroupRow: View {
   var body: some View {
     VStack(spacing: 0) {
       HStack(spacing: 10) {
-        PanelLeadingIcon(icon: item.icon)
+        PanelLeadingIcon(icon: item.icon, reservesSpace: reservesLeadingIconSpace)
         VStack(alignment: .leading, spacing: 2) {
           Text(item.title ?? "").fontWeight(.medium)
           ForEach(Array(details.enumerated()), id: \.offset) { _, detail in
@@ -428,10 +433,11 @@ private struct PanelGroupRow: View {
 
 private struct PanelInformationRow: View {
   let item: TrayItem
+  let reservesLeadingIconSpace: Bool
 
   var body: some View {
     HStack(spacing: 10) {
-      PanelLeadingIcon(icon: item.icon)
+      PanelLeadingIcon(icon: item.icon, reservesSpace: reservesLeadingIconSpace)
       VStack(alignment: .leading, spacing: 2) {
         Text(item.title ?? "")
         if let subtitle = item.subtitle {
@@ -466,6 +472,7 @@ private struct PanelDetail: View {
 
 private struct PanelLeadingIcon: View {
   let icon: TrayIcon?
+  let reservesSpace: Bool
 
   var body: some View {
     if let icon {
@@ -474,6 +481,8 @@ private struct PanelLeadingIcon: View {
         TrayIconView(icon: icon, size: 16)
       }
       .frame(width: 30, height: 30)
+    } else if reservesSpace {
+      Color.clear.frame(width: 30, height: 30)
     }
   }
 }
@@ -527,13 +536,14 @@ private struct PanelCompactControl: View {
 private struct PanelToggleRow: View {
   let item: TrayItem
   @ObservedObject var provider: TrayProvider
+  let reservesLeadingIconSpace: Bool
 
   var body: some View {
     Toggle(isOn: Binding(
       get: { item.value ?? false },
       set: { _ in provider.perform(item) }
     )) {
-      PanelInformationRow(item: item)
+      PanelInformationRow(item: item, reservesLeadingIconSpace: reservesLeadingIconSpace)
     }
     .toggleStyle(.switch)
     .padding(.trailing, 12)
@@ -544,11 +554,12 @@ private struct PanelToggleRow: View {
 private struct PanelActionRow: View {
   let item: TrayItem
   @ObservedObject var provider: TrayProvider
+  let reservesLeadingIconSpace: Bool
   @State private var hovering = false
 
   var body: some View {
     Button { provider.perform(item) } label: {
-      PanelInformationRow(item: item)
+      PanelInformationRow(item: item, reservesLeadingIconSpace: reservesLeadingIconSpace)
         .contentShape(Rectangle())
         .background(
           hovering ? Color.primary.opacity(0.055) : Color.clear,
