@@ -874,6 +874,19 @@ export function workspaceRipPaths(workspaceRoot, fromConfigDirToMirrorRoot = '')
 // membership is the whole fix there: with the sibling in the program the
 // untouched `.rip` specifier resolves by the mirror's filename, so
 // nothing rewrites a specifier and there is no second resolution rule.
+// A closure-edge read failure that means the module DOES NOT EXIST as
+// specified — nothing at the path (ENOENT, including a dangling
+// symlink), a path segment that is a file (ENOTDIR), a symlink cycle
+// (ELOOP), an unresolvable name (ENAMETOOLONG) — as opposed to a module
+// that exists but cannot be read (EACCES, EIO). ripImportsOf hands out
+// relative edges without an existence check, so its consumers meet both
+// classes and route them differently: a missing module is the
+// IMPORTER's defect (its absent face earns tsgo's TS2307 on the
+// importing line), while an unreadable one is a coverage gap a skip
+// would mislabel as "cannot find module".
+export const missingModuleRead = (err) =>
+  err?.code === 'ENOENT' || err?.code === 'ENOTDIR' || err?.code === 'ELOOP' || err?.code === 'ENAMETOOLONG';
+
 export function ripImportsOf(stores, sourceText, fromDir) {
   const seen = new Set();
   const targets = [];
