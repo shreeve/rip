@@ -772,6 +772,23 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // Emitter scaffolding (a bang-def's `: void`, arity `?`s, pin
+  // annotations) never opens the gate: an unannotated file is a silent
+  // file, whatever the face emits for its lowerings.
+  test('an unannotated file with bang-defs stays silent — scaffolding never opens the gate', () => {
+    const dir = workspace({
+      'tool.rip': [
+        'write! = (s) -> s',
+        'n = 42',
+        'bad = n.toUpperCase()',     // inference-only misuse: held
+        'console.log write, bad',
+      ].join('\n') + '\n',
+    });
+    try {
+      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // A NESTED node_modules resolves through the mirror the way bun
   // resolves it at runtime: the face's ancestor walk lives in the mirror
   // tree, so a source-tree install (a quarantined bench dir with its own
@@ -831,10 +848,9 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   }, 90_000);
 
   // A nested package that sets `rip.strict` becomes its own program, the
-  // same auto boundary a globals-declaring package gets — floors are
-  // per-PROGRAM, so without it the root program's floor kept answering
-  // `any` for a package that asked for complaints. Driven: Philip flipped
-  // packages/ai strict and `bun:sqlite` stayed unsquiggled.
+  // same auto boundary a globals-declaring package gets: floors are
+  // per-PROGRAM, and without the boundary the root program's floor keeps
+  // answering `any` for a package that asked for complaints.
   test('a nested rip.strict package refuses the floors: its own program, its own posture', () => {
     const dir = workspace({
       'package.json': JSON.stringify({ workspaces: ['packages/*'] }),

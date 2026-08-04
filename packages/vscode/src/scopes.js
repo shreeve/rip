@@ -34,10 +34,11 @@
 //     and cannot make this exception.
 //
 // The question is whether a declaration HAS TYPE INFORMATION, not whether the
-// author typed one out. Rip supplies types nobody wrote — an event handler's
-// param from HTMLElementEventMap, a schema default, a promoted parameter, a
-// typed component factory — and gating those away would silence exactly the
-// checking rip gives for free.
+// author typed one out. The constructs rip types wholesale — schemas and
+// components (COMPILER_TYPED_KINDS) — are checked without a single TYPE
+// token, because gating them away would silence exactly the checking rip
+// gives for free. Nothing else the emitter writes counts: lowering
+// scaffolding and pin annotations are output, not intent.
 //
 // The gate is FILE-LOCAL. Type information arriving from another module — a
 // typed `.rip` export, an installed `@types` package, a workspace `.d.ts` —
@@ -70,16 +71,13 @@ import { bareRipSpecifierTarget } from './mirror.js';
 // because TypeScript varies the ADVICE, not the defect: a bare miss (2304), a
 // spelling suggestion (2552), and two "change your target library" forms
 // (2583 for ES built-ins, 2584 for DOM globals) are one diagnostic wearing
-// four numbers. Enumerated rather than eyeballed — 2584 was found only by
-// driving the real checker over `doc = document.title`, after 2304 and 2552
-// had both looked sufficient.
+// four numbers. Enumerated rather than eyeballed.
 //
 // The same defect spelled at the MODULE BOUNDARY: importing a member the
 // module does not export (2305, and 2724 with a suggestion), a default
 // import from a module with no default (2613), and a named import that
 // should have been the default (2614). A consumer typo-ing an import name
-// wrote a name that does not exist — found by driving a real consumer over
-// a workspace package, where 2305 was the one silent member of the family.
+// wrote a name that does not exist.
 //
 // The definition cycle (2502): a computed that reads itself, directly or
 // through others, recurses forever the first time anyone reads it. An
@@ -175,45 +173,12 @@ export function checkedLinesOf(source, annotated) {
   return out;
 }
 
-// The 0-based lines the COMPILER typed. `tsRegions` are the face's TS-only
-// spans; mapped back through the face's own mappings they say which .rip
-// bytes carry type information the author never wrote.
-//
-// A region whose mapped span crosses lines is REFUSED, because a
-// construct-wide region says nothing about WHICH member carries type
-// information. Every component gets the same scaffolding — `declare
-// children`, a constructor, a generated interface — all mapped onto the
-// whole `export X = component …` span, so a scaffolding region marking a
-// construct typed would be an accident of emission, not a statement about
-// the construct.
-//
-// What a construct-wide region cannot say, the tree can: an annotation
-// inside a declaration's header types the declaration, and a construct the
-// face types wholesale is typed by its KIND — both declarationHeadersOf's
-// job below. The author's own multi-line annotations need neither path —
-// their TYPE tokens are already counted.
-export function typedRegionLinesOf(tsRegions, mappings, source, code = null) {
-  const lines = new Set();
-  if (!tsRegions || !mappings) return lines;
-  const lineAt = lineIndexer(source);
-  for (const [s, e] of tsRegions) {
-    // A lone `?` is the OPPOSITE of type information. The face writes one
-    // for a parameter the author never annotated (JS arity — see
-    // `jsArityOptional`), and one for a bare `title?`, which says the
-    // parameter may be absent and nothing whatever about its type. Reading
-    // either as an annotation would switch checking on for every function
-    // with an unannotated parameter, which is most of them.
-    if (code && code.slice(s, e) === '?') continue;
-    let span;
-    try { span = generatedSpanToSource(mappings, s, e); } catch { continue; }
-    if (!span) continue;
-    const from = lineAt(span[0]);
-    const to = lineAt(span[1] > span[0] ? span[1] - 1 : span[0]);
-    if (from !== to) continue;
-    lines.add(from);
-  }
-  return lines;
-}
+// The face's TS-only regions are never type information: every region is
+// emitter output — lowering scaffolding (`: void` on a bang-def, arity
+// `?`s) and pin annotations — and reading one as an annotation opens
+// whole unannotated files and re-admits held inference through pins.
+// Author annotations are counted from their TYPE tokens; wholesale-typed
+// constructs by KIND (COMPILER_TYPED_KINDS).
 
 // The FUNCTION SCOPES a source declares, as source spans. Read off the parse
 // tree rather than re-derived from indentation, because indentation answers a
@@ -357,14 +322,11 @@ function scopeAt(regions, off) {
 // guesswork about which spelling declares what.
 //
 // The names come off the lines already known to carry type information
-// rather than off the token stream, because rip spells annotations several
-// ways and only some of them survive as a TYPE token: a bare forward
-// declaration (`y: number`, no initializer) lexes as an OBJECT LITERAL and
-// carries no TYPE token at all — it is the face's `let y!: number` that makes
-// it typed, which the tsRegions pass sees and a token scan never would.
-// Taking every identifier on a typed line covers all spellings at once, and
-// pulls in the useful neighbours: `def filterBy(query: string)` types both
-// the parameter and the function, so call sites are checked too.
+// rather than off the token stream: taking every identifier on a typed
+// line covers all annotation spellings at once (a bare forward's
+// `y: number` lexes as a TYPE token like the rest), and pulls in
+// the useful neighbours: `def filterBy(query: string)` types both the
+// parameter and the function, so call sites are checked too.
 //
 // Residual: an unannotated INNER binding that shadows a typed outer one
 // still reads as typed, because this pass places a binding by where its
@@ -572,7 +534,6 @@ export function typedExportsOf(tokens, source, face) {
 // declaration's header says about the declaration it heads.
 function typedLinesOf(tokens, source, face) {
   const typed = annotatedLinesOf(tokens, source);
-  for (const line of typedRegionLinesOf(face?.tsRegions, face?.mappings, source, face?.code)) typed.add(line);
   const lineAt = lineIndexer(source);
   // OUTWARD: an annotation in a declaration's header is an annotation on the
   // declaration, so it lands on the line that NAMES it. Only the author's own

@@ -368,10 +368,9 @@ if (compiled.size > 0) {
   // The AUTO BOUNDARY: a package becomes its own program when it DECLARES
   // globals (`globalThis.NAME ??=` — the vocabulary stays package-scoped,
   // reaching importers the way the runtime does) or when it sets
-  // `rip.strict` (floors and null posture are per-PROGRAM, so a strict
-  // package inside the root program kept getting the gradual floor's
-  // `any`s — driven by `bun:sqlite` staying unsquiggled in a strict
-  // package). A package already inside a tsconfig-wrapped project needs
+  // `rip.strict` (floors and null posture are per-PROGRAM: a strict
+  // package inside the root program would get the gradual floor's
+  // `any`s). A package already inside a tsconfig-wrapped project needs
   // nothing more; the workspace root has no narrower scope to give.
   const autoBoundaryRels = new Set();
   if (!mirrorRootIsFallback) {
