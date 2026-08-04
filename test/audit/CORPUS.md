@@ -12,6 +12,8 @@ The law that governs `corpus/`, kept apart from the instrument that enforces mos
 
 **Grammar credit** goes to `corpus/grammar/` fixtures alone, so neither an error nor a claims fixture can cover a production by accident. The claims bucket's mirror standard: every `corpus/claims/` fixture must be a named carrier of at least one CLAIMS.md row, judged live. The grammar bucket numbers from 01 and the claims bucket from 20, so the prefix says which charter a fixture answers to; basenames stay unique corpus-wide — twins, pins, and carriers all key on them.
 
+**Placement.** A production is covered in the file of the construct it CARRIES, never its left-hand side's family: `Expression → Gate` is 13-components' because covering it means writing a component, and an export production whose right-hand side is reactive is 12-reactive's because covering it means writing reactive code — the reactive rulings gate that file, not 10-modules. Ties break toward the earlier file in the 01→14 order. Ownership is recorded nowhere: the audit derives it live — the fixture that reduces a production is its owner — so a new production takes this rule to choose its file, and `grammar.coverage` holds the obligation either way.
+
 **The corpus retires.** The unique-contribution line names any fixture the rest already covers, so completeness is not a ratchet — a healthy corpus counts every fixture as reducing a production no other does.
 
 ## Comments
