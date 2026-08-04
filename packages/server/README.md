@@ -130,6 +130,8 @@ registered roots in order and appends the request path to each one. A typical
 tenant registration searches `static/generated`, then
 `sites/{site}/public`, then `sites/common/public`, then `app`. Consequently:
 
+**The `app/` prefix belongs to the disk path and bag id, not the public URL.**
+
 - `static/generated/bundle.json` is requested as `/bundle.json`;
 - `sites/cheetos/public/logo.svg` overrides
   `sites/common/public/logo.svg` for `/logo.svg`;

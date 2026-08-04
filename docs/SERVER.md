@@ -308,6 +308,10 @@ Without a `files` declaration, conventional discovery registers the generated
 root plus `public/` and `app/` when present. The project directory is never an
 implicit public root.
 
+Registered roots are mounted at the URL root. In particular, conventional
+`app/` paths and bag ids retain their `app/` prefix internally, but their
+public URLs do not: `app/routes/home.rip` is served as `/routes/home.rip`.
+
 The SPA shell is a separate HTML-only fallback, commonly `app/index.html`. It
 is not an unconditional final file candidate: a missing script, stylesheet,
 image, or Rip module must never receive HTML.
@@ -615,8 +619,8 @@ reload.
 Query and pathname versions are different URLs, not aliases in HTTP caches:
 
 ```text
-/app/video/intro.mp4?hash=AB31
-/app/video/intro-AB31.mp4
+/video/intro.mp4?hash=AB31
+/video/intro-AB31.mp4
 ```
 
 The query form can map to one stable disk path and is convenient for
