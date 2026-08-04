@@ -3,6 +3,10 @@ import Combine
 import Foundation
 import SwiftUI
 
+private enum TrayLayout {
+  static let automaticRowHeight: CGFloat = 44
+}
+
 public enum TrayIcon: Codable, Equatable, Sendable {
   case symbol(String)
   case svg(source: String, template: Bool)
@@ -67,6 +71,7 @@ public struct TrayDefinition: Codable, Equatable, Sendable {
   public let icon: TrayIcon?
   public let logo: TrayIcon?
   public let tooltip: String?
+  public let rowHeight: Double?
   public let items: [TrayItem]
 
   public init(
@@ -74,12 +79,14 @@ public struct TrayDefinition: Codable, Equatable, Sendable {
     icon: TrayIcon? = nil,
     logo: TrayIcon? = nil,
     tooltip: String? = nil,
+    rowHeight: Double? = nil,
     items: [TrayItem] = []
   ) {
     self.title = title
     self.icon = icon
     self.logo = logo
     self.tooltip = tooltip
+    self.rowHeight = rowHeight
     self.items = items
   }
 }
@@ -94,6 +101,7 @@ public struct TrayItem: Codable, Equatable, Sendable {
   public let prompt: String?
   public let enabled: Bool?
   public let value: Bool?
+  public let rowHeight: Double?
   public let items: [TrayItem]?
 }
 
@@ -255,7 +263,7 @@ public final class TrayProvider: ObservableObject {
         switch envelope.type {
         case "render":
           guard let tray = envelope.tray else { throw TrayHostError("render message has no tray") }
-          try tray.validateIcons()
+          try tray.validate()
           self.tray = tray
           error = nil
         case "error":
@@ -318,6 +326,7 @@ public struct TrayPanel: View {
   }
 
   public var body: some View {
+    let rowHeight = provider.tray.rowHeight.map { CGFloat($0) } ?? TrayLayout.automaticRowHeight
     VStack(spacing: 0) {
       HStack(spacing: 10) {
         if let logo = provider.tray.logo {
@@ -343,11 +352,11 @@ public struct TrayPanel: View {
               .fixedSize(horizontal: false, vertical: true)
               .padding(12)
           }
-          TrayPanelItems(items: provider.tray.items, provider: provider)
+          TrayPanelItems(items: provider.tray.items, provider: provider, defaultRowHeight: rowHeight)
         }
         .padding(.vertical, 6)
       }
-      .frame(height: min(max(provider.tray.items.panelHeight + (provider.error == nil ? 0 : 54), 120), 520))
+      .frame(height: min(max(provider.tray.items.panelHeight(defaultRowHeight: rowHeight) + (provider.error == nil ? 0 : 54), 120), 520))
     }
     .frame(width: 340)
   }
@@ -356,9 +365,14 @@ public struct TrayPanel: View {
 private struct TrayPanelItems: View {
   let items: [TrayItem]
   @ObservedObject var provider: TrayProvider
+  let defaultRowHeight: CGFloat
 
   private var reservesLeadingIconSpace: Bool {
     items.contains { $0.kind != "separator" && $0.icon != nil }
+  }
+
+  private func rowHeight(for item: TrayItem) -> CGFloat {
+    item.rowHeight.map { CGFloat($0) } ?? defaultRowHeight
   }
 
   var body: some View {
@@ -367,13 +381,19 @@ private struct TrayPanelItems: View {
       case "separator":
         Divider().padding(.horizontal, 12).padding(.vertical, 5)
       case "submenu":
-        PanelGroupRow(item: item, provider: provider, reservesLeadingIconSpace: reservesLeadingIconSpace)
+        PanelGroupRow(
+          item: item,
+          provider: provider,
+          reservesLeadingIconSpace: reservesLeadingIconSpace,
+          rowHeight: rowHeight(for: item),
+          defaultRowHeight: defaultRowHeight
+        )
       case "label":
-        PanelInformationRow(item: item, reservesLeadingIconSpace: reservesLeadingIconSpace)
+        PanelInformationRow(item: item, reservesLeadingIconSpace: reservesLeadingIconSpace, rowHeight: rowHeight(for: item))
       case "toggle":
-        PanelToggleRow(item: item, provider: provider, reservesLeadingIconSpace: reservesLeadingIconSpace)
+        PanelToggleRow(item: item, provider: provider, reservesLeadingIconSpace: reservesLeadingIconSpace, rowHeight: rowHeight(for: item))
       case "action", "directory", "link", "quit":
-        PanelActionRow(item: item, provider: provider, reservesLeadingIconSpace: reservesLeadingIconSpace)
+        PanelActionRow(item: item, provider: provider, reservesLeadingIconSpace: reservesLeadingIconSpace, rowHeight: rowHeight(for: item))
       default:
         Label("Unsupported item: \(item.kind)", systemImage: "questionmark.circle")
           .foregroundStyle(.secondary)
@@ -388,6 +408,8 @@ private struct PanelGroupRow: View {
   let item: TrayItem
   @ObservedObject var provider: TrayProvider
   let reservesLeadingIconSpace: Bool
+  let rowHeight: CGFloat
+  let defaultRowHeight: CGFloat
 
   private var details: [TrayItem] {
     (item.items ?? []).filter { $0.kind == "label" }
@@ -419,12 +441,12 @@ private struct PanelGroupRow: View {
         }
       }
       .padding(.horizontal, 17)
-      .padding(.vertical, 7)
+      .frame(minHeight: rowHeight)
       .opacity(item.enabled ?? true ? 1 : 0.45)
       .disabled(!(item.enabled ?? true))
 
       if !nested.isEmpty {
-        TrayPanelItems(items: nested, provider: provider)
+        TrayPanelItems(items: nested, provider: provider, defaultRowHeight: defaultRowHeight)
           .padding(.leading, 22)
       }
     }
@@ -434,6 +456,7 @@ private struct PanelGroupRow: View {
 private struct PanelInformationRow: View {
   let item: TrayItem
   let reservesLeadingIconSpace: Bool
+  let rowHeight: CGFloat
 
   var body: some View {
     HStack(spacing: 10) {
@@ -447,7 +470,7 @@ private struct PanelInformationRow: View {
       Spacer(minLength: 8)
     }
     .padding(.horizontal, 12)
-    .padding(.vertical, 7)
+    .frame(minHeight: rowHeight)
   }
 }
 
@@ -537,13 +560,14 @@ private struct PanelToggleRow: View {
   let item: TrayItem
   @ObservedObject var provider: TrayProvider
   let reservesLeadingIconSpace: Bool
+  let rowHeight: CGFloat
 
   var body: some View {
     Toggle(isOn: Binding(
       get: { item.value ?? false },
       set: { _ in provider.perform(item) }
     )) {
-      PanelInformationRow(item: item, reservesLeadingIconSpace: reservesLeadingIconSpace)
+      PanelInformationRow(item: item, reservesLeadingIconSpace: reservesLeadingIconSpace, rowHeight: rowHeight)
     }
     .toggleStyle(.switch)
     .padding(.trailing, 12)
@@ -555,11 +579,12 @@ private struct PanelActionRow: View {
   let item: TrayItem
   @ObservedObject var provider: TrayProvider
   let reservesLeadingIconSpace: Bool
+  let rowHeight: CGFloat
   @State private var hovering = false
 
   var body: some View {
     Button { provider.perform(item) } label: {
-      PanelInformationRow(item: item, reservesLeadingIconSpace: reservesLeadingIconSpace)
+      PanelInformationRow(item: item, reservesLeadingIconSpace: reservesLeadingIconSpace, rowHeight: rowHeight)
         .contentShape(Rectangle())
         .background(
           hovering ? Color.primary.opacity(0.055) : Color.clear,
@@ -589,31 +614,38 @@ private struct TrayIconView: View {
   }
 }
 
-private extension TrayDefinition {
-  func validateIcons() throws {
+public extension TrayDefinition {
+  func validate() throws {
+    if let rowHeight, !rowHeight.isFinite || rowHeight <= 0 {
+      throw TrayHostError("tray rowHeight must be a positive finite number")
+    }
     if let icon { _ = try icon.nativeImage(accessibilityDescription: title) }
     if let logo { _ = try logo.nativeImage(accessibilityDescription: title) }
-    try items.validateIcons()
+    try items.validate()
   }
 }
 
 private extension Array where Element == TrayItem {
-  var panelHeight: CGFloat {
+  func panelHeight(defaultRowHeight: CGFloat) -> CGFloat {
     reduce(12) { height, item in
       switch item.kind {
       case "separator": return height + 11
       case "submenu":
         let nested = (item.items ?? []).filter { $0.kind == "submenu" }
-        return height + 48 + (nested.isEmpty ? 0 : nested.panelHeight)
-      default: return height + 44
+        let nestedHeight = nested.isEmpty ? 0 : nested.panelHeight(defaultRowHeight: defaultRowHeight)
+        return height + (item.rowHeight.map { CGFloat($0) } ?? defaultRowHeight) + nestedHeight
+      default: return height + (item.rowHeight.map { CGFloat($0) } ?? defaultRowHeight)
       }
     }
   }
 
-  func validateIcons() throws {
+  func validate() throws {
     for item in self {
+      if let rowHeight = item.rowHeight, !rowHeight.isFinite || rowHeight <= 0 {
+        throw TrayHostError("tray item rowHeight must be a positive finite number")
+      }
       if let icon = item.icon { _ = try icon.nativeImage(accessibilityDescription: item.title) }
-      try (item.items ?? []).validateIcons()
+      try (item.items ?? []).validate()
     }
   }
 }

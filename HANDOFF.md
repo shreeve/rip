@@ -33,6 +33,9 @@ The current tip carries the local Rip appliance and its native client:
   `template: false` preserves full color. A separate `logo:` can brand the
   panel header. A sibling group reserves one shared leading-icon column when
   any row has an icon and no column when none do.
+- Tray rows default to the current 44-point system-panel rhythm. A tray-wide or
+  per-item `rowHeight:` supplies a positive minimum; `automatic` or omission
+  retains the native-aligned default while content remains free to grow.
 - `packages/tray/assets` carries the full-color Rip logo and compact monochrome
   menu-bar mark. The built-in Rip Apps tray renders the monochrome mark at the
   visually verified 24-point menu-bar size and the small full-color wordmark
@@ -45,7 +48,7 @@ Live verification for the tray panel cleanup:
 
 - `bun run test` — 6,128 passed, 35 extended-tier skips.
 - `packages/tray`: 12 tests passed. The Swift package built on macOS and its
-  protocol executable passed ten native model/SVG checks.
+  protocol executable passed thirteen native model/SVG/layout checks.
 - `bun run test:all` — all 22 lanes passed, 8,359 tests total.
 - `packages/tray/dist/Rip.app` was rebuilt, its ad-hoc signature and copied SVG
   bytes were verified, the open panel was visually inspected at native Retina

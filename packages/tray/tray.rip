@@ -36,6 +36,11 @@ enabled = (value, at) ->
   fail "#{at} enabled must be Boolean" unless typeof value is 'boolean'
   value
 
+validateRowHeight = (value, at) ->
+  return null unless value? and value isnt 'automatic'
+  fail "#{at} rowHeight must be automatic or a positive number of points" unless typeof value is 'number' and Number.isFinite(value) and value > 0
+  value
+
 export svg = (source, options = {}) ->
   rejectUnknown options, ['template'], 'svg'
   fail 'svg source must be a non-empty string' unless typeof source is 'string' and source.length
@@ -48,21 +53,21 @@ export svgFile = (path, options = {}) ->
   svg readFileSync(resolve(path), 'utf8'), options
 
 export label = (title, options = {}) ->
-  rejectUnknown options, ['icon', 'subtitle'], 'label'
+  rejectUnknown options, ['icon', 'subtitle', 'rowHeight'], 'label'
   validateTitle title, 'label'
   icon = validateIcon options.icon, 'label'
   fail 'label subtitle must be a string or null' unless not options.subtitle? or typeof options.subtitle is 'string'
-  { kind: 'label', title, icon, subtitle: options.subtitle or null }
+  { kind: 'label', title, icon, subtitle: options.subtitle or null, rowHeight: validateRowHeight(options.rowHeight, 'label') }
 
 export separator = -> { kind: 'separator' }
 
 callbackItem = (kind, title, options, extra = []) ->
-  rejectUnknown options, ['id', 'run', 'icon', 'enabled', ...extra], kind
+  rejectUnknown options, ['id', 'run', 'icon', 'enabled', 'rowHeight', ...extra], kind
   validateTitle title, kind
   validateId options.id, kind
   icon = validateIcon options.icon, kind
   fail "#{kind} run must be a function" unless typeof options.run is 'function'
-  { kind, title, id: options.id, icon, enabled: enabled(options.enabled, kind), _run: options.run }
+  { kind, title, id: options.id, icon, enabled: enabled(options.enabled, kind), rowHeight: validateRowHeight(options.rowHeight, kind), _run: options.run }
 
 export action = (title, options = {}) -> callbackItem 'action', title, options
 
@@ -77,29 +82,29 @@ export directory = (title, options = {}) ->
   { ...item, prompt: options.prompt or null }
 
 export link = (title, url, options = {}) ->
-  rejectUnknown options, ['id', 'icon', 'enabled'], 'link'
+  rejectUnknown options, ['id', 'icon', 'enabled', 'rowHeight'], 'link'
   validateTitle title, 'link'
   icon = validateIcon options.icon, 'link'
   id = options.id or url
   validateId id, 'link'
   fail 'link url must be a non-empty string' unless typeof url is 'string' and url.length
-  { kind: 'link', title, id, url, icon, enabled: enabled(options.enabled, 'link') }
+  { kind: 'link', title, id, url, icon, enabled: enabled(options.enabled, 'link'), rowHeight: validateRowHeight(options.rowHeight, 'link') }
 
 export submenu = (title, items, options = {}) ->
-  rejectUnknown options, ['id', 'icon', 'enabled'], 'submenu'
+  rejectUnknown options, ['id', 'icon', 'enabled', 'rowHeight'], 'submenu'
   validateTitle title, 'submenu'
   icon = validateIcon options.icon, 'submenu'
   fail 'submenu items must be an array' unless Array.isArray items
-  { kind: 'submenu', title, id: options.id or title, icon, enabled: enabled(options.enabled, 'submenu'), items }
+  { kind: 'submenu', title, id: options.id or title, icon, enabled: enabled(options.enabled, 'submenu'), rowHeight: validateRowHeight(options.rowHeight, 'submenu'), items }
 
 export quit = (title = 'Quit', options = {}) ->
-  rejectUnknown options, ['icon'], 'quit'
+  rejectUnknown options, ['icon', 'rowHeight'], 'quit'
   validateTitle title, 'quit'
   icon = validateIcon options.icon, 'quit'
-  { kind: 'quit', title, icon }
+  { kind: 'quit', title, icon, rowHeight: validateRowHeight(options.rowHeight, 'quit') }
 
 export tray = (options = {}) ->
-  rejectUnknown options, ['title', 'icon', 'logo', 'tooltip', 'refresh', 'menu'], 'tray'
+  rejectUnknown options, ['title', 'icon', 'logo', 'tooltip', 'refresh', 'rowHeight', 'menu'], 'tray'
   validateTitle options.title, 'tray'
   icon = validateIcon options.icon, 'tray'
   logo = validateIcon options.logo, 'tray logo'
@@ -107,7 +112,7 @@ export tray = (options = {}) ->
   refresh = options.refresh ?? 2
   fail 'tray refresh must be zero or a positive number of seconds' unless typeof refresh is 'number' and Number.isFinite(refresh) and refresh >= 0
   fail 'tray menu must be a function' unless typeof options.menu is 'function'
-  { title: options.title, icon, logo, tooltip: options.tooltip or null, refresh, menu: options.menu }
+  { title: options.title, icon, logo, tooltip: options.tooltip or null, refresh, rowHeight: validateRowHeight(options.rowHeight, 'tray'), menu: options.menu }
 
 normalizeItems = (items, actions, at = 'menu') ->
   fail "#{at} must return an array" unless Array.isArray items
@@ -119,17 +124,17 @@ normalizeItems = (items, actions, at = 'menu') ->
         rejectUnknown item, ['kind'], here
         { kind: 'separator' }
       when 'label'
-        rejectUnknown item, ['kind', 'title', 'icon', 'subtitle'], here
-        label item.title, { icon: item.icon, subtitle: item.subtitle }
+        rejectUnknown item, ['kind', 'title', 'icon', 'subtitle', 'rowHeight'], here
+        label item.title, { icon: item.icon, subtitle: item.subtitle, rowHeight: item.rowHeight }
       when 'link'
-        rejectUnknown item, ['kind', 'title', 'id', 'url', 'icon', 'enabled'], here
-        link item.title, item.url, { id: item.id, icon: item.icon, enabled: item.enabled }
+        rejectUnknown item, ['kind', 'title', 'id', 'url', 'icon', 'enabled', 'rowHeight'], here
+        link item.title, item.url, { id: item.id, icon: item.icon, enabled: item.enabled, rowHeight: item.rowHeight }
       when 'submenu'
-        rejectUnknown item, ['kind', 'title', 'id', 'icon', 'enabled', 'items'], here
-        normalized = submenu item.title, normalizeItems(item.items, actions, "#{here}.items"), { id: item.id, icon: item.icon, enabled: item.enabled }
+        rejectUnknown item, ['kind', 'title', 'id', 'icon', 'enabled', 'rowHeight', 'items'], here
+        normalized = submenu item.title, normalizeItems(item.items, actions, "#{here}.items"), { id: item.id, icon: item.icon, enabled: item.enabled, rowHeight: item.rowHeight }
         normalized
       when 'action', 'toggle', 'directory'
-        allowed = ['kind', 'title', 'id', 'icon', 'enabled', '_run']
+        allowed = ['kind', 'title', 'id', 'icon', 'enabled', 'rowHeight', '_run']
         allowed.push 'value' if item.kind is 'toggle'
         allowed.push 'prompt' if item.kind is 'directory'
         rejectUnknown item, allowed, here
@@ -137,13 +142,13 @@ normalizeItems = (items, actions, at = 'menu') ->
         fail "duplicate tray action id #{JSON.stringify(item.id)}" if actions.has(item.id)
         fail "#{here} callback is missing" unless typeof item._run is 'function'
         actions.set item.id, item._run
-        copy = { kind: item.kind, title: item.title, id: item.id, icon: item.icon, enabled: item.enabled }
+        copy = { kind: item.kind, title: item.title, id: item.id, icon: item.icon, enabled: item.enabled, rowHeight: validateRowHeight(item.rowHeight, here) }
         copy.value = item.value if item.kind is 'toggle'
         copy.prompt = item.prompt if item.kind is 'directory'
         copy
       when 'quit'
-        rejectUnknown item, ['kind', 'title', 'icon'], here
-        quit item.title, { icon: item.icon }
+        rejectUnknown item, ['kind', 'title', 'icon', 'rowHeight'], here
+        quit item.title, { icon: item.icon, rowHeight: item.rowHeight }
       else
         fail "unknown #{here} kind #{JSON.stringify(item.kind)}"
 
@@ -157,6 +162,7 @@ export snapshot = (definition) ->
       icon: definition.icon
       logo: definition.logo
       tooltip: definition.tooltip
+      rowHeight: definition.rowHeight
       items: normalizeItems(items, actions)
     actions
   }

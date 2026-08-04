@@ -82,6 +82,7 @@ icon and `--force` when intentionally replacing that exact destination.
 - **Full panel vocabulary** — labels, separators, actions, toggles, links,
   submenus, directory pickers, and Quit
 - **Native and custom icons** — SF Symbols plus inline or file-backed SVGs
+- **Adaptive row sizing** — Apple-aligned automatic height with tray and item overrides
 - **Live callbacks** — one persistent Rip process retains closures and state
 - **Computed menus** — ordinary Rip loops and conditions build each render
 - **Automatic refresh** — a provider chooses its own interval or disables it
@@ -126,9 +127,32 @@ in arrays, comprehensions, and helper functions.
 | `directory title, id:, run:, ...` | Directory picker passing the selected path |
 | `quit title, ...` | Terminates the native host |
 
-Common options are `icon:` and `enabled:`. Callback items require a stable
-`id:` and `run:` function. A directory callback receives the selected path; a
-toggle callback receives the requested Boolean value.
+Common options are `icon:`, `enabled:`, and `rowHeight:`. Callback items require
+a stable `id:` and `run:` function. A directory callback receives the selected
+path; a toggle callback receives the requested Boolean value.
+
+## Row Height
+
+Rows use the 44-point rhythm of current macOS system panels by default. Keep
+that adaptive default explicitly with `rowHeight: 'automatic'`, or set a
+positive minimum height in points for the complete tray:
+
+```coffee
+app = tray
+  title: 'Example'
+  rowHeight: 48
+  menu: -> [...]
+```
+
+An individual item overrides the tray default:
+
+```coffee
+action 'Detailed Status', id: 'status', rowHeight: 56, run: -> showStatus!()
+```
+
+The value is a minimum, not a fixed frame. Subtitles, localization, and
+accessibility text can still make a row taller. Omitting `rowHeight:` is the
+same as `automatic`, letting the host track the native default as macOS evolves.
 
 ## Icons
 

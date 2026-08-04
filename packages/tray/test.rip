@@ -28,7 +28,10 @@ test 'the macOS host is generic and contains no Rip Apps policy', ->
   ok source.includes 'MenuBarExtra'
   ok source.includes 'TrayPanel(provider: provider)'
   ok source.includes '.menuBarExtraStyle(.window)'
-  ok kit.includes 'PanelGroupRow(item: item, provider: provider, reservesLeadingIconSpace:'
+  ok kit.includes 'PanelGroupRow('
+  ok kit.includes 'rowHeight: rowHeight(for: item)'
+  ok kit.includes '.frame(minHeight: rowHeight)'
+  ok kit.includes 'panelHeight(defaultRowHeight: rowHeight)'
   ok kit.includes 'PanelCompactControl(item: control, provider: provider)'
   ok kit.includes 'items.contains { $0.kind != "separator" && $0.icon != nil }'
   ok kit.includes 'PanelLeadingIcon(icon: item.icon, reservesSpace: reservesLeadingIconSpace)'
@@ -44,7 +47,7 @@ test 'the native host builds and exercises its protocol on macOS', ->
   eq build.exitCode, 0, build.stderr.toString() or build.stdout.toString()
   check = Bun.spawnSync ['swift', 'run', '--package-path', 'macos', 'tray-kit-check'], { cwd: import.meta.dir, stdout: 'pipe', stderr: 'pipe' }
   eq check.exitCode, 0, check.stderr.toString() or check.stdout.toString()
-  ok check.stdout.toString().includes '10 checks passed'
+  ok check.stdout.toString().includes '13 checks passed'
 
 test 'the builder derives an independent app destination and bundle identity', ->
   options = optionsFor [
@@ -67,12 +70,13 @@ test! 'a Rip menu becomes a callback-free native tray document', ->
     title: 'Fixture'
     icon: 'bolt'
     tooltip: 'Fixture tray'
+    rowHeight: 48
     refresh: 0
     menu: -> [
       label 'Ready', icon: 'checkmark.circle', subtitle: 'All systems go'
       separator()
       submenu 'Controls', [
-        action 'Run', id: 'run', run: -> 'ran'
+        action 'Run', id: 'run', rowHeight: 56, run: -> 'ran'
         toggle 'Watch', id: 'watch', value: true, run: (value) -> toggled = value
         directory 'Add…', id: 'add', prompt: 'Choose a project', run: (path) -> picked = path
         link 'Open', 'https://example.test/', icon: 'safari'
@@ -86,19 +90,20 @@ test! 'a Rip menu becomes a callback-free native tray document', ->
     icon: 'bolt'
     logo: null
     tooltip: 'Fixture tray'
+    rowHeight: 48
     items: [
-      { kind: 'label', title: 'Ready', icon: 'checkmark.circle', subtitle: 'All systems go' }
+      { kind: 'label', title: 'Ready', icon: 'checkmark.circle', subtitle: 'All systems go', rowHeight: null }
       { kind: 'separator' }
       {
-        kind: 'submenu', title: 'Controls', id: 'Controls', icon: null, enabled: true
+        kind: 'submenu', title: 'Controls', id: 'Controls', icon: null, enabled: true, rowHeight: null
         items: [
-          { kind: 'action', title: 'Run', id: 'run', icon: null, enabled: true }
-          { kind: 'toggle', title: 'Watch', id: 'watch', icon: null, enabled: true, value: true }
-          { kind: 'directory', title: 'Add…', id: 'add', icon: null, enabled: true, prompt: 'Choose a project' }
-          { kind: 'link', title: 'Open', id: 'https://example.test/', url: 'https://example.test/', icon: 'safari', enabled: true }
+          { kind: 'action', title: 'Run', id: 'run', icon: null, enabled: true, rowHeight: 56 }
+          { kind: 'toggle', title: 'Watch', id: 'watch', icon: null, enabled: true, rowHeight: null, value: true }
+          { kind: 'directory', title: 'Add…', id: 'add', icon: null, enabled: true, rowHeight: null, prompt: 'Choose a project' }
+          { kind: 'link', title: 'Open', id: 'https://example.test/', url: 'https://example.test/', icon: 'safari', enabled: true, rowHeight: null }
         ]
       }
-      { kind: 'quit', title: 'Quit', icon: null }
+      { kind: 'quit', title: 'Quit', icon: null, rowHeight: null }
     ]
   eq result.actions.size, 3
   watch = result.actions.get 'watch'
@@ -136,9 +141,12 @@ test! 'duplicate action ids reject loudly across nested menus', ->
 test 'invalid definitions and items reject at their owning boundary', ->
   throws (-> tray title: '', menu: -> []), 'tray title must be'
   throws (-> tray title: 'Bad', refresh: -1, menu: -> []), 'refresh must be'
+  throws (-> tray title: 'Bad', rowHeight: 0, menu: -> []), 'rowHeight must be automatic or a positive number'
   throws (-> action 'Bad', id: 'bad'), 'run must be a function'
+  throws (-> action 'Bad', id: 'bad', rowHeight: 'compact', run: -> null), 'rowHeight must be automatic or a positive number'
   throws (-> toggle 'Bad', id: 'bad', value: 'yes', run: -> null), 'value must be Boolean'
   throws (-> label 'Bad', icon: { kind: 'png', source: 'x', template: true }), 'icon kind must be svg'
+  eq (tray title: 'Auto', rowHeight: 'automatic', menu: -> []).rowHeight, null
 
 test! 'snapshot revalidates a raw definition instead of trusting its caller', ->
   error = null
