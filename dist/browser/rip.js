@@ -9543,6 +9543,7 @@ class Emitter {
     this.enums = [];
     this.classDecls = [];
     this.loopVars = [];
+    this.attrNames = [];
     this.importedRefs = [];
     this.strict = strict;
     this.ts = face === "ts";
@@ -10620,6 +10621,7 @@ class Emitter {
       "enums",
       "classDecls",
       "loopVars",
+      "attrNames",
       "importedRefs",
       "vocabulary",
       "silences",
@@ -16400,19 +16402,27 @@ ${pad ?? ""}`);
           } else if (i > 0)
             this.b.emit(", ");
           const emitPair = () => {
+            const recordAttr = (fn) => {
+              const start = this.b.offset;
+              fn();
+              if (this.ts)
+                this.attrNames.push([start, this.b.offset]);
+            };
             const mid = isNode4(markNode) ? this.stores.idOf(markNode) : null;
             if (this.ts && p.span != null && mid !== null) {
-              this.b.markSpan(mid, "shorthandProp", p.span[0], p.span[1], () => this.b.emit(p.key));
+              recordAttr(() => this.b.markSpan(mid, "shorthandProp", p.span[0], p.span[1], () => this.b.emit(p.key)));
               this.b.emit(": ");
               p.fn();
               return;
             }
             if (p.key.startsWith("__bind_") && p.key.endsWith("__")) {
-              this.b.emit("__bind_");
-              this.emitRewrittenPrimitive(p.key, p.key.slice(7, -2));
-              this.b.emit("__");
+              recordAttr(() => {
+                this.b.emit("__bind_");
+                this.emitRewrittenPrimitive(p.key, p.key.slice(7, -2));
+                this.b.emit("__");
+              });
             } else {
-              this.emitPrimitive(p.key);
+              recordAttr(() => this.emitPrimitive(p.key));
             }
             this.b.emit(": ");
             p.fn();
@@ -20401,7 +20411,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -20999,6 +21009,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     enums: emitted.enums,
     classDecls: emitted.classDecls,
     loopVars: emitted.loopVars,
+    attrNames: emitted.attrNames,
     importedRefs: emitted.importedRefs,
     imports: emitted.imports,
     trivia: result.trivia ?? [],

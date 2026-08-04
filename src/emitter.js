@@ -421,6 +421,16 @@ class Emitter {
     // is a parameter in the source too and is never recorded — the scope
     // walk decides, never the spelling.
     this.loopVars = [];
+    // Generated `[start, end]` spans of RENDER ATTRIBUTE names — a
+    // component call's prop keys, every spelling. A plain key survives
+    // into the ctor object verbatim, so its `property` token maps and
+    // forwards, while a two-way bind's MINTED key (`__bind_value__`)
+    // maps nowhere verbatim and drops — adjacent attributes in two
+    // colors. The ruling suppresses rather than synthesizes: the editor
+    // drops the token on exactly these spans, every attribute falls back
+    // to the TextMate attribute scope, and no token is ever invented at
+    // a span the mapper could not verify. TS face only.
+    this.attrNames = [];
     // Generated spans of every reference to an IMPORTED name, each with
     // the module it came from: `[start, end, name, specifier]`. One
     // file's compile cannot know an imported name's KIND — that lives in
@@ -2087,7 +2097,7 @@ class Emitter {
     this.b = new CodeBuilder(this.stores, { source });
     const { n, used } = this.temps;
     this.temps.used = new Set(used);
-    const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'loopVars', 'importedRefs',
+    const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'loopVars', 'attrNames', 'importedRefs',
       'vocabulary', 'silences', 'memberDecls', 'importSpans', 'pendingTypeDecls'];
     const saved = {};
     for (const k of channels) { saved[k] = this[k]; this[k] = []; }
@@ -9704,6 +9714,16 @@ class Emitter {
             this.b.emit(inner);
           } else if (i > 0) this.b.emit(', ');
           const emitPair = () => {
+            // Every spelling of the KEY records its generated span into
+            // the attrNames channel (TS face only): the token-suppression
+            // correction is keyed by these spans, so a prop key loses its
+            // `property` token while an object literal inside the VALUE
+            // (emitted by p.fn below) keeps every one of its own.
+            const recordAttr = (fn) => {
+              const start = this.b.offset;
+              fn();
+              if (this.ts) this.attrNames.push([start, this.b.offset]);
+            };
             // A boolean-shorthand key's derived span records a face
             // row (the builder's verbatim comparison makes it EXACT —
             // same bytes), so completions and diagnostics at the
@@ -9712,17 +9732,19 @@ class Emitter {
             // an editor-consumer concern.
             const mid = isNode(markNode) ? this.stores.idOf(markNode) : null;
             if (this.ts && p.span != null && mid !== null) {
-              this.b.markSpan(mid, 'shorthandProp', p.span[0], p.span[1], () => this.b.emit(p.key));
+              recordAttr(() => this.b.markSpan(mid, 'shorthandProp', p.span[0], p.span[1], () => this.b.emit(p.key)));
               this.b.emit(': ');
               p.fn();
               return;
             }
             if (p.key.startsWith('__bind_') && p.key.endsWith('__')) {
-              this.b.emit('__bind_');
-              this.emitRewrittenPrimitive(p.key, p.key.slice(7, -2));
-              this.b.emit('__');
+              recordAttr(() => {
+                this.b.emit('__bind_');
+                this.emitRewrittenPrimitive(p.key, p.key.slice(7, -2));
+                this.b.emit('__');
+              });
             } else {
-              this.emitPrimitive(p.key);
+              recordAttr(() => this.emitPrimitive(p.key));
             }
             this.b.emit(': ');
             p.fn();
@@ -14881,7 +14903,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

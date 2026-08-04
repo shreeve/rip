@@ -402,6 +402,87 @@ describeExtended('semantic tokens — a forward-referenced class binding', () =>
   }, 60000);
 });
 
+// Adjacent component attributes read ALIKE — by suppression, not synthesis.
+//
+// A plain prop (`label: 'Name'`) survives into the generated ctor object
+// as the same bytes, so its `property` token maps exactly and forwards; a
+// two-way bind's key is MINTED (`__bind_value__`), maps nowhere verbatim,
+// and drops. Both drops and forwards are individually correct, and the
+// element reads in two colors. The ruling trades the true classification
+// for a consistent one: the compiler reports each render ATTRIBUTE name's
+// span and the server drops the token there, so every attribute falls
+// back to the TextMate attribute scope. The server still never invents a
+// token at a span the mapper could not verify — the bind key stays
+// dropped by the mapping, not painted by a new rule.
+//
+// The controls carry the weight: a member declaration, a render-body
+// member read, an object literal's property and a member read through it
+// all KEEP their `property` tokens, so the suppression is the compiler's
+// attribute span and never a blanket strip of `property` — and the bind's
+// VALUE side keeps its token too, so the drop reaches the name alone.
+describeExtended('semantic tokens — a render attribute name', () => {
+  const ATTRS = [
+    'Field = component',                             // line 0
+    '  @label: string',                              // line 1
+    "  @value: string := ''",                        // line 2
+    '  render',                                      // line 3
+    '    div',                                       // line 4
+    '      = @label',                                // line 5  a member READ in render — keeps property
+    '',                                              // line 6
+    "obj = { label: 'plain' }",                      // line 7  an object literal — keeps property
+    'console.log obj.label',                         // line 8  a member read — keeps property
+    '',                                              // line 9
+    'Panel = component',                             // line 10
+    "  text := ''",                                  // line 11
+    '  render',                                      // line 12
+    '    div',                                       // line 13
+    '      Field',                                   // line 14
+    "        label: 'Name'",                         // line 15  the plain prop
+    '        value <=> text',                        // line 16  the two-way bind
+    "      Field label: 'Inline', value <=> text",   // line 17  the inline spelling of both
+    '',
+  ].join('\n');
+
+  test('a plain prop and a two-way-bound prop on the same element classify alike — and only there', async () => {
+    const session = await openSession({ 'app.rip': ATTRS });
+    try {
+      session.open('app.rip');
+      const tokens = await session.semanticTokens('app.rip');
+      expect(tokens.length).toBeGreaterThan(0);   // liveness
+
+      // The consistency the row demands: NO semantic token on any
+      // attribute name, in either spelling — every one falls back to the
+      // TextMate attribute scope, the one fact all of them can share.
+      for (const [label, line, character] of [
+        ['the block plain prop', 15, 8],
+        ['the block bind name', 16, 8],
+        ['the inline plain prop', 17, 12],
+        ['the inline bind name', 17, 29],
+      ]) {
+        expect(at(tokens, line, character), `${label} carries no semantic token`).toBeUndefined();
+      }
+
+      // The survivors, which make the absences above mean something: the
+      // suppression is keyed by the compiler's attribute span, so every
+      // other `property` in the file keeps its token.
+      for (const [label, line, character] of [
+        ['the member declaration', 1, 3],
+        ['the reactive member declaration', 2, 3],
+        ['the render-body member read', 5, 9],
+        ['the object literal property', 7, 8],
+        ['the member read', 8, 16],
+        ['the bind\'s value side', 16, 18],
+      ]) {
+        const tok = at(tokens, line, character);
+        expect(tok, `${label} has a token`).toBeDefined();
+        expect(tok.type, label).toBe('property');
+      }
+    } finally {
+      await session.close();
+    }
+  }, 60000);
+});
+
 // A render loop's binding keeps its `variable` color.
 //
 // `for person in people` is the same construct inside a render body and out,

@@ -1454,6 +1454,10 @@ async function refresh(document) {
     // Render-loop binding names — parameters in the face's block factory,
     // loop variables in the source (see ripSemanticTokens).
     loopVars: result.loopVars ?? [],
+    // Render attribute names — prop keys of component calls, whose
+    // semantic tokens are suppressed so every attribute reads through the
+    // TextMate attribute scope (see ripSemanticTokens).
+    attrNames: result.attrNames ?? [],
     // The enum names this module declares — read by IMPORTERS, which
     // cannot compute it from their own compile. An open buffer answers
     // from here; a disk file from its manifest entry.
@@ -2588,6 +2592,15 @@ function ripSemanticTokens(ctx, data) {
   // never touched: the correction is the span, not a rule over the block.
   const variableType = semanticTokensLegend?.tokenTypes?.indexOf('variable') ?? -1;
   const loopStarts = new Set((ctx.good.loopVars ?? []).map(([s]) => s));
+  // The one correction that DROPS instead of retyping: a render attribute
+  // name's token is suppressed, so a plain prop (whose `property` maps
+  // exactly and would forward) reads like its two-way-bound neighbor
+  // (whose minted key cannot map and already drops) — every attribute
+  // falls back to the TextMate attribute scope, the one fact all of them
+  // share. Never the reverse: no token is invented at the bind's span,
+  // and the drop is keyed by the compiler's span, so a property inside an
+  // attribute's VALUE keeps its own.
+  const attrStarts = new Set((ctx.good.attrNames ?? []).map(([s]) => s));
   // An IMPORTED enum carries the same merged-symbol `type` classification
   // its declaration does, and the importing file's compile cannot know
   // that — the kind lives in the declaring module. The compiler reports
@@ -2604,6 +2617,7 @@ function ripSemanticTokens(ctx, data) {
     char = data[i] === 0 ? char + data[i + 1] : data[i + 1];
     const length = data[i + 2];
     const genStart = positionToOffset(ctx.good.genLineStarts, ctx.good.code.length, { line, character: char });
+    if (attrStarts.has(genStart)) continue;
     const srcStart = mapSpan(genStart, genStart + length)
       ?? generatedEditSpanToSource(ctx.good.mappings, genStart, genStart + length, ctx.good.source, ctx.good.code)?.[0]
       ?? null;

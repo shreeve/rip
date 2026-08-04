@@ -279,6 +279,11 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // face, so tsgo classifies it `parameter`; the editor repaints the
     // construct the author declared. TS face only.
     loopVars: emitted.loopVars,
+    // Generated spans of RENDER ATTRIBUTE names — a component call's prop
+    // keys. The editor suppresses semantic tokens on exactly these, so a
+    // plain prop and a two-way-bound prop read alike (the TextMate
+    // attribute scope). TS face only.
+    attrNames: emitted.attrNames,
     // Generated spans of every reference to an IMPORTED binding, each with
     // its original exported name and module. One file's compile cannot
     // know an imported name's kind — the editor resolves the specifier and
