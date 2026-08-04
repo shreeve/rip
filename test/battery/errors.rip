@@ -56,6 +56,20 @@ test "inline statement try finally expression", '''
 
 code "inline try finally emission", "try fsyncSync(directory) finally closeSync(directory)", "try { fsyncSync(directory); } finally { closeSync(directory); }"
 
+# A cast on the try body ends at the finally keyword — the clause is code, never type text.
+test "cast body keeps its inline finally", '''
+  log = []
+  value = try JSON.parse('{"ok":true}') as { ok: boolean } finally log.push('cleanup')
+  [value.ok, log]
+  ''', [true, ['cleanup']]
+
+code "cast stops before an inline finally", "x = try readConfig() as { ok: boolean } finally closeSync(directory)", "let x = (() => { try { return readConfig(); } finally { closeSync(directory); } })();"
+
+# A depth-0 match operator or range dots after a cast are code, never type text.
+test "cast stops before a match operator", "m = 'abc' as string =~ /b/\nm[0]", "b"
+test "cast stops before inclusive range dots", "r = [1 as number .. 4]\nr", [1, 2, 3, 4]
+test "cast stops before exclusive range dots", "r = [1 as number ... 4]\nr", [1, 2, 3]
+
 # Catch with destructuring
 test "catch with pattern", "result = try\n  throw {code: 404}\ncatch {code}\n  code\nresult", 404
 

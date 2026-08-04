@@ -3609,6 +3609,7 @@ var CAST_STOPS = new Set([
   "**",
   "SHIFT",
   "COMPARE",
+  "MATCH",
   "&&",
   "||",
   "??",
@@ -3621,6 +3622,8 @@ var CAST_STOPS = new Set([
   "?.",
   "DAMMIT",
   "EXTENDS",
+  "..",
+  "...",
   "IF",
   "UNLESS",
   "ELSE",
@@ -3634,7 +3637,8 @@ var CAST_STOPS = new Set([
   "SWITCH",
   "RETURN",
   "THROW",
-  "CATCH"
+  "CATCH",
+  "FINALLY"
 ]);
 var ALIAS_STOPS = new Set([
   "IF",

@@ -1,4 +1,4 @@
-// 25-components.tsx — the TSX analogy twin (ROADMAP.md, Oracles), by symbol name, never line parity.
+// 25-components.tsx — the TSX analogy twin (CORPUS.md, Oracles), by symbol name, never line parity.
 // Methods spell as a class: React function components have no member-method concept.
 // Cuff passes its cell as an ordinary ref prop: no TSX line spells the `<=>` channel.
 

@@ -2,7 +2,7 @@
 
 # ── type aliases: simple, union, function ──
 # `satisfies` is deliberately absent: rip has no source spelling for it, and the emitter uses it internally for computed lowerings only.
-# Generic def signatures live with 08-functions; the position-constrained spellings below follow the boundaries note (ROADMAP.md).
+# Generic def signatures live with 08-functions; the position-constrained spellings below follow the boundaries note (CORPUS.md).
 
 type Port = number
 type Flag = boolean | 'auto'

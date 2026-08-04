@@ -2,7 +2,7 @@
 
 # ── Field forms: required, optional, defaults, literal unions, arrays, nested schemas ──
 # Field names are ruled `(field)` with interim silence (RULINGS.md, Schema).
-# The zod twin covers the analogy-honest surface only (ROADMAP.md, Oracles).
+# The zod twin covers the analogy-honest surface only (CORPUS.md, Oracles).
 
 Address = schema
   street! string

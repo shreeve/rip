@@ -72,6 +72,7 @@ Also driven straight against the tsgo binary, bypassing rip: **not a single toke
 **vs v3** — **regression** (driven, above). v3 classifies in-process through the JS TypeScript LanguageService (`getEncodedSemanticClassifications`), which canonicalizes correctly, so the same code on the same machine gets the bit. It surfaced late for the reason the escape slot above records.
 
 **Status.** ⬜ **Open** (2026-07-14) — **fixed upstream, waiting on a stable release.** [microsoft/typescript-go#4635](https://github.com/microsoft/typescript-go/issues/4635) closed 2026-07-21 (PR #4654, `declSourceFile.Path()`), and the modifier is present when the same probe runs against a build carrying it. But no stable release has it: npm `latest` is 7.0.2, published before the merge, and the only builds with the fix are `7.1.0-dev.*` under `next`. This repo pins 7.0.2, and that pin also feeds every tsc-backed gate ([tsc.js](../support/tsc.js) `resolveTsc`), so adopting it early means putting the gates on a daily build. The row's exit is a stable 7.1 reaching the pin. It still sits last because nothing here moves it — but the reason is now a release cadence, not an unfixed upstream bug.
+
 ## Closed
 
 Verified, and gone. **The gate is the record** — each row's constraint is stated where it is enforced, and the audit that retired these bodies confirmed the root of every one already lives in the code it governs, usually better stated than it was here. The body is recoverable from git (`git log -S`), and the commit that filed each finding still names its ID.
@@ -144,3 +145,4 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 64 | The await hint lit the whole construct — the synthetic keyword's cover | `mapping` (the keyword-maps case), `hint-positions` |
 | 65 | A render loop's binding classified `parameter` — the lowering made it one | `semantic-tokens` |
 | 66 | Adjacent component attributes read in two colors — suppressed, not synthesized | `semantic-tokens` |
+| 67 | A materialized mirror was never forwarded to tsgo, so a pruned module's importers kept the stub's any — masked by FSEvents on macOS, wedged on linux | the audit CI job on ubuntu (hover parity + token delivery over the corpus); the compile path forwards its touched list |

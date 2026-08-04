@@ -327,7 +327,7 @@ const TYPE_STARTERS = new Set([
 ]);
 
 const RUN_OPENERS = new Set(['(', 'CALL_START', 'PARAM_START', '[', 'INDEX_START', '{', 'PICK_START', 'OPTPICK_START']);
-const RUN_CLOSERS = new Set([')', 'CALL_END', 'PARAM_END', ']', 'INDEX_END', '}', 'PICK_END']);
+export const RUN_CLOSERS = new Set([')', 'CALL_END', 'PARAM_END', ']', 'INDEX_END', '}', 'PICK_END']);
 
 // Depth-0 enders of every type run. `=` ends a typed declaration's or
 // typed default param's annotation — the reactive assign heads (`:=`,
@@ -336,7 +336,7 @@ const RUN_CLOSERS = new Set([')', 'CALL_END', 'PARAM_END', ']', 'INDEX_END', '}'
 // `h: Function ~> body`); `->` is the arrow
 // operator (a function TYPE spells `=>`, which stops only in
 // arrow-return position).
-const RUN_STOPS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', ',', '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN', 'GATE', 'EFFECT', '->']);
+export const RUN_STOPS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', ',', '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN', 'GATE', 'EFFECT', '->']);
 
 // Extra depth-0 stops for the cast's type run: the postfix cast lives
 // inside a larger expression, so any binary/relational/ternary operator
@@ -344,12 +344,18 @@ const RUN_STOPS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', ',', '=', 'COMPOUN
 // type operators, so `x as A | B` reads `x as (A | B)`, as in TS) —
 // and so does any statement-clause keyword: a trailing clause never
 // swallows into the type string, so `y = x as T if c` keeps its
-// guard.
-const CAST_STOPS = new Set([
-  '+', '-', 'MATH', '**', 'SHIFT', 'COMPARE', '&&', '||', '??', '^',
-  'RELATION', 'TERNARY', '?', 'PRESENCE', ':', '?.', 'DAMMIT', 'EXTENDS',
+// guard. Depth-0 range dots are code operators too, both spellings
+// (`[a as T..b]`, `[a as T...b]`); a tuple's `...` rest sits at
+// bracket depth, untouched. Gated against the grammar by
+// test/toolchain/cast-stops.test.js: every terminal the parser can
+// accept after an Expression must stop the run or be a named
+// continuation there.
+export const CAST_STOPS = new Set([
+  '+', '-', 'MATH', '**', 'SHIFT', 'COMPARE', 'MATCH', '&&', '||', '??',
+  '^', 'RELATION', 'TERNARY', '?', 'PRESENCE', ':', '?.', 'DAMMIT',
+  'EXTENDS', '..', '...',
   'IF', 'UNLESS', 'ELSE', 'THEN', 'WHILE', 'UNTIL', 'LOOP', 'FOR',
-  'WHEN', 'BY', 'SWITCH', 'RETURN', 'THROW', 'CATCH',
+  'WHEN', 'BY', 'SWITCH', 'RETURN', 'THROW', 'CATCH', 'FINALLY',
 ]);
 
 // Statement-clause keywords that end a TYPE ALIAS's right-hand run at
