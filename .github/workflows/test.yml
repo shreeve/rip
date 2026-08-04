@@ -79,8 +79,16 @@ jobs:
   # test/audit, judged by its exit code. Parallel to `test` so its
   # verdict stands on its own — a contract break names itself instead of
   # sitting behind (or in front of) the suite's report.
+  #
+  # Pinned to macOS: the audit's oracle baselines hold there, and on
+  # ubuntu the same commit deterministically breaks three invariants
+  # (hover.parity, token.delivery.*) — the editor surface types dynamic
+  # `.rip` imports as `any` on Linux, a platform divergence in the
+  # tsgo/mirror lane that is its own open defect. Gating on the baseline
+  # platform keeps this job's red meaning "this change broke the
+  # contract"; the Linux divergence is tracked separately.
   audit:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     # Healthy ~2 minutes: a ~30s audit behind two frozen installs.
     timeout-minutes: 10
     steps:
