@@ -23,10 +23,13 @@ test 'has no runtime dependencies and keeps the native host in the package', ->
 test 'the macOS host is generic and contains no Rip Apps policy', ->
   manifest = readFileSync "#{import.meta.dir}/macos/Package.swift", 'utf8'
   source = readFileSync "#{import.meta.dir}/macos/Sources/RipTrayHost/RipTrayHost.swift", 'utf8'
+  kit = readFileSync "#{import.meta.dir}/macos/Sources/TrayKit/TrayKit.swift", 'utf8'
   ok manifest.includes '.macOS(.v13)'
   ok source.includes 'MenuBarExtra'
   ok source.includes 'TrayPanel(provider: provider)'
   ok source.includes '.menuBarExtraStyle(.window)'
+  ok kit.includes 'PanelGroupRow(item: item, provider: provider)'
+  ok kit.includes 'PanelCompactControl(item: control, provider: provider)'
   ok not /rip app|rip edge|Caddy|Janus/.test(source)
 
 test 'the native host builds and exercises its protocol on macOS', ->
@@ -37,7 +40,7 @@ test 'the native host builds and exercises its protocol on macOS', ->
   eq build.exitCode, 0, build.stderr.toString() or build.stdout.toString()
   check = Bun.spawnSync ['swift', 'run', '--package-path', 'macos', 'tray-kit-check'], { cwd: import.meta.dir, stdout: 'pipe', stderr: 'pipe' }
   eq check.exitCode, 0, check.stderr.toString() or check.stdout.toString()
-  ok check.stdout.toString().includes '9 checks passed'
+  ok check.stdout.toString().includes '10 checks passed'
 
 test 'the builder derives an independent app destination and bundle identity', ->
   options = optionsFor [

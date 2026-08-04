@@ -24,6 +24,10 @@ The current tip carries the local Rip appliance and its native client:
   callbacks are authored in Rip. The reusable SwiftUI host renders one
   Apple-style window popover and returns actions; it contains no Rip Server
   policy.
+- The panel stays deliberately flat: a compact branded header, one row per
+  group/app, secondary status text, contextual icon controls, hairline
+  dividers, native hover feedback, and bounded scrolling. It does not nest
+  decorative cards.
 - Tray icons accept SF Symbol strings, inline `svg` values, and file-backed
   `svgFile` values. SVGs are adaptive macOS template images by default;
   `template: false` preserves full color. A separate `logo:` can brand the
@@ -34,16 +38,21 @@ The current tip carries the local Rip appliance and its native client:
   independently named, ad-hoc-signed `.app`. The package's executable
   `tray.rip` mode is the Rip Apps client for `rip app` and `rip edge`.
 
-Live verification for the tray SVG/panel commit:
+Live verification for the tray panel cleanup:
 
 - `bun run test` — 6,128 passed, 35 extended-tier skips.
-- `bun run test:all` — all 22 lanes passed, 8,359 tests total;
-  `packages/tray` ran 12 tests.
-- The Swift package built on macOS and its protocol executable passed nine
+- `packages/tray`: 12 tests passed. The Swift package built on macOS and its
+  protocol executable passed ten
   native model/SVG checks.
+- A canonical run before the final SVG sizing refinement passed all 22 lanes,
+  8,359 tests total. Exact-tree canonical retries hit unrelated load-sensitive
+  gates under parallel load: the Print subprocess lane and one reactive-runtime
+  scaling bound. Print passed 23/23 in isolation, and the complete reactive
+  file passed 89/89 in isolation, including the failed scaling case.
 - `packages/tray/dist/Rip.app` was rebuilt, its ad-hoc signature and copied SVG
-  bytes were verified, and the app plus embedded provider are running. The
-  build directory is ignored.
+  bytes were verified, the open panel was visually inspected at native Retina
+  resolution, and the app plus embedded provider are running. The build
+  directory is ignored.
 - `packages/browser-tests` remains the documented CI-only Playwright lane.
 - `git diff --check` — passed.
 

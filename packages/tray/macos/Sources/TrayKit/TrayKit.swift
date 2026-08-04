@@ -43,7 +43,7 @@ public enum TrayIcon: Codable, Equatable, Sendable {
     }
   }
 
-  public func nativeImage(accessibilityDescription: String? = nil) throws -> NSImage {
+  public func nativeImage(accessibilityDescription: String? = nil, size: CGFloat? = nil) throws -> NSImage {
     switch self {
     case .symbol(let name):
       guard let image = NSImage(systemSymbolName: name, accessibilityDescription: accessibilityDescription) else {
@@ -54,7 +54,9 @@ public enum TrayIcon: Codable, Equatable, Sendable {
       guard let image = NSImage(data: Data(source.utf8)) else {
         throw TrayHostError("invalid SVG icon")
       }
+      if let size { image.size = NSSize(width: size, height: size) }
       image.isTemplate = template
+      image.accessibilityDescription = accessibilityDescription
       return image
     }
   }
@@ -302,7 +304,7 @@ public struct TrayStatusLabel: View {
     Label {
       Text(provider.tray.title)
     } icon: {
-      TrayIconView(icon: provider.tray.icon ?? .symbol("circle"), size: 18)
+      TrayIconView(icon: provider.tray.icon ?? .symbol("circle"), size: 24)
     }
     .help(provider.tray.tooltip ?? provider.tray.title)
   }
@@ -317,37 +319,35 @@ public struct TrayPanel: View {
 
   public var body: some View {
     VStack(spacing: 0) {
-      HStack(spacing: 12) {
-        if let logo = provider.tray.logo ?? provider.tray.icon {
-          TrayIconView(icon: logo, size: 38)
-        }
-        VStack(alignment: .leading, spacing: 2) {
-          Text(provider.tray.title).font(.title2.weight(.semibold))
-          if let tooltip = provider.tray.tooltip {
-            Text(tooltip).font(.subheadline).foregroundStyle(.secondary)
-          }
-        }
+      HStack(spacing: 10) {
+        Text(provider.tray.title).font(.headline)
         Spacer()
+        if let logo = provider.tray.logo ?? provider.tray.icon {
+          TrayIconView(icon: logo, size: 30)
+        }
       }
-      .padding(16)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+      .help(provider.tray.tooltip ?? provider.tray.title)
 
       Divider()
 
       ScrollView {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
           if let error = provider.error {
             Label(error, systemImage: "exclamationmark.triangle.fill")
               .foregroundStyle(.red)
               .font(.callout)
               .fixedSize(horizontal: false, vertical: true)
+              .padding(12)
           }
           TrayPanelItems(items: provider.tray.items, provider: provider)
         }
-        .padding(12)
+        .padding(.vertical, 6)
       }
-      .frame(maxHeight: 520)
+      .frame(height: min(max(provider.tray.items.panelHeight + (provider.error == nil ? 0 : 54), 120), 520))
     }
-    .frame(width: 360)
+    .frame(width: 340)
   }
 }
 
@@ -359,57 +359,78 @@ private struct TrayPanelItems: View {
     ForEach(Array(items.enumerated()), id: \.offset) { _, item in
       switch item.kind {
       case "separator":
-        Divider()
+        Divider().padding(.horizontal, 12).padding(.vertical, 5)
       case "submenu":
-        VStack(alignment: .leading, spacing: 7) {
-          ItemLabel(item: item)
-            .font(.headline)
-            .foregroundStyle(item.enabled ?? true ? .primary : .secondary)
-          VStack(spacing: 2) {
-            TrayPanelItems(items: item.items ?? [], provider: provider)
-          }
-          .padding(6)
-          .background(.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
-        }
-        .disabled(!(item.enabled ?? true))
+        PanelGroupRow(item: item, provider: provider)
       case "label":
-        PanelLabelRow(item: item)
+        PanelInformationRow(item: item)
       case "toggle":
-        Toggle(isOn: Binding(
-          get: { item.value ?? false },
-          set: { _ in provider.perform(item) }
-        )) {
-          PanelLabelRow(item: item)
-        }
-        .toggleStyle(.switch)
-        .disabled(!(item.enabled ?? true))
+        PanelToggleRow(item: item, provider: provider)
       case "action", "directory", "link", "quit":
-        Button { provider.perform(item) } label: {
-          PanelLabelRow(item: item)
-        }
-        .buttonStyle(TrayPanelButtonStyle())
-        .disabled(!(item.enabled ?? true))
+        PanelActionRow(item: item, provider: provider)
       default:
         Label("Unsupported item: \(item.kind)", systemImage: "questionmark.circle")
           .foregroundStyle(.secondary)
+          .padding(.horizontal, 14)
+          .padding(.vertical, 8)
       }
     }
   }
 }
 
-private struct PanelLabelRow: View {
+private struct PanelGroupRow: View {
+  let item: TrayItem
+  @ObservedObject var provider: TrayProvider
+
+  private var details: [TrayItem] {
+    (item.items ?? []).filter { $0.kind == "label" }
+  }
+
+  private var controls: [TrayItem] {
+    (item.items ?? []).filter { ["separator", "action", "toggle", "directory", "link", "quit"].contains($0.kind) }
+  }
+
+  private var nested: [TrayItem] {
+    (item.items ?? []).filter { $0.kind == "submenu" }
+  }
+
+  var body: some View {
+    VStack(spacing: 0) {
+      HStack(spacing: 10) {
+        PanelLeadingIcon(icon: item.icon)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(item.title ?? "").fontWeight(.medium)
+          ForEach(Array(details.enumerated()), id: \.offset) { _, detail in
+            PanelDetail(item: detail)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(spacing: 2) {
+          ForEach(Array(controls.enumerated()), id: \.offset) { _, control in
+            PanelCompactControl(item: control, provider: provider)
+          }
+        }
+      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 7)
+      .opacity(item.enabled ?? true ? 1 : 0.45)
+      .disabled(!(item.enabled ?? true))
+
+      if !nested.isEmpty {
+        TrayPanelItems(items: nested, provider: provider)
+          .padding(.leading, 22)
+      }
+    }
+  }
+}
+
+private struct PanelInformationRow: View {
   let item: TrayItem
 
   var body: some View {
     HStack(spacing: 10) {
-      if let icon = item.icon {
-        ZStack {
-          Circle().fill(.primary.opacity(0.08))
-          TrayIconView(icon: icon, size: 17)
-        }
-        .frame(width: 30, height: 30)
-      }
-      VStack(alignment: .leading, spacing: 1) {
+      PanelLeadingIcon(icon: item.icon)
+      VStack(alignment: .leading, spacing: 2) {
         Text(item.title ?? "")
         if let subtitle = item.subtitle {
           Text(subtitle).font(.caption).foregroundStyle(.secondary)
@@ -417,37 +438,126 @@ private struct PanelLabelRow: View {
       }
       Spacer(minLength: 8)
     }
-    .contentShape(Rectangle())
-    .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 7)
   }
 }
 
-private struct TrayPanelButtonStyle: ButtonStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .padding(.horizontal, 5)
-      .background(
-        configuration.isPressed ? Color.accentColor.opacity(0.16) : Color.clear,
-        in: RoundedRectangle(cornerRadius: 7)
-      )
-  }
-}
-
-private struct ItemLabel: View {
+private struct PanelDetail: View {
   let item: TrayItem
 
   var body: some View {
-    if let icon = item.icon {
-      Label {
-        Text(item.title ?? "")
-      } icon: {
+    let text = [item.title, item.subtitle].compactMap { $0 }.joined(separator: " · ")
+    HStack(spacing: 4) {
+      if let icon = item.icon {
+        TrayIconView(icon: icon, size: 10)
+      }
+      Text(text)
+        .lineLimit(1)
+        .truncationMode(.middle)
+    }
+    .font(.caption)
+    .foregroundStyle(.secondary)
+    .help(text)
+  }
+}
+
+private struct PanelLeadingIcon: View {
+  let icon: TrayIcon?
+
+  var body: some View {
+    if let icon {
+      ZStack {
+        Circle().fill(.primary.opacity(0.08))
         TrayIconView(icon: icon, size: 16)
       }
-        .help(item.subtitle ?? "")
-    } else {
-      Text(item.title ?? "")
-        .help(item.subtitle ?? "")
+      .frame(width: 30, height: 30)
     }
+  }
+}
+
+private struct PanelCompactControl: View {
+  let item: TrayItem
+  @ObservedObject var provider: TrayProvider
+  @State private var hovering = false
+
+  private var fallbackIcon: TrayIcon {
+    switch item.kind {
+    case "directory": .symbol("folder.badge.plus")
+    case "link": .symbol("arrow.up.right")
+    case "quit": .symbol("power")
+    default: .symbol("ellipsis")
+    }
+  }
+
+  var body: some View {
+    if item.kind == "separator" {
+      Divider().frame(height: 18).padding(.horizontal, 2)
+    } else if item.kind == "toggle" {
+      Toggle("", isOn: Binding(
+        get: { item.value ?? false },
+        set: { _ in provider.perform(item) }
+      ))
+      .labelsHidden()
+      .toggleStyle(.switch)
+      .controlSize(.mini)
+      .help(item.title ?? "")
+      .disabled(!(item.enabled ?? true))
+    } else {
+      Button { provider.perform(item) } label: {
+        TrayIconView(icon: item.icon ?? fallbackIcon, size: 14)
+          .frame(width: 27, height: 27)
+          .background(
+            hovering ? Color.primary.opacity(0.09) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 6)
+          )
+      }
+      .buttonStyle(.plain)
+      .help(item.title ?? "")
+      .accessibilityLabel(Text(item.title ?? ""))
+      .onHover { hovering = $0 }
+      .disabled(!(item.enabled ?? true))
+      .opacity(item.enabled ?? true ? 1 : 0.3)
+    }
+  }
+}
+
+private struct PanelToggleRow: View {
+  let item: TrayItem
+  @ObservedObject var provider: TrayProvider
+
+  var body: some View {
+    Toggle(isOn: Binding(
+      get: { item.value ?? false },
+      set: { _ in provider.perform(item) }
+    )) {
+      PanelInformationRow(item: item)
+    }
+    .toggleStyle(.switch)
+    .padding(.trailing, 12)
+    .disabled(!(item.enabled ?? true))
+  }
+}
+
+private struct PanelActionRow: View {
+  let item: TrayItem
+  @ObservedObject var provider: TrayProvider
+  @State private var hovering = false
+
+  var body: some View {
+    Button { provider.perform(item) } label: {
+      PanelInformationRow(item: item)
+        .contentShape(Rectangle())
+        .background(
+          hovering ? Color.primary.opacity(0.055) : Color.clear,
+          in: RoundedRectangle(cornerRadius: 7)
+        )
+    }
+    .buttonStyle(.plain)
+    .padding(.horizontal, 5)
+    .onHover { hovering = $0 }
+    .disabled(!(item.enabled ?? true))
+    .opacity(item.enabled ?? true ? 1 : 0.4)
   }
 }
 
@@ -456,7 +566,7 @@ private struct TrayIconView: View {
   let size: CGFloat
 
   var body: some View {
-    if let image = try? icon.nativeImage() {
+    if let image = try? icon.nativeImage(size: size) {
       Image(nsImage: image)
         .resizable()
         .renderingMode(icon.usesTemplateRendering ? .template : .original)
@@ -475,6 +585,18 @@ private extension TrayDefinition {
 }
 
 private extension Array where Element == TrayItem {
+  var panelHeight: CGFloat {
+    reduce(12) { height, item in
+      switch item.kind {
+      case "separator": return height + 11
+      case "submenu":
+        let nested = (item.items ?? []).filter { $0.kind == "submenu" }
+        return height + 48 + (nested.isEmpty ? 0 : nested.panelHeight)
+      default: return height + 44
+      }
+    }
+  }
+
   func validateIcons() throws {
     for item in self {
       if let icon = item.icon { _ = try icon.nativeImage(accessibilityDescription: item.title) }

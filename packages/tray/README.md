@@ -78,7 +78,7 @@ icon and `--force` when intentionally replacing that exact destination.
 - **Pure Rip authoring** — the complete application is one `.rip` program
 - **One native host** — SwiftUI's `MenuBarExtra` renders any tray provider
 - **Apple-style panel** — a rounded native popover with a branded header,
-  section cards, status rows, and a scrollable body
+  flat status rows, contextual controls, and a scrollable body
 - **Full panel vocabulary** — labels, separators, actions, toggles, links,
   submenus, directory pickers, and Quit
 - **Native and custom icons** — SF Symbols plus inline or file-backed SVGs

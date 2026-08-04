@@ -235,8 +235,9 @@ ripApps = ->
         icon: if edge.state is 'running' then 'checkmark.circle.fill' else 'circle'
     ]
     if edge.state is 'running'
-      items.push action 'Reload', id: 'edge.reload', icon: 'arrow.clockwise', enabled: edge.managed, run: -> json! 'edge', 'reload', '--json'
-      items.push action 'Stop', id: 'edge.stop', icon: 'stop.fill', enabled: edge.managed, run: -> json! 'edge', 'stop', '--json'
+      if edge.managed
+        items.push action 'Reload', id: 'edge.reload', icon: 'arrow.clockwise', run: -> json! 'edge', 'reload', '--json'
+        items.push action 'Stop', id: 'edge.stop', icon: 'stop.fill', run: -> json! 'edge', 'stop', '--json'
     else
       items.push action 'Start', id: 'edge.start', icon: 'play.fill', run: -> json! 'edge', 'start', '--json'
     submenu 'Edge', items, id: 'edge', icon: 'network'
@@ -244,10 +245,12 @@ ripApps = ->
   appMenu = (app) ->
     running = app.state is 'running'
     items = [label app.root, subtitle: app.state]
-    items.push link 'Open', app.url, id: "#{app.id}.open", icon: 'safari' if running and app.url?
-    items.push action 'Start', id: "#{app.id}.start", icon: 'play.fill', enabled: not running, run: -> json! 'app', 'start', app.id, '--json'
-    items.push action 'Stop', id: "#{app.id}.stop", icon: 'stop.fill', enabled: running, run: -> json! 'app', 'stop', app.id, '--json'
-    items.push action 'Restart', id: "#{app.id}.restart", icon: 'arrow.clockwise', enabled: running, run: -> json! 'app', 'restart', app.id, '--json'
+    if running
+      items.push link 'Open', app.url, id: "#{app.id}.open", icon: 'safari' if app.url?
+      items.push action 'Stop', id: "#{app.id}.stop", icon: 'stop.fill', run: -> json! 'app', 'stop', app.id, '--json'
+      items.push action 'Restart', id: "#{app.id}.restart", icon: 'arrow.clockwise', run: -> json! 'app', 'restart', app.id, '--json'
+    else
+      items.push action 'Start', id: "#{app.id}.start", icon: 'play.fill', run: -> json! 'app', 'start', app.id, '--json'
     items.push action 'Open Log', id: "#{app.id}.logs", icon: 'doc.text', run: -> openLog! app
     submenu app.name, items, id: app.id, icon: if running then 'circle.fill' else 'circle'
 
@@ -261,11 +264,8 @@ ripApps = ->
       edge = json! 'edge', 'status', '--json'
       apps = json! 'app', 'status', '--json'
       items = [edgeMenu(edge), separator()]
-      if apps.length
-        items.push appMenu(app) for app in apps
-      else
-        items.push label 'No remembered apps', subtitle: 'Use Add App… or rip app add'
-      items.push separator()
+      items.push appMenu(app) for app in apps
+      items.push separator() if apps.length
       items.push directory 'Add App…', id: 'apps.add', icon: 'plus', prompt: 'Add', run: (path) -> json! 'app', 'add', path, '--json'
       items.push action 'Refresh', id: 'tray.refresh', icon: 'arrow.clockwise', run: -> null
       items.push separator()

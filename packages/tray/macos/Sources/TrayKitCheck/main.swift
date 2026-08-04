@@ -24,8 +24,9 @@ if case .svg(_, let template) = envelope.tray?.logo {
 } else {
   require(false, "SVG logo did not decode")
 }
-let icon = try envelope.tray?.icon?.nativeImage(accessibilityDescription: "Rip")
+let icon = try envelope.tray?.icon?.nativeImage(accessibilityDescription: "Rip", size: 18)
 require(icon?.isTemplate == true, "template SVG did not become an NSImage")
+require(icon?.size == NSSize(width: 18, height: 18), "SVG icon did not adopt its requested point size")
 let logo = try envelope.tray?.logo?.nativeImage(accessibilityDescription: "Rip")
 require(logo?.isTemplate == false, "full-color SVG did not retain original rendering")
 do {
@@ -34,4 +35,4 @@ do {
 } catch {
   require(error.localizedDescription == "invalid SVG icon", "invalid SVG error was not precise")
 }
-print("TrayKitCheck: 9 checks passed")
+print("TrayKitCheck: 10 checks passed")
