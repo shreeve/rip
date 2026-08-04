@@ -80,15 +80,12 @@ jobs:
   # verdict stands on its own — a contract break names itself instead of
   # sitting behind (or in front of) the suite's report.
   #
-  # Pinned to macOS: the audit's oracle baselines hold there, and on
-  # ubuntu the same commit deterministically breaks three invariants
-  # (hover.parity, token.delivery.*) — after a closure prune, the editor
-  # surface types dynamic `.rip` imports as `any` on Linux and never
-  # settles. Gating on the baseline platform keeps this job's red
-  # meaning "this change broke the contract"; the Linux divergence is an
-  # open row in test/audit/FINDINGS.md, and its fix unpins this job.
+  # On ubuntu deliberately: tsgo natively watches the disk only on
+  # macOS, so linux is the platform that proves the server SENDS every
+  # mirror event it owes instead of being rescued by FSEvents — the
+  # masking that once hid a dropped notification from every macOS run.
   audit:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     # Healthy ~2 minutes: a ~30s audit behind two frozen installs.
     timeout-minutes: 10
     steps:

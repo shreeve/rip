@@ -1556,7 +1556,23 @@ async function refresh(document) {
           changes: wrapperFiles.map((p) => ({ uri: 'file://' + p, type: FileChangeType.Changed })),
         });
       }
-      const { compiled, cached, failed } = materializeClosure(imports);
+      const { compiled, cached, failed, touched } = materializeClosure(imports);
+      // Every mirror this materialization wrote is forwarded NOW, the same
+      // way the watcher-event path forwards its own touched list: tsgo's
+      // program otherwise keeps the bytes it last knew for these files —
+      // after a prune, the auto-import stub, whose exports all answer `any`.
+      // The event is owed here by contract: this server advertises
+      // didChangeWatchedFiles to tsgo, and tsgo's own disk watching is
+      // darwin-only in practice, so an unforwarded write is invisible on
+      // linux while FSEvents quietly covers the same gap on macOS.
+      if (touched.length && tsgo) {
+        tsgo.client.notify('workspace/didChangeWatchedFiles', {
+          changes: touched.map((p) => ({
+            uri: 'file://' + p,
+            type: fs.existsSync(p) ? FileChangeType.Changed : FileChangeType.Deleted,
+          })),
+        });
+      }
       if (compiled || cached || failed) {
         connection.console.log(
           `[rip] closure of ${path.basename(fsPath)}: ${compiled} compiled, ${cached} cached, ${failed} failed`,
