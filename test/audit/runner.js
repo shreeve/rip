@@ -3979,13 +3979,13 @@ if (RUN_HOVER) {
   // The reactive clause is LEGACY-SCOPED: 08's React twin approximates
   // reactivity with useState, so its reactive rows have no oracle — but the
   // reactive twin is plain TS written to BE the oracle (CORPUS.md,
-  // Oracles; RULINGS.md, Reactive: the twin agrees live, so no pin), and
+  // Twins; RULINGS.md, Reactive: the twin agrees live, so no pin), and
   // classifying its rows native would silently retire that oracle the run
   // it landed. Component/schema clauses stay corpus-wide: those analogies
   // (TSX/zod) remain approximations in every fixture that carries them.
   // Reactive spellings (`:=`/`~=`/`~>`) are NOT rip-native here: the
   // reactive twin is a deliberate plain-TS oracle (state → let, computed →
-  // const — CORPUS.md, Oracles), so those declarations are twin-judged.
+  // const — CORPUS.md, Twins), so those declarations are twin-judged.
   const ripNative = (r) => {
     const t = r.text ?? '';
     return /=\s*component\b/.test(t)
@@ -4722,10 +4722,17 @@ if (tk) {
   // A row's reason is its DETAIL, at 6 — it sat at 8, which is the level for
   // detail-of-detail and left a gap under a section that has no middle tier.
   const reason = (text) => { for (const l of wrapText(text, TERM_W - 6, 0)) console.log(`      ${dim(l)}`); };
-  const { verdicts, failures } = judge({
+  const { verdicts, failures, drift } = judge({
     states: { gr, mp, el, hp, tk, fails },
     ran: (lane) => AUDITS.find((a) => a.key === lane).ran,
   });
+  // STRUCTURAL refusal, not a verdict: a predicate read a field no summary
+  // carries, so its invariant would judge vacuously green from here on. The
+  // field name drifted between this file and contract.js; fix the seam.
+  if (drift.size) {
+    console.error(`\n✗ contract drift: a predicate read ${[...drift].map((d) => `\`${d}\``).join(', ')} and no summary carries it — the invariant would judge vacuously green; realign contract.js with the runner's summaries.`);
+    process.exit(1);
+  }
   const judged = verdicts.filter((v) => v.state !== 'skipped');
   out(`\n  ${bold('Contract')} ${dim(`(${judged.length} invariant${judged.length === 1 ? '' : 's'} judged${verdicts.length - judged.length ? `, ${verdicts.length - judged.length} unjudged — their lane did not run` : ''})`)}`);
   const shown = judged.filter((x) => x.state !== 'green');

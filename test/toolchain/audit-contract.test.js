@@ -27,7 +27,7 @@ const withRed = (name, why) => withoutReds().map((c) => (c.name === name ? { ...
 // shape the predicates touch. Built fresh per test: a shared object mutated by
 // one case would leak into the next.
 const cleanStates = () => ({
-  gr: { uncovered: 0, badExclusions: 0, negatives: { kindBad: 0, vocabUnfalsified: 0, claimsBroken: 0, cellsMissing: 0, staleMints: 0, headsUnseen: 0, badSpellingExclusions: 0, claimsBadParks: 0, splitDividers: 0 } },
+  gr: { unparsed: 0, uncovered: 0, badExclusions: 0, negatives: { kindBad: 0, vocabUnfalsified: 0, claimsAbsent: 0, claimsBroken: 0, cellsMissing: 0, staleMints: 0, headsUnseen: 0, badSpellingExclusions: 0, claimsBadParks: 0, splitDividers: 0 } },
   mp: { missing: 0, drifted: 0, census: 0, decompositionDrift: 0, badExclusions: 0 },
   fails: 0,
   el: { problems: [] },
@@ -67,6 +67,42 @@ describe('the audit contract judges in both directions', () => {
   test('a tolerated red that now holds FAILS — the recovered signal', () => {
     const { failures } = judge({ states: cleanStates(), ran: allRan, table: withRed('token.type', 'fixed upstream, reason not yet deleted') });
     expect(failures.map((f) => [f.name, f.state])).toEqual([['token.type', 'recovered']]);
+  });
+
+  // The claims registry is the one grammar-lane input that can be ABSENT
+  // (CLAIMS.md is a file); `claimsAbsent` is set only by a successful read, so
+  // its absence must SKIP the claims rows — an unread registry judging its
+  // rows green is exactly the vacuous pass the face-oracle skip exists to
+  // prevent.
+  test('an unread claims registry skips the claims rows, never greens them', () => {
+    const states = cleanStates();
+    delete states.gr.negatives.claimsAbsent;
+    delete states.gr.negatives.claimsBroken;
+    delete states.gr.negatives.cellsMissing;
+    delete states.gr.negatives.claimsBadParks;
+    const { verdicts, failures, drift } = judge({ states, ran: allRan, table: withoutReds() });
+    expect(failures).toEqual([]);
+    expect(drift.size).toBe(0);
+    for (const name of ['claims.carriers', 'claims.parks']) {
+      expect(verdicts.find((v) => v.name === name).state).toBe('skipped');
+    }
+  });
+
+  // The seam the synthetic states cannot police by construction: a summary
+  // field renamed in the runner turns its invariant vacuously green, and this
+  // suite would stay green with it — both sides here are built from the
+  // contract's own names. So judge() itself records every read of a field no
+  // summary carries, and the caller refuses on any.
+  test('a predicate reading a field no summary carries reports drift, never a vacuous green', () => {
+    const states = cleanStates();
+    delete states.tk.survUnclassified;
+    const { drift } = judge({ states, ran: allRan, table: withoutReds() });
+    expect([...drift]).toEqual(['tk.survUnclassified']);
+  });
+
+  test('a clean run reports no drift', () => {
+    const { drift } = judge({ states: cleanStates(), ran: allRan, table: withoutReds() });
+    expect(drift.size).toBe(0);
   });
 
   test('a lane that did not run is skipped, never assumed green', () => {

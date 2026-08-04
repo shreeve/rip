@@ -42,7 +42,7 @@ export const CONTRACT = [
     // partial reductions would otherwise stand as coverage.
     name: 'grammar.parses', lane: 'grammar',
     property: 'every fixture in the corpus parses — coverage is measured only over programs the parser accepts',
-    red: (s) => (s.gr.unparsed ?? 0) > 0,
+    red: (s) => s.gr.unparsed > 0,
   },
   {
     // Graduated from the queue the day the corpus drained it (every production
@@ -66,7 +66,7 @@ export const CONTRACT = [
     // can, and a row that no longer describes the lexer measures nothing.
     name: 'lexer.mints', lane: 'grammar',
     property: "every hand-listed spelling is still produced by the lexer, driven by its own probe",
-    red: (s) => (s.gr.negatives?.staleMints ?? 0) > 0,
+    red: (s) => s.gr.negatives.staleMints > 0,
   },
   {
     // The alias table is read live, so it cannot rot — but the rulings netted
@@ -75,7 +75,7 @@ export const CONTRACT = [
     // lexer stopped rewriting.
     name: 'lexer.exclusions', lane: 'grammar',
     property: 'every excluded spelling is still rewritten by the lexer and still unwritten by the corpus',
-    red: (s) => (s.gr.negatives?.badSpellingExclusions ?? 0) > 0,
+    red: (s) => s.gr.negatives.badSpellingExclusions > 0,
   },
   {
     // The containment matrix is bounded by its curated head list, so an
@@ -85,7 +85,7 @@ export const CONTRACT = [
     // against the cell.
     name: 'containment.heads', lane: 'grammar',
     property: 'every curated containment construct is spelled by at least one fixture, so every pair a claim can name is satisfiable',
-    red: (s) => (s.gr.negatives?.headsUnseen ?? 0) > 0,
+    red: (s) => s.gr.negatives.headsUnseen > 0,
   },
   {
     // A park is a claim that a defect — not an absence of effort — is why a
@@ -93,9 +93,12 @@ export const CONTRACT = [
     // carried, at which point the park is the stale thing. Left unpoliced it
     // would quietly shrink the queue forever, which is the one way this
     // bookkeeping could lie about how much work is left.
+    // Skipped when the claims registry was never read (`claimsAbsent` is set
+    // only by a successful read): an unread registry judges nothing, the
+    // same honesty the face oracle's skip buys below.
     name: 'claims.parks', lane: 'grammar',
-    property: 'every parked claim names a live Behaviors row that is still uncarried',
-    red: (s) => (s.gr.negatives?.claimsBadParks ?? 0) > 0,
+    skip: (s) => s.gr.negatives?.claimsAbsent == null,
+    red: (s) => s.gr.negatives.claimsBadParks > 0,
   },
   {
     // The corpus's one comment rule, and the only half of it that is exactly
@@ -105,22 +108,23 @@ export const CONTRACT = [
     // reported as a gauge instead of gated here.
     name: 'corpus.dividers', lane: 'grammar',
     property: 'every corpus section divider opens and closes on its own line, so no comment is a reflowed paragraph',
-    red: (s) => (s.gr.negatives?.splitDividers ?? 0) > 0,
+    red: (s) => s.gr.negatives.splitDividers > 0,
   },
   {
     name: 'grammar.census', lane: 'grammar',
     property: "every type text the corpus carries classifies against TypeScript's own type grammar",
-    red: (s) => (s.gr.negatives?.kindBad ?? 0) > 0,
+    red: (s) => s.gr.negatives.kindBad > 0,
   },
   {
     name: 'negatives.falsifiability', lane: 'grammar',
     property: 'every type-vocabulary class the positives claim carries at least one error-lane instance',
-    red: (s) => (s.gr.negatives?.vocabUnfalsified ?? 0) > 0,
+    red: (s) => s.gr.negatives.vocabUnfalsified > 0,
   },
   {
     name: 'claims.carriers', lane: 'grammar',
     property: 'every ruled CLAIMS.md row still points at a fixture and symbol that exist in the corpus',
-    red: (s) => ((s.gr.negatives?.claimsBroken ?? 0) + (s.gr.negatives?.cellsMissing ?? 0)) > 0,
+    skip: (s) => s.gr.negatives?.claimsAbsent == null,
+    red: (s) => (s.gr.negatives.claimsBroken + s.gr.negatives.cellsMissing) > 0,
   },
   {
     // The one thing byte-equality cannot check. `placed` and `text` both pass
@@ -131,7 +135,7 @@ export const CONTRACT = [
     // gap closed and the census began gating at zero.
     name: 'mapping.identity', lane: 'map',
     property: 'every resolved read maps back to a source span containing the read it came from',
-    red: (s) => (s.mp.drifted ?? 0) > 0,
+    red: (s) => s.mp.drifted > 0,
   },
   {
     name: 'mapping.spans', lane: 'map',
@@ -147,7 +151,7 @@ export const CONTRACT = [
     // excuse the next read that lands there.
     name: 'mapping.exclusions', lane: 'map',
     property: 'every census exclusion is declared with a reason, and every declared reason still occurs',
-    red: (s) => (s.mp.badExclusions ?? 0) > 0,
+    red: (s) => s.mp.badExclusions > 0,
   },
   {
     // Held red by agreement while the identifier-read row was open, and it is
@@ -163,7 +167,7 @@ export const CONTRACT = [
   {
     name: 'mapping.decomposition', lane: 'map',
     property: 'the mapping census equals the broken-today and by-luck populations it reports',
-    red: (s) => (s.mp.decompositionDrift ?? 0) > 0,
+    red: (s) => s.mp.decompositionDrift > 0,
   },
   {
     name: 'type.dimensions', lane: 'main',
@@ -186,19 +190,25 @@ export const CONTRACT = [
   {
     name: 'diagnostics.positions', lane: 'errors',
     property: 'every diagnostic lands on the span its twin puts it on, outside the two fixtures below',
-    red: (s) => s.el.problems.some((p) => p.kind === 'position' && !/^(11-types|02-operations)\./.test(p.file ?? '')),
+    red: (s) => s.el.problems.some((p) => p.kind === 'position' && !/^(11-types|02-operations)\./.test(p.file)),
   },
   {
     name: 'diagnostics.positions.element', lane: 'errors',
     property: 'a wrong-element diagnostic lands on the offending element, not the whole list',
-    red: (s) => s.el.problems.some((p) => p.kind === 'position' && /^11-types\./.test(p.file ?? '')),
+    red: (s) => s.el.problems.some((p) => p.kind === 'position' && /^11-types\./.test(p.file)),
   },
   {
     name: 'diagnostics.positions.arity', lane: 'errors',
     property: "a paren-injected call's arity error lands on the excess argument",
-    red: (s) => s.el.problems.some((p) => p.kind === 'position' && /^02-operations\./.test(p.file ?? '')),
+    red: (s) => s.el.problems.some((p) => p.kind === 'position' && /^02-operations\./.test(p.file)),
   },
   {
+    // Three properties share this row — twin gaps, pin drift, and the
+    // initialized-binding-`any` invariant. Fine while all three hold; before
+    // this row ever takes a `redBecause`, SPLIT IT FIRST — the positions
+    // rows above record what tolerating a composite costs (the un-tolerated
+    // components ride under the reason, and `recovered` never fires while
+    // any of them is red).
     name: 'hover.parity', lane: 'hover',
     property: 'hover answers what the twin answers, and every pinned answer is unchanged',
     red: (s) => s.hp.gap > 0 || s.hp.snapChanged > 0 || s.hp.violations.length > 0,
@@ -221,12 +231,12 @@ export const CONTRACT = [
   {
     name: 'hover.pins', lane: 'hover',
     property: 'every hover-pins.json key names a live corpus fixture',
-    red: (s) => (s.hp.stalePinKeys ?? []).length > 0,
+    red: (s) => s.hp.stalePinKeys.length > 0,
   },
   {
     name: 'hover.ruled.population', lane: 'hover',
     property: 'the ruled-hover gate carries at least one pinned position',
-    red: (s) => (s.hp.ruledPopulation ?? 0) === 0,
+    red: (s) => s.hp.ruledPopulation === 0,
   },
   {
     name: 'token.delivery', lane: 'token',
@@ -257,13 +267,13 @@ export const CONTRACT = [
     name: 'token.delivery.use-site', lane: 'token',
     property: 'the server delivers a semantic token at every use site TypeScript classifies one',
     skip: (s) => !s.tk.facesAvailable,
-    red: (s) => (s.tk.survDrops ?? []).reduce((n, d) => n + d.count, 0) > 0,
+    red: (s) => s.tk.survDrops.reduce((n, d) => n + d.count, 0) > 0,
   },
   {
     name: 'token.delivery.oracle', lane: 'token',
     property: 'the standalone face oracle and editor server classify the same use-site population',
     skip: (s) => !s.tk.facesAvailable,
-    red: (s) => (s.tk.survUnclassified ?? 0) > 0,
+    red: (s) => s.tk.survUnclassified > 0,
   },
   {
     // The use-site population is defined by the instrument's own inputs — an
@@ -282,7 +292,7 @@ export const CONTRACT = [
     name: 'token.delivery.explained', lane: 'token',
     property: 'every use-site position is served or excused — an exclusion no excuse claims is a hole, not a smaller gauge',
     skip: (s) => !s.tk.facesAvailable,
-    red: (s) => (s.tk.unexplained ?? []).length > 0,
+    red: (s) => s.tk.unexplained.length > 0,
   },
   {
     // The reviewed tier's own hygiene, and the migration guard: excuses
@@ -295,7 +305,7 @@ export const CONTRACT = [
     name: 'token.delivery.excused', lane: 'token',
     property: 'every reviewed exclusion still excludes an excluded position — stale excuses leave with what they excused',
     skip: (s) => !s.tk.facesAvailable,
-    red: (s) => (s.tk.exclusionDrift ?? []).length > 0,
+    red: (s) => s.tk.exclusionDrift.length > 0,
   },
   {
     name: 'token.readonly', lane: 'token',
@@ -307,8 +317,25 @@ export const CONTRACT = [
 // Judge the run. `states` carries the lane summaries, `ran` answers whether a
 // lane ran. Returns one verdict per invariant plus the failures, so the caller
 // prints and the exit code follows from the same computation — no second site
-// can disagree about whether the run passed.
+// can disagree about whether the run passed. It also returns `drift`: field
+// names a predicate read that no summary carries. A renamed summary field
+// would otherwise turn its invariant vacuously green forever (`undefined > 0`
+// is false), and the unit gate cannot see it — its synthetic states are built
+// from the contract's own field names — so every `red` runs against a
+// recording view of the real summaries, and the caller refuses on any miss.
+// `skip` predicates stay unwatched: probing for an absent measurement is
+// their whole job.
 export const judge = ({ states, ran, table = CONTRACT }) => {
+  const drift = new Set();
+  const watch = (obj, path) => new Proxy(obj, {
+    get(t, prop) {
+      if (typeof prop === 'symbol') return t[prop];
+      const v = t[prop];
+      if (v === undefined && !(prop in t)) drift.add(`${path}${path ? '.' : ''}${prop}`);
+      return v !== null && typeof v === 'object' ? watch(v, `${path}${path ? '.' : ''}${prop}`) : v;
+    },
+  });
+  const watched = watch(states, '');
   const verdicts = table.map((c) => {
     if (!ran(c.lane)) return { ...c, state: 'skipped' };
     // A lane can run while one of its measurements is unavailable — an optional
@@ -316,7 +343,11 @@ export const judge = ({ states, ran, table = CONTRACT }) => {
     // honest verdict: the predicate would read a missing measurement as a
     // satisfied one.
     if (c.skip?.(states)) return { ...c, state: 'skipped' };
-    const isRed = c.red(states);
+    let isRed;
+    // A predicate that THROWS read something structurally missing (an absent
+    // array's `.length`); the miss is already recorded, and the refusal
+    // supersedes any verdict this row could give.
+    try { isRed = c.red(watched); } catch { return { ...c, state: 'drift' }; }
     return {
       ...c,
       state: isRed
@@ -326,6 +357,7 @@ export const judge = ({ states, ran, table = CONTRACT }) => {
   });
   return {
     verdicts,
+    drift,
     // `recovered` fails on purpose: the invariant holds again, so its
     // `redBecause` must go or it hides the next break in the same property.
     failures: verdicts.filter((v) => v.state === 'red-new' || v.state === 'recovered'),
