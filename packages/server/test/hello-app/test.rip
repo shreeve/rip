@@ -75,7 +75,7 @@ test! 'App publication rehashes only watcher-reported manifest files', ->
     rmSync dir, { recursive: true, force: true }
 
 test! 'App-only manager publishes a finite dist surface with no workers', ->
-  dir = mkdtempSync join(tmpdir(), 'rip-hello-')
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-app-')
   project = join dir, 'project'
   cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
   project = realpathSync project
@@ -99,7 +99,7 @@ test! 'App-only manager publishes a finite dist surface with no workers', ->
       Response.new('Not Found', { status: 404 })
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--name', 'hello', '--host', 'hello.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--name', 'hello-app', '--host', 'hello-app.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'inherit'

@@ -842,7 +842,7 @@ The focused fixtures test one server capability at a time:
 bun run test:framework
 bun run test:hello-api
 bun run test:workers
-bun run test:hello
+bun run test:hello-app
 bun run test:reloads
 bun run test:operations
 bun run test:manager-boundary
