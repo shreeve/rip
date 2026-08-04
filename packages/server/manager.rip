@@ -2,7 +2,7 @@ import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync,
 import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
-import { rash } from '@rip-lang/app/rash'
+import { rash, check } from '@rip-lang/app/rash'
 import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
 
@@ -502,12 +502,14 @@ appModules = (appRoot) ->
         bytes = readFileSync path
         entries.push { id, hash: rash(bytes) }
         if entry.name.endsWith '.rip'
-          modules[id] = bytes.toString 'utf8'
+          try
+            modules[id] = TextDecoder.new('utf-8', { fatal: true, ignoreBOM: true }).decode bytes
+          catch
+            throw Error.new "rip-server: App module '#{id}' is not valid UTF-8"
           moduleFiles[id] = path
   walk appRoot, ''
   entries.sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
-  inventory = JSON.stringify entries.map (entry) -> [entry.id, entry.hash]
-  { modules, moduleFiles, entries, rash: rash(TextEncoder.new().encode(inventory)) }
+  { modules, moduleFiles, entries, check: check(entries) }
 
 sourceRashes = (paths) ->
   paths.map (path) -> { path, hash: (if existsSync(path) then rash(readFileSync(path)) else null) }
@@ -521,18 +523,22 @@ buildAppDocuments = (project, includeManifest) ->
     appDir: project.root
     packagesDir: join(loaderDir(), '..', 'packages')
   bundle.files = graph.entries
-  bundle.rash = graph.rash
+  bundle.check = graph.check
   {
     graph
     bundle: JSON.stringify(bundle)
-    manifest: (if includeManifest then JSON.stringify({ rash: graph.rash, files: graph.entries }) else null)
+    manifest: (if includeManifest then JSON.stringify({ check: graph.check, files: graph.entries }) else null)
   }
 
 commitAppDocuments = (project, documents) ->
   generated = join project.root, 'static', 'generated'
   mkdirSync generated, { recursive: true }
   writeAtomic join(generated, 'bundle.json'), documents.bundle
-  writeAtomic join(generated, 'manifest.json'), documents.manifest if documents.manifest?
+  manifestPath = join generated, 'manifest.json'
+  if documents.manifest?
+    writeAtomic manifestPath, documents.manifest
+  else
+    unlinkSync manifestPath if existsSync manifestPath
 
 writeAppDocuments = (project, includeManifest) ->
   documents = buildAppDocuments! project, includeManifest
@@ -549,6 +555,9 @@ publishApp = (project, name, includeManifest, documents = undefined, declaredShe
   else if documents?
     commitAppDocuments project, documents
     graph = documents.graph
+  else unless includeManifest
+    manifestPath = join generated, 'manifest.json'
+    unlinkSync manifestPath if existsSync manifestPath
   runtime = join(loaderDir(), '..', 'dist', 'browser', 'rip.js')
   abort "rip-server: browser runtime missing at #{runtime}" unless existsSync runtime
   copyFileSync runtime, join(generated, '@rip', 'rip.js')
@@ -1175,7 +1184,7 @@ export main = (argv) ->
       commitAppDocuments project, documents if documents?
       appGraph = documents.graph if documents?
       apiInputs = Set.new record.inputs
-      appChanged = documents? and appModules(project.appRoot).rash isnt documents.graph.rash
+      appChanged = documents? and appModules(project.appRoot).check isnt documents.graph.check
       apiChanged = JSON.stringify(sourceRashes(record.inputs)) isnt JSON.stringify(record.inputRashes)
       operation = 'Activating'
       admissionAttempted = true

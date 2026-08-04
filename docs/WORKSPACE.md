@@ -79,13 +79,15 @@ forever and “CSP later” are **rejected** as M0 rewrites.
 
 | # | Ruling |
 |---|---|
-| **Q10** | **The Workspace is the default watch door.** Every watching manager publishes stable `bundle.json` / `manifest.json` coordination files, sends dings through Janus, and lets Janus serve authored App bytes directly. Pooled workers are API-only. A watch-off App boots plain and has no development Hub feed. `@rip-lang/app` owns `workspace.rip`, `feed.rip`, `rash`, and browser apply meaning. |
+| **Q10** | **The Workspace is the default watch door.** Every watching manager publishes stable `bundle.json` / `manifest.json` coordination files, sends dings through Janus, and lets Janus serve authored App bytes directly. Pooled workers are API-only. A watch-off App boots plain and has no development Hub feed. `@rip-lang/app` owns `workspace.rip`, `feed.rip`, `rash`, inventory checks, and browser apply meaning. |
 
-The ledger and the bundle are one artifact: first paint fetches the
-ledger (virtual `bundle.json`, each entry carrying its passport) into
-`Workspace.populate`; live mutation fetches a single module generation
-into `Workspace.set`. One record type, two package sizes — per the
-flexible-packaging lock above.
+The first-paint ledger is part of `bundle.json`: its sorted `files` inventory
+and `check` populate the complete Workspace without a manifest fetch. Authored
+Rip entries carry source; CSS and HTML begin as identity-only passports. The
+watch-only `manifest.json` carries the same bodyless inventory shape for
+reconciliation after the Hub opens and reconnects. Live mutation fetches one
+file generation into `Workspace.set`. One record type, flexible package sizes
+— per the packaging lock above.
 
 ### App rails and latest-wins door
 
@@ -210,7 +212,7 @@ Honest exits. Do not promote a rung by renaming a weaker behavior.
 
 ### M0 — Populate
 
-- Serve / fetch a ledger (manifest + files).
+- Serve / fetch a bundle carrying the authored `files` ledger and its `check`.
 - Populate the Workspace; Projection-cache hit path works in prod.
 - Seal in production (no post-populate mutation).
 - Happy path **proves** Q1 constraints: signed Projection bindings and

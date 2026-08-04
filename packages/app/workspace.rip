@@ -240,7 +240,10 @@ export def createWorkspace(): Workspace
         id = validId record.id
         path = validPath record.path
         hash = validHash record.hash
-        source = validContent record.source
+        hasSource = record.source isnt undefined
+        unless hasSource or path.endsWith('.css') or path.endsWith('.html')
+          throw Error.new "Rip Workspace: Rip passport '#{id}' requires source during populate"
+        source = if hasSource then validContent(record.source) else undefined
         compiled = if record.compiled? then validModule record.compiled else undefined
         if seenIds.has id
           throw Error.new "Rip Workspace: duplicate passport id '#{id}' in populate"

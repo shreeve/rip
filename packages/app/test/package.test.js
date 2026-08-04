@@ -7,6 +7,7 @@ test('public entry exposes named substrate exports only', () => {
     'ariaCurrent',
     'browserAdapter',
     'buildRoutes',
+    'check',
     'connectFeed',
     'createApply',
     'createComponents',

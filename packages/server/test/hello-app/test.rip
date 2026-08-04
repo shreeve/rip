@@ -1,8 +1,8 @@
 import { test, eq, ok } from '@rip-lang/testing'
-import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { rash } from '@rip-lang/app/rash'
+import { check } from '@rip-lang/app/rash'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 SERVER = join(import.meta.dir, '..', '..', 'server.rip')
@@ -20,6 +20,8 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
   project = join dir, 'project'
   cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
   project = realpathSync project
+  mkdirSync join(project, 'static', 'generated'), { recursive: true }
+  writeFileSync join(project, 'static', 'generated', 'manifest.json'), '{"stale":true}'
   controlSocket = join dir, 'janus.sock'
   registration = null
   deleted = false
@@ -60,8 +62,7 @@ test! 'App-only manager publishes a finite generated surface with no workers', -
     bundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
     eq bundle.files.map((entry) -> entry.id), ['routes/index.rip', 'styles.css', 'template.html']
     eq Object.keys(bundle.modules).filter((id) -> bundle.files.some((entry) -> entry.id is id)), ['routes/index.rip']
-    inventory = JSON.stringify bundle.files.map (entry) -> [entry.id, entry.hash]
-    eq bundle.rash, rash(TextEncoder.new().encode(inventory))
+    eq bundle.check, check(bundle.files)
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143
@@ -137,7 +138,7 @@ test! 'watch publication commits one shared inventory then batches per-file ding
     generated = join project, 'static', 'generated'
     bundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
     manifest = JSON.parse readFileSync(join(generated, 'manifest.json'), 'utf8')
-    eq manifest.rash, bundle.rash
+    eq manifest.check, bundle.check
     eq manifest.files, bundle.files
 
     writeFileSync join(project, 'app', 'styles.css'), 'body { color: green; }'
@@ -149,9 +150,9 @@ test! 'watch publication commits one shared inventory then batches per-file ding
 
     nextBundle = JSON.parse readFileSync(join(generated, 'bundle.json'), 'utf8')
     nextManifest = JSON.parse readFileSync(join(generated, 'manifest.json'), 'utf8')
-    eq nextManifest.rash, nextBundle.rash
+    eq nextManifest.check, nextBundle.check
     eq nextManifest.files, nextBundle.files
-    ok nextManifest.rash isnt manifest.rash
+    ok nextManifest.check isnt manifest.check
 
     writeFileSync join(project, 'app', 'styles.css'), 'body { color: green; }'
     sleep! 150

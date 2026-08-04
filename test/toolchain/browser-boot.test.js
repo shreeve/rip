@@ -346,19 +346,25 @@ describe('bootApp workspace mode', () => {
     'routes/about.rip': routeSource('About', 'about v1'),
   };
 
-  const MANIFEST = {
-    files: [
-      { id: 'routes/index.rip', hash: hashOf(WS_MODULES['routes/index.rip']) },
-      { id: 'routes/about.rip', hash: hashOf(WS_MODULES['routes/about.rip']) },
-    ],
+  const checkOf = files => hashOf(JSON.stringify(files.map(({ id, hash }) => [id, hash])));
+  const inventoryFor = (modules, extra = []) => [
+    ...Object.entries(modules).map(([id, source]) => ({ id, hash: hashOf(source) })),
+    ...extra,
+  ].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const manifestFor = files => ({ check: checkOf(files), files });
+  const MANIFEST = manifestFor(inventoryFor(WS_MODULES));
+  const publish = (modules, extra = []) => {
+    const bundle = assembleBundle({
+      modules,
+      packagesDir: resolve(root, 'packages'),
+    });
+    const files = inventoryFor(modules, extra);
+    return { ...bundle, check: checkOf(files), files };
   };
 
   // The workspace rides the app package (Q9): plain assembly carries
   // createWorkspace and connectFeed with no extra claim.
-  const assembleWorkspace = () => assembleBundle({
-    modules: WS_MODULES,
-    packagesDir: resolve(root, 'packages'),
-  });
+  const assembleWorkspace = () => publish(WS_MODULES);
 
   const fakeFetch = table => {
     const calls = [];
@@ -448,33 +454,70 @@ describe('bootApp workspace mode', () => {
     }
   });
 
-  test('a workspace boot from a bundle object without a manifest url rejects by name', async () => {
+  test('a workspace boot from a bundle object needs no manifest fetch for first paint', async () => {
     const hub = fakeHub();
-    await expect(bootApp({
+    const fetch = fakeFetch(manifestTable());
+    const result = await bootApp({
       bundle: assembleWorkspace(),
       target: doc.createElement('div'),
       adapter: fakeAdapter('/'),
       workspace: true,
-      feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch: fakeFetch(manifestTable()) },
-    })).rejects.toThrow(/manifestUrl/);
-  });
-
-  test('populate seeds one passport per manifest file the bundle carries, at the manifest hash', async () => {
-    const manifest = {
-      files: [...MANIFEST.files, { id: 'routes/extra.rip', hash: 'aaaaaa' }],
-    };
-    const hub = fakeHub();
-    const { result } = await bootWorkspace({ table: manifestTable(manifest), hub });
+      feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch },
+    });
     try {
-      expect(result.workspace.passport('routes/index.rip').hash).toBe(hashOf(WS_MODULES['routes/index.rip']));
-      expect(result.workspace.passport('routes/about.rip').hash).toBe(hashOf(WS_MODULES['routes/about.rip']));
-      // A manifest file the bundle does not carry is skipped; the
-      // feed's open resync owns it.
-      expect(result.workspace.passport('routes/extra.rip')).toBeUndefined();
       expect(result.workspace.paths().sort()).toEqual(['routes/about.rip', 'routes/index.rip']);
+      expect(fetch.calls).toEqual([]);
     } finally {
       result.destroy();
     }
+  });
+
+  test('populate seeds the complete bundle inventory, with identity-only CSS and HTML passports', async () => {
+    const extra = [
+      { id: 'index.html', hash: hashOf('<main>home</main>') },
+      { id: 'styles.css', hash: hashOf('body {}') },
+    ];
+    const bundle = publish(WS_MODULES, extra);
+    const hub = fakeHub();
+    const { result } = await bootWorkspace({ table: manifestTable(), hub, bundle });
+    try {
+      expect(result.workspace.passport('routes/index.rip').hash).toBe(hashOf(WS_MODULES['routes/index.rip']));
+      expect(result.workspace.passport('routes/about.rip').hash).toBe(hashOf(WS_MODULES['routes/about.rip']));
+      expect(result.workspace.passport('styles.css').source).toBeUndefined();
+      expect(result.workspace.passport('index.html').source).toBeUndefined();
+      expect(result.workspace.paths().sort()).toEqual([
+        'index.html', 'routes/about.rip', 'routes/index.rip', 'styles.css',
+      ]);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('workspace boot rejects an inventory check that does not name its files', async () => {
+    const hub = fakeHub();
+    const bundle = { ...assembleWorkspace(), check: 'AAAAAA' };
+    await expect(bootApp({
+      bundle,
+      target: doc.createElement('div'),
+      adapter: fakeAdapter('/'),
+      workspace: true,
+      feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch: fakeFetch(manifestTable()) },
+    })).rejects.toThrow(/bundle check does not match/);
+    expect(hub.sockets).toEqual([]);
+  });
+
+  test('workspace boot verifies the exact authored Rip source bytes', async () => {
+    const hub = fakeHub();
+    const bundle = assembleWorkspace();
+    bundle.modules = { ...bundle.modules, 'routes/index.rip': routeSource('Home', 'tampered') };
+    await expect(bootApp({
+      bundle,
+      target: doc.createElement('div'),
+      adapter: fakeAdapter('/'),
+      workspace: true,
+      feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch: fakeFetch(manifestTable()) },
+    })).rejects.toThrow(/source 'routes\/index\.rip' hashes to/);
+    expect(hub.sockets).toEqual([]);
   });
 
   test('a ding fetches the latest module and advances the passport (D3/D4)', async () => {
@@ -564,16 +607,11 @@ describe('bootApp workspace mode', () => {
         '    h1 "#{LABEL}"',
       ].join('\n'),
     };
-    const manifest = {
-      files: [
+    const manifest = manifestFor([
         { id: 'badge.rip', hash: hashOf(modules['badge.rip']) },
         { id: 'routes/index.rip', hash: hashOf(modules['routes/index.rip']) },
-      ],
-    };
-    const bundle = assembleBundle({
-      modules,
-      packagesDir: resolve(root, 'packages'),
-    });
+      ]);
+    const bundle = publish(modules);
     const table = new Map([['/manifest.json', JSON.stringify(manifest)]]);
     const v2 = "export LABEL = 'badge v2'";
     const e2 = hashOf(v2);
@@ -605,16 +643,11 @@ describe('bootApp workspace mode', () => {
         '    h1 "#{LABEL}"',
       ].join('\n'),
     };
-    const manifest = {
-      files: [
+    const manifest = manifestFor([
         { id: 'badge.rip', hash: hashOf(modules['badge.rip']) },
         { id: 'routes/index.rip', hash: hashOf(modules['routes/index.rip']) },
-      ],
-    };
-    const bundle = assembleBundle({
-      modules,
-      packagesDir: resolve(root, 'packages'),
-    });
+      ]);
+    const bundle = publish(modules);
     const table = new Map([['/manifest.json', JSON.stringify(manifest)]]);
     const broken = "export OTHER = 'no LABEL'";
     const v3 = "export LABEL = 'badge v3'";
@@ -643,14 +676,7 @@ describe('bootApp workspace mode', () => {
     }
   });
 
-  test('a workspace boot fetches the manifest BEFORE the bundle (etag-over-bytes correlation)', async () => {
-    // The manager writes the manifest AFTER the bundle; the boot
-    // fetches it BEFORE. The only pairing a boot racing a save can
-    // observe is "manifest etags name generations the bundle already
-    // carries (or older)", which the feed's resync heals forward —
-    // a manifest ahead of bundle bytes would strand the bag. The URL
-    // derives from the bundle the same way (…/bundle.json →
-    // …/manifest.json) — no explicit manifestUrl.
+  test('a workspace boot consumes the bundle before manifest reconciliation', async () => {
     const order = [];
     const bundleText = JSON.stringify(assembleWorkspace());
     const fetchText = async url => {
@@ -681,8 +707,10 @@ describe('bootApp workspace mode', () => {
       },
     });
     try {
-      expect(order[0]).toBe('feed:/manifest.json');
-      expect(order).toContain('bundle:/bundle.json');
+      expect(order).toEqual(['bundle:/bundle.json']);
+      hub.sockets[0].onopen();
+      await until(() => order.includes('feed:/manifest.json'));
+      expect(order[0]).toBe('bundle:/bundle.json');
       expect(order).not.toContain('feed:/@rip/manifest');
     } finally {
       result.destroy();

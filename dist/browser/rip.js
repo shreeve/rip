@@ -24389,6 +24389,43 @@ function createModuleLoader({ components: registry, packages = {}, debug = false
 // src/browser-boot.js
 var APP_PACKAGE = "@rip-lang/app";
 var bootGraphs = new Map;
+var isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+var validHash = (value) => typeof value === "string" && /^[A-Za-z0-9_]{6}$/.test(value);
+var validFileId = (id) => {
+  if (typeof id !== "string" || id.length === 0 || id.startsWith("/") || id.includes("\\"))
+    return false;
+  const segments = id.split("/");
+  if (segments.some((segment) => !segment || segment === "." || segment === ".." || segment.startsWith(".")))
+    return false;
+  return id.endsWith(".rip") || id.endsWith(".css") || id.endsWith(".html");
+};
+var validatePublication = (bundle, app) => {
+  if (!validHash(bundle.check) || !Array.isArray(bundle.files)) {
+    throw new Error("rip: workspace bundle requires a check and a files inventory");
+  }
+  let priorId = null;
+  for (const entry of bundle.files) {
+    if (!isRecord(entry) || !validFileId(entry.id) || !validHash(entry.hash) || priorId !== null && priorId >= entry.id) {
+      throw new Error(`rip: workspace bundle has a malformed or unsorted file entry: ${JSON.stringify(entry)}`);
+    }
+    priorId = entry.id;
+  }
+  if (app.check(bundle.files) !== bundle.check) {
+    throw new Error("rip: workspace bundle check does not match its files inventory");
+  }
+  for (const entry of bundle.files) {
+    if (!entry.id.endsWith(".rip"))
+      continue;
+    const source = bundle.modules?.[entry.id];
+    if (typeof source !== "string") {
+      throw new Error(`rip: workspace bundle is missing authored Rip source '${entry.id}'`);
+    }
+    const actual = app.rash(new TextEncoder().encode(source));
+    if (actual !== entry.hash) {
+      throw new Error(`rip: workspace bundle source '${entry.id}' hashes to ${actual}, not ${entry.hash}`);
+    }
+  }
+};
 var browserFetchText = async (url, etag) => {
   const headers = etag ? { "If-None-Match": etag } : {};
   const response = await fetch(url, { headers });
@@ -24454,19 +24491,8 @@ async function bootApp(opts = {}) {
     fetchOpts.storage = opts.bundleStorage;
   const workspaceMode = opts.workspace === true;
   let manifestUrl = null;
-  let fetchBytes = null;
-  let manifest = null;
   if (workspaceMode) {
-    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf("/") + 1)}manifest.json` : null);
-    if (!manifestUrl) {
-      throw new Error("rip: workspace mode booted from a bundle object, so no manifest url derives from the bundle url — pass opts.manifestUrl");
-    }
-    fetchBytes = opts.feed?.fetch ?? ((url) => fetch(url));
-    const res = await fetchBytes(manifestUrl, { cache: "no-cache" });
-    if (!res.ok) {
-      throw new Error(`rip: workspace manifest fetch failed: '${manifestUrl}' answered ${res.status}`);
-    }
-    manifest = await res.json();
+    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf("/") + 1)}manifest.json` : "/manifest.json");
   }
   const bundle = opts.bundle ?? await fetchBundle(opts.url, fetchOpts);
   if (!bundle || typeof bundle !== "object") {
@@ -24515,18 +24541,19 @@ async function bootApp(opts = {}) {
   const app = await loader.import(`${appEntry.root}/${appEntry.entry}`);
   let bag = null;
   if (workspaceMode) {
+    validatePublication(bundle, app);
     bag = app.createWorkspace();
     const records = [];
-    for (const entry of manifest?.files ?? []) {
+    for (const entry of bundle.files) {
       const source = (bundle.modules ?? {})[entry.id];
-      if (source === undefined)
-        continue;
-      records.push({
+      const record = {
         id: entry.id,
         path: entry.id,
-        hash: app.rash(new TextEncoder().encode(source)),
-        source
-      });
+        hash: entry.hash
+      };
+      if (source !== undefined)
+        record.source = source;
+      records.push(record);
     }
     bag.populate(records);
   }
@@ -24778,7 +24805,12 @@ async function bootApp(opts = {}) {
       return bag.set({ ...passport, compiled: { ...module } });
     }
   };
-  const feed = app.connectFeed(door, { ...opts.feed ?? {}, manifestUrl, report });
+  const feed = app.connectFeed(door, {
+    ...opts.feed ?? {},
+    manifestUrl,
+    report,
+    initialCheck: bundle.check
+  });
   const destroy = () => {
     if (destroyed)
       return;

@@ -228,48 +228,244 @@ operations coordinated separately from ordinary file watching.
 
 Caddy and Janus continue running throughout the replacement.
 
-### 3. App, generated files, and client hot dings
+### 3. App publication and the browser Workspace
 
-The App remains in its authored tree. Janus serves eligible App source
-and assets directly; the manager does not copy every App file into a second
-publication tree.
+A Rip App is a bag of authored files. The manager observes that bag, packages
+one coherent snapshot for first paint, and sends identity-only change hints
+while watching. The browser verifies and adopts the bytes it actually
+receives. Janus transports current bytes and Hub messages but assigns no Rip
+meaning to either.
 
 ```text
-App ────────────────────────────────────► served source and assets
-    │
-    └── manager snapshots the graph ───► static/generated
-                                           ├── bundle.json
-                                           └── manifest.json
+authored App bag ───────────────────────────► Janus serves current files
+       │
+       └── manager snapshots and validates ─► static/generated
+                                                ├── bundle.json
+                                                └── manifest.json (watch only)
+                                                        │
+                                                        └── Hub dings (watch only)
 ```
 
-`bundle.json` is the first-paint transfer. It carries the App's Rip source
-graph, browser-safe package sources, package-resolution metadata, and any
-synthetic client projections needed from API schemas. It avoids one initial
-request per Rip module.
+#### Identities
 
-`manifest.json` is the lightweight inventory of current `{ id, hash }`
-representations used to populate and resynchronize the development Workspace.
-After first paint, a ding causes the browser to request only the changed live
-App file.
+`rash(bytes)` is the App content-hash function. It computes SHA-256 over the
+exact bytes, takes the first six unpadded Base64URL characters, and folds `-`
+into `_`. It is a compact change detector, not a security signature.
 
-The manager writes generated files atomically. A bundle lands before a
-manifest or notification names the representations it carries. Rip hashes
-remain manager-owned App content identities; Janus-owned HTTP ETags are
-separate transport validators.
+A `hash` identifies one exact generation of one authored file:
 
-While watching is enabled, an App-source change:
+```json
+{"id":"routes/index.rip","hash":"ABC123"}
+```
 
-1. Re-snapshots the affected App files.
-2. Assigns their new Rip hashes.
-3. Regenerates `bundle.json` and `manifest.json` coherently.
-4. Sends tiny `{ id, hash }` dings through Janus Hub.
-5. Lets the browser choose `reload`, `css`, `update`, or `ignore`.
+A `check` identifies the complete authored inventory. Given entries sorted by
+`id`, both manager and browser compute it as:
 
-An App-only change does not replace API workers. An API-source change replaces
-the API workers without reloading the client app.
+```text
+files
+→ [[id, hash], [id, hash], ...]
+→ deterministic JSON
+→ rash(bytes)
+→ check
+```
 
-With watching disabled, the manager publishes the startup bundle once. It
-does not publish a development manifest or expose the development feed.
+For example:
+
+```json
+{
+  "check": "XYZ789",
+  "files": [
+    {"id":"routes/index.rip","hash":"ABC123"},
+    {"id":"styles.css","hash":"DEF456"}
+  ]
+}
+```
+
+The check covers the authored App bag only. Browser-package modules and
+synthetic schema projections travel in the bundle but do not enter this
+inventory.
+
+Rip `hash`, App `check`, and Janus `ETag` are separate identities. A hash names
+exact authored bytes. A check names the complete authored inventory. An ETag
+is Janus's HTTP transport validator, currently derived from file metadata;
+Janus neither calculates nor interprets hashes or checks.
+
+#### Membership and public paths
+
+The default bag is `app/**/*.{rip,css,html}`. Dot-prefixed files and
+directories are excluded. The id is the path relative to the physical
+`app/` root and also maps to the ordinary public URL:
+
+```text
+app/routes/index.rip → routes/index.rip → /routes/index.rip
+app/styles.css       → styles.css       → /styles.css
+```
+
+The server entry (`app.rip` or `index.rip` at the project root), API source,
+ordinary public assets, package sources, and generated files are outside this
+bag. App-only changes do not replace API workers, and API-only changes do not
+automatically mutate the browser App.
+
+#### `bundle.json`: first-paint package
+
+The bundle is the self-contained first-paint package. It carries:
+
+- authored Rip sources;
+- browser-safe package sources and package-resolution metadata;
+- synthetic client projections extracted from server schemas;
+- the complete authored file inventory and its check;
+- application seed data when present.
+
+Conceptually:
+
+```json
+{
+  "check": "XYZ789",
+  "files": [
+    {"id":"routes/index.rip","hash":"ABC123"},
+    {"id":"styles.css","hash":"DEF456"}
+  ],
+  "modules": {
+    "routes/index.rip": "..."
+  },
+  "packages": {
+    "@rip-lang/app": {}
+  }
+}
+```
+
+The manager builds the sources, file hashes, and check from one in-memory
+snapshot. The browser validates the inventory shape and order, recomputes the
+check, and verifies every authored Rip source against its declared hash before
+populating the Workspace. CSS and HTML enter the initial Workspace as
+identity-only passports: the shell and its stylesheet links own first-paint
+delivery, and a later live fetch fills source when that file advances. The
+bundle alone is sufficient to compile project modules and launch first paint.
+No manifest fetch is part of bundle interpretation.
+
+#### `manifest.json`: current-disk reconciliation
+
+The manifest is the watch-only, bodyless view of current disk membership:
+
+```json
+{
+  "check": "XYZ789",
+  "files": [
+    {"id":"routes/index.rip","hash":"ABC123"},
+    {"id":"styles.css","hash":"DEF456"}
+  ]
+}
+```
+
+It heals changes that raced first paint, changes that happened before the Hub
+subscription became active, reconnect gaps, ding-triggered misses, and
+unresolved wants. The browser fetches it when the Hub opens and after every
+reconnect. A matching check skips detailed reconciliation. A differing check
+is validated before its entries are compared with the Workspace.
+
+Manifest comparison is additive and forward-moving. One manifest omission
+never silently deletes a local or editor-created passport. A server-file
+deletion normally arrives through an explicit, generation-fenced delete ding.
+
+#### Manager publication
+
+With watching enabled, one debounced publication performs:
+
+```text
+filesystem event
+→ rescan complete membership
+→ read exact bytes once
+→ hash each file
+→ sort files by id
+→ calculate check
+→ assemble and validate bundle
+→ atomically publish bundle
+→ atomically publish manifest
+→ diff old and new inventories
+→ send dings
+```
+
+The order is always bundle, then manifest, then dings. A manifest or ding can
+therefore never announce a generation before its complete bundle is
+published. Identical generated bytes are not rewritten, and an unchanged
+filesystem event sends no ding.
+
+Bundle assembly compiles every shipped module, resolves browser packages, and
+materializes allowed schema projections before publication. Invalid UTF-8 Rip
+source, compilation failure, forbidden server-only imports, package-resolution
+failure, or schema-projection failure aborts the candidate. The manager
+publishes nothing from that candidate and retains the last good generation.
+
+#### Dings and latest-wins fetches
+
+Hub messages contain identities only, never source or compiled projections.
+A create or change is:
+
+```json
+{"id":"routes/index.rip","hash":"ABC123"}
+```
+
+A deletion names the generation being retired:
+
+```json
+{"id":"routes/old.rip","hash":"OLD123","kind":"delete"}
+```
+
+That hash fence prevents an old delete from removing a newer passport. An
+epoch announces that a complete server generation changed and requires a page
+reload:
+
+```json
+{"kind":"epoch","epoch":7}
+```
+
+A ding is a reconciliation hint, not a historical source address. For a
+create or change, the client:
+
+```text
+receive {id, hash}
+→ skip when that passport hash is already held
+→ claim a per-id owner token
+→ GET the ordinary latest URL with cache: no-store
+→ compute rash over the response bytes
+→ discard the response if a newer owner superseded it
+→ compile/check the received source
+→ commit the passport
+→ apply update | css | reload | ignore
+```
+
+The fetched bytes win over the hint. If a ding advertises `ABC123` but another
+save lands before the request, the response may hash to `XYZ999`; the browser
+adopts `XYZ999`, and the later `XYZ999` ding is a no-op. Owner tokens prevent
+an older, slower request from overwriting the newer result.
+
+Rip source compiles before its passport commits. Compilation failure reports
+loudly and preserves the last-known-good passport and running application.
+CSS adopts the fetched source and actual hash, then cache-busts the existing
+stylesheet link as `/styles.css?hash=ABC123`; when no link exists, an
+id-tagged `<style>` is used. CSS does not remount component state. Initial HTML
+discovery records identity without reloading; a later hash advancement returns
+the `reload` verdict.
+
+The door and apply engine remain separate. The public apply verdict vocabulary
+is exactly `update | css | reload | ignore`. See [WORKSPACE.md](WORKSPACE.md)
+for the passport bag and feed constitution, and [HMR.md](HMR.md) for the
+separate state-preserving apply contract.
+
+#### Watch modes and ownership
+
+With watching enabled, the manager publishes bundle and manifest, the browser
+opens a mutable Workspace and Hub feed, and manifest reconciliation follows
+the Hub connection. With watching disabled, the manager publishes only the
+bundle, the page follows the plain first-paint launch path, and there is no
+development manifest, Hub connection, or live mutation door.
+
+`@rip-lang/app` owns `rash`, checks, passports, Workspace population,
+bundle/manifest interpretation, response-byte verification, feed
+reconciliation, and apply verdicts. `packages/server` owns disk membership,
+snapshots, hash/check construction, bundle assembly, atomic publication,
+inventory diffing, and dings. Janus owns current-byte delivery, HTTP
+validators, and Hub transport. Caddy owns HTTP and TLS.
 
 ### 4. Static-file policy
 
@@ -555,7 +751,8 @@ ETag: W/"mtime-size"
 The manager serializes deterministically, does not rewrite identical bytes,
 atomically replaces changed files, lands the bundle before the manifest, and
 dings only after publication. Janus's ETag then makes unchanged revalidation
-cheap. This policy remains the same when watching is disabled.
+cheap. The bundle keeps this policy when watching is disabled; the development
+manifest does not exist in that mode.
 
 ### 4. Live Rip source
 

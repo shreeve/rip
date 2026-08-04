@@ -80,3 +80,10 @@ export rash = (value) ->
     alphabet[d[3] >> 2] +
     alphabet[((d[3] & 3) << 4) | (d[4] >> 4)]
   text.replaceAll '-', '_'
+
+# Complete authored-App inventory identity. Callers own structural validation;
+# this function owns the one deterministic byte representation hashed on both
+# sides of the publication protocol.
+export check = (files) ->
+  inventory = JSON.stringify files.map (entry) -> [entry.id, entry.hash]
+  rash TextEncoder.new().encode(inventory)

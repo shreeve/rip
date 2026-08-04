@@ -312,9 +312,10 @@ once disagreed):
   by key and orphaned keys are dropped loudly.
 - **Bag unit noun: file** (path-keyed passport). Swappable component
   identity: **component definition** (not “definition cell”).
-- **Dev delivery: manager file pool + bundle.json first paint**; live
-  mutation fetches one file generation. Production remains the
-  deterministic sealed path.
+- **Dev delivery: manager file pool + `bundle.json` first paint.** The bundle's
+  validated `files` + `check` populate the Workspace; the manifest reconciles
+  only after the Hub opens. Live mutation fetches one file generation.
+  Production remains the deterministic sealed path.
 
 ## Architectural constraints
 
