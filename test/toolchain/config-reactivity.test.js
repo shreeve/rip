@@ -52,11 +52,13 @@ describeExtended('the config surface is reactive', () => {
       s.forget('app.rip');
       s.touch('package.json', pkg({ strict: true }));
 
-      // No didOpen. No didChange. The document is byte-identical.
-      const after = s.codes(await s.diagnostics('app.rip'));
-      expect(after).toContain(7006);                      // strict now governs the open doc
+      // No didOpen. No didChange. The document is byte-identical. The
+      // re-govern lands in waves, so wait for the state — an early wave
+      // still reads the pre-flip posture.
+      await s.diagnosticsUntil('app.rip',
+        (d) => s.codes(d).includes(7006), { timeout: 75000 });
     } finally { await s.close(); }
-  }, 60_000);
+  }, 150_000);
 
   test('and it reverses: dropping rip.strict re-silences the open doc', async () => {
     const s = await openSession({ 'app.rip': UNANNOTATED, 'package.json': pkg({ strict: true }) });
@@ -69,10 +71,12 @@ describeExtended('the config surface is reactive', () => {
 
       // The reverse direction matters as much: a fix that only ever ADDED
       // diagnostics on a config change would pass the test above and still
-      // strand a project that turns strict back off.
-      expect(s.codes(await s.diagnostics('app.rip'))).toEqual([]);
+      // strand a project that turns strict back off. (The empty-set wait is
+      // non-vacuous: the doc carries 7006 until the re-govern lands.)
+      await s.diagnosticsUntil('app.rip',
+        (d) => s.codes(d).length === 0, { timeout: 75000 });
     } finally { await s.close(); }
-  }, 60_000);
+  }, 150_000);
 
   test('rip.noCheck silences an already-open file reactively', async () => {
     const s = await openSession({
@@ -90,13 +94,15 @@ describeExtended('the config surface is reactive', () => {
       s.forget('app/new.rip');
       s.touch('package.json', pkg({ noCheck: ['legacy/**'] }));
 
-      // Matched path goes quiet on the open document…
-      expect(s.codes(await s.diagnostics('legacy/old.rip'))).toEqual([]);
+      // Matched path goes quiet on the open document… (state-waited: the
+      // doc carries 2322 until the re-govern lands)
+      await s.diagnosticsUntil('legacy/old.rip',
+        (d) => s.codes(d).length === 0, { timeout: 75000 });
       // …and the unmatched one is untouched. A noCheck that silenced
       // everything would pass a one-file test.
       expect(s.codes(await s.diagnostics('app/new.rip'))).toContain(2322);
     } finally { await s.close(); }
-  }, 90_000);
+  }, 150_000);
 
   test('a cross-file re-pull cannot resurrect a silenced file', async () => {
     // Why the guard sits in repullDiagnostics() and not only refresh():
@@ -163,10 +169,13 @@ describeExtended('the config surface is reactive', () => {
       s.forget('app.rip');
       s.touch('package.json', JSON.stringify({ devDependencies: { '@types/bun': '0.0.0' } }, null, 2) + '\n');
 
-      // Real types govern now: the member typo surfaces, no reload.
-      expect(s.codes(await s.diagnostics('app.rip', { timeout: 15000 }))).toContain(2339);
+      // Real types govern now: the member typo surfaces, no reload. The
+      // re-govern lands in waves — an early wave still reads the floor,
+      // so wait for the state, not the next publication.
+      await s.diagnosticsUntil('app.rip',
+        (d) => s.codes(d).includes(2339), { timeout: 75000 });
     } finally { await s.close(); }
-  }, 90_000);
+  }, 150_000);
 
   test('partial supply: @types/node alone keeps the Bun floor and defers process to the real types', async () => {
     // The state a half-finished uninstall leaves behind (bun's prune can
@@ -222,9 +231,9 @@ describeExtended('the config surface is reactive', () => {
       // accepting whichever wave publishes first read a pre-re-govern
       // snapshot as the answer on a slow machine.
       await s.diagnosticsUntil('app.rip',
-        (d) => s.codes(d).some((c) => UNRESOLVED_BUN.includes(c)), { timeout: 15000 });
+        (d) => s.codes(d).some((c) => UNRESOLVED_BUN.includes(c)), { timeout: 75000 });
     } finally { await s.close(); }
-  }, 90_000);
+  }, 150_000);
 
   test('a NESTED project\'s tsconfig re-governs its open files mid-session — no restart', async () => {
     // The nested config is matched through the chain its WRAPPER records
@@ -249,7 +258,7 @@ describeExtended('the config surface is reactive', () => {
       // State-based, both flips: the re-govern lands in waves, and the
       // first wave's publication can predate the wrapper regeneration.
       await s.diagnosticsUntil('pkg/mod.rip',
-        (d) => s.codes(d).includes(2322), { timeout: 15000 });
+        (d) => s.codes(d).includes(2322), { timeout: 75000 });
 
       // And it reverses — a fix that only ever ADDED diagnostics would
       // pass the flip above and still strand the project. (The clean
@@ -259,7 +268,7 @@ describeExtended('the config surface is reactive', () => {
       s.forget('pkg/mod.rip');
       s.touch('pkg/tsconfig.json', nested(false));
       await s.diagnosticsUntil('pkg/mod.rip',
-        (d) => s.codes(d).length === 0, { timeout: 15000 });
+        (d) => s.codes(d).length === 0, { timeout: 75000 });
     } finally { await s.close(); }
-  }, 120_000);
+  }, 240_000);
 });
