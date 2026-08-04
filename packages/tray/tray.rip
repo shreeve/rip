@@ -265,10 +265,9 @@ ripApps = ->
       apps = json! 'app', 'status', '--json'
       items = [edgeMenu(edge), separator()]
       items.push appMenu(app) for app in apps
-      items.push separator() if apps.length
       items.push directory 'Add App…', id: 'apps.add', icon: 'plus', prompt: 'Add', run: (path) -> json! 'app', 'add', path, '--json'
-      items.push action 'Refresh', id: 'tray.refresh', icon: 'arrow.clockwise', run: -> null
       items.push separator()
+      items.push action 'Refresh', id: 'tray.refresh', icon: 'arrow.clockwise', run: -> null
       items.push quit 'Quit', icon: 'power'
       items
 
