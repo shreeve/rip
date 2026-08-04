@@ -83,7 +83,7 @@ let called = scale?.(21)
 
 console.log('presence:', chosen, exists, hostname, present, retries, first, scaled, called)
 
-// ── Invocation: explicit parens, the implicit spelling, do, dammit, tagged ──
+// ── Invocation: explicit parens, the implicit spelling, do, dammit, maybe-dammit, tagged ──
 
 let greet = function(name: string) { return `hi ${name}` }
 let loud = greet('ada').toUpperCase()
@@ -93,12 +93,16 @@ let ran = answer()
 let fetchNumber = function() { return Promise.resolve(7) }
 let awaited = await fetchNumber()
 let gotten = await fetchNumber()
+let maybeFetch: (() => Promise<number>) | undefined = function() { return Promise.resolve(8) }
+let handlers: { fire?: () => Promise<number> } = {}
+let perhaps = await maybeFetch?.()
+let skipped = await handlers.fire?.()
 let bundle = await {
   value: 9,
 }
 let rawPath = String.raw`col\t${ten}`
 
-console.log('invoke:', loud, quiet, ran, awaited, gotten, bundle.value, rawPath)
+console.log('invoke:', loud, quiet, ran, awaited, gotten, perhaps, skipped, bundle.value, rawPath)
 
 // ── yield: bare, valued, `yield from`, and the indented-object body ──
 
