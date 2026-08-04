@@ -1507,27 +1507,30 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  // The generated TS mirror is scratch, removed on exit by default so a
-  // repeatedly-run check never litters .rip/check — retained only under
-  // --keep-mirror, for inspecting the exact TypeScript tsgo checked.
-  test('the TS mirror is removed after a run, kept only with --keep-mirror', () => {
+  // The generated TS mirror is a persistent, regenerable cache (the peer
+  // of the editor's .rip/editor): it stays at .rip/check after the run so
+  // the exact TypeScript tsgo checked is inspectable, is self-gitignored,
+  // and freshness comes from the start-of-run wipe — a stale face from an
+  // earlier run never survives into the next program.
+  test('the TS mirror persists after a run and is rebuilt fresh each run', () => {
     const dir = workspace({ 'a.rip': 'x: number = 0\nconsole.log x\n' });
     try {
-      const dotRip = path.join(dir, '.rip');
-      const mirror = path.join(dotRip, 'check');
+      const mirror = path.join(dir, '.rip', 'check');
       check(dir);
-      // The whole .rip parent goes when the check created it (nothing
-      // else lives there) — not just .rip/check.
-      expect(fs.existsSync(dotRip)).toBe(false);
-      const r = check(dir, ['--keep-mirror']);
-      expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(true);  // the face is retained
-      expect(r.stderr).toContain('keeping TS mirror');
+      expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(true);           // the face is retained
+      expect(fs.readFileSync(path.join(mirror, '.gitignore'), 'utf8')).toBe('*\n'); // and git never sees it
+      // A face whose source no longer exists is wiped by the next run,
+      // not trusted from the cache.
+      fs.writeFileSync(path.join(mirror, 'deleted.rip.ts'), 'const ghost: number = 0;\n');
+      check(dir);
+      expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(true);
+      expect(fs.existsSync(path.join(mirror, 'deleted.rip.ts'))).toBe(false);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  // The .rip parent is pruned only when empty: a coexisting editor mirror
-  // (.rip/editor) must survive a batch check.
-  test('a coexisting .rip/editor is preserved (only the empty parent is pruned)', () => {
+  // A coexisting editor mirror (.rip/editor) must survive a batch check:
+  // the two mirrors share the .rip parent but own disjoint subtrees.
+  test('a coexisting .rip/editor is preserved', () => {
     const dir = workspace({ 'a.rip': 'x: number = 0\nconsole.log x\n' });
     try {
       const editorDir = path.join(dir, '.rip', 'editor');
@@ -1535,7 +1538,6 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       fs.writeFileSync(path.join(editorDir, 'marker'), 'keep me\n');
       check(dir);
       expect(fs.existsSync(path.join(editorDir, 'marker'))).toBe(true);          // editor mirror untouched
-      expect(fs.existsSync(path.join(dir, '.rip', 'check'))).toBe(false);        // batch mirror cleaned
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 

@@ -60,9 +60,6 @@ Options:
   --json                   Emit diagnostics as a JSON array instead of the
                            human-readable text report
   --no-frame               Suppress the source code-frame under each error
-  --keep-mirror            Keep the generated TS mirror (.rip/check) after the
-                           run instead of removing it — for inspecting the
-                           exact TypeScript tsgo type-checked
   --build                  Print the build identity (a content hash over the
                            compiler and editor-server trees) and exit — the
                            editor logs the same hash in its ready line, so a
@@ -72,7 +69,9 @@ Options:
 Exit status is 0 when no error-severity diagnostic survives, 1 otherwise.
 Directories are walked for *.rip (node_modules and dot-directories are
 skipped). Config — package.json#rip (strict / noCheck) and the project
-tsconfig — governs exactly as it does in the editor.`;
+tsconfig — governs exactly as it does in the editor. The generated TS
+mirror stays at <root>/.rip/check after the run — the exact TypeScript
+tsgo type-checked, rebuilt fresh each run.`;
 
 const fail = (message, code = 2) => { console.error(message); process.exit(code); };
 
@@ -95,27 +94,24 @@ if (argv.includes('--build')) {
 }
 const asJson = argv.includes('--json');
 const showFrames = !argv.includes('--no-frame') && !asJson;
-const keepMirror = argv.includes('--keep-mirror');
-const KNOWN = new Set(['--json', '--no-frame', '--keep-mirror', '--build']);
+const KNOWN = new Set(['--json', '--no-frame', '--build']);
 const positionals = argv.filter((a) => !a.startsWith('-'));
 const unknownFlags = argv.filter((a) => a.startsWith('-') && !KNOWN.has(a));
 if (unknownFlags.length) fail(`rip check: unknown option${unknownFlags.length === 1 ? '' : 's'}: ${unknownFlags.join(', ')}\n\nRun 'rip check --help' for usage.`);
 
-// The generated TS mirror is scratch, not a build product: it is removed
-// when the process exits by ANY path (normal, error, or process.exit) —
-// rmSync in an exit handler runs synchronously, so this reclaims the
-// <root>/.rip/check tree AND the temp fallback without leaving either
-// behind between runs. `--keep-mirror` retains it for inspecting the
-// exact TypeScript tsgo checked.
-let mirrorToClean = null;
-let dotRipDir = null;   // <root>/.rip, pruned if the mirror left it empty
+// The generated TS mirror at <root>/.rip/check is a persistent,
+// regenerable cache — the peer of the editor's .rip/editor, self-
+// gitignored, left in place between runs so the exact TypeScript tsgo
+// checked stays inspectable. Freshness never depends on cleanup: every
+// run rebuilds the tree from scratch before tsgo sees it. (Create-then-
+// delete also made the .rip dir flicker in and out of editor file trees
+// on every run.) Only the temp fallback root — used when the workspace
+// isn't writable — is ours to remove, on ANY exit path: rmSync in an
+// exit handler runs synchronously.
+let fallbackToClean = null;
 process.on('exit', () => {
-  if (keepMirror || mirrorToClean === null) return;
-  try { fs.rmSync(mirrorToClean, { recursive: true, force: true }); } catch { /* best effort */ }
-  // Prune the .rip parent too, but only when now empty — the editor's
-  // .rip/editor may share it, and rmdirSync refuses a non-empty dir, so
-  // this removes .rip only when `rip check` was what created it.
-  if (dotRipDir !== null) { try { fs.rmdirSync(dotRipDir); } catch { /* not empty / shared */ } }
+  if (fallbackToClean === null) return;
+  try { fs.rmSync(fallbackToClean, { recursive: true, force: true }); } catch { /* best effort */ }
 });
 
 // ── target collection ───────────────────────────────────────────────
@@ -298,11 +294,10 @@ const tsDiags = [];
 let tsgoUnavailable = false; // tsgo needed but could not start — a run that couldn't type-check
 if (compiled.size > 0) {
   // A dedicated mirror at <root>/.rip/check (peer of the editor's
-  // .rip/editor), rebuilt from scratch and removed on exit (see the
-  // exit handler above) — scratch, not a build product. The start-of-run
-  // wipe also guards against a stale mirror a killed/`--keep-mirror` run
-  // left behind, so a since-deleted source's face never lingers in the
-  // `**/*.ts` program.
+  // .rip/editor), rebuilt from scratch each run and left in place after
+  // (see the lifecycle comment on the exit handler above). The start-of-
+  // run wipe is what carries correctness: a since-deleted source's face
+  // from an earlier run never lingers in the `**/*.ts` program.
   let mirrorRoot = path.join(workspaceRoot, '.rip', 'check');
   let mirrorRootIsFallback = false;
   try {
@@ -312,10 +307,8 @@ if (compiled.size > 0) {
   } catch {
     mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-'));
     mirrorRootIsFallback = true;
+    fallbackToClean = mirrorRoot;
   }
-  mirrorToClean = mirrorRoot;
-  if (!mirrorRootIsFallback) dotRipDir = path.join(workspaceRoot, '.rip');
-  if (keepMirror) console.error(`rip check: keeping TS mirror at ${mirrorRoot}`);
   for (const [fsPath, entry] of compiled) {
     const rel = mirrorRelForFsPath(fsPath, mirrorRootIsFallback ? null : workspaceRoot);
     const mirrorPath = path.join(mirrorRoot, rel) + '.ts';
