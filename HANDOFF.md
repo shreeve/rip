@@ -33,7 +33,8 @@ The current tip carries the local Rip appliance and its native client:
   `template: false` preserves full color. A separate `logo:` can brand the
   panel header.
 - `packages/tray/assets` carries the full-color Rip logo and compact monochrome
-  menu-bar mark. The built-in Rip Apps tray uses both.
+  menu-bar mark. The built-in Rip Apps tray uses both; the status mark renders
+  at the visually verified 24-point size.
 - `rip-tray provider.rip --name NAME --identifier ID --output PATH` creates an
   independently named, ad-hoc-signed `.app`. The package's executable
   `tray.rip` mode is the Rip Apps client for `rip app` and `rip edge`.
@@ -42,13 +43,8 @@ Live verification for the tray panel cleanup:
 
 - `bun run test` — 6,128 passed, 35 extended-tier skips.
 - `packages/tray`: 12 tests passed. The Swift package built on macOS and its
-  protocol executable passed ten
-  native model/SVG checks.
-- A canonical run before the final SVG sizing refinement passed all 22 lanes,
-  8,359 tests total. Exact-tree canonical retries hit unrelated load-sensitive
-  gates under parallel load: the Print subprocess lane and one reactive-runtime
-  scaling bound. Print passed 23/23 in isolation, and the complete reactive
-  file passed 89/89 in isolation, including the failed scaling case.
+  protocol executable passed ten native model/SVG checks.
+- `bun run test:all` — all 22 lanes passed, 8,359 tests total.
 - `packages/tray/dist/Rip.app` was rebuilt, its ad-hoc signature and copied SVG
   bytes were verified, the open panel was visually inspected at native Retina
   resolution, and the app plus embedded provider are running. The build
