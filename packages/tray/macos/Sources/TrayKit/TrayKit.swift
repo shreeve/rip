@@ -411,7 +411,7 @@ private struct PanelGroupRow: View {
           }
         }
       }
-      .padding(.horizontal, 12)
+      .padding(.horizontal, 17)
       .padding(.vertical, 7)
       .opacity(item.enabled ?? true ? 1 : 0.45)
       .disabled(!(item.enabled ?? true))
