@@ -1451,6 +1451,9 @@ async function refresh(document) {
     // Hoisted class-expression bindings whose declaration lost its
     // initializer to the hoist split (see ripSemanticTokens).
     classDecls: result.classDecls ?? [],
+    // Render-loop binding names — parameters in the face's block factory,
+    // loop variables in the source (see ripSemanticTokens).
+    loopVars: result.loopVars ?? [],
     // The enum names this module declares — read by IMPORTERS, which
     // cannot compute it from their own compile. An open buffer answers
     // from here; a disk file from its manifest entry.
@@ -2576,6 +2579,15 @@ function ripSemanticTokens(ctx, data) {
   // other type's index, exactly as the enum correction does.
   const classType = semanticTokensLegend?.tokenTypes?.indexOf('class') ?? -1;
   const classStarts = new Set((ctx.good.classDecls ?? []).map(([s]) => s));
+  // The fourth correction of the same shape: a render loop's body lowers
+  // to a block-function factory, so its item/index binding genuinely IS a
+  // parameter in the face — the factory header, the keyed callback, every
+  // read — and tsgo classifies each occurrence so. The author declared a
+  // loop variable. The compiler reports each occurrence's span, so a
+  // handler's own `(e) ->` parameter — a parameter in the source too — is
+  // never touched: the correction is the span, not a rule over the block.
+  const variableType = semanticTokensLegend?.tokenTypes?.indexOf('variable') ?? -1;
+  const loopStarts = new Set((ctx.good.loopVars ?? []).map(([s]) => s));
   // An IMPORTED enum carries the same merged-symbol `type` classification
   // its declaration does, and the importing file's compile cannot know
   // that — the kind lives in the declaring module. The compiler reports
@@ -2614,6 +2626,7 @@ function ripSemanticTokens(ctx, data) {
       modifiers &= ~roBit;
     }
     if (classType >= 0 && classStarts.has(genStart)) type = classType;
+    if (variableType >= 0 && loopStarts.has(genStart)) type = variableType;
     const key = curStart * 0x100000 + length;
     const existing = tokens.get(key);
     if (existing && existing.type === type) {

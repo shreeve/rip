@@ -401,3 +401,85 @@ describeExtended('semantic tokens — a forward-referenced class binding', () =>
     expect(await typeAt({ 'app.rip': NOTACLASS }, 'app.rip', 1, 0, 'the obj declaration')).toBe('variable');
   }, 60000);
 });
+
+// A render loop's binding keeps its `variable` color.
+//
+// `for person in people` is the same construct inside a render body and out,
+// but the render path lowers its body to a BLOCK FUNCTION — the face carries
+// `create_block_0(ctx, person, i)` and a keyed callback `(person, i) =>
+// person` — so in the face the binding genuinely IS a parameter, and tsgo
+// says so. The token names the construct the author declared, and the author
+// declared a loop variable.
+//
+// The binding is NOT one span: the face spells it in the block signature, in
+// the keyed callback, and at every read inside the block, so the loop name is
+// asserted at its binding AND at both reads on the `li` line — a correction
+// reaching the declaration alone leaves every use disagreeing with it, the
+// failure mode the class suite above pins as "every occurrence".
+//
+// The handler is the control that carries the weight: a `(e) ->` passed to
+// `@click` lowers to a real function whose `e` really is a parameter, in the
+// face and in the source. It must stay `parameter` at its declaration and its
+// read, so the correction has to be keyed by the compiler's span for the loop
+// binding and can never be a blanket retype of `parameter` inside a
+// component. The plain module-scope loop is the baseline both sides must
+// match — already `variable`, and pinned so a correction cannot regress it.
+describeExtended('semantic tokens — a render loop binding', () => {
+  const LOOP = [
+    "folks = ['a', 'b']",                                       // line 0
+    'for human in folks',                                        // line 1  the plain loop
+    '  console.log human',                                       // line 2  its read
+    '',                                                          // line 3
+    'List = component',                                          // line 4
+    "  people := ['x', 'y']",                                    // line 5
+    '  render',                                                  // line 6
+    '    ul',                                                    // line 7
+    '      for person in people',                                // line 8  the render loop
+    '        li key: person, person',                            // line 9  the key read, the content read
+    "      button @click: ((e) -> console.log e.type), 'Go'",    // line 10 the handler
+    '',
+  ].join('\n');
+
+  test('the loop name is `variable` at its binding and every read — a handler\'s parameter stays `parameter`', async () => {
+    const session = await openSession({ 'app.rip': LOOP });
+    try {
+      session.open('app.rip');
+      const tokens = await session.semanticTokens('app.rip');
+      expect(tokens.length).toBeGreaterThan(0);   // liveness
+
+      // The baseline: outside a render body the same construct already
+      // answers `variable`, at the binding and the read alike.
+      expect(at(tokens, 1, 4)?.type, 'the plain loop binding').toBe('variable');
+      expect(at(tokens, 2, 14)?.type, 'the plain loop read').toBe('variable');
+
+      // The render loop must answer the same. All three positions answer
+      // separately — the face gives the binding to the block signature and
+      // the reads to the keyed callback, so one corrected span cannot
+      // cover another's position.
+      for (const [label, line, character] of [
+        ['the render loop binding', 8, 10],
+        ['the key read', 9, 16],
+        ['the content read', 9, 24],
+      ]) {
+        const tok = at(tokens, line, character);
+        expect(tok, `${label} has a token`).toBeDefined();
+        expect(tok.type, label).toBe('variable');
+      }
+
+      // The control: the handler's own parameter is a parameter in the
+      // source, not only in the face, and keeps its color at both
+      // positions. A blanket retype inside the component clears the three
+      // assertions above and fails here.
+      for (const [label, line, character] of [
+        ['the handler parameter declaration', 10, 23],
+        ['the handler parameter read', 10, 41],
+      ]) {
+        const tok = at(tokens, line, character);
+        expect(tok, `${label} has a token`).toBeDefined();
+        expect(tok.type, label).toBe('parameter');
+      }
+    } finally {
+      await session.close();
+    }
+  }, 60000);
+});

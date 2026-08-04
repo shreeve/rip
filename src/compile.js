@@ -274,6 +274,11 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // initializer, and a forward reference splits the two — the editor
     // repaints the construct the author declared. TS face only.
     classDecls: emitted.classDecls,
+    // Generated spans of a RENDER loop's item/index binding names. The
+    // render lowering makes the binding a block-function parameter in the
+    // face, so tsgo classifies it `parameter`; the editor repaints the
+    // construct the author declared. TS face only.
+    loopVars: emitted.loopVars,
     // Generated spans of every reference to an IMPORTED binding, each with
     // its original exported name and module. One file's compile cannot
     // know an imported name's kind — the editor resolves the specifier and

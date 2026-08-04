@@ -412,6 +412,15 @@ class Emitter {
     // hoist changed. Components ride this too: one lowers to a class
     // expression, and a forward-rendered child is ordinary library shape.
     this.classDecls = [];
+    // Generated `[start, end]` spans of a RENDER loop's item/index binding
+    // names, every occurrence. The render path lowers the loop body to a
+    // block-function factory, so in the face the binding genuinely IS a
+    // parameter — the factory header, the keyed callback, every read — and
+    // tsgo classifies it so. The author declared a loop variable; the
+    // editor repaints exactly these spans. A handler's `(e) ->` parameter
+    // is a parameter in the source too and is never recorded — the scope
+    // walk decides, never the spelling.
+    this.loopVars = [];
     // Generated spans of every reference to an IMPORTED name, each with
     // the module it came from: `[start, end, name, specifier]`. One
     // file's compile cannot know an imported name's KIND — that lives in
@@ -1306,6 +1315,21 @@ class Emitter {
     return false;
   }
 
+  // Is `name` a RENDER loop's item/index binding here? Same walk as
+  // isEnumName, same reason — and the frame's own set is asked before its
+  // `bound` because a factory frame carries its loop bindings in BOTH: an
+  // inner frame that re-binds the spelling (a handler's parameter) still
+  // answers no before the walk reaches the loop's own frame.
+  isRenderLoopName(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.loopVars !== undefined && f.loopVars.has(name)) return true;
+      if (f.reactive.has(name) || f.bound.has(name)) return false;
+      if (f.members !== undefined && f.members.has(name)) return false;
+    }
+    return false;
+  }
+
   // The module `name` was imported from and its original exported name,
   // or null when `name` is not an import here. Same walk as isEnumName,
   // same reason: an inner binding that re-uses the spelling is not the
@@ -1542,6 +1566,7 @@ class Emitter {
     if (this.isEnumName(value)) { this.enums.push([start, this.b.offset]); return; }
     if (this.isReactiveName(value) && !this.isComputedName(value)) { this.mutables.push([start, this.b.offset]); return; }
     if (this.isClassName(value)) { this.classDecls.push([start, this.b.offset]); return; }
+    if (this.isRenderLoopName(value)) { this.loopVars.push([start, this.b.offset]); return; }
     const imported = this.importSpecOf(value);
     if (imported !== null) {
       this.importedRefs.push([start, this.b.offset, imported.importedName, imported.specifier]);
@@ -2062,7 +2087,7 @@ class Emitter {
     this.b = new CodeBuilder(this.stores, { source });
     const { n, used } = this.temps;
     this.temps.used = new Set(used);
-    const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'importedRefs',
+    const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'loopVars', 'importedRefs',
       'vocabulary', 'silences', 'memberDecls', 'importSpans', 'pendingTypeDecls'];
     const saved = {};
     for (const k of channels) { saved[k] = this[k]; this[k] = []; }
@@ -8487,7 +8512,11 @@ class Emitter {
   withRecordContext(rec, fn) {
     const prevSelf = this.renderSelf;
     this.renderSelf = rec.self;
-    this.rframes.push({ reactive: new Set(), bound: rec.bindings });
+    // A factory record's `bindings` is exactly its loop item/index names
+    // (own plus threaded outer; the class record's is empty), so the same
+    // set feeds both roles: `bound` shadows outer names, `loopVars` marks
+    // the emissions the token correction records (see noteNameSpan).
+    this.rframes.push({ reactive: new Set(), bound: rec.bindings, loopVars: rec.bindings });
     try {
       fn();
     } finally {
@@ -10326,7 +10355,10 @@ class Emitter {
     const prevSlot = R.transitionSlot;
     R.transitionSlot = kind === 'branch' ? { record: rec, el: null } : null;
     R.sink = rec;
-    this.rframes.push({ reactive: new Set(), bound: rec.bindings });
+    // Same double duty as withRecordContext's frame: `bindings` is exactly
+    // the loop item/index names, bound for shadowing, loopVars for the
+    // token correction's recording.
+    this.rframes.push({ reactive: new Set(), bound: rec.bindings, loopVars: rec.bindings });
     try {
       let stmts;
       if (isBlock(part)) {
@@ -10700,12 +10732,22 @@ class Emitter {
         this.b.emit(`, ${indexVar}`);
         if (this.ts) this.b.tsOnly(() => this.b.emit(': number'));
         this.b.emit(') => ');
-        this.withBindings([itemVar, indexVar], () => this.withExpression(() => {
-          const wrap = Emitter.needsGrouping(keyExpr, 'operand') || isObject(keyExpr);
-          if (wrap) this.b.emit('(');
-          this.expr(keyExpr);
-          if (wrap) this.b.emit(')');
-        }));
+        // The keyFn's binding frame carries loopVars too: its body reads
+        // the loop's own variables, and it is the one generated
+        // manifestation of the binding that maps back to the loop HEAD —
+        // without it the token correction reaches every position but the
+        // binding's own.
+        this.rframes.push({ reactive: new Set(), bound: new Set([itemVar, indexVar]), loopVars: new Set([itemVar, indexVar]) });
+        try {
+          this.withExpression(() => {
+            const wrap = Emitter.needsGrouping(keyExpr, 'operand') || isObject(keyExpr);
+            if (wrap) this.b.emit('(');
+            this.expr(keyExpr);
+            if (wrap) this.b.emit(')');
+          });
+        } finally {
+          this.rframes.pop();
+        }
       } else {
         this.b.emit('null');
       }
@@ -14822,7 +14864,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

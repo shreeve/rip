@@ -9542,6 +9542,7 @@ class Emitter {
     this.mutables = [];
     this.enums = [];
     this.classDecls = [];
+    this.loopVars = [];
     this.importedRefs = [];
     this.strict = strict;
     this.ts = face === "ts";
@@ -10078,6 +10079,18 @@ class Emitter {
     }
     return false;
   }
+  isRenderLoopName(name) {
+    for (let i = this.rframes.length - 1;i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.loopVars !== undefined && f.loopVars.has(name))
+        return true;
+      if (f.reactive.has(name) || f.bound.has(name))
+        return false;
+      if (f.members !== undefined && f.members.has(name))
+        return false;
+    }
+    return false;
+  }
   importSpecOf(name) {
     for (let i = this.rframes.length - 1;i >= 0; i--) {
       const f = this.rframes[i];
@@ -10257,6 +10270,10 @@ class Emitter {
     }
     if (this.isClassName(value)) {
       this.classDecls.push([start, this.b.offset]);
+      return;
+    }
+    if (this.isRenderLoopName(value)) {
+      this.loopVars.push([start, this.b.offset]);
       return;
     }
     const imported = this.importSpecOf(value);
@@ -10602,6 +10619,7 @@ class Emitter {
       "mutables",
       "enums",
       "classDecls",
+      "loopVars",
       "importedRefs",
       "vocabulary",
       "silences",
@@ -15478,7 +15496,7 @@ ${pad ?? ""}`);
   withRecordContext(rec, fn) {
     const prevSelf = this.renderSelf;
     this.renderSelf = rec.self;
-    this.rframes.push({ reactive: new Set, bound: rec.bindings });
+    this.rframes.push({ reactive: new Set, bound: rec.bindings, loopVars: rec.bindings });
     try {
       fn();
     } finally {
@@ -16893,7 +16911,7 @@ ${this.replayPad}}` : " }");
     const prevSlot = R.transitionSlot;
     R.transitionSlot = kind === "branch" ? { record: rec, el: null } : null;
     R.sink = rec;
-    this.rframes.push({ reactive: new Set, bound: rec.bindings });
+    this.rframes.push({ reactive: new Set, bound: rec.bindings, loopVars: rec.bindings });
     try {
       let stmts;
       if (isBlock2(part)) {
@@ -17210,14 +17228,19 @@ ${this.replayPad}}` : " }");
         if (this.ts)
           this.b.tsOnly(() => this.b.emit(": number"));
         this.b.emit(") => ");
-        this.withBindings([itemVar, indexVar], () => this.withExpression(() => {
-          const wrap = Emitter.needsGrouping(keyExpr, "operand") || isObject(keyExpr);
-          if (wrap)
-            this.b.emit("(");
-          this.expr(keyExpr);
-          if (wrap)
-            this.b.emit(")");
-        }));
+        this.rframes.push({ reactive: new Set, bound: new Set([itemVar, indexVar]), loopVars: new Set([itemVar, indexVar]) });
+        try {
+          this.withExpression(() => {
+            const wrap = Emitter.needsGrouping(keyExpr, "operand") || isObject(keyExpr);
+            if (wrap)
+              this.b.emit("(");
+            this.expr(keyExpr);
+            if (wrap)
+              this.b.emit(")");
+          });
+        } finally {
+          this.rframes.pop();
+        }
       } else {
         this.b.emit("null");
       }
@@ -20374,7 +20397,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -20971,6 +20994,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     mutables: emitted.mutables,
     enums: emitted.enums,
     classDecls: emitted.classDecls,
+    loopVars: emitted.loopVars,
     importedRefs: emitted.importedRefs,
     imports: emitted.imports,
     trivia: result.trivia ?? [],
