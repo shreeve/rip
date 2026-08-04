@@ -463,8 +463,19 @@ const TSGO_CLIENT_CAPABILITIES = {
       formats: ['relative'],
     },
   },
-  workspace: { configuration: true, didChangeWatchedFiles: {}, symbol: {} },
+  workspace: { configuration: true, didChangeWatchedFiles: {}, symbol: {}, diagnostics: { refreshSupport: true } },
 };
+
+// The broker publishes only what it pulls, so it must accept tsgo's
+// one channel for saying "my answers changed, ask again" — without
+// this handler a program-wide recomputation that lands after the
+// triggering batch's pulls would never publish. (Today's tsgo does
+// not send it; the diagnostic pulls' generous timeout carries the
+// config-flip path until it does.)
+function tsgoDiagnosticRefreshRequest() {
+  repullOpenDocuments();
+  return null;
+}
 
 // tsgo drives preference-sensitive behavior off workspace/configuration
 // answers. The broker FORWARDS tsgo's asks to the editor when the
@@ -512,7 +523,10 @@ function launchTsgo() {
   }
   tsgoReady = startTsgo(rootDir, {
     clientCapabilities: TSGO_CLIENT_CAPABILITIES,
-    serverRequests: { 'workspace/configuration': tsgoConfigurationRequest },
+    serverRequests: {
+      'workspace/configuration': tsgoConfigurationRequest,
+      'workspace/diagnostic/refresh': tsgoDiagnosticRefreshRequest,
+    },
   }).then(
     (session) => {
       tsgo = session;
@@ -1335,7 +1349,13 @@ async function repullDiagnostics(uri) {
   if (documents.get(uri)?.getText() !== good.source) return;
   let pulled;
   try {
-    pulled = await tsgo.client.request('textDocument/diagnostic', { textDocument: { uri: state.tsUri } });
+    // A generous cap, not the default: this pull is issued ONCE per
+    // trigger and abandoned on timeout, so a cap shorter than tsgo's
+    // worst rebuild (a config flip re-governing the program on a loaded
+    // machine) loses the publication forever — nothing re-pulls until
+    // the next user action. A late answer is still safe: the staleness
+    // guards below discard it if the buffer moved on.
+    pulled = await tsgo.client.request('textDocument/diagnostic', { textDocument: { uri: state.tsUri } }, { timeoutMs: 60000 });
   } catch (err) {
     connection.console.error(`[rip] diagnostic re-pull failed: ${err.message}`);
     return;
@@ -1591,7 +1611,10 @@ async function refresh(document) {
   const versionAtRequest = document.version;
   let pulled;
   try {
-    pulled = await tsgo.client.request('textDocument/diagnostic', { textDocument: { uri: state.tsUri } });
+    // Same cap as the re-pull: one shot per refresh, abandoned on
+    // timeout, so the cap must outlast tsgo's worst rebuild; the
+    // version guard below discards a stale answer.
+    pulled = await tsgo.client.request('textDocument/diagnostic', { textDocument: { uri: state.tsUri } }, { timeoutMs: 60000 });
   } catch (err) {
     connection.console.error(`[rip] diagnostic pull failed: ${err.message}`);
     return;

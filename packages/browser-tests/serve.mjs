@@ -51,13 +51,22 @@ const wsModules = { 'routes/index.rip': wsRoute('workspace home') };
 const wsHashes = new Map();
 const ripHash = text => createHash('sha256').update(text).digest('base64url').slice(0, 6).replaceAll('-', '_');
 wsHashes.set('routes/index.rip', ripHash(wsModules['routes/index.rip']));
+const wsInventory = () => [...wsHashes]
+  .map(([id, hash]) => ({ id, hash }))
+  .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+const checkOf = files => ripHash(JSON.stringify(files.map(({ id, hash }) => [id, hash])));
 let wsBundleText = null;
 let wsBundleTag = null;
 const rebuildWsBundle = () => {
-  wsBundleText = JSON.stringify(assembleBundle({
-    modules: wsModules,
-    packagesDir: join(root, 'packages'),
-  }));
+  const files = wsInventory();
+  wsBundleText = JSON.stringify({
+    ...assembleBundle({
+      modules: wsModules,
+      packagesDir: join(root, 'packages'),
+    }),
+    check: checkOf(files),
+    files,
+  });
   wsBundleTag = `"${Bun.hash(wsBundleText).toString(16)}"`;
 };
 rebuildWsBundle();
@@ -95,8 +104,8 @@ Bun.serve({
       return server.upgrade(request) ? undefined : new Response('websocket only', { status: 400 });
     }
     if (pathname === '/manifest.json') {
-      const files = [...wsHashes].map(([id, hash]) => ({ id, hash }));
-      return new Response(JSON.stringify({ files }), {
+      const files = wsInventory();
+      return new Response(JSON.stringify({ check: checkOf(files), files }), {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
       });
     }
