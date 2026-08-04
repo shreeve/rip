@@ -244,7 +244,10 @@ grammar =
     # The dammit operator: `f!` is call-plus-await sugar — a real
     # token and a real node. The head is non-spellable: a user call
     # `dammit f` must never share its shape.
-    o 'Value DAMMIT', '["dammit!", 1]', 'dammit: _, target'
+    # The DAMMIT token is labeled so the `!` keeps its own source span:
+    # the lowering's `await` is synthetic, and a diagnostic on that
+    # keyword (TS80007) must land on the one character that means await.
+    o 'Value DAMMIT[operator]', '["dammit!", 1]', 'dammit: _, target'
     o 'NewValue'
     # Tagged templates: a string against a value (`tag"x"`) or
     # bridged by `$` (`sh $"cmd"`) calls the tag with the template.
@@ -569,8 +572,11 @@ grammar =
     # precedent — a real await node, no hidden channels).
     # prec NEW (below CALL_START): a following argument list shifts
     # INTO the construction (`new X!(a)` supplies the ctor args).
-    o 'NEW NewSpine DAMMIT'          , '["await", ["new", 2]]', prec: 'NEW'
-    o 'NEW NewSpine DAMMIT Arguments', '["await", ["new", [2, ...4]]]'
+    # The bang is labeled here too — same reason as Value DAMMIT's: the
+    # awaited construction's `await` is synthetic, and the operator role
+    # is where its diagnostics land.
+    o 'NEW NewSpine DAMMIT[operator]'          , '["await", ["new", 2]]', 'await: _, _', prec: 'NEW'
+    o 'NEW NewSpine DAMMIT[operator] Arguments', '["await", ["new", [2, ...4]]]', 'await: _, _'
   ]
 
   NewCall: [
@@ -763,7 +769,7 @@ grammar =
     o 'ObjSpreadExpr INDEX_START INDENT Expression OUTDENT INDEX_END', '["[]", 1, 4]', 'index: operator, object, key'
     # The dammit operator on a spread head (`{...f!}` awaits the call
     # and spreads the result); chains read through it (`{...f!.data}`).
-    o 'ObjSpreadExpr DAMMIT'         , '["dammit!", 1]' , 'dammit: _, target'
+    o 'ObjSpreadExpr DAMMIT[operator]', '["dammit!", 1]' , 'dammit: _, target'
     # Pick on a spread head: `{...obj.{a, b}}` spreads the picked
     # literal (the four spread-head pick rules).
     o 'ObjSpreadExpr PICK_START    PickList OptComma PICK_END'               , '[".{}",  1, ...3]', 'pick: _, source, ...items'
@@ -1038,7 +1044,7 @@ grammar =
     # token's own value; `import!(url)` is its awaited form (a real
     # await node — no hidden channels).
     o 'DYNAMIC_IMPORT Arguments'       , '[1, ...2]', 'dynimport: keyword, ...args'
-    o 'DYNAMIC_IMPORT DAMMIT Arguments', '["await", ["import", ...3]]'
+    o 'DYNAMIC_IMPORT DAMMIT[operator] Arguments', '["await", ["import", ...3]]', 'await: _, _'
   ]
 
   Arguments: [
@@ -1327,8 +1333,12 @@ grammar =
     o 'UNARY Expression'     , '[1, 2]'  , 'unary: operator, operand'
     o 'DO Expression'        , '["do-iife", 2]', 'doiife: _, func'
     o 'UNARY_MATH Expression', '[1, 2]'  , 'unary: operator, operand'
-    o 'AWAIT Expression'            , '["await", 2]', 'await: _, value'
-    o 'AWAIT INDENT Object OUTDENT' , '["await", 3]', 'await: _, value'
+    # AWAIT is labeled so the keyword owns its span: TS80007 reports on
+    # the generated `await`, and the author-spelled keyword is where it
+    # honestly lands (the row is verbatim-exact here, a cover onto the
+    # `!` for the dammit sugar).
+    o 'AWAIT[operator] Expression'            , '["await", 2]', 'await: _, value'
+    o 'AWAIT[operator] INDENT Object OUTDENT' , '["await", 3]', 'await: _, value'
     o 'YIELD'                       , '["yield"]'   , 'yield: _'
     o 'YIELD Expression'            , '["yield", 2]', 'yield: _, value'
     o 'YIELD INDENT Object OUTDENT' , '["yield", 3]', 'yield: _, value'

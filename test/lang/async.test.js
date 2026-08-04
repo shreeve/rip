@@ -179,10 +179,17 @@ describe('dammit mapping surfaces', () => {
     expect(code.slice(callee.generatedStart, callee.generatedEnd)).toBe('fn');
     expect(callee.mappingKind).toBe('exact');
 
-    const [operator] = mappings.of(maybe.nodeId, 'operator');
-    expect(src.slice(operator.sourceStart, operator.sourceEnd)).toBe('?!');
-    expect(code.slice(operator.generatedStart, operator.generatedEnd)).toBe('?.');
-    expect(operator.mappingKind).toBe('cover');
+    // TWO manifestations of the operator, in generated order: the
+    // awaiting keyword rides the role first (TS80007's landing — the
+    // `?!` is this spelling's await operator), then the `?.` the call
+    // lowers through. Both are covers onto the same token.
+    const opRows = mappings.of(maybe.nodeId, 'operator');
+    expect(opRows).toHaveLength(2);
+    for (const [row, gen] of [[opRows[0], 'await'], [opRows[1], '?.']]) {
+      expect(src.slice(row.sourceStart, row.sourceEnd)).toBe('?!');
+      expect(code.slice(row.generatedStart, row.generatedEnd)).toBe(gen);
+      expect(row.mappingKind).toBe('cover');
+    }
 
     const [args] = mappings.of(maybe.nodeId, 'args');
     expect(src.slice(args.sourceStart, args.sourceEnd)).toBe('(arg)');

@@ -13879,7 +13879,16 @@ class Emitter {
   // values group: `await (a && b)`; calls stay bare).
   awaitExpr(node) {
     this.mark(node, '$self', () => {
-      this.b.emit('await ');
+      // The keyword's own row, off the operator role the grammar labels
+      // on the AWAIT/DAMMIT token: verbatim-exact where the author
+      // spelled `await`, a cover onto the `!` for the sugar spellings.
+      // TS80007 reports on the generated keyword, and this row is what
+      // its position resolves through — without it the innermost row is
+      // the construct-wide cover, and a hint about one character lights
+      // the whole expression. A synthetic await node has no role and
+      // skips the mark (the emitter's mark() conditions on RoleStore).
+      this.mark(node, 'operator', () => this.b.emit('await'));
+      this.b.emit(' ');
       this.operand(node, 'value', node[1]);
     });
   }
@@ -13924,16 +13933,21 @@ class Emitter {
 
   // ["dammit!", target] standing alone: call-plus-await with no args.
   dammit(node) {
+    // The keyword rides the operator role (the labeled DAMMIT token) in
+    // both branches — the same row awaitExpr records, for the same
+    // reason: TS80007's position resolves to the `!`, not the construct.
     if (isRubyNew(node[1])) {
       this.mark(node, '$self', () => {
-        this.b.emit('await new ');
+        this.mark(node, 'operator', () => this.b.emit('await'));
+        this.b.emit(' new ');
         this.mark(node, 'target', () => this.rubyNewTarget(node[1]));
         this.b.emit('()');
       });
       return;
     }
     this.mark(node, '$self', () => {
-      this.b.emit('await ');
+      this.mark(node, 'operator', () => this.b.emit('await'));
+      this.b.emit(' ');
       this.head(node, 'target', node[1]);
       this.b.emit('()');
     });
@@ -13944,7 +13958,10 @@ class Emitter {
   // is the distinct Houdini/presence operator.
   maybeDammit(node) {
     this.mark(node, '$self', () => {
-      this.b.emit('await ');
+      // The keyword's row maps to the labeled PRESENCE token — the `?`
+      // is this spelling's awaiting operator, the way `!` is dammit's.
+      this.mark(node, 'operator', () => this.b.emit('await'));
+      this.b.emit(' ');
       this.head(node, 'callee', node[1]);
       this.mark(node, 'operator', () => this.b.emit('?.'));
       this.mark(node, 'args', () => {

@@ -1338,3 +1338,54 @@ describe('node identity survives emission', () => {
     walk(r.sexpr);
   });
 });
+
+// The synthetic `await` keyword answers for the source that produced it.
+//
+// Every dammit spelling (`f!`, `new X!`, `new X!(a)`) lowers to an `await`
+// the source never spells, and a diagnostic tsgo puts on that keyword
+// (TS80007 lives there) maps through whatever row contains it. A
+// construct-wide cover made the whole expression light up for a hint about
+// one character. The keyword's own row — recorded off the operator role
+// the grammar labels on the DAMMIT/AWAIT token — maps it to the `!` for
+// the sugar spellings, and verbatim-exactly to the keyword the author
+// wrote for the plain one. The author-spelled row is the control that the
+// correction never bang-hunts: `await` in source maps to `await`, not to
+// some other operator.
+describe('the await keyword maps to the operator that produced it', () => {
+  const compileTS = (src) => {
+    const r = parser.parse(src);
+    expect(r.diagnostics).toEqual([]);
+    const { code, mappings } = emit(r, { source: src, face: 'ts' });
+    return { code, mappings: new Mappings(mappings) };
+  };
+
+  // The resolution mapTsDiagnostic uses: innermost direct row, else the
+  // innermost cover — Mappings.bestAtGenerated, the same stab
+  // generatedSpanToSource (translate.js) rides. Asserted on the row so
+  // this file stays src-pure.
+  const sourceSpanOf = (mappings, g, len) => {
+    const row = mappings.bestAtGenerated(g);
+    if (!row || row.mappingKind === 'synthetic') return null;
+    if (row.mappingKind === 'exact') {
+      return [row.sourceStart + (g - row.generatedStart), row.sourceStart + (g + len - row.generatedStart)];
+    }
+    return [row.sourceStart, row.sourceEnd];
+  };
+
+  // [source, the operator's spelling in source]
+  test.each([
+    ['f = -> 42\nx = f!\n', '!'],                    // call dammit
+    ['class T\n  n: number = 0\nx = new T!\n', '!'], // construction dammit
+    ['class T\n  constructor: (n: number = 1) ->\n    @n = n\n  n: number = 0\nx = new T!(7)\n', '!'], // with ctor args
+    ['x = await 5\n', 'await'],                      // the author-spelled control
+  ])('%p: the generated keyword answers %p', (src, op) => {
+    const { code, mappings } = compileTS(src);
+    const g = code.indexOf('await');
+    expect(g, 'generated await not found').toBeGreaterThan(-1);
+    const at = src.lastIndexOf(op);
+    expect(at, `${op} not in source`).toBeGreaterThan(-1);
+    const span = sourceSpanOf(mappings, g, 'await'.length);
+    expect(span, 'the keyword maps').not.toBeNull();
+    expect(span).toEqual([at, at + op.length]);
+  });
+});
