@@ -199,6 +199,23 @@ test! 'serve.rip rejects a change pattern assigned to the wrong apply kind', ->
     control.stop true
     rmSync dir, { recursive: true, force: true }
 
+test! 'serve.rip rejects an App root overlapping manager publication output', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-dist-app-')
+  project = join dir, 'project'
+  mkdirSync join(project, 'dist'), { recursive: true }
+  writeFileSync join(project, 'serve.rip'), "export default { app: { root: 'dist' } }\n"
+  calls = []
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, calls
+  try
+    { proc, err } = run project, [project, '--control', controlSocket, '--no-watch', '--access-log=off']
+    eq await proc.exited, 1
+    ok (await err).includes('app.root cannot overlap the manager-owned dist directory')
+    ok not calls.some((call) -> call.path is '/1.0/apps')
+  finally
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
 test! 'invalid app-local declarations reject before registration', ->
   dir = mkdtempSync join(tmpdir(), 'rip-manager-invalid-serve-')
   project = join dir, 'project'

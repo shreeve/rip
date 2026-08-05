@@ -107,6 +107,7 @@ test! 'App-only manager publishes a finite dist surface with no workers', ->
     waitFor! -> registration?
 
     eq registration.upstreams, []
+    ok 'files' of registration
     eq registration.files.proxy_first, []
     eq registration.files.roots, [
       { path: join(project, 'dist'), cache: 'revalidate' }
@@ -254,6 +255,80 @@ test! 'watch publication commits one App hash then batches confirmed changes', -
     eq assetChange.from, assetBundle.hash
     eq assetChange.list, [['images/rip.png']]
     eq assetChange.hash, JSON.parse(readFileSync(join(dist, 'bundle.json'), 'utf8')).hash
+
+    stableBundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    writeFileSync join(project, 'app', 'routes', 'index.rip'), 'broken = ((\n'
+    writeFileSync join(project, 'app', 'styles.css'), 'body { color: crimson; }'
+    sleep! 200
+    eq batches.length, 4
+    eq (JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')).hash, stableBundle.hash
+
+    recovered = "export Index = component\n  render\n    h1 'Recovered source'\n"
+    writeFileSync join(project, 'app', 'routes', 'index.rip'), recovered
+    waitFor! -> batches.length is 5
+    recovery = batches[4][0].change
+    eq recovery.from, stableBundle.hash
+    eq recovery.list, [['routes/index.rip', recovered], ['styles.css']]
+    eq recovery.hash, (JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')).hash
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    registrationHeld = false
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'external schema projection changes are watched across registration', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-projection-watch-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
+  mkdirSync join(project, 'api')
+  model = join project, 'api', 'models.rip'
+  writeFileSync model, "export Theme = schema\n  color! string\nexport ThemePublic = Theme.pick('color')\n"
+  writeFileSync join(project, 'app', 'routes', 'index.rip'), "import { ThemePublic } from '../../api/models.rip'\nexport Index = component\n  render\n    h1 'Projection'\n"
+  writeFileSync join(project, 'serve.rip'), "export default\n  app:\n    root: 'app'\n"
+  project = realpathSync project
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  registrationHeld = true
+  batches = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        while registrationHeld
+          sleep! 5
+        return Response.json({ id: 'projection-registration' }, { status: 201 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/projection-registration/hub/publish'
+        batches.push request.json!
+        return Response.json({ deliveries: 0 })
+      Response.new(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'projection.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    waitFor! -> registration?
+    dist = join project, 'dist'
+    initial = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    ok initial.list.some((entry) -> entry[0] is 'api/models.rip')
+
+    writeFileSync model, "export Theme = schema\n  shade! string\nexport ThemePublic = Theme.pick('shade')\n"
+    registrationHeld = false
+    waitFor! -> batches.length is 1
+    change = batches[0][0].change
+    current = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    eq change.from, initial.hash
+    eq change.hash, current.hash
+    eq JSON.parse(readFileSync(join(dist, 'latest.json'), 'utf8')).hash, current.hash
+    eq change.list.length, 1
+    eq change.list[0][0], 'api/models.rip'
+    ok change.list[0][1].includes('shade')
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143

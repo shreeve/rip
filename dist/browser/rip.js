@@ -9533,13 +9533,14 @@ function isModuleImportNode(stores, x) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = "js", pins = null, strict = false, script = false, repl = false } = {}) {
+  constructor(stores, builder, { face = "js", pins = null, strict = false, script = false, browserModule = false, repl = false } = {}) {
     this.stores = stores;
     this.b = builder;
     this.repl = repl;
     this.replResultName = null;
     this.replImportResolver = null;
     this.script = script;
+    this.browserModule = browserModule;
     this.importSpans = [];
     this.pins = pins;
     this.pinnables = [];
@@ -19190,6 +19191,14 @@ ${"  ".repeat(ind)}`);
     });
   }
   call(node) {
+    if (this.browserModule && node[0] === "import" && this.lockedHead(node, "dynimport")) {
+      const error = this.positionedError(node, "emitter: dynamic import is not supported in a browser App module — use a static import so Rip can publish and resolve the dependency");
+      if (typeof error.start !== "number" && this.b.currentMark) {
+        error.start = this.b.currentMark.sourceStart;
+        error.end = this.b.currentMark.sourceEnd;
+      }
+      throw error;
+    }
     if (this.repl && node[0] === "import" && (node.length === 2 || node.length === 3) && this.lockedHead(node, "dynimport")) {
       this.mark(node, "$self", () => {
         this.b.emit(`import(${this.replResolver()}(`);
@@ -20175,7 +20184,7 @@ var inventoryBindings = (emitter, sexpr, ambientNames) => {
   }
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
-function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, dataPayload = null, ambientBindings = null, repl = false } = {}) {
+function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false } = {}) {
   if (!parseResult.sexpr) {
     throw new Error("emitter: cannot emit a failed parse");
   }
@@ -20185,7 +20194,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === "ts" });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script, repl });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl });
   emitter.dataPayload = dataPayload;
   if (runtimeDelivery !== "none" && runtimeDelivery !== "import" && runtimeDelivery !== "inline") {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
@@ -20942,7 +20951,7 @@ var diagnosticError = (file, path, d) => {
   (a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y)` : d.message;
   return positioned(file, path, message, d.start, d.end);
 };
-function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false } = {}) {
+function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false } = {}) {
   if (typeof source !== "string") {
     const kind = source === null ? "null" : Array.isArray(source) ? "an array" : `a ${typeof source}`;
     throw new CompileError(`compile: source must be a string; got ${kind}`, { path });
@@ -20980,7 +20989,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     foldDerivedSchemas(result.sexpr);
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, dataPayload, ambientBindings, repl });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl });
   } catch (err) {
     if (typeof err.start === "number") {
       throw positioned(file, path, err.message, err.start, err.end);
@@ -26071,6 +26080,7 @@ function createRenderer(opts) {
   let pageMountPoint = null;
   let lastRoute = null;
   let forceFrom = null;
+  let lastCommitTeardownFailed = false;
   let shallowEqual = function(a, b) {
     let keysA = Object.keys(a);
     return keysA.length === Object.keys(b).length && keysA.every(function(key) {
@@ -26418,7 +26428,7 @@ function createRenderer(opts) {
     }
     return true;
   };
-  let performMount = async function(info, mine) {
+  let performMount = async function(info, mine, componentRegistry = components) {
     let boundaryIndex, failure, handled, instance, keepPrefix, parent, ready;
     let route = info?.route;
     if (!route?.file) {
@@ -26461,7 +26471,7 @@ function createRenderer(opts) {
       if (index < firstNew) {
         entries.push(mountedEntries[index]);
       } else {
-        entries.push({ file, cls: componentFrom(components, file) });
+        entries.push({ file, cls: componentFrom(componentRegistry, file) });
       }
     }
     let fresh = entries.slice(firstNew);
@@ -26523,8 +26533,20 @@ function createRenderer(opts) {
     mountedEntries = entries;
     lastRoute = { file: route.file, params, query };
     let teardownErrors = cleanup(oldInstances);
+    lastCommitTeardownFailed = teardownErrors.length > 0;
     if (teardownErrors.length) {
-      throw failureFor("<teardown>", "<renderer>", teardownErrors[0]);
+      for (let error of teardownErrors) {
+        failure = failureFor("<teardown>", "<renderer>", error);
+        if (onError != null) {
+          try {
+            onError(failure);
+          } catch (reportError) {
+            console.error("[Rip] renderer teardown reporter failed:", reportError);
+          }
+        } else {
+          console.error("[Rip] renderer teardown error:", failure);
+        }
+      }
     }
     return current;
   };
@@ -26562,11 +26584,11 @@ function createRenderer(opts) {
     }
     return;
   };
-  let remountDirty = async function(paths) {
+  let remountDirty = async function(paths, candidate = components) {
     if (!(Array.isArray(paths) && paths.length > 0))
       return "noop";
     for (let path of paths) {
-      if (path === "stash.rip" || path.startsWith("stash/"))
+      if (path === "stash.rip" || path.startsWith("stash/") || path === "data.rip")
         return "escape";
     }
     let info = router.current;
@@ -26586,22 +26608,24 @@ function createRenderer(opts) {
     if (firstDirty < 0)
       firstDirty = chain.length - 1;
     forceFrom = firstDirty;
+    lastCommitTeardownFailed = false;
+    let expectedGeneration = generation + 1;
     try {
-      await mount(info);
+      await mount(info, candidate);
     } catch (error) {
       forceFrom = null;
       throw error;
     }
-    return "narrow";
+    return generation !== expectedGeneration || lastCommitTeardownFailed ? "reload" : "narrow";
   };
-  mount = async function(info) {
+  mount = async function(info, componentRegistry = components) {
     let error, failure, file;
     let mine = ++generation;
     if (Array.isArray(router) || typeof router === "string" ? router.includes("navigating") : ("navigating" in router))
       router.navigating = true;
     return await (async () => {
       try {
-        return await performMount(info, mine);
+        return await performMount(info, mine, componentRegistry);
       } catch (caught) {
         error = caught;
         if (mine !== generation)
@@ -26996,13 +27020,12 @@ function preloadLinks(router, renderer, host = null) {
 var ROUTE_ROOT;
 var defaultTarget;
 var fail2;
-var validBundle;
 var validComponents;
 ROUTE_ROOT = "routes";
 fail2 = function(message) {
   throw new Error(`Rip App: ${message}`);
 };
-validBundle = function(bundle) {
+var validBundle = function(bundle) {
   let section;
   if (!(bundle != null && typeof bundle === "object" && !Array.isArray(bundle)))
     fail2("launch requires a bundle object");
@@ -27030,6 +27053,23 @@ validComponents = function(store) {
   }
   return store;
 };
+var validatePrepared = function(value, stash = null) {
+  let bundle = validBundle(value);
+  let paths = new Set([...Object.keys(bundle.modules ?? {}), ...Object.keys(bundle.compiled ?? {})]);
+  let routePaths = [...paths].filter(function(path) {
+    return path.startsWith(ROUTE_ROOT + "/");
+  });
+  buildRoutes(routePaths, ROUTE_ROOT);
+  let stashModule = bundle.compiled?.["stash.rip"];
+  let seed = stash ?? stashModule?.stash;
+  if (!(seed != null) && stashModule != null) {
+    fail2("the bundle's 'stash.rip' module must export 'stash'");
+  }
+  if (seed != null && (typeof seed !== "object" || Array.isArray(seed))) {
+    fail2("the application stash must be a plain object");
+  }
+  return { bundle, seed };
+};
 defaultTarget = function() {
   if (!(typeof document !== "undefined" && typeof document.querySelector === "function")) {
     fail2("launch requires a target outside the browser");
@@ -27048,17 +27088,11 @@ function launch(opts) {
     fail2("launch requires an options object");
   if (globalThis.__ripApp != null)
     fail2("an application is already launched; destroy it first");
-  let bundle = validBundle(opts.bundle);
+  let prepared = validatePrepared(opts.bundle, opts.stash);
+  let bundle = prepared.bundle;
   let target = opts.target ?? defaultTarget();
   let adapter = opts.adapter ?? browserAdapter();
-  let stashModule = bundle.compiled?.["stash.rip"];
-  let seed = opts.stash ?? stashModule?.stash;
-  if (!(seed != null) && stashModule != null) {
-    fail2("the bundle's 'stash.rip' module must export 'stash'");
-  }
-  if (seed != null && (typeof seed !== "object" || Array.isArray(seed))) {
-    fail2("the application stash must be a plain object");
-  }
+  let seed = prepared.seed;
   let app = createStash({ data: _cloneSeed(seed ?? {}) });
   _mergePlain(app.data, bundle.data ?? {});
   _stampDefaults(app.data);
@@ -27249,10 +27283,12 @@ prepared = function(state) {
   return { hash, sources, compiled };
 };
 function createWorkspace() {
+  let workspace;
   let sources = new Map;
   let compiled = new Map;
   let watchers = new Set;
   let activeHash = null;
+  let staging = false;
   let notify = function(event, path) {
     for (let watcher of Array.from(watchers)) {
       try {
@@ -27269,11 +27305,13 @@ function createWorkspace() {
     activeHash = next.hash;
     return;
   };
-  let workspace = {
+  workspace = {
     read(path) {
       return sources.get(validPath2(path));
     },
     write(path, content) {
+      if (staging)
+        throw new Error("Rip Workspace: cannot write during a publication transition");
       path = validPath2(path);
       content = validContent2(content);
       let event = sources.has(path) ? "change" : "create";
@@ -27283,6 +27321,8 @@ function createWorkspace() {
       return;
     },
     del(path) {
+      if (staging)
+        throw new Error("Rip Workspace: cannot delete during a publication transition");
       path = validPath2(path);
       sources.delete(path);
       compiled.delete(path);
@@ -27321,6 +27361,8 @@ function createWorkspace() {
       return result;
     },
     load(values) {
+      if (staging)
+        throw new Error("Rip Workspace: cannot load during a publication transition");
       if (!(values != null && typeof values === "object" && !Array.isArray(values))) {
         throw new TypeError("Rip Workspace: component load expects a source object");
       }
@@ -27355,6 +27397,8 @@ function createWorkspace() {
       return compiled.get(validPath2(path));
     },
     setCompiled(path, module) {
+      if (staging)
+        throw new Error("Rip Workspace: cannot compile during a publication transition");
       path = validPath2(path);
       if (!sources.has(path))
         throw new Error(`Rip Workspace: setCompiled for unknown component path '${path}'`);
@@ -27367,11 +27411,14 @@ function createWorkspace() {
     activate(state) {
       if (activeHash != null)
         throw new Error("Rip Workspace: a publication is already active");
+      if (staging)
+        throw new Error("Rip Workspace: a publication transition is already staged");
       replace(prepared(state));
       return;
     },
-    commit(from, state, changed) {
-      let event;
+    stage(from, state, changed) {
+      if (staging)
+        throw new Error("Rip Workspace: a publication transition is already staged");
       from = validHash(from);
       if (!(activeHash === from))
         throw new Error(`Rip Workspace: change starts at ${from}, not ${activeHash}`);
@@ -27384,12 +27431,39 @@ function createWorkspace() {
       if (!(new Set(paths).size === paths.length))
         throw new Error("Rip Workspace: changed paths must be unique");
       let next = prepared(state);
-      let before = sources;
-      replace(next);
-      for (let path of paths) {
-        event = !next.sources.has(path) ? "delete" : before.has(path) ? "change" : "create";
-        notify(event, path);
-      }
+      let before = { sources, compiled, hash: activeHash };
+      staging = true;
+      let done = false;
+      let finish = function(keep) {
+        let event;
+        if (done)
+          throw new Error("Rip Workspace: publication transition is already finished");
+        done = true;
+        staging = false;
+        if (!keep)
+          return;
+        replace(next);
+        for (let path of paths) {
+          event = !next.sources.has(path) ? "delete" : before.sources.has(path) ? "change" : "create";
+          notify(event, path);
+        }
+        return;
+      };
+      return {
+        components: { getCompiled(path) {
+          return next.compiled.get(validPath2(path));
+        } },
+        commit() {
+          return finish(true);
+        },
+        rollback() {
+          return finish(false);
+        }
+      };
+    },
+    commit(from, state, changed) {
+      let transaction = workspace.stage(from, state, changed);
+      transaction.commit();
       return;
     }
   };
@@ -27465,6 +27539,7 @@ function connectFeed(client, opts = {}) {
   let buffer = [];
   let tail = Promise.resolve();
   let probes = new Map;
+  let rejectedHash = null;
   let reload = function(reason) {
     if (failed || closed)
       return;
@@ -27473,16 +27548,22 @@ function connectFeed(client, opts = {}) {
     return;
   };
   let applyOne = async function(change) {
-    let ok;
+    let verdict;
     if (failed || closed)
       return false;
     return await (async () => {
       try {
-        ok = await client.apply(change);
-        if (!ok) {
+        verdict = await client.apply(change);
+        if (verdict === "rejected") {
+          if (validHash2(change?.hash))
+            rejectedHash = change?.hash;
+          return false;
+        }
+        if (verdict === "reload" || !verdict) {
           reload("change could not be applied");
           return false;
         }
+        rejectedHash = null;
         return true;
       } catch (error) {
         report("[Rip] publication change failed:", error);
@@ -27505,7 +27586,7 @@ function connectFeed(client, opts = {}) {
     return;
   };
   let probe = async function(owner) {
-    let ok;
+    let beyondRejected, ok;
     if (closed || failed || owner !== connection)
       return;
     let startHash = client.hash();
@@ -27519,11 +27600,34 @@ function connectFeed(client, opts = {}) {
     }
     if (closed || failed || owner !== connection)
       return;
+    if (rejectedHash != null) {
+      if (latest.hash !== rejectedHash) {
+        reload(`a newer App generation followed rejected ${rejectedHash}`);
+        return;
+      }
+      buffer = [];
+      ready = true;
+      attempts = 0;
+      return;
+    }
     let visited = new Set([startHash]);
     let index = 0;
     while (index < buffer.length) {
       ok = await applyOne(buffer[index]);
-      if (!ok)
+      if (!ok) {
+        beyondRejected = rejectedHash != null && (latest.hash !== rejectedHash || buffer.slice(index + 1).some(function(change) {
+          return change?.hash !== rejectedHash;
+        }));
+        buffer = [];
+        if (beyondRejected) {
+          reload(`a newer App generation followed rejected ${rejectedHash}`);
+          return;
+        }
+        ready = true;
+        attempts = 0;
+        return;
+      }
+      if (closed || failed || owner !== connection)
         return;
       visited.add(client.hash());
       index++;
@@ -27542,7 +27646,10 @@ function connectFeed(client, opts = {}) {
   let beginProbe = function(owner = connection) {
     if (probes.has(owner))
       return probes.get(owner);
-    let task = probe(owner).catch(function(error) {
+    let task = tail.then(function() {
+      return probe(owner);
+    });
+    task = task.catch(function(error) {
       if (closed || failed || owner !== connection)
         return;
       report("[Rip] publication reconnect check failed:", error);
@@ -27552,6 +27659,11 @@ function connectFeed(client, opts = {}) {
           return socket?.close();
         } catch {}
       })();
+    });
+    tail = task.then(function() {
+      return true;
+    }, function() {
+      return false;
     });
     probes.set(owner, task);
     task.finally(function() {
@@ -27580,11 +27692,22 @@ function connectFeed(client, opts = {}) {
           ackTimer = null;
         }
         beginProbe(connection);
-      } else if (object.change !== undefined) {
-        if (ready) {
+      } else if (object.change !== undefined && !Object.hasOwn(object, "<")) {
+        if (rejectedHash != null) {
+          if (object.change?.hash === rejectedHash) {
+            continue;
+          }
+          reload(`a newer App generation followed rejected ${rejectedHash}`);
+        } else if (ready) {
           enqueue(object.change, owner);
         } else {
           buffer.push(object.change);
+        }
+      } else if (object.reload !== undefined && !Object.hasOwn(object, "<")) {
+        if (rejectedHash != null) {
+          beginProbe(owner);
+        } else {
+          reload("server generation changed");
         }
       }
     }
@@ -27736,7 +27859,7 @@ function createApply(opts) {
   let report = opts.report ?? function(...args) {
     return console.log(...args);
   };
-  let absorb = async function(paths) {
+  let absorb = async function(paths, candidate = null) {
     if (!(Array.isArray(paths) && paths.length > 0)) {
       return "ignore";
     }
@@ -27776,18 +27899,24 @@ function createApply(opts) {
     }
     let verdict = "escape";
     try {
-      verdict = await opts.renderer.remountDirty(rip);
+      verdict = await opts.renderer.remountDirty(rip, candidate);
     } catch (error) {
-      report("[Rip] update failed — falling back to full in-page remount", error);
-      verdict = "escape";
+      report("[Rip] update failed", error);
+      throw error;
     }
     if (verdict === "narrow") {
       report(`[Rip] applied ${rip.join(", ")} — update`);
       return "update";
     }
+    if (verdict === "reload") {
+      report(`[Rip] applied ${rip.join(", ")} — reload`);
+      return "reload";
+    }
     if (verdict === "noop")
       return "ignore";
-    await opts.escape(rip);
+    let escapeVerdict = await opts.escape(rip, candidate);
+    if (escapeVerdict === "reload")
+      return "reload";
     report(`[Rip] applied ${rip.join(", ")} — update`);
     return "update";
   };
@@ -27925,6 +28054,18 @@ function createModuleLoader({
   const namespaces = new Map;
   const bridges = new Map;
   const dependents = new Map;
+  const dependencies = new Map;
+  const retired = new Set;
+  const revoke = (url) => {
+    if (typeof url === "string" && url.startsWith("blob:") && typeof URL?.revokeObjectURL === "function") {
+      URL.revokeObjectURL(url);
+    }
+  };
+  const collect = async () => {
+    const pending = [...retired];
+    retired.clear();
+    await Promise.allSettled(pending.map(async (promise) => revoke(await promise)));
+  };
   const bridgeFor = (key, namespace) => {
     if (bridges.has(key))
       return bridges.get(key);
@@ -28005,7 +28146,7 @@ function createModuleLoader({
       if (source2 === undefined) {
         throw new Error(`rip: '${path}' is not in the bundle`);
       }
-      const compiled = compile(source2, { path, runtimeDelivery: "import" });
+      const compiled = compile(source2, { path, runtimeDelivery: "import", browserModule: true });
       let code = compiled.code;
       for (const span of [...compiled.imports].reverse()) {
         const target = resolvePath(span.specifier, path);
@@ -28014,6 +28155,10 @@ function createModuleLoader({
           if (!importers)
             dependents.set(target.path, importers = new Set);
           importers.add(path);
+          let imports = dependencies.get(path);
+          if (!imports)
+            dependencies.set(path, imports = new Set);
+          imports.add(target.path);
         }
         const url = target.bridge ? bridgeFor(target.bridge, target.namespace) : await load(target.path, [...chain, path]);
         code = `${code.slice(0, span.start)}${JSON.stringify(url)}${code.slice(span.end)}`;
@@ -28047,11 +28192,35 @@ function createModuleLoader({
         if (seen.has(at))
           continue;
         seen.add(at);
+        if (urls.has(at))
+          retired.add(urls.get(at));
         urls.delete(at);
         namespaces.delete(at);
         for (const importer of dependents.get(at) ?? [])
           queue.push(importer);
+        dependents.delete(at);
+        for (const dependency of dependencies.get(at) ?? []) {
+          const importers = dependents.get(dependency);
+          importers?.delete(at);
+          if (importers?.size === 0)
+            dependents.delete(dependency);
+        }
+        dependencies.delete(at);
       }
+      return seen;
+    },
+    collect,
+    dispose() {
+      for (const promise of urls.values())
+        retired.add(promise);
+      urls.clear();
+      namespaces.clear();
+      dependents.clear();
+      dependencies.clear();
+      for (const url of bridges.values())
+        revoke(url);
+      bridges.clear();
+      collect();
     }
   };
 }
@@ -28234,8 +28403,11 @@ var validPath3 = (path, ripOnly = false) => {
   const parts = path.split("/");
   if (parts.some((part) => !part || part === "." || part === ".." || part.startsWith(".")))
     return false;
-  if (ripOnly && !path.endsWith(".rip"))
-    return false;
+  if (ripOnly) {
+    const filename = parts.at(-1);
+    if (filename === ".rip" || !filename.endsWith(".rip") || parts.slice(0, -1).some((part) => part.endsWith(".rip")))
+      return false;
+  }
   return true;
 };
 var exactKeys = (value, keys) => {
@@ -28304,8 +28476,8 @@ async function fetchBundle(url, { fetchText = browserFetchText } = {}) {
     throw new Error(`rip: bundle '${url}' is not valid JSON: ${error.message}`);
   }
 }
-var stageProgram = async (sources, debug) => {
-  const files = new Map(Object.entries(sources));
+var createProgram = (initialSources, debug) => {
+  let files = new Map(Object.entries(initialSources));
   const staged = new Map;
   const registry = {
     read: (path) => files.get(path),
@@ -28314,12 +28486,29 @@ var stageProgram = async (sources, debug) => {
     setCompiled: (path, module) => void staged.set(path, module)
   };
   const loader = createModuleLoader({ components: registry, embeddedPackages, debug });
-  const compiled = {};
-  for (const path of Object.keys(sources)) {
-    if (!path.startsWith("@rip-lang/"))
-      compiled[path] = { ...await loader.import(path) };
-  }
-  return compiled;
+  return {
+    sources(nextSources) {
+      files = new Map(Object.entries(nextSources));
+    },
+    async compile(changed = []) {
+      const invalidated = new Set;
+      for (const path of changed) {
+        for (const affected of loader.invalidate(path))
+          invalidated.add(affected);
+      }
+      try {
+        const compiled = {};
+        for (const path of files.keys()) {
+          if (!path.startsWith("@rip-lang/"))
+            compiled[path] = { ...await loader.import(path) };
+        }
+        return { compiled, invalidated: [...invalidated] };
+      } finally {
+        await loader.collect();
+      }
+    },
+    dispose: () => loader.dispose()
+  };
 };
 var sibling = (url, name) => {
   const clean = url.split("?")[0];
@@ -28331,9 +28520,8 @@ async function bootApp(opts = {}) {
   const bundle = opts.bundle ?? await fetchBundle(opts.url, { fetchText: opts.fetchText });
   const sources = publicationSources(bundle);
   const debug = opts.debug === true;
-  const compiled = await stageProgram(sources, debug);
+  const program = createProgram(sources, debug);
   const workspace = exports_app.createWorkspace();
-  workspace.activate({ hash: bundle.hash, sources, compiled });
   const dataFor = (modules) => modules["data.rip"]?.data;
   const launchWith = (modules) => exports_app.launch({
     bundle: { compiled: modules, data: dataFor(modules) },
@@ -28346,7 +28534,15 @@ async function bootApp(opts = {}) {
     storage: opts.storage,
     onError: opts.onError
   });
-  let current = launchWith(compiled);
+  let current;
+  try {
+    const { compiled } = await program.compile();
+    workspace.activate({ hash: bundle.hash, sources, compiled });
+    current = launchWith(compiled);
+  } catch (error) {
+    program.dispose();
+    throw error;
+  }
   let feed = null;
   let destroyed = false;
   const handle = {};
@@ -28358,41 +28554,46 @@ async function bootApp(opts = {}) {
     else if (typeof location !== "undefined")
       location.reload();
   };
-  const cssLinkFor = (path) => {
+  const cssLinksFor = (path) => {
     if (typeof document === "undefined" || typeof document.querySelectorAll !== "function")
-      return null;
+      return [];
+    const matches = new Set;
+    const baseUrl = new URL(typeof location === "undefined" ? "http://rip.invalid/" : location.href);
+    const publicationUrl = new URL("/", baseUrl);
+    publicationUrl.pathname = `/${path.replaceAll("%", "%25")}`;
+    const suffix = publicationUrl.pathname;
     for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
-      if (link.getAttribute("data-rip-css") === path)
-        return link;
-    }
-    const base = path.slice(path.lastIndexOf("/") + 1);
-    for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
+      const explicit = link.getAttribute("data-rip-css") === path;
+      if (explicit)
+        matches.add(link);
       const href = link.getAttribute("href") || "";
-      const clean = href.split("?")[0];
-      if (clean === `/${path}` || clean.endsWith(`/${path}`) || clean === path || clean.endsWith(`/${base}`))
-        return link;
+      if (!href)
+        continue;
+      let url;
+      try {
+        url = new URL(href, baseUrl);
+      } catch {
+        continue;
+      }
+      if (!explicit && url.origin === baseUrl.origin && (url.pathname === suffix || url.pathname.endsWith(suffix)))
+        matches.add(link);
     }
-    return null;
+    return [...matches];
   };
   const refreshCss = (path, hash) => {
-    const link = cssLinkFor(path);
-    if (!link)
-      return;
-    const clean = (link.getAttribute("href") || link.href).split("?")[0];
-    link.setAttribute("href", `${clean}?hash=${encodeURIComponent(hash)}`);
-    link.disabled = false;
-  };
-  const launchCurrent = (modules) => {
-    current.destroy();
-    current = launchWith(modules);
-    Object.assign(handle, current, stable);
+    for (const link of cssLinksFor(path)) {
+      const href = link.getAttribute("href") || link.href;
+      const fragmentAt = href.indexOf("#");
+      const fragment = fragmentAt < 0 ? "" : href.slice(fragmentAt);
+      const request = fragmentAt < 0 ? href : href.slice(0, fragmentAt);
+      const clean = request.split("?")[0];
+      link.setAttribute("href", `${clean}?hash=${encodeURIComponent(hash)}${fragment}`);
+      link.disabled = false;
+    }
   };
   const apply = exports_app.createApply({
-    renderer: { remountDirty: (paths) => current.renderer.remountDirty(paths) },
-    escape: async () => launchCurrent(Object.fromEntries(workspace.listAll().flatMap((path) => {
-      const module = workspace.getCompiled(path);
-      return module === undefined ? [] : [[path, module]];
-    }))),
+    renderer: { remountDirty: (paths, candidate) => current.renderer.remountDirty(paths, candidate) },
+    escape: async () => "reload",
     report: (...args) => {
       if (typeof args[0] === "string" && args[0].startsWith("[Rip] applied"))
         console.log(...args);
@@ -28406,19 +28607,14 @@ async function bootApp(opts = {}) {
       change = parseChange(wire);
     } catch (error) {
       report("[Rip] malformed publication change:", error);
-      return false;
+      return "reload";
     }
     if (workspace.hash() === change.hash)
       return true;
     if (workspace.hash() !== change.from)
-      return false;
-    for (const entry of change.entries) {
-      if (entry.path.endsWith(".rip"))
-        continue;
-      if (!entry.path.endsWith(".css") || entry.deletion)
-        return false;
-    }
-    const nextSources = Object.fromEntries(workspace.listAll().map((path) => [path, workspace.read(path)]));
+      return "reload";
+    const activeSources = () => Object.fromEntries(workspace.listAll().map((path) => [path, workspace.read(path)]));
+    const nextSources = activeSources();
     const changedRip = [];
     for (const entry of change.entries) {
       if (!entry.path.endsWith(".rip"))
@@ -28430,25 +28626,51 @@ async function bootApp(opts = {}) {
         nextSources[entry.path] = entry.source;
     }
     let nextCompiled;
+    let applyPaths;
     try {
-      nextCompiled = await stageProgram(nextSources, debug);
+      program.sources(nextSources);
+      const staged = await program.compile(changedRip);
+      nextCompiled = staged.compiled;
+      applyPaths = staged.invalidated.filter((path) => !path.startsWith("@rip-lang/"));
+      validatePrepared({ compiled: nextCompiled, data: dataFor(nextCompiled) });
     } catch (error) {
+      program.sources(activeSources());
       report("[Rip] changed Rip program failed to compile:", error);
-      return false;
+      return "rejected";
     }
+    const ordinaryReload = change.entries.some((entry) => !entry.path.endsWith(".rip") && (!entry.path.endsWith(".css") || entry.deletion));
+    const route = current.router.current;
+    const mounted = new Set([
+      ...route?.layouts ?? route?.route?.layouts ?? [],
+      route?.route?.file
+    ].filter(Boolean));
+    const mountedDeletion = change.entries.some((entry) => entry.deletion && entry.path.endsWith(".rip") && mounted.has(entry.path));
+    if (ordinaryReload || mountedDeletion) {
+      program.sources(activeSources());
+      return "reload";
+    }
+    let transaction = null;
+    let committed = false;
     try {
-      workspace.commit(change.from, { hash: change.hash, sources: nextSources, compiled: nextCompiled }, changedRip);
+      transaction = workspace.stage(change.from, { hash: change.hash, sources: nextSources, compiled: nextCompiled }, changedRip);
+      const verdict = applyPaths.length ? await apply.absorb(applyPaths, transaction.components) : "ignore";
+      transaction.commit();
+      committed = true;
       for (const entry of change.entries) {
         if (entry.path.endsWith(".css"))
           refreshCss(entry.path, change.hash);
       }
-      if (changedRip.length)
-        await apply.absorb(changedRip);
-      Object.assign(handle, current, stable);
+      if (verdict === "reload") {
+        report("[Rip] committed App update requires a document reload");
+        return "reload";
+      }
       return true;
     } catch (error) {
+      if (transaction && !committed)
+        transaction.rollback();
+      program.sources(activeSources());
       report("[Rip] changed Rip program failed to activate:", error);
-      return false;
+      return "rejected";
     }
   };
   const watch = opts.watch === true || opts.feed != null;
@@ -28466,6 +28688,7 @@ async function bootApp(opts = {}) {
     destroyed = true;
     feed?.close();
     current.destroy();
+    program.dispose();
   };
   const stable = { workspace, feed, destroy };
   return Object.assign(handle, current, stable);

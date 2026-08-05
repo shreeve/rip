@@ -28,6 +28,7 @@ export type Workspace =
   setCompiled: (path: string, module: Record<string, unknown>) => void
   hash: () => string | null
   activate: (state: PreparedWorkspace) => void
+  stage: (from: string, state: PreparedWorkspace, changed: string[]) => { components: { getCompiled: (path: string) => Record<string, unknown> | undefined }, commit: () => void, rollback: () => void }
   commit: (from: string, state: PreparedWorkspace, changed: string[]) => void
 
 validPath = (path) ->
@@ -88,6 +89,7 @@ export def createWorkspace(): Workspace
   compiled = Map.new()
   watchers = Set.new()
   activeHash = null
+  staging = false
 
   notify = (event, path) ->
     for watcher in Array.from(watchers)
@@ -107,6 +109,7 @@ export def createWorkspace(): Workspace
     read: (path) -> sources.get validPath(path)
 
     write: (path, content) ->
+      throw Error.new 'Rip Workspace: cannot write during a publication transition' if staging
       path = validPath path
       content = validContent content
       event = if sources.has(path) then 'change' else 'create'
@@ -116,6 +119,7 @@ export def createWorkspace(): Workspace
       return
 
     del: (path) ->
+      throw Error.new 'Rip Workspace: cannot delete during a publication transition' if staging
       path = validPath path
       sources.delete path
       compiled.delete path
@@ -144,6 +148,7 @@ export def createWorkspace(): Workspace
       result
 
     load: (values) ->
+      throw Error.new 'Rip Workspace: cannot load during a publication transition' if staging
       unless values? and typeof values is 'object' and not Array.isArray(values)
         throw TypeError.new 'Rip Workspace: component load expects a source object'
       next = []
@@ -168,6 +173,7 @@ export def createWorkspace(): Workspace
     getCompiled: (path) -> compiled.get validPath(path)
 
     setCompiled: (path, module) ->
+      throw Error.new 'Rip Workspace: cannot compile during a publication transition' if staging
       path = validPath path
       throw Error.new "Rip Workspace: setCompiled for unknown component path '#{path}'" unless sources.has path
       compiled.set path, validModule(module)
@@ -177,10 +183,12 @@ export def createWorkspace(): Workspace
 
     activate: (state) ->
       throw Error.new 'Rip Workspace: a publication is already active' if activeHash?
+      throw Error.new 'Rip Workspace: a publication transition is already staged' if staging
       replace prepared(state)
       return
 
-    commit: (from, state, changed) ->
+    stage: (from, state, changed) ->
+      throw Error.new 'Rip Workspace: a publication transition is already staged' if staging
       from = validHash from
       throw Error.new "Rip Workspace: change starts at #{from}, not #{activeHash}" unless activeHash is from
       unless Array.isArray changed
@@ -188,11 +196,28 @@ export def createWorkspace(): Workspace
       paths = changed.map (path) -> validPath path
       throw Error.new 'Rip Workspace: changed paths must be unique' unless Set.new(paths).size is paths.length
       next = prepared state
-      before = sources
-      replace next
-      for path in paths
-        event = if not next.sources.has(path) then 'delete' else if before.has(path) then 'change' else 'create'
-        notify event, path
+      before = { sources, compiled, hash: activeHash }
+      staging = true
+      done = false
+      finish = (keep) ->
+        throw Error.new 'Rip Workspace: publication transition is already finished' if done
+        done = true
+        staging = false
+        return unless keep
+        replace next
+        for path in paths
+          event = if not next.sources.has(path) then 'delete' else if before.sources.has(path) then 'change' else 'create'
+          notify event, path
+        return
+      {
+        components: { getCompiled: (path) -> next.compiled.get validPath(path) }
+        commit: -> finish true
+        rollback: -> finish false
+      }
+
+    commit: (from, state, changed) ->
+      transaction = workspace.stage from, state, changed
+      transaction.commit()
       return
 
   workspace

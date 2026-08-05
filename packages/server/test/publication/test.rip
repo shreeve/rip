@@ -1,5 +1,7 @@
 import { test, eq, ok } from '@rip-lang/testing'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { assembleRipBundle } from '../../bundle.rip'
 
 PACKAGES = join(import.meta.dir, '..', '..', '..')
@@ -33,3 +35,112 @@ test! 'unknown and server-only packages reject during server assembly', ->
   catch error
     message = error.message
   ok message?.includes('server-only and unknown modules stay on the server')
+
+test! 'missing relative imports and cycles reject before publication', ->
+  missing = null
+  try
+    assembleRipBundle modules:
+      'index.rip': "import { nope } from './missing.rip'\nexport value = nope"
+  catch error
+    missing = error.message
+  ok missing?.includes("'index.rip' imports './missing.rip', which is not in the bundle")
+
+  cycle = null
+  try
+    assembleRipBundle modules:
+      'a.rip': "import { b } from './b.rip'\nexport a = b"
+      'b.rip': "import { a } from './a.rip'\nexport b = a"
+  catch error
+    cycle = error.message
+  ok cycle?.includes('import cycle')
+
+test! 'dynamic imports reject before browser publication', ->
+  for source in ["export value = import('./other.rip')", 'export value = import()', "export value = import('./other.rip', {}, 3)", "export value = import!('./other.rip')"]
+    message = null
+    try
+      assembleRipBundle modules:
+        'index.rip': source
+        'other.rip': 'export value = 1'
+    catch error
+      message = error.message
+    ok message?.includes('dynamic import is not supported in a browser App module')
+    ok message?.includes('index.rip:1:')
+
+test! 'browser module identities reject hidden segments and file-shaped directories', ->
+  for path in ['.hidden.rip', 'routes/.hidden/page.rip', 'routes/file.rip/page.rip']
+    modules = {}
+    modules[path] = 'export value = 1'
+    message = null
+    try
+      assembleRipBundle { modules }
+    catch error
+      message = error.message
+    ok message?.includes("invalid browser module path '#{path}'")
+
+test! 'a hidden schema projection rejects before publication', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-publication-hidden-')
+  try
+    app = join dir, 'app'
+    hidden = join dir, '.schema'
+    mkdirSync app
+    mkdirSync hidden
+    model = join hidden, 'models.rip'
+    source = join app, 'types.rip'
+    writeFileSync model, "export User = schema\n  name! string\nexport UserPublic = User.pick('name')\n"
+    writeFileSync source, "export { UserPublic } from '../.schema/models.rip'\n"
+    message = null
+    try
+      assembleRipBundle
+        modules: { 'types.rip': readFileSync(source, 'utf8') }
+        moduleFiles: { 'types.rip': source }
+        appDir: dir
+        appRoot: app
+    catch error
+      message = error.message
+    ok message?.includes("invalid browser module path '.schema/models.rip'")
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test! "cross-boundary schema projection requires the conventional 'app' root", ->
+  dir = mkdtempSync join(tmpdir(), 'rip-publication-root-')
+  try
+    custom = join dir, 'client'
+    api = join dir, 'api'
+    mkdirSync custom
+    mkdirSync api
+    model = join api, 'models.rip'
+    source = join custom, 'types.rip'
+    writeFileSync model, "export User = schema\n  name! string\nexport UserPublic = User.pick('name')\n"
+    writeFileSync source, "export { UserPublic } from '../api/models.rip'\n"
+    message = null
+    try
+      assembleRipBundle
+        modules: { 'types.rip': readFileSync(source, 'utf8') }
+        moduleFiles: { 'types.rip': source }
+        appDir: dir
+        appRoot: custom
+    catch error
+      message = error.message
+    ok message?.includes("require the conventional 'app' root")
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test! "cross-boundary schema projection resolves through the conventional 'app' root", ->
+  dir = mkdtempSync join(tmpdir(), 'rip-publication-projection-')
+  try
+    app = join dir, 'app'
+    api = join dir, 'api'
+    mkdirSync app
+    mkdirSync api
+    model = join api, 'models.rip'
+    source = join app, 'types.rip'
+    writeFileSync model, "export User = schema\n  name! string\nexport UserPublic = User.pick('name')\n"
+    writeFileSync source, "export { UserPublic } from '../api/models.rip'\n"
+    list = assembleRipBundle
+      modules: { 'types.rip': readFileSync(source, 'utf8') }
+      moduleFiles: { 'types.rip': source }
+      appDir: dir
+      appRoot: app
+    eq list.map((entry) -> entry[0]), ['api/models.rip', 'types.rip']
+  finally
+    rmSync dir, { recursive: true, force: true }

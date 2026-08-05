@@ -12,7 +12,7 @@ export type Feed =
 
 export type PublicationClient =
   hash: () => string
-  apply: (change: Record<string, unknown>) => Promise<boolean>
+  apply: (change: Record<string, unknown>) => Promise<boolean | 'rejected' | 'reload'>
   reload: (reason?: string) => void
 
 export type ConnectFeedOpts =
@@ -75,6 +75,7 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
   buffer = []
   tail = Promise.resolve()
   probes = Map.new()
+  rejectedHash = null
 
   reload = (reason) ->
     return if failed or closed
@@ -85,10 +86,14 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
   applyOne = (change) ->
     return false if failed or closed
     try
-      ok = client.apply! change
-      unless ok
+      verdict = client.apply! change
+      if verdict is 'rejected'
+        rejectedHash = change?.hash if validHash(change?.hash)
+        return false
+      if verdict is 'reload' or not verdict
         reload 'change could not be applied'
         return false
+      rejectedHash = null
       true
     catch error
       report '[Rip] publication change failed:', error
@@ -116,6 +121,15 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
       throw Error.new 'latest.json is malformed'
     return if closed or failed or owner isnt connection
 
+    if rejectedHash?
+      if latest.hash isnt rejectedHash
+        reload "a newer App generation followed rejected #{rejectedHash}"
+        return
+      buffer = []
+      ready = true
+      attempts = 0
+      return
+
     # The probe may overlap changes received after subscription. A latest hash
     # equal to the starting state or any state reached by the buffered chain is
     # coherent; any other hash proves that a transition was missed.
@@ -123,7 +137,19 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
     index = 0
     while index < buffer.length
       ok = applyOne! buffer[index]
-      return unless ok
+      unless ok
+        beyondRejected = rejectedHash? and (
+          latest.hash isnt rejectedHash or
+          buffer.slice(index + 1).some((change) -> change?.hash isnt rejectedHash)
+        )
+        buffer = []
+        if beyondRejected
+          reload "a newer App generation followed rejected #{rejectedHash}"
+          return
+        ready = true
+        attempts = 0
+        return
+      return if closed or failed or owner isnt connection
       visited.add client.hash()
       index++
     return if closed or failed or owner isnt connection
@@ -137,11 +163,16 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
 
   beginProbe = (owner = connection) ->
     return probes.get(owner) if probes.has owner
-    task = probe(owner).catch (error) ->
+    # A closing connection may still have one asynchronous apply in flight.
+    # Put the reconnect probe behind that same queue so every connection
+    # observes one total publication order.
+    task = tail.then -> probe owner
+    task = task.catch (error) ->
       return if closed or failed or owner isnt connection
       report '[Rip] publication reconnect check failed:', error
       ready = false
       try socket?.close()
+    tail = task.then (-> true), (-> false)
     probes.set owner, task
     task.finally -> probes.delete owner if probes.get(owner) is task
     task
@@ -163,8 +194,18 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
           clearTimeout ackTimer
           ackTimer = null
         beginProbe connection
-      else if object.change isnt undefined
-        if ready then enqueue object.change, owner else buffer.push object.change
+      # Janus stamps every client-originated event with `<`. Publication
+      # changes enter through the server control plane and carry no sender
+      # provenance; accepting a stamped frame would let an App client inject
+      # source into every other subscriber on the shared Hub.
+      else if object.change isnt undefined and not Object.hasOwn(object, '<')
+        if rejectedHash?
+          if object.change?.hash is rejectedHash
+            continue
+          reload "a newer App generation followed rejected #{rejectedHash}"
+        else if ready then enqueue object.change, owner else buffer.push object.change
+      else if object.reload isnt undefined and not Object.hasOwn(object, '<')
+        if rejectedHash? then beginProbe(owner) else reload 'server generation changed'
     return
 
   schedule = ->

@@ -103,7 +103,9 @@ one Rip server
 Three project shapes use the same model:
 
 - **Full:** API workers plus `app/` and dist App files.
-- **API-only:** API workers with no browser App.
+- **API-only:** API workers with no browser App. Its Janus registration omits
+  `files`, so every normal route remains eligible for worker proxying and no
+  empty `dist/` root is created.
 - **App-only:** `app/` and dist files with no API workers.
 
 ## Site Files and Ownership
@@ -560,9 +562,10 @@ rash(UTF8(JSON.stringify(canonical [[path, fileHash], ...] list)))
 ```
 
 The identity list is Manager-private. It covers configured App files plus Rip
-source materialized from browser-safe packages and schema projections. A
-candidate with an invalid or duplicate module path, invalid UTF-8 source, an
-unknown package, or server-only browser code rejects before publication.
+source materialized from browser-safe packages and schema projections. Browser
+publication imports are static: a candidate with a dynamic import, missing or
+cyclic import, invalid or duplicate module path, invalid UTF-8 source, unknown
+package, or server-only browser code rejects before publication.
 
 ### `bundle.json`: complete state
 
@@ -742,9 +745,20 @@ else
 The browser trusts Manager's App hash and never hashes source or HTTP
 responses. A Rip entry already contains its replacement source. A CSS entry
 has only its path and refreshes the linked stylesheet through HTTP. HTML and
-the default unknown-asset verdict reload the page. A rejected compilation,
-malformed entry, deletion that cannot be applied, or failed apply leaves the
-prior committed state running and reloads.
+the default unknown-asset verdict reload the page. A malformed entry,
+disconnected transition, deletion that cannot be applied, or uncertain
+post-commit teardown reloads.
+
+A Rip compile or activation failure rejects and quarantines that candidate
+hash while the last committed App remains live. Repeated delivery or reconnect
+confirmation of the same rejected hash does not retry it or reload the same
+bad complete bundle. The first observed hash beyond the rejected generation
+reloads the page and obtains the newer complete bundle.
+
+A validated Rip transition that requires whole-App reconstruction, such as a
+stash change or deletion of the mounted route or layout, is not a rejected
+generation. It requests a document reload so the browser activates the valid
+complete bundle from HTTP.
 
 ### Reconnect in watch mode
 
@@ -767,7 +781,9 @@ After the acknowledgement it requests `/latest.json` with
 
 - If `latest.json.hash` equals the current client hash, no bundle fetch is
   required.
-- If the hashes differ, the client reloads the page.
+- If a candidate hash is quarantined and `latest.json.hash` still equals it,
+  the client keeps the last committed App and waits.
+- Any other hash difference reloads the page and obtains the complete bundle.
 - Buffered changes are applied only when their `from` value still matches.
 - A duplicate whose `hash` is already current is ignored.
 - Any disconnected transition or ordering uncertainty reloads the page.
@@ -873,13 +889,15 @@ Rip App and browser tests establish:
 2. The browser stores one Manager-declared App hash without recalculating it.
 3. `.rip`, CSS, HTML, creation, deletion, and rename produce the specified App
    verdicts from one change.
-4. A failed compile or apply leaves the prior App generation running.
-5. Missing, duplicate, and racing changes either apply in order or reload.
+4. A failed compile or activation quarantines its candidate hash and leaves
+   the prior App generation running.
+5. Missing, duplicate, and racing changes either apply in order, remain on a
+   quarantined generation, or reload to a newer complete bundle.
 6. Initial HTTP boot and the last committed App remain usable while the Hub is
    unavailable.
 7. Real-browser Chromium, Firefox, and WebKit scenarios exercise initial load
    and live change; focused feed tests exercise disconnect, reconnect, races,
-   and failed apply.
+   and failed activation.
 
 ## App-Local `serve.rip`
 
@@ -927,6 +945,19 @@ root recursively only in watch mode. Matching file events reread and rehash
 only the exact App-relative paths reported by the watcher. Directory and
 pathless events fall back to a full reconciliation.
 
+Package manifests and schema projections discovered while constructing the
+browser Rip graph are publication inputs even when they live outside
+`app.root`. Manager installs recursive watchers for their roots before an
+authoritative reread, so an edit during registration is either included in
+that publication or schedules a following full reconciliation. External
+schema projection uses the conventional `app` root; a custom `app.root`
+rejects that combination because the browser projection mount would be
+ambiguous.
+
+Whether Manager owns the generated shell or an authored `index.html` is fixed
+when the App starts. Creating or deleting authored `index.html` while Manager
+is running rejects the publication; restart the App to change shell ownership.
+
 Each root has optional `cache` policy: `never`, `revalidate`, or `forever`.
 Omission means `revalidate`. The manager emits the normalized policy on every
 Janus root. MIME detection is independent of cache policy.
@@ -946,9 +977,10 @@ API upstreams. That terminal browse-only policy is registered exactly as
 declared, without the dist or conventional roots. With `files` declared, the
 project root is public only when its path is listed explicitly.
 
-Without a `files` declaration, conventional discovery registers `dist/` plus
-`public/` and `app/` when present. The project directory is never an
-implicit public root.
+Without a `files` declaration, a browser App registers `dist/` plus `public/`
+and `app/` when present. A genuinely API-only project with no file surface
+omits `files` entirely. The project directory is never an implicit public
+root.
 
 Janus receives one atomic registration containing identity, site or hosts,
 normalized file policy, and the initial upstream list. Hub direct mode is

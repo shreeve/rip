@@ -4,6 +4,7 @@
 // browser's job—boot does not keep its own ETag/body cache.
 import { createModuleLoader } from './browser-modules.js';
 import { app, embeddedPackages } from './browser-app.js';
+import { validatePrepared } from '../packages/app/launch.rip';
 
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const validHash = value => typeof value === 'string' && /^[A-Za-z0-9_]{6}$/.test(value);
@@ -12,7 +13,10 @@ const validPath = (path, ripOnly = false) => {
   if (typeof path !== 'string' || path.length === 0 || path.startsWith('/') || path.includes('\\')) return false;
   const parts = path.split('/');
   if (parts.some(part => !part || part === '.' || part === '..' || part.startsWith('.'))) return false;
-  if (ripOnly && !path.endsWith('.rip')) return false;
+  if (ripOnly) {
+    const filename = parts.at(-1);
+    if (filename === '.rip' || !filename.endsWith('.rip') || parts.slice(0, -1).some(part => part.endsWith('.rip'))) return false;
+  }
   return true;
 };
 
@@ -84,8 +88,8 @@ export async function fetchBundle(url, { fetchText = browserFetchText } = {}) {
   }
 }
 
-const stageProgram = async (sources, debug) => {
-  const files = new Map(Object.entries(sources));
+const createProgram = (initialSources, debug) => {
+  let files = new Map(Object.entries(initialSources));
   const staged = new Map();
   const registry = {
     read: path => files.get(path),
@@ -94,11 +98,27 @@ const stageProgram = async (sources, debug) => {
     setCompiled: (path, module) => void staged.set(path, module),
   };
   const loader = createModuleLoader({ components: registry, embeddedPackages, debug });
-  const compiled = {};
-  for (const path of Object.keys(sources)) {
-    if (!path.startsWith('@rip-lang/')) compiled[path] = { ...(await loader.import(path)) };
-  }
-  return compiled;
+  return {
+    sources(nextSources) {
+      files = new Map(Object.entries(nextSources));
+    },
+    async compile(changed = []) {
+      const invalidated = new Set();
+      for (const path of changed) {
+        for (const affected of loader.invalidate(path)) invalidated.add(affected);
+      }
+      try {
+        const compiled = {};
+        for (const path of files.keys()) {
+          if (!path.startsWith('@rip-lang/')) compiled[path] = { ...(await loader.import(path)) };
+        }
+        return { compiled, invalidated: [...invalidated] };
+      } finally {
+        await loader.collect();
+      }
+    },
+    dispose: () => loader.dispose(),
+  };
 };
 
 const sibling = (url, name) => {
@@ -111,11 +131,8 @@ export async function bootApp(opts = {}) {
   const bundle = opts.bundle ?? await fetchBundle(opts.url, { fetchText: opts.fetchText });
   const sources = publicationSources(bundle);
   const debug = opts.debug === true;
-  const compiled = await stageProgram(sources, debug);
-
+  const program = createProgram(sources, debug);
   const workspace = app.createWorkspace();
-  workspace.activate({ hash: bundle.hash, sources, compiled });
-
   const dataFor = modules => modules['data.rip']?.data;
   const launchWith = modules => app.launch({
     bundle: { compiled: modules, data: dataFor(modules) },
@@ -129,7 +146,15 @@ export async function bootApp(opts = {}) {
     onError: opts.onError,
   });
 
-  let current = launchWith(compiled);
+  let current;
+  try {
+    const { compiled } = await program.compile();
+    workspace.activate({ hash: bundle.hash, sources, compiled });
+    current = launchWith(compiled);
+  } catch (error) {
+    program.dispose();
+    throw error;
+  }
   let feed = null;
   let destroyed = false;
   const handle = {};
@@ -140,42 +165,44 @@ export async function bootApp(opts = {}) {
     else if (typeof location !== 'undefined') location.reload();
   };
 
-  const cssLinkFor = path => {
-    if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return null;
+  const cssLinksFor = path => {
+    if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return [];
+    const matches = new Set();
+    const baseUrl = new URL(typeof location === 'undefined' ? 'http://rip.invalid/' : location.href);
+    const publicationUrl = new URL('/', baseUrl);
+    publicationUrl.pathname = `/${path.replaceAll('%', '%25')}`;
+    const suffix = publicationUrl.pathname;
     for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
-      if (link.getAttribute('data-rip-css') === path) return link;
-    }
-    const base = path.slice(path.lastIndexOf('/') + 1);
-    for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
+      const explicit = link.getAttribute('data-rip-css') === path;
+      if (explicit) matches.add(link);
       const href = link.getAttribute('href') || '';
-      const clean = href.split('?')[0];
-      if (clean === `/${path}` || clean.endsWith(`/${path}`) || clean === path || clean.endsWith(`/${base}`)) return link;
+      if (!href) continue;
+      let url;
+      try {
+        url = new URL(href, baseUrl);
+      } catch {
+        continue;
+      }
+      if (!explicit && url.origin === baseUrl.origin && (url.pathname === suffix || url.pathname.endsWith(suffix))) matches.add(link);
     }
-    return null;
+    return [...matches];
   };
 
   const refreshCss = (path, hash) => {
-    const link = cssLinkFor(path);
-    if (!link) return;
-    const clean = (link.getAttribute('href') || link.href).split('?')[0];
-    link.setAttribute('href', `${clean}?hash=${encodeURIComponent(hash)}`);
-    link.disabled = false;
-  };
-
-  const launchCurrent = modules => {
-    current.destroy();
-    current = launchWith(modules);
-    Object.assign(handle, current, stable);
+    for (const link of cssLinksFor(path)) {
+      const href = link.getAttribute('href') || link.href;
+      const fragmentAt = href.indexOf('#');
+      const fragment = fragmentAt < 0 ? '' : href.slice(fragmentAt);
+      const request = fragmentAt < 0 ? href : href.slice(0, fragmentAt);
+      const clean = request.split('?')[0];
+      link.setAttribute('href', `${clean}?hash=${encodeURIComponent(hash)}${fragment}`);
+      link.disabled = false;
+    }
   };
 
   const apply = app.createApply({
-    renderer: { remountDirty: paths => current.renderer.remountDirty(paths) },
-    escape: async () => launchCurrent(Object.fromEntries(
-      workspace.listAll().flatMap(path => {
-        const module = workspace.getCompiled(path);
-        return module === undefined ? [] : [[path, module]];
-      }),
-    )),
+    renderer: { remountDirty: (paths, candidate) => current.renderer.remountDirty(paths, candidate) },
+    escape: async () => 'reload',
     report: (...args) => {
       if (typeof args[0] === 'string' && args[0].startsWith('[Rip] applied')) console.log(...args);
       else report(...args);
@@ -188,19 +215,13 @@ export async function bootApp(opts = {}) {
       change = parseChange(wire);
     } catch (error) {
       report('[Rip] malformed publication change:', error);
-      return false;
+      return 'reload';
     }
     if (workspace.hash() === change.hash) return true;
-    if (workspace.hash() !== change.from) return false;
+    if (workspace.hash() !== change.from) return 'reload';
 
-    // CSS can refresh through normal HTTP. Every other ordinary asset and
-    // every ordinary-asset deletion needs a full page reload.
-    for (const entry of change.entries) {
-      if (entry.path.endsWith('.rip')) continue;
-      if (!entry.path.endsWith('.css') || entry.deletion) return false;
-    }
-
-    const nextSources = Object.fromEntries(workspace.listAll().map(path => [path, workspace.read(path)]));
+    const activeSources = () => Object.fromEntries(workspace.listAll().map(path => [path, workspace.read(path)]));
+    const nextSources = activeSources();
     const changedRip = [];
     for (const entry of change.entries) {
       if (!entry.path.endsWith('.rip')) continue;
@@ -210,24 +231,56 @@ export async function bootApp(opts = {}) {
     }
 
     let nextCompiled;
+    let applyPaths;
     try {
-      nextCompiled = await stageProgram(nextSources, debug);
+      program.sources(nextSources);
+      const staged = await program.compile(changedRip);
+      nextCompiled = staged.compiled;
+      applyPaths = staged.invalidated.filter(path => !path.startsWith('@rip-lang/'));
+      validatePrepared({ compiled: nextCompiled, data: dataFor(nextCompiled) });
     } catch (error) {
+      program.sources(activeSources());
       report('[Rip] changed Rip program failed to compile:', error);
-      return false;
+      return 'rejected';
     }
 
+    // Every Rip entry has now passed complete candidate preflight. CSS can
+    // refresh through normal HTTP; other assets and mounted-route deletion
+    // require the valid complete bundle to activate through document reload.
+    const ordinaryReload = change.entries.some(entry =>
+      !entry.path.endsWith('.rip') && (!entry.path.endsWith('.css') || entry.deletion));
+    const route = current.router.current;
+    const mounted = new Set([
+      ...(route?.layouts ?? route?.route?.layouts ?? []),
+      route?.route?.file,
+    ].filter(Boolean));
+    const mountedDeletion = change.entries.some(entry =>
+      entry.deletion && entry.path.endsWith('.rip') && mounted.has(entry.path));
+    if (ordinaryReload || mountedDeletion) {
+      program.sources(activeSources());
+      return 'reload';
+    }
+
+    let transaction = null;
+    let committed = false;
     try {
-      workspace.commit(change.from, { hash: change.hash, sources: nextSources, compiled: nextCompiled }, changedRip);
+      transaction = workspace.stage(change.from, { hash: change.hash, sources: nextSources, compiled: nextCompiled }, changedRip);
+      const verdict = applyPaths.length ? await apply.absorb(applyPaths, transaction.components) : 'ignore';
+      transaction.commit();
+      committed = true;
       for (const entry of change.entries) {
         if (entry.path.endsWith('.css')) refreshCss(entry.path, change.hash);
       }
-      if (changedRip.length) await apply.absorb(changedRip);
-      Object.assign(handle, current, stable);
+      if (verdict === 'reload') {
+        report('[Rip] committed App update requires a document reload');
+        return 'reload';
+      }
       return true;
     } catch (error) {
+      if (transaction && !committed) transaction.rollback();
+      program.sources(activeSources());
       report('[Rip] changed Rip program failed to activate:', error);
-      return false;
+      return 'rejected';
     }
   };
 
@@ -246,6 +299,7 @@ export async function bootApp(opts = {}) {
     destroyed = true;
     feed?.close();
     current.destroy();
+    program.dispose();
   };
   const stable = { workspace, feed, destroy };
   return Object.assign(handle, current, stable);

@@ -84,9 +84,10 @@ fetch /bundle.json
 → release the fetched JSON envelope
 ```
 
-Failure before activation leaves no partially active App. A later failed live
-update leaves the last-known-good App running or reloads when coherence cannot
-be proven.
+Failure before initial activation leaves no partially active App. A live Rip
+compile or activation failure quarantines its candidate hash and leaves the
+last committed App running. A malformed or disconnected transition reloads
+when coherence cannot be proven.
 
 `bundle.json.br` is a server-side precompressed representation of the exact
 JSON bytes. The browser requests `/bundle.json`; transparent HTTP content
@@ -126,9 +127,19 @@ ride in the publication channel.
 The transition applies only when `change.from` equals the Workspace's current
 App hash. The Workspace stages the complete list, applies one coherent
 transaction, then records `change.hash`. A duplicate whose final hash is
-already active is harmless. A gap, malformed transition, failed compilation,
-failed activation, or uncertain ordering reloads the page instead of guessing
-at missing state.
+already active is harmless. A gap, malformed transition, or uncertain ordering
+reloads the page instead of guessing at missing state.
+
+A failed Rip compilation or activation records the candidate hash as rejected
+without committing it. The active App continues running, duplicate delivery of
+that rejected hash is ignored, and reconnect confirmation of the same hash
+waits without fetching the same bad bundle. The first newer hash reloads and
+obtains a complete publication.
+
+A validated transition that requires whole-App reconstruction is different
+from a failed candidate. A stash change or deletion of the mounted route or
+layout requests a document reload and activates the complete bundle through
+normal HTTP.
 
 The path determines the basic apply verdict:
 

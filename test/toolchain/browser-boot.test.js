@@ -139,6 +139,30 @@ describe('bootApp publication', () => {
     const bundle = { hash: H1, list: [['routes/index.rip', 'x = ((']] };
     await expect(bootApp({ bundle, target: node('host'), adapter: fakeAdapter('/') }))
       .rejects.toThrow(/routes\/index\.rip/);
+    const dynamic = { hash: H1, list: [['routes/index.rip', "export load = -> import('./other.rip')"]] };
+    await expect(bootApp({ bundle: dynamic, target: node('host'), adapter: fakeAdapter('/') }))
+      .rejects.toThrow(/dynamic import is not supported in a browser App module/);
+  });
+
+  test('a failed initial program disposes module URLs already staged', async () => {
+    const revoked = [];
+    const original = URL.revokeObjectURL;
+    URL.revokeObjectURL = url => {
+      revoked.push(url);
+      original.call(URL, url);
+    };
+    try {
+      const bundle = { hash: H1, list: [
+        ['probe.rip', 'export probe = 1'],
+        ['routes/index.rip', 'x = (('],
+      ] };
+      await expect(bootApp({ bundle, target: node('host'), adapter: fakeAdapter('/') }))
+        .rejects.toThrow(/routes\/index\.rip/);
+      await Promise.resolve();
+      expect(revoked.some(url => url.startsWith('blob:'))).toBeTrue();
+    } finally {
+      URL.revokeObjectURL = original;
+    }
   });
 
   test('requires exactly hash and canonical Rip source list', async () => {
@@ -227,6 +251,31 @@ describe('bootApp watch changes', () => {
     }
   });
 
+  test('a narrow change does not reevaluate unchanged Rip modules', async () => {
+    globalThis.__ripUnchangedRuns = 0;
+    const modules = {
+      ...APP_MODULES,
+      'probe.rip': [
+        'globalThis.__ripUnchangedRuns = globalThis.__ripUnchangedRuns + 1',
+        'export runs = globalThis.__ripUnchangedRuns',
+      ].join('\n'),
+    };
+    const { result, hub } = await open({ modules });
+    try {
+      await subscribe(hub.sockets[0]);
+      expect(globalThis.__ripUnchangedRuns).toBe(1);
+      const source = route('Home', 'home v2');
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['routes/index.rip', source]] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H2);
+      expect(globalThis.__ripUnchangedRuns).toBe(1);
+      expect(result.workspace.getCompiled('probe.rip').runs).toBe(1);
+    } finally {
+      result.destroy();
+      delete globalThis.__ripUnchangedRuns;
+    }
+  });
+
   test('a duplicate final hash is harmless', async () => {
     const { result, hub, reloads } = await open();
     try {
@@ -257,7 +306,7 @@ describe('bootApp watch changes', () => {
     }
   });
 
-  test('a failed changed program keeps the prior publication and reloads', async () => {
+  test('a failed changed program quarantines its generation and keeps the prior publication', async () => {
     const { result, hub, reloads } = await open();
     try {
       await subscribe(hub.sockets[0]);
@@ -265,6 +314,114 @@ describe('bootApp watch changes', () => {
       await settle();
       expect(result.workspace.hash()).toBe(H1);
       expect(result.workspace.read('routes/index.rip')).toBe(APP_MODULES['routes/index.rip']);
+      expect(reloads).toEqual([]);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a failed live activation rolls back Workspace and keeps the live App', async () => {
+    const { result, hub, reloads } = await open();
+    const liveApp = result.app;
+    try {
+      await subscribe(hub.sockets[0]);
+      const invalidStash = 'export nope = 1';
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['stash.rip', invalidStash]] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(result.workspace.read('stash.rip')).toBe(APP_MODULES['stash.rip']);
+      expect(globalThis.__ripApp).toBe(liveApp);
+      expect(reloads).toEqual([]);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('an ambiguous candidate route manifest is quarantined before commit', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: {
+        from: H1,
+        hash: H2,
+        list: [
+          ['routes/[id].rip', route('ById', 'id')],
+          ['routes/[name].rip', route('ByName', 'name')],
+        ],
+      } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(result.workspace.exists('routes/[id].rip')).toBeFalse();
+      expect(result.workspace.exists('routes/[name].rip')).toBeFalse();
+      expect(reloads).toEqual([]);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a valid stash change reloads instead of quarantining the generation', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      const nextStash = APP_MODULES['stash.rip'].replace('Ada', 'Grace');
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['stash.rip', nextStash]] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H2);
+      expect(result.workspace.read('stash.rip')).toBe(nextStash);
+      expect(reloads.length).toBe(1);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a malformed Rip candidate quarantines before a mixed asset reload', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: {
+        from: H1,
+        hash: H2,
+        list: [['index.html'], ['stash.rip', 'export nope = 1']],
+      } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(result.workspace.read('stash.rip')).toBe(APP_MODULES['stash.rip']);
+      expect(reloads).toEqual([]);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a valid mixed Rip and asset batch reloads the complete bundle', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      const nextStash = APP_MODULES['stash.rip'].replace('Ada', 'Grace');
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: {
+        from: H1,
+        hash: H2,
+        list: [['index.html'], ['stash.rip', nextStash]],
+      } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(result.workspace.read('stash.rip')).toBe(APP_MODULES['stash.rip']);
+      expect(reloads.length).toBe(1);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a generation after a quarantined candidate reloads into the newer complete bundle', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['routes/index.rip', 'x = ((']] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(reloads).toEqual([]);
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H2, hash: H3, list: [['routes/index.rip', route('Home', 'recovered')]] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
       expect(reloads.length).toBe(1);
     } finally {
       result.destroy();
@@ -297,6 +454,58 @@ describe('bootApp watch changes', () => {
     }
   });
 
+  test('a nested CSS change refreshes every exact link and no basename sibling', async () => {
+    const run = await open();
+    const makeLink = href => ({
+      href,
+      disabled: false,
+      getAttribute(name) { return name === 'href' ? this.href : null; },
+      setAttribute(name, value) { if (name === 'href') this.href = value; },
+    });
+    const legacy = makeLink('/legacy/styles.css');
+    const adminA = makeLink('/admin/styles.css');
+    const adminB = makeLink('/base/admin/styles.css?old=1#theme');
+    const cdn = makeLink('https://cdn.example/admin/styles.css');
+    const priorQuery = document.querySelectorAll;
+    document.querySelectorAll = () => [legacy, adminA, adminB, cdn];
+    try {
+      await subscribe(run.hub.sockets[0]);
+      run.hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['admin/styles.css']] } }) });
+      await settle();
+      expect(legacy.href).toBe('/legacy/styles.css');
+      expect(adminA.href).toBe(`/admin/styles.css?hash=${H2}`);
+      expect(adminB.href).toBe(`/base/admin/styles.css?hash=${H2}#theme`);
+      expect(cdn.href).toBe('https://cdn.example/admin/styles.css');
+      expect(run.result.workspace.hash()).toBe(H2);
+    } finally {
+      document.querySelectorAll = priorQuery;
+      run.result.destroy();
+    }
+  });
+
+  test('CSS refresh uses browser URL-path encoding without escaping valid raw path characters', async () => {
+    const run = await open();
+    const link = {
+      href: '/styles/theme+dark[1]%20%C3%BC%23%3F%20100%25.css',
+      disabled: false,
+      getAttribute(name) { return name === 'href' ? this.href : null; },
+      setAttribute(name, value) { if (name === 'href') this.href = value; },
+    };
+    const priorQuery = document.querySelectorAll;
+    document.querySelectorAll = () => [link];
+    try {
+      await subscribe(run.hub.sockets[0]);
+      run.hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['styles/theme+dark[1] ü#? 100%.css']] } }) });
+      await settle();
+      expect(link.href).toBe(`/styles/theme+dark[1]%20%C3%BC%23%3F%20100%25.css?hash=${H2}`);
+      expect(run.result.workspace.hash()).toBe(H2);
+      expect(run.reloads).toEqual([]);
+    } finally {
+      document.querySelectorAll = priorQuery;
+      run.result.destroy();
+    }
+  });
+
   test('Rip create and delete commit as source membership changes', async () => {
     const { result, hub, reloads } = await open();
     try {
@@ -310,6 +519,20 @@ describe('bootApp watch changes', () => {
       expect(result.workspace.exists('routes/new.rip')).toBeFalse();
       expect(result.workspace.hash()).toBe(H3);
       expect(reloads).toEqual([]);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('deleting the mounted route reloads instead of quarantining the generation', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['routes/index.rip', null]] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(result.workspace.exists('routes/index.rip')).toBeTrue();
+      expect(reloads.length).toBe(1);
     } finally {
       result.destroy();
     }

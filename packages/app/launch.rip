@@ -78,6 +78,22 @@ validComponents = (store) ->
       fail "launch components store is missing '#{method}'"
   store
 
+export validatePrepared = (value, stash = null) ->
+  bundle = validBundle value
+  paths = Set.new [
+    ...Object.keys(bundle.modules ?? {})
+    ...Object.keys(bundle.compiled ?? {})
+  ]
+  routePaths = [...paths].filter (path) -> path.startsWith ROUTE_ROOT + '/'
+  buildRoutes routePaths, ROUTE_ROOT
+  stashModule = bundle.compiled?['stash.rip']
+  seed: any = stash ?? stashModule?.stash
+  if not seed? and stashModule?
+    fail "the bundle's 'stash.rip' module must export 'stash'"
+  if seed? and (typeof seed isnt 'object' or Array.isArray(seed))
+    fail 'the application stash must be a plain object'
+  { bundle, seed }
+
 defaultTarget = ->
   unless typeof document isnt 'undefined' and typeof document.querySelector is 'function'
     fail 'launch requires a target outside the browser'
@@ -91,7 +107,8 @@ defaultTarget = ->
 export def launch(opts: LaunchOpts): LaunchResult
   fail 'launch requires an options object' unless opts? and typeof opts is 'object'
   fail 'an application is already launched; destroy it first' if globalThis.__ripApp?
-  bundle = validBundle opts.bundle
+  prepared = validatePrepared opts.bundle, opts.stash
+  bundle = prepared.bundle
   target = opts.target ?? defaultTarget()
   adapter: any = opts.adapter ?? browserAdapter()
 
@@ -99,12 +116,7 @@ export def launch(opts: LaunchOpts): LaunchResult
   # `stash.rip` module provides it through its `stash` export.
   # A stash module without the export is a named mistake, never a
   # silently empty application.
-  stashModule = bundle.compiled?['stash.rip']
-  seed: any = opts.stash ?? stashModule?.stash
-  if not seed? and stashModule?
-    fail "the bundle's 'stash.rip' module must export 'stash'"
-  if seed? and (typeof seed isnt 'object' or Array.isArray(seed))
-    fail "the application stash must be a plain object"
+  seed: any = prepared.seed
   # The seed clones on the way in (cells by reference): the declaration
   # object outlives this launch, and its next launch must start from
   # the declared baseline, not this session's writes.

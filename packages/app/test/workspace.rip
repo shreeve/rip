@@ -82,6 +82,22 @@ test "commit replaces the complete state before notifying changed paths", ->
   eq ws.hash(), HASH_2
   eq seen, [['change', 'app.rip', HASH_2, 'replacement']]
 
+test "a staged publication is invisible as a hash and can roll back", ->
+  workspace = createWorkspace()
+  workspace.activate state HASH_1, 'original'
+  seen = []
+  workspace.watch (event, path) -> seen.push [event, path]
+  transaction = workspace.stage HASH_1, state(HASH_2, 'candidate'), ['app.rip']
+  eq workspace.hash(), HASH_1
+  eq workspace.read('app.rip'), 'original'
+  eq transaction.components.getCompiled('app.rip'), { App: { source: 'candidate' } }
+  eq seen, []
+  throws (-> workspace.write('app.rip', 'lost')), 'cannot write during a publication transition'
+  transaction.rollback()
+  eq workspace.hash(), HASH_1
+  eq workspace.read('app.rip'), 'original'
+  eq seen, []
+
 test "commit supports Rip creation and deletion as one transaction", ->
   ws = createWorkspace()
   ws.activate
@@ -212,6 +228,35 @@ test! "a change received before acknowledgement is buffered and may explain late
   eq reloads, []
   feed.close()
 
+test! "a buffered generation beyond a rejected candidate reloads the complete App", ->
+  active = HASH_1
+  applied = []
+  reloads = []
+  { factory, sockets } = fakeHub()
+  client =
+    hash: -> active
+    apply: (change) ->
+      applied.push change.hash
+      'rejected'
+    reload: (reason) -> reloads.push reason
+  feed = connectFeed client,
+    hub: 'ws://test/hub'
+    makeSocket: factory
+    fetch: -> { ok: true, status: 200, json: -> { hash: HASH_3 } }
+    backoff: { min: 1, max: 2 }
+    ackTimeout: 100
+  socket = sockets[0]
+  socket.onopen()
+  socket.onmessage { data: JSON.stringify({ change: { from: HASH_1, hash: HASH_2, list: [] } }) }
+  socket.onmessage { data: JSON.stringify({ change: { from: HASH_2, hash: HASH_3, list: [] } }) }
+  ack socket
+  settle!
+  eq applied, [HASH_2]
+  eq active, HASH_1
+  eq reloads.length, 1
+  eq feed.connected(), false
+  feed.close()
+
 test! "a latest hash outside the subscribed change chain reloads", ->
   routes = { '/latest.json': JSON.stringify({ hash: HASH_2 }) }
   { feed, sockets, reloads } = openFeed HASH_1, routes
@@ -235,6 +280,41 @@ test! "live changes apply serially in WSS arrival order", ->
   eq applied, [first, second]
   eq active(), HASH_3
   feed.close()
+
+test! "client-originated Hub changes never enter the publication feed", ->
+  { feed, sockets, applied, reloads, active } = openFeed()
+  socket = sockets[0]
+  socket.onopen()
+  ack socket
+  settle!
+  forged = { from: HASH_1, hash: HASH_2, list: [['app.rip', 'attacker source']] }
+  socket.onmessage { data: JSON.stringify({ '<': ['attacker'], change: forged }) }
+  settle!
+  eq applied, []
+  eq active(), HASH_1
+  eq reloads, []
+  feed.close()
+
+test! "only a server-origin operational reload reloads the App", ->
+  forgedRun = openFeed()
+  forgedSocket = forgedRun.sockets[0]
+  forgedSocket.onopen()
+  ack forgedSocket
+  settle!
+  forgedSocket.onmessage { data: JSON.stringify({ '<': ['attacker'], reload: { epoch: 7 } }) }
+  settle!
+  eq forgedRun.reloads, []
+  forgedRun.feed.close()
+
+  trustedRun = openFeed()
+  trustedSocket = trustedRun.sockets[0]
+  trustedSocket.onopen()
+  ack trustedSocket
+  settle!
+  trustedSocket.onmessage { data: JSON.stringify({ reload: { epoch: 8 } }) }
+  settle!
+  eq trustedRun.reloads, ['server generation changed']
+  trustedRun.feed.close()
 
 test! "malformed publication JSON reloads instead of guessing", ->
   { feed, sockets, reloads, reports } = openFeed()
@@ -260,4 +340,92 @@ test! "a dropped connection resubscribes with a fresh token and probes again", -
   ack sockets[1]
   settle!
   eq calls.length, 2
+  feed.close()
+
+test! "a reconnect probe waits for an apply already in flight", ->
+  active = HASH_1
+  started = false
+  release = null
+  gate = Promise.new (resolve) -> release = resolve
+  { factory, sockets } = fakeHub()
+  probes = 0
+  client =
+    hash: -> active
+    apply: (change) ->
+      started = true
+      await gate
+      return false unless change.from is active
+      active = change.hash
+      true
+    reload: -> throw Error.new 'coherent reconnect must not reload'
+  feed = connectFeed client,
+    hub: 'ws://test/hub'
+    makeSocket: factory
+    fetch: ->
+      probes++
+      hash = if probes is 1 then HASH_1 else HASH_2
+      { ok: true, status: 200, json: -> { hash } }
+    backoff: { min: 1, max: 2 }
+    ackTimeout: 100
+  first = sockets[0]
+  first.onopen()
+  ack first
+  settle!
+  first.onmessage { data: JSON.stringify({ change: { from: HASH_1, hash: HASH_2, list: [] } }) }
+  waitFor = ->
+    loop
+      return if started
+      sleep! 1
+  waitFor!
+  first.onclose()
+  Promise.new! (resolve) -> setTimeout resolve, 10
+  second = sockets[1]
+  second.onopen()
+  ack second
+  settle!
+  eq probes, 1
+  release!
+  settle!
+  eq probes, 2
+  eq active, HASH_2
+  feed.close()
+
+test! "a rejected generation survives reconnect and operational probes", ->
+  active = HASH_1
+  latest = HASH_1
+  reloads = []
+  { factory, sockets } = fakeHub()
+  client =
+    hash: -> active
+    apply: -> 'rejected'
+    reload: (reason) -> reloads.push reason
+  options =
+    hub: 'ws://test/hub'
+    makeSocket: factory
+    fetch: -> { ok: true, status: 200, json: -> { hash: latest } }
+    backoff: { min: 1, max: 2 }
+    ackTimeout: 100
+  feed = connectFeed client, options
+  first = sockets[0]
+  first.onopen()
+  ack first
+  settle!
+  first.onmessage { data: JSON.stringify({ change: { from: HASH_1, hash: HASH_2, list: [] } }) }
+  settle!
+  eq reloads, []
+  eq active, HASH_1
+
+  latest = HASH_2
+  first.onclose()
+  Promise.new! (resolve) -> setTimeout resolve, 10
+  second = sockets[1]
+  second.onopen()
+  ack second
+  settle!
+  eq feed.connected(), true
+  eq reloads, []
+  second.onmessage { data: JSON.stringify({ reload: { epoch: 9 } }) }
+  settle!
+  eq feed.connected(), true
+  eq reloads, []
   feed.close()

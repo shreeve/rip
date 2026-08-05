@@ -110,9 +110,11 @@ never based on brittle scanning of generated JavaScript.
 ### Errors
 
 A compile failure shows an overlay and leaves the active application
-running. An activation failure restores the previous module graph and
-living implementations. Full reload remains available when rollback
-cannot restore a coherent graph.
+running. An activation failure restores the active module graph and living
+implementations. The failed candidate hash is quarantined until Manager
+publishes a newer generation. Full reload remains available for a malformed or
+disconnected transition and when post-commit teardown cannot leave a coherent
+document.
 
 ### CSS
 

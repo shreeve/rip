@@ -133,6 +133,47 @@ describe('createModuleLoader', () => {
     expect(registry.getCompiled('routes/page.rip').Page()).toBe('two');
   });
 
+  test('reloading an importer replaces its dependency edges', async () => {
+    const registry = registryOf({
+      'util.rip': "export tag = 'one'",
+      'routes/page.rip': "import { tag } from '../util.rip'\nexport Page = -> tag",
+    });
+    const loader = createModuleLoader({ components: registry });
+    await loader.import('routes/page.rip');
+
+    registry.write('routes/page.rip', "export Page = -> 'independent'");
+    loader.invalidate('routes/page.rip');
+    const page = await loader.import('routes/page.rip');
+    expect(page.Page()).toBe('independent');
+    expect([...loader.invalidate('util.rip')]).toEqual(['util.rip']);
+  });
+
+  test('superseded Blob modules are revoked after replacement loads', async () => {
+    const registry = registryOf({
+      'util.rip': "export tag = 'one'",
+      'routes/page.rip': "import { tag } from '../util.rip'\nexport Page = -> tag",
+    });
+    const revoked = [];
+    const original = URL.revokeObjectURL;
+    URL.revokeObjectURL = url => {
+      revoked.push(url);
+      original.call(URL, url);
+    };
+    const loader = createModuleLoader({ components: registry });
+    try {
+      await loader.import('routes/page.rip');
+      registry.write('util.rip', "export tag = 'two'");
+      loader.invalidate('util.rip');
+      await loader.import('routes/page.rip');
+      await loader.collect();
+      expect(revoked.length).toBeGreaterThanOrEqual(2);
+      expect(revoked.every(url => url.startsWith('blob:'))).toBeTrue();
+    } finally {
+      loader.dispose();
+      URL.revokeObjectURL = original;
+    }
+  });
+
   test('a debug loader appends inline source maps without disturbing the module', async () => {
     const loader = createModuleLoader({
       components: registryOf({
@@ -186,6 +227,33 @@ describe('assembleBundle', () => {
         modules: { 'routes/index.rip': "import { x } from '@rip-lang/serveronly'" },
         packagesDir: dir,
       })).toThrow(/'@rip-lang\/serveronly', which does not declare browser safety/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('dot-prefixed package files stay outside the browser publication', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rip-pkg-'));
+    try {
+      const pkg = join(dir, 'demo');
+      mkdirSync(pkg);
+      mkdirSync(join(pkg, '.private'));
+      writeFileSync(join(pkg, 'package.json'), JSON.stringify({
+        name: '@rip-lang/demo',
+        exports: { '.': './index.rip' },
+        rip: { browser: true },
+      }));
+      writeFileSync(join(pkg, 'index.rip'), 'export ok = 1');
+      writeFileSync(join(pkg, '.internal.rip'), 'export hidden = 1');
+      writeFileSync(join(pkg, '.private', 'secret.rip'), 'export secret = 1');
+      const bundle = assembleBundle({
+        modules: { 'routes/index.rip': "import { ok } from '@rip-lang/demo'\nexport value = ok" },
+        packagesDir: dir,
+      });
+      expect(Object.keys(bundle.modules).sort()).toEqual([
+        '@rip-lang/demo/index.rip',
+        'routes/index.rip',
+      ]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

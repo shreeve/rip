@@ -81,7 +81,9 @@ embedded in `/@rip/rip.js`.
 
 Browser package roots normalize to `@rip-lang/<name>/index.rip`. Package
 manifests are Manager inputs used for browser-safety validation and import
-resolution; resolver metadata does not cross the wire.
+resolution; resolver metadata does not cross the wire. The published graph
+uses static imports only. Missing targets, import cycles, and dynamic imports
+reject before any publication is committed.
 
 The one HTTP response gives Rip its startup optimization: many small source
 modules share one request and one Brotli compression context. After parsing
@@ -209,13 +211,16 @@ compilation-critical. Ordinary asset bytes never use WSS. CSS refreshes its
 linked HTTP URL. HTML and unknown managed assets reload the page.
 
 `from` must equal the browser's current hash. A duplicate whose `hash` is
-already current is harmless. Any gap, malformed transition, failed compile,
-failed apply, or ordering uncertainty reloads the page rather than attempting
-delta reconstruction.
+already current is harmless. A gap, malformed transition, or ordering
+uncertainty reloads the page rather than attempting delta reconstruction. A
+compile or activation failure quarantines the candidate hash and leaves the
+last committed App live. The browser ignores that same rejected generation;
+the first newer hash reloads and obtains a complete bundle.
 
 On reconnect, the browser subscribes before requesting `/latest.json`. Equal
-hashes require no work; unequal hashes reload the page. Initial HTTP boot does
-not require the Hub.
+active hashes require no work. A latest hash equal to the quarantined candidate
+keeps the last committed App live; any other unequal hash reloads the page.
+Initial HTTP boot does not require the Hub.
 
 ## Non-watch mode
 

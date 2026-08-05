@@ -287,9 +287,11 @@ alters surface syntax updates ALL THREE in the same change.
   `change { from, hash, list }`; `[path,source]` updates Rip source, `[path]`
   invalidates an HTTP asset, and `[path,null]` deletes. Client apply verdicts
   are **`reload` | `css` | `update` | `ignore`**. Reconnect subscribes before
-  checking `latest.json`; a mismatched complete App hash reloads. There is no
-  `manifest.json`. Janus transports files and messages without Rip semantics;
-  workers have no App or generated-file routes.
+  checking `latest.json`; a mismatched complete App hash reloads unless it is
+  the quarantined failed candidate, which leaves the last committed App live
+  until a newer hash arrives. There is no `manifest.json`. Janus transports
+  files and messages without Rip semantics; workers have no App or
+  generated-file routes.
 - **Comments explain non-obvious intent** — invariants, constraints,
   why a trade-off was taken. Never narrate what code obviously does,
   never reference project history or future plans. A comment that

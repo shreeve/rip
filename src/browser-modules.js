@@ -15,14 +15,12 @@
 //                           pathname or the …/src/runtime/… spelling
 //
 // Anything else is server-only or unknown and rejects loudly, naming
-// the module that asked. Cycles reject with the requesting chain.
-// Dynamic import() specifiers are expressions and stay unrewritten —
-// inside an object-URL module they fail with the browser's own
-// resolution error. invalidate() forgets a module's compilation AND
-// every importer that reached it, transitively: an importer's code
-// splices its dependency's URL, so an importer left cached would keep
-// running the OLD dependency. Finer-grained propagation belongs to
-// hot replacement.
+// the module that asked. Cycles and dynamic imports reject during
+// compilation. invalidate() forgets a module's compilation AND every
+// importer that reached it, transitively: an importer's code splices
+// its dependency's URL, so an importer left cached would keep running
+// the OLD dependency. Finer-grained propagation belongs to hot
+// replacement.
 //
 // `debug` appends an inline source map to every compiled module, so
 // devtools show the .rip source. Off by default: maps are a
@@ -84,6 +82,20 @@ export function createModuleLoader({
   const namespaces = new Map();
   const bridges = new Map();
   const dependents = new Map();
+  const dependencies = new Map();
+  const retired = new Set();
+
+  const revoke = url => {
+    if (typeof url === 'string' && url.startsWith('blob:') && typeof URL?.revokeObjectURL === 'function') {
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const collect = async () => {
+    const pending = [...retired];
+    retired.clear();
+    await Promise.allSettled(pending.map(async promise => revoke(await promise)));
+  };
 
   // The page's one runtime and embedded-package copies cross into generated
   // module space through named re-export bridges. The stable modules never
@@ -183,7 +195,7 @@ export function createModuleLoader({
       if (source === undefined) {
         throw new Error(`rip: '${path}' is not in the bundle`);
       }
-      const compiled = compile(source, { path, runtimeDelivery: 'import' });
+      const compiled = compile(source, { path, runtimeDelivery: 'import', browserModule: true });
       let code = compiled.code;
       for (const span of [...compiled.imports].reverse()) {
         const target = resolvePath(span.specifier, path);
@@ -191,6 +203,9 @@ export function createModuleLoader({
           let importers = dependents.get(target.path);
           if (!importers) dependents.set(target.path, importers = new Set());
           importers.add(path);
+          let imports = dependencies.get(path);
+          if (!imports) dependencies.set(path, imports = new Set());
+          imports.add(target.path);
         }
         const url = target.bridge
           ? bridgeFor(target.bridge, target.namespace)
@@ -226,10 +241,30 @@ export function createModuleLoader({
         const at = queue.pop();
         if (seen.has(at)) continue;
         seen.add(at);
+        if (urls.has(at)) retired.add(urls.get(at));
         urls.delete(at);
         namespaces.delete(at);
         for (const importer of dependents.get(at) ?? []) queue.push(importer);
+        dependents.delete(at);
+        for (const dependency of dependencies.get(at) ?? []) {
+          const importers = dependents.get(dependency);
+          importers?.delete(at);
+          if (importers?.size === 0) dependents.delete(dependency);
+        }
+        dependencies.delete(at);
       }
+      return seen;
+    },
+    collect,
+    dispose() {
+      for (const promise of urls.values()) retired.add(promise);
+      urls.clear();
+      namespaces.clear();
+      dependents.clear();
+      dependencies.clear();
+      for (const url of bridges.values()) revoke(url);
+      bridges.clear();
+      void collect();
     },
   };
 }
