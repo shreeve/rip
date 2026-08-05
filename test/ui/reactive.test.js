@@ -402,11 +402,11 @@ describe('typed reactive declarations: erased twins with recorded spans', () => 
 
   test('declarations surface the CONTAINER type (the cross-module contract); computed is readonly', () => {
     expect(fullCompile('export count: number := 0').declarations)
-      .toBe('export declare const count: { value: number; read(): number };\n');
+      .toBe('export declare const count: { value: number; read(): number; touch(): void };\n');
     expect(fullCompile('export total: number ~= count * 2').declarations)
       .toBe('export declare const total: { readonly value: number; read(): number };\n');
     expect(fullCompile('label: string := "tag"').declarations)
-      .toBe('declare const label: { value: string; read(): string };\nexport {};\n');
+      .toBe('declare const label: { value: string; read(): string; touch(): void };\nexport {};\n');
     // Untyped declarations declare nothing (M8's contract).
     expect(fullCompile('count := 0').declarations).toBe('');
   });

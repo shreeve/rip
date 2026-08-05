@@ -59,9 +59,61 @@ function monorepo({ rootStrict = false, nestedStrict = true } = {}) {
   return dir;
 }
 
+// A FRESH PROJECT: what a newcomer has after `bun init` plus a .rip
+// file — a tsconfig, and @types/bun installed. `withTypes:false` is the
+// same project before anything is installed, which is the posture the
+// host floor exists for.
+//
+// The source is deliberately ordinary: the idioms rip encourages, not a
+// minimal case. `(opts = {}) ->` is the shape that produced 329 of the
+// 1,657 errors in a survey of packages/ (2026-07-31), and `import.meta.dir`
+// another 143 — between them a fifth of everything a newcomer would see.
+const FRESH = [
+  'greet = (name, opts = {}) ->',
+  "  suffix = opts.suffix ?? ''",
+  '  name + suffix',
+  '',
+  'here = import.meta.dir',
+  "console.log greet('world', { suffix: '!' }), here",
+  '',
+].join('\n');
+
+function freshProject({ withTypes = true } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-fresh-'));
+  fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify({
+    compilerOptions: { target: 'ESNext', module: 'preserve', moduleDetection: 'force', noEmit: true, skipLibCheck: true },
+  }, null, 2));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'fresh', devDependencies: withTypes ? { '@types/bun': 'latest' } : {} }, null, 2));
+  if (withTypes) {
+    const t = path.join(dir, 'node_modules', '@types', 'bun');
+    fs.mkdirSync(t, { recursive: true });
+    fs.writeFileSync(path.join(t, 'package.json'), JSON.stringify({ name: '@types/bun', version: '1.0.0', types: 'index.d.ts' }));
+    fs.writeFileSync(path.join(t, 'index.d.ts'),
+      'declare var Bun: any;\ndeclare var process: any;\ninterface ImportMeta { dir: string; file: string; path: string }\n');
+  }
+  fs.writeFileSync(path.join(dir, 'app.rip'), FRESH);
+  return dir;
+}
+
 function check(dir, args = []) {
   const r = spawnSync('bun', [BIN, 'check', ...args], { cwd: dir, encoding: 'utf8', timeout: 60_000 });
   return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
+}
+
+// Mode-000 `file` for the duration of fn(). Returns false WITHOUT running
+// fn on root/owner-override filesystems where the file stays readable
+// anyway — callers bail, the scenario cannot exist there. The restore
+// lives here so no failure path leaves an unreadable file for the
+// caller's cleanup rmSync to trip on.
+function withUnreadable(file, fn) {
+  fs.chmodSync(file, 0o000);
+  try {
+    try { fs.readFileSync(file, 'utf8'); return false; } catch { /* unreadable, as intended */ }
+    fn();
+    return true;
+  } finally {
+    try { fs.chmodSync(file, 0o644); } catch { /* gone with the fixture */ }
+  }
 }
 
 describe('rip check: usage surface (no server)', () => {
@@ -79,6 +131,16 @@ describe('rip check: usage surface (no server)', () => {
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('no .rip files found');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  // The build hash makes CLI-vs-editor skew diagnosable at a glance: the
+  // editor logs the same identity in its ready line, computed over the
+  // same two trees (compiler + server) by content, so an installed
+  // extension and a worktree CLI agree exactly when their code does.
+  test('--build prints the build identity and exits 0', () => {
+    const r = spawnSync('bun', [BIN, 'check', '--build'], { encoding: 'utf8' });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/^rip check build [0-9a-f]+\n  compiler  .+\n  server    .+\n$/);
   });
 
   test('an unknown flag exits 2', () => {
@@ -363,7 +425,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         'wrongNested = c.nested',
         'wrongDeep = c.deep',
       ].join('\n') + '\n',
-    });
+    }, { strict: true });
     try {
       const diags = JSON.parse(check(dir, ['--json']).stdout);
       expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
@@ -371,6 +433,10 @@ describeExtended('rip check: type diagnostics over the real server', () => {
 
       const neg = JSON.parse(check(negDir, ['--json']).stdout);
       expect(neg.map((d) => [d.code, d.line])).toEqual([
+        // Asserted under rip.strict: a negatives fixture asks for every
+        // diagnostic, and gradual suppresses the implicit-`this` class the
+        // way it suppresses implicit-any — which would hide the two rows
+        // this case exists to prove.
         [2683, 5],   // the `->`'s own untyped `this` — not this class's
         [2683, 7],   // and the arrow under it captures THAT one, not the instance
         [2322, 14],  // `plain` inferred `string`; line 13's write to `wide` stays silent
@@ -521,8 +587,17 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // runs ensures before id/timestamps exist, so the implicit columns
   // type Partial<> and an unguarded `m.id` is refused (TS18048) instead
   // of crashing the first create.
+  //
+  // Both landmines are NULL-assignability facts, so the project spells
+  // `strictNullChecks` in its own tsconfig — which also pins the yield:
+  // gradual supplies `strictNullChecks: false` only to a chain that says
+  // nothing, and an author's own strictness wins (`nullPosture`,
+  // mirror.js). Without it the checker cannot draw the distinction these
+  // contracts ride on, in any mode.
   test('the schema face follows runtime ordering: date defaults admit strings, required [null] publishes, ensures see Partial implicits', () => {
+    const audit = JSON.parse(fs.readFileSync(TSCONFIG, 'utf8'));
     const dir = workspace({
+      'tsconfig.json': JSON.stringify({ ...audit, compilerOptions: { ...audit.compilerOptions, strictNullChecks: true } }),
       'ordering.rip': [
         'Ev = schema :shape',
         '  when! date, ["2024-01-01"]',
@@ -548,6 +623,34 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(diags.filter((d) => d.file === 'ordering.rip')).toEqual([]);
       expect(diags.filter((d) => d.file === 'landmine.rip').map((d) => d.code).sort()).toEqual([1360, 18048]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // TypeScript 7 defaults `strict` ON, which drags catch bindings to
+  // `unknown` through `useUnknownInCatchVariables` — narrowing ceremony
+  // on every member read of an unannotated `catch err`. Gradual's
+  // posture subtracts that flag (nullPosture, mirror.js); a chain that
+  // states its own strictness is yielded to whole and keeps the
+  // unknown.
+  test('gradual catch bindings are not unknown; an author strictness chain keeps them', () => {
+    const catcher = [
+      'export label: (job: () => void) => void = (job) ->',
+      '  try',
+      '    job()',
+      '  catch err',
+      '    console.log(err.message)',
+    ].join('\n') + '\n';
+    const gradual = workspace({ 'catcher.rip': catcher });
+    const audit = JSON.parse(fs.readFileSync(TSCONFIG, 'utf8'));
+    const strict = workspace({ 'catcher.rip': catcher });
+    fs.writeFileSync(path.join(strict, 'tsconfig.json'),
+      JSON.stringify({ ...audit, compilerOptions: { ...audit.compilerOptions, strictNullChecks: true } }));
+    try {
+      expect(JSON.parse(check(gradual, ['--json']).stdout)).toEqual([]);
+      expect(JSON.parse(check(strict, ['--json']).stdout).map((d) => d.code)).toEqual([18046]);
+    } finally {
+      fs.rmSync(gradual, { recursive: true, force: true });
+      fs.rmSync(strict, { recursive: true, force: true });
+    }
   }, 90_000);
 
   // The mixin face promises exactly what the runtime serves, in both
@@ -582,6 +685,305 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // A bare workspace specifier (`@rip/util`) is how packages import each
+  // other: a node_modules symlink whose package.json `exports` lands on a
+  // `.rip` file. bun resolves that at runtime; the mirror must resolve it
+  // too — the target joins the closure and the generated tsconfig maps
+  // the bare name onto the mirror face — or every cross-package import in
+  // the workspace publishes TS2307. The check targets a SUBDIRECTORY on
+  // purpose: the workspace root is the nearest ancestor declaring
+  // `workspaces`, not the first package.json above the target, or the
+  // sibling package sits outside the mirror and nothing resolves.
+  // The gate's ACROSS rule rides the same resolution: the ANNOTATED
+  // export carries into the importer, the inferred one stays held.
+  test('a bare workspace .rip specifier resolves; its annotated exports carry, inferred ones stay held', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-ws-'));
+    try {
+      fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
+      fs.mkdirSync(path.join(dir, 'packages', 'app'), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'packages', 'util'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'packages', 'util', 'package.json'),
+        JSON.stringify({ name: '@rip/util', exports: { '.': './util.rip' } }));
+      fs.writeFileSync(path.join(dir, 'packages', 'util', 'util.rip'),
+        'export answer: number = 42\nexport plain = 1\n');
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'app.rip'), [
+        "import { answer, plain } from '@rip/util'",
+        "import * as mod from '@rip/util'",
+        'bad = answer.toUpperCase()',
+        'meh = plain.toUpperCase()',
+        "import { nosuch } from '@rip/util'",   // a member that does not exist
+        'console.log bad, meh, mod, nosuch',
+      ].join('\n') + '\n');
+      fs.mkdirSync(path.join(dir, 'node_modules', '@rip'), { recursive: true });
+      fs.symlinkSync(path.join('..', '..', 'packages', 'util'), path.join(dir, 'node_modules', '@rip', 'util'));
+      const diags = JSON.parse(check(dir, ['--json', path.join('packages', 'app')]).stdout);
+      // Resolution: no cannot-find-module anywhere, on any of the three
+      // import spellings (named, named-unannotated, namespace).
+      expect(diags.map((d) => d.code)).not.toContain(2307);
+      // ACROSS: `answer`'s annotation carries — the misuse reports at its
+      // line; `plain` carries nothing and its misuse is held. Importing a
+      // member the module does not export is a NAME that does not exist —
+      // the cannot-find family spelled at the module boundary — and
+      // publishes whatever is annotated.
+      expect(diags.filter((d) => d.file === path.join('packages', 'app', 'app.rip')).map((d) => [d.code, d.line])).toEqual([[2339, 3], [2305, 5]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // The hidden-diagnostics summary is the mode's ledger: three lines,
+  // one per family, because the remedies differ — annotate a
+  // declaration, flip `rip.strict`, install declarations. The lines
+  // spell the strict remedy IDENTICALLY (a summary that words the same
+  // lever two ways reads as two levers), and the missing-types advisory
+  // NAMES the declarations it is about — "install the @types package"
+  // with no noun sends the user hunting through their own imports.
+  test('the hidden-diagnostics summary: consistent remedies, and the missing declarations are named', () => {
+    const dir = workspace({
+      'app.rip': [
+        'n = 42',
+        'bad = n.toUpperCase()',      // real error, held → scope family
+        'def shout(msg)',             // implicitly-any parameter → annotation family
+        '  msg',
+        "describe 'adds', ->",        // known-typings globals, no types installed —
+        '  console.log bad, shout',
+        "fsMod = require('fs')",      // …each advisory names ITS missing declaration
+        'console.log fsMod',
+      ].join('\n') + '\n',
+    });
+    try {
+      const out = check(dir).stdout;
+      expect(out).toMatch(/\d+ diagnostics? hidden in unannotated code — annotate a declaration to check its scope, or set `rip\.strict` in package\.json/);
+      expect(out).toMatch(/\d+ annotation diagnostics? hidden — set `rip\.strict` in package\.json to see where annotations are missing/);
+      expect(out).toMatch(/\d+ missing-types advisor(y|ies) hidden — no declarations for `describe`, `require` \(try `bun add -d @types\/bun`\)/);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A top-level `globalThis.NAME ??= expr` DECLARES the global: the
+  // spelling says "install unless someone already did", which is a
+  // declaration in runtime clothes — stamp's sh/ok/run vocabulary is the
+  // resident pattern ("handlers import nothing"). The declaration is
+  // scoped to the declaring PACKAGE (its own program in the mirror), and
+  // reaches importers the way the runtime does — importing the module
+  // runs the installer. A non-importing neighbor keeps its TS2304, which
+  // is the typo protection ambient-everywhere would have spent.
+  test('a top-level `globalThis.NAME ??=` declares the global, scoped to its package', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ workspaces: ['packages/*'] }),
+      'packages/vocab/package.json': JSON.stringify({ name: '@t/vocab' }),
+      'packages/vocab/vocab.rip': [
+        'sh = (cmd: string): string -> cmd',
+        'globalThis.sh ??= sh',
+        'export ping = 1',
+      ].join('\n') + '\n',
+      'packages/vocab/handler.rip': [
+        'out = sh("ls")',        // resolves: same package, declared vocabulary
+        'bad = shh("ls")',       // typo protection survives: cannot-find still fires
+        'console.log out, bad',
+      ].join('\n') + '\n',
+      'packages/other/package.json': JSON.stringify({ name: '@t/other' }),
+      'packages/other/other.rip': [
+        'oops = sh("ls")',       // different package, no import: the global does NOT reach
+        'console.log oops',
+      ].join('\n') + '\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const names = diags.map((d) => [d.file, /'([^']+)'/.exec(d.message)?.[1]]);
+      // vocab's own package: `sh` resolves everywhere; only the typo reports.
+      expect(names.filter(([f]) => f.includes('vocab'))).toEqual([
+        [path.join('packages', 'vocab', 'handler.rip'), 'shh'],
+      ]);
+      // the non-importing neighbor: `sh` is not its vocabulary.
+      expect(names.filter(([f]) => f.includes('other'))).toEqual([
+        [path.join('packages', 'other', 'other.rip'), 'sh'],
+      ]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // Emitter scaffolding (a bang-def's `: void`, arity `?`s, pin
+  // annotations) never opens the gate: an unannotated file is a silent
+  // file, whatever the face emits for its lowerings.
+  test('an unannotated file with bang-defs stays silent — scaffolding never opens the gate', () => {
+    const dir = workspace({
+      'tool.rip': [
+        'write! = (s) -> s',
+        'n = 42',
+        'bad = n.toUpperCase()',     // inference-only misuse: held
+        'console.log write, bad',
+      ].join('\n') + '\n',
+    });
+    try {
+      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A NESTED node_modules resolves through the mirror the way bun
+  // resolves it at runtime: the face's ancestor walk lives in the mirror
+  // tree, so a source-tree install (a quarantined bench dir with its own
+  // manifest) was invisible — bun ran the imports that tsgo called
+  // cannot-finds. The mirror plants a node_modules symlink at each dir
+  // whose source twin has one.
+  test('a nested source-tree node_modules resolves through the mirror', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ workspaces: ['packages/*'] }),
+      'packages/csvish/package.json': JSON.stringify({ name: '@t/csvish' }),
+      'packages/csvish/bench/package.json': JSON.stringify({ name: 'bench', dependencies: { fakelib: '1.0.0' } }),
+      'packages/csvish/bench/node_modules/fakelib/package.json': JSON.stringify({ name: 'fakelib', version: '1.0.0', types: 'index.d.ts', main: 'index.js' }),
+      'packages/csvish/bench/node_modules/fakelib/index.d.ts': 'export declare function parse(s: string): string[];\n',
+      'packages/csvish/bench/node_modules/fakelib/index.js': 'export const parse = (s) => s.split(",");\n',
+      'packages/csvish/bench/compare.rip': [
+        "import { parse } from 'fakelib'",       // resolves through the nested install
+        "import { nope } from 'nolib'",          // liveness: a genuinely-missing module still 2307s
+        "rows: string[] = parse('a,b')",
+        'console.log rows, nope',
+      ].join('\n') + '\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const cannotFinds = diags.filter((d) => d.code === 2307).map((d) => /'([^']+)'/.exec(d.message)?.[1]);
+      expect(cannotFinds).toEqual(['nolib']);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // Installation pressure is annotation pressure's cousin: a bare import
+  // DECLARED in the governing package.json but not installed is the
+  // manifest's stated intent, not a typo — gradual holds its 2307 and
+  // the summary names the install dir; strict publishes it (complaints
+  // mode, like the floors). Undeclared-and-uninstalled stays a published
+  // defect everywhere. Keeps `rip check` green on a fresh clone whose
+  // optional dirs (a quarantined bench) were never installed.
+  test('a declared-but-uninstalled import is held in gradual with the install remedy; strict and undeclared publish', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ workspaces: ['packages/*'] }),
+      'packages/q/package.json': JSON.stringify({ name: '@t/q' }),
+      'packages/q/bench/package.json': JSON.stringify({ name: 'q-bench', dependencies: { fakelib: '1.0.0' } }),
+      'packages/q/bench/compare.rip': [
+        "import { parse } from 'fakelib'",   // declared, not installed → held, advised
+        "import { nope } from 'nolib'",      // undeclared → the defect publishes
+        'console.log parse, nope',
+      ].join('\n') + '\n',
+      'packages/r/package.json': JSON.stringify({ name: '@t/r', rip: { strict: true }, dependencies: { fakelib: '1.0.0' } }),
+      'packages/r/app.rip': "import { parse } from 'fakelib'\nconsole.log parse\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const modOf = (d) => /'([^']+)'/.exec(d.message)?.[1];
+      expect(diags.filter((d) => d.file.includes('q')).map(modOf)).toEqual(['nolib']);
+      expect(diags.filter((d) => d.file.includes(path.join('r', 'app'))).map(modOf)).toEqual(['fakelib']);
+      const text = check(dir).stdout;
+      expect(text).toMatch(/1 uninstalled-dependency import hidden — run `bun install` in packages\/q\/bench/);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A nested package that sets `rip.strict` becomes its own program, the
+  // same auto boundary a globals-declaring package gets: floors are
+  // per-PROGRAM, and without the boundary the root program's floor keeps
+  // answering `any` for a package that asked for complaints.
+  test('a nested rip.strict package refuses the floors: its own program, its own posture', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ workspaces: ['packages/*'] }),
+      'packages/lib/package.json': JSON.stringify({ name: '@t/lib', rip: { strict: true } }),
+      'packages/lib/lib.rip': "import { Database } from 'bun:sqlite'\nconsole.log Database\n",
+      'packages/loose/package.json': JSON.stringify({ name: '@t/loose' }),
+      'packages/loose/loose.rip': "import { Database } from 'bun:sqlite'\nconsole.log Database\n",
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      // The strict package: floor refused, the defect publishes.
+      expect(diags.filter((d) => d.file.includes('lib')).map((d) => d.code)).toContain(2307);
+      // The gradual sibling: floored `any`, still quiet.
+      expect(diags.filter((d) => d.file.includes('loose'))).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // The INVERSE flip: a gradual package nested in a STRICT workspace earns
+  // the same boundary — posture and floors are per-program, so without it
+  // the package rides strict nulls, unknown catches, and refused floors it
+  // never asked for. The tsconfig ABOVE the package must not swallow the
+  // boundary either: a wrapper's posture is the wrapper's, not the
+  // package's (the audit-tree shape, where corpus/gradual sits under
+  // test/audit's tsconfig and strict package.json).
+  test('a gradual package nested in a strict workspace keeps its loose posture and floors', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ workspaces: ['packages/*'], rip: { strict: true } }),
+      'mid/tsconfig.json': JSON.stringify({ compilerOptions: { noEmit: true } }),
+      'mid/loose/package.json': JSON.stringify({ name: '@t/loose' }),
+      'mid/loose/loose.rip': [
+        "import { Database } from 'bun:sqlite'",
+        'greeting: string = null',
+        'console.log(Database, greeting)',
+      ].join('\n') + '\n',
+      'strict.rip': 'flag: string = null\nconsole.log(flag)\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      // The flipped package: floored bun:*, loose nulls — silent.
+      expect(diags.filter((d) => d.file.includes('loose'))).toEqual([]);
+      // The strict root still means strict.
+      expect(diags.filter((d) => d.file === 'strict.rip').map((d) => d.code)).toEqual([2322]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A check answers for the paths it was ASKED about. The closure is
+  // compiled and checked whole — types cannot resolve otherwise — but a
+  // dependency's own diagnostics are its author's, not the caller's:
+  // reporting them makes a package's exit code hostage to code its
+  // author does not own, and surfaces defects the dependency's own
+  // check cannot reproduce. The dependency is not silently dropped —
+  // one summary line names where to look.
+  test('a check reports its targets, not its dependencies', () => {
+    const dir = workspace({
+      'app/app.rip': [
+        "import { helper } from '../lib/lib.rip'",
+        'label: string = helper',
+        'console.log(label)',
+      ].join('\n') + '\n',
+      'lib/lib.rip': [
+        'export helper: string = "x"',
+        'broken: number = "not a number"',
+        'console.log(broken)',
+      ].join('\n') + '\n',
+    });
+    try {
+      // Asked about app/ — the dependency's TS2322 is not the answer.
+      const scoped = JSON.parse(check(dir, ['--json', 'app']).stdout);
+      expect(scoped).toEqual([]);
+      // But it is accounted for, not hidden.
+      expect(check(dir, ['app']).stdout).toMatch(/1 diagnostic in dependencies \(lib\)/);
+      // Asked about the whole tree — the same diagnostic IS the answer.
+      const whole = JSON.parse(check(dir, ['--json']).stdout);
+      expect(whole.map((d) => [d.file, d.code])).toEqual([['lib/lib.rip', 2322]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // Config is per FILE (nearest package.json), so a strict consumer's
+  // check still hides its gradual DEPENDENCIES' diagnostics — and a
+  // summary that says "set `rip.strict` in package.json" after the user
+  // just did exactly that reads as broken. The lines name the projects
+  // the hidden diagnostics belong to, so the remedy points at the right
+  // package.json; the home project ('.') alone stays unnamed.
+  test('hidden-diagnostics summary names the gradual projects when the target itself is strict', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ workspaces: ['packages/*'] }),   // anchor the mirror at the monorepo root
+      'packages/app/package.json': JSON.stringify({ rip: { strict: true } }),
+      'packages/app/app.rip': "import { x } from '../util/util.rip'\nconsole.log x\n",
+      'packages/util/package.json': JSON.stringify({}),
+      'packages/util/util.rip': [
+        'y = 42',
+        'bad = y.toUpperCase()',      // held → scope family, charged to packages/util
+        'def shout(msg)',             // implicitly-any parameter → annotation family
+        '  msg',
+        'export x = 1',
+        'console.log bad, shout',
+      ].join('\n') + '\n',
+    });
+    try {
+      const out = check(dir, [path.join('packages', 'app')]).stdout;
+      expect(out).toMatch(/\d+ diagnostics? hidden in unannotated code \(packages\/util\) — annotate a declaration/);
+      expect(out).toMatch(/\d+ annotation diagnostics? hidden \(packages\/util\) — set `rip\.strict`/);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // A pattern catch mints its binding (`catch (_err) { ({message} = _err); … }`)
   // and annotates it, so the lowering's own destructure never publishes —
   // in EITHER try, statement or value, on EITHER pattern kind. The four
@@ -596,7 +998,15 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // assignment beside the destructure still publishes — so the annotation
   // cannot have been spent on the whole clause. Codes bound to their lines,
   // columns free. Liveness-paired.
-  test('a pattern catch never publishes from its own lowering, and the identifier spelling keeps unknown', () => {
+  // The identifier spelling's `unknown` was deliberate once — the author
+  // can narrow it the ordinary ways, and `catch err: any` is spellable.
+  // The gradual-annotations posture overrides that: `err.message` is the
+  // commonest catch body there is, and requiring a narrowing the author
+  // did not ask for is annotation pressure, which is the one thing this
+  // mode governs. Under `rip.strict` the `unknown` is back — asserted
+  // below, so the ruling is pinned in both directions rather than simply
+  // relaxed.
+  test('a pattern catch never publishes from its own lowering; an identifier catch follows the mode', () => {
     const dir = workspace({
       'catchpat.rip': [
         'try',
@@ -639,8 +1049,27 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       const diags = JSON.parse(check(dir, ['--json']).stdout);
       expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
       expect(diags.filter((d) => d.file === 'catchpat.rip')).toEqual([]);
+      // Gradual: the `e.message` read is gone; the planted TS2322 stays,
+      // so the file is still being checked rather than skipped.
       expect(diags.filter((d) => d.file === 'scoped.rip').map((d) => [d.code, d.line]))
-        .toEqual([[18046, 4], [2322, 9]]);
+        .toEqual([[2322, 9]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // The other half of the same ruling: a project that asked for strict is
+  // told about the unnarrowed catch read, exactly as TypeScript would.
+  test('under rip.strict an identifier catch is `unknown` again', () => {
+    const dir = workspace({
+      'scoped.rip': [
+        'try',
+        "  JSON.parse('broken')",
+        'catch e',
+        '  console.log e.message',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.map((d) => [d.code, d.line])).toEqual([[18046, 4]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
@@ -1320,27 +1749,61 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  // The generated TS mirror is scratch, removed on exit by default so a
-  // repeatedly-run check never litters .rip/check — retained only under
-  // --keep-mirror, for inspecting the exact TypeScript tsgo checked.
-  test('the TS mirror is removed after a run, kept only with --keep-mirror', () => {
+  // The generated TS mirror is a persistent, regenerable cache (the peer
+  // of the editor's .rip/editor): it stays at .rip/check after the run so
+  // the exact TypeScript tsgo checked is inspectable, is self-gitignored,
+  // and freshness comes from the start-of-run wipe — a stale face from an
+  // earlier run never survives into the next program.
+  test('the TS mirror persists after a run and is rebuilt fresh each run', () => {
     const dir = workspace({ 'a.rip': 'x: number = 0\nconsole.log x\n' });
     try {
-      const dotRip = path.join(dir, '.rip');
-      const mirror = path.join(dotRip, 'check');
+      const mirror = path.join(dir, '.rip', 'check');
       check(dir);
-      // The whole .rip parent goes when the check created it (nothing
-      // else lives there) — not just .rip/check.
-      expect(fs.existsSync(dotRip)).toBe(false);
-      const r = check(dir, ['--keep-mirror']);
-      expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(true);  // the face is retained
-      expect(r.stderr).toContain('keeping TS mirror');
+      expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(true);           // the face is retained
+      expect(fs.readFileSync(path.join(mirror, '.gitignore'), 'utf8')).toBe('*\n'); // and git never sees it
+      expect(fs.readFileSync(path.join(mirror, '.build'), 'utf8').trim()).not.toBe(''); // stamped with the build that wrote it
+      // A face whose source no longer exists is wiped by the next run,
+      // not trusted from the cache.
+      fs.writeFileSync(path.join(mirror, 'deleted.rip.ts'), 'const ghost: number = 0;\n');
+      check(dir);
+      expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(true);
+      expect(fs.existsSync(path.join(mirror, 'deleted.rip.ts'))).toBe(false);
+      // The wipe is unconditional: a run whose only target fails to PARSE
+      // still clears the previous run's faces, so the tree never shows a
+      // face for source that no longer compiles.
+      fs.writeFileSync(path.join(dir, 'a.rip'), 'x = (\n');
+      const r = check(dir);
+      expect(r.status).toBe(1);                                          // the parse error still reports
+      expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(false);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  // The .rip parent is pruned only when empty: a coexisting editor mirror
-  // (.rip/editor) must survive a batch check.
-  test('a coexisting .rip/editor is preserved (only the empty parent is pruned)', () => {
+  // An unwritable workspace still checks — rerouted to a temp mirror,
+  // LOUDLY (fidelity degrades: per-project wrappers and @types resolution
+  // change), and the temp root is removed by the exit handler.
+  test('an unwritable workspace falls back to a temp mirror, loudly, and cleans it up', () => {
+    const dir = workspace({ 'a.rip': 'x: number = 0\nconsole.log x\n' });
+    try {
+      fs.chmodSync(dir, 0o555);
+      let writable = false;
+      try { fs.mkdirSync(path.join(dir, '.probe')); writable = true; fs.rmdirSync(path.join(dir, '.probe')); } catch { /* expected EACCES */ }
+      if (writable) return; // root / owner-override filesystem can't exercise this path
+      const before = new Set(fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('rip-check-')));
+      const r = check(dir);
+      expect(r.stderr).toContain('temp fallback');                       // degraded, never silent
+      expect(r.status).toBe(0);                                          // the clean file still checks clean
+      expect(fs.existsSync(path.join(dir, '.rip'))).toBe(false);         // nothing forced into the workspace
+      const leaked = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('rip-check-') && !before.has(n));
+      expect(leaked).toEqual([]);                                        // the exit handler reclaimed the temp root
+    } finally {
+      try { fs.chmodSync(dir, 0o755); } catch { /* restore for cleanup */ }
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  // A coexisting editor mirror (.rip/editor) must survive a batch check:
+  // the two mirrors share the .rip parent but own disjoint subtrees.
+  test('a coexisting .rip/editor is preserved', () => {
     const dir = workspace({ 'a.rip': 'x: number = 0\nconsole.log x\n' });
     try {
       const editorDir = path.join(dir, '.rip', 'editor');
@@ -1348,29 +1811,91 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       fs.writeFileSync(path.join(editorDir, 'marker'), 'keep me\n');
       check(dir);
       expect(fs.existsSync(path.join(editorDir, 'marker'))).toBe(true);          // editor mirror untouched
-      expect(fs.existsSync(path.join(dir, '.rip', 'check'))).toBe(false);        // batch mirror cleaned
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  // Coverage short of what was asked never exits 0: a file readable at
-  // collect time but not at read time is skipped loudly (exit 2, a stderr
-  // note), and a clean sibling does NOT rescue the exit code into a false 0.
+  // A dangling import is the IMPORTER's defect, not a coverage gap: the
+  // absent module never marks the run incomplete — tsgo's TS2307 on the
+  // importing line is the report, matching the editor's closure walk.
+  test('a dangling .rip import earns TS2307 on the importer, not an incomplete run', () => {
+    const dir = workspace({ 'a.rip': "p: import('./gone.rip').T = 5\nconsole.log p\n" });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('TS2307');
+      expect(r.stdout).toContain('a.rip:1');
+      expect(r.stderr).not.toContain('incomplete');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // @ts-nocheck's writ covers the file's imports too: a nocheck'd importer
+  // with a dangling import checks clean and SILENT — the corpus's own
+  // errors fixtures dangle an import on purpose, and a default `rip check`
+  // over a repo containing them must not be permanently "incomplete".
+  test('a dangling import under @ts-nocheck stays silent (exit 0)', () => {
+    const dir = workspace({ 'a.rip': "# @ts-nocheck\np: import('./gone.rip').T = 5\nconsole.log p\n" });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('No type errors');
+      expect(r.stderr).not.toContain('incomplete');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // ENOENT is not the only "module does not exist as specified" errno: a
+  // specifier whose path walks THROUGH a file (./lib.rip/T.rip, ENOTDIR)
+  // is the same importer-side defect and gets the same report — TS2307 on
+  // the importer, never a permanently incomplete run.
+  test('a specifier through a file (ENOTDIR) is a TS2307, not an incomplete run', () => {
+    const dir = workspace({
+      'a.rip': "p: import('./lib.rip/T.rip').T = 5\nconsole.log p\n",
+      'lib.rip': 'export x = 1\n',
+    });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('TS2307');
+      expect(r.stderr).not.toContain('incomplete');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // An import that EXISTS but cannot be read is a real coverage gap: the
+  // run stays loud (the incomplete note beside whatever tsgo says about
+  // the missing face), never a bare "cannot find module" that misstates
+  // the problem. The exit is 1, not 2 — an error-severity diagnostic
+  // outranks the incomplete posture in the exit-code ladder.
+  test('an unreadable (existing) import still marks the run incomplete', () => {
+    const dir = workspace({
+      'a.rip': "p: import('./locked.rip').T = 5\nconsole.log p\n",
+      'locked.rip': 'export helper = 42\n',
+    });
+    try {
+      const exercised = withUnreadable(path.join(dir, 'locked.rip'), () => {
+        // a.rip is the explicit target; locked.rip is reached only as its import.
+        const r = check(dir, [path.join(dir, 'a.rip')]);
+        expect(r.stderr).toContain('locked.rip (EACCES)');
+        expect(r.stderr).toContain('the run is incomplete');
+        expect(r.status).toBe(1); // tsgo's TS2307 on the missing face outranks exit 2
+      });
+      if (!exercised) return; // root / owner-override filesystem can't exercise this path
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // Coverage short of what was asked never exits 0: an explicit target —
+  // named on the command line or swept up by the directory walk — that
+  // cannot be read is skipped loudly (exit 2, a stderr note), and a clean
+  // sibling does NOT rescue the exit code into a false 0.
   test('an unreadable file leaves the run incomplete (exit 2, no false clean)', () => {
     const dir = workspace({ 'ok.rip': 'x: number = 1\nconsole.log x\n', 'locked.rip': 'y: number = 2\nconsole.log y\n' });
-    const locked = path.join(dir, 'locked.rip');
     try {
-      fs.chmodSync(locked, 0o000);
-      let readable = false;
-      try { fs.readFileSync(locked, 'utf8'); readable = true; } catch { /* expected EACCES */ }
-      if (readable) return; // root / owner-override filesystem can't exercise this path
-      const r = check(dir);
-      expect(r.status).toBe(2);                          // incomplete coverage → never 0
-      expect(r.stderr).toContain('the run is incomplete');
-      expect(r.stdout).not.toContain('No type errors');  // ok.rip is clean, but the run isn't
-    } finally {
-      try { fs.chmodSync(locked, 0o644); } catch { /* already restored */ }
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+      const exercised = withUnreadable(path.join(dir, 'locked.rip'), () => {
+        const r = check(dir);
+        expect(r.status).toBe(2);                          // incomplete coverage → never 0
+        expect(r.stderr).toContain('the run is incomplete');
+        expect(r.stdout).not.toContain('No type errors');  // ok.rip is clean, but the run isn't
+      });
+      if (!exercised) return; // root / owner-override filesystem can't exercise this path
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
   // tsgo emits relatedInformation locations as canonical (percent-encoded)
@@ -1413,6 +1938,112 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // The inverse posture, so the assertion above is not passing on a
   // hardcoded direction: strict at the root, loose in the nested project.
   // A flat mirror answers the same way in both, which is the whole defect.
+  // THE ACCEPTANCE GATE for permissive mode: what a newcomer writes on
+  // day one reports nothing. Permissive is the DEFAULT, so this is the
+  // first thing anyone experiences; every error here is one they have to
+  // interpret before they have any way to.
+  test('a fresh project checks clean under permissive mode', () => {
+    const dir = freshProject();
+    try {
+      const r = check(dir);
+      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+      expect(r.status).toBe(0);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // The same project BEFORE `bun install` — no @types anywhere. The host
+  // floor is what carries it, and it deactivates the moment the real
+  // types arrive (the case above), so the two gates hold both sides of
+  // that switch.
+  // The floor stops the moment the real types arrive — asserted, because
+  // an index signature that survived an install would make every typo on
+  // `import.meta` legal forever. The read is annotated so the line is
+  // gated ON: what this pins is the FLOOR yielding (a widened ImportMeta
+  // would answer `any` and report nothing even on a checked line), not
+  // where the gate reaches — an ambient global's type does not open the
+  // lines that merely mention it (see scopes.js).
+  test('the floor yields to @types/bun rather than widening it', () => {
+    const dir = freshProject();                       // withTypes: the real declaration governs
+    try {
+      fs.writeFileSync(path.join(dir, 'app.rip'), 'x: unknown = import.meta.nosuchfield\nconsole.log x\n');
+      expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toEqual([2339]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // Bun's builtin MODULES ride the floor too: `import { Database } from
+  // 'bun:sqlite'` is ordinary Bun code, and without installed host types
+  // the import is a cannot-find DEFECT on a module that demonstrably
+  // exists at runtime. One wildcard shorthand (`declare module "bun:*"`)
+  // floors them as `any`, with the floor's own gates: installed types
+  // outrank it, and strict refuses it — the defect returns until the
+  // project declares real host types.
+  test('bun:* builtin modules ride the host floor: `any` under gradual, the defect under strict', () => {
+    const dir = freshProject({ withTypes: false });
+    try {
+      fs.writeFileSync(path.join(dir, 'app.rip'), "import { Database } from 'bun:sqlite'\ndb = new Database(':memory:')\nconsole.log db\n");
+      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'fresh', rip: { strict: true } }));
+      expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toContain(2307);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  test('the same project is quiet before anything is installed', () => {
+    const dir = freshProject({ withTypes: false });
+    try {
+      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // An import TypeScript cannot type is `any` — it says so itself, and
+  // says it TWICE: TS7016 for a .js module with no declarations, which
+  // gradual has always suppressed, and TS2580 for a well-known @types
+  // package that is not installed, which it did not. Same situation, same
+  // posture. The binding is `any` either way, so nothing downstream
+  // changes; what changes is whether the advisory is shouted at a project
+  // that did not ask for it.
+  test('a missing @types package is advisory in gradual mode, an error under strict', () => {
+    const files = { 'app.rip': "import { readFileSync } from 'fs'\nconsole.log readFileSync('/x')\n" };
+    const gradual = workspace(files);
+    const strict = workspace(files, { strict: true });
+    try {
+      expect(JSON.parse(check(gradual, ['--json']).stdout)).toEqual([]);
+      // Strict still says it, so the suppression is a MODE, not a deletion.
+      expect(JSON.parse(check(strict, ['--json']).stdout).map((d) => d.code)).toEqual([2580]);
+    } finally {
+      fs.rmSync(gradual, { recursive: true, force: true });
+      fs.rmSync(strict, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  // `noImplicitThis` rides the strict umbrella, and TS2683's own message
+  // is "'this' implicitly has type 'any'" — the same class the 7xxx family
+  // covers, numbered outside it. `@req` in a handler is a receiver the
+  // author never annotated and has no obvious spelling to annotate, so
+  // demanding one is annotation pressure by another route.
+  test("an unannotated `this` is quiet in gradual mode, an error under strict", () => {
+    const files = { 'app.rip': 'handler = -> @req\nconsole.log handler\n' };
+    const gradual = workspace(files);
+    const strict = workspace(files, { strict: true });
+    try {
+      expect(JSON.parse(check(gradual, ['--json']).stdout)).toEqual([]);
+      expect(JSON.parse(check(strict, ['--json']).stdout).map((d) => d.code)).toEqual([2683]);
+    } finally {
+      fs.rmSync(gradual, { recursive: true, force: true });
+      fs.rmSync(strict, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  // The line that must NOT move: a module nothing can resolve stays an
+  // error. Typos, missing dependencies, and rip's own unresolved
+  // workspace packages all live here, and TypeScript's own code is what
+  // separates them from the advisory above.
+  test('an unresolvable module is still an error in gradual mode', () => {
+    const dir = workspace({ 'app.rip': "import { x } from 'totally-not-a-package'\nconsole.log x\n" });
+    try {
+      expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toEqual([2307]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
   test('the polarity inverts with the configs — strict root, loose nested', () => {
     const dir = monorepo({ rootStrict: true, nestedStrict: false });
     try {

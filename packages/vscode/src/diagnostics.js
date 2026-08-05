@@ -13,6 +13,8 @@ import {
   offsetToPosition, positionToOffset, generatedSpanToSource,
   SUPPRESSED_TS_CODES, diagnosticTagsFor,
 } from './translate.js';
+import { ALWAYS_REPORTED_CODES } from './scopes.js';
+import { declaredButUninstalled } from './mirror.js';
 
 // A CompileError → { reason, start, end } in SOURCE offsets: the first
 // message line with its `path:line:col:` prefix stripped (the excerpt
@@ -46,10 +48,27 @@ export function compileErrorInfo(err, textLength) {
 // related location itself rather than routing it through here.
 export function mapTsDiagnostic(good, d) {
   if (!good.strict && SUPPRESSED_TS_CODES.has(d.code)) return null;
+  // Installation pressure: a bare import the governing manifest declares
+  // but nobody installed. Gradual holds it (the CLI counts it with the
+  // install remedy); strict publishes. `good.dir` is the source file's
+  // own dir — absent (older callers) leaves the defect published.
+  if (!good.strict && d.code === 2307 && good.dir) {
+    const spec = /Cannot find module '([^']+)'/.exec(d.message)?.[1];
+    if (spec && declaredButUninstalled(spec, good.dir)) return null;
+  }
   const s = positionToOffset(good.genLineStarts, good.code.length, d.range.start);
   const e = positionToOffset(good.genLineStarts, good.code.length, d.range.end);
   const span = generatedSpanToSource(good.mappings, s, e);
   if (!span) return null;
+  // The DECLARATION-SCOPE gate. Judged on the MAPPED source position, so it
+  // must follow the mapping: the question is which .rip declaration the
+  // author would see this on, not where it landed in the face. A strict
+  // project is ungated, and a name/module that does not resolve reports
+  // either way — see scopes.js.
+  if (!good.strict && good.checkedLines && !ALWAYS_REPORTED_CODES.has(d.code)) {
+    const line = offsetToPosition(good.srcLineStarts, span[0]).line;
+    if (!good.checkedLines[line]) return null;
+  }
   // tsgo supplies Unnecessary/Deprecated tags itself over the pull slot;
   // diagnosticTagsFor is the fallback for any item tsgo leaves untagged
   // (a batch `tsc` run carries none), so VS Code renders the unused/
@@ -154,6 +173,27 @@ export function ripDirectiveLines(good) {
   return good._directiveLines;
 }
 
+// Is `a` within `b`?
+const inside = (a, b) =>
+  (a.start.line > b.start.line || (a.start.line === b.start.line && a.start.character >= b.start.character)) &&
+  (a.end.line < b.end.line || (a.end.line === b.end.line && a.end.character <= b.end.character));
+
+// One claim can also land on spans that NEST rather than match: a component
+// member's type is rendered twice (the class declare and the companion
+// interface), and the two renderings mark different extents of the same
+// annotation — `: T` against `T`. Same code, severity and message over a
+// containing range is the same claim, so the narrowest span keeps it and
+// exact ties go to the first.
+//
+// This runs LAST, after directives have been charged. A directive is
+// charged by a diagnostic STARTING on its governed line, so collapsing
+// first could retire the only row that starts there and leave the
+// directive reading unused.
+const collapseNested = (rows) => rows.filter((m, i) => !rows.some((o, j) => j !== i
+  && o.code === m.code && o.severity === m.severity && o.message === m.message
+  && inside(o.range, m.range)
+  && (!inside(m.range, o.range) || j < i)));
+
 export function applyRipDirectives(good, mapped) {
   // A lowering can manifest one source error at several face positions.
   // Once mapping collapses them to the same code, severity, range, and
@@ -166,7 +206,7 @@ export function applyRipDirectives(good, mapped) {
     return true;
   });
   const directives = ripDirectiveLines(good);
-  if (directives.length === 0) return mapped;
+  if (directives.length === 0) return collapseNested(mapped);
   const is2578 = (m) => String(m.code) === '2578';
   const used = new Set();
   const survivors = [];
@@ -195,7 +235,7 @@ export function applyRipDirectives(good, mapped) {
   // directive is genuinely used — an ERROR landed on its governed line (a
   // mis-governed multi-line face directive whose leaked error we suppressed
   // over rip positions). Otherwise it survives: unused stays loud.
-  return survivors.filter((m) => !(is2578(m) && used.has(m.range.start.line)));
+  return collapseNested(survivors.filter((m) => !(is2578(m) && used.has(m.range.start.line))));
 }
 
 // A rip.noCheck glob → anchored regex, matched against a project-root-

@@ -1,0 +1,53 @@
+# Every family gradual HOLDS, one section each. This file publishes NOTHING
+# in gradual mode — no directives, no exemptions — so it is a live canary:
+# `rip check` over the tree goes red the day any hold regresses. Every
+# section still publishes under strict (gradual-pins.json pins that side),
+# so a family that goes quiet in BOTH modes is a red row, never a pass.
+
+# hold, declared-but-uninstalled: declared by this directory's package.json,
+# never installed (strict: TS2307)
+import { pad } from '@rip-audit/absent'
+
+# floor, host builtins: bun:* rides the any floor (strict: TS2307)
+import { Database } from 'bun:sqlite'
+
+console.log(pad, Database)
+
+# code suppression, implicit-any: an unannotated parameter (strict: TS7006)
+def double(value)
+  value * 2
+console.log(double(21))
+
+# code suppression, missing-types: a known-typings global with no
+# declarations installed (strict: TS2580)
+console.log(Buffer.from('abc'))
+
+# gate, inference-only: a misuse no annotation reaches (strict: TS2339)
+answer = 42
+console.log(answer.length)
+
+# gate, scaffolding: a bang-def's face `: void` is emitter output, not an
+# annotation — it opens nothing (strict: TS7006 on the parameter; the body
+# types through `any` even there)
+def ping!(payload)
+  console.log(payload.missingMember)
+
+# posture, null family: null into an annotated string — the line IS reached
+# in gradual; strictNullChecks holds it (strict: TS2322)
+greeting: string = null
+console.log(greeting)
+
+# posture, catch bindings: a member read on an unannotated catch inside a
+# reached scope; useUnknownInCatchVariables holds it (strict: TS18046)
+export label: (job: () => void) => void = (job) ->
+  try
+    job()
+  catch err
+    console.log(err.message)
+
+# posture, object-literal this: a method reading `@` members; the loose base
+# types `this` as `any` (strict: TS2339 on the member and TS7023 on the
+# circular return)
+counter =
+  bump: -> (@count or 0) + 1
+console.log(counter.bump())

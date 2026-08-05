@@ -1,0 +1,26 @@
+# published.rip — what gradual PUBLISHES, each diagnostic pinned in
+# gradual-pins.json (the lane strips the pragma before measuring).
+# @ts-nocheck
+
+# always-reported, unresolvable module: nothing declares or resolves it (TS2307)
+import { missing } from './does-not-exist.rip'
+
+# always-reported, free name (TS2304)
+console.log(mysteryValue)
+
+# always-reported, misspelling with a near name (TS2552)
+oops = fetchh('https://example.com')
+console.log(oops)
+
+# reach, annotation: a wrong-typed annotated binding (TS2322)
+port: number = 'eighty'
+
+# reach, flow: the annotated type moves along assignment (TS2339)
+alias = port
+console.log(alias.length)
+
+# reach, compiler-typed: a model scope filtering an undeclared column (TS2353)
+Coupon = schema :model
+  code! string
+  @scope :active, -> @where(active: true)
+console.log(Coupon)

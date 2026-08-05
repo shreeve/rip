@@ -2531,11 +2531,13 @@ type "cross-file relation target degrades to unknown", '''
   export {};
   '''
 
-# A derived schema (`Name = Base.pick(...)`) has no `schema` body, so nothing
-# declares a bare `Name` type — yet projections are exactly where one is needed
-# (annotate `u: UserView`, re-export under a clean name). Emit a bare type that
-# reads the algebra's result back off the value's own `parse`, reusing the
-# Schema<Out, In> interface inference instead of re-deriving Pick/Omit here.
+# A derived schema (`Name = Base.pick(...)`) has no `schema` body, and
+# projections are exactly where a bare `Name` type is needed — to annotate
+# `u: UserView`, or to re-export under a clean name. The companion is the
+# RESOLVED shape, projected by the same folder the browser bundler runs, so
+# it reads as a shape rather than as a `Pick<…>` the reader has to apply.
+# The declaration road states the const too: it has no algebra call to infer
+# from, and a shipped type name whose value never declared is unusable.
 
 type "derived schema emits a bare projection type", '''
     User = schema :model
@@ -2606,6 +2608,8 @@ type "derived schema emits a bare projection type", '''
   type UserCreate = { firstName: string; lastName: string };
   type User = UserData & { save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
   declare const User: ModelSchema<User, UserData, number, UserCreate>;
+  type UserView = { id: number; firstName: string };
+  declare const UserView: Schema<UserView, UserView>;
   export {};
   '''
 
@@ -2681,6 +2685,8 @@ type "chained + exported derived schema emits one bare type each", '''
   type UserCreate = { firstName: string; lastName: string };
   type User = UserData & { save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
   declare const User: ModelSchema<User, UserData, number, UserCreate>;
+  export type UserView = { id: number; firstName: string };
+  export declare const UserView: Schema<UserView, UserView>;
   export {};
   '''
 

@@ -237,7 +237,7 @@ makeSourceFamily = (fetchFn, staleTime) ->
     prune normalized
     cell
 
-  family = (key) -> cellFor(key).read()
+  family: any = (key) -> cellFor(key).read()
   family[SOURCE_FAMILY] = true
   family.cellFor = cellFor
   family.reset = ->
@@ -260,11 +260,11 @@ export def source<T extends NonNullSourceValue, A extends SourceArgs>(opts: Sour
     if opts.kind is 'singleton'
       if opts.fetch.length > 1
         throw TypeError.new "Rip App: singleton source fetch accepts at most one AbortSignal parameter"
-      return makeSourceCell opts.fetch, staleTime
+      return makeSourceCell(opts.fetch, staleTime) as SourceDeclaration<T, A>
     if opts.fetch.length < 1 or opts.fetch.length > 2
       throw TypeError.new "Rip App: keyed source fetch requires a key parameter and accepts one optional AbortSignal parameter"
-    return makeSourceFamily opts.fetch, staleTime
+    return makeSourceFamily(opts.fetch, staleTime) as SourceDeclaration<T, A>
 
   if opts.fetch.length > 1
     throw TypeError.new 'Rip App: inferred source fetch accepts no parameters for a singleton or one key parameter for a keyed family'
-  if opts.fetch.length is 1 then makeSourceFamily(opts.fetch, staleTime) else makeSourceCell(opts.fetch, staleTime)
+  if opts.fetch.length is 1 then makeSourceFamily(opts.fetch, staleTime) as SourceDeclaration<T, A> else makeSourceCell(opts.fetch, staleTime) as SourceDeclaration<T, A>

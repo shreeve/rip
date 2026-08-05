@@ -169,6 +169,17 @@ const CLEAN_ROWS = [
     // the algebra generics: a derived schema types through TS's own
     // Pick/Omit (the face needs no emission for it)
  'Base = schema :shape\n  a! string\n  b? integer\nView = Base.omit("b")\nw = View.parse({})\ns: string = w.a\ns = "z"',
+    // A derivation's COMPANION and the type its algebra call yields are
+    // two independent computations of one shape — the folder projects
+    // the field set, the intrinsic `pick`/`omit` signatures apply TS's
+    // own Pick/Omit. Assigning each to the other is what makes them one
+    // claim: were the folder to drift from `projectableFields`, a
+    // companion naming a field the algebra does not (or missing one it
+    // does) fails here rather than shipping a wrong shape. The model
+    // arm carries the implicit columns — id and @timestamps — which is
+    // where the two field sets are computed most differently.
+ 'Base = schema :shape\n  a! string\n  b? integer\nView = Base.omit("b")\nv: View = View.parse({})\nechoed = View.parse({})\nechoed = v\ns: string = v.a\ns = "z"',
+ 'User = schema :model\n  name! string\n  @timestamps\nView = User.pick("id", "name", "createdAt")\nv: View = View.parse({})\nechoed = View.parse({})\nechoed = v\ni: number = v.id\nn: string = v.name\nn = "z"\ni = 2',
     //  the component member model — every member kind's declare,
     // methods/hooks, the ctor and _init props annotations, the
     // companion interface used as an annotation type
@@ -184,6 +195,12 @@ const CLEAN_ROWS = [
     // the face carries NO duplicate `children` entries (was TS2300 ×4
     // + TS2717 ×2 on this five-line legal component)
  'Child = component\n  @children: string\n  render\n    div "x"\nHost = component\n  msg := "hi"\n  render\n    section\n      Child children: msg\nconsole.log Child, Host',
+    // A bind into a CHAIN notifies the root container with
+    // `.touch?.()` — a nested write changes no container identity. The
+    // member is annotated so the container type is real and the call
+    // meets a checked receiver; an inferred `any` would type-check
+    // whatever the face spelled and prove nothing.
+ 'Form = component\n  data: { first: string } := { first: "" }\n  render\n    input type: "text", value <=> data.first\nconsole.log Form',
 ];
 
 // The clean rows check as ONE tsc program: one file per row,

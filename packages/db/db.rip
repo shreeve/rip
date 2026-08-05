@@ -1036,7 +1036,7 @@ export def createMcpServer(deps)
       output.warning = warning if warning
       output
     catch err
-      { success: false, error, errorType: err.constructor?.name or 'Error' }
+      { success: false, error: err.message or String(err), errorType: err.constructor?.name or 'Error' }
 
   listTables = ->
     try
@@ -1052,7 +1052,7 @@ export def createMcpServer(deps)
       tables = rowsToObjects result.columns, result.data
       { success: true, tables, tableCount: (tables.filter (t) -> t.type is 'table').length, viewCount: (tables.filter (t) -> t.type is 'view').length }
     catch err
-      { success: false, error, errorType: err.constructor?.name or 'Error' }
+      { success: false, error: err.message or String(err), errorType: err.constructor?.name or 'Error' }
 
   listColumns = (params) ->
     table = params?.table
@@ -1082,7 +1082,7 @@ export def createMcpServer(deps)
       columns = rowsToObjects result.columns, result.data
       { success: true, table, columns, columnCount: columns.length }
     catch err
-      { success: false, error, errorType: err.constructor?.name or 'Error' }
+      { success: false, error: err.message or String(err), errorType: err.constructor?.name or 'Error' }
 
   respond = (id, result) -> JSON.stringify { jsonrpc: '2.0', id, result }
   respondError = (id, code, message) -> JSON.stringify { jsonrpc: '2.0', id, error: { code, message } }

@@ -26,7 +26,7 @@
 // evolving-`let` inference — an unannotated hoisted `let x; x = 42`
 // reads as number at use sites, which is exactly what hover and the
 // real error classes (TS2322/TS2339 etc.) need.
-export const SUPPRESSED_TS_CODES = new Set([
+export const IMPLICIT_ANY_CODES = new Set([
   7005, // variable implicitly any
   7006, // parameter implicitly any
   7008, // member implicitly any
@@ -36,6 +36,7 @@ export const SUPPRESSED_TS_CODES = new Set([
   7015, // element implicitly any (index expression)
   7016, // imported .js module has no declaration file — implicitly any
   7017, // element implicitly any (type has no index signature)
+  7018, // object literal's property implicitly any
   7019, // rest parameter implicitly any[]
   7022, // implicitly any from own-initializer reference
   7023, // implicitly any return type from self-reference
@@ -45,9 +46,45 @@ export const SUPPRESSED_TS_CODES = new Set([
   7043, // variable implicitly any — inferable suggestion
   7044, // parameter implicitly any — inferable suggestion
   7045, // member implicitly any — inferable suggestion
+  7052, // element implicitly any (no index signature — the `did you mean` phrasing)
   7053, // element implicitly any (no index signature)
   7057, // `yield` implicitly any (generator lacking return-type annotation)
+  // Numbered outside the family it belongs to. TS2683's own message is
+  // "'this' implicitly has type 'any' because it does not have a type
+  // annotation" — the same diagnostic class, from `noImplicitThis` rather
+  // than `noImplicitAny`. A receiver the author never annotated, and in
+  // rip often one they have no spelling to annotate: `@req` inside a
+  // handler.
+  2683, // `this` implicitly any
 ]);
+
+// The MISSING-@TYPES advisories. TypeScript raises these when a
+// well-known types package is absent — `import … from 'fs'` with no
+// @types/node — and they are advice, not defects: the binding is already
+// `any`, everything downstream type-checks against `any`, and the
+// program is fully usable. That is the same situation as 7016 above
+// ("imported .js module has no declaration file — implicitly any"),
+// which this list has always suppressed, so the two belong together.
+//
+// TS2307 ("Cannot find module") is deliberately ABSENT. TypeScript
+// itself draws the line: 'fs' gets the advisory below, while a typo, a
+// missing dependency, and an unresolved workspace `.rip` package all get
+// 2307. Suppressing that would hide the errors this project most needs
+// to see, including its own module-resolution gaps.
+// jQuery's pair (2581/2592) is deliberately absent — nothing reaches for
+// it from rip, and carrying it would state an opinion about a library
+// this toolchain has no relationship with. Someone who does use it sees
+// the advisory, which is the honest outcome for an unlisted case.
+export const MISSING_TYPES_CODES = new Set([
+  2580, // needs @types/node
+  2582, // needs a test runner's types — bun's `describe`/`it` land here
+  2591, // needs @types/node, AND `node` in the tsconfig `types` field
+  2593, // needs a test runner's types, same
+]);
+
+// What a GRADUAL file never publishes: both families above. A strict
+// file publishes everything.
+export const SUPPRESSED_TS_CODES = new Set([...IMPLICIT_ANY_CODES, ...MISSING_TYPES_CODES]);
 
 // TypeScript classifies diagnostics for rendering — reportsUnnecessary
 // (fade the span) and reportsDeprecated (strike it through) — and tsgo

@@ -29,11 +29,11 @@ const SRC = [
   '',                                                                // line 4
   'instant = new Ticket!',                                           // line 5  bang at col 20
   'numbered = new Ticket!(7)',                                       // line 6  bang at col 21
-  'syncFn = -> 42',                                                  // line 7
+  'syncFn: () => number = -> 42',                                    // line 7 annotated: types line 8's read
   'got = syncFn!',                                                   // line 8  bang at col 12
   'fetchReal = -> Promise.resolve(7)',                               // line 9
   'good = fetchReal!',                                               // line 10 a real await — silent
-  'plain = await 5',                                                 // line 11 author-spelled, cols 8-13
+  'plain: number = await 5',                                         // line 11 author-spelled, cols 16-21
   'console.log(instant.serial, numbered.serial, got, good, plain)',  // line 12
   '',
 ].join('\n');
@@ -60,7 +60,7 @@ describeExtended('hint positions — the await hint lands on the operator the au
       expect(spanOf(6), 'new Ticket!(7) — the bang').toEqual([21, 6, 22]);
       expect(spanOf(8), 'syncFn! — the bang').toEqual([12, 8, 13]);
       // The author-spelled control: the keyword itself, never bang-hunted.
-      expect(spanOf(11), 'await 5 — the keyword').toEqual([8, 11, 13]);
+      expect(spanOf(11), 'await 5 — the keyword').toEqual([16, 11, 21]);
       // The discriminating silence: awaiting a real Promise draws nothing.
       expect(hints.some((d) => d.range.start.line === 10), 'fetchReal! stays silent').toBe(false);
     } finally {

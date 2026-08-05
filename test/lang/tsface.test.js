@@ -55,6 +55,7 @@ const REGION_SHAPES = [
   /^satisfies \S/u,                                       // a schema field default's value enforcement: `v satisfies T`
   /^<\S/su,                                               // a type ARGUMENT list: an annotated reactive's `__state<T>(v)`, and a generic `def`'s own `<T>` parameters
   /^!$/u,                                                 // a component prop assertion's bare `!` (state fallbacks like `props.label!`)
+  /^\?$/u,                                                // JS arity: the `?` on a bare unannotated trailing param
   /^[()]$/u,                                              // arrow-param / cast parens
   /^as\s+\S/u,                                            // the cast's `as T` spelling
   /^this: \S/u,                                           // schema callable `this` param 
@@ -358,7 +359,7 @@ describe('TS-face emission pins', () => {
   test('return types: def, arrow, parameterless def; async wraps as Promise<T> (TS1064)', () => {
     expect(ts('def f(a: number): string\n  String(a)\n').code)
       .toBe('function f(a: number): string {\n  return String(a);\n}' + MARKER);
-    expect(ts('k = (x): number => x + 1\n').code).toBe('let k = (x): number => (x + 1);' + MARKER);
+    expect(ts('k = (x): number => x + 1\n').code).toBe('let k = (x?): number => (x + 1);' + MARKER);
     expect(ts('def go(a: number): number\n  await a\n').code)
       .toBe('async function go(a: number): Promise<number> {\n  return await a;\n}' + MARKER);
     // A user-spelled Promise passes through unwrapped.
@@ -367,13 +368,13 @@ describe('TS-face emission pins', () => {
   });
 
   test('void definitions annotate `: void` (async: Promise<void>) under the voidMarker', () => {
-    expect(ts('def save!(x)\n  x\n').code).toBe('function save(x): void {\n  x;\n  return;\n}' + MARKER);
+    expect(ts('def save!(x)\n  x\n').code).toBe('function save(x?): void {\n  x;\n  return;\n}' + MARKER);
     // The binding declares in place, so the annotation sits on an
     // INITIALIZED declaration — the span a semantic token and a hover
     // are both read at carries the function value.
-    expect(ts('tick! = (x) =>\n  x\n').code).toBe('let tick = (x): void => {\n  x;\n  return;\n};' + MARKER);
+    expect(ts('tick! = (x) =>\n  x\n').code).toBe('let tick = (x?): void => {\n  x;\n  return;\n};' + MARKER);
     expect(ts('def flush!(x)\n  await x\n').code)
-      .toBe('async function flush(x): Promise<void> {\n  await x;\n  return;\n}' + MARKER);
+      .toBe('async function flush(x?): Promise<void> {\n  await x;\n  return;\n}' + MARKER);
   });
 
   test('structured aliases: one-line, generic, block union, block object, wrapped single', () => {
@@ -431,12 +432,72 @@ describe('TS-face emission pins', () => {
 
   test('overload signatures print adjacent to their implementation (TS2391)', () => {
     expect(ts('def f(a: number): string\ndef f(a: string): string\ndef f(a)\n  String(a)\n').code)
-      .toBe('function f(a: number): string;\nfunction f(a: string): string;\nfunction f(a) {\n  return String(a);\n}' + MARKER);
+      .toBe('function f(a: number): string;\nfunction f(a: string): string;\nfunction f(a?) {\n  return String(a);\n}' + MARKER);
   });
 
   test('typed class fields, methods, and void methods', () => {
     expect(ts('class A\n  x: number = 5\n  y: string\n  m: (v: number): number -> v\n  save!: (v) ->\n    v\n').code)
-      .toBe('class A {\n  x: number = 5;\n  y: string;\n  m(v: number): number {\n    return v;\n  }\n  save(v): void {\n    v;\n    return;\n  }\n}' + MARKER);
+      .toBe('class A {\n  x: number = 5;\n  y: string;\n  m(v: number): number {\n    return v;\n  }\n  save(v?): void {\n    v;\n    return;\n  }\n}' + MARKER);
+  });
+
+  test('a field an instance METHOD assigns is declared, wherever the constructor put it', () => {
+    // A constructor that hands its field setup to a helper establishes
+    // those fields just as surely as one that inlines them. Scanning the
+    // constructor alone left them undeclared, and TypeScript reads a
+    // class's properties from its DECLARATIONS — so the assignment and
+    // every later read both published TS2339 on a class that runs
+    // correctly. This repo's own `Time` fills a dozen cached parts in
+    // `_refresh()` and drew 121 diagnostics for it.
+    const src = 'class A\n  constructor: ->\n    @refresh()\n  refresh: ->\n    @count = 1\n  read: -> @count\n';
+    const helper = ts(src);
+    expect(helper.code).toBe(
+      'class A {\n  count;\n  constructor() {\n    this.refresh();\n  }\n  refresh() {\n    return (this.count = 1);\n  }\n  read() {\n    return this.count;\n  }\n}' + MARKER);
+    // TS-only, like the promoted parameter's: a declaration in the JS
+    // twin would REDEFINE the property rather than describe it.
+    expect(stripFace(helper.code, helper.tsRegions)).toBe(js(src).code);
+
+    // One declaration per field, and the CONSTRUCTOR's annotation wins:
+    // two would read to TypeScript as duplicate identifiers.
+    expect(ts('class B\n  constructor: ->\n    @v: string = "s"\n  m: ->\n    @v = "t"\n').code)
+      .toBe('class B {\n  v: string;\n  constructor() {\n    this.v = "s";\n  }\n  m() {\n    return (this.v = "t");\n  }\n}' + MARKER);
+
+    // A STATIC method's `this` is the class, so what it assigns is not
+    // an instance property — `cache` must not declare, `seen` must.
+    expect(ts('class C\n  @make: ->\n    @cache = 1\n  m: ->\n    @seen = 2\n').code)
+      .toBe('class C {\n  seen;\n  static make() {\n    return (this.cache = 1);\n  }\n  m() {\n    return (this.seen = 2);\n  }\n}' + MARKER);
+  });
+
+  test('JS arity: a bare trailing parameter is optional — except where something else types it', () => {
+    // Calling with fewer arguments is legal in rip as in JavaScript, and
+    // `arguments.length` branching on it is idiomatic. Declaring every
+    // unannotated parameter REQUIRED made the face enforce an arity rip
+    // never promised: this repo's own `resolveUrl = (url, env) ->` drew
+    // TS2554 at each one-argument call it was written to accept.
+    expect(ts('def g(url, env)\n  url\n').code)
+      .toBe('function g(url?, env?) {\n  return url;\n}' + MARKER);
+    // A default and a rest are passed OVER — already call-site optional,
+    // and stopping at one would leave `a` demanding its argument.
+    expect(ts('f = (a, opts = {}) ->\n  a\n').code).toContain('function(a?, opts = {})');
+    expect(ts('f = (a, ...rest) ->\n  a\n').code).toContain('function(a?, ...rest)');
+    // An ANNOTATED parameter stops the scan: the author said something, and
+    // `x?` is theirs to write. It MUST stop, too — TypeScript rejects a
+    // required parameter following an optional one.
+    expect(ts('f = (a, b: number) ->\n  a\n').code).toContain('function(a, b: number)');
+    expect(ts('f = (a: number, b) ->\n  a\n').code).toContain('function(a: number, b?)');
+
+    // NOT where the parameter is already typed from elsewhere: marking a
+    // contextual `number` optional widens it to `number | undefined` and
+    // publishes TS18048 on correct code. Argument position…
+    expect(ts('xs = [1]\nm = xs.map (n) -> n * 2\n').code).toContain('xs.map(function(n) {');
+    // …and an annotated binding, which types the parameters from its target.
+    expect(ts('d: (n: number) => string = (n) => String(n)\n').code)
+      .toContain('let d: (n: number) => string = n => String(n);');
+
+    // TS-only throughout: stripping restores the bare JS spelling, including
+    // the parens a lone `x?` needs and JS mode does not write.
+    const lone = ts('f = (x) => x\n');
+    expect(lone.code).toContain('(x?) => x');
+    expect(stripFace(lone.code, lone.tsRegions)).toBe(js('f = (x) => x\n').code);
   });
 
   test('exported typed declarations annotate the const', () => {
@@ -449,7 +510,7 @@ describe('TS-face emission pins', () => {
     // explicit TYPE ARGUMENT — which checks the initializer and
     // simultaneously makes the call's return type the annotated
     // container, so a wrong value publishes once rather than twice.
-    expect(code).toContain('const count: { value: number; read(): number } = __state<number>(0);');
+    expect(code).toContain('const count: { value: number; read(): number; touch(): void } = __state<number>(0);');
     expect(code).toContain('const total: { readonly value: number; read(): number } = __computed<number>(() => (count.value * 2));');
     expect(code).toContain('const ro: string = "s";');
     expect(code).toContain('const h: Function = __effect(() => { console.log(count.value); });');
@@ -706,7 +767,7 @@ describe('TS directive comments', () => {
   test('a directive above an overload signature follows it to the printed overload row', () => {
     pin(
  'def o(a: number): string\n# @ts-expect-error\ndef o(a: string): string\ndef o(a)\n  String(a)\n',
- 'function o(a: number): string;\n// @ts-expect-error\nfunction o(a: string): string;\nfunction o(a) {\n  return String(a);\n}',
+ 'function o(a: number): string;\n// @ts-expect-error\nfunction o(a: string): string;\nfunction o(a?) {\n  return String(a);\n}',
     );
   });
 
@@ -886,12 +947,12 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
 
   test('every member kind declares: state/prop containers, computed readonly, readonly/plain/accept raw', () => {
     const code = ts(FIXTURE).code;
-    expect(code).toContain('declare count: { value: number; read(): number };');       // unannotated state: literal initializers infer syntactically 
-    expect(code).toContain('declare label: { value: any; read(): any };');          // bare prop
-    expect(code).toContain('declare opt: { value: any; read(): any };');            // optional bare prop
-    expect(code).toContain('declare max: { value: number | undefined; read(): number | undefined };'); // @max?: number — the value may be absent
-    expect(code).toContain('declare title: { value: string; read(): string };');       // required typed prop
-    expect(code).toContain('declare step: { value: number; read(): number };');        // typed defaulted prop
+    expect(code).toContain('declare count: { value: number; read(): number; touch(): void };');       // unannotated state: literal initializers infer syntactically 
+    expect(code).toContain('declare label: { value: any; read(): any; touch?(): void };');          // bare prop
+    expect(code).toContain('declare opt: { value: any; read(): any; touch?(): void };');            // optional bare prop
+    expect(code).toContain('declare max: { value: number | undefined; read(): number | undefined; touch?(): void };'); // @max?: number — the value may be absent
+    expect(code).toContain('declare title: { value: string; read(): string; touch?(): void };');       // required typed prop
+    expect(code).toContain('declare step: { value: number; read(): number; touch?(): void };');        // typed defaulted prop
     expect(code).toContain('declare total: { readonly value: number; read(): number };'); // computed
     expect(code).toContain('declare readonly limit: number;'); // =! members declare readonly                   // readonly: the raw value
     expect(code).toContain('declare note: string;');                   // plain field: literal initializer infers 
@@ -909,13 +970,13 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
 
   test('the props ctor: optional entries with container unions and bind slots; the REQUIRED prop is an arm', () => {
     const code = ts(FIXTURE).code;
-    expect(code).toContain('max?: number | { value: number; read(): number }');
-    expect(code).toContain('__bind_max__?: { value: number; read(): number }');
+    expect(code).toContain('max?: number | { value: number; read(): number; touch?(): void }');
+    expect(code).toContain('__bind_max__?: { value: number; read(): number; touch?(): void }');
     expect(code).toContain('label?: any');
     expect(code).toContain('children?: any');
     // @title: string (annotated, no marker, no default) is REQUIRED —
     // passable as the plain slot or the `<=>` container slot.
-    expect(code).toContain('& ({ title: string | { value: string; read(): string } } | { __bind_title__: { value: string; read(): string } })');
+    expect(code).toContain('& ({ title: string | { value: string; read(): string; touch?(): void } } | { __bind_title__: { value: string; read(): string; touch?(): void } })');
     // A required prop makes the ctor's props param required.
     expect(code).toContain('constructor(props: {');
     expect(code).toContain(') { super(props); }');
@@ -960,7 +1021,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
 
   test('extends: the tag attribute surface + string index in the props type, the rest declare', () => {
     const code = ts('Deck = component extends section\n  name := "n"\n  render\n    section.deck\n      = name\n').code;
-    expect(code).toContain('declare rest: { value: Record<string, any>; read(): Record<string, any> };');
+    expect(code).toContain('declare rest: { value: Record<string, any>; read(): Record<string, any>; touch(): void };');
     // Intrinsic attrs type through the tag's DOM interface with an
     // extends-Record guard; camelCased DOM twins get
     // their own entries (tabindex/tabIndex).
@@ -1035,10 +1096,10 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     // The declared prop's entry (+ its bind slot and required arm)
     // carries the name; the projection-channel fallback suppresses —
     // a duplicate key is TS2300 on every artifact.
-    expect(ctorLine).toContain('children?: string | { value: string; read(): string }');
+    expect(ctorLine).toContain('children?: string | { value: string; read(): string; touch?(): void }');
     expect(ctorLine).not.toContain('children?: any');
     expect(faced.code.split('\n').filter((l) => l.includes('declare children')).length).toBe(1);
-    expect(faced.code).toContain('declare children: { value: string; read(): string };');
+    expect(faced.code).toContain('declare children: { value: string; read(): string; touch?(): void };');
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
   });
 
@@ -1070,7 +1131,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     const src = 'Outer = component\n  inner = component\n    n := 1\n  render\n    div "x"\n';
     const code = ts(src).code;
     expect(code).toContain('declare inner: any;');
-    expect(code).toContain('declare n: { value: number; read(): number };');
+    expect(code).toContain('declare n: { value: number; read(): number; touch(): void };');
     expect(code).not.toContain('interface inner');
   });
 });
@@ -1288,5 +1349,34 @@ describe('soak prototype access', () => {
   test('the annotated soak write rejects with the fix named', () => {
     expect(() => ts('String?::cap: () => string = -> "x"\n'))
       .toThrow(/soak form cannot carry the annotation/);
+  });
+});
+
+// A top-level `globalThis.NAME ??= expr` DECLARES the global (the
+// spelling says "install unless someone already did" — DSL vocabulary,
+// stamp's sh/ok/run). The type rides a module-level alias because inside
+// `declare global` the bare name resolves to the global being declared
+// (TS2502, driven against real tsc). Plain `=` and non-top-level `??=`
+// deliberately declare nothing: overwrites (fetch mocks) and lifecycle
+// installs (an app's guarded __ripApp, deleted on destroy) are not
+// vocabulary.
+describe('globalThis ??= declares the global', () => {
+  test('top-level ??= emits the declare-global block, typed through the alias', () => {
+    const src = 'sh = (cmd: string): string -> cmd\nglobalThis.sh ??= sh\nexport ping = 1\n';
+    const r = ts(src);
+    expect(r.code).toContain('type __ripGlobal_sh = typeof sh;');
+    expect(r.code).toContain('declare global {\n  var sh: __ripGlobal_sh;\n}');
+    expect(r.globalDecls).toEqual(['sh']);
+    expect(stripFace(r.code, r.tsRegions)).toBe(js(src).code);
+  });
+
+  test('non-identifier initializers declare `any`; `=` and nested `??=` declare nothing', () => {
+    const src = 'globalThis.seed ??= null\nglobalThis.late = 1\nf = -> globalThis.inner ??= 2\nconsole.log f\n';
+    const r = ts(src);
+    expect(r.code).toContain('var seed: any;');
+    expect(r.code).not.toContain('var late');
+    expect(r.code).not.toContain('var inner');
+    expect(r.globalDecls).toEqual(['seed']);
+    expect(stripFace(r.code, r.tsRegions)).toBe(js(src).code);
   });
 });

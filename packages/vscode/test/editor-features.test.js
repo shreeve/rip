@@ -136,7 +136,10 @@ async function inWorkspace(files, fn) {
     const init = await client.request('initialize', {
       processId: process.pid,
       rootUri: 'file://' + ws,
-      capabilities: { workspace: { configuration: true } },
+      // linkSupport mirrors VS Code: a definition may answer LocationLink,
+      // and the specifier-origin test below depends on it. Identifier
+      // definitions still answer plain locations either way.
+      capabilities: { workspace: { configuration: true }, textDocument: { definition: { linkSupport: true } } },
     });
     api.capabilities = init.capabilities;
     client.notify('initialized', {});
@@ -415,7 +418,46 @@ describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
     });
   }, 30000);
 
-  test('a mirror corrupted AFTER the face warmed stops answering: results drop, rename refuses (byte-verification on every ask)', async () => {
+  // Cmd-hover underlines what the definition answer names as its origin.
+  // Left to the editor's word pattern, a specifier like './util.rip'
+  // underlines one path segment at a time (words break at '/', '-', '.');
+  // TypeScript underlines the whole path. The answer is a LocationLink
+  // whose originSelectionRange spans the whole string literal, quotes
+  // included — what TypeScript underlines.
+  test('definition from inside an import specifier names the whole path as its origin', async () => {
+    await inWorkspace({ 'util.rip': UTIL }, async (api) => {
+      await api.open('app.rip', 'import { answer } from "./util.rip"\nconsole.log answer\n');
+      const defs = await api.definition('app.rip', 0, 28); // inside 'util' — one word of the path
+      expect(defs.length).toBeGreaterThanOrEqual(1);
+      expect(defs[0].targetUri).toBe(api.uriOf('util.rip'));
+      // Quotes included — TypeScript underlines the whole string literal.
+      expect(defs[0].originSelectionRange).toEqual({
+        start: { line: 0, character: 23 }, end: { line: 0, character: 35 },
+      });
+
+      // Both quote spellings answer, through different mappings: the
+      // single-quoted specifier is the face's own quote style and maps
+      // EXACTLY; the double-quoted one above has no verbatim twin (the
+      // face normalizes quotes) and rides the specifier-scoped lenient
+      // fallback. Same origin either way.
+      await api.change('app.rip', "import { answer } from './util.rip'\nconsole.log answer\n");
+      const single = await api.definition('app.rip', 0, 28);
+      expect(single.length).toBeGreaterThanOrEqual(1);
+      expect(single[0].originSelectionRange).toEqual({
+        start: { line: 0, character: 23 }, end: { line: 0, character: 35 },
+      });
+    });
+  }, 30000);
+
+  // The byte verification runs on EVERY ask, cache hits included — and a
+  // mismatch HEALS rather than stranding: the canonical face of a closed
+  // file is exactly what a re-materialization writes, so the mirror is
+  // rewritten and the ask answers. The two real drift sources are a
+  // crash-partial write and a PINNED face outliving its session (an open
+  // buffer's refresh writes its pin-annotated face for importers; pins
+  // are per-session probe answers, so the pin-less recompile can never
+  // reproduce those bytes).
+  test('a mirror drifted AFTER the face warmed heals: re-materialized and answering on the next ask', async () => {
     await inWorkspace(THREE_FILES, async (api) => {
       await api.open('app.rip', APP_AB); // pulls a, b, util into the program
       // WARM the mirror face: a cross-file definition into unopened a.rip.
@@ -423,24 +465,25 @@ describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
       expect(defs).toHaveLength(1);
       expect(defs[0].uri).toBe(api.uriOf('a.rip'));
 
-      // Corrupt the MIRROR with the source unchanged — a source-hash
-      // memo alone would keep serving the stale face; the byte
-      // verification must run on EVERY ask, cache hits included.
+      // Drift the MIRROR with the source unchanged — a source-hash memo
+      // alone would keep serving the stale face.
       const mirror = path.join(api.ws, '.rip', 'editor', 'a.rip.ts');
-      fs.writeFileSync(mirror, fs.readFileSync(mirror, 'utf8') + '\n// drifted\n');
+      const good = fs.readFileSync(mirror, 'utf8');
+      fs.writeFileSync(mirror, good + '\n// drifted\n');
 
-      // Definition and references DROP the drifted file's landings —
-      // the face no longer reproduces what tsgo answered from.
-      expect(await api.definition('app.rip', 2, 5)).toEqual([]);
+      // The next ask detects the drift, re-materializes, and answers —
+      // and the mirror on disk is the canonical face again.
+      const healed = await api.definition('app.rip', 2, 5);
+      expect(healed).toHaveLength(1);
+      expect(healed[0].uri).toBe(api.uriOf('a.rip'));
+      expect(fs.readFileSync(mirror, 'utf8')).toBe(good);
+      expect(api.logs.some((l) => /re-materialized/.test(l))).toBe(true);
+
+      // References and rename serve across the healed file too.
       await api.open('util.rip', THREE_FILES['util.rip']);
       const refs = await api.references('util.rip', 0, 10); // answer at its declaration
-      expect(refs.length).toBeGreaterThan(0);
-      expect(refs.every((r) => r.uri !== api.uriOf('a.rip'))).toBe(true);
-      expect(refs.some((r) => r.uri === api.uriOf('b.rip'))).toBe(true); // the intact sibling still serves
-
-      // A rename whose edits would land in the drifted file REFUSES
-      // WHOLE — never a partial application to the healthy files.
-      expect(api.rename('util.rip', 0, 10, 'total')).rejects.toThrow(/rename refused.*a\.rip/);
+      expect(refs.some((r) => r.uri === api.uriOf('a.rip'))).toBe(true);
+      expect(refs.some((r) => r.uri === api.uriOf('b.rip'))).toBe(true);
     });
   }, 30000);
 

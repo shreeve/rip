@@ -81,11 +81,11 @@ const ROWS = [
   // the void-marker family declares `: void`
   ['def save!(x: number)\n  x', 'declare function save(x: number): void;\nexport {};\n'],
   ['def tick!\n  1', 'declare function tick(): void;\nexport {};\n'],
-  ['save! = (x) -> x', 'declare function save(x: any): void;\nexport {};\n'],
+  ['save! = (x) -> x', 'declare function save(x?: any): void;\nexport {};\n'],
   ['export save! = (x: number) -> x', 'export declare function save(x: number): void;\n'],
   // an explicit return type on a void def wins (the rule; the marker
   // still suppresses the implicit return at runtime)
-  ['def typed!(x): Number\n  bump(x)', 'declare function typed(x: any): Number;\nexport {};\n'],
+  ['def typed!(x): Number\n  bump(x)', 'declare function typed(x?: any): Number;\nexport {};\n'],
   // bodiless overload signatures
   ['def f(a: number): string\ndef f(a)\n  a', 'declare function f(a: number): string;\nexport {};\n'],
   [
@@ -343,9 +343,9 @@ describe('component declarations: the class shape, the props surface, the extend
       '',
     ].join('\n')).declarations;
     expect(d).toContain('interface Counter {');
-    expect(d).toContain('  count: { value: number; read(): number };');
-    expect(d).toContain('  title: { value: string; read(): string };');
-    expect(d).toContain('  max: { value: number | undefined; read(): number | undefined };');
+    expect(d).toContain('  count: { value: number; read(): number; touch(): void };');
+    expect(d).toContain('  title: { value: string; read(): string; touch?(): void };');
+    expect(d).toContain('  max: { value: number | undefined; read(): number | undefined; touch?(): void };');
     expect(d).toContain('  total: { readonly value: number; read(): number };');
     expect(d).toContain('  readonly limit: number;');   // =! members surface readonly
     expect(d).toContain('  theme: any;');
@@ -356,8 +356,8 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain('  emit(name: string, detail?: any): void;');
     expect(d).toContain('declare let Counter: {');
     // The required prop's union arm and the bind slot.
-    expect(d).toContain('& ({ title: string | { value: string; read(): string } } | { __bind_title__: { value: string; read(): string } })');
-    expect(d).toContain('__bind_max__?: { value: number; read(): number }');
+    expect(d).toContain('& ({ title: string | { value: string; read(): string; touch?(): void } } | { __bind_title__: { value: string; read(): string; touch?(): void } })');
+    expect(d).toContain('__bind_max__?: { value: number; read(): number; touch?(): void }');
     // A REQUIRED prop suppresses the static mount mirror (the
     // runtime's static mount constructs with NO props — offering it
     // would be tsc-clean with a required container holding
@@ -386,14 +386,14 @@ describe('component declarations: the class shape, the props surface, the extend
     // (a plain `{ value: 5 }` would DOUBLE-WRAP). The tsc rejection
     // cells live in dts-tsc/tsface-tsc.
     const d = compile('Chip = component\n  @size: number := 1\n').declarations;
-    expect(d).toContain('size: { value: number; read(): number };');
-    expect(d).toContain('size?: number | { value: number; read(): number }');
-    expect(d).toContain('__bind_size__?: { value: number; read(): number }');
+    expect(d).toContain('size: { value: number; read(): number; touch?(): void };');
+    expect(d).toContain('size?: number | { value: number; read(): number; touch?(): void }');
+    expect(d).toContain('__bind_size__?: { value: number; read(): number; touch?(): void }');
   });
 
   test('extends: the attribute surface for the extended tag, the index signature, the rest view', () => {
     const d = compile('Btn = component extends button\n  @label := "go"\n  render\n    button\n      = @label\n').declarations;
-    expect(d).toContain('rest: { value: Record<string, any>; read(): Record<string, any> };');
+    expect(d).toContain('rest: { value: Record<string, any>; read(): Record<string, any>; touch(): void };');
     expect(d).toContain(`disabled?: HTMLElementTagNameMap["button"] extends Record<'disabled', infer T> ? T : any`); // per-tag, DOM-typed
     expect(d).toContain(`formaction?: HTMLElementTagNameMap["button"] extends Record<'formAction', infer T> ? T : any`); // camelCased DOM twin
     expect(d).toContain(`id?: HTMLElementTagNameMap["button"] extends Record<'id', infer T> ? T : any`); // global attr, DOM-typed
@@ -412,7 +412,7 @@ describe('component declarations: the class shape, the props surface, the extend
 
   test('a declared @children prop owns the key in the .d.ts too', () => {
     const d = compile('export Child = component\n  @children: string\n  render\n    div "x"\n').declarations;
-    expect(d).toContain('children: { value: string; read(): string };');
+    expect(d).toContain('children: { value: string; read(): string; touch?(): void };');
     expect(d).not.toContain('children?: any');
     // Exactly three manifestations: the interface member, the ctor's
     // optional entry, the required arm's plain slot (`__bind_children__`

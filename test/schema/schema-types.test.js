@@ -175,13 +175,48 @@ describe('schema declarations: the per-kind shapes', () => {
     expect(dts('f = (a) -> a + 1')).toBe('');
   });
 
-  test('boundaries: derived-schema bindings and function-local schemas declare nothing', () => {
-    // `View = Base.omit(...)` — the face infers it through the
-    // algebra generics; a shipped declaration would need argument
-    // re-derivation (recorded future work)
+  test('a derived binding declares its projected shape AND its const', () => {
+    // The const is the declaration road's own obligation: a .d.ts has
+    // no algebra call to infer the value from, so a type name shipped
+    // without it could be annotated but never called.
     const d = dts('Base = schema :shape\n  a! string\n  b? integer\nView = Base.omit("b")');
-    expect(d).toContain('type Base = ');
-    expect(d).not.toContain('View');
+    expect(d).toContain('type Base = { a: string; b?: number };');
+    expect(d).toContain('type View = { a: string };');
+    expect(d).toContain('declare const View: Schema<View, View>;');
+  });
+
+  test('a REBOUND name gets no companion, and the module still compiles', () => {
+    // A companion is a claim about one shape, and a name bound twice
+    // holds two. Silence is the only honest answer — and the only safe
+    // one: two claims on one type name meet the collision check and
+    // would reject a program that compiles fine with no companion at
+    // all. Each of these is legal code, so each must still compile.
+    const twice = 'A = schema :shape\n  a! string\nB = schema :shape\n  b! integer\n' +
+                  'View = A.pick("a")\nView = B.pick("b")\nconsole.log View\n';
+    expect(dts(twice)).not.toContain('type View');
+    expect(() => dts(twice)).not.toThrow();
+    // Counted over EVERY assignment, not only the foldable ones: the
+    // second write here cannot be projected, and a companion stating
+    // the first would misdescribe what the binding ends up holding.
+    const mixed = 'A = schema :shape\n  a! string\nk = "a"\n' +
+                  'View = A.pick("a")\nView = A.pick(k)\nconsole.log View\n';
+    expect(dts(mixed)).not.toContain('type View');
+    // The control: bound once, companion emitted.
+    expect(dts('A = schema :shape\n  a! string\nView = A.pick("a")'))
+      .toContain('type View = { a: string };');
+  });
+
+  test('boundaries: an unprovable projection and function-local schemas declare nothing', () => {
+    // Folding is what makes the projected shape knowable, and it
+    // refuses to guess: dynamic keys and a base that is not a same-file
+    // schema each leave the binding with the type its algebra call
+    // infers and no companion. Emitting one here would state a shape
+    // nothing computed.
+    const dynamic = dts('Base = schema :shape\n  a! string\n  b? integer\nk = "b"\nView = Base.omit(k)');
+    expect(dynamic).toContain('type Base = ');
+    expect(dynamic).not.toContain('View');
+    const foreign = dts('Base = schema :shape\n  a! string\nView = Imported.omit("b")');
+    expect(foreign).not.toContain('View');
     // function-local schemas are not module-boundary surface
     const f = dts('mk = ->\n  S = schema :shape\n    a! string\n  S');
     expect(f).toBe('');

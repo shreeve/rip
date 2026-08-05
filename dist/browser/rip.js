@@ -228,6 +228,20 @@ function collectSchemaDecls(programSexpr) {
   }
   return out;
 }
+function collectAssignedNames(programSexpr) {
+  const counts = new Map;
+  if (!isNode(programSexpr) || programSexpr[0] !== "program")
+    return counts;
+  for (const stmt of programSexpr.slice(1)) {
+    const assign = isNode(stmt) && stmt[0] === "export" && stmt.length === 2 ? stmt[1] : stmt;
+    if (!isNode(assign) || assign[0] !== "=" || assign.length !== 3)
+      continue;
+    if (typeof assign[1] !== "string")
+      continue;
+    counts.set(assign[1], (counts.get(assign[1]) ?? 0) + 1);
+  }
+  return counts;
+}
 function collectUserTypeNames(programSexpr) {
   const names = new Map;
   if (!isNode(programSexpr) || programSexpr[0] !== "program")
@@ -499,7 +513,12 @@ function buildSchemaTypeStory(programSexpr) {
   const decls = collectSchemaDecls(programSexpr);
   if (decls.length === 0)
     return null;
-  const known = new Set(decls.map((d) => d.name));
+  const derived = derivedSchemaDescriptors(programSexpr);
+  const assignedNames = collectAssignedNames(programSexpr);
+  const known = new Set([
+    ...decls.map((d) => d.name),
+    ...derived.filter((d) => assignedNames.get(d.name) === 1).map((d) => d.name)
+  ]);
   const byName = new Map(decls.map((d) => [d.name, d]));
   const userTypes = collectUserTypeNames(programSexpr);
   const withModel = decls.some((d) => d.descriptor.kind === "model");
@@ -511,23 +530,25 @@ function buildSchemaTypeStory(programSexpr) {
     }
   }
   const owners = new Map;
+  const claim = (t, whose, start, at = null) => {
+    if (SCHEMA_INTRINSIC_NAMES.has(t)) {
+      throw new SchemaTypeError(`${whose} emits the type name '${t}', which is reserved by the schema ` + `intrinsic declarations (${[...SCHEMA_INTRINSIC_NAMES].join(", ")}) — rename the schema`, start, at);
+    }
+    const prior = owners.get(t);
+    if (prior !== undefined) {
+      throw new SchemaTypeError(`${whose} emits the type name '${t}', which ${prior} already emits — ` + `every schema-emitted type name binds once per module; rename one`, start, at);
+    }
+    owners.set(t, whose);
+    const user = userTypes.get(t);
+    if (user !== undefined) {
+      throw new SchemaTypeError(`${whose} emits the type name '${t}', which collides with ${user.what} — ` + `the schema's types and the user declaration would merge or duplicate; rename one`, null, user.node);
+    }
+  };
   const stories = [];
   for (const d of decls) {
     const story = schemaTypeStory(d, byName, known);
-    for (const t of story.typeNames) {
-      if (SCHEMA_INTRINSIC_NAMES.has(t)) {
-        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which is reserved by the schema ` + `intrinsic declarations (${[...SCHEMA_INTRINSIC_NAMES].join(", ")}) — rename the schema`, d.descriptor.start ?? null);
-      }
-      const prior = owners.get(t);
-      if (prior !== undefined) {
-        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which ${prior} already emits — ` + `every schema-emitted type name binds once per module; rename one`, d.descriptor.start ?? null);
-      }
-      owners.set(t, `schema '${d.name}'`);
-      const user = userTypes.get(t);
-      if (user !== undefined) {
-        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which collides with ${user.what} — ` + `the schema's types and the user declaration would merge or duplicate; rename one`, null, user.node);
-      }
-    }
+    for (const t of story.typeNames)
+      claim(t, `schema '${d.name}'`, d.descriptor.start ?? null);
     const defaultTypes = new Map;
     d.descriptor.entries.forEach((e, i) => {
       if (e.tag !== "field" || e.constraints?.default === undefined)
@@ -537,8 +558,18 @@ function buildSchemaTypeStory(programSexpr) {
     });
     stories.push({ decl: d, ...story, defaultTypes });
   }
+  const derivations = [];
+  for (const d of derived) {
+    if (assignedNames.get(d.name) > 1)
+      continue;
+    const story = schemaTypeStory({ name: d.name, descriptor: d.descriptor }, byName, known);
+    for (const t of story.typeNames)
+      claim(t, `the derived schema '${d.name}'`, null, d.node);
+    derivations.push({ decl: d, aliasLines: story.aliasLines, constType: story.constType });
+  }
   return {
     stories,
+    derivations,
     intrinsicLines: schemaIntrinsicLines(withModel, withMixin),
     withModel
   };
@@ -2352,7 +2383,7 @@ function foldParseStrLit(node) {
     return null;
   return inner;
 }
-function foldDerivedSchemas(sexpr) {
+function walkDerivedSchemas(sexpr, onFolded) {
   if (!Array.isArray(sexpr))
     return;
   const head = foldStr(sexpr[0]);
@@ -2361,9 +2392,8 @@ function foldDerivedSchemas(sexpr) {
   for (const stmt of stmts) {
     if (!Array.isArray(stmt))
       continue;
-    let assign = stmt;
-    if (foldStr(stmt[0]) === "export" && Array.isArray(stmt[1]))
-      assign = stmt[1];
+    const exported = foldStr(stmt[0]) === "export" && Array.isArray(stmt[1]);
+    const assign = exported ? stmt[1] : stmt;
     if (foldStr(assign[0]) !== "=" || !Array.isArray(assign[2]))
       continue;
     const name = foldStr(assign[1]);
@@ -2382,9 +2412,19 @@ function foldDerivedSchemas(sexpr) {
     const folded = foldProjectionDescriptor(baseDesc, chain.ops, byName);
     if (!folded)
       continue;
-    assign[2] = ["schema", folded];
     byName.set(name, folded);
+    onFolded({ name, descriptor: folded, node: assign, exported });
   }
+}
+function foldDerivedSchemas(sexpr) {
+  walkDerivedSchemas(sexpr, ({ descriptor, node }) => {
+    node[2] = ["schema", descriptor];
+  });
+}
+function derivedSchemaDescriptors(sexpr) {
+  const out = [];
+  walkDerivedSchemas(sexpr, (d) => out.push(d));
+  return out;
 }
 
 // src/dom-vocab.js
@@ -4278,6 +4318,8 @@ var syncTypeGenericMemo = (tokens, memo) => {
     } else if (t.kind === "=") {
       memo.answers.set(memo.level, typeAliasEq(tokens, j));
     } else if (t.kind === "RESERVED" && t.value === "interface" && atStatementBoundary(tokens, j - 1)) {
+      memo.answers.set(memo.level, true);
+    } else if (t.kind === "IDENTIFIER" && t.value === "as" && tokens[j - 1] && tokens[j - 1].kind !== "." && tokens[j - 1].kind !== "?." && CAST_LHS_ENDERS.has(tokens[j - 1].kind)) {
       memo.answers.set(memo.level, true);
     }
   }
@@ -8837,7 +8879,24 @@ var renderParam = (p, isOptional) => {
   }
   return renderTarget(p, patternType(p), opt);
 };
-var renderParams = (params, isOptional) => `(${params.map((p) => renderParam(p, isOptional)).join(", ")})`;
+var jsArityOptional = (params) => {
+  const out = new Set;
+  for (let i = params.length - 1;i >= 0; i--) {
+    const p = params[i];
+    if (typeof p === "string") {
+      out.add(i);
+      continue;
+    }
+    if (Array.isArray(p) && (p[0] === "default" || p[0] === "rest"))
+      continue;
+    break;
+  }
+  return out;
+};
+var renderParams = (params, isOptional) => {
+  const arity = jsArityOptional(params);
+  return `(${params.map((p, i) => renderParam(p, (q) => isOptional(q) || arity.has(i))).join(", ")})`;
+};
 var paramTyped = (p) => isTypedWrapper(p) || isNode2(p) && (p[0] === "default" || p[0] === "rest") && isTypedWrapper(p[1]);
 
 // src/component-types.js
@@ -9068,6 +9127,8 @@ function componentTypeInfo(stores, source, node, behavior = null) {
 }
 var segmentsText = (segs) => segs.map((s) => s.text).join("");
 var containerish = (m) => m.kind === "state" || m.kind === "prop";
+var MINTED = "; touch(): void";
+var TAKEN = "; touch?(): void";
 var typeParamNames = (typeParams) => {
   if (!typeParams)
     return [];
@@ -9115,7 +9176,7 @@ var selfArgsOf = (typeParams) => {
   const names = typeParamNames(typeParams);
   return names.length === 0 ? "" : `<${names.join(", ")}>`;
 };
-var containerType = (t, ro = "") => `{ ${ro}value: ${t}; read(): ${t} }`;
+var containerType = (t, ro = "", notify = TAKEN) => `{ ${ro}value: ${t}; read(): ${t}${ro === "" ? notify : ""} }`;
 var syntacticLiteralType = (v) => {
   if (typeof v === "string") {
     if (v === "true" || v === "false")
@@ -9189,16 +9250,18 @@ var memberTypeSegments = (m, lead) => {
   const vt = t ?? "any";
   if (m.kind === "accept")
     return [{ text: `${lead}any` }];
+  const readBack = (pre, post) => t !== null ? [{ text: pre }, { text: vt, node: m.node, role: "annotation" }, { text: post }] : [{ text: `${pre}${vt}${post}` }];
   if (containerish(m)) {
     const und = t !== null && m.optional && m.kind === "prop" ? " | undefined" : "";
+    const notify = m.isPublic ? TAKEN : MINTED;
     return [
       { text: `${lead}{ value` },
       ...typed,
-      { text: `${und}; read(): ${vt}${und} }` }
+      ...readBack(`${und}; read(): `, `${und}${notify} }`)
     ];
   }
   if (m.kind === "computed" || m.kind === "gate") {
-    return [{ text: `${lead}{ readonly value` }, ...typed, { text: `; read(): ${vt} }` }];
+    return [{ text: `${lead}{ readonly value` }, ...typed, ...readBack("; read(): ", " }")];
   }
   if (t === null)
     return [{ text: `${lead}any` }];
@@ -9305,21 +9368,27 @@ function instanceTypeLines(info, selfType) {
       const declared = info.roleText(m.func, "returnType");
       const base = declared ?? (m.isVoid ? "void" : "any");
       const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push({ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};` });
+      lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};` }] });
       continue;
     }
     lines.push({
-      text: `${m.kind === "readonly" ? "readonly " : ""}${m.name}${segmentsText(memberTypeSegments(m, ": "))};`,
-      ...isBehaviorProjected(m) ? { node: m.nameNode, role: m.nameRole } : {}
+      node: m.nameNode,
+      role: m.nameRole,
+      segs: [
+        { text: m.kind === "readonly" ? "readonly " : "" },
+        { text: m.name },
+        ...memberTypeSegments(m, ": "),
+        { text: ";" }
+      ]
     });
   }
   if (!hasChildren)
-    lines.push({ text: "children?: any;" });
+    lines.push({ segs: [{ text: "children?: any;" }] });
   if (info.extendsTag !== null)
-    lines.push({ text: `rest: ${containerType("Record<string, any>")};` });
-  lines.push({ text: `mount(target?: any): ${selfType};` });
-  lines.push({ text: "unmount(options?: { removeDOM?: boolean }): void;" });
-  lines.push({ text: "emit(name: string, detail?: any): void;" });
+    lines.push({ segs: [{ text: `rest: ${containerType("Record<string, any>", "", MINTED)};` }] });
+  lines.push({ segs: [{ text: `mount(target?: any): ${selfType};` }] });
+  lines.push({ segs: [{ text: "unmount(options?: { removeDOM?: boolean }): void;" }] });
+  lines.push({ segs: [{ text: "emit(name: string, detail?: any): void;" }] });
   return lines;
 }
 
@@ -9413,7 +9482,7 @@ function atParamField(p) {
     return null;
   return { name, typed: isNode4(x) && x[0] === "typed-var" && x.length === 3 ? x : null };
 }
-function ctorAtFields(body) {
+function ctorAtFields(bodies) {
   const out = [];
   const seen = new Map;
   const walk = (n, inArrow) => {
@@ -9439,7 +9508,10 @@ function ctorAtFields(body) {
     for (const el of n.slice(1))
       walk(el, inArrow || h === "=>");
   };
-  walk(body, false);
+  for (const body of bodies) {
+    if (body !== null && body !== undefined)
+      walk(body, false);
+  }
   return out;
 }
 var COMPARISONS = new Set(["<", ">", "<=", ">=", "==", "!="]);
@@ -9542,6 +9614,7 @@ class Emitter {
     this.script = script;
     this.browserModule = browserModule;
     this.importSpans = [];
+    this.typeOnlyImports = new Set;
     this.pins = pins;
     this.pinnables = [];
     this.mutables = [];
@@ -10608,7 +10681,7 @@ class Emitter {
     if (!hasChildren)
       line(() => this.b.emit("declare children: any;"));
     if (info.extendsTag !== null)
-      line(() => this.b.emit(`declare rest: ${containerType("Record<string, any>")};`));
+      line(() => this.b.emit(`declare rest: ${containerType("Record<string, any>", "", MINTED)};`));
     line(() => this.b.emit("[key: `_${string}`]: any;"));
   }
   tsScaffoldAny(suffix = "") {
@@ -10731,10 +10804,18 @@ class Emitter {
         for (const l of instanceTypeLines(info, `${name}${selfArgs}`)) {
           this.b.emit(`
 ` + pad + "  ");
+          const segs = () => {
+            for (const s of l.segs) {
+              if (s.node !== undefined)
+                this.mark(s.node, s.role, () => this.b.emit(s.text));
+              else
+                this.b.emit(s.text);
+            }
+          };
           if (l.node !== undefined)
-            this.mark(l.node, l.role, () => this.b.emit(l.text));
+            this.mark(l.node, l.role, segs);
           else
-            this.b.emit(l.text);
+            segs();
         }
         this.b.emit(`
 ` + pad + "}");
@@ -10760,6 +10841,39 @@ class Emitter {
     }));
   }
   static TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
+  collectTypeOnlyImports(sexpr, source) {
+    const used = new Set;
+    const bound = [];
+    const walk = (x) => {
+      if (typeof x === "string") {
+        used.add(x);
+        return;
+      }
+      if (!isNode4(x))
+        return;
+      if (isModuleImportNode(this.stores, x)) {
+        bound.push(...Emitter.importedNames([x]));
+        return;
+      }
+      for (const c of x)
+        walk(c);
+    };
+    walk(sexpr);
+    if (bound.length === 0 || !source)
+      return;
+    const inTypes = new Set;
+    for (const n of this.stores.nodes ?? []) {
+      for (const r of this.stores.rolesOf(n.nodeId)) {
+        if (!Emitter.TYPE_ROLES.has(r.role) || typeof r.sourceStart !== "number")
+          continue;
+        for (const m of source.slice(r.sourceStart, r.sourceEnd).matchAll(/[A-Za-z_$][\w$]*/g))
+          inTypes.add(m[0]);
+      }
+    }
+    for (const name of bound)
+      if (inTypes.has(name) && !used.has(name))
+        this.typeOnlyImports.add(name);
+  }
   collectTsDirectives(sexpr, trivia, source) {
     this.tsDirectiveMap = new Map;
     this.tsNocheck = null;
@@ -11569,6 +11683,7 @@ class Emitter {
     }
     return specs;
   }
+  static TYPE_ROLES = new Set(["annotation", "returnType", "typeParams"]);
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {
@@ -11682,16 +11797,38 @@ class Emitter {
   moduleSource(s) {
     return moduleSourceText(s);
   }
+  static specifierLocal(s) {
+    return isNode4(s) ? s[1] : s;
+  }
   emitSpecifiers(list) {
-    list.forEach((s, i) => {
-      if (i > 0)
+    const kept = list.filter((s) => !this.typeOnlyImports.has(Emitter.specifierLocal(s)));
+    let emitted = 0;
+    list.forEach((s) => {
+      const erased = this.typeOnlyImports.has(Emitter.specifierLocal(s));
+      const one = () => {
+        if (isNode4(s)) {
+          this.emitPrimitive(s[0]);
+          this.b.emit(" as ");
+          this.emitPrimitive(s[1]);
+        } else
+          this.emitPrimitive(s);
+      };
+      if (erased) {
+        if (!this.ts)
+          return;
+        this.b.tsOnly(() => {
+          if (emitted > 0)
+            this.b.emit(", ");
+          one();
+          if (emitted === 0 && kept.length > 0)
+            this.b.emit(", ");
+        });
+        return;
+      }
+      if (emitted > 0)
         this.b.emit(", ");
-      if (isNode4(s)) {
-        this.emitPrimitive(s[0]);
-        this.b.emit(" as ");
-        this.emitPrimitive(s[1]);
-      } else
-        this.emitPrimitive(s);
+      one();
+      emitted++;
     });
   }
   importStatement(node) {
@@ -11704,7 +11841,8 @@ class Emitter {
     const specs = node.slice(1, -1);
     this.mark(node, "$self", () => {
       this.b.emit("import ");
-      if (specs.length > 0) {
+      const allErased = specs.length > 0 && specs.every((spec) => spec !== "{}" && (typeof spec === "string" || spec[0] === "*" ? this.typeOnlyImports.has(typeof spec === "string" ? spec : spec[1]) : spec.every((s) => this.typeOnlyImports.has(Emitter.specifierLocal(s)))));
+      const clause = () => {
         specs.forEach((spec, i) => {
           if (i > 0)
             this.b.emit(", ");
@@ -11721,6 +11859,12 @@ class Emitter {
           }
         });
         this.b.emit(" from ");
+      };
+      if (specs.length > 0) {
+        if (!allErased)
+          clause();
+        else if (this.ts)
+          this.b.tsOnly(clause);
       }
       {
         const specStart = this.b.offset;
@@ -14496,12 +14640,12 @@ ${pad ?? ""}`);
         this.mutables.push([nameStart, this.b.offset]);
       if (this.ts && this.annotationText(node) !== null) {
         const ro = head === "computed" ? "readonly " : "";
-        this.tsAnnotate(node, "annotation", containerType(this.annotationText(node), ro));
+        this.tsAnnotate(node, "annotation", containerType(this.annotationText(node), ro, MINTED));
       } else if (this.ts) {
         const t = syntacticLiteralType(value);
         if (t !== null) {
           const ro = head === "computed" ? "readonly " : "";
-          this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro)}`));
+          this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro, MINTED)}`));
         }
       }
       this.b.emit(" ");
@@ -18379,6 +18523,7 @@ ${this.replayPad}}` : " }");
     const declared = new Set;
     let ctorParams = null;
     let ctorBody = null;
+    const methodBodies = [];
     for (const stmt of stmts) {
       if (!isObject(stmt)) {
         const field = isStaticKey(stmt) ? null : typeof stmt === "string" ? stmt : Emitter.isTypedWrapper(stmt) && typeof stmt[1] === "string" ? stmt[1] : isNode4(stmt) && stmt[0] === "=" && stmt.length === 3 && typeof stmt[1] === "string" ? stmt[1] : null;
@@ -18403,6 +18548,9 @@ ${this.replayPad}}` : " }");
         } else if (!isStaticKey(pair[1]) && typeof mName === "string") {
           declared.add(mName);
         }
+        if (isFunc2(pair[2]) && !isStaticKey(pair[1]) && mName !== "constructor") {
+          methodBodies.push(pair[2][2]);
+        }
         if (isFunc2(pair[2]) && pair[2][0] === "=>" && !isStaticKey(pair[1]) && mName !== "constructor") {
           bound.push(mName);
           firstBound ??= pair;
@@ -18423,8 +18571,8 @@ ${this.replayPad}}` : " }");
 `));
       }
     }
-    if (this.ts && ctorBody !== null) {
-      for (const at of ctorAtFields(ctorBody)) {
+    if (this.ts) {
+      for (const at of ctorAtFields([ctorBody, ...methodBodies])) {
         if (declared.has(at.name))
           continue;
         declared.add(at.name);
@@ -18835,14 +18983,43 @@ ${"  ".repeat(ind)}`);
       }))
     };
   }
-  emitParams(params, firstParamTypeText = null) {
-    Emitter.expansionSplit(params).list.forEach((p, i) => {
+  contextuallyTyped(node) {
+    const id = this.stores.idOf(node);
+    const self = id === null ? null : this.stores.node(id);
+    if (!self || typeof self.sourceStart !== "number")
+      return false;
+    this._argSpans ??= this.stores.roles.filter((r) => r.role === "args" && typeof r.sourceStart === "number").map((r) => [r.sourceStart, r.sourceEnd]);
+    if (this._argSpans.some(([s, e]) => self.sourceStart >= s && self.sourceEnd <= e))
+      return true;
+    this._annotatedValueSpans ??= (() => {
+      const spans = new Set;
+      for (const n of this.stores.nodes) {
+        if (n.semanticKind !== "assign" && n.semanticKind !== "pair")
+          continue;
+        if (!this.stores.role(n.nodeId, "annotation"))
+          continue;
+        const v = this.stores.role(n.nodeId, "value");
+        if (typeof v?.sourceStart === "number")
+          spans.add(`${v.sourceStart}:${v.sourceEnd}`);
+      }
+      return spans;
+    })();
+    return this._annotatedValueSpans.has(`${self.sourceStart}:${self.sourceEnd}`);
+  }
+  emitParams(params, firstParamTypeText = null, jsArity = true) {
+    const list = Emitter.expansionSplit(params).list;
+    const optional = jsArity ? jsArityOptional(list) : new Set;
+    if (firstParamTypeText !== null)
+      optional.delete(0);
+    list.forEach((p, i) => {
       if (atParamName(p) !== null || isNode4(p) && p[0] === "default" && atParamName(p[1]) !== null) {
         throw this.positionedError(isNode4(p) ? p : params, "emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here");
       }
       if (i > 0)
         this.b.emit(", ");
       this.emitParam(p);
+      if (optional.has(i) && this.ts)
+        this.b.tsOnly(() => this.b.emit("?"));
       if (i === 0 && firstParamTypeText !== null && typeof p === "string" && this.ts) {
         this.b.tsOnly(() => this.b.emit(`: ${firstParamTypeText}`));
       }
@@ -18864,13 +19041,14 @@ ${"  ".repeat(ind)}`);
     if (isGen && kind === "=>") {
       throw this.positionedError(node, srcKind === "->" ? "emitter: a generator arrow cannot sit inside a component body — thin arrows lower to fat arrows there to keep `this` on the instance, and JS has no generator arrows (name the generator a method and call it)" : "emitter: fat arrows cannot contain yield (JS has no generator arrows; use ->)");
     }
+    const inArgs = this.ts && this.contextuallyTyped(node);
     this.mark(node, "returnType", () => this.mark(node, "$self", () => {
       if (kind === "->") {
         if (isAsync)
           this.b.emit("async ");
         this.mark(node, "kind", () => this.b.emit(isGen ? "function*" : "function"));
         this.b.emit("(");
-        this.mark(node, "params", () => this.emitParams(params));
+        this.mark(node, "params", () => this.emitParams(params, null, !inArgs));
         this.b.emit(")");
         this.tsReturnAnnotation(node, isAsync, isVoid);
         this.b.emit(" ");
@@ -18878,17 +19056,20 @@ ${"  ".repeat(ind)}`);
       } else {
         if (isAsync)
           this.b.emit("async ");
-        const tsParens = this.ts && params.length === 1 && typeof Emitter.paramCore(params[0]) === "string" && (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, "returnType") !== null || isVoid);
+        const jsArity = this.ts && !inArgs && params.length === 1 && typeof params[0] === "string";
+        const tsParens = this.ts && params.length === 1 && typeof Emitter.paramCore(params[0]) === "string" && (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, "returnType") !== null || isVoid || jsArity);
         this.mark(node, "params", () => {
           if (params.length === 1 && typeof Emitter.paramCore(params[0]) === "string") {
             if (tsParens)
               this.b.tsOnly(() => this.b.emit("("));
             this.emitParam(params[0]);
+            if (jsArity)
+              this.b.tsOnly(() => this.b.emit("?"));
             if (tsParens)
               this.b.tsOnly(() => this.b.emit(")"));
           } else {
             this.b.emit("(");
-            this.emitParams(params);
+            this.emitParams(params, null, !inArgs);
             this.b.emit(")");
           }
         });
@@ -19806,7 +19987,7 @@ var RUNTIME_TABLE = [
     url: new URL("./runtime/reactive.js", import.meta.url),
     triggers: (sexpr, preds) => containsReactive(sexpr, preds.isTrigger),
     types: {
-      __state: "<T>(value: T | { value: T; read(): T }) => { value: T; read(): T }",
+      __state: "<T>(value: T | { value: T; read(): T }) => { value: T; read(): T; touch(): void }",
       __computed: "<T>(fn: () => T) => { readonly value: T; read(): T }",
       __effect: "(fn: () => void | (() => void)) => () => void",
       __batch: "<T>(fn: () => T) => T",
@@ -20200,6 +20381,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
   }
   emitter.collectTsDirectives(parseResult.sexpr, parseResult.trivia ?? [], source);
+  emitter.collectTypeOnlyImports(parseResult.sexpr, source);
   if (emitter.tsNocheck !== null) {
     const programId = stores.idOf(parseResult.sexpr);
     const t = emitter.tsNocheck;
@@ -20356,16 +20538,31 @@ return { ${unit.names.join(", ")} };
         });
       }
       emitter.schemaStories = new Map;
-      story.stories.forEach((s, i) => {
-        emitter.schemaStories.set(s.decl.node, s);
-        const exp = s.decl.exported ? "export " : "";
-        const nodeId = stores.idOf(s.decl.node);
-        const tail = i === story.stories.length - 1 ? `
+      const blocks = [
+        ...story.stories.map((s) => ({
+          node: s.decl.node,
+          exported: s.decl.exported,
+          story: s,
+          lines: s.faceAliasLines ?? s.aliasLines
+        })),
+        ...story.derivations.map((d) => ({
+          node: d.decl.node,
+          exported: d.decl.exported,
+          story: null,
+          lines: d.aliasLines
+        }))
+      ];
+      blocks.forEach((b, i) => {
+        if (b.story !== null)
+          emitter.schemaStories.set(b.node, b.story);
+        const exp = b.exported ? "export " : "";
+        const nodeId = stores.idOf(b.node);
+        const tail = i === blocks.length - 1 ? `
 
 ` : `
 `;
         builder.tsOnly(() => {
-          const lines = () => builder.emit((s.faceAliasLines ?? s.aliasLines).map((l) => `${exp}${l}`).join(`
+          const lines = () => builder.emit(b.lines.map((l) => `${exp}${l}`).join(`
 `));
           if (nodeId !== null)
             builder.mark(nodeId, "$self", lines);
@@ -20400,6 +20597,43 @@ return { ${unit.names.join(", ")} };
     emitter.rframes.pop();
     emitter.scopes.pop();
   }
+  const globalDecls = [];
+  if (face === "ts" && isNode4(parseResult.sexpr) && parseResult.sexpr[0] === "program") {
+    const IDENT2 = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+    for (const stmt of parseResult.sexpr.slice(1)) {
+      if (!isNode4(stmt) || stmt[0] !== "??=" || stmt.length !== 3)
+        continue;
+      const target = stmt[1];
+      if (!isNode4(target) || target[0] !== "." || target[1] !== "globalThis")
+        continue;
+      if (typeof target[2] !== "string" || !IDENT2.test(target[2]))
+        continue;
+      const RESERVED = new Set(["null", "undefined", "true", "false", "this"]);
+      const v = stmt[2];
+      globalDecls.push({
+        name: target[2],
+        anchor: typeof v === "string" && IDENT2.test(v) && !RESERVED.has(v) ? v : null
+      });
+    }
+    if (globalDecls.length) {
+      builder.tsOnly(() => {
+        for (const g of globalDecls) {
+          if (g.anchor !== null)
+            builder.emit(`
+type __ripGlobal_${g.name} = typeof ${g.anchor};`);
+        }
+        builder.emit(`
+declare global {`);
+        for (const g of globalDecls) {
+          builder.emit(`
+  var ${g.name}: ${g.anchor === null ? "any" : `__ripGlobal_${g.name}`};`);
+        }
+        builder.emit(`
+}
+`);
+      });
+    }
+  }
   if (face === "ts" && !isModuleShaped(parseResult.sexpr, (s) => emitter.isModuleImport(s))) {
     builder.tsOnly(() => builder.emit(`
 export {};
@@ -20424,7 +20658,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -20511,10 +20745,13 @@ function emitDeclarations({ sexpr, stores, source }) {
     throw err;
   }
   const schemaByNode = new Map;
+  const schemaDerivedByNode = new Map;
   if (schemaStory) {
     lines.push(...schemaStory.intrinsicLines);
     for (const s of schemaStory.stories)
       schemaByNode.set(s.decl.node, s);
+    for (const d of schemaStory.derivations)
+      schemaDerivedByNode.set(d.decl.node, d);
   }
   const schemaDecl = (story, exported) => {
     const exp = exported ? "export " : "";
@@ -20602,6 +20839,20 @@ function emitDeclarations({ sexpr, stores, source }) {
         }
       }
     }
+    const instanceMethodBodies = [];
+    for (const stmt of stmts) {
+      if (!isNode5(stmt) || stmt[0] !== "object")
+        continue;
+      for (const pair of stmt.slice(1)) {
+        if (pair[0] !== ":" && pair[0] !== "void-pair")
+          continue;
+        if (isStaticKey(pair[1]) || !isFunc3(pair[2]))
+          continue;
+        if (memberName(pair[1]) === "constructor")
+          continue;
+        instanceMethodBodies.push(pair[2][2]);
+      }
+    }
     for (const stmt of stmts) {
       if (isNode5(stmt) && stmt[0] === "object") {
         for (const pair of stmt.slice(1)) {
@@ -20640,7 +20891,7 @@ function emitDeclarations({ sexpr, stores, source }) {
               const plain = typed !== null ? ["typed-var", n, typed[2]] : n;
               return dflt !== null ? ["default", plain, dflt[2]] : plain;
             });
-            for (const at of ctorAtFields(value[2])) {
+            for (const at of ctorAtFields([value[2], ...instanceMethodBodies])) {
               if (declared.has(at.name))
                 continue;
               declared.add(at.name);
@@ -20706,7 +20957,7 @@ function emitDeclarations({ sexpr, stores, source }) {
     if (annotation === null)
       return;
     const ro = node[0] === "computed" ? "readonly " : "";
-    lines.push(`${exported ? "export " : ""}declare const ${node[1]}: ${containerType(annotation, ro)};`);
+    lines.push(`${exported ? "export " : ""}declare const ${node[1]}: ${containerType(annotation, ro, MINTED)};`);
   };
   const isReactiveDecl = (stmt) => {
     if (!isNode5(stmt) || stmt[0] !== "state" && stmt[0] !== "computed" || stmt.length !== 3)
@@ -20730,7 +20981,7 @@ function emitDeclarations({ sexpr, stores, source }) {
     const self = `${name}${selfArgsOf(typeParams)}`;
     lines.push(`${exp}interface ${name}${typeParams} {`);
     for (const l of rendered(() => instanceTypeLines(info, self)))
-      lines.push(`  ${l.text}`);
+      lines.push(`  ${segmentsText(l.segs)}`);
     lines.push("}");
     lines.push(`${exp}declare let ${name}: {`);
     if (gated) {
@@ -20861,6 +21112,8 @@ function emitDeclarations({ sexpr, stores, source }) {
       defDecl(stmt, exported);
     else if (head === "=" && stmt.length === 3 && schemaByNode.has(stmt[2])) {
       schemaDecl(schemaByNode.get(stmt[2]), exported);
+    } else if (head === "=" && stmt.length === 3 && schemaDerivedByNode.has(stmt)) {
+      schemaDecl(schemaDerivedByNode.get(stmt), exported);
     } else if (head === "=" && stmt.length === 3 && typeof stmt[1] === "string" && isComponentDecl(stmt[2])) {
       componentDecl(stmt[2], stmt[1], exported, stmt);
     } else if (head === "=" && stmt.length === 3 && protoMemberTarget(stmt) !== null) {
@@ -21017,6 +21270,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     replImportResolver: emitted.replImportResolver,
     tsRegions: emitted.tsRegions,
     echoSpans: emitted.echoSpans ?? [],
+    globalDecls: emitted.globalDecls ?? [],
     pinnables: emitted.pinnables,
     mutables: emitted.mutables,
     enums: emitted.enums,
@@ -24740,9 +24994,7 @@ resetSources = function(value, seen) {
       if (!Object.hasOwn(raw, key))
         continue;
       let nested = raw[key];
-      if (key !== SIGNALS) {
-        result.push(resetSources(nested, seen));
-      }
+      result.push(resetSources(nested, seen));
     }
     return result;
   })();
@@ -25039,7 +25291,7 @@ function createStash(data = {}) {
   return makeProxy(data);
 }
 function unwrapStash(stash) {
-  return stash != null && stash[RAW] ? stash[RAW] : stash;
+  return stash?.[RAW] || stash;
 }
 // packages/app/mutation.rip
 function createMutation(fn, opts = {}) {

@@ -1,0 +1,8 @@
+{
+  "rip": {
+    "strict": false
+  },
+  "dependencies": {
+    "@rip-audit/absent": "1.0.0"
+  }
+}

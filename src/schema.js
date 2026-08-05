@@ -1955,12 +1955,13 @@ function foldParseStrLit(node) {
   return inner;
 }
 
-// Walk the program's top-level statements, fold every foldable
-// derived-schema assignment in place, and thread folded results into the
-// same-file schema map so a later `.extend`/chain can reference an
-// already-folded projection. Mutates `sexpr`. Called by compile() only
-// when options.foldProjections is set.
-export function foldDerivedSchemas(sexpr) {
+// Walk the program's top-level statements and evaluate every foldable
+// derived-schema assignment, threading each result into the same-file
+// schema map so a later `.extend`/chain can reference an already-folded
+// projection. `onFolded` receives every one it proves; the walk itself
+// never writes to the tree, so a caller that only wants to READ the
+// projected shapes leaves the program alone.
+function walkDerivedSchemas(sexpr, onFolded) {
   if (!Array.isArray(sexpr)) return;
   const head = foldStr(sexpr[0]);
   const stmts = (head === 'program' || head === 'block') ? sexpr.slice(1) : [sexpr];
@@ -1968,8 +1969,8 @@ export function foldDerivedSchemas(sexpr) {
   for (const stmt of stmts) {
     if (!Array.isArray(stmt)) continue;
     // Unwrap `export <assign>` to reach the assignment node.
-    let assign = stmt;
-    if (foldStr(stmt[0]) === 'export' && Array.isArray(stmt[1])) assign = stmt[1];
+    const exported = foldStr(stmt[0]) === 'export' && Array.isArray(stmt[1]);
+    const assign = exported ? stmt[1] : stmt;
     if (foldStr(assign[0]) !== '=' || !Array.isArray(assign[2])) continue;
     const name = foldStr(assign[1]);
     if (typeof name !== 'string') continue;
@@ -1988,7 +1989,24 @@ export function foldDerivedSchemas(sexpr) {
     const folded = foldProjectionDescriptor(baseDesc, chain.ops, byName);
     if (!folded) continue;   // not statically foldable — leave the runtime call
 
-    assign[2] = ['schema', folded];
     byName.set(name, folded);
+    onFolded({ name, descriptor: folded, node: assign, exported });
   }
+}
+
+// Rewrite every foldable derived-schema assignment to a fresh,
+// self-contained schema literal. Mutates `sexpr`. Called by compile()
+// only when options.foldProjections is set.
+export function foldDerivedSchemas(sexpr) {
+  walkDerivedSchemas(sexpr, ({ descriptor, node }) => { node[2] = ['schema', descriptor]; });
+}
+
+// The same projections, READ rather than written: the shape each
+// derived binding yields, for a consumer that wants the projected type
+// while the JS keeps the runtime call (which carries the
+// `_sourceModel` back-pointer folding drops). Declaration order.
+export function derivedSchemaDescriptors(sexpr) {
+  const out = [];
+  walkDerivedSchemas(sexpr, (d) => out.push(d));
+  return out;
 }

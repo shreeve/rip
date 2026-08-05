@@ -62,3 +62,41 @@ test('identical mapped manifestations collapse before directive handling', () =>
   ];
   expect(applyRipDirectives({ source: '' }, mapped)).toEqual([mapped[0], mapped[2]]);
 });
+
+// Two renderings of one claim can mark different EXTENTS of the same span
+// (`: T` against `T`), which the identity collapse above cannot see. The
+// narrowest keeps it.
+test('a claim on nested spans collapses to the narrowest', () => {
+  const at = (sc, ec) => ({ start: { line: 3, character: sc }, end: { line: 3, character: ec } });
+  const mapped = [
+    { code: 2304, severity: 1, message: "Cannot find name 'Nope'.", range: at(5, 11) },
+    { code: 2304, severity: 1, message: "Cannot find name 'Nope'.", range: at(7, 11) },
+    { code: 2304, severity: 1, message: "Cannot find name 'Other'.", range: at(5, 11) },
+  ];
+  expect(applyRipDirectives({ source: '' }, mapped)).toEqual([mapped[1], mapped[2]]);
+});
+
+// A directive is charged by a diagnostic STARTING on its governed line, so
+// the nested collapse has to run AFTER charging: collapsing first can retire
+// the only row that starts there and leave the directive reading unused,
+// resurrecting the TS2578 the charge exists to drop.
+test('the wider span still charges its directive before the collapse', () => {
+  const source = 'x = 1\n# @ts-expect-error\nouter\ninner\n';
+  const wide = {
+    code: 2304, severity: 1, message: "Cannot find name 'Nope'.",
+    range: { start: { line: 2, character: 0 }, end: { line: 3, character: 9 } },
+  };
+  const narrow = {
+    code: 2304, severity: 1, message: "Cannot find name 'Nope'.",
+    range: { start: { line: 3, character: 2 }, end: { line: 3, character: 6 } },
+  };
+  // TS2578 lands on the directive comment itself (line 1).
+  const unused = {
+    code: 2578, severity: 1, message: "Unused '@ts-expect-error' directive.",
+    range: { start: { line: 1, character: 0 }, end: { line: 1, character: 19 } },
+  };
+  const out = applyRipDirectives({ source }, [wide, narrow, unused]);
+  // The directive absorbed the wide one and is therefore USED, so its
+  // TS2578 drops; the narrow one is not on a governed line and survives.
+  expect(out).toEqual([narrow]);
+});
