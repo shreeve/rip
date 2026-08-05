@@ -1,0 +1,24 @@
+# Cart — a multi-route shop proving the full app rails: index.rip +
+# app/ + api/ + SQLite. See README.md for the run script.
+import { get, start, use, hub } from '@rip-lang/sites'
+import { sessions } from '@rip-lang/sites/middleware'
+import { setup } from './setup.rip'
+import './api/index.rip'
+
+setup!
+
+use sessions
+  secret: process.env.CART_SESSION_SECRET or 'cart-dev-session-secret'
+  secure: true
+  sameSite: 'Lax'
+
+# Bam bridge at POST /hub — Janus open/text/close; session cookie required.
+hub
+  bridge: 'hub'
+  open: ->
+    # Publication feed joins /hub after admit; app events use other channels.
+    { '+': ['/hub'] }
+
+get '/styles.css' -> @send "#{import.meta.dir}/app/styles.css", 'text/css; charset=UTF-8'
+
+start!

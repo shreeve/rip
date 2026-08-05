@@ -32,11 +32,11 @@ Usage:
                                      (default: the current directory; 'rip check --help')
   rip schema <verb> [args...]        Schema evolution: status | plan | make | migrate
                                      (run 'rip schema --help' for the full surface)
-  rip site [entry] [flags...]        Run a @rip-lang/site project under the worker-pool
+  rip site [entry] [flags...]        Run a @rip-lang/sites project under the worker-pool
                                      manager behind Janus
   rip site browse <directory>        Publish one directory through Janus browse
                                      (run 'rip site --help' for the flags)
-  rip sites <verb> [args...]         Remember and control Rip sites
+  rip sites <verb> [args...]         Remember and control Rip Sites
                                      (list | add | start | stop | status | logs)
   rip edge <verb> [args...]          Control the shared Caddy + Janus edge
                                      (status | start | stop | reload)
@@ -156,10 +156,10 @@ if (args[0] === 'test') {
 }
 
 // `rip sites` and `rip edge` are the two appliance clients shipped by
-// @rip-lang/site. They are core surfaces, so dispatch is independent of the
+// @rip-lang/sites. They are core surfaces, so dispatch is independent of the
 // caller's cwd and of package-manager bin-link installation.
 if (args[0] === 'sites' || args[0] === 'edge') {
-  const applianceCliPath = join(dirname(fileURLToPath(import.meta.url)), `../packages/site/${args[0]}.rip`);
+  const applianceCliPath = join(dirname(fileURLToPath(import.meta.url)), `../packages/sites/${args[0]}.rip`);
   const r = spawnSync('bun', [`--preload=${loaderPath}`, applianceCliPath, ...args.slice(1)], {
     stdio: 'inherit',
     env: process.env,

@@ -1,6 +1,6 @@
-# Rip Site
+# Rip Sites
 
-Rip Site publishes browser applications and runs API workers behind one
+Rip Sites publishes browser applications and runs API workers behind one
 Caddy + Janus edge. The durable boundary is producer versus consumer:
 
 ```text
@@ -286,7 +286,7 @@ control socket.
 ## Verification
 
 ```bash
-cd packages/site
+cd packages/sites
 bun run test
 ```
 

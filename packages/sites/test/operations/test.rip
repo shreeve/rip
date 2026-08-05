@@ -1,0 +1,309 @@
+import { test, eq, ok } from '@rip-lang/testing'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
+SERVER = join(import.meta.dir, '..', '..', 'site.rip')
+RELOAD_PROJECT = join(import.meta.dir, '..', 'reloads', 'project')
+
+FILE_DB = '''
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+
+export const fileDB = (path) => {
+  const load = () => existsSync(path)
+    ? JSON.parse(readFileSync(path, 'utf8'))
+    : { history: [], log: [] }
+  const save = (state) => writeFileSync(path, JSON.stringify(state))
+  return {
+    async query(sql, params = []) {
+      const state = load()
+      state.log.push(sql)
+      if (sql.startsWith('SELECT version')) {
+        await new Promise((done) => setTimeout(done, 250))
+        save(state)
+        return {
+          columns: ['version', 'name', 'checksum', 'applied_at'].map((name) => ({ name })),
+          data: state.history.map((entry) => [entry.version, entry.name, entry.checksum, null]),
+          rowCount: state.history.length,
+        }
+      }
+      if (sql.includes('FAIL_NOW')) {
+        save(state)
+        throw new Error('FAIL_NOW tripped')
+      }
+      if (sql.startsWith('INSERT INTO _rip_migrations')) {
+        state.history.push({ version: params[0], name: params[1], checksum: params[2] })
+      }
+      save(state)
+      return { columns: [], data: [], rowCount: 0 }
+    },
+  }
+}
+'''
+
+MODELS = '''
+import { fileDB } from './filedb.mjs'
+schema.setAdapter fileDB('./db.json')
+
+export Item = schema :model
+  name! string
+'''
+
+waitFor = (fn, timeout = 5000) ->
+  deadline = Date.now() + timeout
+  loop
+    value = fn!
+    return value if value
+    throw Error.new('operation test timed out') if Date.now() >= deadline
+    sleep! 10
+
+unixFetch = (path, socket) ->
+  options = { unix: socket }
+  fetch "http://worker#{path}", options
+
+command = (name, project) ->
+  proc = Bun.spawn [process.execPath, PRELOAD, SERVER, name, project],
+    stdin: 'ignore'
+    stdout: 'pipe'
+    stderr: 'pipe'
+  out = Response.new(proc.stdout).text()
+  err = Response.new(proc.stderr).text()
+  code = await proc.exited
+  eq code, 0, await err
+  JSON.parse await out
+
+failedCommand = (name, project) ->
+  proc = Bun.spawn [process.execPath, PRELOAD, SERVER, name, project],
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'pipe'
+  diagnostic = Response.new(proc.stderr).text()
+  code = await proc.exited
+  { code, diagnostic: await diagnostic }
+
+test! 'hold fences App publication, API replacement, and client messages', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-operations-hold-')
+  project = join dir, 'project'
+  cpSync RELOAD_PROJECT, project, { recursive: true }
+  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
+  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'sites'), 'dir'
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  updates = []
+  messages = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'operations-registration' }, { status: 201 })
+      if request.method is 'PUT'
+        updates.push request.json!
+        return Response.new(null, { status: 204 })
+      if url.pathname.endsWith('/hub/publish')
+        messages.push ...(request.json!)
+        return Response.json({ deliveries: 0 })
+      Response.new(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'operations.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    waitFor! -> registration?
+    first = registration.upstreams[0].path
+    rival = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'operations.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'ignore'
+    eq (await rival.exited), 1
+    eq (command!('status', project)).operation, 'Active'
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
+
+    held = command! 'hold', project
+    eq held.operation, 'Held'
+
+    writeFileSync join(project, 'app', 'routes', 'index.rip'), "export changed = true\n"
+    writeFileSync join(project, 'index.rip'), 'broken API @@@'
+    failed = failedCommand! 'release', project
+    eq failed.code, 1
+    eq (command!('status', project)).operation, 'Held'
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
+
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from '@rip-lang/sites'
+    get '/version' -> { version: 'held-change' }
+    start!
+    """
+    sleep! 300
+    eq updates, []
+    eq messages, []
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
+    eq (command!('status', project)).operation, 'Held'
+
+    released = command! 'release', project
+    eq released.operation, 'Active'
+    fresh = updates.at(-1).upstreams[0].path
+    eq ((unixFetch!('/version', fresh)).json!), { version: 'held-change' }
+    eq messages.length, 1
+    ok messages[0].reload.epoch > 0
+    dist = join project, 'dist'
+    bundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    latest = JSON.parse readFileSync(join(dist, 'latest.json'), 'utf8')
+    eq bundle.hash, latest.hash
+    eq bundle.list.find((entry) -> entry[0] is 'routes/index.rip')[1], "export changed = true\n"
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'coordinated migration cuts admission and unresolved work recovers durably', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-operations-migrate-')
+  project = join dir, 'project'
+  cpSync RELOAD_PROJECT, project, { recursive: true }
+  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
+  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'sites'), 'dir'
+  writeFileSync join(project, 'filedb.mjs'), FILE_DB
+  writeFileSync join(project, 'models.rip'), MODELS
+  mkdirSync join(project, 'migrations')
+  writeFileSync join(project, 'migrations', '0001_init.sql'), "SELECT 1;\n"
+
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  updates = []
+  messages = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'migration-registration' }, { status: 201 })
+      if request.method is 'PUT'
+        updates.push request.json!
+        return Response.new(null, { status: 204 })
+      if url.pathname.endsWith('/hub/publish')
+        messages.push ...(request.json!)
+        return Response.json({ deliveries: 0 })
+      Response.new(null, { status: 204 })
+
+  diagnostics = []
+  startManager = ->
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'migration.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'pipe'
+    diagnostics.push Response.new(proc.stderr).text()
+    proc
+
+  operation = (args) ->
+    Bun.spawn [process.execPath, PRELOAD, SERVER, ...args],
+      cwd: project
+      stdin: 'ignore'
+      stdout: 'pipe'
+      stderr: 'pipe'
+
+  proc = null
+  try
+    proc = startManager()
+    waitFor! -> registration?
+    command! 'hold', project
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from '@rip-lang/sites'
+    get '/version' -> { version: 'migrated' }
+    start!
+    """
+
+    firstId = '11111111111111111111111111111111'
+    migrationProc = operation ['migrate', 'models.rip', '--dir', 'migrations', '--id', firstId]
+    migrationError = Response.new(migrationProc.stderr).text()
+    waitFor! ->
+      throw Error.new("migration exited before cutting admission: #{await migrationError}") if migrationProc.exitCode?
+      updates.some (update) -> update.upstreams.length is 0
+    eq migrationProc.exitCode, null
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from '@rip-lang/sites'
+    get '/version' -> { version: 'reconciled' }
+    get '/crash' -> process.exit 7
+    start!
+    """
+    eq (await migrationProc.exited), 0, await migrationError
+    migrated = JSON.parse Response.new(migrationProc.stdout).text!
+    eq migrated.operation, 'Active'
+    bell = waitFor! ->
+      update = updates.findLast (candidate) -> candidate.upstreams[0]?.doorbell is true
+      update?.upstreams[0]?.path
+    eq (unixFetch!('/ring', bell)).status, 204
+    active = waitFor! ->
+      socket = updates.at(-1)?.upstreams[0]
+      socket.path if socket?.path? and not socket.doorbell
+    eq ((unixFetch!('/version', active)).json!), { version: 'reconciled' }
+    try unixFetch!('/crash', active)
+    replacement = waitFor! ->
+      socket = updates.at(-1)?.upstreams[0]?.path
+      socket if socket? and socket isnt active
+    eq ((unixFetch!('/version', replacement)).json!), { version: 'reconciled' }
+    retry = operation ['migrate', 'models.rip', '--dir', 'migrations', '--id', firstId]
+    eq (await retry.exited), 0, Response.new(retry.stderr).text!
+    eq (JSON.parse(Response.new(retry.stdout).text!)).operation, 'Active'
+    eq JSON.parse(readFileSync(join(project, 'db.json'), 'utf8')).history[0].version, '0001'
+    eq existsSync(join(project, '.rip', 'server-operation.json')), false
+
+    command! 'hold', project
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from '@rip-lang/sites'
+    get '/version' -> { version: 'recovered' }
+    start!
+    """
+    writeFileSync join(project, 'migrations', '0002_partial.sql'), "SELECT 2;\nSELECT FAIL_NOW;\n"
+    secondId = '22222222222222222222222222222222'
+    failedProc = operation ['migrate', 'models.rip', '--dir', 'migrations', '--id', secondId]
+    eq (await failedProc.exited), 1
+    journalPath = join project, '.rip', 'server-operation.json'
+    journal = JSON.parse readFileSync(journalPath, 'utf8')
+    eq journal.id, secondId
+    eq journal.outcome, 'partial'
+    eq (command!('status', project)).operation, 'Maintenance'
+    eq updates.at(-1).upstreams, []
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+    proc = null
+    registration = null
+    updates = []
+    proc = startManager()
+    waitFor! -> registration?
+    eq registration.upstreams, []
+    restarted = command! 'status', project
+    eq restarted.operation, 'Maintenance'
+    eq restarted.migration.id, secondId
+
+    wrong = operation ['recover', '33333333333333333333333333333333']
+    eq (await wrong.exited), 1
+    eq existsSync(journalPath), true
+
+    recoveredProc = operation ['recover', secondId]
+    eq (await recoveredProc.exited), 0, Response.new(recoveredProc.stderr).text!
+    recovered = JSON.parse Response.new(recoveredProc.stdout).text!
+    eq recovered.operation, 'Active'
+    recoveredSocket = updates.at(-1).upstreams[0].path
+    eq ((unixFetch!('/version', recoveredSocket)).json!), { version: 'recovered' }
+    eq existsSync(journalPath), false
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+    output = diagnostics.at!(-1)
+    ok output.includes("unresolved migration #{secondId}; Maintenance has empty admission")
+    proc = null
+  finally
+    try proc?.kill('SIGTERM')
+    await proc.exited if proc?
+    Promise.all! diagnostics
+    control.stop true
+    rmSync dir, { recursive: true, force: true }

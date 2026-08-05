@@ -225,7 +225,7 @@ executable: an accessory application with no Dock icon and one SwiftUI
 `MenuBarExtra` using the native window presentation. The host resolves and
 launches `rip`, decodes the provider's panel, renders it, presents native
 directory pickers and URLs, and returns action messages. It contains no
-knowledge of Rip Site or the included provider.
+knowledge of Rip Sites or the included provider.
 
 The built application still locates the machine's `rip` executable at runtime;
 `~/.bun/rip` and `~/.bun/bin/rip` are checked automatically. Run

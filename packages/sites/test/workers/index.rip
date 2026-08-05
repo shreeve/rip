@@ -1,0 +1,10 @@
+import { get, start } from '@rip-lang/sites'
+
+get '/hello' -> { message: 'hello' }
+get '/slow' ->
+  sleep! 250
+  { complete: true }
+get '/crash' -> process.exit 7
+get '/hang' -> Promise.new (->)
+
+start!

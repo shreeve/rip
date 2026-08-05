@@ -1,4 +1,4 @@
-// Cart publication apply: real `rip site` on packages/site/demos/cart behind a stub
+// Cart publication apply: real `rip site` on packages/sites/demos/cart behind a stub
 // Janus edge. API requests proxy to API-only workers; registered roots serve
 // App/dist bytes; `/hub` fans out ordered Manager publication changes.
 import {
@@ -11,9 +11,9 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
-const cartSrc = join(root, 'packages/site/demos/cart');
+const cartSrc = join(root, 'packages/sites/demos/cart');
 const loaderPath = join(root, 'src/loader.js');
-const serverBin = join(root, 'packages/site/site.rip');
+const serverBin = join(root, 'packages/sites/site.rip');
 const PORT = Number(process.env.CART_HARNESS_PORT || 4174);
 
 const fixtureRoot = mkdtempSync(join(tmpdir(), `rip-cart-harness-${process.pid}-`));

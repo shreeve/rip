@@ -3,7 +3,7 @@
 # Closing this shell (or Cursor) does not stop the tray, edge, or sites.
 #
 # Expected:
-#   bin/rip, bin/rip-tray-host, packages/site/bin/caddy-janus
+#   bin/rip, bin/rip-tray-host, packages/sites/bin/caddy-janus
 # Provider (from the checkout): packages/tray/tray.rip
 set -euo pipefail
 
@@ -11,7 +11,7 @@ BIN="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$BIN/.." && pwd)"
 HOST="$BIN/rip-tray-host"
 RIP="$BIN/rip"
-CADDY="$ROOT/packages/site/bin/caddy-janus"
+CADDY="$ROOT/packages/sites/bin/caddy-janus"
 PROVIDER="$ROOT/packages/tray/tray.rip"
 LABEL="io.ripdev.apps.tray"
 UID_NUM="$(/usr/bin/id -u)"

@@ -34,9 +34,9 @@ but it must not block direct-path package implementation and tests.
 - **Server:** the edge belongs to Janus running with Caddy — proxy
   and stream execution, the TLS story (ACME, certificates, SNI), and
   WebSocket termination with hub fan-out — so none of that is Rip
-  Server work; `packages/site` atomically registers files, direct Hub
+  Sites work; `packages/sites` atomically registers files, direct Hub
   admission, and API upstreams with the control plane. Remaining in Rip
-  Server itself (contract in the packages/site README's Planned
+  Sites itself (contract in the packages/sites README's Planned
   section): opt-in file logging (a
   `logs:` knob / `RIP_LOG_DIR` redirect of the merged server stream
   to `logs/server.log`; stdout stays the default). Process workers,
@@ -209,7 +209,7 @@ mapping-safe representation of argument literals.
 ## Rip Workspace
 
 The browser publication-consumption and mutation contract lives in
-[WORKSPACE.md](WORKSPACE.md). Rip Site publishes applications; Janus
+[WORKSPACE.md](WORKSPACE.md). Rip Sites publishes applications; Janus
 transports their files and watch-mode changes; Rip App consumes them. The
 publication substrate and framework-aware apply engine remain separate test
 boundaries.

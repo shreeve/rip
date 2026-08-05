@@ -102,8 +102,8 @@
         "@rip-lang/testing": "workspace:*",
       },
     },
-    "packages/site": {
-      "name": "@rip-lang/site",
+    "packages/sites": {
+      "name": "@rip-lang/sites",
       "version": "4.0.0",
       "bin": {
         "rip-site": "./site.rip",
@@ -231,7 +231,7 @@
 
     "@rip-lang/script": ["@rip-lang/script@workspace:packages/script"],
 
-    "@rip-lang/site": ["@rip-lang/site@workspace:packages/site"],
+    "@rip-lang/sites": ["@rip-lang/sites@workspace:packages/sites"],
 
     "@rip-lang/stamp": ["@rip-lang/stamp@workspace:packages/stamp"],
 

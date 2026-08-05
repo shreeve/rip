@@ -27,7 +27,6 @@ test('authored Rip uses dammit calls, Ruby construction, and awaits only stored 
   const violations = [];
   const files = [
     ...ripFiles(join(ROOT, 'packages')),
-    ...ripFiles(join(ROOT, 'examples')),
     join(ROOT, 'src/grammar/solar.rip'),
   ];
 

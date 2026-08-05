@@ -1,0 +1,168 @@
+#!/usr/bin/env rip
+
+import { printJson, requestAgent } from './appliance.rip'
+
+throw Error.new('@rip-lang/sites/sites is a CLI, not a library; run `rip sites`') unless import.meta.main
+
+HELP = '''
+  usage: rip sites <command> [arguments]
+
+  Commands:
+    list                                 List remembered Rip sites
+    add [project] [options]              Remember a Rip project (default: cwd)
+    remove <site>                        Forget a stopped site
+    start <site>                         Start and supervise a site
+    stop <site>                          Gracefully stop a site
+    restart <site>                       Stop and start a site
+    status [site]                        Show one site, or every site
+    open <site>                          Open the site in the default browser
+    logs <site> [--lines N] [--follow]   Show the manager log
+
+  Add options:
+    --name NAME                          Stable display and manager name
+    --host HOST                          Janus host claim (repeatable)
+    --workers N                          Worker count (default: 2)
+    --concurrency N                      Requests per worker (default: 1)
+    --no-watch                           Disable App and API source watching
+    --no-watch-app                       Disable App publication watching
+    --no-watch-api                       Disable API worker watching
+    --eager                              Boot replacement workers before demand
+
+  Output:
+    --json                               Print the complete JSON response
+'''
+
+args = process.argv.slice 2
+if args.length is 0 or args[0] in ['-h', '--help', 'help']
+  console.log HELP
+  exit 0
+
+command = args.shift()
+json = false
+follow = false
+lines = 100
+name = null
+hosts = null
+workers = 2
+concurrency = 1
+watchApp = true
+watchApi = true
+eager = false
+positionals = []
+addFlags = []
+logFlags = []
+
+take = (flag) ->
+  abort "rip-sites: #{flag} requires a value" unless args.length
+  args.shift()
+
+while args.length
+  value = args.shift()
+  switch value
+    when '--json' then json = true
+    when '--follow', '-f'
+      follow = true
+      logFlags.push value
+    when '--lines', '-n'
+      logFlags.push value
+      text = take value
+      lines = parseInt text
+      abort 'rip-sites: --lines must be an integer from 1 through 10000' unless Number.isInteger(lines) and lines >= 1 and lines <= 10000 and String(lines) is text
+    when '--name'
+      addFlags.push value
+      name = take value
+    when '--host'
+      addFlags.push value
+      hosts or= []
+      hosts.push take(value)
+    when '--workers'
+      addFlags.push value
+      text = take value
+      workers = parseInt text
+      abort 'rip-sites: --workers must be a positive integer' unless Number.isInteger(workers) and workers > 0 and String(workers) is text
+    when '--concurrency'
+      addFlags.push value
+      text = take value
+      concurrency = parseInt text
+      abort 'rip-sites: --concurrency must be a positive integer' unless Number.isInteger(concurrency) and concurrency > 0 and String(concurrency) is text
+    when '--no-watch'
+      addFlags.push value
+      watchApp = false
+      watchApi = false
+    when '--no-watch-app'
+      addFlags.push value
+      watchApp = false
+    when '--no-watch-api'
+      addFlags.push value
+      watchApi = false
+    when '--eager'
+      addFlags.push value
+      eager = true
+    else
+      abort "rip-sites: unknown option #{value}" if value.startsWith '-'
+      positionals.push value
+
+selector = ->
+  abort "rip-sites: #{command} requires exactly one site" unless positionals.length is 1
+  encodeURIComponent positionals[0]
+
+abort "rip-sites: #{command} does not accept add options: #{addFlags.join(', ')}" if command isnt 'add' and addFlags.length
+abort "rip-sites: #{command} does not accept log options: #{logFlags.join(', ')}" if command isnt 'logs' and logFlags.length
+abort 'rip-sites: --follow conflicts with --json' if follow and json
+
+renderState = (app) ->
+  marker = if app.state is 'running' then '●' else '○'
+  url = if app.url then "  #{app.url}" else ''
+  "#{marker} #{app.name}  #{app.state}#{url}\n  #{app.root}"
+
+switch command
+  when 'list'
+    abort 'rip-sites: list takes no site' if positionals.length
+    apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps'
+    if json then printJson apps else if apps.length then console.log(apps.map(renderState).join('\n')) else console.log 'No Rip sites. Add one with `rip sites add [project]`.'
+  when 'add'
+    abort 'rip-sites: add takes at most one project' if positionals.length > 1
+    app = requestAgent! 'rip-sites', 'POST', '/1.0/apps',
+      root: positionals[0] or process.cwd()
+      name: name
+      hosts: hosts
+      options: { workers, concurrency, watchApp, watchApi, eager }
+    if json then printJson app else console.log "Added #{app.name}\n#{app.root}"
+  when 'remove'
+    app = requestAgent! 'rip-sites', 'DELETE', "/1.0/apps/#{selector!}"
+    if json then printJson app else console.log "Removed #{app.name}"
+  when 'start', 'stop', 'restart'
+    app = requestAgent! 'rip-sites', 'POST', "/1.0/apps/#{selector!}/#{command}", {}
+    if json then printJson app else console.log renderState(app)
+  when 'status'
+    abort 'rip-sites: status takes at most one site' if positionals.length > 1
+    result = if positionals.length then requestAgent!('rip-sites', 'GET', "/1.0/apps/#{encodeURIComponent(positionals[0])}") else requestAgent!('rip-sites', 'GET', '/1.0/apps')
+    if json
+      printJson result
+    else if Array.isArray result
+      if result.length then console.log(result.map(renderState).join('\n')) else console.log 'No Rip sites.'
+    else
+      console.log renderState(result)
+  when 'open'
+    app = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{selector!}"
+    abort "rip-sites: #{app.name} has no URL" unless app.url
+    result = Bun.spawnSync ['open', app.url], { stdout: 'ignore', stderr: 'pipe' }
+    abort "rip-sites: cannot open #{app.url}: #{result.stderr.toString().trim()}" unless result.exitCode is 0
+    printJson({ url: app.url }) if json
+  when 'logs'
+    id = selector!
+    read = (after = null) -> requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?#{if after? then "after=#{after}" else "lines=#{lines}"}"
+    log = read!
+    if json
+      printJson log
+    else
+      process.stdout.write log.text
+      if follow
+        offset = log.next
+        loop
+          sleep! 250
+          next = read! offset
+          process.stdout.write next.text if next.text
+          offset = next.next
+  else
+    abort "rip-sites: unknown command #{JSON.stringify(command)} — run `rip sites --help`"
