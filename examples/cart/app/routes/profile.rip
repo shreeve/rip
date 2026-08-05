@@ -21,7 +21,7 @@ export Profile = component
 
   render
     h1 'Profiler'
-    form @submit: ((e) -> e.preventDefault(); updateUser!(form))
+    form @submit: ((e) -> e.preventDefault(); updateUser(form))
       div.grid
         label
           'First name'
