@@ -248,7 +248,7 @@ resetSources = (value, seen) ->
   raw = if value[RAW] then value[RAW] else value
   return if seen.has raw
   seen.add raw
-  resetSources nested, seen for own key, nested of raw when key isnt SIGNALS
+  resetSources nested, seen for own key, nested of raw
 
 # The declared baseline: plain values snapshotted deeply, source cells
 # skipped (they reset to unloaded, not to a value).
@@ -449,7 +449,7 @@ makeProxy = (target) ->
   PROXIES.set target, proxy
   proxy
 
-export def createStash<D extends Record<string, any>>(data: D = {}): Stash<D>
+export def createStash<D extends Record<string, any>>(data: D = {} as D): Stash<D>
   unless data? and typeof data is 'object' and not Array.isArray(data)
     throw TypeError.new 'Rip App: createStash expects a plain object'
   unless Object.getPrototypeOf(data) is Object.prototype or Object.getPrototypeOf(data) is null
@@ -457,4 +457,4 @@ export def createStash<D extends Record<string, any>>(data: D = {}): Stash<D>
   makeProxy data
 
 export def unwrapStash<D extends Record<string, any>>(stash: Stash<D>): D
-  if stash? and stash[RAW] then stash[RAW] else stash
+  (stash as any)?[RAW] or stash

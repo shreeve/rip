@@ -51,6 +51,8 @@
 // one is known; dts wraps them as DtsError and the TS face as a
 // positioned emitter diagnostic.
 
+import { derivedSchemaDescriptors } from './schema.js';
+
 export class SchemaTypeError extends Error {
   constructor(message, start = null, node = null) {
     super(message);
@@ -238,6 +240,11 @@ export const schemaIntrinsicLines = (withModel, withMixin = false) => [
 
 // ── collection ───────────────────────────────────────────────────────
 
+// The projection folder lives with the runtime's own algebra
+// (src/schema.js), so the shape a derivation TYPES is the shape the
+// runtime BUILDS, computed once. schema.js imports `behaviorName` from
+// here; both sides of that cycle are function declarations, reached
+// only at call time.
 const isNode = (x) => Array.isArray(x);
 const isSchemaNode = (x) =>
   isNode(x) && x[0] === 'schema' && x.length === 2 &&
@@ -260,6 +267,24 @@ export function collectSchemaDecls(programSexpr) {
     else consider(stmt, false);
   }
   return out;
+}
+
+// How many times the module's top level BINDS each name with `=`.
+// A companion may only be stated for a name bound exactly once: a
+// rebound name holds a different value on different lines, and one
+// alias cannot describe both. Counted over every `=` statement rather
+// than only the foldable ones, so a name folded once and reassigned
+// something unprojectable is caught too.
+export function collectAssignedNames(programSexpr) {
+  const counts = new Map();
+  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return counts;
+  for (const stmt of programSexpr.slice(1)) {
+    const assign = isNode(stmt) && stmt[0] === 'export' && stmt.length === 2 ? stmt[1] : stmt;
+    if (!isNode(assign) || assign[0] !== '=' || assign.length !== 3) continue;
+    if (typeof assign[1] !== 'string') continue;
+    counts.set(assign[1], (counts.get(assign[1]) ?? 0) + 1);
+  }
+  return counts;
 }
 
 // User-declared TYPE-SPACE names at module level — everything that
@@ -639,7 +664,26 @@ export function schemaTypeStory(decl, byName, known) {
 export function buildSchemaTypeStory(programSexpr) {
   const decls = collectSchemaDecls(programSexpr);
   if (decls.length === 0) return null;
-  const known = new Set(decls.map((d) => d.name));
+  // A DERIVED binding (`UserPublic = User.pick("id", "email")`) builds
+  // its schema by calling the algebra, so the checker types the VALUE
+  // from the intrinsic signatures and needs nothing from here — but the
+  // name has no type-space meaning, and `form: UserPublic` reads it as
+  // one (TS2749, "refers to a value, but is being used as a type").
+  // The shape comes from the same folder the browser bundler uses, so a
+  // derivation's TYPE is what the runtime's own algebra BUILDS rather
+  // than a second spelling of it, and it is a resolved shape rather
+  // than a `Pick<…>` the reader has to apply. Folding is conservative
+  // and bails to nothing on an unknown base, dynamic keys, or a mixin —
+  // each of those keeps today's behavior, never a wrong companion.
+  const derived = derivedSchemaDescriptors(programSexpr);
+  const assignedNames = collectAssignedNames(programSexpr);
+  // Only names that actually get an alias may be `known`: a field
+  // rendering a name no alias binds would ship an unresolved
+  // identifier, which this module's whole rendering contract forbids.
+  const known = new Set([
+    ...decls.map((d) => d.name),
+    ...derived.filter((d) => assignedNames.get(d.name) === 1).map((d) => d.name),
+  ]);
   const byName = new Map(decls.map((d) => [d.name, d]));
   const userTypes = collectUserTypeNames(programSexpr);
   const withModel = decls.some((d) => d.descriptor.kind === 'model');
@@ -667,37 +711,45 @@ export function buildSchemaTypeStory(programSexpr) {
   }
 
   const owners = new Map(); // emitted type name → owning description
+  // One name's claim on the module's type-space namespace. Derived
+  // bindings claim through here too — their alias occupies the same
+  // namespace and collides on the same three fronts.
+  // `at` positions the rejection where no descriptor offset exists: a
+  // folded descriptor is built fresh and carries none, so a derived
+  // name's collision would otherwise report against the file instead of
+  // the line the reader has to change.
+  const claim = (t, whose, start, at = null) => {
+    if (SCHEMA_INTRINSIC_NAMES.has(t)) {
+      throw new SchemaTypeError(
+        `${whose} emits the type name '${t}', which is reserved by the schema ` +
+        `intrinsic declarations (${[...SCHEMA_INTRINSIC_NAMES].join(', ')}) — rename the schema`,
+        start, at);
+    }
+    const prior = owners.get(t);
+    if (prior !== undefined) {
+      throw new SchemaTypeError(
+        `${whose} emits the type name '${t}', which ${prior} already emits — ` +
+        `every schema-emitted type name binds once per module; rename one`,
+        start, at);
+    }
+    owners.set(t, whose);
+    const user = userTypes.get(t);
+    if (user !== undefined) {
+      // Positioned on the USER declaration — the offender the user
+      // can rename — like the intrinsic-collision path above. The
+      // reserved family is `${name}Data` / `${name}Create` /
+      // `${name}Ensure` / `${name}Query` beside the schema's own
+      // name: a deliberate per-schema namespace reservation.
+      throw new SchemaTypeError(
+        `${whose} emits the type name '${t}', which collides with ${user.what} — ` +
+        `the schema's types and the user declaration would merge or duplicate; rename one`,
+        null, user.node);
+    }
+  };
   const stories = [];
   for (const d of decls) {
     const story = schemaTypeStory(d, byName, known);
-    for (const t of story.typeNames) {
-      if (SCHEMA_INTRINSIC_NAMES.has(t)) {
-        throw new SchemaTypeError(
-          `schema '${d.name}' emits the type name '${t}', which is reserved by the schema ` +
-          `intrinsic declarations (${[...SCHEMA_INTRINSIC_NAMES].join(', ')}) — rename the schema`,
-          d.descriptor.start ?? null);
-      }
-      const prior = owners.get(t);
-      if (prior !== undefined) {
-        throw new SchemaTypeError(
-          `schema '${d.name}' emits the type name '${t}', which ${prior} already emits — ` +
-          `every schema-emitted type name binds once per module; rename one`,
-          d.descriptor.start ?? null);
-      }
-      owners.set(t, `schema '${d.name}'`);
-      const user = userTypes.get(t);
-      if (user !== undefined) {
-        // Positioned on the USER declaration — the offender the user
-        // can rename — like the intrinsic-collision path above. The
-        // reserved family is `${name}Data` / `${name}Create` /
-        // `${name}Ensure` / `${name}Query` beside the schema's own
-        // name: a deliberate per-schema namespace reservation.
-        throw new SchemaTypeError(
-          `schema '${d.name}' emits the type name '${t}', which collides with ${user.what} — ` +
-          `the schema's types and the user declaration would merge or duplicate; rename one`,
-          null, user.node);
-      }
-    }
+    for (const t of story.typeNames) claim(t, `schema '${d.name}'`, d.descriptor.start ?? null);
     // A field's `[default]` is a bare JS value in the runtime
     // descriptor, related to the field's declared type by nothing the
     // checker can see — so the face states the relation: entry index →
@@ -719,8 +771,39 @@ export function buildSchemaTypeStory(programSexpr) {
     });
     stories.push({ decl: d, ...story, defaultTypes });
   }
+
+  // The companion alias, and ONLY that: the binding keeps the type the
+  // algebra gives its value, so nothing here re-declares the const and
+  // a fold that disagreed with the intrinsic signatures could not turn
+  // into a diagnostic on the user's own line. The two agree by
+  // construction — `pick` returns `Pick<In, K>` over the same field set
+  // the folder projects — and the CLEAN_ROWS in
+  // test/lang/tsface-tsc.test.js assign each to the other, so a folder
+  // that drifted fails at the checker rather than shipping a wrong
+  // shape.
+  //
+  // A name the module binds more than once gets NO companion. It has no
+  // single shape to state — whichever were emitted would describe one
+  // assignment and misdescribe the other — and a rebound name is legal
+  // code, so the alternative is worse than silence: two claims on one
+  // type name would meet the collision check below and REJECT a program
+  // that compiles fine without any companion at all.
+  const derivations = [];
+  for (const d of derived) {
+    if (assignedNames.get(d.name) > 1) continue;
+    const story = schemaTypeStory({ name: d.name, descriptor: d.descriptor }, byName, known);
+    for (const t of story.typeNames) claim(t, `the derived schema '${d.name}'`, null, d.node);
+    // `constType` is the DECLARATION road's alone. A face has the
+    // algebra call to infer from and must not re-state it; a .d.ts has
+    // no call at all, so the value would otherwise vanish while its
+    // type name shipped — a consumer could annotate `u: UserView` and
+    // still not call `UserView.parse`.
+    derivations.push({ decl: d, aliasLines: story.aliasLines, constType: story.constType });
+  }
+
   return {
     stories,
+    derivations,
     intrinsicLines: schemaIntrinsicLines(withModel, withMixin),
     withModel,
   };

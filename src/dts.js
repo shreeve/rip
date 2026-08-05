@@ -46,7 +46,8 @@ import {
 import { buildSchemaTypeStory, SchemaTypeError } from './schema-types.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode, ctorAtFields } from './emitter.js';
 import {
-  componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
+  componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
+  segmentsText,
   selfArgsOf,
   anyArgsOf,
 } from './component-types.js';
@@ -84,9 +85,11 @@ export function emitDeclarations({ sexpr, stores, source }) {
     throw err;
   }
   const schemaByNode = new Map();
+  const schemaDerivedByNode = new Map();
   if (schemaStory) {
     lines.push(...schemaStory.intrinsicLines);
     for (const s of schemaStory.stories) schemaByNode.set(s.decl.node, s);
+    for (const d of schemaStory.derivations) schemaDerivedByNode.set(d.decl.node, d);
   }
 
   // One schema declaration's lines: exported schemas export their
@@ -192,6 +195,21 @@ export function emitDeclarations({ sexpr, stores, source }) {
         }
       }
     }
+    // Instance method bodies, for the `@field = …` walk below. A field a
+    // helper establishes is the class's just as surely as one the
+    // constructor inlines, and the declaration must say so or a consumer
+    // publishes TS2339 cross-module on a property the runtime really has.
+    // Statics are excluded — their `this` is the class.
+    const instanceMethodBodies = [];
+    for (const stmt of stmts) {
+      if (!isNode(stmt) || stmt[0] !== 'object') continue;
+      for (const pair of stmt.slice(1)) {
+        if (pair[0] !== ':' && pair[0] !== 'void-pair') continue;
+        if (isStaticKey(pair[1]) || !isFunc(pair[2])) continue;
+        if (memberName(pair[1]) === 'constructor') continue;
+        instanceMethodBodies.push(pair[2][2]);
+      }
+    }
     for (const stmt of stmts) {
       if (isNode(stmt) && stmt[0] === 'object') {
         for (const pair of stmt.slice(1)) {
@@ -238,7 +256,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
             // author's annotation when there is one; `any` otherwise —
             // a declaration file cannot repeat the constructor
             // inference the face relies on.
-            for (const at of ctorAtFields(value[2])) {
+            for (const at of ctorAtFields([value[2], ...instanceMethodBodies])) {
               if (declared.has(at.name)) continue;
               declared.add(at.name);
               // Any of the field's assignments can carry the author's
@@ -312,7 +330,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     const annotation = roleType(node, 'annotation');
     if (annotation === null) return;
     const ro = node[0] === 'computed' ? 'readonly ' : '';
-    lines.push(`${exported ? 'export ' : ''}declare const ${node[1]}: ${containerType(annotation, ro)};`);
+    lines.push(`${exported ? 'export ' : ''}declare const ${node[1]}: ${containerType(annotation, ro, MINTED)};`);
   };
 
   const isReactiveDecl = (stmt) => {
@@ -351,7 +369,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     const typeParams = typeParamsOf(stmt);
     const self = `${name}${selfArgsOf(typeParams)}`;
     lines.push(`${exp}interface ${name}${typeParams} {`);
-    for (const l of rendered(() => instanceTypeLines(info, self))) lines.push(`  ${l.text}`);
+    for (const l of rendered(() => instanceTypeLines(info, self))) lines.push(`  ${segmentsText(l.segs)}`);
     lines.push('}');
     lines.push(`${exp}declare let ${name}: {`);
     if (gated) {
@@ -505,6 +523,8 @@ export function emitDeclarations({ sexpr, stores, source }) {
     else if (isDefHead(head) && stmt.length === 4) defDecl(stmt, exported);
     else if (head === '=' && stmt.length === 3 && schemaByNode.has(stmt[2])) {
       schemaDecl(schemaByNode.get(stmt[2]), exported);
+    } else if (head === '=' && stmt.length === 3 && schemaDerivedByNode.has(stmt)) {
+      schemaDecl(schemaDerivedByNode.get(stmt), exported);
     } else if (head === '=' && stmt.length === 3 && typeof stmt[1] === 'string' && isComponentDecl(stmt[2])) {
       componentDecl(stmt[2], stmt[1], exported, stmt);
     } else if (head === '=' && stmt.length === 3 && protoMemberTarget(stmt) !== null) {

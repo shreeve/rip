@@ -195,7 +195,7 @@
         "line": 72,
         "character": 8,
         "token": "label",
-        "expect": "(property) label?: string | { value: string; read(): string; } | undefined",
+        "expect": "(property) label?: string | { value: string; read(): string; touch?(): void; } | undefined",
         "rule": "attr/prop name (component)",
         "why": "the props surface's real declared type — truthful interim; the container arm rides the bind slot by design"
       },

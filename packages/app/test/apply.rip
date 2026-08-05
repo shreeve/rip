@@ -7,8 +7,11 @@ import { test, eq, throws } from '@rip-lang/testing'
 import { createApply } from '../apply.rip'
 
 test "createApply validates its options", ->
+  # @ts-expect-error
   throws (-> createApply()), 'expects an options object'
+  # @ts-expect-error
   throws (-> createApply {}), 'requires renderer.remountDirty'
+  # @ts-expect-error
   throws (-> createApply { renderer: remountDirty: -> 'narrow' }), 'requires an escape remount'
 
 test! "absorb ignores an empty set and reloads for ordinary assets", ->

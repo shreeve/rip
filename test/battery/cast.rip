@@ -122,3 +122,39 @@ code "a clause keyword ends the cast's type run", '''
     return {live: false};
   } })();
 '''
+
+# ==============================================================================
+# A trailing generic close ends the cast's line
+# ==============================================================================
+
+# The `>` closing `as D<T>` is a generic close, not a comparison waiting on a
+# right operand: the next line starts its own statement in the OUTER block —
+# continuation here would nest it into the wrong block silently.
+code "block-final generic cast keeps the dedent", """
+  def f(x)
+    if x
+      return g(x) as D<T>
+    h(x)
+  """, '''
+  function f(x) {
+    if (x) {
+      return g(x);
+    }
+    return h(x);
+  }
+  '''
+
+code "block-final generic cast before a sibling if", """
+  def f(x)
+    if x
+      return g(x) as D<T, A>
+    if x
+      h(x)
+  """, '''
+  function f(x) {
+    if (x) {
+      return g(x);
+    }
+    return (x ? h(x) : undefined);
+  }
+  '''

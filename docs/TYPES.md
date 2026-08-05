@@ -152,12 +152,25 @@ package carries the pinned TypeScript/`tsgo` toolchain it brokers.
 A state exports its container, not an unwrapped snapshot:
 
 ```ts
-{ value: T; read(): T }
+{ value: T; read(): T; touch(): void }
 ```
 
-A computed exports a readonly `value`. `read(): T` is the structural
-brand shared with the runtime's container detection, preventing an
-ordinary `{value: …}` object from satisfying a binding-container slot.
+A computed exports its `value` readonly and carries no `touch` — it has
+no notify seam at runtime.
+
+`read(): T` is the structural brand shared with the runtime's container
+detection, preventing an ordinary `{value: …}` object from satisfying a
+binding-container slot.
+
+`touch` is the writable container's notify seam, which a bind into a
+chain calls because a nested write changes no container identity. A slot
+that holds a container rip minted — a module reactive, `rest`, a
+component's own `:=` member — spells it `touch(): void`, so a consumer
+holding that container calls it unguarded. A slot that ACCEPTS a
+container from elsewhere — a prop, a bind channel — spells it
+`touch?(): void`, because the sharing contract admits a caller-supplied
+`{ value, read }`, which the runtime treats as a container but which has
+no `touch`.
 
 Typed initializers are checked without changing runtime bytes.
 
@@ -171,6 +184,14 @@ Schema descriptors project into:
 - query, CRUD, scope, and relation surfaces;
 - callable `this` types;
 - enum and union outputs.
+
+A derived binding (`UserPublic = User.pick('id', 'email')`) gets a type
+companion under its own name, so it can be annotated and re-exported
+like any declared schema. The companion is the resolved shape, projected
+by the same folder the browser bundler uses, so a derivation types as
+what the runtime builds. The projection is conservative: an unknown
+base, dynamic keys, or a `@mixin` base yields no companion rather than a
+guessed one, and the binding keeps the type its algebra call infers.
 
 Runtime delivery and type rendering are separate: using schema syntax
 delivers the runtime machinery while the TS face and declarations carry
@@ -191,6 +212,21 @@ It produces:
 
 The face and declaration paths consume the same model.
 
+## Declared globals
+
+A top-level `globalThis.NAME ??= expr` declares the global. The `??=`
+spelling says "install unless someone already did" — DSL vocabulary,
+like stamp's `sh`/`ok`/`run` — and the face emits the typed declaration
+for it: `typeof` the initializer when it is an identifier, `any`
+otherwise. Plain `=` and non-top-level installs declare nothing on
+purpose: a test overwriting `globalThis.fetch` and an app's guarded,
+destroy-cleared lifecycle globals are not vocabulary.
+
+The declaring package becomes its own program in the mirror (an
+automatic project boundary), so the vocabulary stays package-scoped and
+reaches importers the way the runtime does — importing the module runs
+the installer. A non-importing neighbor keeps its cannot-find.
+
 ## Editor pipeline
 
 The VS Code/Cursor extension:
@@ -207,6 +243,45 @@ hashes. It is never committed or shipped.
 
 Synthetic generated ranges do not receive fabricated Rip positions.
 Diagnostics without an honest source mapping are dropped.
+
+## Diagnostic publishing
+
+Every mode checks the same always-on program; modes differ in which
+diagnostics publish.
+
+Gradual — the default — publishes a diagnostic only where type
+information reaches its mapped source line: an annotation in the
+declaration's header, the compiler's own types (schemas, components),
+flow along assignment, or an import of a typed export (annotated `.rip`
+exports, relative `.ts` modules, and bare workspace `.rip` packages).
+Inference alone never publishes, and an annotation is how you ask for
+more. What inference produces over unannotated Rip is dominated by
+confident errors about correct code: a parameter is typed from its
+`= {}` default, so every legitimate `opts.foo` reads as "does not exist
+on type `{}`"; an object built by spread reads as closed to the key set
+it was built with; a Bun API is unknown for want of `@types/bun`. Those
+land exactly where the author declined to annotate, and no edit but an
+annotation answers them. The case the other side would catch —
+`answer = 42` later misused as a string — is genuine but was not found
+anywhere in this repository. The gate lives in
+`packages/vscode/src/scopes.js`, shared verbatim by the editor and
+`rip check`, and it fails OPEN: a source the lexer refuses publishes
+everything.
+
+Names and modules that do not resolve, and definition cycles, publish
+in every mode — defects no annotation answers. One exception spells the
+difference between a typo and stated intent: a bare import DECLARED in
+the governing package.json but not installed is held under gradual
+(`rip check` counts it with the install remedy), while strict publishes
+it; undeclared-and-uninstalled stays a defect everywhere. Gradual rides
+TypeScript 7's default `strict` and subtracts only what it deliberately
+loosens: `strictNullChecks` (the lever that changes types, not just
+which diagnostics publish), `useUnknownInCatchVariables` (an
+unannotated `catch` answers `any`), and `noImplicitThis` (`this` in an
+unannotated object-literal method is `any`). Everything else — present
+and future strict-family members — stays on, so new strictness arrives
+as a visible leak, never as silent inference loss. Any strictness the
+project's own tsconfig chain sets is yielded to whole.
 
 ## Project configuration
 
@@ -227,10 +302,26 @@ use-before-assignment checking for typed forwards. `noCheck` suppresses
 diagnostics for matching paths while keeping those files in the
 TypeScript program so imports continue to resolve.
 
+A nested package whose mode FLIPS against its parent package's becomes
+its own program in the mirror (the same automatic boundary a
+globals-declaring package gets): host floors and null posture are
+per-program, so the package's own mode governs them. The flip cuts both
+ways — a strict package inside a gradual workspace gets its complaints
+(an unresolvable `bun:sqlite` instead of a floored `any`), and a
+gradual package inside a strict workspace keeps its loose base instead
+of riding strict nulls and refused floors.
+
 Configuration changes refresh open editor documents without a window
 reload. `rip check [paths...]` applies the same project configuration,
 materializes the same TypeScript faces and import closure, and translates
 diagnostics through the same mapping seam without starting an editor.
+
+A check answers for the paths it was given. The closure is compiled and
+checked whole — a target's types cannot resolve otherwise — but a
+dependency's own diagnostics report through its own check, counted here
+in one summary line instead. The editor draws the same line by a
+different rule: it publishes per open document, so a dependency stays
+silent until you open it.
 
 ## Correctness gates
 
@@ -243,6 +334,11 @@ diagnostics through the same mapping seam without starting an editor.
   and produce their required TS regions.
 - **Audit:** real Rip fixtures compare compilation, diagnostics,
   runtime behavior, and editor answers against TypeScript twins.
+- **Suppression matrix:** the audit's gradual pair
+  (`test/audit/corpus/gradual/`) asserts every family gradual holds
+  publishes nothing in gradual AND still publishes under strict — a
+  family quiet in both modes is a failure — plus the published set,
+  pinned per line, with `rip check` and the editor answering alike.
 - **Mapping:** annotations, diagnostics, hover, and definitions
   round-trip through exact UTF-16 offsets.
 
@@ -258,6 +354,7 @@ diagnostics through the same mapping seam without starting an editor.
 | schema type rendering | `src/schema-types.js` |
 | component type rendering | `src/component-types.js` |
 | editor broker | `packages/vscode/src/` |
+| diagnostic gate | `packages/vscode/src/scopes.js` |
 | type gates | `test/lang/`, `test/toolchain/`, `test/audit/` |
 
 Open type/editor work is tracked in [ROADMAP.md](ROADMAP.md).

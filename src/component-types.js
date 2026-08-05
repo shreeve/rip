@@ -241,8 +241,35 @@ export function componentTypeInfo(stores, source, node, behavior = null) {
 export const segmentsText = (segs) => segs.map((s) => s.text).join('');
 
 // Is a reactive-container member — its runtime slot is a `__state`
-// container ({ value: T; read(): T }).
+// container ({ value: T; read(): T; touch(): void }).
 const containerish = (m) => m.kind === 'state' || m.kind === 'prop';
+
+// A WRITABLE container's notify seam: a nested write (`form.first <=> …`)
+// changes no container identity, so the bind notifies the root through
+// `touch`. The two spellings answer two different questions, and a
+// container position must pick the one that matches how it got its
+// container:
+//
+//   MINTED — the slot holds a container `__state` made (a module
+//     reactive, `rest`, a component's own `:=` member). It has `touch`,
+//     so the type says so outright and a consumer holding the container
+//     writes `count.touch()` with no guard. Spelling this optional was
+//     measured: under `rip.strict` the guardless call draws TS2722 on a
+//     notify that cannot be absent.
+//
+//   TAKEN — the slot ACCEPTS a container from somewhere else (a prop, a
+//     bind channel, and the prop's own instance type, since that is the
+//     accepted container). The sharing contract admits a caller-supplied
+//     `{ value, read }`, which the runtime treats as a container (the
+//     `read` predicate) but which has no `touch`, so its nested writes
+//     notify nothing. Optional is the honest spelling and is why the
+//     lowering emits `.touch?.()` rather than `.touch()`.
+//
+// Read-only containers (`~=`) have no `touch` at runtime and spell
+// neither. TAKEN is the default: claiming a `touch` that is not there
+// rejects containers the runtime accepts, which is the louder failure.
+export const MINTED = '; touch(): void';
+export const TAKEN = '; touch?(): void';
 
 // The container type carries the STRUCTURAL BRAND `read(): T` — the
 // runtime's own container-detection predicate (`typeof x.read ===
@@ -310,7 +337,8 @@ export const selfArgsOf = (typeParams) => {
   return names.length === 0 ? '' : `<${names.join(', ')}>`;
 };
 
-export const containerType = (t, ro = '') => `{ ${ro}value: ${t}; read(): ${t} }`;
+export const containerType = (t, ro = '', notify = TAKEN) =>
+  `{ ${ro}value: ${t}; read(): ${t}${ro === '' ? notify : ''} }`;
 
 // The member's INSTANCE type as segments (`declare name: …` bodies,
 // interface member lines). The annotated piece marks as `: T` — the
@@ -431,15 +459,28 @@ const memberTypeSegments = (m, lead) => {
     : [{ text: ': any' }];
   const vt = t ?? 'any';
   if (m.kind === 'accept') return [{ text: `${lead}any` }];
+  // The container renders the member's type TWICE — once on `value`, once
+  // as `read()`'s return. Both spellings are the same annotation, so both
+  // carry its span: an unmarked one falls to whatever cover encloses the
+  // line, which in the companion interface is the whole component.
+  const readBack = (pre, post) => (t !== null
+    ? [{ text: pre }, { text: vt, node: m.node, role: 'annotation' }, { text: post }]
+    : [{ text: `${pre}${vt}${post}` }]);
   if (containerish(m)) {
     const und = t !== null && m.optional && m.kind === 'prop' ? ' | undefined' : '';
+    // PUBLIC is the line, not the kind: a member the caller can reach
+    // takes whatever container arrives on its bind channel, and a
+    // defaulted prop (`@step: number = 1`) carries kind 'state' while
+    // `_init` still reads `props.__bind_step__` first. A private member
+    // is minted here and nowhere else.
+    const notify = m.isPublic ? TAKEN : MINTED;
     return [
       { text: `${lead}{ value` }, ...typed,
-      { text: `${und}; read(): ${vt}${und} }` },
+      ...readBack(`${und}; read(): `, `${und}${notify} }`),
     ];
   }
   if (m.kind === 'computed' || m.kind === 'gate') {
-    return [{ text: `${lead}{ readonly value` }, ...typed, { text: `; read(): ${vt} }` }];
+    return [{ text: `${lead}{ readonly value` }, ...typed, ...readBack('; read(): ', ' }')];
   }
   if (t === null) return [{ text: `${lead}any` }];
   return typed; // readonly / plain: the annotation IS `: T`
@@ -618,18 +659,37 @@ export function instanceTypeLines(info, selfType) {
       const declared = info.roleText(m.func, 'returnType');
       const base = declared ?? (m.isVoid ? 'void' : 'any');
       const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push({ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};` });
+      lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};` }] });
       continue;
     }
+    // SEGMENTS, not one blob: the member's type is rendered here a second
+    // time (the class declare is the first), so a fault in it publishes
+    // twice, and the companion has no source line of its own to fall back
+    // on — an unmapped byte lands on the component's `$self` cover and
+    // paints every line of the component. The type segments already carry
+    // their annotation spans; passing them through is what puts the second
+    // publication on the member the author wrote.
     lines.push({
-      text: `${m.kind === 'readonly' ? 'readonly ' : ''}${m.name}${segmentsText(memberTypeSegments(m, ': '))};`,
-      ...(isBehaviorProjected(m) ? { node: m.nameNode, role: m.nameRole } : {}),
+      // The line's own cover is the MEMBER, so any byte without a finer
+      // span of its own — the container's `value`, which is where TS
+      // reports a computed cycle — lands on the member the author wrote
+      // instead of on the component. Segments carrying a span (the
+      // annotation) nest inside and win where they apply.
+      node: m.nameNode, role: m.nameRole,
+      segs: [
+        { text: m.kind === 'readonly' ? 'readonly ' : '' },
+        { text: m.name },
+        ...memberTypeSegments(m, ': '),
+        { text: ';' },
+      ],
     });
   }
-  if (!hasChildren) lines.push({ text: 'children?: any;' });
-  if (info.extendsTag !== null) lines.push({ text: `rest: ${containerType('Record<string, any>')};` });
-  lines.push({ text: `mount(target?: any): ${selfType};` });
-  lines.push({ text: 'unmount(options?: { removeDOM?: boolean }): void;' });
-  lines.push({ text: 'emit(name: string, detail?: any): void;' });
+  // Scaffolding the author never wrote: no source span exists for these, so
+  // they carry no mark and stay under the component's cover.
+  if (!hasChildren) lines.push({ segs: [{ text: 'children?: any;' }] });
+  if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${containerType('Record<string, any>', '', MINTED)};` }] });
+  lines.push({ segs: [{ text: `mount(target?: any): ${selfType};` }] });
+  lines.push({ segs: [{ text: 'unmount(options?: { removeDOM?: boolean }): void;' }] });
+  lines.push({ segs: [{ text: 'emit(name: string, detail?: any): void;' }] });
   return lines;
 }

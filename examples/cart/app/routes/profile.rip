@@ -1,5 +1,5 @@
 import { UserPublic as User } from '../../api/models.rip'
-import { api, parseApiError } from '../api-client.rip'
+import { api, ApiErrors, parseApiError } from '../api-client.rip'
 import { Button } from '../components/button.rip'
 import { title } from '../config.rip'
 import { createMutation } from '@rip-lang/app'
@@ -21,7 +21,7 @@ export Profile = component
 
   render
     h1 'Profiler'
-    form @submit: ((e) -> e.preventDefault(); updateUser!(form))
+    form @submit: ((e) -> e.preventDefault(); updateUser(form))
       div.grid
         label
           'First name'

@@ -21,15 +21,34 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { cacheIdentityOf } from '../packages/vscode/src/hash.js';
 import { compile } from './compile.js';
 import { readProjectConfig } from './config.js';
 import { identifierRunAt } from './lexer.js';
 import { startTsgo } from '../packages/vscode/src/tsgo.js';
 import { buildProbe, parseProbeHover } from '../packages/vscode/src/pins.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from '../packages/vscode/src/diagnostics.js';
-import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from '../packages/vscode/src/mirror.js';
+import { SUPPRESSED_TS_CODES, IMPLICIT_ANY_CODES, MISSING_TYPES_CODES } from '../packages/vscode/src/translate.js';
+import { scopeGateOf, typedExportsOf, typedImportsOf } from '../packages/vscode/src/scopes.js';
+import { tokenize } from './lexer.js';
+import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, missingModuleRead, linkNestedNodeModules, declaredButUninstalled } from '../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../packages/vscode/src/translate.js';
+
+// Fails OPEN, like the editor's: a source the lexer refuses leaves the gate
+// undefined and every diagnostic publishes. An empty annotation set would
+// silence the whole file, and a silent file reads as a clean one.
+const scopeGate = (source, fsPath, face, typedImports) => {
+  try { return scopeGateOf(tokenize(source, fsPath).tokens, source, face, typedImports); }
+  catch { return undefined; }
+};
+
+// A module's ANNOTATED exports — file-local, so a lexer refusal costs this
+// module's importers their cross-file checking and nothing else.
+const moduleTypedExports = (source, fsPath, face) => {
+  try { return typedExportsOf(tokenize(source, fsPath).tokens, source, face); }
+  catch { return new Set(); }
+};
 
 const HELP = `rip check — type-check .rip files headlessly (the tsc --noEmit of rip-land)
 
@@ -41,44 +60,59 @@ Options:
   --json                   Emit diagnostics as a JSON array instead of the
                            human-readable text report
   --no-frame               Suppress the source code-frame under each error
-  --keep-mirror            Keep the generated TS mirror (.rip/check) after the
-                           run instead of removing it — for inspecting the
-                           exact TypeScript tsgo type-checked
+  --build                  Print the build identity (a content hash over the
+                           compiler and editor-server trees) and exit — the
+                           editor logs the same hash in its ready line, so a
+                           mismatch means the installed extension is stale
   -h, --help               Show this help
 
 Exit status is 0 when no error-severity diagnostic survives, 1 otherwise.
 Directories are walked for *.rip (node_modules and dot-directories are
 skipped). Config — package.json#rip (strict / noCheck) and the project
-tsconfig — governs exactly as it does in the editor.`;
+tsconfig — governs exactly as it does in the editor. The generated TS
+mirror stays at <root>/.rip/check after the run — the exact TypeScript
+the LAST run type-checked (only the files that run covered), wiped and
+rebuilt at the start of every run; .build inside it names the compiler
+build that wrote it.`;
 
 const fail = (message, code = 2) => { console.error(message); process.exit(code); };
 
 // ── argument parsing ────────────────────────────────────────────────
 const argv = process.argv.slice(2);
 if (argv.includes('-h') || argv.includes('--help')) { console.log(HELP); process.exit(0); }
+// The build identity, printed and exited on before anything else: the same
+// content hash over the same two trees (compiler + editor server) the
+// editor computes for its cache key and logs in its ready line. When the
+// two hashes differ, the installed extension is running different code
+// than this CLI — the skew behind "the editor and rip check disagree".
+if (argv.includes('--build')) {
+  const compilerDir = path.dirname(fileURLToPath(import.meta.url));
+  const serverDir = path.join(compilerDir, '..', 'packages', 'vscode', 'src');
+  const tilde = (p) => (p.startsWith(os.homedir() + path.sep) ? '~' + p.slice(os.homedir().length) : p);
+  console.log(`rip check build ${cacheIdentityOf(compilerDir, serverDir)}`);
+  console.log(`  compiler  ${tilde(compilerDir)}`);
+  console.log(`  server    ${tilde(serverDir)}`);
+  process.exit(0);
+}
 const asJson = argv.includes('--json');
 const showFrames = !argv.includes('--no-frame') && !asJson;
-const keepMirror = argv.includes('--keep-mirror');
-const KNOWN = new Set(['--json', '--no-frame', '--keep-mirror']);
+const KNOWN = new Set(['--json', '--no-frame', '--build']);
 const positionals = argv.filter((a) => !a.startsWith('-'));
 const unknownFlags = argv.filter((a) => a.startsWith('-') && !KNOWN.has(a));
 if (unknownFlags.length) fail(`rip check: unknown option${unknownFlags.length === 1 ? '' : 's'}: ${unknownFlags.join(', ')}\n\nRun 'rip check --help' for usage.`);
 
-// The generated TS mirror is scratch, not a build product: it is removed
-// when the process exits by ANY path (normal, error, or process.exit) —
-// rmSync in an exit handler runs synchronously, so this reclaims the
-// <root>/.rip/check tree AND the temp fallback without leaving either
-// behind between runs. `--keep-mirror` retains it for inspecting the
-// exact TypeScript tsgo checked.
-let mirrorToClean = null;
-let dotRipDir = null;   // <root>/.rip, pruned if the mirror left it empty
+// The generated TS mirror at <root>/.rip/check is a persistent,
+// regenerable cache — the peer of the editor's .rip/editor, self-
+// gitignored, left in place between runs so the exact TypeScript tsgo
+// checked stays inspectable. Freshness never depends on cleanup: every
+// run wipes and rebuilds the tree before tsgo sees it. Only the temp
+// fallback root — used when the workspace isn't writable — is ours to
+// remove, on ANY exit path: rmSync in an exit handler runs
+// synchronously.
+let fallbackToClean = null;
 process.on('exit', () => {
-  if (keepMirror || mirrorToClean === null) return;
-  try { fs.rmSync(mirrorToClean, { recursive: true, force: true }); } catch { /* best effort */ }
-  // Prune the .rip parent too, but only when now empty — the editor's
-  // .rip/editor may share it, and rmdirSync refuses a non-empty dir, so
-  // this removes .rip only when `rip check` was what created it.
-  if (dotRipDir !== null) { try { fs.rmdirSync(dotRipDir); } catch { /* not empty / shared */ } }
+  if (fallbackToClean === null) return;
+  try { fs.rmSync(fallbackToClean, { recursive: true, force: true }); } catch { /* best effort */ }
 });
 
 // ── target collection ───────────────────────────────────────────────
@@ -124,17 +158,28 @@ function commonAncestor(files) {
   for (; i < first.length; i++) if (!split.every((parts) => parts[i] === first[i])) break;
   return first.slice(0, i).join(path.sep) || path.sep;
 }
+// The workspace root anchors the mirror, and a WORKSPACES root outranks
+// a nearer plain package.json: checking `packages/http` from a monorepo
+// root must land the sibling packages its bare imports resolve to INSIDE
+// the mirror, and stopping at the package's own manifest strands them
+// outside. The walk records the nearest marker as the fallback and keeps
+// climbing for a `workspaces` declaration — bun's own resolution rule.
 function findWorkspaceRoot(files) {
   const base = commonAncestor(files);
+  let nearest = null;
   for (let cur = base; ; ) {
-    for (const marker of ['package.json', 'tsconfig.json', '.git']) {
-      if (fs.existsSync(path.join(cur, marker))) return cur;
+    const pkg = path.join(cur, 'package.json');
+    if (fs.existsSync(pkg)) {
+      try { if (JSON.parse(fs.readFileSync(pkg, 'utf8')).workspaces) return cur; } catch { /* malformed — a marker, not a root */ }
+      nearest ??= cur;
+    } else if (['tsconfig.json', '.git'].some((m) => fs.existsSync(path.join(cur, m)))) {
+      nearest ??= cur;
     }
     const parent = path.dirname(cur);
     if (parent === cur) break;
     cur = parent;
   }
-  return base;
+  return nearest ?? base;
 }
 
 const targets = collectTargets(positionals.length ? positionals : ['.']);
@@ -144,6 +189,35 @@ if (targets.length === 0) {
   process.exit(0);
 }
 const workspaceRoot = findWorkspaceRoot(targets);
+
+// ── mirror root ─────────────────────────────────────────────────────
+// A dedicated mirror at <root>/.rip/check (peer of the editor's
+// .rip/editor), wiped and rebuilt EVERY run — unconditionally, before
+// anything compiles, so a run whose targets all fail to parse still
+// clears the previous run's faces and the tree always holds exactly
+// what the LAST run checked. `.build` stamps it with the compiler build
+// that wrote it. The wipe is what carries correctness: a since-deleted
+// source's face from an earlier run never lingers in the `**/*.ts`
+// program.
+let mirrorRoot = path.join(workspaceRoot, '.rip', 'check');
+let mirrorRootIsFallback = false;
+try {
+  fs.rmSync(mirrorRoot, { recursive: true, force: true });
+  fs.mkdirSync(mirrorRoot, { recursive: true });
+  fs.writeFileSync(path.join(mirrorRoot, '.gitignore'), '*\n');
+  const compilerDir = path.dirname(fileURLToPath(import.meta.url));
+  fs.writeFileSync(path.join(mirrorRoot, '.build'),
+    cacheIdentityOf(compilerDir, path.join(compilerDir, '..', 'packages', 'vscode', 'src')) + '\n');
+} catch (err) {
+  // Degraded, never silent: the fallback re-roots tsgo outside the
+  // workspace, so per-project wrappers stop applying and @types
+  // resolution changes — the user must know their diagnostics come
+  // from a different posture than the editor's.
+  mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-'));
+  mirrorRootIsFallback = true;
+  fallbackToClean = mirrorRoot;
+  console.error(`rip check: workspace mirror root unavailable (${err.code ?? err.message}) — using a temp fallback (tsconfig/@types fidelity degrades)`);
+}
 
 // ── closure compile (pins-less) ─────────────────────────────────────
 // BFS the target set + its transitive .rip imports. Each source is
@@ -165,7 +239,35 @@ const parseDiags = [];        // rows for files that failed to compile
 // clean 0 must mean "checked, and clean", never "couldn't check"), mirroring
 // the tsgo-unavailable posture below.
 let incompleteCheck = false;
+// Diagnostics dropped by the gradual posture, counted so the summary can
+// say so. A run that hides hundreds and reports nothing about it reads as
+// "rip's checker is weak" rather than "this project is in gradual mode" —
+// the wrong lesson, and an undiscoverable one.
+//
+// Counted per FAMILY because the remedies differ: one is a mode you can
+// turn on, the other is a package you can install. A single total would
+// point everyone at the wrong one.
+let hiddenAnnotations = 0;
+let hiddenMissingTypes = 0;
+let hiddenScope = 0;
+// The NAMES the missing-types advisories are about (`describe`, `require`
+// …) — TypeScript's own message carries each one, and a summary that says
+// "install the @types package" without a noun sends the user hunting
+// through their imports for which declaration is absent.
+const missingTypeNames = new Set();
+// The PROJECTS the hidden diagnostics belong to (config-dir, cwd-relative),
+// per family — named in the summary so the `rip.strict` remedy points at
+// the right package.json. The home project ('.') stays unnamed.
+const hiddenScopeDirs = new Set();
+const hiddenAnnotationDirs = new Set();
+let hiddenUninstalled = 0;
+const hiddenUninstalledDirs = new Set();   // where `bun install` answers
+// A DEPENDENCY's diagnostics — a closure file the run was not asked
+// about. Counted, never reported: see the pull loop.
+let dependencyDiags = 0;
+const dependencyDirs = new Set();
 const seen = new Set();
+const explicitTargets = new Set(targets);
 const queue = [...targets];
 while (queue.length) {
   const fsPath = queue.shift();
@@ -174,8 +276,20 @@ while (queue.length) {
   let source;
   try { source = fs.readFileSync(fsPath, 'utf8'); }
   catch (err) {
-    // Readable at collect time (statSync), not now: a permission flip, a
-    // broken symlink, a race. Never silently drop it — mark the run short.
+    // A QUEUED import whose module does not exist as specified
+    // (missingModuleRead: ENOENT, ENOTDIR, ELOOP…) is not a coverage
+    // gap: a dangling specifier is the IMPORTER's defect, and its
+    // missing face already earns the importer tsgo's TS2307 on the .rip
+    // line (or silence under @ts-nocheck, whose writ covers the file's
+    // imports). Everything else stays loud and marks the run short: an
+    // explicit target is part of what was ASKED to be checked (named on
+    // the command line or found by the walk), and an import that EXISTS
+    // but cannot be read (EACCES) must not skip into a "cannot find
+    // module" that misstates the problem. The editor's closure walk is
+    // broader here — it parks EVERY unreadable import for a later
+    // Created event — because an open-buffer server retries where a
+    // batch gate answers once, loudly.
+    if (!explicitTargets.has(fsPath) && missingModuleRead(err)) continue;
     incompleteCheck = true;
     console.error(`rip check: cannot read ${path.relative(process.cwd(), fsPath)} (${err.code ?? err.message}) — skipped; the run is incomplete`);
     continue;
@@ -194,12 +308,13 @@ while (queue.length) {
     continue;
   }
   compiled.set(fsPath, {
-    source, cfg,
+    source, cfg, result,
     good: {
       source, code: result.code, mappings: result.mappings,
       echoSpans: result.echoSpans ?? [],
       srcLineStarts, genLineStarts: lineStartsOf(result.code),
       strict: cfg.strict === true,
+      dir: path.dirname(fsPath),
     },
     pinnables: result.pinnables ?? [],
   });
@@ -208,29 +323,26 @@ while (queue.length) {
   }
 }
 
+// The gate runs in a SECOND pass, once the whole closure is compiled: a
+// file's gate depends on which of its imports name an ANNOTATED export, and
+// the queue reaches a dependency after the file importing it as often as
+// before. Typed exports are file-local, so this pass needs no ordering of
+// its own and an import cycle cannot recur through it.
+const typedExports = new Map();
+for (const [fsPath, entry] of compiled) {
+  typedExports.set(fsPath, moduleTypedExports(entry.source, fsPath, entry.result));
+}
+for (const [fsPath, entry] of compiled) {
+  entry.good.checkedLines = scopeGate(
+    entry.source, fsPath, entry.result,
+    typedImportsOf(entry.result.stores, entry.source, path.dirname(fsPath), (p) => typedExports.get(p)),
+  );
+}
+
 // ── materialize the mirror + drive one tsgo session ─────────────────
 const tsDiags = [];
 let tsgoUnavailable = false; // tsgo needed but could not start — a run that couldn't type-check
 if (compiled.size > 0) {
-  // A dedicated mirror at <root>/.rip/check (peer of the editor's
-  // .rip/editor), rebuilt from scratch and removed on exit (see the
-  // exit handler above) — scratch, not a build product. The start-of-run
-  // wipe also guards against a stale mirror a killed/`--keep-mirror` run
-  // left behind, so a since-deleted source's face never lingers in the
-  // `**/*.ts` program.
-  let mirrorRoot = path.join(workspaceRoot, '.rip', 'check');
-  let mirrorRootIsFallback = false;
-  try {
-    fs.rmSync(mirrorRoot, { recursive: true, force: true });
-    fs.mkdirSync(mirrorRoot, { recursive: true });
-    fs.writeFileSync(path.join(mirrorRoot, '.gitignore'), '*\n');
-  } catch {
-    mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-'));
-    mirrorRootIsFallback = true;
-  }
-  mirrorToClean = mirrorRoot;
-  if (!mirrorRootIsFallback) dotRipDir = path.join(workspaceRoot, '.rip');
-  if (keepMirror) console.error(`rip check: keeping TS mirror at ${mirrorRoot}`);
   for (const [fsPath, entry] of compiled) {
     const rel = mirrorRelForFsPath(fsPath, mirrorRootIsFallback ? null : workspaceRoot);
     const mirrorPath = path.join(mirrorRoot, rel) + '.ts';
@@ -240,6 +352,7 @@ if (compiled.size > 0) {
     // them whenever the path carries a space or non-ASCII char.
     entry.mirrorUri = pathToFileURL(mirrorPath).href;
     fs.mkdirSync(path.dirname(mirrorPath), { recursive: true });
+    if (!mirrorRootIsFallback) linkNestedNodeModules(workspaceRoot, mirrorRoot, fsPath);
     fs.writeFileSync(mirrorPath, entry.good.code);
   }
   // Per-project wrappers: one generated tsconfig at each mirrored dir whose
@@ -256,8 +369,39 @@ if (compiled.size > 0) {
       wrapperRels.add(path.relative(workspaceRoot, path.dirname(owner)));
     }
   }
+  // The AUTO BOUNDARY: a package becomes its own program when it DECLARES
+  // globals (`globalThis.NAME ??=` — the vocabulary stays package-scoped,
+  // reaching importers the way the runtime does) or when its MODE FLIPS
+  // against its parent package's (floors and null posture are per-PROGRAM:
+  // a strict package inside a gradual program would get the floor's `any`s,
+  // and a gradual package inside a strict program would get strict nulls
+  // and refused floors). A package whose own tsconfig wraps it needs
+  // nothing more; the workspace root has no narrower scope to give.
+  const autoBoundaryRels = new Set();
+  if (!mirrorRootIsFallback) {
+    for (const [fsPath, entry] of compiled) {
+      let pkgDir = null;
+      const cfgDir = entry.cfg._configDir;
+      if (cfgDir && cfgDir !== workspaceRoot
+          && (entry.cfg.strict === true) !== (readProjectConfig(path.dirname(cfgDir)).strict === true)) {
+        pkgDir = cfgDir;
+      } else if (entry.result.globalDecls?.length) {
+        for (let dir = path.dirname(fsPath); ; dir = path.dirname(dir)) {
+          if (fs.existsSync(path.join(dir, 'package.json'))) { pkgDir = dir; break; }
+          if (dir === workspaceRoot || path.dirname(dir) === dir) break;
+        }
+      }
+      if (pkgDir === null || pkgDir === workspaceRoot || !pkgDir.startsWith(workspaceRoot + path.sep)) continue;
+      const rel = path.relative(workspaceRoot, pkgDir);
+      // A tsconfig AT the package dir already partitions it (that wrapper
+      // reads its posture from the package). One ABOVE it does not — the
+      // wrapper's posture is the wrapper's, so a flipped package below a
+      // wrapped project still needs its own boundary.
+      if (![...wrapperRels].some((w) => rel === w)) autoBoundaryRels.add(rel);
+    }
+  }
   const mirror = generatedMirror({
-    workspaceRoot, mirrorRootIsFallback, excludeDirs: [...wrapperRels],
+    workspaceRoot, mirrorRootIsFallback, excludeDirs: [...wrapperRels, ...autoBoundaryRels],
   });
   fs.writeFileSync(path.join(mirrorRoot, 'tsconfig.json'), JSON.stringify(mirror.tsconfig, null, 2));
   fs.writeFileSync(path.join(mirrorRoot, HOST_FLOOR_NAME), mirror.hostFloorDts);
@@ -265,6 +409,17 @@ if (compiled.size > 0) {
     const wrapperDir = path.join(mirrorRoot, rel);
     const wrapper = projectWrapper({
       wrapperDir, sourceTsconfig: path.join(workspaceRoot, rel, 'tsconfig.json'),
+      workspaceRoot, mirrorRoot,
+    });
+    fs.mkdirSync(wrapperDir, { recursive: true });
+    fs.writeFileSync(path.join(wrapperDir, 'tsconfig.json'), JSON.stringify(wrapper.tsconfig, null, 2));
+    fs.writeFileSync(path.join(wrapperDir, HOST_FLOOR_NAME), wrapper.hostFloorDts);
+  }
+  for (const rel of autoBoundaryRels) {
+    const wrapperDir = path.join(mirrorRoot, rel);
+    const wrapper = projectWrapper({
+      wrapperDir, sourceTsconfig: null, sourceDir: path.join(workspaceRoot, rel),
+      workspaceRoot, mirrorRoot,
     });
     fs.mkdirSync(wrapperDir, { recursive: true });
     fs.writeFileSync(path.join(wrapperDir, 'tsconfig.json'), JSON.stringify(wrapper.tsconfig, null, 2));
@@ -402,9 +557,45 @@ if (compiled.size > 0) {
           console.error(`rip check: could not pull diagnostics for ${path.relative(process.cwd(), fsPath)} (${err.message}) — the run is incomplete`);
           continue;
         }
+        // A DEPENDENCY answers for itself: a file the run was not asked
+        // about is still compiled and checked — a target's types cannot
+        // resolve otherwise — but its diagnostics report through its own
+        // check, not this one. Reporting them makes a package's exit
+        // code hostage to code its author does not own, and shows a
+        // consumer defects the dependency's own check cannot reproduce.
+        // Its HIDDEN families still count below: those name which
+        // package.json a `rip.strict` remedy belongs to, which is as
+        // true of a dependency as of a target.
+        const isTarget = explicitTargets.has(fsPath);
         const mapped = [];
         for (const d of pulled?.items ?? []) {
           const m = mapTsDiagnostic(entry.good, d);
+          // Count only what strict would actually SHOW. The suppression
+          // check runs before the mapping one, so a bare code test also
+          // counts diagnostics that would have been dropped anyway for
+          // having no source span — inflating the number several-fold and
+          // promising the user diagnostics `rip.strict` would never
+          // deliver. Re-map with the strict flag to ask the real question.
+          if (!m && !entry.cfg.strict && mapTsDiagnostic({ ...entry.good, strict: true }, d)) {
+            // Which PROJECT the hidden diagnostic belongs to — config is
+            // per file, so a strict consumer's check still hides its
+            // gradual dependencies' diagnostics, and a summary that says
+            // "set `rip.strict`" right after the user did exactly that
+            // reads as broken unless it names whose package.json is meant.
+            const proj = path.relative(process.cwd(), entry.cfg._configDir ?? path.dirname(fsPath)) || '.';
+            const uninstalledAt = d.code === 2307
+              ? declaredButUninstalled(/Cannot find module '([^']+)'/.exec(d.message)?.[1], path.dirname(fsPath)) : null;
+            if (uninstalledAt) { hiddenUninstalled++; hiddenUninstalledDirs.add(path.relative(process.cwd(), uninstalledAt) || '.'); }
+            else if (IMPLICIT_ANY_CODES.has(d.code)) { hiddenAnnotations++; hiddenAnnotationDirs.add(proj); }
+            else if (MISSING_TYPES_CODES.has(d.code)) {
+              hiddenMissingTypes++;
+              const name = /Cannot find name '([^']+)'/.exec(d.message)?.[1];
+              if (name) missingTypeNames.add(name);
+            }
+            // Held by the declaration-scope gate: the author annotated
+            // nothing here, so nothing is asked of them.
+            else { hiddenScope++; hiddenScopeDirs.add(proj); }
+          }
           if (!m) continue;
           // The diagnostic carries its own relatedInformation (secondary
           // "declared here" locations), each mapped from its generated
@@ -413,6 +604,20 @@ if (compiled.size > 0) {
           mapped.push(m);
         }
         for (const m of applyRipDirectives(entry.good, mapped)) {
+          if (!isTarget) {
+            // Counted under the REPORT's own rule — error/warning only,
+            // no unused/deprecated fade classes — so the number is in the
+            // same currency as the count above it. It covers the
+            // dependency files THIS closure reached, which is fewer than
+            // checking that directory outright.
+            if ((m.severity ?? 1) > 2) continue;
+            dependencyDiags++;
+            // The file's own directory, not its project: the line answers
+            // "where do I go to see these", and a directory is what `rip
+            // check` takes back.
+            dependencyDirs.add(path.relative(process.cwd(), path.dirname(fsPath)) || '.');
+            continue;
+          }
           tsDiags.push({
             file: fsPath, severity: m.severity, code: m.code, message: m.message,
             line: m.range.start.line, character: m.range.start.character,
@@ -535,7 +740,50 @@ if (asJson) {
   }
   // Named once, at the end, whatever the run's verdict — a clean run that
   // hid 2,000 diagnostics is exactly the case where saying nothing
-  // misleads most.
+  // misleads most. Three lines because the remedies differ — annotate a
+  // declaration, flip the mode, install declarations — and the strict
+  // remedy is SPELLED IDENTICALLY on both lines that offer it: a summary
+  // wording one lever two ways reads as two levers.
+  const plural = (n) => (n === 1 ? '' : 's');
+  // The projects a family's hidden diagnostics live in, minus the home
+  // project — "set `rip.strict`" must point at the right package.json when
+  // the hiding happens in a dependency the target does not govern.
+  const inProjects = (dirs) => {
+    const named = [...dirs].filter((d) => d !== '.').sort();
+    if (!named.length) return '';
+    return ` (${named.slice(0, 3).join(', ')}${named.length > 3 ? ` and ${named.length - 3} more` : ''})`;
+  };
+  if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0 || hiddenUninstalled > 0 || dependencyDiags > 0) console.log('');
+  if (dependencyDiags > 0) {
+    // Every directory names itself here — unlike the `rip.strict`
+    // families, whose home project is the one the reader is already in.
+    const dirs = [...dependencyDirs].sort();
+    const shown = dirs.slice(0, 3).join(', ') + (dirs.length > 3 ? ` and ${dirs.length - 3} more` : '');
+    console.log(gray(`${dependencyDiags} diagnostic${plural(dependencyDiags)} in dependencies (${shown}) `
+      + `— check them there`));
+  }
+  if (hiddenScope > 0) {
+    console.log(gray(`${hiddenScope} diagnostic${plural(hiddenScope)} hidden in unannotated code${inProjects(hiddenScopeDirs)} `
+      + `— annotate a declaration to check its scope, or set \`rip.strict\` in package.json`));
+  }
+  if (hiddenAnnotations > 0) {
+    console.log(gray(`${hiddenAnnotations} annotation diagnostic${plural(hiddenAnnotations)} hidden${inProjects(hiddenAnnotationDirs)} `
+      + `— set \`rip.strict\` in package.json to see where annotations are missing`));
+  }
+  if (hiddenUninstalled > 0) {
+    const dirs = [...hiddenUninstalledDirs].sort();
+    const shown = dirs.slice(0, 3).join(', ') + (dirs.length > 3 ? ` and ${dirs.length - 3} more` : '');
+    console.log(gray(`${hiddenUninstalled} uninstalled-dependency import${plural(hiddenUninstalled)} hidden `
+      + `— run \`bun install\` in ${shown}`));
+  }
+  if (hiddenMissingTypes > 0) {
+    const names = [...missingTypeNames].sort();
+    const shown = names.slice(0, 4).map((n) => `\`${n}\``).join(', ');
+    const more = names.length > 4 ? ` and ${names.length - 4} more` : '';
+    const about = names.length ? ` — no declarations for ${shown}${more}` : '';
+    console.log(gray(`${hiddenMissingTypes} missing-types advisor${hiddenMissingTypes === 1 ? 'y' : 'ies'} hidden`
+      + `${about} (try \`bun add -d @types/bun\`)`));
+  }
 }
 
 // Exit: 1 on type errors; 2 when the run could not cover what was asked —

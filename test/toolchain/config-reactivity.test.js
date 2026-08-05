@@ -149,7 +149,11 @@ describeExtended('the config surface is reactive', () => {
   // workspace package.json, which is on the watch list —
   // node_modules events themselves never arrive (VS Code's watcher
   // excludes them), and nothing in this pipeline self-watches the disk.
-  const FLOOR_PROBE = 'console.log(Bun.nonsense)\n';
+  // ANNOTATED probe: an ambient global's type never opens the lines that
+  // merely mention it (the gate's stated limit), so the read rides an
+  // annotated binding — what these tests pin is the FLOOR's answer, and
+  // that answer must be asserted on a line the gradual gate checks.
+  const FLOOR_PROBE = 'probe: unknown = Bun.nonsense\nconsole.log(probe)\n';
   const UNRESOLVED_BUN = [2304, 2580, 2867, 2868]; // "cannot find name" family, per checker context
 
   test('installing @types retracts the floor live — the manifest edit re-governs the program', async () => {
@@ -184,7 +188,7 @@ describeExtended('the config surface is reactive', () => {
     // `process` at its installed truth, `Bun` still an honest `any` — a
     // single all-or-nothing floor would strand `Bun` unresolvable here.
     const s = await openSession({
-      'app.rip': 'console.log(Bun.nonsense)\nconsole.log(process.madeUp)\n',
+      'app.rip': 'a: unknown = Bun.nonsense\nb: unknown = process.madeUp\nconsole.log(a, b)\n',
       'package.json': pkg(null),
       'node_modules/@types/node/package.json': '{ "name": "@types/node", "version": "0.0.0", "types": "index.d.ts" }\n',
       'node_modules/@types/node/index.d.ts': 'declare var process: { pid: number };\n',

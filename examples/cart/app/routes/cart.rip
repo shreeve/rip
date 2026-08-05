@@ -1,4 +1,4 @@
-import { api, parseApiError } from '../api-client.rip'
+import { api, ApiErrors, parseApiError } from '../api-client.rip'
 import { Button, ButtonLink } from '../components/button.rip'
 import { title, formatPrice } from '../config.rip'
 import { createMutation } from '@rip-lang/app'
@@ -73,7 +73,7 @@ export Cart = component
                 strong "#{formatPrice(cart.totalPrice())}"
               td
       div.cart-actions
-        Button loading: placeOrder.pending, @click: (-> placeOrder!), 'Place Order'
+        Button loading: placeOrder.pending, @click: (-> placeOrder()), 'Place Order'
         Button variant: 'secondary', outline, link: true, @click: (-> cart.clear()), 'Clear Cart'
       if errors.form
         p.error errors.form

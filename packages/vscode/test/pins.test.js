@@ -4,6 +4,8 @@
 // and a wrong-typed write inside the def surfaces as a REAL TS
 // diagnostic on rip source — the case TS7034 suppression hides today.
 import { test, expect, describe } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { buildProbe, parseProbeHover } from '../src/pins.js';
 
@@ -93,15 +95,22 @@ describe.skipIf(!tsgoAvailable)('pin probe over LSP stdio', () => {
   test('def-referenced hoisted binding gets pinned; wrong-typed write surfaces on rip source', async () => {
     const { LspClient } = await import('../src/tsgo.js');
     const published = [];
+    // A STRICT project: the wrong-write diagnostic is a pin giving the
+    // implicit-any family PRECISION — strict is where that family
+    // publishes, and gradual holds inference-with-certainty by design
+    // (a pin is exactly materialized inference). The pin's other half,
+    // truthful hover, is mode-independent and pinned elsewhere.
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-pin-'));
+    fs.writeFileSync(path.join(ws, 'package.json'), JSON.stringify({ rip: { strict: true } }));
     const client = new LspClient('bun', [SERVER, '--stdio'], {
       onNotification: (method, params) => {
         if (method === 'textDocument/publishDiagnostics') published.push(params);
       },
     });
     try {
-      await client.request('initialize', { processId: process.pid, rootUri: 'file:///pindemo', capabilities: {} });
+      await client.request('initialize', { processId: process.pid, rootUri: 'file://' + ws, capabilities: {} });
       client.notify('initialized', {});
-      const uri = 'file:///pindemo/app.rip';
+      const uri = 'file://' + path.join(ws, 'app.rip');
       client.notify('textDocument/didOpen', {
         textDocument: { uri, languageId: 'rip', version: 1, text: SRC },
       });
@@ -119,6 +128,7 @@ describe.skipIf(!tsgoAvailable)('pin probe over LSP stdio', () => {
       expect(hit.range.start.line).toBe(6);
     } finally {
       await client.stop();
+      fs.rmSync(ws, { recursive: true, force: true });
     }
   }, 45000);
 });

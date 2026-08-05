@@ -1,21 +1,16 @@
 // The mirror layout and its generated tsconfig — shared by the editor
-// server (which materializes the mirror demand-driven, per keystroke)
-// and the batch `rip check` (which materializes a target's closure once,
-// then runs `tsc --noEmit` over it). Both need the SAME tsconfig and the
-// SAME mirror-file naming, or the batch checker would resolve imports /
-// @types / strictness differently from the editor.
+// server and the batch `rip check`, which must resolve imports, @types,
+// and strictness identically.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-// The lexer rides the same dual-path resolution as the server's
-// compiler load: `../../../src/` in-repo, `../compiler/src/` in the
-// staged .vsix (scripts/package.js). A static relative import knows
-// only the repo layout — installed, it reaches OUTSIDE the extension
-// directory and the server dies at import time, which is a dead editor
-// with no diagnostics at all.
+// Dual-path like the server's compiler load: `../../../src/` in-repo,
+// `../compiler/src/` in the staged .vsix. A static relative import knows
+// only the repo layout — installed, it reaches outside the extension and
+// the server dies at import time.
 const { identifierRunAt } = await (async () => {
   const candidates = [
     new URL('../../../src/lexer.js', import.meta.url),   // in-repo
@@ -30,10 +25,9 @@ const { identifierRunAt } = await (async () => {
 const stripJsonComments = (text) =>
   text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
-// Resolve one `extends` specifier the way TS does, bounded: relative and
-// absolute paths get the exact / +.json / +/tsconfig.json attempts; bare
-// package specifiers resolve node-style from the extending config's
-// directory. Null when unresolvable.
+// Resolve one `extends` specifier the way TS does: exact / +.json /
+// +/tsconfig.json for paths, node-style for bare packages. Null when
+// unresolvable.
 export function resolveExtends(spec, fromDir) {
   const attempts = [];
   if (spec.startsWith('.') || path.isAbsolute(spec)) {
@@ -51,13 +45,10 @@ export function resolveExtends(spec, fromDir) {
   return null;
 }
 
-// Does the user's config — ANYWHERE in its resolved `extends` chain —
-// set compilerOptions.types? Injecting types:["*"] over a chain that
-// narrows types would clobber the user's narrowing, so unresolvable or
-// unreadable links answer TRUE (conservative: never clobber what we
-// cannot see). Visited files are recorded into `chain` so a watcher can
-// re-govern when a chain member changes; `onUnresolved(spec)` is an
-// optional log hook. Bounded depth, cycles guarded.
+// Does the config — anywhere in its resolved `extends` chain — set
+// compilerOptions.types? Unresolvable or unreadable links answer TRUE:
+// never clobber a narrowing we cannot see. Visited files land in `chain`
+// for the watcher's re-govern; `onUnresolved(spec)` is a log hook.
 export function chainSetsTypes(configPath, chain, onUnresolved, visited = new Set(), depth = 0) {
   if (depth > 16 || visited.has(configPath)) return false; // cycle/degenerate
   visited.add(configPath);
@@ -83,36 +74,72 @@ export function chainSetsTypes(configPath, chain, onUnresolved, visited = new Se
   });
 }
 
-// The zero-config host floor: the runtime-host globals (`process`,
-// `Bun`) declared by EXISTENCE only, as `any` — the permissive default
-// for a workspace that supplies no host types. A workspace with no
-// node_modules has nothing for tsgo's typeRoots walk-up to find, so the
-// names are unresolvable on every face; a floor (a one-line d.ts
-// shipped with the toolchain) resolves its name without claiming any
-// shape that could go stale or be wrong. GATED per name: a workspace
-// that installs the name's real declaration package (anywhere up its
-// ancestor chain — the same walk tsgo's default typeRoots performs)
-// never sees that floor; a second declaration beside the real one
-// would be a TS2403 conflict, and precision is the user's opt-in.
-// The probes walk the DISK, not module resolution: Bun's
-// `createRequire().resolve` falls back to the machine-global install
-// cache (`~/.bun/install/cache`), which tsgo's typeRoots walk never
-// consults — a resolve-based probe would false-positive on any machine
-// that ever installed the package.
-//
-// A strict project refuses every floor: `rip.strict` means MISSING
-// annotations get complained about (src/config.js), and a floor is
-// exactly a missing-annotation forgiveness — host globals as `any`. A
-// strict project gets the unresolved-name diagnostic (pointing at
-// @types/bun) until it declares real host types. The probe mirrors
-// readProjectConfig's boundary rule — walk UP to the FIRST package.json
-// and stop; unreadable answers false, like readProjectConfig's own
-// defaults — but stays local: mirror.js must remain layout-agnostic
-// (repo checkout vs staged vsix), so it cannot import the compiler.
-// The strictness read is the WORKSPACE root's: a floor joins the
-// program whole-or-not (one tsconfig include), so a nested project's
-// own package.json cannot govern it per-file the way the diagnostic
-// gate does.
+// The zero-config host floor: host globals (`process`, `Bun`) declared
+// by EXISTENCE as `any` — otherwise unresolvable on every face in a
+// workspace with no installed host types. Gated per name by a DISK probe
+// of ancestor node_modules, never module resolution (Bun's resolve falls
+// back to the machine-global install cache, which tsgo's typeRoots walk
+// never consults — a resolve probe false-positives). A floored name that
+// gets its real package installed would be a TS2403 double declaration,
+// so the floor exists only where the package is absent. A strict project
+// refuses every floor — a floor is exactly a missing-annotation
+// forgiveness — and keeps the unresolved-name diagnostic until real host
+// types are declared. The strictness read is the WORKSPACE ROOT's (a
+// floor joins the program whole-or-not), walked to the first
+// package.json locally: mirror.js stays layout-agnostic and cannot
+// import the compiler's readProjectConfig.
+// Base posture by mode: TypeScript 7 defaults `strict` ON, and gradual
+// RIDES that default, subtracting only what it deliberately loosens. The
+// direction is the constraint: a strict-family member this list does not
+// name arrives ON, so any noise it brings LEAKS where the canaries look
+// (the gradual pair's held fixture, the corpus count) — never OFF, where
+// it would degrade inference silently (`strictBindCallApply` off, for
+// one, collapses every type the face routes through a `.call` to
+// `any`). The three loosenings:
+//   `strictNullChecks` — the one lever that changes TYPES, not just
+//     which diagnostics publish (`find()` hovers `T` here,
+//     `T | undefined` under `rip.strict`);
+//   `useUnknownInCatchVariables` — an unannotated `catch err` answers
+//     `any`, never narrowing ceremony;
+//   `noImplicitThis` — `this` in an unannotated object-literal method
+//     is `any`, not the literal's inferred type.
+// `noImplicitAny` stays ON everywhere (set in the generated config):
+// turning it off disables evolving-array inference and strands
+// unannotated `[]` on `never[]`.
+const nullPosture = (dir, configPath) => {
+  if (dir && workspaceIsStrict(dir)) return {};
+  // The user's OWN tsconfig wins: rip's default posture never overrules
+  // a strictness the author wrote down.
+  if (configPath && chainSetsStrictness(configPath)) return {};
+  return { strictNullChecks: false, useUnknownInCatchVariables: false, noImplicitThis: false };
+};
+
+// Does the config chain SET strictness (`strict` or `strictNullChecks`)
+// anywhere? Mirrors chainSetsTypes' conservatism: an unreadable or
+// unfollowable link answers TRUE, so an unknown config is never overridden.
+export function chainSetsStrictness(configPath, visited = new Set(), depth = 0) {
+  if (depth > 16 || visited.has(configPath)) return false;
+  visited.add(configPath);
+  let text;
+  try { text = fs.readFileSync(configPath, 'utf8'); } catch { return true; }
+  const stripped = stripJsonComments(text);
+  let parsed;
+  try { parsed = JSON.parse(stripped); } catch {
+    if (/"(strict|strictNullChecks)"\s*:/.test(stripped)) return true;
+    return /"extends"\s*:/.test(stripped);
+  }
+  const co = parsed?.compilerOptions;
+  if (co && (co.strict !== undefined || co.strictNullChecks !== undefined)) return true;
+  if (parsed?.extends === undefined) return false;
+  const bases = Array.isArray(parsed.extends) ? parsed.extends : [parsed.extends];
+  return bases.some((spec) => {
+    if (typeof spec !== 'string') return true;
+    const next = resolveExtends(spec, path.dirname(configPath));
+    if (!next) return true;
+    return chainSetsStrictness(next, visited, depth + 1);
+  });
+}
+
 const workspaceIsStrict = (workspaceRoot) => {
   for (let dir = workspaceRoot; ; dir = path.dirname(dir)) {
     const pkgPath = path.join(dir, 'package.json');
@@ -123,28 +150,33 @@ const workspaceIsStrict = (workspaceRoot) => {
     if (path.dirname(dir) === dir) return false;
   }
 };
-// One floor PER NAME, because the names' real-type suppliers differ:
-// @types/node declares `process` but not `Bun`. A workspace with only
-// @types/node keeps `process` at its installed truth and still floors
-// `Bun` (rip runs on Bun — the name is real in every rip program); a
-// workspace with @types/bun supplies both and floors nothing. The disk
-// probe governs only the no-`types`-field world, where the mirror's
-// `types:["*"]` makes @types presence and program inclusion the same
-// fact — which is also why bare `bun-types` is NOT probed: on disk it
-// is inert (outside the @types root) until a `types` entry names it,
-// and a chain that sets `types` refuses floors wholesale before any
-// probe runs (`userSetsTypes` below).
-//
-// The declarations are COMPILER-TOOLCHAIN DATA, not shipped .d.ts
-// assets: the text lives here and is emitted into the mirror root as a
-// generated file beside the generated tsconfig (the mirror's existing
-// `**/*.ts` include picks it up). A shipped asset would be one more
-// packaging surface (vsix staging, a future CLI `files` list) whose
-// omission fails SILENTLY — an existence-gated floor that simply never
-// materializes; text in this module ships wherever the toolchain does.
+// One floor PER NAME — the suppliers differ (@types/node declares
+// `process` but not `Bun`), so a partial install keeps each name at its
+// installed truth. Bare `bun-types` is not probed: outside the @types
+// root it is inert until a `types` field names it, and a chain that sets
+// `types` refuses floors wholesale before any probe runs. The texts live
+// HERE, not as shipped .d.ts assets: a packaging list can omit an asset
+// silently; text in this module ships wherever the toolchain does.
 const HOST_FLOORS = [
   { text: 'declare var process: any;', suppliedBy: ['@types/node', '@types/bun'] },
   { text: 'declare var Bun: any;', suppliedBy: ['@types/bun'] },
+  // `import.meta.dir` and kin are an interface to MERGE, not a global to
+  // shadow — a var would not reach `import.meta.x` at all. An INDEX
+  // SIGNATURE, not an enumeration: naming fields asserts an API rip does
+  // not own, and the enumeration was wrong on arrival (`main` missing,
+  // ten call sites red). Merging is additive: `url` keeps its real type.
+  {
+    text: 'interface ImportMeta { [key: string]: any }',
+    suppliedBy: ['@types/bun'],
+  },
+  // Bun's builtin modules (`bun:sqlite`, `bun:ffi`, …): a bodyless
+  // wildcard SHORTHAND types every matching import `any`, and an exact
+  // declaration from installed @types/bun outranks a wildcard by TS's
+  // own pattern rules.
+  {
+    text: 'declare module "bun:*";',
+    suppliedBy: ['@types/bun'],
+  },
 ];
 export const HOST_FLOOR_NAME = 'host-floor.d.ts';
 const ancestorHas = (fromDir, pkgs) => {
@@ -153,16 +185,11 @@ const ancestorHas = (fromDir, pkgs) => {
     if (path.dirname(dir) === dir) return false;
   }
 };
-// `userSetsTypes`: the resolved tsconfig chain sets
-// compilerOptions.types — the user's COMPLETE ambient manifest, the
-// same signal that already stops the `types:["*"]` injection. Floors
-// defer to it wholesale: an enumerated list means "these ambients and
-// no others", whether or not the named packages are even installed —
-// a floor beside an explicit manifest would clobber the narrowing
-// exactly like `["*"]` would. The generated file is written even when
-// every floor is refused (with the reason in its body) — an
-// always-present file with varying content, so the flip is a plain
-// Changed event and no caller carries a create/delete lifecycle.
+// `userSetsTypes`: the chain sets compilerOptions.types — the user's
+// COMPLETE ambient manifest, the same signal that stops the types:["*"]
+// injection — and floors defer to it wholesale. The file is written even
+// when every floor is refused (reason in the body): an always-present
+// file makes the flip a plain Changed event, no create/delete lifecycle.
 export function hostFloorDts(workspaceRoot, { userSetsTypes = false } = {}) {
   const head = '// Generated by rip — the zero-config host floor. Do not edit.\n';
   if (userSetsTypes) {
@@ -178,34 +205,22 @@ export function hostFloorDts(workspaceRoot, { userSetsTypes = false } = {}) {
   return head + active.map(({ text }) => text + '\n').join('');
 }
 
-// The generated mirror-root files, built together because they share
-// one probe of the user's config chain: the tsconfig, and the host
-// floor's content (written as HOST_FLOOR_NAME beside it — the
-// tsconfig's own `**/*.ts` include picks it up). Tsconfig overrides
-// applied over the user's config (or the defaults): noImplicitAny
-// stays ON (it activates the evolving-`let` inference; the
-// implicit-any family is suppressed per-code in translate.js), noEmit
-// (the project never emits; also what legalizes
-// allowImportingTsExtensions), and rootDirs merging the mirror tree
-// with the real workspace (a .rip file importing a real .ts sibling
-// resolves). The mirror root MUST sit two levels below the workspace so
-// the `../../` reach-ups (extends, ambient d.ts, node_modules) resolve.
-// A tsconfig path is written into a generated config, so it is always
-// POSIX-separated — a Windows `..\\pkg\\tsconfig.json` is not a legal
-// `extends` spec.
+// The generated mirror-root files, built together because they share one
+// probe of the user's config chain. Overrides: noImplicitAny stays ON (it
+// powers evolving-`let` inference; the implicit-any family is suppressed
+// per-code in translate.js), noEmit also legalizes
+// allowImportingTsExtensions, and rootDirs merges the mirror with the
+// real workspace so a `.rip` file importing a real `.ts` sibling
+// resolves. The mirror root MUST sit two levels below the workspace for
+// the `../../` reach-ups to resolve; written tsconfig paths are POSIX
+// (`..\\pkg` is not a legal `extends` spec).
 const posix = (p) => p.split(path.sep).join('/');
 
-// The nearest `tsconfig.json` at or above `dir`, stopping AT `anchor`
-// (inclusive). Null when the walk reaches the anchor without finding
-// one, which is the ordinary case: most directories are governed by the
-// workspace root's config and need no wrapper of their own.
-//
-// The anchor BOUNDS the walk, it is not merely a stop the walk may pass
-// through: a dir OUTSIDE the anchor answers null immediately. Without
-// that, an out-of-workspace document climbed to the filesystem root,
-// adopted whatever tsconfig.json it met on the way, and the resulting
-// '..'-shaped rel carried the wrapper write out of the mirror — into
-// directories the extension does not own.
+// The nearest tsconfig.json at or above `dir`, BOUNDED by `anchor`: a
+// dir outside the anchor answers null immediately — without that, an
+// out-of-workspace document adopted whatever config it met on the climb
+// and the '..'-shaped rel carried the wrapper write out of the mirror.
+// Null is the ordinary answer (the workspace root's config governs).
 export function nearestTsconfig(dir, anchor) {
   if (dir !== anchor && !dir.startsWith(anchor + path.sep)) return null;
   for (let d = dir; ; d = path.dirname(d)) {
@@ -215,63 +230,75 @@ export function nearestTsconfig(dir, anchor) {
   }
 }
 
-// The generated WRAPPER for one nested project: the same overrides the
-// mirror root gets, but reaching up to that project's own tsconfig
-// instead of the workspace root's, with every reach-up computed rather
-// than spelled. tsgo's LSP does per-file nearest-tsconfig discovery (the
-// tsserver configured-project model), so placing one of these at each
-// mirrored project dir partitions the faces by project inside a SINGLE
-// mirror tree and a SINGLE session — no multiplexing, and the pin pass
-// is untouched.
-//
-// The wrapper states its own include/exclude, so the source tsconfig's
-// FILE SET is not inherited — only its compilerOptions. And the floor is
-// emitted per project, from that project's own gate answers: a nested
-// project's strictness and installed types govern whether ITS files see
-// it, which a single workspace-root floor could never express.
-export function projectWrapper({ wrapperDir, sourceTsconfig, chain = new Set(), onUnresolved }) {
-  const sourceDir = path.dirname(sourceTsconfig);
+// The generated WRAPPER for one nested project: tsgo's LSP assigns each
+// file its nearest config, so a wrapper per mirrored project dir
+// partitions the faces inside ONE tree and ONE session. It states its
+// own include/exclude — only the source config's compilerOptions are
+// inherited — and emits the floor per project, from that project's own
+// strictness and installs. `sourceTsconfig: null` (with `sourceDir`) is
+// the AUTO-BOUNDARY form for a globals-declaring package that owns no
+// tsconfig: the wrapper anchors on the workspace root's config, or the
+// mirror-root defaults when there is none.
+export function projectWrapper({ wrapperDir, sourceTsconfig, sourceDir: sourceDirIn = null, workspaceRoot = null, mirrorRoot = null, chain = new Set(), onUnresolved }) {
+  const sourceDir = sourceDirIn ?? path.dirname(sourceTsconfig);
+  const rootConfig = workspaceRoot ? path.join(workspaceRoot, 'tsconfig.json') : null;
+  const anchor = sourceTsconfig ?? (rootConfig && fs.existsSync(rootConfig) ? rootConfig : null);
   const overrides = {
     noImplicitAny: true,
     noEmit: true,
     allowImportingTsExtensions: true,
+    ...nullPosture(sourceDir, anchor),
     rootDirs: ['.', posix(path.relative(wrapperDir, sourceDir))],
   };
+  // The mirror root's bare-specifier map, rebased through this wrapper's
+  // reach-up: paths are read from the config that declares them.
+  if (workspaceRoot && mirrorRoot) {
+    const ripPaths = workspaceRipPaths(workspaceRoot, path.relative(wrapperDir, mirrorRoot));
+    if (Object.keys(ripPaths).length) overrides.paths = ripPaths;
+  }
   chain.clear();
-  const setsTypes = chainSetsTypes(sourceTsconfig, chain, onUnresolved);
+  const setsTypes = anchor !== null && chainSetsTypes(anchor, chain, onUnresolved);
   if (!setsTypes) overrides.types = ['*'];
   const reachUp = posix(path.relative(wrapperDir, sourceDir));
+  const tsconfig = {
+    compilerOptions: overrides,
+    include: ['**/*.ts', `${reachUp}/**/*.d.ts`],
+    exclude: ['**/node_modules', `${reachUp}/**/node_modules`],
+  };
+  if (anchor !== null) tsconfig.extends = posix(path.relative(wrapperDir, anchor));
+  else Object.assign(overrides, { target: 'esnext', module: 'esnext', lib: ['esnext', 'dom'] });
   return {
-    tsconfig: {
-      extends: posix(path.relative(wrapperDir, sourceTsconfig)),
-      compilerOptions: overrides,
-      include: ['**/*.ts', `${reachUp}/**/*.d.ts`],
-      exclude: ['node_modules', `${reachUp}/**/node_modules`],
-    },
+    tsconfig,
     hostFloorDts: hostFloorDts(sourceDir, { userSetsTypes: setsTypes }),
   };
 }
 
 export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = new Set(), onUnresolved, excludeDirs = [] } = {}) {
+  const rootConfig = !mirrorRootIsFallback && workspaceRoot
+    ? path.join(workspaceRoot, 'tsconfig.json') : null;
   const overrides = {
     noImplicitAny: true,
     noEmit: true,
     allowImportingTsExtensions: true,
+    ...nullPosture(workspaceRoot, rootConfig && fs.existsSync(rootConfig) ? rootConfig : null),
   };
   if (!mirrorRootIsFallback) overrides.rootDirs = ['.', '../..'];
-  // Workspace AMBIENT declarations (`rip-env.d.ts` and kin) join the
-  // program. An explicit `exclude` REPLACES the built-in defaults, so
-  // `node_modules` is restated alongside the `../../` reach-up.
+  // Workspace ambient d.ts join the program; an explicit `exclude`
+  // REPLACES the defaults, so node_modules is restated.
   const include = ['**/*.ts'];
-  // A nested project's mirrored subtree belongs to ITS wrapper. Without
-  // the exclusion both configs claim the same faces, and which one
-  // answers is tsgo's discovery order rather than the file's own
-  // nearest config.
-  const exclude = ['node_modules', ...excludeDirs.map((d) => `${posix(d)}/**`)];
+  // A wrapped subtree belongs to ITS config; without the exclusion two
+  // configs claim the same faces in tsgo's discovery order.
+  const exclude = ['**/node_modules', ...excludeDirs.map((d) => `${posix(d)}/**`)];
   if (!mirrorRootIsFallback) {
     include.push('../../**/*.d.ts');
     exclude.push('../../**/node_modules');
   }
+  // Bare workspace `.rip` specifiers resolve by MAP: their manifests land
+  // on `.rip` files TypeScript will not follow, so `paths` points each
+  // bare name at the mirror face the closure compiled. `paths` outranks
+  // the node_modules walk.
+  const ripPaths = mirrorRootIsFallback ? {} : workspaceRipPaths(workspaceRoot);
+  if (Object.keys(ripPaths).length) overrides.paths = ripPaths;
   const floorRoot = mirrorRootIsFallback ? null : workspaceRoot;
   const userConfig = !mirrorRootIsFallback && workspaceRoot
     ? path.join(workspaceRoot, 'tsconfig.json') : null;
@@ -299,12 +326,55 @@ export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = n
   };
 }
 
-// A workspace file's mirror path is RELATIVE to the mirror root: workspace
-// files keep their relative structure (so relative imports between mirrors
-// resolve exactly as between sources — and a `foo.rip.ts` name lets a bare
-// `./foo.rip` import resolve by TS's extension-append); files outside the
-// workspace mirror under __external__ so distinct buffers never collide.
-// The caller forms the on-disk path: `join(mirrorRoot, rel) + '.ts'`.
+// A bare specifier DECLARED in a governing package.json but not
+// installed anywhere on the ancestor chain — the manifest's stated
+// intent, not a typo. Returns the declaring dir (for the install
+// remedy), or null. Gradual holds these 2307s; strict publishes them.
+export function declaredButUninstalled(spec, fromDir) {
+  if (!spec || !fromDir || spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('#')) return null;
+  if (spec.startsWith('node:') || spec.startsWith('bun:')) return null;
+  const parts = spec.split('/');
+  const pkgName = spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+  if (!pkgName || (spec.startsWith('@') && parts.length < 2)) return null;
+  let declaringDir = null;
+  for (let dir = fromDir; ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, 'node_modules', pkgName))) return null;   // installed: resolution's problem, not ours
+    if (declaringDir === null && fs.existsSync(path.join(dir, 'package.json'))) {
+      try {
+        const m = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+        for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+          if (m?.[field]?.[pkgName] !== undefined) { declaringDir = dir; break; }
+        }
+      } catch { /* unreadable manifest declares nothing */ }
+    }
+    if (path.dirname(dir) === dir) return declaringDir;
+  }
+}
+
+// A face's module walk lives in the MIRROR tree, so a nested source
+// install (a quarantined bench dir's own node_modules) was invisible to
+// it — bun resolves those at runtime. Every source dir on the file's
+// ancestor chain that carries node_modules gets a symlink twin in the
+// mirror; the workspace root needs none (the walk exits the mirror into
+// it). Best-effort: a failed link leaves the 2307 standing.
+export function linkNestedNodeModules(workspaceRoot, mirrorRoot, fsPath) {
+  if (!workspaceRoot || !mirrorRoot || !fsPath.startsWith(workspaceRoot + path.sep)) return;
+  for (let dir = path.dirname(fsPath); dir !== workspaceRoot && dir.startsWith(workspaceRoot + path.sep); dir = path.dirname(dir)) {
+    const srcNm = path.join(dir, 'node_modules');
+    if (!fs.existsSync(srcNm)) continue;
+    const at = path.join(mirrorRoot, path.relative(workspaceRoot, dir), 'node_modules');
+    try {
+      fs.mkdirSync(path.dirname(at), { recursive: true });
+      if (!fs.lstatSync(at, { throwIfNoEntry: false })) fs.symlinkSync(srcNm, at);
+    } catch { /* best-effort */ }
+  }
+}
+
+// Workspace files keep their relative structure (imports between mirrors
+// resolve as between sources; `foo.rip.ts` lets `./foo.rip` resolve by
+// TS's extension-append); files outside the workspace mirror under
+// __external__ so distinct buffers never collide. The caller forms the
+// on-disk path: `join(mirrorRoot, rel) + '.ts'`.
 export function mirrorRelForFsPath(fsPath, workspaceRoot) {
   if (workspaceRoot && fsPath.startsWith(workspaceRoot + path.sep)) {
     return path.relative(workspaceRoot, fsPath);
@@ -312,29 +382,20 @@ export function mirrorRelForFsPath(fsPath, workspaceRoot) {
   return path.join('__external__', fsPath.replace(/^[/\\]/, '').replace(/:/g, ''));
 }
 
-// ---- the auto-import stub face: what a workspace `.rip` NOTHING has
-// opened or imported contributes to the program, so its exported names
-// are auto-import candidates from cold.
-//
-// Built from a SOURCE scan, not a compile, and that is the whole reason
-// the eager pass is affordable: compiling every workspace face is ~92%
-// of population time (1456 ms over 277 files, measured), against ~8 ms
-// to read the export lines. A stub and a full face produce the same
-// completion item and the same import edit, so the compile buys nothing
-// candidacy needs.
-//
-// Scanning SOURCE for a fact the compiler already knows is otherwise the
-// never-list's territory (ripImportsOf reads the stores, not text) — the
-// exemption is precise and holds only here: this runs where there is no
-// compile to read stores from, its output is thrown away the instant a
-// real edge materializes the true face over it, and a name this scan
-// misses costs a missing completion candidate, never a wrong answer. It
-// must NOT be reused anywhere a mapping, a diagnostic, or a closure edge
+// ---- the auto-import stub face: what an unopened, unimported workspace
+// `.rip` contributes, so its exports are auto-import candidates from
+// cold. A SOURCE scan, not a compile — compiling every face is ~92% of
+// population time (1456 ms over 277 files, measured) and buys nothing
+// candidacy needs. Text-scanning is otherwise the never-list's
+// territory; the exemption holds only here: no compile exists to read
+// stores from, the output dies when a real face materializes over it,
+// and a missed name costs a completion candidate, never a wrong answer.
+// It must NOT be reused anywhere a mapping, diagnostic, or closure edge
 // depends on it.
 
 const IDENT = String.raw`[A-Za-z_$][A-Za-z0-9_$]*`;
-// Words that open a declaration form and are therefore never the
-// exported NAME in rip's bare `export name = …` production.
+// Words that open a declaration form — never the exported NAME in
+// rip's bare `export name = …` production.
 const EXPORT_KEYWORDS = new Set([
   'default', 'from', 'as', 'declare', 'async', 'abstract', 'type', 'interface',
   'class', 'enum', 'function', 'def', 'const', 'let', 'var', 'namespace', 'module',
@@ -345,36 +406,37 @@ const DECLARATION = new RegExp(
 );
 const STAR = new RegExp(String.raw`^\*\s*(?:as\s+(${IDENT})\s+)?from\s*['"]([^'"]+)['"]`);
 const CLAUSE = new RegExp(String.raw`^(?:(type)\s+)?(${IDENT}|default)(?:\s+as\s+(${IDENT}|default))?$`);
-// A binding inside a destructuring pattern: an identifier followed by a
-// separator, a closer, end of text, or `=` — the last because a binding
-// may carry a DEFAULT (`{ a = 1, b }`) and is still the name being bound.
-// A renamed key (`{ a: renamed }`) is deliberately not matched at `a`,
-// whose `:` is in none of these: `renamed` is the binding.
+// A pattern binding: an identifier before a separator, closer, end, or
+// `=` (a default's name is still bound). A renamed key's `a:` matches
+// none of these — `renamed` is the binding.
 const PATTERN_NAME = new RegExp(String.raw`(${IDENT})\s*(?:[,}\]=]|$)`, 'g');
 const FROM_SPEC = /^from\s*['"]([^'"]+)['"]/;
 
 // The exported names of one `.rip` SOURCE, split by declaration space.
-// `stars` carries the specifiers of `export * from …`, which name no
-// names of their own — the caller resolves those against its own scan of
-// the target (buildStubFaces does). `hasDefault` is tracked separately
-// because a default export has no name to carry: a consumer spells it
-// `import theme from …` or `import { default as theme } from …`, and a
-// stub that omitted it answered TS1192/TS2305 on every such consumer.
+// `stars` carries `export * from …` specifiers (the caller resolves them
+// against its other scans); `hasDefault` is separate because a default
+// has no name — a stub omitting it answered TS1192/TS2305 on every
+// `import theme from …` consumer.
 export function scanExportNames(source) {
   const values = new Set();
   const types = new Set();
   const stars = [];
+  const globals = new Set();   // top-level `globalThis.NAME ??=` — declared vocabulary
   let hasDefault = false;
   const lines = source.split('\n');
   let inBlockString = false;
   for (let i = 0; i < lines.length; i++) {
-    // A block string's CONTENT can start a line with `export` — rip's own
-    // suites embed whole modules that way, and reading one as an export
-    // put two names in the candidate set that the face never exported.
+    // A block string's content can start a line with `export` (rip's own
+    // suites embed whole modules) — never read those as exports.
     const fences = (lines[i].match(/"""|'''/g) ?? []).length;
     const wasInBlockString = inBlockString;
     if (fences % 2) inBlockString = !inBlockString;
     if (wasInBlockString) continue;
+    // A top-level `globalThis.NAME ??=` declares the global (the face
+    // emits the typed declaration); the stub carries an `any` twin so the
+    // name resolves before anything compiles.
+    const g = /^globalThis\.([A-Za-z_$][A-Za-z0-9_$]*)\s*\?\?=/.exec(lines[i]);
+    if (g) { globals.add(g[1]); continue; }
     if (!/^export\b/.test(lines[i])) continue;   // exports are top-level: column 0
     let rest = lines[i].slice('export'.length).trim();
 
@@ -390,21 +452,15 @@ export function scanExportNames(source) {
     if (/^type\s*\{/.test(rest)) { typeOnly = true; rest = rest.slice('type'.length).trim(); }
 
     if (rest.startsWith('{')) {
-      // A brace list may span lines (`export {\n  a,\n  b,\n}`), so read
-      // forward to the closing brace rather than judging one line. Joined
-      // with a COMMA: rip lets a multi-line list separate its entries by
-      // newline alone, and a space-join fuses those into one unparseable
-      // clause (an empty clause from a trailing comma is skipped below).
+      // A brace list may span lines; joined with a COMMA because rip lets
+      // entries separate by newline alone — a space-join fuses them into
+      // one unparseable clause.
       while (!rest.includes('}') && i + 1 < lines.length) rest += ',' + lines[++i].trim();
       const close = rest.indexOf('}');
       if (close < 0) continue;                   // unterminated: nothing trustworthy to emit
-      // A brace list is the whole statement or a re-export — and a
-      // re-export's target contributes nothing beyond the names written
-      // here (`export { a } from './x.rip'` states `a` outright). Anything
-      // ELSE after the brace is a shape this scan does not understand, so
-      // the clauses are not read: names guessed out of it would be offered
-      // as candidates the real face never exports. Checked BEFORE the
-      // clause loop, so it gates the names rather than trailing them.
+      // Anything after the brace other than a `from` spec is a shape this
+      // scan does not understand — gate the names BEFORE reading clauses,
+      // or it offers candidates the real face never exports.
       const tail = rest.slice(close + 1).trim();
       if (tail && !FROM_SPEC.test(tail)) continue;
       for (const raw of rest.slice(1, close).split(',')) {
@@ -432,10 +488,9 @@ export function scanExportNames(source) {
     const pattern = /^(?:declare\s+)?(?:const|let|var)\s*([[{])/.exec(rest);
     if (pattern) {
       const body = rest.slice(rest.indexOf(pattern[1]));
-      // The assignment `=` is the one at DEPTH ZERO. A binding's DEFAULT
-      // spells `=` too (`{ a = 1, b }`), and cutting at the first one
-      // drops every name after it — the pattern's own tail, not the
-      // initializer.
+      // Cut at the DEPTH-ZERO `=`: a binding's default spells `=` too
+      // (`{ a = 1, b }`), and cutting at the first drops the pattern's
+      // own tail.
       let depth = 0, end = -1;
       for (let j = 0; j < body.length && end < 0; j++) {
         const ch = body[j];
@@ -454,65 +509,45 @@ export function scanExportNames(source) {
     if (!bare || EXPORT_KEYWORDS.has(bare[1])) continue;
     const name = bare[1];
     values.add(name);
-    // A schema binding is a TYPE as well as a value, and a `:model` also
-    // ships the two companion types its lowering derives from the name.
-    // This is the one place the scan encodes a lowering rule rather than
-    // reading what the source says, and the cost of it going stale is
-    // bounded to candidacy: an offered name the real face does not export
-    // fails loudly at the import the moment that face materializes.
+    // A schema binding is a TYPE too, and `:model` ships two derived
+    // companions — the one lowering rule the scan encodes; staleness is
+    // bounded to candidacy and fails loudly at the import.
     const schema = /^(?:[^=]*)=\s*schema\s+:(\w+)/.exec(rest);
     if (!schema) continue;
     types.add(name);
     if (schema[1] === 'model') { types.add(name + 'Data'); types.add(name + 'Create'); }
   }
-  return { values: [...values], types: [...types], stars, hasDefault };
+  return { values: [...values], types: [...types], stars, hasDefault, globals: [...globals] };
 }
 
-// The stub text for one file's exported names. Every name is `any`: the
-// stub exists to make the NAME reachable, and a shape it guessed would be
-// a shape that could be wrong. A type alias and a variable occupy
-// different declaration spaces, so a class or enum can legally be both.
-//
-// `defaultName` is the local the default export binds, and it is the name
-// the editor OFFERS the default under — see defaultLocalName below, where
-// every constraint on it is recorded.
-export function stubFace({ values = [], types = [], hasDefault = false, defaultName = '_default' } = {}) {
+// The stub text for one file's exported names — every name `any`: the
+// stub makes NAMES reachable, and a guessed shape could be wrong. A type
+// alias and a variable occupy different declaration spaces, so a class
+// or enum is legally both. `defaultName`: see defaultLocalName.
+export function stubFace({ values = [], types = [], hasDefault = false, defaultName = '_default', globals = [] } = {}) {
   const lines = [];
   for (const name of types) lines.push(`export type ${name} = any;`);
   for (const name of values) lines.push(`export declare const ${name}: any;`);
   if (hasDefault) lines.push(`declare const ${defaultName}: any;`, `export default ${defaultName};`);
+  // Declared vocabulary, `any` until the real face materializes.
+  if (globals.length) {
+    lines.push('declare global {');
+    for (const name of globals) lines.push(`  var ${name}: any;`);
+    lines.push('}');
+  }
   lines.push('export {};');   // a module even when it exports nothing
   return lines.join('\n') + '\n';
 }
 
-// Stub faces from already-scanned sources (fsPath → scanExportNames
-// result), as fsPath → text. `export * from './x.rip'` is resolved
-// against the OTHER scans here — the one export form whose names are not
-// written where it appears. Split from the scan so a caller populating a
-// large workspace can yield between reads; `buildStubFaces` below is the
-// whole-thing convenience.
-// The local a default export binds, and therefore the name the editor
-// offers it under. Derived from the SOURCE file, because that is the name
-// the author would write: a mirror is `theme.rip.ts`, and TypeScript's own
-// derivation from THAT yields `themeRip`. A named declaration beats the
-// file derivation, which is the whole reason this exists.
-//
-// Four fallbacks to `_default`, each driven, none theoretical:
-//   · not an identifier at all (`10-modules.rip` cannot start with a digit)
-//   · a LEADING DOUBLE underscore — escaped in TypeScript's symbol tables
-//     (`__x` → `___x`), which leaves the default with no candidate at all
-//   · already exported by this module, so binding it twice would not compile
-//   · a reserved word, which is a SYNTAX error in a const declaration
-// `_default` itself always works; it just answers with TypeScript's
-// file-derived spelling instead of the author's.
-//
-// Names that CANNOT be a `const` binding. Verified by compiling
-// `declare const X: any; export default X;` for each: every one draws a
-// syntax error (TS1389 and friends), while the contextual keywords —
-// `type`, `as`, `of`, `from`, `any`, `never` — bind fine and are
-// deliberately absent, also driven. `let` is here because a lexical
-// declaration cannot bind it, and `await` because a module body is always
-// async context.
+// The local a default export binds — the name the editor OFFERS it
+// under, derived from the SOURCE filename (the mirror's `theme.rip.ts`
+// would derive as `themeRip`). Four fallbacks to `_default`, each
+// driven: not an identifier; a leading double underscore (TS escapes
+// `__x` to `___x`, leaving no candidate); already exported here; a
+// reserved word. Below: the names a `const` cannot bind, verified by
+// compiling each — contextual keywords (`type`, `as`, `of`, …) bind
+// fine and are deliberately absent; `await` is reserved because a
+// module body is always async context.
 const NOT_BINDABLE = new Set([
   'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
   'default', 'delete', 'do', 'else', 'enum', 'export', 'extends', 'false',
@@ -531,8 +566,8 @@ function defaultLocalName(file, taken) {
 }
 
 export function stubFacesFromScans(scans) {
-  // Star edges, resolved once. A target outside `scans` contributes
-  // nothing — there is no source here to read names from.
+  // Star edges, resolved once; a target outside `scans` contributes
+  // nothing.
   const starsOf = new Map();
   for (const [file, scan] of scans) {
     starsOf.set(file, scan.stars
@@ -546,14 +581,11 @@ export function stubFacesFromScans(scans) {
     values.set(file, new Set(scan.values));
     types.set(file, new Set(scan.types));
   }
-  // Grown to a FIXPOINT rather than resolved by recursion. `export *` is
-  // transitive and a cycle of them is legal (mutually re-exporting barrel
-  // files), so a recursive walk has to break the cycle somewhere and
-  // whichever file it breaks on gets a short answer — which a memo then
-  // stores as if it were complete, making the result depend on traversal
-  // order. Iterating to closure has no break to place: every file ends up
-  // with the union its stars reach, cycles included. It terminates because
-  // the sets only grow and the name space is finite.
+  // Grown to a FIXPOINT, not recursed: `export *` cycles are legal
+  // (mutual barrels), and a recursive walk breaks the cycle somewhere,
+  // memoizing that file's short answer as complete — order-dependent
+  // results. Iteration terminates: the sets only grow, the space is
+  // finite.
   for (let changed = true; changed; ) {
     changed = false;
     for (const [file, targets] of starsOf) {
@@ -565,12 +597,12 @@ export function stubFacesFromScans(scans) {
   }
   const faces = new Map();
   for (const [file, scan] of scans) {
-    // `export * from` carries names but never a DEFAULT — the star form
-    // is defined to skip it — so hasDefault stays this file's own.
+    // `export * from` never carries a default; hasDefault stays local.
     const v = [...values.get(file)];
     const t = [...types.get(file)];
     faces.set(file, stubFace({
       values: v, types: t, hasDefault: scan.hasDefault,
+      globals: scan.globals ?? [],
       defaultName: defaultLocalName(file, new Set([...v, ...t])),
     }));
   }
@@ -588,8 +620,8 @@ export function buildStubFaces(files, read) {
   return stubFacesFromScans(scans);
 }
 
-// The roles whose recorded span is TYPE TEXT — where an import type's
-// specifier lives, since it belongs to no import node.
+// Roles whose recorded span is TYPE TEXT — where an import type's
+// specifier lives (it belongs to no import node).
 const TYPE_TEXT_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declaration']);
 
 const skipTypeTrivia = (text, from) => {
@@ -626,10 +658,10 @@ const quotedTypeText = (text, start) => {
   return null;
 };
 
-// Static module specifiers in authored type text. Literal and comment
-// contents are data, and a property named `import` is not an import type.
-// Identifier recognition comes from the lexer vocabulary so a larger
-// Unicode name ending in `import` cannot be split into a false keyword.
+// Static module specifiers in authored type text. Literals and comments
+// are data; a property named `import` is not an import type; identifier
+// recognition uses the lexer vocabulary so a Unicode name ending in
+// `import` cannot split into a false keyword.
 export function typeImportSpecifiers(text) {
   const specs = [];
   let i = 0;
@@ -670,25 +702,139 @@ export function typeImportSpecifiers(text) {
   return specs;
 }
 
-// The relative .rip import targets of a compiled file, as absolute paths
-// — the closure edges. Read from the compiler's OWN stores (never
-// scanned from generated text — the never-list): import/export nodes
-// carry a `source` role whose exact source span is the specifier string;
-// dynimport nodes carry an `args` span, followed only when it is a single
-// static string literal (a computed specifier is a recorded closure miss);
-// and an IMPORT TYPE (`c: import('./lib.rip').Crate`) names its module
-// inside recorded type text, which is read the same way — a role's own
-// span over SOURCE, never a scan of anything generated. Program
-// membership is the whole fix there: with the sibling in the program the
-// untouched `.rip` specifier resolves by the mirror's filename, so
-// nothing rewrites a specifier and there is no second resolution rule.
+// The `.rip` file a manifest serves for `subpath` ('.', './x'), or
+// null. `exports` beats `main`; a conditions object reads in bun's
+// runtime order (import → default → first string). Only `.rip` targets
+// answer; glob subpaths are not expanded — a miss errs toward the
+// TS2307, never a silent wrong file.
+function ripManifestTarget(manifest, subpath) {
+  const pick = (entry) => {
+    if (typeof entry === 'string') return entry;
+    if (entry && typeof entry === 'object') {
+      for (const key of ['import', 'default', ...Object.keys(entry)]) {
+        if (typeof entry[key] === 'string') return entry[key];
+      }
+    }
+    return null;
+  };
+  let target = null;
+  const exp = manifest?.exports;
+  if (typeof exp === 'string') { if (subpath === '.') target = exp; }
+  else if (exp && typeof exp === 'object') {
+    // A conditions-only exports object ({ import: './x.rip' }) IS the
+    // '.' entry; a subpath map nests them one level down.
+    const bySubpath = Object.keys(exp).some((k) => k === '.' || k.startsWith('./'));
+    target = bySubpath ? pick(exp[subpath]) : (subpath === '.' ? pick(exp) : null);
+  } else if (subpath === '.' && typeof manifest?.main === 'string') {
+    target = manifest.main;
+  }
+  return target !== null && target.endsWith('.rip') ? target : null;
+}
+
+// The `.rip` file a BARE specifier lands on, resolved the way bun will:
+// node_modules walk-up, manifest, then realpath (a workspace package is
+// a symlink; the mirror is keyed by the real source path). Null for
+// builtins, uninstalled packages, non-`.rip` targets, and targets
+// physically inside node_modules — those would mirror under an excluded
+// tree (a recorded limit).
+export function bareRipSpecifierTarget(spec, fromDir) {
+  if (!spec || spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('#')) return null;
+  if (spec.startsWith('node:') || spec.startsWith('bun:')) return null;
+  const parts = spec.split('/');
+  const pkgName = spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+  if (!pkgName || (spec.startsWith('@') && parts.length < 2)) return null;
+  const subpath = '.' + spec.slice(pkgName.length);
+  for (let dir = fromDir; ; dir = path.dirname(dir)) {
+    const pkgDir = path.join(dir, 'node_modules', pkgName);
+    let manifest = null;
+    try { manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')); } catch { /* keep walking */ }
+    if (manifest) {
+      const target = ripManifestTarget(manifest, subpath);
+      if (target === null) return null;
+      let real;
+      try { real = fs.realpathSync(path.join(pkgDir, target)); } catch { return null; }
+      return real.includes(`${path.sep}node_modules${path.sep}`) ? null : real;
+    }
+    if (path.dirname(dir) === dir) return null;
+  }
+}
+
+// tsconfig `paths` for every workspace package serving `.rip`:
+// bare-name → mirror face, enumerated from the root's `workspaces`
+// globs (`<dir>/*` form; members without `.rip` exports contribute
+// nothing). Paths are relative to the CONFIG carrying them — the mirror
+// root passes '', a wrapper passes its reach-up.
+export function workspaceRipPaths(workspaceRoot, fromConfigDirToMirrorRoot = '') {
+  const paths = {};
+  if (!workspaceRoot) return paths;
+  let ws;
+  try { ws = JSON.parse(fs.readFileSync(path.join(workspaceRoot, 'package.json'), 'utf8')).workspaces; } catch { return paths; }
+  const globs = Array.isArray(ws) ? ws : Array.isArray(ws?.packages) ? ws.packages : [];
+  const memberDirs = [];
+  for (const glob of globs) {
+    if (typeof glob !== 'string') continue;
+    if (glob.endsWith('/*')) {
+      const parent = path.join(workspaceRoot, glob.slice(0, -2));
+      let entries;
+      try { entries = fs.readdirSync(parent, { withFileTypes: true }); } catch { continue; }
+      for (const e of entries) if (e.isDirectory()) memberDirs.push(path.join(parent, e.name));
+    } else {
+      memberDirs.push(path.join(workspaceRoot, glob));
+    }
+  }
+  for (const dir of memberDirs) {
+    let manifest;
+    try { manifest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); } catch { continue; }
+    if (typeof manifest?.name !== 'string') continue;
+    const subpaths = ['.'];
+    if (manifest.exports && typeof manifest.exports === 'object') {
+      for (const k of Object.keys(manifest.exports)) if (k.startsWith('./')) subpaths.push(k);
+    }
+    for (const sub of subpaths) {
+      const target = ripManifestTarget(manifest, sub);
+      if (target === null) continue;
+      const face = path.relative(workspaceRoot, path.resolve(dir, target)) + '.ts';
+      const name = sub === '.' ? manifest.name : manifest.name + sub.slice(1);
+      paths[name] = [posix(path.join(fromConfigDirToMirrorRoot, face))];
+    }
+  }
+  return paths;
+}
+
+// A closure-edge read failure that means the module DOES NOT EXIST as
+// specified — nothing at the path (ENOENT, including a dangling
+// symlink), a path segment that is a file (ENOTDIR), a symlink cycle
+// (ELOOP), an unresolvable name (ENAMETOOLONG) — as opposed to a module
+// that exists but cannot be read (EACCES, EIO). ripImportsOf hands out
+// relative edges without an existence check, so its consumers meet both
+// classes and route them differently: a missing module is the
+// IMPORTER's defect (its absent face earns tsgo's TS2307 on the
+// importing line), while an unreadable one is a coverage gap a skip
+// would mislabel as "cannot find module".
+export const missingModuleRead = (err) =>
+  err?.code === 'ENOENT' || err?.code === 'ENOTDIR' || err?.code === 'ELOOP' || err?.code === 'ENAMETOOLONG';
+
+// The `.rip` import targets of a compiled file — the closure edges.
+// Read from the compiler's OWN stores, never generated text (the
+// never-list): import/export `source` roles, dynimport args only when a
+// single static literal (computed specifiers are a recorded miss), and
+// import types inside recorded type text. Program membership is the
+// whole fix: with the sibling in the program, the untouched specifier
+// resolves by the mirror's filename — no rewriting, no second rule.
 export function ripImportsOf(stores, sourceText, fromDir) {
   const seen = new Set();
   const targets = [];
   const addSpec = (spec) => {
-    if (!spec.endsWith('.rip')) return;
-    if (!spec.startsWith('./') && !spec.startsWith('../')) return;
-    const abs = path.resolve(fromDir, spec);
+    // Bare specifiers resolve through node_modules, relative ones by the
+    // filesystem — absolute paths either way.
+    let abs;
+    if (spec.startsWith('./') || spec.startsWith('../')) {
+      if (!spec.endsWith('.rip')) return;
+      abs = path.resolve(fromDir, spec);
+    } else {
+      abs = bareRipSpecifierTarget(spec, fromDir);
+      if (abs === null) return;
+    }
     if (seen.has(abs)) return;   // one edge per module, however many spellings name it
     seen.add(abs);
     targets.push(abs);

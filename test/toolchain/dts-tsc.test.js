@@ -366,7 +366,7 @@ describeTscExtended('component declarations: consumer programs check against the
     // while a REAL container (another module's exported reactive,
     // whose .d.ts carries the same brand) still passes.
     const reactiveDts = compile('export label: string := "x"').declarations;
-    expect(reactiveDts).toContain('export declare const label: { value: string; read(): string };');
+    expect(reactiveDts).toContain('export declare const label: { value: string; read(): string; touch(): void };');
     const bad = [
       "import { Counter } from './counter';",
       "new Counter({ title: { value: 'x' } });",

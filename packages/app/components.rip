@@ -41,7 +41,7 @@ validDirectory = (dir) ->
 export def createComponents(): ComponentsStore
   files = Map.new()
   compiled = Map.new()
-  watchers = Set.new()
+  watchers: Set<(event: ComponentEvent, path: string) => void> = Set.new()
 
   notify = (event, path) ->
     for watcher in Array.from(watchers)

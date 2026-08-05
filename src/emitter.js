@@ -25,12 +25,12 @@ import { descriptorSegments, behaviorObjectText, paramNamesOf, splitTopLevelByCo
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './schema-types.js';
 import { Parser } from './parser.js';
 import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, identifierRunAt, isIdentifierName } from './lexer.js';
-import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader } from './typetext.js';
+import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './typetext.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom-vocab.js';
 import {
   COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS, componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer,
-  propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
+  propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType,
 } from './component-types.js';
@@ -152,7 +152,7 @@ export function atParamField(p) {
   return { name, typed: isNode(x) && x[0] === 'typed-var' && x.length === 3 ? x : null };
 }
 
-// Every `@name = …` a constructor body assigns, in source order,
+// Every `@name = …` an instance method body assigns, in source order,
 // deduped by name (a field written twice declares once). A plain
 // function is not entered — its `this` is another object; a bound
 // arrow is, because its `this` is this instance's. `viaArrow` marks
@@ -167,7 +167,22 @@ export function atParamField(p) {
 // field, and a declaration built from the first-seen node alone dropped
 // whichever annotation arrived later. This walk has no store access, so
 // it cannot ask which node carries one; the consumers can, and scan.
-export function ctorAtFields(body) {
+//
+// Takes EVERY instance method body, not the constructor's alone. A
+// constructor that hands its field setup to a helper (`@_refresh()` filling
+// in a dozen cached parts) establishes those fields just as surely as one
+// that inlines them, and the class is no less correct for it — this repo's
+// own `Time` published 121 diagnostics on that shape. TypeScript reads plain
+// `.js` the same way, inferring a class's properties from `this.x =` in any
+// method, so this is the rule its own untyped dialect already follows.
+//
+// The bodies share one `seen` map, so the merging above works ACROSS them:
+// a field an arrow assigns in the constructor and a method assigns directly
+// is not arrow-only, and the annotation can ride whichever body carries it.
+// Pass the constructor first — source order is what orders the result. Takes
+// an ARRAY always: a body is itself an array, so no runtime test can tell one
+// from a list of them, and guessing silently walked neither.
+export function ctorAtFields(bodies) {
   const out = [];
   const seen = new Map();
   const walk = (n, inArrow) => {
@@ -202,7 +217,9 @@ export function ctorAtFields(body) {
     }
     for (const el of n.slice(1)) walk(el, inArrow || h === '=>');
   };
-  walk(body, false);
+  for (const body of bodies) {
+    if (body !== null && body !== undefined) walk(body, false);
+  }
   return out;
 }
 // The comparison family — every COMPARE-level operator chains,
@@ -377,6 +394,10 @@ class Emitter {
     // rediscovered by scanning output): the browser module loader
     // splices resolved specifiers by these exact offsets.
     this.importSpans = [];
+    // Imported bindings the running program never references — the face
+    // keeps them (they are real types there), the JS emission does not
+    // (see collectTypeOnlyImports).
+    this.typeOnlyImports = new Set();
     // Tier 3 pins (TS face only): Map of `${name}@${valueHash}` → type
     // text, supplied by the editor's probe pass. Names the scan reports
     // as pinnable (still hoisted + nested occurrence) collect in
@@ -2051,7 +2072,7 @@ class Emitter {
       line(() => this.emitSegments(memberDeclareSegments(m)));
     }
     if (!hasChildren) line(() => this.b.emit('declare children: any;'));
-    if (info.extendsTag !== null) line(() => this.b.emit(`declare rest: ${containerType('Record<string, any>')};`));
+    if (info.extendsTag !== null) line(() => this.b.emit(`declare rest: ${containerType('Record<string, any>', '', MINTED)};`));
     line(() => this.b.emit('[key: `_${string}`]: any;'));
   }
 
@@ -2278,14 +2299,21 @@ class Emitter {
       this.b.emit('\n' + pad);
       this.mark(compNode, '$self', () => {
         this.b.emit(`${exported ? 'export ' : ''}interface ${name}${typeParams ?? ''} {`);
-        // Lines carrying a node (behavior-projected computeds) mark
-        // their own row nested inside the $self cover, so a diagnostic
-        // born in the projection anchors at the member the author
-        // wrote rather than across the whole component.
+        // Every segment carrying a node marks its own row nested inside
+        // the $self cover, so a diagnostic born in this second rendering
+        // of a member's type anchors at the member the author wrote
+        // rather than across the whole component. Scaffolding segments
+        // have no source span and stay under the cover.
         for (const l of instanceTypeLines(info, `${name}${selfArgs}`)) {
           this.b.emit('\n' + pad + '  ');
-          if (l.node !== undefined) this.mark(l.node, l.role, () => this.b.emit(l.text));
-          else this.b.emit(l.text);
+          const segs = () => {
+            for (const s of l.segs) {
+              if (s.node !== undefined) this.mark(s.node, s.role, () => this.b.emit(s.text));
+              else this.b.emit(s.text);
+            }
+          };
+          if (l.node !== undefined) this.mark(l.node, l.role, segs);
+          else segs();
         }
         this.b.emit('\n' + pad + '}');
       });
@@ -2376,6 +2404,54 @@ class Emitter {
   // child-ctor object's LAYOUT (one pair per line), and the strip
   // contract — face minus regions === JS bytes — holds only if both
   // modes make that layout decision from the same map.
+  // The imported bindings that are TYPE-ONLY: named in an import and
+  // then never referenced by the running program. Type syntax is absent
+  // from the s-expression tree — an annotation is erased into the side
+  // tables — so a name used only in one appears NOWHERE in the value
+  // tree, and that absence is the whole test. No cross-module
+  // resolution is needed, and none would help: whether the exporting
+  // module spells the name as a type is its business, while whether
+  // THIS file needs it at runtime is answerable here.
+  //
+  // A name must be USED BY A TYPE to be elided, not merely unused: an
+  // import nobody references at all is dead code, which is the author's
+  // business and not the emitter's — removing it would rewrite a program
+  // nobody asked to have rewritten.
+  //
+  // Both halves are deliberately conservative, and they fail the same
+  // safe way. Every string in the value tree counts as a use, including
+  // ones that are not references (a property key sharing the name); and
+  // only the roles below are read for type text, so a type position this
+  // list does not name goes unseen. Either way the name is KEPT, which
+  // costs an elision. The opposite — emitting an import of a name the
+  // module does not export — is a module that fails to load.
+  collectTypeOnlyImports(sexpr, source) {
+    const used = new Set();
+    const bound = [];
+    const walk = (x) => {
+      if (typeof x === 'string') { used.add(x); return; }
+      if (!isNode(x)) return;
+      // A module import's own specifiers are the declaration, not a use,
+      // so they are recorded and not descended into. A DYNAMIC import is
+      // an ordinary expression and walks normally.
+      if (isModuleImportNode(this.stores, x)) {
+        bound.push(...Emitter.importedNames([x]));
+        return;
+      }
+      for (const c of x) walk(c);
+    };
+    walk(sexpr);
+    if (bound.length === 0 || !source) return;
+    const inTypes = new Set();
+    for (const n of this.stores.nodes ?? []) {
+      for (const r of this.stores.rolesOf(n.nodeId)) {
+        if (!Emitter.TYPE_ROLES.has(r.role) || typeof r.sourceStart !== 'number') continue;
+        for (const m of source.slice(r.sourceStart, r.sourceEnd).matchAll(/[A-Za-z_$][\w$]*/g)) inTypes.add(m[0]);
+      }
+    }
+    for (const name of bound) if (inTypes.has(name) && !used.has(name)) this.typeOnlyImports.add(name);
+  }
+
   collectTsDirectives(sexpr, trivia, source) {
     this.tsDirectiveMap = new Map();
     this.tsNocheck = null;
@@ -3617,6 +3693,10 @@ class Emitter {
     return specs;
   }
 
+  // The roles whose recorded span is TYPE text. Additive by design —
+  // see collectTypeOnlyImports for why an omission is safe.
+  static TYPE_ROLES = new Set(['annotation', 'returnType', 'typeParams']);
+
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {
@@ -3768,14 +3848,43 @@ class Emitter {
   // stops being verbatim at the first newline and every name past it loses its
   // position. Each name is a source read and takes its own row; the alias is a
   // binding site and takes one too.
+  // The LOCAL name a named specifier binds — what the rest of the file
+  // would have to reference for the import to be needed at runtime.
+  static specifierLocal(s) { return isNode(s) ? s[1] : s; }
+
   emitSpecifiers(list) {
-    list.forEach((s, i) => {
-      if (i > 0) this.b.emit(', ');
-      if (isNode(s)) {
-        this.emitPrimitive(s[0]);
-        this.b.emit(' as ');
-        this.emitPrimitive(s[1]);
-      } else this.emitPrimitive(s);
+    // A type-only name stays in the FACE — it is a real type there, and
+    // dropping it would strand every annotation that uses it — but never
+    // reaches the JS, where importing a name the module does not export
+    // is a module that fails to load. The region carries the separator
+    // too, or stripping would leave a dangling comma.
+    const kept = list.filter((s) => !this.typeOnlyImports.has(Emitter.specifierLocal(s)));
+    let emitted = 0;
+    list.forEach((s) => {
+      const erased = this.typeOnlyImports.has(Emitter.specifierLocal(s));
+      const one = () => {
+        if (isNode(s)) {
+          this.emitPrimitive(s[0]);
+          this.b.emit(' as ');
+          this.emitPrimitive(s[1]);
+        } else this.emitPrimitive(s);
+      };
+      if (erased) {
+        if (!this.ts) return;                  // the shipping emission: gone
+        // The face keeps it, inside a region so stripping reproduces the
+        // JS byte for byte. The separator rides along — lead with it when
+        // something survives ahead, otherwise trail it — or a strip would
+        // leave a dangling comma.
+        this.b.tsOnly(() => {
+          if (emitted > 0) this.b.emit(', ');
+          one();
+          if (emitted === 0 && kept.length > 0) this.b.emit(', ');
+        });
+        return;
+      }
+      if (emitted > 0) this.b.emit(', ');
+      one();
+      emitted++;
     });
   }
 
@@ -3799,7 +3908,16 @@ class Emitter {
       // waiting to be filled, and an editor offering to add a name puts it
       // there instead of on a real import. The two are distinct nodes now,
       // so the emission can be what was written.
-      if (specs.length > 0) {
+      // Every binding erased leaves the clause with nothing to say, and
+      // the JS becomes a bare `import 'mod'` — which still RUNS the
+      // module. Dropping the statement outright would silently discard
+      // its side effects, so the clause and its `from` ride the region
+      // and the specifier stays.
+      const allErased = specs.length > 0 && specs.every((spec) => spec !== '{}'
+        && (typeof spec === 'string' || spec[0] === '*'
+          ? this.typeOnlyImports.has(typeof spec === 'string' ? spec : spec[1])
+          : spec.every((s) => this.typeOnlyImports.has(Emitter.specifierLocal(s)))));
+      const clause = () => {
         specs.forEach((spec, i) => {
           if (i > 0) this.b.emit(', ');
           if (spec === '{}') this.b.emit('{}');
@@ -3812,6 +3930,10 @@ class Emitter {
           }
         });
         this.b.emit(' from ');
+      };
+      if (specs.length > 0) {
+        if (!allErased) clause();
+        else if (this.ts) this.b.tsOnly(clause);
       }
       {
         const specStart = this.b.offset;
@@ -7206,7 +7328,7 @@ class Emitter {
       // satisfy a container position the runtime would double-wrap.
       if (this.ts && this.annotationText(node) !== null) {
         const ro = head === 'computed' ? 'readonly ' : '';
-        this.tsAnnotate(node, 'annotation', containerType(this.annotationText(node), ro));
+        this.tsAnnotate(node, 'annotation', containerType(this.annotationText(node), ro, MINTED));
       } else if (this.ts) {
         // Unannotated reactive with a syntactically-evident value type
         //: the container annotates from the
@@ -7218,7 +7340,7 @@ class Emitter {
         const t = syntacticLiteralType(value);
         if (t !== null) {
           const ro = head === 'computed' ? 'readonly ' : '';
-          this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro)}`));
+          this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro, MINTED)}`));
         }
       }
       this.b.emit(' ');
@@ -12252,6 +12374,8 @@ class Emitter {
     const declared = new Set();
     let ctorParams = null;
     let ctorBody = null;
+    // Instance method bodies, for the `@field = …` pass below.
+    const methodBodies = [];
     for (const stmt of stmts) {
       if (!isObject(stmt)) {
         const field = isStaticKey(stmt) ? null
@@ -12275,6 +12399,11 @@ class Emitter {
           if (isFunc(pair[2])) { ctorParams = pair[2][1]; ctorBody = pair[2][2]; }
         } else if (!isStaticKey(pair[1]) && typeof mName === 'string') {
           declared.add(mName);
+        }
+        // A STATIC method is excluded: its `this` is the class, so what
+        // it assigns is not an instance property.
+        if (isFunc(pair[2]) && !isStaticKey(pair[1]) && mName !== 'constructor') {
+          methodBodies.push(pair[2][2]);
         }
         if (isFunc(pair[2]) && pair[2][0] === '=>' && !isStaticKey(pair[1]) && mName !== 'constructor') {
           bound.push(mName);
@@ -12306,7 +12435,7 @@ class Emitter {
       }
     }
 
-    // A constructor BODY's `@field = value` is the same story as a
+    // An instance method's `@field = value` is the same story as a
     // promoted parameter, by a different route: it assigns the instance
     // property and declares nothing, and TypeScript reads a class's
     // properties from its declarations alone — so every assignment AND
@@ -12317,8 +12446,8 @@ class Emitter {
     // where a declaration would REDEFINE it rather than describe it.
     //
     // Control flow is walked THROUGH (a field assigned inside an `if`
-    // still declares) but a nested function is not: its `this` is not
-    // this instance's, so an assignment there says nothing about this
+    // still declares) but a nested plain function is not: its `this` is
+    // not this instance's, so an assignment there says nothing about this
     // class. The `declared` set keeps a body-level declaration winning,
     // here as for promotions — one declaration, or TypeScript reads the
     // pair as duplicate identifiers.
@@ -12328,8 +12457,11 @@ class Emitter {
     // descend into arrows, so its bare declaration would be an implicit
     // any — TS7008 under noImplicitAny, minted on generated-only bytes
     // no source position answers for (the tsScaffoldAny doctrine).
-    if (this.ts && ctorBody !== null) {
-      for (const at of ctorAtFields(ctorBody)) {
+    //
+    // EVERY instance method feeds this, not the constructor alone — see
+    // ctorAtFields. The constructor leads so source order holds.
+    if (this.ts) {
+      for (const at of ctorAtFields([ctorBody, ...methodBodies])) {
         if (declared.has(at.name)) continue;
         declared.add(at.name);
         // The annotation can ride ANY of the field's assignments — the
@@ -12850,8 +12982,50 @@ class Emitter {
   // TS-only, and only when that param is a bare name — an annotated,
   // defaulted, rest or pattern param is the author's own shape and is
   // never overridden.
-  emitParams(params, firstParamTypeText = null) {
-    Emitter.expansionSplit(params).list.forEach((p, i) => {
+  // True when something OTHER than the parameter list already types a
+  // function's parameters, so JS arity must not touch them: marking a
+  // contextually-typed `number` optional widens it to `number | undefined`
+  // and publishes TS18048 on correct code. The audit caught both sources.
+  //
+  //   ARGUMENT POSITION — `nums.reduce((acc, n) => acc + n, 0)` writes no
+  //     annotation, but `reduce` types `acc` and `n`. Tested by containment
+  //     in an `args` role span, so a callback nested in another callback is
+  //     one too. A `def` inside a callback body is swept along; that only
+  //     WITHHOLDS the marker, which is the safe direction.
+  //
+  //   AN ANNOTATED BINDING — `doubler: (n: number) => string = (n) => …`
+  //     types `n` from the target's annotation, not from the parameter.
+  //
+  // The compiler's own handler-param injection is the third source, handled
+  // where it is applied (`firstParamTypeText` in emitParams).
+  contextuallyTyped(node) {
+    const id = this.stores.idOf(node);
+    const self = id === null ? null : this.stores.node(id);
+    if (!self || typeof self.sourceStart !== 'number') return false;
+    this._argSpans ??= this.stores.roles
+      .filter((r) => r.role === 'args' && typeof r.sourceStart === 'number')
+      .map((r) => [r.sourceStart, r.sourceEnd]);
+    if (this._argSpans.some(([s, e]) => self.sourceStart >= s && self.sourceEnd <= e)) return true;
+    this._annotatedValueSpans ??= (() => {
+      const spans = new Set();
+      for (const n of this.stores.nodes) {
+        if (n.semanticKind !== 'assign' && n.semanticKind !== 'pair') continue;
+        if (!this.stores.role(n.nodeId, 'annotation')) continue;
+        const v = this.stores.role(n.nodeId, 'value');
+        if (typeof v?.sourceStart === 'number') spans.add(`${v.sourceStart}:${v.sourceEnd}`);
+      }
+      return spans;
+    })();
+    return this._annotatedValueSpans.has(`${self.sourceStart}:${self.sourceEnd}`);
+  }
+
+  emitParams(params, firstParamTypeText = null, jsArity = true) {
+    const list = Emitter.expansionSplit(params).list;
+    const optional = jsArity ? jsArityOptional(list) : new Set();
+    // The injected handler-param annotation types the FIRST param, so JS
+    // arity leaves it alone — it is no longer unannotated.
+    if (firstParamTypeText !== null) optional.delete(0);
+    list.forEach((p, i) => {
       // A promoted parameter reaching emission was NOT stripped by a
       // constructor — the shape belongs to constructors alone (there
       // is no instance for any other function's `@name` to bind).
@@ -12861,11 +13035,25 @@ class Emitter {
       }
       if (i > 0) this.b.emit(', ');
       this.emitParam(p);
+      // JS ARITY (TS-only). A bare parameter the author never annotated is
+      // optional, because in rip — as in JavaScript — calling with fewer
+      // arguments is legal and yields `undefined`, and `arguments.length`
+      // branching on it is idiomatic. Declaring it REQUIRED made the face
+      // enforce an arity rip never promised: `resolveUrl = (url, env) ->`
+      // drew TS2554 at every one-argument call it was written to accept.
+      //
+      // Nothing is lost under `rip.strict`, which is why this needs no mode:
+      // an unannotated parameter is already TS7006 there, so the omission is
+      // reported once, at the parameter, rather than again at every call.
+      // The moment the author annotates, the parameter is required and the
+      // arity check is back.
+      if (optional.has(i) && this.ts) this.b.tsOnly(() => this.b.emit('?'));
       if (i === 0 && firstParamTypeText !== null && typeof p === 'string' && this.ts) {
         this.b.tsOnly(() => this.b.emit(`: ${firstParamTypeText}`));
       }
     });
   }
+
 
   // ['->'|'=>', params, block]. `->` emits a function expression, `=>` an
   // arrow (single simple param drops its parens; a single-expression body
@@ -12898,6 +13086,9 @@ class Emitter {
         ? 'emitter: a generator arrow cannot sit inside a component body — thin arrows lower to fat arrows there to keep `this` on the instance, and JS has no generator arrows (name the generator a method and call it)'
         : 'emitter: fat arrows cannot contain yield (JS has no generator arrows; use ->)');
     }
+    // A callback's parameters are typed by its callee, so JS arity does
+    // not apply to them (see inCallArgs).
+    const inArgs = this.ts && this.contextuallyTyped(node);
     // The return-type role (side-band) covers the whole emitted
     // function; mark() is a no-op for untyped rows.
     this.mark(node, 'returnType', () => this.mark(node, '$self', () => {
@@ -12905,7 +13096,7 @@ class Emitter {
         if (isAsync) this.b.emit('async ');
         this.mark(node, 'kind', () => this.b.emit(isGen ? 'function*' : 'function'));
         this.b.emit('(');
-        this.mark(node, 'params', () => this.emitParams(params));
+        this.mark(node, 'params', () => this.emitParams(params, null, !inArgs));
         this.b.emit(')');
         this.tsReturnAnnotation(node, isAsync, isVoid);
         this.b.emit(' ');
@@ -12916,9 +13107,13 @@ class Emitter {
         // before a return annotation (`x: T => …` does not parse);
         // the TS face adds them as TS-only bytes, so stripping
         // restores the bare-name JS spelling.
+        // A lone BARE param takes the JS-arity `?` like any other (see
+        // emitParams), which needs the parens too — `x? => …` does not
+        // parse. Both are TS-only, so stripping restores `x => …`.
+        const jsArity = this.ts && !inArgs && params.length === 1 && typeof params[0] === 'string';
         const tsParens = this.ts &&
           params.length === 1 && typeof Emitter.paramCore(params[0]) === 'string' &&
-          (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, 'returnType') !== null || isVoid);
+          (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, 'returnType') !== null || isVoid || jsArity);
         this.mark(node, 'params', () => {
           // Only a single PLAIN name drops its parens — patterns,
           // rests, and defaults keep them (JS requires it). A typed
@@ -12926,10 +13121,11 @@ class Emitter {
           if (params.length === 1 && typeof Emitter.paramCore(params[0]) === 'string') {
             if (tsParens) this.b.tsOnly(() => this.b.emit('('));
             this.emitParam(params[0]);
+            if (jsArity) this.b.tsOnly(() => this.b.emit('?'));
             if (tsParens) this.b.tsOnly(() => this.b.emit(')'));
           } else {
             this.b.emit('(');
-            this.emitParams(params);
+            this.emitParams(params, null, !inArgs);
             this.b.emit(')');
           }
         });
@@ -14191,6 +14387,15 @@ const RUNTIME_TABLE = [
     // the pass-through, and the alternative was measured — splitting
     // it into overloads makes TypeScript report TS2769 against the
     // last one, which loses the array/tuple spellings' element anchor.
+    // The RETURN states `touch()`, the minted spelling, because an
+    // annotated `:=` declares a minted container and this call is its
+    // initializer — an optional return would not be assignable to it.
+    // The pass-through arm is where that reaches past what the runtime
+    // guarantees: a hand-built `{ value, read }` handed to `__state`
+    // comes back with a `touch` the type promises and the object lacks.
+    // That arm's own reason for existing is the prop seam, where the
+    // result lands in a member typed with the TAKEN spelling and the
+    // promise is narrowed straight back off.
     key: 'reactive',
     names: ['__state', '__computed', '__effect', '__batch', '__readonly',
             '__setErrorHandler', '__handleError', '__catchErrors', 'getEffectSignal'],
@@ -14198,7 +14403,7 @@ const RUNTIME_TABLE = [
     url: new URL('./runtime/reactive.js', import.meta.url),
     triggers: (sexpr, preds) => containsReactive(sexpr, preds.isTrigger),
     types: {
-      __state: '<T>(value: T | { value: T; read(): T }) => { value: T; read(): T }',
+      __state: '<T>(value: T | { value: T; read(): T }) => { value: T; read(): T; touch(): void }',
       __computed: '<T>(fn: () => T) => { readonly value: T; read(): T }',
       __effect: '(fn: () => void | (() => void)) => () => void',
       __batch: '<T>(fn: () => T) => T',
@@ -14619,6 +14824,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // ahead of any runtime injection — since TypeScript honors it only
   // before all code.
   emitter.collectTsDirectives(parseResult.sexpr, parseResult.trivia ?? [], source);
+  emitter.collectTypeOnlyImports(parseResult.sexpr, source);
   if (emitter.tsNocheck !== null) {
     const programId = stores.idOf(parseResult.sexpr);
     const t = emitter.tsNocheck;
@@ -14833,15 +15039,23 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         });
       }
       emitter.schemaStories = new Map();
-      story.stories.forEach((s, i) => {
-        emitter.schemaStories.set(s.decl.node, s);
-        const exp = s.decl.exported ? 'export ' : '';
-        const nodeId = stores.idOf(s.decl.node);
-        // The last block carries the blank separator before the
-        // program's own first line (still inside its region).
-        const tail = i === story.stories.length - 1 ? '\n\n' : '\n';
+      // A derived binding contributes an alias and nothing else, so it
+      // joins the same block on the same terms — marked under its own
+      // assignment, and the LAST block of either kind carries the
+      // separator before the program's first line.
+      const blocks = [
+        ...story.stories.map((s) => ({ node: s.decl.node, exported: s.decl.exported, story: s,
+                                       lines: s.faceAliasLines ?? s.aliasLines })),
+        ...story.derivations.map((d) => ({ node: d.decl.node, exported: d.decl.exported, story: null,
+                                          lines: d.aliasLines })),
+      ];
+      blocks.forEach((b, i) => {
+        if (b.story !== null) emitter.schemaStories.set(b.node, b.story);
+        const exp = b.exported ? 'export ' : '';
+        const nodeId = stores.idOf(b.node);
+        const tail = i === blocks.length - 1 ? '\n\n' : '\n';
         builder.tsOnly(() => {
-          const lines = () => builder.emit((s.faceAliasLines ?? s.aliasLines).map((l) => `${exp}${l}`).join('\n'));
+          const lines = () => builder.emit(b.lines.map((l) => `${exp}${l}`).join('\n'));
           if (nodeId !== null) builder.mark(nodeId, '$self', lines);
           else lines();
           builder.emit(tail);
@@ -14875,6 +15089,53 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   if (ambient.length > 0) {
     emitter.rframes.pop();
     emitter.scopes.pop();
+  }
+  // A top-level `globalThis.NAME ??= expr` DECLARES the global. The
+  // spelling is the boundary: `??=` says "install unless someone already
+  // did", which is a declaration wearing runtime clothes — DSL vocabulary
+  // like stamp's `sh`/`ok`/`run`, whose handlers import nothing by
+  // design. Plain `=` stays meaningless here on purpose (a test
+  // overwriting `globalThis.fetch` must not redeclare the host's fetch),
+  // and a non-top-level install is lifecycle state, not vocabulary (an
+  // app's guarded `__ripApp`, deleted on destroy, must not be declared
+  // ever-present). An identifier initializer declares `typeof` it — the
+  // module binding is lexically visible inside `declare global` — and
+  // any other initializer declares `any`. The block is TS-only, so the
+  // strip gate holds byte identity; `declare global` requires module
+  // shape, which the marker below guarantees for bare files.
+  const globalDecls = [];
+  if (face === 'ts' && isNode(parseResult.sexpr) && parseResult.sexpr[0] === 'program') {
+    const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+    for (const stmt of parseResult.sexpr.slice(1)) {
+      if (!isNode(stmt) || stmt[0] !== '??=' || stmt.length !== 3) continue;
+      const target = stmt[1];
+      if (!isNode(target) || target[0] !== '.' || target[1] !== 'globalThis') continue;
+      if (typeof target[2] !== 'string' || !IDENT.test(target[2])) continue;
+      // Keyword literals are identifier-shaped in the sexpr (`??= null`
+      // seeds ui's focus tracker) but are not typeof-able values.
+      const RESERVED = new Set(['null', 'undefined', 'true', 'false', 'this']);
+      const v = stmt[2];
+      globalDecls.push({
+        name: target[2],
+        anchor: typeof v === 'string' && IDENT.test(v) && !RESERVED.has(v) ? v : null,
+      });
+    }
+    if (globalDecls.length) {
+      // The type rides a MODULE-LEVEL alias: inside `declare global` the
+      // bare name resolves to the global being declared (TS2502,
+      // driven), so `typeof sh` must be taken where `sh` still means the
+      // module binding and carried in by alias.
+      builder.tsOnly(() => {
+        for (const g of globalDecls) {
+          if (g.anchor !== null) builder.emit(`\ntype __ripGlobal_${g.name} = typeof ${g.anchor};`);
+        }
+        builder.emit('\ndeclare global {');
+        for (const g of globalDecls) {
+          builder.emit(`\n  var ${g.name}: ${g.anchor === null ? 'any' : `__ripGlobal_${g.name}`};`);
+        }
+        builder.emit('\n}\n');
+      });
+    }
   }
   // The module marker: the loader runs every .rip file as a Bun
   // ES module, so a face whose own syntax carries no import/export
@@ -14912,7 +15173,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

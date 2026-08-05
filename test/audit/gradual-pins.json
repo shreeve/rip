@@ -1,0 +1,118 @@
+{
+  "held.rip": [
+    {
+      "line": 9,
+      "character": 20,
+      "code": 2307,
+      "token": "'@rip-audit/absent'",
+      "why": "declared-but-uninstalled: gradual holds it with the install remedy; strict publishes the unresolved module"
+    },
+    {
+      "line": 12,
+      "character": 25,
+      "code": 2307,
+      "token": "'bun:sqlite'",
+      "why": "the host floor: gradual supplies `declare module \"bun:*\"`; strict refuses every floor"
+    },
+    {
+      "line": 17,
+      "character": 11,
+      "code": 7006,
+      "token": "value",
+      "why": "the implicit-any family: code-suppressed in gradual, published in strict"
+    },
+    {
+      "line": 23,
+      "character": 12,
+      "code": 2580,
+      "token": "Buffer",
+      "why": "the missing-types family: gradual counts it as an advisory, strict publishes the missing declarations"
+    },
+    {
+      "line": 27,
+      "character": 19,
+      "code": 2339,
+      "token": "length",
+      "why": "inference-only reach: no annotation reaches the line, so the gate holds it; strict checks everything"
+    },
+    {
+      "line": 32,
+      "character": 10,
+      "code": 7006,
+      "token": "payload",
+      "why": "scaffolding: the bang-def's face `: void` is emitter output and opens nothing in gradual; strict still asks for the parameter's type"
+    },
+    {
+      "line": 37,
+      "character": 0,
+      "code": 2322,
+      "token": "greeting",
+      "why": "the null family: the line is reached in gradual (it is annotated) and held by posture, not by the gate"
+    },
+    {
+      "line": 46,
+      "character": 16,
+      "code": 18046,
+      "token": "err",
+      "why": "catch bindings: reached scope, held by posture (useUnknownInCatchVariables) — the family TypeScript 7 turned on by default"
+    },
+    {
+      "line": 52,
+      "character": 2,
+      "code": 7023,
+      "token": "bump",
+      "why": "object-literal `this` under strict makes the member read circular; gradual's loose base types `this` as `any`"
+    },
+    {
+      "line": 52,
+      "character": 13,
+      "code": 2339,
+      "token": "count",
+      "why": "the same method's member read against the literal type strict gives `this`"
+    }
+  ],
+  "published.rip": [
+    {
+      "line": 6,
+      "character": 24,
+      "code": 2307,
+      "token": "'./does-not-exist.rip'",
+      "why": "always-reported: an unresolvable module no one declared is a defect in every mode"
+    },
+    {
+      "line": 9,
+      "character": 12,
+      "code": 2304,
+      "token": "mysteryValue",
+      "why": "always-reported: a free name is a defect in every mode"
+    },
+    {
+      "line": 12,
+      "character": 7,
+      "code": 2552,
+      "token": "fetchh",
+      "why": "always-reported: the did-you-mean misspelling family publishes in gradual"
+    },
+    {
+      "line": 16,
+      "character": 0,
+      "code": 2322,
+      "token": "port",
+      "why": "reach by annotation: the author wrote a type, so the violation publishes"
+    },
+    {
+      "line": 20,
+      "character": 18,
+      "code": 2339,
+      "token": "length",
+      "why": "reach by flow: the annotated type moves along assignment to the alias"
+    },
+    {
+      "line": 23,
+      "character": 16,
+      "code": 2353,
+      "token": ":model",
+      "why": "reach by construction: models are compiler-typed, and the scope filters a column the schema never declared — anchored on the schema head"
+    }
+  ]
+}

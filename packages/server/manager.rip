@@ -22,7 +22,7 @@ REGISTER_409_MS = positiveEnv 'RIP_REGISTER_409_MS', 30000
 
 parseArgs = (argv) ->
   command = if ['browse', 'status', 'stop', 'hold', 'release', 'migrate', 'recover'].includes(argv[0]) then argv[0] else 'start'
-  args: any = { command, entry: null, migrationEntry: null, migrationDir: 'migrations', operationId: null, name: null, hosts: [], control: process.env.JANUS_CONTROL or null, workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, untilRestart: false, accessMode: 'pretty', accessPicture: null, accessExplicit: false, startupFlags: [] }
+  args = { command, entry: null, migrationEntry: null, migrationDir: 'migrations', operationId: null, name: null, hosts: [], control: process.env.JANUS_CONTROL or null, workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, untilRestart: false, accessMode: 'pretty', accessPicture: null, accessExplicit: false, startupFlags: [] }
   i = if command is 'start' then 0 else 1
   while i < argv.length
     value = argv[i]

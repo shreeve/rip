@@ -433,7 +433,7 @@ type "typed constant dts", "MAX: number =! 100", '''
 # Reactive state
 
 type "reactive state dts", "count: number := 0", '''
-  declare const count: { value: number; read(): number };
+  declare const count: { value: number; read(): number; touch(): void };
   export {};
   '''
 
@@ -443,7 +443,7 @@ type "computed dts", '''
     count: number := 0
     doubled: number ~= count * 2
   ''', '''
-  declare const count: { value: number; read(): number };
+  declare const count: { value: number; read(): number; touch(): void };
   declare const doubled: { readonly value: number; read(): number };
   export {};
   '''
@@ -494,7 +494,7 @@ type "this-typed interface dts", '''
 # Export reactive
 
 type "export reactive dts", "export count: number := 0", '''
-  export declare const count: { value: number; read(): number };
+  export declare const count: { value: number; read(): number; touch(): void };
 '''
 
 # Arrow function
