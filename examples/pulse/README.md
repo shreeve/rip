@@ -64,7 +64,7 @@ rip server index.rip --name pulse
 Open the page, then edit `app/mood.rip`: change the `up` label
 `'riding high'` to anything else and save. The manager sees a
 client-only change and dings the Hub with `{id, hash}` — no bytes ride the
-socket. The page fetches the latest file over HTTP, verifies its rash,
+socket. The page fetches the latest file over HTTP, verifies its hash,
 sets it into the Workspace, and every badge on the page
 updates without a manual refresh.
 

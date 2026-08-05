@@ -615,7 +615,7 @@ export updateAppModules = (appRoot, manifest, graph, ids) ->
     changed
   }
 
-sourceRashes = (paths) ->
+sourceHashes = (paths) ->
   paths.map (path) -> { path, hash: (if existsSync(path) then rash(readFileSync(path)) else null) }
 
 appDocuments = (project, graph, includeManifest) ->
@@ -1321,7 +1321,7 @@ export main = (argv) ->
       appGraph = documents.graph if documents?
       apiInputs = Set.new record.inputs
       appChanged = documents? and appModules(project.appRoot, project.appManifest).check isnt documents.graph.check
-      apiChanged = JSON.stringify(sourceRashes(record.inputs)) isnt JSON.stringify(record.inputRashes)
+      apiChanged = JSON.stringify(sourceHashes(record.inputs)) isnt JSON.stringify(record.inputHashes)
       operation = 'Activating'
       admissionAttempted = true
       publishUpstreams! candidateWorkers.map (worker) -> { path: worker.socket }
@@ -1409,7 +1409,7 @@ export main = (argv) ->
         oldArtifact: oldArtifact
         appCandidate: appCandidate
         inputs: report.inputs
-        inputRashes: sourceRashes(report.inputs)
+        inputHashes: sourceHashes(report.inputs)
         migrationEntry: body.entry or null
         migrationDir: body.dir
       persistMigration record

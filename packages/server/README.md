@@ -23,8 +23,10 @@ own HTTP and TLS, host and tenant admission, static and App files, cache
 policy, Hub WebSockets, and routing to private API worker sockets. The manager
 never handles an ordinary client request.
 
-The authoritative ownership, reload, migration, request-flow, and cache-policy
-contract is [docs/SERVER.md](../../docs/SERVER.md).
+The system-wide ownership, reload, migration, request-flow, and cache-policy
+contract is [docs/SERVER.md](../../docs/SERVER.md). The App publication wire
+contract and its implementation lifecycle are specified below under
+[Detailed Lifecycle](#detailed-lifecycle).
 
 ## Quick Start
 
@@ -93,7 +95,7 @@ one Rip server
 │   ├── registration + heartbeats
 │   ├── generation + worker supervision
 │   ├── dist App publication
-│   └── watch dings + local control
+│   └── watch changes + local control
 ├── API source ───────────► disposable worker processes
 └── App source + assets ──► served directly by Janus
 ```
@@ -122,7 +124,7 @@ project/
 └── dist/                         manager-owned publication
     ├── @rip/rip.js
     ├── bundle.json
-    └── manifest.json             watch publication artifact
+    └── latest.json               current bundle identity
 ```
 
 The paths on disk are not public directory prefixes. Janus searches the
@@ -130,14 +132,16 @@ registered roots in order and appends the request path to each one. A typical
 tenant registration searches `dist`, then
 `sites/{site}/public`, then `sites/common/public`, then `app`. Consequently:
 
-**Root names are never exposed.** An App member's id is its path relative to
-`app/`, which is also its normal public URL without the leading slash.
+**Root names are never exposed.** An App member's publication URL is its path
+relative to `app/`, which is also its normal public URL without the leading
+slash.
 
 - `dist/bundle.json` is requested as `/bundle.json`;
+- `dist/latest.json` is requested as `/latest.json`;
 - `sites/cheetos/public/logo.svg` overrides
   `sites/common/public/logo.svg` for `/logo.svg`;
-- `app/routes/[id].rip` has the bag id `routes/[id].rip` and is fetched from
-  `/routes/[id].rip`; and
+- `app/routes/[id].rip` has the publication URL `routes/[id].rip` and is
+  fetched from `/routes/[id].rip`; and
 - `app/index.html` is an HTML-navigation fallback, not a response for a
   missing script, stylesheet, image, or module.
 
@@ -153,12 +157,12 @@ The three owners have deliberately narrow jobs:
   may use `@send`; the worker selects the file and Janus performs the actual
   `X-Sendfile` transfer, including validators, ranges, and content type.
 - **The manager publishes App identity.** It snapshots the configured App
-  manifest (by default `app/**/*.{rip,css,html}`), assigns each member a six-character content
-  `hash`, and identifies it relative to the App root (`routes/home.rip`, not
-  `app/routes/home.rip`). It writes a deterministic `bundle.json` and—while
-  watching—a matching `manifest.json`. The bundle carries the complete
-  inventory plus Rip module source needed for first paint; the manifest
-  carries the inventory without source bodies.
+  manifest (by default `app/**/*.{rip,css,html}`), assigns each member a
+  six-character content `hash`, and identifies it relative to the App root
+  (`routes/home.rip`, not `app/routes/home.rip`). It writes a deterministic
+  `bundle.json` containing the complete member inventory and a tiny
+  `latest.json` containing only the resulting bundle hash. While watching, it
+  publishes one metadata change for each nonempty watcher batch.
 - **Caddy and Janus serve bytes.** They terminate HTTPS, select the trusted
   tenant, search file roots, proxy configured API prefixes, serve the SPA
   shell, and provide ordinary HTTP cache behavior.
@@ -168,25 +172,23 @@ The three owners have deliberately narrow jobs:
 These identifiers are intentionally independent:
 
 ```text
-authored bytes ──manager──► hash/rash ──Hub ding──► browser Workspace
+authored bytes ──manager──► hash ──Hub change──► browser Workspace
 file metadata  ──Janus────► weak ETag  ──HTTP──────► browser cache
 ```
 
-The manager's `hash` is a content identity (`rash(bytes)`) used to suppress
-no-op changes, describe the manifest, and tell an open browser that a bag
-member may be newer. Janus's weak `W/"mtime-size"` ETag is a cheap transport
-validator used for conditional HTTP requests. Janus neither calculates nor
+The manager's `hash` is a content identity produced by `rash(bytes)` and used to suppress
+no-op changes, describe individual files, and construct the complete bundle
+hash. The publication client trusts manager-issued Rip hashes and compares
+them for equality; it never calculates a Rip hash for server-published bytes
+or bundle state. Janus's weak `W/"mtime-size"` ETag is a separate transport
+validator used for ordinary HTTP caching. Janus neither calculates nor
 compares Rip hashes.
 
-For a real App change, the manager writes the bundle and then the manifest,
-atomically replacing each file, and only then publishes a tiny `{id, hash}`
-ding. The browser treats that hash as a
-freshness hint, fetches the current file at its ordinary URL with
-`cache: "no-store"`, hashes the bytes it actually received, and applies only
-the latest completed fetch. This remains correct if another edit lands between
-the ding and the fetch. Stable generated URLs such as `/bundle.json` and
-`/manifest.json` instead use `Cache-Control: no-cache` plus Janus's ETag, so
-an unchanged revalidation is a cheap `304`.
+For a real App change, the manager atomically replaces `bundle.json`, then
+`latest.json`, and only then publishes one metadata-only `change`. The browser
+fetches non-eager content at its ordinary URL. `/latest.json` uses
+`Cache-Control: no-store` because it is the small authoritative reconnect
+probe. File responses retain their configured Caddy/Janus cache policy.
 
 ## Features
 
@@ -206,8 +208,9 @@ an unchanged revalidation is a cheap `304`.
   security headers, cooperative timeout, and mobile JSON rendering.
 - **Safe API reload:** a short-lived generation process validates a candidate
   before the manager cuts admission to the active workers.
-- **Latest-wins App updates:** tiny `{id,hash}` dings trigger ordinary HTTP
-  fetches of current source; source bytes never ride Hub frames.
+- **Latest-wins App updates:** one `from → hash` change names the affected
+  URLs; ordinary HTTP supplies content, with explicitly enabled development
+  mode allowed to carry bounded eager text.
 - **Operational barriers:** `hold`, `release`, coordinated `migrate`, and
   fix-forward `recover`.
 
@@ -470,37 +473,520 @@ an existing `Content-Encoding` remains authoritative.
 
 ## Browser App and Development Feed
 
-An `app/` directory is the browser App. The manager assembles its `.rip`
-module graph into `dist/bundle.json`; while watching, it also
-publishes `manifest.json`.
+An `app/` directory is the browser App. The manager publishes its complete
+configured membership in `dist/bundle.json` and publishes the current bundle
+identity in `dist/latest.json`.
 
 Janus serves:
 
 - The App shell
 - Authored `.rip`, CSS, HTML, and other registered files
-- `bundle.json` and `manifest.json`
-- The browser runtime at `/@rip/rip.js`
+- `bundle.json` and `latest.json`
+- The browser runtime at `/@rip/rip.js`, including compiled `@rip-lang/app`
 - Hub WebSockets
 
 Workers serve API routes only. The manager writes files and publishes control
 state but is never on the client data path.
 
-The conventional development manifest selects `app/**/*.{rip,css,html}`. Its
-ids are relative to the App root, so a change to `app/routes/home.rip`
-produces a tiny ding naming `{id: "routes/home.rip", hash}`:
+The complete `@rip-lang/app` package is part of the versioned browser runtime,
+not an App publication. `bundle.json` carries authored modules and any imported
+non-core browser packages; it never duplicates App framework source. Authored
+imports from `@rip-lang/app` resolve to the copy already active in `rip.js`.
+
+The conventional App membership selects `app/**/*.{rip,css,html}`. Its URLs
+are relative to the App root, so `app/routes/home.rip` is represented as
+`routes/home.rip` and requested as `/routes/home.rip`. One watcher batch
+produces one `change` containing its affected URLs; a batch with no effective
+change publishes nothing:
 
 - `.rip` → fetch and apply the latest module
 - `.css` → fetch latest bytes and update the existing stylesheet URL
 - `.html` → full reload
-- unknown or retired entries → ignore or resynchronize as appropriate
+- an unrecognized or disconnected transition → recover from `bundle.json`
 
-The six-character `hash` is `rash(bytes)`, a change/deduplication identity
-computed from the bytes the browser actually receives. It is not an HTTP
-ETag. Rapid saves converge on the newest available representation; Janus does
-not retain historical App versions.
+Rip Manager is the only Rip-hash authority for server-published files. The
+browser stores and compares manager-declared hashes but never recalculates
+them. Rapid saves converge on the newest available HTTP representation; Janus
+does not retain historical App versions.
 
 See [docs/WORKSPACE.md](../../docs/WORKSPACE.md) for the browser passport bag
 and door contract.
+
+## Detailed Lifecycle
+
+This section is the implementation contract for App publication shared by Rip
+Server, Rip App, and the browser runtime. Its central separation is:
+
+```text
+HTTP                         WSS /hub
+────                         ────────
+bundle.json                  change metadata
+latest.json                  optional bounded development text
+authored file content        no production file content
+```
+
+`manifest.json` is not part of this protocol. `bundle.json` is the complete
+App snapshot, and `latest.json` is the inexpensive reconnect probe.
+
+### Authority and browser state
+
+Rip Manager owns all Rip hashes. For each configured App member it calculates
+`rash(bytes)`, and from the complete canonical member list it calculates the
+bundle hash. The publication client never hashes downloaded server bytes and
+never recomputes the server bundle hash. It trusts the manager's declarations
+and uses hashes as synchronization identities, not as client-verified
+integrity proofs. Hashes for browser-local editor entries are outside this
+server-publication protocol.
+
+The browser keeps three related pieces of state:
+
+```text
+File Store       URL → content, when content has been obtained
+Hash Store       URL → manager-declared file hash
+current hash     manager-declared complete bundle hash
+```
+
+Both stores are keyed by URL. Content is not stored by hash. A client commit
+must never advance `current hash` without also committing the corresponding
+Hash Store mutations. Content needed for the immediate apply verdict is
+staged before the commit; lazy content may remain absent from the File Store.
+
+### Canonical URLs and bundle hash
+
+A publication URL is an App-root-relative URL path such as
+`routes/home.rip`, never a disk path such as `app/routes/home.rip`. It has no
+leading slash, query, fragment, backslash, empty segment, `.` segment, or
+`..` segment. The browser requests it by prefixing `/` and URL-encoding its
+individual path segments.
+
+Every wire hash is the six-character, Base64URL-folded value produced by `rash`.
+It is a Rip synchronization identity and never an HTTP ETag.
+
+The complete list is sorted lexicographically by URL and contains each URL
+exactly once. Rip Manager calculates the bundle hash as:
+
+```text
+rash(UTF8(JSON.stringify(canonical [[url, fileHash], ...] list)))
+```
+
+Optional eager content never participates in either the file hash or bundle
+hash. A candidate with an invalid URL, duplicate URL, invalid hash, invalid
+UTF-8 eager source, or noncanonical ordering rejects before publication.
+
+### `bundle.json`: complete state
+
+`GET /bundle.json` returns the complete current membership:
+
+```json
+{
+  "hash": "APP123",
+  "list": [
+    ["routes/index.rip", "RIP111"],
+    ["styles.css", "CSS222"],
+    ["template.html", "HTML33"]
+  ]
+}
+```
+
+The rules are:
+
+- `hash` is the resulting complete bundle hash.
+- `list` contains every current configured App member.
+- Every normal entry is exactly `[url, fileHash]`.
+- A complete bundle never contains a deletion or `null` hash.
+- Normal production and watch publication do not include file content.
+- Manager-owned `bundle.json` and `latest.json` are never members of the
+  bundle.
+
+The client validates the document's structure, hash syntax, URL syntax,
+ordering, and uniqueness. It does not recalculate any Rip hash.
+
+### `latest.json`: reconnect identity
+
+`GET /latest.json` returns only the current complete bundle hash:
+
+```json
+{"hash":"APP123"}
+```
+
+Rip Manager writes this file only when the bundle hash changes. It is served
+with `Cache-Control: no-store`; clients must not use a cached body to decide
+that they are current. `latest.json` is manager-owned, is outside the watched
+App root, never appears in a change, and cannot create a watcher feedback
+loop.
+
+The file exists whether watching is enabled or disabled. A client uses it for
+live-session recovery only when the publication feed is active. A production
+Hub used for chat, presence, CRDTs, or other application traffic does not by
+itself activate the publication feed.
+
+### `change`: one App transition
+
+With watching active, one nonempty watcher batch produces one WSS message:
+
+```json
+{
+  "change": {
+    "from": "APP123",
+    "hash": "APP124",
+    "list": [
+      ["routes/index.rip", "RIP444"],
+      ["styles.css", "CSS555"]
+    ]
+  }
+}
+```
+
+Its meaning is: "If the client is at `from`, applying this list advances it
+to `hash`." The fields are:
+
+- `from`: the complete bundle hash immediately before the watcher batch.
+- `hash`: the complete bundle hash after the watcher batch.
+- `list`: only URLs created, changed, or deleted by that batch.
+
+The list is sorted by URL and contains each affected URL once. Creation and
+replacement use `[url, fileHash]`. Deletion uses `[url, null]`:
+
+```json
+{"change":{"from":"APP124","hash":"APP125","list":[["routes/old.rip",null]]}}
+```
+
+A rename is one atomic deletion plus creation. The transport does not infer a
+rename from watcher event names and does not preserve component identity
+across it; any state-preserving rename semantics belong to Rip App.
+
+An ordinary transition has different `from` and `hash` values and a nonempty
+list. An unchanged watcher batch emits no message. WSS never carries
+`bundle.json` or `latest.json`.
+
+### Manager startup and initial publication
+
+At startup the manager:
+
+1. Resolves the configured App root and membership globs.
+2. Reads and hashes every current member once.
+3. Builds the canonical complete list and bundle hash.
+4. Assembles and validates `bundle.json` in memory.
+5. Atomically writes `bundle.json`.
+6. Atomically writes `latest.json` with the same hash.
+7. Opens the watcher only after the in-memory graph and both files agree.
+
+If an existing valid `bundle.json` and `latest.json` disagree after an
+interrupted manager run, startup rewrites `latest.json` from the validated
+bundle before enabling the publication feed. `latest.json` must never lead
+`bundle.json`: the complete recovery document is made visible first.
+
+### Initial browser load
+
+Initial App boot does not depend on WSS or `latest.json`:
+
+1. The browser requests `/bundle.json`.
+2. It validates the envelope and stages the complete Hash Store.
+3. It obtains the files required to launch through their ordinary HTTP URLs.
+4. Rip App validates or compiles the required source.
+5. The browser atomically commits the File Store, Hash Store, and bundle hash.
+6. The App renders.
+
+If the Hub is unavailable, initial HTTP boot still succeeds. Watching only
+controls whether an already-open App receives live transitions.
+
+### Watch processing and publication
+
+The recursive watcher observes the configured App root. Manager-owned output
+lives under `dist/`, outside that root, and is never watched. Ordinary events
+for paths outside configured App membership are ignored by the publication
+pipeline and remain normal Janus-served static files.
+
+For exact matching file events, the manager collects only the reported URLs
+in one debounced dirty set. It reads and hashes only those files. Directory,
+pathless, overflow, or otherwise ambiguous events require a complete
+membership reconciliation because the watcher did not identify a trustworthy
+individual path.
+
+One batch follows this order:
+
+```text
+read and hash watcher-identified members
+→ stop if membership and hashes are unchanged
+→ merge changes into the prior in-memory graph
+→ calculate the resulting bundle hash
+→ assemble and validate bundle.json
+→ atomically write bundle.json
+→ atomically write latest.json
+→ commit the manager's in-memory graph
+→ publish one WSS change
+```
+
+Writing `bundle.json` and `latest.json` is manager publication, not an App
+file event. Neither write produces another change.
+
+If bundle construction, validation, or either atomic write fails, the manager
+does not publish the WSS transition. If WSS publication fails after the HTTP
+documents are current, the manager retains and retries the pending transition
+until Janus acknowledges it or a newer transition supersedes it. A superseded
+transition is never published after its successor; clients that missed it
+fail the successor's `from` check and recover from `bundle.json`. An ambiguous
+acknowledgement may produce a harmless duplicate. If the manager exits, loss
+of its Janus registration closes live sockets, and reconnect recovery through
+`latest.json` remains authoritative.
+
+### Live client application
+
+The browser serializes changes in WSS arrival order. For each change:
+
+```text
+if current hash == change.hash
+  ignore the duplicate
+
+else if current hash != change.from
+  stop applying queued changes and recover from bundle.json
+
+else
+  stage change.list against the current Hash Store
+  obtain content required for immediate apply
+  validate or compile affected Rip source
+  atomically commit staged stores and change.hash
+  emit one Rip App apply batch
+```
+
+The browser trusts every declared file hash and the resulting bundle hash. It
+does not hash eager server content, server HTTP responses, or the staged
+server inventory.
+
+For a non-eager creation or replacement, the browser requests the current
+content from the entry's ordinary URL. HTTP delivery is latest-wins: if a
+newer edit reaches disk between the change and the fetch, the browser may
+receive the newer representation. A later `change` advances the declared
+identity; a missed or disconnected transition is healed by `from` mismatch or
+reconnect recovery. Request-owner tokens or equivalent cancellation fencing
+must prevent an older completed request from overwriting a newer committed
+request.
+
+Deletion removes the declared URL from both stores as one staged operation.
+A missing HTTP response, rejected compilation, malformed entry, or failed
+apply leaves the prior committed state running and triggers complete recovery.
+
+### Reconnect in watch mode
+
+The browser never uses the WebSocket `open` event alone as proof that its
+subscription is active. It installs the message handler first, then sends one
+Janus frame that joins `/hub` and asks for an acknowledgement:
+
+```json
+{"+":["/hub"],"?":"sync-17"}
+```
+
+It buffers incoming changes immediately and waits for:
+
+```json
+{"!":"sync-17"}
+```
+
+After the acknowledgement it requests `/latest.json` with
+`cache: "no-store"`:
+
+- If `latest.json.hash` equals the current client hash, no bundle fetch is
+  required.
+- If the hashes differ, the client fetches and atomically installs
+  `/bundle.json`.
+- It then replays buffered changes in arrival order using the normal
+  `from → hash` rules.
+- A buffered change already represented by the installed bundle is a
+  duplicate and is ignored.
+- Any disconnected transition causes another complete bundle recovery.
+
+This ordering closes every reconnect race:
+
+- A change completed before subscription is visible through `latest.json` and
+  `bundle.json`.
+- A change completed after subscription is delivered through WSS.
+- A change racing the HTTP checks may be represented by both paths, and the
+  duplicate rule makes that harmless.
+
+Browser `online`, page restoration, and tab resumption are triggers to attempt
+this procedure, not proof that the network or App state is current. A failed
+probe leaves the last committed App running and retries with bounded backoff.
+
+### Optional eager development content
+
+The metadata-only change format is the default. An explicitly enabled
+development optimization may add a third tuple element containing the exact
+UTF-8 text Rip Manager already read for that watcher batch:
+
+```json
+{
+  "change": {
+    "from": "APP123",
+    "hash": "APP124",
+    "list": [
+      ["routes/index.rip", "RIP444", "export Index = component ..."]
+    ]
+  }
+}
+```
+
+This optimization obeys all of these rules:
+
+- Its eager-pattern list is empty by default.
+- It requires watching and an explicit development configuration.
+- Only replacement paths matching `app.changes.eager` are eligible.
+- Matched content must be valid UTF-8; deletes and binary files never carry
+  content.
+- The total eager UTF-8 byte length for one change is capped by
+  `app.changes.limit`, which defaults to 32768 bytes.
+- If the eligible content exceeds the cap, the entire change is sent without
+  eager content and the browser uses HTTP; the manager does not split one
+  transition into multiple messages.
+- Eager content is never required for correctness or reconnect recovery.
+- A client whose current hash does not equal `from` ignores all eager content
+  and recovers from `bundle.json`.
+
+The `serve.rip` schema exposes the eligible paths as `app.changes.eager`, an
+array of App-relative globs defaulting to `[]`, and the byte cap as
+`app.changes.limit`, defaulting to `32768`. A nonempty eager list while
+watching is disabled or while `RIP_ENV` is `production` rejects during
+configuration validation.
+
+### Watch-off and production behavior
+
+With watching disabled, the manager publishes `bundle.json` and
+`latest.json` but sends no App changes and the browser opens no publication
+subscription. The same Janus Hub may independently carry application-owned
+chat, presence, CRDT, collaboration, or other realtime traffic. Those
+messages do not activate file watching and are outside this lifecycle.
+
+All App file bytes remain available through HTTP. Production never includes
+App file content in WSS changes, even when the Hub is enabled for unrelated
+realtime behavior.
+
+### Implementation sequence
+
+The transport and the application runtime land as two explicit phases. Phase
+1 proves Rip Server, Rip Manager, Janus, HTTP, and WSS without importing or
+launching Rip App. Phase 2 integrates that proven protocol with browser boot,
+the Workspace, compilation, and rendering. No compatibility adapter, dual
+wire format, or temporary translation layer belongs between the phases.
+
+#### Phase 1: Server and protocol reference client
+
+Phase 1 implements:
+
+- manager publication of `bundle.json` and `latest.json`;
+- watcher batching, exact dirty-path hashing, deletion, rename, and no-op
+  suppression;
+- `from → hash` WSS changes and bounded optional eager development text;
+- Janus file serving and Hub publication using the existing `/hub` endpoint;
+- publish ordering, failure retry, manager restart repair, and watch-off
+  behavior; and
+- a small protocol reference client owned by `packages/server/test`.
+
+The reference client is intentionally not Rip App. It performs only the
+operations required to prove the wire contract:
+
+```text
+HTTP GET bundle.json / latest.json / authored URLs
+WSS join + acknowledgement + ordered frame collection
+URL → declared-hash map maintenance
+current bundle-hash comparison
+from mismatch and duplicate recovery
+optional eager-content capture
+```
+
+It does not compile Rip, render a component, create a Workspace, implement an
+apply verdict, or calculate a Rip hash. Tests obtain expected hashes from the
+manager's published documents and messages. The harness must exercise the
+real published Janus integration, not a mock that bypasses Hub ordering or
+static-file behavior.
+
+Phase 1 may change the server wire format before Rip App understands it. Its
+checkpoint gate is the focused `packages/server` suite and the real-Janus
+reference-client scenarios below. This is an internal feature-branch
+checkpoint, not a completion, commit, or merge boundary: the complete change
+still requires Phase 2 and the canonical repository-wide suite. No dual format
+is added merely to keep both protocols alive between the two work phases.
+
+#### Phase 2: Rip App and browser integration
+
+Phase 2 begins only after the Phase 1 protocol survives its failure and race
+tests. It updates the existing browser seams rather than moving server logic
+into Rip App:
+
+- `src/browser-boot.js` consumes the new `bundle.json`, obtains required
+  modules through HTTP, and stops validating server declarations by hashing
+  their source.
+- `packages/app/feed.rip` consumes `change` and owns the acknowledged
+  subscribe-before-`latest.json` reconnect flow. It has no separate manifest
+  reconciliation or per-file notification format.
+- `packages/app/workspace.rip` accepts manager-declared hashes for
+  server-owned records. Its local editor/write behavior remains a separate
+  concern and does not become server publication authority.
+- Rip App keeps ownership of `.rip` update, CSS replacement, HTML reload,
+  compilation, last-known-good behavior, and one atomic apply batch.
+- Browser delivery keeps request-owner fencing so an older HTTP completion
+  cannot overwrite a newer change.
+
+The compiled `@rip-lang/app` core launch embedded in `rip.js` remains
+transport-agnostic: it receives prepared
+bundle objects and compiled components. HTTP, WSS, `latest.json`, and browser
+cache behavior stay in the browser delivery/feed boundary.
+
+### Phase 1 acceptance tests
+
+The Server/Manager phase is incomplete until its reference client establishes
+all of the following without Rip App:
+
+1. `/bundle.json` and every required authored HTTP URL load with the Hub
+   unavailable.
+2. `bundle.json` and `latest.json` contain the same bundle hash.
+3. Both manager-owned files are excluded from watcher membership and changes.
+4. An exact file event reads and hashes only that file.
+5. An idempotent file event rewrites nothing and publishes nothing.
+6. One multi-file watcher batch produces one sorted `from → hash` change.
+7. Missing change 7 makes change 8 fail its `from` check and fetch the bundle.
+8. A duplicate whose `hash` is already current is ignored.
+9. Create, replace, delete, and rename transitions produce the expected
+   complete URL/hash map.
+10. `bundle.json` and `latest.json` are visible before the WSS transition.
+11. Startup repairs a valid bundle/latest mismatch before opening the feed.
+12. Subscription acknowledgement precedes the `latest.json` reconnect probe.
+13. Changes racing the reconnect probe are buffered and reconciled without a
+    mixed committed map.
+14. A failed or ambiguous Hub publish retries safely; an acknowledged
+    duplicate is harmless.
+15. Manager or Janus restart makes the client reconnect and recover through
+    `latest.json` and `bundle.json`.
+16. A nonmatching static-asset event produces no publication work.
+17. Normal and production WSS changes contain no file content.
+18. Eager development content respects `app.changes.eager` and
+    `app.changes.limit`.
+19. An oversized eager candidate falls back to one metadata-only change.
+20. Watch-off mode publishes no changes while unrelated Hub traffic remains
+    available.
+21. Neither the reference client nor any production browser-publication code
+    calculates a Rip hash for manager-published content.
+
+### Phase 2 acceptance tests
+
+Rip App integration is incomplete until tests establish:
+
+1. Browser boot obtains the complete server publication without a manifest.
+2. The browser stores manager-declared file and bundle hashes without
+   recalculating them.
+3. `.rip`, CSS, HTML, creation, deletion, and rename produce the specified App
+   verdicts from one staged change.
+4. A failed fetch, compile, or apply leaves the prior App generation running.
+5. Two rapid changes cannot let an older request completion overwrite the
+   newer committed state.
+6. Missing, duplicate, and racing changes converge through the same
+   `latest.json` and `bundle.json` recovery proven in Phase 1.
+7. Eager and non-eager development changes have identical observable apply
+   results.
+8. Initial HTTP boot and the last committed App remain usable while the Hub is
+   unavailable.
+9. Real-browser Chromium, Firefox, and WebKit scenarios exercise initial load,
+   live change, disconnect, reconnect, and failed apply.
+10. Browser-local editor entries remain isolated from manager-declared server
+    state and do not alter the server bundle hash.
 
 ## App-Local `serve.rip`
 
@@ -516,6 +1002,9 @@ export default
       update: ['**/*.rip']
       css: ['**/*.css']
       reload: ['**/*.html']
+    changes:
+      eager: []
+      limit: 32768
   sites:
     host: '{site}.medlabs.health'
     dir: 'sites'
@@ -545,6 +1034,12 @@ outside the manifest. Bun still observes the entire App root recursively.
 Nonmatching asset-file events do no publication work, and matching file events
 reread and rehash only the exact App-relative paths reported by the watcher.
 Directory and pathless events fall back to a full membership reconciliation.
+
+`app.changes.eager` is an array of App-relative globs and defaults to `[]`.
+Matching replacement files may use the eager-text optimization defined in
+Detailed Lifecycle. `app.changes.limit` is a positive integer byte limit and
+defaults to `32768`. A nonempty eager list rejects when watching is disabled
+or `RIP_ENV` is `production`. Unknown keys in `app.changes` reject.
 
 Each root has optional `cache` policy: `never`, `revalidate`, or `forever`.
 Omission means `revalidate`. The manager emits the normalized policy on every
@@ -593,16 +1088,16 @@ The manager never imports API artifacts. Compiler and bundler memory dies with
 the generation child. Every worker imports the same plain-JavaScript artifact,
 so worker count no longer multiplies compilation work.
 
-App-only changes regenerate coordination files and ding browsers without
-touching API admission. API-only changes replace workers without reloading the
-browser App.
+App-only changes regenerate coordination files and notify watching browsers
+without touching API admission. API-only changes replace workers without
+reloading the browser App.
 
 ## Operational States and Local Control
 
 The manager has three operational states:
 
 - **Active:** observe and activate API and App changes.
-- **Held:** keep the last generated API/App state active, emit no dings, and
+- **Held:** keep the last generated API/App state active, emit no App changes, and
   decline generation changes. Janus still reads explicitly requested authored
   files from live roots.
 - **Maintenance:** keep registration and heartbeats alive with no admitted API
@@ -624,7 +1119,7 @@ canonical manager to drain its workers, deregister from Janus, remove its local
 control artifacts, and exit cleanly.
 
 `release` prepares one coherent API/App snapshot, exposes it, sends one
-full-reload ding, and then clears hold.
+full-reload notification, and then clears hold.
 
 ## Per-User App and Edge Control
 

@@ -19,8 +19,8 @@ Janus serves every public byte.
   conventional policy selects `app/**/*.{rip,css,html}`. Each id is relative
   to the App root, so the disk file `app/routes/index.rip` is
   `routes/index.rip` in the bundle, manifest, ding, and Workspace.
-- Each entry receives one six-character content rash. The wire field is
-  `hash`; its value is that rash.
+- Each entry receives one six-character content hash from `rash(bytes)`. The
+  wire field is `hash`.
 - Entries sort by `id`. The App check is
   `rash(JSON.stringify(entries.map(({id, hash}) => [id, hash])))`.
 - `bundle.json` and `manifest.json` enumerate the same complete inventory and

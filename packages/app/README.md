@@ -18,7 +18,7 @@ The package currently provides:
   component records ([docs/WORKSPACE.md](../../docs/WORKSPACE.md))
 - `connectFeed` for the workspace dev feed — the hub subscriber that turns
   `{id, hash}` dings into latest-wins HTTP fetches and `workspace.set` calls
-- `rash` for the six-character App content identity used by manifests,
+- `rash` for producing the six-character App content hash used by manifests,
   dings, and received-byte verification
 
 Only named exports are supported:
