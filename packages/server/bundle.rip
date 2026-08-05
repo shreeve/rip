@@ -12,6 +12,15 @@ SKIP_DIRS =! Set.new ['node_modules', 'test', 'bench']
 
 unquote = (specifier) -> specifier.slice 1, -1
 
+readRipSource = (path) ->
+  bytes = readFileSync path
+  try
+    TextDecoder.new('utf-8', { fatal: true, ignoreBOM: true }).decode bytes
+  catch error
+    framed = Error.new "rip: '#{path}' is not valid UTF-8"
+    framed.cause = error
+    throw framed
+
 ripFilesUnder = (dir) ->
   out = []
   walk = (at, depth) ->
@@ -88,7 +97,7 @@ materializeSharedSchemas = (modules, moduleFiles, appDir, appRoot) ->
     relativeRoot = relative(appDir, appRoot).replace(/\\/g, '/') if appRoot?
     if appRoot? and relativeRoot isnt 'app'
       throw Error.new "rip: browser schema projections require the conventional 'app' root; '#{relativeRoot}' cannot preserve imports that cross the App boundary"
-    result = extractClientProjections readFileSync(absolute, 'utf8'), [...entry.names], { path: entry.key }
+    result = extractClientProjections readRipSource(absolute), [...entry.names], { path: entry.key }
     unless result.ok
       throw Error.new "rip: cannot ship schema import to the browser bundle: #{result.error}"
     modules[entry.key] = result.source
@@ -142,7 +151,7 @@ export assembleBundle = ({ modules, packagesDir, data = null, moduleFiles = null
       key = "#{name}/#{relativePath}"
       if bundle.modules[key]?
         throw Error.new "rip: App module '#{key}' collides with browser package '#{name}'"
-      bundle.modules[key] = readFileSync file, 'utf8'
+      bundle.modules[key] = readRipSource file
       bundle.inputs.push file
 
   queue = Object.keys bundle.modules

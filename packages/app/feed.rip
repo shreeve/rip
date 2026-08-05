@@ -117,7 +117,7 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
     unless response?.ok
       throw Error.new "latest.json fetch failed (#{response?.status})"
     latest = response.json!
-    unless latest? and typeof latest is 'object' and not Array.isArray(latest) and validHash(latest.hash)
+    unless latest? and typeof latest is 'object' and not Array.isArray(latest) and Object.keys(latest).length is 1 and Object.hasOwn(latest, 'hash') and validHash(latest.hash)
       throw Error.new 'latest.json is malformed'
     return if closed or failed or owner isnt connection
 
@@ -189,7 +189,7 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
     objects = if Array.isArray(frame) then frame else [frame]
     for object in objects
       continue unless object? and typeof object is 'object'
-      if object['!'] is token
+      if Object.keys(object).length is 1 and Object.hasOwn(object, '!') and object['!'] is token and ackTimer?
         if ackTimer?
           clearTimeout ackTimer
           ackTimer = null

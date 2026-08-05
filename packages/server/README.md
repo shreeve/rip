@@ -533,16 +533,18 @@ reject idempotent filesystem events. From the complete managed App state and
 the browser Rip graph it calculates one App hash. Individual file hashes never
 cross the wire.
 
-The browser keeps only:
+The browser keeps:
 
 ```text
 current hash          manager-declared complete App identity
+active Rip source     canonical source used to stage later changes
 compiled module graph executable browser Rip program
 ```
 
-The client never recalculates a server hash. Eager source exists only while
-the browser parses and compiles the publication; ordinary assets remain in
-the browser's HTTP cache rather than a second Rip-owned content store.
+The client never recalculates a server hash. The JSON publication envelope is
+released after activation; its active Rip source lives once in Workspace so a
+later change can be staged transactionally. Ordinary assets remain in the
+browser's HTTP cache rather than a second Rip-owned content store.
 
 ### Canonical URLs and bundle hash
 
@@ -775,6 +777,10 @@ It buffers incoming changes immediately and waits for:
 ```json
 {"!":"sync-17"}
 ```
+
+Only that exact, outstanding, server-origin acknowledgement starts the probe.
+A client-origin frame stamped with `<`, a combined frame, or a duplicate
+acknowledgement is ignored.
 
 After the acknowledgement it requests `/latest.json` with
 `cache: "no-store"`:

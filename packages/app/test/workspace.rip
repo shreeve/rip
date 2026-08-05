@@ -213,6 +213,30 @@ test! "open subscribes with an acknowledgement token before probing latest.json"
   ok feed.connected()
   feed.close()
 
+test! "only one exact server acknowledgement can start the reconnect probe", ->
+  { feed, sockets, calls } = openFeed()
+  socket = sockets[0]
+  socket.onopen()
+  join = JSON.parse socket.sent[0]
+  ack socket
+  settle!
+  eq calls.length, 1
+  socket.onmessage { data: JSON.stringify({ '!': join['?'], '<': ['attacker'] }) }
+  socket.onmessage { data: JSON.stringify({ '!': join['?'] }) }
+  settle!
+  eq calls.length, 1
+  feed.close()
+
+test! "latest.json is exactly one hash field", ->
+  routes = { '/latest.json': JSON.stringify({ hash: HASH_1, unexpected: true }) }
+  { feed, sockets, reports } = openFeed HASH_1, routes
+  sockets[0].onopen()
+  ack sockets[0]
+  settle!
+  ok not feed.connected()
+  ok reports.some((args) -> String(args[0]).includes('reconnect check failed'))
+  feed.close()
+
 test! "a change received before acknowledgement is buffered and may explain latest", ->
   routes = { '/latest.json': JSON.stringify({ hash: HASH_2 }) }
   { feed, sockets, applied, reloads, active } = openFeed HASH_1, routes

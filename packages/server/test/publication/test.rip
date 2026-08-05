@@ -36,6 +36,44 @@ test! 'unknown and server-only packages reject during server assembly', ->
     message = error.message
   ok message?.includes('server-only and unknown modules stay on the server')
 
+test! 'package and projection source reject malformed UTF-8 bytes', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-publication-utf8-')
+  try
+    packageRoot = join dir, 'broken'
+    mkdirSync packageRoot
+    writeFileSync join(packageRoot, 'package.json'), '{"rip":{"browser":true},"exports":{".":"./index.rip"}}\n'
+    invalid = Uint8Array.new [35, 32, 255, 10, 101, 120, 112, 111, 114, 116, 32, 118, 97, 108, 117, 101, 32, 61, 32, 49, 10]
+    writeFileSync join(packageRoot, 'index.rip'), invalid
+    packageError = null
+    try
+      assembleRipBundle
+        modules: { 'index.rip': "import { value } from '@rip-lang/broken'\nexport answer = value" }
+        packagesDir: dir
+    catch error
+      packageError = error.message
+    ok packageError?.includes('is not valid UTF-8')
+
+    app = join dir, 'app'
+    api = join dir, 'api'
+    mkdirSync app
+    mkdirSync api
+    model = join api, 'models.rip'
+    source = join app, 'types.rip'
+    writeFileSync model, invalid
+    writeFileSync source, "export { UserPublic } from '../api/models.rip'\n"
+    projectionError = null
+    try
+      assembleRipBundle
+        modules: { 'types.rip': readFileSync(source, 'utf8') }
+        moduleFiles: { 'types.rip': source }
+        appDir: dir
+        appRoot: app
+    catch error
+      projectionError = error.message
+    ok projectionError?.includes('is not valid UTF-8')
+  finally
+    rmSync dir, { recursive: true, force: true }
+
 test! 'missing relative imports and cycles reject before publication', ->
   missing = null
   try

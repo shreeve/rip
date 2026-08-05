@@ -173,6 +173,10 @@ committed during the probe is either reflected by `latest.json` or arrives as
 a live transition. If ordering remains ambiguous, reload is the honest
 fallback.
 
+The probe begins only after the exact outstanding Janus acknowledgement.
+Client-origin Hub frames carry sender provenance and cannot acknowledge a
+subscription or enter the publication stream.
+
 `latest.json` is a cache-revalidated probe containing only the latest complete
 App hash. It is not a manifest and carries no source or file inventory.
 

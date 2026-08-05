@@ -27595,7 +27595,7 @@ function connectFeed(client, opts = {}) {
       throw new Error(`latest.json fetch failed (${response?.status})`);
     }
     let latest = await response.json();
-    if (!(latest != null && typeof latest === "object" && !Array.isArray(latest) && validHash2(latest.hash))) {
+    if (!(latest != null && typeof latest === "object" && !Array.isArray(latest) && Object.keys(latest).length === 1 && Object.hasOwn(latest, "hash") && validHash2(latest.hash))) {
       throw new Error("latest.json is malformed");
     }
     if (closed || failed || owner !== connection)
@@ -27686,7 +27686,7 @@ function connectFeed(client, opts = {}) {
     for (let object of objects) {
       if (!(object != null && typeof object === "object"))
         continue;
-      if (object["!"] === token) {
+      if (Object.keys(object).length === 1 && Object.hasOwn(object, "!") && object["!"] === token && ackTimer != null) {
         if (ackTimer != null) {
           clearTimeout(ackTimer);
           ackTimer = null;
