@@ -8,6 +8,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { currentWorkerSocket } from './harness-worker.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
@@ -122,13 +123,8 @@ drain(manager.stderr, 'err');
 const workerSock = async () => {
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
-    const put = [...calls].reverse().find(
-      (c) => c.method === 'PUT' && c.body?.upstreams?.length &&
-        !c.body.upstreams.some((u) => u.doorbell),
-    );
-    const upstreams = put?.body?.upstreams ?? registration?.upstreams;
-    const path = upstreams?.find((upstream) => !upstream.doorbell)?.path;
-    if (path && existsSync(path)) return path;
+    const path = currentWorkerSocket(calls, registration, existsSync);
+    if (path) return path;
     await Bun.sleep(25);
   }
   throw new Error('cart-harness: worker socket never registered');
