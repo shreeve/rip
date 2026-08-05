@@ -19,8 +19,8 @@ export type Apply =
 
 export type ApplyOpts =
   # Renderer seam still speaks narrow/escape/noop; absorb maps to update/ignore.
-  renderer: { remountDirty: (paths: string[]) => Promise<'narrow' | 'noop' | 'escape'> }
-  escape: (paths: string[]) => Promise<void>
+  renderer: { remountDirty: (paths: string[]) => 'narrow' | 'noop' | 'escape' | Promise<'narrow' | 'noop' | 'escape'> }
+  escape: (paths: string[]) => void
   report?: (...args: any[]) => void
 
 export def createApply(opts: ApplyOpts): Apply

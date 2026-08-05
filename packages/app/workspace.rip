@@ -18,8 +18,8 @@ export type Passport =
   id: string
   path: string
   hash: string
-  source: string
-  compiled: Record<string, unknown> | undefined
+  source?: string
+  compiled?: Record<string, unknown>
 
 export type Workspace =
   read: (path: string) => string | undefined
@@ -91,7 +91,7 @@ hashOf = (text) -> rash TextEncoder.new().encode(text)
 export def createWorkspace(): Workspace
   passports = Map.new()
   pathToId = Map.new()
-  watchers = Set.new()
+  watchers: Set<(event: WorkspaceEvent, path: string) => void> = Set.new()
   locked = false
 
   guard = (operation) ->

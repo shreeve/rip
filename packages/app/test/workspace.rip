@@ -105,6 +105,7 @@ test "rejects non-string paths and content", ->
   throws (-> ws.write('', 'source')), 'non-empty string'
   throws (-> ws.write(null, 'source')), 'non-empty string'
   throws (-> ws.write('app.rip', null)), 'must be a string'
+  # @ts-expect-error
   throws (-> ws.read(42)), 'non-empty string'
 
 test "exists and size", ->
@@ -128,6 +129,7 @@ test "list is one level; listAll is recursive", ->
   eq ws.listAll('routes'), ['routes/hi.rip', 'routes/admin/users.rip']
   eq ws.listAll().length, 3
   throws (-> ws.list('routes//admin')), 'invalid component directory'
+  # @ts-expect-error
   throws (-> ws.list(42)), 'directory must be a string'
 
 test "load is bulk write and fires no events", ->
@@ -139,6 +141,7 @@ test "load is bulk write and fires no events", ->
   eq ws.read('fresh.rip'), 'born'
   eq events, []
   throws (-> ws.load(null)), 'source object'
+  # @ts-expect-error
   throws (-> ws.load(['app.rip'])), 'source object'
 
 test "load clears compiled for rewritten paths", ->
@@ -198,6 +201,7 @@ test "setCompiled validates its module and requires a passport", ->
   ws = createWorkspace()
   ws.write 'app.rip', 'src'
   throws (-> ws.setCompiled('app.rip', null)), 'must be an object'
+  # @ts-expect-error
   throws (-> ws.setCompiled('app.rip', [1])), 'must be an object'
   throws (-> ws.setCompiled('ghost.rip', {})), "unknown component path 'ghost.rip'"
   eq ws.getCompiled('ghost.rip'), undefined
@@ -245,16 +249,21 @@ test "populate is birth: a second populate rejects", ->
 test "populate rejects malformed input", ->
   ws = createWorkspace()
   throws (-> ws.populate(null)), 'expects an array'
+  # @ts-expect-error
   throws (-> ws.populate({})), 'expects an array'
   throws (-> ws.populate([null])), 'expects passport records'
   throws (-> ws.populate([{ id: '', path: 'a.rip', hash: srcHash('s'), source: 's' }])), 'id must be a non-empty string'
   throws (-> ws.populate([{ id: 'c1', path: 'bad', hash: srcHash('s'), source: 's' }])), 'invalid component path'
+  # @ts-expect-error
   throws (-> ws.populate([{ id: 'c1', path: 'a.rip', source: 's' }])), 'six Base64URL-folded'
+  # @ts-expect-error
   throws (-> ws.populate([{ id: 'c1', path: 'a.rip', hash: 1, source: 's' }])), 'six Base64URL-folded'
   throws (-> ws.populate([{ id: 'c1', path: 'a.rip', hash: 'abc-12', source: 's' }])), 'six Base64URL-folded'
   throws (-> ws.populate([{ id: 'c1', path: 'a.rip', hash: 'short', source: 's' }])), 'six Base64URL-folded'
+  # @ts-expect-error
   throws (-> ws.populate([{ id: 'c1', path: 'a.rip', etag: 'Q8-tolerated?', source: 's' }])), 'six Base64URL-folded'
   throws (-> ws.populate([{ id: 'c1', path: 'a.rip', hash: srcHash('s'), source: null }])), 'source must be a string'
+  # @ts-expect-error
   throws (-> ws.populate([{ id: 'c1', path: 'a.rip', hash: srcHash('s'), source: 's', compiled: [] }])), 'must be an object'
 
 test "populate rejects duplicate ids and duplicate paths", ->
@@ -336,6 +345,7 @@ test "an unknown id without a full record rejects", ->
 test "set validates its passport", ->
   { ws } = seeded()
   throws (-> ws.set(null)), 'set expects a passport record'
+  # @ts-expect-error
   throws (-> ws.set([])), 'set expects a passport record'
   throws (-> ws.set({ hash: 'dddddd' })), 'id must be a non-empty string'
   throws (-> ws.set({ id: 'c1' })), 'six Base64URL-folded'
@@ -475,6 +485,7 @@ test "passport of an unknown key is undefined; non-strings reject", ->
   eq ws.passport('ghost.rip'), undefined
   eq ws.passport('c9'), undefined
   throws (-> ws.passport('')), 'passport lookup expects'
+  # @ts-expect-error
   throws (-> ws.passport(42)), 'passport lookup expects'
 
 test "ids and paths enumerate the bag", ->
