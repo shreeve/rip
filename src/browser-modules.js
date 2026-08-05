@@ -6,10 +6,10 @@
 //
 //   './x.rip', '../y.rip'   another bundle module, relative to here
 //                           (including project-root projection overlays)
-//   '@rip-lang/<name>/…'    a bundled package module (store path = import
-//                           spelling) or a package entry from the
-//                           packages table — only packages the bundle
-//                           carries
+//   '@rip-lang/app[/rash]'  the App package embedded in rip.js
+//   '@rip-lang/<name>/…'    a bundled non-core package module (store path =
+//                           import spelling) or a package entry from the
+//                           packages table
 //   …/runtime/<m>.js        the page's ONE runtime copy, through a
 //                           bridge module — never a second evaluation;
 //                           matched by the emitter's own delivery
@@ -47,7 +47,7 @@ const RUNTIME_PATHS = new Map(Object.keys(RUNTIME_MODULES).map(
   name => [new URL(`./runtime/${name}.js`, import.meta.url).pathname, name],
 ));
 const RUNTIME_RE = /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/;
-const BRIDGE_KEY = '__ripRuntimeBridge';
+const BRIDGE_KEY = '__ripModuleBridge';
 
 const unquote = specifier => specifier.slice(1, -1);
 
@@ -72,7 +72,12 @@ const toObjectUrl = code => {
   return `data:text/javascript;base64,${btoa(unescape(encodeURIComponent(code)))}`;
 };
 
-export function createModuleLoader({ components: registry, packages = {}, debug = false } = {}) {
+export function createModuleLoader({
+  components: registry,
+  packages = {},
+  embeddedPackages = {},
+  debug = false,
+} = {}) {
   if (!registry || typeof registry.read !== 'function') {
     throw new TypeError('rip: createModuleLoader requires a component registry');
   }
@@ -82,34 +87,36 @@ export function createModuleLoader({ components: registry, packages = {}, debug 
   const bridges = new Map();
   const dependents = new Map();
 
-  // The page's one runtime copy crosses into module space through a
-  // generated bridge: named re-exports reading a global handle, so the
-  // runtime module itself never evaluates twice.
-  const bridgeFor = name => {
-    if (bridges.has(name)) return bridges.get(name);
-    const namespace = RUNTIME_MODULES[name];
+  // The page's one runtime and embedded-package copies cross into generated
+  // module space through named re-export bridges. The stable modules never
+  // evaluate twice, while Blob modules can import them by ordinary ESM names.
+  const bridgeFor = (key, namespace) => {
+    if (bridges.has(key)) return bridges.get(key);
     globalThis[BRIDGE_KEY] ??= {};
-    const existing = globalThis[BRIDGE_KEY][name];
+    const existing = globalThis[BRIDGE_KEY][key];
     if (existing && existing !== namespace) {
-      throw new Error(`rip: two copies of the Rip runtime are bridging '${name}' on one page`);
+      throw new Error(`rip: two copies of embedded module '${key}' are active on one page`);
     }
-    globalThis[BRIDGE_KEY][name] = namespace;
-    const lines = [`const ns = globalThis['${BRIDGE_KEY}']['${name}'];`];
-    for (const key of Object.keys(namespace)) {
-      if (!/^[A-Za-z_$][\w$]*$/.test(key)) {
-        throw new Error(`rip: runtime '${name}' exports '${key}', which cannot cross the module bridge`);
+    globalThis[BRIDGE_KEY][key] = namespace;
+    const lines = [`const ns = globalThis['${BRIDGE_KEY}'][${JSON.stringify(key)}];`];
+    for (const name of Object.keys(namespace)) {
+      if (name === 'default') {
+        lines.push("export default ns['default'];");
+      } else if (/^[A-Za-z_$][\w$]*$/.test(name)) {
+        lines.push(`export const ${name} = ns[${JSON.stringify(name)}];`);
+      } else {
+        throw new Error(`rip: embedded module '${key}' exports '${name}', which cannot cross the module bridge`);
       }
-      lines.push(`export const ${key} = ns['${key}'];`);
     }
     const url = toObjectUrl(lines.join('\n'));
-    bridges.set(name, url);
+    bridges.set(key, url);
     return url;
   };
 
   const resolvePath = (specifier, from) => {
     const spec = unquote(specifier);
     const runtime = RUNTIME_PATHS.get(spec) ?? spec.match(RUNTIME_RE)?.[1];
-    if (runtime) return { bridge: runtime };
+    if (runtime) return { bridge: `runtime:${runtime}`, namespace: RUNTIME_MODULES[runtime] };
     const inBundle = path => {
       try {
         return registry.exists(path);
@@ -141,7 +148,13 @@ export function createModuleLoader({ components: registry, packages = {}, debug 
     const bare = spec.match(/^@rip-lang\/([\w-]+)(?:\/(.+))?$/);
     if (bare) {
       if (inBundle(spec)) return { path: spec };
-      const entry = packages[`@rip-lang/${bare[1]}`];
+      const packageName = `@rip-lang/${bare[1]}`;
+      const embedded = embeddedPackages[spec];
+      if (embedded) return { bridge: `package:${spec}`, namespace: embedded };
+      if (embeddedPackages[packageName]) {
+        throw new Error(`rip: '${from}' imports '${spec}', which '${packageName}' does not export in the browser`);
+      }
+      const entry = packages[packageName];
       if (!entry) {
         throw new Error(
           `rip: '${from}' imports '${spec}', but the bundle carries no such package — ` +
@@ -185,7 +198,9 @@ export function createModuleLoader({ components: registry, packages = {}, debug 
           if (!importers) dependents.set(target.path, importers = new Set());
           importers.add(path);
         }
-        const url = target.bridge ? bridgeFor(target.bridge) : await load(target.path, [...chain, path]);
+        const url = target.bridge
+          ? bridgeFor(target.bridge, target.namespace)
+          : await load(target.path, [...chain, path]);
         code = `${code.slice(0, span.start)}${JSON.stringify(url)}${code.slice(span.end)}`;
       }
       if (debug) {

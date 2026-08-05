@@ -146,6 +146,11 @@ export function assembleBundle({ modules, packagesDir, data = null, moduleFiles 
     throw new TypeError('rip: assembleBundle requires a modules object');
   }
   const bundle = { modules: { ...modules }, packages: {} };
+  for (const path of Object.keys(bundle.modules)) {
+    if (path === '@rip-lang/app' || path.startsWith('@rip-lang/app/')) {
+      throw new Error(`rip: App module '${path}' collides with embedded browser package '@rip-lang/app'`);
+    }
+  }
   if (data) bundle.data = data;
 
   if (moduleFiles && appDir) {
@@ -189,11 +194,6 @@ export function assembleBundle({ modules, packagesDir, data = null, moduleFiles 
     }
   };
 
-  // The application package is the boot substrate: every bundle
-  // carries it, imported or not — and the workspace rides inside it
-  // (docs/WORKSPACE.md, Q9), so no second claim exists.
-  if (packagesDir) claimPackage('@rip-lang/app', '<boot>');
-
   const queue = Object.keys(bundle.modules);
   const seen = new Set();
   while (queue.length) {
@@ -217,8 +217,14 @@ export function assembleBundle({ modules, packagesDir, data = null, moduleFiles 
     for (const span of compiled.imports) {
       const spec = unquote(span.specifier);
       if (RUNTIME_RE.test(spec)) continue;
-      // Relative imports and already-claimed package store paths
-      // (`@rip-lang/app/feed.rip`) need no further package claim.
+      if (spec === '@rip-lang/app' || spec === '@rip-lang/app/rash') continue;
+      if (spec.startsWith('@rip-lang/app/')) {
+        throw new Error(
+          `rip: '${path}' imports '${spec}', which embedded package '@rip-lang/app' does not export`,
+        );
+      }
+      // Relative imports and already-claimed package store paths need no
+      // further package claim.
       if (spec.startsWith('./') || spec.startsWith('../') || bundle.modules[spec]) continue;
       const bare = spec.match(/^(@rip-lang\/[\w-]+)(?:\/.+)?$/);
       if (!bare) {

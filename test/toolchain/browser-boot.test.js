@@ -1,6 +1,6 @@
 // Application boot through the browser entry, end to end under Node:
-// bundle fetch with ETag revalidation, the module graph compiling the
-// app package and every route, launch wiring, navigation, and render
+// bundle fetch with ETag revalidation, the embedded App package, authored
+// module compilation, launch wiring, navigation, and render
 // gates — the same path the real-browser certification drives.
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
@@ -150,13 +150,10 @@ describe('fetchBundle reconciliation', () => {
 });
 
 describe('bootApp', () => {
-  test('a bundle without the app package rejects by name', async () => {
-    await expect(bootApp({ bundle: { modules: {}, packages: {} } })).rejects.toThrow(/@rip-lang\/app/);
-  });
-
   test('boots the assembled app, mounts the route, and navigates', async () => {
     const bundle = assemble();
-    expect(bundle.packages['@rip-lang/app'].root).toBe('@rip-lang/app');
+    expect(bundle.packages['@rip-lang/app']).toBeUndefined();
+    expect(Object.keys(bundle.modules).some(path => path.startsWith('@rip-lang/app/'))).toBeFalse();
     const host = node('host');
     const adapter = fakeAdapter('/');
     const result = await bootApp({ bundle, target: host, adapter });
@@ -242,7 +239,7 @@ describe('bootApp', () => {
   });
 });
 
-// One page, one cached graph per app fingerprint: reboots must see
+// One page, one cached graph per debug mode: reboots must see
 // exactly their own bundle — no stale importers, no leftover modules,
 // no frozen packages table.
 describe('boot graph reconciliation', () => {

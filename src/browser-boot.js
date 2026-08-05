@@ -1,7 +1,7 @@
 // Application boot through the browser entry: fetch the bundle (ETag
 // revalidation against session storage), stand up the module graph,
-// compile every route and app module through it, pull the app package
-// itself out of the graph, and hand launch() a fully compiled bundle.
+// compile every route and app module through it, and hand the embedded App
+// package's launch() a fully compiled bundle.
 // Every host concern — fetch, storage, the router adapter, the mount
 // target — is an option with the browser default applied only when
 // omitted, so the whole boot tests under Node; the real-browser
@@ -18,8 +18,7 @@
 // after the Hub opens, and apply chooses reload | css | update | ignore.
 // Off, every path below is byte-identical to the plain boot.
 import { createModuleLoader } from './browser-modules.js';
-
-const APP_PACKAGE = '@rip-lang/app';
+import { app, embeddedPackages } from './browser-app.js';
 
 const bootGraphs = new Map();
 
@@ -143,25 +142,14 @@ export async function bootApp(opts = {}) {
   if (!bundle || typeof bundle !== 'object') {
     throw new Error('rip: bootApp requires a bundle or a url');
   }
-  const appEntry = bundle.packages?.[APP_PACKAGE];
-  if (!appEntry) {
-    throw new Error(
-      `rip: the bundle carries no '${APP_PACKAGE}' package — assemble the application with its packages`,
-    );
-  }
-
   // The loader's registry contract is four functions; the boot's own
   // minimal store satisfies it, and launch() builds the application's
   // real component store from the same bundle afterwards. The graph is
-  // cached per app-package fingerprint: the renderer claims its
-  // construction capability exactly once per page, so a relaunch with
-  // the same app sources reuses the evaluated graph instead of
-  // claiming twice; changed app sources — or a flipped debug mode —
-  // are a new application and reject loudly through the claim. Watch
-  // mode owns the debug transition with a full reload.
+  // cached per debug mode: the embedded App renderer claims its construction
+  // capability exactly once per page, while authored sources are invalidated
+  // within this graph. Watch mode owns a debug transition with a full reload.
   const debug = opts.debug === true;
-  const appPackagePaths = Object.keys(bundle.modules ?? {}).filter(path => path.startsWith(`${appEntry.root}/`)).sort();
-  const fingerprint = `${debug}:${JSON.stringify(appPackagePaths.map(path => [path, bundle.modules[path]]))}`;
+  const fingerprint = debug ? 'debug' : 'plain';
   let graph = bootGraphs.get(fingerprint);
   if (!graph) {
     const files = new Map();
@@ -176,7 +164,11 @@ export async function bootApp(opts = {}) {
     // bare specifiers through it at import time, so each boot syncs it
     // to ITS bundle instead of freezing the first bundle's view.
     const packages = {};
-    graph = { files, packages, loader: createModuleLoader({ components: registry, packages, debug }) };
+    graph = {
+      files,
+      packages,
+      loader: createModuleLoader({ components: registry, packages, embeddedPackages, debug }),
+    };
     bootGraphs.set(fingerprint, graph);
   }
   const { files, packages, loader } = graph;
@@ -201,11 +193,9 @@ export async function bootApp(opts = {}) {
     }
   }
 
-  const app = await loader.import(`${appEntry.root}/${appEntry.entry}`);
-
   let bag = null;
   if (workspaceMode) {
-    // The workspace is part of the app package (docs/WORKSPACE.md, Q9):
+    // The workspace is part of the embedded App package (docs/WORKSPACE.md, Q9):
     // createWorkspace and connectFeed ride the same module the launch
     // does — one graph, never a second copy.
     validatePublication(bundle, app);

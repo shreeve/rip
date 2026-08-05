@@ -60,6 +60,19 @@ describe('createModuleLoader', () => {
     expect(page.message).toBe('hi rip');
   });
 
+  test('embedded package imports resolve without bundle source or metadata', async () => {
+    const loader = createModuleLoader({
+      components: registryOf({
+        'routes/page.rip': "import { answer } from '@rip-lang/core'\nexport value = answer + 1",
+      }),
+      embeddedPackages: {
+        '@rip-lang/core': Object.freeze({ answer: 41 }),
+      },
+    });
+    const page = await loader.import('routes/page.rip');
+    expect(page.value).toBe(42);
+  });
+
   test('runtime imports bridge to the one page copy', async () => {
     const loader = createModuleLoader({
       components: registryOf({
@@ -143,6 +156,8 @@ describe('assembleBundle', () => {
       packagesDir: resolve(root, 'packages'),
     });
     expect(bundle.packages['@rip-lang/validate'].root).toBe('@rip-lang/validate');
+    expect(bundle.packages['@rip-lang/app']).toBeUndefined();
+    expect(Object.keys(bundle.modules).some(path => path.startsWith('@rip-lang/app/'))).toBeFalse();
     expect(bundle.modules['@rip-lang/validate/validate.rip']).toContain('registerValidator');
     // Runnable verb files (root test.rip etc.) are dev-only, never bundled.
     expect(bundle.modules['@rip-lang/validate/test.rip']).toBeUndefined();
@@ -159,14 +174,12 @@ describe('assembleBundle', () => {
   test('a package without browser safety is refused by name', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rip-pkg-'));
     try {
-      // The stand-in packages dir carries the app package (every
-      // bundle's boot substrate) and one package with no browser flag.
-      for (const name of ['app', 'serveronly']) {
+      for (const name of ['serveronly']) {
         mkdirSync(join(dir, name));
         writeFileSync(join(dir, name, 'package.json'), JSON.stringify({
           name: `@rip-lang/${name}`,
           main: 'index.rip',
-          rip: name === 'app' ? { browser: true } : {},
+          rip: {},
         }));
         writeFileSync(join(dir, name, 'index.rip'), 'export ok = 1');
       }
@@ -179,11 +192,23 @@ describe('assembleBundle', () => {
     }
   });
 
-  test('a root-relative App id cannot collide with a browser package module', () => {
+  test('a root-relative App id cannot collide with the embedded App package', () => {
     expect(() => assembleBundle({
       modules: { '@rip-lang/app/index.rip': 'export page = 1' },
       packagesDir: resolve(root, 'packages'),
-    })).toThrow(/App module '@rip-lang\/app\/index.rip' collides with browser package '@rip-lang\/app'/);
+    })).toThrow(/collides with embedded browser package '@rip-lang\/app'/);
+  });
+
+  test('the embedded App package never enters an assembled bundle', () => {
+    const bundle = assembleBundle({
+      modules: {
+        'stash.rip': "import { source } from '@rip-lang/app'\nexport stash = { value: source fetch: -> 1 }",
+        'probe.rip': "import { rash } from '@rip-lang/app/rash'\nexport probe = rash",
+      },
+      packagesDir: resolve(root, 'packages'),
+    });
+    expect(bundle.packages['@rip-lang/app']).toBeUndefined();
+    expect(Object.keys(bundle.modules).sort()).toEqual(['probe.rip', 'stash.rip']);
   });
 
   test('end to end: assembled validate package loads in the browser graph', async () => {

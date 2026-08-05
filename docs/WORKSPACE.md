@@ -99,7 +99,7 @@ file generation into `Workspace.set`. One record type, flexible package sizes
 | **Static** | Multi-tenant: `sites/{slug}/public` then `sites/common/public`. Simple apps: `public/` (one fallback per app) |
 | **Serve config** | Optional app-local `serve.rip`; strict `app` + `sites` + `files` normalization resolves the App root, manifest policy, and Janus registration fields. The default manifest is `update: **/*.rip`, `css: **/*.css`, `reload: **/*.html`. Ordinary apps keep exact `hosts`. |
 | **Edge** | Janus resolves `{site}`, tries tenant/common file roots, and proxies `proxyFirst` paths before static lookup. Rip semantics remain in Rip. |
-| **Runtime JS** | Prefer CDN-pinned `rip.js` once the slice lands; until then `/@rip/rip.js` from the checkout is fine |
+| **Runtime JS** | Prefer CDN-pinned `rip.js`; it contains the compiled `@rip-lang/app` package, while `/@rip/rip.js` from the checkout provides the same artifact during development |
 | **Hub** | `/hub` for workspace dings (client self-join; Janus direct admission) |
 | **Minimal App** | [`examples/hello/`](../examples/hello/) — browser-only App with explicit manifest defaults and a non-manifest image asset |
 | **Full-shape exemplar** | [`examples/cart/`](../examples/cart/) — multi-route shop (SQLite first, then `@rip-lang/db` / DuckDB) |

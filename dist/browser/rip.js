@@ -24100,10 +24100,4116 @@ var runtimes = Object.freeze({
   ...exports_components
 });
 
+// packages/app/index.rip
+var exports_app = {};
+__export(exports_app, {
+  unwrapStash: () => unwrapStash,
+  throttle: () => throttle,
+  source: () => source,
+  rash: () => rash,
+  preloadLinks: () => preloadLinks,
+  persistStash: () => persistStash,
+  parseQuery: () => parseQuery,
+  ownsAnchor: () => ownsAnchor,
+  launch: () => launch,
+  interceptClicks: () => interceptClicks,
+  hold: () => hold,
+  delay: () => delay,
+  debounce: () => debounce,
+  createWorkspace: () => createWorkspace,
+  createStash: () => createStash,
+  createRouter: () => createRouter,
+  createRenderer: () => createRenderer,
+  createMutation: () => createMutation,
+  createComponents: () => createComponents,
+  createApply: () => createApply,
+  connectFeed: () => connectFeed,
+  check: () => check,
+  buildRoutes: () => buildRoutes,
+  browserAdapter: () => browserAdapter,
+  ariaCurrent: () => ariaCurrent
+});
+
+// packages/app/source.rip
+var makeSourceCell;
+var makeSourceFamily;
+var parseStaleTime;
+var SOURCE = Symbol.for("rip.source");
+var SOURCE_FAMILY = Symbol.for("rip.source.family");
+var SOURCE_FAMILY_CAP = 64;
+var PRELOAD_FRESH_MS = 30000;
+var DURATION_RE = /^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/i;
+function _isSourceCell(value) {
+  return value != null && (typeof value === "object" || typeof value === "function") && (value[SOURCE] === true || value[SOURCE_FAMILY] === true);
+}
+function _isSourceFamily(value) {
+  return value != null && typeof value === "function" && value[SOURCE_FAMILY] === true;
+}
+parseStaleTime = function(value) {
+  let amount, parts;
+  if (!(value != null))
+    return 0;
+  if (typeof value === "number") {
+    if (!(Number.isFinite(value) && value >= 0)) {
+      throw new TypeError('Rip App: source staleTime must be a non-negative finite number, a duration string, or "forever"');
+    }
+    return value;
+  }
+  if (typeof value === "string") {
+    if (value === "forever")
+      return Infinity;
+    if (/^\d+$/.test(value))
+      return +value;
+    parts = value.match(DURATION_RE);
+    if (parts) {
+      amount = parseFloat(parts[1]);
+      return (() => {
+        switch (parts[2][0].toLowerCase()) {
+          case "s":
+            return amount * 1000;
+          case "m":
+            return amount * 60000;
+          case "h":
+            return amount * 3600000;
+          case "d":
+            return amount * 86400000;
+          case "w":
+            return amount * 604800000;
+          case "y":
+            return amount * 31536000000;
+        }
+      })();
+    }
+  }
+  throw new TypeError('Rip App: source staleTime must be a non-negative number, a duration such as "5 min", or "forever"');
+};
+makeSourceCell = function(fetchFn, staleTime, onSettle = null) {
+  let data = __state(null);
+  let loading = __state(false);
+  let failure = __state(null);
+  let generation = 0;
+  let controller = null;
+  let inflight = null;
+  let inflightPreload = false;
+  let preloadConsumed = false;
+  let loaded = false;
+  let loadedAt = 0;
+  let freshUntil = 0;
+  let load = async function(background = false, preload = false) {
+    let pending, result;
+    controller?.abort();
+    controller = typeof AbortController !== "undefined" ? new AbortController : null;
+    let mine = ++generation;
+    if (!background)
+      loading.value = true;
+    let wasLoaded = loaded;
+    return await (async () => {
+      try {
+        pending = fetchFn(controller?.signal);
+        if (!(pending != null && typeof pending.then === "function")) {
+          throw new TypeError("Rip App: source fetch must return a Promise");
+        }
+        result = await pending;
+        if (mine !== generation)
+          return result;
+        failure.value = null;
+        data.value = result;
+        loaded = true;
+        loadedAt = Date.now();
+        freshUntil = preload && !preloadConsumed ? loadedAt + PRELOAD_FRESH_MS : 0;
+        return result;
+      } catch (error) {
+        if (mine !== generation)
+          return;
+        if (error?.name === "AbortError")
+          return;
+        failure.value = error;
+        if (!wasLoaded) {
+          loaded = false;
+          loadedAt = 0;
+          throw error;
+        }
+        return;
+      } finally {
+        if (mine === generation) {
+          loading.value = false;
+          inflight = null;
+          inflightPreload = false;
+          preloadConsumed = false;
+          onSettle?.();
+        }
+      }
+    })();
+  };
+  let start = function(background = false, preload = false) {
+    let pending = load(background, preload);
+    inflight = pending;
+    inflightPreload = preload;
+    preloadConsumed = false;
+    return pending;
+  };
+  let isFresh = function() {
+    return staleTime === Infinity || Date.now() - loadedAt < staleTime || Date.now() < freshUntil;
+  };
+  let cell = {};
+  cell[SOURCE] = true;
+  cell.read = function() {
+    let value = data.value;
+    if (!(loaded || inflight))
+      start().catch(function() {
+        return null;
+      });
+    return value;
+  };
+  cell.peek = function() {
+    return data.read();
+  };
+  cell.ensure = function() {
+    let stale;
+    let value = data.read();
+    if (loaded) {
+      if (inflightPreload)
+        preloadConsumed = true;
+      stale = !isFresh();
+      freshUntil = 0;
+      if (stale && !inflight)
+        start(true).catch(function() {
+          return null;
+        });
+      return Promise.resolve(value);
+    }
+    if (inflight) {
+      if (inflightPreload) {
+        preloadConsumed = true;
+        return inflight.finally(function() {
+          return freshUntil = 0;
+        });
+      }
+      return inflight;
+    }
+    return start();
+  };
+  cell.preload = function() {
+    let value = data.read();
+    if (loaded) {
+      if (!isFresh() && !inflight)
+        start(true, true).catch(function() {
+          return null;
+        });
+      return Promise.resolve(value);
+    }
+    if (inflight)
+      return inflight;
+    return start(false, true);
+  };
+  cell.write = function(value) {
+    generation++;
+    controller?.abort();
+    controller = null;
+    inflight = null;
+    inflightPreload = false;
+    preloadConsumed = false;
+    loading.value = false;
+    failure.value = null;
+    data.value = value;
+    loaded = value != null;
+    loadedAt = loaded ? Date.now() : 0;
+    freshUntil = 0;
+    onSettle?.();
+    return value;
+  };
+  cell.reset = function() {
+    generation++;
+    controller?.abort();
+    controller = null;
+    inflight = null;
+    inflightPreload = false;
+    preloadConsumed = false;
+    loading.value = false;
+    failure.value = null;
+    data.value = null;
+    loaded = false;
+    loadedAt = 0;
+    freshUntil = 0;
+    onSettle?.();
+    return;
+  };
+  cell.refetch = function() {
+    return start();
+  };
+  Object.defineProperty(cell, "loading", { get() {
+    return loading.value;
+  } });
+  Object.defineProperty(cell, "error", { get() {
+    return failure.value;
+  } });
+  return cell;
+};
+var normalizeKey = function(key) {
+  let encoded;
+  if (key != null && typeof key === "object") {
+    try {
+      encoded = JSON.stringify(key);
+    } catch {
+      throw new TypeError("Rip App: keyed source object keys must be JSON-serializable");
+    }
+    if (!(encoded != null))
+      throw new TypeError("Rip App: keyed source object keys must be JSON-serializable");
+    return encoded;
+  }
+  return key;
+};
+makeSourceFamily = function(fetchFn, staleTime) {
+  let cells = new Map;
+  let prune = function(protectedKey = undefined) {
+    let removed;
+    while (cells.size > SOURCE_FAMILY_CAP) {
+      removed = false;
+      for (let [oldestKey, oldest] of cells) {
+        if (oldestKey === protectedKey)
+          continue;
+        if (oldest.loading)
+          continue;
+        cells.delete(oldestKey);
+        oldest.reset();
+        removed = true;
+        break;
+      }
+      if (!removed)
+        break;
+    }
+    return;
+  };
+  let cellFor = function(key) {
+    if (!(key != null))
+      throw new TypeError("Rip App: keyed source requires a key");
+    let normalized = normalizeKey(key);
+    let cell = cells.get(normalized);
+    if (cell) {
+      cells.delete(normalized);
+      cells.set(normalized, cell);
+      return cell;
+    }
+    cell = makeSourceCell(function(signal) {
+      return fetchFn(key, signal);
+    }, staleTime, prune);
+    cells.set(normalized, cell);
+    prune(normalized);
+    return cell;
+  };
+  let family = function(key) {
+    return cellFor(key).read();
+  };
+  family[SOURCE_FAMILY] = true;
+  family.cellFor = cellFor;
+  family.reset = function() {
+    let existing = Array.from(cells.values());
+    cells.clear();
+    for (let cell of existing) {
+      cell.reset();
+    }
+    return;
+  };
+  return family;
+};
+function source(opts) {
+  if (!(opts != null && typeof opts === "object" && !Array.isArray(opts))) {
+    throw new TypeError("Rip App: source expects an options object");
+  }
+  if (!(typeof opts.fetch === "function")) {
+    throw new TypeError("Rip App: source options require a fetch function");
+  }
+  let staleTime = parseStaleTime(opts.staleTime);
+  let hasKind = Object.prototype.hasOwnProperty.call(opts, "kind");
+  if (hasKind) {
+    if (!(opts.kind === "singleton" || opts.kind === "keyed")) {
+      throw new TypeError("Rip App: source kind must be 'singleton' or 'keyed'");
+    }
+    if (opts.kind === "singleton") {
+      if (opts.fetch.length > 1) {
+        throw new TypeError("Rip App: singleton source fetch accepts at most one AbortSignal parameter");
+      }
+      return makeSourceCell(opts.fetch, staleTime);
+    }
+    if (opts.fetch.length < 1 || opts.fetch.length > 2) {
+      throw new TypeError("Rip App: keyed source fetch requires a key parameter and accepts one optional AbortSignal parameter");
+    }
+    return makeSourceFamily(opts.fetch, staleTime);
+  }
+  if (opts.fetch.length > 1) {
+    throw new TypeError("Rip App: inferred source fetch accepts no parameters for a singleton or one key parameter for a keyed family");
+  }
+  return opts.fetch.length === 1 ? makeSourceFamily(opts.fetch, staleTime) : makeSourceCell(opts.fetch, staleTime);
+}
+// packages/app/stash.rip
+var makeProxy;
+var plainObject;
+var resetSources;
+var snapshotDefaults;
+var RAW = Symbol("rip.app.stash.raw");
+var SIGNALS = Symbol("rip.app.stash.signals");
+var KEYS = Symbol("rip.app.stash.keys");
+var DEFAULTS = Symbol("rip.app.stash.defaults");
+var PURGE = Symbol.for("rip.app.stash.purge");
+var PROXIES = new WeakMap;
+var keysVersion = 0;
+var _stashVersion = __state(0);
+var touchVersion = function() {
+  return _stashVersion.value++;
+};
+var signalFor = function(target, prop) {
+  let signals = target[SIGNALS];
+  if (!signals) {
+    signals = new Map;
+    Object.defineProperty(target, SIGNALS, { value: signals });
+  }
+  let signal = signals.get(prop);
+  if (!signal) {
+    signal = __state(target[prop]);
+    signals.set(prop, signal);
+  }
+  return signal;
+};
+var keysSignal = function(target) {
+  return signalFor(target, KEYS);
+};
+var touchKeys = function(target) {
+  keysSignal(target).value = ++keysVersion;
+  return;
+};
+plainObject = function(value) {
+  if (!(value != null && typeof value === "object"))
+    return false;
+  let proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null || Array.isArray(value);
+};
+var wrap = function(value) {
+  if (!plainObject(value))
+    return value;
+  let existing = PROXIES.get(value);
+  if (existing)
+    return existing;
+  return makeProxy(value);
+};
+var readLiteral = function(value, prop) {
+  let raw = value?.[RAW];
+  if (!raw)
+    return value[prop];
+  let current = raw[prop];
+  if (_isSourceCell(current)) {
+    if (_isSourceFamily(current))
+      return current;
+    return wrap(current.read());
+  }
+  return wrap(signalFor(raw, prop).value);
+};
+var writeLiteral = function(target, prop, value) {
+  let _ref, _ref1, newLength, oldLength;
+  let raw = target?.[RAW];
+  if (!raw) {
+    target[prop] = value;
+    return value;
+  }
+  if (Array.isArray(raw) && prop === "length") {
+    oldLength = raw.length;
+    newLength = +value;
+    raw.length = newLength;
+    if (newLength !== oldLength) {
+      if (raw[SIGNALS]) {
+        for (let index = Math.min(oldLength, newLength), _ref2 = Math.max(oldLength, newLength);index < _ref2; index++) {
+          if ((_ref = raw[SIGNALS].get(String(index))) != null)
+            _ref.value = raw[index];
+        }
+      }
+      touchKeys(raw);
+      touchVersion();
+    }
+    return value;
+  }
+  let current = raw[prop];
+  if (_isSourceCell(current) && !_isSourceCell(value)) {
+    if (_isSourceFamily(current)) {
+      throw new TypeError(`Rip App: cannot assign a value to keyed source '${String(prop)}'; use cellFor(key).write(value)`);
+    }
+    current.write(value?.[RAW] ? value[RAW] : value);
+    return value;
+  }
+  let unwrapped = value?.[RAW] ? value[RAW] : value;
+  let had = Object.prototype.hasOwnProperty.call(raw, prop);
+  if (prop === "__proto__") {
+    Object.defineProperty(raw, prop, { value: unwrapped, writable: true, enumerable: true, configurable: true });
+  } else {
+    raw[prop] = unwrapped;
+  }
+  if ((_ref1 = raw[SIGNALS]?.get(prop)) != null)
+    _ref1.value = unwrapped;
+  if (!had)
+    touchKeys(raw);
+  touchVersion();
+  return value;
+};
+var pathParts = function(path) {
+  let marker, part, quote, start;
+  if (!(typeof path === "string" && path.length > 0)) {
+    throw new TypeError("Rip App: stash path must be a non-empty string");
+  }
+  let parts = [];
+  let index = 0;
+  if (!(path[0] === "[")) {
+    start = index;
+    while (index < path.length && path[index] !== "." && path[index] !== "/" && path[index] !== "[") {
+      index++;
+    }
+    part = path.slice(start, index);
+    if (!part || /\s/.test(part)) {
+      throw new TypeError(`Rip App: malformed stash path '${path}'`);
+    }
+    parts.push(part);
+  }
+  while (index < path.length) {
+    marker = path[index];
+    if (marker === "." || marker === "/") {
+      index++;
+      start = index;
+      while (index < path.length && path[index] !== "." && path[index] !== "/" && path[index] !== "[") {
+        index++;
+      }
+      part = path.slice(start, index);
+      if (!part || /\s/.test(part)) {
+        throw new TypeError(`Rip App: malformed stash path '${path}'`);
+      }
+      parts.push(part);
+    } else if (marker === "[") {
+      index++;
+      if (path[index] === '"' || path[index] === "'") {
+        quote = path[index];
+        index++;
+        start = index;
+        while (index < path.length && path[index] !== quote) {
+          index++;
+        }
+        if (index >= path.length || index === start) {
+          throw new TypeError(`Rip App: malformed stash path '${path}'`);
+        }
+        part = path.slice(start, index);
+        index++;
+        if (!(path[index] === "]")) {
+          throw new TypeError(`Rip App: malformed stash path '${path}'`);
+        }
+        index++;
+        parts.push(part);
+      } else {
+        start = index;
+        while (index < path.length && path[index] !== "]") {
+          index++;
+        }
+        part = path.slice(start, index);
+        if (!(/^[-+]?\d+$/.test(part) && path[index] === "]")) {
+          throw new TypeError(`Rip App: malformed stash path '${path}'`);
+        }
+        index++;
+        parts.push(+part);
+      }
+    } else {
+      throw new TypeError(`Rip App: malformed stash path '${path}'`);
+    }
+  }
+  return parts;
+};
+var isPathKey = function(prop) {
+  return typeof prop === "string" && (prop.includes(".") || prop.includes("/") || prop.includes("["));
+};
+var resolvePart = function(part, target) {
+  return typeof part === "number" && part < 0 && Array.isArray(target) ? target.length + part : part;
+};
+var readPath = function(proxy, path) {
+  let value = proxy;
+  for (let part of pathParts(path)) {
+    if (!(value != null))
+      return;
+    value = readLiteral(value, resolvePart(part, value));
+  }
+  return value;
+};
+var writePath = function(proxy, path, value) {
+  let nested, nextPart, part;
+  let parts = pathParts(path);
+  let target = proxy;
+  for (let index = 0;index < parts.length; index++) {
+    let part2 = parts[index];
+    part2 = resolvePart(part2, target);
+    if (index === parts.length - 1) {
+      writeLiteral(target, part2, value);
+    } else {
+      nested = readLiteral(target, part2);
+      if (!(nested != null)) {
+        nextPart = parts[index + 1];
+        writeLiteral(target, part2, typeof nextPart === "number" ? [] : {});
+        nested = readLiteral(target, part2);
+      }
+      if (!(nested != null && typeof nested === "object")) {
+        throw new TypeError(`Rip App: cannot write through non-object stash path segment '${part2}'`);
+      }
+      target = nested;
+    }
+  }
+  return value;
+};
+var peekPath = function(target, path) {
+  let value = target;
+  if (!(path != null))
+    return value;
+  for (let part of pathParts(path)) {
+    if (!(value != null))
+      return;
+    if (_isSourceCell(value)) {
+      if (_isSourceFamily(value))
+        return;
+      value = value.peek();
+      if (!(value != null))
+        return;
+    }
+    value = value[resolvePart(part, value)];
+  }
+  return _isSourceCell(value) ? _isSourceFamily(value) ? undefined : value.peek() : value;
+};
+var sourceHandle = function(raw, path, key) {
+  let cell = null;
+  let value = raw;
+  for (let part of pathParts(path)) {
+    if (!(value != null && typeof value === "object"))
+      break;
+    value = value[resolvePart(part, value)];
+    if (_isSourceCell(value)) {
+      cell = value;
+      break;
+    }
+  }
+  if (!cell) {
+    throw new Error(`Rip App: source('${path}') does not resolve to a source key — declare it with source() in app/stash.rip`);
+  }
+  if (_isSourceFamily(cell)) {
+    if (!(key != null))
+      throw new Error(`Rip App: keyed source('${path}') requires a key — source('${path}', key)`);
+    cell = cell.cellFor(key);
+  } else if (key != null) {
+    throw new Error(`Rip App: source('${path}') is not keyed — drop the key argument`);
+  }
+  let handle = { refetch: cell.refetch, reset: cell.reset };
+  Object.defineProperty(handle, "value", {
+    get() {
+      return cell.read();
+    },
+    set(v) {
+      return cell.write(v);
+    }
+  });
+  Object.defineProperty(handle, "loading", { get() {
+    return cell.loading;
+  } });
+  Object.defineProperty(handle, "error", { get() {
+    return cell.error;
+  } });
+  return handle;
+};
+resetSources = function(value, seen) {
+  if (!(value != null && (typeof value === "object" || typeof value === "function")))
+    return;
+  if (_isSourceCell(value)) {
+    value.reset();
+    return;
+  }
+  if (!plainObject(value))
+    return;
+  let raw = value[RAW] ? value[RAW] : value;
+  if (seen.has(raw))
+    return;
+  seen.add(raw);
+  return (() => {
+    const result = [];
+    for (let key in raw) {
+      if (!Object.hasOwn(raw, key))
+        continue;
+      let nested = raw[key];
+      if (key !== SIGNALS) {
+        result.push(resetSources(nested, seen));
+      }
+    }
+    return result;
+  })();
+};
+snapshotDefaults = function(value) {
+  if (!plainObject(value))
+    return value;
+  let raw = value[RAW] ? value[RAW] : value;
+  if (Array.isArray(raw)) {
+    return (() => {
+      const result = [];
+      for (let item of raw) {
+        if (!_isSourceCell(item)) {
+          result.push(snapshotDefaults(item));
+        }
+      }
+      return result;
+    })();
+  }
+  let out = {};
+  for (let key in raw) {
+    if (!Object.hasOwn(raw, key))
+      continue;
+    let nested = raw[key];
+    if (_isSourceCell(nested))
+      continue;
+    out[key] = snapshotDefaults(nested);
+  }
+  return out;
+};
+function _stampDefaults(stash) {
+  let raw = stash?.[RAW] ? stash[RAW] : stash;
+  if (!(raw != null && typeof raw === "object"))
+    return;
+  Object.defineProperty(raw, DEFAULTS, { value: snapshotDefaults(raw), configurable: true });
+  return;
+}
+function _cloneSeed(value) {
+  if (_isSourceCell(value))
+    return value;
+  if (!plainObject(value))
+    return value;
+  let raw = value[RAW] ? value[RAW] : value;
+  if (Array.isArray(raw)) {
+    return (() => {
+      const result = [];
+      for (let item of raw) {
+        result.push(_cloneSeed(item));
+      }
+      return result;
+    })();
+  }
+  let out = {};
+  for (let key in raw) {
+    if (!Object.hasOwn(raw, key))
+      continue;
+    let nested = raw[key];
+    Object.defineProperty(out, key, { value: _cloneSeed(nested), writable: true, enumerable: true, configurable: true });
+  }
+  return out;
+}
+function _mergePlain(proxy, values) {
+  let current, currentPlain, valuePlain;
+  if (!(proxy != null && typeof proxy === "object"))
+    return;
+  if (!(values != null && typeof values === "object"))
+    return;
+  let raw = proxy[RAW] ? proxy[RAW] : proxy;
+  for (let key in values) {
+    if (!Object.hasOwn(values, key))
+      continue;
+    let value = values[key];
+    current = Object.prototype.hasOwnProperty.call(raw, key) ? raw[key] : undefined;
+    if (_isSourceCell(current))
+      continue;
+    if (Array.isArray(current) && current.some(function(item) {
+      return _isSourceCell(item);
+    })) {
+      continue;
+    }
+    currentPlain = current != null && typeof current === "object" && !Array.isArray(current);
+    valuePlain = value != null && typeof value === "object" && !Array.isArray(value);
+    if (currentPlain && valuePlain) {
+      _mergePlain(proxy[key], value);
+    } else {
+      proxy[key] = snapshotDefaults(value);
+    }
+  }
+  return;
+}
+var restoreDefaults = function(proxy, raw) {
+  let prune;
+  let defaults = raw[DEFAULTS];
+  if (!defaults)
+    return;
+  prune = function(proxyLevel, rawLevel, defaultsLevel) {
+    let current;
+    for (let key in rawLevel) {
+      if (!Object.hasOwn(rawLevel, key))
+        continue;
+      current = rawLevel[key];
+      if (_isSourceCell(current))
+        continue;
+      if (!(defaultsLevel != null && Object.prototype.hasOwnProperty.call(defaultsLevel, key))) {
+        delete proxyLevel[key];
+        continue;
+      }
+      if (current != null && typeof current === "object" && !Array.isArray(current)) {
+        prune(proxyLevel[key], current, defaultsLevel[key]);
+      }
+    }
+    return;
+  };
+  prune(proxy, raw, defaults);
+  _mergePlain(proxy, defaults);
+  return;
+};
+var STASH_METHODS = { inc: true, dec: true, flip: true, join: true, keys: true, has: true, del: true, peek: true, reset: true, source: true };
+var stashMethod = function(proxy, raw, prop) {
+  if (prop === "inc") {
+    return function(path, step = 1) {
+      let next = (readPath(proxy, path) ?? 0) + step;
+      writePath(proxy, path, next);
+      return next;
+    };
+  }
+  if (prop === "dec") {
+    return function(path, step = 1) {
+      let next = (readPath(proxy, path) ?? 0) - step;
+      writePath(proxy, path, next);
+      return next;
+    };
+  }
+  if (prop === "flip") {
+    return function(path) {
+      let next = !(readPath(proxy, path) ?? false);
+      writePath(proxy, path, next);
+      return next;
+    };
+  }
+  if (prop === "join") {
+    return function(path, obj) {
+      if (!(obj != null && typeof obj === "object" && !Array.isArray(obj))) {
+        throw new TypeError("Rip App: join expects a plain object");
+      }
+      __batch(function() {
+        let target = readPath(proxy, path);
+        if (!(target != null && typeof target === "object" && !Array.isArray(target))) {
+          writePath(proxy, path, {});
+          target = readPath(proxy, path);
+        }
+        return (() => {
+          const result = [];
+          for (let k in obj) {
+            if (!Object.hasOwn(obj, k))
+              continue;
+            let v = obj[k];
+            result.push(target[k] = v);
+          }
+          return result;
+        })();
+      });
+      return;
+    };
+  }
+  if (prop === "keys") {
+    return function(path) {
+      let obj = path != null ? readPath(proxy, path) : proxy;
+      if (!(obj != null && typeof obj === "object"))
+        return [];
+      let t = obj[RAW] ? obj[RAW] : obj;
+      keysSignal(t).value;
+      return Object.keys(t);
+    };
+  }
+  if (prop === "has") {
+    return function(path) {
+      let key, t;
+      let parts = pathParts(path);
+      if (!(parts.length > 0))
+        return false;
+      let obj = proxy;
+      for (let i = 0;i < parts.length; i++) {
+        let part = parts[i];
+        key = resolvePart(part, obj);
+        if (i === parts.length - 1) {
+          t = obj[RAW] ? obj[RAW] : obj;
+          keysSignal(t).value;
+          return Object.prototype.hasOwnProperty.call(t, key);
+        }
+        if (!(obj != null))
+          return false;
+        obj = readLiteral(obj, key);
+      }
+      return false;
+    };
+  }
+  if (prop === "del") {
+    return function(path) {
+      let key;
+      let parts = pathParts(path);
+      if (!(parts.length > 0))
+        return;
+      let obj = proxy;
+      for (let i = 0;i < parts.length; i++) {
+        let part = parts[i];
+        key = resolvePart(part, obj);
+        if (i === parts.length - 1) {
+          delete obj[key];
+          return;
+        }
+        if (!(obj != null))
+          return;
+        obj = readLiteral(obj, key);
+      }
+      return;
+    };
+  }
+  if (prop === "peek") {
+    return function(path) {
+      return peekPath(raw, path);
+    };
+  }
+  if (prop === "reset") {
+    return function() {
+      restoreDefaults(proxy, raw);
+      resetSources(raw, new WeakSet);
+      raw[PURGE]?.();
+      return;
+    };
+  }
+  if (prop === "source") {
+    return function(path, key) {
+      return sourceHandle(raw, path, key);
+    };
+  }
+  return;
+};
+makeProxy = function(target) {
+  let proxy = null;
+  let handler = {
+    get(raw, prop) {
+      if (prop === RAW)
+        return raw;
+      if (typeof prop === "symbol")
+        return Reflect.get(raw, prop);
+      if (prop === "length" && Array.isArray(raw)) {
+        keysSignal(raw).value;
+        return raw.length;
+      }
+      if (STASH_METHODS[prop]) {
+        return stashMethod(proxy, raw, prop);
+      }
+      if (isPathKey(prop))
+        return readPath(proxy, prop);
+      return readLiteral(proxy, prop);
+    },
+    set(raw, prop, value) {
+      if (isPathKey(prop)) {
+        writePath(proxy, prop, value);
+        return true;
+      }
+      writeLiteral(proxy, prop, value);
+      return true;
+    },
+    deleteProperty(raw, prop) {
+      let _ref2;
+      let had = Object.prototype.hasOwnProperty.call(raw, prop);
+      let deleted = delete raw[prop];
+      if ((_ref2 = raw[SIGNALS]?.get(prop)) != null)
+        _ref2.value = undefined;
+      if (had) {
+        touchKeys(raw);
+        touchVersion();
+      }
+      return deleted;
+    },
+    ownKeys(raw) {
+      keysSignal(raw).value;
+      return Reflect.ownKeys(raw);
+    }
+  };
+  proxy = new Proxy(target, handler);
+  PROXIES.set(target, proxy);
+  return proxy;
+};
+function createStash(data = {}) {
+  if (!(data != null && typeof data === "object" && !Array.isArray(data))) {
+    throw new TypeError("Rip App: createStash expects a plain object");
+  }
+  if (!(Object.getPrototypeOf(data) === Object.prototype || Object.getPrototypeOf(data) === null)) {
+    throw new TypeError("Rip App: createStash expects a plain object");
+  }
+  return makeProxy(data);
+}
+function unwrapStash(stash) {
+  return stash != null && stash[RAW] ? stash[RAW] : stash;
+}
+// packages/app/mutation.rip
+function createMutation(fn, opts = {}) {
+  if (!(typeof fn === "function")) {
+    throw new TypeError("Rip App: createMutation expects a function");
+  }
+  let _pending = __state(false);
+  let _succeeded = __state(false);
+  let _error = __state(null);
+  let generation = 0;
+  let mutation = async function(...args) {
+    let r;
+    let me = ++generation;
+    __batch(function() {
+      _pending.value = true;
+      _succeeded.value = false;
+      return _error.value = null;
+    });
+    try {
+      r = await fn(...args);
+    } catch (e) {
+      if (!(me === generation))
+        return;
+      _error.value = e;
+      try {
+        if (opts.onError) {
+          return await opts.onError(e);
+        } else {
+          throw e;
+        }
+      } finally {
+        if (me === generation)
+          _pending.value = false;
+      }
+    }
+    if (!(me === generation))
+      return;
+    return await (async () => {
+      try {
+        _succeeded.value = true;
+        await opts.onSuccess?.(r);
+        return r;
+      } finally {
+        if (me === generation)
+          _pending.value = false;
+      }
+    })();
+  };
+  Object.defineProperty(mutation, "pending", { get() {
+    return _pending.value;
+  } });
+  Object.defineProperty(mutation, "succeeded", { get() {
+    return _succeeded.value;
+  } });
+  Object.defineProperty(mutation, "error", { get() {
+    return _error.value;
+  } });
+  return mutation;
+}
+// packages/app/timing.rip
+var toFn;
+var wrap2;
+toFn = function(source2) {
+  return typeof source2 === "function" ? source2 : function() {
+    return source2.value;
+  };
+};
+wrap2 = function(out, source2, disposer) {
+  let obj = { read() {
+    return out.read();
+  } };
+  let descriptor = { get() {
+    return out.value;
+  } };
+  if (typeof source2 !== "function")
+    descriptor.set = function(v) {
+      return source2.value = v;
+    };
+  Object.defineProperty(obj, "value", descriptor);
+  obj.dispose = function() {
+    return disposer?.();
+  };
+  return obj;
+};
+function delay(ms, source2) {
+  let fn = toFn(source2);
+  let out = __state(!!fn());
+  let eff = __effect(function() {
+    let t;
+    if (fn()) {
+      if (out.read())
+        return;
+      t = setTimeout(function() {
+        return out.value = true;
+      }, ms);
+      return function() {
+        return clearTimeout(t);
+      };
+    }
+    out.value = false;
+    return;
+  });
+  return wrap2(out, source2, eff);
+}
+function debounce(ms, source2) {
+  let fn = toFn(source2);
+  let out = __state(fn());
+  let eff = __effect(function() {
+    let val = fn();
+    let t = setTimeout(function() {
+      return out.value = val;
+    }, ms);
+    return function() {
+      return clearTimeout(t);
+    };
+  });
+  return wrap2(out, source2, eff);
+}
+function throttle(ms, source2) {
+  let fn = toFn(source2);
+  let out = __state(fn());
+  let last = 0;
+  let eff = __effect(function() {
+    let val = fn();
+    let now = Date.now();
+    let remaining = ms - (now - last);
+    if (remaining <= 0) {
+      out.value = val;
+      last = now;
+      return;
+    }
+    let t = setTimeout(function() {
+      out.value = fn();
+      return last = Date.now();
+    }, remaining);
+    return function() {
+      return clearTimeout(t);
+    };
+  });
+  return wrap2(out, source2, eff);
+}
+function hold(ms, source2) {
+  let fn = toFn(source2);
+  let out = __state(!!fn());
+  let eff = __effect(function() {
+    if (fn()) {
+      out.value = true;
+      return;
+    }
+    if (!out.read())
+      return;
+    let t = setTimeout(function() {
+      return out.value = false;
+    }, ms);
+    return function() {
+      return clearTimeout(t);
+    };
+  });
+  return wrap2(out, source2, eff);
+}
+// packages/app/components.rip
+var validContent;
+var validDirectory;
+var validPath;
+validPath = function(path) {
+  if (!(typeof path === "string" && path.length > 0)) {
+    throw new TypeError("Rip App: component path must be a non-empty string");
+  }
+  let segments = path.split("/");
+  let invalidSegment = segments.some(function(segment) {
+    return !segment || segment === "." || segment === "..";
+  });
+  let filename = segments.at(-1);
+  let fileAsDirectory = segments.slice(0, -1).some(function(segment) {
+    return segment.endsWith(".rip");
+  });
+  if (path.includes("\\") || invalidSegment || fileAsDirectory || filename === ".rip" || !filename.endsWith(".rip")) {
+    throw new TypeError(`Rip App: invalid component path '${path}'`);
+  }
+  return path;
+};
+validContent = function(content) {
+  if (!(typeof content === "string")) {
+    throw new TypeError("Rip App: component source must be a string");
+  }
+  return content;
+};
+validDirectory = function(dir) {
+  if (dir === "" || !(dir != null))
+    return "";
+  if (!(typeof dir === "string")) {
+    throw new TypeError("Rip App: component directory must be a string");
+  }
+  let segments = dir.split("/");
+  if (dir.includes("\\") || segments.some(function(segment) {
+    return !segment || segment === "." || segment === "..";
+  })) {
+    throw new TypeError(`Rip App: invalid component directory '${dir}'`);
+  }
+  return dir;
+};
+function createComponents() {
+  let files = new Map;
+  let compiled = new Map;
+  let watchers = new Set;
+  let notify = function(event, path) {
+    const _result = [];
+    for (let watcher of Array.from(watchers)) {
+      _result.push((() => {
+        try {
+          return watcher(event, path);
+        } catch (error) {
+          return console.error("[Rip] component watcher error:", error);
+        }
+      })());
+    }
+    return _result;
+  };
+  let store = {
+    read(path) {
+      return files.get(validPath(path));
+    },
+    write(path, content) {
+      path = validPath(path);
+      content = validContent(content);
+      let event = files.has(path) ? "change" : "create";
+      files.set(path, content);
+      compiled.delete(path);
+      notify(event, path);
+      return;
+    },
+    del(path) {
+      path = validPath(path);
+      files.delete(path);
+      compiled.delete(path);
+      notify("delete", path);
+      return;
+    },
+    exists(path) {
+      return files.has(validPath(path));
+    },
+    size() {
+      return files.size;
+    },
+    list(dir = "") {
+      let rest;
+      dir = validDirectory(dir);
+      let prefix = dir ? dir + "/" : "";
+      let result = [];
+      for (let [path] of files) {
+        if (path.startsWith(prefix)) {
+          rest = path.slice(prefix.length);
+          if (!rest.includes("/"))
+            result.push(path);
+        }
+      }
+      return result;
+    },
+    listAll(dir = "") {
+      dir = validDirectory(dir);
+      let prefix = dir ? dir + "/" : "";
+      let result = [];
+      for (let [path] of files) {
+        if (path.startsWith(prefix)) {
+          result.push(path);
+        }
+      }
+      return result;
+    },
+    load(sources) {
+      let content, path;
+      if (!(sources != null && typeof sources === "object" && !Array.isArray(sources))) {
+        throw new TypeError("Rip App: component load expects a source object");
+      }
+      for (let path2 in sources) {
+        if (!Object.hasOwn(sources, path2))
+          continue;
+        let content2 = sources[path2];
+        path2 = validPath(path2);
+        content2 = validContent(content2);
+        files.set(path2, content2);
+        compiled.delete(path2);
+      }
+      return;
+    },
+    watch(fn) {
+      if (!(typeof fn === "function")) {
+        throw new TypeError("Rip App: component watch expects a function");
+      }
+      watchers.add(fn);
+      let disposed = false;
+      return function() {
+        if (disposed)
+          return;
+        disposed = true;
+        watchers.delete(fn);
+        return;
+      };
+    },
+    getCompiled(path) {
+      return compiled.get(validPath(path));
+    },
+    setCompiled(path, module) {
+      path = validPath(path);
+      if (!(module != null && typeof module === "object" && !Array.isArray(module))) {
+        throw new TypeError("Rip App: compiled component module must be an object");
+      }
+      compiled.set(path, module);
+      return;
+    }
+  };
+  return store;
+}
+// packages/app/routes.rip
+var compile2;
+var fail;
+var layoutChain;
+var matchParts;
+var validRoot;
+var NAME = /^\w+$/;
+var RANKS = { static: 0, dynamic: 1, optional: 2, catchall: 3 };
+var OPTIONAL_LIMIT = 8;
+fail = function(message) {
+  throw new Error(`Rip App: ${message}`);
+};
+var decodeSegment = function(segment) {
+  return (() => {
+    try {
+      return decodeURIComponent(segment);
+    } catch (error) {
+      return null;
+    }
+  })();
+};
+validRoot = function(root) {
+  if (root === "")
+    return "";
+  if (!(typeof root === "string")) {
+    throw new TypeError("Rip App: route root must be a string");
+  }
+  let segments = root.split("/");
+  if (root.includes("\\") || segments.some(function(segment) {
+    return !segment || segment === "." || segment === "..";
+  })) {
+    throw new TypeError(`Rip App: invalid route root '${root}'`);
+  }
+  return root;
+};
+var parseSegment = function(segment, rel) {
+  let m;
+  if (m = /^\[\[(.+)\]\]$/.exec(segment)) {
+    if (!NAME.test(m[1]))
+      fail(`invalid optional segment '${segment}' in '${rel}'`);
+    return { kind: "optional", name: m[1] };
+  } else if (m = /^\[\.\.\.(.+)\]$/.exec(segment)) {
+    if (!NAME.test(m[1]))
+      fail(`invalid catch-all segment '${segment}' in '${rel}'`);
+    return { kind: "catchall", name: m[1] };
+  } else if (segment.startsWith("[...")) {
+    return fail(`invalid catch-all segment '${segment}' in '${rel}'`);
+  } else if (m = /^\[(.+)\]$/.exec(segment)) {
+    if (!NAME.test(m[1]))
+      fail(`invalid dynamic segment '${segment}' in '${rel}'`);
+    return { kind: "dynamic", name: m[1] };
+  } else if (/^\(.+\)$/.test(segment)) {
+    return { kind: "group" };
+  } else if (segment.includes("[") || segment.includes("]")) {
+    return fail(`invalid segment '${segment}' in '${rel}': markers claim a whole segment`);
+  } else {
+    return { kind: "static", text: segment };
+  }
+};
+compile2 = function(rel) {
+  let piece;
+  let parsed = (() => {
+    const result = [];
+    for (let segment of rel.slice(0, -4).split("/")) {
+      result.push(parseSegment(segment, rel));
+    }
+    return result;
+  })();
+  if (parsed[parsed.length - 1].kind === "group")
+    fail(`route file name cannot be a group segment: '${rel}'`);
+  let kept = parsed.filter(function(part) {
+    return part.kind !== "group";
+  });
+  for (let i = 0;i < kept.length; i++) {
+    let part = kept[i];
+    if (part.kind === "catchall" && i !== kept.length - 1) {
+      fail(`catch-all segment must be last in '${rel}'`);
+    }
+  }
+  let final = kept[kept.length - 1];
+  if (kept.length && final.kind === "static" && final.text === "index")
+    kept.pop();
+  let names = [];
+  let optionals = 0;
+  for (let part of kept) {
+    if (part.name != null) {
+      if (names.includes(part.name))
+        fail(`duplicate parameter name '${part.name}' in '${rel}'`);
+      names.push(part.name);
+      if (part.kind === "optional")
+        optionals += 1;
+    }
+  }
+  if (optionals > OPTIONAL_LIMIT)
+    fail(`more than ${OPTIONAL_LIMIT} optional segments in '${rel}'`);
+  let pattern = "";
+  let ranks = [];
+  let expansions = [{ shape: "", display: "" }];
+  for (let part of kept) {
+    ranks.push(RANKS[part.kind]);
+    switch (part.kind) {
+      case "static":
+        piece = "/" + part.text;
+        pattern += piece;
+        expansions = expansions.map(function(e) {
+          return { shape: e.shape + piece, display: e.display + piece };
+        });
+        break;
+      case "dynamic":
+        pattern += `/:${part.name}`;
+        expansions = expansions.map(function(e) {
+          return { shape: e.shape + "/:", display: `${e.display}/:${part.name}` };
+        });
+        break;
+      case "optional":
+        pattern += `/:${part.name}?`;
+        expansions = expansions.flatMap(function(e) {
+          return [e, { shape: e.shape + "/:", display: `${e.display}/:${part.name}` }];
+        });
+        break;
+      case "catchall":
+        pattern += `/*${part.name}`;
+        expansions = expansions.map(function(e) {
+          return { shape: e.shape + "/*", display: `${e.display}/*${part.name}` };
+        });
+        break;
+    }
+  }
+  if (pattern === "")
+    pattern = "/";
+  let shapes = new Set(expansions.map(function(e) {
+    return e.shape || "/";
+  }));
+  if (shapes.size < expansions.length)
+    fail(`route '${rel}' is ambiguous with itself`);
+  return { pattern, parts: kept, ranks, expansions };
+};
+matchParts = function(parts, segments) {
+  let walk;
+  walk = function(pi, si) {
+    let pieces, rest, skipped, value;
+    if (pi === parts.length) {
+      return si === segments.length ? [] : null;
+    }
+    let part = parts[pi];
+    return (() => {
+      switch (part.kind) {
+        case "static":
+          if (!(si < segments.length))
+            return null;
+          if (!(decodeSegment(segments[si]) === part.text))
+            return null;
+          return walk(pi + 1, si + 1);
+        case "dynamic":
+          if (!(si < segments.length && segments[si] !== ""))
+            return null;
+          value = decodeSegment(segments[si]);
+          if (!(value != null))
+            return null;
+          rest = walk(pi + 1, si + 1);
+          if (!rest)
+            return null;
+          return [[part.name, value], ...rest];
+        case "optional":
+          skipped = walk(pi + 1, si);
+          if (skipped)
+            return skipped;
+          if (!(si < segments.length && segments[si] !== ""))
+            return null;
+          value = decodeSegment(segments[si]);
+          if (!(value != null))
+            return null;
+          rest = walk(pi + 1, si + 1);
+          if (!rest)
+            return null;
+          return [[part.name, value], ...rest];
+        case "catchall":
+          if (si === segments.length && si !== 0)
+            return null;
+          pieces = [];
+          for (let segment of segments.slice(si)) {
+            value = decodeSegment(segment);
+            if (!(value != null))
+              return null;
+            pieces.push(value);
+          }
+          return [[part.name, pieces.join("/")]];
+      }
+    })();
+  };
+  return walk(0, 0);
+};
+layoutChain = function(rel, layouts) {
+  let chain = [];
+  if (layouts.has(""))
+    chain.push(layouts.get(""));
+  let segments = rel.split("/");
+  let dir = "";
+  for (let i = 0;i < segments.length; i++) {
+    let segment = segments[i];
+    if (i < segments.length - 1) {
+      dir = dir ? `${dir}/${segment}` : segment;
+      if (layouts.has(dir))
+        chain.push(layouts.get(dir));
+    }
+  }
+  return chain;
+};
+function buildRoutes(files, root = "routes") {
+  let display, existing, first, invalid, rel, second, segments, shape;
+  if (!Array.isArray(files)) {
+    throw new TypeError("Rip App: buildRoutes expects an array of file paths");
+  }
+  root = validRoot(root);
+  let prefix = root ? root + "/" : "";
+  let layouts = new Map;
+  let entries = [];
+  for (let file of files) {
+    if (!(typeof file === "string")) {
+      throw new TypeError("Rip App: route file paths must be strings");
+    }
+    if (!(file.startsWith(prefix) && file.length > prefix.length))
+      continue;
+    rel = file.slice(prefix.length);
+    segments = rel.split("/");
+    invalid = segments.some(function(segment) {
+      return !segment || segment === "." || segment === "..";
+    });
+    if (rel.includes("\\") || invalid || segments.at(-1) === ".rip") {
+      throw new TypeError(`Rip App: invalid route file path '${file}'`);
+    }
+    if (segments.at(-1) === "_layout.rip") {
+      layouts.set(segments.slice(0, -1).join("/"), file);
+      continue;
+    }
+    if (segments.some(function(segment) {
+      return segment.startsWith("_");
+    }))
+      continue;
+    if (!rel.endsWith(".rip")) {
+      throw new TypeError(`Rip App: route files must be .rip sources: '${file}'`);
+    }
+    entries.push({ ...compile2(rel), rel, file });
+  }
+  let seen = new Map;
+  for (let entry of [...entries].sort(function(a, b) {
+    return a.rel < b.rel ? -1 : 1;
+  })) {
+    for (let expansion of entry.expansions) {
+      shape = expansion.shape || "/";
+      display = expansion.display || "/";
+      if (existing = seen.get(shape)) {
+        if (existing.rel === entry.rel)
+          fail(`route '${entry.rel}' is listed more than once`);
+        [first, second] = [existing.rel, entry.rel].sort();
+        fail(`'${first}' and '${second}' both resolve to '${existing.display}'`);
+      }
+      seen.set(shape, { rel: entry.rel, display });
+    }
+  }
+  entries.sort(function(a, b) {
+    let ra, rb;
+    for (let i = 0, _ref = Math.max(a.ranks.length, b.ranks.length);i < _ref; i++) {
+      ra = a.ranks[i] ?? -1;
+      rb = b.ranks[i] ?? -1;
+      if (ra !== rb)
+        return ra - rb;
+    }
+    if (a.pattern < b.pattern)
+      return -1;
+    if (a.pattern > b.pattern)
+      return 1;
+    return 0;
+  });
+  let compiled = entries.map(function(entry) {
+    let route = Object.freeze({ pattern: entry.pattern, file: entry.file, layouts: Object.freeze(layoutChain(entry.rel, layouts)) });
+    return { route, parts: entry.parts };
+  });
+  let match = function(path) {
+    let pairs;
+    if (!(typeof path === "string")) {
+      throw new TypeError("Rip App: route match expects a path string");
+    }
+    if (!path.startsWith("/"))
+      return null;
+    segments = path === "/" ? [] : path.slice(1).split("/");
+    for (let entry of compiled) {
+      pairs = matchParts(entry.parts, segments);
+      if (!pairs)
+        continue;
+      return { route: entry.route, params: Object.fromEntries(pairs) };
+    }
+    return null;
+  };
+  return Object.freeze({ routes: Object.freeze(compiled.map(function(c) {
+    return c.route;
+  })), match });
+}
+function parseQuery(search) {
+  if (!(typeof search === "string")) {
+    throw new TypeError("Rip App: parseQuery expects a query string");
+  }
+  return Object.fromEntries(new URLSearchParams(search));
+}
+// packages/app/router.rip
+var splitUrl;
+var stableRecord;
+var validBase;
+var validManifest;
+splitUrl = function(url) {
+  let hashAt = url.indexOf("#");
+  let hash = hashAt >= 0 ? url.slice(hashAt + 1) : "";
+  let rest = hashAt >= 0 ? url.slice(0, hashAt) : url;
+  let queryAt = rest.indexOf("?");
+  let query = queryAt >= 0 ? rest.slice(queryAt + 1) : "";
+  let path = queryAt >= 0 ? rest.slice(0, queryAt) : rest;
+  return { path, query, hash };
+};
+stableRecord = function(previous, next) {
+  let keys = Object.keys(next);
+  let same = keys.length === Object.keys(previous).length && keys.every(function(key) {
+    return previous[key] === next[key];
+  });
+  return same ? previous : next;
+};
+validManifest = function(manifest) {
+  if (!(manifest != null && typeof manifest.match === "function" && Array.isArray(manifest.routes))) {
+    throw new TypeError("Rip App: createRouter requires a route manifest");
+  }
+  return manifest;
+};
+validBase = function(base) {
+  if (base === "" || !(base != null))
+    return "";
+  if (!(typeof base === "string" && base.startsWith("/") && !base.endsWith("/"))) {
+    throw new TypeError(`Rip App: invalid router base '${base}'`);
+  }
+  return base;
+};
+function createRouter(opts) {
+  let adapter, onError, router, routes;
+  ({ routes, adapter, onError } = opts ?? {});
+  if (!(routes != null && (typeof routes === "function" || typeof routes.match === "function" && Array.isArray(routes.routes)))) {
+    throw new TypeError("Rip App: createRouter requires a route manifest or manifest thunk");
+  }
+  for (let method of ["read", "push", "replace", "go", "listen"]) {
+    if (!(typeof adapter?.[method] === "function")) {
+      throw new TypeError(`Rip App: router adapter requires a ${method} function`);
+    }
+  }
+  let base = validBase(opts?.base);
+  let hashMode = opts?.hash === true;
+  if (base && hashMode) {
+    throw new TypeError("Rip App: a base path does not apply in hash mode");
+  }
+  let activeManifest = typeof routes === "function" ? validManifest(routes()) : validManifest(routes);
+  let callbacks = new Set;
+  let unlisten = null;
+  let _path = __state(null);
+  let _route = __state(null);
+  let _params = __state({});
+  let _query = __state({});
+  let _hash = __state("");
+  let _navigating = delay(100, __state(false));
+  let _current = __computed(function() {
+    let route = _route.value;
+    if (!route)
+      return null;
+    return { route, layouts: route.layouts, params: _params.value, query: _query.value };
+  });
+  let stripBase = function(path) {
+    if (!base)
+      return path;
+    if (path === base)
+      return "/";
+    if (path.startsWith(base + "/"))
+      return path.slice(base.length);
+    return null;
+  };
+  let addBase = function(path) {
+    if (!base)
+      return path;
+    return path === "/" ? base : base + path;
+  };
+  let externalFor = function(url) {
+    return hashMode ? adapter.read().split("#")[0] + "#" + url : addBase(url);
+  };
+  let miss = function(path) {
+    onError?.({ status: 404, path });
+    return false;
+  };
+  let depth = 0;
+  let attempt = function(path) {
+    if (typeof path !== "string" || path.startsWith("//") || path.includes("\\"))
+      return null;
+    return activeManifest.match(path);
+  };
+  let commit = function(hit, path, queryString, hash) {
+    let params = stableRecord(_params.value, hit.params);
+    let query = stableRecord(_query.value, parseQuery(queryString));
+    __batch(function() {
+      _path.value = path;
+      _route.value = hit.route;
+      _params.value = params;
+      _query.value = query;
+      return _hash.value = hash;
+    });
+    let info = { path, route: hit.route, params, query, hash };
+    depth += 1;
+    try {
+      for (let callback of Array.from(callbacks)) {
+        try {
+          callback(info);
+        } catch (error) {
+          console.error("[Rip] router onNavigate error:", error);
+        }
+      }
+    } finally {
+      depth -= 1;
+    }
+    return true;
+  };
+  let guardLoop = function() {
+    if (depth >= 10) {
+      throw new Error("Rip App: navigation loop — ten nested navigations from onNavigate");
+    }
+  };
+  let handleExternal = function() {
+    let at, hash, inner, path, query;
+    let external = adapter.read();
+    if (hashMode) {
+      at = external.indexOf("#");
+      inner = at >= 0 ? external.slice(at + 1) : "/";
+      if (inner === "")
+        inner = "/";
+      ({ path, query, hash } = splitUrl(inner));
+    } else {
+      ({ path, query, hash } = splitUrl(external));
+      path = stripBase(path);
+      if (!(path != null))
+        return miss(splitUrl(external).path);
+    }
+    let hit = attempt(path);
+    if (!hit)
+      return miss(path);
+    return commit(hit, path, query, hash);
+  };
+  let saveTimer = null;
+  let unwatchScroll = null;
+  let saveScrollNow = function() {
+    saveTimer = null;
+    let state = adapter.readState?.() ?? {};
+    return adapter.replace(adapter.read(), { ...state, __ripScroll: adapter.scroll?.save?.() ?? null });
+  };
+  let saveScroll = function() {
+    return !saveTimer ? saveTimer = setTimeout(saveScrollNow, 100) : undefined;
+  };
+  router = {
+    init() {
+      if (unlisten)
+        return router;
+      handleExternal();
+      unlisten = adapter.listen(function() {
+        if (!handleExternal())
+          return;
+        let state = adapter.readState?.();
+        return adapter.scroll?.restore?.(state?.__ripScroll ?? null);
+      });
+      unwatchScroll = adapter.scroll?.watch?.(saveScroll) ?? null;
+      return router;
+    },
+    push(url, opts2 = {}) {
+      let hash, path, query;
+      guardLoop();
+      ({ path, query, hash } = splitUrl(url));
+      let hit = attempt(path);
+      if (!hit)
+        return miss(path);
+      let position = adapter.scroll?.save?.() ?? null;
+      let state = adapter.readState?.() ?? {};
+      adapter.replace(adapter.read(), { ...state, __ripScroll: position });
+      adapter.push(externalFor(url), null);
+      commit(hit, path, query, hash);
+      if (!opts2.noScroll)
+        adapter.scroll?.top?.();
+      return true;
+    },
+    replace(url, opts2 = {}) {
+      let hash, path, query;
+      guardLoop();
+      ({ path, query, hash } = splitUrl(url));
+      let hit = attempt(path);
+      if (!hit)
+        return miss(path);
+      let state = adapter.readState?.() ?? {};
+      adapter.replace(externalFor(url), { ...state, __ripScroll: null });
+      commit(hit, path, query, hash);
+      if (!opts2.noScroll)
+        adapter.scroll?.top?.();
+      return true;
+    },
+    back() {
+      return adapter.go(-1);
+    },
+    forward() {
+      return adapter.go(1);
+    },
+    match(url) {
+      let hash, path, query;
+      ({ path, query, hash } = splitUrl(url));
+      let hit = attempt(path);
+      if (!hit)
+        return null;
+      return { route: hit.route, params: hit.params, query: parseQuery(query), hash };
+    },
+    claims(url) {
+      let at, hash, inner, path, query;
+      if (!(typeof url === "string" && url.length > 0))
+        return null;
+      if (hashMode) {
+        at = url.indexOf("#");
+        if (at < 0)
+          return null;
+        inner = url.slice(at + 1);
+        if (inner === "")
+          inner = "/";
+        ({ path, query, hash } = splitUrl(inner));
+      } else {
+        if (!url.startsWith("/"))
+          return null;
+        ({ path, query, hash } = splitUrl(url));
+        path = stripBase(path);
+        if (!(path != null))
+          return null;
+      }
+      let hit = attempt(path);
+      if (!hit)
+        return null;
+      let internal = path + (query ? "?" + query : "") + (hash ? "#" + hash : "");
+      return { path, url: internal, route: hit.route, params: hit.params, query: parseQuery(query), hash };
+    },
+    onNavigate(fn) {
+      if (!(typeof fn === "function")) {
+        throw new TypeError("Rip App: onNavigate expects a function");
+      }
+      callbacks.add(fn);
+      return function() {
+        return callbacks.delete(fn);
+      };
+    },
+    rebuild() {
+      activeManifest = typeof routes === "function" ? validManifest(routes()) : activeManifest;
+      if (unlisten)
+        handleExternal();
+      return;
+    },
+    destroy() {
+      unlisten?.();
+      unlisten = null;
+      unwatchScroll?.();
+      unwatchScroll = null;
+      if (saveTimer)
+        clearTimeout(saveTimer);
+      saveTimer = null;
+      return;
+    }
+  };
+  Object.defineProperty(router, "current", { get() {
+    return _current.value;
+  } });
+  Object.defineProperty(router, "path", { get() {
+    return _path.value;
+  } });
+  Object.defineProperty(router, "hash", { get() {
+    return _hash.value;
+  } });
+  Object.defineProperty(router, "params", { get() {
+    return _params.value;
+  } });
+  Object.defineProperty(router, "query", { get() {
+    return _query.value;
+  } });
+  Object.defineProperty(router, "navigating", {
+    get() {
+      return _navigating.value;
+    },
+    set(value) {
+      return _navigating.value = value;
+    }
+  });
+  return router;
+}
+function browserAdapter() {
+  if (typeof window === "undefined" || !(window.history != null) || !(window.location != null)) {
+    throw new Error("Rip App: browserAdapter requires a browser environment");
+  }
+  window.history.scrollRestoration = "manual";
+  let frame = function(fn) {
+    return window.requestAnimationFrame ? window.requestAnimationFrame(fn) : setTimeout(fn, 16);
+  };
+  let restoring = 0;
+  return {
+    read() {
+      return window.location.pathname + window.location.search + window.location.hash;
+    },
+    readState() {
+      return window.history.state;
+    },
+    push(url, state) {
+      return window.history.pushState(state, "", url);
+    },
+    replace(url, state) {
+      return window.history.replaceState(state, "", url);
+    },
+    go(delta) {
+      return window.history.go(delta);
+    },
+    listen(fn) {
+      window.addEventListener("popstate", fn);
+      return function() {
+        return window.removeEventListener("popstate", fn);
+      };
+    },
+    scroll: {
+      save() {
+        return { x: window.scrollX, y: window.scrollY };
+      },
+      restore(position) {
+        let step;
+        if (!(position != null))
+          return;
+        let ticket = ++restoring;
+        let x = position.x || 0;
+        let y = position.y || 0;
+        let attempts = 0;
+        step = function() {
+          if (!(ticket === restoring))
+            return;
+          let maxY = Math.max(0, (window.document?.documentElement?.scrollHeight || 0) - window.innerHeight);
+          window.scrollTo(x, Math.min(y, maxY));
+          attempts += 1;
+          return y > maxY && attempts < 20 ? frame(step) : undefined;
+        };
+        frame(step);
+        return;
+      },
+      top() {
+        restoring += 1;
+        return window.scrollTo(0, 0);
+      },
+      watch(fn) {
+        window.addEventListener("scroll", fn, { passive: true });
+        return function() {
+          return window.removeEventListener("scroll", fn);
+        };
+      }
+    }
+  };
+}
+// packages/app/renderer.rip
+var componentFrom;
+var constructGateComponent;
+var failureFor;
+constructGateComponent = __claimGateConstructor();
+failureFor = function(path, file, error, message = null) {
+  let text = message ?? error?.message ?? String(error);
+  let failure = new Error(text);
+  failure.name = "GateFailure";
+  failure.status = error?.status ?? error?.response?.status ?? 500;
+  failure.path = path;
+  failure.file = file;
+  failure.error = error;
+  return failure;
+};
+componentFrom = function(components, file) {
+  let module = components.getCompiled(file);
+  if (!(module != null && typeof module === "object")) {
+    throw new Error(`Rip App: no precompiled component module for '${file}'`);
+  }
+  let isComponent = function(value) {
+    return typeof value === "function" && typeof value.prototype?.mount === "function";
+  };
+  if (isComponent(module.default))
+    return module.default;
+  let found = [];
+  for (let key in module) {
+    let value = module[key];
+    if (key === "default")
+      continue;
+    if (isComponent(value)) {
+      found.push(value);
+    }
+  }
+  if (!(found.length === 1)) {
+    throw new Error(`Rip App: precompiled module '${file}' must export exactly one component class`);
+  }
+  return found[0];
+};
+function createRenderer(opts) {
+  let app, components, mount, onError, router, target;
+  if (!(opts != null && typeof opts === "object")) {
+    throw new TypeError("Rip App: createRenderer expects an options object");
+  }
+  ({ router, app, components, target, onError } = opts);
+  if (!(router != null && typeof router === "object")) {
+    throw new TypeError("Rip App: createRenderer requires a router object");
+  }
+  if (!(app?.data != null)) {
+    throw new TypeError("Rip App: createRenderer requires app.data");
+  }
+  if (!(components != null && typeof components.getCompiled === "function")) {
+    throw new TypeError("Rip App: createRenderer requires a component registry");
+  }
+  if (!(target != null && typeof target.appendChild === "function")) {
+    throw new TypeError("Rip App: createRenderer requires a target with appendChild()");
+  }
+  if (onError != null && typeof onError !== "function") {
+    throw new TypeError("Rip App: createRenderer onError must be a function");
+  }
+  let instances = [];
+  let current = null;
+  let generation = 0;
+  let disposeRoute = null;
+  let mountedEntries = [];
+  let pageMountPoint = null;
+  let lastRoute = null;
+  let forceFrom = null;
+  let shallowEqual = function(a, b) {
+    let keysA = Object.keys(a);
+    return keysA.length === Object.keys(b).length && keysA.every(function(key) {
+      return a[key] === b[key];
+    });
+  };
+  let sameChain = function(a, b) {
+    return a.length === b.length && a.every(function(file, index) {
+      return b[index] === file;
+    });
+  };
+  let resolveGateCell = function(path) {
+    let value = unwrapStash(app.data);
+    let segments = path.split(".");
+    for (let index = 0;index < segments.length; index++) {
+      let segment = segments[index];
+      if (!(value != null && (typeof value === "object" || typeof value === "function")))
+        return null;
+      value = value[segment];
+      if (_isSourceCell(value)) {
+        return { cell: value, tail: segments.slice(index + 1) };
+      }
+    }
+    return null;
+  };
+  let gateFailure = function(path, file, message, error = null) {
+    let cause = error ?? new Error(message);
+    return failureFor(path, file, cause, message);
+  };
+  let queryKeyedRetargets = function(entriesToCheck, params, query) {
+    let binding, cell, gates, keyFn, resolved;
+    for (let entry of entriesToCheck) {
+      gates = entry.cls.__gates;
+      if (!Array.isArray(gates))
+        continue;
+      for (let index = 0;index < gates.length; index++) {
+        let gate = gates[index];
+        keyFn = typeof gate === "string" ? null : gate?.key;
+        if (!(typeof keyFn === "function"))
+          continue;
+        binding = entry.bindings?.[index];
+        if (!binding)
+          return true;
+        resolved = resolveGateCell(binding.path);
+        if (!(resolved && _isSourceFamily(resolved.cell)))
+          return true;
+        try {
+          cell = resolved.cell.cellFor(keyFn(params, query));
+        } catch (error) {
+          return true;
+        }
+        if (!(cell === binding.cell))
+          return true;
+      }
+    }
+    return false;
+  };
+  let gateJobs = function(entries, params, query) {
+    let cell, error, gates, key, keyFn, path, resolved;
+    let jobs = new Map;
+    for (let entryIndex = 0;entryIndex < entries.length; entryIndex++) {
+      let entry = entries[entryIndex];
+      gates = entry.cls.__gates;
+      entry.bindings = [];
+      if (!(gates != null))
+        continue;
+      if (!Array.isArray(gates)) {
+        throw gateFailure("<static>", entry.file, `Rip App: ${entry.file} static __gates must be an array`);
+      }
+      for (let gateIndex = 0;gateIndex < gates.length; gateIndex++) {
+        let gate = gates[gateIndex];
+        path = typeof gate === "string" ? gate : gate?.path;
+        keyFn = typeof gate === "string" ? null : gate?.key;
+        if (!(typeof path === "string" && path.length > 0)) {
+          throw gateFailure(String(path), entry.file, `Rip App: ${entry.file} has a malformed render gate path`);
+        }
+        if (keyFn != null && typeof keyFn !== "function") {
+          throw gateFailure(path, entry.file, `Rip App: gate '${path}' has a non-function key`);
+        }
+        resolved = resolveGateCell(path);
+        if (!resolved) {
+          throw gateFailure(path, entry.file, `Rip App: gate '${path}' does not resolve to a source`);
+        }
+        cell = resolved.cell;
+        if (_isSourceFamily(cell)) {
+          if (!keyFn) {
+            throw gateFailure(path, entry.file, `Rip App: gate '${path}' is keyed and requires a key function`);
+          }
+          try {
+            key = keyFn(params, query);
+            cell = cell.cellFor(key);
+          } catch (caught) {
+            error = caught;
+            throw failureFor(path, entry.file, error, `Rip App: gate '${path}' key failed: ${error.message}`);
+          }
+        } else if (keyFn) {
+          throw gateFailure(path, entry.file, `Rip App: gate '${path}' is a singleton and does not accept a key function`);
+        }
+        entry.bindings[gateIndex] = { cell, tail: resolved.tail, path, file: entry.file };
+        if (!jobs.has(cell)) {
+          jobs.set(cell, { cell, path, file: entry.file, entryIndex });
+        }
+      }
+    }
+    return Array.from(jobs.values());
+  };
+  let ensureGates = async function(entries, params, query, mine) {
+    let job, value;
+    let jobs = gateJobs(entries, params, query);
+    let results = await Promise.allSettled((() => {
+      const result1 = [];
+      for (let job2 of jobs) {
+        result1.push(job2.cell.ensure());
+      }
+      return result1;
+    })());
+    if (mine !== generation)
+      return false;
+    let failing = null;
+    let consider = function(failure, entryIndex) {
+      failure.entryIndex = entryIndex;
+      if (!(failing != null) || entryIndex < failing.entryIndex)
+        failing = failure;
+      return;
+    };
+    for (let index = 0;index < results.length; index++) {
+      let result = results[index];
+      job = jobs[index];
+      if (result.status === "rejected") {
+        consider(failureFor(job.path, job.file, result.reason), job.entryIndex);
+      } else {
+        if (!(result.value != null)) {
+          consider(gateFailure(job.path, job.file, `Rip App: gate '${job.path}' resolved to ${result.value}; gated sources must resolve to a non-null value`), job.entryIndex);
+        }
+      }
+    }
+    for (let entryIndex = 0;entryIndex < entries.length; entryIndex++) {
+      let entry = entries[entryIndex];
+      if (failing != null && entryIndex >= failing.entryIndex)
+        break;
+      for (let binding of entry.bindings) {
+        value = binding.cell.peek();
+        for (let segment of binding.tail) {
+          if (!(value != null))
+            break;
+          value = value[segment];
+        }
+        if (!(value != null)) {
+          consider(gateFailure(binding.path, binding.file, `Rip App: gate '${binding.path}' resolved to ${value}; every gated subpath must exist and be non-null`), entryIndex);
+          break;
+        }
+        binding.value = value;
+      }
+    }
+    if (failing != null)
+      throw failing;
+    return true;
+  };
+  let construct = function(entry, parent) {
+    return constructGateComponent(entry.cls, { gates: entry.bindings, parent, app, router });
+  };
+  let cleanup = function(list) {
+    let errors = [];
+    for (let _i = list.length - 1;_i >= 0; _i--) {
+      let instance = list[_i];
+      try {
+        instance.unmount?.();
+      } catch (error) {
+        errors.push(error);
+        try {
+          instance._teardown?.({ state: "unmounted", hooks: false, removeDOM: true });
+        } catch (fallbackError) {
+          errors.push(fallbackError);
+        }
+      }
+    }
+    return errors;
+  };
+  let unmount = function() {
+    let oldInstances = instances;
+    instances = [];
+    current = null;
+    mountedEntries = [];
+    pageMountPoint = null;
+    lastRoute = null;
+    let errors = cleanup(oldInstances);
+    if (errors.length)
+      throw errors[0];
+    return;
+  };
+  let fatalCard = null;
+  let clearFatalCard = function() {
+    fatalCard?.remove?.();
+    fatalCard = null;
+    return;
+  };
+  let showFatalCard = function(failure) {
+    let card;
+    clearFatalCard();
+    let text = failure.error?.stack ?? failure.stack ?? failure.message ?? String(failure);
+    fatalCard = (() => {
+      if (typeof document !== "undefined" && typeof document.createElement === "function") {
+        card = document.createElement("pre");
+        card.style.cssText = "margin:2rem;padding:1rem 1.25rem;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere";
+        card.textContent = text;
+        return card;
+      } else {
+        card = { nodeName: "PRE", textContent: text };
+        card.remove = function() {
+          let siblings = card.parentNode?.children;
+          let index = siblings?.indexOf(card) ?? -1;
+          if (index >= 0)
+            siblings.splice(index, 1);
+          card.parentNode = null;
+          return;
+        };
+        return card;
+      }
+    })();
+    target.appendChild(fatalCard);
+    return;
+  };
+  let stagingTarget = function() {
+    if (typeof document !== "undefined" && typeof document.createDocumentFragment === "function") {
+      return document.createDocumentFragment();
+    }
+    let children = [];
+    return {
+      children,
+      appendChild(node) {
+        children.push(node);
+        return node;
+      }
+    };
+  };
+  let commitStaging = function(staging, into = target) {
+    clearFatalCard();
+    if (staging.nodeType === 11) {
+      into.appendChild(staging);
+    } else {
+      for (let node of staging.children) {
+        into.appendChild(node);
+      }
+    }
+    return;
+  };
+  let layoutMountPoint = function(instance, fallback) {
+    let slot;
+    let roots = instance._nodes ?? [instance._root];
+    for (let root of roots) {
+      if (!root)
+        continue;
+      if (root.matches?.("#content"))
+        return root;
+      slot = root.querySelector?.("#content");
+      if (slot)
+        return slot;
+    }
+    return roots.find(function(root) {
+      return root != null;
+    }) ?? fallback;
+  };
+  let mountBoundary = function(prefixEntries, failure, mine) {
+    let handler, instance, parent;
+    if (!prefixEntries.some(function(entry) {
+      return typeof entry.cls.prototype?.onError === "function";
+    }))
+      return false;
+    let staging = stagingTarget();
+    let mountPoint = staging;
+    let built = [];
+    try {
+      for (let index = 0;index < prefixEntries.length; index++) {
+        let entry = prefixEntries[index];
+        parent = built[built.length - 1] ?? null;
+        instance = construct(entry, parent);
+        built.push(instance);
+        entry.instance = instance;
+        instance.mount?.(mountPoint);
+        if (instance._state === "failed") {
+          cleanup(built);
+          return false;
+        }
+        mountPoint = layoutMountPoint(instance, mountPoint);
+      }
+      if (mine !== generation) {
+        cleanup(built);
+        return false;
+      }
+      handler = null;
+      for (let _i = built.length - 1;_i >= 0; _i--) {
+        let instance2 = built[_i];
+        if (typeof instance2.onError === "function") {
+          handler = instance2;
+          break;
+        }
+      }
+      commitStaging(staging);
+    } catch (error) {
+      console.error("[Rip] boundary chain failed to mount:", error);
+      cleanup(built);
+      return false;
+    }
+    let old = instances;
+    instances = built;
+    current = built[built.length - 1] ?? null;
+    mountedEntries = prefixEntries;
+    pageMountPoint = mountPoint;
+    lastRoute = null;
+    try {
+      handler.onError(failure);
+    } catch (error) {
+      console.error("[Rip] boundary onError error:", error);
+    }
+    for (let error of cleanup(old)) {
+      console.error("[Rip] boundary teardown error:", error);
+    }
+    return true;
+  };
+  let boundaryOnMounted = function(prefixEntries, failure) {
+    let handler = null;
+    for (let _i = prefixEntries.length - 1;_i >= 0; _i--) {
+      let entry = prefixEntries[_i];
+      if (typeof entry.instance?.onError === "function") {
+        handler = entry.instance;
+        break;
+      }
+    }
+    if (!handler)
+      return false;
+    let oldPage = instances.slice(prefixEntries.length);
+    instances = prefixEntries.map(function(entry) {
+      return entry.instance;
+    });
+    current = instances[instances.length - 1] ?? null;
+    mountedEntries = prefixEntries;
+    lastRoute = null;
+    try {
+      handler.onError(failure);
+    } catch (error) {
+      console.error("[Rip] boundary onError error:", error);
+    }
+    for (let error of cleanup(oldPage)) {
+      console.error("[Rip] boundary teardown error:", error);
+    }
+    return true;
+  };
+  let performMount = async function(info, mine) {
+    let boundaryIndex, failure, handled, instance, keepPrefix, parent, ready;
+    let route = info?.route;
+    if (!route?.file) {
+      throw new Error("Rip App: renderer route state requires route.file");
+    }
+    let params = info.params ?? {};
+    let query = info.query ?? {};
+    let layoutFiles = info.layouts ?? [];
+    if (!Array.isArray(layoutFiles)) {
+      throw new Error("Rip App: renderer route state layouts must be an array");
+    }
+    let mountedFiles = mountedEntries.map(function(entry) {
+      return entry.file;
+    });
+    let forcedFrom = forceFrom;
+    forceFrom = null;
+    if (!(forcedFrom != null) && current != null && lastRoute != null && route.file === lastRoute.file) {
+      if (sameChain([...layoutFiles, route.file], mountedFiles) && shallowEqual(params, lastRoute.params)) {
+        if (!(shallowEqual(query, lastRoute.query) || queryKeyedRetargets(mountedEntries, params, query))) {
+          if (typeof current.load === "function")
+            await current.load(params, query);
+          if (mine !== generation)
+            return null;
+          lastRoute = { file: route.file, params, query };
+          return current;
+        }
+      }
+    }
+    let chainFiles = [...layoutFiles, route.file];
+    let reusableLayouts = lastRoute != null && layoutFiles.length > 0 && mountedEntries.length === layoutFiles.length + 1 && sameChain(layoutFiles, mountedFiles.slice(0, -1)) && !queryKeyedRetargets(mountedEntries.slice(0, -1), params, query);
+    let firstNew = forcedFrom != null ? Math.max(0, Math.min(forcedFrom, chainFiles.length - 1)) : reusableLayouts ? layoutFiles.length : 0;
+    if (forcedFrom != null && firstNew > 0) {
+      if (!(mountedEntries.length === chainFiles.length && sameChain(chainFiles.slice(0, firstNew), mountedFiles.slice(0, firstNew)))) {
+        firstNew = 0;
+      }
+    }
+    let entries = [];
+    for (let index = 0;index < chainFiles.length; index++) {
+      let file = chainFiles[index];
+      if (index < firstNew) {
+        entries.push(mountedEntries[index]);
+      } else {
+        entries.push({ file, cls: componentFrom(components, file) });
+      }
+    }
+    let fresh = entries.slice(firstNew);
+    try {
+      ready = await ensureGates(fresh, params, query, mine);
+      if (!ready)
+        return null;
+    } catch (caught) {
+      failure = caught;
+      if (mine !== generation)
+        return null;
+      if (failure?.name === "GateFailure" && typeof failure.entryIndex === "number") {
+        boundaryIndex = failure.entryIndex + firstNew;
+        if (boundaryIndex > 0) {
+          handled = reusableLayouts ? boundaryOnMounted(entries.slice(0, boundaryIndex), failure) : mountBoundary(entries.slice(0, boundaryIndex), failure, mine);
+          if (handled)
+            return null;
+        }
+      }
+      throw failure;
+    }
+    let staging = stagingTarget();
+    let mountPoint = staging;
+    let built = [];
+    let keptParent = firstNew > 0 ? entries[firstNew - 1].instance : null;
+    try {
+      for (let _ref = entries.slice(firstNew), index = 0;index < _ref.length; index++) {
+        let entry = _ref[index];
+        parent = built[built.length - 1] ?? keptParent;
+        instance = construct(entry, parent);
+        built.push(instance);
+        entry.instance = instance;
+        instance.mount?.(mountPoint);
+        if (instance._state === "failed") {
+          throw new Error(`Rip App: component '${entry.file}' failed during mount`);
+        }
+        if (firstNew + index < entries.length - 1) {
+          mountPoint = layoutMountPoint(instance, mountPoint);
+        }
+      }
+      if (mine !== generation) {
+        cleanup(built);
+        return null;
+      }
+      keepPrefix = firstNew > 0;
+      commitStaging(staging, keepPrefix ? pageMountPoint ?? target : target);
+    } catch (error) {
+      cleanup(built);
+      throw error;
+    }
+    keepPrefix = firstNew > 0;
+    let oldInstances = keepPrefix ? instances.slice(firstNew) : instances;
+    let keptInstances = keepPrefix ? instances.slice(0, firstNew) : [];
+    instances = [...keptInstances, ...built];
+    current = built[built.length - 1] ?? null;
+    if (!keepPrefix) {
+      pageMountPoint = entries.length > 1 ? mountPoint : null;
+    }
+    mountedEntries = entries;
+    lastRoute = { file: route.file, params, query };
+    let teardownErrors = cleanup(oldInstances);
+    if (teardownErrors.length) {
+      throw failureFor("<teardown>", "<renderer>", teardownErrors[0]);
+    }
+    return current;
+  };
+  let preload = function(info) {
+    let entries, jobs;
+    let route = info?.route;
+    if (!route?.file)
+      return;
+    let params = info.params ?? {};
+    let query = info.query ?? {};
+    let layoutFiles = info.layouts ?? route.layouts ?? [];
+    let mountedFiles = mountedEntries.map(function(entry) {
+      return entry.file;
+    });
+    let layoutsStay = lastRoute != null && sameChain(layoutFiles, mountedFiles.slice(0, -1));
+    if (layoutsStay && route.file === lastRoute.file && shallowEqual(params, lastRoute.params))
+      return;
+    let files = layoutsStay ? [route.file] : [...layoutFiles, route.file];
+    try {
+      entries = (() => {
+        const result1 = [];
+        for (let file of files) {
+          result1.push({ file, cls: componentFrom(components, file) });
+        }
+        return result1;
+      })();
+      jobs = gateJobs(entries, params, query);
+    } catch (error) {
+      return;
+    }
+    for (let job of jobs) {
+      job.cell.preload().catch(function() {
+        return null;
+      });
+    }
+    return;
+  };
+  let remountDirty = async function(paths) {
+    if (!(Array.isArray(paths) && paths.length > 0))
+      return "noop";
+    for (let path of paths) {
+      if (path === "stash.rip" || path.startsWith("stash/"))
+        return "escape";
+    }
+    let info = router.current;
+    if (!(info?.route?.file && lastRoute != null))
+      return "noop";
+    let dirty = new Set(paths);
+    let layoutFiles = info.layouts ?? info.route.layouts ?? [];
+    let chain = [...layoutFiles, info.route.file];
+    let firstDirty = -1;
+    for (let index = 0;index < chain.length; index++) {
+      let file = chain[index];
+      if (dirty.has(file)) {
+        firstDirty = index;
+        break;
+      }
+    }
+    if (firstDirty < 0)
+      firstDirty = chain.length - 1;
+    forceFrom = firstDirty;
+    try {
+      await mount(info);
+    } catch (error) {
+      forceFrom = null;
+      throw error;
+    }
+    return "narrow";
+  };
+  mount = async function(info) {
+    let error, failure, file;
+    let mine = ++generation;
+    if (Array.isArray(router) || typeof router === "string" ? router.includes("navigating") : ("navigating" in router))
+      router.navigating = true;
+    return await (async () => {
+      try {
+        return await performMount(info, mine);
+      } catch (caught) {
+        error = caught;
+        if (mine !== generation)
+          return null;
+        failure = (() => {
+          if (error?.name === "GateFailure") {
+            return error;
+          } else {
+            file = info?.route?.file ?? "<route>";
+            return failureFor(error?.path ?? file, file, error);
+          }
+        })();
+        onError?.(failure);
+        if (!(current != null))
+          showFatalCard(failure);
+        throw failure;
+      } finally {
+        if (mine === generation && (Array.isArray(router) || typeof router === "string" ? router.includes("navigating") : ("navigating" in router)))
+          router.navigating = false;
+      }
+    })();
+  };
+  let renderer = null;
+  renderer = {
+    current: null,
+    mount,
+    preload,
+    remountDirty,
+    start() {
+      if (disposeRoute)
+        return renderer;
+      router.init?.();
+      disposeRoute = __effect(function() {
+        let info = router.current;
+        if (info?.route)
+          mount(info).catch(function() {
+            return null;
+          });
+        return;
+      });
+      return renderer;
+    },
+    stop() {
+      let error, failure;
+      generation++;
+      disposeRoute?.();
+      disposeRoute = null;
+      if (Array.isArray(router) || typeof router === "string" ? router.includes("navigating") : ("navigating" in router))
+        router.navigating = false;
+      try {
+        unmount();
+      } catch (caught) {
+        error = caught;
+        failure = failureFor("<teardown>", "<renderer>", error);
+        onError?.(failure);
+        throw failure;
+      }
+      return;
+    }
+  };
+  Object.defineProperty(renderer, "current", { get() {
+    return current;
+  } });
+  return renderer;
+}
+// packages/app/persist.rip
+var resolveStorage;
+var sourceReplacer;
+var PERSISTED = Symbol.for("rip.app.stash.persisted");
+var PURGE2 = Symbol.for("rip.app.stash.purge");
+sourceReplacer = function(key, value) {
+  return _isSourceCell(value) ? undefined : value;
+};
+resolveStorage = function(opts) {
+  if (opts.storage != null)
+    return opts.storage;
+  if (!(typeof window !== "undefined" && window.localStorage != null)) {
+    throw new Error("Rip App: persistStash requires a browser or an injected storage");
+  }
+  return opts.local ? window.localStorage : window.sessionStorage;
+};
+function persistStash(app, opts = {}) {
+  let saved;
+  let target = unwrapStash(app) || app;
+  if (target[PERSISTED])
+    return function() {
+      return null;
+    };
+  target[PERSISTED] = true;
+  let storage = resolveStorage(opts);
+  let storageKey = opts.key || "__rip_app";
+  let wait = opts.debounce ?? 2000;
+  try {
+    saved = storage.getItem(storageKey);
+    if (saved)
+      _mergePlain(app.data, JSON.parse(saved));
+  } catch (error) {}
+  let pending = null;
+  let save = function() {
+    pending = null;
+    try {
+      storage.setItem(storageKey, JSON.stringify(unwrapStash(app.data), sourceReplacer));
+    } catch (error) {}
+    return;
+  };
+  let primed = false;
+  let disposeEffect = __effect(function() {
+    _stashVersion.value;
+    if (!primed) {
+      primed = true;
+      return;
+    }
+    if (pending != null)
+      clearTimeout(pending);
+    pending = setTimeout(save, wait);
+    return function() {
+      return pending != null ? clearTimeout(pending) : undefined;
+    };
+  });
+  if (typeof window !== "undefined")
+    window.addEventListener("beforeunload", save);
+  let dataRaw = unwrapStash(app.data);
+  if (dataRaw != null && typeof dataRaw === "object") {
+    Object.defineProperty(dataRaw, PURGE2, {
+      value() {
+        if (pending != null) {
+          clearTimeout(pending);
+          pending = null;
+        }
+        try {
+          storage.removeItem(storageKey);
+        } catch (error) {}
+        return;
+      },
+      configurable: true,
+      writable: true
+    });
+  }
+  let disposed = false;
+  return function() {
+    if (disposed)
+      return;
+    disposed = true;
+    disposeEffect?.();
+    if (typeof window !== "undefined")
+      window.removeEventListener("beforeunload", save);
+    save();
+    if (dataRaw != null && typeof dataRaw === "object")
+      dataRaw[PURGE2] = null;
+    target[PERSISTED] = false;
+    return;
+  };
+}
+// packages/app/aria.rip
+var browserHost;
+var excluded;
+excluded = function(anchor) {
+  if (anchor.hasAttribute?.("data-router-ignore"))
+    return true;
+  if (anchor.hasAttribute?.("download"))
+    return true;
+  let targetAttr = anchor.getAttribute?.("target");
+  if (targetAttr && targetAttr.toLowerCase() !== "_self")
+    return true;
+  return false;
+};
+function _anchorHref(anchor) {
+  let origin;
+  let href = anchor.getAttribute?.("href") ?? anchor.href;
+  if (!(typeof href === "string" && href.length > 0))
+    return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+    origin = typeof location !== "undefined" ? location.origin : null;
+    if (!(origin != null && href.startsWith(origin)))
+      return null;
+    href = href.slice(origin.length);
+  }
+  if (href.startsWith("//") || href.includes("\\"))
+    return null;
+  return href;
+}
+function ownsAnchor(router, anchor) {
+  if (!(anchor != null))
+    return false;
+  if (excluded(anchor))
+    return false;
+  let href = _anchorHref(anchor);
+  if (!(href != null))
+    return false;
+  return router.claims(href) != null;
+}
+browserHost = function() {
+  if (!(typeof document !== "undefined" && typeof document.querySelectorAll === "function")) {
+    throw new Error("Rip App: ariaCurrent requires a browser or an injected host");
+  }
+  return {
+    anchors() {
+      return Array.from(document.querySelectorAll("a[href]"));
+    },
+    observe(fn) {
+      let scheduled = false;
+      let observer = new MutationObserver(function() {
+        if (scheduled)
+          return;
+        scheduled = true;
+        return requestAnimationFrame(function() {
+          scheduled = false;
+          return fn();
+        });
+      });
+      observer.observe(document.documentElement ?? document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["href", "target", "download", "data-router-ignore"] });
+      return function() {
+        return observer.disconnect();
+      };
+    }
+  };
+};
+function ariaCurrent(router, host = null) {
+  if (!(router != null && typeof router.claims === "function")) {
+    throw new TypeError("Rip App: ariaCurrent requires a router");
+  }
+  host = host ?? browserHost();
+  let owned = new WeakSet;
+  let markCurrent = function() {
+    let hit, state;
+    let current = router.path;
+    for (let anchor of host.anchors()) {
+      hit = excluded(anchor) ? null : router.claims(_anchorHref(anchor) ?? "");
+      state = !(hit != null) || !(current != null) ? null : hit.path === current ? "page" : hit.path !== "/" && current.startsWith(hit.path + "/") ? "true" : null;
+      if (state != null) {
+        if (!owned.has(anchor) && anchor.getAttribute?.("aria-current") != null)
+          continue;
+        if (!(anchor.getAttribute?.("aria-current") === state))
+          anchor.setAttribute("aria-current", state);
+        owned.add(anchor);
+      } else if (owned.has(anchor)) {
+        anchor.removeAttribute("aria-current");
+        owned.delete(anchor);
+      }
+    }
+    return;
+  };
+  let walk = function() {
+    try {
+      markCurrent();
+    } catch (error) {
+      console.error("[Rip] aria-current walk failed:", error);
+    }
+    return;
+  };
+  let disposeEffect = __effect(function() {
+    router.path;
+    return walk();
+  });
+  let unobserve = host.observe?.(walk) ?? null;
+  let disposed = false;
+  return function() {
+    if (disposed)
+      return;
+    disposed = true;
+    disposeEffect();
+    unobserve?.();
+    try {
+      for (let anchor of host.anchors()) {
+        if (owned.has(anchor)) {
+          anchor.removeAttribute("aria-current");
+          owned.delete(anchor);
+        }
+      }
+    } catch (error) {}
+    return;
+  };
+}
+
+// packages/app/links.rip
+var REPEAT_MS;
+var SETTLE_MS;
+var anchorFrom;
+var browserHost2;
+SETTLE_MS = 50;
+REPEAT_MS = 3000;
+browserHost2 = function() {
+  if (!(typeof document !== "undefined" && typeof document.addEventListener === "function")) {
+    throw new Error("Rip App: link listeners require a browser or an injected host");
+  }
+  return { listen(type, fn, opts = null) {
+    document.addEventListener(type, fn, opts ?? false);
+    return function() {
+      return document.removeEventListener(type, fn, opts ?? false);
+    };
+  } };
+};
+anchorFrom = function(node) {
+  while (node != null && node.tagName !== "A") {
+    node = node.parentElement;
+  }
+  return node ?? null;
+};
+function interceptClicks(router, host = null) {
+  if (!(router != null && typeof router.claims === "function" && typeof router.push === "function")) {
+    throw new TypeError("Rip App: interceptClicks requires a router");
+  }
+  host = host ?? browserHost2();
+  let onClick = function(event) {
+    if (event.defaultPrevented)
+      return;
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+      return;
+    let anchor = anchorFrom(event.target);
+    if (!(anchor != null && ownsAnchor(router, anchor)))
+      return;
+    let hit = router.claims(_anchorHref(anchor));
+    if (!(hit != null))
+      return;
+    event.preventDefault();
+    router.push(hit.url, { noScroll: anchor.hasAttribute?.("data-router-noscroll") === true });
+    return;
+  };
+  let remove = host.listen("click", onClick);
+  let disposed = false;
+  return function() {
+    if (disposed)
+      return;
+    disposed = true;
+    remove();
+    return;
+  };
+}
+function preloadLinks(router, renderer, host = null) {
+  if (!(router != null && typeof router.claims === "function")) {
+    throw new TypeError("Rip App: preloadLinks requires a router");
+  }
+  if (!(renderer != null && typeof renderer.preload === "function")) {
+    throw new TypeError("Rip App: preloadLinks requires a renderer with preload()");
+  }
+  host = host ?? browserHost2();
+  let settleTimer = null;
+  let settleAnchor = null;
+  let last = { href: null, at: 0 };
+  let cancelSettle = function() {
+    if (settleTimer != null)
+      clearTimeout(settleTimer);
+    settleTimer = null;
+    settleAnchor = null;
+    return;
+  };
+  let onIntent = function(event) {
+    let anchor = anchorFrom(event.target);
+    if (!(anchor != null && ownsAnchor(router, anchor)))
+      return;
+    if (anchor === settleAnchor)
+      return;
+    cancelSettle();
+    settleAnchor = anchor;
+    let href = _anchorHref(anchor);
+    settleTimer = setTimeout(function() {
+      settleTimer = null;
+      settleAnchor = null;
+      let now = Date.now();
+      if (href === last.href && now - last.at < REPEAT_MS)
+        return;
+      last.href = href;
+      last.at = now;
+      let hit = router.claims(href);
+      return hit != null ? renderer.preload(hit) : undefined;
+    }, SETTLE_MS);
+    return;
+  };
+  let onIntentCancel = function(event) {
+    if (!(settleAnchor != null))
+      return;
+    let related = event.relatedTarget;
+    if (!(related != null && settleAnchor.contains?.(related)))
+      cancelSettle();
+    return;
+  };
+  let removers = [host.listen("pointerover", onIntent, { passive: true }), host.listen("focusin", onIntent, { passive: true }), host.listen("pointerout", onIntentCancel, { passive: true }), host.listen("focusout", onIntentCancel, { passive: true })];
+  let disposed = false;
+  return function() {
+    if (disposed)
+      return;
+    disposed = true;
+    cancelSettle();
+    for (let remove of removers) {
+      remove();
+    }
+    return;
+  };
+}
+
+// packages/app/launch.rip
+var ROUTE_ROOT;
+var defaultTarget;
+var fail2;
+var validBundle;
+var validComponents;
+ROUTE_ROOT = "routes";
+fail2 = function(message) {
+  throw new Error(`Rip App: ${message}`);
+};
+validBundle = function(bundle) {
+  let section;
+  if (!(bundle != null && typeof bundle === "object" && !Array.isArray(bundle)))
+    fail2("launch requires a bundle object");
+  for (let key of ["modules", "compiled"]) {
+    section = bundle[key];
+    if (!(section != null))
+      continue;
+    if (!(typeof section === "object" && !Array.isArray(section))) {
+      fail2(`launch bundle ${key} must be an object of store paths`);
+    }
+  }
+  if (bundle.data != null && (typeof bundle.data !== "object" || Array.isArray(bundle.data))) {
+    fail2("launch bundle data must be an object");
+  }
+  return bundle;
+};
+var STORE_METHODS = ["read", "write", "del", "exists", "size", "list", "listAll", "load", "watch", "getCompiled", "setCompiled"];
+validComponents = function(store) {
+  if (!(typeof store === "object" && !Array.isArray(store)))
+    fail2("launch components must be an object");
+  for (let method of STORE_METHODS) {
+    if (!(typeof store[method] === "function")) {
+      fail2(`launch components store is missing '${method}'`);
+    }
+  }
+  return store;
+};
+defaultTarget = function() {
+  if (!(typeof document !== "undefined" && typeof document.querySelector === "function")) {
+    fail2("launch requires a target outside the browser");
+  }
+  let found = document.querySelector("#app");
+  if (!found) {
+    found = document.createElement("div");
+    found.id = "app";
+    document.body.appendChild(found);
+  }
+  return found;
+};
+function launch(opts) {
+  let removeClicks, removePreload;
+  if (!(opts != null && typeof opts === "object"))
+    fail2("launch requires an options object");
+  if (globalThis.__ripApp != null)
+    fail2("an application is already launched; destroy it first");
+  let bundle = validBundle(opts.bundle);
+  let target = opts.target ?? defaultTarget();
+  let adapter = opts.adapter ?? browserAdapter();
+  let stashModule = bundle.compiled?.["stash.rip"];
+  let seed = opts.stash ?? stashModule?.stash;
+  if (!(seed != null) && stashModule != null) {
+    fail2("the bundle's 'stash.rip' module must export 'stash'");
+  }
+  if (seed != null && (typeof seed !== "object" || Array.isArray(seed))) {
+    fail2("the application stash must be a plain object");
+  }
+  let app = createStash({ data: _cloneSeed(seed ?? {}) });
+  _mergePlain(app.data, bundle.data ?? {});
+  _stampDefaults(app.data);
+  let components = opts.components != null ? validComponents(opts.components) : createComponents();
+  if (bundle.modules != null)
+    components.load(bundle.modules);
+  if (bundle.compiled != null) {
+    const _ref = bundle.compiled;
+    for (let path in _ref) {
+      if (!Object.hasOwn(_ref, path))
+        continue;
+      let module = _ref[path];
+      if (!components.exists(path))
+        components.write(path, "");
+      components.setCompiled(path, module);
+    }
+  }
+  let router = createRouter({
+    routes() {
+      return buildRoutes(components.listAll(ROUTE_ROOT), ROUTE_ROOT);
+    },
+    adapter,
+    base: opts.base,
+    hash: opts.hash,
+    onError: opts.onError
+  });
+  let renderer = createRenderer({ router, app, components, target, onError: opts.onError });
+  let unwatch = components.watch(function(_event, path) {
+    return path.startsWith(ROUTE_ROOT + "/") ? router.rebuild() : undefined;
+  });
+  let disposeLinks = null;
+  if (opts.links != null || typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    removeClicks = interceptClicks(router, opts.links);
+    removePreload = preloadLinks(router, renderer, opts.links);
+    disposeLinks = function() {
+      removeClicks();
+      removePreload();
+      return;
+    };
+  }
+  let disposePersist = null;
+  if (opts.persist) {
+    disposePersist = persistStash(app, { local: opts.persist === "local", key: "__rip_app", storage: opts.storage });
+  }
+  let destroyed = false;
+  let destroy = function() {
+    if (destroyed)
+      return;
+    destroyed = true;
+    let errors = [];
+    let run = function(fn) {
+      try {
+        fn();
+      } catch (e) {
+        errors.push(e);
+      }
+      return;
+    };
+    run(function() {
+      return disposeLinks?.();
+    });
+    run(function() {
+      return renderer.stop();
+    });
+    run(function() {
+      return router.destroy();
+    });
+    run(function() {
+      return unwatch();
+    });
+    run(function() {
+      return disposePersist?.();
+    });
+    if (globalThis.__ripApp === app)
+      delete globalThis.__ripApp;
+    if (globalThis.__ripRouter === router)
+      delete globalThis.__ripRouter;
+    if (errors.length === 1) {
+      throw errors[0];
+    }
+    if (errors.length > 1) {
+      throw new AggregateError(errors, "Rip App: launch.destroy failed");
+    }
+    return;
+  };
+  globalThis.__ripApp = app;
+  globalThis.__ripRouter = router;
+  try {
+    if (typeof target.replaceChildren === "function") {
+      target.replaceChildren();
+    } else if (Array.isArray(target.children)) {
+      target.children.length = 0;
+    }
+    renderer.start();
+  } catch (error) {
+    destroy();
+    throw error;
+  }
+  return { app, components, router, renderer, destroy };
+}
+// packages/app/rash.rip
+var asBytes = function(value) {
+  if (value instanceof Uint8Array)
+    return value;
+  if (value instanceof ArrayBuffer)
+    return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  throw new TypeError("Rip App: rash expects bytes");
+};
+var sha256 = function(input) {
+  let S0, S1, a, b, c, ch, d, e, f, g, h, maj, s0, s1, temp1, temp2;
+  let bytes = asBytes(input);
+  if (typeof Bun !== "undefined" && Bun.CryptoHasher != null) {
+    return new Uint8Array(new Bun.CryptoHasher("sha256").update(bytes).digest());
+  }
+  let K = [1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221, 3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580, 3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986, 2554220882, 2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895, 666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037, 2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344, 430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298];
+  let bitLen = bytes.length * 8;
+  let padded = new Uint8Array(bytes.length + 9 + 63 & ~63);
+  padded.set(bytes);
+  padded[bytes.length] = 128;
+  let view = new DataView(padded.buffer);
+  view.setUint32(padded.length - 4, bitLen >>> 0, false);
+  view.setUint32(padded.length - 8, Math.floor(bitLen / 4294967296) >>> 0, false);
+  let H = [1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225];
+  let rotr = function(x, n) {
+    return x >>> n | x << 32 - n;
+  };
+  let w = new Uint32Array(64);
+  let i = 0;
+  while (i < padded.length) {
+    for (let j of ((s, e2) => Array.from({ length: Math.max(0, Math.abs(e2 - s)) }, (_, i2) => s + i2 * (s <= e2 ? 1 : -1)))(0, 16)) {
+      w[j] = view.getUint32(i + j * 4, false);
+    }
+    for (let j = 16;j < 64; j++) {
+      s0 = rotr(w[j - 15], 7) ^ rotr(w[j - 15], 18) ^ w[j - 15] >>> 3;
+      s1 = rotr(w[j - 2], 17) ^ rotr(w[j - 2], 19) ^ w[j - 2] >>> 10;
+      w[j] = w[j - 16] + s0 + w[j - 7] + s1 >>> 0;
+    }
+    [a, b, c, d, e, f, g, h] = H;
+    for (let j = 0;j < 64; j++) {
+      S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      ch = e & f ^ ~e & g;
+      temp1 = h + S1 + ch + K[j] + w[j] >>> 0;
+      S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      maj = a & b ^ a & c ^ b & c;
+      temp2 = S0 + maj >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = d + temp1 >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = temp1 + temp2 >>> 0;
+    }
+    H[0] = H[0] + a >>> 0;
+    H[1] = H[1] + b >>> 0;
+    H[2] = H[2] + c >>> 0;
+    H[3] = H[3] + d >>> 0;
+    H[4] = H[4] + e >>> 0;
+    H[5] = H[5] + f >>> 0;
+    H[6] = H[6] + g >>> 0;
+    H[7] = H[7] + h >>> 0;
+    i += 64;
+  }
+  let digest = new Uint8Array(32);
+  let out = new DataView(digest.buffer);
+  for (let i2 of ((s, e2) => Array.from({ length: Math.max(0, Math.abs(e2 - s)) }, (_, i3) => s + i3 * (s <= e2 ? 1 : -1)))(0, 8)) {
+    out.setUint32(i2 * 4, H[i2], false);
+  }
+  return digest;
+};
+var rash = function(value) {
+  let d = sha256(value);
+  let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  let text = alphabet[d[0] >> 2] + alphabet[(d[0] & 3) << 4 | d[1] >> 4] + alphabet[(d[1] & 15) << 2 | d[2] >> 6] + alphabet[d[2] & 63] + alphabet[d[3] >> 2] + alphabet[(d[3] & 3) << 4 | d[4] >> 4];
+  return text.replaceAll("-", "_");
+};
+var check = function(files) {
+  let inventory = JSON.stringify(files.map(function(entry) {
+    return [entry.id, entry.hash];
+  }));
+  return rash(new TextEncoder().encode(inventory));
+};
+
+// packages/app/workspace.rip
+var hashOf;
+var validContent2;
+var validDirectory2;
+var validHash;
+var validId;
+var validModule;
+var validPath2;
+var isBagPath = function(name) {
+  return name.endsWith(".rip") || name.endsWith(".css") || name.endsWith(".html");
+};
+validPath2 = function(path) {
+  if (!(typeof path === "string" && path.length > 0)) {
+    throw new TypeError("Rip Workspace: component path must be a non-empty string");
+  }
+  let segments = path.split("/");
+  let invalidSegment = segments.some(function(segment) {
+    return !segment || segment === "." || segment === "..";
+  });
+  let filename = segments.at(-1);
+  let fileAsDirectory = segments.slice(0, -1).some(function(segment) {
+    return isBagPath(segment);
+  });
+  if (path.includes("\\") || invalidSegment || fileAsDirectory || filename === ".rip" || filename === ".css" || filename === ".html" || !isBagPath(filename)) {
+    throw new TypeError(`Rip Workspace: invalid component path '${path}'`);
+  }
+  return path;
+};
+validContent2 = function(content) {
+  if (!(typeof content === "string")) {
+    throw new TypeError("Rip Workspace: component source must be a string");
+  }
+  return content;
+};
+validDirectory2 = function(dir) {
+  if (dir === "" || !(dir != null))
+    return "";
+  if (!(typeof dir === "string")) {
+    throw new TypeError("Rip Workspace: component directory must be a string");
+  }
+  let segments = dir.split("/");
+  if (dir.includes("\\") || segments.some(function(segment) {
+    return !segment || segment === "." || segment === "..";
+  })) {
+    throw new TypeError(`Rip Workspace: invalid component directory '${dir}'`);
+  }
+  return dir;
+};
+validId = function(id) {
+  if (!(typeof id === "string" && id.length > 0)) {
+    throw new TypeError("Rip Workspace: passport id must be a non-empty string");
+  }
+  return id;
+};
+validHash = function(hash) {
+  if (!(typeof hash === "string" && /^[A-Za-z0-9_]{6}$/.test(hash))) {
+    throw new TypeError("Rip Workspace: passport hash must be six Base64URL-folded characters");
+  }
+  return hash;
+};
+validModule = function(module) {
+  if (!(module != null && typeof module === "object" && !Array.isArray(module))) {
+    throw new TypeError("Rip Workspace: compiled component module must be an object");
+  }
+  return module;
+};
+hashOf = function(text) {
+  return rash(new TextEncoder().encode(text));
+};
+function createWorkspace() {
+  let passports = new Map;
+  let pathToId = new Map;
+  let watchers = new Set;
+  let locked = false;
+  let guard = function(operation) {
+    if (locked) {
+      throw new Error(`Rip Workspace: ${operation} on a sealed workspace`);
+    }
+    return;
+  };
+  let notify = function(event, path) {
+    for (let watcher of Array.from(watchers)) {
+      try {
+        watcher(event, path);
+      } catch (error) {
+        console.error("[Rip] workspace watcher error:", error);
+      }
+    }
+    return;
+  };
+  let byPath = function(path) {
+    let id = pathToId.get(path);
+    return id != null ? passports.get(id) : undefined;
+  };
+  let mintId = function(path) {
+    if (passports.has(path)) {
+      throw new Error(`Rip Workspace: cannot mint id '${path}'; a passport already holds that id`);
+    }
+    return path;
+  };
+  let claimPath = function(path, id) {
+    let holder = pathToId.get(path);
+    if (holder != null && holder !== id) {
+      throw new Error(`Rip Workspace: path '${path}' already labels passport '${holder}'`);
+    }
+    return;
+  };
+  let applySource = function(record, content) {
+    passports.set(record.id, { ...record, hash: hashOf(content), source: content, compiled: undefined });
+    return;
+  };
+  let birthPassport = function(path, content) {
+    let id = mintId(path);
+    passports.set(id, { id, path, hash: hashOf(content), source: content, compiled: undefined });
+    pathToId.set(path, id);
+    return;
+  };
+  let workspace = {
+    read(path) {
+      return byPath(validPath2(path))?.source;
+    },
+    write(path, content) {
+      guard("write");
+      path = validPath2(path);
+      content = validContent2(content);
+      let record = byPath(path);
+      if (record) {
+        applySource(record, content);
+        notify("change", path);
+      } else {
+        birthPassport(path, content);
+        notify("create", path);
+      }
+      return;
+    },
+    del(path) {
+      guard("del");
+      path = validPath2(path);
+      let record = byPath(path);
+      if (record) {
+        passports.delete(record.id);
+        pathToId.delete(path);
+      }
+      notify("delete", path);
+      return;
+    },
+    exists(path) {
+      return pathToId.has(validPath2(path));
+    },
+    size() {
+      return passports.size;
+    },
+    list(dir = "") {
+      let rest;
+      dir = validDirectory2(dir);
+      let prefix = dir ? dir + "/" : "";
+      let result = [];
+      for (let [path] of pathToId) {
+        if (path.startsWith(prefix)) {
+          rest = path.slice(prefix.length);
+          if (!rest.includes("/"))
+            result.push(path);
+        }
+      }
+      return result;
+    },
+    listAll(dir = "") {
+      dir = validDirectory2(dir);
+      let prefix = dir ? dir + "/" : "";
+      let result = [];
+      for (let [path] of pathToId) {
+        if (path.startsWith(prefix)) {
+          result.push(path);
+        }
+      }
+      return result;
+    },
+    load(sources) {
+      let content, path, record;
+      guard("load");
+      if (!(sources != null && typeof sources === "object" && !Array.isArray(sources))) {
+        throw new TypeError("Rip Workspace: component load expects a source object");
+      }
+      for (let path2 in sources) {
+        if (!Object.hasOwn(sources, path2))
+          continue;
+        let content2 = sources[path2];
+        path2 = validPath2(path2);
+        content2 = validContent2(content2);
+        record = byPath(path2);
+        if (record) {
+          applySource(record, content2);
+        } else {
+          birthPassport(path2, content2);
+        }
+      }
+      return;
+    },
+    watch(fn) {
+      if (!(typeof fn === "function")) {
+        throw new TypeError("Rip Workspace: component watch expects a function");
+      }
+      watchers.add(fn);
+      let disposed = false;
+      return function() {
+        if (disposed)
+          return;
+        disposed = true;
+        watchers.delete(fn);
+        return;
+      };
+    },
+    getCompiled(path) {
+      return byPath(validPath2(path))?.compiled;
+    },
+    setCompiled(path, module) {
+      guard("setCompiled");
+      path = validPath2(path);
+      module = validModule(module);
+      let record = byPath(path);
+      if (!record) {
+        throw new Error(`Rip Workspace: setCompiled for unknown component path '${path}'`);
+      }
+      passports.set(record.id, { ...record, compiled: module });
+      return;
+    },
+    populate(records) {
+      let compiled, hasSource, hash, id, path, source2;
+      guard("populate");
+      if (!Array.isArray(records)) {
+        throw new TypeError("Rip Workspace: populate expects an array of passport records");
+      }
+      if (passports.size > 0) {
+        throw new Error("Rip Workspace: populate requires an empty workspace; mutate with set");
+      }
+      let seenIds = new Set;
+      let seenPaths = new Set;
+      let next = [];
+      for (let record of records) {
+        if (!(record != null && typeof record === "object" && !Array.isArray(record))) {
+          throw new TypeError("Rip Workspace: populate expects passport records");
+        }
+        id = validId(record.id);
+        path = validPath2(record.path);
+        hash = validHash(record.hash);
+        hasSource = record.source !== undefined;
+        if (!(hasSource || path.endsWith(".css") || path.endsWith(".html"))) {
+          throw new Error(`Rip Workspace: Rip passport '${id}' requires source during populate`);
+        }
+        source2 = hasSource ? validContent2(record.source) : undefined;
+        compiled = record.compiled != null ? validModule(record.compiled) : undefined;
+        if (seenIds.has(id)) {
+          throw new Error(`Rip Workspace: duplicate passport id '${id}' in populate`);
+        }
+        if (seenPaths.has(path)) {
+          throw new Error(`Rip Workspace: duplicate passport path '${path}' in populate`);
+        }
+        seenIds.add(id);
+        seenPaths.add(path);
+        next.push({ id, path, hash, source: source2, compiled });
+      }
+      for (let row of next) {
+        passports.set(row.id, row);
+        pathToId.set(row.path, row.id);
+      }
+      return;
+    },
+    set(record) {
+      let compiled, path, source2;
+      guard("set");
+      if (!(record != null && typeof record === "object" && !Array.isArray(record))) {
+        throw new TypeError("Rip Workspace: set expects a passport record");
+      }
+      let id = validId(record.id);
+      let hash = validHash(record.hash);
+      let current = passports.get(id);
+      if (!current) {
+        if (record.deleted === true)
+          return false;
+        if (!(record.path != null && record.source != null)) {
+          throw new Error(`Rip Workspace: set of unknown passport '${id}' requires a full record (id, path, hash, source)`);
+        }
+        path = validPath2(record.path);
+        source2 = validContent2(record.source);
+        compiled = record.compiled != null ? validModule(record.compiled) : undefined;
+        claimPath(path, id);
+        passports.set(id, { id, path, hash, source: source2, compiled });
+        pathToId.set(path, id);
+        notify("create", path);
+        return true;
+      }
+      if (record.deleted === true) {
+        if (!(hash === current.hash))
+          return false;
+        passports.delete(id);
+        pathToId.delete(current.path);
+        notify("delete", current.path);
+        return true;
+      }
+      if (hash === current.hash)
+        return false;
+      let newPath = record.path != null ? validPath2(record.path) : current.path;
+      let renamed = newPath !== current.path;
+      let hasSource = record.source !== undefined && record.source !== null;
+      let hasCompiled = record.compiled !== undefined && record.compiled !== null;
+      if (!(hasSource || hasCompiled || renamed)) {
+        throw new Error(`Rip Workspace: set for passport '${id}' carries nothing to apply (source, compiled, path, or deleted)`);
+      }
+      if (renamed)
+        claimPath(newPath, id);
+      source2 = hasSource ? validContent2(record.source) : current.source;
+      compiled = hasCompiled ? validModule(record.compiled) : hasSource ? undefined : current.compiled;
+      let oldPath = current.path;
+      if (renamed)
+        pathToId.delete(oldPath);
+      passports.set(id, { id, path: newPath, hash, source: source2, compiled });
+      pathToId.set(newPath, id);
+      if (renamed) {
+        notify("delete", oldPath);
+        notify("create", newPath);
+      } else {
+        notify("change", newPath);
+      }
+      return true;
+    },
+    seal() {
+      if (locked) {
+        throw new Error("Rip Workspace: workspace is already sealed");
+      }
+      locked = true;
+      return;
+    },
+    sealed() {
+      return locked;
+    },
+    passport(pathOrId) {
+      let id;
+      if (!(typeof pathOrId === "string" && pathOrId.length > 0)) {
+        throw new TypeError("Rip Workspace: passport lookup expects a passport id or component path");
+      }
+      let record = passports.get(pathOrId);
+      if (!record) {
+        id = pathToId.get(pathOrId);
+        record = id != null ? passports.get(id) : undefined;
+      }
+      if (!record)
+        return;
+      return { ...record };
+    },
+    ids() {
+      return Array.from(passports.keys());
+    },
+    paths() {
+      return Array.from(pathToId.keys());
+    }
+  };
+  return workspace;
+}
+// packages/app/feed.rip
+var FEED_BACKOFF_MAX;
+var FEED_BACKOFF_MIN;
+var defaultFetch;
+var defaultHubUrl;
+var defaultModuleUrl;
+var defaultSocketFactory;
+var validFileId;
+var validWireHash;
+FEED_BACKOFF_MIN = 250;
+FEED_BACKOFF_MAX = 8000;
+defaultHubUrl = function() {
+  if (typeof location === "undefined") {
+    throw new Error("Rip Workspace: connectFeed needs a hub URL (no location to derive one from)");
+  }
+  let scheme = location.protocol === "https:" ? "wss" : "ws";
+  return `${scheme}://${location.host}/hub`;
+};
+defaultSocketFactory = function() {
+  if (typeof WebSocket === "undefined") {
+    throw new Error("Rip Workspace: connectFeed needs a socket factory (no global WebSocket)");
+  }
+  return function(url) {
+    return new WebSocket(url);
+  };
+};
+defaultFetch = function() {
+  if (typeof fetch === "undefined") {
+    throw new Error("Rip Workspace: connectFeed needs a fetch (no global fetch)");
+  }
+  return function(url, opts) {
+    return fetch(url, opts);
+  };
+};
+defaultModuleUrl = function(id) {
+  return "/" + id.split("/").map(encodeURIComponent).join("/");
+};
+validWireHash = function(hash) {
+  return typeof hash === "string" && /^[A-Za-z0-9_]{6}$/.test(hash);
+};
+validFileId = function(id) {
+  if (!(typeof id === "string" && id.length > 0 && !id.startsWith("/") && !id.includes("\\")))
+    return false;
+  let segments = id.split("/");
+  if (segments.some(function(segment) {
+    return !segment || segment === "." || segment === ".." || segment.startsWith(".");
+  }))
+    return false;
+  return id.endsWith(".rip") || id.endsWith(".css") || id.endsWith(".html");
+};
+function connectFeed(workspace, opts = {}) {
+  let connect, resync;
+  if (!(workspace != null && typeof workspace.set === "function" && typeof workspace.passport === "function" && typeof workspace.sealed === "function")) {
+    throw new TypeError("Rip Workspace: connectFeed expects a workspace");
+  }
+  if (workspace.sealed()) {
+    throw new Error("Rip Workspace: connectFeed on a sealed workspace — production has no hub");
+  }
+  let hubUrl = opts.hub ?? defaultHubUrl();
+  let makeSocket = opts.makeSocket ?? defaultSocketFactory();
+  let fetchBytes = opts.fetch ?? defaultFetch();
+  let moduleUrl = opts.moduleUrl ?? defaultModuleUrl;
+  let manifestUrl = opts.manifestUrl ?? "/manifest.json";
+  let report = opts.report ?? function(...args) {
+    return console.error(...args);
+  };
+  let backoffMin = opts.backoff?.min ?? FEED_BACKOFF_MIN;
+  let backoffMax = opts.backoff?.max ?? FEED_BACKOFF_MAX;
+  let onEpoch = opts.onEpoch ?? function(ding) {
+    report(`[Rip] workspace feed: a new epoch is live (${ding.epoch}) — reloading`);
+    if (typeof location !== "undefined")
+      location.reload();
+    return;
+  };
+  let closed = false;
+  let isOpen = false;
+  let socket = null;
+  let attempts = 0;
+  let timer = null;
+  let resyncTimer = null;
+  let resyncAttempts = 0;
+  let lastCheck = opts.initialCheck ?? null;
+  if (!(lastCheck === null || validWireHash(lastCheck))) {
+    throw new TypeError("Rip Workspace: feed initialCheck must be six Base64URL-folded characters");
+  }
+  let wants = {};
+  let owners = {};
+  let claim = function(id) {
+    owners[id] = (owners[id] || 0) + 1;
+    workspace.claim?.(id, owners[id]);
+    return owners[id];
+  };
+  let owns = function(id, owner) {
+    return owners[id] === owner && !closed;
+  };
+  let fetchLatest = async function(id, owner) {
+    let res = await fetchBytes(moduleUrl(id), { cache: "no-store" });
+    if (!res.ok)
+      return { res };
+    let bytes = new Uint8Array(await res.arrayBuffer());
+    if (!owns(id, owner))
+      return null;
+    return { res, hash: rash(bytes), source: new TextDecoder().decode(bytes) };
+  };
+  let applyLatest = async function(id, owner) {
+    let result = await fetchLatest(id, owner);
+    if (!(result != null && owns(id, owner)))
+      return { stale: true };
+    if (!result.res.ok)
+      return { status: result?.res?.status, ok: false };
+    let current = workspace.passport(id);
+    let passport = { id, hash: result.hash, source: result.source, owner };
+    if (!(current != null))
+      passport.path = id;
+    let applied = await workspace.set(passport);
+    if (owns(id, owner))
+      delete wants[id];
+    return { ok: true, hash: result.hash, applied };
+  };
+  let wantsSatisfied = function() {
+    let current;
+    for (let id in wants) {
+      let want = wants[id];
+      current = workspace.passport(id);
+      if (current != null && current.hash === want.hash)
+        delete wants[id];
+    }
+    return Object.keys(wants).length === 0;
+  };
+  let scheduleResync = function() {
+    if (closed || resyncTimer != null)
+      return;
+    let delay2 = Math.min(backoffMin * 2 ** resyncAttempts, backoffMax);
+    resyncAttempts += 1;
+    resyncTimer = setTimeout(function() {
+      resyncTimer = null;
+      return resync().catch(function(error) {
+        return report("[Rip] workspace feed: resync failed:", error);
+      });
+    }, delay2);
+    return;
+  };
+  resync = async function() {
+    let current, owner, result, want;
+    let clean = true;
+    let res = await fetchBytes(manifestUrl, { cache: "no-cache" });
+    if (!res.ok) {
+      report(`[Rip] workspace feed: manifest fetch failed (${res.status})`);
+      scheduleResync();
+      return;
+    }
+    let manifest = await res.json();
+    let files = manifest?.files;
+    if (!(manifest != null && typeof manifest === "object" && !Array.isArray(manifest) && validWireHash(manifest.check) && Array.isArray(files))) {
+      report("[Rip] workspace feed: malformed manifest:", manifest);
+      return;
+    }
+    let priorId = null;
+    for (let entry of files) {
+      if (!(entry != null && typeof entry === "object" && !Array.isArray(entry) && validFileId(entry.id) && validWireHash(entry.hash) && (priorId === null || priorId < entry.id))) {
+        report("[Rip] workspace feed: malformed manifest entry:", entry);
+        return;
+      }
+      priorId = entry.id;
+    }
+    if (!(check(files) === manifest.check)) {
+      report("[Rip] workspace feed: manifest check does not match its files:", manifest);
+      return;
+    }
+    if (manifest.check === lastCheck && Object.keys(wants).length === 0) {
+      resyncAttempts = 0;
+      return;
+    }
+    let named = new Set;
+    for (let entry of files) {
+      named.add(entry.id);
+      current = workspace.passport(entry.id);
+      if (current != null && current.hash === entry.hash)
+        continue;
+      owner = claim(entry.id);
+      result = await applyLatest(entry.id, owner);
+      if (!(result?.ok || result?.stale)) {
+        report(`[Rip] workspace feed: module fetch missed (${result?.status}) for '${entry.id}' during resync`);
+        wants[entry.id] = { hash: entry.hash, sig: null };
+        clean = false;
+      }
+    }
+    let sig = JSON.stringify(files);
+    for (let id in { ...wants }) {
+      want = wants[id];
+      current = workspace.passport(id);
+      if (current != null && current.hash === want.hash) {
+        delete wants[id];
+        continue;
+      }
+      owner = claim(id);
+      result = await applyLatest(id, owner);
+      if (result?.ok) {
+        delete wants[id];
+      } else if (!result?.stale && !named.has(id)) {
+        if (want.sig != null && want.sig !== sig) {
+          if (wants[id] === want)
+            delete wants[id];
+        } else {
+          want.sig = sig;
+        }
+      } else {
+        if (!result?.stale) {
+          clean = false;
+        }
+      }
+    }
+    lastCheck = manifest.check;
+    if (clean && wantsSatisfied()) {
+      resyncAttempts = 0;
+    } else {
+      scheduleResync();
+    }
+    return;
+  };
+  let applyDing = async function(ding) {
+    let hash, id, kind2;
+    if (ding != null && typeof ding === "object" && ding.kind === "epoch") {
+      onEpoch(ding);
+      return;
+    }
+    if (!(ding != null && typeof ding === "object" && validFileId(ding.id))) {
+      report("[Rip] workspace feed: malformed ding:", ding);
+      return;
+    }
+    ({ id, kind: kind2, hash } = ding);
+    if (!validWireHash(hash)) {
+      report(`[Rip] workspace feed: malformed ${kind2 === "delete" ? "delete " : ""}ding:`, ding);
+      return;
+    }
+    if (kind2 === "delete") {
+      claim(id);
+      delete wants[id];
+      workspace.set({ id, hash, deleted: true, owner: owners[id] });
+      return;
+    }
+    let current = workspace.passport(id);
+    if (current != null && current.hash === hash)
+      return;
+    let owner = claim(id);
+    let result = await applyLatest(id, owner);
+    if (result?.stale || result?.ok)
+      return;
+    report(`[Rip] workspace feed: module fetch missed (${result?.status}) for '${id}' — resyncing from the manifest`);
+    wants[id] = { hash, sig: null };
+    await resync();
+    return;
+  };
+  let handleFrame = function(text) {
+    let frame = null;
+    try {
+      frame = JSON.parse(text);
+    } catch {
+      report("[Rip] workspace feed: unparseable hub frame:", text);
+      return;
+    }
+    let objects = Array.isArray(frame) ? frame : [frame];
+    for (let obj of objects) {
+      if (!(obj != null && typeof obj === "object" && obj.ding !== undefined))
+        continue;
+      applyDing(obj.ding).catch(function(error) {
+        return report("[Rip] workspace feed: ding apply failed:", error);
+      });
+    }
+    return;
+  };
+  let schedule = function() {
+    if (closed || timer != null)
+      return;
+    let delay2 = Math.min(backoffMin * 2 ** attempts, backoffMax);
+    attempts += 1;
+    timer = setTimeout(function() {
+      timer = null;
+      return connect();
+    }, delay2);
+    return;
+  };
+  connect = function() {
+    if (closed)
+      return;
+    try {
+      socket = makeSocket(hubUrl);
+    } catch (error) {
+      report("[Rip] workspace feed: socket open failed:", error);
+      schedule();
+      return;
+    }
+    socket.onopen = function() {
+      isOpen = true;
+      attempts = 0;
+      try {
+        socket.send(JSON.stringify({ "+": ["/hub"] }));
+      } catch (error) {
+        report("[Rip] workspace feed: self-join failed:", error);
+      }
+      resync().catch(function(error) {
+        return report("[Rip] workspace feed: resync failed:", error);
+      });
+      return;
+    };
+    socket.onmessage = function(event) {
+      handleFrame(String(event.data));
+      return;
+    };
+    socket.onclose = function() {
+      isOpen = false;
+      schedule();
+      return;
+    };
+    socket.onerror = function() {
+      return;
+    };
+    return;
+  };
+  connect();
+  return {
+    close() {
+      if (closed)
+        return;
+      closed = true;
+      for (let id in owners) {
+        owners[id] += 1;
+      }
+      if (timer != null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (resyncTimer != null) {
+        clearTimeout(resyncTimer);
+        resyncTimer = null;
+      }
+      try {
+        socket?.close();
+      } catch {}
+      return;
+    },
+    connected() {
+      return isOpen && !closed;
+    },
+    resync() {
+      return resync();
+    }
+  };
+}
+// packages/app/apply.rip
+function createApply(opts) {
+  if (!(opts != null && typeof opts === "object")) {
+    throw new TypeError("Rip App: createApply expects an options object");
+  }
+  if (!(typeof opts.renderer?.remountDirty === "function")) {
+    throw new TypeError("Rip App: createApply requires renderer.remountDirty");
+  }
+  if (!(typeof opts.escape === "function")) {
+    throw new TypeError("Rip App: createApply requires an escape remount");
+  }
+  let report = opts.report ?? function(...args) {
+    return console.log(...args);
+  };
+  let absorb = async function(paths) {
+    if (!(Array.isArray(paths) && paths.length > 0)) {
+      return "ignore";
+    }
+    let css = (() => {
+      const result = [];
+      for (let p2 of paths) {
+        if (typeof p2 === "string" && p2.endsWith(".css")) {
+          result.push(p2);
+        }
+      }
+      return result;
+    })();
+    let html = (() => {
+      const result = [];
+      for (let p2 of paths) {
+        if (typeof p2 === "string" && p2.endsWith(".html")) {
+          result.push(p2);
+        }
+      }
+      return result;
+    })();
+    let rip = (() => {
+      const result = [];
+      for (let p2 of paths) {
+        if (typeof p2 === "string" && p2.endsWith(".rip")) {
+          result.push(p2);
+        }
+      }
+      return result;
+    })();
+    if (rip.length === 0) {
+      if (css.length > 0 && html.length === 0)
+        return "css";
+      if (html.length > 0)
+        return "reload";
+      return "ignore";
+    }
+    let verdict = "escape";
+    try {
+      verdict = await opts.renderer.remountDirty(rip);
+    } catch (error) {
+      report("[Rip] update failed — falling back to full in-page remount", error);
+      verdict = "escape";
+    }
+    if (verdict === "narrow") {
+      report(`[Rip] applied ${rip.join(", ")} — update`);
+      return "update";
+    }
+    if (verdict === "noop")
+      return "ignore";
+    await opts.escape(rip);
+    report(`[Rip] applied ${rip.join(", ")} — update`);
+    return "update";
+  };
+  return { absorb };
+}
+// src/browser-app.js
+var rash2 = Object.freeze({ rash, check });
+var embeddedPackages = Object.freeze({
+  "@rip-lang/app": exports_app,
+  "@rip-lang/app/rash": rash2
+});
+
+// src/browser-modules.js
+var RUNTIME_MODULES = { intrinsics: exports_intrinsics, stdlib: exports_stdlib, schema: exports_schema, reactive: exports_reactive, components: exports_components };
+var RUNTIME_PATHS = new Map(Object.keys(RUNTIME_MODULES).map((name) => [new URL(`./runtime/${name}.js`, import.meta.url).pathname, name]));
+var RUNTIME_RE = /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/;
+var BRIDGE_KEY = "__ripModuleBridge";
+var unquote = (specifier) => specifier.slice(1, -1);
+var joinPath = (from, relative) => {
+  const parts = from.split("/").slice(0, -1);
+  for (const piece of relative.split("/")) {
+    if (piece === "" || piece === ".")
+      continue;
+    if (piece === "..") {
+      if (!parts.length)
+        return null;
+      parts.pop();
+    } else {
+      parts.push(piece);
+    }
+  }
+  return parts.join("/");
+};
+var toObjectUrl = (code) => {
+  if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function" && typeof Blob !== "undefined") {
+    return URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+  }
+  return `data:text/javascript;base64,${btoa(unescape(encodeURIComponent(code)))}`;
+};
+function createModuleLoader({
+  components: registry,
+  packages = {},
+  embeddedPackages: embeddedPackages2 = {},
+  debug = false
+} = {}) {
+  if (!registry || typeof registry.read !== "function") {
+    throw new TypeError("rip: createModuleLoader requires a component registry");
+  }
+  const urls = new Map;
+  const namespaces = new Map;
+  const bridges = new Map;
+  const dependents = new Map;
+  const bridgeFor = (key, namespace) => {
+    if (bridges.has(key))
+      return bridges.get(key);
+    globalThis[BRIDGE_KEY] ??= {};
+    const existing = globalThis[BRIDGE_KEY][key];
+    if (existing && existing !== namespace) {
+      throw new Error(`rip: two copies of embedded module '${key}' are active on one page`);
+    }
+    globalThis[BRIDGE_KEY][key] = namespace;
+    const lines = [`const ns = globalThis['${BRIDGE_KEY}'][${JSON.stringify(key)}];`];
+    for (const name of Object.keys(namespace)) {
+      if (name === "default") {
+        lines.push("export default ns['default'];");
+      } else if (/^[A-Za-z_$][\w$]*$/.test(name)) {
+        lines.push(`export const ${name} = ns[${JSON.stringify(name)}];`);
+      } else {
+        throw new Error(`rip: embedded module '${key}' exports '${name}', which cannot cross the module bridge`);
+      }
+    }
+    const url = toObjectUrl(lines.join(`
+`));
+    bridges.set(key, url);
+    return url;
+  };
+  const resolvePath = (specifier, from) => {
+    const spec = unquote(specifier);
+    const runtime = RUNTIME_PATHS.get(spec) ?? spec.match(RUNTIME_RE)?.[1];
+    if (runtime)
+      return { bridge: `runtime:${runtime}`, namespace: RUNTIME_MODULES[runtime] };
+    const inBundle = (path) => {
+      try {
+        return registry.exists(path);
+      } catch {
+        return false;
+      }
+    };
+    const hint = spec.endsWith(".rip") ? "" : ` — did you mean '${spec}.rip'?`;
+    if (spec.startsWith("./") || spec.startsWith("../")) {
+      const joined = joinPath(from, spec);
+      if (joined && inBundle(joined))
+        return { path: joined };
+      if (!from.startsWith("@rip-lang/")) {
+        const physical = joinPath(`app/${from}`, spec);
+        const mounted = physical?.startsWith("app/") ? physical.slice("app/".length) : physical;
+        if (mounted && inBundle(mounted))
+          return { path: mounted };
+      }
+      throw new Error(`rip: '${from}' imports '${spec}', which is not in the bundle${hint}`);
+    }
+    const bare = spec.match(/^@rip-lang\/([\w-]+)(?:\/(.+))?$/);
+    if (bare) {
+      if (inBundle(spec))
+        return { path: spec };
+      const packageName = `@rip-lang/${bare[1]}`;
+      const embedded = embeddedPackages2[spec];
+      if (embedded)
+        return { bridge: `package:${spec}`, namespace: embedded };
+      if (embeddedPackages2[packageName]) {
+        throw new Error(`rip: '${from}' imports '${spec}', which '${packageName}' does not export in the browser`);
+      }
+      const entry = packages[packageName];
+      if (!entry) {
+        throw new Error(`rip: '${from}' imports '${spec}', but the bundle carries no such package — ` + "only packages declaring browser safety travel to the browser");
+      }
+      const sub = bare[2] ? entry.exports?.[`./${bare[2]}`] ?? (bare[2].endsWith(".rip") ? bare[2] : `${bare[2]}.rip`) : entry.entry;
+      const path = `${entry.root}/${sub}`;
+      if (!inBundle(path)) {
+        throw new Error(`rip: '${from}' imports '${spec}', but '${path}' is not in the bundle`);
+      }
+      return { path };
+    }
+    throw new Error(`rip: '${from}' imports '${spec}', which is not loadable in a browser — ` + "server-only and unknown modules never travel to the browser");
+  };
+  const load = (path, chain) => {
+    if (chain.includes(path)) {
+      throw new Error(`rip: import cycle through '${path}' (${chain.join(" -> ")} -> ${path})`);
+    }
+    if (urls.has(path))
+      return urls.get(path);
+    const promise = (async () => {
+      const source2 = registry.read(path);
+      if (source2 === undefined) {
+        throw new Error(`rip: '${path}' is not in the bundle`);
+      }
+      const compiled = compile(source2, { path, runtimeDelivery: "import" });
+      let code = compiled.code;
+      for (const span of [...compiled.imports].reverse()) {
+        const target = resolvePath(span.specifier, path);
+        if (target.path) {
+          let importers = dependents.get(target.path);
+          if (!importers)
+            dependents.set(target.path, importers = new Set);
+          importers.add(path);
+        }
+        const url = target.bridge ? bridgeFor(target.bridge, target.namespace) : await load(target.path, [...chain, path]);
+        code = `${code.slice(0, span.start)}${JSON.stringify(url)}${code.slice(span.end)}`;
+      }
+      if (debug) {
+        const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(compiled.map))));
+        code += `
+//# sourceMappingURL=data:application/json;charset=utf-8;base64,${b64}`;
+      }
+      return toObjectUrl(code);
+    })();
+    urls.set(path, promise);
+    promise.catch(() => urls.delete(path));
+    return promise;
+  };
+  return {
+    async import(path) {
+      if (namespaces.has(path))
+        return namespaces.get(path);
+      const url = await load(path, []);
+      const namespace = await import(url);
+      namespaces.set(path, namespace);
+      registry.setCompiled(path, { ...namespace });
+      return namespace;
+    },
+    invalidate(path) {
+      const queue = [path];
+      const seen = new Set;
+      while (queue.length) {
+        const at = queue.pop();
+        if (seen.has(at))
+          continue;
+        seen.add(at);
+        urls.delete(at);
+        namespaces.delete(at);
+        for (const importer of dependents.get(at) ?? [])
+          queue.push(importer);
+      }
+    }
+  };
+}
+
 // src/browser-scripts.js
 var scopeNames = Object.keys(runtimes);
 var scopeValues = scopeNames.map((name) => runtimes[name]);
-var browserHost = () => {
+var browserHost3 = () => {
   if (typeof document === "undefined" || typeof document.querySelectorAll !== "function") {
     throw new Error("rip: processRipScripts requires a browser or an injected host");
   }
@@ -24165,7 +28271,7 @@ var claimKey = (label) => {
   }
 };
 async function processRipScripts(host = null) {
-  const h = host ?? browserHost();
+  const h = host ?? browserHost3();
   await h.ready?.();
   const sources = [];
   const seen = new Set;
@@ -24196,18 +28302,18 @@ async function processRipScripts(host = null) {
     h.report?.(error);
   };
   const loaded = [];
-  for (const source of sources) {
-    if (source.text !== null) {
-      loaded.push(source);
+  for (const source2 of sources) {
+    if (source2.text !== null) {
+      loaded.push(source2);
       continue;
     }
     if (typeof h.fetchText !== "function") {
       throw new Error("rip: this host loads script sources by URL but provides no fetchText");
     }
     try {
-      loaded.push({ ...source, text: await h.fetchText(source.url) });
+      loaded.push({ ...source2, text: await h.fetchText(source2.url) });
     } catch (error) {
-      report(source.label, new Error(`rip: failed to load '${source.label}': ${error.message}`));
+      report(source2.label, new Error(`rip: failed to load '${source2.label}': ${error.message}`));
     }
   }
   let active = loaded;
@@ -24216,10 +28322,10 @@ async function processRipScripts(host = null) {
     const offsets = [];
     let line = 1;
     const parts = [];
-    for (const source of active) {
-      offsets.push({ source, start: line });
-      const text = source.text.endsWith(`
-`) ? source.text.slice(0, -1) : source.text;
+    for (const source2 of active) {
+      offsets.push({ source: source2, start: line });
+      const text = source2.text.endsWith(`
+`) ? source2.text.slice(0, -1) : source2.text;
       parts.push(text);
       line += text.split(`
 `).length;
@@ -24240,7 +28346,7 @@ async function processRipScripts(host = null) {
       framed.line = local;
       framed.col = error.col;
       report(owner.source.label, framed);
-      active = active.filter((source) => source !== owner.source);
+      active = active.filter((source2) => source2 !== owner.source);
       compiled = null;
     }
   }
@@ -24269,172 +28375,11 @@ ${compiled.code}
   }
   return { count: active.length, executed, failures };
 }
-// src/browser-modules.js
-var RUNTIME_MODULES = { intrinsics: exports_intrinsics, stdlib: exports_stdlib, schema: exports_schema, reactive: exports_reactive, components: exports_components };
-var RUNTIME_PATHS = new Map(Object.keys(RUNTIME_MODULES).map((name) => [new URL(`./runtime/${name}.js`, import.meta.url).pathname, name]));
-var RUNTIME_RE = /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/;
-var BRIDGE_KEY = "__ripRuntimeBridge";
-var unquote = (specifier) => specifier.slice(1, -1);
-var joinPath = (from, relative) => {
-  const parts = from.split("/").slice(0, -1);
-  for (const piece of relative.split("/")) {
-    if (piece === "" || piece === ".")
-      continue;
-    if (piece === "..") {
-      if (!parts.length)
-        return null;
-      parts.pop();
-    } else {
-      parts.push(piece);
-    }
-  }
-  return parts.join("/");
-};
-var toObjectUrl = (code) => {
-  if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function" && typeof Blob !== "undefined") {
-    return URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
-  }
-  return `data:text/javascript;base64,${btoa(unescape(encodeURIComponent(code)))}`;
-};
-function createModuleLoader({ components: registry, packages = {}, debug = false } = {}) {
-  if (!registry || typeof registry.read !== "function") {
-    throw new TypeError("rip: createModuleLoader requires a component registry");
-  }
-  const urls = new Map;
-  const namespaces = new Map;
-  const bridges = new Map;
-  const dependents = new Map;
-  const bridgeFor = (name) => {
-    if (bridges.has(name))
-      return bridges.get(name);
-    const namespace = RUNTIME_MODULES[name];
-    globalThis[BRIDGE_KEY] ??= {};
-    const existing = globalThis[BRIDGE_KEY][name];
-    if (existing && existing !== namespace) {
-      throw new Error(`rip: two copies of the Rip runtime are bridging '${name}' on one page`);
-    }
-    globalThis[BRIDGE_KEY][name] = namespace;
-    const lines = [`const ns = globalThis['${BRIDGE_KEY}']['${name}'];`];
-    for (const key of Object.keys(namespace)) {
-      if (!/^[A-Za-z_$][\w$]*$/.test(key)) {
-        throw new Error(`rip: runtime '${name}' exports '${key}', which cannot cross the module bridge`);
-      }
-      lines.push(`export const ${key} = ns['${key}'];`);
-    }
-    const url = toObjectUrl(lines.join(`
-`));
-    bridges.set(name, url);
-    return url;
-  };
-  const resolvePath = (specifier, from) => {
-    const spec = unquote(specifier);
-    const runtime = RUNTIME_PATHS.get(spec) ?? spec.match(RUNTIME_RE)?.[1];
-    if (runtime)
-      return { bridge: runtime };
-    const inBundle = (path) => {
-      try {
-        return registry.exists(path);
-      } catch {
-        return false;
-      }
-    };
-    const hint = spec.endsWith(".rip") ? "" : ` — did you mean '${spec}.rip'?`;
-    if (spec.startsWith("./") || spec.startsWith("../")) {
-      const joined = joinPath(from, spec);
-      if (joined && inBundle(joined))
-        return { path: joined };
-      if (!from.startsWith("@rip-lang/")) {
-        const physical = joinPath(`app/${from}`, spec);
-        const mounted = physical?.startsWith("app/") ? physical.slice("app/".length) : physical;
-        if (mounted && inBundle(mounted))
-          return { path: mounted };
-      }
-      throw new Error(`rip: '${from}' imports '${spec}', which is not in the bundle${hint}`);
-    }
-    const bare = spec.match(/^@rip-lang\/([\w-]+)(?:\/(.+))?$/);
-    if (bare) {
-      if (inBundle(spec))
-        return { path: spec };
-      const entry = packages[`@rip-lang/${bare[1]}`];
-      if (!entry) {
-        throw new Error(`rip: '${from}' imports '${spec}', but the bundle carries no such package — ` + "only packages declaring browser safety travel to the browser");
-      }
-      const sub = bare[2] ? entry.exports?.[`./${bare[2]}`] ?? (bare[2].endsWith(".rip") ? bare[2] : `${bare[2]}.rip`) : entry.entry;
-      const path = `${entry.root}/${sub}`;
-      if (!inBundle(path)) {
-        throw new Error(`rip: '${from}' imports '${spec}', but '${path}' is not in the bundle`);
-      }
-      return { path };
-    }
-    throw new Error(`rip: '${from}' imports '${spec}', which is not loadable in a browser — ` + "server-only and unknown modules never travel to the browser");
-  };
-  const load = (path, chain) => {
-    if (chain.includes(path)) {
-      throw new Error(`rip: import cycle through '${path}' (${chain.join(" -> ")} -> ${path})`);
-    }
-    if (urls.has(path))
-      return urls.get(path);
-    const promise = (async () => {
-      const source = registry.read(path);
-      if (source === undefined) {
-        throw new Error(`rip: '${path}' is not in the bundle`);
-      }
-      const compiled = compile(source, { path, runtimeDelivery: "import" });
-      let code = compiled.code;
-      for (const span of [...compiled.imports].reverse()) {
-        const target = resolvePath(span.specifier, path);
-        if (target.path) {
-          let importers = dependents.get(target.path);
-          if (!importers)
-            dependents.set(target.path, importers = new Set);
-          importers.add(path);
-        }
-        const url = target.bridge ? bridgeFor(target.bridge) : await load(target.path, [...chain, path]);
-        code = `${code.slice(0, span.start)}${JSON.stringify(url)}${code.slice(span.end)}`;
-      }
-      if (debug) {
-        const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(compiled.map))));
-        code += `
-//# sourceMappingURL=data:application/json;charset=utf-8;base64,${b64}`;
-      }
-      return toObjectUrl(code);
-    })();
-    urls.set(path, promise);
-    promise.catch(() => urls.delete(path));
-    return promise;
-  };
-  return {
-    async import(path) {
-      if (namespaces.has(path))
-        return namespaces.get(path);
-      const url = await load(path, []);
-      const namespace = await import(url);
-      namespaces.set(path, namespace);
-      registry.setCompiled(path, { ...namespace });
-      return namespace;
-    },
-    invalidate(path) {
-      const queue = [path];
-      const seen = new Set;
-      while (queue.length) {
-        const at = queue.pop();
-        if (seen.has(at))
-          continue;
-        seen.add(at);
-        urls.delete(at);
-        namespaces.delete(at);
-        for (const importer of dependents.get(at) ?? [])
-          queue.push(importer);
-      }
-    }
-  };
-}
 // src/browser-boot.js
-var APP_PACKAGE = "@rip-lang/app";
 var bootGraphs = new Map;
 var isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-var validHash = (value) => typeof value === "string" && /^[A-Za-z0-9_]{6}$/.test(value);
-var validFileId = (id) => {
+var validHash2 = (value) => typeof value === "string" && /^[A-Za-z0-9_]{6}$/.test(value);
+var validFileId2 = (id) => {
   if (typeof id !== "string" || id.length === 0 || id.startsWith("/") || id.includes("\\"))
     return false;
   const segments = id.split("/");
@@ -24443,12 +28388,12 @@ var validFileId = (id) => {
   return id.endsWith(".rip") || id.endsWith(".css") || id.endsWith(".html");
 };
 var validatePublication = (bundle, app) => {
-  if (!validHash(bundle.check) || !Array.isArray(bundle.files)) {
+  if (!validHash2(bundle.check) || !Array.isArray(bundle.files)) {
     throw new Error("rip: workspace bundle requires a check and a files inventory");
   }
   let priorId = null;
   for (const entry of bundle.files) {
-    if (!isRecord(entry) || !validFileId(entry.id) || !validHash(entry.hash) || priorId !== null && priorId >= entry.id) {
+    if (!isRecord(entry) || !validFileId2(entry.id) || !validHash2(entry.hash) || priorId !== null && priorId >= entry.id) {
       throw new Error(`rip: workspace bundle has a malformed or unsorted file entry: ${JSON.stringify(entry)}`);
     }
     priorId = entry.id;
@@ -24459,11 +28404,11 @@ var validatePublication = (bundle, app) => {
   for (const entry of bundle.files) {
     if (!entry.id.endsWith(".rip"))
       continue;
-    const source = bundle.modules?.[entry.id];
-    if (typeof source !== "string") {
+    const source2 = bundle.modules?.[entry.id];
+    if (typeof source2 !== "string") {
       throw new Error(`rip: workspace bundle is missing authored Rip source '${entry.id}'`);
     }
-    const actual = app.rash(new TextEncoder().encode(source));
+    const actual = app.rash(new TextEncoder().encode(source2));
     if (actual !== entry.hash) {
       throw new Error(`rip: workspace bundle source '${entry.id}' hashes to ${actual}, not ${entry.hash}`);
     }
@@ -24541,13 +28486,8 @@ async function bootApp(opts = {}) {
   if (!bundle || typeof bundle !== "object") {
     throw new Error("rip: bootApp requires a bundle or a url");
   }
-  const appEntry = bundle.packages?.[APP_PACKAGE];
-  if (!appEntry) {
-    throw new Error(`rip: the bundle carries no '${APP_PACKAGE}' package — assemble the application with its packages`);
-  }
   const debug = opts.debug === true;
-  const appPackagePaths = Object.keys(bundle.modules ?? {}).filter((path) => path.startsWith(`${appEntry.root}/`)).sort();
-  const fingerprint = `${debug}:${JSON.stringify(appPackagePaths.map((path) => [path, bundle.modules[path]]))}`;
+  const fingerprint = debug ? "debug" : "plain";
   let graph = bootGraphs.get(fingerprint);
   if (!graph) {
     const files2 = new Map;
@@ -24559,7 +28499,11 @@ async function bootApp(opts = {}) {
       setCompiled: (path, module) => void compiledStore.set(path, module)
     };
     const packages2 = {};
-    graph = { files: files2, packages: packages2, loader: createModuleLoader({ components: registry, packages: packages2, debug }) };
+    graph = {
+      files: files2,
+      packages: packages2,
+      loader: createModuleLoader({ components: registry, packages: packages2, embeddedPackages, debug })
+    };
     bootGraphs.set(fingerprint, graph);
   }
   const { files, packages, loader } = graph;
@@ -24575,27 +28519,26 @@ async function bootApp(opts = {}) {
       loader.invalidate(path);
     }
   }
-  for (const [path, source] of Object.entries(modules)) {
-    if (files.get(path) !== source) {
-      files.set(path, source);
+  for (const [path, source2] of Object.entries(modules)) {
+    if (files.get(path) !== source2) {
+      files.set(path, source2);
       loader.invalidate(path);
     }
   }
-  const app = await loader.import(`${appEntry.root}/${appEntry.entry}`);
   let bag = null;
   if (workspaceMode) {
-    validatePublication(bundle, app);
-    bag = app.createWorkspace();
+    validatePublication(bundle, exports_app);
+    bag = exports_app.createWorkspace();
     const records = [];
     for (const entry of bundle.files) {
-      const source = (bundle.modules ?? {})[entry.id];
+      const source2 = (bundle.modules ?? {})[entry.id];
       const record = {
         id: entry.id,
         path: entry.id,
         hash: entry.hash
       };
-      if (source !== undefined)
-        record.source = source;
+      if (source2 !== undefined)
+        record.source = source2;
       records.push(record);
     }
     bag.populate(records);
@@ -24607,7 +28550,7 @@ async function bootApp(opts = {}) {
     }
   }
   if (!workspaceMode) {
-    return app.launch({
+    return exports_app.launch({
       bundle: { modules: bundle.modules, compiled, data: bundle.data },
       target: opts.target,
       adapter: opts.adapter,
@@ -24618,7 +28561,7 @@ async function bootApp(opts = {}) {
       onError: opts.onError
     });
   }
-  const launchWith = (compiledModules) => app.launch({
+  const launchWith = (compiledModules) => exports_app.launch({
     bundle: { compiled: compiledModules, data: bundle.data },
     components: bag,
     target: opts.target,
@@ -24655,8 +28598,8 @@ async function bootApp(opts = {}) {
     }
     return null;
   };
-  const applyCssSheet = (id, source, hash) => {
-    if (typeof document === "undefined" || typeof source !== "string")
+  const applyCssSheet = (id, source2, hash) => {
+    if (typeof document === "undefined" || typeof source2 !== "string")
       return;
     const link = cssLinkFor(id);
     if (link && typeof hash === "string" && hash.length > 0) {
@@ -24684,7 +28627,7 @@ async function bootApp(opts = {}) {
       el.setAttribute("data-rip-css", id);
       document.head.appendChild(el);
     }
-    el.textContent = source;
+    el.textContent = source2;
   };
   const removeCssSheet = (id) => {
     if (typeof document === "undefined")
@@ -24714,7 +28657,7 @@ async function bootApp(opts = {}) {
     current = launchWith(snapshot);
     Object.assign(handle, current, stable);
   };
-  const apply = app.createApply({
+  const apply = exports_app.createApply({
     renderer: {
       remountDirty: (paths) => current.renderer.remountDirty(paths)
     },
@@ -24848,7 +28791,7 @@ async function bootApp(opts = {}) {
       return bag.set({ ...passport, compiled: { ...module } });
     }
   };
-  const feed = app.connectFeed(door, {
+  const feed = exports_app.connectFeed(door, {
     ...opts.feed ?? {},
     manifestUrl,
     report,
@@ -24870,17 +28813,20 @@ async function bootApp(opts = {}) {
   return Object.assign(handle, current, stable);
 }
 // src/browser.js
-function compileToJS(source, options = {}) {
+function createModuleLoader2(options = {}) {
+  return createModuleLoader({ ...options, embeddedPackages });
+}
+function compileToJS(source2, options = {}) {
   if (options.runtimeDelivery !== undefined && options.runtimeDelivery !== "none") {
     throw new Error(`rip: browser compilation delivers runtimes by scope; runtimeDelivery '${options.runtimeDelivery}' is not available here`);
   }
-  return compile(source, { ...options, runtimeDelivery: "none" });
+  return compile(source2, { ...options, runtimeDelivery: "none" });
 }
 export {
   runtimes,
   processRipScripts,
   fetchBundle,
-  createModuleLoader,
+  createModuleLoader2 as createModuleLoader,
   compileToJS,
   compile,
   bootApp
