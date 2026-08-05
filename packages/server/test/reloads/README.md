@@ -6,6 +6,7 @@ Full App-and-API reload shape:
 - API edits prepare a complete candidate before cutting admission;
 - a broken candidate leaves the active pool and App usable;
 - accepted workers replace the pool without dropping Janus-held connections;
-- missed file dings recover through the manifest.
+- missed publication changes recover through `latest.json` and a complete
+  reload.
 
 The fixture distinguishes browser publication from server artifact generation.

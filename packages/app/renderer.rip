@@ -498,7 +498,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     job.cell.preload().catch(-> null) for job in jobs
     return
 
-  # Probe 1 apply seam: remount living route/layout instances whose
+  # Publication apply seam: remount living route/layout instances whose
   # modules changed, keeping the stash and ancestor layouts. Stash and
   # non-UI modules are the caller's escape (whole-launch remount).
   remountDirty = (paths) ->

@@ -29,7 +29,7 @@ test('programmatic push and back drive navigation with render gates', async ({ p
   await expect(page.locator('#title')).toHaveText('home');
 });
 
-test('a reload revalidates the bundle through its ETag', async ({ page }) => {
+test('a reload obtains the bundle through normal HTTP cache policy', async ({ page }) => {
   const statuses = [];
   page.on('response', response => {
     if (response.url().endsWith('/bundle.json')) statuses.push(response.status());
@@ -39,7 +39,8 @@ test('a reload revalidates the bundle through its ETag', async ({ page }) => {
   await page.reload();
   await expect.poll(() => page.evaluate(() => globalThis.__bootResult)).toBe('ok');
   expect(statuses[0]).toBe(200);
-  expect(statuses[1]).toBe(304);
+  expect([200, 304]).toContain(statuses[1]);
+  expect(await page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith('__rip_bundle_')))).toEqual([]);
 });
 
 test('source maps ship only when the page opts into debug', async ({ page, browserName }) => {

@@ -27159,6 +27159,640 @@ function launch(opts) {
   }
   return { app, components, router, renderer, destroy };
 }
+// packages/app/workspace.rip
+var prepared;
+var validContent2;
+var validDirectory2;
+var validHash;
+var validModule;
+var validPath2;
+validPath2 = function(path) {
+  if (!(typeof path === "string" && path.length > 0)) {
+    throw new TypeError("Rip Workspace: component path must be a non-empty string");
+  }
+  let segments = path.split("/");
+  let invalidSegment = segments.some(function(segment) {
+    return !segment || segment === "." || segment === ".." || segment.startsWith(".");
+  });
+  let filename = segments.at(-1);
+  let fileAsDirectory = segments.slice(0, -1).some(function(segment) {
+    return segment.endsWith(".rip");
+  });
+  if (path.includes("\\") || path.startsWith("/") || invalidSegment || fileAsDirectory || filename === ".rip" || !filename.endsWith(".rip")) {
+    throw new TypeError(`Rip Workspace: invalid component path '${path}'`);
+  }
+  return path;
+};
+validContent2 = function(content) {
+  if (!(typeof content === "string")) {
+    throw new TypeError("Rip Workspace: component source must be a string");
+  }
+  return content;
+};
+validDirectory2 = function(dir) {
+  if (dir === "" || !(dir != null))
+    return "";
+  if (!(typeof dir === "string")) {
+    throw new TypeError("Rip Workspace: component directory must be a string");
+  }
+  let segments = dir.split("/");
+  if (dir.includes("\\") || dir.startsWith("/") || segments.some(function(segment) {
+    return !segment || segment === "." || segment === ".." || segment.startsWith(".");
+  })) {
+    throw new TypeError(`Rip Workspace: invalid component directory '${dir}'`);
+  }
+  return dir;
+};
+validHash = function(hash) {
+  if (!(typeof hash === "string" && /^[A-Za-z0-9_]{6}$/.test(hash))) {
+    throw new TypeError("Rip Workspace: publication hash must be six Base64URL-folded characters");
+  }
+  return hash;
+};
+validModule = function(module) {
+  if (!(module != null && typeof module === "object" && !Array.isArray(module))) {
+    throw new TypeError("Rip Workspace: compiled component module must be an object");
+  }
+  return module;
+};
+prepared = function(state) {
+  let path;
+  if (!(state != null && typeof state === "object" && !Array.isArray(state))) {
+    throw new TypeError("Rip Workspace: prepared state must be an object");
+  }
+  let hash = validHash(state.hash);
+  if (!(state.sources != null && typeof state.sources === "object" && !Array.isArray(state.sources))) {
+    throw new TypeError("Rip Workspace: prepared sources must be an object");
+  }
+  if (!(state.compiled != null && typeof state.compiled === "object" && !Array.isArray(state.compiled))) {
+    throw new TypeError("Rip Workspace: prepared compiled modules must be an object");
+  }
+  let sources = new Map;
+  let compiled = new Map;
+  const _ref = state.sources;
+  for (let path2 in _ref) {
+    if (!Object.hasOwn(_ref, path2))
+      continue;
+    let source2 = _ref[path2];
+    sources.set(validPath2(path2), validContent2(source2));
+  }
+  const _ref1 = state.compiled;
+  for (let path2 in _ref1) {
+    if (!Object.hasOwn(_ref1, path2))
+      continue;
+    let module = _ref1[path2];
+    path2 = validPath2(path2);
+    if (!sources.has(path2))
+      throw new Error(`Rip Workspace: compiled module '${path2}' has no source`);
+    compiled.set(path2, validModule(module));
+  }
+  return { hash, sources, compiled };
+};
+function createWorkspace() {
+  let sources = new Map;
+  let compiled = new Map;
+  let watchers = new Set;
+  let activeHash = null;
+  let notify = function(event, path) {
+    for (let watcher of Array.from(watchers)) {
+      try {
+        watcher(event, path);
+      } catch (error) {
+        console.error("[Rip] workspace watcher error:", error);
+      }
+    }
+    return;
+  };
+  let replace = function(next) {
+    sources = next.sources;
+    compiled = next.compiled;
+    activeHash = next.hash;
+    return;
+  };
+  let workspace = {
+    read(path) {
+      return sources.get(validPath2(path));
+    },
+    write(path, content) {
+      path = validPath2(path);
+      content = validContent2(content);
+      let event = sources.has(path) ? "change" : "create";
+      sources.set(path, content);
+      compiled.delete(path);
+      notify(event, path);
+      return;
+    },
+    del(path) {
+      path = validPath2(path);
+      sources.delete(path);
+      compiled.delete(path);
+      notify("delete", path);
+      return;
+    },
+    exists(path) {
+      return sources.has(validPath2(path));
+    },
+    size() {
+      return sources.size;
+    },
+    list(dir = "") {
+      let rest;
+      dir = validDirectory2(dir);
+      let prefix = dir ? dir + "/" : "";
+      let result = [];
+      for (let [path] of sources) {
+        if (path.startsWith(prefix)) {
+          rest = path.slice(prefix.length);
+          if (!rest.includes("/"))
+            result.push(path);
+        }
+      }
+      return result;
+    },
+    listAll(dir = "") {
+      dir = validDirectory2(dir);
+      let prefix = dir ? dir + "/" : "";
+      let result = [];
+      for (let [path] of sources) {
+        if (path.startsWith(prefix)) {
+          result.push(path);
+        }
+      }
+      return result;
+    },
+    load(values) {
+      if (!(values != null && typeof values === "object" && !Array.isArray(values))) {
+        throw new TypeError("Rip Workspace: component load expects a source object");
+      }
+      let next = [];
+      for (let path in values) {
+        if (!Object.hasOwn(values, path))
+          continue;
+        let content = values[path];
+        next.push([validPath2(path), validContent2(content)]);
+      }
+      for (let [path, content] of next) {
+        sources.set(path, content);
+        compiled.delete(path);
+      }
+      return;
+    },
+    watch(fn) {
+      if (!(typeof fn === "function")) {
+        throw new TypeError("Rip Workspace: component watch expects a function");
+      }
+      watchers.add(fn);
+      let disposed = false;
+      return function() {
+        if (disposed)
+          return;
+        disposed = true;
+        watchers.delete(fn);
+        return;
+      };
+    },
+    getCompiled(path) {
+      return compiled.get(validPath2(path));
+    },
+    setCompiled(path, module) {
+      path = validPath2(path);
+      if (!sources.has(path))
+        throw new Error(`Rip Workspace: setCompiled for unknown component path '${path}'`);
+      compiled.set(path, validModule(module));
+      return;
+    },
+    hash() {
+      return activeHash;
+    },
+    activate(state) {
+      if (activeHash != null)
+        throw new Error("Rip Workspace: a publication is already active");
+      replace(prepared(state));
+      return;
+    },
+    commit(from, state, changed) {
+      let event;
+      from = validHash(from);
+      if (!(activeHash === from))
+        throw new Error(`Rip Workspace: change starts at ${from}, not ${activeHash}`);
+      if (!Array.isArray(changed)) {
+        throw new TypeError("Rip Workspace: changed paths must be an array");
+      }
+      let paths = changed.map(function(path) {
+        return validPath2(path);
+      });
+      if (!(new Set(paths).size === paths.length))
+        throw new Error("Rip Workspace: changed paths must be unique");
+      let next = prepared(state);
+      let before = sources;
+      replace(next);
+      for (let path of paths) {
+        event = !next.sources.has(path) ? "delete" : before.has(path) ? "change" : "create";
+        notify(event, path);
+      }
+      return;
+    }
+  };
+  return workspace;
+}
+// packages/app/feed.rip
+var FEED_ACK_TIMEOUT;
+var FEED_BACKOFF_MAX;
+var FEED_BACKOFF_MIN;
+var defaultFetch;
+var defaultHubUrl;
+var defaultSocketFactory;
+var serial;
+var validHash2;
+FEED_BACKOFF_MIN = 250;
+FEED_BACKOFF_MAX = 8000;
+FEED_ACK_TIMEOUT = 5000;
+serial = 0;
+validHash2 = function(hash) {
+  return typeof hash === "string" && /^[A-Za-z0-9_]{6}$/.test(hash);
+};
+defaultHubUrl = function() {
+  if (typeof location === "undefined") {
+    throw new Error("Rip App: connectFeed needs a hub URL (no location to derive one from)");
+  }
+  let scheme = location.protocol === "https:" ? "wss" : "ws";
+  return `${scheme}://${location.host}/hub`;
+};
+defaultSocketFactory = function() {
+  if (typeof WebSocket === "undefined") {
+    throw new Error("Rip App: connectFeed needs a socket factory (no global WebSocket)");
+  }
+  return function(url) {
+    return new WebSocket(url);
+  };
+};
+defaultFetch = function() {
+  if (typeof fetch === "undefined") {
+    throw new Error("Rip App: connectFeed needs a fetch (no global fetch)");
+  }
+  return function(url, opts) {
+    return fetch(url, opts);
+  };
+};
+function connectFeed(client, opts = {}) {
+  let connect;
+  if (!(client != null && typeof client.hash === "function" && typeof client.apply === "function" && typeof client.reload === "function")) {
+    throw new TypeError("Rip App: connectFeed expects hash, apply, and reload callbacks");
+  }
+  if (!validHash2(client.hash())) {
+    throw new TypeError("Rip App: connectFeed client hash must be six Base64URL-folded characters");
+  }
+  let hubUrl = opts.hub ?? defaultHubUrl();
+  let latestUrl = opts.latestUrl ?? "/latest.json";
+  let makeSocket = opts.makeSocket ?? defaultSocketFactory();
+  let fetchLatest = opts.fetch ?? defaultFetch();
+  let report = opts.report ?? function(...args) {
+    return console.error(...args);
+  };
+  let backoffMin = opts.backoff?.min ?? FEED_BACKOFF_MIN;
+  let backoffMax = opts.backoff?.max ?? FEED_BACKOFF_MAX;
+  let ackTimeout = opts.ackTimeout ?? FEED_ACK_TIMEOUT;
+  let closed = false;
+  let failed = false;
+  let isOpen = false;
+  let ready = false;
+  let socket = null;
+  let attempts = 0;
+  let reconnectTimer = null;
+  let ackTimer = null;
+  let connection = 0;
+  let token = null;
+  let buffer = [];
+  let tail = Promise.resolve();
+  let probes = new Map;
+  let reload = function(reason) {
+    if (failed || closed)
+      return;
+    failed = true;
+    client.reload(reason);
+    return;
+  };
+  let applyOne = async function(change) {
+    let ok;
+    if (failed || closed)
+      return false;
+    return await (async () => {
+      try {
+        ok = await client.apply(change);
+        if (!ok) {
+          reload("change could not be applied");
+          return false;
+        }
+        return true;
+      } catch (error) {
+        report("[Rip] publication change failed:", error);
+        reload("change failed");
+        return false;
+      }
+    })();
+  };
+  let enqueue = function(change, owner) {
+    tail = tail.then(async function() {
+      if (owner !== connection)
+        return true;
+      return await applyOne(change);
+    });
+    tail = tail.catch(function(error) {
+      report("[Rip] publication queue failed:", error);
+      reload("change queue failed");
+      return false;
+    });
+    return;
+  };
+  let probe = async function(owner) {
+    let ok;
+    if (closed || failed || owner !== connection)
+      return;
+    let startHash = client.hash();
+    let response = await fetchLatest(latestUrl, { cache: "no-store" });
+    if (!response?.ok) {
+      throw new Error(`latest.json fetch failed (${response?.status})`);
+    }
+    let latest = await response.json();
+    if (!(latest != null && typeof latest === "object" && !Array.isArray(latest) && validHash2(latest.hash))) {
+      throw new Error("latest.json is malformed");
+    }
+    if (closed || failed || owner !== connection)
+      return;
+    let visited = new Set([startHash]);
+    let index = 0;
+    while (index < buffer.length) {
+      ok = await applyOne(buffer[index]);
+      if (!ok)
+        return;
+      visited.add(client.hash());
+      index++;
+    }
+    if (closed || failed || owner !== connection)
+      return;
+    if (!visited.has(latest.hash)) {
+      reload(`latest App hash ${latest.hash} is not in the received change chain`);
+      return;
+    }
+    buffer = [];
+    ready = true;
+    attempts = 0;
+    return;
+  };
+  let beginProbe = function(owner = connection) {
+    if (probes.has(owner))
+      return probes.get(owner);
+    let task = probe(owner).catch(function(error) {
+      if (closed || failed || owner !== connection)
+        return;
+      report("[Rip] publication reconnect check failed:", error);
+      ready = false;
+      return (() => {
+        try {
+          return socket?.close();
+        } catch {}
+      })();
+    });
+    probes.set(owner, task);
+    task.finally(function() {
+      return probes.get(owner) === task ? probes.delete(owner) : undefined;
+    });
+    return task;
+  };
+  let handleFrame = function(text, owner) {
+    if (owner !== connection)
+      return;
+    let frame = null;
+    try {
+      frame = JSON.parse(text);
+    } catch {
+      report("[Rip] publication feed received invalid JSON:", text);
+      reload("malformed publication frame");
+      return;
+    }
+    let objects = Array.isArray(frame) ? frame : [frame];
+    for (let object of objects) {
+      if (!(object != null && typeof object === "object"))
+        continue;
+      if (object["!"] === token) {
+        if (ackTimer != null) {
+          clearTimeout(ackTimer);
+          ackTimer = null;
+        }
+        beginProbe(connection);
+      } else if (object.change !== undefined) {
+        if (ready) {
+          enqueue(object.change, owner);
+        } else {
+          buffer.push(object.change);
+        }
+      }
+    }
+    return;
+  };
+  let schedule = function() {
+    if (closed || failed || reconnectTimer != null)
+      return;
+    let delay2 = Math.min(backoffMin * 2 ** attempts, backoffMax);
+    attempts += 1;
+    reconnectTimer = setTimeout(function() {
+      reconnectTimer = null;
+      return connect();
+    }, delay2);
+    return;
+  };
+  connect = function() {
+    if (closed || failed)
+      return;
+    connection += 1;
+    let owner = connection;
+    ready = false;
+    buffer = [];
+    token = `rip-${++serial}`;
+    try {
+      socket = makeSocket(hubUrl);
+    } catch (error) {
+      report("[Rip] publication socket open failed:", error);
+      schedule();
+      return;
+    }
+    socket.onmessage = function(event) {
+      handleFrame(String(event.data), owner);
+      return;
+    };
+    socket.onopen = function() {
+      if (owner !== connection || closed)
+        return;
+      isOpen = true;
+      try {
+        socket.send(JSON.stringify({ "+": ["/hub"], "?": token }));
+      } catch (error) {
+        report("[Rip] publication subscription failed:", error);
+        try {
+          socket.close();
+        } catch {}
+        return;
+      }
+      ackTimer = setTimeout(function() {
+        if (closed || failed || owner !== connection || ready)
+          return;
+        report("[Rip] publication subscription acknowledgement timed out");
+        return (() => {
+          try {
+            return socket.close();
+          } catch {}
+        })();
+      }, ackTimeout);
+      return;
+    };
+    socket.onclose = function() {
+      if (owner !== connection)
+        return;
+      isOpen = false;
+      ready = false;
+      if (ackTimer != null) {
+        clearTimeout(ackTimer);
+        ackTimer = null;
+      }
+      schedule();
+      return;
+    };
+    socket.onerror = function() {
+      return;
+    };
+    return;
+  };
+  let resync = function() {
+    if (closed || failed)
+      return;
+    if (socket != null) {
+      try {
+        socket.close();
+      } catch {}
+    } else {
+      schedule();
+    }
+    return;
+  };
+  let listeners = [];
+  let listen = function(target, name, fn) {
+    if (!(typeof target?.addEventListener === "function"))
+      return;
+    target.addEventListener(name, fn);
+    listeners.push(function() {
+      return target.removeEventListener(name, fn);
+    });
+    return;
+  };
+  listen(globalThis, "online", function() {
+    return resync();
+  });
+  listen(globalThis, "pageshow", function(event) {
+    return event.persisted === true ? resync() : undefined;
+  });
+  if (typeof document !== "undefined") {
+    listen(document, "visibilitychange", function() {
+      return document.visibilityState === "visible" ? resync() : undefined;
+    });
+  }
+  connect();
+  return {
+    close() {
+      if (closed)
+        return;
+      closed = true;
+      connection += 1;
+      if (reconnectTimer != null)
+        clearTimeout(reconnectTimer);
+      if (ackTimer != null)
+        clearTimeout(ackTimer);
+      for (let dispose of listeners) {
+        dispose();
+      }
+      try {
+        socket?.close();
+      } catch {}
+      return;
+    },
+    connected() {
+      return isOpen && ready && !closed && !failed;
+    },
+    resync() {
+      return resync();
+    }
+  };
+}
+// packages/app/apply.rip
+function createApply(opts) {
+  if (!(opts != null && typeof opts === "object")) {
+    throw new TypeError("Rip App: createApply expects an options object");
+  }
+  if (!(typeof opts.renderer?.remountDirty === "function")) {
+    throw new TypeError("Rip App: createApply requires renderer.remountDirty");
+  }
+  if (!(typeof opts.escape === "function")) {
+    throw new TypeError("Rip App: createApply requires an escape remount");
+  }
+  let report = opts.report ?? function(...args) {
+    return console.log(...args);
+  };
+  let absorb = async function(paths) {
+    if (!(Array.isArray(paths) && paths.length > 0)) {
+      return "ignore";
+    }
+    let css = (() => {
+      const result = [];
+      for (let p2 of paths) {
+        if (typeof p2 === "string" && p2.endsWith(".css")) {
+          result.push(p2);
+        }
+      }
+      return result;
+    })();
+    let rip = (() => {
+      const result = [];
+      for (let p2 of paths) {
+        if (typeof p2 === "string" && p2.endsWith(".rip")) {
+          result.push(p2);
+        }
+      }
+      return result;
+    })();
+    let ordinary = (() => {
+      const result = [];
+      for (let p2 of paths) {
+        if (typeof p2 === "string" && !p2.endsWith(".rip") && !p2.endsWith(".css")) {
+          result.push(p2);
+        }
+      }
+      return result;
+    })();
+    if (rip.length === 0) {
+      if (ordinary.length > 0)
+        return "reload";
+      if (css.length > 0)
+        return "css";
+      return "ignore";
+    }
+    let verdict = "escape";
+    try {
+      verdict = await opts.renderer.remountDirty(rip);
+    } catch (error) {
+      report("[Rip] update failed — falling back to full in-page remount", error);
+      verdict = "escape";
+    }
+    if (verdict === "narrow") {
+      report(`[Rip] applied ${rip.join(", ")} — update`);
+      return "update";
+    }
+    if (verdict === "noop")
+      return "ignore";
+    await opts.escape(rip);
+    report(`[Rip] applied ${rip.join(", ")} — update`);
+    return "update";
+  };
+  return { absorb };
+}
 // packages/app/rash.rip
 var asBytes = function(value) {
   if (value instanceof Uint8Array)
@@ -27245,785 +27879,6 @@ var check = function(files) {
   }));
   return rash(new TextEncoder().encode(inventory));
 };
-
-// packages/app/workspace.rip
-var hashOf;
-var validContent2;
-var validDirectory2;
-var validHash;
-var validId;
-var validModule;
-var validPath2;
-var isBagPath = function(name) {
-  return name.endsWith(".rip") || name.endsWith(".css") || name.endsWith(".html");
-};
-validPath2 = function(path) {
-  if (!(typeof path === "string" && path.length > 0)) {
-    throw new TypeError("Rip Workspace: component path must be a non-empty string");
-  }
-  let segments = path.split("/");
-  let invalidSegment = segments.some(function(segment) {
-    return !segment || segment === "." || segment === "..";
-  });
-  let filename = segments.at(-1);
-  let fileAsDirectory = segments.slice(0, -1).some(function(segment) {
-    return isBagPath(segment);
-  });
-  if (path.includes("\\") || invalidSegment || fileAsDirectory || filename === ".rip" || filename === ".css" || filename === ".html" || !isBagPath(filename)) {
-    throw new TypeError(`Rip Workspace: invalid component path '${path}'`);
-  }
-  return path;
-};
-validContent2 = function(content) {
-  if (!(typeof content === "string")) {
-    throw new TypeError("Rip Workspace: component source must be a string");
-  }
-  return content;
-};
-validDirectory2 = function(dir) {
-  if (dir === "" || !(dir != null))
-    return "";
-  if (!(typeof dir === "string")) {
-    throw new TypeError("Rip Workspace: component directory must be a string");
-  }
-  let segments = dir.split("/");
-  if (dir.includes("\\") || segments.some(function(segment) {
-    return !segment || segment === "." || segment === "..";
-  })) {
-    throw new TypeError(`Rip Workspace: invalid component directory '${dir}'`);
-  }
-  return dir;
-};
-validId = function(id) {
-  if (!(typeof id === "string" && id.length > 0)) {
-    throw new TypeError("Rip Workspace: passport id must be a non-empty string");
-  }
-  return id;
-};
-validHash = function(hash) {
-  if (!(typeof hash === "string" && /^[A-Za-z0-9_]{6}$/.test(hash))) {
-    throw new TypeError("Rip Workspace: passport hash must be six Base64URL-folded characters");
-  }
-  return hash;
-};
-validModule = function(module) {
-  if (!(module != null && typeof module === "object" && !Array.isArray(module))) {
-    throw new TypeError("Rip Workspace: compiled component module must be an object");
-  }
-  return module;
-};
-hashOf = function(text) {
-  return rash(new TextEncoder().encode(text));
-};
-function createWorkspace() {
-  let passports = new Map;
-  let pathToId = new Map;
-  let watchers = new Set;
-  let locked = false;
-  let guard = function(operation) {
-    if (locked) {
-      throw new Error(`Rip Workspace: ${operation} on a sealed workspace`);
-    }
-    return;
-  };
-  let notify = function(event, path) {
-    for (let watcher of Array.from(watchers)) {
-      try {
-        watcher(event, path);
-      } catch (error) {
-        console.error("[Rip] workspace watcher error:", error);
-      }
-    }
-    return;
-  };
-  let byPath = function(path) {
-    let id = pathToId.get(path);
-    return id != null ? passports.get(id) : undefined;
-  };
-  let mintId = function(path) {
-    if (passports.has(path)) {
-      throw new Error(`Rip Workspace: cannot mint id '${path}'; a passport already holds that id`);
-    }
-    return path;
-  };
-  let claimPath = function(path, id) {
-    let holder = pathToId.get(path);
-    if (holder != null && holder !== id) {
-      throw new Error(`Rip Workspace: path '${path}' already labels passport '${holder}'`);
-    }
-    return;
-  };
-  let applySource = function(record, content) {
-    passports.set(record.id, { ...record, hash: hashOf(content), source: content, compiled: undefined });
-    return;
-  };
-  let birthPassport = function(path, content) {
-    let id = mintId(path);
-    passports.set(id, { id, path, hash: hashOf(content), source: content, compiled: undefined });
-    pathToId.set(path, id);
-    return;
-  };
-  let workspace = {
-    read(path) {
-      return byPath(validPath2(path))?.source;
-    },
-    write(path, content) {
-      guard("write");
-      path = validPath2(path);
-      content = validContent2(content);
-      let record = byPath(path);
-      if (record) {
-        applySource(record, content);
-        notify("change", path);
-      } else {
-        birthPassport(path, content);
-        notify("create", path);
-      }
-      return;
-    },
-    del(path) {
-      guard("del");
-      path = validPath2(path);
-      let record = byPath(path);
-      if (record) {
-        passports.delete(record.id);
-        pathToId.delete(path);
-      }
-      notify("delete", path);
-      return;
-    },
-    exists(path) {
-      return pathToId.has(validPath2(path));
-    },
-    size() {
-      return passports.size;
-    },
-    list(dir = "") {
-      let rest;
-      dir = validDirectory2(dir);
-      let prefix = dir ? dir + "/" : "";
-      let result = [];
-      for (let [path] of pathToId) {
-        if (path.startsWith(prefix)) {
-          rest = path.slice(prefix.length);
-          if (!rest.includes("/"))
-            result.push(path);
-        }
-      }
-      return result;
-    },
-    listAll(dir = "") {
-      dir = validDirectory2(dir);
-      let prefix = dir ? dir + "/" : "";
-      let result = [];
-      for (let [path] of pathToId) {
-        if (path.startsWith(prefix)) {
-          result.push(path);
-        }
-      }
-      return result;
-    },
-    load(sources) {
-      let content, path, record;
-      guard("load");
-      if (!(sources != null && typeof sources === "object" && !Array.isArray(sources))) {
-        throw new TypeError("Rip Workspace: component load expects a source object");
-      }
-      for (let path2 in sources) {
-        if (!Object.hasOwn(sources, path2))
-          continue;
-        let content2 = sources[path2];
-        path2 = validPath2(path2);
-        content2 = validContent2(content2);
-        record = byPath(path2);
-        if (record) {
-          applySource(record, content2);
-        } else {
-          birthPassport(path2, content2);
-        }
-      }
-      return;
-    },
-    watch(fn) {
-      if (!(typeof fn === "function")) {
-        throw new TypeError("Rip Workspace: component watch expects a function");
-      }
-      watchers.add(fn);
-      let disposed = false;
-      return function() {
-        if (disposed)
-          return;
-        disposed = true;
-        watchers.delete(fn);
-        return;
-      };
-    },
-    getCompiled(path) {
-      return byPath(validPath2(path))?.compiled;
-    },
-    setCompiled(path, module) {
-      guard("setCompiled");
-      path = validPath2(path);
-      module = validModule(module);
-      let record = byPath(path);
-      if (!record) {
-        throw new Error(`Rip Workspace: setCompiled for unknown component path '${path}'`);
-      }
-      passports.set(record.id, { ...record, compiled: module });
-      return;
-    },
-    populate(records) {
-      let compiled, hasSource, hash, id, path, source2;
-      guard("populate");
-      if (!Array.isArray(records)) {
-        throw new TypeError("Rip Workspace: populate expects an array of passport records");
-      }
-      if (passports.size > 0) {
-        throw new Error("Rip Workspace: populate requires an empty workspace; mutate with set");
-      }
-      let seenIds = new Set;
-      let seenPaths = new Set;
-      let next = [];
-      for (let record of records) {
-        if (!(record != null && typeof record === "object" && !Array.isArray(record))) {
-          throw new TypeError("Rip Workspace: populate expects passport records");
-        }
-        id = validId(record.id);
-        path = validPath2(record.path);
-        hash = validHash(record.hash);
-        hasSource = record.source !== undefined;
-        if (!(hasSource || path.endsWith(".css") || path.endsWith(".html"))) {
-          throw new Error(`Rip Workspace: Rip passport '${id}' requires source during populate`);
-        }
-        source2 = hasSource ? validContent2(record.source) : undefined;
-        compiled = record.compiled != null ? validModule(record.compiled) : undefined;
-        if (seenIds.has(id)) {
-          throw new Error(`Rip Workspace: duplicate passport id '${id}' in populate`);
-        }
-        if (seenPaths.has(path)) {
-          throw new Error(`Rip Workspace: duplicate passport path '${path}' in populate`);
-        }
-        seenIds.add(id);
-        seenPaths.add(path);
-        next.push({ id, path, hash, source: source2, compiled });
-      }
-      for (let row of next) {
-        passports.set(row.id, row);
-        pathToId.set(row.path, row.id);
-      }
-      return;
-    },
-    set(record) {
-      let compiled, path, source2;
-      guard("set");
-      if (!(record != null && typeof record === "object" && !Array.isArray(record))) {
-        throw new TypeError("Rip Workspace: set expects a passport record");
-      }
-      let id = validId(record.id);
-      let hash = validHash(record.hash);
-      let current = passports.get(id);
-      if (!current) {
-        if (record.deleted === true)
-          return false;
-        if (!(record.path != null && record.source != null)) {
-          throw new Error(`Rip Workspace: set of unknown passport '${id}' requires a full record (id, path, hash, source)`);
-        }
-        path = validPath2(record.path);
-        source2 = validContent2(record.source);
-        compiled = record.compiled != null ? validModule(record.compiled) : undefined;
-        claimPath(path, id);
-        passports.set(id, { id, path, hash, source: source2, compiled });
-        pathToId.set(path, id);
-        notify("create", path);
-        return true;
-      }
-      if (record.deleted === true) {
-        if (!(hash === current.hash))
-          return false;
-        passports.delete(id);
-        pathToId.delete(current.path);
-        notify("delete", current.path);
-        return true;
-      }
-      if (hash === current.hash)
-        return false;
-      let newPath = record.path != null ? validPath2(record.path) : current.path;
-      let renamed = newPath !== current.path;
-      let hasSource = record.source !== undefined && record.source !== null;
-      let hasCompiled = record.compiled !== undefined && record.compiled !== null;
-      if (!(hasSource || hasCompiled || renamed)) {
-        throw new Error(`Rip Workspace: set for passport '${id}' carries nothing to apply (source, compiled, path, or deleted)`);
-      }
-      if (renamed)
-        claimPath(newPath, id);
-      source2 = hasSource ? validContent2(record.source) : current.source;
-      compiled = hasCompiled ? validModule(record.compiled) : hasSource ? undefined : current.compiled;
-      let oldPath = current.path;
-      if (renamed)
-        pathToId.delete(oldPath);
-      passports.set(id, { id, path: newPath, hash, source: source2, compiled });
-      pathToId.set(newPath, id);
-      if (renamed) {
-        notify("delete", oldPath);
-        notify("create", newPath);
-      } else {
-        notify("change", newPath);
-      }
-      return true;
-    },
-    seal() {
-      if (locked) {
-        throw new Error("Rip Workspace: workspace is already sealed");
-      }
-      locked = true;
-      return;
-    },
-    sealed() {
-      return locked;
-    },
-    passport(pathOrId) {
-      let id;
-      if (!(typeof pathOrId === "string" && pathOrId.length > 0)) {
-        throw new TypeError("Rip Workspace: passport lookup expects a passport id or component path");
-      }
-      let record = passports.get(pathOrId);
-      if (!record) {
-        id = pathToId.get(pathOrId);
-        record = id != null ? passports.get(id) : undefined;
-      }
-      if (!record)
-        return;
-      return { ...record };
-    },
-    ids() {
-      return Array.from(passports.keys());
-    },
-    paths() {
-      return Array.from(pathToId.keys());
-    }
-  };
-  return workspace;
-}
-// packages/app/feed.rip
-var FEED_BACKOFF_MAX;
-var FEED_BACKOFF_MIN;
-var defaultFetch;
-var defaultHubUrl;
-var defaultModuleUrl;
-var defaultSocketFactory;
-var validFileId;
-var validWireHash;
-FEED_BACKOFF_MIN = 250;
-FEED_BACKOFF_MAX = 8000;
-defaultHubUrl = function() {
-  if (typeof location === "undefined") {
-    throw new Error("Rip Workspace: connectFeed needs a hub URL (no location to derive one from)");
-  }
-  let scheme = location.protocol === "https:" ? "wss" : "ws";
-  return `${scheme}://${location.host}/hub`;
-};
-defaultSocketFactory = function() {
-  if (typeof WebSocket === "undefined") {
-    throw new Error("Rip Workspace: connectFeed needs a socket factory (no global WebSocket)");
-  }
-  return function(url) {
-    return new WebSocket(url);
-  };
-};
-defaultFetch = function() {
-  if (typeof fetch === "undefined") {
-    throw new Error("Rip Workspace: connectFeed needs a fetch (no global fetch)");
-  }
-  return function(url, opts) {
-    return fetch(url, opts);
-  };
-};
-defaultModuleUrl = function(id) {
-  return "/" + id.split("/").map(encodeURIComponent).join("/");
-};
-validWireHash = function(hash) {
-  return typeof hash === "string" && /^[A-Za-z0-9_]{6}$/.test(hash);
-};
-validFileId = function(id) {
-  if (!(typeof id === "string" && id.length > 0 && !id.startsWith("/") && !id.includes("\\")))
-    return false;
-  let segments = id.split("/");
-  if (segments.some(function(segment) {
-    return !segment || segment === "." || segment === ".." || segment.startsWith(".");
-  }))
-    return false;
-  return id.endsWith(".rip") || id.endsWith(".css") || id.endsWith(".html");
-};
-function connectFeed(workspace, opts = {}) {
-  let connect, resync;
-  if (!(workspace != null && typeof workspace.set === "function" && typeof workspace.passport === "function" && typeof workspace.sealed === "function")) {
-    throw new TypeError("Rip Workspace: connectFeed expects a workspace");
-  }
-  if (workspace.sealed()) {
-    throw new Error("Rip Workspace: connectFeed on a sealed workspace — production has no hub");
-  }
-  let hubUrl = opts.hub ?? defaultHubUrl();
-  let makeSocket = opts.makeSocket ?? defaultSocketFactory();
-  let fetchBytes = opts.fetch ?? defaultFetch();
-  let moduleUrl = opts.moduleUrl ?? defaultModuleUrl;
-  let manifestUrl = opts.manifestUrl ?? "/manifest.json";
-  let report = opts.report ?? function(...args) {
-    return console.error(...args);
-  };
-  let backoffMin = opts.backoff?.min ?? FEED_BACKOFF_MIN;
-  let backoffMax = opts.backoff?.max ?? FEED_BACKOFF_MAX;
-  let onEpoch = opts.onEpoch ?? function(ding) {
-    report(`[Rip] workspace feed: a new epoch is live (${ding.epoch}) — reloading`);
-    if (typeof location !== "undefined")
-      location.reload();
-    return;
-  };
-  let closed = false;
-  let isOpen = false;
-  let socket = null;
-  let attempts = 0;
-  let timer = null;
-  let resyncTimer = null;
-  let resyncAttempts = 0;
-  let lastCheck = opts.initialCheck ?? null;
-  if (!(lastCheck === null || validWireHash(lastCheck))) {
-    throw new TypeError("Rip Workspace: feed initialCheck must be six Base64URL-folded characters");
-  }
-  let wants = {};
-  let owners = {};
-  let claim = function(id) {
-    owners[id] = (owners[id] || 0) + 1;
-    workspace.claim?.(id, owners[id]);
-    return owners[id];
-  };
-  let owns = function(id, owner) {
-    return owners[id] === owner && !closed;
-  };
-  let fetchLatest = async function(id, owner) {
-    let res = await fetchBytes(moduleUrl(id), { cache: "no-store" });
-    if (!res.ok)
-      return { res };
-    let bytes = new Uint8Array(await res.arrayBuffer());
-    if (!owns(id, owner))
-      return null;
-    return { res, hash: rash(bytes), source: new TextDecoder().decode(bytes) };
-  };
-  let applyLatest = async function(id, owner) {
-    let result = await fetchLatest(id, owner);
-    if (!(result != null && owns(id, owner)))
-      return { stale: true };
-    if (!result.res.ok)
-      return { status: result?.res?.status, ok: false };
-    let current = workspace.passport(id);
-    let passport = { id, hash: result.hash, source: result.source, owner };
-    if (!(current != null))
-      passport.path = id;
-    let applied = await workspace.set(passport);
-    if (owns(id, owner))
-      delete wants[id];
-    return { ok: true, hash: result.hash, applied };
-  };
-  let wantsSatisfied = function() {
-    let current;
-    for (let id in wants) {
-      let want = wants[id];
-      current = workspace.passport(id);
-      if (current != null && current.hash === want.hash)
-        delete wants[id];
-    }
-    return Object.keys(wants).length === 0;
-  };
-  let scheduleResync = function() {
-    if (closed || resyncTimer != null)
-      return;
-    let delay2 = Math.min(backoffMin * 2 ** resyncAttempts, backoffMax);
-    resyncAttempts += 1;
-    resyncTimer = setTimeout(function() {
-      resyncTimer = null;
-      return resync().catch(function(error) {
-        return report("[Rip] workspace feed: resync failed:", error);
-      });
-    }, delay2);
-    return;
-  };
-  resync = async function() {
-    let current, owner, result, want;
-    let clean = true;
-    let res = await fetchBytes(manifestUrl, { cache: "no-cache" });
-    if (!res.ok) {
-      report(`[Rip] workspace feed: manifest fetch failed (${res.status})`);
-      scheduleResync();
-      return;
-    }
-    let manifest = await res.json();
-    let files = manifest?.files;
-    if (!(manifest != null && typeof manifest === "object" && !Array.isArray(manifest) && validWireHash(manifest.check) && Array.isArray(files))) {
-      report("[Rip] workspace feed: malformed manifest:", manifest);
-      return;
-    }
-    let priorId = null;
-    for (let entry of files) {
-      if (!(entry != null && typeof entry === "object" && !Array.isArray(entry) && validFileId(entry.id) && validWireHash(entry.hash) && (priorId === null || priorId < entry.id))) {
-        report("[Rip] workspace feed: malformed manifest entry:", entry);
-        return;
-      }
-      priorId = entry.id;
-    }
-    if (!(check(files) === manifest.check)) {
-      report("[Rip] workspace feed: manifest check does not match its files:", manifest);
-      return;
-    }
-    if (manifest.check === lastCheck && Object.keys(wants).length === 0) {
-      resyncAttempts = 0;
-      return;
-    }
-    let named = new Set;
-    for (let entry of files) {
-      named.add(entry.id);
-      current = workspace.passport(entry.id);
-      if (current != null && current.hash === entry.hash)
-        continue;
-      owner = claim(entry.id);
-      result = await applyLatest(entry.id, owner);
-      if (!(result?.ok || result?.stale)) {
-        report(`[Rip] workspace feed: module fetch missed (${result?.status}) for '${entry.id}' during resync`);
-        wants[entry.id] = { hash: entry.hash, sig: null };
-        clean = false;
-      }
-    }
-    let sig = JSON.stringify(files);
-    for (let id in { ...wants }) {
-      want = wants[id];
-      current = workspace.passport(id);
-      if (current != null && current.hash === want.hash) {
-        delete wants[id];
-        continue;
-      }
-      owner = claim(id);
-      result = await applyLatest(id, owner);
-      if (result?.ok) {
-        delete wants[id];
-      } else if (!result?.stale && !named.has(id)) {
-        if (want.sig != null && want.sig !== sig) {
-          if (wants[id] === want)
-            delete wants[id];
-        } else {
-          want.sig = sig;
-        }
-      } else {
-        if (!result?.stale) {
-          clean = false;
-        }
-      }
-    }
-    lastCheck = manifest.check;
-    if (clean && wantsSatisfied()) {
-      resyncAttempts = 0;
-    } else {
-      scheduleResync();
-    }
-    return;
-  };
-  let applyDing = async function(ding) {
-    let hash, id, kind2;
-    if (ding != null && typeof ding === "object" && ding.kind === "epoch") {
-      onEpoch(ding);
-      return;
-    }
-    if (!(ding != null && typeof ding === "object" && validFileId(ding.id))) {
-      report("[Rip] workspace feed: malformed ding:", ding);
-      return;
-    }
-    ({ id, kind: kind2, hash } = ding);
-    if (!validWireHash(hash)) {
-      report(`[Rip] workspace feed: malformed ${kind2 === "delete" ? "delete " : ""}ding:`, ding);
-      return;
-    }
-    if (kind2 === "delete") {
-      claim(id);
-      delete wants[id];
-      workspace.set({ id, hash, deleted: true, owner: owners[id] });
-      return;
-    }
-    let current = workspace.passport(id);
-    if (current != null && current.hash === hash)
-      return;
-    let owner = claim(id);
-    let result = await applyLatest(id, owner);
-    if (result?.stale || result?.ok)
-      return;
-    report(`[Rip] workspace feed: module fetch missed (${result?.status}) for '${id}' — resyncing from the manifest`);
-    wants[id] = { hash, sig: null };
-    await resync();
-    return;
-  };
-  let handleFrame = function(text) {
-    let frame = null;
-    try {
-      frame = JSON.parse(text);
-    } catch {
-      report("[Rip] workspace feed: unparseable hub frame:", text);
-      return;
-    }
-    let objects = Array.isArray(frame) ? frame : [frame];
-    for (let obj of objects) {
-      if (!(obj != null && typeof obj === "object" && obj.ding !== undefined))
-        continue;
-      applyDing(obj.ding).catch(function(error) {
-        return report("[Rip] workspace feed: ding apply failed:", error);
-      });
-    }
-    return;
-  };
-  let schedule = function() {
-    if (closed || timer != null)
-      return;
-    let delay2 = Math.min(backoffMin * 2 ** attempts, backoffMax);
-    attempts += 1;
-    timer = setTimeout(function() {
-      timer = null;
-      return connect();
-    }, delay2);
-    return;
-  };
-  connect = function() {
-    if (closed)
-      return;
-    try {
-      socket = makeSocket(hubUrl);
-    } catch (error) {
-      report("[Rip] workspace feed: socket open failed:", error);
-      schedule();
-      return;
-    }
-    socket.onopen = function() {
-      isOpen = true;
-      attempts = 0;
-      try {
-        socket.send(JSON.stringify({ "+": ["/hub"] }));
-      } catch (error) {
-        report("[Rip] workspace feed: self-join failed:", error);
-      }
-      resync().catch(function(error) {
-        return report("[Rip] workspace feed: resync failed:", error);
-      });
-      return;
-    };
-    socket.onmessage = function(event) {
-      handleFrame(String(event.data));
-      return;
-    };
-    socket.onclose = function() {
-      isOpen = false;
-      schedule();
-      return;
-    };
-    socket.onerror = function() {
-      return;
-    };
-    return;
-  };
-  connect();
-  return {
-    close() {
-      if (closed)
-        return;
-      closed = true;
-      for (let id in owners) {
-        owners[id] += 1;
-      }
-      if (timer != null) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      if (resyncTimer != null) {
-        clearTimeout(resyncTimer);
-        resyncTimer = null;
-      }
-      try {
-        socket?.close();
-      } catch {}
-      return;
-    },
-    connected() {
-      return isOpen && !closed;
-    },
-    resync() {
-      return resync();
-    }
-  };
-}
-// packages/app/apply.rip
-function createApply(opts) {
-  if (!(opts != null && typeof opts === "object")) {
-    throw new TypeError("Rip App: createApply expects an options object");
-  }
-  if (!(typeof opts.renderer?.remountDirty === "function")) {
-    throw new TypeError("Rip App: createApply requires renderer.remountDirty");
-  }
-  if (!(typeof opts.escape === "function")) {
-    throw new TypeError("Rip App: createApply requires an escape remount");
-  }
-  let report = opts.report ?? function(...args) {
-    return console.log(...args);
-  };
-  let absorb = async function(paths) {
-    if (!(Array.isArray(paths) && paths.length > 0)) {
-      return "ignore";
-    }
-    let css = (() => {
-      const result = [];
-      for (let p2 of paths) {
-        if (typeof p2 === "string" && p2.endsWith(".css")) {
-          result.push(p2);
-        }
-      }
-      return result;
-    })();
-    let html = (() => {
-      const result = [];
-      for (let p2 of paths) {
-        if (typeof p2 === "string" && p2.endsWith(".html")) {
-          result.push(p2);
-        }
-      }
-      return result;
-    })();
-    let rip = (() => {
-      const result = [];
-      for (let p2 of paths) {
-        if (typeof p2 === "string" && p2.endsWith(".rip")) {
-          result.push(p2);
-        }
-      }
-      return result;
-    })();
-    if (rip.length === 0) {
-      if (css.length > 0 && html.length === 0)
-        return "css";
-      if (html.length > 0)
-        return "reload";
-      return "ignore";
-    }
-    let verdict = "escape";
-    try {
-      verdict = await opts.renderer.remountDirty(rip);
-    } catch (error) {
-      report("[Rip] update failed — falling back to full in-page remount", error);
-      verdict = "escape";
-    }
-    if (verdict === "narrow") {
-      report(`[Rip] applied ${rip.join(", ")} — update`);
-      return "update";
-    }
-    if (verdict === "noop")
-      return "ignore";
-    await opts.escape(rip);
-    report(`[Rip] applied ${rip.join(", ")} — update`);
-    return "update";
-  };
-  return { absorb };
-}
 // src/browser-app.js
 var rash2 = Object.freeze({ rash, check });
 var embeddedPackages = Object.freeze({
@@ -28060,7 +27915,6 @@ var toObjectUrl = (code) => {
 };
 function createModuleLoader({
   components: registry,
-  packages = {},
   embeddedPackages: embeddedPackages2 = {},
   debug = false
 } = {}) {
@@ -28131,14 +27985,10 @@ function createModuleLoader({
       if (embeddedPackages2[packageName]) {
         throw new Error(`rip: '${from}' imports '${spec}', which '${packageName}' does not export in the browser`);
       }
-      const entry = packages[packageName];
-      if (!entry) {
-        throw new Error(`rip: '${from}' imports '${spec}', but the bundle carries no such package — ` + "only packages declaring browser safety travel to the browser");
-      }
-      const sub = bare[2] ? entry.exports?.[`./${bare[2]}`] ?? (bare[2].endsWith(".rip") ? bare[2] : `${bare[2]}.rip`) : entry.entry;
-      const path = `${entry.root}/${sub}`;
+      const sub = bare[2] ? bare[2].endsWith(".rip") ? bare[2] : `${bare[2]}.rip` : "index.rip";
+      const path = `${packageName}/${sub}`;
       if (!inBundle(path)) {
-        throw new Error(`rip: '${from}' imports '${spec}', but '${path}' is not in the bundle`);
+        throw new Error(`rip: '${from}' imports '${spec}', but '${path}' is not in the bundle — ` + "only packages declaring browser safety travel to the browser");
       }
       return { path };
     }
@@ -28376,194 +28226,118 @@ ${compiled.code}
   return { count: active.length, executed, failures };
 }
 // src/browser-boot.js
-var bootGraphs = new Map;
 var isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-var validHash2 = (value) => typeof value === "string" && /^[A-Za-z0-9_]{6}$/.test(value);
-var validFileId2 = (id) => {
-  if (typeof id !== "string" || id.length === 0 || id.startsWith("/") || id.includes("\\"))
+var validHash3 = (value) => typeof value === "string" && /^[A-Za-z0-9_]{6}$/.test(value);
+var validPath3 = (path, ripOnly = false) => {
+  if (typeof path !== "string" || path.length === 0 || path.startsWith("/") || path.includes("\\"))
     return false;
-  const segments = id.split("/");
-  if (segments.some((segment) => !segment || segment === "." || segment === ".." || segment.startsWith(".")))
+  const parts = path.split("/");
+  if (parts.some((part) => !part || part === "." || part === ".." || part.startsWith(".")))
     return false;
-  return id.endsWith(".rip") || id.endsWith(".css") || id.endsWith(".html");
+  if (ripOnly && !path.endsWith(".rip"))
+    return false;
+  return true;
 };
-var validatePublication = (bundle, app) => {
-  if (!validHash2(bundle.check) || !Array.isArray(bundle.files)) {
-    throw new Error("rip: workspace bundle requires a check and a files inventory");
-  }
-  let priorId = null;
-  for (const entry of bundle.files) {
-    if (!isRecord(entry) || !validFileId2(entry.id) || !validHash2(entry.hash) || priorId !== null && priorId >= entry.id) {
-      throw new Error(`rip: workspace bundle has a malformed or unsorted file entry: ${JSON.stringify(entry)}`);
-    }
-    priorId = entry.id;
-  }
-  if (app.check(bundle.files) !== bundle.check) {
-    throw new Error("rip: workspace bundle check does not match its files inventory");
-  }
-  for (const entry of bundle.files) {
-    if (!entry.id.endsWith(".rip"))
-      continue;
-    const source2 = bundle.modules?.[entry.id];
-    if (typeof source2 !== "string") {
-      throw new Error(`rip: workspace bundle is missing authored Rip source '${entry.id}'`);
-    }
-    const actual = app.rash(new TextEncoder().encode(source2));
-    if (actual !== entry.hash) {
-      throw new Error(`rip: workspace bundle source '${entry.id}' hashes to ${actual}, not ${entry.hash}`);
-    }
-  }
+var exactKeys = (value, keys) => {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 };
-var browserFetchText = async (url, etag) => {
-  const headers = etag ? { "If-None-Match": etag } : {};
-  const response = await fetch(url, { headers });
-  if (response.status === 304)
-    return { fresh: false };
+var publicationSources = (bundle) => {
+  if (!isRecord(bundle) || !exactKeys(bundle, ["hash", "list"]) || !validHash3(bundle.hash) || !Array.isArray(bundle.list)) {
+    throw new Error("rip: bundle must contain exactly one hash and one source list");
+  }
+  const sources = {};
+  let prior = null;
+  for (const entry of bundle.list) {
+    if (!Array.isArray(entry) || entry.length !== 2 || !validPath3(entry[0], true) || typeof entry[1] !== "string" || prior !== null && prior >= entry[0]) {
+      throw new Error(`rip: bundle has a malformed or unsorted source entry: ${JSON.stringify(entry)}`);
+    }
+    if (entry[0] === "@rip-lang/app" || entry[0].startsWith("@rip-lang/app/")) {
+      throw new Error(`rip: bundle source '${entry[0]}' collides with embedded package '@rip-lang/app'`);
+    }
+    prior = entry[0];
+    sources[entry[0]] = entry[1];
+  }
+  return sources;
+};
+var parseChange = (change) => {
+  if (!isRecord(change) || !exactKeys(change, ["from", "hash", "list"]) || !validHash3(change.from) || !validHash3(change.hash) || !Array.isArray(change.list)) {
+    throw new Error("rip: publication change must contain exactly from, hash, and list");
+  }
+  let prior = null;
+  const entries = [];
+  for (const tuple of change.list) {
+    if (!Array.isArray(tuple) || tuple.length < 1 || tuple.length > 2 || !validPath3(tuple[0]) || prior !== null && prior >= tuple[0]) {
+      throw new Error(`rip: publication change has a malformed or unsorted entry: ${JSON.stringify(tuple)}`);
+    }
+    const [path] = tuple;
+    const deletion = tuple.length === 2 && tuple[1] === null;
+    if (path.endsWith(".rip")) {
+      if (tuple.length !== 2 || !deletion && typeof tuple[1] !== "string") {
+        throw new Error(`rip: Rip change '${path}' must carry source or null`);
+      }
+    } else if (tuple.length === 2 && !deletion) {
+      throw new Error(`rip: ordinary asset change '${path}' cannot carry content`);
+    }
+    prior = path;
+    entries.push({ path, source: tuple[1], deletion });
+  }
+  return { from: change.from, hash: change.hash, entries };
+};
+var browserFetchText = async (url) => {
+  const response = await fetch(url);
   if (!response.ok)
     throw new Error(`rip: failed to fetch bundle '${url}': ${response.status} ${response.statusText}`);
-  return { fresh: true, text: await response.text(), etag: response.headers.get("ETag") };
+  return response.text();
 };
-var browserStorage = () => {
-  try {
-    return typeof sessionStorage !== "undefined" ? sessionStorage : null;
-  } catch {
-    return null;
-  }
-};
-async function fetchBundle(url, { fetchText = browserFetchText, storage = browserStorage() } = {}) {
+async function fetchBundle(url, { fetchText = browserFetchText } = {}) {
   if (!url)
     throw new Error("rip: fetchBundle requires a url");
-  const etagKey = `__rip_bundle_etag:${url}`;
-  const bodyKey = `__rip_bundle_body:${url}`;
-  const attempt = async (conditional) => {
-    const knownTag = conditional ? storage?.getItem(etagKey) ?? null : null;
-    const cached = knownTag ? storage?.getItem(bodyKey) ?? null : null;
-    const result = await fetchText(url, cached ? knownTag : null);
-    if (!result.fresh) {
-      if (!cached)
-        throw new Error(`rip: bundle '${url}' revalidated with no cached body`);
-      try {
-        return JSON.parse(cached);
-      } catch {
-        try {
-          storage?.removeItem?.(etagKey);
-          storage?.removeItem?.(bodyKey);
-        } catch {}
-        return;
-      }
-    }
-    let bundle;
-    try {
-      bundle = JSON.parse(result.text);
-    } catch (error) {
-      throw new Error(`rip: bundle '${url}' is not valid JSON: ${error.message}`);
-    }
-    if (result.etag && storage) {
-      try {
-        storage.setItem(etagKey, result.etag);
-        storage.setItem(bodyKey, result.text);
-      } catch {}
-    }
-    return bundle;
-  };
-  return await attempt(true) ?? await attempt(false);
+  const result = await fetchText(url);
+  const text = typeof result === "string" ? result : result?.text;
+  if (typeof text !== "string")
+    throw new Error(`rip: bundle '${url}' fetch did not return text`);
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`rip: bundle '${url}' is not valid JSON: ${error.message}`);
+  }
 }
-async function bootApp(opts = {}) {
-  if (!opts.bundle && !opts.url) {
-    throw new Error("rip: bootApp requires a bundle or a url");
-  }
-  const fetchOpts = {};
-  if (opts.fetchText)
-    fetchOpts.fetchText = opts.fetchText;
-  if ("bundleStorage" in opts)
-    fetchOpts.storage = opts.bundleStorage;
-  const workspaceMode = opts.workspace === true;
-  let manifestUrl = null;
-  if (workspaceMode) {
-    manifestUrl = opts.manifestUrl ?? opts.feed?.manifestUrl ?? (opts.url ? `${opts.url.slice(0, opts.url.lastIndexOf("/") + 1)}manifest.json` : "/manifest.json");
-  }
-  const bundle = opts.bundle ?? await fetchBundle(opts.url, fetchOpts);
-  if (!bundle || typeof bundle !== "object") {
-    throw new Error("rip: bootApp requires a bundle or a url");
-  }
-  const debug = opts.debug === true;
-  const fingerprint = debug ? "debug" : "plain";
-  let graph = bootGraphs.get(fingerprint);
-  if (!graph) {
-    const files2 = new Map;
-    const compiledStore = new Map;
-    const registry = {
-      read: (path) => files2.get(path),
-      exists: (path) => files2.has(path),
-      getCompiled: (path) => compiledStore.get(path),
-      setCompiled: (path, module) => void compiledStore.set(path, module)
-    };
-    const packages2 = {};
-    graph = {
-      files: files2,
-      packages: packages2,
-      loader: createModuleLoader({ components: registry, packages: packages2, embeddedPackages, debug })
-    };
-    bootGraphs.set(fingerprint, graph);
-  }
-  const { files, packages, loader } = graph;
-  for (const name of Object.keys(packages)) {
-    if (!(name in (bundle.packages ?? {})))
-      delete packages[name];
-  }
-  Object.assign(packages, bundle.packages ?? {});
-  const modules = bundle.modules ?? {};
-  for (const path of [...files.keys()]) {
-    if (modules[path] === undefined) {
-      files.delete(path);
-      loader.invalidate(path);
-    }
-  }
-  for (const [path, source2] of Object.entries(modules)) {
-    if (files.get(path) !== source2) {
-      files.set(path, source2);
-      loader.invalidate(path);
-    }
-  }
-  let bag = null;
-  if (workspaceMode) {
-    validatePublication(bundle, exports_app);
-    bag = exports_app.createWorkspace();
-    const records = [];
-    for (const entry of bundle.files) {
-      const source2 = (bundle.modules ?? {})[entry.id];
-      const record = {
-        id: entry.id,
-        path: entry.id,
-        hash: entry.hash
-      };
-      if (source2 !== undefined)
-        record.source = source2;
-      records.push(record);
-    }
-    bag.populate(records);
-  }
+var stageProgram = async (sources, debug) => {
+  const files = new Map(Object.entries(sources));
+  const staged = new Map;
+  const registry = {
+    read: (path) => files.get(path),
+    exists: (path) => files.has(path),
+    getCompiled: (path) => staged.get(path),
+    setCompiled: (path, module) => void staged.set(path, module)
+  };
+  const loader = createModuleLoader({ components: registry, embeddedPackages, debug });
   const compiled = {};
-  for (const path of Object.keys(bundle.modules ?? {})) {
-    if (path.endsWith(".rip") && !path.startsWith("@rip-lang/")) {
+  for (const path of Object.keys(sources)) {
+    if (!path.startsWith("@rip-lang/"))
       compiled[path] = { ...await loader.import(path) };
-    }
   }
-  if (!workspaceMode) {
-    return exports_app.launch({
-      bundle: { modules: bundle.modules, compiled, data: bundle.data },
-      target: opts.target,
-      adapter: opts.adapter,
-      base: opts.base,
-      hash: opts.hash,
-      persist: opts.persist,
-      storage: opts.storage,
-      onError: opts.onError
-    });
-  }
-  const launchWith = (compiledModules) => exports_app.launch({
-    bundle: { compiled: compiledModules, data: bundle.data },
-    components: bag,
+  return compiled;
+};
+var sibling = (url, name) => {
+  const clean = url.split("?")[0];
+  return `${clean.slice(0, clean.lastIndexOf("/") + 1)}${name}`;
+};
+async function bootApp(opts = {}) {
+  if (!opts.bundle && !opts.url)
+    throw new Error("rip: bootApp requires a bundle or a url");
+  const bundle = opts.bundle ?? await fetchBundle(opts.url, { fetchText: opts.fetchText });
+  const sources = publicationSources(bundle);
+  const debug = opts.debug === true;
+  const compiled = await stageProgram(sources, debug);
+  const workspace = exports_app.createWorkspace();
+  workspace.activate({ hash: bundle.hash, sources, compiled });
+  const dataFor = (modules) => modules["data.rip"]?.data;
+  const launchWith = (modules) => exports_app.launch({
+    bundle: { compiled: modules, data: dataFor(modules) },
+    components: workspace,
     target: opts.target,
     adapter: opts.adapter,
     base: opts.base,
@@ -28573,243 +28347,127 @@ async function bootApp(opts = {}) {
     onError: opts.onError
   });
   let current = launchWith(compiled);
-  const report = opts.feed?.report ?? ((...args) => console.error(...args));
+  let feed = null;
   let destroyed = false;
-  let timer = null;
-  let remounting = false;
-  const pending = new Set;
   const handle = {};
-  const isCssPath = (path) => typeof path === "string" && path.endsWith(".css");
-  const isHtmlPath = (path) => typeof path === "string" && path.endsWith(".html");
-  const isNonRipBag = (path) => isCssPath(path) || isHtmlPath(path);
-  const cssLinkFor = (id) => {
-    if (typeof document === "undefined")
+  const report = opts.feed?.report ?? ((...args) => console.error(...args));
+  const reload = (reason) => {
+    report(`[Rip] reloading${reason ? ` — ${reason}` : ""}`);
+    if (typeof opts.reload === "function")
+      opts.reload(reason);
+    else if (typeof location !== "undefined")
+      location.reload();
+  };
+  const cssLinkFor = (path) => {
+    if (typeof document === "undefined" || typeof document.querySelectorAll !== "function")
       return null;
     for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
-      if (link.getAttribute("data-rip-css") === id)
+      if (link.getAttribute("data-rip-css") === path)
         return link;
     }
-    const base = id.includes("/") ? id.slice(id.lastIndexOf("/") + 1) : id;
+    const base = path.slice(path.lastIndexOf("/") + 1);
     for (const link of document.querySelectorAll('link[rel="stylesheet"][href]')) {
       const href = link.getAttribute("href") || "";
-      const path = href.split("?")[0];
-      if (path === `/${base}` || path.endsWith(`/${base}`) || path === base)
+      const clean = href.split("?")[0];
+      if (clean === `/${path}` || clean.endsWith(`/${path}`) || clean === path || clean.endsWith(`/${base}`))
         return link;
     }
     return null;
   };
-  const applyCssSheet = (id, source2, hash) => {
-    if (typeof document === "undefined" || typeof source2 !== "string")
+  const refreshCss = (path, hash) => {
+    const link = cssLinkFor(path);
+    if (!link)
       return;
-    const link = cssLinkFor(id);
-    if (link && typeof hash === "string" && hash.length > 0) {
-      const raw = link.getAttribute("href") || link.href;
-      const path = raw.split("?")[0];
-      const next = `${path}?hash=${encodeURIComponent(hash)}`;
-      if (link.getAttribute("href") !== next)
-        link.setAttribute("href", next);
-      link.disabled = false;
-      for (const node of [...document.querySelectorAll("style[data-rip-css]")]) {
-        if (node.getAttribute("data-rip-css") === id)
-          node.remove();
-      }
-      return;
-    }
-    let el = null;
-    for (const node of document.querySelectorAll("style[data-rip-css]")) {
-      if (node.getAttribute("data-rip-css") === id) {
-        el = node;
-        break;
-      }
-    }
-    if (!el) {
-      el = document.createElement("style");
-      el.setAttribute("data-rip-css", id);
-      document.head.appendChild(el);
-    }
-    el.textContent = source2;
+    const clean = (link.getAttribute("href") || link.href).split("?")[0];
+    link.setAttribute("href", `${clean}?hash=${encodeURIComponent(hash)}`);
+    link.disabled = false;
   };
-  const removeCssSheet = (id) => {
-    if (typeof document === "undefined")
-      return;
-    for (const node of [...document.querySelectorAll("style[data-rip-css]")]) {
-      if (node.getAttribute("data-rip-css") === id)
-        node.remove();
-    }
-    const link = cssLinkFor(id);
-    if (link) {
-      const path = (link.getAttribute("href") || "").split("?")[0];
-      if (path)
-        link.setAttribute("href", path);
-    }
-  };
-  const escapeRemount = async (applied) => {
-    const snapshot = {};
-    for (const path of bag.paths()) {
-      if (isNonRipBag(path))
-        continue;
-      snapshot[path] = { ...await loader.import(path) };
-    }
-    for (const [path, module] of Object.entries(snapshot)) {
-      bag.setCompiled(path, module);
-    }
+  const launchCurrent = (modules) => {
     current.destroy();
-    current = launchWith(snapshot);
+    current = launchWith(modules);
     Object.assign(handle, current, stable);
   };
   const apply = exports_app.createApply({
-    renderer: {
-      remountDirty: (paths) => current.renderer.remountDirty(paths)
-    },
-    escape: async (paths) => {
-      await escapeRemount(paths);
-    },
+    renderer: { remountDirty: (paths) => current.renderer.remountDirty(paths) },
+    escape: async () => launchCurrent(Object.fromEntries(workspace.listAll().flatMap((path) => {
+      const module = workspace.getCompiled(path);
+      return module === undefined ? [] : [[path, module]];
+    }))),
     report: (...args) => {
-      if (typeof args[0] === "string" && args[0].startsWith("[Rip] applied")) {
+      if (typeof args[0] === "string" && args[0].startsWith("[Rip] applied"))
         console.log(...args);
-      } else {
+      else
         report(...args);
-      }
     }
   });
-  const absorb = async () => {
-    timer = null;
-    if (destroyed)
-      return;
-    if (remounting) {
-      timer = setTimeout(absorb, 25);
-      return;
-    }
-    remounting = true;
-    const applied = [...pending];
-    pending.clear();
+  const applyChange = async (wire) => {
+    let change;
     try {
-      const snapshot = {};
-      for (const path of bag.paths()) {
-        if (isNonRipBag(path))
-          continue;
-        try {
-          snapshot[path] = { ...await loader.import(path) };
-        } catch (error) {
-          report(`[Rip] ${path} failed to compile — keeping the last good version`, error);
-          return;
-        }
+      change = parseChange(wire);
+    } catch (error) {
+      report("[Rip] malformed publication change:", error);
+      return false;
+    }
+    if (workspace.hash() === change.hash)
+      return true;
+    if (workspace.hash() !== change.from)
+      return false;
+    for (const entry of change.entries) {
+      if (entry.path.endsWith(".rip"))
+        continue;
+      if (!entry.path.endsWith(".css") || entry.deletion)
+        return false;
+    }
+    const nextSources = Object.fromEntries(workspace.listAll().map((path) => [path, workspace.read(path)]));
+    const changedRip = [];
+    for (const entry of change.entries) {
+      if (!entry.path.endsWith(".rip"))
+        continue;
+      changedRip.push(entry.path);
+      if (entry.deletion)
+        delete nextSources[entry.path];
+      else
+        nextSources[entry.path] = entry.source;
+    }
+    let nextCompiled;
+    try {
+      nextCompiled = await stageProgram(nextSources, debug);
+    } catch (error) {
+      report("[Rip] changed Rip program failed to compile:", error);
+      return false;
+    }
+    try {
+      workspace.commit(change.from, { hash: change.hash, sources: nextSources, compiled: nextCompiled }, changedRip);
+      for (const entry of change.entries) {
+        if (entry.path.endsWith(".css"))
+          refreshCss(entry.path, change.hash);
       }
-      if (destroyed)
-        return;
-      for (const [path, module] of Object.entries(snapshot)) {
-        bag.setCompiled(path, module);
-      }
-      try {
-        const verdict = await apply.absorb(applied);
-        if (verdict === "update" || verdict === "ignore" || verdict === "css") {
-          Object.assign(handle, current, stable);
-        }
-      } catch (error) {
-        report("[Rip] apply failed — waiting for the next good change", error);
-      }
-    } finally {
-      remounting = false;
+      if (changedRip.length)
+        await apply.absorb(changedRip);
+      Object.assign(handle, current, stable);
+      return true;
+    } catch (error) {
+      report("[Rip] changed Rip program failed to activate:", error);
+      return false;
     }
   };
-  const unwatch = bag.watch((_event, path) => {
-    if (isNonRipBag(path))
-      return;
-    pending.add(path);
-    timer ??= setTimeout(absorb, 25);
-  });
-  const door = {
-    owners: new Map,
-    claim(id, owner) {
-      this.owners.set(id, owner);
-    },
-    passport: bag.passport,
-    sealed: bag.sealed,
-    set: async (passport) => {
-      const owner = passport.owner;
-      if (owner !== undefined && door.owners.get(passport.id) !== owner)
-        return false;
-      const known = bag.passport(passport.id);
-      if (known && typeof passport.hash === "string" && passport.hash === known.hash) {
-        if (passport.deleted !== true)
-          return false;
-      }
-      if (passport.deleted === true) {
-        if (known && typeof passport.hash === "string" && passport.hash !== known.hash)
-          return false;
-        const path2 = bag.passport(passport.id)?.path;
-        if (path2 !== undefined) {
-          if (isCssPath(path2)) {
-            removeCssSheet(path2);
-          } else if (isHtmlPath(path2)) {
-            if (typeof location !== "undefined")
-              location.reload();
-          } else {
-            files.delete(path2);
-            loader.invalidate(path2);
-          }
-        }
-        return bag.set(passport);
-      }
-      const path = passport.path ?? passport.id;
-      if (isCssPath(path)) {
-        const applied = bag.set({ id: passport.id, path, hash: passport.hash, source: passport.source });
-        if (applied) {
-          applyCssSheet(path, passport.source, passport.hash);
-          console.log(`[Rip] applied ${path} — css`);
-        }
-        return applied;
-      }
-      if (isHtmlPath(path)) {
-        const had = known != null;
-        const applied = bag.set({ id: passport.id, path, hash: passport.hash, source: passport.source });
-        if (applied && had) {
-          console.log(`[Rip] applied ${path} — reload`);
-          if (typeof location !== "undefined")
-            location.reload();
-        }
-        return applied;
-      }
-      files.set(path, passport.source);
-      loader.invalidate(path);
-      let module;
-      try {
-        module = await loader.import(path);
-      } catch (error) {
-        if (owner === undefined || door.owners.get(passport.id) === owner) {
-          if (known)
-            files.set(path, known.source);
-          else
-            files.delete(path);
-          loader.invalidate(path);
-        }
-        report(`[Rip] ${path} hash ${passport.hash} failed to compile — keeping the last good version`, error);
-        return false;
-      }
-      if (owner !== undefined && door.owners.get(passport.id) !== owner)
-        return false;
-      return bag.set({ ...passport, compiled: { ...module } });
-    }
-  };
-  const feed = exports_app.connectFeed(door, {
-    ...opts.feed ?? {},
-    manifestUrl,
-    report,
-    initialCheck: bundle.check
-  });
+  const watch = opts.watch === true || opts.feed != null;
+  if (watch) {
+    const latestUrl = opts.latestUrl ?? opts.feed?.latestUrl ?? (opts.url ? sibling(opts.url, "latest.json") : "/latest.json");
+    feed = exports_app.connectFeed({ hash: () => workspace.hash(), apply: applyChange, reload }, {
+      ...opts.feed ?? {},
+      latestUrl,
+      report
+    });
+  }
   const destroy = () => {
     if (destroyed)
       return;
     destroyed = true;
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    unwatch();
-    feed.close();
+    feed?.close();
     current.destroy();
   };
-  const stable = { workspace: bag, feed, destroy };
+  const stable = { workspace, feed, destroy };
   return Object.assign(handle, current, stable);
 }
 // src/browser.js

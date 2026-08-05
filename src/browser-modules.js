@@ -7,9 +7,8 @@
 //   './x.rip', '../y.rip'   another bundle module, relative to here
 //                           (including project-root projection overlays)
 //   '@rip-lang/app[/rash]'  the App package embedded in rip.js
-//   '@rip-lang/<name>/…'    a bundled non-core package module (store path =
-//                           import spelling) or a package entry from the
-//                           packages table
+//   '@rip-lang/<name>/…'    a bundled non-core package module. Package roots
+//                           resolve to index.rip; subpaths resolve to .rip.
 //   …/runtime/<m>.js        the page's ONE runtime copy, through a
 //                           bridge module — never a second evaluation;
 //                           matched by the emitter's own delivery
@@ -74,7 +73,6 @@ const toObjectUrl = code => {
 
 export function createModuleLoader({
   components: registry,
-  packages = {},
   embeddedPackages = {},
   debug = false,
 } = {}) {
@@ -142,9 +140,9 @@ export function createModuleLoader({
 
       throw new Error(`rip: '${from}' imports '${spec}', which is not in the bundle${hint}`);
     }
-    // Store paths use the author-facing package spelling. A specifier
-    // that is already an exact bag key resolves as itself; otherwise
-    // bare `@rip-lang/<name>[/sub]` goes through the packages table.
+    // Store paths use the author-facing package spelling. The publication
+    // needs no separate resolver table: package roots and subpaths have one
+    // canonical Rip filename convention.
     const bare = spec.match(/^@rip-lang\/([\w-]+)(?:\/(.+))?$/);
     if (bare) {
       if (inBundle(spec)) return { path: spec };
@@ -154,19 +152,15 @@ export function createModuleLoader({
       if (embeddedPackages[packageName]) {
         throw new Error(`rip: '${from}' imports '${spec}', which '${packageName}' does not export in the browser`);
       }
-      const entry = packages[packageName];
-      if (!entry) {
+      const sub = bare[2]
+        ? (bare[2].endsWith('.rip') ? bare[2] : `${bare[2]}.rip`)
+        : 'index.rip';
+      const path = `${packageName}/${sub}`;
+      if (!inBundle(path)) {
         throw new Error(
-          `rip: '${from}' imports '${spec}', but the bundle carries no such package — ` +
+          `rip: '${from}' imports '${spec}', but '${path}' is not in the bundle — ` +
           'only packages declaring browser safety travel to the browser',
         );
-      }
-      const sub = bare[2]
-        ? entry.exports?.[`./${bare[2]}`] ?? (bare[2].endsWith('.rip') ? bare[2] : `${bare[2]}.rip`)
-        : entry.entry;
-      const path = `${entry.root}/${sub}`;
-      if (!inBundle(path)) {
-        throw new Error(`rip: '${from}' imports '${spec}', but '${path}' is not in the bundle`);
       }
       return { path };
     }

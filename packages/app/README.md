@@ -14,12 +14,12 @@ The package currently provides:
 - `launch` for the one application boot path, with `persistStash`
 - `ariaCurrent` and `ownsAnchor` route-aware accessibility helpers
 - `createRenderer` for precompiled route/layout construction with render gates
-- `createWorkspace` for the Rip Workspace — the reactive passport bag of
-  component records ([docs/WORKSPACE.md](../../docs/WORKSPACE.md))
-- `connectFeed` for the workspace dev feed — the hub subscriber that turns
-  `{id, hash}` dings into latest-wins HTTP fetches and `workspace.set` calls
-- `rash` for producing the six-character App content hash used by manifests,
-  dings, and received-byte verification
+- `createWorkspace` for one active Rip publication: module source, compiled
+  modules, and one complete App hash ([docs/WORKSPACE.md](../../docs/WORKSPACE.md))
+- `connectFeed` for ordered watch changes and subscribe-before-`latest.json`
+  reconnect recovery
+- `rash` and `check` as server/tooling hash utilities; the browser publication
+  consumer trusts Manager's declared App hash
 
 Only named exports are supported:
 

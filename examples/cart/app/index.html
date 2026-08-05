@@ -23,15 +23,7 @@
     <script type="module">
       import { bootApp } from '/@rip/rip.js'
       const debug = new URLSearchParams(location.search).has('debug')
-      // Workspace door only where the feed surface exists (watching
-      // worker). A missing manifest is a plain 404 — never SPA HTML —
-      // because fetch Accept is */*, not text/html.
-      let workspace = false
-      try {
-        const res = await fetch('/manifest.json')
-        workspace = res.ok
-      } catch {}
-      bootApp({ url: '/bundle.json', debug, workspace })
+      bootApp({ url: '/bundle.json', debug, watch: true })
     </script>
   </body>
 </html>

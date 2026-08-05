@@ -1,39 +1,29 @@
 # hello-app
 
-Minimal browser-App-only shape:
+Minimal browser-App-only Server fixture:
 
-- authored modules under `app/`;
-- one manager-generated `bundle.json`;
-- a watch-only `manifest.json`;
+- authored App files under `app/`;
+- Manager-generated `bundle.json`, `bundle.json.br`, and `latest.json`;
 - finite Janus file roots;
-- an authored or explicitly generated shell;
-- no API entry and no workers.
+- an authored or generated shell; and
+- no API entry or workers.
 
-Janus serves every public byte.
+The fixture pins the publication boundary:
 
-## Publication checklist
+1. Watch and non-watch startup produce the same two-key
+   `{ hash, list }` bundle shape.
+2. The list contains only the complete browser Rip source graph.
+3. Private hashes for every managed App file contribute to the complete App
+   hash without crossing the wire.
+4. The Brotli sidecar expands to the exact `bundle.json` bytes.
+5. `latest.json` contains the same complete App hash.
+6. `manifest.json` is absent.
+7. Exact watcher events rehash only the reported configured paths.
+8. An idempotent write publishes nothing.
+9. A Rip edit publishes `[path, source]`; a CSS edit publishes `[path]`; a
+   deletion publishes `[path, null]`.
+10. One confirmed watcher batch becomes one ordered
+    `change { from, hash, list }` message.
 
-- Initial publication and ambiguous directory events walk every member selected
-  by `serve.rip` `app.manifest` into an ephemeral in-memory snapshot. Ordinary
-  file events reread and rehash only the exact watcher-reported ids. The
-  conventional policy selects `app/**/*.{rip,css,html}`. Each id is relative
-  to the App root, so the disk file `app/routes/index.rip` is
-  `routes/index.rip` in the bundle, manifest, ding, and Workspace.
-- Each entry receives one six-character content hash from `rash(bytes)`. The
-  wire field is `hash`.
-- Entries sort by `id`. The App check is
-  `rash(JSON.stringify(entries.map(({id, hash}) => [id, hash])))`.
-- `bundle.json` and `manifest.json` enumerate the same complete inventory and
-  carry the same top-level `check`.
-- The bundle retains the browser's `modules` and `packages` boot ABI and carries
-  selected content, initially every `.rip` source. The manifest carries no file
-  content.
-- A ding batch is the changed subset of manifest entries. Each ding describes
-  exactly one file; an empty change set sends no publish request. Deletions are
-  tombstones and are absent from the new inventory.
-- Bundle and manifest candidates come from the same snapshot. The manager
-  commits the bundle first and the manifest second using atomic renames.
-- Unchanged bytes are not rewritten. The manager retains committed metadata,
-  not a permanent in-memory copy of App source.
-- The shared check is App inventory identity. Janus independently supplies
-  each file's weak mtime/size ETag and conditional HTTP behavior.
+Janus serves every public byte and transports changes without interpreting
+Rip source or hashes.

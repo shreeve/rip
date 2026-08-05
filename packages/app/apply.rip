@@ -1,15 +1,14 @@
 # ==============================================================================
-# Apply — discardable hot-absorb policy for Workspace bag mutations
+# Apply — discardable hot-absorb policy for Workspace module commits
 #
-# Door mutates passports; apply chooses a verdict:
+# Browser delivery commits prepared state; apply chooses a verdict:
 #   reload | css | update | ignore
 #
-# Soft paths (css / html reload) are adopted in the door; absorb reports
+# CSS refresh and document reload happen in browser delivery; absorb reports
 # their verdicts when asked and runs Rip updates through the renderer.
 # `update` is the product verb — narrow remount vs whole-launch remount
 # is an implementation detail underneath.
 #
-# Delete this module if door and apply fuse — Q10.
 # ==============================================================================
 
 export type ApplyVerdict = 'reload' | 'css' | 'update' | 'ignore'
@@ -36,14 +35,13 @@ export def createApply(opts: ApplyOpts): Apply
     unless Array.isArray(paths) and paths.length > 0
       return 'ignore'
     css = (p for p in paths when typeof p is 'string' and p.endsWith '.css')
-    html = (p for p in paths when typeof p is 'string' and p.endsWith '.html')
     rip = (p for p in paths when typeof p is 'string' and p.endsWith '.rip')
+    ordinary = (p for p in paths when typeof p is 'string' and not p.endsWith('.rip') and not p.endsWith('.css'))
 
-    # Soft paths: door already adopted; absorb only names the verdict.
-    # *.css is always css — never reload.
+    # *.css is always css; every other ordinary managed asset reloads.
     if rip.length is 0
-      return 'css' if css.length > 0 and html.length is 0
-      return 'reload' if html.length > 0
+      return 'reload' if ordinary.length > 0
+      return 'css' if css.length > 0
       return 'ignore'
 
     verdict = 'escape'

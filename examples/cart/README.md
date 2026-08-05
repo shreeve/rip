@@ -2,10 +2,11 @@
 
 A multi-route shop that proves the full app rails: `index.rip` + `app/` +
 `api/` + SQLite persistence. Products, cart, profile, and orders — the
-canonical full-shape exemplar beside Pulse’s thin Workspace door demo
+canonical full-shape exemplar beside Pulse’s thin live-publication demo
 ([docs/WORKSPACE.md](../../docs/WORKSPACE.md)).
 
-It is a runnable example — not a CI suite.
+It is a runnable example; the browser suite also drives its publication apply
+path through a real Rip Server.
 
 ## Layout
 
@@ -35,5 +36,5 @@ rip server index.rip --name cart
 
 Open the registered site. Seeded products render; add to cart, place an
 order, and edit the profile. Data lives in `api/cart.sqlite` (gitignored).
-Watching mode opens the Workspace door; edit a client module under `app/`
-to see a live update.
+Watching mode activates the Workspace publication feed; edit a client module
+under `app/` to see a live update.

@@ -1,4 +1,4 @@
-# HANDOFF — session launch document (2026-08-04)
+# HANDOFF — session launch document (2026-08-05)
 
 The tracked session launch document (see AGENTS.md, working ledgers): read it
 first when starting a session; rewrite it at session boundaries with
@@ -8,59 +8,75 @@ live-verified facts only.
 
 - Repo: `~/Data/Code/rip` — the live v4 checkout.
 - Commands: `bun run test:all` · `bun run test` · `bun run audit`.
-- Permanent server architecture and current App publication protocol:
-  `docs/SERVER.md`.
-- Next App publication wire contract and implementation sequence:
-  `packages/server/README.md`, under Detailed Lifecycle.
+- Permanent Server architecture: `docs/SERVER.md`.
+- Browser publication consumer contract: `docs/WORKSPACE.md`.
+- Detailed implementation lifecycle: `packages/server/README.md`.
 
 ## Active branch
 
 **Branch: `rip-app-preparation`, tracking
 `origin/rip-app-preparation`.**
 
-The branch carries three scoped feature commits above `1eaeb3c`:
+The branch tip contains the embedded `@rip-lang/app` browser runtime and the
+macOS inherited-port edge work. The worktree contains the uncommitted complete
+Server/Manager/browser publication implementation described below.
 
-- `7b750c5` embeds the complete compiled `@rip-lang/app` package in
-  `dist/browser/rip.js`. App bundles no longer repeat the framework source;
-  authored modules resolve App imports through the stable browser runtime.
-- `eb97263` gives the packaged macOS edge a per-user, launchd-owned
-  `127.0.0.1:443` TCP socket. The launcher passes it to ordinary user-owned
-  Caddy as `fd/3`; stop, restart, reload, listener release, and the Hello App
-  were live-verified. The inherited stream serves HTTP/1.1 and HTTP/2 because
-  HTTP/3 requires a separately inherited UDP socket for QUIC.
-- `f613865` specifies the next `bundle.json`, `latest.json`, and `from → hash`
-  change lifecycle, its two implementation phases, and their acceptance
-  tests. That lifecycle is a specification: the current server and Rip App
-  still implement the manifest-and-ding protocol documented in
-  `docs/SERVER.md`.
+## Publication implementation
 
-The generated browser artifact is unminified `dist/browser/rip.js`; no
-`rip.min.js.br` or `rip.js.br` file is generated. The current artifact is
-1,508,152 bytes and measured 193,473 bytes through Brotli. The combined
-browser-runtime change is 21,915 Brotli bytes over the branch base artifact.
+- Browser-program construction is pure Rip in `packages/server/bundle.rip`.
+  Server owns package traversal, browser-safety validation, shared schema
+  projection, and canonical source-list construction.
+- `bundle.json` is exactly `{ hash, list }`. The sorted list contains
+  `[modulePath, source]` for the complete browser Rip program. There is no
+  `manifest.json`, public per-file hash inventory, resolver table, or embedded
+  `@rip-lang/app` source.
+- Manager privately hashes managed App files, suppresses idempotent watcher
+  events, calculates one complete App hash, and atomically publishes
+  `bundle.json`, exact `bundle.json.br`, and `latest.json {hash}`.
+- One effective watch batch sends one ordered
+  `change {from,hash,list}`. Rip source rides as `[path,source]`, ordinary
+  changed assets ride as `[path]`, and deletions ride as `[path,null]`.
+- Watch and non-watch modes share the same initial publication. Non-watch mode
+  creates no App watcher and no publication feed.
+- Browser boot validates the two-key bundle, trusts the Manager-declared hash,
+  compiles and atomically activates the complete Rip program, and leaves CSS,
+  HTML, images, fonts, and other assets to normal HTTP caching.
+- Workspace holds active Rip source, compiled modules, and one complete hash.
+  It applies only a connected `from` to `hash` transition; malformed input,
+  a sequence gap, or failed activation reloads instead of guessing.
+- Reconnect subscribes to `/hub` before fetching `latest.json`. A matching
+  hash continues; a mismatch reloads and obtains a complete bundle.
+- CSS changes refresh the linked stylesheet over HTTP, Rip changes compile and
+  update, and HTML or another managed ordinary asset reloads.
+- Hello, Pulse, Cart, and the browser certification fixture all use this one
+  protocol. There is no compatibility wire format.
 
 ## Verification
 
-- `bun run test:all` — all 22 lanes passed, 8,387 tests total in 73.1s.
-- Root extended suite — 6,519 passed.
-- `packages/vscode` — 169 passed.
-- `packages/server` — 93 passed, including real published Janus integration
-  and the launchd edge pin.
-- Focused browser bundle, module-loader, and boot suites — 57 passed, one
-  extended freshness test skipped locally and covered by `test:all`.
-- `packages/browser-tests` remains the documented CI-only Playwright lane.
+- `bun run test:all` — 22 lanes, 8,323 tests passed in 82.6s.
+- `packages/server` within that gate — 96 passed.
+- `packages/app` within that gate — 311 passed.
+- `bun run test` fast tier — 6,133 passed, 38 intentionally skipped.
+- `bunx playwright test --reporter=line` in `packages/browser-tests` —
+  21 passed, 2 skipped across Chromium, Firefox, WebKit, and the real
+  Server/Manager Cart harness.
+- Direct publication assembly — Hello 1 Rip module, Pulse 3, Cart 13.
 - `git diff --check` — passed.
 
-## Next work
+## Remaining edge and landing work
 
-Review the three feature commits and begin Phase 1 of the Detailed Lifecycle
-with the Server/Manager protocol reference client. Phase 1 proves publication,
-change ordering, reconnect recovery, and failure handling independently of Rip
-App. Phase 2 then moves Rip App and browser boot to the proven protocol. The
-feature branch may be temporarily incomplete between phases; it does not carry
-a dual wire format or land until both phases pass.
+1. Released Janus v1.5 does not select precompressed sidecars in its custom
+   registered-file path. Manager produces `bundle.json.br`, but transparent
+   Brotli delivery requires Janus behavior equivalent to Caddy
+   `file_server { precompressed }`.
+2. Complete the remaining open items in `packages/server/TODO.md`, including
+   the Janus repository gates and independent/cold verification required for a
+   substantial merge.
+3. Review the complete worktree scope, commit intentionally, push, and open or
+   update the branch PR when requested.
 
 ## Working agreements
 
 - **Land** = merge green + delete feature branch.
-- PRs: TRUE MERGE only. No AI attribution.
+- Shared branches catch up by merge, never rebase; never force-push.
+- PRs land as true merge commits only. No AI attribution.

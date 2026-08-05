@@ -35,29 +35,30 @@ reload is a fallback, not the default once framework refresh exists.
 
 ## Current baseline
 
-The Workspace **door** (Layer A) is shipped: watch → `/hub` ding
-`{id,hash}` → latest-wins HTTP `GET` at the App root → compute `rash(bytes)` →
-`Workspace.set` → visible update (see [WORKSPACE.md](WORKSPACE.md) Q8). Apply today is the
-labeled whole-launch **remount escape** — not state-preserving refresh.
-Marquee apply (Layer B) is open research against the S-suite; do not
-call remount “HMR done.”
+The publication substrate (Layer A) is defined by
+[WORKSPACE.md](WORKSPACE.md): initial `bundle.json`, ordered
+`change {from,hash,list}` messages in watch mode, and reconnect recovery through
+`latest.json`. Rip Server produces that protocol and Rip App consumes it.
+The baseline remounts the affected live route while preserving the App stash
+and compatible ancestor layouts. Definition patching and signature-aware
+state migration remain outside this baseline.
 
 ## Two-layer architecture
 
 HMR has two independent owners:
 
 ```text
-Layer A — Workspace door (dev substrate)
-watch → hub ding {id,hash} → HTTP GET latest bytes → Workspace.set
+Layer A — Workspace publication (dev substrate)
+watch → Manager confirms bytes → change {from,hash,list} → Workspace transaction
                          │
                          ▼
 Layer B — framework refresh (apply engine)
 identity → signature → patch/migrate/remount → effects → DOM
 ```
 
-Layer A mutates the passport bag. Layer B decides whether living
-instances can adopt the mutation. Layer A **is** the Workspace door —
-not a second WebSocket body bus.
+Layer A mutates the active module Workspace. Layer B decides whether living
+instances can adopt the mutation. Rip source may ride in a watch-mode change;
+ordinary asset bytes remain on HTTP.
 
 Rip owns the language, compiler, runtime, renderer, router, and server,
 so both layers can share stable ids and compiler-produced metadata
@@ -67,15 +68,10 @@ without heuristic source transforms.
 
 ### Module graph
 
-Each file records:
-
-- stable file id (B′);
-- Rip content hash;
-- imported dependencies;
-- importers;
-- accepted dependencies/self-accept status;
-- dispose and prune callbacks;
-- the last successful namespace.
+The active Workspace records canonical Rip module paths, source, compiled
+modules, and one complete Manager-declared App hash. Per-file hashes remain
+private to Manager. Dependency and acceptance metadata needed for finer HMR
+belongs to the compiler/module graph rather than the publication wire format.
 
 ### Update protocol
 
@@ -292,13 +288,11 @@ signature decisions remain deterministic unit tests.
 
 ## Resolved decisions
 
-Aligned with [WORKSPACE.md](WORKSPACE.md) (door wins where this file
-once disagreed):
+Aligned with [WORKSPACE.md](WORKSPACE.md):
 
-- **Layer A transport: Workspace door.** Hub ding `{ id, hash }`
-  (no bodies); HTTP carries latest file bytes at the ordinary App-root URL.
-  Production has no hub (Q2). SSE body buses and WS-inline update
-  payloads are rejected.
+- **Layer A transport: publication changes.** A watch-mode Hub message carries
+  one ordered `from → hash` transition. Changed Rip source may be inline;
+  ordinary asset bytes use HTTP. Watch-off publication requires no Hub.
 - **API: Rip-native, no `import.meta.hot` shim.** Compiler-owned
   accept/boundaries; Rip events for tools later.
 - **Container identity during patch: owner-frame + declared key**, never
@@ -310,12 +304,12 @@ once disagreed):
 - **Stash / schema-registry replacement: replace-and-revalidate.** The
   registry is replaced and revalidated; live stash values are preserved
   by key and orphaned keys are dropped loudly.
-- **Bag unit noun: file** (path-keyed passport). Swappable component
-  identity: **component definition** (not “definition cell”).
-- **Dev delivery: manager file pool + `bundle.json` first paint.** The bundle's
-  validated `files` + `check` populate the Workspace; the manifest reconciles
-  only after the Hub opens. Live mutation fetches one file generation.
-  Production remains the deterministic sealed path.
+- **Workspace unit noun: module.** Rip modules are path-keyed. Swappable
+  component identity is **component definition**, not “definition cell.”
+- **Delivery: complete Rip program first paint.** `bundle.json.list` carries
+  the validated source graph and `bundle.json.hash` identifies the complete
+  managed App state. `latest.json` is reconnect recovery; there is no
+  manifest or public per-file hash inventory.
 
 ## Architectural constraints
 

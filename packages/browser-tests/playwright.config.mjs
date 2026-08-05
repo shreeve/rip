@@ -8,7 +8,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   webServer: [
     {
-      command: 'bun serve.mjs',
+      command: 'bun --preload=../../src/loader.js serve.mjs',
       port: 4173,
       reuseExistingServer: !process.env.CI,
     },
@@ -40,7 +40,7 @@ export default defineConfig({
       use: { ...devices['Desktop Safari'], baseURL: 'http://127.0.0.1:4173' },
     },
     {
-      // Cart Probe 1 is chromium-first: real rip server + door. Expand
+      // Cart publication apply is chromium-first: real Rip Server. Expand
       // to firefox/webkit once the harness is sticky in CI.
       name: 'cart-chromium',
       testMatch: /cart-apply/,

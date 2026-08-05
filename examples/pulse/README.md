@@ -2,7 +2,7 @@
 
 A tiny status board that proves the whole stack end to end: Janus serves
 the browser App, Rip Server handles a small API, and saving a component
-file updates the running page through the Workspace door.
+file updates the running page through the Workspace publication feed.
 
 It is a runnable example and a demo script — not a test suite. Nothing
 here is wired into CI.
@@ -17,10 +17,9 @@ here is wired into CI.
 | `app/mood.rip` | `MoodBadge`, the mood → label leaf. **This is the file the live demo edits.** |
 | `app/routes/index.rip` | The page: post form + the status list through `MoodBadge` |
 
-The `app/` directory is the browser app. Bundle, manifest, ding, and Workspace
-paths are relative to that root: `routes/index.rip` is the `/` route and
-`stash.rip` is the stash contract. Route files live on disk under
-`app/routes/`.
+The `app/` directory is the browser App. Publication and Workspace paths are
+relative to that root: `routes/index.rip` is the `/` route and `stash.rip` is
+the stash contract. Route files live on disk under `app/routes/`.
 
 ## The API
 
@@ -52,7 +51,7 @@ Janus admits the host, routes it to the live worker sockets
 (least-conn with health), answers anonymous GETs from its micro-cache,
 and owns the Hub directly.
 
-## Leg 3 — the door
+## Leg 3 — live publication
 
 Same as leg 2, with the flag in the manager's environment:
 
@@ -63,14 +62,14 @@ rip server index.rip --name pulse
 
 Open the page, then edit `app/mood.rip`: change the `up` label
 `'riding high'` to anything else and save. The manager sees a
-client-only change and dings the Hub with `{id, hash}` — no bytes ride the
-socket. The page fetches the latest file over HTTP, verifies its hash,
-sets it into the Workspace, and every badge on the page
-updates without a manual refresh.
+client-only change and publishes one `change {from,hash,list}` through the
+Hub. The list carries the changed Rip source. Rip App stages that source,
+advances the Workspace atomically, and every badge on the page updates without
+a manual refresh.
 
 The update applies by **remount labeled escape** (docs/WORKSPACE.md,
 M1): the route remounts against the new component, and the console says
-so — this is the door working, not hot state-preserving apply.
+so — this is publication apply working, not definition-patching HMR.
 
 ## Leg 4 — live collaboration
 
@@ -78,9 +77,8 @@ No new commands: any pooled run (leg 2 or 3) already carries it. Open
 the page in TWO browser windows and post from one — the other's list
 updates without a refresh.
 
-The mechanism is the app-level twin of the dev feed, over the same
-Janus hub, under the same doctrine — **the frame is a hint, the data
-rides HTTP**:
+This application-owned mechanism shares the Janus Hub but is independent of
+file publication. Its frame is a hint and its data rides HTTP:
 
 - On mount the page opens a `/hub` socket and self-enrolls with
   `{"+": ["/pulse"]}` — a client-legal hub directive; the worker is

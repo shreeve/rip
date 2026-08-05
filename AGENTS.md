@@ -11,9 +11,8 @@ Permanent documentation:
  Caddy/Janus/manager/worker architecture and lifecycle contract.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
 - [docs/WORKSPACE.md](docs/WORKSPACE.md) — the Rip Workspace
- constitution: the browser passport bag, the dev feed ("door"), and
- the apply roadmap. The door is the DEFAULT for watching
- manager-served browser apps; production has no hub.
+  constitution: browser publication consumption, live changes, reconnect
+  recovery, and the apply boundary.
 - [docs/HMR.md](docs/HMR.md) — HMR design and acceptance contract.
 - [docs/FRAME.md](docs/FRAME.md) — Rip-native hypermedia design and acceptance contract.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work.
@@ -281,20 +280,16 @@ alters surface syntax updates ALL THREE in the same change.
   or choose the nearest idiomatic alternative; never paper over with
   curly-brace JS style. Read nearby `.rip` for the local dialect
   before writing new code.
-- **Workspace vocabulary (door / apply):** bag = **membership** (default
-  disk set `app/**/*.{rip,css,html}`); bag ids and paths are relative to the
-  App root (`routes/home.rip`, never `app/routes/home.rip`); bag unit =
-  **module** (path-keyed);
-  in-memory record = **passport**; swappable component identity =
-  **component definition**. Not “cell.” Hub dings `{ id, hash }` only —
-  no apply kind on the wire. Client apply verdicts:
-  **`reload` | `css` | `update` | `ignore`** (`*.css` → `css` never
-  `reload`; `*.html` → `reload`; `*.rip` → `update`). CSS updates the
-  stylesheet the page already linked (e.g. `/styles.css`) — one path,
-  cache-bust `?hash=`. Main server entry (`app.rip` / `index.rip` at
-  project root) is outside the client bag → epoch on change. Manifest
-  entries use **files** (`{ files: [{id,hash}] }`). Janus serves latest
-  authored bytes directly; workers have no App or generated-file routes.
+- **Workspace vocabulary (publication / apply):** Rip Server publishes
+  applications. `bundle.json` is `{ hash, list }`; `list` is the complete
+  canonical `[modulePath, source]` Rip program. Individual file hashes remain
+  private to Manager. Watch-mode Hub messages carry one
+  `change { from, hash, list }`; `[path,source]` updates Rip source, `[path]`
+  invalidates an HTTP asset, and `[path,null]` deletes. Client apply verdicts
+  are **`reload` | `css` | `update` | `ignore`**. Reconnect subscribes before
+  checking `latest.json`; a mismatched complete App hash reloads. There is no
+  `manifest.json`. Janus transports files and messages without Rip semantics;
+  workers have no App or generated-file routes.
 - **Comments explain non-obvious intent** — invariants, constraints,
   why a trade-off was taken. Never narrate what code obviously does,
   never reference project history or future plans. A comment that
@@ -408,7 +403,7 @@ alters surface syntax updates ALL THREE in the same change.
  (deps come from the repo-root `bun install`; no package-local lock).
 - `bunx playwright test` FROM `packages/browser-tests` — the real-DOM
  certification (chromium, firefox, webkit), including the workspace
- ding spec.
+ publication-change spec.
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus-expected` — regenerate the corpus expected outputs.
 - `bun run browser-bundle` — regenerate `dist/browser/rip.js` after any

@@ -67,22 +67,21 @@ login in front of an unsecured app) lives in the Janus repository.
 package-graph handling are shipped and certified in CI: Node suites
 plus real-browser Playwright runs across Chromium, Firefox, and WebKit
 (`packages/browser-tests`) drive `processRipScripts` and the
-`assembleBundle` → `bootApp` → `launch` path end to end — SPA
-navigation, ETag revalidation, debug-gated source maps.
+`assembleRipBundle` → `bootApp` → `launch` path end to end — SPA
+navigation, ordinary HTTP cache behavior, debug-gated source maps.
 
-The manager assembles the page and bundle for Janus to serve directly;
+The manager assembles the page and publication for Janus to serve directly;
 API workers do not carry a browser-delivery surface. The certification
-fixture `packages/browser-tests/serve.mjs` remains the browser-CI
-harness. The remaining browser work is:
+fixture `packages/browser-tests/serve.mjs` remains the browser-CI harness.
+The browser consumes `bundle.json {hash,list}`, watch-mode
+`change {from,hash,list}`, and reconnect recovery through `latest.json` as
+specified by [WORKSPACE.md](WORKSPACE.md). The remaining browser work is:
 
-- the watch→browser transport (none exists in v4; for Workspace door
-  work follow [WORKSPACE.md](WORKSPACE.md) Q2 — Hub ding, HTTP bytes —
-  not HMR.md’s inline-WebSocket payload row);
+- transparent `bundle.json.br` selection in Janus's registered-file path;
 - `rip.browser` granularity: the flag is package-level, so
   `@rip-lang/ui/browser` cannot travel while the package's Tailwind
   half carries npm dependencies — subpath metadata, a package split,
-  or an assembly-time export filter needs an owner ruling;
-- CSS delivery.
+  or an assembly-time export filter needs an owner ruling.
 
 Production precompiled output (a CSP-clean path with no in-browser
 compiler) is deliberately deferred by owner leaning (2026-07-22: the
@@ -209,24 +208,19 @@ mapping-safe representation of argument literals.
 
 ## Rip Workspace
 
-Living constitution (plan + backout charter) for the browser mutation
-door and Pure Rip passport model: [WORKSPACE.md](WORKSPACE.md).
-Experimental until apply research lands; not a Janus capability.
-Q4 scenario suite (**S1–S15**) + Probe 0/1: **Research / apply** in
-that file. Door (M1) and apply stay separate. Sealed populate (M0)
-may run in production once M0 exit holds; live-mutate / apply stay
-off until refresh contract tests pass.
+The browser publication-consumption and mutation contract lives in
+[WORKSPACE.md](WORKSPACE.md). Rip Server publishes applications; Janus
+transports their files and watch-mode changes; Rip App consumes them. The
+publication substrate and framework-aware apply engine remain separate test
+boundaries.
 
 ## Hot module replacement
 
 Framework-refresh aspiration and phased tests: [HMR.md](HMR.md).
-Mutations enter via Workspace ([WORKSPACE.md](WORKSPACE.md)); refresh
-decides how living instances adopt them. **Transport note:** Workspace
-**Q2** locks Hub ding + HTTP bodies for the Workspace door — that
-supersedes HMR.md rows that put update payloads on a WebSocket.
-Apply research track and scenario suite live under WORKSPACE.md
-**Research / apply**; HMR.md Layer B remains the aspirational ladder
-once evidence lands.
+Mutations enter through one ordered Workspace transition; refresh decides how
+living instances adopt them. Watch-mode changes may include Rip source, while
+ordinary asset bytes remain on HTTP. HMR.md's apply layer remains the
+aspirational ladder once evidence lands.
 
 ## Rip-native hypermedia
 

@@ -11,13 +11,13 @@ test "createApply validates its options", ->
   throws (-> createApply {}), 'requires renderer.remountDirty'
   throws (-> createApply { renderer: remountDirty: -> 'narrow' }), 'requires an escape remount'
 
-test! "absorb ignores empty sets and non-App file types", ->
+test! "absorb ignores an empty set and reloads for ordinary assets", ->
   calls = []
   apply = createApply
     renderer: remountDirty: (paths) -> calls.push ['narrow', paths]; 'narrow'
     escape: (paths) -> calls.push ['escape', paths]
   eq apply.absorb!([]), 'ignore'
-  eq apply.absorb!(['notes.txt']), 'ignore'
+  eq apply.absorb!(['notes.txt']), 'reload'
   eq calls, []
 
 test! "absorb reports css for CSS-only dirty sets (never reload)", ->

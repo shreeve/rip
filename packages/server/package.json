@@ -33,6 +33,7 @@
     "worker.rip",
     "generate.rip",
     "manager.rip",
+    "bundle.rip",
     "control.rip",
     "appliance.rip",
     "agent.rip",

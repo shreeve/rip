@@ -1,0 +1,35 @@
+import { test, eq, ok } from '@rip-lang/testing'
+import { join } from 'node:path'
+import { assembleRipBundle } from '../../bundle.rip'
+
+PACKAGES = join(import.meta.dir, '..', '..', '..')
+
+test! 'Rip bundle is one canonical source list with no resolver metadata', ->
+  list = assembleRipBundle
+    modules:
+      'routes/index.rip': "import { http } from '@rip-lang/http'\nexport client = http"
+    packagesDir: PACKAGES
+
+  paths = list.map (entry) -> entry[0]
+  eq paths, [...paths].sort()
+  ok paths.includes 'routes/index.rip'
+  ok paths.includes '@rip-lang/http/index.rip'
+  ok not paths.includes '@rip-lang/http/http.rip'
+  ok list.find((entry) -> entry[0] is '@rip-lang/http/index.rip')[1].includes('export class HTTPError')
+
+test! 'embedded App imports never add App source to the server bundle', ->
+  list = assembleRipBundle
+    modules:
+      'stash.rip': "import { source } from '@rip-lang/app'\nexport value = source fetch: -> 1"
+    packagesDir: PACKAGES
+  eq list.map((entry) -> entry[0]), ['stash.rip']
+
+test! 'unknown and server-only packages reject during server assembly', ->
+  message = null
+  try
+    assembleRipBundle
+      modules: { 'bad.rip': "import { readFileSync } from 'node:fs'" }
+      packagesDir: PACKAGES
+  catch error
+    message = error.message
+  ok message?.includes('server-only and unknown modules stay on the server')

@@ -18,8 +18,8 @@
 # `stash.rip` through its `stash` export; the `stash` option
 # overrides it for tests and embedding hosts.
 #
-# The `components` option injects the component store (the Workspace
-# bag implements the same interface — WORKSPACE.md Q7); omitted,
+# The `components` option injects the component store (Workspace implements
+# the same interface); omitted,
 # launch creates its own store and behavior is unchanged.
 #
 # A second launch while one is live rejects loudly, as does a malformed
