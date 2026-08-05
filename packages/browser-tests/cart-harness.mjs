@@ -57,7 +57,6 @@ const stub = Bun.serve({
   idleTimeout: 120,
   fetch: async (rq) => {
     const url = new URL(rq.url);
-    if (rq.method === 'GET') return new Response('janus', { status: 404 });
     let body = null;
     if (rq.method === 'POST' || rq.method === 'PUT') {
       body = await rq.json().catch(() => null);
@@ -68,6 +67,9 @@ const stub = Bun.serve({
       return Response.json({ id: 'cart-probe' }, { status: 201 });
     }
     if (rq.method === 'PUT' && url.pathname.endsWith('/upstreams')) {
+      if (registration && body?.upstreams) {
+        registration = { ...registration, upstreams: body.upstreams };
+      }
       return Response.json({ ok: true });
     }
     if (rq.method === 'POST' && url.pathname.endsWith('/heartbeat')) {
@@ -79,21 +81,25 @@ const stub = Bun.serve({
       return Response.json({ objects: n, deliveries: n, unknown_targets: 0 });
     }
     if (rq.method === 'DELETE') return new Response(null, { status: 204 });
+    // Access-log GETs are not part of this harness; manager is started with
+    // --access-log=off. Anything else on the control plane is unknown.
     return new Response('nope', { status: 404 });
   },
 });
 
-// Invoke the manager the same way the server suite does: bun + loader +
+// Real Janus load-balances across worker upstreams. This stub must too:
+// Cart stash fetches user/products/orders in parallel, and each worker
+// defaults to concurrency 1.
+const WORKERS = 4;
+
+// Invoke the manager the same way the sites suite does: bun + loader +
 // site.rip. `rip site` only resolves when cwd can see rip-site on
 // PATH (repo root / linked bins) — a /tmp cart copy cannot.
 const manager = Bun.spawn(
   [
     process.execPath, `--preload=${loaderPath}`, serverBin,
-    // Cart stash loads user/products/orders in parallel. Default -c 1
-    // 503s the extras; -c>1 requires API watch off (manager rule). This
-    // suite only edits App files, so App-watch alone is enough.
     'index.rip', '--control', ctlSock, '--name', 'cart-probe',
-    '--watch-app', '--no-watch-api', '-w', '1', '-c', '8',
+    '-w', String(WORKERS), '--access-log=off',
   ],
   {
     cwd: cartDir,
@@ -128,26 +134,39 @@ const drain = async (stream, label) => {
 drain(manager.stdout, 'out');
 drain(manager.stderr, 'err');
 
-const workerSock = async () => {
-  // CI runners are slower to spawn the manager + first worker than a laptop.
+const liveUpstreams = () => {
+  const put = [...calls].reverse().find(
+    (c) => c.method === 'PUT' && c.body?.upstreams?.length &&
+      !c.body.upstreams.some((u) => u.doorbell),
+  );
+  const upstreams = put?.body?.upstreams ?? registration?.upstreams ?? [];
+  return upstreams
+    .filter((u) => !u.doorbell && u.path && existsSync(u.path))
+    .map((u) => u.path);
+};
+
+let rr = 0;
+const workerSock = async ({ need = 1 } = {}) => {
+  // CI runners are slower to spawn the manager + worker pool than a laptop.
   const deadline = Date.now() + (process.env.CI ? 55000 : 30000);
   while (Date.now() < deadline) {
     if (manager.exitCode != null) {
-      throw new Error(`cart-harness: manager exited ${manager.exitCode} before registering a worker`);
+      throw new Error(`cart-harness: manager exited ${manager.exitCode} before registering workers`);
     }
-    const put = [...calls].reverse().find(
-      (c) => c.method === 'PUT' && c.body?.upstreams?.length &&
-        !c.body.upstreams.some((u) => u.doorbell),
-    );
-    const upstreams = put?.body?.upstreams ?? registration?.upstreams;
-    const path = upstreams?.find((upstream) => !upstream.doorbell)?.path;
-    if (path && existsSync(path)) return path;
+    const paths = liveUpstreams();
+    if (paths.length >= need) {
+      const path = paths[rr % paths.length];
+      rr += 1;
+      return path;
+    }
     await Bun.sleep(25);
   }
-  throw new Error('cart-harness: worker socket never registered');
+  throw new Error(`cart-harness: only ${liveUpstreams().length}/${need} worker sockets registered`);
 };
 
-const initialSock = await workerSock();
+// Wait for the full pool so the first parallel stash fetches do not stampede
+// a single upstream before siblings appear.
+const initialSock = await workerSock({ need: WORKERS });
 writeFileSync(join(fixtureRoot, 'ready'), `${initialSock}\n`);
 // Playwright only needs a 2xx on /__test/ready; do not re-block on the
 // socket for every probe (Bun's default idleTimeout is 10s).
