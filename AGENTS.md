@@ -394,11 +394,13 @@ the affected final gates again.
  snapshots, strip/emission pins. The extended tier (tsc-spawning
  validity gates, scaling gates, fuzz drift) registers visible skips
  here.
-- `bun run test:all` — the CANONICAL repository suite: everything above PLUS
+- `bun run test:all` — the EXHAUSTIVE repository certification: everything above PLUS
  the extended tier PLUS every `packages/*/` suite, which
  `scripts/test-all.mjs` spawns as parallel lanes and aggregates into
- one exit code. CI runs this, always. COMPLETION CLAIMS run against
- `bun run test:all`, not the fast loop. The ONE suite it does not
+ one exit code. Run it explicitly for release certification; the manual
+ `repository-certification` workflow runs it with the corpus audit and
+ generated-byte gates. It is not the edit loop or an automatic pull-request
+ gate. The ONE suite it does not
  carry is `packages/browser-tests` — it needs installed Playwright
  browsers. CI runs its deterministic Chromium/Firefox/WebKit smoke
  matrix as a required job; the live Cart Server/Manager certification

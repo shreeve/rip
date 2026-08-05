@@ -145,22 +145,30 @@ definition of "test."
 - Missing optional tools are reported clearly.
 - No browser installation or live multi-process harness unless selected.
 
-### Merge gates
+### Pull-request gates
 
 - Operate on a frozen candidate.
-- Cover repository-wide compiler invariants and affected package boundaries.
+- Cover the fast compiler loop and affected package boundaries already named
+  by the author.
 - Include deterministic browser smoke for browser-owned changes.
-- Include expensive full-stack certification only when its owned boundary is
-  affected or when explicitly requested for a release candidate.
 - Never report a reduced suite as the complete suite.
+
+### Certification gates
+
+- Run explicitly for a release or repository-wide confidence check.
+- Cover every package, the extended compiler tier, corpus audit, generated
+  bytes, and selected full-stack exemplars.
+- Do not block ordinary feature work merely because certification has not been
+  requested.
 
 ### CI tiers
 
 Design the workflow around intent:
 
-- Draft/work-in-progress: fast compiler loop plus affected package lanes.
-- Ready pull request: canonical merge gates.
-- Scheduled or release certification: exhaustive permutations, scaling,
+- Draft/work-in-progress: focused local tests only.
+- Ready pull request: fast compiler loop plus affected package evidence and
+  deterministic browser smoke.
+- Manual release certification: exhaustive permutations, scaling,
   fuzzing, multi-browser expansion, and expensive real-stack exemplars.
 
 Path selection must include declared dependency edges. A package-only change
