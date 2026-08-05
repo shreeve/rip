@@ -89,7 +89,11 @@ const stub = Bun.serve({
 const manager = Bun.spawn(
   [
     process.execPath, `--preload=${loaderPath}`, serverBin,
-    'index.rip', '--control', ctlSock, '--name', 'cart-probe', '-w', '1',
+    // Cart stash loads user/products/orders in parallel. Default -c 1
+    // 503s the extras; -c>1 requires API watch off (manager rule). This
+    // suite only edits App files, so App-watch alone is enough.
+    'index.rip', '--control', ctlSock, '--name', 'cart-probe',
+    '--watch-app', '--no-watch-api', '-w', '1', '-c', '8',
   ],
   {
     cwd: cartDir,
