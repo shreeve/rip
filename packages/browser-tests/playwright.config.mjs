@@ -13,7 +13,7 @@ const cartServers = [{
   command: 'bun cart-harness.mjs',
   url: `${cartUrl}/__test/ready`,
   reuseExistingServer: !process.env.CI,
-  timeout: 60000,
+  timeout: 90000,
   env: {
     ...process.env,
     CART_HARNESS_PORT: '4174',

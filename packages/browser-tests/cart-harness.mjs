@@ -26,9 +26,12 @@ const nm = join(fixtureRoot, 'node_modules', '@rip-lang');
 mkdirSync(nm, { recursive: true });
 const repoRipLang = join(root, 'node_modules', '@rip-lang');
 for (const name of readdirSync(repoRipLang)) {
+  const target = join(repoRipLang, name);
+  // Skip dangling workspace leftovers (e.g. a stale `site` link after rename).
+  if (!existsSync(target)) continue;
   const link = join(nm, name);
   try { unlinkSync(link); } catch { /* fresh */ }
-  symlinkSync(join(repoRipLang, name), link);
+  symlinkSync(target, link);
 }
 
 const ctlSock = join(fixtureRoot, 'janus.sock');
@@ -51,6 +54,7 @@ const fanoutChange = (body) => {
 
 const stub = Bun.serve({
   unix: ctlSock,
+  idleTimeout: 120,
   fetch: async (rq) => {
     const url = new URL(rq.url);
     if (rq.method === 'GET') return new Response('janus', { status: 404 });
@@ -100,11 +104,12 @@ const manager = Bun.spawn(
       RIP_DRAIN_MS: '100',
       RIP_KILL_MS: '400',
       RIP_HOLD_MS: '8000',
-      RIP_BOOT_DEADLINE_MS: '30000',
+      RIP_BOOT_DEADLINE_MS: process.env.CI ? '55000' : '30000',
     },
   },
 );
 
+const mirrorManager = process.env.CART_HARNESS_LOG || process.env.CI;
 const drain = async (stream, label) => {
   if (!stream) return;
   const reader = stream.getReader();
@@ -113,15 +118,19 @@ const drain = async (stream, label) => {
     const { done, value } = await reader.read();
     if (done) break;
     const text = dec.decode(value);
-    if (process.env.CART_HARNESS_LOG) process.stderr.write(`[cart-harness:${label}] ${text}`);
+    if (mirrorManager) process.stderr.write(`[cart-harness:${label}] ${text}`);
   }
 };
 drain(manager.stdout, 'out');
 drain(manager.stderr, 'err');
 
 const workerSock = async () => {
-  const deadline = Date.now() + 30000;
+  // CI runners are slower to spawn the manager + first worker than a laptop.
+  const deadline = Date.now() + (process.env.CI ? 55000 : 30000);
   while (Date.now() < deadline) {
+    if (manager.exitCode != null) {
+      throw new Error(`cart-harness: manager exited ${manager.exitCode} before registering a worker`);
+    }
     const put = [...calls].reverse().find(
       (c) => c.method === 'PUT' && c.body?.upstreams?.length &&
         !c.body.upstreams.some((u) => u.doorbell),
@@ -136,6 +145,9 @@ const workerSock = async () => {
 
 const initialSock = await workerSock();
 writeFileSync(join(fixtureRoot, 'ready'), `${initialSock}\n`);
+// Playwright only needs a 2xx on /__test/ready; do not re-block on the
+// socket for every probe (Bun's default idleTimeout is 10s).
+let readySock = initialSock;
 
 const proxy = async (request) => {
   const url = new URL(request.url);
@@ -181,6 +193,7 @@ const edgeFile = (pathname, accept) => {
 
 const server = Bun.serve({
   port: PORT,
+  idleTimeout: 120,
   async fetch(request, srv) {
     const url = new URL(request.url);
     if (url.pathname === '/hub') {
@@ -193,7 +206,11 @@ const server = Bun.serve({
       return Response.json({ cartDir, fixtureRoot });
     }
     if (url.pathname === '/__test/ready') {
-      return Response.json({ ok: true, sock: await workerSock() });
+      if (readySock && existsSync(readySock)) {
+        return Response.json({ ok: true, sock: readySock });
+      }
+      readySock = await workerSock();
+      return Response.json({ ok: true, sock: readySock });
     }
     if (registration?.files?.proxy_first?.some(prefix => url.pathname === prefix || url.pathname.startsWith(`${prefix}/`))) {
       return proxy(request);
