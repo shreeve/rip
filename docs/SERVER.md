@@ -90,6 +90,32 @@ loopback, and uses the real, publicly trusted development-only certificate and
 key shipped beside it. A custom Caddyfile and Janus-enabled Caddy binary may be
 selected at start.
 
+On macOS, a non-root process may bind a low port on every interface but may not
+bind it specifically to loopback. Rip does not widen the listener. For the
+packaged Caddyfile, the Agent registers a per-user launchd socket at
+`127.0.0.1:443`, and a small launcher passes that descriptor to the normal
+user-owned Caddy process as `fd/3`. This local inherited listener serves
+HTTP/1.1 and HTTP/2. Stopping the edge unloads the launchd job and releases
+the port. Agent replacement adopts the running edge, while login or reboot
+recreates the job only when the saved desired state remains `running`.
+
+The packaged macOS edge intentionally configures Caddy with `protocols h1 h2`.
+HTTP/1.1 and HTTP/2 use the inherited TCP stream socket. HTTP/3 uses QUIC over
+UDP and therefore cannot use that descriptor; enabling HTTP/3 while supplying
+only `fd/3` makes Caddy reject startup when it tries to create a QUIC listener
+for a stream-only network address (`network 'fd' cannot handle HTTP/3
+connections`). This is a socket-type constraint, not a general limitation of
+socket inheritance.
+
+HTTP/3 support for this edge requires a second loopback-only UDP socket on port
+443, inherited separately from the TCP socket, plus Caddy configuration or
+integration that assigns the UDP descriptor to QUIC. Its lifecycle must be
+started, adopted, reloaded, and released with the TCP listener. Until both
+socket types are managed as one edge, local HTTPS uses HTTP/2. TLS, Janus Hub
+WebSockets, App serving, and publication semantics do not depend on HTTP/3. An
+explicit custom Caddyfile runs directly and retains its own protocol and
+listener choices.
+
 The private protocol exposes app list/add/remove,
 start/stop/restart/status/logs, and edge start/stop/reload/status. It is the
 single control boundary for terminal and graphical clients; process ownership
@@ -101,7 +127,9 @@ does not move into a client.
 
 One Caddy process is the machine's public HTTP server. It owns:
 
-- Network listeners and HTTP/1–3.
+- Network listeners and their enabled HTTP protocols; an independently bound
+  edge may enable HTTP/1–3, while the packaged macOS edge uses HTTP/1–2 as
+  specified above.
 - TLS termination and ACME certificates.
 - SNI and the HTTP handler pipeline.
 - Public connection parsing, transport timeouts, slow-client defense, and

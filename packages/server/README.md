@@ -658,6 +658,20 @@ Janus before starting it. `--config` selects another Caddyfile; the packaged
 baseline is the default. An external reachable edge is observable but never
 silently adopted as a Rip-owned process.
 
+On macOS, the packaged baseline remains both unprivileged and loopback-only on
+standard HTTPS. The Agent registers a per-user `launchd` socket for
+`127.0.0.1:443`; the launchd listener passes that descriptor to an ordinary
+user-owned Caddy process, which serves HTTP/1.1 and HTTP/2 directly from the
+inherited TCP socket. The packaged Caddyfile explicitly selects `h1 h2` because
+HTTP/3 is QUIC over UDP and cannot use the stream descriptor passed as `fd/3`.
+Adding HTTP/3 to this launch path requires a separately inherited loopback UDP
+socket on port 443 and Caddy integration that assigns it to QUIC; enabling the
+protocol without that datagram listener makes Caddy reject startup. Stop
+removes the launchd job and releases port 443. A running edge survives an Agent
+restart, and the Agent recreates its launchd job after a login or reboot when
+the durable desired state is `running`. An explicitly selected Caddyfile runs
+directly as a Rip-owned child and retains its own listener choices.
+
 Migration is explicit. It never runs because the server started, a file
 changed, or a worker booted. Coordinated migration enters Maintenance, drains
 workers, runs the database-only child, records a durable outcome, and either

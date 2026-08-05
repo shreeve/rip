@@ -36,6 +36,7 @@
     "control.rip",
     "appliance.rip",
     "agent.rip",
+    "launchd-listener.js",
     "app.rip",
     "edge.rip",
     "Caddyfile",
