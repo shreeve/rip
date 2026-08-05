@@ -108,7 +108,32 @@ describeExtended('a reactive import — what the checker says', () => {
     ].join('\n'));
     const out = check('t.rip').stdout;
     expect(out).toContain('TS2322');
-    expect(out).toContain('{ value: number; read(): number; }');
+    expect(out).toContain('{ value: number; read(): number; touch(): void; }');
+  });
+
+  // `touch()` is the notify seam a consumer reaches for after mutating
+  // through `.value` — and on an EXPORTED `:=` the container is one
+  // `__state` minted, so the call can never meet an absent method. The
+  // gate is the STRICT posture and nothing else: spelling `touch`
+  // optional draws TS2722 ("possibly 'undefined'") on this line, and
+  // strictNullChecks is off in the gradual posture, so a default-mode run
+  // is quiet whichever way the face spells it and witnesses nothing.
+  test('a consumer notifies through `touch()` unguarded — under rip.strict too', () => {
+    const strictDir = mkdtempSync(join(tmpdir(), 'rip-reactive-strict-'));
+    try {
+      writeFileSync(join(strictDir, 'package.json'), '{"name":"strict-fixture","rip":{"strict":true}}');
+      writeFileSync(join(strictDir, 'tsconfig.json'), readFileSync(TSCONFIG, 'utf8'));
+      writeFileSync(join(strictDir, 'store.rip'), 'export count: number := 0\n');
+      writeFileSync(join(strictDir, 'notify.rip'), [
+        "import { count } from './store.rip'",
+        'count.touch()',
+        'console.log count.value',
+        '',
+      ].join('\n'));
+      const r = spawnSync('bun', [BIN, 'check', 'notify.rip'], { cwd: strictDir, encoding: 'utf8' });
+      expect(r.stdout).toContain('No type errors');
+      expect(r.status).toBe(0);
+    } finally { rmSync(strictDir, { recursive: true, force: true }); }
   });
 
   test('`.value` checks clean — the contract type-checks, not merely runs', () => {

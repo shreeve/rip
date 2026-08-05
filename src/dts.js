@@ -46,7 +46,7 @@ import {
 import { buildSchemaTypeStory, SchemaTypeError } from './schema-types.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode, ctorAtFields } from './emitter.js';
 import {
-  componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
+  componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
   segmentsText,
   selfArgsOf,
   anyArgsOf,
@@ -328,7 +328,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     const annotation = roleType(node, 'annotation');
     if (annotation === null) return;
     const ro = node[0] === 'computed' ? 'readonly ' : '';
-    lines.push(`${exported ? 'export ' : ''}declare const ${node[1]}: ${containerType(annotation, ro)};`);
+    lines.push(`${exported ? 'export ' : ''}declare const ${node[1]}: ${containerType(annotation, ro, MINTED)};`);
   };
 
   const isReactiveDecl = (stmt) => {

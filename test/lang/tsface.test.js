@@ -510,7 +510,7 @@ describe('TS-face emission pins', () => {
     // explicit TYPE ARGUMENT — which checks the initializer and
     // simultaneously makes the call's return type the annotated
     // container, so a wrong value publishes once rather than twice.
-    expect(code).toContain('const count: { value: number; read(): number } = __state<number>(0);');
+    expect(code).toContain('const count: { value: number; read(): number; touch(): void } = __state<number>(0);');
     expect(code).toContain('const total: { readonly value: number; read(): number } = __computed<number>(() => (count.value * 2));');
     expect(code).toContain('const ro: string = "s";');
     expect(code).toContain('const h: Function = __effect(() => { console.log(count.value); });');
@@ -947,12 +947,12 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
 
   test('every member kind declares: state/prop containers, computed readonly, readonly/plain/accept raw', () => {
     const code = ts(FIXTURE).code;
-    expect(code).toContain('declare count: { value: number; read(): number };');       // unannotated state: literal initializers infer syntactically 
-    expect(code).toContain('declare label: { value: any; read(): any };');          // bare prop
-    expect(code).toContain('declare opt: { value: any; read(): any };');            // optional bare prop
-    expect(code).toContain('declare max: { value: number | undefined; read(): number | undefined };'); // @max?: number — the value may be absent
-    expect(code).toContain('declare title: { value: string; read(): string };');       // required typed prop
-    expect(code).toContain('declare step: { value: number; read(): number };');        // typed defaulted prop
+    expect(code).toContain('declare count: { value: number; read(): number; touch(): void };');       // unannotated state: literal initializers infer syntactically 
+    expect(code).toContain('declare label: { value: any; read(): any; touch?(): void };');          // bare prop
+    expect(code).toContain('declare opt: { value: any; read(): any; touch?(): void };');            // optional bare prop
+    expect(code).toContain('declare max: { value: number | undefined; read(): number | undefined; touch?(): void };'); // @max?: number — the value may be absent
+    expect(code).toContain('declare title: { value: string; read(): string; touch?(): void };');       // required typed prop
+    expect(code).toContain('declare step: { value: number; read(): number; touch?(): void };');        // typed defaulted prop
     expect(code).toContain('declare total: { readonly value: number; read(): number };'); // computed
     expect(code).toContain('declare readonly limit: number;'); // =! members declare readonly                   // readonly: the raw value
     expect(code).toContain('declare note: string;');                   // plain field: literal initializer infers 
@@ -970,13 +970,13 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
 
   test('the props ctor: optional entries with container unions and bind slots; the REQUIRED prop is an arm', () => {
     const code = ts(FIXTURE).code;
-    expect(code).toContain('max?: number | { value: number; read(): number }');
-    expect(code).toContain('__bind_max__?: { value: number; read(): number }');
+    expect(code).toContain('max?: number | { value: number; read(): number; touch?(): void }');
+    expect(code).toContain('__bind_max__?: { value: number; read(): number; touch?(): void }');
     expect(code).toContain('label?: any');
     expect(code).toContain('children?: any');
     // @title: string (annotated, no marker, no default) is REQUIRED —
     // passable as the plain slot or the `<=>` container slot.
-    expect(code).toContain('& ({ title: string | { value: string; read(): string } } | { __bind_title__: { value: string; read(): string } })');
+    expect(code).toContain('& ({ title: string | { value: string; read(): string; touch?(): void } } | { __bind_title__: { value: string; read(): string; touch?(): void } })');
     // A required prop makes the ctor's props param required.
     expect(code).toContain('constructor(props: {');
     expect(code).toContain(') { super(props); }');
@@ -1021,7 +1021,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
 
   test('extends: the tag attribute surface + string index in the props type, the rest declare', () => {
     const code = ts('Deck = component extends section\n  name := "n"\n  render\n    section.deck\n      = name\n').code;
-    expect(code).toContain('declare rest: { value: Record<string, any>; read(): Record<string, any> };');
+    expect(code).toContain('declare rest: { value: Record<string, any>; read(): Record<string, any>; touch(): void };');
     // Intrinsic attrs type through the tag's DOM interface with an
     // extends-Record guard; camelCased DOM twins get
     // their own entries (tabindex/tabIndex).
@@ -1096,10 +1096,10 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     // The declared prop's entry (+ its bind slot and required arm)
     // carries the name; the projection-channel fallback suppresses —
     // a duplicate key is TS2300 on every artifact.
-    expect(ctorLine).toContain('children?: string | { value: string; read(): string }');
+    expect(ctorLine).toContain('children?: string | { value: string; read(): string; touch?(): void }');
     expect(ctorLine).not.toContain('children?: any');
     expect(faced.code.split('\n').filter((l) => l.includes('declare children')).length).toBe(1);
-    expect(faced.code).toContain('declare children: { value: string; read(): string };');
+    expect(faced.code).toContain('declare children: { value: string; read(): string; touch?(): void };');
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
   });
 
@@ -1131,7 +1131,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     const src = 'Outer = component\n  inner = component\n    n := 1\n  render\n    div "x"\n';
     const code = ts(src).code;
     expect(code).toContain('declare inner: any;');
-    expect(code).toContain('declare n: { value: number; read(): number };');
+    expect(code).toContain('declare n: { value: number; read(): number; touch(): void };');
     expect(code).not.toContain('interface inner');
   });
 });

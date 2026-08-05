@@ -241,8 +241,35 @@ export function componentTypeInfo(stores, source, node, behavior = null) {
 export const segmentsText = (segs) => segs.map((s) => s.text).join('');
 
 // Is a reactive-container member — its runtime slot is a `__state`
-// container ({ value: T; read(): T }).
+// container ({ value: T; read(): T; touch(): void }).
 const containerish = (m) => m.kind === 'state' || m.kind === 'prop';
+
+// A WRITABLE container's notify seam: a nested write (`form.first <=> …`)
+// changes no container identity, so the bind notifies the root through
+// `touch`. The two spellings answer two different questions, and a
+// container position must pick the one that matches how it got its
+// container:
+//
+//   MINTED — the slot holds a container `__state` made (a module
+//     reactive, `rest`, a component's own `:=` member). It has `touch`,
+//     so the type says so outright and a consumer holding the container
+//     writes `count.touch()` with no guard. Spelling this optional was
+//     measured: under `rip.strict` the guardless call draws TS2722 on a
+//     notify that cannot be absent.
+//
+//   TAKEN — the slot ACCEPTS a container from somewhere else (a prop, a
+//     bind channel, and the prop's own instance type, since that is the
+//     accepted container). The sharing contract admits a caller-supplied
+//     `{ value, read }`, which the runtime treats as a container (the
+//     `read` predicate) but which has no `touch`, so its nested writes
+//     notify nothing. Optional is the honest spelling and is why the
+//     lowering emits `.touch?.()` rather than `.touch()`.
+//
+// Read-only containers (`~=`) have no `touch` at runtime and spell
+// neither. TAKEN is the default: claiming a `touch` that is not there
+// rejects containers the runtime accepts, which is the louder failure.
+export const MINTED = '; touch(): void';
+export const TAKEN = '; touch?(): void';
 
 // The container type carries the STRUCTURAL BRAND `read(): T` — the
 // runtime's own container-detection predicate (`typeof x.read ===
@@ -310,7 +337,8 @@ export const selfArgsOf = (typeParams) => {
   return names.length === 0 ? '' : `<${names.join(', ')}>`;
 };
 
-export const containerType = (t, ro = '') => `{ ${ro}value: ${t}; read(): ${t} }`;
+export const containerType = (t, ro = '', notify = TAKEN) =>
+  `{ ${ro}value: ${t}; read(): ${t}${ro === '' ? notify : ''} }`;
 
 // The member's INSTANCE type as segments (`declare name: …` bodies,
 // interface member lines). The annotated piece marks as `: T` — the
@@ -440,9 +468,15 @@ const memberTypeSegments = (m, lead) => {
     : [{ text: `${pre}${vt}${post}` }]);
   if (containerish(m)) {
     const und = t !== null && m.optional && m.kind === 'prop' ? ' | undefined' : '';
+    // PUBLIC is the line, not the kind: a member the caller can reach
+    // takes whatever container arrives on its bind channel, and a
+    // defaulted prop (`@step: number = 1`) carries kind 'state' while
+    // `_init` still reads `props.__bind_step__` first. A private member
+    // is minted here and nowhere else.
+    const notify = m.isPublic ? TAKEN : MINTED;
     return [
       { text: `${lead}{ value` }, ...typed,
-      ...readBack(`${und}; read(): `, `${und} }`),
+      ...readBack(`${und}; read(): `, `${und}${notify} }`),
     ];
   }
   if (m.kind === 'computed' || m.kind === 'gate') {
@@ -653,7 +687,7 @@ export function instanceTypeLines(info, selfType) {
   // Scaffolding the author never wrote: no source span exists for these, so
   // they carry no mark and stay under the component's cover.
   if (!hasChildren) lines.push({ segs: [{ text: 'children?: any;' }] });
-  if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${containerType('Record<string, any>')};` }] });
+  if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${containerType('Record<string, any>', '', MINTED)};` }] });
   lines.push({ segs: [{ text: `mount(target?: any): ${selfType};` }] });
   lines.push({ segs: [{ text: 'unmount(options?: { removeDOM?: boolean }): void;' }] });
   lines.push({ segs: [{ text: 'emit(name: string, detail?: any): void;' }] });

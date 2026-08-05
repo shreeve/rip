@@ -30,7 +30,7 @@ import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttri
 import {
   COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS, componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer,
-  propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
+  propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType,
 } from './component-types.js';
@@ -2072,7 +2072,7 @@ class Emitter {
       line(() => this.emitSegments(memberDeclareSegments(m)));
     }
     if (!hasChildren) line(() => this.b.emit('declare children: any;'));
-    if (info.extendsTag !== null) line(() => this.b.emit(`declare rest: ${containerType('Record<string, any>')};`));
+    if (info.extendsTag !== null) line(() => this.b.emit(`declare rest: ${containerType('Record<string, any>', '', MINTED)};`));
     line(() => this.b.emit('[key: `_${string}`]: any;'));
   }
 
@@ -7328,7 +7328,7 @@ class Emitter {
       // satisfy a container position the runtime would double-wrap.
       if (this.ts && this.annotationText(node) !== null) {
         const ro = head === 'computed' ? 'readonly ' : '';
-        this.tsAnnotate(node, 'annotation', containerType(this.annotationText(node), ro));
+        this.tsAnnotate(node, 'annotation', containerType(this.annotationText(node), ro, MINTED));
       } else if (this.ts) {
         // Unannotated reactive with a syntactically-evident value type
         //: the container annotates from the
@@ -7340,7 +7340,7 @@ class Emitter {
         const t = syntacticLiteralType(value);
         if (t !== null) {
           const ro = head === 'computed' ? 'readonly ' : '';
-          this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro)}`));
+          this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro, MINTED)}`));
         }
       }
       this.b.emit(' ');
@@ -14387,6 +14387,15 @@ const RUNTIME_TABLE = [
     // the pass-through, and the alternative was measured — splitting
     // it into overloads makes TypeScript report TS2769 against the
     // last one, which loses the array/tuple spellings' element anchor.
+    // The RETURN states `touch()`, the minted spelling, because an
+    // annotated `:=` declares a minted container and this call is its
+    // initializer — an optional return would not be assignable to it.
+    // The pass-through arm is where that reaches past what the runtime
+    // guarantees: a hand-built `{ value, read }` handed to `__state`
+    // comes back with a `touch` the type promises and the object lacks.
+    // That arm's own reason for existing is the prop seam, where the
+    // result lands in a member typed with the TAKEN spelling and the
+    // promise is narrowed straight back off.
     key: 'reactive',
     names: ['__state', '__computed', '__effect', '__batch', '__readonly',
             '__setErrorHandler', '__handleError', '__catchErrors', 'getEffectSignal'],
@@ -14394,7 +14403,7 @@ const RUNTIME_TABLE = [
     url: new URL('./runtime/reactive.js', import.meta.url),
     triggers: (sexpr, preds) => containsReactive(sexpr, preds.isTrigger),
     types: {
-      __state: '<T>(value: T | { value: T; read(): T }) => { value: T; read(): T }',
+      __state: '<T>(value: T | { value: T; read(): T }) => { value: T; read(): T; touch(): void }',
       __computed: '<T>(fn: () => T) => { readonly value: T; read(): T }',
       __effect: '(fn: () => void | (() => void)) => () => void',
       __batch: '<T>(fn: () => T) => T',

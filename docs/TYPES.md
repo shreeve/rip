@@ -152,12 +152,25 @@ package carries the pinned TypeScript/`tsgo` toolchain it brokers.
 A state exports its container, not an unwrapped snapshot:
 
 ```ts
-{ value: T; read(): T }
+{ value: T; read(): T; touch(): void }
 ```
 
-A computed exports a readonly `value`. `read(): T` is the structural
-brand shared with the runtime's container detection, preventing an
-ordinary `{value: …}` object from satisfying a binding-container slot.
+A computed exports its `value` readonly and carries no `touch` — it has
+no notify seam at runtime.
+
+`read(): T` is the structural brand shared with the runtime's container
+detection, preventing an ordinary `{value: …}` object from satisfying a
+binding-container slot.
+
+`touch` is the writable container's notify seam, which a bind into a
+chain calls because a nested write changes no container identity. A slot
+that holds a container rip minted — a module reactive, `rest`, a
+component's own `:=` member — spells it `touch(): void`, so a consumer
+holding that container calls it unguarded. A slot that ACCEPTS a
+container from elsewhere — a prop, a bind channel — spells it
+`touch?(): void`, because the sharing contract admits a caller-supplied
+`{ value, read }`, which the runtime treats as a container but which has
+no `touch`.
 
 Typed initializers are checked without changing runtime bytes.
 

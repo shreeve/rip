@@ -184,6 +184,12 @@ const CLEAN_ROWS = [
     // the face carries NO duplicate `children` entries (was TS2300 ×4
     // + TS2717 ×2 on this five-line legal component)
  'Child = component\n  @children: string\n  render\n    div "x"\nHost = component\n  msg := "hi"\n  render\n    section\n      Child children: msg\nconsole.log Child, Host',
+    // A bind into a CHAIN notifies the root container with
+    // `.touch?.()` — a nested write changes no container identity. The
+    // member is annotated so the container type is real and the call
+    // meets a checked receiver; an inferred `any` would type-check
+    // whatever the face spelled and prove nothing.
+ 'Form = component\n  data: { first: string } := { first: "" }\n  render\n    input type: "text", value <=> data.first\nconsole.log Form',
 ];
 
 // The clean rows check as ONE tsc program: one file per row,

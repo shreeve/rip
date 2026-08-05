@@ -4279,6 +4279,8 @@ var syncTypeGenericMemo = (tokens, memo) => {
       memo.answers.set(memo.level, typeAliasEq(tokens, j));
     } else if (t.kind === "RESERVED" && t.value === "interface" && atStatementBoundary(tokens, j - 1)) {
       memo.answers.set(memo.level, true);
+    } else if (t.kind === "IDENTIFIER" && t.value === "as" && tokens[j - 1] && tokens[j - 1].kind !== "." && tokens[j - 1].kind !== "?." && CAST_LHS_ENDERS.has(tokens[j - 1].kind)) {
+      memo.answers.set(memo.level, true);
     }
   }
   memo.upTo = tokens.length;
@@ -9085,6 +9087,8 @@ function componentTypeInfo(stores, source, node, behavior = null) {
 }
 var segmentsText = (segs) => segs.map((s) => s.text).join("");
 var containerish = (m) => m.kind === "state" || m.kind === "prop";
+var MINTED = "; touch(): void";
+var TAKEN = "; touch?(): void";
 var typeParamNames = (typeParams) => {
   if (!typeParams)
     return [];
@@ -9132,7 +9136,7 @@ var selfArgsOf = (typeParams) => {
   const names = typeParamNames(typeParams);
   return names.length === 0 ? "" : `<${names.join(", ")}>`;
 };
-var containerType = (t, ro = "") => `{ ${ro}value: ${t}; read(): ${t} }`;
+var containerType = (t, ro = "", notify = TAKEN) => `{ ${ro}value: ${t}; read(): ${t}${ro === "" ? notify : ""} }`;
 var syntacticLiteralType = (v) => {
   if (typeof v === "string") {
     if (v === "true" || v === "false")
@@ -9206,16 +9210,18 @@ var memberTypeSegments = (m, lead) => {
   const vt = t ?? "any";
   if (m.kind === "accept")
     return [{ text: `${lead}any` }];
+  const readBack = (pre, post) => t !== null ? [{ text: pre }, { text: vt, node: m.node, role: "annotation" }, { text: post }] : [{ text: `${pre}${vt}${post}` }];
   if (containerish(m)) {
     const und = t !== null && m.optional && m.kind === "prop" ? " | undefined" : "";
+    const notify = m.isPublic ? TAKEN : MINTED;
     return [
       { text: `${lead}{ value` },
       ...typed,
-      { text: `${und}; read(): ${vt}${und} }` }
+      ...readBack(`${und}; read(): `, `${und}${notify} }`)
     ];
   }
   if (m.kind === "computed" || m.kind === "gate") {
-    return [{ text: `${lead}{ readonly value` }, ...typed, { text: `; read(): ${vt} }` }];
+    return [{ text: `${lead}{ readonly value` }, ...typed, ...readBack("; read(): ", " }")];
   }
   if (t === null)
     return [{ text: `${lead}any` }];
@@ -9322,21 +9328,27 @@ function instanceTypeLines(info, selfType) {
       const declared = info.roleText(m.func, "returnType");
       const base = declared ?? (m.isVoid ? "void" : "any");
       const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push({ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};` });
+      lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};` }] });
       continue;
     }
     lines.push({
-      text: `${m.kind === "readonly" ? "readonly " : ""}${m.name}${segmentsText(memberTypeSegments(m, ": "))};`,
-      ...isBehaviorProjected(m) ? { node: m.nameNode, role: m.nameRole } : {}
+      node: m.nameNode,
+      role: m.nameRole,
+      segs: [
+        { text: m.kind === "readonly" ? "readonly " : "" },
+        { text: m.name },
+        ...memberTypeSegments(m, ": "),
+        { text: ";" }
+      ]
     });
   }
   if (!hasChildren)
-    lines.push({ text: "children?: any;" });
+    lines.push({ segs: [{ text: "children?: any;" }] });
   if (info.extendsTag !== null)
-    lines.push({ text: `rest: ${containerType("Record<string, any>")};` });
-  lines.push({ text: `mount(target?: any): ${selfType};` });
-  lines.push({ text: "unmount(options?: { removeDOM?: boolean }): void;" });
-  lines.push({ text: "emit(name: string, detail?: any): void;" });
+    lines.push({ segs: [{ text: `rest: ${containerType("Record<string, any>", "", MINTED)};` }] });
+  lines.push({ segs: [{ text: `mount(target?: any): ${selfType};` }] });
+  lines.push({ segs: [{ text: "unmount(options?: { removeDOM?: boolean }): void;" }] });
+  lines.push({ segs: [{ text: "emit(name: string, detail?: any): void;" }] });
   return lines;
 }
 
@@ -9562,6 +9574,7 @@ class Emitter {
     this.script = script;
     this.browserModule = browserModule;
     this.importSpans = [];
+    this.typeOnlyImports = new Set;
     this.pins = pins;
     this.pinnables = [];
     this.mutables = [];
@@ -10628,7 +10641,7 @@ class Emitter {
     if (!hasChildren)
       line(() => this.b.emit("declare children: any;"));
     if (info.extendsTag !== null)
-      line(() => this.b.emit(`declare rest: ${containerType("Record<string, any>")};`));
+      line(() => this.b.emit(`declare rest: ${containerType("Record<string, any>", "", MINTED)};`));
     line(() => this.b.emit("[key: `_${string}`]: any;"));
   }
   tsScaffoldAny(suffix = "") {
@@ -10751,10 +10764,18 @@ class Emitter {
         for (const l of instanceTypeLines(info, `${name}${selfArgs}`)) {
           this.b.emit(`
 ` + pad + "  ");
+          const segs = () => {
+            for (const s of l.segs) {
+              if (s.node !== undefined)
+                this.mark(s.node, s.role, () => this.b.emit(s.text));
+              else
+                this.b.emit(s.text);
+            }
+          };
           if (l.node !== undefined)
-            this.mark(l.node, l.role, () => this.b.emit(l.text));
+            this.mark(l.node, l.role, segs);
           else
-            this.b.emit(l.text);
+            segs();
         }
         this.b.emit(`
 ` + pad + "}");
@@ -10780,6 +10801,39 @@ class Emitter {
     }));
   }
   static TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
+  collectTypeOnlyImports(sexpr, source) {
+    const used = new Set;
+    const bound = [];
+    const walk = (x) => {
+      if (typeof x === "string") {
+        used.add(x);
+        return;
+      }
+      if (!isNode4(x))
+        return;
+      if (isModuleImportNode(this.stores, x)) {
+        bound.push(...Emitter.importedNames([x]));
+        return;
+      }
+      for (const c of x)
+        walk(c);
+    };
+    walk(sexpr);
+    if (bound.length === 0 || !source)
+      return;
+    const inTypes = new Set;
+    for (const n of this.stores.nodes ?? []) {
+      for (const r of this.stores.rolesOf(n.nodeId)) {
+        if (!Emitter.TYPE_ROLES.has(r.role) || typeof r.sourceStart !== "number")
+          continue;
+        for (const m of source.slice(r.sourceStart, r.sourceEnd).matchAll(/[A-Za-z_$][\w$]*/g))
+          inTypes.add(m[0]);
+      }
+    }
+    for (const name of bound)
+      if (inTypes.has(name) && !used.has(name))
+        this.typeOnlyImports.add(name);
+  }
   collectTsDirectives(sexpr, trivia, source) {
     this.tsDirectiveMap = new Map;
     this.tsNocheck = null;
@@ -11589,6 +11643,7 @@ class Emitter {
     }
     return specs;
   }
+  static TYPE_ROLES = new Set(["annotation", "returnType", "typeParams"]);
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {
@@ -11702,16 +11757,38 @@ class Emitter {
   moduleSource(s) {
     return moduleSourceText(s);
   }
+  static specifierLocal(s) {
+    return isNode4(s) ? s[1] : s;
+  }
   emitSpecifiers(list) {
-    list.forEach((s, i) => {
-      if (i > 0)
+    const kept = list.filter((s) => !this.typeOnlyImports.has(Emitter.specifierLocal(s)));
+    let emitted = 0;
+    list.forEach((s) => {
+      const erased = this.typeOnlyImports.has(Emitter.specifierLocal(s));
+      const one = () => {
+        if (isNode4(s)) {
+          this.emitPrimitive(s[0]);
+          this.b.emit(" as ");
+          this.emitPrimitive(s[1]);
+        } else
+          this.emitPrimitive(s);
+      };
+      if (erased) {
+        if (!this.ts)
+          return;
+        this.b.tsOnly(() => {
+          if (emitted > 0)
+            this.b.emit(", ");
+          one();
+          if (emitted === 0 && kept.length > 0)
+            this.b.emit(", ");
+        });
+        return;
+      }
+      if (emitted > 0)
         this.b.emit(", ");
-      if (isNode4(s)) {
-        this.emitPrimitive(s[0]);
-        this.b.emit(" as ");
-        this.emitPrimitive(s[1]);
-      } else
-        this.emitPrimitive(s);
+      one();
+      emitted++;
     });
   }
   importStatement(node) {
@@ -11724,7 +11801,8 @@ class Emitter {
     const specs = node.slice(1, -1);
     this.mark(node, "$self", () => {
       this.b.emit("import ");
-      if (specs.length > 0) {
+      const allErased = specs.length > 0 && specs.every((spec) => spec !== "{}" && (typeof spec === "string" || spec[0] === "*" ? this.typeOnlyImports.has(typeof spec === "string" ? spec : spec[1]) : spec.every((s) => this.typeOnlyImports.has(Emitter.specifierLocal(s)))));
+      const clause = () => {
         specs.forEach((spec, i) => {
           if (i > 0)
             this.b.emit(", ");
@@ -11741,6 +11819,12 @@ class Emitter {
           }
         });
         this.b.emit(" from ");
+      };
+      if (specs.length > 0) {
+        if (!allErased)
+          clause();
+        else if (this.ts)
+          this.b.tsOnly(clause);
       }
       {
         const specStart = this.b.offset;
@@ -14516,12 +14600,12 @@ ${pad ?? ""}`);
         this.mutables.push([nameStart, this.b.offset]);
       if (this.ts && this.annotationText(node) !== null) {
         const ro = head === "computed" ? "readonly " : "";
-        this.tsAnnotate(node, "annotation", containerType(this.annotationText(node), ro));
+        this.tsAnnotate(node, "annotation", containerType(this.annotationText(node), ro, MINTED));
       } else if (this.ts) {
         const t = syntacticLiteralType(value);
         if (t !== null) {
           const ro = head === "computed" ? "readonly " : "";
-          this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro)}`));
+          this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro, MINTED)}`));
         }
       }
       this.b.emit(" ");
@@ -19863,7 +19947,7 @@ var RUNTIME_TABLE = [
     url: new URL("./runtime/reactive.js", import.meta.url),
     triggers: (sexpr, preds) => containsReactive(sexpr, preds.isTrigger),
     types: {
-      __state: "<T>(value: T | { value: T; read(): T }) => { value: T; read(): T }",
+      __state: "<T>(value: T | { value: T; read(): T }) => { value: T; read(): T; touch(): void }",
       __computed: "<T>(fn: () => T) => { readonly value: T; read(): T }",
       __effect: "(fn: () => void | (() => void)) => () => void",
       __batch: "<T>(fn: () => T) => T",
@@ -20257,6 +20341,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
   }
   emitter.collectTsDirectives(parseResult.sexpr, parseResult.trivia ?? [], source);
+  emitter.collectTypeOnlyImports(parseResult.sexpr, source);
   if (emitter.tsNocheck !== null) {
     const programId = stores.idOf(parseResult.sexpr);
     const t = emitter.tsNocheck;
@@ -20814,7 +20899,7 @@ function emitDeclarations({ sexpr, stores, source }) {
     if (annotation === null)
       return;
     const ro = node[0] === "computed" ? "readonly " : "";
-    lines.push(`${exported ? "export " : ""}declare const ${node[1]}: ${containerType(annotation, ro)};`);
+    lines.push(`${exported ? "export " : ""}declare const ${node[1]}: ${containerType(annotation, ro, MINTED)};`);
   };
   const isReactiveDecl = (stmt) => {
     if (!isNode5(stmt) || stmt[0] !== "state" && stmt[0] !== "computed" || stmt.length !== 3)
@@ -20838,7 +20923,7 @@ function emitDeclarations({ sexpr, stores, source }) {
     const self = `${name}${selfArgsOf(typeParams)}`;
     lines.push(`${exp}interface ${name}${typeParams} {`);
     for (const l of rendered(() => instanceTypeLines(info, self)))
-      lines.push(`  ${l.text}`);
+      lines.push(`  ${segmentsText(l.segs)}`);
     lines.push("}");
     lines.push(`${exp}declare let ${name}: {`);
     if (gated) {
@@ -24849,9 +24934,7 @@ resetSources = function(value, seen) {
       if (!Object.hasOwn(raw, key))
         continue;
       let nested = raw[key];
-      if (key !== SIGNALS) {
-        result.push(resetSources(nested, seen));
-      }
+      result.push(resetSources(nested, seen));
     }
     return result;
   })();
@@ -25148,7 +25231,7 @@ function createStash(data = {}) {
   return makeProxy(data);
 }
 function unwrapStash(stash) {
-  return stash != null && stash[RAW] ? stash[RAW] : stash;
+  return stash?.[RAW] || stash;
 }
 // packages/app/mutation.rip
 function createMutation(fn, opts = {}) {

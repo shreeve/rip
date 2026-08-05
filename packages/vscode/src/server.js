@@ -2480,7 +2480,7 @@ function presentReactiveCellHover(contents, atMemberDecl = false) {
   // and anything narrower silently leaves the container standing on every
   // generic component. The greedy run cannot swallow the type, which is
   // anchored behind `: { … value: `.
-  const m = /^(?:(const|let) ([A-Za-z_$][\w$]*)|\(property\) ((?:.+\.)?[A-Za-z_$][\w$]*)): \{ (readonly )?value: (.+); read\(\): (.+?);? \}$/.exec(flat);
+  const m = /^(?:(const|let) ([A-Za-z_$][\w$]*)|\(property\) ((?:.+\.)?[A-Za-z_$][\w$]*)): \{ (readonly )?value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/.exec(flat);
   if (!m) return null;
   const [, , plain, qualified, ro, t, readT] = m;
   const member = qualified !== undefined;
