@@ -185,6 +185,14 @@ Schema descriptors project into:
 - callable `this` types;
 - enum and union outputs.
 
+A derived binding (`UserPublic = User.pick('id', 'email')`) gets a type
+companion under its own name, so it can be annotated and re-exported
+like any declared schema. The companion is the resolved shape, projected
+by the same folder the browser bundler uses, so a derivation types as
+what the runtime builds. The projection is conservative: an unknown
+base, dynamic keys, or a `@mixin` base yields no companion rather than a
+guessed one, and the binding keeps the type its algebra call infers.
+
 Runtime delivery and type rendering are separate: using schema syntax
 delivers the runtime machinery while the TS face and declarations carry
 the static contract.

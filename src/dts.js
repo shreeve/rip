@@ -85,9 +85,11 @@ export function emitDeclarations({ sexpr, stores, source }) {
     throw err;
   }
   const schemaByNode = new Map();
+  const schemaDerivedByNode = new Map();
   if (schemaStory) {
     lines.push(...schemaStory.intrinsicLines);
     for (const s of schemaStory.stories) schemaByNode.set(s.decl.node, s);
+    for (const d of schemaStory.derivations) schemaDerivedByNode.set(d.decl.node, d);
   }
 
   // One schema declaration's lines: exported schemas export their
@@ -521,6 +523,8 @@ export function emitDeclarations({ sexpr, stores, source }) {
     else if (isDefHead(head) && stmt.length === 4) defDecl(stmt, exported);
     else if (head === '=' && stmt.length === 3 && schemaByNode.has(stmt[2])) {
       schemaDecl(schemaByNode.get(stmt[2]), exported);
+    } else if (head === '=' && stmt.length === 3 && schemaDerivedByNode.has(stmt)) {
+      schemaDecl(schemaDerivedByNode.get(stmt), exported);
     } else if (head === '=' && stmt.length === 3 && typeof stmt[1] === 'string' && isComponentDecl(stmt[2])) {
       componentDecl(stmt[2], stmt[1], exported, stmt);
     } else if (head === '=' && stmt.length === 3 && protoMemberTarget(stmt) !== null) {

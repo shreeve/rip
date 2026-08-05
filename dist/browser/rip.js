@@ -228,6 +228,20 @@ function collectSchemaDecls(programSexpr) {
   }
   return out;
 }
+function collectAssignedNames(programSexpr) {
+  const counts = new Map;
+  if (!isNode(programSexpr) || programSexpr[0] !== "program")
+    return counts;
+  for (const stmt of programSexpr.slice(1)) {
+    const assign = isNode(stmt) && stmt[0] === "export" && stmt.length === 2 ? stmt[1] : stmt;
+    if (!isNode(assign) || assign[0] !== "=" || assign.length !== 3)
+      continue;
+    if (typeof assign[1] !== "string")
+      continue;
+    counts.set(assign[1], (counts.get(assign[1]) ?? 0) + 1);
+  }
+  return counts;
+}
 function collectUserTypeNames(programSexpr) {
   const names = new Map;
   if (!isNode(programSexpr) || programSexpr[0] !== "program")
@@ -499,7 +513,12 @@ function buildSchemaTypeStory(programSexpr) {
   const decls = collectSchemaDecls(programSexpr);
   if (decls.length === 0)
     return null;
-  const known = new Set(decls.map((d) => d.name));
+  const derived = derivedSchemaDescriptors(programSexpr);
+  const assignedNames = collectAssignedNames(programSexpr);
+  const known = new Set([
+    ...decls.map((d) => d.name),
+    ...derived.filter((d) => assignedNames.get(d.name) === 1).map((d) => d.name)
+  ]);
   const byName = new Map(decls.map((d) => [d.name, d]));
   const userTypes = collectUserTypeNames(programSexpr);
   const withModel = decls.some((d) => d.descriptor.kind === "model");
@@ -511,23 +530,25 @@ function buildSchemaTypeStory(programSexpr) {
     }
   }
   const owners = new Map;
+  const claim = (t, whose, start, at = null) => {
+    if (SCHEMA_INTRINSIC_NAMES.has(t)) {
+      throw new SchemaTypeError(`${whose} emits the type name '${t}', which is reserved by the schema ` + `intrinsic declarations (${[...SCHEMA_INTRINSIC_NAMES].join(", ")}) — rename the schema`, start, at);
+    }
+    const prior = owners.get(t);
+    if (prior !== undefined) {
+      throw new SchemaTypeError(`${whose} emits the type name '${t}', which ${prior} already emits — ` + `every schema-emitted type name binds once per module; rename one`, start, at);
+    }
+    owners.set(t, whose);
+    const user = userTypes.get(t);
+    if (user !== undefined) {
+      throw new SchemaTypeError(`${whose} emits the type name '${t}', which collides with ${user.what} — ` + `the schema's types and the user declaration would merge or duplicate; rename one`, null, user.node);
+    }
+  };
   const stories = [];
   for (const d of decls) {
     const story = schemaTypeStory(d, byName, known);
-    for (const t of story.typeNames) {
-      if (SCHEMA_INTRINSIC_NAMES.has(t)) {
-        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which is reserved by the schema ` + `intrinsic declarations (${[...SCHEMA_INTRINSIC_NAMES].join(", ")}) — rename the schema`, d.descriptor.start ?? null);
-      }
-      const prior = owners.get(t);
-      if (prior !== undefined) {
-        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which ${prior} already emits — ` + `every schema-emitted type name binds once per module; rename one`, d.descriptor.start ?? null);
-      }
-      owners.set(t, `schema '${d.name}'`);
-      const user = userTypes.get(t);
-      if (user !== undefined) {
-        throw new SchemaTypeError(`schema '${d.name}' emits the type name '${t}', which collides with ${user.what} — ` + `the schema's types and the user declaration would merge or duplicate; rename one`, null, user.node);
-      }
-    }
+    for (const t of story.typeNames)
+      claim(t, `schema '${d.name}'`, d.descriptor.start ?? null);
     const defaultTypes = new Map;
     d.descriptor.entries.forEach((e, i) => {
       if (e.tag !== "field" || e.constraints?.default === undefined)
@@ -537,8 +558,18 @@ function buildSchemaTypeStory(programSexpr) {
     });
     stories.push({ decl: d, ...story, defaultTypes });
   }
+  const derivations = [];
+  for (const d of derived) {
+    if (assignedNames.get(d.name) > 1)
+      continue;
+    const story = schemaTypeStory({ name: d.name, descriptor: d.descriptor }, byName, known);
+    for (const t of story.typeNames)
+      claim(t, `the derived schema '${d.name}'`, null, d.node);
+    derivations.push({ decl: d, aliasLines: story.aliasLines, constType: story.constType });
+  }
   return {
     stories,
+    derivations,
     intrinsicLines: schemaIntrinsicLines(withModel, withMixin),
     withModel
   };
@@ -2352,7 +2383,7 @@ function foldParseStrLit(node) {
     return null;
   return inner;
 }
-function foldDerivedSchemas(sexpr) {
+function walkDerivedSchemas(sexpr, onFolded) {
   if (!Array.isArray(sexpr))
     return;
   const head = foldStr(sexpr[0]);
@@ -2361,9 +2392,8 @@ function foldDerivedSchemas(sexpr) {
   for (const stmt of stmts) {
     if (!Array.isArray(stmt))
       continue;
-    let assign = stmt;
-    if (foldStr(stmt[0]) === "export" && Array.isArray(stmt[1]))
-      assign = stmt[1];
+    const exported = foldStr(stmt[0]) === "export" && Array.isArray(stmt[1]);
+    const assign = exported ? stmt[1] : stmt;
     if (foldStr(assign[0]) !== "=" || !Array.isArray(assign[2]))
       continue;
     const name = foldStr(assign[1]);
@@ -2382,9 +2412,19 @@ function foldDerivedSchemas(sexpr) {
     const folded = foldProjectionDescriptor(baseDesc, chain.ops, byName);
     if (!folded)
       continue;
-    assign[2] = ["schema", folded];
     byName.set(name, folded);
+    onFolded({ name, descriptor: folded, node: assign, exported });
   }
+}
+function foldDerivedSchemas(sexpr) {
+  walkDerivedSchemas(sexpr, ({ descriptor, node }) => {
+    node[2] = ["schema", descriptor];
+  });
+}
+function derivedSchemaDescriptors(sexpr) {
+  const out = [];
+  walkDerivedSchemas(sexpr, (d) => out.push(d));
+  return out;
 }
 
 // src/dom-vocab.js
@@ -20498,16 +20538,31 @@ return { ${unit.names.join(", ")} };
         });
       }
       emitter.schemaStories = new Map;
-      story.stories.forEach((s, i) => {
-        emitter.schemaStories.set(s.decl.node, s);
-        const exp = s.decl.exported ? "export " : "";
-        const nodeId = stores.idOf(s.decl.node);
-        const tail = i === story.stories.length - 1 ? `
+      const blocks = [
+        ...story.stories.map((s) => ({
+          node: s.decl.node,
+          exported: s.decl.exported,
+          story: s,
+          lines: s.faceAliasLines ?? s.aliasLines
+        })),
+        ...story.derivations.map((d) => ({
+          node: d.decl.node,
+          exported: d.decl.exported,
+          story: null,
+          lines: d.aliasLines
+        }))
+      ];
+      blocks.forEach((b, i) => {
+        if (b.story !== null)
+          emitter.schemaStories.set(b.node, b.story);
+        const exp = b.exported ? "export " : "";
+        const nodeId = stores.idOf(b.node);
+        const tail = i === blocks.length - 1 ? `
 
 ` : `
 `;
         builder.tsOnly(() => {
-          const lines = () => builder.emit((s.faceAliasLines ?? s.aliasLines).map((l) => `${exp}${l}`).join(`
+          const lines = () => builder.emit(b.lines.map((l) => `${exp}${l}`).join(`
 `));
           if (nodeId !== null)
             builder.mark(nodeId, "$self", lines);
@@ -20690,10 +20745,13 @@ function emitDeclarations({ sexpr, stores, source }) {
     throw err;
   }
   const schemaByNode = new Map;
+  const schemaDerivedByNode = new Map;
   if (schemaStory) {
     lines.push(...schemaStory.intrinsicLines);
     for (const s of schemaStory.stories)
       schemaByNode.set(s.decl.node, s);
+    for (const d of schemaStory.derivations)
+      schemaDerivedByNode.set(d.decl.node, d);
   }
   const schemaDecl = (story, exported) => {
     const exp = exported ? "export " : "";
@@ -21054,6 +21112,8 @@ function emitDeclarations({ sexpr, stores, source }) {
       defDecl(stmt, exported);
     else if (head === "=" && stmt.length === 3 && schemaByNode.has(stmt[2])) {
       schemaDecl(schemaByNode.get(stmt[2]), exported);
+    } else if (head === "=" && stmt.length === 3 && schemaDerivedByNode.has(stmt)) {
+      schemaDecl(schemaDerivedByNode.get(stmt), exported);
     } else if (head === "=" && stmt.length === 3 && typeof stmt[1] === "string" && isComponentDecl(stmt[2])) {
       componentDecl(stmt[2], stmt[1], exported, stmt);
     } else if (head === "=" && stmt.length === 3 && protoMemberTarget(stmt) !== null) {

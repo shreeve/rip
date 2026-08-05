@@ -15039,15 +15039,23 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         });
       }
       emitter.schemaStories = new Map();
-      story.stories.forEach((s, i) => {
-        emitter.schemaStories.set(s.decl.node, s);
-        const exp = s.decl.exported ? 'export ' : '';
-        const nodeId = stores.idOf(s.decl.node);
-        // The last block carries the blank separator before the
-        // program's own first line (still inside its region).
-        const tail = i === story.stories.length - 1 ? '\n\n' : '\n';
+      // A derived binding contributes an alias and nothing else, so it
+      // joins the same block on the same terms — marked under its own
+      // assignment, and the LAST block of either kind carries the
+      // separator before the program's first line.
+      const blocks = [
+        ...story.stories.map((s) => ({ node: s.decl.node, exported: s.decl.exported, story: s,
+                                       lines: s.faceAliasLines ?? s.aliasLines })),
+        ...story.derivations.map((d) => ({ node: d.decl.node, exported: d.decl.exported, story: null,
+                                          lines: d.aliasLines })),
+      ];
+      blocks.forEach((b, i) => {
+        if (b.story !== null) emitter.schemaStories.set(b.node, b.story);
+        const exp = b.exported ? 'export ' : '';
+        const nodeId = stores.idOf(b.node);
+        const tail = i === blocks.length - 1 ? '\n\n' : '\n';
         builder.tsOnly(() => {
-          const lines = () => builder.emit((s.faceAliasLines ?? s.aliasLines).map((l) => `${exp}${l}`).join('\n'));
+          const lines = () => builder.emit(b.lines.map((l) => `${exp}${l}`).join('\n'));
           if (nodeId !== null) builder.mark(nodeId, '$self', lines);
           else lines();
           builder.emit(tail);

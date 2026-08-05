@@ -169,6 +169,17 @@ const CLEAN_ROWS = [
     // the algebra generics: a derived schema types through TS's own
     // Pick/Omit (the face needs no emission for it)
  'Base = schema :shape\n  a! string\n  b? integer\nView = Base.omit("b")\nw = View.parse({})\ns: string = w.a\ns = "z"',
+    // A derivation's COMPANION and the type its algebra call yields are
+    // two independent computations of one shape — the folder projects
+    // the field set, the intrinsic `pick`/`omit` signatures apply TS's
+    // own Pick/Omit. Assigning each to the other is what makes them one
+    // claim: were the folder to drift from `projectableFields`, a
+    // companion naming a field the algebra does not (or missing one it
+    // does) fails here rather than shipping a wrong shape. The model
+    // arm carries the implicit columns — id and @timestamps — which is
+    // where the two field sets are computed most differently.
+ 'Base = schema :shape\n  a! string\n  b? integer\nView = Base.omit("b")\nv: View = View.parse({})\nechoed = View.parse({})\nechoed = v\ns: string = v.a\ns = "z"',
+ 'User = schema :model\n  name! string\n  @timestamps\nView = User.pick("id", "name", "createdAt")\nv: View = View.parse({})\nechoed = View.parse({})\nechoed = v\ni: number = v.id\nn: string = v.name\nn = "z"\ni = 2',
     //  the component member model — every member kind's declare,
     // methods/hooks, the ctor and _init props annotations, the
     // companion interface used as an annotation type
