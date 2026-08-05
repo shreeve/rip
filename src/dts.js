@@ -47,6 +47,7 @@ import { buildSchemaTypeStory, SchemaTypeError } from './schema-types.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode, ctorAtFields } from './emitter.js';
 import {
   componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
+  segmentsText,
   selfArgsOf,
   anyArgsOf,
 } from './component-types.js';
@@ -366,7 +367,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     const typeParams = typeParamsOf(stmt);
     const self = `${name}${selfArgsOf(typeParams)}`;
     lines.push(`${exp}interface ${name}${typeParams} {`);
-    for (const l of rendered(() => instanceTypeLines(info, self))) lines.push(`  ${l.text}`);
+    for (const l of rendered(() => instanceTypeLines(info, self))) lines.push(`  ${segmentsText(l.segs)}`);
     lines.push('}');
     lines.push(`${exp}declare let ${name}: {`);
     if (gated) {

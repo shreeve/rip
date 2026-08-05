@@ -2295,14 +2295,21 @@ class Emitter {
       this.b.emit('\n' + pad);
       this.mark(compNode, '$self', () => {
         this.b.emit(`${exported ? 'export ' : ''}interface ${name}${typeParams ?? ''} {`);
-        // Lines carrying a node (behavior-projected computeds) mark
-        // their own row nested inside the $self cover, so a diagnostic
-        // born in the projection anchors at the member the author
-        // wrote rather than across the whole component.
+        // Every segment carrying a node marks its own row nested inside
+        // the $self cover, so a diagnostic born in this second rendering
+        // of a member's type anchors at the member the author wrote
+        // rather than across the whole component. Scaffolding segments
+        // have no source span and stay under the cover.
         for (const l of instanceTypeLines(info, `${name}${selfArgs}`)) {
           this.b.emit('\n' + pad + '  ');
-          if (l.node !== undefined) this.mark(l.node, l.role, () => this.b.emit(l.text));
-          else this.b.emit(l.text);
+          const segs = () => {
+            for (const s of l.segs) {
+              if (s.node !== undefined) this.mark(s.node, s.role, () => this.b.emit(s.text));
+              else this.b.emit(s.text);
+            }
+          };
+          if (l.node !== undefined) this.mark(l.node, l.role, segs);
+          else segs();
         }
         this.b.emit('\n' + pad + '}');
       });

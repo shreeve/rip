@@ -558,6 +558,46 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
     }
   }, 30000);
 
+  // A member's type is rendered TWICE — on the class declare and again on
+  // the same-name companion interface — so a fault in it reaches the editor
+  // twice. Both must land on the member the author wrote. The companion has
+  // no source line of its own, so an unmapped byte there falls to the
+  // component's `$self` cover and paints every line of the component red
+  // while the Problems count still reads one. The END of the range is what
+  // carries that, which is why it is asserted here: the test above pins
+  // starts, and a whole-component span has a correct start.
+  test('a fault in a member type anchors on the member — no diagnostic spans the component', async () => {
+    const published = [];
+    const client = await startServer((p) => published.push(p));
+    try {
+      const wait = nextDiagnostics(published);
+      const fixture = [
+        'export Widget = component',   // 0
+        '  bad: Nope := {}',           // 1  ← the plant: an unresolved type
+        '  render',                    // 2
+        "    div 'one'",               // 3
+        "    div 'two'",               // 4
+        '',
+      ].join('\n');
+      client.notify('textDocument/didOpen', {
+        textDocument: { uri, languageId: 'rip', version: 1, text: fixture },
+      });
+      const { diagnostics } = await wait();
+      expect(diagnostics.length).toBeGreaterThan(0);
+      for (const d of diagnostics) {
+        expect(d.code).toBe(2304);
+        // Every publication sits on the member's own line and covers the
+        // annotation — never the component. The exact extent differs (the
+        // container spells the type twice, once with its colon), so the
+        // assertion is containment, not one span.
+        expect([d.range.start.line, d.range.end.line]).toEqual([1, 1]);
+        expect(fixture.split('\n')[1].slice(d.range.start.character, d.range.end.character)).toContain('Nope');
+      }
+    } finally {
+      await client.stop();
+    }
+  }, 30000);
+
   test('prop completions and prop-key hover at a child-component call site', async () => {
     const published = [];
     const client = await startServer((p) => published.push(p));

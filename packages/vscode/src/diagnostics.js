@@ -184,6 +184,19 @@ export function applyRipDirectives(good, mapped) {
     seen.add(key);
     return true;
   });
+  // The same claim can also land on spans that NEST rather than match: a
+  // member's type is rendered twice (the class declare and the companion
+  // interface), and the two renderings mark different extents of the same
+  // annotation — `: T` against `T`. Identical code, severity and message
+  // over a containing range is the same claim, so the narrower span keeps
+  // it; only exact duplicates were collapsed above.
+  const inside = (a, b) =>   // is `a` within `b`?
+    (a.start.line > b.start.line || (a.start.line === b.start.line && a.start.character >= b.start.character)) &&
+    (a.end.line < b.end.line || (a.end.line === b.end.line && a.end.character <= b.end.character));
+  mapped = mapped.filter((m, i) => !mapped.some((o, j) => j !== i
+    && o.code === m.code && o.severity === m.severity && o.message === m.message
+    && inside(o.range, m.range)
+    && !(inside(m.range, o.range) && j > i)));   // identical spans: keep the first
   const directives = ripDirectiveLines(good);
   if (directives.length === 0) return mapped;
   const is2578 = (m) => String(m.code) === '2578';
