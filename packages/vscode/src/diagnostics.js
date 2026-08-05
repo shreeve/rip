@@ -173,6 +173,27 @@ export function ripDirectiveLines(good) {
   return good._directiveLines;
 }
 
+// Is `a` within `b`?
+const inside = (a, b) =>
+  (a.start.line > b.start.line || (a.start.line === b.start.line && a.start.character >= b.start.character)) &&
+  (a.end.line < b.end.line || (a.end.line === b.end.line && a.end.character <= b.end.character));
+
+// One claim can also land on spans that NEST rather than match: a component
+// member's type is rendered twice (the class declare and the companion
+// interface), and the two renderings mark different extents of the same
+// annotation — `: T` against `T`. Same code, severity and message over a
+// containing range is the same claim, so the narrowest span keeps it and
+// exact ties go to the first.
+//
+// This runs LAST, after directives have been charged. A directive is
+// charged by a diagnostic STARTING on its governed line, so collapsing
+// first could retire the only row that starts there and leave the
+// directive reading unused.
+const collapseNested = (rows) => rows.filter((m, i) => !rows.some((o, j) => j !== i
+  && o.code === m.code && o.severity === m.severity && o.message === m.message
+  && inside(o.range, m.range)
+  && (!inside(m.range, o.range) || j < i)));
+
 export function applyRipDirectives(good, mapped) {
   // A lowering can manifest one source error at several face positions.
   // Once mapping collapses them to the same code, severity, range, and
@@ -184,21 +205,8 @@ export function applyRipDirectives(good, mapped) {
     seen.add(key);
     return true;
   });
-  // The same claim can also land on spans that NEST rather than match: a
-  // member's type is rendered twice (the class declare and the companion
-  // interface), and the two renderings mark different extents of the same
-  // annotation — `: T` against `T`. Identical code, severity and message
-  // over a containing range is the same claim, so the narrower span keeps
-  // it; only exact duplicates were collapsed above.
-  const inside = (a, b) =>   // is `a` within `b`?
-    (a.start.line > b.start.line || (a.start.line === b.start.line && a.start.character >= b.start.character)) &&
-    (a.end.line < b.end.line || (a.end.line === b.end.line && a.end.character <= b.end.character));
-  mapped = mapped.filter((m, i) => !mapped.some((o, j) => j !== i
-    && o.code === m.code && o.severity === m.severity && o.message === m.message
-    && inside(o.range, m.range)
-    && !(inside(m.range, o.range) && j > i)));   // identical spans: keep the first
   const directives = ripDirectiveLines(good);
-  if (directives.length === 0) return mapped;
+  if (directives.length === 0) return collapseNested(mapped);
   const is2578 = (m) => String(m.code) === '2578';
   const used = new Set();
   const survivors = [];
@@ -227,7 +235,7 @@ export function applyRipDirectives(good, mapped) {
   // directive is genuinely used — an ERROR landed on its governed line (a
   // mis-governed multi-line face directive whose leaked error we suppressed
   // over rip positions). Otherwise it survives: unused stays loud.
-  return survivors.filter((m) => !(is2578(m) && used.has(m.range.start.line)));
+  return collapseNested(survivors.filter((m) => !(is2578(m) && used.has(m.range.start.line))));
 }
 
 // A rip.noCheck glob → anchored regex, matched against a project-root-
