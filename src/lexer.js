@@ -1055,6 +1055,14 @@ const syncTypeGenericMemo = (tokens, memo) => {
       // angle level (`interface P<T>` / `… extends Q<T>` — the
       // trailing close must end the line so the body INDENT forms).
       memo.answers.set(memo.level, true);
+    } else if (t.kind === 'IDENTIFIER' && t.value === 'as' &&
+               tokens[j - 1] && tokens[j - 1].kind !== '.' && tokens[j - 1].kind !== '?.' &&
+               CAST_LHS_ENDERS.has(tokens[j - 1].kind)) {
+      // A postfix-cast head (`expr as Map<K, V>`): the trailing close
+      // ends the line the same way a return-type or declaration head
+      // does — otherwise the next line continues this one and its
+      // statement silently nests into the wrong block.
+      memo.answers.set(memo.level, true);
     }
   }
   memo.upTo = tokens.length;
