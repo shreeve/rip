@@ -1,0 +1,31 @@
+# Live Cart certification is explicit because it boots Rip Server, Manager,
+# workers, a Janus-shaped edge, and Chromium. Pull requests use the deterministic
+# browser smoke matrix in test.yml; this workflow preserves the full-stack
+# contract without making that mutable process harness the edit loop.
+name: cart-certification
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install workspace
+        run: bun install --frozen-lockfile
+
+      - name: Install Chromium and system dependencies
+        working-directory: packages/browser-tests
+        run: bunx playwright install --with-deps chromium
+
+      - name: Live Cart Server/Manager certification
+        working-directory: packages/browser-tests
+        run: bun run test:cart

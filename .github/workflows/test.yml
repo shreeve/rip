@@ -6,7 +6,7 @@
 # grammar change whose production no fixture reduces paints the push
 # that made it — the audit deliberately stays outside test:all, so
 # nothing else watches its exit code.
-# `browser` is the real-browser certification, isolated because its
+# `browser` is the real-browser smoke matrix, isolated because its
 # slow part is not ours: `playwright install --with-deps` runs an apt
 # install the browser cache cannot cover, and a throttled Ubuntu mirror
 # can stretch it past 20 minutes — a stall that must not sit between a
@@ -104,8 +104,8 @@ jobs:
       - name: Corpus audit — the contract must hold
         run: bun run audit
 
-  # The one suite test:all does not carry: it needs real browsers, which
-  # a local checkout is not required to have. Parallel to `test`, so its
+  # The one smoke suite test:all does not carry: it needs real browsers,
+  # which a local checkout is not required to have. Parallel to `test`, so its
   # environment setup — the slowest and least ours part of CI — cannot
   # delay the main verdict.
   browser:
@@ -132,8 +132,8 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('packages/browser-tests/package.json') }}
 
-      - name: Real-browser suite (packages/browser-tests — Playwright in Chromium/Firefox/WebKit)
+      - name: Real-browser smoke (packages/browser-tests — Chromium/Firefox/WebKit)
         working-directory: packages/browser-tests
         run: |
           bunx playwright install --with-deps
-          bun run test
+          bun run test:smoke
