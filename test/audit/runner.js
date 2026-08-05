@@ -309,6 +309,7 @@ const SURVIVAL_EXCUSED = (() => {
 // hover-pins.json: reviewed measurements, gated on RULINGS.md, asserting the
 // interim where a ledger row holds the target.
 const ERROR_PINS = path.join(HERE, 'error-pins.json');
+const GRADUAL_PINS = path.join(HERE, 'gradual-pins.json');
 // ONE terminal width for every wrap in this file. Four sites used to read it
 // independently, with three different fallbacks (120, 120, 200, 200) and only
 // two honouring COLUMNS — so one run could wrap its totals at 200 and its kind
@@ -1007,7 +1008,7 @@ let corpusConfigCache = null;
 const corpusConfig = () => (corpusConfigCache ??= readProjectConfig(CORPUS));
 
 class EditorServer {
-  constructor() {
+  constructor({ packageJson = null } = {}) {
     this.diags = new Map();
     this.dir = mkTemp(path.join(os.tmpdir(), 'rip-audit-'));
     this.open = null;
@@ -1021,8 +1022,14 @@ class EditorServer {
     //
     // Only the `rip` block travels. A tsconfig would change what the
     // faces resolve against, which every pin was measured under.
+    //
+    // `packageJson` overrides the workspace config whole — the gradual
+    // pair measures under corpus/gradual's own config (mode AND declared
+    // dependencies), and such a workspace stays bare: no fixture copies,
+    // no mode assertion against the corpus.
+    this.corpusMode = packageJson === null;
     fs.writeFileSync(path.join(this.dir, 'package.json'),
-      JSON.stringify({ rip: { strict: corpusConfig().strict } }, null, 2));
+      JSON.stringify(packageJson ?? { rip: { strict: corpusConfig().strict } }, null, 2));
   }
 
   // ── THE INVARIANT THAT MAKES CONCURRENCY SAFE ────────────────────────────
@@ -1054,7 +1061,7 @@ class EditorServer {
   }
   release(uri) { if (this.open === uri) this.open = null; }
   async start() {
-    for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(d, f), path.join(this.dir, f));
+    if (this.corpusMode) for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(d, f), path.join(this.dir, f));
     // No errors/ copy: the Diagnostics Audit opens its fixtures with in-memory
     // text under `errors/…` URIs (distinct from every flat fixture by path
     // alone), and the server compiles the didOpen text — it never reads an
@@ -3391,6 +3398,7 @@ if (RUN_MAIN) {
 // rank in the rip source's same line, fixes the expected column. A twin that
 // stops aligning therefore fails loudly instead of drifting.
 let el = null;
+let gl = null;
 if (RUN_ERRORS) {
   // Each regex mirrors ITS tool's honoring rule — not a tidier one — so
   // whatever would silence a measurement is exactly what gets stripped and
@@ -3635,6 +3643,142 @@ if (RUN_ERRORS) {
       ...stalePinKeys.map((k) => ({ kind: 'stale-pin', note: `${k}: error-pins.json entry with no fixture`, file: k })),
     ],
   };
+
+  // ── the GRADUAL PAIR (corpus/gradual): the suppression matrix. Every
+  // fixture above measures under the corpus's strict config; this pair
+  // measures the OTHER mode, under corpus/gradual's own package.json
+  // (gradual, with a declared-but-never-installed dependency), through the
+  // same editor server the lane drives.
+  //
+  //   held.rip       every family gradual HOLDS, one section each. Gradual
+  //                  must publish NOTHING — the file carries no directives,
+  //                  so it doubles as an in-tree canary under `rip check`.
+  //                  The SAME text measured under the corpus's strict
+  //                  config must publish every pinned family
+  //                  (gradual-pins.json): a family quiet in BOTH modes
+  //                  stopped producing its diagnostic at all — `vacuous`,
+  //                  never a pass. A toolchain default flip lands here:
+  //                  a new strict-family member leaking into gradual is a
+  //                  `leak` row the day the toolchain pin moves.
+  //   published.rip  what gradual DOES publish — reach by annotation, by
+  //                  flow, by compiler-typed construction, and the
+  //                  always-reported defects — pinned per line, under the
+  //                  errors/ pragma discipline.
+  //
+  // `rip check` then runs over a stripped copy of the pair as the second
+  // instrument: the CLI and the editor share the gate (scopes.js), and
+  // this is the seam that proves they keep answering alike.
+  {
+    const GRAD = path.join(CORPUS, 'gradual');
+    auditBanner('GRADUAL PAIR', 'held publishes nothing in gradual, everything pinned under strict · published matches its pins · CLI parity');
+    const pins = fs.existsSync(GRADUAL_PINS) ? JSON.parse(fs.readFileSync(GRADUAL_PINS, 'utf8')) : {};
+    const heldSrc = fs.readFileSync(path.join(GRAD, 'held.rip'), 'utf8');
+    const pubRaw = fs.readFileSync(path.join(GRAD, 'published.rip'), 'utf8');
+    const heldLines = heldSrc.split('\n');
+    const pubLines = pubRaw.split('\n');
+    const problems = [];
+
+    // held.rip stays BARE everywhere — any directive would consume the very
+    // leak the canary exists to publish; published.rip leads with the pragma
+    // (the errors/ discipline) and carries nothing besides.
+    heldLines.forEach((l, i) => {
+      if (/^[ \t]*#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/.test(l)) problems.push({ kind: 'shape', file: 'held.rip', note: `line ${i + 1} carries a suppression directive — the canary must be bare` });
+    });
+    if (!pragmaLeads(pubLines, RIP_NOCHECK, /^\s*#/)) problems.push({ kind: 'shape', file: 'published.rip', note: '`# @ts-nocheck` missing or below the first statement — authoring surfaces would squiggle instrument content' });
+    pubLines.forEach((l, i) => {
+      const m = l.match(/^[ \t]*#[ \t]*@ts-(expect-error|ignore)(?=\s|$)/);
+      if (m) problems.push({ kind: 'shape', file: 'published.rip', note: `line ${i + 1} carries @ts-${m[1]} — the pair's fixtures must be unsuppressed beyond the leading pragma` });
+    });
+    const pubStripped = pubLines.map((l) => (RIP_NOCHECK.test(l) ? '#' : l)).join('\n');
+
+    // One matcher for both sides, the errors-lane discipline: token is the
+    // pin's checksum, exact column claims before same-line fallback, and
+    // whatever remains unclaimed is a stray.
+    const matchPins = (fixture, side, ds, pinRows, srcLines) => {
+      const out = [];
+      const expected = [];
+      for (const p of pinRows) {
+        if (typeof p.token !== 'string' || p.token === '') { out.push({ kind: 'shape', file: fixture, note: `pin TS${p.code} at ${p.line}:${p.character}: no \`token\` — a pin states the source text it sits on` }); continue; }
+        if ((srcLines[p.line - 1] ?? '').slice(p.character, p.character + p.token.length) !== p.token) {
+          out.push({ kind: 'shape', file: fixture, note: `pin \`${p.token}\` not at ${p.line}:${p.character} — the fixture moved under the pin (re-measure and re-pin)` });
+          continue;
+        }
+        expected.push({ line: p.line - 1, character: p.character, code: p.code, token: p.token });
+      }
+      const unmatched = ds.filter((d) => (d.severity ?? 1) <= 2);
+      for (const e of expected) {
+        let i = unmatched.findIndex((d) => d.code === e.code && d.range.start.line === e.line && d.range.start.character === e.character);
+        if (i < 0) i = unmatched.findIndex((d) => d.code === e.code && d.range.start.line === e.line);
+        if (i < 0) {
+          out.push({ kind: side === 'strict' ? 'vacuous' : 'missing', file: fixture, note: `expected TS${e.code} at ${e.line + 1}:${e.character} (\`${e.token}\`) — never published${side === 'strict' ? ' even under strict: the construct stopped producing its diagnostic, so the gradual hold above it proves nothing' : ''}` });
+          continue;
+        }
+        const [d] = unmatched.splice(i, 1);
+        if (d.range.start.character !== e.character) out.push({ kind: 'position', file: fixture, note: `TS${e.code} at line ${e.line + 1}: expected column ${e.character} (\`${e.token}\`), published ${d.range.start.character}` });
+      }
+      for (const d of unmatched) out.push({ kind: 'stray', file: fixture, note: `unexpected TS${d.code} at ${d.range.start.line + 1}:${d.range.start.character} — ${String(d.message).split('\n')[0]}` });
+      return { problems: out, asserted: expected.length };
+    };
+
+    // The gradual workspace: corpus/gradual's package.json AT THE ROOT, so
+    // the opened documents resolve gradual mode and the declared-but-absent
+    // dependency from it. The strict side reuses a lane server — its
+    // workspace already carries the corpus's strict config — and both open
+    // the same text under a `gradual/` URI no flat fixture collides with.
+    const gserver = new EditorServer({ packageJson: JSON.parse(fs.readFileSync(path.join(GRAD, 'package.json'), 'utf8')) });
+    await gserver.start();
+    let heldGradual, pubGradual, heldStrict;
+    try {
+      heldGradual = await gserver.verdict('gradual/held.rip', heldSrc);
+      pubGradual = await gserver.verdict('gradual/published.rip', pubStripped);
+      heldStrict = await pool[0].verdict('gradual/held.rip', heldSrc);
+    } finally { await gserver.stop(); }
+
+    for (const d of heldGradual.filter((d) => (d.severity ?? 1) <= 2)) {
+      problems.push({ kind: 'leak', file: 'held.rip', note: `gradual published TS${d.code} at ${d.range.start.line + 1}:${d.range.start.character} — ${String(d.message).split('\n')[0]}` });
+    }
+    const strictSide = matchPins('held.rip', 'strict', heldStrict, pins['held.rip'] ?? [], heldLines);
+    const pubSide = matchPins('published.rip', 'gradual', pubGradual, pins['published.rip'] ?? [], pubLines);
+    problems.push(...strictSide.problems, ...pubSide.problems);
+
+    // The CLI instrument over the same pair: held silent, published equal
+    // to the pins. rip check exits non-zero when it reports, so the JSON
+    // rides stdout either way.
+    const pdir = mkTemp(path.join(os.tmpdir(), 'rip-audit-gradual-check-'));
+    fs.copyFileSync(path.join(GRAD, 'package.json'), path.join(pdir, 'package.json'));
+    fs.writeFileSync(path.join(pdir, 'held.rip'), heldSrc);
+    fs.writeFileSync(path.join(pdir, 'published.rip'), pubStripped);
+    let cliRows = null;
+    try { cliRows = JSON.parse((await execFileP('bun', [RIP, 'check', '--json', pdir], { encoding: 'utf8', timeout: 120000 })).stdout); }
+    catch (err) {
+      try { cliRows = JSON.parse((err.stdout || '').toString()); }
+      catch { problems.push({ kind: 'parity', file: 'gradual', note: `rip check over the pair produced no JSON: ${String(err.message).split('\n')[0]}` }); }
+    }
+    if (cliRows) {
+      for (const r of cliRows.filter((r) => path.basename(r.file) === 'held.rip')) {
+        problems.push({ kind: 'parity', file: 'held.rip', note: `rip check reports TS${r.code} at ${r.line}:${r.column} where the editor holds — the instruments disagree` });
+      }
+      const want = (pins['published.rip'] ?? []).map((p) => `${p.line}:${p.character}:TS${p.code}`).sort();
+      const got = cliRows.filter((r) => path.basename(r.file) === 'published.rip').map((r) => `${r.line}:${r.column - 1}:TS${r.code}`).sort();
+      if (want.join(' ') !== got.join(' ')) {
+        problems.push({ kind: 'parity', file: 'published.rip', note: `rip check disagrees with the pins — pinned [${want.join(', ')}] vs CLI [${got.join(', ')}]` });
+      }
+    }
+
+    const buckets = [
+      ['gradual/held.rip · gradual verdict', `${heldGradual.length === 0 ? 'nothing published' : `${heldGradual.length} published`}`, (p) => p.kind === 'leak' || (p.kind === 'shape' && p.file === 'held.rip')],
+      ['gradual/held.rip · strict pairing', `${strictSide.asserted} famil${strictSide.asserted === 1 ? 'y' : 'ies'} asserted`, (p) => (p.kind === 'vacuous' || ((p.kind === 'stray' || p.kind === 'position') && p.file === 'held.rip'))],
+      ['gradual/published.rip', `${pubSide.asserted} diagnostic${pubSide.asserted === 1 ? '' : 's'} asserted`, (p) => p.file === 'published.rip' && p.kind !== 'parity'],
+      ['gradual/ · rip check parity', 'CLI and editor share the gate', (p) => p.kind === 'parity'],
+    ];
+    for (const [label, detail, match] of buckets) {
+      const mine = problems.filter(match);
+      console.log(`    ${mine.length === 0 ? green('✓') : red('✗')} ${pad(label, ERR_NAME_W + 18)} ${dim(detail)}`
+        + (mine.length === 0 ? '' : dim(' · ') + red(`${mine.length} violation${mine.length === 1 ? '' : 's'}`)));
+      for (const p of mine) out(`      ${red('·')} ${yellow(p.kind)} ${dim(p.note)}`);
+    }
+    gl = { held: strictSide.asserted, published: pubSide.asserted, problems };
+  }
 }
 
 const PROBES = new Map();   // file → { decls, hovers, tokens, tmap }
@@ -4722,7 +4866,7 @@ if (tk) {
   // detail-of-detail and left a gap under a section that has no middle tier.
   const reason = (text) => { for (const l of wrapText(text, TERM_W - 6, 0)) console.log(`      ${dim(l)}`); };
   const { verdicts, failures, drift } = judge({
-    states: { gr, mp, el, hp, tk, fails },
+    states: { gr, mp, el, gl, hp, tk, fails },
     ran: (lane) => AUDITS.find((a) => a.key === lane).ran,
   });
   // STRUCTURAL refusal, not a verdict: a predicate read a field no summary

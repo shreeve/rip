@@ -367,17 +367,20 @@ if (compiled.size > 0) {
   }
   // The AUTO BOUNDARY: a package becomes its own program when it DECLARES
   // globals (`globalThis.NAME ??=` — the vocabulary stays package-scoped,
-  // reaching importers the way the runtime does) or when it sets
-  // `rip.strict` (floors and null posture are per-PROGRAM: a strict
-  // package inside the root program would get the gradual floor's
-  // `any`s). A package already inside a tsconfig-wrapped project needs
+  // reaching importers the way the runtime does) or when its MODE FLIPS
+  // against its parent package's (floors and null posture are per-PROGRAM:
+  // a strict package inside a gradual program would get the floor's `any`s,
+  // and a gradual package inside a strict program would get strict nulls
+  // and refused floors). A package whose own tsconfig wraps it needs
   // nothing more; the workspace root has no narrower scope to give.
   const autoBoundaryRels = new Set();
   if (!mirrorRootIsFallback) {
     for (const [fsPath, entry] of compiled) {
       let pkgDir = null;
-      if (entry.cfg.strict === true && entry.cfg._configDir && entry.cfg._configDir !== workspaceRoot) {
-        pkgDir = entry.cfg._configDir;
+      const cfgDir = entry.cfg._configDir;
+      if (cfgDir && cfgDir !== workspaceRoot
+          && (entry.cfg.strict === true) !== (readProjectConfig(path.dirname(cfgDir)).strict === true)) {
+        pkgDir = cfgDir;
       } else if (entry.result.globalDecls?.length) {
         for (let dir = path.dirname(fsPath); ; dir = path.dirname(dir)) {
           if (fs.existsSync(path.join(dir, 'package.json'))) { pkgDir = dir; break; }
@@ -386,7 +389,11 @@ if (compiled.size > 0) {
       }
       if (pkgDir === null || pkgDir === workspaceRoot || !pkgDir.startsWith(workspaceRoot + path.sep)) continue;
       const rel = path.relative(workspaceRoot, pkgDir);
-      if (![...wrapperRels].some((w) => rel === w || rel.startsWith(w + path.sep))) autoBoundaryRels.add(rel);
+      // A tsconfig AT the package dir already partitions it (that wrapper
+      // reads its posture from the package). One ABOVE it does not — the
+      // wrapper's posture is the wrapper's, so a flipped package below a
+      // wrapped project still needs its own boundary.
+      if (![...wrapperRels].some((w) => rel === w)) autoBoundaryRels.add(rel);
     }
   }
   const mirror = generatedMirror({

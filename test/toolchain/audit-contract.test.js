@@ -31,6 +31,7 @@ const cleanStates = () => ({
   mp: { missing: 0, drifted: 0, census: 0, decompositionDrift: 0, badExclusions: 0 },
   fails: 0,
   el: { problems: [] },
+  gl: { held: 1, published: 1, problems: [] },
   hp: { gap: 0, snapChanged: 0, violations: [], silentLeaks: 0, ruledDiverging: 0, stalePinKeys: [], ruledPopulation: 1 },
   tk: { missing: [], badType: [], badReadonly: [], survDrops: [], survUnclassified: 0, unexplained: [], exclusionDrift: [], facesAvailable: true },
 });
@@ -140,6 +141,8 @@ describe('the audit contract judges in both directions', () => {
       'diagnostics.positions': (s) => { s.el.problems = [{ kind: 'position', file: '09-classes.errors.rip' }]; },
       'diagnostics.positions.element': (s) => { s.el.problems = [{ kind: 'position', file: '11-types.errors.rip' }]; },
       'diagnostics.positions.arity': (s) => { s.el.problems = [{ kind: 'position', file: '02-operations.errors.rip' }]; },
+      'gradual.held': (s) => { s.gl.problems = [{ kind: 'leak', file: 'held.rip' }]; },
+      'gradual.published': (s) => { s.gl.problems = [{ kind: 'missing', file: 'published.rip' }]; },
       'hover.parity': (s) => { s.hp.gap = 1; },
       'hover.silence': (s) => { s.hp.silentLeaks = 1; },
       'hover.ruled': (s) => { s.hp.ruledDiverging = 1; },

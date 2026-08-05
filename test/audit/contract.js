@@ -198,6 +198,21 @@ export const CONTRACT = [
     red: (s) => s.el.problems.some((p) => p.kind === 'position' && /^11-types\./.test(p.file)),
   },
   {
+    // The gradual pair's held side is TWO invariants in one predicate on
+    // purpose: "publishes nothing in gradual" (leak) and "still publishes
+    // under strict" (vacuous) are one property — a hold is only a hold
+    // while the diagnostic it holds exists. A toolchain default flip
+    // reds this row the day it lands.
+    name: 'gradual.held', lane: 'errors',
+    property: 'every family gradual holds publishes nothing in gradual and still publishes under strict',
+    red: (s) => s.gl.problems.some((p) => p.file === 'held.rip' || p.kind === 'vacuous' || p.kind === 'leak'),
+  },
+  {
+    name: 'gradual.published', lane: 'errors',
+    property: 'gradual publishes exactly the pinned reach-and-defect set, and rip check answers like the editor',
+    red: (s) => s.gl.problems.some((p) => p.file === 'published.rip' || p.kind === 'parity'),
+  },
+  {
     name: 'diagnostics.positions.arity', lane: 'errors',
     property: "a paren-injected call's arity error lands on the excess argument",
     red: (s) => s.el.problems.some((p) => p.kind === 'position' && /^02-operations\./.test(p.file)),

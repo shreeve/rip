@@ -365,8 +365,6 @@ function writeProjectWrapper(rel, sourceTsconfig) {
 // root config, whose exclusions grew — for the caller to forward to tsgo.
 function ensureAutoBoundary(fsPath) {
   if (mirrorRootIsFallback || !workspaceRoot || !mirrorRootReady) return [];
-  const owner = nearestTsconfig(path.dirname(fsPath), workspaceRoot);
-  if (owner !== null && path.dirname(owner) !== workspaceRoot) return [];
   let dir = path.dirname(fsPath);
   let pkgDir = null;
   for (;;) {
@@ -375,6 +373,15 @@ function ensureAutoBoundary(fsPath) {
     dir = path.dirname(dir);
   }
   if (pkgDir === null || pkgDir === workspaceRoot) return [];
+  // A tsconfig AT or BELOW the package already partitions it (that wrapper
+  // reads its posture from the package's own directory). One ABOVE it does
+  // not — the wrapper's posture is the wrapper's — so a flipped package
+  // below a wrapped project still earns its boundary.
+  const owner = nearestTsconfig(path.dirname(fsPath), workspaceRoot);
+  if (owner !== null) {
+    const ownerDir = path.dirname(owner);
+    if (ownerDir === pkgDir || ownerDir.startsWith(pkgDir + path.sep)) return [];
+  }
   const rel = path.relative(workspaceRoot, pkgDir);
   if (rel === '' || path.isAbsolute(rel) || rel === '..' || rel.startsWith('..' + path.sep)) return [];
   if (wrapperDirs.has(rel)) return [];
@@ -835,9 +842,13 @@ function mirrorFromDisk(fsPath, source) {
   const mirrorPath = mirrorPathOf('file://' + fsPath);
   warnOnMirrorCollision(mirrorPath, fsPath);
   writeMirror(mirrorPath, result.code);
-  // A dependency that DECLARES globals gets its boundary the moment its
-  // face materializes — the closure pass may be the first to see it.
-  if (result.globalDecls?.length) {
+  // A dependency that DECLARES globals or lives in a mode-flipped package
+  // gets its boundary the moment its face materializes — the closure pass
+  // may be the first to see it.
+  const depCfg = readProjectConfig ? readProjectConfig(path.dirname(fsPath)) : null;
+  const depFlipped = depCfg?._configDir && depCfg._configDir !== workspaceRoot
+    && (depCfg.strict === true) !== (readProjectConfig(path.dirname(depCfg._configDir)).strict === true);
+  if (result.globalDecls?.length || depFlipped) {
     const bw = ensureAutoBoundary(fsPath);
     if (bw.length && tsgo) {
       tsgo.client.notify('workspace/didChangeWatchedFiles', {
@@ -1762,9 +1773,14 @@ async function refresh(document) {
         scheduleManifestSave();
       }
       const wrapperFiles = ensureProjectWrapper(fsPath);
-      // Globals-declaring or nested-strict: either way the package needs
-      // its own program (floors and null posture are per-program).
-      if (result.globalDecls?.length || (state.strict === true && state.configDir && state.configDir !== workspaceRoot)) {
+      // Globals-declaring or mode-flipped against the parent package:
+      // either way the package needs its own program (floors and null
+      // posture are per-program, and a flip cuts both ways — a strict
+      // package inside a gradual program would ride the floor's `any`s, a
+      // gradual one inside a strict program would ride strict nulls).
+      const flipped = state.configDir && state.configDir !== workspaceRoot
+        && (state.strict === true) !== (readProjectConfig(path.dirname(state.configDir)).strict === true);
+      if (result.globalDecls?.length || flipped) {
         wrapperFiles.push(...ensureAutoBoundary(fsPath));
       }
       if (wrapperFiles.length && tsgo) {

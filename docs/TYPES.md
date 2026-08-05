@@ -245,11 +245,15 @@ in every mode — defects no annotation answers. One exception spells the
 difference between a typo and stated intent: a bare import DECLARED in
 the governing package.json but not installed is held under gradual
 (`rip check` counts it with the install remedy), while strict publishes
-it; undeclared-and-uninstalled stays a defect everywhere. Gradual also
-supplies `strict: false` (TypeScript 7 defaults it on), restoring the
-loose base — null checks off, catch bindings `any` — while
-`noImplicitAny` stays on; any strictness the project's own tsconfig
-chain sets is yielded to whole.
+it; undeclared-and-uninstalled stays a defect everywhere. Gradual rides
+TypeScript 7's default `strict` and subtracts only what it deliberately
+loosens: `strictNullChecks` (the lever that changes types, not just
+which diagnostics publish), `useUnknownInCatchVariables` (an
+unannotated `catch` answers `any`), and `noImplicitThis` (`this` in an
+unannotated object-literal method is `any`). Everything else — present
+and future strict-family members — stays on, so new strictness arrives
+as a visible leak, never as silent inference loss. Any strictness the
+project's own tsconfig chain sets is yielded to whole.
 
 ## Project configuration
 
@@ -270,11 +274,14 @@ use-before-assignment checking for typed forwards. `noCheck` suppresses
 diagnostics for matching paths while keeping those files in the
 TypeScript program so imports continue to resolve.
 
-A nested package that sets `rip.strict` becomes its own program in the
-mirror (the same automatic boundary a globals-declaring package gets):
-host floors and null posture are per-program, so the package's own
-strictness governs them — an unresolvable `bun:sqlite` is a complaint
-there, not a floored `any`.
+A nested package whose mode FLIPS against its parent package's becomes
+its own program in the mirror (the same automatic boundary a
+globals-declaring package gets): host floors and null posture are
+per-program, so the package's own mode governs them. The flip cuts both
+ways — a strict package inside a gradual workspace gets its complaints
+(an unresolvable `bun:sqlite` instead of a floored `any`), and a
+gradual package inside a strict workspace keeps its loose base instead
+of riding strict nulls and refused floors.
 
 Configuration changes refresh open editor documents without a window
 reload. `rip check [paths...]` applies the same project configuration,
@@ -292,6 +299,11 @@ diagnostics through the same mapping seam without starting an editor.
   and produce their required TS regions.
 - **Audit:** real Rip fixtures compare compilation, diagnostics,
   runtime behavior, and editor answers against TypeScript twins.
+- **Suppression matrix:** the audit's gradual pair
+  (`test/audit/corpus/gradual/`) asserts every family gradual holds
+  publishes nothing in gradual AND still publishes under strict — a
+  family quiet in both modes is a failure — plus the published set,
+  pinned per line, with `rip check` and the editor answering alike.
 - **Mapping:** annotations, diagnostics, hover, and definitions
   round-trip through exact UTF-16 offsets.
 

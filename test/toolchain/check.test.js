@@ -627,9 +627,9 @@ describeExtended('rip check: type diagnostics over the real server', () => {
 
   // TypeScript 7 defaults `strict` ON, which drags catch bindings to
   // `unknown` through `useUnknownInCatchVariables` — narrowing ceremony
-  // on every member read of an unannotated `catch err`. Gradual restores
-  // the loose base (`strict: false` — nullPosture, mirror.js); a chain
-  // that states its own strictness is yielded to whole and keeps the
+  // on every member read of an unannotated `catch err`. Gradual's
+  // posture subtracts that flag (nullPosture, mirror.js); a chain that
+  // states its own strictness is yielded to whole and keeps the
   // unknown.
   test('gradual catch bindings are not unknown; an author strictness chain keeps them', () => {
     const catcher = [
@@ -893,6 +893,34 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(diags.filter((d) => d.file.includes('lib')).map((d) => d.code)).toContain(2307);
       // The gradual sibling: floored `any`, still quiet.
       expect(diags.filter((d) => d.file.includes('loose'))).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // The INVERSE flip: a gradual package nested in a STRICT workspace earns
+  // the same boundary — posture and floors are per-program, so without it
+  // the package rides strict nulls, unknown catches, and refused floors it
+  // never asked for. The tsconfig ABOVE the package must not swallow the
+  // boundary either: a wrapper's posture is the wrapper's, not the
+  // package's (the audit-tree shape, where corpus/gradual sits under
+  // test/audit's tsconfig and strict package.json).
+  test('a gradual package nested in a strict workspace keeps its loose posture and floors', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ workspaces: ['packages/*'], rip: { strict: true } }),
+      'mid/tsconfig.json': JSON.stringify({ compilerOptions: { noEmit: true } }),
+      'mid/loose/package.json': JSON.stringify({ name: '@t/loose' }),
+      'mid/loose/loose.rip': [
+        "import { Database } from 'bun:sqlite'",
+        'greeting: string = null',
+        'console.log(Database, greeting)',
+      ].join('\n') + '\n',
+      'strict.rip': 'flag: string = null\nconsole.log(flag)\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      // The flipped package: floored bun:*, loose nulls — silent.
+      expect(diags.filter((d) => d.file.includes('loose'))).toEqual([]);
+      // The strict root still means strict.
+      expect(diags.filter((d) => d.file === 'strict.rip').map((d) => d.code)).toEqual([2322]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
