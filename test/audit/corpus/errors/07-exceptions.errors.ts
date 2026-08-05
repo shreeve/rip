@@ -11,3 +11,8 @@ let wrongAccess = function() {
     return 'ok'
   } catch (error) {
     return error.message } }
+let wrongSealed = function() {
+  try {
+    return reasonCode
+  } finally {
+    reasonCode.padStart(2) } }

@@ -2314,6 +2314,7 @@ if (RUN_GRAMMAR) {
   // a red the reader cannot see is a red nobody fixes.
   if (groups.size) {
     out(`\n    ${bold('Uncovered, by construct')} ${red(`— ${uncovered.length} violating grammar.coverage`)}`);
+    out(`    ${dim('each wants a fixture in the file of the construct it carries (CORPUS.md § Placement), a redBecause while a finding blocks it, or a ruled EXCLUDED row')}`);
     const rows = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
     for (const [g, rules] of rows) {
       console.log(`      ${pad(g, 24)} ${red(String(rules.length).padStart(3))}`);
@@ -2326,14 +2327,16 @@ if (RUN_GRAMMAR) {
   // denominator here is the POSITIVE CORPUS ITSELF, on the polarity
   // principle the token invariant already states: a claim class the
   // positives make with no negative demonstrating its rejection is untested
-  // in the direction that matters. Two layers with different standing:
+  // in the direction that matters. Two contractual layers, one gauge:
   // TYPE VOCABULARY is CONTRACTUAL — every class the positives claim must
   // have at least one error-lane instance, and an unfalsified class paints
   // red (the type-level text is invisible to the parser: a TYPE token is
   // one token, so tuples, index signatures, constraints live beneath the
-  // production grid). Productions-per-family remains a GAUGE — which
-  // families have any negative at all, on the gate's own denominator;
-  // report-only until its contract is ruled. Classification is textual and
+  // production grid). FAMILY PRESENCE is contractual too
+  // (negatives.families): every family the positives exercise carries at
+  // least one negative, gated at zero since the error lane drained the
+  // queue. The per-family FRACTION stays a gauge — a negative proves one
+  // rejection and has no target count. Classification is textual and
   // conservative.
   let ng = null;
   {
@@ -2668,11 +2671,11 @@ if (RUN_GRAMMAR) {
     // it never said why a second denominator exists. It exists because these
     // spellings are the ones the production count cannot tell apart.
     out(`\n    ${bold('Lexer-spelling census')} ${dim("(what the lexer rewrites before the parser sees it — invisible to the production count)")}`);
-    // Deliberately NOT a fraction. This queue is a gauge — the next line says
-    // so — and a `5 / 9` printed between two closed-denominator scores reads
-    // as the worst mark on the screen, which is a comparison the prose then
-    // has to spend a sentence undoing. A count of what is tracked carries the
-    // same information and invites no ranking against the obligations.
+    // Deliberately NOT a fraction. A `5 / 9` printed between two
+    // closed-denominator scores reads as the worst mark on the screen, which
+    // is a comparison the prose then has to spend a sentence undoing. A count
+    // of what is tracked carries the same information, and the written
+    // obligation (lexer.written) paints its own line below when it breaks.
     // `after N exclusions` rather than a trailing `N excluded — netted from
     // the denominator`: the count leads the denominator it already belongs
     // to, the way the productions banner states its own, and the clause the
@@ -2682,8 +2685,8 @@ if (RUN_GRAMMAR) {
     out(`    ${dim(`${spellings.length} spellings${EXCLUDED_SPELLINGS.size ? ` after ${EXCLUDED_SPELLINGS.size} exclusions${VERBOSE ? '' : ' (-v lists them)'}` : ''} · ${rewritten.length} read live from the alias table, ${MINTS.length} hand-listed, each probed`)}`);
     if (VERBOSE) for (const [label, why] of groupByReason(EXCLUDED_SPELLINGS)) labeled(6, label, 8, `excluded — ${why}`);
     if (darkSpellings.length) {
-      out(`    ${yellow(`${darkSpellings.length} never written by the corpus — candidates, not obligations:`)}`);
-      for (const s of darkSpellings) console.log(`      ${yellow(pad(s.spelling, 8))} ${dim(`→ ${s.becomes}`)}`);
+      out(`    ${red(`${darkSpellings.length} never written by the corpus — violating lexer.written:`)} ${dim('write each spelling into a positive fixture, or exclude it as redundant (EXCLUDED_SPELLINGS, with the reason)')}`);
+      for (const s of darkSpellings) console.log(`      ${red(pad(s.spelling, 8))} ${dim(`→ ${s.becomes}`)}`);
     } else out(`    ${green('every rewritten spelling is written somewhere in the corpus')}`);
     if (VERBOSE) for (const s of spellings.filter((x) => spellingSeen.has(x.spelling))) {
       out(`      ${pad(s.spelling, 8)} ${dim(`→ ${s.becomes} · lexes as ${[...spellingSeen.get(s.spelling)].join(', ')}`)}`);
@@ -2701,16 +2704,18 @@ if (RUN_GRAMMAR) {
     // filtered to unclaimed kinds can never contain one.
     const heldButClaimed = [...HELD_KINDS.keys()].filter((k) => claimedSet.has(k));
     if (kindQueue.length) {
-      const writable = kindQueue.length - heldKinds.length;
-      out(`    ${yellow(`${kindQueue.length} unclaimed — ${heldKinds.length === kindQueue.length
-        ? 'every one held by an open finding'
-        : heldKinds.length ? `${writable} a fixture could claim today, ${heldKinds.length} held by an open finding` : 'the vocabulary queue'}:`)}`);
-      for (const k of kindQueue) {
-        const held = HELD_KINDS.get(k);
-        if (held) labeled(6, k, 26, `· held by ${held}`, yellow);
-      }
       const free = kindQueue.filter((k) => !HELD_KINDS.has(k));
-      if (free.length) wrapList(free, yellow);
+      if (free.length) {
+        out(`    ${red(`${free.length} unclaimed — violating grammar.census.claimed:`)} ${dim('claim each kind in a corpus type position, or exclude it by ruling (EXCLUDED_KINDS, with the reason)')}`);
+        wrapList(free, red);
+      }
+      if (heldKinds.length) {
+        out(`    ${yellow(`${heldKinds.length} unclaimed, held by open findings — the queue resumes when they close:`)}`);
+        for (const k of kindQueue) {
+          const held = HELD_KINDS.get(k);
+          if (held) labeled(6, k, 26, `· held by ${held}`, yellow);
+        }
+      }
     } else out(`    ${green('every kind claimed or excluded')}`);
     for (const k of heldButClaimed) out(`    ${red('✗')} ${red('held but claimed:')} ${k} ${dim('— the finding closed; drop the hold')}`);
     for (const k of staleHeldKinds) out(`    ${red('✗')} ${red('held kind not in the universe:')} ${k} ${dim('— stale; fix the census hold table')}`);
@@ -2772,7 +2777,7 @@ if (RUN_GRAMMAR) {
     // which is news about nothing. When the number does look wrong, the file
     // is one grep away, and no threshold has to be invented to decide when to
     // print it.
-    out(`\n    ${bold('Negative coverage')} ${dim(`(the error lane against the positive corpus — vocabulary contractual, family fractions a gauge)`)}`);
+    out(`\n    ${bold('Negative coverage')} ${dim(`(the error lane against the positive corpus — vocabulary and family presence contractual, family fractions a gauge)`)}`);
     // The reduction COUNT is gone from this line, not reworded. Nothing acts
     // on it: it has no target (a negative proves one rejection and has no
     // reason to re-exercise the grammar), no obligation behind it, and no
@@ -2783,7 +2788,7 @@ if (RUN_GRAMMAR) {
     // per-family counts stay under -v, where a reader who wants the texture
     // asks for it.
     out(`    ${dim(`${negParsed} error fixtures`)}${dim(' · ')}${famZero.length
-      ? yellow(`no negative at all for: ${famZero.join(', ')}`)
+      ? red(`no negative at all for: ${famZero.join(', ')}`) + ' ' + dim('— violating negatives.families: author one in the family\'s corpus/errors pair (fixture + line-aligned twin, diagnostics asserted)')
       : green('every construct family has at least one negative')}`);
     if (VERBOSE) for (const [g, n] of [...famPos.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       out(`      ${pad(g, 24)} ${dim(`${String(famNeg.get(g) ?? 0).padStart(3)} of ${String(n).padStart(3)} exercised productions appear in a negative`)}`);
@@ -2875,7 +2880,7 @@ if (RUN_GRAMMAR) {
         if (s1 === 'missing' || s2 === 'missing') { broken++; loud.push(`${red('✗')} ${b.behavior} ${dim('— the fixture this row points at is gone:')} ${red(s1 === 'missing' ? b.carrier : b.neg)}`); }
         else if (s1 === 'absent' || s2 === 'absent') {
           if (until) { parked++; parkedRows.push(`${yellow('·')} ${b.behavior} ${dim(`— PARKED until ${until}`)}`); }
-          else { absent++; quiet.push(`${yellow('·')} ${b.behavior} ${dim('— ruled, uncarried')}`); }
+          else { absent++; loud.push(`${red('✗')} ${b.behavior} ${dim('— ruled, uncarried: author its carrier, or park the row on the finding that blocks it')}`); }
         } else {
           carried++;
           if (until) staleParks.push(b.behavior);
@@ -2902,7 +2907,7 @@ if (RUN_GRAMMAR) {
         loud.push(`${red('✗')} ${f} ${dim('— a claims fixture no CLAIMS row names: removable, or mis-bucketed under corpus/claims')}`);
       }
       out(`\n    ${bold('Corpus claims')} ${dim('(CLAIMS.md — behaviors and containment cells; the no-denominator coverage record)')}`);
-      out(`    ${dim('behaviors: ')}${green(`${carried} carried`)}${absent ? `${dim(' · ')}${yellow(`${absent} ruled, uncarried`)}` : ''}${parked ? `${dim(' · ')}${yellow(`${parked} parked on open findings`)}` : ''}${VERBOSE ? '' : dim(' — -v lists every row')}`);
+      out(`    ${dim('behaviors: ')}${green(`${carried} carried`)}${absent ? `${dim(' · ')}${red(`${absent} ruled, uncarried — violating claims.carriage`)}` : ''}${parked ? `${dim(' · ')}${yellow(`${parked} parked on open findings`)}` : ''}${VERBOSE ? '' : dim(' — -v lists every row')}`);
       // The pair count lands here, where it is not a bare rising number but
       // the pool the cells below are drawn from.
       out(`    ${dim('containment: ')}${(cellsMissing ? red : green)(`${cells.length - cellsMissing} of ${cells.length} cells carried`)}${dim(` · ${pairsSeen.size} pairs available to name`)}`);
@@ -4158,13 +4163,14 @@ if (RUN_HOVER) {
   }
 
   const typedRatio = `${probeCount - anyCount} / ${probeCount}`;
-  out(`\n  ${bold('Gauge')} ${dim('(hover probes answering a real type — an `any` the twin also answers is one; keep this full)')}`);
-  console.log(`    ${pad('typed hovers', 12)} ${anyCount === 0 ? green(typedRatio) : yellow(typedRatio)}`);
+  out(`\n  ${bold('Typed answers')} ${dim('(every probe answers a real type — an `any` the twin also answers counts as one; hover.typed gates at full)')}`);
+  console.log(`    ${pad('typed hovers', 12)} ${anyCount === 0 ? green(typedRatio) : red(typedRatio)}${anyCount ? ` ${dim('— a hover with no twin to defer to fell to `any`: a degradation to fix, or a truly-`any` position to rule and pin')}` : ''}`);
 
   hp = {
     probed, gap: tally.gap, snapChanged: snapChanged.length, violations,
     silentLeaks: silentLeaks.length, ruledDiverging: ruledDiverging.length,
     stalePinKeys: staleHoverPinKeys, ruledPopulation: ruledRows.length,
+    untyped: anyCount,
   };
 }
 
@@ -4480,6 +4486,17 @@ if (RUN_TOKENS) {
       console.log(`      ${pad('state use', 10)} ${dim('expect writable')}  `
         + (stBad ? `${green(`${stateUses - stBad} ok`)}, ${red(`${stBad} bad`)}` : green(`${stateUses} ok`)));
     }
+    // The floor under the polarity table: the readonly invariant is judged
+    // per row, so a FORM vanishing from the corpus fails nothing — it
+    // silently shrinks what the invariant proves. Each named form must keep
+    // at least one asserted declaration; retiring a form from the language
+    // retires its name here.
+    const REQUIRED_FORMS = ['computed', 'effect', 'export', 'pinned', 'plain', 'state'];
+    const missingForms = REQUIRED_FORMS.filter((f) => !byForm.has(f));
+    if (missingForms.length) {
+      await abort('The Token Audit lost a readonly polarity form', missingForms.map((f) =>
+        `no ${f} declaration asserts readonly polarity — the corpus must keep at least one, or the invariant proves nothing for that form`));
+    }
     // The use-site population is derived from the corpus, so it can go to
     // zero without any invariant failing — and a zero population is an
     // invariant that proves nothing while reporting green. Loud, like
@@ -4597,12 +4614,16 @@ if (gr) {
   const claimsRead = n.claimsAbsent != null;
   const claimsRed = (n.claimsBroken ?? 0) + (n.cellsMissing ?? 0) + (n.claimsBadParks ?? 0);
   if (claimsRead && claimsRed) broken.push(`${s(claimsRed, 'claims row')} red`);
-  // Queues: yellow because work remains, never because anything is wrong.
+  // These four were queues until the corpus drained them; each gates at zero
+  // now, so a count here is a regression demanding its fixture or its ruling.
+  if (n.famZero) broken.push(`${s(n.famZero, 'family', 'families')} without negatives — author them in corpus/errors/`);
+  if (n.darkSpellings) broken.push(`${s(n.darkSpellings, 'spelling')} never written — write or exclude`);
+  if ((n.kindQueued ?? 0) - (n.kindHeld ?? 0) > 0) broken.push(`${s(n.kindQueued - n.kindHeld, 'type kind')} unclaimed — claim or exclude`);
+  if (claimsRead && n.claimsAbsent) broken.push(`${s(n.claimsAbsent, 'claims row')} uncarried — author or park`);
+  // Queues: yellow because work is BLOCKED on an open finding, never because
+  // anything is wrong — everything writable today gates above.
   const queues = [];
-  if (n.kindQueued) queues.push(`${s(n.kindQueued, 'type kind')} unclaimed${n.kindHeld === n.kindQueued ? ' (all held)' : n.kindHeld ? ` (${n.kindHeld} held)` : ''}`);
-  if (n.claimsAbsent) queues.push(`${n.claimsAbsent} claims ruled-uncarried`);
-  if (n.darkSpellings) queues.push(`${n.darkSpellings} of ${n.spellings} spellings never written`);
-  if (n.famZero) queues.push(`${s(n.famZero, 'family', 'families')} without negatives`);
+  if (n.kindHeld) queues.push(`${s(n.kindHeld, 'type kind')} held by open findings`);
   if (n.claimsParked) queues.push(`${s(n.claimsParked, 'claims row')} parked`);
   // The green text NAMES what it checked, so it can only ever claim ground
   // actually covered: each clause is pushed by the same condition that made
@@ -4619,6 +4640,9 @@ if (gr) {
   const held = ['exclusions'];
   if (n.headsTotal) held.push('containment constructs');
   if (n.vocabClaimed) held.push('vocabulary classes');
+  if (n.famZero != null) held.push('family negatives');
+  if (n.spellings) held.push('spellings');
+  if (n.kindDenom) held.push('census kinds');
   if (claimsRead) held.push('claims rows');
   // The divider rule prints no section of its own while it holds, so this
   // clause is the only place a reader learns it was measured at all.
@@ -4631,7 +4655,7 @@ if (gr) {
     // a deleted CLAIMS.md is the absence of something a reader has to
     // remember to miss.
     + (claimsRead ? '' : `${dim(' · ')}${yellow('claims: CLAIMS.md absent — not judged')}`)
-    + (queues.length ? `${dim(' · queues: ')}${yellow(queues.join(', '))}` : `${dim(' · ')}${green('no queue — nothing ruled and unbuilt')}`));
+    + (queues.length ? `${dim(' · queues: ')}${yellow(queues.join(', '))}` : `${dim(' · ')}${green('no queue — nothing blocked on a finding')}`));
 }
 // The Mapping Audit's flagged reads were a GAUGE while the mapping gap was
 // open. It is closed and the census gates at zero, so a flagged read is now a
