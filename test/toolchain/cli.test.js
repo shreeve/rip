@@ -101,14 +101,14 @@ describe('cli: compile surface', () => {
     const h = rip(['--help']);
     expect(h.status).toBe(0);
     expect(h.stdout).toContain('Usage:');
-    expect(h.stdout).toContain('rip app <verb>');
+    expect(h.stdout).toContain('rip sites <verb>');
     expect(h.stdout).toContain('rip edge <verb>');
   });
 
-  test('the app and edge appliance help is cwd-independent', () => {
-    const app = rip(['app', '--help']);
-    expect(app.status).toBe(0);
-    expect(app.stdout).toContain('rip app <command>');
+  test('the sites and edge appliance help is cwd-independent', () => {
+    const sites = rip(['sites', '--help']);
+    expect(sites.status).toBe(0);
+    expect(sites.stdout).toContain('rip sites <command>');
     const edge = rip(['edge', '--help']);
     expect(edge.status).toBe(0);
     expect(edge.stdout).toContain('rip edge <command>');

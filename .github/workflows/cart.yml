@@ -1,4 +1,4 @@
-# Live Cart certification is explicit because it boots Rip Server, Manager,
+# Live Cart certification is explicit because it boots Rip Site, Manager,
 # workers, a Janus-shaped edge, and Chromium. Pull requests use the deterministic
 # browser smoke matrix in test.yml; this workflow preserves the full-stack
 # contract without making that mutable process harness the edit loop.

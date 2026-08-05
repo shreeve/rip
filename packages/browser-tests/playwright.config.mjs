@@ -39,7 +39,7 @@ const smokeProjects = [
 ];
 
 const cartProjects = [{
-  // Cart publication apply is chromium-first: real Rip Server.
+  // Cart publication apply is chromium-first: real Rip Site.
   name: 'cart-chromium',
   testMatch: /cart-apply/,
   use: {

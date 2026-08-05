@@ -12,7 +12,7 @@ lives in `docs/`; git history and pull requests retain completed-work detail.
   `packages/browser-tests: bun run test:cart`.
 - Server architecture: `docs/SERVER.md`.
 - Browser publication contract: `docs/WORKSPACE.md`.
-- Detailed lifecycle: `packages/server/README.md`.
+- Detailed lifecycle: `packages/site/README.md`.
 - Testing cleanup plan: `TEST-DIET.md`.
 
 ## App publication contract
@@ -70,13 +70,13 @@ PR #210 true-merged the testing policy as `769bc2a`:
 - manual live Cart certification: `cart-certification` workflow;
 - package suites run at coherent layer milestones, not after every edit.
 
-`rip-app-publication` merged that mainline at `bd8f407`. The two isolated,
+`rip-sites-publication` merged that mainline at `bd8f407`. The two isolated,
 unsuccessful browser-harness experiments were removed by normal revert commits:
 
 - `e603ea2 Revert "Make Cart readiness nonblocking"`;
 - `e188acf Revert "Stabilize Cart harness readiness"`.
 
-Those experiments never modified Rip Server or Rip App production code.
+Those experiments never modified Rip Site or Rip App production code.
 
 Arbitrary top-level ESM side effects execute while a candidate module graph is
 evaluated and cannot be rolled back. Workspace, renderer, source, route

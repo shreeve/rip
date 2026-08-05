@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Launch the Rip Apps menu-bar tray via a per-user LaunchAgent.
-# Closing this shell (or Cursor) does not stop the tray, edge, or apps.
+# Launch the Rip Sites menu-bar tray via a per-user LaunchAgent.
+# Closing this shell (or Cursor) does not stop the tray, edge, or sites.
 #
-# Expected beside this script:
-#   rip, caddy, rip-tray-host
+# Expected:
+#   bin/rip, bin/rip-tray-host, packages/site/bin/caddy-janus
 # Provider (from the checkout): packages/tray/tray.rip
 set -euo pipefail
 
@@ -11,7 +11,7 @@ BIN="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$BIN/.." && pwd)"
 HOST="$BIN/rip-tray-host"
 RIP="$BIN/rip"
-CADDY="$BIN/caddy"
+CADDY="$ROOT/packages/site/bin/caddy-janus"
 PROVIDER="$ROOT/packages/tray/tray.rip"
 LABEL="io.ripdev.apps.tray"
 UID_NUM="$(/usr/bin/id -u)"

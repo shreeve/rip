@@ -45,7 +45,7 @@ bun run corpus-expected
 bun run audit
 ```
 
-`test:all` needs `xcaddy` on PATH for the `packages/server` janus lane:
+`test:all` needs `xcaddy` on PATH for the `packages/site` janus lane:
 
 ```sh
 go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest

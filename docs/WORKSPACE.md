@@ -228,7 +228,7 @@ optional optimizations without becoming publication authority.
 | application launch/render behavior from prepared state | Rip App core |
 | compilation implementation | shared compiler infrastructure |
 
-The ownership test is simple: Rip Server publishes applications; Caddy serves
+The ownership test is simple: Rip Site publishes applications; Caddy serves
 published files; Janus announces published changes; Rip App consumes published
 applications.
 

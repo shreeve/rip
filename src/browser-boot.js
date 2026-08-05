@@ -1,4 +1,4 @@
-// Browser publication consumer. Rip Server publishes {hash,list}; this layer
+// Browser publication consumer. Rip Site publishes {hash,list}; this layer
 // validates and compiles that complete Rip program, launches App from prepared
 // state, and optionally applies ordered watch changes. HTTP caching remains the
 // browser's job—boot does not keep its own ETag/body cache.

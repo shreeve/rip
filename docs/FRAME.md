@@ -70,7 +70,7 @@ Product promise:
 Rip v4 establishes `NodeStore`, `RoleStore`, `MappingStore`, and
 `CodeBuilder`. The app architecture separates stash, source, mutation,
 renderer, and routes. The server uses a Sinatra-style request-handler
-model (`@rip-lang/server`).
+model (`@rip-lang/site`).
 
 Rip does not yet define:
 

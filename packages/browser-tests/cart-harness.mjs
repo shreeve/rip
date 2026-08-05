@@ -1,4 +1,4 @@
-// Cart publication apply: real `rip server` on examples/cart behind a stub
+// Cart publication apply: real `rip site` on packages/site/demos/cart behind a stub
 // Janus edge. API requests proxy to API-only workers; registered roots serve
 // App/dist bytes; `/hub` fans out ordered Manager publication changes.
 import {
@@ -11,9 +11,9 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
-const cartSrc = join(root, 'examples/cart');
+const cartSrc = join(root, 'packages/site/demos/cart');
 const loaderPath = join(root, 'src/loader.js');
-const serverBin = join(root, 'packages/server/server.rip');
+const serverBin = join(root, 'packages/site/site.rip');
 const PORT = Number(process.env.CART_HARNESS_PORT || 4174);
 
 const fixtureRoot = mkdtempSync(join(tmpdir(), `rip-cart-harness-${process.pid}-`));
@@ -80,7 +80,7 @@ const stub = Bun.serve({
 });
 
 // Invoke the manager the same way the server suite does: bun + loader +
-// server.rip. `rip server` only resolves when cwd can see rip-server on
+// site.rip. `rip site` only resolves when cwd can see rip-site on
 // PATH (repo root / linked bins) — a /tmp cart copy cannot.
 const manager = Bun.spawn(
   [

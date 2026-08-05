@@ -1,0 +1,223 @@
+import { test, eq, ok } from '@rip-lang/testing'
+import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
+SERVER = join(import.meta.dir, '..', '..', 'site.rip')
+
+waitFor = (fn, timeout = 5000) ->
+  deadline = Date.now() + timeout
+  loop
+    value = fn!
+    return value if value
+    throw Error.new('reload test timed out') if Date.now() >= deadline
+    sleep! 10
+
+unixFetch = (path, socket) ->
+  options = { unix: socket }
+  fetch "http://worker#{path}", options
+
+test! 'App edits preserve workers and valid API candidates swap through the doorbell', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-reloads-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'project'), project, { recursive: true }
+  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
+  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'site'), 'dir'
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  updates = []
+  messages = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'reload-registration' }, { status: 201 })
+      if request.method is 'PUT' and url.pathname is '/1.0/apps/reload-registration/upstreams'
+        body = request.json!
+        updates.push body.upstreams
+        return Response.new(null, { status: 204 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/reload-registration/hub/publish'
+        messages.push ...(request.json!)
+        return Response.json({ deliveries: 0 })
+      Response.new(null, { status: 204 })
+  proc = null
+  diagnostic = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--workers', '1', '--host', 'reload.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'pipe'
+    diagnostic = Response.new(proc.stderr).text()
+    waitFor! -> registration?
+    first = registration.upstreams[0].path
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
+
+    writeFileSync join(project, 'app', 'routes', 'index.rip'), """
+    export Index = component
+      render
+        h1 'Reload two'
+    """
+    waitFor! -> messages.length > 0
+    eq updates.length, 0
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
+
+    writeFileSync join(project, 'index.rip'), 'this is not valid Rip @@@'
+    sleep! 300
+    eq updates.length, 0
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
+
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from '@rip-lang/site'
+    sleep! 1000
+    get '/version' -> { version: 'two' }
+    start!
+    """
+    doorbell = waitFor! -> updates.find((list) -> list.length is 1 and list[0].doorbell is true)
+    ring = unixFetch '/ring', doorbell[0].path
+    sleep! 50
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from '@rip-lang/site'
+    get '/version' -> { version: 'three' }
+    start!
+    """
+    fresh = waitFor! -> updates.find((list) -> list.length is 1 and not list[0].doorbell and list[0].path isnt first)
+    eq (await ring).status, 204
+    eq ((unixFetch!('/version', fresh[0].path)).json!), { version: 'three' }
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+    output = await diagnostic
+    ok output.includes 'API candidate rejected; keeping current workers'
+    ok output.includes 'this is not valid Rip @@@'
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    await diagnostic if diagnostic?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'App-only watch publishes Hub changes without API upstream swaps', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-reloads-app-only-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'project'), project, { recursive: true }
+  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
+  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'site'), 'dir'
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  updates = []
+  messages = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'app-only-registration' }, { status: 201 })
+      if request.method is 'PUT' and url.pathname is '/1.0/apps/app-only-registration/upstreams'
+        updates.push request.json!.upstreams
+        return Response.new(null, { status: 204 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/app-only-registration/hub/publish'
+        messages.push ...(request.json!)
+        return Response.json({ deliveries: 0 })
+      Response.new(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch-app', '--no-watch-api', '--workers', '1', '--host', 'app-only.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    waitFor! -> registration?
+    first = registration.upstreams[0].path
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
+
+    writeFileSync join(project, 'app', 'routes', 'index.rip'), """
+    export Index = component
+      render
+        h1 'App only'
+    """
+    waitFor! -> messages.some (message) -> message.change?
+    eq updates.length, 0
+
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from '@rip-lang/site'
+    get '/version' -> { version: 'two' }
+    start!
+    """
+    sleep! 300
+    eq updates.length, 0
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'API-only watch swaps workers without App Hub publication', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-reloads-api-only-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'project'), project, { recursive: true }
+  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
+  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'site'), 'dir'
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  updates = []
+  messages = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'api-only-registration' }, { status: 201 })
+      if request.method is 'PUT' and url.pathname is '/1.0/apps/api-only-registration/upstreams'
+        updates.push request.json!.upstreams
+        return Response.new(null, { status: 204 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/api-only-registration/hub/publish'
+        messages.push ...(request.json!)
+        return Response.json({ deliveries: 0 })
+      Response.new(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch-api', '--no-watch-app', '--workers', '1', '--host', 'api-only.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    waitFor! -> registration?
+    first = registration.upstreams[0].path
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
+
+    writeFileSync join(project, 'app', 'routes', 'index.rip'), """
+    export Index = component
+      render
+        h1 'API only'
+    """
+    sleep! 300
+    eq messages.length, 0
+    eq updates.length, 0
+
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from '@rip-lang/site'
+    sleep! 1000
+    get '/version' -> { version: 'two' }
+    start!
+    """
+    doorbell = waitFor! -> updates.find((list) -> list.length is 1 and list[0].doorbell is true)
+    ring = unixFetch '/ring', doorbell[0].path
+    fresh = waitFor! -> updates.find((list) -> list.length is 1 and not list[0].doorbell and list[0].path isnt first)
+    eq (await ring).status, 204
+    eq ((unixFetch!('/version', fresh[0].path)).json!), { version: 'two' }
+    eq messages.length, 0
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }

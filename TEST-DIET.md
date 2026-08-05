@@ -215,7 +215,7 @@ shown to detect its claimed failure needs redesign.
 
 1. `packages/browser-tests`: separate browser-runtime smoke from the live Cart
    Server/Manager exemplar; make harness failures diagnostic and deterministic.
-2. `packages/server`: separate pure publication/registration contracts from
+2. `packages/site`: separate pure publication/registration contracts from
    live Janus and process lifecycle certification.
 3. `packages/app`: consolidate repeated Workspace/apply scenarios around the
    transactional invariants they share.

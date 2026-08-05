@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createModuleLoader } from '../../src/browser-modules.js';
-import { assembleBundle, assembleRipBundle } from '../../packages/server/bundle.rip';
+import { assembleBundle, assembleRipBundle } from '../../packages/site/bundle.rip';
 // The store comes from its own module, not the package entry: the
 // entry evaluates renderer.rip, which claims the process's one
 // render-gate construction capability — and that claim belongs to the
@@ -224,7 +224,7 @@ describe('assembleBundle', () => {
         writeFileSync(join(dir, name, 'index.rip'), 'export ok = 1');
       }
       expect(() => assembleBundle({
-        modules: { 'routes/index.rip': "import { x } from '@rip-lang/serveronly'" },
+        modules: { 'routes/index.rip': "import { x } from '@rip-lang/siteonly'" },
         packagesDir: dir,
       })).toThrow(/'@rip-lang\/serveronly', which does not declare browser safety/);
     } finally {

@@ -7,7 +7,7 @@ support.
 Permanent documentation:
 
 - [README.md](README.md) — repository orientation and entry points.
-- [docs/SERVER.md](docs/SERVER.md) — Rip Server's system-wide
+- [docs/SERVER.md](docs/SERVER.md) — Rip Site's system-wide
  Caddy/Janus/manager/worker architecture and lifecycle contract.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
 - [docs/WORKSPACE.md](docs/WORKSPACE.md) — the Rip Workspace
@@ -280,7 +280,7 @@ alters surface syntax updates ALL THREE in the same change.
   or choose the nearest idiomatic alternative; never paper over with
   curly-brace JS style. Read nearby `.rip` for the local dialect
   before writing new code.
-- **Workspace vocabulary (publication / apply):** Rip Server publishes
+- **Workspace vocabulary (publication / apply):** Rip Site publishes
   applications. `bundle.json` is `{ hash, list }`; `list` is the complete
   canonical `[modulePath, source]` Rip program. Individual file hashes remain
   private to Manager. Watch-mode Hub messages carry one
@@ -402,7 +402,7 @@ the affected final gates again.
  browsers. CI runs its deterministic Chromium/Firefox/WebKit smoke
  matrix as a required job; the live Cart Server/Manager certification
  is explicit through `bun run test:cart` in that package and the manual
- `cart-certification` workflow. `packages/server` needs
+ `cart-certification` workflow. `packages/site` needs
  `xcaddy` on PATH — `go install
  github.com/caddyserver/xcaddy/cmd/xcaddy@latest`, PLUS
  `$(go env GOPATH)/bin` on PATH, which it is not by default: without
@@ -412,7 +412,7 @@ the affected final gates again.
  `JANUS_CADDY=<path>` supplies a janus-enabled binary instead.
  Without either, the lane is fail-fast at `janus` and the six
  directories sorted after it do not run.
-- `bun run test` FROM a package (`packages/vscode`, `packages/server`,
+- `bun run test` FROM a package (`packages/vscode`, `packages/site`,
  `packages/app`, …) — that package's own suite, and the inner loop
  for work on that package; the root fast loop excludes `packages/**`
  by bunfig, and `test:all` reaches these only by spawning them there
@@ -444,7 +444,7 @@ the affected final gates again.
  loudly if any `@rip-lang/*` name resolves outside this repo (e.g.
  shadowed by a sibling checkout's global links).
 - `rip` on a TTY (or `rip -r`) — the interactive REPL; `rip -e <code>`
- evaluates one entry; `rip schema`/`rip server`/`rip test` dispatch
+ evaluates one entry; `rip schema`/`rip site`/`rip test` dispatch
  their surfaces (`--help` on each).
 
 ## When Blocked
