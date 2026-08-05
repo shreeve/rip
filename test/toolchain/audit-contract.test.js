@@ -27,11 +27,11 @@ const withRed = (name, why) => withoutReds().map((c) => (c.name === name ? { ...
 // shape the predicates touch. Built fresh per test: a shared object mutated by
 // one case would leak into the next.
 const cleanStates = () => ({
-  gr: { unparsed: 0, uncovered: 0, badExclusions: 0, negatives: { kindBad: 0, vocabUnfalsified: 0, claimsAbsent: 0, claimsBroken: 0, cellsMissing: 0, staleMints: 0, headsUnseen: 0, badSpellingExclusions: 0, claimsBadParks: 0, splitDividers: 0 } },
+  gr: { unparsed: 0, uncovered: 0, badExclusions: 0, negatives: { kindBad: 0, vocabUnfalsified: 0, famZero: 0, darkSpellings: 0, kindQueued: 0, kindHeld: 0, claimsAbsent: 0, claimsBroken: 0, cellsMissing: 0, staleMints: 0, headsUnseen: 0, badSpellingExclusions: 0, claimsBadParks: 0, splitDividers: 0 } },
   mp: { missing: 0, drifted: 0, census: 0, decompositionDrift: 0, badExclusions: 0 },
   fails: 0,
   el: { problems: [] },
-  hp: { gap: 0, snapChanged: 0, violations: [], silentLeaks: 0, ruledDiverging: 0, stalePinKeys: [], ruledPopulation: 1 },
+  hp: { gap: 0, snapChanged: 0, violations: [], silentLeaks: 0, ruledDiverging: 0, stalePinKeys: [], ruledPopulation: 1, untyped: 0 },
   tk: { missing: [], badType: [], badReadonly: [], survDrops: [], survUnclassified: 0, unexplained: [], exclusionDrift: [], facesAvailable: true },
 });
 const allRan = () => true;
@@ -83,7 +83,7 @@ describe('the audit contract judges in both directions', () => {
     const { verdicts, failures, drift } = judge({ states, ran: allRan, table: withoutReds() });
     expect(failures).toEqual([]);
     expect(drift.size).toBe(0);
-    for (const name of ['claims.carriers', 'claims.parks']) {
+    for (const name of ['claims.carriers', 'claims.parks', 'claims.carriage']) {
       expect(verdicts.find((v) => v.name === name).state).toBe('skipped');
     }
   });
@@ -126,9 +126,13 @@ describe('the audit contract judges in both directions', () => {
       'lexer.exclusions': (s) => { s.gr.negatives.badSpellingExclusions = 1; },
       'containment.heads': (s) => { s.gr.negatives.headsUnseen = 1; },
       'grammar.census': (s) => { s.gr.negatives.kindBad = 1; },
+      'grammar.census.claimed': (s) => { s.gr.negatives.kindQueued = 1; },
       'negatives.falsifiability': (s) => { s.gr.negatives.vocabUnfalsified = 1; },
+      'negatives.families': (s) => { s.gr.negatives.famZero = 1; },
+      'lexer.written': (s) => { s.gr.negatives.darkSpellings = 1; },
       'claims.carriers': (s) => { s.gr.negatives.claimsBroken = 1; },
       'claims.parks': (s) => { s.gr.negatives.claimsBadParks = 1; },
+      'claims.carriage': (s) => { s.gr.negatives.claimsAbsent = 1; },
       'corpus.dividers': (s) => { s.gr.negatives.splitDividers = 1; },
       'mapping.identity': (s) => { s.mp.drifted = 1; },
       'mapping.spans': (s) => { s.mp.missing = 1; },
@@ -141,6 +145,7 @@ describe('the audit contract judges in both directions', () => {
       'diagnostics.positions.element': (s) => { s.el.problems = [{ kind: 'position', file: '11-types.errors.rip' }]; },
       'diagnostics.positions.arity': (s) => { s.el.problems = [{ kind: 'position', file: '02-operations.errors.rip' }]; },
       'hover.parity': (s) => { s.hp.gap = 1; },
+      'hover.typed': (s) => { s.hp.untyped = 1; },
       'hover.silence': (s) => { s.hp.silentLeaks = 1; },
       'hover.ruled': (s) => { s.hp.ruledDiverging = 1; },
       'hover.pins': (s) => { s.hp.stalePinKeys = ['gone.rip']; },

@@ -1,14 +1,17 @@
 // THE CONTRACT — which of the audit's own findings GATE, and which are red by
 // agreement.
 //
-// The audit is a scoreboard, and most of what it prints is a GAUGE: a queue
-// whose non-zero size is work remaining, not a regression. Unclaimed census
-// kinds, ruled-uncarried claims rows, the dark-spelling queue — every one of
-// those is expected non-zero today and says so in its own line. None of them
-// appear below, and that is the point: a gauge that gated would fail forever.
+// The audit is a scoreboard, and part of what it prints is a GAUGE: a number
+// whose size is work remaining or texture, not a regression. The per-family
+// negative fractions, the containment pair count, the header-length number,
+// kinds held by open findings, claims rows parked on them — each is expected
+// non-zero or unbounded and says so in its own line. None of them appear
+// below, and that is the point: a gauge that gated would fail forever.
 // A gauge whose queue DRAINS graduates: grammar coverage, the mapping census,
 // and the token use-site clause each gated at zero the day their queue hit
-// the bottom, because from that day a nonzero count is a regression.
+// the bottom, and the family-negative, dark-spelling, census-kind,
+// claims-carriage, and typed-hover queues followed when the corpus drained
+// them, because from that day a nonzero count is a regression.
 //
 // What DOES gate is an INVARIANT: a property that holds, or else something
 // broke. Each row below names one, states it as the property (never as its
@@ -101,6 +104,17 @@ export const CONTRACT = [
     red: (s) => s.gr.negatives.claimsBadParks > 0,
   },
   {
+    // Graduated when the last ruled row got its carrier. Defect-blocked
+    // rows are parked (and parks are policed above), so an uncarried,
+    // unparked row is a ruling that landed without its fixture — or an
+    // edit that evaporated a carrier the carriers row cannot see because
+    // the registry text already says ABSENT.
+    name: 'claims.carriage', lane: 'grammar',
+    property: 'every ruled CLAIMS.md behavior row is carried by a fixture or parked on an open finding',
+    skip: (s) => s.gr.negatives?.claimsAbsent == null,
+    red: (s) => s.gr.negatives.claimsAbsent > 0,
+  },
+  {
     // The corpus's one comment rule, and the only half of it that is exactly
     // checkable: a `── … ──` divider opens and closes on the same line. No
     // threshold, no heuristic, and the fix is always joining the lines —
@@ -116,9 +130,39 @@ export const CONTRACT = [
     red: (s) => s.gr.negatives.kindBad > 0,
   },
   {
+    // Graduated when the census queue drained. Kinds a finding blocks sit
+    // in the hold table and stay a yellow queue — hold rot reds under
+    // grammar.census — so what gates here is the writable remainder: a kind
+    // nobody claimed, excluded, or parked behind a defect. The universe is
+    // the pinned tsgo's own type grammar, so a pin bump that widens it
+    // paints this row until each new kind is claimed or ruled.
+    name: 'grammar.census.claimed', lane: 'grammar',
+    property: 'every kind in the census universe is claimed by the corpus, excluded by ruling, or held by an open finding',
+    red: (s) => (s.gr.negatives.kindQueued - s.gr.negatives.kindHeld) > 0,
+  },
+  {
     name: 'negatives.falsifiability', lane: 'grammar',
     property: 'every type-vocabulary class the positives claim carries at least one error-lane instance',
     red: (s) => s.gr.negatives.vocabUnfalsified > 0,
+  },
+  {
+    // Graduated the day the error lane drained the family queue. From that
+    // day a family with no negative — one that lost its last, or a NEW
+    // family arriving behind a fresh production's positive fixture — is a
+    // regression demanding its error pair. The per-family FRACTION stays a
+    // gauge: a negative proves one rejection and has no target count.
+    name: 'negatives.families', lane: 'grammar',
+    property: 'every construct family the positive corpus exercises appears in at least one error-lane fixture',
+    red: (s) => s.gr.negatives.famZero > 0,
+  },
+  {
+    // Graduated when the corpus wrote the last dark spelling. The alias
+    // table is read live from the lexer, so a NEW rewrite arrives already
+    // counted — and reds here until a fixture writes it or a ruling
+    // excludes it as redundant.
+    name: 'lexer.written', lane: 'grammar',
+    property: 'every spelling the lexer rewrites is written by the corpus or excluded by ruling',
+    red: (s) => s.gr.negatives.darkSpellings > 0,
   },
   {
     name: 'claims.carriers', lane: 'grammar',
@@ -232,6 +276,17 @@ export const CONTRACT = [
     name: 'hover.pins', lane: 'hover',
     property: 'every hover-pins.json key names a live corpus fixture',
     red: (s) => s.hp.stalePinKeys.length > 0,
+  },
+  {
+    // Graduated at full. Twin-covered positions are watched by parity and
+    // rip-native initialized bindings by the `any` invariant; this row
+    // holds the remainder — a twin-less probe has no oracle to disagree
+    // with, so its falling to `any` reds here or nowhere. The cost is a
+    // constraint on the corpus: a twin-less binding honestly annotated
+    // `any` cannot enter without a ruling that re-shapes this row.
+    name: 'hover.typed', lane: 'hover',
+    property: 'every hover probe answers a real type — an `any` counts as typed only when the twin answers it too',
+    red: (s) => s.hp.untyped > 0,
   },
   {
     name: 'hover.ruled.population', lane: 'hover',
