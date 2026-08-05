@@ -3,7 +3,7 @@ export default
   hosts: ['hello.ripdev.io'] # the edge owns standard HTTPS on port 443
   app:
     root: 'app'             # default
-    manifest:               # default
+    changes:                # default
       update: ['**/*.rip']  # default
       css: ['**/*.css']     # default
-      reload: ['**/*.html'] # default
+      reload: ['**/*']      # default for every other App file

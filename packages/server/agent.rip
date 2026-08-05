@@ -2,6 +2,7 @@ import { closeSync, existsSync, fsyncSync, openSync, readFileSync, realpathSync,
 import { spawn } from 'node:child_process'
 import { basename, join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { platform } from 'node:os'
 import { agentPaths, loaderArg, secureDirectory } from './appliance.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
 
@@ -9,6 +10,9 @@ throw Error.new('@rip-lang/server/agent is private process machinery') unless im
 
 paths = agentPaths 'rip-agent'
 secureDirectory paths.appLogs, 'rip-agent'
+PACKAGED_CADDYFILE = realpathSync join(import.meta.dir, 'Caddyfile')
+
+usesLaunchd = (config) -> platform() is 'darwin' and config is PACKAGED_CADDYFILE
 
 fail = (message, status = 400) ->
   error = Error.new message
@@ -70,17 +74,19 @@ loadState = ->
 
 state = loadState()
 
-saveState = ->
-  temporary = "#{paths.state}.tmp-#{process.pid}"
+writeSecure = (path, text) ->
+  temporary = "#{path}.tmp-#{process.pid}"
   fd = openSync temporary, 'w', 0o600
   try
-    writeFileSync fd, JSON.stringify(state, null, 2) + '\n'
+    writeFileSync fd, text
     fsyncSync fd
   finally
     closeSync fd
-  renameSync temporary, paths.state
+  renameSync temporary, path
   directory = openSync paths.stateRoot, 'r'
   try fsyncSync(directory) finally closeSync(directory)
+
+saveState = -> writeSecure paths.state, JSON.stringify(state, null, 2) + '\n'
 
 tail = (path, lines = 100) ->
   return '' unless existsSync path
@@ -294,18 +300,32 @@ removeApp = (app) ->
   saveState()
   { removed: app.id, name: app.name, root: app.root }
 
+readEdgePid = ->
+  return null unless existsSync paths.edgePid
+  try
+    value = parseInt readFileSync(paths.edgePid, 'utf8')
+    if Number.isInteger(value) and value > 0 then value else null
+  catch then null
+
+readEdgeExit = ->
+  return null unless existsSync paths.edgeExit
+  try return JSON.parse(readFileSync(paths.edgeExit, 'utf8')) catch then return null
+
 snapshotEdge = ->
   health = edgeHealth!
-  managed = state.edge.managed and processAlive(state.edge.pid)
+  pid = readEdgePid! or state.edge.pid
+  managed = state.edge.managed and processAlive(pid)
+  launcher = if managed and state.edge.config? then (if usesLaunchd(state.edge.config) then 'launchd' else 'direct') else null
   {
     state: if health? then 'running' else 'stopped'
     desired: state.edge.desired
     managed: managed
-    pid: if managed then state.edge.pid else null
+    pid: if managed then pid else null
     caddy: state.edge.caddy
     config: state.edge.config
     control: state.edge.control
     baseUrl: state.edge.baseUrl
+    launcher: launcher
     janus: health
     lastError: state.edge.lastError
   }
@@ -319,6 +339,65 @@ resolveFile = (value, description) ->
   path
 
 edgeAddress = (path) -> "unix/#{path}"
+
+LAUNCHD_LABEL = 'io.ripdev.edge'
+LAUNCHD_DOMAIN = if typeof process.getuid is 'function' then "gui/#{process.getuid!}" else null
+LAUNCHD_SERVICE = if LAUNCHD_DOMAIN? then "#{LAUNCHD_DOMAIN}/#{LAUNCHD_LABEL}" else null
+
+xml = (value) -> String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+xmlEntry = (key, value) -> "<key>#{xml key}</key><string>#{xml value}</string>"
+
+launchdPlist = (caddy, config, control) ->
+  launcher = resolveFile join(import.meta.dir, 'launchd-listener.js'), 'launchd edge listener'
+  argv = [process.execPath, launcher, caddy, config, paths.edgePid, paths.edgeExit]
+  environment =
+    HOME: process.env.HOME
+    PATH: '/usr/bin:/bin:/usr/sbin:/sbin'
+    TMPDIR: process.env.TMPDIR
+    RIP_EDGE_ADMIN: paths.edgeAdmin
+    RIP_EDGE_BIND: 'fd/3'
+    RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt')
+    RIP_EDGE_CONTROL: control
+    RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key')
+  argumentXml = argv.map((value) -> "<string>#{xml value}</string>").join('')
+  environmentXml = Object.keys(environment).sort().filter((key) -> environment[key]?).map((key) -> xmlEntry(key, environment[key])).join('')
+  """<?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0"><dict>
+      <key>Label</key><string>#{LAUNCHD_LABEL}</string>
+      <key>ProgramArguments</key><array>#{argumentXml}</array>
+      <key>EnvironmentVariables</key><dict>#{environmentXml}</dict>
+      <key>WorkingDirectory</key><string>#{xml paths.stateRoot}</string>
+      <key>RunAtLoad</key><true/>
+      <key>ProcessType</key><string>Background</string>
+      <key>Umask</key><integer>63</integer>
+      <key>StandardOutPath</key><string>#{xml paths.edgeLog}</string>
+      <key>StandardErrorPath</key><string>#{xml paths.edgeLog}</string>
+      <key>Sockets</key><dict>
+        <key>HTTPS</key><dict>
+          <key>SockFamily</key><string>IPv4</string>
+          <key>SockNodeName</key><string>127.0.0.1</string>
+          <key>SockServiceName</key><integer>443</integer>
+          <key>SockType</key><string>stream</string>
+        </dict>
+      </dict>
+    </dict></plist>
+    """
+
+launchctl = (args, missing = false) ->
+  result = Bun.spawnSync ['/bin/launchctl', ...args], { stdout: 'pipe', stderr: 'pipe' }
+  return true if result.exitCode is 0
+  detail = result.stderr.toString().trim() or result.stdout.toString().trim()
+  return false if missing and (detail.includes('Could not find service') or detail.includes('No such process') or detail.includes('service not found'))
+  fail "launchctl #{args[0]} failed#{if detail then ": #{detail}" else ''}", 503
+
+bootoutLaunchd = (missing = false) -> launchctl ['bootout', LAUNCHD_SERVICE], missing
+
+startLaunchd = (caddy, config, control) ->
+  fail 'launchd user domain is unavailable', 503 unless LAUNCHD_SERVICE?
+  bootoutLaunchd true
+  writeSecure paths.edgePlist, launchdPlist(caddy, config, control)
+  launchctl ['bootstrap', LAUNCHD_DOMAIN, paths.edgePlist]
 
 edgeStarting = null
 edgeRestartCount = 0
@@ -342,39 +421,48 @@ startEdge = (body = {}, automatic = false) ->
     fail "Caddy binary does not contain Janus: #{caddy}", 503 unless modules.exitCode is 0 and moduleText.split('\n').includes('janus')
     control = body.control or paths.edgeControl
     baseUrl = body.baseUrl or state.edge.baseUrl or 'https://{host}/'
+    launcher = if usesLaunchd(config) then 'launchd' else 'direct'
+    environment = { ...process.env, RIP_EDGE_ADMIN: paths.edgeAdmin, RIP_EDGE_BIND: (if launcher is 'launchd' then 'fd/3' else '127.0.0.1'), RIP_EDGE_CONTROL: control, RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt'), RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key') }
     # These paths belong exclusively to a Rip-owned edge. An unclean exit can
     # leave the filesystem entries behind after no listener remains.
     try unlinkSync paths.edgeAdmin
     try unlinkSync paths.edgePid
+    try unlinkSync paths.edgeExit
     try unlinkSync control if control is paths.edgeControl
     log = openSync paths.edgeLog, 'a', 0o600
     child = null
     try
-      child = spawn caddy, ['run', '--config', config, '--adapter', 'caddyfile', '--pidfile', paths.edgePid],
-        cwd: paths.stateRoot
-        detached: true
-        stdio: ['ignore', log, log]
-        env: { ...process.env, RIP_EDGE_ADMIN: paths.edgeAdmin, RIP_EDGE_CONTROL: control, RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt'), RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key') }
+      if launcher is 'launchd'
+        startLaunchd caddy, config, control
+      else
+        child = spawn caddy, ['run', '--config', config, '--adapter', 'caddyfile', '--pidfile', paths.edgePid],
+          cwd: paths.stateRoot
+          detached: true
+          stdio: ['ignore', log, log]
+          env: environment
     finally
       closeSync log
-    state.edge = { ...state.edge, desired: 'running', managed: true, pid: child.pid, caddy, config, control, admin: paths.edgeAdmin, baseUrl, lastError: null }
+    state.edge = { ...state.edge, desired: 'running', managed: true, pid: child?.pid or null, caddy, config, control, admin: paths.edgeAdmin, baseUrl, lastError: null }
     saveState()
     deadline = Date.now() + 10000
     loop
       health = edgeHealth!
       if health?
-        caddyPid = parseInt readFileSync(paths.edgePid, 'utf8')
-        fail 'Caddy wrote an invalid pidfile', 503 unless Number.isInteger(caddyPid) and caddyPid > 0
+        caddyPid = readEdgePid!
+        fail 'Caddy wrote an invalid pidfile', 503 unless caddyPid?
         state.edge.pid = caddyPid
         saveState()
         edgeRestartCount = 0
         edgeRestartAt = 0
         return snapshotEdge!
-      break if child.exitCode? or Date.now() >= deadline
+      break if child?.exitCode? or existsSync(paths.edgeExit) or Date.now() >= deadline
       sleep! 25
     diagnostic = tail(paths.edgeLog, 30).trim()
-    message = if child.exitCode? then "Caddy exited #{child.exitCode}" else 'Caddy readiness deadline expired'
+    outcome = readEdgeExit!
+    code = child?.exitCode ?? outcome?.code
+    message = if code? then "Caddy exited #{code}" else 'Caddy readiness deadline expired'
     message += ":\n#{diagnostic}" if diagnostic
+    bootoutLaunchd true if launcher is 'launchd'
     state.edge = { ...state.edge, desired: (if automatic then 'running' else 'stopped'), managed: false, pid: null, lastError: message }
     saveState()
     fail message, 503
@@ -386,7 +474,10 @@ startEdge = (body = {}, automatic = false) ->
 
 stopEdge = ->
   fail 'edge is not owned by Rip; stop the external Caddy service with its own supervisor', 409 unless state.edge.managed
-  unless edgeHealth! or processAlive(state.edge.pid)
+  pid = readEdgePid! or state.edge.pid
+  launcher = if usesLaunchd(state.edge.config) then 'launchd' else 'direct'
+  unless edgeHealth! or processAlive(pid)
+    bootoutLaunchd true if launcher is 'launchd'
     state.edge = { ...state.edge, desired: 'stopped', managed: false, pid: null, lastError: null }
     saveState()
     return snapshotEdge!
@@ -394,15 +485,18 @@ stopEdge = ->
   for app in state.apps
     running.push app if managerStatus!(app)?
   fail "stop #{running.map((app) -> app.name).join(', ')} before stopping the edge", 409 if running.length
-  result = Bun.spawnSync [state.edge.caddy, 'stop', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, RIP_EDGE_ADMIN: state.edge.admin, RIP_EDGE_CONTROL: state.edge.control, RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt'), RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key') } }
+  bind = if launcher is 'launchd' then 'fd/3' else '127.0.0.1'
+  result = Bun.spawnSync [state.edge.caddy, 'stop', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, RIP_EDGE_ADMIN: state.edge.admin, RIP_EDGE_BIND: bind, RIP_EDGE_CONTROL: state.edge.control, RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt'), RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key') } }
   fail "Caddy stop failed: #{result.stderr.toString().trim()}", 503 unless result.exitCode is 0
+  bootoutLaunchd true if launcher is 'launchd'
   state.edge = { ...state.edge, desired: 'stopped', managed: false, pid: null, lastError: null }
   saveState()
   snapshotEdge!
 
 reloadEdge = ->
   fail 'edge is not owned by Rip; reload the external Caddy service with its own supervisor', 409 unless state.edge.managed
-  result = Bun.spawnSync [state.edge.caddy, 'reload', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, RIP_EDGE_ADMIN: state.edge.admin, RIP_EDGE_CONTROL: state.edge.control, RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt'), RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key') } }
+  bind = if usesLaunchd(state.edge.config) then 'fd/3' else '127.0.0.1'
+  result = Bun.spawnSync [state.edge.caddy, 'reload', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, RIP_EDGE_ADMIN: state.edge.admin, RIP_EDGE_BIND: bind, RIP_EDGE_CONTROL: state.edge.control, RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt'), RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key') } }
   fail "Caddy reload failed: #{result.stderr.toString().trim()}", 503 unless result.exitCode is 0
   snapshotEdge!
 

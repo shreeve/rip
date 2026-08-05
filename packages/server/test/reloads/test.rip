@@ -27,7 +27,7 @@ test! 'App edits preserve workers and valid API candidates swap through the door
   controlSocket = join dir, 'janus.sock'
   registration = null
   updates = []
-  dings = []
+  messages = []
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
@@ -40,7 +40,7 @@ test! 'App edits preserve workers and valid API candidates swap through the door
         updates.push body.upstreams
         return Response.new(null, { status: 204 })
       if request.method is 'POST' and url.pathname is '/1.0/apps/reload-registration/hub/publish'
-        dings.push ...(request.json!)
+        messages.push ...(request.json!)
         return Response.json({ deliveries: 0 })
       Response.new(null, { status: 204 })
   proc = null
@@ -60,7 +60,7 @@ test! 'App edits preserve workers and valid API candidates swap through the door
       render
         h1 'Reload two'
     """
-    waitFor! -> dings.length > 0
+    waitFor! -> messages.length > 0
     eq updates.length, 0
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }
 

@@ -1,26 +1,25 @@
 # ==============================================================================
-# Apply — discardable hot-absorb policy for Workspace bag mutations
+# Apply — discardable hot-absorb policy for Workspace module commits
 #
-# Door mutates passports; apply chooses a verdict:
+# Browser delivery commits prepared state; apply chooses a verdict:
 #   reload | css | update | ignore
 #
-# Soft paths (css / html reload) are adopted in the door; absorb reports
+# CSS refresh and document reload happen in browser delivery; absorb reports
 # their verdicts when asked and runs Rip updates through the renderer.
 # `update` is the product verb — narrow remount vs whole-launch remount
 # is an implementation detail underneath.
 #
-# Delete this module if door and apply fuse — Q10.
 # ==============================================================================
 
 export type ApplyVerdict = 'reload' | 'css' | 'update' | 'ignore'
 
 export type Apply =
-  absorb: (paths: string[]) => Promise<ApplyVerdict>
+  absorb: (paths: string[], candidate?: Record<string, any>) => Promise<ApplyVerdict>
 
 export type ApplyOpts =
   # Renderer seam still speaks narrow/escape/noop; absorb maps to update/ignore.
-  renderer: { remountDirty: (paths: string[]) => Promise<'narrow' | 'noop' | 'escape'> }
-  escape: (paths: string[]) => Promise<void>
+  renderer: { remountDirty: (paths: string[], candidate?: Record<string, any>) => Promise<'narrow' | 'noop' | 'escape' | 'reload'> }
+  escape: (paths: string[], candidate?: Record<string, any>) => Promise<void | 'reload'>
   report?: (...args: any[]) => void
 
 export def createApply(opts: ApplyOpts): Apply
@@ -32,33 +31,36 @@ export def createApply(opts: ApplyOpts): Apply
     throw TypeError.new 'Rip App: createApply requires an escape remount'
   report = opts.report ?? (...args) -> console.log ...args
 
-  absorb = (paths) ->
+  absorb = (paths, candidate = null) ->
     unless Array.isArray(paths) and paths.length > 0
       return 'ignore'
     css = (p for p in paths when typeof p is 'string' and p.endsWith '.css')
-    html = (p for p in paths when typeof p is 'string' and p.endsWith '.html')
     rip = (p for p in paths when typeof p is 'string' and p.endsWith '.rip')
+    ordinary = (p for p in paths when typeof p is 'string' and not p.endsWith('.rip') and not p.endsWith('.css'))
 
-    # Soft paths: door already adopted; absorb only names the verdict.
-    # *.css is always css — never reload.
+    # *.css is always css; every other ordinary managed asset reloads.
     if rip.length is 0
-      return 'css' if css.length > 0 and html.length is 0
-      return 'reload' if html.length > 0
+      return 'reload' if ordinary.length > 0
+      return 'css' if css.length > 0
       return 'ignore'
 
     verdict = 'escape'
     try
-      verdict = opts.renderer.remountDirty! rip
+      verdict = opts.renderer.remountDirty! rip, candidate
     catch error
-      report '[Rip] update failed — falling back to full in-page remount', error
-      verdict = 'escape'
+      report '[Rip] update failed', error
+      throw error
 
     if verdict is 'narrow'
       report "[Rip] applied #{rip.join ', '} — update"
       return 'update'
+    if verdict is 'reload'
+      report "[Rip] applied #{rip.join ', '} — reload"
+      return 'reload'
     return 'ignore' if verdict is 'noop'
 
-    opts.escape! rip
+    escapeVerdict = opts.escape! rip, candidate
+    return 'reload' if escapeVerdict is 'reload'
     report "[Rip] applied #{rip.join ', '} — update"
     'update'
 

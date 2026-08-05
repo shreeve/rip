@@ -10,6 +10,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describeExtended } from '../support/extended.js';
+import { compile } from '../../src/compile.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const artifactPath = resolve(root, 'dist/browser/rip.js');
@@ -36,15 +37,21 @@ const transpiler = new Bun.Transpiler({ loader: 'js' });
 const walkGraph = () => {
   const seen = new Set();
   const externals = new Set();
-  const queue = ['src/browser.js'];
+  const queue = [resolve(root, 'src/browser.js')];
   while (queue.length) {
-    const file = queue.pop();
+    const absolute = queue.pop();
+    const file = absolute.slice(root.length + 1);
     if (seen.has(file)) continue;
     seen.add(file);
-    const source = readFileSync(resolve(root, file), 'utf8');
+    let source = readFileSync(absolute, 'utf8');
+    if (file.endsWith('.rip')) {
+      source = compile(source, { path: absolute, runtimeDelivery: 'import' }).code;
+    }
     for (const { path } of transpiler.scanImports(source)) {
-      if (path.startsWith('.')) {
-        queue.push(resolve('/', dirname(file), path).slice(1));
+      if (path.startsWith('.') || path.startsWith('/')) {
+        const target = path.startsWith('/') ? path : resolve(dirname(absolute), path);
+        if (target.startsWith(`${root}/`)) queue.push(target);
+        else externals.add(path);
       } else {
         externals.add(path.replace(/^node:/, ''));
       }
@@ -60,6 +67,7 @@ describe('browser entry graph', () => {
       expect(seen.has(file)).toBeFalse();
     }
     expect(seen.has('src/compile.js')).toBeTrue();
+    expect(seen.has('packages/app/index.rip')).toBeTrue();
     expect(seen.has('src/runtime/reactive.js')).toBeTrue();
     expect(seen.has('src/runtime/components.js')).toBeTrue();
   });
@@ -137,6 +145,7 @@ describe('browser bundle artifact', () => {
     expect(code).toContain('rip.runtime.reactive');
     expect(code).toContain('rip.runtime.components');
     expect(code).toContain('rip.runtime.schema');
+    expect(code).toContain('launch requires an options object');
   });
 
   test('loads standalone and compiles', () => {
@@ -145,6 +154,11 @@ describe('browser bundle artifact', () => {
       "const out = mod.compileToJS('x = 41\\nx + 1');",
       "if (out.code !== 'let x = 41;\\nx + 1;') throw new Error('unexpected output: ' + out.code);",
       "if (typeof mod.runtimes.__state !== 'function') throw new Error('missing runtime');",
+      "const files = new Map([['probe.rip', \"import { rash } from '@rip-lang/app/rash'\\nexport value = rash(new TextEncoder().encode('probe'))\"]]);",
+      "const compiled = new Map();",
+      "const loader = mod.createModuleLoader({ components: { read: p => files.get(p), exists: p => files.has(p), setCompiled: (p, v) => compiled.set(p, v) } });",
+      "const probe = await loader.import('probe.rip');",
+      "if (!/^[A-Za-z0-9_]{6}$/.test(probe.value)) throw new Error('embedded App package did not resolve');",
       "console.log('ok');",
     ].join('\n')], { cwd: root, encoding: 'utf8' });
     expect(probe.stderr).toBe('');

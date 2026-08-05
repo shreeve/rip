@@ -11,13 +11,13 @@ test "createApply validates its options", ->
   throws (-> createApply {}), 'requires renderer.remountDirty'
   throws (-> createApply { renderer: remountDirty: -> 'narrow' }), 'requires an escape remount'
 
-test! "absorb ignores empty sets and non-App file types", ->
+test! "absorb ignores an empty set and reloads for ordinary assets", ->
   calls = []
   apply = createApply
     renderer: remountDirty: (paths) -> calls.push ['narrow', paths]; 'narrow'
     escape: (paths) -> calls.push ['escape', paths]
   eq apply.absorb!([]), 'ignore'
-  eq apply.absorb!(['notes.txt']), 'ignore'
+  eq apply.absorb!(['notes.txt']), 'reload'
   eq calls, []
 
 test! "absorb reports css for CSS-only dirty sets (never reload)", ->
@@ -49,6 +49,13 @@ test! "absorb reports update when the renderer accepts a narrow remount", ->
   eq escaped, []
   eq (logs.some (l) -> l.includes('— update')), true
 
+test! "absorb requests reload after a committed remount with teardown damage", ->
+  apply = createApply
+    renderer: remountDirty: -> 'reload'
+    escape: -> throw Error.new 'committed remount must not escape'
+    report: ->
+  eq apply.absorb!(['routes/index.rip']), 'reload'
+
 test! "absorb reports update after whole-launch remount for stash edits", ->
   escaped = []
   apply = createApply
@@ -58,11 +65,21 @@ test! "absorb reports update after whole-launch remount for stash edits", ->
   eq apply.absorb!(['stash.rip']), 'update'
   eq escaped, [['stash.rip']]
 
-test! "absorb falls back to update when narrow throws", ->
-  escaped = []
+test! "absorb surfaces a failed narrow activation", ->
   apply = createApply
     renderer: remountDirty: -> throw Error.new 'boom'
-    escape: (paths) -> escaped.push paths
+    escape: -> throw Error.new 'failed activation must not escape'
     report: ->
-  eq apply.absorb!(['routes/cart.rip']), 'update'
-  eq escaped, [['routes/cart.rip']]
+  failure = null
+  try
+    apply.absorb! ['routes/cart.rip']
+  catch error
+    failure = error
+  eq failure?.message, 'boom'
+
+test! "an unsupported in-page update may request document reload", ->
+  apply = createApply
+    renderer: remountDirty: -> 'escape'
+    escape: -> 'reload'
+    report: ->
+  eq apply.absorb!(['stash.rip']), 'reload'

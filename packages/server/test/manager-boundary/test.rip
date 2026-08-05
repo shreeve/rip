@@ -135,8 +135,8 @@ test! 'shell-less all-browsable declaration registers exactly its declared roots
     control.stop true
     rmSync dir, { recursive: true, force: true }
 
-test! 'serve.rip selects a custom App root and manifest membership', ->
-  dir = mkdtempSync join(tmpdir(), 'rip-manager-app-manifest-')
+test! 'serve.rip selects a custom App root and change policy', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-app-changes-')
   project = join dir, 'project'
   mkdirSync join(project, 'client', 'routes'), { recursive: true }
   mkdirSync join(project, 'client', 'styles'), { recursive: true }
@@ -146,10 +146,10 @@ test! 'serve.rip selects a custom App root and manifest membership', ->
   writeFileSync join(project, 'client', 'styles', 'site.css'), 'body { color: navy; }'
   writeFileSync join(project, 'serve.rip'), """
   export default
-    hosts: ['manifest.example.test']
+    hosts: ['changes.example.test']
     app:
       root: 'client'
-      manifest:
+      changes:
         update: ['routes/**/*.rip']
         css: []
     files:
@@ -171,8 +171,9 @@ test! 'serve.rip selects a custom App root and manifest membership', ->
     catch error
       throw Error.new "#{error.message}; calls=#{JSON.stringify(calls)}"
     bundle = JSON.parse readFileSync(join(project, 'dist', 'bundle.json'), 'utf8')
-    eq bundle.files.map((entry) -> entry.id), ['index.html', 'routes/index.rip']
-    eq Object.keys(bundle.modules).filter((id) -> bundle.files.some((entry) -> entry.id is id)), ['routes/index.rip']
+    eq Object.keys(bundle), ['hash', 'list']
+    eq bundle.list.map((entry) -> entry[0]), ['routes/index.rip']
+    eq JSON.parse(readFileSync(join(project, 'dist', 'latest.json'), 'utf8')), { hash: bundle.hash }
     process.kill 'SIGTERM'
     eq await process.exited, 143
   finally
@@ -181,18 +182,35 @@ test! 'serve.rip selects a custom App root and manifest membership', ->
     control.stop true
     rmSync dir, { recursive: true, force: true }
 
-test! 'serve.rip rejects a manifest pattern assigned to the wrong apply kind', ->
-  dir = mkdtempSync join(tmpdir(), 'rip-manager-invalid-manifest-')
+test! 'serve.rip rejects a change pattern assigned to the wrong apply kind', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-invalid-changes-')
   project = join dir, 'project'
   mkdirSync join(project, 'app'), { recursive: true }
-  writeFileSync join(project, 'serve.rip'), "export default { app: { manifest: { css: ['**/*.rip'] } } }\n"
+  writeFileSync join(project, 'serve.rip'), "export default { app: { changes: { css: ['**/*.rip'] } } }\n"
   calls = []
   controlSocket = join dir, 'janus.sock'
   control = startControl controlSocket, calls
   try
     { proc, err } = run project, [project, '--control', controlSocket, '--no-watch', '--access-log=off']
     eq await proc.exited, 1
-    ok (await err).includes('serve.rip app.manifest.css[0] must select .css files')
+    ok (await err).includes('serve.rip app.changes.css[0] must select .css files')
+    ok not calls.some((call) -> call.path is '/1.0/apps')
+  finally
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'serve.rip rejects an App root overlapping manager publication output', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-dist-app-')
+  project = join dir, 'project'
+  mkdirSync join(project, 'dist'), { recursive: true }
+  writeFileSync join(project, 'serve.rip'), "export default { app: { root: 'dist' } }\n"
+  calls = []
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, calls
+  try
+    { proc, err } = run project, [project, '--control', controlSocket, '--no-watch', '--access-log=off']
+    eq await proc.exited, 1
+    ok (await err).includes('app.root cannot overlap the manager-owned dist directory')
     ok not calls.some((call) -> call.path is '/1.0/apps')
   finally
     control.stop true

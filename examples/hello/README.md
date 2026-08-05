@@ -1,8 +1,8 @@
 # Hello App
 
-A minimal browser-only Rip App with no API workers. This README is the
-walkthrough checklist for App loading, manifest membership, and watcher
-publication. Permanent protocol details live in [`docs/SERVER.md`](../../docs/SERVER.md).
+A minimal browser-only Rip App with no API workers. Permanent publication
+details live in [`docs/SERVER.md`](../../docs/SERVER.md); browser consumption
+details live in [`docs/WORKSPACE.md`](../../docs/WORKSPACE.md).
 
 ## Add and start
 
@@ -20,50 +20,44 @@ rip app add examples/hello
 rip app start hello
 ```
 
-`serve.rip` explicitly declares the `hello` name, `hello.ripdev.io` host,
-conventional `app/` root, and default manifest categories.
+`serve.rip` declares the `hello` name, `hello.ripdev.io` host, conventional
+`app/` root, and explicit default change policy.
 
-## Initial load
+## Server publication
 
-- [ ] Open `https://hello.ripdev.io/`.
-- [ ] `index.html` loads from the authored App root.
-- [ ] `rip.js` and `bundle.json` load from `dist/`.
-- [ ] `bundle.json` contains the four manifest members listed below.
-- [ ] `/images/rip.png` loads as an ordinary static asset but is absent from
-      the manifest.
-- [ ] `/hub` opens and receives its join message.
-- [ ] The Hello Rip page renders.
-
-Expected manifest members:
+Manager writes these files under `dist/`:
 
 ```text
-index.html
-routes/index.rip
-styles.css
-template.html
+@rip/rip.js
+bundle.json
+bundle.json.br
+latest.json
 ```
 
-## Watcher changes
+`bundle.json` has exactly `hash` and `list`. This App's source list contains
+only `routes/index.rip`. The stylesheet, HTML shell, template, and image remain
+ordinary HTTP files; their bytes are not embedded in the bundle. Because the
+default change policy manages every non-hidden App file, their private hashes
+still contribute to the complete App hash.
 
-With the page and its `/hub` WebSocket open:
+`bundle.json.br` is the Brotli representation of the exact JSON bytes.
+`latest.json` contains the same complete App hash. There is no manifest.
 
-- [ ] Edit `app/routes/index.rip`: one `update` ding and an in-place module
-      apply.
-- [ ] Touch or rewrite `app/routes/index.rip` with identical bytes: no ding.
-- [ ] Edit `app/styles.css`: one `css` ding and an in-place stylesheet update.
-- [ ] Edit `app/index.html`: one `reload` ding and a page reload.
-- [ ] Edit `app/template.html`: one `reload` ding and a page reload.
-- [ ] Replace `app/images/rip.png`: new static bytes and HTTP ETag, no manifest
-      publication and no ding.
-- [ ] Add or edit another non-manifest asset such as `app/images/note.txt`: no
-      manifest publication and no ding.
+## Watcher checklist
 
-## Implementation contract
+With Server watch mode active:
 
-- [x] `serve.rip` can override the App root and each manifest category.
-- [x] Omitted categories use `**/*.rip`, `**/*.css`, and `**/*.html`; `[]`
-      disables a category.
-- [x] The recursive watcher observes the complete App root and filters
-      ordinary asset-file events before publication.
-- [x] A publication batch rehashes only manifest paths reported changed by the
-      watcher; a directory or pathless event may request a full reconciliation.
+- [ ] Edit `app/routes/index.rip`: one change contains
+      `["routes/index.rip", source]`.
+- [ ] Rewrite `app/routes/index.rip` with identical bytes: no change.
+- [ ] Edit `app/styles.css`: one change contains `["styles.css"]`.
+- [ ] Edit `app/index.html`: one change contains `["index.html"]`.
+- [ ] Edit `app/template.html`: one change contains `["template.html"]`.
+- [ ] Replace `app/images/rip.png`: one change contains
+      `["images/rip.png"]`; the bytes remain on HTTP.
+- [ ] Delete a managed file: one change contains `[path, null]`.
+- [ ] Every change's `from` equals the prior App hash and its `hash` equals the
+      new `bundle.json` and `latest.json` hash.
+
+The Server suite proves publication and transport, and the browser suites prove
+the same bundle, ordered-change, and reconnect contracts through Rip App.

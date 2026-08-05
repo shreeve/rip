@@ -1,6 +1,6 @@
-// Probe 1 cart door: real `rip server` on examples/cart behind a stub
+// Cart publication apply: real `rip server` on examples/cart behind a stub
 // Janus edge. API requests proxy to API-only workers; registered roots serve
-// App/dist bytes; `/hub` fans out manager dings.
+// App/dist bytes; `/hub` fans out ordered Manager publication changes.
 import {
   cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync,
   statSync, symlinkSync, unlinkSync, writeFileSync, readFileSync,
@@ -37,11 +37,11 @@ const hubClients = new Set();
 const hubFrames = [];
 let registration = null;
 
-const fanoutDing = (body) => {
+const fanoutChange = (body) => {
   const items = Array.isArray(body) ? body : [body];
   for (const item of items) {
-    if (!item?.ding) continue;
-    const frame = JSON.stringify({ ding: item.ding });
+    if (!item?.change) continue;
+    const frame = JSON.stringify({ change: item.change });
     hubFrames.push(frame);
     for (const socket of hubClients) {
       try { socket.send(frame); } catch { /* closed */ }
@@ -70,7 +70,7 @@ const stub = Bun.serve({
       return new Response(null, { status: 204 });
     }
     if (rq.method === 'POST' && url.pathname.endsWith('/hub/publish')) {
-      fanoutDing(body);
+      fanoutChange(body);
       const n = Array.isArray(body) ? body.length : 1;
       return Response.json({ objects: n, deliveries: n, unknown_targets: 0 });
     }
@@ -204,7 +204,12 @@ const server = Bun.serve({
     open(ws) {
       hubClients.add(ws);
     },
-    message() { /* browser self-joins /hub; this harness has one channel */ },
+    message(ws, text) {
+      try {
+        const frame = JSON.parse(String(text));
+        if (typeof frame?.['?'] === 'string') ws.send(JSON.stringify({ '!': frame['?'] }));
+      } catch { /* malformed client test traffic is irrelevant here */ }
+    },
     close(ws) { hubClients.delete(ws); },
   },
 });

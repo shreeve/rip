@@ -203,6 +203,12 @@ app. It uses only the public `rip edge` and `rip app` commands to:
 - open an application's manager log
 - add a project with the native macOS directory picker
 
+Starting the packaged edge asks the per-user Rip Agent to register a
+loopback-only `launchd` socket on standard HTTPS. Caddy and Janus continue to
+run as the signed-in user; `launchd` contributes only the inherited
+`127.0.0.1:443` listener that macOS does not allow an ordinary process to bind
+directly.
+
 Run it from this package:
 
 ```bash
