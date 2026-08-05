@@ -799,6 +799,9 @@ This ordering closes every reconnect race:
 Browser `online`, page restoration, and tab resumption are triggers to attempt
 this procedure, not proof that the network or App state is current. A failed
 probe leaves the last committed App running and retries with bounded backoff.
+If an operational reload arrives during a quarantine probe, the browser queues
+a fresh probe behind the in-flight request so a stale response cannot swallow
+the newer Server generation.
 
 ### Rip source and ordinary assets
 

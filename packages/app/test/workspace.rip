@@ -429,3 +429,53 @@ test! "a rejected generation survives reconnect and operational probes", ->
   eq feed.connected(), true
   eq reloads, []
   feed.close()
+
+test! "an operational reload queues a fresh probe behind a stale quarantine probe", ->
+  active = HASH_1
+  reloads = []
+  fetchCount = 0
+  releaseStale = null
+  stale = Promise.new (resolve) ->
+    releaseStale = -> resolve { ok: true, status: 200, json: -> { hash: HASH_2 } }
+  { factory, sockets } = fakeHub()
+  client =
+    hash: -> active
+    apply: -> 'rejected'
+    reload: (reason) -> reloads.push reason
+  feed = connectFeed client,
+    hub: 'ws://test/hub'
+    makeSocket: factory
+    fetch: ->
+      fetchCount++
+      return { ok: true, status: 200, json: -> { hash: HASH_1 } } if fetchCount is 1
+      return stale if fetchCount is 2
+      { ok: true, status: 200, json: -> { hash: HASH_3 } }
+    backoff: { min: 1, max: 2 }
+    ackTimeout: 100
+
+  first = sockets[0]
+  first.onopen()
+  ack first
+  settle!
+  first.onmessage { data: JSON.stringify({ change: { from: HASH_1, hash: HASH_2, list: [] } }) }
+  settle!
+  eq reloads, []
+
+  first.onclose()
+  Promise.new! (resolve) -> setTimeout resolve, 10
+  second = sockets[1]
+  second.onopen()
+  ack second
+  waitForProbe = ->
+    loop
+      return if fetchCount is 2
+      sleep! 1
+  waitForProbe!
+  second.onmessage { data: JSON.stringify({ reload: { epoch: 10 } }) }
+  releaseStale!
+  settle!
+  settle!
+  eq fetchCount, 3
+  eq reloads.length, 1
+  eq feed.connected(), false
+  feed.close()

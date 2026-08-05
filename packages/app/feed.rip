@@ -161,8 +161,8 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
     attempts = 0
     return
 
-  beginProbe = (owner = connection) ->
-    return probes.get(owner) if probes.has owner
+  beginProbe = (owner = connection, repeat = false) ->
+    return probes.get(owner) if probes.has(owner) and not repeat
     # A closing connection may still have one asynchronous apply in flight.
     # Put the reconnect probe behind that same queue so every connection
     # observes one total publication order.
@@ -205,7 +205,7 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
           reload "a newer App generation followed rejected #{rejectedHash}"
         else if ready then enqueue object.change, owner else buffer.push object.change
       else if object.reload isnt undefined and not Object.hasOwn(object, '<')
-        if rejectedHash? then beginProbe(owner) else reload 'server generation changed'
+        if rejectedHash? then beginProbe(owner, true) else reload 'server generation changed'
     return
 
   schedule = ->

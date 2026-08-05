@@ -41,7 +41,7 @@ lives in `docs/`; git history and pull requests retain completed-work detail.
 
 ## Verified landing candidate
 
-- `bun run test:all` — 22 lanes, 8,353 tests passed in 73.7 seconds.
+- `bun run test:all` — 22 lanes, 8,354 tests passed in 76.9 seconds.
 - `bunx playwright test --reporter=line` in `packages/browser-tests` — 21
   passed, 2 intentionally skipped across Chromium, Firefox, WebKit, and the
   live Cart Server/Manager harness.

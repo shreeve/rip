@@ -27643,8 +27643,8 @@ function connectFeed(client, opts = {}) {
     attempts = 0;
     return;
   };
-  let beginProbe = function(owner = connection) {
-    if (probes.has(owner))
+  let beginProbe = function(owner = connection, repeat = false) {
+    if (probes.has(owner) && !repeat)
       return probes.get(owner);
     let task = tail.then(function() {
       return probe(owner);
@@ -27705,7 +27705,7 @@ function connectFeed(client, opts = {}) {
         }
       } else if (object.reload !== undefined && !Object.hasOwn(object, "<")) {
         if (rejectedHash != null) {
-          beginProbe(owner);
+          beginProbe(owner, true);
         } else {
           reload("server generation changed");
         }
