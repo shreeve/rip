@@ -1,82 +1,67 @@
 # HANDOFF — session launch document (2026-08-05)
 
-The tracked session launch document (see AGENTS.md, working ledgers): read it
-first when starting a session; rewrite it at session boundaries with
-live-verified facts only.
+Read this working ledger first when starting a session. Permanent architecture
+lives in `docs/`; git history and pull requests retain completed-work detail.
 
 ## Orientation
 
 - Repo: `~/Data/Code/rip` — the live v4 checkout.
 - Commands: `bun run test:all` · `bun run test` · `bun run audit`.
-- Permanent Server architecture: `docs/SERVER.md`.
-- Browser publication consumer contract: `docs/WORKSPACE.md`.
-- Detailed implementation lifecycle: `packages/server/README.md`.
+- Server architecture: `docs/SERVER.md`.
+- Browser publication contract: `docs/WORKSPACE.md`.
+- Detailed lifecycle: `packages/server/README.md`.
 
-## Active branch
+## App publication contract
 
-**Branch: `rip-app-publication`, tracking
-`origin/rip-app-publication`.**
+- Rip Manager publishes `bundle.json` as exactly `{ hash, list }`. The sorted
+  list contains the complete browser Rip program as `[modulePath, source]`.
+  There is no `manifest.json`, public per-file hash inventory, resolver table,
+  or duplicated `@rip-lang/app` source.
+- `bundle.json.br` is the exact Brotli representation of `bundle.json`.
+  `latest.json` contains only the complete App hash used for reconnect checks.
+- Manager privately hashes managed App files, rejects idempotent watcher
+  events, watches package and schema-projection inputs, atomically publishes
+  complete state, and sends one ordered `change {from,hash,list}` per effective
+  batch.
+- Changed Rip source rides through the watch feed. CSS and every other ordinary
+  asset remain normal HTTP resources; changes carry only their paths. Non-watch
+  mode publishes the same initial files without watchers or change messages.
+- Rip App owns browser delivery. It validates and compiles the complete Rip
+  graph, keeps one persistent module loader, stages Workspace and renderer
+  state transactionally, and leaves HTTP bytes in the browser cache.
+- A malformed or disconnected transition reloads. A failed Rip candidate is
+  quarantined while the last committed App stays live; the next newer
+  generation reloads a complete bundle. A valid transition that requires
+  whole-App reconstruction reloads without being quarantined.
+- Reconnect joins `/hub`, receives the Janus acknowledgement, then requests
+  `latest.json`. Client-originated Hub frames cannot inject publication changes.
+- Browser publication modules use static imports and canonical Rip paths.
+  Missing targets, cycles, dynamic imports, hidden segments, and file-shaped
+  directory segments reject before Manager commits a publication.
 
-The branch tip contains the embedded `@rip-lang/app` browser runtime, the
-macOS inherited-port edge work, and the complete Server/Manager/browser
-publication implementation described below.
+## Verified landing candidate
 
-## Publication implementation
-
-- Browser-program construction is pure Rip in `packages/server/bundle.rip`.
-  Server owns package traversal, browser-safety validation, shared schema
-  projection, and canonical source-list construction.
-- `bundle.json` is exactly `{ hash, list }`. The sorted list contains
-  `[modulePath, source]` for the complete browser Rip program. There is no
-  `manifest.json`, public per-file hash inventory, resolver table, or embedded
-  `@rip-lang/app` source.
-- Manager privately hashes managed App files, suppresses idempotent watcher
-  events, calculates one complete App hash, and atomically publishes
-  `bundle.json`, exact `bundle.json.br`, and `latest.json {hash}`.
-- One effective watch batch sends one ordered
-  `change {from,hash,list}`. Rip source rides as `[path,source]`, ordinary
-  changed assets ride as `[path]`, and deletions ride as `[path,null]`.
-- Watch and non-watch modes share the same initial publication. Non-watch mode
-  creates no App watcher and no publication feed.
-- Browser boot validates the two-key bundle, trusts the Manager-declared hash,
-  compiles and atomically activates the complete Rip program, and leaves CSS,
-  HTML, images, fonts, and other assets to normal HTTP caching.
-- Workspace holds active Rip source, compiled modules, and one complete hash.
-  It applies only a connected `from` to `hash` transition; malformed input,
-  a sequence gap, or failed activation reloads instead of guessing.
-- Reconnect subscribes to `/hub` before fetching `latest.json`. A matching
-  hash continues; a mismatch reloads and obtains a complete bundle.
-- CSS changes refresh the linked stylesheet over HTTP, Rip changes compile and
-  update, and HTML or another managed ordinary asset reloads.
-- Hello, Pulse, Cart, and the browser certification fixture all use this one
-  protocol. There is no compatibility wire format.
-
-## Verification
-
-- `bun run test:all` — 22 lanes, 8,323 tests passed in 82.6s.
-- `packages/server` within that gate — 96 passed.
-- `packages/app` within that gate — 311 passed.
-- `bun run test` fast tier — 6,133 passed, 38 intentionally skipped.
-- `bunx playwright test --reporter=line` in `packages/browser-tests` —
-  21 passed, 2 skipped across Chromium, Firefox, WebKit, and the real
-  Server/Manager Cart harness.
-- Direct publication assembly — Hello 1 Rip module, Pulse 3, Cart 13.
+- `bun run test:all` — 22 lanes, 8,353 tests passed in 73.7 seconds.
+- `bunx playwright test --reporter=line` in `packages/browser-tests` — 21
+  passed, 2 intentionally skipped across Chromium, Firefox, WebKit, and the
+  live Cart Server/Manager harness.
 - `git diff --check` — passed.
+- Adversarial publication review — GO after empirical race, security,
+  invalidation, watcher, and transaction probes were converted into tests.
 
-## Remaining edge and landing work
+Arbitrary top-level ESM side effects execute while a candidate module graph is
+evaluated and cannot be rolled back. Workspace, renderer, source, route
+manifest, and DOM state remain transactional; code that performs external
+top-level effects owns that consequence.
 
-1. Released Janus v1.5 does not select precompressed sidecars in its custom
-   registered-file path. Manager produces `bundle.json.br`, but transparent
-   Brotli delivery requires Janus behavior equivalent to Caddy
-   `file_server { precompressed }`.
-2. Complete the remaining open items in `packages/server/TODO.md`, including
-   the Janus repository gates and independent/cold verification required for a
-   substantial merge.
-3. Open the branch PR, complete the required reviews, and land it as a true
-   merge when requested.
+## Session state
+
+No publication implementation work remains in this delivery. Check the active
+branch and worktree before beginning new work. Precompressed-sidecar selection
+is Janus-owned behavior and is not implemented by the Rip repository.
 
 ## Working agreements
 
 - **Land** = merge green + delete feature branch.
 - Shared branches catch up by merge, never rebase; never force-push.
-- PRs land as true merge commits only. No AI attribution.
+- Pull requests land as true merge commits only. No AI attribution.
