@@ -14,12 +14,12 @@ live-verified facts only.
 
 ## Active branch
 
-**Branch: `rip-app-preparation`, tracking
-`origin/rip-app-preparation`.**
+**Branch: `rip-app-publication`, tracking
+`origin/rip-app-publication`.**
 
-The branch tip contains the embedded `@rip-lang/app` browser runtime and the
-macOS inherited-port edge work. The worktree contains the uncommitted complete
-Server/Manager/browser publication implementation described below.
+The branch tip contains the embedded `@rip-lang/app` browser runtime, the
+macOS inherited-port edge work, and the complete Server/Manager/browser
+publication implementation described below.
 
 ## Publication implementation
 
@@ -72,8 +72,8 @@ Server/Manager/browser publication implementation described below.
 2. Complete the remaining open items in `packages/server/TODO.md`, including
    the Janus repository gates and independent/cold verification required for a
    substantial merge.
-3. Review the complete worktree scope, commit intentionally, push, and open or
-   update the branch PR when requested.
+3. Open the branch PR, complete the required reviews, and land it as a true
+   merge when requested.
 
 ## Working agreements
 
