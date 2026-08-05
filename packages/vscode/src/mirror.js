@@ -88,17 +88,19 @@ export function chainSetsTypes(configPath, chain, onUnresolved, visited = new Se
 // floor joins the program whole-or-not), walked to the first
 // package.json locally: mirror.js stays layout-agnostic and cannot
 // import the compiler's readProjectConfig.
-// Null posture by mode: gradual supplies `strictNullChecks: false` — the
-// one lever that changes TYPES, not just which diagnostics publish
-// (`find()` hovers `T` here, `T | undefined` under `rip.strict`).
-// `noImplicitAny` stays ON everywhere: turning it off disables
-// evolving-array inference and strands unannotated `[]` on `never[]`.
+// Base posture by mode: TypeScript 7 defaults `strict` ON, so gradual's
+// loose base must be stated: `strict: false` turns the family off whole
+// (null checks change TYPES, not just which diagnostics publish —
+// `find()` hovers `T` here, `T | undefined` under `rip.strict` — and
+// catch bindings are `any`, not `unknown`). The generated config keeps
+// `noImplicitAny` ON everywhere: turning it off disables evolving-array
+// inference and strands unannotated `[]` on `never[]`.
 const nullPosture = (dir, configPath) => {
   if (dir && workspaceIsStrict(dir)) return {};
   // The user's OWN tsconfig wins: rip's default posture never overrules
   // a strictness the author wrote down.
   if (configPath && chainSetsStrictness(configPath)) return {};
-  return { strictNullChecks: false };
+  return { strict: false };
 };
 
 // Does the config chain SET strictness (`strict` or `strictNullChecks`)

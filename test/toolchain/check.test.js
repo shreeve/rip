@@ -625,6 +625,34 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // TypeScript 7 defaults `strict` ON, which drags catch bindings to
+  // `unknown` through `useUnknownInCatchVariables` — narrowing ceremony
+  // on every member read of an unannotated `catch err`. Gradual restores
+  // the loose base (`strict: false` — nullPosture, mirror.js); a chain
+  // that states its own strictness is yielded to whole and keeps the
+  // unknown.
+  test('gradual catch bindings are not unknown; an author strictness chain keeps them', () => {
+    const catcher = [
+      'export label: (job: () => void) => void = (job) ->',
+      '  try',
+      '    job()',
+      '  catch err',
+      '    console.log(err.message)',
+    ].join('\n') + '\n';
+    const gradual = workspace({ 'catcher.rip': catcher });
+    const audit = JSON.parse(fs.readFileSync(TSCONFIG, 'utf8'));
+    const strict = workspace({ 'catcher.rip': catcher });
+    fs.writeFileSync(path.join(strict, 'tsconfig.json'),
+      JSON.stringify({ ...audit, compilerOptions: { ...audit.compilerOptions, strictNullChecks: true } }));
+    try {
+      expect(JSON.parse(check(gradual, ['--json']).stdout)).toEqual([]);
+      expect(JSON.parse(check(strict, ['--json']).stdout).map((d) => d.code)).toEqual([18046]);
+    } finally {
+      fs.rmSync(gradual, { recursive: true, force: true });
+      fs.rmSync(strict, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // The mixin face promises exactly what the runtime serves, in both
   // directions. The projection algebra works on a mixin — __schemaDerive
   // refuses only :union/:enum, and a mixin derivation is an instantiable
