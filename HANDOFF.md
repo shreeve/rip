@@ -1,4 +1,4 @@
-# HANDOFF — session launch document (2026-08-03)
+# HANDOFF — session launch document (2026-08-04)
 
 The tracked session launch document (see AGENTS.md, working ledgers): read it
 first when starting a session; rewrite it at session boundaries with
@@ -8,80 +8,57 @@ live-verified facts only.
 
 - Repo: `~/Data/Code/rip` — the live v4 checkout.
 - Commands: `bun run test:all` · `bun run test` · `bun run audit`.
-- Permanent server architecture and App publication protocol:
+- Permanent server architecture and current App publication protocol:
   `docs/SERVER.md`.
+- Next App publication wire contract and implementation sequence:
+  `packages/server/README.md`, under Detailed Lifecycle.
 
 ## Active branch
 
-**Branch: `main`, synchronized with `origin/main`.**
+**Branch: `rip-app-preparation`, tracking
+`origin/rip-app-preparation`.**
 
-Tip `129c35b0` carries the coherent Rip App publication protocol:
+The branch carries three scoped feature commits above `1eaeb3c`:
 
-- The default authored bag is `app/**/*.{rip,css,html}` with dot-prefixed
-  files and directories excluded. Ids are paths relative to `app/` and map to
-  ordinary root URLs.
-- `rash(bytes)` identifies exact authored file bytes. `check(files)` hashes the
-  deterministic sorted `[id, hash]` inventory and is the complete authored-bag
-  identity. Bundle and manifest now carry `check`, not an aggregate `rash`.
-- `bundle.json` is the self-contained first-paint package. It carries the
-  complete authored inventory plus Rip source, browser packages, resolution
-  metadata, schema projections, and seed data. The browser validates inventory
-  shape/order, recomputes the check, verifies authored Rip source hashes, and
-  populates the Workspace without fetching the manifest.
-- CSS and HTML populate as identity-only passports. The shell and stylesheet
-  links own first-paint delivery; a later advancing fetch supplies source and
-  applies `css` or `reload`.
-- `manifest.json` is watch-only and bodyless. It is fetched after the Hub opens,
-  on reconnect, after misses, and while unresolved wants remain. A matching
-  check skips detailed reconciliation; malformed entries or a mismatched check
-  reject before mutation. Manifest comparison stays additive and never infers
-  deletion from one omission.
-- Publication remains bundle → manifest → dings from one in-memory snapshot.
-  Invalid UTF-8 Rip source and all bundle assembly/validation failures preserve
-  the last good generation. Starting with watch disabled removes a stale
-  generated manifest and opens no development feed.
-- `dist/` is the manager-owned App publication root. It carries `@rip/rip.js`,
-  `bundle.json`, the watch-only `manifest.json`, and a generated shell when the
-  App does not author one. Janus mounts `dist/` at the URL root, and the API
-  watcher excludes it. Every runnable example ignores its runtime `dist/`
-  tree; Hello, Cart, and Pulse have each been live-verified against that path.
-- `serve.rip` may select `app.root` and classify App membership through
-  `app.manifest.update`, `.css`, and `.reload` globs. The defaults are
-  `app/` plus `**/*.rip`, `**/*.css`, and `**/*.html`; omitted categories keep
-  their defaults and `[]` disables one explicitly. The recursive watcher
-  observes the complete configured root but filters nonmatching asset-file
-  events before publication work. Matching file events contribute exact ids to
-  a debounced dirty set and only those members are reread and rehashed;
-  directory and pathless events request a complete reconciliation.
-- Dings remain identity-only hints. Latest fetched bytes win, owner tokens
-  fence stale requests, delete hashes fence newer passports, compilation
-  precedes Rip passport commit, and the apply vocabulary remains
-  `update | css | reload | ignore`.
-- Janus still owns current-byte delivery, HTTP ETags, and Hub transport without
-  calculating or interpreting Rip hashes or checks. App and API lifecycles stay
-  independent.
-- `docs/SERVER.md` now contains the complete end-to-end publication model;
-  `docs/WORKSPACE.md` and `docs/HMR.md` carry only their matching constitutional
-  and apply-specific statements.
+- `7b750c5` embeds the complete compiled `@rip-lang/app` package in
+  `dist/browser/rip.js`. App bundles no longer repeat the framework source;
+  authored modules resolve App imports through the stable browser runtime.
+- `eb97263` gives the packaged macOS edge a per-user, launchd-owned
+  `127.0.0.1:443` TCP socket. The launcher passes it to ordinary user-owned
+  Caddy as `fd/3`; stop, restart, reload, listener release, and the Hello App
+  were live-verified. The inherited stream serves HTTP/1.1 and HTTP/2 because
+  HTTP/3 requires a separately inherited UDP socket for QUIC.
+- `f613865` specifies the next `bundle.json`, `latest.json`, and `from → hash`
+  change lifecycle, its two implementation phases, and their acceptance
+  tests. That lifecycle is a specification: the current server and Rip App
+  still implement the manifest-and-ding protocol documented in
+  `docs/SERVER.md`.
+
+The generated browser artifact is unminified `dist/browser/rip.js`; no
+`rip.min.js.br` or `rip.js.br` file is generated. The current artifact is
+1,508,152 bytes and measured 193,473 bytes through Brotli. The combined
+browser-runtime change is 21,915 Brotli bytes over the branch base artifact.
 
 ## Verification
 
-- `bun run test:all` — all 22 lanes passed, 8,369 tests total.
-- Root fast suite — 6,131 passed, 35 extended-tier skips.
-- `packages/app` — package, Workspace/feed, and apply suites passed.
-- `packages/server` — all 92 package tests passed, including real published
-  Janus integration and the exact-dirty-path watcher pin.
-- Browser bundle regeneration under Bun 1.3.14 is byte-identical to the
-  committed artifact.
+- `bun run test:all` — all 22 lanes passed, 8,387 tests total in 73.1s.
+- Root extended suite — 6,519 passed.
+- `packages/vscode` — 169 passed.
+- `packages/server` — 93 passed, including real published Janus integration
+  and the launchd edge pin.
+- Focused browser bundle, module-loader, and boot suites — 57 passed, one
+  extended freshness test skipped locally and covered by `test:all`.
 - `packages/browser-tests` remains the documented CI-only Playwright lane.
 - `git diff --check` — passed.
 
 ## Next work
 
-The App publication redesign is implemented and documented. State-preserving
-framework refresh remains the separate research/apply track described in
-`docs/HMR.md`; the shipped apply engine still uses its honestly labeled remount
-escape.
+Review the three feature commits and begin Phase 1 of the Detailed Lifecycle
+with the Server/Manager protocol reference client. Phase 1 proves publication,
+change ordering, reconnect recovery, and failure handling independently of Rip
+App. Phase 2 then moves Rip App and browser boot to the proven protocol. The
+feature branch may be temporarily incomplete between phases; it does not carry
+a dual wire format or land until both phases pass.
 
 ## Working agreements
 
