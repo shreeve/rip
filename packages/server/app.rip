@@ -23,7 +23,9 @@ HELP = '''
     --host HOST                       Janus host claim (repeatable)
     --workers N                       Worker count (default: 2)
     --concurrency N                   Requests per worker (default: 1)
-    --no-watch                        Disable source watching
+    --no-watch                        Disable App and API source watching
+    --no-watch-app                    Disable App publication watching
+    --no-watch-api                    Disable API worker watching
     --eager                           Boot replacement workers before demand
 
   Output:
@@ -43,7 +45,8 @@ name = null
 hosts = null
 workers = 2
 concurrency = 1
-watch = true
+watchApp = true
+watchApi = true
 eager = false
 positionals = []
 addFlags = []
@@ -84,7 +87,14 @@ while args.length
       abort 'rip-app: --concurrency must be a positive integer' unless Number.isInteger(concurrency) and concurrency > 0 and String(concurrency) is text
     when '--no-watch'
       addFlags.push value
-      watch = false
+      watchApp = false
+      watchApi = false
+    when '--no-watch-app'
+      addFlags.push value
+      watchApp = false
+    when '--no-watch-api'
+      addFlags.push value
+      watchApi = false
     when '--eager'
       addFlags.push value
       eager = true
@@ -116,7 +126,7 @@ switch command
       root: positionals[0] or process.cwd()
       name: name
       hosts: hosts
-      options: { workers, concurrency, watch, eager }
+      options: { workers, concurrency, watchApp, watchApi, eager }
     if json then printJson app else console.log "Added #{app.name}\n#{app.root}"
   when 'remove'
     app = requestAgent! 'rip-app', 'DELETE', "/1.0/apps/#{selector!}"

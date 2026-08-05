@@ -53,7 +53,7 @@ validateState = (state) ->
   names = Set.new()
   roots = Set.new()
   for app in state.apps
-    valid = isRecord(app) and /^[a-f0-9]{16}$/.test(app.id) and typeof app.name is 'string' and typeof app.root is 'string' and Array.isArray(app.hosts) and app.hosts.every((host) -> typeof host is 'string') and isRecord(app.options) and Number.isInteger(app.options.workers) and app.options.workers > 0 and Number.isInteger(app.options.concurrency) and app.options.concurrency > 0 and typeof app.options.watch is 'boolean' and typeof app.options.eager is 'boolean' and app.desired in ['running', 'stopped']
+    valid = isRecord(app) and /^[a-f0-9]{16}$/.test(app.id) and typeof app.name is 'string' and typeof app.root is 'string' and Array.isArray(app.hosts) and app.hosts.every((host) -> typeof host is 'string') and isRecord(app.options) and Number.isInteger(app.options.workers) and app.options.workers > 0 and Number.isInteger(app.options.concurrency) and app.options.concurrency > 0 and typeof app.options.watchApp is 'boolean' and typeof app.options.watchApi is 'boolean' and typeof app.options.eager is 'boolean' and app.desired in ['running', 'stopped']
     fail("malformed app record at #{paths.state}", 500) unless valid
     fail("duplicate app record at #{paths.state}", 500) if ids.has(app.id) or names.has(app.name) or roots.has(app.root)
     ids.add app.id
@@ -64,15 +64,41 @@ validateState = (state) ->
   fail("malformed edge record at #{paths.state}", 500) unless valid
   state
 
+normalizeAppOptions = (options) ->
+  fail 'app options must be an object', 500 unless isRecord options
+  watchApp = options.watchApp
+  watchApi = options.watchApi
+  if typeof options.watch is 'boolean'
+    watchApp = options.watch unless typeof watchApp is 'boolean'
+    watchApi = options.watch unless typeof watchApi is 'boolean'
+  {
+    workers: options.workers
+    concurrency: options.concurrency
+    watchApp: watchApp
+    watchApi: watchApi
+    eager: options.eager
+  }
+
+migrateState = (raw) ->
+  return { state: raw, dirty: false } unless isRecord(raw) and Array.isArray(raw.apps)
+  changed = false
+  apps = raw.apps.map (app) ->
+    return app unless isRecord(app) and isRecord(app.options)
+    options = normalizeAppOptions app.options
+    return app if typeof options.watchApp is 'boolean' and typeof options.watchApi is 'boolean' and not ('watch' of app.options)
+    changed = true
+    { ...app, options }
+  return { state: raw, dirty: false } unless changed
+  { state: { ...raw, apps }, dirty: true }
+
 loadState = ->
-  return defaultState() unless existsSync paths.state
+  return { state: defaultState(), dirty: false } unless existsSync paths.state
   try
-    validateState JSON.parse(readFileSync(paths.state, 'utf8'))
+    migrated = migrateState JSON.parse(readFileSync(paths.state, 'utf8'))
+    { state: validateState(migrated.state), dirty: migrated.dirty }
   catch error
     throw error if error?.status?
     fail "cannot read state at #{paths.state}: #{error?.message or error}", 500
-
-state = loadState()
 
 writeSecure = (path, text) ->
   temporary = "#{path}.tmp-#{process.pid}"
@@ -87,6 +113,9 @@ writeSecure = (path, text) ->
   try fsyncSync(directory) finally closeSync(directory)
 
 saveState = -> writeSecure paths.state, JSON.stringify(state, null, 2) + '\n'
+loaded = loadState()
+state = loaded.state
+saveState() if loaded.dirty
 
 tail = (path, lines = 100) ->
   return '' unless existsSync path
@@ -185,9 +214,13 @@ addApp = (body) ->
   fail "invalid host #{JSON.stringify(host)}" for host in hosts when not validHost(host)
   fail 'hosts must not contain duplicates' unless Set.new(hosts).size is hosts.length
   options = body.options or {}
-  rejectUnknown options, ['workers', 'concurrency', 'watch', 'eager'], 'app options'
+  rejectUnknown options, ['workers', 'concurrency', 'watch', 'watchApp', 'watchApi', 'eager'], 'app options'
   fail 'watch must be Boolean' if options.watch? and typeof options.watch isnt 'boolean'
+  fail 'watchApp must be Boolean' if options.watchApp? and typeof options.watchApp isnt 'boolean'
+  fail 'watchApi must be Boolean' if options.watchApi? and typeof options.watchApi isnt 'boolean'
   fail 'eager must be Boolean' if options.eager? and typeof options.eager isnt 'boolean'
+  watchApp = if options.watchApp? then options.watchApp else if options.watch? then options.watch else true
+  watchApi = if options.watchApi? then options.watchApi else if options.watch? then options.watch else true
   app =
     id: randomBytes(8).toString('hex')
     name: name
@@ -196,7 +229,8 @@ addApp = (body) ->
     options:
       workers: options.workers ?? 2
       concurrency: options.concurrency ?? 1
-      watch: options.watch isnt false
+      watchApp: watchApp
+      watchApi: watchApi
       eager: options.eager is true
     desired: 'stopped'
     addedAt: Date.new().toISOString()
@@ -211,7 +245,13 @@ addApp = (body) ->
 serverArgv = (app) ->
   argv = [process.execPath, loaderArg('rip-agent'), join(import.meta.dir, 'server.rip'), app.root, '--name', app.name, '--control', state.edge.control, '--access-log=off', '--workers', String(app.options.workers), '--concurrency', String(app.options.concurrency)]
   argv.push '--host', host for host in app.hosts
-  argv.push if app.options.watch then '--watch' else '--no-watch'
+  if app.options.watchApp and app.options.watchApi
+    argv.push '--watch'
+  else if not app.options.watchApp and not app.options.watchApi
+    argv.push '--no-watch'
+  else
+    argv.push if app.options.watchApp then '--watch-app' else '--no-watch-app'
+    argv.push if app.options.watchApi then '--watch-api' else '--no-watch-api'
   argv.push '--eager' if app.options.eager
   argv
 

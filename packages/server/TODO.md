@@ -5,9 +5,6 @@ retain completed history.
 
 ## 1. Finish edge policy
 
-- [ ] Add Janus precompressed-sidecar negotiation for `.br`, `.zst`, and
-      `.gz` representations of the canonical registered file, preserving root
-      priority, validators, ranges, MIME type, and `Vary: Accept-Encoding`.
 - [ ] Pin one Caddy compression policy: encodings, minimum size, MIME
       exclusions, streaming bodies, pre-encoded responses, and
       `Cache-Control: no-transform`.
@@ -23,8 +20,8 @@ retain completed history.
 
 ## 2. Finish manager policy
 
-- [ ] Make watching the default, remove `--watch`, and retain `--no-watch` as
-      the explicit opt-out.
+- [ ] Make watching the default, remove `--watch`, keep `--no-watch` /
+      `--no-watch-app` / `--no-watch-api` as explicit opt-outs.
 - [ ] Make configured symlinked and workspace dependencies participate in API
       invalidation.
 - [ ] Bound heartbeat and re-registration requests so a stalled control plane

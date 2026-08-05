@@ -4,7 +4,7 @@ import {
   get, post, put, patch, del, all, use, prefix,
   before, after, raw, onError, notFound, fetch as handle,
   App, resetGlobals, requestContext,
-  start, read, error, notice, bail,
+  start, read, error, notice, bail, hub,
   ctx, session, env, subrequest, mark, errorEnvelope, openapi,
 } from '@rip-lang/server'
 import { resolve } from 'node:path'
@@ -31,7 +31,7 @@ test 'public package surface exposes the documented framework', ->
   expected = [
     'App', 'after', 'all', 'bail', 'before', 'check', 'ctx', 'del', 'env',
     'error', 'errorEnvelope', 'fetch', 'formatMoney', 'get', 'getValidator',
-    'isBlank', 'isRawType', 'mark', 'notFound', 'notice', 'onError',
+    'hub', 'isBlank', 'isRawType', 'mark', 'notFound', 'notice', 'onError',
     'openapi', 'patch', 'post', 'prefix', 'put', 'raw', 'read',
     'registerValidator', 'requestContext', 'resetGlobals', 'session', 'start',
     'subrequest', 'toName', 'toPhone', 'use', 'validatorNames',
@@ -443,3 +443,37 @@ test 'start performs only the artifact-worker handoff', ->
     if priorArtifact? then process.env.APP_ARTIFACT = priorArtifact else delete process.env.APP_ARTIFACT
     if priorSocket? then process.env.SOCKET_PATH = priorSocket else delete process.env.SOCKET_PATH
     delete globalThis.__ripHandler
+
+test! 'hub registers a Bam bridge that admits authenticated sessions', ->
+  resetGlobals()
+  admitted = []
+  hub
+    bridge: 'hub'
+    auth: -> @req.header('x-auth') is 'yes'
+    open: ->
+      admitted.push 'open'
+      { '+': ['/hub'] }
+    text: -> { '@': ['/hub'], ping: {} }
+  denied = handle! Request.new('http://test/hub', {
+    method: 'POST'
+    headers: { 'sec-websocket-frame': 'open' }
+  })
+  eq denied.status, 401
+  opened = handle! Request.new('http://test/hub', {
+    method: 'POST'
+    headers: { 'sec-websocket-frame': 'open', 'x-auth': 'yes' }
+  })
+  eq opened.status, 200
+  eq opened.json!, { '+': ['/hub'] }
+  eq admitted, ['open']
+  texted = handle! Request.new('http://test/hub', {
+    method: 'POST'
+    headers: { 'sec-websocket-frame': 'text', 'x-auth': 'yes' }
+    body: '{}'
+  })
+  eq texted.json!, { '@': ['/hub'], ping: {} }
+  quiet = handle! Request.new('http://test/hub', {
+    method: 'POST'
+    headers: { 'sec-websocket-frame': 'close', 'x-auth': 'yes' }
+  })
+  eq quiet.status, 204

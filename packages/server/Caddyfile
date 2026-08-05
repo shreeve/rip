@@ -26,10 +26,12 @@
 			max_app_share 50
 		}
 		hub {
-			mode direct
+			mode bridge
 			origin same
 		}
-		files
+		files {
+			precompressed
+		}
 		browse
 	}
 }

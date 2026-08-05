@@ -1,5 +1,5 @@
 import { test, eq, ok } from '@rip-lang/testing'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -182,6 +182,63 @@ test! 'serve.rip selects a custom App root and change policy', ->
     control.stop true
     rmSync dir, { recursive: true, force: true }
 
+test! 'serve.rip hub.bridge normalizes Bam names onto registration', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-hub-')
+  project = join dir, 'project'
+  mkdirSync join(project, 'app'), { recursive: true }
+  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
+  writeFileSync join(project, 'index.rip'), """
+  import { get, start, hub } from '@rip-lang/server'
+  hub bridge: 'hub', auth: false
+  get '/api/ok' -> 'ok'
+  start!
+  """
+  mkdirSync join(project, 'app', 'routes'), { recursive: true }
+  writeFileSync join(project, 'app', 'routes', 'index.rip'), "export Index = component\n  render\n    h1 'Hub'\n"
+  writeFileSync join(project, 'serve.rip'), """
+  export default
+    hub:
+      bridge: 'hub'
+    app:
+      root: 'app'
+  """
+  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'server'), 'dir'
+  calls = []
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, calls
+  process = null
+  try
+    { proc: process } = run project, [project, '--control', controlSocket, '--no-watch', '--access-log=off', '--workers', '1', '--host', 'hub.example.test']
+    waitFor! 'hub registration', ->
+      calls.some (call) -> call.method is 'POST' and call.path is '/1.0/apps'
+    body = calls.find((call) -> call.method is 'POST' and call.path is '/1.0/apps').body
+    eq body.bridge, '/hub'
+    ok body.files.proxy_first.includes('/api')
+    ok body.files.proxy_first.includes('/hub')
+    process.kill 'SIGTERM'
+    eq await process.exited, 143
+  finally
+    try process?.kill 'SIGKILL'
+    await process.exited if process?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'serve.rip rejects hub.bridge without an API entry', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-hub-app-only-')
+  project = join dir, 'project'
+  mkdirSync join(project, 'app'), { recursive: true }
+  writeFileSync join(project, 'app', 'index.rip'), "export default -> 'ok'\n"
+  writeFileSync join(project, 'serve.rip'), "export default { hub: { bridge: 'hub' }, app: { root: 'app' } }\n"
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, []
+  try
+    { proc, err } = run project, [project, '--control', controlSocket, '--no-watch', '--access-log=off']
+    eq await proc.exited, 1
+    ok (await err).includes('hub.bridge requires an API entry')
+  finally
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
 test! 'serve.rip rejects a change pattern assigned to the wrong apply kind', ->
   dir = mkdtempSync join(tmpdir(), 'rip-manager-invalid-changes-')
   project = join dir, 'project'
@@ -353,6 +410,10 @@ test! 'control commands reject every startup-only option', ->
     ['--control', join(dir, 'janus.sock')]
     ['--watch']
     ['--no-watch']
+    ['--watch-app']
+    ['--no-watch-app']
+    ['--watch-api']
+    ['--no-watch-api']
     ['--allow-watch']
     ['--eager']
     ['--workers', '1']
@@ -403,7 +464,7 @@ test! 'stop command gracefully deregisters and exits the canonical manager', ->
       operation: 'Active'
       stopping: true
       workers: 0
-      watch: false
+      watch: { app: false, api: false }
       migration: null
     ok calls.some((call) -> call.method is 'DELETE' and call.path is '/1.0/apps/registration-1')
   finally

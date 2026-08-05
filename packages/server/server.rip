@@ -16,6 +16,7 @@
 #   Validation: read, registerValidator, getValidator, isRawType,
 #               validatorNames, check
 #   Context:    ctx, session, env, subrequest, mark
+#   Hub:        hub
 #   Utilities:  isBlank, toName, toPhone, formatMoney
 #   OpenAPI:    openapi, errorEnvelope
 #   Dev:        resetGlobals, requestContext
@@ -708,6 +709,37 @@ export start = ->
     throw Error.new 'start() requires the Rip worker runtime — run the application with `rip server`'
   globalThis.__ripHandler = fetch
   fetch
+
+# Bam Hub bridge — Janus POSTs open|text|close here; return directive
+# frames (or null for 204). `bridge: 'hub'` matches serve.rip and becomes
+# POST /hub. auth: true (default) requires session.authenticated.
+export hub = (opts = {}) ->
+  throw TypeError.new('hub options must be an object') unless opts? and typeof opts is 'object' and not Array.isArray(opts)
+  name = opts.bridge ?? 'hub'
+  throw TypeError.new('hub.bridge must be a nonempty string') unless typeof name is 'string' and name.length > 0
+  name = name.replace(/^\/+/, '').replace(/\/+$/, '')
+  throw TypeError.new('hub.bridge must be a path name without ? #') if name.length is 0 or /[?#\s]/.test(name) or name.includes('\\') or name.includes('//')
+  for part in name.split('/')
+    throw TypeError.new('hub.bridge must not contain . or .. segments') if part is '' or part is '.' or part is '..'
+  bridgePath = "/#{name}"
+  auth = opts.auth
+  auth = true if auth is undefined
+  throw TypeError.new('hub.auth must be boolean or a function') unless typeof auth is 'boolean' or typeof auth is 'function'
+  open = opts.open ?? (-> null)
+  text = opts.text ?? (-> null)
+  close = opts.close ?? (-> null)
+  for [label, fn] in [['open', open], ['text', text], ['close', close]]
+    throw TypeError.new("hub.#{label} must be a function") unless typeof fn is 'function'
+  post bridgePath, ->
+    if auth is true
+      bail! unless session.authenticated is true
+    else if typeof auth is 'function'
+      bail! unless auth.call(@)
+    kind = (@req.header('sec-websocket-frame') or '').toLowerCase()
+    if kind is 'open' then return open.call(@)
+    if kind is 'close' then return close.call(@)
+    if kind is 'text' then return text.call(@)
+    null
 
 export App = (fn) ->
   resetGlobals()

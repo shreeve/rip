@@ -1,0 +1,7 @@
+export default
+  name: 'cart'
+  hosts: ['cart.ripdev.io']
+  hub:
+    bridge: 'hub'
+  app:
+    root: 'app'

@@ -22,7 +22,7 @@ REGISTER_409_MS = positiveEnv 'RIP_REGISTER_409_MS', 30000
 
 parseArgs = (argv) ->
   command = if ['browse', 'status', 'stop', 'hold', 'release', 'migrate', 'recover'].includes(argv[0]) then argv[0] else 'start'
-  args: any = { command, entry: null, migrationEntry: null, migrationDir: 'migrations', operationId: null, name: null, hosts: [], control: process.env.JANUS_CONTROL or null, workers: 2, concurrency: 1, watch: null, allowWatch: false, eager: false, untilRestart: false, accessMode: 'pretty', accessPicture: null, accessExplicit: false, startupFlags: [] }
+  args: any = { command, entry: null, migrationEntry: null, migrationDir: 'migrations', operationId: null, name: null, hosts: [], control: process.env.JANUS_CONTROL or null, workers: 2, concurrency: 1, watchApp: null, watchApi: null, allowWatch: false, eager: false, untilRestart: false, accessMode: 'pretty', accessPicture: null, accessExplicit: false, startupFlags: [] }
   i = if command is 'start' then 0 else 1
   while i < argv.length
     value = argv[i]
@@ -44,11 +44,29 @@ parseArgs = (argv) ->
       when '--watch'
         abort 'rip-server: --watch does not apply to browse' if command is 'browse'
         args.startupFlags.push value
-        args.watch = true
+        args.watchApp = true
+        args.watchApi = true
       when '--no-watch'
         abort 'rip-server: --no-watch does not apply to browse' if command is 'browse'
         args.startupFlags.push value
-        args.watch = false
+        args.watchApp = false
+        args.watchApi = false
+      when '--watch-app'
+        abort 'rip-server: --watch-app does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.watchApp = true
+      when '--no-watch-app'
+        abort 'rip-server: --no-watch-app does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.watchApp = false
+      when '--watch-api'
+        abort 'rip-server: --watch-api does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.watchApi = true
+      when '--no-watch-api'
+        abort 'rip-server: --no-watch-api does not apply to browse' if command is 'browse'
+        args.startupFlags.push value
+        args.watchApi = false
       when '--allow-watch'
         abort 'rip-server: --allow-watch does not apply to browse' if command is 'browse'
         args.startupFlags.push value
@@ -239,8 +257,20 @@ requireFile = (path, at) ->
   invalidServe "#{at} file not found: #{path}" unless existsSync path
   invalidServe "#{at} is not a file: #{path}" unless statSync(path).isFile()
 
+# Hub bridge paths are Bam-simple: hub, /hub, hub/, ///hub/// → /hub.
+normalizeHubBridge = (value, at) ->
+  name = needString value, at
+  name = name.replace /^\/+/, ''
+  name = name.replace /\/+$/, ''
+  invalidServe "#{at} must be a nonempty path" unless name.length > 0
+  invalidServe "#{at} must not contain ? # whitespace or backslash" if /[?#\s]/.test(name) or name.includes('\\')
+  invalidServe "#{at} must not contain empty path segments" if name.includes('//')
+  for part in name.split('/')
+    invalidServe "#{at} must not contain '.' or '..' segments" if part is '' or part is '.' or part is '..'
+  "/#{name}"
+
 normalizeServeConfig = (raw, appDir) ->
-  rejectUnknown raw, ['name', 'hosts', 'sites', 'files', 'app'], 'serve.rip'
+  rejectUnknown raw, ['name', 'hosts', 'sites', 'files', 'app', 'hub'], 'serve.rip'
   out = {}
   out.name = needString(raw.name, 'serve.rip name') if raw.name?
   if raw.hosts?
@@ -325,8 +355,22 @@ normalizeServeConfig = (raw, appDir) ->
     overlapsDist = root is dist or root.startsWith("#{dist}/") or dist.startsWith("#{root}/")
     invalidServe 'serve.rip app.root cannot overlap the manager-owned dist directory' if overlapsDist
     out.app = { root, changes: normalizeAppChanges(raw.app.changes) }
+  if raw.hub?
+    rejectUnknown raw.hub, ['bridge'], 'serve.rip hub'
+    invalidServe 'serve.rip hub.bridge is required when hub is declared' unless 'bridge' of raw.hub
+    out.hub = { bridge: normalizeHubBridge(raw.hub.bridge, 'serve.rip hub.bridge') }
   invalidServe 'serve.rip sites requires files' if out.site? and not out.files?
   out
+
+ensureProxyFirst = (files, bridgePath) ->
+  return files unless files? and bridgePath?
+  proxy = [...(files.proxy_first or [])]
+  covered = proxy.some (prefix) -> bridgePath is prefix or bridgePath.startsWith("#{prefix}/") or prefix is '/'
+  unless covered
+    for prior in proxy
+      invalidServe "serve.rip hub.bridge #{bridgePath} overlaps proxyFirst #{JSON.stringify(prior)}" if prior.startsWith("#{bridgePath}/")
+    proxy = [...proxy, bridgePath]
+  { ...files, proxy_first: proxy }
 
 loadServeConfig = (appDir) ->
   configPath = join appDir, 'serve.rip'
@@ -811,6 +855,7 @@ export main = (argv) ->
     project.appChanges = serve.app.changes
   else if project.appRoot?
     project.appChanges = defaultAppChanges()
+  hubBridge = serve?.hub?.bridge ?? (if project.entry? then '/hub' else null)
   args.name = args.name or serve?.name or basename(project.root).replace(/\.[^.]+$/, '')
   site = serve?.site ?? null
   if site? and args.hosts.length > 0
@@ -822,15 +867,19 @@ export main = (argv) ->
     else [args.name]
   for host, i in hosts
     abort "rip-server: --host value is not valid: #{host}" unless typeof host is 'string' and validHost host
+  if hubBridge? and not project.entry?
+    abort 'rip-server: hub.bridge requires an API entry so Janus can POST the Bam bridge to workers'
   if serve?.files? and not serve.files.shell? and project.entry?
     abort 'rip-server: shell-less browse policy cannot publish API upstreams'
   prod = process.env.RIP_ENV is 'production'
-  args.watch = args.watch ?? (not prod)
-  if args.watch and prod
+  defaultWatch = not prod
+  args.watchApp = args.watchApp ?? defaultWatch
+  args.watchApi = args.watchApi ?? defaultWatch
+  if (args.watchApp or args.watchApi) and prod
     abort 'rip-server: watch in production requires --allow-watch' unless args.allowWatch
     warn 'rip-server: WATCH ENABLED IN PRODUCTION'
-  if project.entry? and args.concurrency > 1 and (args.watch or args.eager)
-    abort "rip-server: -c #{args.concurrency} requires watch off — raise c only with watch off"
+  if project.entry? and args.concurrency > 1 and (args.watchApi or args.eager)
+    abort "rip-server: -c #{args.concurrency} requires API watch off — raise c only with --no-watch-api"
   abort 'rip-server: --control or JANUS_CONTROL is required' unless args.control?
   probeControl! args.control
   runDir = mkdtempSync join(tmpdir(), 'rip-srv-')
@@ -905,10 +954,11 @@ export main = (argv) ->
     else
       body.hosts = hosts
     body.files = files if files?
+    body.bridge = hubBridge if hubBridge?
     body
 
   status = ->
-    { name: args.name, root: project.root, hosts, site, operation, stopping, workers: workers.length, watch: args.watch, migration: (if migration? then { id: migration.id, phase: migration.phase, outcome: migration.outcome } else null) }
+    { name: args.name, root: project.root, hosts, site, operation, stopping, workers: workers.length, watch: { app: args.watchApp, api: args.watchApi }, migration: (if migration? then { id: migration.id, phase: migration.phase, outcome: migration.outcome } else null) }
 
   managerOutput = (text) ->
     stream = if args.accessMode is 'raw' then process.stderr else process.stdout
@@ -1176,7 +1226,7 @@ export main = (argv) ->
     return
 
   watchAppDependencies = (documents) ->
-    return 0 unless args.watch
+    return 0 unless args.watchApp
     added = 0
     for root in documents.watchRoots or []
       root = resolve root
@@ -1228,7 +1278,7 @@ export main = (argv) ->
     publishChange! change
 
   startAppWatcher = ->
-    return unless args.watch and project.appRoot?
+    return unless args.watchApp and project.appRoot?
     appWatcher = watch project.appRoot, { recursive: true }, (_event, filename) ->
       return if stopping
       if not appWatchReady or operation isnt 'Active'
@@ -1316,7 +1366,7 @@ export main = (argv) ->
     return
 
   startApiWatcher = ->
-    return unless args.watch and project.entry?
+    return unless args.watchApi and project.entry?
     apiWatcher = watch project.root, { recursive: true }, (event, filename) ->
       return if stopping
       rel = String(filename or '')
@@ -1431,7 +1481,7 @@ export main = (argv) ->
     { ...report, code, output: (if code is 0 then stdout.trim() else stderr.trim()) }
 
   publishReload = ->
-    return unless args.watch
+    return unless args.watchApp
     delay = 25
     loop
       try
@@ -1685,12 +1735,13 @@ export main = (argv) ->
       startAppWatcher()
       authoritative = buildAppDocuments! project
       authoritative = (stabilizeAppDocuments! authoritative).documents
-      publication = publishApp! project, args.name, args.watch, authoritative, serve?.files?.shell
+      publication = publishApp! project, args.name, args.watchApp, authoritative, serve?.files?.shell
       appPublication = authoritative
       appGraph = authoritative.graph
     else
-      publication = publishApp! project, args.name, args.watch, (if operation is 'Maintenance' then null else undefined), serve?.files?.shell
+      publication = publishApp! project, args.name, args.watchApp, (if operation is 'Maintenance' then null else undefined), serve?.files?.shell
     files = registrationFiles project, serve?.files, publication
+    files = ensureProxyFirst files, hubBridge
     if project.entry?
       startApiWatcher()
       workerArtifact = join runDir, 'worker.js'

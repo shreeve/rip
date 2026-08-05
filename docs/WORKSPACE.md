@@ -205,11 +205,12 @@ available.
 
 ## Watch-off and production
 
-Watch-off mode publishes the same initial bundle and latest probe, creates no
-App watcher, and announces no file changes. An application may still use the
-same Hub for chat, presence, CRDTs, collaborative editing, or other realtime
-features. Those messages are application data and do not enable publication
-watching.
+App watch-off publishes the same initial bundle and latest probe, creates no
+App watcher, and announces no file changes. API watch-off leaves admitted
+workers in place and does not prepare replacement generations from source
+edits. An application may still use the same Hub for chat, presence, CRDTs,
+collaborative editing, or other realtime features. Those messages are
+application data and do not enable publication watching.
 
 Production content uses HTTP. Production does not require source deltas over
 WSS, a service worker, OPFS, or RipFS. Those storage mechanisms may be added as

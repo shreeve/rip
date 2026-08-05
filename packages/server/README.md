@@ -916,6 +916,8 @@ policy:
 ```coffee
 export default
   name: 'medlabs'
+  hub:
+    bridge: 'hub'
   app:
     root: 'app'
     changes:
@@ -992,8 +994,11 @@ omits `files` entirely. The project directory is never an implicit public
 root.
 
 Janus receives one atomic registration containing identity, site or hosts,
-normalized file policy, and the initial upstream list. Hub direct mode is
-Janus edge policy; it is not a separate manager registration field.
+normalized file policy, optional Bam `bridge`, and the initial upstream
+list. App-local `hub.bridge: 'hub'` (or `'/hub'`, `'///hub///'`, …) normalizes
+to `/hub`; Manager registers that path and ensures it is proxied to workers.
+Presence of `hub.bridge` selects Janus bridge mode’s tenant HTTP door; Manager
+publication still uses control-plane `hub/publish` and does not ride the bridge.
 
 ## API Generation and Hot Reload
 
@@ -1115,8 +1120,11 @@ for `app.rip`, `index.rip`, or `app/`.
 --name <name>           registration name
 --host <host>           exact public host; repeatable
 -w, --workers <n>       worker processes (default 2)
--c, --concurrency <n>   requests per worker (default 1; >1 requires watch off)
---watch / --no-watch    enable or disable watching
+-c, --concurrency <n>   requests per worker (default 1; >1 requires API watch off)
+--watch / --no-watch    enable or disable App and API watching together
+--watch-app / --no-watch-app
+--watch-api / --no-watch-api
+                        enable or disable App publication or API worker watching
 --allow-watch           required to watch under RIP_ENV=production
 --eager                 boot after settle instead of waiting for a ring
 --control <target>      Janus unix socket or HTTP(S) control endpoint
@@ -1288,7 +1296,7 @@ bun run test:appliance
 bun run test:janus
 ```
 
-`test:janus` builds and caches a Caddy binary with released Janus `v1.5.0`;
+`test:janus` builds and caches a Caddy binary with released Janus `v1.6.1`;
 `JANUS_CADDY` can override that binary. `bun run test` discovers and runs every
 `test/*/test.rip` fixture.
 
