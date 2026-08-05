@@ -233,12 +233,19 @@ information reaches its mapped source line: an annotation in the
 declaration's header, the compiler's own types (schemas, components),
 flow along assignment, or an import of a typed export (annotated `.rip`
 exports, relative `.ts` modules, and bare workspace `.rip` packages).
-Inference alone never publishes — `answer = 42` misused as a string is
-held until someone writes a type — which keeps the rule statable: you
-get diagnostics where type information reaches, and an annotation is how
-you ask for more. The gate lives in `packages/vscode/src/scopes.js`,
-shared verbatim by the editor and `rip check`, and it fails OPEN: a
-source the lexer refuses publishes everything.
+Inference alone never publishes, and an annotation is how you ask for
+more. What inference produces over unannotated Rip is dominated by
+confident errors about correct code: a parameter is typed from its
+`= {}` default, so every legitimate `opts.foo` reads as "does not exist
+on type `{}`"; an object built by spread reads as closed to the key set
+it was built with; a Bun API is unknown for want of `@types/bun`. Those
+land exactly where the author declined to annotate, and no edit but an
+annotation answers them. The case the other side would catch —
+`answer = 42` later misused as a string — is genuine but was not found
+anywhere in this repository. The gate lives in
+`packages/vscode/src/scopes.js`, shared verbatim by the editor and
+`rip check`, and it fails OPEN: a source the lexer refuses publishes
+everything.
 
 Names and modules that do not resolve, and definition cycles, publish
 in every mode — defects no annotation answers. One exception spells the
