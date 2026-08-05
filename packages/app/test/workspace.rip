@@ -218,10 +218,12 @@ test! "only one exact server acknowledgement can start the reconnect probe", ->
   socket = sockets[0]
   socket.onopen()
   join = JSON.parse socket.sent[0]
+  socket.onmessage { data: JSON.stringify({ '!': join['?'], '<': ['attacker'] }) }
+  settle!
+  eq calls.length, 0
   ack socket
   settle!
   eq calls.length, 1
-  socket.onmessage { data: JSON.stringify({ '!': join['?'], '<': ['attacker'] }) }
   socket.onmessage { data: JSON.stringify({ '!': join['?'] }) }
   settle!
   eq calls.length, 1

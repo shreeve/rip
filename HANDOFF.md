@@ -34,20 +34,24 @@ lives in `docs/`; git history and pull requests retain completed-work detail.
   generation reloads a complete bundle. A valid transition that requires
   whole-App reconstruction reloads without being quarantined.
 - Reconnect joins `/hub`, receives the Janus acknowledgement, then requests
-  `latest.json`. Client-originated Hub frames cannot inject publication changes.
+  `latest.json`. Only one exact outstanding server acknowledgement starts the
+  probe; client-originated Hub frames cannot acknowledge or inject publication
+  changes. `latest.json` is exactly `{ hash }`.
 - Browser publication modules use static imports and canonical Rip paths.
   Missing targets, cycles, dynamic imports, hidden segments, and file-shaped
-  directory segments reject before Manager commits a publication.
+  directory segments reject before Manager commits a publication. App,
+  package, and schema-projection source reject malformed UTF-8.
 
 ## Verified landing candidate
 
-- `bun run test:all` — 22 lanes, 8,354 tests passed in 76.9 seconds.
+- `bun run test:all` — 22 lanes, 8,357 tests passed in 96.3 seconds.
 - `bunx playwright test --reporter=line` in `packages/browser-tests` — 21
   passed, 2 intentionally skipped across Chromium, Firefox, WebKit, and the
   live Cart Server/Manager harness.
 - `git diff --check` — passed.
-- Adversarial publication review — GO after empirical race, security,
-  invalidation, watcher, and transaction probes were converted into tests.
+- Independent verification and genuinely cold adversarial review — GO after
+  empirical race, security, invalidation, watcher, encoding, and transaction
+  probes were converted into tests.
 
 Arbitrary top-level ESM side effects execute while a candidate module graph is
 evaluated and cannot be rolled back. Workspace, renderer, source, route
