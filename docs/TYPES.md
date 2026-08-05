@@ -288,6 +288,13 @@ reload. `rip check [paths...]` applies the same project configuration,
 materializes the same TypeScript faces and import closure, and translates
 diagnostics through the same mapping seam without starting an editor.
 
+A check answers for the paths it was given. The closure is compiled and
+checked whole — a target's types cannot resolve otherwise — but a
+dependency's own diagnostics report through its own check, counted here
+in one summary line instead. The editor draws the same line by a
+different rule: it publishes per open document, so a dependency stays
+silent until you open it.
+
 ## Correctness gates
 
 - **Erasure:** typed and untyped twins emit identical JavaScript.

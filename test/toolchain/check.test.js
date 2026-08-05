@@ -924,6 +924,38 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // A check answers for the paths it was ASKED about. The closure is
+  // compiled and checked whole — types cannot resolve otherwise — but a
+  // dependency's own diagnostics are its author's, not the caller's:
+  // reporting them makes a package's exit code hostage to code its
+  // author does not own, and surfaces defects the dependency's own
+  // check cannot reproduce. The dependency is not silently dropped —
+  // one summary line names where to look.
+  test('a check reports its targets, not its dependencies', () => {
+    const dir = workspace({
+      'app/app.rip': [
+        "import { helper } from '../lib/lib.rip'",
+        'label: string = helper',
+        'console.log(label)',
+      ].join('\n') + '\n',
+      'lib/lib.rip': [
+        'export helper: string = "x"',
+        'broken: number = "not a number"',
+        'console.log(broken)',
+      ].join('\n') + '\n',
+    });
+    try {
+      // Asked about app/ — the dependency's TS2322 is not the answer.
+      const scoped = JSON.parse(check(dir, ['--json', 'app']).stdout);
+      expect(scoped).toEqual([]);
+      // But it is accounted for, not hidden.
+      expect(check(dir, ['app']).stdout).toMatch(/1 diagnostic in dependencies \(lib\)/);
+      // Asked about the whole tree — the same diagnostic IS the answer.
+      const whole = JSON.parse(check(dir, ['--json']).stdout);
+      expect(whole.map((d) => [d.file, d.code])).toEqual([['lib/lib.rip', 2322]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // Config is per FILE (nearest package.json), so a strict consumer's
   // check still hides its gradual DEPENDENCIES' diagnostics — and a
   // summary that says "set `rip.strict` in package.json" after the user

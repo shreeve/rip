@@ -262,6 +262,10 @@ const hiddenScopeDirs = new Set();
 const hiddenAnnotationDirs = new Set();
 let hiddenUninstalled = 0;
 const hiddenUninstalledDirs = new Set();   // where `bun install` answers
+// A DEPENDENCY's diagnostics — a closure file the run was not asked
+// about. Counted, never reported: see the pull loop.
+let dependencyDiags = 0;
+const dependencyDirs = new Set();
 const seen = new Set();
 const explicitTargets = new Set(targets);
 const queue = [...targets];
@@ -553,6 +557,16 @@ if (compiled.size > 0) {
           console.error(`rip check: could not pull diagnostics for ${path.relative(process.cwd(), fsPath)} (${err.message}) — the run is incomplete`);
           continue;
         }
+        // A DEPENDENCY answers for itself: a file the run was not asked
+        // about is still compiled and checked — a target's types cannot
+        // resolve otherwise — but its diagnostics report through its own
+        // check, not this one. Reporting them makes a package's exit
+        // code hostage to code its author does not own, and shows a
+        // consumer defects the dependency's own check cannot reproduce.
+        // Its HIDDEN families still count below: those name which
+        // package.json a `rip.strict` remedy belongs to, which is as
+        // true of a dependency as of a target.
+        const isTarget = explicitTargets.has(fsPath);
         const mapped = [];
         for (const d of pulled?.items ?? []) {
           const m = mapTsDiagnostic(entry.good, d);
@@ -590,6 +604,20 @@ if (compiled.size > 0) {
           mapped.push(m);
         }
         for (const m of applyRipDirectives(entry.good, mapped)) {
+          if (!isTarget) {
+            // Counted under the REPORT's own rule — error/warning only,
+            // no unused/deprecated fade classes — so the number is in the
+            // same currency as the count above it. It covers the
+            // dependency files THIS closure reached, which is fewer than
+            // checking that directory outright.
+            if ((m.severity ?? 1) > 2) continue;
+            dependencyDiags++;
+            // The file's own directory, not its project: the line answers
+            // "where do I go to see these", and a directory is what `rip
+            // check` takes back.
+            dependencyDirs.add(path.relative(process.cwd(), path.dirname(fsPath)) || '.');
+            continue;
+          }
           tsDiags.push({
             file: fsPath, severity: m.severity, code: m.code, message: m.message,
             line: m.range.start.line, character: m.range.start.character,
@@ -725,7 +753,15 @@ if (asJson) {
     if (!named.length) return '';
     return ` (${named.slice(0, 3).join(', ')}${named.length > 3 ? ` and ${named.length - 3} more` : ''})`;
   };
-  if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0 || hiddenUninstalled > 0) console.log('');
+  if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0 || hiddenUninstalled > 0 || dependencyDiags > 0) console.log('');
+  if (dependencyDiags > 0) {
+    // Every directory names itself here — unlike the `rip.strict`
+    // families, whose home project is the one the reader is already in.
+    const dirs = [...dependencyDirs].sort();
+    const shown = dirs.slice(0, 3).join(', ') + (dirs.length > 3 ? ` and ${dirs.length - 3} more` : '');
+    console.log(gray(`${dependencyDiags} diagnostic${plural(dependencyDiags)} in dependencies (${shown}) `
+      + `— check them there`));
+  }
   if (hiddenScope > 0) {
     console.log(gray(`${hiddenScope} diagnostic${plural(hiddenScope)} hidden in unannotated code${inProjects(hiddenScopeDirs)} `
       + `— annotate a declaration to check its scope, or set \`rip.strict\` in package.json`));
