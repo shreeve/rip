@@ -2774,7 +2774,9 @@ function anchorLine(file, anchor) {
   return -1;
 }
 
-connection.onDocumentLinks((params) => {
+connection.onDocumentLinks(async (params) => {
+  // Asked once on open and cached, so the same settle the outline needs.
+  await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx?.good.trivia || !params.textDocument.uri.startsWith('file://')) return null;
   let dir;
@@ -2859,6 +2861,10 @@ function ripDocumentSymbols(ctx, symbols, seen = new Set()) {
 
 connection.onDocumentSymbol(async (params) => {
   await tsgoReady;
+  // Cached by the editor exactly like semantic tokens, and asked once when
+  // the editor opens — before the first compile that is a null, and the
+  // outline and breadcrumbs stay empty until an edit re-asks.
+  await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return null;
   const result = await tsgoRequest('textDocument/documentSymbol', {
