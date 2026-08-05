@@ -102,13 +102,13 @@
         "@rip-lang/testing": "workspace:*",
       },
     },
-    "packages/server": {
-      "name": "@rip-lang/server",
+    "packages/sites": {
+      "name": "@rip-lang/sites",
       "version": "4.0.0",
       "bin": {
-        "rip-app": "./app.rip",
+        "rip-site": "./site.rip",
+        "rip-sites": "./sites.rip",
         "rip-edge": "./edge.rip",
-        "rip-server": "./server.rip",
       },
       "dependencies": {
         "@rip-lang/app": "workspace:*",
@@ -231,7 +231,7 @@
 
     "@rip-lang/script": ["@rip-lang/script@workspace:packages/script"],
 
-    "@rip-lang/server": ["@rip-lang/server@workspace:packages/server"],
+    "@rip-lang/sites": ["@rip-lang/sites@workspace:packages/sites"],
 
     "@rip-lang/stamp": ["@rip-lang/stamp@workspace:packages/stamp"],
 

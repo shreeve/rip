@@ -1,6 +1,6 @@
-# Rip Server
+# Rip Sites
 
-Rip Server publishes browser applications and runs API workers behind one
+Rip Sites publishes browser applications and runs API workers behind one
 Caddy + Janus edge. The durable boundary is producer versus consumer:
 
 ```text
@@ -16,7 +16,8 @@ Rip Manager ── publishes application files ──► Caddy / Janus ──►
   validates browser publications, commits them, announces confirmed changes,
   builds API generations, and supervises workers.
 - **Caddy and Janus provide infrastructure.** Caddy owns TLS and HTTP. Janus
-  owns registration, static files, API proxying, Hub transport, cache
+  owns registration, static files, API proxying, Hub transport (Bam: WSS at the
+  edge, optional HTTP bridge to workers, control-plane publish), cache
   validators, and access streams. Neither interprets Rip source or Rip hashes.
 - **Workers execute API code.** They do not compile browser Apps or serve App
   files.
@@ -224,10 +225,14 @@ Initial HTTP boot does not require the Hub.
 
 ## Non-watch mode
 
-Non-watch mode constructs and publishes the same `bundle.json`,
-`bundle.json.br`, and `latest.json`. It creates no App watcher and announces no
-publication changes. A Hub used for chat, presence, CRDTs, or collaboration
-does not implicitly enable file publication.
+App and API watching are independent. `--no-watch` disables both;
+`--no-watch-app` / `--no-watch-api` disable one side. With App watching off,
+Manager still constructs and publishes the same `bundle.json`,
+`bundle.json.br`, and `latest.json`, creates no App watcher, and announces no
+publication changes. With API watching off, Manager serves the admitted worker
+pool and does not prepare replacement generations from source edits. A Hub used
+for chat, presence, CRDTs, or collaboration does not implicitly enable file
+publication.
 
 ## API generations and workers
 
@@ -281,7 +286,7 @@ control socket.
 ## Verification
 
 ```bash
-cd packages/server
+cd packages/sites
 bun run test
 ```
 

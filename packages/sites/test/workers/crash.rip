@@ -1,0 +1,10 @@
+import { existsSync, writeFileSync } from 'node:fs'
+import { get, start } from '@rip-lang/sites'
+
+marker = process.env.RIP_TEST_CRASH_ONCE
+if marker? and not existsSync(marker)
+  writeFileSync marker, 'crashed'
+  process.exit 7
+
+get '/hello' -> { message: 'recovered' }
+start!

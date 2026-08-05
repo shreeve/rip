@@ -1,0 +1,81 @@
+import './db.rip'
+import { get, post, patch, read, session } from '@rip-lang/sites'
+import { User, Product, Order, OrderItem, OrderLine, UserPublic, ProductPublic, OrderPublic } from './models.rip'
+
+def errorResponse(errors: { form?: string, field?: Partial<Record<string, string>> }, status = 400)
+  return Response.json({ errors }, { status })
+
+# Demo identity: the seeded user. Mark the session authenticated so the
+# Bam Hub bridge (POST /hub) admits the same cookie the API already uses.
+currentUser = () ->
+  user = User.find!(1)
+  if user?
+    session.authenticated = true
+    session.userId = user.id
+  user
+
+get '/api/user' ->
+  user = currentUser!
+  if not user then return errorResponse({ form: 'No user found' }, 404)
+  return UserPublic.parse(user)
+
+patch '/api/user' ->
+  firstName = read 'firstName', 'name'
+  lastName  = read 'lastName',  'name'
+  phone     = read 'phone',     'text'
+
+  field: Partial<Record<keyof UserPublic, string>> = {}
+  if not firstName then field.firstName = 'Enter a first name'
+  if not lastName then field.lastName = 'Enter a last name'
+
+  if Object.keys(field).length then return errorResponse({ field })
+
+  user = currentUser!
+  if not user then return errorResponse({ form: 'No user found' }, 404)
+
+  Object.assign(user, { firstName, lastName, phone })
+  user.save!
+
+  return UserPublic.parse(user)
+
+get '/api/products' -> Product.all!.map((p) -> ProductPublic.parse(p))
+
+get '/api/orders' ->
+  user = currentUser!
+  if not user then return []
+  return user.orders!.reverse().map((o) -> OrderPublic.parse(o))
+
+get '/api/orders/:id' ->
+  id = read 'id', 'id'
+
+  user = currentUser!
+  if not user then return errorResponse({ form: 'No user found' }, 404)
+
+  order = Order.where({ id, userId: user.id }).first!
+  if not order then return errorResponse({ form: 'Order not found' }, 404)
+
+  return OrderPublic.parse(order)
+
+post '/api/orders' ->
+  raw = read 'items', 'array'
+
+  if not raw?.length then return errorResponse({ form: 'Invalid order data' })
+
+  total = 0
+  items: OrderItem[] = []
+  for line in raw
+    result = OrderLine.safe(line)
+    if not result.ok
+      return errorResponse({ form: 'Invalid order data' })
+    { productId, quantity } = result.value
+    product = Product.find!(productId)
+    if not product
+      return errorResponse({ form: "Product #{productId} not found" })
+    total += product.price * quantity
+    items.push({ productId, name: product.name, price: product.price, image: product.image, quantity })
+
+  user = currentUser!
+  if not user then return errorResponse({ form: 'No user found' }, 404)
+
+  order = Order.create!({ userId: user.id, total, items })
+  return @json(OrderPublic.parse(order), 201)

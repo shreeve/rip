@@ -1,0 +1,68 @@
+#!/usr/bin/env rip
+
+import { printJson, requestAgent } from './appliance.rip'
+
+throw Error.new('@rip-lang/sites/edge is a CLI, not a library; run `rip edge`') unless import.meta.main
+
+HELP = '''
+  usage: rip edge <command> [options]
+
+  Commands:
+    status                               Show Caddy and Janus health
+    start [options]                      Start the shared Caddy+Janus edge
+    stop                                 Gracefully stop a Rip-owned edge
+    reload                               Reload a Rip-owned Caddyfile
+
+  Start options:
+    --caddy PATH                         Janus-enabled Caddy binary
+    --config PATH                        Caddyfile (default: Rip baseline)
+    --control TARGET                     Janus HTTP URL or Unix socket
+    --base-url TEMPLATE                  App URL, containing {host}
+
+  Output:
+    --json                               Print the complete JSON response
+
+  An already-running external edge is reported but never stopped or reloaded.
+'''
+
+args = process.argv.slice 2
+if args.length is 0 or args[0] in ['-h', '--help', 'help']
+  console.log HELP
+  exit 0
+
+command = args.shift()
+json = false
+body = {}
+
+take = (flag) ->
+  abort "rip-edge: #{flag} requires a value" unless args.length
+  args.shift()
+
+while args.length
+  value = args.shift()
+  switch value
+    when '--json' then json = true
+    when '--caddy' then body.caddy = take value
+    when '--config' then body.config = take value
+    when '--control' then body.control = take value
+    when '--base-url'
+      body.baseUrl = take value
+      abort 'rip-edge: --base-url must contain {host}' unless body.baseUrl.includes '{host}'
+    else
+      abort "rip-edge: unknown option #{value}"
+
+abort "rip-edge: unknown command #{JSON.stringify(command)} — run `rip edge --help`" unless command in ['status', 'start', 'stop', 'reload']
+abort "rip-edge: #{command} does not accept start options" if command isnt 'start' and Object.keys(body).length
+
+edge = if command is 'status' then requestAgent!('rip-edge', 'GET', '/1.0/edge') else requestAgent!('rip-edge', 'POST', "/1.0/edge/#{command}", body)
+
+if json
+  printJson edge
+else
+  marker = if edge.state is 'running' then '●' else '○'
+  ownership = if edge.managed then 'Rip-owned' else if edge.state is 'running' then 'external' else 'not running'
+  console.log "#{marker} Edge  #{edge.state} (#{ownership})"
+  console.log "  Control: #{edge.control}"
+  console.log "  Caddy:   #{edge.caddy}" if edge.caddy
+  console.log "  Config:  #{edge.config}" if edge.config
+  console.log "  Error:   #{edge.lastError}" if edge.lastError

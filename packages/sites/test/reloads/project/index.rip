@@ -1,0 +1,4 @@
+import { get, start } from '@rip-lang/sites'
+
+get '/version' -> { version: 'one' }
+start!

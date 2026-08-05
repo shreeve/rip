@@ -38,7 +38,7 @@ reload is a fallback, not the default once framework refresh exists.
 The publication substrate (Layer A) is defined by
 [WORKSPACE.md](WORKSPACE.md): initial `bundle.json`, ordered
 `change {from,hash,list}` messages in watch mode, and reconnect recovery through
-`latest.json`. Rip Server produces that protocol and Rip App consumes it.
+`latest.json`. Rip Sites produces that protocol and Rip App consumes it.
 The baseline remounts the affected live route while preserving the App stash
 and compatible ancestor layouts. Definition patching and signature-aware
 state migration remain outside this baseline.

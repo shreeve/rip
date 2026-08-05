@@ -1,4 +1,4 @@
-// Cart exemplar through real Rip Server: disk edits under app/ and Workspace
+// Cart exemplar through real Rip Site: disk edits under app/ and Workspace
 // publication apply. Vue remount floor — layout +
 // stash survive leaf edits; reload is never the happy path.
 import { expect, test } from '@playwright/test';

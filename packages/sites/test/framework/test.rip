@@ -1,0 +1,479 @@
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import * as server from '@rip-lang/sites'
+import {
+  get, post, put, patch, del, all, use, prefix,
+  before, after, raw, onError, notFound, fetch as handle,
+  App, resetGlobals, requestContext,
+  start, read, error, notice, bail, hub,
+  ctx, session, env, subrequest, mark, errorEnvelope, openapi,
+} from '@rip-lang/sites'
+import { resolve } from 'node:path'
+
+request = (method, path, opts = {}) ->
+  Request.new "http://framework.test#{path}", { method, ...opts }
+
+jsonRequest = (method, path, body) ->
+  request method, path,
+    body: JSON.stringify body
+    headers: { 'content-type': 'application/json' }
+
+captureWarnings = (fn) ->
+  prior = console.warn
+  warnings = []
+  console.warn = (...parts) -> warnings.push parts.map(String).join(' ')
+  try
+    fn!
+    warnings
+  finally
+    console.warn = prior
+
+test 'public package surface exposes the documented framework', ->
+  expected = [
+    'App', 'after', 'all', 'bail', 'before', 'check', 'ctx', 'del', 'env',
+    'error', 'errorEnvelope', 'fetch', 'formatMoney', 'get', 'getValidator',
+    'hub', 'isBlank', 'isRawType', 'mark', 'notFound', 'notice', 'onError',
+    'openapi', 'patch', 'post', 'prefix', 'put', 'raw', 'read',
+    'registerValidator', 'requestContext', 'resetGlobals', 'session', 'start',
+    'subrequest', 'toName', 'toPhone', 'use', 'validatorNames',
+  ]
+  eq Object.keys(server).sort(), expected
+
+test! 'routes, parameters, prefixes, and smart responses compose', ->
+  resetGlobals()
+  get '/text' -> 'hello'
+  get '/html' -> '<h1>Hello</h1>'
+  get '/number' -> 42
+  get '/boolean' -> true
+  get '/object' -> { ok: true }
+  get '/empty' -> null
+  get '/users/:id' -> { id: @req.param('id') }
+  get '/users/:id/books/:book' -> @req.param()
+  get '/files/*' -> @req.path
+  get '/numbers/:id{\\d+}' -> @req.param('id')
+  get '/maybe/:id?' -> @req.param('id') ?? 'none'
+  all '/method' -> @req.method
+  prefix '/api', -> get '/ping' -> 'pong'
+
+  text = handle! request('GET', '/text')
+  eq text.text!, 'hello'
+  eq text.headers.get('content-type'), 'text/plain; charset=UTF-8'
+  ok (handle! request('GET', '/html')).headers.get('content-type').startsWith 'text/html'
+  eq (handle! request('GET', '/number')).text!, '42'
+  eq (handle! request('GET', '/boolean')).text!, 'true'
+  eq (handle! request('GET', '/object')).json!, { ok: true }
+  eq (handle! request('GET', '/empty')).status, 204
+  eq (handle! request('GET', '/users/a%20b')).json!, { id: 'a b' }
+  eq (handle! request('GET', '/users/7/books/9')).json!, { id: '7', book: '9' }
+  eq (handle! request('GET', '/files/a/b')).text!, '/files/a/b'
+  eq (handle! request('GET', '/numbers/42')).text!, '42'
+  eq (handle! request('GET', '/numbers/nope')).status, 404
+  eq (handle! request('GET', '/maybe')).text!, 'none'
+  eq (handle! request('DELETE', '/method')).text!, 'DELETE'
+  eq (handle! request('GET', '/api/ping')).text!, 'pong'
+  eq (handle! request('GET', '/text/')).status, 200
+  malformed = handle! request('GET', '/users/%zz')
+  eq malformed.status, 400
+  eq malformed.json!, { error: { message: 'malformed percent-encoding in path' } }
+  head = handle! request('HEAD', '/text')
+  eq head.status, 200
+  eq head.text!, ''
+
+test! 'middleware uses Request and next in registration order', ->
+  resetGlobals()
+  order = []
+  use (request, next) ->
+    order.push "in:#{request.method}"
+    response = next!
+    order.push 'out'
+    Response.new response.body,
+      status: response.status
+      headers: { ...Object.fromEntries(response.headers), 'x-global': 'yes' }
+  use '/api', (request, next) ->
+    order.push 'scoped'
+    replacement = Request.new request.url,
+      method: request.method
+      headers: { ...Object.fromEntries(request.headers), 'x-replaced': 'yes' }
+    next replacement
+  get '/api/check' -> { replaced: @req.header('x-replaced') }
+
+  response = handle! request('GET', '/api/check')
+  eq response.json!, { replaced: 'yes' }
+  eq response.headers.get('x-global'), 'yes'
+  eq order, ['in:GET', 'scoped', 'out']
+
+test! 'middleware can short-circuit and rejects duplicate next calls', ->
+  resetGlobals()
+  use '/private', -> Response.new('denied', { status: 401 })
+  get '/private/data' -> 'never'
+  eq (handle! request('GET', '/private/data')).status, 401
+
+  resetGlobals()
+  use (request, next) ->
+    next!
+    next()
+  get '/once' -> 'ok'
+  warnings = captureWarnings! ->
+    response = handle! request('GET', '/once')
+    eq response.status, 500
+    eq response.json!, { error: { message: 'Internal Server Error' } }
+  ok warnings.some((message) -> message.includes('next() more than once'))
+
+test! 'before and after filters compose around handlers and short-circuit', ->
+  resetGlobals()
+  order = []
+  use (request, next) ->
+    order.push 'middleware-in'
+    response = next!
+    order.push 'middleware-out'
+    response
+  before -> order.push 'before-1'
+  before -> order.push 'before-2'
+  after -> order.push 'after-1'
+  after -> order.push 'after-2'
+  get '/flow' ->
+    order.push 'handler'
+    'ok'
+  eq (handle! request('GET', '/flow')).text!, 'ok'
+  eq order, [
+    'middleware-in', 'before-1', 'before-2', 'handler',
+    'after-1', 'after-2', 'middleware-out',
+  ]
+
+  resetGlobals()
+  reached = { handler: false, after: false }
+  before -> @text 'halted', 403
+  after -> reached.after = true
+  get '/blocked' ->
+    reached.handler = true
+    'never'
+  blocked = handle! request('GET', '/blocked')
+  eq blocked.status, 403
+  eq blocked.text!, 'halted'
+  eq reached, { handler: false, after: false }
+
+  resetGlobals()
+  late = []
+  get '/late' ->
+    late.push 'handler'
+    'ok'
+  handle! request('GET', '/late')
+  before -> late.push 'before'
+  after -> late.push 'after'
+  handle! request('GET', '/late')
+  eq late, ['handler', 'before', 'handler', 'after']
+
+  resetGlobals()
+  before -> throw Error.new 'filter secret'
+  get '/failure' -> 'never'
+  warnings = captureWarnings! ->
+    failure = handle! request('GET', '/failure')
+    eq failure.status, 500
+    eq failure.json!, { error: { message: 'Internal Server Error' } }
+  ok warnings.some((message) -> message.includes('filter secret'))
+
+test! 'raw filters run before body parsing on write requests only', ->
+  resetGlobals()
+  calls = []
+  raw (incoming) ->
+    calls.push incoming.method
+    incoming.headers.set 'content-type', 'application/json'
+  post '/raw-json' -> { name: read('name') }
+  get '/raw-get' -> 'ok'
+  response = handle! request('POST', '/raw-json', { body: '{"name":"Amy"}' })
+  eq response.json!, { name: 'Amy' }
+  eq calls, ['POST']
+  handle! request('GET', '/raw-get')
+  eq calls, ['POST']
+
+test! 'error helpers, terminal handlers, and masking follow the contract', ->
+  resetGlobals()
+  get '/bad' -> error! 'invalid', 422
+  get '/notice' -> notice! 'try again'
+  get '/bail' ->
+    session.secret = 'discard'
+    bail!
+  get '/secret' -> throw Error.new 'database password'
+  notFound -> @text 'lost', 404
+  warnings = captureWarnings! ->
+    bad = handle! request('GET', '/bad')
+    eq bad.status, 422
+    eq bad.json!, { error: { message: 'invalid' } }
+    noticeResponse = handle! request('GET', '/notice')
+    eq noticeResponse.status, 400
+    eq noticeResponse.json!, { error: { notice: 'try again' } }
+    bailResponse = handle! request('GET', '/bail')
+    eq bailResponse.status, 401
+    eq bailResponse.json!, { error: { message: 'Unauthorized' } }
+    eq (handle! request('GET', '/secret')).json!, { error: { message: 'Internal Server Error' } }
+    eq (handle! request('GET', '/missing')).text!, 'lost'
+
+    resetGlobals()
+    onError (failure) -> @json { handled: failure.message }, 409
+    get '/custom' -> throw Error.new 'handled here'
+    custom = handle! request('GET', '/custom')
+    eq custom.status, 409
+    eq custom.json!, { handled: 'handled here' }
+
+    resetGlobals()
+    get '/present' -> 'yes'
+    missing = handle! request('GET', '/missing')
+    eq missing.status, 404
+    eq missing.text!, 'Not Found'
+  ok warnings.some((message) -> message.includes('database password'))
+  ok warnings.some((message) -> message.includes('handled here'))
+
+test 'error envelopes expose client details and mask server details', ->
+  eq errorEnvelope(Error.new('database password')),
+    status: 500
+    error: { message: 'Internal Server Error' }
+  failure = Object.assign Error.new('invalid input'),
+    status: 400
+    issues: [{ field: 'email' }]
+  eq errorEnvelope(failure),
+    status: 400
+    error:
+      message: 'invalid input'
+      issues: [{ field: 'email' }]
+
+test! 'read merges body, query, and path with request-local context', ->
+  resetGlobals()
+  post '/orders/:id' ->
+    session.seen = true
+    nested = subrequest!({ value: '  inner  ' }, -> read('value'))
+    {
+      id: read('id', 'id!')
+      email: read('email', 'email!')
+      page: read('page', 'int', 1)
+      nested
+      active: session.seen
+      current: ctx() is @
+      total: read('total', 'money!')
+      date: read('date', 'date')
+      size: read('size', ['S', 'M', 'L'])
+      qty: read('qty', [1, 99])
+      note: read('note', /\d+/)
+      patient: read('patient.name')
+      token: read('token', 'text', -> 'minted')
+    }
+  post '/required' -> read 'missing', 'id!'
+  response = handle! jsonRequest 'POST', '/orders/42?page=3',
+    email: 'A@B.COM'
+    total: '$12.34'
+    date: '2024-02-29'
+    size: 'M'
+    qty: '7'
+    note: 'order-123'
+    patient: { name: 'Amy' }
+  eq response.json!,
+    id: 42
+    email: 'a@b.com'
+    page: 3
+    nested: 'inner'
+    active: true
+    current: true
+    total: 1234
+    date: '2024-02-29'
+    size: 'M'
+    qty: 7
+    note: '123'
+    patient: 'Amy'
+    token: 'minted'
+  required = handle! jsonRequest('POST', '/required', {})
+  eq required.status, 400
+  eq required.json!, { error: { message: 'Missing required field: missing' } }
+  eq ctx(), null
+  eq mark(), null
+  throws (-> read('outside')), 'no context for read()'
+
+test! 'request marks and trusted tenant context stay request-local', ->
+  resetGlobals()
+  get '/context' ->
+    @mark = 'corr-1'
+    { mark: mark(), site: @req.site }
+  direct = handle! request('GET', '/context', { headers: { 'Rip-Site': 'ola' } })
+  eq direct.headers.get('rip-mark'), 'corr-1'
+  eq direct.json!, { mark: 'corr-1', site: null }
+  priorWorker = process.env.WORKER_ID
+  process.env.WORKER_ID = 'framework-test'
+  try
+    proxied = handle! request('GET', '/context', { headers: { 'Rip-Site': 'ola' } })
+    eq proxied.json!, { mark: 'corr-1', site: 'ola' }
+  finally
+    if priorWorker? then process.env.WORKER_ID = priorWorker else delete process.env.WORKER_ID
+
+test 'requestContext and env expose focused ambient capabilities', ->
+  marker = { name: 'synthetic' }
+  result = requestContext.run { env: marker, data: { value: '  inside  ' } }, ->
+    { value: read('value'), current: ctx() }
+  eq result, { value: 'inside', current: marker }
+  eq ctx(), null
+  prior = process.env.FRAMEWORK_TEST
+  process.env.FRAMEWORK_TEST = 'present'
+  try
+    eq env.FRAMEWORK_TEST, 'present'
+  finally
+    if prior? then process.env.FRAMEWORK_TEST = prior else delete process.env.FRAMEWORK_TEST
+
+test! 'schema input and OpenAPI stay tied to live routes', ->
+  Signup = schema :input
+    name! 2..20
+    age? ~integer
+
+  resetGlobals()
+  openapi title: 'Framework Test', version: '1.0.0'
+  post '/signup', input: Signup, -> { input: @input }
+  post '/teams/:team/signup', input: Signup, -> { input: @input }
+  good = handle! jsonRequest('POST', '/signup', { name: 'Amy', age: '30' })
+  eq good.json!, { input: { name: 'Amy', age: 30 } }
+  bad = handle! jsonRequest('POST', '/signup', { name: 'x' })
+  eq bad.status, 400
+  badBody = bad.json!
+  eq badBody.error.message, 'Validation failed'
+  ok Array.isArray(badBody.error.issues)
+  invalid = handle! request 'POST', '/signup',
+    body: '{oops'
+    headers: { 'content-type': 'application/json' }
+  eq invalid.status, 400
+  eq invalid.json!,
+    error:
+      message: 'Invalid JSON body'
+      issues: [{ field: '', error: 'json', message: 'request body is not valid JSON' }]
+  document = (handle! request('GET', '/openapi.json')).json!
+  eq document.openapi, '3.1.0'
+  eq document.info, { title: 'Framework Test', version: '1.0.0' }
+  ok document.paths['/signup'].post.requestBody?
+  eq document.paths['/teams/{team}/signup'].post.parameters,
+    [{ name: 'team', in: 'path', required: true, schema: { type: 'string' } }]
+
+test! 'response helpers preserve explicit headers and emit send instructions', ->
+  resetGlobals()
+  get '/send-default' -> @send 'report.rip'
+  get '/send' ->
+    @header 'Content-Disposition', 'attachment; filename="report.rip"'
+    @header 'ETag', '"release-42"'
+    @cache 'forever'
+    @send 'report.rip', 'text/x-rip'
+  get '/send-header-type' ->
+    @header 'Content-Type', 'application/x-custom'
+    @send 'report.rip'
+  defaultResponse = handle! request 'GET', '/send-default',
+    headers:
+      'If-None-Match': '"anything"'
+      Range: 'bytes=0-9'
+  eq defaultResponse.status, 200
+  eq defaultResponse.headers.get('x-sendfile'), resolve('report.rip')
+  eq defaultResponse.headers.get('content-type'), null
+  eq defaultResponse.headers.get('etag'), null
+  eq defaultResponse.headers.get('cache-control'), 'no-cache'
+  eq defaultResponse.text!, ''
+  response = handle! request('GET', '/send')
+  eq response.headers.get('x-sendfile'), resolve('report.rip')
+  eq response.headers.get('content-type'), 'text/x-rip'
+  eq response.headers.get('content-disposition'), 'attachment; filename="report.rip"'
+  eq response.headers.get('etag'), '"release-42"'
+  eq response.headers.get('cache-control'), 'public, max-age=31536000, immutable'
+  eq response.text!, ''
+  eq (handle! request('GET', '/send-header-type')).headers.get('content-type'), 'application/x-custom'
+
+test! 'cache directives emit exact policy and reject guesses', ->
+  resetGlobals()
+  directives =
+    seconds: 10
+    bare: '90'
+    minutes: '36m'
+    hours: '2 hours'
+    month: '1 month'
+    zero: 0
+    false: false
+    off: 'off'
+    noStore: 'no-store'
+    forever: 'forever'
+    unknown: 'always'
+    milliseconds: '5ms'
+    negative: -1
+    fraction: 1.5
+  get '/cache/:kind' ->
+    @cache directives[@req.param('kind')]
+    'x'
+  cached = handle! request('GET', '/cache/seconds')
+  eq cached.headers.get('cache-control'), 'public, max-age=10'
+  ok cached.headers.get('expires')?
+  eq (handle! request('GET', '/cache/bare')).headers.get('cache-control'), 'public, max-age=90'
+  eq (handle! request('GET', '/cache/minutes')).headers.get('cache-control'), 'public, max-age=2160'
+  eq (handle! request('GET', '/cache/hours')).headers.get('cache-control'), 'public, max-age=7200'
+  eq (handle! request('GET', '/cache/month')).headers.get('cache-control'), 'public, max-age=2592000'
+  for kind in ['zero', 'false', 'off', 'noStore']
+    response = handle! request('GET', "/cache/#{kind}")
+    eq response.headers.get('cache-control'), 'no-store'
+    eq response.headers.get('expires'), null
+  eq (handle! request('GET', '/cache/forever')).headers.get('cache-control'), 'public, max-age=31536000, immutable'
+  warnings = captureWarnings! ->
+    for kind in ['unknown', 'milliseconds', 'negative', 'fraction']
+      eq (handle! request('GET', "/cache/#{kind}")).status, 500
+  eq warnings.length, 4
+  ok warnings.every((message) -> message.includes('cache() takes a duration'))
+
+test! 'App resets registrations and returns the shared fetch handler', ->
+  resetGlobals()
+  get '/stale' -> 'stale'
+  before -> throw Error.new 'stale filter'
+  notFound -> @text 'stale not found', 404
+  handler = App ->
+    get '/fresh' -> 'fresh'
+  ok handler is handle
+  stale = handler! request('GET', '/stale')
+  eq stale.status, 404
+  eq stale.text!, 'Not Found'
+  eq (handler! request('GET', '/fresh')).text!, 'fresh'
+
+test 'start performs only the artifact-worker handoff', ->
+  priorArtifact = process.env.APP_ARTIFACT
+  priorSocket = process.env.SOCKET_PATH
+  delete process.env.APP_ARTIFACT
+  delete process.env.SOCKET_PATH
+  try
+    throws (-> start()), 'requires the Rip worker runtime'
+    process.env.APP_ARTIFACT = '/tmp/framework-app.js'
+    process.env.SOCKET_PATH = '/tmp/framework-worker.sock'
+    handler = start()
+    ok handler is handle
+    ok globalThis.__ripHandler is handler
+    ok typeof handler.then isnt 'function'
+  finally
+    if priorArtifact? then process.env.APP_ARTIFACT = priorArtifact else delete process.env.APP_ARTIFACT
+    if priorSocket? then process.env.SOCKET_PATH = priorSocket else delete process.env.SOCKET_PATH
+    delete globalThis.__ripHandler
+
+test! 'hub registers a Bam bridge that admits authenticated sessions', ->
+  resetGlobals()
+  admitted = []
+  hub
+    bridge: 'hub'
+    auth: -> @req.header('x-auth') is 'yes'
+    open: ->
+      admitted.push 'open'
+      { '+': ['/hub'] }
+    text: -> { '@': ['/hub'], ping: {} }
+  denied = handle! Request.new('http://test/hub', {
+    method: 'POST'
+    headers: { 'sec-websocket-frame': 'open' }
+  })
+  eq denied.status, 401
+  opened = handle! Request.new('http://test/hub', {
+    method: 'POST'
+    headers: { 'sec-websocket-frame': 'open', 'x-auth': 'yes' }
+  })
+  eq opened.status, 200
+  eq opened.json!, { '+': ['/hub'] }
+  eq admitted, ['open']
+  texted = handle! Request.new('http://test/hub', {
+    method: 'POST'
+    headers: { 'sec-websocket-frame': 'text', 'x-auth': 'yes' }
+    body: '{}'
+  })
+  eq texted.json!, { '@': ['/hub'], ping: {} }
+  quiet = handle! Request.new('http://test/hub', {
+    method: 'POST'
+    headers: { 'sec-websocket-frame': 'close', 'x-auth': 'yes' }
+  })
+  eq quiet.status, 204

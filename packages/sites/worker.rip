@@ -1,0 +1,110 @@
+artifact = process.env.APP_ARTIFACT or abort 'rip-site worker: APP_ARTIFACT is required'
+socket = process.env.SOCKET_PATH or abort 'rip-site worker: SOCKET_PATH is required'
+workerId = process.env.WORKER_ID or '?'
+RECYCLE = :rip.server.recycle
+
+concurrencyText = process.env.WORKER_CONCURRENCY or '1'
+concurrency = parseInt concurrencyText
+abort "worker #{workerId}: WORKER_CONCURRENCY must be an integer greater than zero" unless Number.isFinite(concurrency) and concurrency > 0 and String(concurrency) is concurrencyText
+
+drainText = process.env.RIP_DRAIN_DEADLINE_MS or '4500'
+drainMs = parseInt drainText
+abort "worker #{workerId}: RIP_DRAIN_DEADLINE_MS must be an integer greater than zero" unless Number.isFinite(drainMs) and drainMs > 0 and String(drainMs) is drainText
+
+handlerText = process.env.RIP_HANDLER_DEADLINE_MS or '0'
+handlerMs = parseInt handlerText
+abort "worker #{workerId}: RIP_HANDLER_DEADLINE_MS must be a nonnegative integer" unless Number.isFinite(handlerMs) and handlerMs >= 0 and String(handlerMs) is handlerText
+
+ppidText = process.env.RIP_PPID_MS or '1000'
+ppidMs = parseInt ppidText
+abort "worker #{workerId}: RIP_PPID_MS must be an integer greater than zero" unless Number.isFinite(ppidMs) and ppidMs > 0 and String(ppidMs) is ppidText
+
+state =
+  ready: false
+  bootError: null
+  handler: null
+  inflight: 0
+  inflightStarts: Map.new()
+  requestSerial: 0
+  draining: false
+  recycleScheduled: false
+
+boot = ->
+  try
+    import!(artifact)
+    Promise.resolve!
+    handler = globalThis.__ripHandler
+    throw Error.new("no start! handoff in #{artifact}") unless typeof handler is 'function'
+    state.handler = handler
+    state.ready = true
+  catch error
+    state.bootError = String error
+    warn "[worker #{workerId}] boot failed: #{state.bootError}"
+    setTimeout (-> exit 1), 1500
+
+server = Bun.serve
+  unix: socket
+  fetch: (request) ->
+    url = request.url
+    if request.method is 'GET' and (url.endsWith('/ready') or url.includes('/ready?')) and URL.new(url).pathname is '/ready'
+      return Response.new('ok') if state.ready and not state.draining
+      headers = if state.bootError? then { 'rip-boot-failed': '1' } else {}
+      return Response.new(state.bootError or (if state.draining then 'draining' else 'not ready'), { status: 503, headers })
+
+    return Response.new(state.bootError or 'not ready', { status: 503 }) unless state.ready
+    if state.draining
+      return Response.new('draining', { status: 503, headers: { 'retry-after': '0', 'rip-worker-draining': '1' } })
+    if state.inflight >= concurrency
+      return Response.new('busy', { status: 503, headers: { 'retry-after': '0', 'rip-worker-busy': '1' } })
+
+    state.inflight++
+    serial = ++state.requestSerial
+    state.inflightStarts.set serial, Date.now()
+    try
+      response = state.handler! request
+      throw TypeError.new('Rip worker handlers must return a Response') unless response instanceof Response
+      response
+    catch error
+      warn "[worker #{workerId}] request failed:", error
+      Response.new('Internal Server Error', { status: 500 })
+    finally
+      state.inflightStarts.delete serial
+      state.inflight--
+
+boot!
+
+shutdown = ->
+  return if state.draining
+  state.draining = true
+  deadline = Date.now() + drainMs
+  while state.inflight > 0 and Date.now() < deadline
+    sleep! 10
+  try server.stop()
+  exit 0
+
+globalThis[RECYCLE] = ->
+  return if state.recycleScheduled or state.draining
+  state.recycleScheduled = true
+  warn "[worker #{workerId}] handler ignored timeout cancellation; recycling"
+  setTimeout shutdown, 25
+
+process.on 'SIGTERM', shutdown
+
+if handlerMs > 0
+  interval = Math.min(1000, Math.max(25, Math.floor(handlerMs / 4)))
+  setInterval ->
+    return if state.draining
+    now = Date.now()
+    for started as state.inflightStarts.values()
+      if now - started > handlerMs
+        warn "[worker #{workerId}] handler exceeded #{handlerMs}ms; recycling"
+        shutdown!
+        return
+  , interval
+
+parent = process.ppid
+setInterval ->
+  return if process.ppid is parent and process.ppid isnt 1
+  warn "[worker #{workerId}] manager exited; draining"
+  shutdown!
+, ppidMs

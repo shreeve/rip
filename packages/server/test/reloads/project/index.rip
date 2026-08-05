@@ -1,4 +1,0 @@
-import { get, start } from '@rip-lang/server'
-
-get '/version' -> { version: 'one' }
-start!

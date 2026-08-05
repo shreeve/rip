@@ -1,0 +1,340 @@
+import { test, eq, ok } from '@rip-lang/testing'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { brotliDecompressSync } from 'node:zlib'
+import { check, rash } from '@rip-lang/app/rash'
+import { appChangeKind, appEventPublication, updateAppModules } from '../../manager.rip'
+
+PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
+SERVER = join(import.meta.dir, '..', '..', 'site.rip')
+
+waitFor = (fn, timeout = 5000) ->
+  deadline = Date.now() + timeout
+  loop
+    value = fn!
+    return value if value
+    throw Error.new('App publication test timed out') if Date.now() >= deadline
+    sleep! 10
+
+test! 'App watcher reports configured files and reconciles directory ambiguity', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-sites-watch-filter-')
+  try
+    mkdirSync join(dir, 'assets')
+    graph = { directories: ['assets', 'removed'] }
+    changes =
+      update: ['routes/**/*.rip']
+      css: ['styles/**/*.css']
+      reload: ['**/*.html']
+    eq appChangeKind(changes, 'routes/index.rip'), 'update'
+    eq appChangeKind(changes, 'other/index.rip'), null
+    eq appChangeKind(changes, 'styles/site.css'), 'css'
+    eq appChangeKind(changes, 'index.html'), 'reload'
+    eq appEventPublication(dir, graph, changes, 'routes/index.rip'), 'routes/index.rip'
+    eq appEventPublication(dir, graph, changes, 'other/index.rip'), null
+    eq appEventPublication(dir, graph, changes, 'styles/site.css'), 'styles/site.css'
+    eq appEventPublication(dir, graph, changes, 'index.html'), 'index.html'
+    eq appEventPublication(dir, graph, changes, 'images/hero.png'), null
+    eq appEventPublication(dir, graph, changes, 'fonts/body.woff2'), null
+    eq appEventPublication(dir, graph, changes, '.cache/probe.rip'), null
+    eq appEventPublication(dir, graph, changes, 'assets'), '*'
+    eq appEventPublication(dir, graph, changes, 'removed'), '*'
+    eq appEventPublication(dir, graph, changes, null), '*'
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test! 'App publication rehashes only watcher-reported configured files', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-sites-dirty-files-')
+  try
+    mkdirSync join(dir, 'routes')
+    route = "export Index = component\n  render\n    h1 'Stable'\n"
+    css = 'body { color: navy; }\n'
+    routePath = join dir, 'routes', 'index.rip'
+    cssPath = join dir, 'styles.css'
+    writeFileSync routePath, route
+    writeFileSync cssPath, css
+    routeEntry = { id: 'routes/index.rip', hash: rash(Buffer.from(route)) }
+    cssEntry = { id: 'styles.css', hash: rash(Buffer.from(css)) }
+    graph =
+      modules: { 'routes/index.rip': route }
+      moduleFiles: { 'routes/index.rip': routePath }
+      entries: [routeEntry, cssEntry]
+      directories: ['routes']
+      check: check([routeEntry, cssEntry])
+    changes =
+      update: ['**/*.rip']
+      css: ['**/*.css']
+      reload: ['**/*.html']
+    writeFileSync routePath, Buffer.from([0xff])
+    writeFileSync cssPath, 'body { color: green; }\n'
+    result = updateAppModules dir, changes, graph, ['styles.css']
+    eq result.changed, ['styles.css']
+    eq result.graph.modules['routes/index.rip'], route
+    eq result.graph.entries.find((entry) -> entry.id is 'routes/index.rip'), routeEntry
+    ok result.graph.entries.find((entry) -> entry.id is 'styles.css').hash isnt cssEntry.hash
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test! 'App-only manager publishes a finite dist surface with no workers', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-app-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
+  project = realpathSync project
+  mkdirSync join(project, 'dist'), { recursive: true }
+  writeFileSync join(project, 'dist', 'manifest.json'), '{"stale":true}'
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  deleted = false
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'app-registration' }, { status: 201 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/app-registration/heartbeat'
+        return Response.new(null, { status: 204 })
+      if request.method is 'DELETE' and url.pathname is '/1.0/apps/app-registration'
+        deleted = true
+        return Response.new(null, { status: 204 })
+      Response.new('Not Found', { status: 404 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--name', 'hello-app', '--host', 'hello-app.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    waitFor! -> registration?
+
+    eq registration.upstreams, []
+    ok 'files' of registration
+    eq registration.files.proxy_first, []
+    eq registration.files.roots, [
+      { path: join(project, 'dist'), cache: 'revalidate' }
+      { path: join(project, 'app'), cache: 'never' }
+    ]
+    eq registration.files.shell, join(project, 'dist', 'index.html')
+
+    dist = join project, 'dist'
+    ok existsSync(join(dist, 'bundle.json'))
+    ok existsSync(join(dist, 'bundle.json.br'))
+    ok existsSync(join(dist, 'latest.json'))
+    ok existsSync(join(dist, '@rip', 'rip.js'))
+    ok existsSync(join(dist, 'index.html'))
+    ok not existsSync(join(dist, 'manifest.json'))
+    bundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    eq Object.keys(bundle), ['hash', 'list']
+    eq bundle.list.map((entry) -> entry[0]), ['routes/index.rip']
+    eq bundle.list[0][1], readFileSync(join(project, 'app', 'routes', 'index.rip'), 'utf8')
+    eq JSON.parse(readFileSync(join(dist, 'latest.json'), 'utf8')), { hash: bundle.hash }
+    eq brotliDecompressSync(readFileSync(join(dist, 'bundle.json.br'))).toString('utf8'), JSON.stringify(bundle)
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+    ok deleted
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'authored App shell is registered without generating a replacement', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-authored-shell-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
+  project = realpathSync project
+  Bun.write! join(project, 'app', 'index.html'), '<!doctype html><h1>Authored</h1>'
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'authored-registration' }, { status: 201 })
+      Response.new(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--host', 'authored.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    waitFor! -> registration?
+    eq registration.files.shell, join(project, 'app', 'index.html')
+    ok not existsSync(join(project, 'dist', 'index.html'))
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'watch publication commits one App hash then batches confirmed changes', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-watch-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
+  mkdirSync join(project, 'app', 'images')
+  writeFileSync join(project, 'app', 'images', 'rip.png'), Buffer.from([1, 2, 3])
+  writeFileSync join(project, 'serve.rip'), """
+  export default
+    app:
+      root: 'app'
+  """
+  project = realpathSync project
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  registrationHeld = true
+  batches = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        while registrationHeld
+          sleep! 5
+        return Response.json({ id: 'watch-registration' }, { status: 201 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/watch-registration/hub/publish'
+        batches.push request.json!
+        return Response.json({ deliveries: 0 })
+      Response.new(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'watch.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'ignore'
+    waitFor! -> registration?
+    dist = join project, 'dist'
+    bundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    latest = JSON.parse readFileSync(join(dist, 'latest.json'), 'utf8')
+    eq latest.hash, bundle.hash
+    ok not existsSync(join(dist, 'manifest.json'))
+
+    writeFileSync join(project, 'app', 'styles.css'), 'body { color: green; }'
+    registrationHeld = false
+    waitFor! -> batches.length > 0
+    eq batches[0].length, 1
+    eq batches[0][0]['@'], ['/hub']
+    first = batches[0][0].change
+    eq first.from, bundle.hash
+    eq first.list, [['styles.css']]
+
+    nextBundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    nextLatest = JSON.parse readFileSync(join(dist, 'latest.json'), 'utf8')
+    eq first.hash, nextBundle.hash
+    eq nextLatest.hash, nextBundle.hash
+    ok nextBundle.hash isnt bundle.hash
+    eq nextBundle.list, bundle.list
+
+    writeFileSync join(project, 'app', 'styles.css'), 'body { color: green; }'
+    sleep! 150
+    eq batches.length, 1
+
+    routeSource = "export Index = component\n  render\n    h1 'Changed source'\n"
+    writeFileSync join(project, 'app', 'routes', 'index.rip'), routeSource
+    waitFor! -> batches.length is 2
+    routeChange = batches[1][0].change
+    eq routeChange.from, nextBundle.hash
+    eq routeChange.list, [['routes/index.rip', routeSource]]
+    routeBundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    eq routeChange.hash, routeBundle.hash
+
+    unlinkSync join(project, 'app', 'template.html')
+    waitFor! -> batches.length is 3
+    eq batches[2].length, 1
+    eq batches[2][0].change.from, routeBundle.hash
+    eq batches[2][0].change.list, [['template.html', null]]
+
+    assetBundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    writeFileSync join(project, 'app', 'images', 'rip.png'), Buffer.from([3, 2, 1])
+    waitFor! -> batches.length is 4
+    assetChange = batches[3][0].change
+    eq assetChange.from, assetBundle.hash
+    eq assetChange.list, [['images/rip.png']]
+    eq assetChange.hash, JSON.parse(readFileSync(join(dist, 'bundle.json'), 'utf8')).hash
+
+    stableBundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    writeFileSync join(project, 'app', 'routes', 'index.rip'), 'broken = ((\n'
+    writeFileSync join(project, 'app', 'styles.css'), 'body { color: crimson; }'
+    sleep! 200
+    eq batches.length, 4
+    eq (JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')).hash, stableBundle.hash
+
+    recovered = "export Index = component\n  render\n    h1 'Recovered source'\n"
+    writeFileSync join(project, 'app', 'routes', 'index.rip'), recovered
+    waitFor! -> batches.length is 5
+    recovery = batches[4][0].change
+    eq recovery.from, stableBundle.hash
+    eq recovery.list, [['routes/index.rip', recovered], ['styles.css']]
+    eq recovery.hash, (JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')).hash
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    registrationHeld = false
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'external schema projection changes are watched across registration', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-projection-watch-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
+  mkdirSync join(project, 'api')
+  model = join project, 'api', 'models.rip'
+  writeFileSync model, "export Theme = schema\n  color! string\nexport ThemePublic = Theme.pick('color')\n"
+  writeFileSync join(project, 'app', 'routes', 'index.rip'), "import { ThemePublic } from '../../api/models.rip'\nexport Index = component\n  render\n    h1 'Projection'\n"
+  writeFileSync join(project, 'serve.rip'), "export default\n  app:\n    root: 'app'\n"
+  project = realpathSync project
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  registrationHeld = true
+  batches = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        while registrationHeld
+          sleep! 5
+        return Response.json({ id: 'projection-registration' }, { status: 201 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/projection-registration/hub/publish'
+        batches.push request.json!
+        return Response.json({ deliveries: 0 })
+      Response.new(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'projection.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    waitFor! -> registration?
+    dist = join project, 'dist'
+    initial = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    ok initial.list.some((entry) -> entry[0] is 'api/models.rip')
+
+    writeFileSync model, "export Theme = schema\n  shade! string\nexport ThemePublic = Theme.pick('shade')\n"
+    registrationHeld = false
+    waitFor! -> batches.length is 1
+    change = batches[0][0].change
+    current = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    eq change.from, initial.hash
+    eq change.hash, current.hash
+    eq JSON.parse(readFileSync(join(dist, 'latest.json'), 'utf8')).hash, current.hash
+    eq change.list.length, 1
+    eq change.list[0][0], 'api/models.rip'
+    ok change.list[0][1].includes('shade')
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    registrationHeld = false
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }

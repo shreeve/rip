@@ -170,7 +170,7 @@ const planLanes = () => {
   // start cannot stretch the wall clock past the root suite. Correctness
   // does not depend on the order.
   const weight = (lane) =>
-    lane.label === ROOT_LANE ? 0 : lane.label === 'packages/vscode' ? 1 : lane.label === 'packages/server' ? 2 : 3;
+    lane.label === ROOT_LANE ? 0 : lane.label === 'packages/vscode' ? 1 : lane.label === 'packages/sites' ? 2 : 3;
   lanes.sort((a, b) => weight(a) - weight(b));
 
   return { lanes, excluded };

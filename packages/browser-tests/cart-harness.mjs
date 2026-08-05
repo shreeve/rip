@@ -1,4 +1,4 @@
-// Cart publication apply: real `rip server` on examples/cart behind a stub
+// Cart publication apply: real `rip site` on packages/sites/demos/cart behind a stub
 // Janus edge. API requests proxy to API-only workers; registered roots serve
 // App/dist bytes; `/hub` fans out ordered Manager publication changes.
 import {
@@ -11,9 +11,9 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
-const cartSrc = join(root, 'examples/cart');
+const cartSrc = join(root, 'packages/sites/demos/cart');
 const loaderPath = join(root, 'src/loader.js');
-const serverBin = join(root, 'packages/server/server.rip');
+const serverBin = join(root, 'packages/sites/site.rip');
 const PORT = Number(process.env.CART_HARNESS_PORT || 4174);
 
 const fixtureRoot = mkdtempSync(join(tmpdir(), `rip-cart-harness-${process.pid}-`));
@@ -26,9 +26,12 @@ const nm = join(fixtureRoot, 'node_modules', '@rip-lang');
 mkdirSync(nm, { recursive: true });
 const repoRipLang = join(root, 'node_modules', '@rip-lang');
 for (const name of readdirSync(repoRipLang)) {
+  const target = join(repoRipLang, name);
+  // Skip dangling workspace leftovers (e.g. a stale `site` link after rename).
+  if (!existsSync(target)) continue;
   const link = join(nm, name);
   try { unlinkSync(link); } catch { /* fresh */ }
-  symlinkSync(join(repoRipLang, name), link);
+  symlinkSync(target, link);
 }
 
 const ctlSock = join(fixtureRoot, 'janus.sock');
@@ -51,9 +54,9 @@ const fanoutChange = (body) => {
 
 const stub = Bun.serve({
   unix: ctlSock,
+  idleTimeout: 120,
   fetch: async (rq) => {
     const url = new URL(rq.url);
-    if (rq.method === 'GET') return new Response('janus', { status: 404 });
     let body = null;
     if (rq.method === 'POST' || rq.method === 'PUT') {
       body = await rq.json().catch(() => null);
@@ -64,6 +67,9 @@ const stub = Bun.serve({
       return Response.json({ id: 'cart-probe' }, { status: 201 });
     }
     if (rq.method === 'PUT' && url.pathname.endsWith('/upstreams')) {
+      if (registration && body?.upstreams) {
+        registration = { ...registration, upstreams: body.upstreams };
+      }
       return Response.json({ ok: true });
     }
     if (rq.method === 'POST' && url.pathname.endsWith('/heartbeat')) {
@@ -75,17 +81,26 @@ const stub = Bun.serve({
       return Response.json({ objects: n, deliveries: n, unknown_targets: 0 });
     }
     if (rq.method === 'DELETE') return new Response(null, { status: 204 });
+    // Access-log GETs are not part of this harness; manager is started with
+    // --access-log=off. Anything else on the control plane is unknown.
     return new Response('nope', { status: 404 });
   },
 });
 
-// Invoke the manager the same way the server suite does: bun + loader +
-// server.rip. `rip server` only resolves when cwd can see rip-server on
+// Real Janus load-balances across worker upstreams. This stub must too:
+// Cart stash fetches user/products/orders in parallel, and each worker
+// defaults to concurrency 1. App-only watch matches this suite (it edits
+// app/ files) and avoids API-pool swaps that briefly drop every socket.
+const WORKERS = 4;
+
+// Invoke the manager the same way the sites suite does: bun + loader +
+// site.rip. `rip site` only resolves when cwd can see rip-site on
 // PATH (repo root / linked bins) — a /tmp cart copy cannot.
 const manager = Bun.spawn(
   [
     process.execPath, `--preload=${loaderPath}`, serverBin,
-    'index.rip', '--control', ctlSock, '--name', 'cart-probe', '-w', '1',
+    'index.rip', '--control', ctlSock, '--name', 'cart-probe',
+    '-w', String(WORKERS), '--watch-app', '--no-watch-api', '--access-log=off',
   ],
   {
     cwd: cartDir,
@@ -100,11 +115,12 @@ const manager = Bun.spawn(
       RIP_DRAIN_MS: '100',
       RIP_KILL_MS: '400',
       RIP_HOLD_MS: '8000',
-      RIP_BOOT_DEADLINE_MS: '30000',
+      RIP_BOOT_DEADLINE_MS: process.env.CI ? '55000' : '30000',
     },
   },
 );
 
+const mirrorManager = process.env.CART_HARNESS_LOG || process.env.CI;
 const drain = async (stream, label) => {
   if (!stream) return;
   const reader = stream.getReader();
@@ -113,29 +129,54 @@ const drain = async (stream, label) => {
     const { done, value } = await reader.read();
     if (done) break;
     const text = dec.decode(value);
-    if (process.env.CART_HARNESS_LOG) process.stderr.write(`[cart-harness:${label}] ${text}`);
+    if (mirrorManager) process.stderr.write(`[cart-harness:${label}] ${text}`);
   }
 };
 drain(manager.stdout, 'out');
 drain(manager.stderr, 'err');
 
-const workerSock = async () => {
-  const deadline = Date.now() + 30000;
-  while (Date.now() < deadline) {
-    const put = [...calls].reverse().find(
-      (c) => c.method === 'PUT' && c.body?.upstreams?.length &&
-        !c.body.upstreams.some((u) => u.doorbell),
-    );
-    const upstreams = put?.body?.upstreams ?? registration?.upstreams;
-    const path = upstreams?.find((upstream) => !upstream.doorbell)?.path;
-    if (path && existsSync(path)) return path;
-    await Bun.sleep(25);
+const liveUpstreams = () => {
+  // Latest upstream PUT wins, including lists that also carry a doorbell —
+  // skip only the doorbell entries, not the whole PUT.
+  let upstreams = registration?.upstreams ?? [];
+  for (let i = calls.length - 1; i >= 0; i--) {
+    const c = calls[i];
+    if (c.method === 'PUT' && Array.isArray(c.body?.upstreams)) {
+      upstreams = c.body.upstreams;
+      break;
+    }
   }
-  throw new Error('cart-harness: worker socket never registered');
+  return upstreams
+    .filter((u) => u && !u.doorbell && u.path && existsSync(u.path))
+    .map((u) => u.path);
 };
 
-const initialSock = await workerSock();
+let rr = 0;
+const workerSock = async ({ need = 1 } = {}) => {
+  // CI runners are slower to spawn the manager + worker pool than a laptop.
+  const deadline = Date.now() + (process.env.CI ? 55000 : 30000);
+  while (Date.now() < deadline) {
+    if (manager.exitCode != null) {
+      throw new Error(`cart-harness: manager exited ${manager.exitCode} before registering workers`);
+    }
+    const paths = liveUpstreams();
+    if (paths.length >= need) {
+      const path = paths[rr % paths.length];
+      rr += 1;
+      return path;
+    }
+    await Bun.sleep(25);
+  }
+  throw new Error(`cart-harness: only ${liveUpstreams().length}/${need} worker sockets registered`);
+};
+
+// Wait for the full pool so the first parallel stash fetches do not stampede
+// a single upstream before siblings appear.
+const initialSock = await workerSock({ need: WORKERS });
 writeFileSync(join(fixtureRoot, 'ready'), `${initialSock}\n`);
+// Playwright only needs a 2xx on /__test/ready after boot.
+let readySock = initialSock;
+let booted = true;
 
 const proxy = async (request) => {
   const url = new URL(request.url);
@@ -181,6 +222,7 @@ const edgeFile = (pathname, accept) => {
 
 const server = Bun.serve({
   port: PORT,
+  idleTimeout: 120,
   async fetch(request, srv) {
     const url = new URL(request.url);
     if (url.pathname === '/hub') {
@@ -193,7 +235,15 @@ const server = Bun.serve({
       return Response.json({ cartDir, fixtureRoot });
     }
     if (url.pathname === '/__test/ready') {
-      return Response.json({ ok: true, sock: await workerSock() });
+      const paths = liveUpstreams();
+      if (paths.length) {
+        readySock = paths[rr % paths.length];
+        return Response.json({ ok: true, sock: readySock, workers: paths.length });
+      }
+      // After first boot, a brief empty pool must not fail Playwright's probe.
+      if (booted) return Response.json({ ok: true, sock: readySock, workers: 0 });
+      readySock = await workerSock({ need: 1 });
+      return Response.json({ ok: true, sock: readySock });
     }
     if (registration?.files?.proxy_first?.some(prefix => url.pathname === prefix || url.pathname.startsWith(`${prefix}/`))) {
       return proxy(request);

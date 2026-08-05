@@ -1,5 +1,0 @@
-import { get, start } from '@rip-lang/server'
-
-get '/hello' -> { message: 'hello' }
-
-start!

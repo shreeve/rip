@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createModuleLoader } from '../../src/browser-modules.js';
-import { assembleBundle, assembleRipBundle } from '../../packages/server/bundle.rip';
+import { assembleBundle, assembleRipBundle } from '../../packages/sites/bundle.rip';
 // The store comes from its own module, not the package entry: the
 // entry evaluates renderer.rip, which claims the process's one
 // render-gate construction capability — and that claim belongs to the

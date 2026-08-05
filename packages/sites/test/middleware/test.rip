@@ -1,0 +1,272 @@
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { cors, csrf, htmlJson, secureHeaders, sessions, timeout } from '@rip-lang/sites/middleware'
+
+PRELOAD = process.execArgv.find (arg) -> arg.startsWith('--preload=')
+GENERATOR = join(import.meta.dir, '..', '..', 'generate.rip')
+WORKER = join(import.meta.dir, '..', '..', 'worker.rip')
+PACKAGE = join(import.meta.dir, '..', '..')
+
+generate = (entry, artifact, report, task) ->
+  proc = Bun.spawn [process.execPath, PRELOAD, GENERATOR, entry, artifact, report, task, '0'],
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'pipe'
+  diagnostic = Response.new(proc.stderr).text()
+  code = await proc.exited
+  eq code, 0, await diagnostic
+  JSON.parse readFileSync(report, 'utf8')
+
+waitFor = (fn) ->
+  deadline = Date.now() + 5000
+  loop
+    value = fn!
+    return value if value
+    throw Error.new('middleware test timed out') if Date.now() >= deadline
+    sleep! 10
+
+unixFetch = (socket, path, options = {}) ->
+  options.unix = socket
+  fetch "http://worker#{path}", options
+
+cookieJar = (response, prior = {}) ->
+  next = { ...prior }
+  for line in response.headers.getSetCookie()
+    [pair] = line.split ';'
+    at = pair.indexOf '='
+    next[pair.slice(0, at)] = pair.slice at + 1
+  next
+
+cookieHeader = (jar) ->
+  Object.entries(jar).map(([name, value]) -> "#{name}=#{value}").join '; '
+
+responseJson = (response) ->
+  text = response.text!
+  try
+    JSON.parse text
+  catch
+    throw Error.new("expected JSON from #{response.status}: #{text}")
+
+runMode = (encrypt) ->
+  dir = mkdtempSync join(tmpdir(), "rip-middleware-#{if encrypt then 'encrypted' else 'signed'}-")
+  entry = join dir, 'index.rip'
+  appArtifact = join dir, 'app.js'
+  workerArtifact = join dir, 'worker.js'
+  socket = join dir, 'worker.sock'
+  mkdirSync join(dir, 'node_modules', '@rip-lang'), { recursive: true }
+  symlinkSync PACKAGE, join(dir, 'node_modules', '@rip-lang', 'sites'), 'dir'
+  writeFileSync entry, """
+  import { get, post, session, start, use } from '@rip-lang/sites'
+  import { cors, csrf, sessions, timeout } from '@rip-lang/sites/middleware'
+
+  use cors origin: 'https://client.test', credentials: true
+  use sessions secret: 'session-secret', encrypt: #{encrypt}
+  use csrf secret: 'csrf-secret'
+  use '/timed', timeout 1, grace: 1
+  use '/once', (request, next) ->
+    next!
+    next()
+
+  get '/once' -> { reached: true }
+  get '/state', (c) ->
+    session.count = (session.count or 0) + 1
+    { count: session.count, token: c.req.raw.csrfToken }
+
+  post '/write' -> { count: session.count }
+
+  get '/timed/abort', (c) ->
+    signal = c.req.raw.signal
+    new Promise (_, reject) ->
+      signal.addEventListener 'abort', -> reject signal.reason
+
+  get '/timed/ignore' ->
+    sleep! 3000
+    { tooLate: true }
+
+  post '/timed/body', (c) -> c.req.raw.text!
+
+  start!
+  """
+  proc = null
+  diagnostic = null
+  try
+    generate! entry, appArtifact, join(dir, 'app.json'), 'middleware-app'
+    generate! WORKER, workerArtifact, join(dir, 'worker.json'), 'middleware-worker'
+    proc = Bun.spawn [process.execPath, workerArtifact],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'pipe'
+      env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: 'middleware', WORKER_CONCURRENCY: '2' }
+    diagnostic = Response.new(proc.stderr).text()
+    waitFor! ->
+      try (unixFetch!(socket, '/ready')).status is 200 catch then false
+    repeated = unixFetch! socket, '/once'
+    eq repeated.status, 500
+
+    preflight = unixFetch! socket, '/write',
+      method: 'OPTIONS'
+      headers:
+        origin: 'https://client.test'
+        'access-control-request-method': 'POST'
+    eq preflight.status, 204
+    eq preflight.headers.get('access-control-allow-origin'), 'https://client.test'
+    eq preflight.headers.get('access-control-allow-credentials'), 'true'
+    eq preflight.headers.get('vary'), 'Origin'
+
+    rejected = unixFetch! socket, '/state', { headers: { origin: 'https://other.test' } }
+    eq rejected.status, 200
+    eq rejected.headers.get('access-control-allow-origin'), null
+
+    first = unixFetch! socket, '/state', { headers: { origin: 'https://client.test' } }
+    eq first.status, 200
+    eq first.headers.get('access-control-allow-origin'), 'https://client.test'
+    body = responseJson! first
+    eq body.count, 1
+    jar = cookieJar first
+    ok jar.session?
+    ok jar.csrf_token?
+    decodedSession = decodeURIComponent jar.session
+    ok decodedSession.startsWith(if encrypt then 'e1.' else 's1.')
+    ok not decodedSession.includes('count')
+
+    other = unixFetch! socket, '/state'
+    eq (responseJson!(other.clone())).count, 1
+    otherJar = cookieJar other
+    [second, otherSecond] = Promise.all! [
+      unixFetch socket, '/state', { headers: { cookie: cookieHeader(jar) } }
+      unixFetch socket, '/state', { headers: { cookie: cookieHeader(otherJar) } }
+    ]
+    eq (responseJson!(second)).count, 2
+    eq (responseJson!(otherSecond)).count, 2
+    jar = cookieJar second, jar
+
+    denied = unixFetch! socket, '/write', { method: 'POST', headers: { cookie: cookieHeader(jar) } }
+    eq denied.status, 403
+    eq denied.text!, 'CSRF token mismatch'
+
+    accepted = unixFetch! socket, '/write',
+      method: 'POST'
+      headers:
+        cookie: cookieHeader jar
+        'x-csrf-token': body.token
+    eq accepted.status, 200
+    eq responseJson!(accepted), { count: 2 }
+
+    broken = { ...jar, session: "#{jar.session}x" }
+    reset = unixFetch! socket, '/state', { headers: { cookie: cookieHeader(broken) } }
+    eq (responseJson!(reset)).count, 1
+
+    aborted = unixFetch! socket, '/timed/abort'
+    eq aborted.status, 504
+    eq aborted.text!, 'Gateway Timeout'
+    eq (unixFetch!(socket, '/ready')).status, 200
+
+    echoed = unixFetch! socket, '/timed/body',
+      method: 'POST'
+      body: 'streamed once'
+      headers:
+        cookie: cookieHeader jar
+        'x-csrf-token': body.token
+    eq echoed.text!, 'streamed once'
+
+    unless encrypt
+      started = performance.now()
+      ignored = unixFetch! socket, '/timed/ignore'
+      eq ignored.status, 504
+      eq ignored.headers.get('connection'), 'close'
+      ok performance.now() - started < 1500
+      eq (await proc.exited), 0
+      proc = null
+  finally
+    try proc?.kill('SIGTERM')
+    await proc.exited if proc?
+    if diagnostic?
+      output = await diagnostic
+      ok output.includes 'middleware called next() more than once'
+      ok output.includes('[worker middleware] handler ignored timeout cancellation; recycling') unless encrypt
+    rmSync dir, { recursive: true, force: true }
+
+test 'invalid middleware policy rejects during registration', ->
+  throws (-> cors({ origin: '*', credentials: true })), 'specific origin'
+  throws (-> cors({ origin: '' })), 'nonempty'
+  throws (-> cors({ origin: 'https://client.test', credentials: 'true' })), 'boolean'
+  throws (-> sessions({})), 'nonempty secret'
+  throws (-> sessions({ secret: 'x', encrypt: 'true' })), 'boolean'
+  throws (-> csrf({ secret: 'x', sameSite: 'None' })), 'requires Secure'
+  throws (-> timeout(0)), 'positive integer'
+  throws (-> timeout(1, { status: 408 })), '500 through 599'
+
+test! 'CORS distinguishes preflight, denied variants, and async predicates', ->
+  policy = cors origin: -> Promise.resolve false
+  denied = policy!(Request.new('http://worker/state', { headers: { origin: 'https://other.test' } }), -> Response.new('ok'))
+  eq denied.status, 200
+  eq denied.headers.get('access-control-allow-origin'), null
+  eq denied.headers.get('vary'), 'Origin'
+  ordinary = policy!(Request.new('http://worker/state', { method: 'OPTIONS' }), -> Response.new('ordinary', { status: 209 }))
+  eq ordinary.status, 204
+  eq ordinary.text!, ''
+
+test! 'htmlJson renders direct iOS navigation and leaves API JSON alone', ->
+  json = -> Response.json { unsafe: '<script>', count: 2 }
+  navigation = Request.new 'http://worker/state',
+    headers:
+      'user-agent': 'Mozilla/5.0 (iPhone)'
+      accept: 'text/html'
+      'sec-fetch-dest': 'document'
+  rendered = htmlJson! navigation, json
+  eq rendered.headers.get('content-type'), 'text/html; charset=UTF-8'
+  eq rendered.headers.get('vary'), 'User-Agent, Accept, Sec-Fetch-Dest'
+  html = rendered.text!
+  ok html.includes '&lt;script&gt;'
+  ok html.includes '<span class="number">2</span>'
+  api = htmlJson!(Request.new('http://worker/state', { headers: { 'user-agent': 'Mozilla/5.0 (iPhone)', accept: 'application/json' } }), json)
+  ok api.headers.get('content-type').startsWith 'application/json'
+  eq api.headers.get('vary'), 'User-Agent, Accept, Sec-Fetch-Dest'
+  eq api.json!, { unsafe: '<script>', count: 2 }
+  rejected = htmlJson!(Request.new('http://worker/state', { headers: { 'user-agent': 'Mozilla/5.0 (iPhone)', accept: 'application/json, text/html;q=0', 'sec-fetch-dest': 'document' } }), json)
+  ok rejected.headers.get('content-type').startsWith 'application/json'
+  largeText = JSON.stringify({ value: 'x'.repeat(1_000_001) })
+  large = htmlJson! navigation, -> Response.new(largeText, { headers: { 'content-type': 'application/json', 'content-length': String(largeText.length) } })
+  ok large.headers.get('content-type').startsWith 'application/json'
+  stream = ReadableStream.new
+    start: (controller) ->
+      controller.enqueue TextEncoder.new().encode(largeText)
+      controller.close()
+  streamed = Promise.race! [
+    htmlJson navigation, -> Response.new(stream, { headers: { 'content-type': 'application/json' } })
+    Promise.new((_, reject) -> setTimeout((-> reject(Error.new('htmlJson size cancellation blocked'))), 1000))
+  ]
+  eq (streamed.text!).length, largeText.length
+
+test! 'secureHeaders fills API defaults without overriding application policy', ->
+  policy = secureHeaders permissionsPolicy: 'camera=(), microphone=()'
+  response = policy! Request.new('http://worker/state'), ->
+    Response.new 'ok',
+      headers:
+        'content-security-policy': "default-src 'none'"
+        'x-frame-options': 'DENY'
+  eq response.headers.get('x-content-type-options'), 'nosniff'
+  eq response.headers.get('referrer-policy'), 'strict-origin-when-cross-origin'
+  eq response.headers.get('content-security-policy'), "default-src 'none'"
+  eq response.headers.get('x-frame-options'), 'DENY'
+  eq response.headers.get('permissions-policy'), 'camera=(), microphone=()'
+  eq response.headers.get('x-xss-protection'), null
+  eq response.headers.get('strict-transport-security'), null
+
+  reduced = secureHeaders contentSecurityPolicy: false, frameOptions: false
+  response = reduced! Request.new('http://worker/state'), -> Response.new 'ok'
+  eq response.headers.get('content-security-policy'), null
+  eq response.headers.get('x-frame-options'), null
+  throws (-> secureHeaders({ referrerPolicy: '   ' })), 'nonempty header value or false'
+  throws (-> secureHeaders({ referrerPolicy: "same-origin\nunsafe-url" })), 'valid header value or false'
+
+test! 'prototype-named cookies are data', ->
+  policy = csrf secret: 'csrf-secret', cookieName: 'toString'
+  response = policy!(Request.new('http://worker/state', { headers: { cookie: 'toString=not-a-token' } }), -> Response.new('ok'))
+  eq response.status, 200
+  ok response.headers.get('set-cookie').startsWith 'toString='
+
+test! 'signed sessions and CSRF remain request-local', -> runMode! false
+test! 'encrypted sessions remain opaque and authenticated', -> runMode! true

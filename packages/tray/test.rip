@@ -20,7 +20,7 @@ test 'has no runtime dependencies and keeps the native host in the package', ->
   ok existsSync "#{import.meta.dir}/assets/rip-template.svg"
   ok readFileSync("#{import.meta.dir}/macos/Package.swift", 'utf8').includes('RipTrayHost')
 
-test 'the macOS host is generic and contains no Rip Apps policy', ->
+test 'the macOS host is generic and contains no Rip Sites policy', ->
   manifest = readFileSync "#{import.meta.dir}/macos/Package.swift", 'utf8'
   source = readFileSync "#{import.meta.dir}/macos/Sources/RipTrayHost/RipTrayHost.swift", 'utf8'
   kit = readFileSync "#{import.meta.dir}/macos/Sources/TrayKit/TrayKit.swift", 'utf8'
@@ -37,7 +37,7 @@ test 'the macOS host is generic and contains no Rip Apps policy', ->
   ok kit.includes 'PanelLeadingIcon(icon: item.icon, reservesSpace: reservesLeadingIconSpace)'
   ok kit.includes 'if let logo = provider.tray.logo {'
   ok not kit.includes 'provider.tray.logo ?? provider.tray.icon'
-  ok not /rip app|rip edge|Caddy|Janus/.test(source)
+  ok not /rip sites|rip edge|Caddy|Janus/.test(source)
 
 test 'the native host builds and exercises its protocol on macOS', ->
   if process.platform isnt 'darwin'
@@ -196,6 +196,6 @@ test! 'the persistent Rip provider handles an action and publishes the new menu'
   finally
     rmSync root, { recursive: true, force: true }
 
-test 'the framework and its executable Rip Apps mode compile as one ordinary Rip file', ->
+test 'the framework and its executable Rip Sites mode compile as one ordinary Rip file', ->
   result = Bun.spawnSync ['rip', '-c', "#{import.meta.dir}/tray.rip"], { stdout: 'ignore', stderr: 'pipe' }
   eq result.exitCode, 0, result.stderr.toString()
