@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "playwright test"
+    "test": "bun run test:smoke",
+    "test:smoke": "playwright test",
+    "test:cart": "RIP_CART_CERTIFICATION=1 playwright test"
   },
   "devDependencies": {
     "@playwright/test": "1.58.2"
