@@ -394,6 +394,10 @@ class Emitter {
     // rediscovered by scanning output): the browser module loader
     // splices resolved specifiers by these exact offsets.
     this.importSpans = [];
+    // Imported bindings the running program never references — the face
+    // keeps them (they are real types there), the JS emission does not
+    // (see collectTypeOnlyImports).
+    this.typeOnlyImports = new Set();
     // Tier 3 pins (TS face only): Map of `${name}@${valueHash}` → type
     // text, supplied by the editor's probe pass. Names the scan reports
     // as pinnable (still hoisted + nested occurrence) collect in
@@ -2400,6 +2404,54 @@ class Emitter {
   // child-ctor object's LAYOUT (one pair per line), and the strip
   // contract — face minus regions === JS bytes — holds only if both
   // modes make that layout decision from the same map.
+  // The imported bindings that are TYPE-ONLY: named in an import and
+  // then never referenced by the running program. Type syntax is absent
+  // from the s-expression tree — an annotation is erased into the side
+  // tables — so a name used only in one appears NOWHERE in the value
+  // tree, and that absence is the whole test. No cross-module
+  // resolution is needed, and none would help: whether the exporting
+  // module spells the name as a type is its business, while whether
+  // THIS file needs it at runtime is answerable here.
+  //
+  // A name must be USED BY A TYPE to be elided, not merely unused: an
+  // import nobody references at all is dead code, which is the author's
+  // business and not the emitter's — removing it would rewrite a program
+  // nobody asked to have rewritten.
+  //
+  // Both halves are deliberately conservative, and they fail the same
+  // safe way. Every string in the value tree counts as a use, including
+  // ones that are not references (a property key sharing the name); and
+  // only the roles below are read for type text, so a type position this
+  // list does not name goes unseen. Either way the name is KEPT, which
+  // costs an elision. The opposite — emitting an import of a name the
+  // module does not export — is a module that fails to load.
+  collectTypeOnlyImports(sexpr, source) {
+    const used = new Set();
+    const bound = [];
+    const walk = (x) => {
+      if (typeof x === 'string') { used.add(x); return; }
+      if (!isNode(x)) return;
+      // A module import's own specifiers are the declaration, not a use,
+      // so they are recorded and not descended into. A DYNAMIC import is
+      // an ordinary expression and walks normally.
+      if (isModuleImportNode(this.stores, x)) {
+        bound.push(...Emitter.importedNames([x]));
+        return;
+      }
+      for (const c of x) walk(c);
+    };
+    walk(sexpr);
+    if (bound.length === 0 || !source) return;
+    const inTypes = new Set();
+    for (const n of this.stores.nodes ?? []) {
+      for (const r of this.stores.rolesOf(n.nodeId)) {
+        if (!Emitter.TYPE_ROLES.has(r.role) || typeof r.sourceStart !== 'number') continue;
+        for (const m of source.slice(r.sourceStart, r.sourceEnd).matchAll(/[A-Za-z_$][\w$]*/g)) inTypes.add(m[0]);
+      }
+    }
+    for (const name of bound) if (inTypes.has(name) && !used.has(name)) this.typeOnlyImports.add(name);
+  }
+
   collectTsDirectives(sexpr, trivia, source) {
     this.tsDirectiveMap = new Map();
     this.tsNocheck = null;
@@ -3641,6 +3693,10 @@ class Emitter {
     return specs;
   }
 
+  // The roles whose recorded span is TYPE text. Additive by design —
+  // see collectTypeOnlyImports for why an omission is safe.
+  static TYPE_ROLES = new Set(['annotation', 'returnType', 'typeParams']);
+
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {
@@ -3792,14 +3848,43 @@ class Emitter {
   // stops being verbatim at the first newline and every name past it loses its
   // position. Each name is a source read and takes its own row; the alias is a
   // binding site and takes one too.
+  // The LOCAL name a named specifier binds — what the rest of the file
+  // would have to reference for the import to be needed at runtime.
+  static specifierLocal(s) { return isNode(s) ? s[1] : s; }
+
   emitSpecifiers(list) {
-    list.forEach((s, i) => {
-      if (i > 0) this.b.emit(', ');
-      if (isNode(s)) {
-        this.emitPrimitive(s[0]);
-        this.b.emit(' as ');
-        this.emitPrimitive(s[1]);
-      } else this.emitPrimitive(s);
+    // A type-only name stays in the FACE — it is a real type there, and
+    // dropping it would strand every annotation that uses it — but never
+    // reaches the JS, where importing a name the module does not export
+    // is a module that fails to load. The region carries the separator
+    // too, or stripping would leave a dangling comma.
+    const kept = list.filter((s) => !this.typeOnlyImports.has(Emitter.specifierLocal(s)));
+    let emitted = 0;
+    list.forEach((s) => {
+      const erased = this.typeOnlyImports.has(Emitter.specifierLocal(s));
+      const one = () => {
+        if (isNode(s)) {
+          this.emitPrimitive(s[0]);
+          this.b.emit(' as ');
+          this.emitPrimitive(s[1]);
+        } else this.emitPrimitive(s);
+      };
+      if (erased) {
+        if (!this.ts) return;                  // the shipping emission: gone
+        // The face keeps it, inside a region so stripping reproduces the
+        // JS byte for byte. The separator rides along — lead with it when
+        // something survives ahead, otherwise trail it — or a strip would
+        // leave a dangling comma.
+        this.b.tsOnly(() => {
+          if (emitted > 0) this.b.emit(', ');
+          one();
+          if (emitted === 0 && kept.length > 0) this.b.emit(', ');
+        });
+        return;
+      }
+      if (emitted > 0) this.b.emit(', ');
+      one();
+      emitted++;
     });
   }
 
@@ -3823,7 +3908,16 @@ class Emitter {
       // waiting to be filled, and an editor offering to add a name puts it
       // there instead of on a real import. The two are distinct nodes now,
       // so the emission can be what was written.
-      if (specs.length > 0) {
+      // Every binding erased leaves the clause with nothing to say, and
+      // the JS becomes a bare `import 'mod'` — which still RUNS the
+      // module. Dropping the statement outright would silently discard
+      // its side effects, so the clause and its `from` ride the region
+      // and the specifier stays.
+      const allErased = specs.length > 0 && specs.every((spec) => spec !== '{}'
+        && (typeof spec === 'string' || spec[0] === '*'
+          ? this.typeOnlyImports.has(typeof spec === 'string' ? spec : spec[1])
+          : spec.every((s) => this.typeOnlyImports.has(Emitter.specifierLocal(s)))));
+      const clause = () => {
         specs.forEach((spec, i) => {
           if (i > 0) this.b.emit(', ');
           if (spec === '{}') this.b.emit('{}');
@@ -3836,6 +3930,10 @@ class Emitter {
           }
         });
         this.b.emit(' from ');
+      };
+      if (specs.length > 0) {
+        if (!allErased) clause();
+        else if (this.ts) this.b.tsOnly(clause);
       }
       {
         const specStart = this.b.offset;
@@ -14717,6 +14815,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // ahead of any runtime injection — since TypeScript honors it only
   // before all code.
   emitter.collectTsDirectives(parseResult.sexpr, parseResult.trivia ?? [], source);
+  emitter.collectTypeOnlyImports(parseResult.sexpr, source);
   if (emitter.tsNocheck !== null) {
     const programId = stores.idOf(parseResult.sexpr);
     const t = emitter.tsNocheck;

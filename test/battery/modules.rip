@@ -492,3 +492,42 @@ code "an exported class rebinds", '''
   };
   Marker = 5;
 '''
+
+# ==============================================================================
+# Type-only imports
+# ==============================================================================
+
+# A name used only in an annotation is not a value: the running program never
+# references it, and emitting the import would name an export the module may
+# not have. The face keeps it — the annotation still has to resolve there.
+code "an imported name used only in a type is elided", '''
+  import { api, Shape } from './lib.rip'
+  errors: Shape = {}
+  console.log(api, errors)
+''', '''
+  import { api } from "./lib.rip";
+  let errors = {};
+  console.log(api, errors);
+'''
+
+# Every name erased leaves the module still IMPORTED — a bare specifier runs
+# it. Dropping the statement would discard its side effects silently.
+code "an all-type clause keeps the module's side effect", '''
+  import { Shape } from './lib.rip'
+  errors: Shape = {}
+  console.log(errors)
+''', '''
+  import "./lib.rip";
+  let errors = {};
+  console.log(errors);
+'''
+
+# An import nobody references AT ALL is dead code, not a type — the emitter
+# does not rewrite it away.
+code "an unreferenced value import survives", '''
+  import { useState } from 'react'
+  console.log(1)
+''', '''
+  import { useState } from "react";
+  console.log(1);
+'''
