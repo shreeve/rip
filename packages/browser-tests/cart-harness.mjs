@@ -89,7 +89,8 @@ const stub = Bun.serve({
 
 // Real Janus load-balances across worker upstreams. This stub must too:
 // Cart stash fetches user/products/orders in parallel, and each worker
-// defaults to concurrency 1.
+// defaults to concurrency 1. App-only watch matches this suite (it edits
+// app/ files) and avoids API-pool swaps that briefly drop every socket.
 const WORKERS = 4;
 
 // Invoke the manager the same way the sites suite does: bun + loader +
@@ -99,7 +100,7 @@ const manager = Bun.spawn(
   [
     process.execPath, `--preload=${loaderPath}`, serverBin,
     'index.rip', '--control', ctlSock, '--name', 'cart-probe',
-    '-w', String(WORKERS), '--access-log=off',
+    '-w', String(WORKERS), '--watch-app', '--no-watch-api', '--access-log=off',
   ],
   {
     cwd: cartDir,
@@ -135,13 +136,18 @@ drain(manager.stdout, 'out');
 drain(manager.stderr, 'err');
 
 const liveUpstreams = () => {
-  const put = [...calls].reverse().find(
-    (c) => c.method === 'PUT' && c.body?.upstreams?.length &&
-      !c.body.upstreams.some((u) => u.doorbell),
-  );
-  const upstreams = put?.body?.upstreams ?? registration?.upstreams ?? [];
+  // Latest upstream PUT wins, including lists that also carry a doorbell —
+  // skip only the doorbell entries, not the whole PUT.
+  let upstreams = registration?.upstreams ?? [];
+  for (let i = calls.length - 1; i >= 0; i--) {
+    const c = calls[i];
+    if (c.method === 'PUT' && Array.isArray(c.body?.upstreams)) {
+      upstreams = c.body.upstreams;
+      break;
+    }
+  }
   return upstreams
-    .filter((u) => !u.doorbell && u.path && existsSync(u.path))
+    .filter((u) => u && !u.doorbell && u.path && existsSync(u.path))
     .map((u) => u.path);
 };
 
@@ -168,9 +174,9 @@ const workerSock = async ({ need = 1 } = {}) => {
 // a single upstream before siblings appear.
 const initialSock = await workerSock({ need: WORKERS });
 writeFileSync(join(fixtureRoot, 'ready'), `${initialSock}\n`);
-// Playwright only needs a 2xx on /__test/ready; do not re-block on the
-// socket for every probe (Bun's default idleTimeout is 10s).
+// Playwright only needs a 2xx on /__test/ready after boot.
 let readySock = initialSock;
+let booted = true;
 
 const proxy = async (request) => {
   const url = new URL(request.url);
@@ -229,10 +235,14 @@ const server = Bun.serve({
       return Response.json({ cartDir, fixtureRoot });
     }
     if (url.pathname === '/__test/ready') {
-      if (readySock && existsSync(readySock)) {
-        return Response.json({ ok: true, sock: readySock });
+      const paths = liveUpstreams();
+      if (paths.length) {
+        readySock = paths[rr % paths.length];
+        return Response.json({ ok: true, sock: readySock, workers: paths.length });
       }
-      readySock = await workerSock();
+      // After first boot, a brief empty pool must not fail Playwright's probe.
+      if (booted) return Response.json({ ok: true, sock: readySock, workers: 0 });
+      readySock = await workerSock({ need: 1 });
       return Response.json({ ok: true, sock: readySock });
     }
     if (registration?.files?.proxy_first?.some(prefix => url.pathname === prefix || url.pathname.startsWith(`${prefix}/`))) {
