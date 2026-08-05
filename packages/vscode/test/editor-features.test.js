@@ -95,6 +95,12 @@ async function inWorkspace(files, fn) {
       client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(rel), languageId: 'rip', version: 1, text } });
       await awaitPublish(rel, before);
     },
+    // didOpen with NO wait for the first compile — the editor's own
+    // cold-open ordering, where a cached answer is the only answer.
+    openNoWait(rel, text) {
+      versions.set(rel, 1);
+      client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(rel), languageId: 'rip', version: 1, text } });
+    },
     async change(rel, text) {
       const before = published.length;
       const v = (versions.get(rel) || 1) + 1;
@@ -683,6 +689,27 @@ describe.skipIf(!tsgoAvailable)('document and workspace symbols', () => {
       for (const s of symbols) {
         expect(s.children.every((c) => !c.name.startsWith('__'))).toBe(true);
       }
+    });
+  }, 30000);
+
+  test('the outline answers the request that arrives before the first compile', async () => {
+    await inWorkspace({}, async (api) => {
+      api.openNoWait('cold.rip', 'class Greeter\n  greet: (who: string): string ->\n    who\ncount: number = 42\n');
+      // The editor asks once on open and caches; a null here is an
+      // outline that stays empty for the life of the buffer version.
+      const symbols = await api.documentSymbol('cold.rip');
+      expect(symbols).not.toBeNull();
+      expect(symbols.map((s) => s.name).sort()).toEqual(['Greeter', 'count']);
+    });
+  }, 30000);
+
+  test('document links answer the request that arrives before the first compile', async () => {
+    await inWorkspace({ 'util.rip': UTIL }, async (api) => {
+      api.openNoWait('cold-links.rip', '# see ./util.rip for the answer\nx = 1\n');
+      const links = await api.documentLink('cold-links.rip');
+      expect(links).not.toBeNull();
+      expect(links).toHaveLength(1);
+      expect(links[0].target).toBe(api.uriOf('util.rip'));
     });
   }, 30000);
 
