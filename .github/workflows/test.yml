@@ -43,6 +43,10 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Fast compiler and toolchain loop
+        # This is intentionally the local edit loop. The explicit
+        # repository-certification workflow owns CI-required extended tiers.
+        env:
+          CI: ''
         run: bun run test
 
   # The one smoke suite test:all does not carry: it needs real browsers,
