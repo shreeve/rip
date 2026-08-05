@@ -1,263 +1,284 @@
 # ==============================================================================
-# Workspace feed — hash hints over Hub, latest bytes over HTTP
+# Publication feed — ordered watch changes plus latest.json reconnect recovery
+#
+# The feed owns transport ordering only. Browser boot owns bundle syntax,
+# compilation, activation, and apply policy through the three client callbacks.
 # ==============================================================================
-
-import { rash, check } from './rash.rip'
 
 export type Feed =
   close: () => void
   connected: () => boolean
   resync: () => Promise<void>
 
+export type PublicationClient =
+  hash: () => string
+  apply: (change: Record<string, unknown>) => Promise<boolean | 'rejected' | 'reload'>
+  reload: (reason?: string) => void
+
 export type ConnectFeedOpts =
   hub?: string
+  latestUrl?: string
   makeSocket?: (url: string) => any
   fetch?: (url: string, opts?: Record<string, unknown>) => Promise<any>
-  moduleUrl?: (id: string) => string
-  manifestUrl?: string
-  initialCheck?: string
   report?: (...args: any[]) => void
-  onEpoch?: (ding: Record<string, unknown>) => void
   backoff?: { min?: number, max?: number }
+  ackTimeout?: number
 
 FEED_BACKOFF_MIN = 250
 FEED_BACKOFF_MAX = 8000
+FEED_ACK_TIMEOUT = 5000
+serial = 0
+
+validHash = (hash) -> typeof hash is 'string' and /^[A-Za-z0-9_]{6}$/.test(hash)
 
 defaultHubUrl = ->
   if typeof location is 'undefined'
-    throw Error.new 'Rip Workspace: connectFeed needs a hub URL (no location to derive one from)'
+    throw Error.new 'Rip App: connectFeed needs a hub URL (no location to derive one from)'
   scheme = if location.protocol is 'https:' then 'wss' else 'ws'
   "#{scheme}://#{location.host}/hub"
 
 defaultSocketFactory = ->
   if typeof WebSocket is 'undefined'
-    throw Error.new 'Rip Workspace: connectFeed needs a socket factory (no global WebSocket)'
+    throw Error.new 'Rip App: connectFeed needs a socket factory (no global WebSocket)'
   (url) -> WebSocket.new(url)
 
 defaultFetch = ->
   if typeof fetch is 'undefined'
-    throw Error.new 'Rip Workspace: connectFeed needs a fetch (no global fetch)'
+    throw Error.new 'Rip App: connectFeed needs a fetch (no global fetch)'
   (url, opts) -> fetch(url, opts)
 
-defaultModuleUrl = (id) ->
-  '/' + id.split('/').map(encodeURIComponent).join('/')
-validWireHash = (hash) -> typeof hash is 'string' and /^[A-Za-z0-9_]{6}$/.test(hash)
-validFileId = (id) ->
-  return false unless typeof id is 'string' and id.length > 0 and not id.startsWith('/') and not id.includes('\\')
-  segments = id.split '/'
-  return false if segments.some((segment) -> not segment or segment is '.' or segment is '..' or segment.startsWith('.'))
-  id.endsWith('.rip') or id.endsWith('.css') or id.endsWith('.html')
-
-export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
-  unless workspace? and typeof workspace.set is 'function' and typeof workspace.passport is 'function' and typeof workspace.sealed is 'function'
-    throw TypeError.new 'Rip Workspace: connectFeed expects a workspace'
-  if workspace.sealed()
-    throw Error.new 'Rip Workspace: connectFeed on a sealed workspace — production has no hub'
+export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): Feed
+  unless client? and typeof client.hash is 'function' and typeof client.apply is 'function' and typeof client.reload is 'function'
+    throw TypeError.new 'Rip App: connectFeed expects hash, apply, and reload callbacks'
+  unless validHash client.hash()
+    throw TypeError.new 'Rip App: connectFeed client hash must be six Base64URL-folded characters'
 
   hubUrl = opts.hub ?? defaultHubUrl()
+  latestUrl = opts.latestUrl ?? '/latest.json'
   makeSocket = opts.makeSocket ?? defaultSocketFactory()
-  fetchBytes = opts.fetch ?? defaultFetch()
-  moduleUrl = opts.moduleUrl ?? defaultModuleUrl
-  manifestUrl = opts.manifestUrl ?? '/manifest.json'
-  report = opts.report ?? (...args) -> console.error(...args)
+  fetchLatest = opts.fetch ?? defaultFetch()
+  report = opts.report ?? (...args) -> console.error ...args
   backoffMin = opts.backoff?.min ?? FEED_BACKOFF_MIN
   backoffMax = opts.backoff?.max ?? FEED_BACKOFF_MAX
-  onEpoch = opts.onEpoch ?? (ding) ->
-    report "[Rip] workspace feed: a new epoch is live (#{ding.epoch}) — reloading"
-    location.reload() if typeof location isnt 'undefined'
-    return
+  ackTimeout = opts.ackTimeout ?? FEED_ACK_TIMEOUT
 
   closed = false
+  failed = false
   isOpen = false
+  ready = false
   socket = null
   attempts = 0
-  timer = null
-  resyncTimer = null
-  resyncAttempts = 0
-  lastCheck = opts.initialCheck ?? null
-  unless lastCheck is null or validWireHash(lastCheck)
-    throw TypeError.new 'Rip Workspace: feed initialCheck must be six Base64URL-folded characters'
-  wants = {}       # id → { hash, sig }: hint not yet healed
-  owners = {}      # id → request/apply owner token
+  reconnectTimer = null
+  ackTimer = null
+  connection = 0
+  token = null
+  buffer = []
+  tail = Promise.resolve()
+  probes = Map.new()
+  rejectedHash = null
 
-  claim = (id) ->
-    owners[id] = (owners[id] or 0) + 1
-    workspace.claim?(id, owners[id])
-    owners[id]
-
-  owns = (id, owner) -> owners[id] is owner and not closed
-
-  fetchLatest = (id, owner) ->
-    res = fetchBytes! moduleUrl(id), { cache: 'no-store' }
-    return { res } unless res.ok
-    bytes = Uint8Array.new(res.arrayBuffer!)
-    return null unless owns(id, owner)
-    { res, hash: rash(bytes), source: TextDecoder.new().decode(bytes) }
-
-  applyLatest = (id, owner) ->
-    result = fetchLatest! id, owner
-    return { stale: true } unless result? and owns(id, owner)
-    return { status: result?.res?.status, ok: false } unless result.res.ok
-    current = workspace.passport id
-    passport: any = { id, hash: result.hash, source: result.source, owner }
-    passport.path = id unless current?
-    applied = workspace.set! passport
-    delete wants[id] if owns(id, owner)
-    { ok: true, hash: result.hash, applied }
-
-  wantsSatisfied = ->
-    for id, want of wants
-      current = workspace.passport id
-      delete wants[id] if current? and current.hash is want.hash
-    Object.keys(wants).length is 0
-
-  scheduleResync = ->
-    return if closed or resyncTimer?
-    delay = Math.min backoffMin * 2 ** resyncAttempts, backoffMax
-    resyncAttempts += 1
-    resyncTimer = setTimeout (->
-      resyncTimer = null
-      resync().catch (error) -> report '[Rip] workspace feed: resync failed:', error
-    ), delay
+  reload = (reason) ->
+    return if failed or closed
+    failed = true
+    client.reload reason
     return
 
-  # Additive-and-forward: manifests never delete local/editor passports.
-  resync = ->
-    clean = true
-    res = fetchBytes! manifestUrl, { cache: 'no-cache' }
-    unless res.ok
-      report "[Rip] workspace feed: manifest fetch failed (#{res.status})"
-      scheduleResync()
-      return
-    manifest = res.json!
-    files = manifest?.files
-    unless manifest? and typeof manifest is 'object' and not Array.isArray(manifest) and validWireHash(manifest.check) and Array.isArray(files)
-      report '[Rip] workspace feed: malformed manifest:', manifest
-      return
-    priorId = null
-    for entry in files
-      unless entry? and typeof entry is 'object' and not Array.isArray(entry) and validFileId(entry.id) and validWireHash(entry.hash) and (priorId is null or priorId < entry.id)
-        report '[Rip] workspace feed: malformed manifest entry:', entry
+  applyOne = (change) ->
+    return false if failed or closed
+    try
+      verdict = client.apply! change
+      if verdict is 'rejected'
+        rejectedHash = change?.hash if validHash(change?.hash)
+        return false
+      if verdict is 'reload' or not verdict
+        reload 'change could not be applied'
+        return false
+      rejectedHash = null
+      true
+    catch error
+      report '[Rip] publication change failed:', error
+      reload 'change failed'
+      false
+
+  enqueue = (change, owner) ->
+    tail = tail.then ->
+      return true if owner isnt connection
+      applyOne! change
+    tail = tail.catch (error) ->
+      report '[Rip] publication queue failed:', error
+      reload 'change queue failed'
+      false
+    return
+
+  probe = (owner) ->
+    return if closed or failed or owner isnt connection
+    startHash = client.hash()
+    response = fetchLatest! latestUrl, { cache: 'no-store' }
+    unless response?.ok
+      throw Error.new "latest.json fetch failed (#{response?.status})"
+    latest = response.json!
+    unless latest? and typeof latest is 'object' and not Array.isArray(latest) and Object.keys(latest).length is 1 and Object.hasOwn(latest, 'hash') and validHash(latest.hash)
+      throw Error.new 'latest.json is malformed'
+    return if closed or failed or owner isnt connection
+
+    if rejectedHash?
+      if latest.hash isnt rejectedHash
+        reload "a newer App generation followed rejected #{rejectedHash}"
         return
-      priorId = entry.id
-    unless check(files) is manifest.check
-      report '[Rip] workspace feed: manifest check does not match its files:', manifest
+      buffer = []
+      ready = true
+      attempts = 0
       return
-    if manifest.check is lastCheck and Object.keys(wants).length is 0
-      resyncAttempts = 0
-      return
-    named = Set.new()
-    for entry in files
-      named.add entry.id
-      current = workspace.passport entry.id
-      continue if current? and current.hash is entry.hash
-      owner = claim entry.id
-      result = applyLatest! entry.id, owner
-      unless result?.ok or result?.stale
-        report "[Rip] workspace feed: module fetch missed (#{result?.status}) for '#{entry.id}' during resync"
-        wants[entry.id] = { hash: entry.hash, sig: null }
-        clean = false
 
-    sig = JSON.stringify files
-    for id of { ...wants }
-      want = wants[id]
-      current = workspace.passport id
-      if current? and current.hash is want.hash
-        delete wants[id]
-        continue
-      # A successful latest fetch satisfies the want even when the hint was
-      # already superseded. Missing paths need two distinct manifest views
-      # before retirement is inferred.
-      owner = claim id
-      result = applyLatest! id, owner
-      if result?.ok
-        delete wants[id]
-      else if not result?.stale and not named.has(id)
-        if want.sig? and want.sig isnt sig
-          delete wants[id] if wants[id] is want
-        else
-          want.sig = sig
-      else unless result?.stale
-        clean = false
-    lastCheck = manifest.check
-    if clean and wantsSatisfied()
-      resyncAttempts = 0
-    else
-      scheduleResync()
+    # The probe may overlap changes received after subscription. A latest hash
+    # equal to the starting state or any state reached by the buffered chain is
+    # coherent; any other hash proves that a transition was missed.
+    visited = Set.new [startHash]
+    index = 0
+    while index < buffer.length
+      ok = applyOne! buffer[index]
+      unless ok
+        beyondRejected = rejectedHash? and (
+          latest.hash isnt rejectedHash or
+          buffer.slice(index + 1).some((change) -> change?.hash isnt rejectedHash)
+        )
+        buffer = []
+        if beyondRejected
+          reload "a newer App generation followed rejected #{rejectedHash}"
+          return
+        ready = true
+        attempts = 0
+        return
+      return if closed or failed or owner isnt connection
+      visited.add client.hash()
+      index++
+    return if closed or failed or owner isnt connection
+    unless visited.has latest.hash
+      reload "latest App hash #{latest.hash} is not in the received change chain"
+      return
+    buffer = []
+    ready = true
+    attempts = 0
     return
 
-  applyDing = (ding) ->
-    if ding? and typeof ding is 'object' and ding.kind is 'epoch'
-      onEpoch ding
-      return
-    unless ding? and typeof ding is 'object' and validFileId(ding.id)
-      report '[Rip] workspace feed: malformed ding:', ding
-      return
-    { id, kind, hash } = ding
-    unless validWireHash(hash)
-      report "[Rip] workspace feed: malformed #{if kind is 'delete' then 'delete ' else ''}ding:", ding
-      return
-    if kind is 'delete'
-      claim id
-      delete wants[id]
-      workspace.set { id, hash, deleted: true, owner: owners[id] }
-      return
-    current = workspace.passport id
-    return if current? and current.hash is hash
-    owner = claim id
-    result = applyLatest! id, owner
-    return if result?.stale or result?.ok
-    report "[Rip] workspace feed: module fetch missed (#{result?.status}) for '#{id}' — resyncing from the manifest"
-    wants[id] = { hash, sig: null }
-    resync!
-    return
+  beginProbe = (owner = connection, repeat = false) ->
+    return probes.get(owner) if probes.has(owner) and not repeat
+    # A closing connection may still have one asynchronous apply in flight.
+    # Put the reconnect probe behind that same queue so every connection
+    # observes one total publication order.
+    task = tail.then -> probe owner
+    task = task.catch (error) ->
+      return if closed or failed or owner isnt connection
+      report '[Rip] publication reconnect check failed:', error
+      ready = false
+      try socket?.close()
+    tail = task.then (-> true), (-> false)
+    probes.set owner, task
+    task.finally -> probes.delete owner if probes.get(owner) is task
+    task
 
-  handleFrame = (text) ->
+  handleFrame = (text, owner) ->
+    return if owner isnt connection
     frame = null
     try
       frame = JSON.parse text
     catch
-      report '[Rip] workspace feed: unparseable hub frame:', text
+      report '[Rip] publication feed received invalid JSON:', text
+      reload 'malformed publication frame'
       return
     objects = if Array.isArray(frame) then frame else [frame]
-    for obj in objects
-      continue unless obj? and typeof obj is 'object' and obj.ding isnt undefined
-      applyDing(obj.ding).catch (error) -> report '[Rip] workspace feed: ding apply failed:', error
+    for object in objects
+      continue unless object? and typeof object is 'object'
+      if Object.keys(object).length is 1 and Object.hasOwn(object, '!') and object['!'] is token and ackTimer?
+        if ackTimer?
+          clearTimeout ackTimer
+          ackTimer = null
+        beginProbe connection
+      # Janus stamps every client-originated event with `<`. Publication
+      # changes enter through the server control plane and carry no sender
+      # provenance; accepting a stamped frame would let an App client inject
+      # source into every other subscriber on the shared Hub.
+      else if object.change isnt undefined and not Object.hasOwn(object, '<')
+        if rejectedHash?
+          if object.change?.hash is rejectedHash
+            continue
+          reload "a newer App generation followed rejected #{rejectedHash}"
+        else if ready then enqueue object.change, owner else buffer.push object.change
+      else if object.reload isnt undefined and not Object.hasOwn(object, '<')
+        if rejectedHash? then beginProbe(owner, true) else reload 'server generation changed'
     return
 
   schedule = ->
-    return if closed or timer?
+    return if closed or failed or reconnectTimer?
     delay = Math.min backoffMin * 2 ** attempts, backoffMax
     attempts += 1
-    timer = setTimeout (->
-      timer = null
+    reconnectTimer = setTimeout (->
+      reconnectTimer = null
       connect()
     ), delay
     return
 
   connect = ->
-    return if closed
+    return if closed or failed
+    connection += 1
+    owner = connection
+    ready = false
+    buffer = []
+    token = "rip-#{++serial}"
     try
       socket = makeSocket hubUrl
     catch error
-      report '[Rip] workspace feed: socket open failed:', error
+      report '[Rip] publication socket open failed:', error
       schedule()
       return
-    socket.onopen = ->
-      isOpen = true
-      attempts = 0
-      try socket.send(JSON.stringify({ '+': ['/hub'] })) catch error then report '[Rip] workspace feed: self-join failed:', error
-      resync().catch (error) -> report '[Rip] workspace feed: resync failed:', error
-      return
     socket.onmessage = (event) ->
-      handleFrame String(event.data)
+      handleFrame String(event.data), owner
+      return
+    socket.onopen = ->
+      return if owner isnt connection or closed
+      isOpen = true
+      try
+        socket.send JSON.stringify({ '+': ['/hub'], '?': token })
+      catch error
+        report '[Rip] publication subscription failed:', error
+        try socket.close()
+        return
+      ackTimer = setTimeout (->
+        return if closed or failed or owner isnt connection or ready
+        report '[Rip] publication subscription acknowledgement timed out'
+        try socket.close()
+      ), ackTimeout
       return
     socket.onclose = ->
+      return if owner isnt connection
       isOpen = false
+      ready = false
+      if ackTimer?
+        clearTimeout ackTimer
+        ackTimer = null
       schedule()
       return
     socket.onerror = -> return
     return
+
+  resync = ->
+    return if closed or failed
+    if socket?
+      try socket.close()
+    else
+      schedule()
+    return
+
+  listeners = []
+  listen = (target, name, fn) ->
+    return unless typeof target?.addEventListener is 'function'
+    target.addEventListener name, fn
+    listeners.push -> target.removeEventListener name, fn
+    return
+  listen globalThis, 'online', -> resync()
+  listen globalThis, 'pageshow', (event) -> resync() if event.persisted is true
+  if typeof document isnt 'undefined'
+    listen document, 'visibilitychange', -> resync() if document.visibilityState is 'visible'
 
   connect()
 
@@ -265,15 +286,12 @@ export def connectFeed(workspace, opts: ConnectFeedOpts = {}): Feed
     close: ->
       return if closed
       closed = true
-      owners[id] += 1 for id of owners
-      if timer?
-        clearTimeout timer
-        timer = null
-      if resyncTimer?
-        clearTimeout resyncTimer
-        resyncTimer = null
+      connection += 1
+      clearTimeout reconnectTimer if reconnectTimer?
+      clearTimeout ackTimer if ackTimer?
+      dispose() for dispose in listeners
       try socket?.close()
       return
-    connected: -> isOpen and not closed
+    connected: -> isOpen and ready and not closed and not failed
     resync: -> resync()
   }

@@ -1,5 +1,5 @@
 import { test, eq, ok } from '@rip-lang/testing'
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -81,7 +81,11 @@ test! 'artifact-only worker becomes ready, serves, and drains', ->
     rmSync dir, { recursive: true, force: true }
 
 test! 'foreground manager registers one ready worker and deregisters before exit', ->
-  dir = mkdtempSync join(tmpdir(), 'rip-hello-manager-')
+  dir = mkdtempSync join(import.meta.dir, '.rip-hello-manager-')
+  project = join dir, 'project'
+  mkdirSync project
+  entry = join project, 'app.rip'
+  copyFileSync join(import.meta.dir, 'index.rip'), entry
   controlSocket = join dir, 'janus.sock'
   registration = null
   deleted = false
@@ -130,16 +134,27 @@ test! 'foreground manager registers one ready worker and deregisters before exit
       unixFetch "http://worker#{url.pathname}", registration.upstreams[0].path
   proc = null
   try
-    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, join(import.meta.dir, 'index.rip'), '--name', 'hello', '--host', 'hello.test', '--control', controlSocket, '--workers', '1', '--no-watch'],
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, entry, '--name', 'hello', '--host', 'hello.test', '--control', controlSocket, '--workers', '1', '--no-watch'],
       stdin: 'ignore'
       stdout: 'pipe'
       stderr: 'pipe'
     output = Response.new(proc.stdout).text()
     diagnostic = Response.new(proc.stderr).text()
-    waitFor! -> registration? and accessConnected
+    sleep! 100
+    throw Error.new(await diagnostic) if proc.exitCode?
+    try
+      waitFor! -> registration?
+    catch error
+      throw Error.new "registration: #{error.message}"
+    try
+      waitFor! -> accessConnected
+    catch error
+      throw Error.new "access: #{error.message}"
     eq registration.name, 'hello'
     eq registration.hosts, ['hello.test']
     eq registration.upstreams.length, 1
+    ok not ('files' of registration), 'API-only registration must leave Janus file routing disabled'
+    ok not existsSync(join(project, 'dist')), 'API-only startup must not manufacture a dist root'
     response = fetch! "http://127.0.0.1:#{edge.port}/hello"
     eq response.status, 200
     eq (response.json!), { message: 'hello' }

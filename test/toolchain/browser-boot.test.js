@@ -1,26 +1,23 @@
-// Application boot through the browser entry, end to end under Node:
-// bundle fetch with ETag revalidation, the module graph compiling the
-// app package and every route, launch wiring, navigation, and render
-// gates — the same path the real-browser certification drives.
+// Browser publication consumer, end to end under Node: the two-key bundle,
+// canonical package resolution, prepared App launch, ordered watch changes,
+// and latest.json reconnect recovery.
 import { beforeAll, describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bootApp, fetchBundle } from '../../src/browser.js';
-import { assembleBundle } from '../../src/bundle.js';
+import { assembleRipBundle } from '../../packages/server/bundle.rip';
 import { installRecordingDOM } from '../support/recording-dom.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const H1 = 'AAAAAA';
+const H2 = 'BBBBBB';
+const H3 = 'CCCCCC';
 
 const node = name => ({
   name,
   children: [],
   parentNode: null,
-  appendChild(child) {
-    child.parentNode = this;
-    this.children.push(child);
-    return child;
-  },
+  appendChild(child) { child.parentNode = this; this.children.push(child); return child; },
   remove() {
     if (!this.parentNode) return;
     const index = this.parentNode.children.indexOf(this);
@@ -28,6 +25,7 @@ const node = name => ({
     this.parentNode = null;
   },
   querySelector: () => null,
+  replaceChildren(...children) { this.children = children; },
 });
 
 const fakeAdapter = (initial = '/') => {
@@ -49,773 +47,508 @@ const fakeAdapter = (initial = '/') => {
   };
 };
 
+const route = (name, text) => [
+  `export ${name} = component`,
+  '  render',
+  `    h1 '${text}'`,
+].join('\n');
+
 const APP_MODULES = {
+  'data.rip': "export data = { title: 'probe' }",
   'stash.rip': [
     "import { source } from '@rip-lang/app'",
     'export stash = {',
     '  user: source fetch: -> Promise.resolve { name: "Ada" }',
     '}',
   ].join('\n'),
-  'routes/index.rip': [
-    'export Home = component',
-    '  render',
-    '    h1 "home"',
-  ].join('\n'),
-  'routes/about.rip': [
-    'export About = component',
-    '  render',
-    '    h1 "about"',
-  ].join('\n'),
+  'routes/index.rip': route('Home', 'home'),
+  'routes/about.rip': route('About', 'about'),
 };
 
-const assemble = () => assembleBundle({
-  modules: APP_MODULES,
-  packagesDir: resolve(root, 'packages'),
-  data: { title: 'probe' },
+const bundleFor = (modules = APP_MODULES, hash = H1) => ({
+  hash,
+  list: assembleRipBundle({ modules, packagesDir: resolve(root, 'packages') }),
 });
+
+const settle = async () => {
+  await Bun.sleep(0);
+  await Bun.sleep(0);
+  await Bun.sleep(0);
+};
 
 describe('fetchBundle', () => {
-  test('caches by ETag and serves 304 revalidations from storage', async () => {
-    const table = new Map();
-    const storage = {
-      getItem: key => table.get(key) ?? null,
-      setItem: (key, value) => void table.set(key, value),
-    };
-    let calls = 0;
-    const fetchText = async (url, etag) => {
-      calls += 1;
-      if (etag === 'v1') return { fresh: false };
-      return { fresh: true, text: JSON.stringify({ modules: {}, packages: { x: 1 }, n: calls }), etag: 'v1' };
-    };
-    const first = await fetchBundle('/app', { fetchText, storage });
-    expect(first.n).toBe(1);
-    const second = await fetchBundle('/app', { fetchText, storage });
-    expect(second.n).toBe(1);
-    expect(calls).toBe(2);
+  test('parses fetched JSON and leaves caching to HTTP', async () => {
+    const calls = [];
+    const bundle = await fetchBundle('/bundle.json', {
+      fetchText: async url => (calls.push(url), JSON.stringify({ hash: H1, list: [] })),
+    });
+    expect(bundle).toEqual({ hash: H1, list: [] });
+    expect(calls).toEqual(['/bundle.json']);
   });
 
-  test('a failed fetch and a bodyless 304 reject loudly', async () => {
-    await expect(fetchBundle('/app', {
-      fetchText: async () => { throw new Error('rip: failed to fetch bundle'); },
-      storage: null,
-    })).rejects.toThrow(/failed to fetch/);
-    await expect(fetchBundle('/app', {
-      fetchText: async () => ({ fresh: false }),
-      storage: null,
-    })).rejects.toThrow(/no cached body/);
-  });
-});
-
-describe('fetchBundle reconciliation', () => {
-  test('a poisoned cache self-heals with one unconditional refetch', async () => {
-    const table = new Map([
-      ['__rip_bundle_etag:/app', 'v1'],
-      ['__rip_bundle_body:/app', 'not json'],
-    ]);
-    const storage = {
-      getItem: key => table.get(key) ?? null,
-      setItem: (key, value) => void table.set(key, value),
-      removeItem: key => void table.delete(key),
-    };
-    const etags = [];
-    const fetchText = async (url, etag) => {
-      etags.push(etag);
-      if (etag === 'v1') return { fresh: false };
-      return { fresh: true, text: '{"ok":1}', etag: 'v2' };
-    };
-    const bundle = await fetchBundle('/app', { fetchText, storage });
-    expect(bundle.ok).toBe(1);
-    expect(etags).toEqual(['v1', null]);
-    expect(table.get('__rip_bundle_body:/app')).toBe('{"ok":1}');
-    expect(table.get('__rip_bundle_etag:/app')).toBe('v2');
-  });
-
-  test('an invalid fresh body rejects by name and never caches', async () => {
-    const table = new Map();
-    const storage = {
-      getItem: key => table.get(key) ?? null,
-      setItem: (key, value) => void table.set(key, value),
-    };
-    await expect(fetchBundle('/app', {
-      fetchText: async () => ({ fresh: true, text: 'nope', etag: 'v1' }),
-      storage,
-    })).rejects.toThrow(/'\/app' is not valid JSON/);
-    expect(table.size).toBe(0);
-  });
-
-  test('a missing url rejects by name', async () => {
+  test('rejects missing URLs, non-text fetches, and invalid JSON loudly', async () => {
     await expect(fetchBundle()).rejects.toThrow(/requires a url/);
+    await expect(fetchBundle('/bundle.json', { fetchText: async () => ({}) })).rejects.toThrow(/did not return text/);
+    await expect(fetchBundle('/bundle.json', { fetchText: async () => 'nope' })).rejects.toThrow(/not valid JSON/);
     await expect(bootApp({})).rejects.toThrow(/bundle or a url/);
   });
 });
 
-describe('bootApp', () => {
-  test('a bundle without the app package rejects by name', async () => {
-    await expect(bootApp({ bundle: { modules: {}, packages: {} } })).rejects.toThrow(/@rip-lang\/app/);
-  });
-
-  test('boots the assembled app, mounts the route, and navigates', async () => {
-    const bundle = assemble();
-    expect(bundle.packages['@rip-lang/app'].root).toBe('@rip-lang/app');
-    const host = node('host');
-    const adapter = fakeAdapter('/');
-    const result = await bootApp({ bundle, target: host, adapter });
+describe('bootApp publication', () => {
+  test('compiles, launches, navigates, and reads data.rip seed data', async () => {
+    const result = await bootApp({ bundle: bundleFor(), target: node('host'), adapter: fakeAdapter('/') });
     try {
-      await Bun.sleep(0);
-      await Bun.sleep(0);
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
       expect(result.router.current.route.file).toBe('routes/index.rip');
-      expect(globalThis.__ripApp).toBe(result.app);
-      result.router.push('/about');
-      await Bun.sleep(0);
-      await Bun.sleep(0);
-      expect(result.router.current.route.file).toBe('routes/about.rip');
       expect(result.app.data.title).toBe('probe');
+      result.router.push('/about');
+      await settle();
+      expect(result.router.current.route.file).toBe('routes/about.rip');
     } finally {
       result.destroy();
     }
   });
 
-  test('the app stash flows from stash.rip and gates prefetch through it', async () => {
-    const bundle = assemble();
-    bundle.modules['routes/profile.rip'] = [
-      'export Profile = component',
-      '  user <~ @app.data.user',
-      '  render',
-      '    h1 user.name',
-    ].join('\n');
-    const failures = [];
-    const result = await bootApp({
-      bundle,
-      target: node('host'),
-      adapter: fakeAdapter('/'),
-      onError: failure => failures.push(failure),
-    });
+  test('trusts the declared complete hash without calculating browser hashes', async () => {
+    const bundle = bundleFor({ 'routes/index.rip': route('Home', 'arbitrary bytes') }, H3);
+    const result = await bootApp({ bundle, target: node('host'), adapter: fakeAdapter('/') });
     try {
-      result.router.push('/profile');
-      let user = null;
-      for (let tries = 0; tries < 50 && !user; tries += 1) {
-        await Bun.sleep(1);
-        user = result.app.data.user;
-      }
-      expect(result.router.current.route.file).toBe('routes/profile.rip');
-      expect(user).toEqual({ name: 'Ada' });
-      expect(failures.map(f => f.path)).not.toContain('user');
+      expect(result.workspace.hash()).toBe(H3);
+      expect(result.workspace.read('routes/index.rip')).toContain('arbitrary bytes');
     } finally {
       result.destroy();
     }
   });
 
-  test('a route that fails to compile rejects the boot at its own position', async () => {
-    const bundle = assemble();
-    bundle.modules['routes/broken.rip'] = 'x = ((';
-    await expect(bootApp({ bundle, target: node('host'), adapter: fakeAdapter('/') }))
-      .rejects.toThrow(/routes\/broken\.rip/);
-  });
-
-  test('render gates prefetch through the boot path', async () => {
-    const bundle = assembleBundle({
-      modules: {
-        'routes/index.rip': [
-          'export Profile = component',
-          '  user <~ @app.data.user',
-          '  render',
-          '    h1 user.name',
-        ].join('\n'),
-      },
-      packagesDir: resolve(root, 'packages'),
-    });
-    const host = node('host');
-    const failures = [];
-    const result = await bootApp({
-      bundle,
-      target: host,
-      adapter: fakeAdapter('/'),
-      onError: failure => failures.push(failure),
-    });
-    try {
-      await Bun.sleep(0);
-      await Bun.sleep(0);
-      expect(failures.map(f => f.path)).toEqual(['user']);
-    } finally {
-      result.destroy();
-    }
-  });
-});
-
-// One page, one cached graph per app fingerprint: reboots must see
-// exactly their own bundle — no stale importers, no leftover modules,
-// no frozen packages table.
-describe('boot graph reconciliation', () => {
-  const bootOf = bundle => bootApp({ bundle, target: node('host'), adapter: fakeAdapter('/') });
-
-  test('a reboot recompiles unchanged importers of a changed module', async () => {
-    const make = tag => assembleBundle({
-      modules: {
-        'util.rip': `export tag = '${tag}'`,
-        'routes/index.rip': "import { tag } from '../util.rip'\nexport Home = -> tag",
-      },
-      packagesDir: resolve(root, 'packages'),
-    });
-    const first = await bootOf(make('one'));
-    expect(first.components.getCompiled('routes/index.rip').Home()).toBe('one');
-    first.destroy();
-    const second = await bootOf(make('two'));
-    try {
-      expect(second.components.getCompiled('routes/index.rip').Home()).toBe('two');
-    } finally {
-      second.destroy();
-    }
-  });
-
-  test('a module a later bundle does not carry stops resolving', async () => {
+  test('resolves browser-safe package roots by canonical index.rip convention', async () => {
     const modules = {
-      'routes/index.rip': "import { x } from '../helper.rip'\nexport Home = -> x",
+      'routes/index.rip': "import { check } from '@rip-lang/validate'\nexport value = -> check('a@b.co', 'email')",
     };
-    const withHelper = assembleBundle({
-      modules: { ...modules, 'helper.rip': 'export x = 1' },
-      packagesDir: resolve(root, 'packages'),
-    });
-    const without = assembleBundle({ modules, packagesDir: resolve(root, 'packages') });
-    const first = await bootOf(withHelper);
-    first.destroy();
-    await expect(bootOf(without)).rejects.toThrow(/'\.\.\/helper\.rip', which is not in the bundle/);
-  });
-
-  test('a later bundle may carry packages the first did not', async () => {
-    const first = await bootOf(assemble());
-    first.destroy();
-    const withValidate = assembleBundle({
-      modules: {
-        ...APP_MODULES,
-        'routes/check.rip': "import { check } from '@rip-lang/validate'\nexport ok = -> check('a@b.co', 'email')",
-      },
-      packagesDir: resolve(root, 'packages'),
-    });
-    const second = await bootOf(withValidate);
+    const bundle = bundleFor(modules);
+    expect(bundle.list.some(([path]) => path === '@rip-lang/validate/index.rip')).toBeTrue();
+    const result = await bootApp({ bundle, target: node('host'), adapter: fakeAdapter('/') });
     try {
-      expect(second.components.getCompiled('routes/check.rip').ok()).toBe('a@b.co');
+      expect(result.workspace.getCompiled('routes/index.rip').value()).toBe('a@b.co');
     } finally {
-      second.destroy();
+      result.destroy();
     }
   });
 
-  test('the bundle cache storage is its own option, apart from persist storage', async () => {
-    const table = new Map();
-    const bundleStorage = {
-      getItem: key => table.get(key) ?? null,
-      setItem: (key, value) => void table.set(key, value),
+  test('a broken module rejects at its own Rip path', async () => {
+    const bundle = { hash: H1, list: [['routes/index.rip', 'x = ((']] };
+    await expect(bootApp({ bundle, target: node('host'), adapter: fakeAdapter('/') }))
+      .rejects.toThrow(/routes\/index\.rip/);
+    const dynamic = { hash: H1, list: [['routes/index.rip', "export load = -> import('./other.rip')"]] };
+    await expect(bootApp({ bundle: dynamic, target: node('host'), adapter: fakeAdapter('/') }))
+      .rejects.toThrow(/dynamic import is not supported in a browser App module/);
+  });
+
+  test('a failed initial program disposes module URLs already staged', async () => {
+    const revoked = [];
+    const original = URL.revokeObjectURL;
+    URL.revokeObjectURL = url => {
+      revoked.push(url);
+      original.call(URL, url);
     };
-    const persistReads = [];
+    try {
+      const bundle = { hash: H1, list: [
+        ['probe.rip', 'export probe = 1'],
+        ['routes/index.rip', 'x = (('],
+      ] };
+      await expect(bootApp({ bundle, target: node('host'), adapter: fakeAdapter('/') }))
+        .rejects.toThrow(/routes\/index\.rip/);
+      await Promise.resolve();
+      expect(revoked.some(url => url.startsWith('blob:'))).toBeTrue();
+    } finally {
+      URL.revokeObjectURL = original;
+    }
+  });
+
+  test('requires exactly hash and canonical Rip source list', async () => {
+    const boot = bundle => bootApp({ bundle, target: node('host'), adapter: fakeAdapter('/') });
+    await expect(boot({ hash: H1, list: [], files: [] })).rejects.toThrow(/exactly one hash and one source list/);
+    await expect(boot({ hash: 'bad', list: [] })).rejects.toThrow(/source list/);
+    await expect(boot({ hash: H1, list: [['styles.css', 'x']] })).rejects.toThrow(/malformed/);
+    await expect(boot({ hash: H1, list: [['b.rip', 'b'], ['a.rip', 'a']] })).rejects.toThrow(/unsorted/);
+    await expect(boot({ hash: H1, list: [['@rip-lang/app/index.rip', 'x']] })).rejects.toThrow(/collides/);
+  });
+
+  test('watch-off boot creates no publication socket', async () => {
+    let sockets = 0;
     const result = await bootApp({
-      url: '/app.json',
-      fetchText: async () => ({ fresh: true, text: JSON.stringify(assemble()), etag: 'v1' }),
-      bundleStorage,
-      storage: { getItem: key => (persistReads.push(key), null), setItem: () => {}, removeItem: () => {} },
+      bundle: bundleFor(),
       target: node('host'),
       adapter: fakeAdapter('/'),
+      makeSocket: () => (sockets += 1),
     });
     try {
-      expect(table.get('__rip_bundle_etag:/app.json')).toBe('v1');
-      expect([...table.keys()].every(key => key.startsWith('__rip_bundle_'))).toBe(true);
+      expect(result.feed).toBeNull();
+      expect(sockets).toBe(0);
     } finally {
       result.destroy();
     }
   });
 });
 
-// The Workspace door (docs/WORKSPACE.md, Probe 0): populate from the
-// manifest, ding → HTTP → set → passport mutation → visible update,
-// with remount labeled escape. The feed's seams (hub socket, fetch)
-// are hand-driven fakes; the recording DOM makes the update visible.
-describe('bootApp workspace mode', () => {
-  let doc;
-  beforeAll(() => {
-    doc = installRecordingDOM();
-  });
-
-  const hashOf = s => createHash('sha256').update(s).digest('base64url').slice(0, 6).replaceAll('-', '_');
-
-  const routeSource = (name, text) => [
-    `export ${name} = component`,
-    '  render',
-    `    h1 "${text}"`,
-  ].join('\n');
-
-  const WS_MODULES = {
-    'routes/index.rip': routeSource('Home', 'home v1'),
-    'routes/about.rip': routeSource('About', 'about v1'),
-  };
-
-  const checkOf = files => hashOf(JSON.stringify(files.map(({ id, hash }) => [id, hash])));
-  const inventoryFor = (modules, extra = []) => [
-    ...Object.entries(modules).map(([id, source]) => ({ id, hash: hashOf(source) })),
-    ...extra,
-  ].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  const manifestFor = files => ({ check: checkOf(files), files });
-  const MANIFEST = manifestFor(inventoryFor(WS_MODULES));
-  const publish = (modules, extra = []) => {
-    const bundle = assembleBundle({
-      modules,
-      packagesDir: resolve(root, 'packages'),
-    });
-    const files = inventoryFor(modules, extra);
-    return { ...bundle, check: checkOf(files), files };
-  };
-
-  // The workspace rides the app package (Q9): plain assembly carries
-  // createWorkspace and connectFeed with no extra claim.
-  const assembleWorkspace = () => publish(WS_MODULES);
-
-  const fakeFetch = table => {
-    const calls = [];
-    const impl = async url => {
-      calls.push(url);
-      const body = table.get(url);
-      if (body === undefined) {
-        return { ok: false, status: 404, json: async () => null, text: async () => '' };
-      }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => JSON.parse(body),
-        text: async () => body,
-        arrayBuffer: async () => new TextEncoder().encode(body).buffer,
-      };
-    };
-    impl.calls = calls;
-    return impl;
-  };
+describe('bootApp watch changes', () => {
+  beforeAll(() => installRecordingDOM());
 
   const fakeHub = () => {
     const sockets = [];
-    return {
-      sockets,
-      makeSocket: url => {
-        const socket = { url, close() { this.onclose?.(); } };
-        sockets.push(socket);
-        return socket;
-      },
+    const makeSocket = url => {
+      const socket = { url, sent: [], onopen: null, onmessage: null, onclose: null, onerror: null };
+      socket.send = text => socket.sent.push(text);
+      socket.close = () => socket.onclose?.();
+      sockets.push(socket);
+      return socket;
     };
+    return { sockets, makeSocket };
   };
 
-  const until = async (predicate, tries = 500) => {
-    for (let i = 0; i < tries; i += 1) {
-      if (predicate()) return;
-      await Bun.sleep(1);
-    }
-    throw new Error('until: the condition never became true');
-  };
-
-  // Slightly above the escape's 25ms coalesce window, so a settled
-  // remount is deterministic to await.
-  const settleEscape = () => Bun.sleep(40);
-
-  const manifestTable = (manifest = MANIFEST) => new Map([
-    ['/manifest.json', JSON.stringify(manifest)],
-  ]);
-
-  const bootWorkspace = async ({ table, hub, reports = [], bundle = null, fetchImpl = null }) => {
-    const target = doc.createElement('div');
-    const fetch = fetchImpl ?? fakeFetch(table);
+  const open = async ({ latest = H1, reloads = [], modules = APP_MODULES } = {}) => {
+    const hub = fakeHub();
+    const latestState = { hash: latest };
+    const reports = [];
     const result = await bootApp({
-      bundle: bundle ?? assembleWorkspace(),
-      target,
+      bundle: bundleFor(modules, H1),
+      target: node('host'),
       adapter: fakeAdapter('/'),
-      workspace: true,
-      manifestUrl: '/manifest.json',
+      watch: true,
+      reload: reason => reloads.push(reason),
       feed: {
-        hub: 'ws://test/dev',
+        hub: 'ws://test/hub',
         makeSocket: hub.makeSocket,
-        fetch,
-        report: (...args) => reports.push(args.map(String).join(' ')),
+        fetch: async () => ({ ok: true, status: 200, json: async () => ({ hash: latestState.hash }) }),
         backoff: { min: 1, max: 2 },
+        ackTimeout: 100,
+        report: (...args) => reports.push(args),
       },
     });
-    return { result, target, fetch };
+    return { result, hub, reloads, latestState, reports };
   };
 
-  test('without opts.workspace the boot is untouched: no bag, no feed, no manifest fetch (D1)', async () => {
-    const fetch = fakeFetch(manifestTable());
-    const hub = fakeHub();
-    const result = await bootApp({
-      bundle: assembleWorkspace(),
-      target: doc.createElement('div'),
-      adapter: fakeAdapter('/'),
-      manifestUrl: '/manifest.json',
-      feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch },
-    });
+  const subscribe = async socket => {
+    socket.onopen();
+    const token = JSON.parse(socket.sent[0])['?'];
+    socket.onmessage({ data: JSON.stringify({ '!': token }) });
+    await settle();
+  };
+
+  test('an ordered Rip change advances source, compiled state, and App hash', async () => {
+    const { result, hub, reloads } = await open();
     try {
-      expect(result.workspace).toBeUndefined();
-      expect(result.feed).toBeUndefined();
-      expect(fetch.calls).toEqual([]);
-      expect(hub.sockets).toEqual([]);
+      await subscribe(hub.sockets[0]);
+      const source = route('Home', 'home v2');
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['routes/index.rip', source]] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H2);
+      expect(result.workspace.read('routes/index.rip')).toBe(source);
+      expect(result.workspace.getCompiled('routes/index.rip')).toBeDefined();
+      expect(reloads).toEqual([]);
     } finally {
       result.destroy();
     }
   });
 
-  test('a workspace boot from a bundle object needs no manifest fetch for first paint', async () => {
-    const hub = fakeHub();
-    const fetch = fakeFetch(manifestTable());
-    const result = await bootApp({
-      bundle: assembleWorkspace(),
-      target: doc.createElement('div'),
-      adapter: fakeAdapter('/'),
-      workspace: true,
-      feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch },
-    });
-    try {
-      expect(result.workspace.paths().sort()).toEqual(['routes/about.rip', 'routes/index.rip']);
-      expect(fetch.calls).toEqual([]);
-    } finally {
-      result.destroy();
-    }
-  });
-
-  test('populate seeds the complete bundle inventory, with identity-only CSS and HTML passports', async () => {
-    const extra = [
-      { id: 'index.html', hash: hashOf('<main>home</main>') },
-      { id: 'styles.css', hash: hashOf('body {}') },
-    ];
-    const bundle = publish(WS_MODULES, extra);
-    const hub = fakeHub();
-    const { result } = await bootWorkspace({ table: manifestTable(), hub, bundle });
-    try {
-      expect(result.workspace.passport('routes/index.rip').hash).toBe(hashOf(WS_MODULES['routes/index.rip']));
-      expect(result.workspace.passport('routes/about.rip').hash).toBe(hashOf(WS_MODULES['routes/about.rip']));
-      expect(result.workspace.passport('styles.css').source).toBeUndefined();
-      expect(result.workspace.passport('index.html').source).toBeUndefined();
-      expect(result.workspace.paths().sort()).toEqual([
-        'index.html', 'routes/about.rip', 'routes/index.rip', 'styles.css',
-      ]);
-    } finally {
-      result.destroy();
-    }
-  });
-
-  test('workspace boot rejects an inventory check that does not name its files', async () => {
-    const hub = fakeHub();
-    const bundle = { ...assembleWorkspace(), check: 'AAAAAA' };
-    await expect(bootApp({
-      bundle,
-      target: doc.createElement('div'),
-      adapter: fakeAdapter('/'),
-      workspace: true,
-      feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch: fakeFetch(manifestTable()) },
-    })).rejects.toThrow(/bundle check does not match/);
-    expect(hub.sockets).toEqual([]);
-  });
-
-  test('workspace boot verifies the exact authored Rip source bytes', async () => {
-    const hub = fakeHub();
-    const bundle = assembleWorkspace();
-    bundle.modules = { ...bundle.modules, 'routes/index.rip': routeSource('Home', 'tampered') };
-    await expect(bootApp({
-      bundle,
-      target: doc.createElement('div'),
-      adapter: fakeAdapter('/'),
-      workspace: true,
-      feed: { hub: 'ws://test/dev', makeSocket: hub.makeSocket, fetch: fakeFetch(manifestTable()) },
-    })).rejects.toThrow(/source 'routes\/index\.rip' hashes to/);
-    expect(hub.sockets).toEqual([]);
-  });
-
-  test('a ding fetches the latest module and advances the passport (D3/D4)', async () => {
-    const table = manifestTable();
-    const v2 = routeSource('Home', 'home v2');
-    const e2 = hashOf(v2);
-    table.set('/routes/index.rip', v2);
-    const hub = fakeHub();
-    const { result, fetch } = await bootWorkspace({ table, hub });
-    try {
-      const socket = hub.sockets[0];
-      socket.onopen();
-      await until(() => fetch.calls.includes('/manifest.json'));
-      socket.onmessage({ data: JSON.stringify({ ding: { id: 'routes/index.rip', hash: e2 } }) });
-      await until(() => result.workspace.passport('routes/index.rip').hash === e2);
-      expect(fetch.calls).toContain('/routes/index.rip');
-      const passport = result.workspace.passport('routes/index.rip');
-      expect(passport.source).toBe(v2);
-      expect(passport.compiled).toBeDefined();
-      await settleEscape();
-    } finally {
-      result.destroy();
-    }
-  });
-
-  test('a module that fails to compile reports and leaves the last good generation live (S10)', async () => {
-    const table = manifestTable();
-    const bad = 'x = ((';
-    const eBad = hashOf(bad);
-    table.set('/routes/index.rip', bad);
-    const hub = fakeHub();
-    const reports = [];
-    const { result } = await bootWorkspace({ table, hub, reports });
-    try {
-      const before = result.workspace.passport('routes/index.rip');
-      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'routes/index.rip', hash: eBad } }) });
-      await until(() => reports.some(line => line.includes('routes/index.rip')));
-      const after = result.workspace.passport('routes/index.rip');
-      expect(after.hash).toBe(hashOf(WS_MODULES['routes/index.rip']));
-      expect(after.source).toBe(before.source);
-      expect(after.compiled).toBe(before.compiled);
-      expect(reports.join('\n')).toContain('failed to compile');
-    } finally {
-      result.destroy();
-    }
-  });
-
-  test('a route ding updates in place and logs the update verdict', async () => {
-    const table = manifestTable();
-    const v2 = routeSource('Home', 'home v2');
-    const e2 = hashOf(v2);
-    table.set('/routes/index.rip', v2);
-    const hub = fakeHub();
-    const logs = [];
-    const originalLog = console.log;
-    console.log = (...args) => void logs.push(args.join(' '));
-    let boot = null;
-    try {
-      boot = await bootWorkspace({ table, hub });
-      const { result, target } = boot;
-      await until(() => target.textContent.includes('home v1'));
-      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'routes/index.rip', hash: e2 } }) });
-      await until(() => result.workspace.passport('routes/index.rip').hash === e2);
-      await settleEscape();
-      await until(() => target.textContent.includes('home v2'));
-      // The applied-log is user-facing: it names the file that changed
-      // and is honest that the remount resets component state.
-      const appliedLines = logs.filter(line => line.includes('applied'));
-      expect(appliedLines).toEqual(['[Rip] applied routes/index.rip — update']);
-      expect(result.router.current.route.file).toBe('routes/index.rip');
-    } finally {
-      console.log = originalLog;
-      boot?.result.destroy();
-    }
-  });
-
-  test('a ding to a DEPENDENCY recompiles its importers: the remount shows the new value through the importing route', async () => {
-    // The loader invalidates importers transitively; the remount must
-    // read its projections THROUGH the loader, or the route keeps the
-    // stale module that closed over the old dependency.
+  test('a narrow change does not reevaluate unchanged Rip modules', async () => {
+    globalThis.__ripUnchangedRuns = 0;
     const modules = {
-      'badge.rip': "export LABEL = 'badge v1'",
-      'routes/index.rip': [
-        "import { LABEL } from '../badge.rip'",
-        'export Home = component',
-        '  render',
-        '    h1 "#{LABEL}"',
+      ...APP_MODULES,
+      'probe.rip': [
+        'globalThis.__ripUnchangedRuns = globalThis.__ripUnchangedRuns + 1',
+        'export runs = globalThis.__ripUnchangedRuns',
       ].join('\n'),
     };
-    const manifest = manifestFor([
-        { id: 'badge.rip', hash: hashOf(modules['badge.rip']) },
-        { id: 'routes/index.rip', hash: hashOf(modules['routes/index.rip']) },
-      ]);
-    const bundle = publish(modules);
-    const table = new Map([['/manifest.json', JSON.stringify(manifest)]]);
-    const v2 = "export LABEL = 'badge v2'";
-    const e2 = hashOf(v2);
-    table.set('/badge.rip', v2);
-    const hub = fakeHub();
-    const { result, target } = await bootWorkspace({ table, hub, bundle });
+    const { result, hub } = await open({ modules });
     try {
-      await until(() => target.textContent.includes('badge v1'));
-      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'badge.rip', hash: e2 } }) });
-      await until(() => result.workspace.passport('badge.rip').hash === e2);
-      await settleEscape();
-      await until(() => target.textContent.includes('badge v2'));
+      await subscribe(hub.sockets[0]);
+      expect(globalThis.__ripUnchangedRuns).toBe(1);
+      const source = route('Home', 'home v2');
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['routes/index.rip', source]] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H2);
+      expect(globalThis.__ripUnchangedRuns).toBe(1);
+      expect(result.workspace.getCompiled('probe.rip').runs).toBe(1);
+    } finally {
+      result.destroy();
+      delete globalThis.__ripUnchangedRuns;
+    }
+  });
+
+  test('a duplicate final hash is harmless', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      const source = route('Home', 'home v2');
+      const change = { from: H1, hash: H2, list: [['routes/index.rip', source]] };
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change }) });
+      await settle();
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H2);
+      expect(reloads).toEqual([]);
     } finally {
       result.destroy();
     }
   });
 
-  test('a remount whose importer fails keeps the page interactive (compile barrier)', async () => {
-    // A shared cell can compile while its importer cannot (export
-    // removed). The remount must stage every projection first and
-    // abort with ZERO bag.setCompiled / destroy / relaunch — otherwise
-    // the page tears down into a version-mixed launch (S10).
-    const modules = {
-      'badge.rip': "export LABEL = 'badge v1'",
-      'routes/index.rip': [
-        "import { LABEL } from '../badge.rip'",
-        'export Home = component',
-        '  render',
-        '    h1 "#{LABEL}"',
-      ].join('\n'),
-    };
-    const manifest = manifestFor([
-        { id: 'badge.rip', hash: hashOf(modules['badge.rip']) },
-        { id: 'routes/index.rip', hash: hashOf(modules['routes/index.rip']) },
-      ]);
-    const bundle = publish(modules);
-    const table = new Map([['/manifest.json', JSON.stringify(manifest)]]);
-    const broken = "export OTHER = 'no LABEL'";
-    const v3 = "export LABEL = 'badge v3'";
-    const e2 = hashOf(broken);
-    const e3 = hashOf(v3);
-    table.set('/badge.rip', broken);
-    const hub = fakeHub();
-    const reports = [];
-    const { result, target } = await bootWorkspace({ table, hub, bundle, reports });
+  test('a missed transition reloads instead of applying a disconnected delta', async () => {
+    const { result, hub, reloads } = await open();
     try {
-      await until(() => target.textContent.includes('badge v1'));
-      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'badge.rip', hash: e2 } }) });
-      await until(() => result.workspace.passport('badge.rip').hash === e2);
-      await settleEscape();
-      await until(() => reports.some(line => line.includes('failed to compile') && line.includes('routes/index.rip')));
-      expect(target.textContent).toContain('badge v1');
-      expect(target.textContent).not.toContain('badge v3');
-      // The next good generation recovers through the same path.
-      table.set('/badge.rip', v3);
-      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'badge.rip', hash: e3 } }) });
-      await until(() => result.workspace.passport('badge.rip').hash === e3);
-      await settleEscape();
-      await until(() => target.textContent.includes('badge v3'));
+      await subscribe(hub.sockets[0]);
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H2, hash: H3, list: [] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(reloads.length).toBe(1);
     } finally {
       result.destroy();
     }
   });
 
-  test('a workspace boot consumes the bundle before manifest reconciliation', async () => {
-    const order = [];
-    const bundleText = JSON.stringify(assembleWorkspace());
-    const fetchText = async url => {
-      order.push(`bundle:${url}`);
-      return { fresh: true, text: bundleText, etag: null };
-    };
-    const table = manifestTable();
-    const fetchImpl = async url => {
-      order.push(`feed:${url}`);
-      const body = table.get(url);
-      if (body === undefined) return { ok: false, status: 404, json: async () => null, text: async () => '' };
-      return { ok: true, status: 200, json: async () => JSON.parse(body), text: async () => body };
-    };
-    const hub = fakeHub();
-    const result = await bootApp({
-      url: '/bundle.json',
-      fetchText,
-      bundleStorage: null,
-      target: doc.createElement('div'),
-      adapter: fakeAdapter('/'),
-      workspace: true,
-      feed: {
-        hub: 'ws://test/dev',
-        makeSocket: hub.makeSocket,
-        fetch: fetchImpl,
-        report: () => {},
-        backoff: { min: 1, max: 2 },
-      },
-    });
+  test('a failed changed program quarantines its generation and keeps the prior publication', async () => {
+    const { result, hub, reloads } = await open();
     try {
-      expect(order).toEqual(['bundle:/bundle.json']);
-      hub.sockets[0].onopen();
-      await until(() => order.includes('feed:/manifest.json'));
-      expect(order[0]).toBe('bundle:/bundle.json');
-      expect(order).not.toContain('feed:/@rip/manifest');
+      await subscribe(hub.sockets[0]);
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['routes/index.rip', 'x = ((']] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(result.workspace.read('routes/index.rip')).toBe(APP_MODULES['routes/index.rip']);
+      expect(reloads).toEqual([]);
     } finally {
       result.destroy();
     }
   });
 
-  test('an out-of-order stale fetch never touches the module graph: latest-wins ownership preserves newest bytes', async () => {
-    const table = manifestTable();
-    const v2 = routeSource('Home', 'home v2');
-    const v3 = routeSource('Home', 'home v3');
-    const e2 = hashOf(v2);
-    const e3 = hashOf(v3);
-    const aboutV2 = routeSource('About', 'about v2');
-    const aboutE2 = hashOf(aboutV2);
-    table.set('/routes/about.rip', aboutV2);
-    let releaseV2 = null;
-    const gate = new Promise(resolve => { releaseV2 = resolve; });
-    const base = fakeFetch(table);
-    let indexFetches = 0;
-    const fetchImpl = async url => {
-      if (url === '/routes/index.rip') {
-        const ordinal = ++indexFetches;
-        if (ordinal === 1) await gate;
-        const text = ordinal === 1 ? v2 : v3;
-        return {
-          ok: true,
-          status: 200,
-          json: async () => null,
-          text: async () => text,
-          arrayBuffer: async () => new TextEncoder().encode(text).buffer,
-        };
+  test('a failed live activation rolls back Workspace and keeps the live App', async () => {
+    const { result, hub, reloads } = await open();
+    const liveApp = result.app;
+    try {
+      await subscribe(hub.sockets[0]);
+      const invalidStash = 'export nope = 1';
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['stash.rip', invalidStash]] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(result.workspace.read('stash.rip')).toBe(APP_MODULES['stash.rip']);
+      expect(globalThis.__ripApp).toBe(liveApp);
+      expect(reloads).toEqual([]);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('an ambiguous candidate route manifest is quarantined before commit', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: {
+        from: H1,
+        hash: H2,
+        list: [
+          ['routes/[id].rip', route('ById', 'id')],
+          ['routes/[name].rip', route('ByName', 'name')],
+        ],
+      } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(result.workspace.exists('routes/[id].rip')).toBeFalse();
+      expect(result.workspace.exists('routes/[name].rip')).toBeFalse();
+      expect(reloads).toEqual([]);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a valid stash change reloads instead of quarantining the generation', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      const nextStash = APP_MODULES['stash.rip'].replace('Ada', 'Grace');
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['stash.rip', nextStash]] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H2);
+      expect(result.workspace.read('stash.rip')).toBe(nextStash);
+      expect(reloads.length).toBe(1);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a malformed Rip candidate quarantines before a mixed asset reload', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: {
+        from: H1,
+        hash: H2,
+        list: [['index.html'], ['stash.rip', 'export nope = 1']],
+      } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(result.workspace.read('stash.rip')).toBe(APP_MODULES['stash.rip']);
+      expect(reloads).toEqual([]);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a valid mixed Rip and asset batch reloads the complete bundle', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      const nextStash = APP_MODULES['stash.rip'].replace('Ada', 'Grace');
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: {
+        from: H1,
+        hash: H2,
+        list: [['index.html'], ['stash.rip', nextStash]],
+      } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(result.workspace.read('stash.rip')).toBe(APP_MODULES['stash.rip']);
+      expect(reloads.length).toBe(1);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('a generation after a quarantined candidate reloads into the newer complete bundle', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['routes/index.rip', 'x = ((']] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(reloads).toEqual([]);
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H2, hash: H3, list: [['routes/index.rip', route('Home', 'recovered')]] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(reloads.length).toBe(1);
+    } finally {
+      result.destroy();
+    }
+  });
+
+  test('CSS changes use HTTP identity while HTML and other assets reload', async () => {
+    const cssRun = await open();
+    try {
+      await subscribe(cssRun.hub.sockets[0]);
+      cssRun.hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['styles.css']] } }) });
+      await settle();
+      expect(cssRun.result.workspace.hash()).toBe(H2);
+      expect(cssRun.reloads).toEqual([]);
+    } finally {
+      cssRun.result.destroy();
+    }
+
+    for (const path of ['index.html', 'images/rip.png']) {
+      const run = await open();
+      try {
+        await subscribe(run.hub.sockets[0]);
+        run.hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [[path]] } }) });
+        await settle();
+        expect(run.result.workspace.hash()).toBe(H1);
+        expect(run.reloads.length).toBe(1);
+      } finally {
+        run.result.destroy();
       }
-      return base(url);
+    }
+  });
+
+  test('a nested CSS change refreshes every exact link and no basename sibling', async () => {
+    const run = await open();
+    const makeLink = href => ({
+      href,
+      disabled: false,
+      getAttribute(name) { return name === 'href' ? this.href : null; },
+      setAttribute(name, value) { if (name === 'href') this.href = value; },
+    });
+    const legacy = makeLink('/legacy/styles.css');
+    const adminA = makeLink('/admin/styles.css');
+    const adminB = makeLink('/base/admin/styles.css?old=1#theme');
+    const cdn = makeLink('https://cdn.example/admin/styles.css');
+    const priorQuery = document.querySelectorAll;
+    document.querySelectorAll = () => [legacy, adminA, adminB, cdn];
+    try {
+      await subscribe(run.hub.sockets[0]);
+      run.hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['admin/styles.css']] } }) });
+      await settle();
+      expect(legacy.href).toBe('/legacy/styles.css');
+      expect(adminA.href).toBe(`/admin/styles.css?hash=${H2}`);
+      expect(adminB.href).toBe(`/base/admin/styles.css?hash=${H2}#theme`);
+      expect(cdn.href).toBe('https://cdn.example/admin/styles.css');
+      expect(run.result.workspace.hash()).toBe(H2);
+    } finally {
+      document.querySelectorAll = priorQuery;
+      run.result.destroy();
+    }
+  });
+
+  test('CSS refresh uses browser URL-path encoding without escaping valid raw path characters', async () => {
+    const run = await open();
+    const link = {
+      href: '/styles/theme+dark[1]%20%C3%BC%23%3F%20100%25.css',
+      disabled: false,
+      getAttribute(name) { return name === 'href' ? this.href : null; },
+      setAttribute(name, value) { if (name === 'href') this.href = value; },
     };
-    fetchImpl.calls = base.calls;
-    const hub = fakeHub();
-    const { result, target } = await bootWorkspace({ table, hub, fetchImpl });
+    const priorQuery = document.querySelectorAll;
+    document.querySelectorAll = () => [link];
     try {
-      await until(() => target.textContent.includes('home v1'));
-      const socket = hub.sockets[0];
-      socket.onmessage({ data: JSON.stringify({ ding: { id: 'routes/index.rip', hash: e2 } }) });
-      socket.onmessage({ data: JSON.stringify({ ding: { id: 'routes/index.rip', hash: e3 } }) });
-      await until(() => result.workspace.passport('routes/index.rip').hash === e3);
-      await settleEscape();
-      await until(() => target.textContent.includes('home v3'));
-      releaseV2();
-      await settleEscape();
-      // A ding to another file forces the next remount; index.rip must
-      // remain on the newest content, never the late-arriving stale bytes.
-      socket.onmessage({ data: JSON.stringify({ ding: { id: 'routes/about.rip', hash: aboutE2 } }) });
-      await until(() => result.workspace.passport('routes/about.rip').hash === aboutE2);
-      await settleEscape();
-      expect(result.workspace.passport('routes/index.rip').hash).toBe(e3);
-      expect(result.workspace.passport('routes/index.rip').source).toBe(v3);
-      expect(target.textContent).toContain('home v3');
-      expect(target.textContent).not.toContain('home v2');
+      await subscribe(run.hub.sockets[0]);
+      run.hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['styles/theme+dark[1] ü#? 100%.css']] } }) });
+      await settle();
+      expect(link.href).toBe(`/styles/theme+dark[1]%20%C3%BC%23%3F%20100%25.css?hash=${H2}`);
+      expect(run.result.workspace.hash()).toBe(H2);
+      expect(run.reloads).toEqual([]);
+    } finally {
+      document.querySelectorAll = priorQuery;
+      run.result.destroy();
+    }
+  });
+
+  test('Rip create and delete commit as source membership changes', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      const born = route('New', 'new');
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['routes/new.rip', born]] } }) });
+      await settle();
+      expect(result.workspace.exists('routes/new.rip')).toBeTrue();
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H2, hash: H3, list: [['routes/new.rip', null]] } }) });
+      await settle();
+      expect(result.workspace.exists('routes/new.rip')).toBeFalse();
+      expect(result.workspace.hash()).toBe(H3);
+      expect(reloads).toEqual([]);
     } finally {
       result.destroy();
     }
   });
 
-  test('a remount whose relaunch throws reports loudly and the next good change recovers the page', async () => {
-    // A cell can compile cleanly and still break launch (the stash
-    // contract: 'stash.rip' must export stash). The remount's
-    // teardown-plus-relaunch must not die as an unhandled rejection
-    // with the page silently unmounted — it reports, and a following
-    // good generation relaunches.
-    const table = manifestTable();
-    const badStash = 'export nothing = 1';
-    const goodStash = 'export stash = {}';
-    const e1 = hashOf(badStash);
-    const e2 = hashOf(goodStash);
-    table.set('/stash.rip', badStash);
-    const hub = fakeHub();
-    const reports = [];
-    const { result, target } = await bootWorkspace({ table, hub, reports });
+  test('deleting the mounted route reloads instead of quarantining the generation', async () => {
+    const { result, hub, reloads } = await open();
     try {
-      await until(() => target.textContent.includes('home v1'));
-      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'stash.rip', hash: e1 } }) });
-      await until(() => result.workspace.passport('stash.rip')?.hash === e1);
-      await settleEscape();
-      await until(() => reports.some(line => line.includes('remount failed') || line.includes('apply failed')));
-      table.set('/stash.rip', goodStash);
-      hub.sockets[0].onmessage({ data: JSON.stringify({ ding: { id: 'stash.rip', hash: e2 } }) });
-      await until(() => result.workspace.passport('stash.rip')?.hash === e2);
-      await settleEscape();
-      await until(() => target.textContent.includes('home v1'));
+      await subscribe(hub.sockets[0]);
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['routes/index.rip', null]] } }) });
+      await settle();
+      expect(result.workspace.hash()).toBe(H1);
+      expect(result.workspace.exists('routes/index.rip')).toBeTrue();
+      expect(reloads.length).toBe(1);
     } finally {
       result.destroy();
     }
   });
 
-  test('a delete ding removes the passport and the remount survives against the shrunken bag', async () => {
-    const hub = fakeHub();
-    const { result } = await bootWorkspace({ table: manifestTable(), hub });
+  test('reconnect latest mismatch reloads; a matching probe does not', async () => {
+    const { result, hub, reloads, latestState } = await open();
     try {
-      expect(result.workspace.passport('routes/about.rip')).toBeDefined();
-      const aboutHash = hashOf(WS_MODULES['routes/about.rip']);
-      hub.sockets[0].onmessage({
-        data: JSON.stringify({ ding: { id: 'routes/about.rip', hash: aboutHash, kind: 'delete' } }),
-      });
-      await until(() => result.workspace.passport('routes/about.rip') === undefined);
-      expect(result.workspace.paths()).toEqual(['routes/index.rip']);
-      await settleEscape();
-      await until(() => result.router.current?.route?.file === 'routes/index.rip');
+      await subscribe(hub.sockets[0]);
+      expect(reloads).toEqual([]);
+      hub.sockets[0].onclose();
+      latestState.hash = H2;
+      await Bun.sleep(10);
+      expect(hub.sockets.length).toBe(2);
+      await subscribe(hub.sockets[1]);
+      expect(reloads.length).toBe(1);
     } finally {
       result.destroy();
     }

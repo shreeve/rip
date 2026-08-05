@@ -11,9 +11,8 @@ Permanent documentation:
  Caddy/Janus/manager/worker architecture and lifecycle contract.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
 - [docs/WORKSPACE.md](docs/WORKSPACE.md) — the Rip Workspace
- constitution: the browser passport bag, the dev feed ("door"), and
- the apply roadmap. The door is the DEFAULT for watching
- manager-served browser apps; production has no hub.
+  constitution: browser publication consumption, live changes, reconnect
+  recovery, and the apply boundary.
 - [docs/HMR.md](docs/HMR.md) — HMR design and acceptance contract.
 - [docs/FRAME.md](docs/FRAME.md) — Rip-native hypermedia design and acceptance contract.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work.
@@ -281,20 +280,18 @@ alters surface syntax updates ALL THREE in the same change.
   or choose the nearest idiomatic alternative; never paper over with
   curly-brace JS style. Read nearby `.rip` for the local dialect
   before writing new code.
-- **Workspace vocabulary (door / apply):** bag = **membership** (default
-  disk set `app/**/*.{rip,css,html}`); bag ids and paths are relative to the
-  App root (`routes/home.rip`, never `app/routes/home.rip`); bag unit =
-  **module** (path-keyed);
-  in-memory record = **passport**; swappable component identity =
-  **component definition**. Not “cell.” Hub dings `{ id, hash }` only —
-  no apply kind on the wire. Client apply verdicts:
-  **`reload` | `css` | `update` | `ignore`** (`*.css` → `css` never
-  `reload`; `*.html` → `reload`; `*.rip` → `update`). CSS updates the
-  stylesheet the page already linked (e.g. `/styles.css`) — one path,
-  cache-bust `?hash=`. Main server entry (`app.rip` / `index.rip` at
-  project root) is outside the client bag → epoch on change. Manifest
-  entries use **files** (`{ files: [{id,hash}] }`). Janus serves latest
-  authored bytes directly; workers have no App or generated-file routes.
+- **Workspace vocabulary (publication / apply):** Rip Server publishes
+  applications. `bundle.json` is `{ hash, list }`; `list` is the complete
+  canonical `[modulePath, source]` Rip program. Individual file hashes remain
+  private to Manager. Watch-mode Hub messages carry one
+  `change { from, hash, list }`; `[path,source]` updates Rip source, `[path]`
+  invalidates an HTTP asset, and `[path,null]` deletes. Client apply verdicts
+  are **`reload` | `css` | `update` | `ignore`**. Reconnect subscribes before
+  checking `latest.json`; a mismatched complete App hash reloads unless it is
+  the quarantined failed candidate, which leaves the last committed App live
+  until a newer hash arrives. There is no `manifest.json`. Janus transports
+  files and messages without Rip semantics; workers have no App or
+  generated-file routes.
 - **Comments explain non-obvious intent** — invariants, constraints,
   why a trade-off was taken. Never narrate what code obviously does,
   never reference project history or future plans. A comment that
@@ -378,20 +375,34 @@ alters surface syntax updates ALL THREE in the same change.
 
 ## Commands
 
+Testing has three rhythms. During implementation, run the smallest test
+that can disprove the change; at a coherent layer boundary, run the
+owning package suite and direct consumers; after the complete diff is
+frozen and reviewed, run repository and affected certification gates
+once on that exact candidate. Do not use `test:all` as the edit loop or
+start final certification before review can still change code. A code
+change after certification starts creates a new candidate and requires
+the affected final gates again.
+
 - `bun run test:rip` — the battery alone (every test/battery/*.rip
  row — the language's syntax contract), sub-second: the inner loop
- for language work.
+ for language work and the automatic pull-request code check.
 - `bun run test` — the FAST compiler loop: language, mapping,
  snapshots, strip/emission pins. The extended tier (tsc-spawning
  validity gates, scaling gates, fuzz drift) registers visible skips
  here.
-- `bun run test:all` — the CANONICAL full suite: everything above PLUS
+- `bun run test:all` — the EXHAUSTIVE repository certification: everything above PLUS
  the extended tier PLUS every `packages/*/` suite, which
  `scripts/test-all.mjs` spawns as parallel lanes and aggregates into
- one exit code. CI runs this, always. COMPLETION CLAIMS run against
- `bun run test:all`, not the fast loop. The ONE suite it does not
+ one exit code. Run it explicitly for release certification; the manual
+ `repository-certification` workflow runs it with the corpus audit and
+ generated-byte gates. It is not the edit loop or an automatic pull-request
+ gate. The ONE suite it does not
  carry is `packages/browser-tests` — it needs installed Playwright
- browsers, and CI runs it as its own job. `packages/server` needs
+ browsers. CI runs its deterministic Chromium/Firefox/WebKit smoke
+ matrix as a required job; the live Cart Server/Manager certification
+ is explicit through `bun run test:cart` in that package and the manual
+ `cart-certification` workflow. `packages/server` needs
  `xcaddy` on PATH — `go install
  github.com/caddyserver/xcaddy/cmd/xcaddy@latest`, PLUS
  `$(go env GOPATH)/bin` on PATH, which it is not by default: without
@@ -406,9 +417,13 @@ alters surface syntax updates ALL THREE in the same change.
  for work on that package; the root fast loop excludes `packages/**`
  by bunfig, and `test:all` reaches these only by spawning them there
  (deps come from the repo-root `bun install`; no package-local lock).
-- `bunx playwright test` FROM `packages/browser-tests` — the real-DOM
- certification (chromium, firefox, webkit), including the workspace
- ding spec.
+- `bun run test:smoke` FROM `packages/browser-tests` — the required
+ real-DOM matrix across Chromium, Firefox, and WebKit. It does not boot
+ the live Cart Server/Manager harness and includes the Workspace
+ publication-change spec.
+- `bun run test:cart` FROM `packages/browser-tests` — the explicit live
+ Cart Server/Manager certification in Chromium. It is preserved as a
+ manual certification surface, not a pull-request gate.
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus-expected` — regenerate the corpus expected outputs.
 - `bun run browser-bundle` — regenerate `dist/browser/rip.js` after any

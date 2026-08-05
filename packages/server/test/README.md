@@ -9,7 +9,7 @@ Order:
 1. `framework` — public routing, response, validation, and context contract.
 2. `hello-api` — one API artifact, worker, route, and clean shutdown.
 3. `workers` — readiness, concurrency, draining, failure, and recycling.
-4. `hello` — one browser App with no API workers.
+4. `hello-app` — one browser App with no API workers.
 5. `reloads` — App updates and API pool replacement.
 6. `operations` — hold, release, migration, and recovery.
 7. `manager-boundary` — declaration, finite file policy, and standalone browse.

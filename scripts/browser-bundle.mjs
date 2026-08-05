@@ -3,9 +3,10 @@
 // a different Bun refuses instead of producing unexplained drift.
 // Upgrading Bun is a deliberate change — regenerate, inspect the diff,
 // and bump REQUIRED_BUN in the same commit.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compile } from '../src/compile.js';
 
 const REQUIRED_BUN = '1.3.14';
 if (Bun.version !== REQUIRED_BUN) {
@@ -33,6 +34,23 @@ const nodeStubs = {
   },
 };
 
+// @rip-lang/app is part of the stable browser distribution. Compile its Rip
+// modules while building rip.js; authored App source still compiles in the
+// browser, while the shared framework is transferred and evaluated once per
+// runtime version instead of once per App publication.
+const ripModules = {
+  name: 'rip-browser-modules',
+  setup(build) {
+    build.onLoad({ filter: /\.rip$/ }, args => ({
+      contents: compile(readFileSync(args.path, 'utf8'), {
+        path: args.path,
+        runtimeDelivery: 'import',
+      }).code,
+      loader: 'js',
+    }));
+  },
+};
+
 const result = await Bun.build({
   entrypoints: [resolve(root, 'src/browser.js')],
   root: resolve(root, 'src'),
@@ -40,7 +58,7 @@ const result = await Bun.build({
   format: 'esm',
   minify: false,
   sourcemap: 'none',
-  plugins: [nodeStubs],
+  plugins: [ripModules, nodeStubs],
 });
 
 if (!result.success) {

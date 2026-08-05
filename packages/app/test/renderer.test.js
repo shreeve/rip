@@ -693,13 +693,12 @@ describe('renderer render gates', () => {
       throw new Error('old teardown');
     };
     attempts.length = 0;
-    const commitFailure = await renderer.mount(route('next.rip')).catch(error => error);
-    expect(commitFailure.message).toContain('old teardown');
-    expect(commitFailure.path).toBe('<teardown>');
-    expect(commitFailure.file).toBe('<renderer>');
+    const committed = await renderer.mount(route('next.rip'));
+    expect(committed).toBeInstanceOf(Next);
     expect(attempts).toEqual(['old']);
     expect(renderer.current).toBeInstanceOf(Next);
     expect(host.children).toEqual([nextRoot]);
+    expect(failures.at(-1)).toMatchObject({ path: '<teardown>', file: '<renderer>', message: 'old teardown' });
 
     attempts.length = 0;
     class StopFirst extends First {}

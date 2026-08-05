@@ -163,7 +163,11 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
     bundle = edgeFetch! port, '/bundle.json'
     eq bundle.status, 200
     bundleDocument = JSON.parse bundle.text!
-    eq bundleDocument.files.map((entry) -> entry.id), ['routes/index.rip', 'styles.css']
+    eq Object.keys(bundleDocument), ['hash', 'list']
+    eq bundleDocument.list.map((entry) -> entry[0]), ['routes/index.rip']
+    latest = edgeFetch! port, '/latest.json'
+    eq latest.status, 200
+    eq JSON.parse(latest.text!), { hash: bundleDocument.hash }
     etag = bundle.headers.get 'etag'
     ok etag?.startsWith('W/"')
     eq (edgeFetch!(port, '/bundle.json', { 'if-none-match': etag })).status, 304

@@ -10,12 +10,7 @@
     <script type="module">
       import { bootApp } from '/@rip/rip.js'
       const debug = new URLSearchParams(location.search).has('debug')
-      let workspace = false
-      try {
-        const res = await fetch('/manifest.json')
-        workspace = res.ok
-      } catch {}
-      bootApp({ url: '/bundle.json', debug, workspace })
+      bootApp({ url: '/bundle.json', debug, watch: true })
     </script>
   </body>
 </html>

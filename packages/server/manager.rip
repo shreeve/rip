@@ -2,6 +2,7 @@ import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync,
 import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
+import { brotliCompressSync, constants as zlib } from 'node:zlib'
 import { rash, check } from '@rip-lang/app/rash'
 import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
@@ -187,29 +188,29 @@ pathTemplate = (value, at) ->
     invalidServe "#{at} must use {site} as a complete path segment" unless segments.includes '{site}'
   { value, dynamic: count is 1 }
 
-defaultAppManifest = ->
+defaultAppChanges = ->
   update: ['**/*.rip']
   css: ['**/*.css']
-  reload: ['**/*.html']
+  reload: ['**/*']
 
-normalizeAppManifest = (raw) ->
+normalizeAppChanges = (raw) ->
   raw = {} unless raw?
-  rejectUnknown raw, ['update', 'css', 'reload'], 'serve.rip app.manifest'
-  defaults = defaultAppManifest()
-  suffixes = { update: '.rip', css: '.css', reload: '.html' }
-  manifest = {}
+  rejectUnknown raw, ['update', 'css', 'reload'], 'serve.rip app.changes'
+  defaults = defaultAppChanges()
+  suffixes = { update: '.rip', css: '.css' }
+  changes = {}
   for kind in ['update', 'css', 'reload']
     values = raw[kind] ?? defaults[kind]
-    invalidServe "serve.rip app.manifest.#{kind} must be an array" unless Array.isArray values
+    invalidServe "serve.rip app.changes.#{kind} must be an array" unless Array.isArray values
     seen = Set.new()
-    manifest[kind] = values.map (value, i) ->
-      at = "serve.rip app.manifest.#{kind}[#{i}]"
+    changes[kind] = values.map (value, i) ->
+      at = "serve.rip app.changes.#{kind}[#{i}]"
       pattern = needString value, at
       invalidServe "#{at} must be relative to the App root" if pattern.startsWith '/'
       invalidServe "#{at} must use / path separators" if pattern.includes '\\'
       segments = pattern.split '/'
       invalidServe "#{at} must be a clean relative glob" if segments.some (part) -> not part or part is '.' or part is '..' or part.startsWith '.'
-      invalidServe "#{at} must select #{suffixes[kind]} files" unless pattern.endsWith suffixes[kind]
+      invalidServe "#{at} must select #{suffixes[kind]} files" if suffixes[kind]? and not pattern.endsWith suffixes[kind]
       invalidServe "#{at} duplicates #{JSON.stringify(pattern)}" if seen.has pattern
       try
         Bun.Glob.new pattern
@@ -217,15 +218,16 @@ normalizeAppManifest = (raw) ->
         invalidServe "#{at} is not a valid glob: #{error?.message or error}"
       seen.add pattern
       pattern
-  manifest
+  changes
 
-export appManifestKind = (manifest, id) ->
+export appChangeKind = (changes, id) ->
   return null unless typeof id is 'string' and id.length > 0
   id = id.replaceAll '\\', '/'
   segments = id.split '/'
   return null if segments.some (segment) -> not segment or segment is '.' or segment is '..' or segment.startsWith '.'
   for kind in ['update', 'css', 'reload']
-    for pattern in manifest[kind]
+    return null if kind is 'reload' and (id.endsWith('.rip') or id.endsWith('.css'))
+    for pattern in changes[kind]
       return kind if Bun.Glob.new(pattern).match id
   null
 
@@ -314,12 +316,15 @@ normalizeServeConfig = (raw, appDir) ->
     out.files = { roots: normalizedRoots, proxy_first: normalizedProxy }
     out.files.shell = shell if shell?
   if raw.app?
-    rejectUnknown raw.app, ['root', 'manifest'], 'serve.rip app'
+    rejectUnknown raw.app, ['root', 'changes'], 'serve.rip app'
     rootValue = pathTemplate(raw.app.root ?? 'app', 'serve.rip app.root')
     invalidServe 'serve.rip app.root cannot contain a template' if rootValue.dynamic
     root = resolve appDir, rootValue.value
     requireDir root, 'serve.rip app.root'
-    out.app = { root, manifest: normalizeAppManifest(raw.app.manifest) }
+    dist = resolve appDir, 'dist'
+    overlapsDist = root is dist or root.startsWith("#{dist}/") or dist.startsWith("#{root}/")
+    invalidServe 'serve.rip app.root cannot overlap the manager-owned dist directory' if overlapsDist
+    out.app = { root, changes: normalizeAppChanges(raw.app.changes) }
   invalidServe 'serve.rip sites requires files' if out.site? and not out.files?
   out
 
@@ -536,19 +541,19 @@ writeAtomic = (path, text) ->
 escapeHtml = (value) ->
   String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
 
-export appEventPublication = (appRoot, graph, manifest, filename) ->
+export appEventPublication = (appRoot, graph, changes, filename) ->
   return '*' unless filename?
   id = String(filename).replaceAll '\\', '/'
   segments = id.split '/'
   return '*' if not id or segments.some((segment) -> not segment or segment is '.' or segment is '..')
   return null if segments.some (segment) -> segment.startsWith '.'
-  return id if appManifestKind(manifest, id)?
+  return id if appChangeKind(changes, id)?
   return '*' if graph?.directories?.includes id
   path = resolve appRoot, id
   return '*' if existsSync(path) and statSync(path).isDirectory()
   null
 
-appModules = (appRoot, manifest) ->
+appModules = (appRoot, changes) ->
   modules = {}
   moduleFiles = {}
   entries = []
@@ -562,7 +567,7 @@ appModules = (appRoot, manifest) ->
         walk path, "#{prefix}#{entry.name}/"
       else
         id = "#{prefix}#{entry.name}"
-        kind = appManifestKind manifest, id
+        kind = appChangeKind changes, id
         continue unless kind?
         bytes = readFileSync path
         entries.push { id, hash: rash(bytes) }
@@ -576,13 +581,13 @@ appModules = (appRoot, manifest) ->
   entries.sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
   { modules, moduleFiles, entries, directories, check: check(entries) }
 
-export updateAppModules = (appRoot, manifest, graph, ids) ->
+export updateAppModules = (appRoot, changes, graph, ids) ->
   modules = { ...graph.modules }
   moduleFiles = { ...graph.moduleFiles }
   entries = Map.new graph.entries.map (entry) -> [entry.id, entry]
   changed = []
   for id in [...Set.new(ids)].sort()
-    kind = appManifestKind manifest, id
+    kind = appChangeKind changes, id
     continue unless kind?
     prior = entries.get id
     path = resolve appRoot, id
@@ -615,56 +620,79 @@ export updateAppModules = (appRoot, manifest, graph, ids) ->
     changed
   }
 
-sourceRashes = (paths) ->
+sourceHashes = (paths) ->
   paths.map (path) -> { path, hash: (if existsSync(path) then rash(readFileSync(path)) else null) }
 
-appDocuments = (project, graph, includeManifest) ->
-  { assembleBundle } = import!(join(loaderDir(), 'bundle.js'))
-  bundle = assembleBundle
+appDocuments = (project, graph) ->
+  { assembleRipPublication } = import!(join(import.meta.dir, 'bundle.rip'))
+  assembled = assembleRipPublication
     modules: graph.modules
     moduleFiles: graph.moduleFiles
     appDir: project.root
+    appRoot: project.appRoot
     packagesDir: join(loaderDir(), '..', 'packages')
-  bundle.files = graph.entries
-  bundle.check = graph.check
+  list = assembled.list
+  identities = Map.new graph.entries.map (entry) -> [entry.id, entry]
+  encoder = TextEncoder.new()
+  for [id, source] in list
+    identities.set(id, { id, hash: rash(encoder.encode(source)) }) unless identities.has id
+  complete = [...identities.values()].sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
+  hash = check complete
   {
     graph
-    bundle: JSON.stringify(bundle)
-    manifest: (if includeManifest then JSON.stringify({ check: graph.check, files: graph.entries }) else null)
+    hash
+    list
+    inputs: assembled.inputs
+    watchRoots: assembled.watchRoots
+    bundle: JSON.stringify({ hash, list })
+    latest: JSON.stringify({ hash })
   }
 
-buildAppDocuments = (project, includeManifest) ->
-  graph = appModules project.appRoot, project.appManifest
-  appDocuments! project, graph, includeManifest
+buildAppDocuments = (project) ->
+  graph = appModules project.appRoot, project.appChanges
+  appDocuments! project, graph
 
 commitAppDocuments = (project, documents) ->
   dist = join project.root, 'dist'
   mkdirSync dist, { recursive: true }
-  writeAtomic join(dist, 'bundle.json'), documents.bundle
+  bundlePath = join dist, 'bundle.json'
+  compressedPath = join dist, 'bundle.json.br'
+  token = randomBytes(8).toString 'hex'
+  temporaryBundle = join dist, ".bundle.json.#{token}.tmp"
+  temporaryCompressed = join dist, ".bundle.json.br.#{token}.tmp"
+  try
+    writeFileSync temporaryBundle, documents.bundle
+    brotli = { params: {} }
+    brotli.params[zlib.BROTLI_PARAM_QUALITY] = 11
+    writeFileSync temporaryCompressed, brotliCompressSync(documents.bundle, brotli)
+    unlinkSync compressedPath if existsSync compressedPath
+    renameSync temporaryBundle, bundlePath
+    try
+      renameSync temporaryCompressed, compressedPath
+    catch error
+      warn "rip-server: bundle.json committed without Brotli sidecar: #{String(error)}"
+    writeAtomic join(dist, 'latest.json'), documents.latest
+  finally
+    unlinkSync temporaryBundle if existsSync temporaryBundle
+    unlinkSync temporaryCompressed if existsSync temporaryCompressed
   manifestPath = join dist, 'manifest.json'
-  if documents.manifest?
-    writeAtomic manifestPath, documents.manifest
-  else
-    unlinkSync manifestPath if existsSync manifestPath
+  unlinkSync manifestPath if existsSync manifestPath
 
-writeAppDocuments = (project, includeManifest) ->
-  documents = buildAppDocuments! project, includeManifest
+writeAppDocuments = (project) ->
+  documents = buildAppDocuments! project
   commitAppDocuments project, documents
-  documents.graph
+  documents
 
-publishApp = (project, name, includeManifest, documents = undefined, declaredShell = null) ->
+publishApp = (project, name, watch, documents = undefined, declaredShell = null) ->
   return null unless project.appRoot?
   dist = join project.root, 'dist'
   mkdirSync join(dist, '@rip'), { recursive: true }
-  graph = null
+  publication = null
   if documents is undefined
-    graph = writeAppDocuments! project, includeManifest
+    publication = writeAppDocuments! project
   else if documents?
     commitAppDocuments project, documents
-    graph = documents.graph
-  else unless includeManifest
-    manifestPath = join dist, 'manifest.json'
-    unlinkSync manifestPath if existsSync manifestPath
+    publication = documents
   runtime = join(loaderDir(), '..', 'dist', 'browser', 'rip.js')
   abort "rip-server: browser runtime missing at #{runtime}" unless existsSync runtime
   copyFileSync runtime, join(dist, '@rip', 'rip.js')
@@ -681,7 +709,7 @@ publishApp = (project, name, includeManifest, documents = undefined, declaredShe
     <div id="app"></div>
     <script type="module">
       import { bootApp } from '/@rip/rip.js'
-      bootApp({ url: '/bundle.json'#{if includeManifest then ', workspace: true' else ''} })
+      bootApp({ url: '/bundle.json', watch: #{if watch then 'true' else 'false'} })
     </script>
     """
 
@@ -689,10 +717,13 @@ publishApp = (project, name, includeManifest, documents = undefined, declaredShe
     { path: dist, cache: 'revalidate' }
     { path: project.appRoot, cache: 'never' }
   ]
-  { files: { roots, proxy_first: (if project.entry? then ['/api'] else []), shell }, graph }
+  { files: { roots, proxy_first: (if project.entry? then ['/api'] else []), shell }, publication }
 
 registrationFiles = (project, declared, publication) ->
   dist = join project.root, 'dist'
+  publicRoot = join project.root, 'public'
+  hasPublicRoot = existsSync(publicRoot) and statSync(publicRoot).isDirectory()
+  return null unless declared? or publication? or project.appRoot? or hasPublicRoot
   try
     mkdirSync dist, { recursive: true }
     invalidServe "dist root is not a directory: #{dist}" unless statSync(dist).isDirectory()
@@ -707,8 +738,7 @@ registrationFiles = (project, declared, publication) ->
     files.shell = declared.shell if declared.shell?
     return files
   roots = [{ path: dist, cache: 'revalidate' }]
-  publicRoot = join project.root, 'public'
-  roots.push { path: publicRoot, cache: 'revalidate' } if existsSync(publicRoot) and statSync(publicRoot).isDirectory()
+  roots.push { path: publicRoot, cache: 'revalidate' } if hasPublicRoot
   roots.push { path: project.appRoot, cache: 'never' } if project.appRoot?
   files =
     roots: roots
@@ -778,9 +808,9 @@ export main = (argv) ->
     abort error?.message or String(error)
   if serve?.app?
     project.appRoot = serve.app.root
-    project.appManifest = serve.app.manifest
+    project.appChanges = serve.app.changes
   else if project.appRoot?
-    project.appManifest = defaultAppManifest()
+    project.appChanges = defaultAppChanges()
   args.name = args.name or serve?.name or basename(project.root).replace(/\.[^.]+$/, '')
   site = serve?.site ?? null
   if site? and args.hosts.length > 0
@@ -811,14 +841,19 @@ export main = (argv) ->
   workerArtifact = null
   files = null
   appGraph = null
+  appPublication = null
   appWatcher = null
   appTimer = null
   appDirty = Set.new()
   appReconcile = false
   appChain = Promise.resolve()
+  appDependencyWatchers = Map.new()
+  appWatchReady = false
   apiWatcher = null
   apiTimer = null
   apiChain = Promise.resolve()
+  apiReconcile = false
+  apiWatchReady = false
   apiInputs = Set.new()
   generation = 0
   apiEpoch = 0
@@ -957,9 +992,23 @@ export main = (argv) ->
         return Response.json({ error: 'manager is stopping' }, { status: 409 }) if stopping
         if request.method is 'POST' and path is '/hold'
           return Response.json({ error: "cannot hold while #{operation}" }, { status: 409 }) unless operation is 'Active'
+          operation = 'Holding'
+          if appTimer?
+            clearTimeout appTimer
+            appTimer = null
+            appReconcile = true
+          if apiTimer?
+            clearTimeout apiTimer
+            apiTimer = null
+            apiReconcile = true
+          await appChain
+          await apiChain
+          try
+            bootPrepared! if prepared?
+            await bootPromise if bootPromise?
+          catch error
+            warn "rip-server: pending API candidate failed while holding: #{String(error)}"
           operation = 'Held'
-          clearTimeout appTimer if appTimer?
-          clearTimeout apiTimer if apiTimer?
           return Response.json status()
         if request.method is 'POST' and path is '/release'
           try return Response.json(releaseHold!)
@@ -1059,58 +1108,138 @@ export main = (argv) ->
           Promise.new! (done) -> setTimeout done, 250
     return
 
-  publishDings = (dings) ->
-    return unless dings.length > 0
+  publishChange = (change) ->
+    return unless change?.list?.length > 0
     while not appId? and not stopping
       sleep! 5
     return if stopping
-    directives = dings.map (ding) -> { '@': ['/hub'], ding }
-    for i in [0...directives.length] by 16
-      response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", directives.slice(i, i + 16)
-      throw Error.new("Janus ding publish failed (#{response.status})") unless response.ok
+    delay = 25
+    loop
+      try
+        response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/hub'], change }]
+        return if response.ok
+        warn "rip-server: Janus change publish failed (#{response.status}); retrying"
+      catch error
+        warn "rip-server: Janus change publish failed: #{String(error)}; retrying"
+      return if stopping
+      sleep! delay
+      delay = Math.min delay * 2, 1000
+
+  changedAppIds = (prior, current) ->
+    before = Map.new((prior?.graph?.entries or []).map((entry) -> [entry.id, entry.hash]))
+    after = Map.new(current.graph.entries.map((entry) -> [entry.id, entry.hash]))
+    ids = Set.new [...before.keys(), ...after.keys()]
+    [...ids].filter((id) -> before.get(id) isnt after.get(id)).sort()
+
+  appChange = (prior, current, ids) ->
+    entries = Map.new()
+    beforeSources = Map.new prior.list
+    currentSources = Map.new current.list
+    sourceIds = Set.new [...beforeSources.keys(), ...currentSources.keys()]
+    for id in sourceIds
+      before = beforeSources.get id
+      after = currentSources.get id
+      entries.set(id, [id, after ?? null]) unless before is after
+    for id in ids
+      kind = appChangeKind project.appChanges, id
+      if kind is 'update'
+        entries.set id, [id, currentSources.get(id) ?? null]
+      else
+        exists = current.graph.entries.some (entry) -> entry.id is id
+        entries.set id, (if exists then [id] else [id, null])
+    {
+      from: prior.hash
+      hash: current.hash
+      list: [...entries.values()].sort (a, b) -> if a[0] < b[0] then -1 else if a[0] > b[0] then 1 else 0
+    }
+
+  scheduleAppRefresh = (publication = '*') ->
+    if publication is '*'
+      appReconcile = true
+    else if publication?
+      appDirty.add publication
+    clearTimeout appTimer if appTimer?
+    appTimer = setTimeout ->
+      appTimer = null
+      # Snapshot only when this job reaches the head of the queue. A prior
+      # failed job marks reconciliation before the next queued batch begins,
+      # so its dirty files cannot be stranded behind an incremental refresh.
+      next = appChain.then ->
+        batch = { full: appReconcile, ids: [...appDirty] }
+        appReconcile = false
+        appDirty.clear()
+        refreshApp! batch
+      appChain = next.catch (error) ->
+        appReconcile = true
+        warn "rip-server: App publication failed: #{String(error)}"
+    , 50
+    return
+
+  watchAppDependencies = (documents) ->
+    return 0 unless args.watch
+    added = 0
+    for root in documents.watchRoots or []
+      root = resolve root
+      continue if appDependencyWatchers.has root
+      try
+        watcher = watch root, { recursive: true }, ->
+          return if stopping
+          if not appWatchReady or operation isnt 'Active'
+            appReconcile = true
+            return
+          scheduleAppRefresh '*'
+        appDependencyWatchers.set root, watcher
+        added++
+      catch error
+        throw Error.new "cannot watch App publication dependency '#{root}': #{String(error)}"
+    added
+
+  stabilizeAppDocuments = (documents) ->
+    rebuilt = false
+    while watchAppDependencies(documents) > 0
+      # The first read discovered the dependency root. Watching before the
+      # next read closes the discovery gap: an edit is either in this rebuild
+      # or schedules a following reconciliation through the installed watch.
+      documents = buildAppDocuments! project
+      rebuilt = true
+    { documents, rebuilt }
 
   refreshApp = (batch = { full: true, ids: [] }) ->
     if batch.full
-      next = writeAppDocuments! project, true
-      changed = null
+      documents = buildAppDocuments! project
+      ids = changedAppIds appPublication, documents
     else
-      update = updateAppModules project.appRoot, project.appManifest, appGraph, batch.ids
+      update = updateAppModules project.appRoot, project.appChanges, appGraph, batch.ids
       return unless update.changed.length
-      next = update.graph
-      documents = appDocuments! project, next, true
-      commitAppDocuments project, documents
-      changed = Set.new update.changed
-    prior = Map.new((appGraph?.entries or []).map((entry) -> [entry.id, entry.hash]))
-    current = Map.new(next.entries.map((entry) -> [entry.id, entry.hash]))
-    dings = []
-    for entry in next.entries
-      continue if changed? and not changed.has entry.id
-      dings.push { id: entry.id, hash: entry.hash } unless prior.get(entry.id) is entry.hash
-    for entry in appGraph?.entries or []
-      continue if changed? and not changed.has entry.id
-      dings.push { id: entry.id, hash: entry.hash, kind: 'delete' } unless current.has entry.id
-    appGraph = next
-    publishDings! dings
+      documents = appDocuments! project, update.graph
+      ids = update.changed
+    stabilized = stabilizeAppDocuments! documents
+    documents = stabilized.documents
+    ids = changedAppIds(appPublication, documents) if stabilized.rebuilt
+    return if documents.hash is appPublication.hash
+    priorShell = appPublication.graph.entries.some (entry) -> entry.id is 'index.html'
+    nextShell = documents.graph.entries.some (entry) -> entry.id is 'index.html'
+    if priorShell isnt nextShell
+      throw Error.new 'App index.html cannot be created or deleted while Manager is running; restart to change shell ownership'
+    change = appChange appPublication, documents, ids
+    commitAppDocuments project, documents
+    appPublication = documents
+    appGraph = documents.graph
+    publishChange! change
 
   startAppWatcher = ->
     return unless args.watch and project.appRoot?
     appWatcher = watch project.appRoot, { recursive: true }, (_event, filename) ->
-      return unless operation is 'Active'
-      publication = appEventPublication project.appRoot, appGraph, project.appManifest, filename
+      return if stopping
+      if not appWatchReady or operation isnt 'Active'
+        appReconcile = true
+        return
+      publication = appEventPublication project.appRoot, appGraph, project.appChanges, filename
       return unless publication?
       if publication is '*'
-        appReconcile = true
+        scheduleAppRefresh '*'
       else
-        appDirty.add publication
-      clearTimeout appTimer if appTimer?
-      appTimer = setTimeout ->
-        batch = { full: appReconcile, ids: [...appDirty] }
-        appReconcile = false
-        appDirty.clear()
-        appTimer = null
-        next = appChain.then -> refreshApp! batch
-        appChain = next.catch (error) -> warn "rip-server: App publication failed: #{String(error)}"
-      , 50
+        scheduleAppRefresh publication
 
   bootPrepared = ->
     return bootPromise if bootPromise?
@@ -1174,22 +1303,33 @@ export main = (argv) ->
     apiSettledEpoch = epoch
     bootPrepared! if args.eager
 
+  scheduleApiRefresh = ->
+    apiReconcile = false
+    apiEpoch++
+    epoch = apiEpoch
+    clearTimeout apiTimer if apiTimer?
+    apiTimer = setTimeout ->
+      apiTimer = null
+      next = apiChain.then -> prepareApi! epoch
+      apiChain = next.catch (error) -> warn "rip-server: API reload failed: #{String(error)}"
+    , 50
+    return
+
   startApiWatcher = ->
     return unless args.watch and project.entry?
     apiWatcher = watch project.root, { recursive: true }, (event, filename) ->
-      return unless operation is 'Active'
+      return if stopping
       rel = String(filename or '')
       return if rel.startsWith('dist/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
       path = resolve project.root, rel
       return if project.appRoot? and (path is project.appRoot or path.startsWith("#{project.appRoot}/"))
-      return unless path is project.entry or apiInputs.has path
-      apiEpoch++
-      epoch = apiEpoch
-      clearTimeout apiTimer if apiTimer?
-      apiTimer = setTimeout ->
-        next = apiChain.then -> prepareApi! epoch
-        apiChain = next.catch (error) -> warn "rip-server: API reload failed: #{String(error)}"
-      , 50
+      if not apiWatchReady or operation isnt 'Active'
+        apiReconcile = true
+        return
+      ambiguous = not filename? or rel is ''
+      relevant = ambiguous or path is project.entry or apiInputs.has(path) or [...apiInputs].some((input) -> input.startsWith("#{path}/"))
+      return unless relevant
+      scheduleApiRefresh()
 
   startDoorbell = ->
     return unless project.entry?
@@ -1212,7 +1352,9 @@ export main = (argv) ->
     documents = null
     swapped = false
     try
-      documents = buildAppDocuments!(project, args.watch) if project.appRoot?
+      if project.appRoot?
+        documents = buildAppDocuments! project
+        documents = (stabilizeAppDocuments! documents).documents
       if project.entry?
         generation++
         candidateArtifact = join runDir, "release-#{generation}.js"
@@ -1226,15 +1368,15 @@ export main = (argv) ->
       queuePublish!
       swapped = true
       commitAppDocuments project, documents if documents?
-      appGraph = documents.graph if documents?
+      if documents?
+        appPublication = documents
+        appGraph = documents.graph
       for worker in workers
         monitorWorker worker
-      try
-        response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/hub'], ding: { kind: 'epoch', epoch: generation } }]
-        warn "rip-server: release reload ding failed (#{response.status})" unless response.ok
-      catch error
-        warn "rip-server: release reload ding failed: #{String(error)}"
+      publishReload!
       operation = 'Active'
+      scheduleAppRefresh('*') if appReconcile
+      scheduleApiRefresh() if apiReconcile
       Promise.all! oldWorkers.map (worker) -> stopWorker worker.proc
       status()
     catch error
@@ -1288,10 +1430,19 @@ export main = (argv) ->
     report = migrationOutcome "#{stdout}\n#{stderr}"
     { ...report, code, output: (if code is 0 then stdout.trim() else stderr.trim()) }
 
-  epochDing = ->
+  publishReload = ->
     return unless args.watch
-    response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/hub'], ding: { kind: 'epoch', epoch: generation } }]
-    throw Error.new("Janus epoch ding failed (#{response.status})") unless response.ok
+    delay = 25
+    loop
+      try
+        response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/hub'], reload: { epoch: generation } }]
+        return if response.ok
+        warn "rip-server: Janus reload publish failed (#{response.status}); retrying"
+      catch error
+        warn "rip-server: Janus reload publish failed: #{String(error)}; retrying"
+      return if stopping
+      sleep! delay
+      delay = Math.min delay * 2, 1000
 
   bootArtifact = (artifact) ->
     appArtifact = artifact
@@ -1317,11 +1468,14 @@ export main = (argv) ->
       candidateWorkers = bootArtifact! activeArtifact
       startDoorbell() unless doorbell?
       documents = readAppCandidate record.appCandidate
+      watchAppDependencies documents if documents?
       commitAppDocuments project, documents if documents?
-      appGraph = documents.graph if documents?
+      if documents?
+        appPublication = documents
+        appGraph = documents.graph
       apiInputs = Set.new record.inputs
-      appChanged = documents? and appModules(project.appRoot, project.appManifest).check isnt documents.graph.check
-      apiChanged = JSON.stringify(sourceRashes(record.inputs)) isnt JSON.stringify(record.inputRashes)
+      appChanged = documents? and buildAppDocuments!(project).hash isnt documents.hash
+      apiChanged = JSON.stringify(sourceHashes(record.inputs)) isnt JSON.stringify(record.inputHashes)
       operation = 'Activating'
       admissionAttempted = true
       publishUpstreams! candidateWorkers.map (worker) -> { path: worker.socket }
@@ -1329,17 +1483,15 @@ export main = (argv) ->
       bootingWorkers = []
       for worker in workers
         monitorWorker worker
-      epochDing!
+      publishReload!
       operation = 'Active'
+      scheduleAppRefresh('*') if appReconcile
+      scheduleApiRefresh() if apiReconcile
       clearMigration record
       if appChanged
         next = appChain.then -> refreshApp!
         appChain = next.catch (error) -> warn "rip-server: post-migration App refresh failed: #{String(error)}"
-      if apiChanged
-        apiEpoch++
-        epoch = apiEpoch
-        next = apiChain.then -> prepareApi! epoch
-        apiChain = next.catch (error) -> warn "rip-server: post-migration API refresh failed: #{String(error)}"
+      scheduleApiRefresh() if apiChanged or apiReconcile
       status()
     catch error
       try publishUpstreams! [] if admissionAttempted
@@ -1384,7 +1536,9 @@ export main = (argv) ->
     record = null
     cut = false
     try
-      documents = buildAppDocuments!(project, args.watch) if project.appRoot?
+      if project.appRoot?
+        documents = buildAppDocuments! project
+        documents = (stabilizeAppDocuments! documents).documents
       generation++
       candidateArtifact = join runDir, "migration-#{generation}.js"
       reportPath = join runDir, "migration-#{generation}.json"
@@ -1409,7 +1563,7 @@ export main = (argv) ->
         oldArtifact: oldArtifact
         appCandidate: appCandidate
         inputs: report.inputs
-        inputRashes: sourceRashes(report.inputs)
+        inputHashes: sourceHashes(report.inputs)
         migrationEntry: body.entry or null
         migrationDir: body.dir
       persistMigration record
@@ -1477,6 +1631,7 @@ export main = (argv) ->
       clearTimeout appTimer if appTimer?
       clearTimeout apiTimer if apiTimer?
       appWatcher?.close()
+      watcher.close() for [_, watcher] in appDependencyWatchers
       apiWatcher?.close()
       try migrationChild?.kill('SIGTERM')
       try await operationPromise if operationPromise?
@@ -1522,22 +1677,38 @@ export main = (argv) ->
 
   try
     startManagerControl()
-    publication = publishApp! project, args.name, args.watch, (if operation is 'Maintenance' then null else undefined), serve?.files?.shell
-    if publication?
-      appGraph = publication.graph
+    publication = null
+    if project.appRoot? and operation isnt 'Maintenance'
+      preliminary = buildAppDocuments! project
+      appPublication = preliminary
+      appGraph = preliminary.graph
+      startAppWatcher()
+      authoritative = buildAppDocuments! project
+      authoritative = (stabilizeAppDocuments! authoritative).documents
+      publication = publishApp! project, args.name, args.watch, authoritative, serve?.files?.shell
+      appPublication = authoritative
+      appGraph = authoritative.graph
+    else
+      publication = publishApp! project, args.name, args.watch, (if operation is 'Maintenance' then null else undefined), serve?.files?.shell
     files = registrationFiles project, serve?.files, publication
     if project.entry?
+      startApiWatcher()
       workerArtifact = join runDir, 'worker.js'
       generate! join(import.meta.dir, 'worker.rip'), workerArtifact, join(runDir, 'worker-result.json'), 'worker'
       unless operation is 'Maintenance'
         appArtifact = join runDir, 'app.js'
         report = generate! project.entry, appArtifact, join(runDir, 'app-result.json'), 'app'
         apiInputs = Set.new report.inputs
+        if project.appRoot?
+          authoritative = buildAppDocuments! project
+          authoritative = (stabilizeAppDocuments! authoritative).documents
+          if authoritative.hash isnt appPublication.hash
+            commitAppDocuments project, authoritative
+            appPublication = authoritative
+            appGraph = authoritative.graph
         for slot in [0...args.workers]
           bootSlot!
         startDoorbell()
-    startAppWatcher()
-    startApiWatcher()
     if stopping
       process.exitCode = await finished
       return
@@ -1547,6 +1718,10 @@ export main = (argv) ->
       process.exitCode = await finished
       return
     appId = registrationId
+    appWatchReady = true
+    scheduleAppRefresh('*') if appReconcile
+    apiWatchReady = true
+    scheduleApiRefresh() if apiReconcile
     # Let the finite POST release its control transport before opening the
     # registration's long-lived stream; control writes must remain independent.
     moveAccess()

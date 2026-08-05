@@ -1,5 +1,5 @@
-// Probe 1 on the cart exemplar: real rip server (cart-harness.mjs), disk
-// edits under app/, Workspace door apply. Vue remount floor — layout +
+// Cart exemplar through real Rip Server: disk edits under app/ and Workspace
+// publication apply. Vue remount floor — layout +
 // stash survive leaf edits; reload is never the happy path.
 import { expect, test } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -27,8 +27,8 @@ async function editFile(relPath, transform) {
   return { abs, before, restore: () => writeFileSync(abs, before) };
 }
 
-test.describe('cart Probe 1 apply', () => {
-  test('leaf markup edit updates without reload; layout and hub stay ding-only', async ({ page }) => {
+test.describe('cart publication apply', () => {
+  test('leaf markup edit updates without reload through one ordered change', async ({ page }) => {
     await bootCart(page);
     await page.evaluate(() => {
       globalThis.__wsSentinel = 'alive';
@@ -49,10 +49,11 @@ test.describe('cart Probe 1 apply', () => {
       const frames = await (await fetch(`${HARNESS}/__test/frames`)).json();
       expect(frames.length).toBeGreaterThan(0);
       const last = JSON.parse(frames[frames.length - 1]);
-      expect(Object.keys(last)).toEqual(['ding']);
-      expect(last.ding.id).toBe('routes/index.rip');
-      expect(typeof last.ding.hash).toBe('string');
-      expect(frames[frames.length - 1].includes(stamp)).toBe(false);
+      expect(Object.keys(last)).toEqual(['change']);
+      expect(last.change.list[0][0]).toBe('routes/index.rip');
+      expect(last.change.list[0][1]).toContain(stamp);
+      expect(typeof last.change.from).toBe('string');
+      expect(typeof last.change.hash).toBe('string');
     } finally {
       edit.restore();
     }
@@ -115,9 +116,8 @@ test.describe('cart Probe 1 apply', () => {
       const frames = await (await fetch(`${HARNESS}/__test/frames`)).json();
       expect(frames.length).toBeGreaterThan(0);
       const last = JSON.parse(frames[frames.length - 1]);
-      expect(last.ding.id).toBe('index.html');
-      expect(typeof last.ding.hash).toBe('string');
-      expect(last.ding.kind).toBeUndefined();
+      expect(last.change.list).toEqual([['index.html']]);
+      expect(typeof last.change.hash).toBe('string');
     } finally {
       edit.restore();
     }
@@ -162,10 +162,9 @@ test.describe('cart Probe 1 apply', () => {
       const frames = await (await fetch(`${HARNESS}/__test/frames`)).json();
       expect(frames.length).toBeGreaterThan(0);
       const last = JSON.parse(frames[frames.length - 1]);
-      expect(Object.keys(last)).toEqual(['ding']);
-      expect(last.ding.id).toBe('styles.css');
-      expect(typeof last.ding.hash).toBe('string');
-      expect(last.ding.kind).toBeUndefined();
+      expect(Object.keys(last)).toEqual(['change']);
+      expect(last.change.list).toEqual([['styles.css']]);
+      expect(typeof last.change.hash).toBe('string');
       expect(frames[frames.length - 1].includes('--rip-s12')).toBe(false);
     } finally {
       edit.restore();

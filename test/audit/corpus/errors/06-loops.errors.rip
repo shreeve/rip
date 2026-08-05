@@ -23,3 +23,6 @@ supply = 2
 gathered = while supply-- > 0
   supply
 wrongElement = gathered.toUpperCase()
+looped = loop 2
+  supply
+wrongLooped = looped.toUpperCase()

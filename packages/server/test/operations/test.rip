@@ -82,7 +82,7 @@ failedCommand = (name, project) ->
   code = await proc.exited
   { code, diagnostic: await diagnostic }
 
-test! 'hold fences App publication, API replacement, and dings', ->
+test! 'hold fences App publication, API replacement, and client messages', ->
   dir = mkdtempSync join(tmpdir(), 'rip-operations-hold-')
   project = join dir, 'project'
   cpSync RELOAD_PROJECT, project, { recursive: true }
@@ -91,7 +91,7 @@ test! 'hold fences App publication, API replacement, and dings', ->
   controlSocket = join dir, 'janus.sock'
   registration = null
   updates = []
-  dings = []
+  messages = []
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
@@ -103,7 +103,7 @@ test! 'hold fences App publication, API replacement, and dings', ->
         updates.push request.json!
         return Response.new(null, { status: 204 })
       if url.pathname.endsWith('/hub/publish')
-        dings.push ...(request.json!)
+        messages.push ...(request.json!)
         return Response.json({ deliveries: 0 })
       Response.new(null, { status: 204 })
   proc = null
@@ -139,7 +139,7 @@ test! 'hold fences App publication, API replacement, and dings', ->
     """
     sleep! 300
     eq updates, []
-    eq dings, []
+    eq messages, []
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }
     eq (command!('status', project)).operation, 'Held'
 
@@ -147,13 +147,13 @@ test! 'hold fences App publication, API replacement, and dings', ->
     eq released.operation, 'Active'
     fresh = updates.at(-1).upstreams[0].path
     eq ((unixFetch!('/version', fresh)).json!), { version: 'held-change' }
-    eq dings.length, 1
-    eq dings[0].ding.kind, 'epoch'
+    eq messages.length, 1
+    ok messages[0].reload.epoch > 0
     dist = join project, 'dist'
     bundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
-    manifest = JSON.parse readFileSync(join(dist, 'manifest.json'), 'utf8')
-    eq bundle.check, manifest.check
-    eq bundle.modules['routes/index.rip'], "export changed = true\n"
+    latest = JSON.parse readFileSync(join(dist, 'latest.json'), 'utf8')
+    eq bundle.hash, latest.hash
+    eq bundle.list.find((entry) -> entry[0] is 'routes/index.rip')[1], "export changed = true\n"
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143
@@ -177,7 +177,7 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
   controlSocket = join dir, 'janus.sock'
   registration = null
   updates = []
-  dings = []
+  messages = []
   control = Bun.serve
     unix: controlSocket
     fetch: (request) ->
@@ -189,7 +189,7 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
         updates.push request.json!
         return Response.new(null, { status: 204 })
       if url.pathname.endsWith('/hub/publish')
-        dings.push ...(request.json!)
+        messages.push ...(request.json!)
         return Response.json({ deliveries: 0 })
       Response.new(null, { status: 204 })
 

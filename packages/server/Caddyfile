@@ -3,12 +3,17 @@
 # this file give each app clean HTTPS. The edge exposes no public control
 # listener and names no application.
 # `rip app` registers projects through the private Janus socket at runtime.
+# On macOS, `rip edge` supplies a launchd-owned loopback socket as fd/3.
 {
 	admin unix/{$RIP_EDGE_ADMIN}
 	persist_config off
 	auto_https disable_redirects
-	default_bind 127.0.0.1
+	default_bind {$RIP_EDGE_BIND:127.0.0.1}
 	skip_install_trust
+	servers {
+		# fd/3 is the packaged macOS edge's TCP socket; HTTP/3 requires UDP.
+		protocols h1 h2
+	}
 
 	janus {
 		control internal {$RIP_EDGE_CONTROL}

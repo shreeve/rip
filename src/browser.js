@@ -9,11 +9,16 @@
 // that.
 import { compile } from './compile.js';
 import { runtimes } from './browser-runtimes.js';
+import { embeddedPackages } from './browser-app.js';
+import { createModuleLoader as createLoader } from './browser-modules.js';
 
 export { compile };
 export { runtimes };
 export { processRipScripts } from './browser-scripts.js';
-export { createModuleLoader } from './browser-modules.js';
+
+export function createModuleLoader(options = {}) {
+  return createLoader({ ...options, embeddedPackages });
+}
 
 // The compiler call browser loaders make: JavaScript out, runtimes by
 // scope, original-position diagnostics carried on the thrown error.

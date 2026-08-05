@@ -19,7 +19,7 @@ export type Renderer =
   # keeping ancestor layouts and the live stash (Probe 1 / S3 floor).
   # Returns 'narrow' when it remounted, 'noop' when nothing was mounted,
   # 'escape' when the caller should fall back to whole-launch remount.
-  remountDirty: (paths: string[]) => Promise<'narrow' | 'noop' | 'escape'>
+  remountDirty: (paths: string[], candidate?: Record<string, any>) => Promise<'narrow' | 'noop' | 'escape' | 'reload'>
   start: () => Renderer
   stop: () => void
   readonly current: any
@@ -80,6 +80,7 @@ export def createRenderer(opts: RendererOpts): Renderer
   pageMountPoint: any = null
   lastRoute: any = null
   forceFrom = null
+  lastCommitTeardownFailed = false
 
   shallowEqual = (a, b) ->
     keysA = Object.keys a
@@ -361,7 +362,7 @@ export def createRenderer(opts: RendererOpts): Renderer
       console.error '[Rip] boundary teardown error:', error
     true
 
-  performMount = (info, mine) ->
+  performMount = (info, mine, componentRegistry = components) ->
     route = info?.route
     unless route?.file
       throw Error.new 'Rip App: renderer route state requires route.file'
@@ -413,7 +414,7 @@ export def createRenderer(opts: RendererOpts): Renderer
       if index < firstNew
         entries.push mountedEntries[index]
       else
-        entries.push { file, cls: componentFrom(components, file) }
+        entries.push { file, cls: componentFrom(componentRegistry, file) }
     fresh = entries.slice firstNew
 
     try
@@ -468,8 +469,17 @@ export def createRenderer(opts: RendererOpts): Renderer
     mountedEntries = entries
     lastRoute = { file: route.file, params, query }
     teardownErrors = cleanup oldInstances
+    lastCommitTeardownFailed = teardownErrors.length > 0
     if teardownErrors.length
-      throw failureFor '<teardown>', '<renderer>', teardownErrors[0]
+      # The replacement DOM and renderer state are already committed. Report
+      # teardown as a diagnostic; throwing here would falsely invite callers
+      # to roll back source state that can no longer match the live renderer.
+      for error in teardownErrors
+        failure = failureFor '<teardown>', '<renderer>', error
+        if onError?
+          try onError(failure) catch reportError then console.error '[Rip] renderer teardown reporter failed:', reportError
+        else
+          console.error '[Rip] renderer teardown error:', failure
     current
 
   # Link-intent preloading: warm the gate cells that navigating to
@@ -498,16 +508,16 @@ export def createRenderer(opts: RendererOpts): Renderer
     job.cell.preload().catch(-> null) for job in jobs
     return
 
-  # Probe 1 apply seam: remount living route/layout instances whose
+  # Publication apply seam: remount living route/layout instances whose
   # modules changed, keeping the stash and ancestor layouts. Stash and
   # non-UI modules are the caller's escape (whole-launch remount).
-  remountDirty = (paths) ->
+  remountDirty = (paths, candidate = components) ->
     return 'noop' unless Array.isArray(paths) and paths.length > 0
     # Escape before the live-route guard: after a failed whole-launch
     # escape the renderer may be stopped (no lastRoute), but a stash
     # edit must still request escape so the next good generation recovers.
     for path in paths
-      return 'escape' if path is 'stash.rip' or path.startsWith 'stash/'
+      return 'escape' if path is 'stash.rip' or path.startsWith('stash/') or path is 'data.rip'
     info = router.current
     return 'noop' unless info?.route?.file and lastRoute?
     dirty = Set.new paths
@@ -522,18 +532,20 @@ export def createRenderer(opts: RendererOpts): Renderer
     # remounts the page — Vue script remount floor for that leaf.
     firstDirty = chain.length - 1 if firstDirty < 0
     forceFrom = firstDirty
+    lastCommitTeardownFailed = false
+    expectedGeneration = generation + 1
     try
-      mount! info
+      mount! info, candidate
     catch error
       forceFrom = null
       throw error
-    'narrow'
+    if generation isnt expectedGeneration or lastCommitTeardownFailed then 'reload' else 'narrow'
 
-  mount = (info) ->
+  mount = (info, componentRegistry = components) ->
     mine = ++generation
     router.navigating = true if 'navigating' in router
     try
-      performMount! info, mine
+      performMount! info, mine, componentRegistry
     catch caught
       error = caught as any
       return null if mine isnt generation

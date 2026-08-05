@@ -1,25 +1,18 @@
 # ==============================================================================
-# Rip Workspace — the reactive passport bag (@rip-lang/app)
+# Rip Workspace — one active browser publication
 #
-# One bag of component records ("passports") in the browser. Producers
-# mutate the bag through the door (populate / set / seal); the app reads
-# it through a path-keyed view that implements the exact ComponentsStore
-# interface from @rip-lang/app, so launch() can take it as an injected
-# store. Records + door + view — nothing more.
-#
-# Freshness is the six-character Rip hash over exact UTF-8 source bytes.
+# The Workspace is the App-facing component store plus one complete App hash.
+# Browser delivery stages source and compilation outside it, then activates or
+# commits one prepared state. It never calculates hashes and never stores
+# ordinary HTTP assets.
 # ==============================================================================
-
-import { rash } from './rash.rip'
 
 export type WorkspaceEvent = 'create' | 'change' | 'delete'
 
-export type Passport =
-  id: string
-  path: string
+export type PreparedWorkspace =
   hash: string
-  source?: string
-  compiled?: Record<string, unknown>
+  sources: Record<string, string>
+  compiled: Record<string, Record<string, unknown>>
 
 export type Workspace =
   read: (path: string) => string | undefined
@@ -33,27 +26,19 @@ export type Workspace =
   watch: (fn: (event: WorkspaceEvent, path: string) => void) => () => void
   getCompiled: (path: string) => Record<string, unknown> | undefined
   setCompiled: (path: string, module: Record<string, unknown>) => void
-  populate: (records: Passport[]) => void
-  set: (record: Record<string, unknown>) => boolean
-  seal: () => void
-  sealed: () => boolean
-  passport: (pathOrId: string) => Passport | undefined
-  ids: () => string[]
-  paths: () => string[]
-
-# Bag paths: Rip modules, CSS sheets (S12), HTML shells (reload).
-# Route/component stores stay .rip-only in components.rip.
-isBagPath = (name) ->
-  name.endsWith('.rip') or name.endsWith('.css') or name.endsWith('.html')
+  hash: () => string | null
+  activate: (state: PreparedWorkspace) => void
+  stage: (from: string, state: PreparedWorkspace, changed: string[]) => { components: { getCompiled: (path: string) => Record<string, unknown> | undefined }, commit: () => void, rollback: () => void }
+  commit: (from: string, state: PreparedWorkspace, changed: string[]) => void
 
 validPath = (path) ->
   unless typeof path is 'string' and path.length > 0
     throw TypeError.new 'Rip Workspace: component path must be a non-empty string'
   segments = path.split '/'
-  invalidSegment = segments.some (segment) -> not segment or segment is '.' or segment is '..'
+  invalidSegment = segments.some (segment) -> not segment or segment is '.' or segment is '..' or segment.startsWith '.'
   filename = segments[-1]
-  fileAsDirectory = segments.slice(0, -1).some (segment) -> isBagPath segment
-  if path.includes('\\') or invalidSegment or fileAsDirectory or filename is '.rip' or filename is '.css' or filename is '.html' or not isBagPath(filename)
+  fileAsDirectory = segments.slice(0, -1).some (segment) -> segment.endsWith '.rip'
+  if path.includes('\\') or path.startsWith('/') or invalidSegment or fileAsDirectory or filename is '.rip' or not filename.endsWith('.rip')
     throw TypeError.new "Rip Workspace: invalid component path '#{path}'"
   path
 
@@ -67,18 +52,13 @@ validDirectory = (dir) ->
   unless typeof dir is 'string'
     throw TypeError.new 'Rip Workspace: component directory must be a string'
   segments = dir.split '/'
-  if dir.includes('\\') or segments.some((segment) -> not segment or segment is '.' or segment is '..')
+  if dir.includes('\\') or dir.startsWith('/') or segments.some((segment) -> not segment or segment is '.' or segment is '..' or segment.startsWith '.')
     throw TypeError.new "Rip Workspace: invalid component directory '#{dir}'"
   dir
 
-validId = (id) ->
-  unless typeof id is 'string' and id.length > 0
-    throw TypeError.new 'Rip Workspace: passport id must be a non-empty string'
-  id
-
 validHash = (hash) ->
   unless typeof hash is 'string' and /^[A-Za-z0-9_]{6}$/.test(hash)
-    throw TypeError.new 'Rip Workspace: passport hash must be six Base64URL-folded characters'
+    throw TypeError.new 'Rip Workspace: publication hash must be six Base64URL-folded characters'
   hash
 
 validModule = (module) ->
@@ -86,18 +66,30 @@ validModule = (module) ->
     throw TypeError.new 'Rip Workspace: compiled component module must be an object'
   module
 
-hashOf = (text) -> rash TextEncoder.new().encode(text)
+prepared = (state) ->
+  unless state? and typeof state is 'object' and not Array.isArray(state)
+    throw TypeError.new 'Rip Workspace: prepared state must be an object'
+  hash = validHash state.hash
+  unless state.sources? and typeof state.sources is 'object' and not Array.isArray(state.sources)
+    throw TypeError.new 'Rip Workspace: prepared sources must be an object'
+  unless state.compiled? and typeof state.compiled is 'object' and not Array.isArray(state.compiled)
+    throw TypeError.new 'Rip Workspace: prepared compiled modules must be an object'
+  sources = Map.new()
+  compiled = Map.new()
+  for own path, source of state.sources
+    sources.set validPath(path), validContent(source)
+  for own path, module of state.compiled
+    path = validPath path
+    throw Error.new "Rip Workspace: compiled module '#{path}' has no source" unless sources.has path
+    compiled.set path, validModule(module)
+  { hash, sources, compiled }
 
 export def createWorkspace(): Workspace
-  passports = Map.new()
-  pathToId = Map.new()
-  watchers: Set<(event: WorkspaceEvent, path: string) => void> = Set.new()
-  locked = false
-
-  guard = (operation) ->
-    if locked
-      throw Error.new "Rip Workspace: #{operation} on a sealed workspace"
-    return
+  sources = Map.new()
+  compiled = Map.new()
+  watchers = Set.new()
+  activeHash = null
+  staging = false
 
   notify = (event, path) ->
     for watcher in Array.from(watchers)
@@ -107,72 +99,42 @@ export def createWorkspace(): Workspace
         console.error '[Rip] workspace watcher error:', error
     return
 
-  byPath = (path) ->
-    id = pathToId.get path
-    if id? then passports.get(id) else undefined
-
-  # B′: the id is path-derived at birth. A locally minted passport (an
-  # editor write, not a server file) uses its birth path as its id.
-  mintId = (path) ->
-    if passports.has path
-      throw Error.new "Rip Workspace: cannot mint id '#{path}'; a passport already holds that id"
-    path
-
-  claimPath = (path, id) ->
-    holder = pathToId.get path
-    if holder? and holder isnt id
-      throw Error.new "Rip Workspace: path '#{path}' already labels passport '#{holder}'"
-    return
-
-  applySource = (record, content) ->
-    passports.set record.id, { ...record, hash: hashOf(content), source: content, compiled: undefined }
-    return
-
-  birthPassport = (path, content) ->
-    id = mintId path
-    passports.set id, { id, path, hash: hashOf(content), source: content, compiled: undefined }
-    pathToId.set path, id
+  replace = (next) ->
+    sources = next.sources
+    compiled = next.compiled
+    activeHash = next.hash
     return
 
   workspace =
-    # --- ComponentsStore view (path-keyed) ---
-
-    read: (path) ->
-      byPath(validPath(path))?.source
+    read: (path) -> sources.get validPath(path)
 
     write: (path, content) ->
-      guard 'write'
+      throw Error.new 'Rip Workspace: cannot write during a publication transition' if staging
       path = validPath path
       content = validContent content
-      record = byPath path
-      if record
-        applySource record, content
-        notify 'change', path
-      else
-        birthPassport path, content
-        notify 'create', path
+      event = if sources.has(path) then 'change' else 'create'
+      sources.set path, content
+      compiled.delete path
+      notify event, path
       return
 
     del: (path) ->
-      guard 'del'
+      throw Error.new 'Rip Workspace: cannot delete during a publication transition' if staging
       path = validPath path
-      record = byPath path
-      if record
-        passports.delete record.id
-        pathToId.delete path
+      sources.delete path
+      compiled.delete path
       notify 'delete', path
       return
 
-    exists: (path) ->
-      pathToId.has validPath(path)
+    exists: (path) -> sources.has validPath(path)
 
-    size: -> passports.size
+    size: -> sources.size
 
     list: (dir = '') ->
       dir = validDirectory dir
       prefix = if dir then dir + '/' else ''
       result = []
-      for [path] in pathToId
+      for [path] in sources
         if path.startsWith prefix
           rest = path.slice prefix.length
           result.push path unless rest.includes '/'
@@ -182,21 +144,19 @@ export def createWorkspace(): Workspace
       dir = validDirectory dir
       prefix = if dir then dir + '/' else ''
       result = []
-      result.push path for [path] in pathToId when path.startsWith(prefix)
+      result.push path for [path] in sources when path.startsWith(prefix)
       result
 
-    load: (sources) ->
-      guard 'load'
-      unless sources? and typeof sources is 'object' and not Array.isArray(sources)
+    load: (values) ->
+      throw Error.new 'Rip Workspace: cannot load during a publication transition' if staging
+      unless values? and typeof values is 'object' and not Array.isArray(values)
         throw TypeError.new 'Rip Workspace: component load expects a source object'
-      for own path, content of sources
-        path = validPath path
-        content = validContent content
-        record = byPath path
-        if record
-          applySource record, content
-        else
-          birthPassport path, content
+      next = []
+      for own path, content of values
+        next.push [validPath(path), validContent(content)]
+      for [path, content] in next
+        sources.set path, content
+        compiled.delete path
       return
 
     watch: (fn) ->
@@ -210,134 +170,54 @@ export def createWorkspace(): Workspace
         watchers.delete fn
         return
 
-    getCompiled: (path) ->
-      byPath(validPath(path))?.compiled
+    getCompiled: (path) -> compiled.get validPath(path)
 
     setCompiled: (path, module) ->
-      guard 'setCompiled'
+      throw Error.new 'Rip Workspace: cannot compile during a publication transition' if staging
       path = validPath path
-      module = validModule module
-      record = byPath path
-      unless record
-        throw Error.new "Rip Workspace: setCompiled for unknown component path '#{path}'"
-      passports.set record.id, { ...record, compiled: module }
+      throw Error.new "Rip Workspace: setCompiled for unknown component path '#{path}'" unless sources.has path
+      compiled.set path, validModule(module)
       return
 
-    # --- Door ---
+    hash: -> activeHash
 
-    populate: (records) ->
-      guard 'populate'
-      unless Array.isArray records
-        throw TypeError.new 'Rip Workspace: populate expects an array of passport records'
-      if passports.size > 0
-        throw Error.new 'Rip Workspace: populate requires an empty workspace; mutate with set'
-      seenIds = Set.new()
-      seenPaths = Set.new()
-      next = []
-      for record in records
-        unless record? and typeof record is 'object' and not Array.isArray(record)
-          throw TypeError.new 'Rip Workspace: populate expects passport records'
-        id = validId record.id
-        path = validPath record.path
-        hash = validHash record.hash
-        hasSource = record.source isnt undefined
-        unless hasSource or path.endsWith('.css') or path.endsWith('.html')
-          throw Error.new "Rip Workspace: Rip passport '#{id}' requires source during populate"
-        source = if hasSource then validContent(record.source) else undefined
-        compiled = if record.compiled? then validModule record.compiled else undefined
-        if seenIds.has id
-          throw Error.new "Rip Workspace: duplicate passport id '#{id}' in populate"
-        if seenPaths.has path
-          throw Error.new "Rip Workspace: duplicate passport path '#{path}' in populate"
-        seenIds.add id
-        seenPaths.add path
-        next.push { id, path, hash, source, compiled }
-      for row in next
-        passports.set row.id, row
-        pathToId.set row.path, row.id
+    activate: (state) ->
+      throw Error.new 'Rip Workspace: a publication is already active' if activeHash?
+      throw Error.new 'Rip Workspace: a publication transition is already staged' if staging
+      replace prepared(state)
       return
 
-    set: (record) ->
-      guard 'set'
-      unless record? and typeof record is 'object' and not Array.isArray(record)
-        throw TypeError.new 'Rip Workspace: set expects a passport record'
-      id = validId record.id
-      hash = validHash record.hash
-      current = passports.get id
+    stage: (from, state, changed) ->
+      throw Error.new 'Rip Workspace: a publication transition is already staged' if staging
+      from = validHash from
+      throw Error.new "Rip Workspace: change starts at #{from}, not #{activeHash}" unless activeHash is from
+      unless Array.isArray changed
+        throw TypeError.new 'Rip Workspace: changed paths must be an array'
+      paths = changed.map (path) -> validPath path
+      throw Error.new 'Rip Workspace: changed paths must be unique' unless Set.new(paths).size is paths.length
+      next = prepared state
+      before = { sources, compiled, hash: activeHash }
+      staging = true
+      done = false
+      finish = (keep) ->
+        throw Error.new 'Rip Workspace: publication transition is already finished' if done
+        done = true
+        staging = false
+        return unless keep
+        replace next
+        for path in paths
+          event = if not next.sources.has(path) then 'delete' else if before.sources.has(path) then 'change' else 'create'
+          notify event, path
+        return
+      {
+        components: { getCompiled: (path) -> next.compiled.get validPath(path) }
+        commit: -> finish true
+        rollback: -> finish false
+      }
 
-      unless current
-        # A delete for an id the bag no longer holds is a replayed
-        # ding — not an error.
-        return false if record.deleted is true
-        unless record.path? and record.source?
-          throw Error.new "Rip Workspace: set of unknown passport '#{id}' requires a full record (id, path, hash, source)"
-        path = validPath record.path
-        source = validContent record.source
-        compiled = if record.compiled? then validModule record.compiled else undefined
-        claimPath path, id
-        passports.set id, { id, path, hash, source, compiled }
-        pathToId.set path, id
-        notify 'create', path
-        return true
-
-      if record.deleted is true
-        # Delete names the generation being retired; a newer passport wins.
-        return false unless hash is current.hash
-        passports.delete id
-        pathToId.delete current.path
-        notify 'delete', current.path
-        return true
-
-      return false if hash is current.hash
-
-      newPath = if record.path? then validPath record.path else current.path
-      renamed = newPath isnt current.path
-      hasSource = record.source isnt undefined and record.source isnt null
-      hasCompiled = record.compiled isnt undefined and record.compiled isnt null
-      unless hasSource or hasCompiled or renamed
-        throw Error.new "Rip Workspace: set for passport '#{id}' carries nothing to apply (source, compiled, path, or deleted)"
-      claimPath newPath, id if renamed
-      source = if hasSource then validContent record.source else current.source
-      compiled = if hasCompiled
-        validModule record.compiled
-      else if hasSource
-        undefined   # new source invalidates the old projection
-      else
-        current.compiled
-
-      oldPath = current.path
-      pathToId.delete oldPath if renamed
-      passports.set id, { id, path: newPath, hash, source, compiled }
-      pathToId.set newPath, id
-      if renamed
-        notify 'delete', oldPath
-        notify 'create', newPath
-      else
-        notify 'change', newPath
-      true
-
-    seal: ->
-      if locked
-        throw Error.new 'Rip Workspace: workspace is already sealed'
-      locked = true
+    commit: (from, state, changed) ->
+      transaction = workspace.stage from, state, changed
+      transaction.commit()
       return
-
-    sealed: -> locked
-
-    # --- Inspection ---
-
-    passport: (pathOrId) ->
-      unless typeof pathOrId is 'string' and pathOrId.length > 0
-        throw TypeError.new 'Rip Workspace: passport lookup expects a passport id or component path'
-      record = passports.get pathOrId
-      unless record
-        id = pathToId.get pathOrId
-        record = if id? then passports.get(id) else undefined
-      return undefined unless record
-      { ...record }
-
-    ids: -> Array.from passports.keys()
-
-    paths: -> Array.from pathToId.keys()
 
   workspace

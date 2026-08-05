@@ -5,6 +5,9 @@ retain completed history.
 
 ## 1. Finish edge policy
 
+- [ ] Add Janus precompressed-sidecar negotiation for `.br`, `.zst`, and
+      `.gz` representations of the canonical registered file, preserving root
+      priority, validators, ranges, MIME type, and `Vary: Accept-Encoding`.
 - [ ] Pin one Caddy compression policy: encodings, minimum size, MIME
       exclusions, streaming bodies, pre-encoded responses, and
       `Cache-Control: no-transform`.
@@ -42,14 +45,10 @@ retain completed history.
       it from the App root.
 - [ ] Move Cart migration and seed setup out of worker import into an explicit
       one-off command.
-- [ ] Update Cart, Pulse, ROADMAP, AGENTS, package metadata, and server docs to
-      state only the final architecture.
 
 ## 5. Certify and land
 
 - [ ] Run every `test:*` script, including released-Janus verification.
-- [ ] Run `bun run test:all` at the repository root.
-- [ ] Run `bunx playwright test` in `packages/browser-tests`.
 - [ ] Run `go test ./...` and `./test.sh` in Janus.
 - [ ] Run `git diff --check` in both repositories.
 - [ ] Perform independent empirical verification of `X-Sendfile`, API reload,

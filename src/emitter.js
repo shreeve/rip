@@ -374,7 +374,7 @@ export function isModuleImportNode(stores, x) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, repl = false } = {}) {
+  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false } = {}) {
     this.stores = stores;
     this.b = builder;
     // repl emission: the final top-level expression statement lands
@@ -389,6 +389,7 @@ class Emitter {
     // page scope and are not modules, so every module form rejects at
     // its own position instead of emitting bytes new Function cannot take.
     this.script = script;
+    this.browserModule = browserModule;
     // Emitted module-specifier spans, RECORDED at emission (never
     // rediscovered by scanning output): the browser module loader
     // splices resolved specifiers by these exact offsets.
@@ -13427,6 +13428,14 @@ class Emitter {
   }
 
   call(node) {
+    if (this.browserModule && node[0] === 'import' && this.lockedHead(node, 'dynimport')) {
+      const error = this.positionedError(node, 'emitter: dynamic import is not supported in a browser App module — use a static import so Rip can publish and resolve the dependency');
+      if (typeof error.start !== 'number' && this.b.currentMark) {
+        error.start = this.b.currentMark.sourceStart;
+        error.end = this.b.currentMark.sourceEnd;
+      }
+      throw error;
+    }
     // repl mode: a dynamic import evaluates inside an async function
     // whose module context is the REPL's own, so a specifier that
     // should resolve against the user's cwd would silently anchor
@@ -14678,7 +14687,7 @@ const inventoryBindings = (emitter, sexpr, ambientNames) => {
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, dataPayload = null, ambientBindings = null, repl = false } = {}) {
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -14688,7 +14697,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script, repl });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl });
   emitter.dataPayload = dataPayload;
 
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {
