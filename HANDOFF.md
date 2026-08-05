@@ -6,10 +6,14 @@ lives in `docs/`; git history and pull requests retain completed-work detail.
 ## Orientation
 
 - Repo: `~/Data/Code/rip` — the live v4 checkout.
-- Commands: `bun run test:all` · `bun run test` · `bun run audit`.
+- Fast commands: `bun run test:rip` · package-local `bun run test` ·
+  `packages/browser-tests: bun run test:smoke`.
+- Explicit certification: `bun run test:all` · `bun run audit` ·
+  `packages/browser-tests: bun run test:cart`.
 - Server architecture: `docs/SERVER.md`.
 - Browser publication contract: `docs/WORKSPACE.md`.
 - Detailed lifecycle: `packages/server/README.md`.
+- Testing cleanup plan: `TEST-DIET.md`.
 
 ## App publication contract
 
@@ -26,9 +30,9 @@ lives in `docs/`; git history and pull requests retain completed-work detail.
 - Changed Rip source rides through the watch feed. CSS and every other ordinary
   asset remain normal HTTP resources; changes carry only their paths. Non-watch
   mode publishes the same initial files without watchers or change messages.
-- Rip App owns browser delivery. It validates and compiles the complete Rip
-  graph, keeps one persistent module loader, stages Workspace and renderer
-  state transactionally, and leaves HTTP bytes in the browser cache.
+- Rip App validates and compiles the complete Rip graph, keeps one persistent
+  module loader, stages Workspace and renderer state transactionally, and
+  leaves HTTP bytes in the browser cache.
 - A malformed or disconnected transition reloads. A failed Rip candidate is
   quarantined while the last committed App stays live; the next newer
   generation reloads a complete bundle. A valid transition that requires
@@ -44,35 +48,35 @@ lives in `docs/`; git history and pull requests retain completed-work detail.
 
 ## Verification state
 
+The immutable publication implementation checkpoint is `147f37c`.
+
 - `bun run test:all` — 22 lanes, 8,357 tests passed in 96.3 seconds.
 - `bunx playwright test --reporter=line` in `packages/browser-tests` — 21
   passed, 2 intentionally skipped across Chromium, Firefox, WebKit, and the
   live Cart Server/Manager harness.
-- `git diff --check` — passed.
-- Independent verification and genuinely cold adversarial review — GO after
-  empirical race, security, invalidation, watcher, encoding, and transaction
-  probes were converted into tests.
+- Independent empirical verification — GO.
+- Genuinely cold adversarial review — GO after its findings were fixed and
+  pinned.
+- A path-limited comparison from `147f37c` through the test-policy merge and
+  harness reverts is empty for Server, App, compiler/runtime, browser bundle,
+  examples, and permanent docs: the verified production implementation has
+  not changed.
 
-The pushed feature tip entering this handoff is `eaa93fe` on
-`rip-app-publication`. Its final two commits are isolated browser-harness work:
+PR #210 true-merged the testing policy as `769bc2a`:
 
-- `f820b8f Stabilize Cart harness readiness` changes only `HANDOFF.md` and
-  `packages/browser-tests/`.
-- `eaa93fe Make Cart readiness nonblocking` changes only
-  `packages/browser-tests/cart-harness.mjs`.
+- automatic PR code check: sub-second `bun run test:rip`;
+- automatic browser check: deterministic `bun run test:smoke`;
+- manual repository certification: `repository-certification` workflow;
+- manual live Cart certification: `cart-certification` workflow;
+- package suites run at coherent layer milestones, not after every edit.
 
-PR #209 is open and must not be merged until its Cart browser decision is made.
-GitHub Actions run `30998804952`, browser job `92282290483`, reached the tests
-but failed all five `cart-chromium` cases at initial boot: `h1` never appeared
-with text `Products` within 20 seconds, and each retry failed the same way. The
-job finished with 5 failed, 19 passed, and 2 skipped. The run's main test job
-passed in 4m41s and its audit job passed in 37s.
+`rip-app-publication` merged that mainline at `bd8f407`. The two isolated,
+unsuccessful browser-harness experiments were removed by normal revert commits:
 
-A subsequent local Playwright attempt never reached a test. The managed sandbox
-rejected local TCP binds while `lsof` and the process table showed no listener;
-even a direct Bun bind to unused port 4175 reported `EADDRINUSE`. Treat that as
-a sandbox finding, not a repository failure. The outside-sandbox retry was
-aborted without a result. No Cart opt-in change remains in the worktree.
+- `e603ea2 Revert "Make Cart readiness nonblocking"`;
+- `e188acf Revert "Stabilize Cart harness readiness"`.
+
+Those experiments never modified Rip Server or Rip App production code.
 
 Arbitrary top-level ESM side effects execute while a candidate module graph is
 evaluated and cannot be rolled back. Workspace, renderer, source, route
@@ -81,11 +85,14 @@ top-level effects owns that consequence.
 
 ## Session state
 
-Landing is deliberately stopped. Do not rerun tests, modify the Cart selection,
-rewrite or revert the two pushed harness commits, or merge PR #209 without new
-direction. The publication implementation and its reviews remain intact;
-precompressed-sidecar selection is Janus-owned behavior and is not implemented
-by the Rip repository.
+PR #209 is open. The branch has merged current `origin/main`, preserves the
+verified publication implementation, and deliberately excludes the Cart
+harness experiments. Push the current tip, accept only the lightweight
+language-battery and browser-smoke PR checks, then true-merge #209 and delete
+the feature branch.
+
+Do not run exhaustive repository or Cart certification unless the owner
+explicitly requests it.
 
 ## Working agreements
 
