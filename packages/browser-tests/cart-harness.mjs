@@ -189,7 +189,7 @@ const server = Bun.serve({
       return Response.json({ cartDir, fixtureRoot });
     }
     if (url.pathname === '/__test/ready') {
-      return Response.json({ ok: true, sock: initialSock });
+      return Response.json({ ok: true, sock: await workerSock() });
     }
     if (registration?.files?.proxy_first?.some(prefix => url.pathname === prefix || url.pathname.startsWith(`${prefix}/`))) {
       return proxy(request);
