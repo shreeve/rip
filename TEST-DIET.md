@@ -148,7 +148,7 @@ definition of "test."
 ### Pull-request gates
 
 - Operate on a frozen candidate.
-- Cover the fast compiler loop and affected package boundaries already named
+- Cover the language battery and affected package boundaries already named
   by the author.
 - Include deterministic browser smoke for browser-owned changes.
 - Never report a reduced suite as the complete suite.
@@ -166,7 +166,7 @@ definition of "test."
 Design the workflow around intent:
 
 - Draft/work-in-progress: focused local tests only.
-- Ready pull request: fast compiler loop plus affected package evidence and
+- Ready pull request: language battery plus affected package evidence and
   deterministic browser smoke.
 - Manual release certification: exhaustive permutations, scaling,
   fuzzing, multi-browser expansion, and expensive real-stack exemplars.

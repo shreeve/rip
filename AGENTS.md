@@ -389,7 +389,7 @@ the affected final gates again.
 
 - `bun run test:rip` — the battery alone (every test/battery/*.rip
  row — the language's syntax contract), sub-second: the inner loop
- for language work.
+ for language work and the automatic pull-request code check.
 - `bun run test` — the FAST compiler loop: language, mapping,
  snapshots, strip/emission pins. The extended tier (tsc-spawning
  validity gates, scaling gates, fuzz drift) registers visible skips

@@ -1,4 +1,4 @@
-# Fast CI for every push and pull request to main. Package milestone suites
+# Lightweight CI for every push and pull request to main. Package milestone suites
 # are run by their owners while a layer is being built; exhaustive repository
 # and corpus certification live in the explicit repository-certification
 # workflow.
@@ -42,12 +42,8 @@ jobs:
       - name: Install (one workspace install provisions every member; compiler purity is gated separately)
         run: bun install --frozen-lockfile
 
-      - name: Fast compiler and toolchain loop
-        # This is intentionally the local edit loop. The explicit
-        # repository-certification workflow owns CI-required extended tiers.
-        env:
-          CI: ''
-        run: bun run test
+      - name: Rip language battery
+        run: bun run test:rip
 
   # The one smoke suite test:all does not carry: it needs real browsers,
   # which a local checkout is not required to have. Parallel to `test`, so its
