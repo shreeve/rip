@@ -25,3 +25,5 @@ let wrongVoid: number = notify(label)
 let wrongPick: number = pick(label)
 let wrongTuple: [number, string] = [extra, extra]
 let wrongSignature: (n: number) => string = scale
+let wrongDeclared = function(flag: boolean): string {
+  return flag }

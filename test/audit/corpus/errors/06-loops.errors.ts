@@ -23,3 +23,6 @@ let supply = 2
 let gathered = (() => { const got: number[] = []; while (supply-- > 0) {
   got.push(supply) }; return got })()
 let wrongElement = gathered.toUpperCase()
+let looped = [1, 2].map(() =>
+  supply)
+let wrongLooped = looped.toUpperCase()

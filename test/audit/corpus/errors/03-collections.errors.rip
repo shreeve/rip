@@ -16,3 +16,4 @@ wrongSlice = list[0..count.length]
 wrongMapProperty = scores.alpha
 wrongMapValue: string = scores.get('alpha')
 wrongPick: { name: number } = { ...person.{ name } }
+wrongSparse = [,, 'gap'].toUpperCase()

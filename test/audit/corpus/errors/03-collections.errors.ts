@@ -16,3 +16,4 @@ let wrongSlice = list.slice(0, count.length + 1)
 let wrongMapProperty = scores.alpha
 let wrongMapValue: string = scores.get('alpha')
 let wrongPick: { name: number } = { ...{ name: person.name } }
+let wrongSparse = [,, 'gap'].toUpperCase()

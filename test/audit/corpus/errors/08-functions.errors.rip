@@ -25,3 +25,5 @@ wrongVoid: number = notify(label)
 wrongPick: number = pick(label)
 wrongTuple: [number, string] = [extra, extra]
 wrongSignature: (n: number) => string = scale
+wrongDeclared = (flag: boolean): string ->
+  return flag

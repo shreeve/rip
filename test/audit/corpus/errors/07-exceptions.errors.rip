@@ -11,3 +11,8 @@ wrongAccess = ->
     'ok'
   catch error
     error.message
+wrongSealed = ->
+  try
+    reasonCode
+  finally
+    reasonCode.padStart(2)
