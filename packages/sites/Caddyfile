@@ -33,6 +33,10 @@
 			precompressed
 		}
 		browse
+		# Dedicated status front door (this edge is HTTPS-only on 443).
+		mdns {
+			listen :7680
+		}
 	}
 }
 
