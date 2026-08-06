@@ -5,7 +5,8 @@
 > **Rip Sites — concise routes, smart responses, validated input, safe hot reload,
 > and disposable Bun workers behind Caddy and Janus (App + API)**
 
-Rip Sites has four surfaces that share one contract:
+Rip Sites has four CLI/API surfaces that share one contract, plus an optional
+macOS menu-bar UI over the same CLIs:
 
 - `@rip-lang/sites` is the framework API source imports: routes, response
   helpers, `read()` validation, schemas, middleware, sessions, and request
@@ -16,6 +17,9 @@ Rip Sites has four surfaces that share one contract:
 - `rip sites` remembers projects and controls their managers through the private
   per-user Rip Agent.
 - `rip edge` observes or controls the one shared Caddy+Janus edge.
+- The **Sites tray** ([`tray-sites.rip`](tray-sites.rip)) is a menu-bar provider
+  for `@rip-lang/tray`: one generic host renders it; there is no Sites-specific
+  native binary.
 
 Caddy and [Janus](https://github.com/shreeve/janus) form the public edge. They
 own HTTP and TLS, host and tenant admission, static and App files, cache
@@ -80,6 +84,65 @@ HTTPS using the real, publicly trusted development-only certificate and key
 included with this package. Both names resolve only to `127.0.0.1`.
 `rip edge status` also observes an already-running external edge, but Rip will
 not stop or reload a process it does not own.
+
+## Menu-bar tray
+
+The Sites tray is an ordinary Rip **provider**
+([`tray-sites.rip`](tray-sites.rip)). It drives menus only through `rip sites`
+and `rip edge`. The native UI is the shared `@rip-lang/tray` host — see
+[packages/tray/README.md](../tray/README.md) for the toolkit, `demo.rip`, and
+host layout.
+
+The menubar is **host + provider**. From a directory that contains `tray.rip` or
+`tray-<dirname>.rip`, `rip tray` discovers the provider and launches the generic
+host. The LaunchAgent keeps that pair alive across shells.
+
+### Foreground (dev)
+
+From the **repo root**, build the generic host once, then either:
+
+```bash
+swift build -c release --package-path packages/tray/macos --product rip-tray-host
+
+cd packages/sites
+rip tray
+```
+
+or pass the provider to the host explicitly (still from the repo root):
+
+```bash
+RIP_TRAY_RIP="$PWD/bin/rip" \
+  packages/tray/macos/.build/release/rip-tray-host \
+  "$PWD/packages/sites/tray-sites.rip"
+```
+
+### Keep it alive (LaunchAgent)
+
+Closing the terminal does not stop the tray, edge, or sites:
+
+```bash
+packages/sites/bin/rip-tray-agent start
+packages/sites/bin/rip-tray-agent status
+packages/sites/bin/rip-tray-agent stop
+```
+
+Plist and log live under `~/Library/LaunchAgents` and `~/Library/Logs`.
+
+### Provider path only
+
+`rip tray` always starts the menubar host. To run the provider process alone
+(what the host spawns), point `rip` at the file:
+
+```bash
+rip packages/sites/tray-sites.rip
+```
+
+### Using the menu
+
+1. **Edge → Start** if the shared edge is down  
+2. **Add Site…** and pick a project directory  
+3. Open that site’s submenu → **Start** → **Open**  
+4. **Open Log** / **Restart** / **Stop** as needed  
 
 ## The Shape of a Site
 

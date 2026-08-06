@@ -1,0 +1,53 @@
+#!/usr/bin/env rip
+
+# =============================================================================
+# demo.rip — minimal menu-bar tray provider
+# =============================================================================
+#
+# A tray is TWO pieces:
+#   1. This file (the provider) — title, icon, menu, state, click handlers
+#   2. rip-tray-host (ONE generic macOS app) — draws the menu bar + panel
+#
+# There is no per-app native binary. Copy this file, change the `tray` block,
+# point the host at your path.
+#
+# Run from packages/tray:
+#
+#   bun run demo
+#
+# Or explicitly:
+#
+#   swift build --package-path macos --product rip-tray-host
+#   RIP_TRAY_RIP=../../bin/rip \
+#     macos/.build/debug/rip-tray-host "$(pwd)/demo.rip"
+#
+# Optional Finder wrapper (same host, embeds this provider):
+#
+#   bun run build:demo
+#   open dist/Demo.app
+#
+# Full docs: README.md
+# =============================================================================
+
+import { action, label, quit, separator, serve, svg, tray } from '@rip-lang/tray'
+
+# Ordinary Rip state — survives across menu clicks in this process.
+count = 0
+
+# `serve!` speaks the host protocol on stdin/stdout. The host calls back into
+# `run:` closures, then asks for a fresh menu.
+serve! tray
+  title: 'Demo'                    # panel heading (unless logo: is set)
+  icon: svg '''
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+      <path d="M12 2 15 9l7 .6-5.3 4.7 1.6 7.2L12 17.8l-6.3 3.7 1.6-7.2L2 9.6 9 9z"/>
+    </svg>
+    '''                            # menu-bar icon (SVG is template-tinted)
+  tooltip: 'Rip Tray demo'         # hover text on the status item
+  refresh: 0                       # seconds between auto-rerenders; 0 = off
+  menu: -> [                       # rebuild the panel each render
+    label "Count: #{count}", icon: 'number.circle'   # SF Symbol also fine
+    separator()
+    action 'Increment', id: 'increment', icon: 'plus', run: -> count++
+    quit()                         # quits the host process
+  ]

@@ -40,6 +40,8 @@
     "launchd-listener.js",
     "sites.rip",
     "edge.rip",
+    "tray-sites.rip",
+    "bin/rip-tray-agent",
     "Caddyfile",
     "ripdev.io.crt",
     "ripdev.io.key",
@@ -48,6 +50,7 @@
   ],
   "dependencies": {
     "@rip-lang/app": "workspace:*",
+    "@rip-lang/tray": "workspace:*",
     "@rip-lang/validate": "workspace:*"
   },
   "devDependencies": {

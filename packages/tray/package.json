@@ -3,21 +3,23 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Pure-Rip macOS menu-bar apps rendered by one small reusable SwiftUI host",
+  "description": "One generic macOS host. Many Rip providers. No per-app native binary.",
   "exports": {
     ".": "./tray.rip"
   },
   "bin": {
-    "rip-tray": "./build.rip"
+    "rip-tray": "./tray.rip",
+    "rip-tray-build": "./build.rip"
   },
   "scripts": {
     "test": "rip test.rip",
     "test:swift": "swift build --package-path macos && swift run --package-path macos tray-kit-check",
-    "build": "rip build.rip tray.rip --name Rip --identifier io.ripdev.apps --output dist --force",
-    "demo": "RIP_TRAY_RIP=../../bin/rip swift run --package-path macos rip-tray-host tray.rip"
+    "demo": "RIP_TRAY_RIP=../../bin/rip swift run --package-path macos rip-tray-host demo.rip",
+    "build:demo": "rip build.rip demo.rip --name Demo --identifier io.example.tray.demo --output dist --force"
   },
   "files": [
     "tray.rip",
+    "demo.rip",
     "build.rip",
     "assets",
     "macos",

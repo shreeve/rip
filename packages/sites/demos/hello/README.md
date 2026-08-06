@@ -6,7 +6,7 @@ details live in [`docs/WORKSPACE.md`](../../docs/WORKSPACE.md).
 
 ## Add and start
 
-In the Rip tray, choose **Add App…**, then select this project directory:
+In the Rip tray, choose **Add Site…**, then select this project directory:
 
 ```text
 packages/sites/demos/hello

@@ -1,0 +1,73 @@
+#!/usr/bin/env rip
+
+# Rip Sites menu-bar provider. Imports the reusable tray vocabulary from
+# @rip-lang/tray and drives menus only through the public `rip sites` /
+# `rip edge` CLI.
+
+import { dirname, join } from 'node:path'
+import { action, directory, label, link, quit, separator, serve, submenu, svgFile, tray } from '@rip-lang/tray'
+
+trayDir = dirname(Bun.resolveSync('@rip-lang/tray', import.meta.dir))
+asset = (name, options = {}) -> svgFile(join(trayDir, 'assets', name), options)
+
+rip = process.env.RIP_TRAY_RIP or 'rip'
+
+command = (args) ->
+  proc = Bun.spawn [rip, ...args], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }
+  out = Response.new(proc.stdout).text()
+  err = Response.new(proc.stderr).text()
+  code = await proc.exited
+  out = await out
+  err = await err
+  throw Error.new(err.trim() or "rip #{args.join(' ')} exited #{code}") unless code is 0
+  out
+
+json = (...args) -> JSON.parse command! args
+capitalize = (text) -> text[0].toUpperCase() + text.slice(1)
+
+openLog = (site) ->
+  log = json! 'sites', 'logs', site.name, '--lines', '1', '--json'
+  result = Bun.spawnSync ['open', log.path], { stdout: 'ignore', stderr: 'pipe' }
+  throw Error.new(result.stderr.toString().trim() or "cannot open #{log.path}") unless result.exitCode is 0
+
+edgeMenu = (edge) ->
+  items = [
+    label "#{capitalize(edge.state)} · #{if edge.managed then 'Rip-owned' else if edge.state is 'running' then 'external' else 'not running'}",
+      icon: if edge.state is 'running' then 'checkmark.circle.fill' else 'circle'
+  ]
+  if edge.state is 'running'
+    if edge.managed
+      items.push action 'Reload', id: 'edge.reload', icon: 'arrow.clockwise', run: -> json! 'edge', 'reload', '--json'
+      items.push action 'Stop', id: 'edge.stop', icon: 'stop.fill', run: -> json! 'edge', 'stop', '--json'
+  else
+    items.push action 'Start', id: 'edge.start', icon: 'play.fill', run: -> json! 'edge', 'start', '--json'
+  submenu 'Edge', items, id: 'edge', icon: 'network'
+
+siteMenu = (site) ->
+  running = site.state is 'running'
+  items = [label site.root, subtitle: site.state]
+  if running
+    items.push link 'Open', site.url, id: "#{site.id}.open", icon: 'safari' if site.url?
+    items.push action 'Stop', id: "#{site.id}.stop", icon: 'stop.fill', run: -> json! 'sites', 'stop', site.id, '--json'
+    items.push action 'Restart', id: "#{site.id}.restart", icon: 'arrow.clockwise', run: -> json! 'sites', 'restart', site.id, '--json'
+  else
+    items.push action 'Start', id: "#{site.id}.start", icon: 'play.fill', run: -> json! 'sites', 'start', site.id, '--json'
+  items.push action 'Open Log', id: "#{site.id}.logs", icon: 'doc.text', run: -> openLog! site
+  submenu site.name, items, id: site.id, icon: if running then 'circle.fill' else 'circle'
+
+serve! tray
+  title: 'Rip'
+  icon: asset 'rip-template.svg'
+  logo: asset 'rip-color.svg', template: false
+  tooltip: 'Rip Sites'
+  refresh: 2
+  menu: ->
+    edge = json! 'edge', 'status', '--json'
+    sites = json! 'sites', 'status', '--json'
+    items = [edgeMenu(edge), separator()]
+    items.push siteMenu(site) for site in sites
+    items.push directory 'Add Site…', id: 'sites.add', icon: 'plus', prompt: 'Add', run: (path) -> json! 'sites', 'add', path, '--json'
+    items.push separator()
+    items.push action 'Refresh', id: 'tray.refresh', icon: 'arrow.clockwise', run: -> null
+    items.push quit 'Quit', icon: 'power'
+    items
