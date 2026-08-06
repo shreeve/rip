@@ -22,8 +22,31 @@ usesLaunchd = (config) -> platform() is 'darwin' and PACKAGED_CADDYFILES.has(con
 
 packagedConfigForMode = (mode) -> if mode is 'local' then PACKAGED_LOCAL else PACKAGED_DEFAULT
 
-# App hosts follow posture: *.ripdev.io in default, *.local in local.
-defaultAppHost = (name, mode) -> if mode is 'local' then "#{name}.local" else "#{name}.ripdev.io"
+# Dual-claim so default (loopback) and local (LAN) stay reachable without remapping.
+defaultAppHosts = (name) -> ["#{name}.ripdev.io", "#{name}.local"]
+
+# For every *.ripdev.io host, ensure the matching *.local twin is present.
+ensureLanHosts = (hosts) ->
+  out = [...hosts]
+  seen = Set.new out
+  for host in hosts
+    continue unless host.endsWith '.ripdev.io'
+    twin = "#{host.slice(0, -'.ripdev.io'.length)}.local"
+    continue if seen.has twin
+    fail "invalid LAN twin host #{JSON.stringify(twin)}" unless validHost twin
+    out.push twin
+    seen.add twin
+  out
+
+preferredHost = (hosts) ->
+  return null unless hosts?.length
+  if state.edge.mode is 'local'
+    match = hosts.find (host) -> host.endsWith '.local'
+    return match if match?
+  else
+    match = hosts.find (host) -> host.endsWith '.ripdev.io'
+    return match if match?
+  hosts[0]
 
 bindHost = -> if state.edge.mode is 'local' then '0.0.0.0' else '127.0.0.1'
 
@@ -195,9 +218,10 @@ edgeHealth = ->
 
 appUrl = (app, manager = null) ->
   hosts = if app.hosts.length then app.hosts else manager?.hosts or []
-  return null unless hosts.length
+  host = preferredHost hosts
+  return null unless host?
   template = state.edge.baseUrl or 'https://{host}/'
-  template.replace '{host}', hosts[0]
+  template.replace '{host}', host
 
 snapshotApp = (app) ->
   manager = managerStatus! app
@@ -240,9 +264,10 @@ addApp = (body) ->
   fail "app name is already registered: #{name}", 409 if state.apps.some((app) -> app.name is name)
   hosts = body.hosts
   if not hosts?
-    hosts = if existsSync(join(project.root, 'serve.rip')) then [] else [defaultAppHost(name, state.edge.mode)]
+    hosts = if existsSync(join(project.root, 'serve.rip')) then [] else defaultAppHosts(name)
   fail 'hosts must be an array' unless Array.isArray hosts
   fail "invalid host #{JSON.stringify(host)}" for host in hosts when not validHost(host)
+  hosts = ensureLanHosts hosts
   fail 'hosts must not contain duplicates' unless Set.new(hosts).size is hosts.length
   options = body.options or {}
   rejectUnknown options, ['workers', 'concurrency', 'watch', 'watchApp', 'watchApi', 'eager'], 'app options'
@@ -616,6 +641,10 @@ setEdgeMode = (mode) ->
   state.edge.config = packagedConfigForMode mode
   state.edge.baseUrl = 'https://{host}/'
   state.edge.lastError = null
+  # Catalog-stored hosts get a *.local twin so LAN peers can open apps after restart.
+  if mode is 'local'
+    for app in state.apps when app.hosts.length
+      app.hosts = ensureLanHosts app.hosts
   saveState()
   return startEdge!({}) if wasRunning
   snapshotEdge!
@@ -635,12 +664,33 @@ exportEdgeCa = ->
 
 escapeHtml = (value) -> String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
 
+statusActions = (app) ->
+  id = encodeURIComponent app.id
+  if app.state is 'running'
+    """
+    <form method="post" action="/apps/#{id}/stop"><button type="submit">Stop</button></form>
+    <form method="post" action="/apps/#{id}/restart"><button type="submit">Restart</button></form>
+    """
+  else
+    """<form method="post" action="/apps/#{id}/start"><button type="submit">Start</button></form>"""
+
 statusPage = ->
   apps = Promise.all! state.apps.map (app) -> snapshotApp! app
   edge = snapshotEdge!
   rows = apps.map (app) ->
+    hosts = if app.hosts.length then app.hosts else app.manager?.hosts or []
     url = if app.url? then "<a href=\"#{escapeHtml app.url}\">#{escapeHtml app.url}</a>" else '—'
-    "<tr><td>#{escapeHtml app.name}</td><td>#{escapeHtml app.state}</td><td>#{url}</td></tr>"
+    extras = hosts.filter((host) -> not app.url? or not app.url.includes(host)).map (host) ->
+      "<div class=\"alt\"><a href=\"https://#{escapeHtml host}/\">https://#{escapeHtml host}/</a></div>"
+    .join ''
+    """
+    <tr>
+      <td>#{escapeHtml app.name}</td>
+      <td>#{escapeHtml app.state}</td>
+      <td>#{url}#{extras}</td>
+      <td class="actions">#{statusActions app}</td>
+    </tr>
+    """
   .join ''
   statusHost = if edge.mode is 'local' then 'https://sites.local/' else 'https://sites.ripdev.io/'
   trustHint = if edge.mode is 'local'
@@ -652,17 +702,20 @@ statusPage = ->
 <title>Rip Sites</title>
 <style>
   :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
-  body { margin: 2rem auto; max-width: 52rem; padding: 0 1rem; line-height: 1.45; }
+  body { margin: 2rem auto; max-width: 56rem; padding: 0 1rem; line-height: 1.45; }
   h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
   .meta { color: #666; margin-bottom: 1.5rem; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 0.5rem 0.4rem; border-bottom: 1px solid #ccc3; }
+  th, td { text-align: left; padding: 0.5rem 0.4rem; border-bottom: 1px solid #ccc3; vertical-align: top; }
+  td.actions form { display: inline-block; margin: 0 0.25rem 0.25rem 0; }
+  td.actions button { font: inherit; padding: 0.2rem 0.55rem; cursor: pointer; }
+  .alt { font-size: 0.85em; opacity: 0.75; margin-top: 0.2rem; }
   a { color: inherit; }
 </style></head><body>
   <h1>Rip Sites</h1>
   <p class="meta">Edge #{escapeHtml edge.state} · mode #{escapeHtml edge.mode} · #{escapeHtml statusHost}</p>
-  <table><thead><tr><th>App</th><th>State</th><th>URL</th></tr></thead><tbody>
-  #{rows or '<tr><td colspan="3">No apps registered.</td></tr>'}
+  <table><thead><tr><th>App</th><th>State</th><th>URL</th><th>Actions</th></tr></thead><tbody>
+  #{rows or '<tr><td colspan="4">No apps registered.</td></tr>'}
   </tbody></table>
   <p class="meta" style="margin-top:1.5rem">#{trustHint}</p>
 </body></html>
@@ -685,6 +738,16 @@ handleStatus = (request) ->
         <p>Local CA is not ready yet. On the Mac run <code>rip edge trust</code>, then <code>rip edge local</code>.</p>
         </body></html>'''
       return Response.new html, { headers: { 'content-type': 'text/html; charset=utf-8' }, status: 503 }
+    actionMatch = url.pathname.match /^\/apps\/([^/]+)\/(start|stop|restart)$/
+    if request.method is 'POST' and actionMatch?
+      selector = decodeURIComponent actionMatch[1]
+      action = actionMatch[2]
+      mutate! ->
+        app = findApp! selector
+        if action is 'start' then startApp! app
+        else if action is 'stop' then stopApp! app
+        else restartApp! app
+      return Response.new null, { status: 303, headers: { location: '/' } }
     Response.json { error: 'not found' }, { status: 404 }
   catch error
     Response.json({ error: error?.message or String(error) }, { status: error?.status or 500 })

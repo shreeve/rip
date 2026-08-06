@@ -1,6 +1,6 @@
 export default
   name: 'cart'
-  hosts: ['cart.ripdev.io']
+  hosts: ['cart.ripdev.io', 'cart.local']
   hub:
     bridge: 'hub'
   app:

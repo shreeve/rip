@@ -72,6 +72,7 @@ test! 'the packaged macOS edge activates loopback HTTP+HTTPS sockets without Bon
   ok not caddyfile.includes '7680'
   ok localfile.includes 'mdns'
   ok localfile.includes 'name sites.local'
+  ok localfile.includes 'apps on'
   ok localfile.includes 'tls internal'
   # Product HTTPS status is the Rip catalog — Janus stays on the HTTP mdns door.
   ok /sites\.local \{\s*tls internal\s*reverse_proxy unix\/\{\$RIP_EDGE_STATUS\}/s.test(localfile)
@@ -85,6 +86,11 @@ test! 'the packaged macOS edge activates loopback HTTP+HTTPS sockets without Bon
   ok agent.includes 'PACKAGED_CADDYFILES'
   ok agent.includes "mode: 'default'"
   ok agent.includes 'localCaTrusted'
+  ok agent.includes 'ensureLanHosts'
+  ok agent.includes 'defaultAppHosts'
+  helloServe = readFileSync join(import.meta.dir, '..', '..', 'demos', 'hello', 'serve.rip'), 'utf8'
+  ok helloServe.includes 'hello.ripdev.io'
+  ok helloServe.includes 'hello.local'
 
 startJanus = (socket, calls) ->
   serial = 0

@@ -1,6 +1,6 @@
 export default
   name: 'hello'
-  hosts: ['hello.ripdev.io'] # the edge owns standard HTTPS on port 443
+  hosts: ['hello.ripdev.io', 'hello.local'] # loopback + LAN (after `rip edge local`)
   hub:
     bridge: 'hub'           # Janus Bam door for live App watch (see index.rip)
   access:
