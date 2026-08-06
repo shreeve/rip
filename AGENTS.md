@@ -8,7 +8,7 @@ Permanent documentation:
 
 - [README.md](README.md) — repository orientation and entry points.
 - [docs/SERVER.md](docs/SERVER.md) — Rip Sites' system-wide
- Caddy/Janus/manager/worker architecture and lifecycle contract.
+  Caddy/Janus/manager/worker architecture and lifecycle contract.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
 - [docs/WORKSPACE.md](docs/WORKSPACE.md) — the Rip Workspace
   constitution: browser publication consumption, live changes, reconnect
@@ -17,17 +17,18 @@ Permanent documentation:
 - [docs/FRAME.md](docs/FRAME.md) — Rip-native hypermedia design and acceptance contract.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work.
 - [docs/CLEANROOM.md](docs/CLEANROOM.md) — the clean-room engine
- rewrite plan (activates when v4 is declared done).
+  rewrite plan (activates when v4 is declared done).
 
 Working ledgers (not permanent docs):
 
 - `TODO.md` — open design/correctness notes ONLY. Remove items when
   fixed or moved into real docs/tests; git history and PR bodies are
-  the record of completed work. No done-items archive.
+  the record of completed work. No done-items archive. Package-local
+  leftovers live beside the package (for example `packages/sites/TODO.md`).
 - `HANDOFF.md` — the tracked session launch document. Read it first
- when starting a session; rewrite it at session boundaries with
- live-verified facts only — never stale state. It is committed like
- any other file.
+  when starting a session; rewrite it at session boundaries with
+  live-verified facts only — never stale state. It is committed like
+  any other file.
 
 Placement test for any new document: opened as part of WORKING →
 repository root; consulted for UNDERSTANDING → docs/.

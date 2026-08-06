@@ -1,53 +1,73 @@
 # TODO — Rip Sites
 
-Open work only. Remove an item when it lands; commits and test fixtures
-retain completed history.
+Open work only. Remove an item when it lands or moves into real docs/tests;
+commits and PR bodies retain completed history.
 
-## 1. Finish edge policy
+## Edge postures (follow-ups)
+
+Default / local / trust / dual-port launchd / Rip status / tray mode
+controls landed. Remaining:
+
+- [ ] Land uncommitted LAN dual-claim + status-page Start/Stop/Restart
+      (working tree: `agent.rip`, demos `serve.rip`, `Caddyfile.local`
+      `mdns { apps on }`, README walkthrough).
+- [ ] **`public` posture (phase 2):** ACME / real DNS hosts; keep
+      `rip edge public` refusing until the Caddyfile and Agent mode
+      exist. Do not persist `public` in state before that.
+- [ ] Behavioral appliance pins for trust gate, mode flip (stop sites
+      first), and `.local` host registration — today only static string
+      pins.
+- [ ] After Agent/Caddyfile changes, document (or automate) Agent
+      restart so launchd dual-socket listeners cannot race a stale
+      in-memory Agent writing an old plist.
+
+## Opt-in file logging
+
+Roadmap still cites a README Planned contract that no longer exists.
+Re-lock before coding:
+
+- [ ] Decide knob shape: `serve.rip` `logs: '<dir>'` and/or
+      `RIP_LOG_DIR`; env vs serve precedence; foreground-only vs also
+      Agent (Agent already writes `apps/<id>.log`).
+- [ ] Implement merged stream → `<dir>/server.log` (0600); stdout
+      remains the default when unset. Edge `access.log` stays
+      Caddy/operator-owned.
+- [ ] Drop or rewrite the stale “Planned section” pointer in
+      `docs/ROADMAP.md`.
+
+## Edge policy
 
 - [ ] Pin one Caddy compression policy: encodings, minimum size, MIME
       exclusions, streaming bodies, pre-encoded responses, and
       `Cache-Control: no-transform`.
-- [ ] Configure Caddy streaming compression for static, generated,
-      `X-Sendfile`, and proxied API responses.
-- [ ] Certify compression through released Janus, including streaming,
-      `no-transform`, and an already encoded response.
+- [ ] Certify compression through released Janus (streaming,
+      `no-transform`, already-encoded response).
 - [ ] Pin the edge security-header baseline and fill-only precedence so
-      explicit application headers win.
-- [ ] Apply and certify that baseline across static files, generated files,
-      SPA shells, `X-Sendfile`, proxied API responses, redirects, and
-      Janus-generated errors.
+      explicit application headers win; certify across static files,
+      generated files, SPA shells, `X-Sendfile`, proxied API, redirects,
+      and Janus-generated errors.
 
-## 2. Finish manager policy
+## Manager policy
 
-- [ ] Make watching the default, remove `--watch`, keep `--no-watch` /
+- [ ] Make watching the default; remove `--watch`; keep `--no-watch` /
       `--no-watch-app` / `--no-watch-api` as explicit opt-outs.
-- [ ] Make configured symlinked and workspace dependencies participate in API
-      invalidation.
-- [ ] Bound heartbeat and re-registration requests so a stalled control plane
+- [ ] Make configured symlinked and workspace dependencies participate
+      in API invalidation.
+- [ ] Bound heartbeat and re-registration so a stalled control plane
       cannot accumulate overlapping requests.
 - [ ] Pin one concurrency policy independent of environment-named modes.
 
-## 3. Finish the per-user appliance
+## Appliance / distribution
 
-- [ ] Register the Rip Agent as a macOS LaunchAgent so desired edge and app
-      state reconciles immediately at login, before the first CLI request.
-- [ ] Build the native SwiftUI menu-bar client over the private agent protocol.
-- [ ] Add a signed/notarized distribution pipeline for the menu app, agent,
-      Janus-enabled Caddy binary, and local edge assets.
+- [ ] Register the Rip Agent as a macOS LaunchAgent so desired edge and
+      app state reconciles at login before the first CLI request
+      (tray LaunchAgent already exists; Agent is still on-demand).
+- [ ] Signed/notarized distribution for tray host, Agent, Janus-enabled
+      Caddy, and local edge assets.
 
-## 4. Remove obsolete project usage
+## Project cleanups
 
-- [ ] Remove Cart's worker route for authored `app/styles.css`; Janus serves
-      it from the App root.
-- [ ] Move Cart migration and seed setup out of worker import into an explicit
-      one-off command.
-
-## 5. Certify and land
-
-- [ ] Run every `test:*` script, including released-Janus verification.
-- [ ] Run `go test ./...` and `./test.sh` in Janus.
-- [ ] Run `git diff --check` in both repositories.
-- [ ] Perform independent empirical verification of `X-Sendfile`, API reload,
-      App delivery, and migration state transitions.
-- [ ] Run one cold review over both complete branch diffs.
+- [ ] Remove Cart’s worker route for authored `app/styles.css` if Janus
+      already serves it from the App root.
+- [ ] Move Cart migration and seed setup out of worker import into an
+      explicit one-off command.

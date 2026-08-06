@@ -11,52 +11,61 @@ This repository owns the complete Rip product:
 - the lexer, grammar, parser generator, and compiler;
 - precise bidirectional mappings between Rip and generated artifacts;
 - reactive, schema, ORM, component, and standard-library runtimes;
-- package and application infrastructure;
+- package and application infrastructure, including
+  [`@rip-lang/sites`](packages/sites) (Agent, edge, tray, demos);
 - VS Code/Cursor, Vim, and highlight.js integrations;
 - language, mapping, type, runtime, corpus, and editor test contracts.
 
 Every capability must preserve the compiler's mapping architecture and
 carry correctness tests at the surfaces it affects.
 
-The compiler, feature runtimes, schema/ORM core, and editor integrations
-are present. The remaining package and application portfolio is tracked
-in [docs/ROADMAP.md](docs/ROADMAP.md).
+Open product work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md) and
+package-local `TODO.md` files (for example
+[packages/sites/TODO.md](packages/sites/TODO.md)).
 
 ## Documentation
 
+**Working ledgers (read / rewrite while shipping):**
+
 - [AGENTS.md](AGENTS.md) — mandatory repository rules and invariants
-- [docs/SERVER.md](docs/SERVER.md) — server, Janus, manager, and worker architecture
+- [HANDOFF.md](HANDOFF.md) — current session launch facts
+- [TODO.md](TODO.md) — open design/correctness notes (repo-wide)
+
+**Understanding (permanent contracts under `docs/`):**
+
+- [docs/SERVER.md](docs/SERVER.md) — Sites, Janus, manager, worker architecture
+- [docs/WORKSPACE.md](docs/WORKSPACE.md) — browser publication / apply contract
 - [docs/TYPES.md](docs/TYPES.md) — type-system and editor architecture
-- [docs/WORKSPACE.md](docs/WORKSPACE.md) — browser passport and development-feed architecture
 - [docs/HMR.md](docs/HMR.md) — hot-module-replacement design
 - [docs/FRAME.md](docs/FRAME.md) — Rip-native hypermedia design
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work
-- [docs/CLEANROOM.md](docs/CLEANROOM.md) — the clean-room engine rewrite plan (activates when v4 is declared done)
+- [docs/CLEANROOM.md](docs/CLEANROOM.md) — clean-room engine rewrite plan
 
 ## Core commands
 
 ```sh
-bun run test:rip       # language battery
+bun run test:rip       # language battery (PR code check)
 bun run test           # fast compiler/runtime suite
-bun run test:all       # canonical full suite: extended tier + every package
+bun run test:all       # exhaustive: extended tier + every package
 rip check [paths...]   # headless TypeScript checking over Rip source
 bun run parser         # regenerate src/parser.js
 bun run corpus-expected
 bun run audit
 ```
 
-`test:all` needs `xcaddy` on PATH for the `packages/sites` janus lane:
+Package work: `bun run test` from that package directory (for example
+`packages/sites`). Browser smoke:
+`cd packages/browser-tests && bun run test:smoke`.
+
+`test:all` needs `xcaddy` on PATH for the Sites janus lane:
 
 ```sh
 go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
 export PATH="$(go env GOPATH)/bin:$PATH"     # in your shell profile
 ```
 
-`go install` writes to `$(go env GOPATH)/bin`, which is not on PATH by
-default — without the second line the lane fails as though xcaddy were
-never installed. It builds a Caddy binary from the published Janus module
-on first run and caches it. `JANUS_CADDY=/path/to/caddy` supplies an
-existing janus-enabled binary instead.
+`JANUS_CADDY=/path/to/caddy` supplies an existing janus-enabled binary
+instead of building one.
 
 ## REPL
 
@@ -65,3 +74,14 @@ bindings persist across lines, input is syntax-highlighted live from
 the real lexer, themes auto-detect the terminal background (`.theme`
 to override), imports resolve against the session cwd, and `-e`
 evaluates one entry. `.help` inside the session lists the commands.
+
+## Sites (local HTTPS)
+
+```sh
+rip edge start
+rip sites add packages/sites/demos/hello
+rip sites start hello
+# https://hello.ripdev.io/
+```
+
+Postures, tray, and LAN/`local` trust: [packages/sites/README.md](packages/sites/README.md).

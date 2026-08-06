@@ -1,98 +1,61 @@
-# HANDOFF — session launch document (2026-08-05)
+# HANDOFF — session launch document (2026-08-06)
 
-Read this working ledger first when starting a session. Permanent architecture
-lives in `docs/`; git history and pull requests retain completed-work detail.
+Read this first when starting a session. Permanent architecture lives in
+`docs/`. Git history and pull requests retain completed-work detail.
 
 ## Orientation
 
-- Repo: `~/Data/Code/rip` — the live v4 checkout.
+- Repo: `~/Data/Code/rip` — live v4 checkout; branch `main` at
+  `de205cb` (merge of Sites edge postures #215), tracking `origin/main`.
 - Fast commands: `bun run test:rip` · package-local `bun run test` ·
-  `packages/browser-tests: bun run test:smoke`.
+  `packages/browser-tests`: `bun run test:smoke`.
 - Explicit certification: `bun run test:all` · `bun run audit` ·
-  `packages/browser-tests: bun run test:cart`.
-- Server architecture: `docs/SERVER.md`.
-- Browser publication contract: `docs/WORKSPACE.md`.
-- Detailed lifecycle: `packages/sites/README.md`.
-- Testing cleanup plan: `TEST-DIET.md`.
+  `packages/browser-tests`: `bun run test:cart`.
+- Sites architecture: `docs/SERVER.md` · `packages/sites/README.md`.
+- Browser publication: `docs/WORKSPACE.md`.
+- Sites open work: `packages/sites/TODO.md`.
+- Repo open notes: `TODO.md`.
 
-## App publication contract
+## Live machine state (verified 2026-08-06)
 
-- Rip Manager publishes `bundle.json` as exactly `{ hash, list }`. The sorted
-  list contains the complete browser Rip program as `[modulePath, source]`.
-  There is no `manifest.json`, public per-file hash inventory, resolver table,
-  or duplicated `@rip-lang/app` source.
-- `bundle.json.br` is the exact Brotli representation of `bundle.json`.
-  `latest.json` contains only the complete App hash used for reconnect checks.
-- Manager privately hashes managed App files, rejects idempotent watcher
-  events, watches package and schema-projection inputs, atomically publishes
-  complete state, and sends one ordered `change {from,hash,list}` per effective
-  batch.
-- Changed Rip source rides through the watch feed. CSS and every other ordinary
-  asset remain normal HTTP resources; changes carry only their paths. Non-watch
-  mode publishes the same initial files without watchers or change messages.
-- Rip App validates and compiles the complete Rip graph, keeps one persistent
-  module loader, stages Workspace and renderer state transactionally, and
-  leaves HTTP bytes in the browser cache.
-- A malformed or disconnected transition reloads. A failed Rip candidate is
-  quarantined while the last committed App stays live; the next newer
-  generation reloads a complete bundle. A valid transition that requires
-  whole-App reconstruction reloads without being quarantined.
-- Reconnect joins `/hub`, receives the Janus acknowledgement, then requests
-  `latest.json`. Only one exact outstanding server acknowledgement starts the
-  probe; client-originated Hub frames cannot acknowledge or inject publication
-  changes. `latest.json` is exactly `{ hash }`.
-- Browser publication modules use static imports and canonical Rip paths.
-  Missing targets, cycles, dynamic imports, hidden segments, and file-shaped
-  directory segments reject before Manager commits a publication. App,
-  package, and schema-projection source reject malformed UTF-8.
+- Edge: running, Rip-owned, mode `default`, ports 80/443, packaged
+  `Caddyfile`, Janus control under `$TMPDIR/rip-agent-<uid>/janus.sock`.
+- Hello demo: running via Agent; `https://hello.ripdev.io/` → 200.
+  Uncommitted `serve.rip` dual-claims `hello.ripdev.io` + `hello.local`.
+- `https://sites.ripdev.io/` currently answers 500 (investigate before
+  treating status as healthy).
+- After Agent or Caddyfile changes: kill the Agent process (or stop
+  edge + sites) so launchd picks up a fresh dual-socket plist — a stale
+  Agent writing an old single-socket plist bricks Janus heartbeats.
 
-## Verification state
+## Uncommitted working tree
 
-The immutable publication implementation checkpoint is `147f37c`.
+LAN dual-claim + status-page Start/Stop/Restart + `mdns { apps on }` +
+demo/README walkthrough — not yet on `main`:
 
-- `bun run test:all` — 22 lanes, 8,357 tests passed in 96.3 seconds.
-- `bunx playwright test --reporter=line` in `packages/browser-tests` — 21
-  passed, 2 intentionally skipped across Chromium, Firefox, WebKit, and the
-  live Cart Server/Manager harness.
-- Independent empirical verification — GO.
-- Genuinely cold adversarial review — GO after its findings were fixed and
-  pinned.
-- A path-limited comparison from `147f37c` through the test-policy merge and
-  harness reverts is empty for Server, App, compiler/runtime, browser bundle,
-  examples, and permanent docs: the verified production implementation has
-  not changed.
+- `packages/sites/agent.rip`, `Caddyfile.local`, `tray` already on main
+  from #215; remaining diff is dual-claim / dashboard actions / demo hosts.
+- `packages/sites/TODO.md` rewritten for current leftovers.
 
-PR #210 true-merged the testing policy as `769bc2a`:
+Land as its own PR when ready; do not mix with unrelated compiler work.
 
-- automatic PR code check: sub-second `bun run test:rip`;
-- automatic browser check: deterministic `bun run test:smoke`;
-- manual repository certification: `repository-certification` workflow;
-- manual live Cart certification: `cart-certification` workflow;
-- package suites run at coherent layer milestones, not after every edit.
+## Product posture (Sites edge)
 
-`rip-sites-publication` merged that mainline at `bd8f407`. The two isolated,
-unsuccessful browser-harness experiments were removed by normal revert commits:
+| Mode | Bind | Apps | Status |
+| --- | --- | --- | --- |
+| default | loopback 80/443 | `*.ripdev.io` | `https://sites.ripdev.io/` |
+| local | all interfaces | `*.local` (+ ripdev.io twin) | `https://sites.local/` |
+| public | phase 2 | — | `rip edge public` refuses |
 
-- `e603ea2 Revert "Make Cart readiness nonblocking"`;
-- `e188acf Revert "Stabilize Cart harness readiness"`.
+Trust required before `rip edge local`. Mode flips stop+recreate; stop
+sites first.
 
-Those experiments never modified Rip Sites or Rip App production code.
+## Testing cadence (durable — also in AGENTS.md)
 
-Arbitrary top-level ESM side effects execute while a candidate module graph is
-evaluated and cannot be rolled back. Workspace, renderer, source, route
-manifest, and DOM state remain transactional; code that performs external
-top-level effects owns that consequence.
-
-## Session state
-
-PR #209 is open. The branch has merged current `origin/main`, preserves the
-verified publication implementation, and deliberately excludes the Cart
-harness experiments. Push the current tip, accept only the lightweight
-language-battery and browser-smoke PR checks, then true-merge #209 and delete
-the feature branch.
-
-Do not run exhaustive repository or Cart certification unless the owner
-explicitly requests it.
+1. Edit loop — smallest disproof (`test:rip`, package `test`, named spec).
+2. Milestone — owning package suite + direct consumers.
+3. Landing — freeze candidate, then PR gates (`test:rip` + browser smoke);
+   `test:all` / cart only when explicitly certifying.
 
 ## Working agreements
 

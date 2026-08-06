@@ -82,7 +82,7 @@ Three postures:
 | --- | --- | --- | --- |
 | Bind | `127.0.0.1` | all interfaces | phase 2 |
 | Bonjour | off | shared `sites.local` (apps use `{name}.local` hosts) | — |
-| Apps | `https://{name}.ripdev.io/` | `https://{name}.local/` (register that host) | — |
+| Apps | `https://{name}.ripdev.io/` (+ `.local` twin claimed) | `https://{name}.local/` (dual-claim with ripdev.io) | — |
 | Status | `https://sites.ripdev.io/` | `https://sites.local/` (Rip catalog + `/trust`) | — |
 | TLS | packaged `*.ripdev.io` | `tls internal` (trust first) | — |
 
@@ -99,6 +99,20 @@ rip edge public                # refuses until phase 2
 
 `*.ripdev.io` names still resolve only to `127.0.0.1`, so phones on the LAN
 need `{name}.local` hosts (and the trusted local CA), not the ripdev.io URLs.
+Catalog adds and `rip edge local` dual-claim every `*.ripdev.io` host with a
+matching `*.local` twin; demos declare both in `serve.rip`. After a mode flip,
+restart sites so managers re-register the hosts.
+
+Phone walkthrough (hello):
+
+```bash
+rip sites stop hello
+rip edge trust && rip edge local
+rip sites start hello
+# http://sites.local/trust  → install CA on the phone
+# https://hello.local/      → the app
+# https://sites.local/      → Rip catalog (Start/Stop/Restart)
+```
 
 Overrides when needed:
 

@@ -5,6 +5,9 @@ permanent product docs live under `docs/`. Remove items when fixed or
 moved into real docs/tests — git history and PR bodies are the record
 of completed work.
 
+Package-local leftovers live beside the package (for example
+[`packages/sites/TODO.md`](packages/sites/TODO.md)).
+
 ---
 
 ## Documentation
@@ -18,6 +21,14 @@ of completed work.
 
 ---
 
+## Distribution
+
+- [ ] Owner call: CLI publish channel (npm/bunx vs other), thin-client
+      vs self-contained VS Code extension, timing. Blocks marketplace
+      publish of the extension.
+
+---
+
 ## Workspace feed
 
 - [ ] When an editor producer lands (M2), `crossRun` cannot distinguish
@@ -25,3 +36,17 @@ of completed work.
       server-owned id bumps the rev with local bytes, and the next
       resync would reload and discard the local edit. Unreachable
       today — nothing writes server-owned ids locally.
+
+---
+
+## Test-lane audits (remaining)
+
+Edit / milestone / landing gates and PR vs certification CI already
+landed. Still worth a focused pass when touching that package:
+
+- [ ] `packages/app` — consolidate repeated Workspace/apply scenarios
+      around shared transactional invariants.
+- [ ] Root compiler suite — collapse permutations already covered by
+      battery, corpus, mapping, or generated-byte gates.
+- [ ] `packages/vscode` — separate fast protocol/unit behavior from
+      tsgo process integration and editor-wide certification.

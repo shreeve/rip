@@ -60,4 +60,7 @@ Extension tests live ONLY in this package (the owner-ratified test boundary): `b
 
 ## Distribution & publishing
 
-How the extension (and the rip CLI it depends on) ships, the marketplace identity and versioning, and the open decisions around all of it live in one place at the repo root: [DISTRIBUTION.md](../../DISTRIBUTION.md). It's an open decision that needs owner sign-off, not a settled plan.
+How the extension (and the rip CLI it depends on) ships is an open
+owner decision — see the Distribution item in the repo-root `TODO.md`.
+Marketplace identity stays `rip-lang.vscode-rip`; each publish must
+increment `packages/vscode/package.json` version and never reuse one.
