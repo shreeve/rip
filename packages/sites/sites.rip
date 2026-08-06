@@ -41,11 +41,11 @@ HELP = '''
     logs <app|edge|all> [--lines N] [-f] Manager or edge logs
 
   Advanced (catalog app → manager; same nouns as start/stop):
-    run [project] …                    Foreground manager (no catalog)
-    browse <dir> …                     Publish one directory (no catalog)
-    hold|release <app> […]             Deploy barriers on a remembered app
-    migrate <app> [entry] […]         Coordinated DB migrate (cwd = app root)
-    recover <app> <op-id> […]         Fix-forward recovery (cwd = app root)
+    run [project] …                      Foreground manager (no catalog)
+    browse <dir> …                       Publish one directory (no catalog)
+    hold|release <app> […]               Deploy barriers on a remembered app
+    migrate <app> [entry] […]            Coordinated DB migrate (cwd = app root)
+    recover <app> <op-id> […]            Fix-forward recovery (cwd = app root)
 
   Start edge options:
     --caddy PATH  --config PATH  --control TARGET
