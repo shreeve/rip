@@ -269,8 +269,24 @@ normalizeHubBridge = (value, at) ->
     invalidServe "#{at} must not contain '.' or '..' segments" if part is '' or part is '.' or part is '..'
   "/#{name}"
 
+normalizeAccess = (raw) ->
+  rejectUnknown raw, ['log', 'format'], 'serve.rip access'
+  invalidServe 'serve.rip access requires log and/or format' unless 'log' of raw or 'format' of raw
+  out = {}
+  if 'log' of raw
+    out.log = needString raw.log, 'serve.rip access.log'
+    invalidServe 'serve.rip access.log must be pretty, raw, or off' unless out.log in ['pretty', 'raw', 'off']
+  if 'format' of raw
+    out.format = needString raw.format, 'serve.rip access.format'
+    invalidServe 'serve.rip access.format only applies with access.log pretty' if out.log? and out.log isnt 'pretty'
+    try
+      parseAccessPicture out.format
+    catch error
+      invalidServe "serve.rip access.format: #{error?.message or error}"
+  out
+
 normalizeServeConfig = (raw, appDir) ->
-  rejectUnknown raw, ['name', 'hosts', 'sites', 'files', 'app', 'hub'], 'serve.rip'
+  rejectUnknown raw, ['name', 'hosts', 'sites', 'files', 'app', 'hub', 'access'], 'serve.rip'
   out = {}
   out.name = needString(raw.name, 'serve.rip name') if raw.name?
   if raw.hosts?
@@ -359,6 +375,9 @@ normalizeServeConfig = (raw, appDir) ->
     rejectUnknown raw.hub, ['bridge'], 'serve.rip hub'
     invalidServe 'serve.rip hub.bridge is required when hub is declared' unless 'bridge' of raw.hub
     out.hub = { bridge: normalizeHubBridge(raw.hub.bridge, 'serve.rip hub.bridge') }
+  if raw.access?
+    invalidServe 'serve.rip access must be an object' unless isRecord raw.access
+    out.access = normalizeAccess raw.access
   invalidServe 'serve.rip sites requires files' if out.site? and not out.files?
   out
 
@@ -759,7 +778,7 @@ publishApp = (project, name, watch, documents = undefined, declaredShell = null)
 
   roots = [
     { path: dist, cache: 'revalidate' }
-    { path: project.appRoot, cache: 'never' }
+    { path: project.appRoot, cache: 'revalidate' }
   ]
   { files: { roots, proxy_first: (if project.entry? then ['/api'] else []), shell }, publication }
 
@@ -783,7 +802,7 @@ registrationFiles = (project, declared, publication) ->
     return files
   roots = [{ path: dist, cache: 'revalidate' }]
   roots.push { path: publicRoot, cache: 'revalidate' } if hasPublicRoot
-  roots.push { path: project.appRoot, cache: 'never' } if project.appRoot?
+  roots.push { path: project.appRoot, cache: 'revalidate' } if project.appRoot?
   files =
     roots: roots
     proxy_first: if project.entry? then ['/api'] else []
@@ -871,6 +890,12 @@ export main = (argv) ->
     abort 'rip-site: hub.bridge requires an API entry so Janus can POST the Bam bridge to workers'
   if serve?.files? and not serve.files.shell? and project.entry?
     abort 'rip-site: shell-less browse policy cannot publish API upstreams'
+  unless args.accessExplicit
+    if serve?.access?.log?
+      args.accessMode = serve.access.log
+    if serve?.access?.format?
+      abort 'rip-site: serve.rip access.format requires --access-log=pretty (or omit --access-log)' unless args.accessMode is 'pretty'
+      args.accessPicture = serve.access.format
   prod = process.env.RIP_ENV is 'production'
   defaultWatch = not prod
   args.watchApp = args.watchApp ?? defaultWatch

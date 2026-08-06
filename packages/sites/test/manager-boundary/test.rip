@@ -290,6 +290,31 @@ test! 'invalid app-local declarations reject before registration', ->
     control.stop true
     rmSync dir, { recursive: true, force: true }
 
+test! 'serve.rip access.log and access.format validate before registration', ->
+  cases = [
+    [{ access: {} }, 'access requires log and/or format']
+    [{ access: { log: 'loud' } }, 'access.log must be pretty, raw, or off']
+    [{ access: { log: 'raw', format: '{method}' } }, 'access.format only applies with access.log pretty']
+    [{ access: { format: '{bogus}' } }, 'unknown field']
+  ]
+  for [body, needle] in cases
+    dir = mkdtempSync join(tmpdir(), 'rip-manager-access-')
+    project = join dir, 'project'
+    mkdirSync join(project, 'app'), { recursive: true }
+    writeFileSync join(project, 'app', 'index.rip'), "export default -> 'ok'\n"
+    writeFileSync join(project, 'serve.rip'), "export default #{JSON.stringify(body)}\n"
+    calls = []
+    controlSocket = join dir, 'janus.sock'
+    control = startControl controlSocket, calls
+    try
+      { proc, err } = run project, [project, '--control', controlSocket, '--no-watch']
+      eq await proc.exited, 1
+      ok (await err).includes(needle), await err
+      ok not calls.some((call) -> call.path is '/1.0/apps')
+    finally
+      control.stop true
+      rmSync dir, { recursive: true, force: true }
+
 test! 'manager retries stale registration claims within a bounded window', ->
   dir = mkdtempSync join(tmpdir(), 'rip-manager-registration-retry-')
   project = join dir, 'project'

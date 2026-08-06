@@ -1,0 +1,10 @@
+# Tiny API so Janus can Bam-admit the Hub. App-only sites have no bridge;
+# without this, `bootApp({ watch: true })` connects and Janus refuses.
+import { hub, start } from '@rip-lang/sites'
+
+hub
+  bridge: 'hub'
+  auth: false
+  open: -> { '+': ['/hub'] }
+
+start!

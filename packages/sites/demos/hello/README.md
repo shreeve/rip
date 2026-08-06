@@ -1,6 +1,7 @@
 # Hello App
 
-A minimal browser-only Rip App with no API workers. Permanent publication
+A minimal Rip App demo: `app/` plus a tiny Hub-admit API (`index.rip`) so
+live watch works on the packaged bridge-mode edge. Permanent publication
 details live in [`docs/SERVER.md`](../../docs/SERVER.md); browser consumption
 details live in [`docs/WORKSPACE.md`](../../docs/WORKSPACE.md).
 

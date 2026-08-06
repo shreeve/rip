@@ -39,4 +39,9 @@
 ripdev.io, *.ripdev.io {
 	tls {$RIP_EDGE_CERT} {$RIP_EDGE_KEY}
 	janus
+	# Janus access-stream encoder (required for `rip sites logs` / pretty access).
+	log {
+		output stderr
+		format janus
+	}
 }

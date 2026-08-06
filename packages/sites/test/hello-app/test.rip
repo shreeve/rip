@@ -111,7 +111,7 @@ test! 'App-only manager publishes a finite dist surface with no workers', ->
     eq registration.files.proxy_first, []
     eq registration.files.roots, [
       { path: join(project, 'dist'), cache: 'revalidate' }
-      { path: join(project, 'app'), cache: 'never' }
+      { path: join(project, 'app'), cache: 'revalidate' }
     ]
     eq registration.files.shell, join(project, 'dist', 'index.html')
 

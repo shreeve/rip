@@ -1,6 +1,16 @@
 export default
   name: 'hello'
   hosts: ['hello.ripdev.io'] # the edge owns standard HTTPS on port 443
+  hub:
+    bridge: 'hub'           # Janus Bam door for live App watch (see index.rip)
+  access:
+    log: 'pretty'           # pretty | raw | off — CLI --access-log overrides
+    format: %w[
+      {local_time} {local_timezone} {duration_seconds:@s} │
+      {status} {mime_abbrev:<4} {response_bytes:@B} │
+      {method:<4} {path:25^} │
+      {mark}
+    ].join ' '
   app:
     root: 'app'             # default
     changes:                # default

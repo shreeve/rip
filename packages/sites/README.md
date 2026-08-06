@@ -1109,6 +1109,9 @@ export default
   name: 'medlabs'
   hub:
     bridge: 'hub'
+  access:
+    log: 'pretty'
+    format: '{local_time} {status} {method} {path}'
   app:
     root: 'app'
     changes:
@@ -1125,7 +1128,7 @@ export default
       { path: 'public' }
       { path: 'sites/{site}/public', cache: 'revalidate', browse: true }
       { path: 'sites/common/public', cache: 'forever' }
-      { path: 'app', cache: 'never' }
+      { path: 'app', cache: 'revalidate' }
     ]
     proxyFirst: ['/api']
     shell: 'app/index.html'
@@ -1133,6 +1136,13 @@ export default
 
 Exact-host servers use `hosts` instead of `sites`. `hosts` and `sites` are
 mutually exclusive.
+
+`access.log` is `pretty` (default when omitted), `raw`, or `off`. `access.format`
+is the pretty picture (same grammar as `--access-format`); it is only legal with
+pretty logging. CLI `--access-log` / `--access-format` override `serve.rip` when
+passed. You can edit `access.format` while the site is running; restart the
+manager (`rip sites restart <site>`, or stop/start a foreground `rip site`) to
+pick up the new picture — the access stream does not hot-reload `serve.rip`.
 
 `app.root` selects the browser App directory relative to the project.
 `app.changes` classifies authored files by client apply verdict. The block
@@ -1339,11 +1349,25 @@ another ready socket without poisoning health accounting.
 
 ## Logging
 
-Caddy and Janus own the public access log because they observe static hits,
-Hub traffic, cache hits, unknown hosts, and requests that never reach a
-worker.
+```bash
+rip sites logs hello
+rip sites logs hello --follow
+```
 
-The foreground manager subscribes to the current registration's live access
+That reads the manager log
+(`~/Library/Application Support/Rip/apps/<id>.log`). Agent-managed sites use
+`--access-log=pretty` by default (or `serve.rip` `access.log` / `access.format`
+when set). The packaged edge Caddyfile must include `log { format janus }` on
+the site block — without that encoder Janus publishes nothing and the log stays
+URL-only.
+
+Caddy/Janus process diagnostics (TLS, Hub, dial failures) go to:
+
+```bash
+tail -f ~/Library/Application\ Support/Rip/edge.log
+```
+
+The foreground manager also subscribes to the registration's live access
 stream. `--access-log=pretty` renders one line per request with the default
 picture:
 

@@ -243,7 +243,7 @@ addApp = (body) ->
   snapshotApp! app
 
 serverArgv = (app) ->
-  argv = [process.execPath, loaderArg('rip-agent'), join(import.meta.dir, 'site.rip'), app.root, '--name', app.name, '--control', state.edge.control, '--access-log=off', '--workers', String(app.options.workers), '--concurrency', String(app.options.concurrency)]
+  argv = [process.execPath, loaderArg('rip-agent'), join(import.meta.dir, 'site.rip'), app.root, '--name', app.name, '--control', state.edge.control, '--workers', String(app.options.workers), '--concurrency', String(app.options.concurrency)]
   argv.push '--host', host for host in app.hosts
   if app.options.watchApp and app.options.watchApi
     argv.push '--watch'
