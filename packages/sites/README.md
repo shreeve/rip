@@ -8,8 +8,9 @@ Rip Sites is how you run Rip projects on HTTPS locally: a **framework** for
 routes and validation, a **manager** per project, a **shared edge** for TLS and
 routing, and an optional **menu-bar tray** that drives the same CLIs.
 
-**Runtime:** Bun on the server (managers, workers, Agent). Browser Apps use the
-published Workspace. The menubar host is macOS-only (`@rip-lang/tray`).
+**Runtime:** Bun on the server (managers, workers, edge-scoped control).
+Browser Apps use the published Workspace. The menubar host is macOS-only
+(`@rip-lang/tray`).
 
 The system-wide ownership, reload, migration, and cache contract is
 [docs/SERVER.md](../../docs/SERVER.md). App publication wire details are under
@@ -19,13 +20,14 @@ The system-wide ownership, reload, migration, and cache contract is
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│  rip edge          Caddy + Janus (one per user)             │
+│  rip sites             one CLI: apps · edge · tray          │
 │                    HTTPS *.ripdev.io → files / Hub / /api   │
 └────────────────────────────┬────────────────────────────────┘
                              │ Janus control socket
 ┌────────────────────────────▼────────────────────────────────┐
-│  rip sites / Agent     remembers projects, starts managers  │
-│  rip site              one foreground manager (optional)    │
+│  sites.json + control      remembered projects, start/stop  │
+│  (control lives with edge — no idle forever daemon)         │
+│  rip sites run             one foreground manager (optional)│
 └────────────────────────────┬────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────┐
@@ -33,7 +35,7 @@ The system-wide ownership, reload, migration, and cache contract is
 │                        workers + published dist/            │
 └─────────────────────────────────────────────────────────────┘
 
-Optional UI:  rip tray  /  rip-tray-agent   →  menu over the same CLIs
+Optional UI:  rip sites start tray   →  menu over the same CLI
 ```
 
 Caddy and [Janus](https://github.com/shreeve/janus) own every client request
@@ -45,15 +47,14 @@ ordinary HTTP themselves — they register with Janus and supervise workers.
 | Surface | What it is | When you use it |
 | --- | --- | --- |
 | `@rip-lang/sites` | Framework API (`get`, `read`, middleware, …) | Inside `index.rip` / App code |
-| `rip edge` | Shared Caddy+Janus process | Once per machine/session — TLS + routing |
-| `rip sites` | Remembered catalog via the private **Rip Agent** | Add / start / stop / open projects |
-| `rip site` | Foreground manager for **one** project | Dev without the Agent, or advanced ops |
-| Sites tray | Menu-bar UI over `rip sites` + `rip edge` | Click instead of typing |
+| `rip sites` | Unified CLI: catalog, apps, edge, tray, advanced | Day-to-day Sites |
+| `rip sites run` / `rip site` | Foreground manager for **one** project | Dev without the catalog |
+| Sites tray | Menu-bar UI over `rip sites` | Click instead of typing |
 
-The **Rip Agent** is not a separate CLI. `rip sites` and `rip edge` auto-start
-it on demand. It owns durable state at
-`~/Library/Application Support/Rip/agent.json` (macOS) and the runtime socket
-under `$TMPDIR/rip-agent-<uid>/`.
+Reserved nouns (not app names): **`edge`**, **`all`**, **`tray`**.
+`rip edge …` is a thin alias of `rip sites … edge`. Durable catalog is
+`sites.json` (Rip-owned). The control plane starts with the edge / desired
+apps and exits when nothing remains to supervise — Janus stays live-only.
 
 ## Quick Start
 
@@ -63,8 +64,8 @@ From this repo the packaged Janus-enabled binary and Caddyfile are the
 defaults:
 
 ```bash
-rip edge start
-rip edge status
+rip sites start edge
+rip sites status edge
 # ● Edge  running (Rip-owned)
 #   Control: …/rip-agent-…/janus.sock
 #   Caddy:   …/packages/sites/bin/caddy-janus
@@ -78,7 +79,7 @@ Those names resolve only to `127.0.0.1`. Browser status is at
 
 Three postures:
 
-| | **Default** (`rip edge start`) | **`local`** | **`public`** |
+| | **Default** (`rip sites start edge`) | **`local`** | **`public`** |
 | --- | --- | --- | --- |
 | Bind | `127.0.0.1` | all interfaces | phase 2 |
 | Bonjour | off | shared `sites.local` (apps use `{name}.local` hosts) | — |
@@ -87,19 +88,19 @@ Three postures:
 | TLS | packaged `*.ripdev.io` | `tls internal` (trust first) | — |
 
 ```bash
-rip edge trust                 # install the local CA (required before local)
+rip sites trust edge                 # install the local CA (required before local)
 # stop running sites first — mode flips recreate the edge
-rip edge local                 # LAN / Bonjour posture (stop+recreate)
-rip edge local --off           # back to default
-rip edge trust --export ca.crt # share the CA with a phone / peer
+rip sites local edge                 # LAN / Bonjour posture (stop+recreate)
+rip sites local edge --off           # back to default
+rip sites trust edge --export ca.crt # share the CA with a phone / peer
 # phone bootstrap without temporary HTTPS accept:
 #   http://sites.local/trust
-rip edge public                # refuses until phase 2
+rip sites public edge                # refuses until phase 2
 ```
 
 `*.ripdev.io` names still resolve only to `127.0.0.1`, so phones on the LAN
 need `{name}.local` hosts (and the trusted local CA), not the ripdev.io URLs.
-Catalog adds and `rip edge local` dual-claim every `*.ripdev.io` host with a
+Catalog adds and `rip sites local edge` dual-claim every `*.ripdev.io` host with a
 matching `*.local` twin; demos declare both in `serve.rip`. After a mode flip,
 restart sites so managers re-register the hosts.
 
@@ -107,7 +108,7 @@ Phone walkthrough (hello):
 
 ```bash
 rip sites stop hello
-rip edge trust && rip edge local
+rip sites trust edge && rip sites local edge
 rip sites start hello
 # http://sites.local/trust  → install CA on the phone
 # https://hello.local/      → the app
@@ -117,11 +118,11 @@ rip sites start hello
 Overrides when needed:
 
 ```bash
-rip edge start --caddy /path/to/caddy-janus --config /path/to/Caddyfile
-# or: JANUS_CADDY=/path/to/caddy-janus rip edge start
+rip sites start edge --caddy /path/to/caddy-janus --config /path/to/Caddyfile
+# or: JANUS_CADDY=/path/to/caddy-janus rip sites start edge
 ```
 
-`rip edge status` also reports an **external** edge Rip did not start — Rip
+`rip sites status edge` also reports an **external** edge Rip did not start — Rip
 will not stop or reload a process it does not own.
 
 ### 2. Remember and start a demo site
@@ -147,11 +148,11 @@ Stop sites **before** the edge — the edge refuses to die under a live manager:
 
 ```bash
 rip sites stop hello
-rip edge stop
+rip sites stop edge
 ```
 
 ```text
-rip edge stop
+rip sites stop edge
 # rip-edge: stop hello before stopping the edge   ← intentional
 ```
 
@@ -184,62 +185,53 @@ manager (see [`rip site`](#rip-site--one-foreground-manager)).
 
 ## Commands at a glance
 
-### `rip edge` — shared HTTPS edge
+### `rip sites` — unified Sites CLI
+
+Grammar: `rip sites <verb> <noun>`. Reserved nouns (not app names):
+**`edge`**, **`all`**, **`tray`**.
 
 | Command | Meaning |
 | --- | --- |
-| `rip edge status [--json]` | Running? Mode? Rip-owned or external? Control socket path |
-| `rip edge start [options]` | Start packaged (or `--caddy` / `--config`) edge in current mode |
-| `rip edge reload` | Reload a Rip-owned Caddyfile |
-| `rip edge stop` | Stop a Rip-owned edge (**rejects if any site is running**) |
-| `rip edge trust [--export [PATH]]` | Install (or export) the local edge CA |
-| `rip edge local [--off]` | Enter (or leave) LAN / Bonjour posture — requires trust |
-| `rip edge public` | Refuse — public posture is phase 2 |
+| `rip sites list` | Remembered apps |
+| `rip sites add [project]` | Remember a project |
+| `rip sites remove <app>` | Forget a stopped app |
+| `rip sites start \| stop \| restart <app\|all\|edge\|tray>` | Lifecycle |
+| `rip sites status [app\|all\|edge\|tray]` | Summary (bare = edge + apps) |
+| `rip sites open <app\|edge>` | Open app URL or status dashboard |
+| `rip sites logs <app\|edge\|all>` | Logs |
+| `rip sites reload \| trust \| local \| public edge` | Edge-only verbs |
+| `rip sites run \| browse \| hold \| release \| migrate \| recover` | Advanced / foreground (was `rip site`) |
 
-Start options: `--caddy PATH`, `--config PATH`, `--control TARGET`,
-`--base-url TEMPLATE` (must contain `{host}`), `--http-port N`,
-`--https-port N` (defaults **80** / **443**).
-
-### `rip sites` — Agent catalog (remembered projects)
-
-| Command | Meaning |
-| --- | --- |
-| `rip sites list [--json]` | Remembered sites and run state |
-| `rip sites add [project] [options]` | Remember a project (default: cwd) |
-| `rip sites remove <site>` | Forget a **stopped** site |
-| `rip sites start \| stop \| restart <site>` | Supervise the manager |
-| `rip sites status [site] [--json]` | One site or every site |
-| `rip sites open <site>` | Open its URL in the default browser |
-| `rip sites logs <site> [--lines N] [--follow]` | Manager log |
+`rip edge <verb>` is a thin alias of `rip sites <verb> edge`.
 
 Add options: `--name`, `--host` (repeatable), `--workers`, `--concurrency`,
 `--no-watch` / `--no-watch-app` / `--no-watch-api`, `--eager`.
 
-Selectors accept stable id, unique name, or canonical root. Starting needs a
-reachable Janus control plane (normally: edge already up).
+Selectors accept stable id, unique name, or canonical root. Starting apps needs a
+reachable Janus control plane (normally: `rip sites start edge` first).
 
-### `rip site` — one foreground manager
+### `rip sites run` / `rip site` — one foreground manager
 
-Does **not** use the Agent catalog. Needs Janus control explicitly:
+Does **not** use the Sites catalog. Needs Janus control explicitly:
 
 ```bash
-rip edge start
-CONTROL=$(rip edge status --json | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).control)')
+rip sites start edge
+CONTROL=$(rip sites status edge --json | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).control)')
 
 cd packages/sites/demos/hello
-rip site --control "$CONTROL"
+rip sites run --control "$CONTROL"
 # or: JANUS_CONTROL=$CONTROL rip site
 ```
 
 Without `--control` / `JANUS_CONTROL` you get:
 `rip-site: --control or JANUS_CONTROL is required`.
 
-Also: `rip site status|stop|hold|release`, `rip site browse`, `rip site migrate`,
-`rip site recover` — see [CLI](#cli) for flags.
+Also: `rip sites hold|release|migrate|recover <app>`, `rip sites browse`,
+and the package-bin equivalents under `rip site …` — see [CLI](#cli).
 
 ### Menubar — Sites tray
 
-A clickable subset of `rip sites` / `rip edge`, via
+A clickable subset of `rip sites`, via
 [`tray-sites.rip`](tray-sites.rip) and the generic `@rip-lang/tray` host.
 There is **no** Sites-specific native binary — see
 [packages/tray/README.md](../tray/README.md).
@@ -247,8 +239,8 @@ There is **no** Sites-specific native binary — see
 **Tray covers:** edge start/stop/reload, **Open Dashboard**, **Trust CA**,
 **Use Local / Use Default**, site start/stop/restart/open/log, Add Site.
 
-**CLI-only for now:** `rip sites remove`, `rip edge trust --export`,
-`rip edge public`, port overrides, custom `--config` / `--caddy`.
+**CLI-only for now:** `rip sites remove`, `rip sites trust edge --export`,
+`rip sites public edge`, port overrides, custom `--config` / `--caddy`.
 
 **Foreground (dev)** — build the host once, then from this package:
 
@@ -263,9 +255,9 @@ rip tray                  # discovers tray-sites.rip → launches rip-tray-host
 **Keep it alive (LaunchAgent)** — survives closing the terminal / Cursor:
 
 ```bash
-packages/sites/bin/rip-tray-agent start
-packages/sites/bin/rip-tray-agent status
-packages/sites/bin/rip-tray-agent stop
+rip sites start tray      # or: packages/sites/bin/rip-tray-agent start
+rip sites status tray
+rip sites stop tray
 ```
 
 Plist under `~/Library/LaunchAgents`; logs under `~/Library/Logs`.
@@ -290,32 +282,32 @@ rip packages/sites/tray-sites.rip
 **Happy path (Agent)**
 
 ```bash
-rip edge start
+rip sites start edge
 rip sites add packages/sites/demos/pulse --name pulse --host pulse.ripdev.io
 rip sites start pulse
 rip sites open pulse
 # …develop…
 rip sites stop pulse
-rip edge stop
+rip sites stop edge
 ```
 
 **Several sites, one edge**
 
 ```bash
-rip edge start
+rip sites start edge
 rip sites start hello
 rip sites start pulse
 rip sites start cart
 # https://hello.ripdev.io/  https://pulse.ripdev.io/  https://cart.ripdev.io/
 rip sites stop hello && rip sites stop pulse && rip sites stop cart
-rip edge stop
+rip sites stop edge
 ```
 
 **Tear down order**
 
 ```text
 sites (running)  →  stop each
-edge (Rip-owned) →  rip edge stop
+edge (Rip-owned) →  rip sites stop edge
 tray LaunchAgent →  rip-tray-agent stop   (optional; independent of edge)
 ```
 
@@ -1290,12 +1282,13 @@ The manager has three operational states:
 Control commands find the canonical manager for the project:
 
 ```bash
+rip sites hold <app>
+rip sites release <app>
+rip sites migrate <app> [models] --dir migrations
+rip sites recover <app> <operation-id>
+# Foreground equivalents still work via `rip site …` / `rip sites run …`
 rip site status [project]
 rip site stop [project]
-rip site hold [project]
-rip site release [project]
-rip site migrate [models] --dir migrations
-rip site recover <operation-id>
 ```
 
 `status` prints the manager's machine-readable JSON state. `stop` asks the
@@ -1305,17 +1298,20 @@ control artifacts, and exit cleanly.
 `release` prepares one coherent API/App snapshot, exposes it, sends one
 full-reload notification, and then clears hold.
 
-## Per-User Agent and Edge Internals
+## Per-User Catalog and Edge Internals
 
 Day-to-day commands live under [Commands at a glance](#commands-at-a-glance).
 This section is the ownership contract behind them.
 
-The Rip Agent is private process machinery shared by `rip sites` and
-`rip edge`. It auto-starts on demand, stores one durable site catalog
-(`~/Library/Application Support/Rip/agent.json` on macOS), captures manager and
-edge logs, and adopts healthy managers after an agent restart.
+Rip owns the durable catalog at `sites.json`
+(`~/Library/Application Support/Rip/sites.json` on macOS; a one-time rename
+from `agent.json` still applies). Catalog reads and writes (`list` / `add` /
+`remove`) do not require a live control plane. A small control process starts
+when the edge or a desired-running app needs supervision, adopts healthy
+managers after a restart, and exits when the edge is stopped and no app
+remains desired-running. Janus never writes the catalog.
 
-`rip edge start` finds Caddy through `--caddy`, the remembered configuration,
+`rip sites start edge` finds Caddy through `--caddy`, the remembered configuration,
 `JANUS_CADDY`, the packaged `bin/caddy-janus`, or `PATH`, in that order, and
 verifies that the binary contains Janus before starting it. `--config` selects
 another Caddyfile; the packaged baseline beside this README is the default. An
@@ -1323,21 +1319,21 @@ external reachable edge is observable but never silently adopted as a
 Rip-owned process.
 
 On macOS, the packaged baselines remain both unprivileged and (in default
-mode) loopback-only on standard HTTP and HTTPS. The Agent registers per-user
-`launchd` sockets for `127.0.0.1:80` and `127.0.0.1:443` (or the configured
-ports; `local` mode omits the loopback node name so launchd binds all
-interfaces). The launchd listener activates both sockets and passes them as
-`fd/3` (HTTP) and `fd/4` (HTTPS) to an ordinary user-owned Caddy process, which
-serves HTTP/1.1 and HTTP/2 directly from the inherited TCP sockets. The
+mode) loopback-only on standard HTTP and HTTPS. The control plane registers
+per-user `launchd` sockets for `127.0.0.1:80` and `127.0.0.1:443` (or the
+configured ports; `local` mode omits the loopback node name so launchd binds
+all interfaces). The launchd listener activates both sockets and passes them
+as `fd/3` (HTTP) and `fd/4` (HTTPS) to an ordinary user-owned Caddy process,
+which serves HTTP/1.1 and HTTP/2 directly from the inherited TCP sockets. The
 packaged Caddyfiles explicitly select `h1 h2` because HTTP/3 is QUIC over UDP
 and cannot use stream descriptors. Adding HTTP/3 to this launch path requires
 separately inherited loopback UDP sockets on the HTTPS port and Caddy
 integration that assigns them to QUIC; enabling the protocol without that
 datagram listener makes Caddy reject startup. Default posture has no Bonjour
 and no side-door status port. Stop removes the launchd job and releases the
-ports. A running edge survives an Agent restart, and the Agent recreates its
-launchd job after a login or reboot when the durable desired state is
-`running`. Mode flips (`rip edge local` / `local --off`) stop and recreate
+ports. A running edge survives a control-plane restart, and desired
+`running` edge state reconciles after login when the control plane comes
+back. Mode flips (`rip sites local edge` / `local --off`) stop and recreate
 rather than reload, because the socket bind and Caddyfile change. An
 explicitly selected Caddyfile runs directly as a Rip-owned child and retains
 its own listener choices.
@@ -1351,9 +1347,10 @@ changed, activation failure stays in Maintenance for fix-forward recovery.
 ## CLI
 
 ```bash
-rip site [project] [options]
-rip site browse <directory> [--host <host>] [--control <target>]
-rip site browse <directory> [--host <host>] [--until-restart]
+rip sites run [project] [options]
+rip sites browse <directory> [--host <host>] [--control <target>]
+rip sites browse <directory> [--host <host>] [--until-restart]
+# `rip site …` remains the package bin for the same foreground manager.
 ```
 
 The project argument may identify an entry or directory. Discovery searches
@@ -1379,7 +1376,8 @@ for `app.rip`, `index.rip`, or `app/`.
 `JANUS_CONTROL` supplies the control endpoint when `--control` is omitted.
 Startup validates the endpoint before claiming the server.
 
-`rip site browse` resolves and publishes exactly the named directory as one
+`rip sites browse` (or `rip site browse`) resolves and publishes exactly the
+named directory as one
 `revalidate` browsable root. It publishes no worker upstreams and no SPA shell. By
 default it chooses `browse-<random>.localhost`, prints
 `https://<host>/`, heartbeats while running, and deletes the registration on

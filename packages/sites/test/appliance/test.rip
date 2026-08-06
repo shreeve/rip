@@ -118,6 +118,15 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     empty = cli! APP, ['list', '--json'], env
     eq empty.code, 0
     eq JSON.parse(empty.out), []
+    ok not existsSync(join(site.runtime, 'agent.json')), 'list must not spawn the control plane'
+
+    idleStatus = cli! APP, ['status', '--json'], env
+    eq idleStatus.code, 0
+    idle = JSON.parse idleStatus.out
+    # Fixture Janus is already listening — report external, never spawn control.
+    eq idle.edge.state, 'running'
+    eq idle.edge.managed, false
+    ok not existsSync(join(site.runtime, 'agent.json')), 'idle status must not spawn the control plane'
 
     added = cli! APP, ['add', project, '--name', 'fixture', '--host', 'fixture.ripdev.io', '--json'], env
     eq added.code, 0
@@ -125,6 +134,8 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     eq app.name, 'fixture'
     eq app.state, 'stopped'
     eq app.url, 'https://fixture.ripdev.io/'
+    ok existsSync(join(site.state, 'sites.json')), 'add writes sites.json'
+    ok not existsSync(join(site.runtime, 'agent.json')), 'add must not spawn the control plane'
 
     duplicate = cli! APP, ['add', project], env
     eq duplicate.code, 1
@@ -144,9 +155,16 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     eq live.desired, 'running'
     ok Number.isInteger live.pid
 
-    listed = JSON.parse((cli!(APP, ['status', '--json'], env)).out)
+    listed = JSON.parse((cli!(APP, ['list', '--json'], env)).out)
     eq listed.length, 1
     eq listed[0].pid, live.pid
+    summary = JSON.parse((cli!(APP, ['status', '--json'], env)).out)
+    ok summary.edge?
+    eq summary.apps.length, 1
+    eq summary.apps[0].pid, live.pid
+    reserved = cli! APP, ['add', project, '--name', 'edge'], env
+    eq reserved.code, 1
+    ok reserved.err.includes 'reserved'
 
     # The manager outlives the UI/control client. A replacement agent adopts
     # the same canonical manager socket and preserves the desired state.
@@ -197,7 +215,10 @@ test! 'rip edge distinguishes an external edge from one owned by Rip', ->
     ok stopped.err.includes 'edge is not owned by Rip'
     wrongSurface = cli! EDGE, ['status', '--caddy', FAKE_CADDY], externalEnv
     eq wrongSurface.code, 1
-    ok wrongSurface.err.includes 'status does not accept start options'
+    ok wrongSurface.err.includes 'does not accept start options'
+    viaSites = JSON.parse((cli!(APP, ['status', 'edge', '--json'], externalEnv)).out)
+    eq viaSites.state, 'running'
+    eq viaSites.managed, false
   finally
     stopAgent! external.runtime
     janus.stop true
@@ -233,7 +254,7 @@ test! 'rip edge distinguishes an external edge from one owned by Rip', ->
         replacement = probe
         break
       if Date.now() >= deadline
-        diagnostic = readFileSync join(owned.state, 'agent.json'), 'utf8'
+        diagnostic = readFileSync join(owned.state, 'sites.json'), 'utf8'
         agentLog = readFileSync join(owned.state, 'agent.log'), 'utf8'
         edgeLog = readFileSync join(owned.state, 'edge.log'), 'utf8'
         throw Error.new("timed out waiting for owned edge restart: #{JSON.stringify(probe)}\n#{diagnostic}\nAGENT:\n#{agentLog}\nEDGE:\n#{edgeLog}")

@@ -1,4 +1,4 @@
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync } from 'node:fs'
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { homedir, platform, tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -22,10 +22,16 @@ export agentPaths = (label = 'rip-agent') ->
   runtimeRoot = process.env.RIP_AGENT_RUNTIME or join(tmpdir(), "rip-agent-#{uid}")
   secureDirectory stateRoot, label
   secureDirectory runtimeRoot, label
+  catalog = join(stateRoot, 'sites.json')
+  legacy = join(stateRoot, 'agent.json')
+  # One-time rename: durable catalog is sites.json (Rip-owned).
+  if existsSync(legacy) and not existsSync(catalog)
+    try renameSync legacy, catalog
   {
     stateRoot
     runtimeRoot
-    state: join(stateRoot, 'agent.json')
+    state: catalog
+    legacyState: legacy
     agentLog: join(stateRoot, 'agent.log')
     socket: join(runtimeRoot, 'agent.sock')
     owner: join(runtimeRoot, 'agent.json')
@@ -57,6 +63,15 @@ agentDiagnostic = (paths) ->
   lines = text.trim().split '\n'
   lines.slice(-8).join '\n'
 
+# Soft probe — never spawns. null when the control plane is down.
+export probeAgent = (label = 'rip-sites') ->
+  paths = agentPaths label
+  try
+    response = agentFetch! paths, 'GET', '/1.0', null, 800
+    return paths if response.ok
+  catch then null
+  null
+
 export ensureAgent = (label) ->
   paths = agentPaths label
   try
@@ -80,15 +95,18 @@ export ensureAgent = (label) ->
     sleep! 20
   diagnostic = agentDiagnostic paths
   suffix = if diagnostic then "\n#{diagnostic}" else " — see #{paths.agentLog}"
-  abort "#{label}: Rip Agent did not start#{suffix}"
+  abort "#{label}: Sites control plane did not start#{suffix}"
 
-export requestAgent = (label, method, path, body = null) ->
-  paths = ensureAgent! label
+# start:true (default) boots the control plane; start:false requires it already up.
+export requestAgent = (label, method, path, body = null, options = {}) ->
+  start = if options.start? then options.start else true
+  paths = if start then ensureAgent!(label) else probeAgent!(label)
+  abort "#{label}: Sites control plane is not running — start the edge first (`rip sites start edge`)" unless paths?
   response = agentFetch! paths, method, path, body
   text = response.text!
   unless response.ok
     detail = try JSON.parse(text).error catch then text
-    abort "#{label}: #{detail or "agent request failed (#{response.status})"}"
+    abort "#{label}: #{detail or "control request failed (#{response.status})"}"
   return null unless text
   try JSON.parse(text) catch then text
 

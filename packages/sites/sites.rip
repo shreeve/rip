@@ -1,35 +1,64 @@
 #!/usr/bin/env rip
 
-import { printJson, requestAgent } from './appliance.rip'
+# Unified Sites CLI: rip sites <verb> <noun>
+# Reserved nouns: edge, all, tray — never real app names.
+
+import { agentPaths, printJson, probeAgent, requestAgent } from './appliance.rip'
+import { addCatalogApp, findCatalogApp, loadCatalog, removeCatalogApp } from './catalog.rip'
+import { writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 
 throw Error.new('@rip-lang/sites/sites is a CLI, not a library; run `rip sites`') unless import.meta.main
 
-HELP = '''
-  usage: rip sites <command> [arguments]
+RESERVED = ['edge', 'all', 'tray']
+TRAY_AGENT = join(import.meta.dir, 'bin', 'rip-tray-agent')
 
-  Commands:
-    list                                 List remembered Rip sites
-    add [project] [options]              Remember a Rip project (default: cwd)
-    remove <site>                        Forget a stopped site
-    start <site>                         Start and supervise a site
-    stop <site>                          Gracefully stop a site
-    restart <site>                       Stop and start a site
-    status [site]                        Show one site, or every site
-    open <site>                          Open the site in the default browser
-    logs <site> [--lines N] [--follow]   Show the manager log
+HELP = '''
+  usage: rip sites <verb> [noun] [options]
+
+  Grammar: rip sites <verb> <noun>
+  Reserved nouns (not app names): edge · all · tray
+
+  Catalog:
+    list                                 List remembered apps
+    add [project] [options]              Remember a project (default: cwd)
+    remove <app>                         Forget a stopped app
+
+  Lifecycle (noun: <app> | all | edge | tray):
+    start <noun>                         Start app(s), edge, or tray
+    stop <noun>                          Stop app(s), edge, or tray
+    restart <noun>                       Restart app(s), edge, or tray
+    status [noun]                        Edge+apps summary, or one target
+
+  Edge-only (noun must be edge):
+    reload edge                          Reload the Rip-owned Caddyfile
+    trust edge [--export [PATH]]         Install (or export) the local CA
+    local edge [--off]                   LAN / Bonjour posture (trust first)
+    public edge                          Refuse — public posture is phase 2
+
+  Daily:
+    open <app|edge>                      Open the app URL or status dashboard
+    logs <app|edge|all> [--lines N] [-f] Manager or edge logs
+
+  Advanced (foreground manager — was `rip site`):
+    run [project] …                    Foreground manager (blocks)
+    browse <dir> …                     Publish one directory
+    hold|release <app>                 Deploy barriers
+    migrate <app> [entry] …            Coordinated DB migrate
+    recover <app> <op-id>              Fix-forward recovery
+
+  Start edge options:
+    --caddy PATH  --config PATH  --control TARGET
+    --base-url TEMPLATE  --http-port N  --https-port N
 
   Add options:
-    --name NAME                          Stable display and manager name
-    --host HOST                          Janus host claim (repeatable)
-    --workers N                          Worker count (default: 2)
-    --concurrency N                      Requests per worker (default: 1)
-    --no-watch                           Disable App and API source watching
-    --no-watch-app                       Disable App publication watching
-    --no-watch-api                       Disable API worker watching
-    --eager                              Boot replacement workers before demand
+    --name NAME  --host HOST (repeatable)  --workers N  --concurrency N
+    --no-watch  --no-watch-app  --no-watch-api  --eager
 
   Output:
-    --json                               Print the complete JSON response
+    --json                               Machine-readable response
+
+  `rip edge …` remains a thin alias of these spells (e.g. start → start edge).
 '''
 
 args = process.argv.slice 2
@@ -37,7 +66,7 @@ if args.length is 0 or args[0] in ['-h', '--help', 'help']
   console.log HELP
   exit 0
 
-command = args.shift()
+verb = args.shift()
 json = false
 follow = false
 lines = 100
@@ -51,10 +80,54 @@ eager = false
 positionals = []
 addFlags = []
 logFlags = []
+edgeBody = {}
+edgeFlags = []
+exportPath = null
+trustExport = false
+localOff = false
+
+# Advanced / foreground manager verbs forward the rest of argv unchanged
+# to site.rip (its own flags). Do not parse Sites catalog/edge options first.
+ADVANCED = ['run', 'browse', 'hold', 'release', 'migrate', 'recover']
+
+forwardSite = (argv) ->
+  site = join(import.meta.dir, 'site.rip')
+  preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
+  abort 'rip-sites: the Rip loader is missing' unless preload?
+  env = { ...process.env }
+  unless env.JANUS_CONTROL
+    try
+      doc = loadCatalog()
+      control = doc.edge?.control
+      want = doc.edge?.desired is 'running' or doc.apps.some((app) -> app.desired is 'running')
+      if want
+        edge = requestAgent! 'rip-sites', 'GET', '/1.0/edge', null, { start: true }
+        env.JANUS_CONTROL = edge.control if edge?.control?
+      else if control?
+        env.JANUS_CONTROL = control
+    catch then null
+  result = Bun.spawnSync [process.execPath, preload, site, ...argv],
+    stdout: 'inherit'
+    stderr: 'inherit'
+    stdin: 'inherit'
+    env: env
+  exit result.exitCode ?? 1
+
+if verb in ADVANCED
+  if verb in ['hold', 'release', 'migrate', 'recover']
+    abort "rip-sites: #{verb} requires an app noun" unless args.length and not args[0].startsWith('-')
+    abort "rip-sites: #{JSON.stringify(args[0])} is reserved (edge | all | tray) — not an app name" if args[0] in RESERVED
+  forwarded = if verb is 'browse' then ['browse', ...args] else if verb is 'run' then args else [verb, ...args]
+  forwardSite! forwarded
 
 take = (flag) ->
   abort "rip-sites: #{flag} requires a value" unless args.length
   args.shift()
+
+parsePort = (flag, text) ->
+  value = parseInt text, 10
+  abort "rip-sites: #{flag} must be an integer from 1 through 65535" unless Number.isInteger(value) and value >= 1 and value <= 65535 and String(value) is text
+  value
 
 while args.length
   value = args.shift()
@@ -98,71 +171,333 @@ while args.length
     when '--eager'
       addFlags.push value
       eager = true
+    when '--off'
+      localOff = true
+      edgeFlags.push value
+    when '--export'
+      trustExport = true
+      edgeFlags.push value
+      exportPath = if args[0]? and not args[0].startsWith('-') then args.shift() else 'rip-edge-local-ca.crt'
+    when '--caddy'
+      edgeFlags.push value
+      edgeBody.caddy = take value
+    when '--config'
+      edgeFlags.push value
+      edgeBody.config = take value
+    when '--control'
+      edgeFlags.push value
+      edgeBody.control = take value
+    when '--base-url'
+      edgeFlags.push value
+      edgeBody.baseUrl = take value
+      abort 'rip-sites: --base-url must contain {host}' unless edgeBody.baseUrl.includes '{host}'
+    when '--http-port'
+      edgeFlags.push value
+      edgeBody.httpPort = parsePort value, take(value)
+    when '--https-port'
+      edgeFlags.push value
+      edgeBody.httpsPort = parsePort value, take(value)
     else
       abort "rip-sites: unknown option #{value}" if value.startsWith '-'
       positionals.push value
 
-selector = ->
-  abort "rip-sites: #{command} requires exactly one site" unless positionals.length is 1
-  encodeURIComponent positionals[0]
+noun = if positionals.length then positionals[0] else null
+extra = positionals.slice 1
 
-abort "rip-sites: #{command} does not accept add options: #{addFlags.join(', ')}" if command isnt 'add' and addFlags.length
-abort "rip-sites: #{command} does not accept log options: #{logFlags.join(', ')}" if command isnt 'logs' and logFlags.length
+abort "rip-sites: #{verb} does not accept add options: #{addFlags.join(', ')}" if verb isnt 'add' and addFlags.length
+abort "rip-sites: #{verb} does not accept log options: #{logFlags.join(', ')}" if verb isnt 'logs' and logFlags.length
 abort 'rip-sites: --follow conflicts with --json' if follow and json
+abort "rip-sites: #{verb} does not accept start options" if Object.keys(edgeBody).length and not (verb is 'start' and noun is 'edge')
+abort "rip-sites: --off is only valid on `local edge`" if localOff and verb isnt 'local'
+abort "rip-sites: --export is only valid on `trust edge`" if trustExport and verb isnt 'trust'
+abort "rip-sites: unexpected arguments #{JSON.stringify(extra)}" if extra.length and verb isnt 'add'
 
-renderState = (app) ->
+requireNoun = (allowed) ->
+  abort "rip-sites: #{verb} requires a noun (#{allowed.join(' | ')})" unless noun?
+  abort "rip-sites: #{verb} does not accept noun #{JSON.stringify(noun)}" unless noun in allowed or (allowed.includes('<app>') and noun not in RESERVED)
+  noun
+
+requireApp = ->
+  abort "rip-sites: #{verb} requires an app name" unless noun?
+  abort "rip-sites: #{JSON.stringify(noun)} is reserved — pick another app name" if noun in RESERVED
+  noun
+
+reservedAsApp = (label) ->
+  abort "rip-sites: #{JSON.stringify(label)} is reserved (edge | all | tray) — not an app name" if label in RESERVED
+
+isAppNoun = (n) -> n? and n not in RESERVED
+
+renderApp = (app) ->
   marker = if app.state is 'running' then '●' else '○'
   url = if app.url then "  #{app.url}" else ''
   "#{marker} #{app.name}  #{app.state}#{url}\n  #{app.root}"
 
-switch command
+renderEdge = (edge) ->
+  marker = if edge.state is 'running' then '●' else '○'
+  ownership = if edge.managed then 'Rip-owned' else if edge.state is 'running' then 'external' else 'not running'
+  lines = ["#{marker} Edge  #{edge.state} (#{ownership})"]
+  lines.push "  Mode:    #{edge.mode}" if edge.mode?
+  lines.push "  Control: #{edge.control}"
+  lines.push "  Caddy:   #{edge.caddy}" if edge.caddy
+  lines.push "  Config:  #{edge.config}" if edge.config
+  lines.push "  Ports:   HTTP #{edge.httpPort} / HTTPS #{edge.httpsPort}" if edge.httpPort? and edge.httpsPort?
+  lines.push "  Trusted: #{if edge.localCaTrusted then 'yes' else 'no (run rip sites trust edge)'}" if edge.mode is 'local' or verb is 'local'
+  lines.push "  Error:   #{edge.lastError}" if edge.lastError
+  lines.join '\n'
+
+printEdge = (edge) ->
+  if json then printJson edge else console.log renderEdge(edge)
+
+printApp = (app) ->
+  if json then printJson app else console.log renderApp(app)
+
+eachApp = (action) ->
+  apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: true }
+  abort 'rip-sites: no apps in the catalog' unless apps.length
+  results = []
+  for app in apps
+    results.push requestAgent!('rip-sites', 'POST', "/1.0/apps/#{encodeURIComponent(app.id)}/#{action}", {}, { start: true })
+  results
+
+dashboardUrl = (edge) ->
+  host = if edge.mode is 'local' then 'sites.local' else 'sites.ripdev.io'
+  port = if Number.isInteger(edge.httpsPort) and edge.httpsPort isnt 443 then ":#{edge.httpsPort}" else ''
+  "https://#{host}#{port}/"
+
+runTray = (action) ->
+  result = Bun.spawnSync [TRAY_AGENT, action], { stdout: 'pipe', stderr: 'pipe' }
+  out = result.stdout.toString()
+  err = result.stderr.toString()
+  unless result.exitCode is 0
+    # status exits 1 when stopped — still a successful query for humans.
+    if action is 'status' and result.exitCode is 1 and out.trim() is 'stopped'
+      if json then printJson { state: 'stopped' } else console.log out.trim()
+      return
+    abort "rip-sites: tray #{action} failed: #{(err or out).trim() or "exit #{result.exitCode}"}"
+  text = (out or err).trim()
+  if json
+    state = if text.includes('running') then 'running' else if text.includes('stopped') then 'stopped' else text
+    printJson { state, detail: text }
+  else
+    console.log text or "tray #{action} ok"
+
+edgePost = (path, body = {}, start = true) ->
+  requestAgent! 'rip-sites', 'POST', path, body, { start }
+
+# Revive the control plane only when the catalog still wants something running
+# (adoption after crash). Idle catalog reads never spawn it.
+wantsControl = ->
+  doc = loadCatalog()
+  doc.edge?.desired is 'running' or doc.apps.some((app) -> app.desired is 'running')
+
+controlGet = (path) ->
+  requestAgent! 'rip-sites', 'GET', path, null, { start: wantsControl! }
+
+offlineApp = (app) ->
+  host = app.hosts?.find((h) -> h.endsWith '.ripdev.io') or app.hosts?[0]
+  {
+    ...app
+    state: 'stopped'
+    pid: null
+    url: if host? then "https://#{host}/" else null
+    manager: null
+  }
+
+offlineEdge = (edge, health = null) ->
+  control = process.env.JANUS_CONTROL or edge?.control or null
+  {
+    state: if health? then 'running' else 'stopped'
+    desired: edge?.desired or 'stopped'
+    managed: false
+    pid: null
+    caddy: edge?.caddy or null
+    config: edge?.config or null
+    control: control
+    baseUrl: edge?.baseUrl or 'https://{host}/'
+    mode: edge?.mode or 'default'
+    httpPort: edge?.httpPort or 80
+    httpsPort: edge?.httpsPort or 443
+    localCaTrusted: edge?.localCaTrusted is true
+    launcher: null
+    janus: health
+    lastError: edge?.lastError or null
+  }
+
+# Live Janus without a Rip control plane (external edge) — no spawn.
+probeJanus = (control) ->
+  return null unless typeof control is 'string' and control.length
+  try
+    options = { signal: AbortSignal.timeout(1000) }
+    if control.startsWith('http://') or control.startsWith('https://')
+      response = fetch! "#{control}/1.0", options
+    else
+      options.unix = control
+      response = fetch! 'http://janus/1.0', options
+    return response.json! if response.ok
+  catch then null
+  null
+
+readOfflineEdge = ->
+  doc = loadCatalog()
+  control = process.env.JANUS_CONTROL or doc.edge?.control
+  offlineEdge doc.edge, probeJanus!(control)
+
+switch verb
   when 'list'
-    abort 'rip-sites: list takes no site' if positionals.length
-    apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps'
-    if json then printJson apps else if apps.length then console.log(apps.map(renderState).join('\n')) else console.log 'No Rip sites. Add one with `rip sites add [project]`.'
+    abort 'rip-sites: list takes no noun' if noun?
+    if probeAgent! 'rip-sites'
+      apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: false }
+    else
+      apps = loadCatalog().apps.map offlineApp
+    if json then printJson apps else if apps.length then console.log(apps.map(renderApp).join('\n')) else console.log 'No Rip sites. Add one with `rip sites add [project]`.'
+
   when 'add'
-    abort 'rip-sites: add takes at most one project' if positionals.length > 1
-    app = requestAgent! 'rip-sites', 'POST', '/1.0/apps',
+    abort 'rip-sites: add takes at most one project path' if positionals.length > 1
+    reservedAsApp name if name?
+    body =
       root: positionals[0] or process.cwd()
       name: name
       hosts: hosts
-      options: { workers, concurrency, watchApp, watchApi, eager }
+      options: { workers, concurrency, watchApp, watchApi, eager: eager is true }
+    if probeAgent! 'rip-sites'
+      app = requestAgent! 'rip-sites', 'POST', '/1.0/apps', body, { start: false }
+    else
+      app = addCatalogApp! body
     if json then printJson app else console.log "Added #{app.name}\n#{app.root}"
+
   when 'remove'
-    app = requestAgent! 'rip-sites', 'DELETE', "/1.0/apps/#{selector!}"
+    requireApp!
+    if probeAgent! 'rip-sites'
+      app = requestAgent! 'rip-sites', 'DELETE', "/1.0/apps/#{encodeURIComponent(noun)}", null, { start: false }
+    else
+      app = removeCatalogApp! noun
     if json then printJson app else console.log "Removed #{app.name}"
+
   when 'start', 'stop', 'restart'
-    app = requestAgent! 'rip-sites', 'POST', "/1.0/apps/#{selector!}/#{command}", {}
-    if json then printJson app else console.log renderState(app)
+    requireNoun ['<app>', 'all', 'edge', 'tray']
+    if noun is 'edge'
+      abort "rip-sites: restart edge is not supported — use stop edge && start edge" if verb is 'restart'
+      abort "rip-sites: start options only apply to `start edge`" if verb isnt 'start' and Object.keys(edgeBody).length
+      edge = if verb is 'start' then edgePost!('/1.0/edge/start', edgeBody, true) else edgePost!('/1.0/edge/stop', {}, true)
+      printEdge edge
+    else if noun is 'tray'
+      abort "rip-sites: restart tray is not supported — use stop tray && start tray" if verb is 'restart'
+      runTray! if verb is 'start' then 'start' else 'stop'
+    else if noun is 'all'
+      results = eachApp! verb
+      if json then printJson results else console.log results.map(renderApp).join('\n')
+    else
+      app = requestAgent! 'rip-sites', 'POST', "/1.0/apps/#{encodeURIComponent(noun)}/#{verb}", {}, { start: true }
+      printApp app
+
   when 'status'
-    abort 'rip-sites: status takes at most one site' if positionals.length > 1
-    result = if positionals.length then requestAgent!('rip-sites', 'GET', "/1.0/apps/#{encodeURIComponent(positionals[0])}") else requestAgent!('rip-sites', 'GET', '/1.0/apps')
-    if json
-      printJson result
-    else if Array.isArray result
-      if result.length then console.log(result.map(renderState).join('\n')) else console.log 'No Rip sites.'
+    abort 'rip-sites: status takes at most one noun' if positionals.length > 1
+    live = probeAgent! 'rip-sites'
+    if not live and wantsControl!
+      try
+        requestAgent! 'rip-sites', 'GET', '/1.0', null, { start: true }
+        live = probeAgent! 'rip-sites'
+      catch then live = null
+    if not noun? or noun is 'all'
+      if live
+        edge = requestAgent! 'rip-sites', 'GET', '/1.0/edge', null, { start: false }
+        apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: false }
+      else
+        doc = loadCatalog()
+        edge = readOfflineEdge!
+        apps = doc.apps.map offlineApp
+      if json
+        printJson if noun is 'all' then apps else { edge, apps }
+      else if noun is 'all'
+        if apps.length then console.log(apps.map(renderApp).join('\n')) else console.log 'No Rip sites.'
+      else
+        console.log renderEdge(edge)
+        console.log ''
+        if apps.length then console.log(apps.map(renderApp).join('\n')) else console.log 'No Rip sites.'
+    else if noun is 'edge'
+      if live or wantsControl!
+        printEdge requestAgent!('rip-sites', 'GET', '/1.0/edge', null, { start: true })
+      else
+        printEdge readOfflineEdge!
+    else if noun is 'tray'
+      runTray! 'status'
     else
-      console.log renderState(result)
+      requireApp!
+      if live or wantsControl!
+        printApp requestAgent!('rip-sites', 'GET', "/1.0/apps/#{encodeURIComponent(noun)}", null, { start: true })
+      else
+        printApp offlineApp(findCatalogApp(loadCatalog(), noun))
+
   when 'open'
-    app = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{selector!}"
-    abort "rip-sites: #{app.name} has no URL" unless app.url
-    result = Bun.spawnSync ['open', app.url], { stdout: 'ignore', stderr: 'pipe' }
-    abort "rip-sites: cannot open #{app.url}: #{result.stderr.toString().trim()}" unless result.exitCode is 0
-    printJson({ url: app.url }) if json
-  when 'logs'
-    id = selector!
-    read = (after = null) -> requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?#{if after? then "after=#{after}" else "lines=#{lines}"}"
-    log = read!
-    if json
-      printJson log
+    requireNoun ['<app>', 'edge']
+    if noun is 'edge'
+      edge = requestAgent! 'rip-sites', 'GET', '/1.0/edge', null, { start: wantsControl! }
+      abort 'rip-sites: edge is not running' unless edge.state is 'running'
+      url = dashboardUrl edge
     else
-      process.stdout.write log.text
-      if follow
-        offset = log.next
-        loop
-          sleep! 250
-          next = read! offset
-          process.stdout.write next.text if next.text
-          offset = next.next
+      requireApp!
+      app = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{encodeURIComponent(noun)}", null, { start: true }
+      abort "rip-sites: #{app.name} has no URL" unless app.url
+      url = app.url
+    result = Bun.spawnSync ['open', url], { stdout: 'ignore', stderr: 'pipe' }
+    abort "rip-sites: cannot open #{url}: #{result.stderr.toString().trim()}" unless result.exitCode is 0
+    printJson({ url }) if json
+
+  when 'logs'
+    requireNoun ['<app>', 'edge', 'all']
+    if noun is 'edge'
+      abort 'rip-sites: edge log follow is not implemented yet' if follow
+      paths = agentPaths 'rip-sites'
+      console.log "Edge logs: #{paths.edgeLog}"
+      console.log "Control log: #{paths.agentLog}"
+      printJson({ edgeLog: paths.edgeLog, agentLog: paths.agentLog }) if json
+    else if noun is 'all'
+      apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: wantsControl! }
+      abort 'rip-sites: no apps in the catalog' unless apps.length
+      for app in apps
+        id = encodeURIComponent app.id
+        log = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?lines=#{lines}", null, { start: false }
+        console.log "—— #{app.name} ——"
+        process.stdout.write log.text or '(empty)\n'
+    else
+      requireApp!
+      id = encodeURIComponent noun
+      read = (after = null) -> requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?#{if after? then "after=#{after}" else "lines=#{lines}"}", null, { start: true }
+      log = read!
+      if json
+        printJson log
+      else
+        process.stdout.write log.text
+        if follow
+          offset = log.next
+          loop
+            sleep! 250
+            next = read! offset
+            process.stdout.write next.text if next.text
+            offset = next.next
+
+  when 'reload'
+    requireNoun ['edge']
+    printEdge edgePost!('/1.0/edge/reload', {}, true)
+
+  when 'trust'
+    requireNoun ['edge']
+    if trustExport
+      edge = edgePost! '/1.0/edge/export-ca', {}, true
+      target = resolve exportPath
+      writeFileSync target, edge.pem, { mode: 0o600 }
+      if json then printJson { path: target, source: edge.path } else console.log "Exported edge CA → #{target}"
+    else
+      edge = edgePost! '/1.0/edge/trust', {}, true
+      if json then printJson edge else console.log "● Edge CA trusted for local mode#{if edge.root then "\n  Root: #{edge.root}" else ''}"
+
+  when 'local'
+    requireNoun ['edge']
+    printEdge edgePost!('/1.0/edge/local', { off: localOff }, true)
+
+  when 'public'
+    requireNoun ['edge']
+    abort 'rip-sites: public posture is not available yet — use default (`rip sites start edge`) or `rip sites local edge`'
+
   else
-    abort "rip-sites: unknown command #{JSON.stringify(command)} — run `rip sites --help`"
+    abort "rip-sites: unknown verb #{JSON.stringify(verb)} — run `rip sites --help`"

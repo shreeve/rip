@@ -261,6 +261,7 @@ addApp = (body) ->
   fail "project is already registered: #{project.root}", 409 if state.apps.some((app) -> app.root is project.root)
   name = body.name or basename(project.root).replace(/\.[^.]+$/, '')
   fail "invalid app name #{JSON.stringify(name)}" unless validName name
+  fail "#{JSON.stringify(name)} is reserved (edge | all | tray) — not an app name" if name in ['edge', 'all', 'tray']
   fail "app name is already registered: #{name}", 409 if state.apps.some((app) -> app.name is name)
   hosts = body.hosts
   if not hosts?
@@ -379,12 +380,17 @@ stopApp = (app) ->
   saveState()
   runtime = managerRuntime app.root, 'rip-agent'
   live = managerStatus! app
-  return snapshotApp! app unless live?
+  unless live?
+    snap = snapshotApp! app
+    maybeExitIdle()
+    return snap
   response = managerRequest! runtime.socket, 'POST', '/stop'
   body = response.text!
   fail "manager stop failed (#{response.status}): #{body}", 503 unless response.ok
   waitManagerStopped! runtime.socket
-  snapshotApp! app
+  snap = snapshotApp! app
+  maybeExitIdle()
+  snap
 
 restartApp = (app) ->
   stopApp! app
@@ -610,7 +616,9 @@ stopEdge = ->
     bootoutLaunchd true if launcher is 'launchd'
     state.edge = { ...state.edge, desired: 'stopped', managed: false, pid: null, lastError: null }
     saveState()
-    return snapshotEdge!
+    snap = snapshotEdge!
+    maybeExitIdle()
+    return snap
   running = []
   for app in state.apps
     running.push app if managerStatus!(app)?
@@ -620,7 +628,9 @@ stopEdge = ->
   bootoutLaunchd true if launcher is 'launchd'
   state.edge = { ...state.edge, desired: 'stopped', managed: false, pid: null, lastError: null }
   saveState()
-  snapshotEdge!
+  snap = snapshotEdge!
+  maybeExitIdle()
+  snap
 
 reloadEdge = ->
   fail 'edge is not owned by Rip; reload the external Caddy service with its own supervisor', 409 unless state.edge.managed
@@ -632,7 +642,7 @@ reloadEdge = ->
 # Mode flips recreate the edge (launchd sockets + Caddyfile) — reload is not enough.
 setEdgeMode = (mode) ->
   fail "edge mode must be default or local, got #{JSON.stringify(mode)}" unless mode in ['default', 'local']
-  fail 'local mode requires `rip edge trust` first — install the edge CA, then retry', 403 if mode is 'local' and not state.edge.localCaTrusted
+  fail 'local mode requires `rip sites trust edge` first — install the edge CA, then retry', 403 if mode is 'local' and not state.edge.localCaTrusted
   return snapshotEdge! if state.edge.mode is mode and (not state.edge.config? or state.edge.config is packagedConfigForMode(mode))
   current = snapshotEdge!
   wasRunning = current.state is 'running' and state.edge.managed
@@ -649,6 +659,12 @@ setEdgeMode = (mode) ->
   return startEdge!({}) if wasRunning
   snapshotEdge!
 
+# Exit when nothing remains to supervise — no idle forever control plane.
+maybeExitIdle = ->
+  return unless state.edge.desired is 'stopped' and not state.edge.managed
+  return if state.apps.some (app) -> app.desired is 'running'
+  setTimeout shutdown, 100
+
 trustEdge = ->
   caddy = resolveCaddy!
   result = Bun.spawnSync [caddy, 'trust'], { stdout: 'pipe', stderr: 'pipe' }
@@ -659,7 +675,7 @@ trustEdge = ->
   { trusted: true, root: if existsSync(CADDY_PKI_ROOT) then CADDY_PKI_ROOT else null }
 
 exportEdgeCa = ->
-  fail "edge CA not found at #{CADDY_PKI_ROOT} — run `rip edge trust` (and start local once if needed)", 404 unless existsSync CADDY_PKI_ROOT
+  fail "edge CA not found at #{CADDY_PKI_ROOT} — run `rip sites trust edge` (and start local once if needed)", 404 unless existsSync CADDY_PKI_ROOT
   { path: CADDY_PKI_ROOT, pem: readFileSync(CADDY_PKI_ROOT, 'utf8') }
 
 escapeHtml = (value) -> String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
@@ -856,7 +872,10 @@ try
         state.edge.lastError = error.message
         saveState()
   setTimeout reconcile, 0
-  setInterval reconcile, 2000
+  setInterval (->
+    reconcile()
+    maybeExitIdle()
+  ), 2000
 catch error
   try unlinkSync paths.owner
   throw error

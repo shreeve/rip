@@ -17,9 +17,9 @@ controls landed. Remaining:
 - [ ] Behavioral appliance pins for trust gate, mode flip (stop sites
       first), and `.local` host registration — today only static string
       pins.
-- [ ] After Agent/Caddyfile changes, document (or automate) Agent
+- [ ] After control-plane / Caddyfile changes, document (or automate)
       restart so launchd dual-socket listeners cannot race a stale
-      in-memory Agent writing an old plist.
+      in-memory process writing an old plist.
 
 ## Opt-in file logging
 
@@ -28,7 +28,7 @@ Re-lock before coding:
 
 - [ ] Decide knob shape: `serve.rip` `logs: '<dir>'` and/or
       `RIP_LOG_DIR`; env vs serve precedence; foreground-only vs also
-      Agent (Agent already writes `apps/<id>.log`).
+      remembered apps (control already writes `apps/<id>.log`).
 - [ ] Implement merged stream → `<dir>/server.log` (0600); stdout
       remains the default when unset. Edge `access.log` stays
       Caddy/operator-owned.
@@ -59,11 +59,9 @@ Re-lock before coding:
 
 ## Appliance / distribution
 
-- [ ] Register the Rip Agent as a macOS LaunchAgent so desired edge and
-      app state reconciles at login before the first CLI request
-      (tray LaunchAgent already exists; Agent is still on-demand).
-- [ ] Signed/notarized distribution for tray host, Agent, Janus-enabled
-      Caddy, and local edge assets.
+- [ ] Signed/notarized distribution for tray host, Janus-enabled Caddy,
+      and local edge assets. Control plane is edge-scoped (no idle
+      forever LaunchAgent for a separate Agent product).
 
 ## Project cleanups
 

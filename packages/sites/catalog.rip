@@ -1,0 +1,185 @@
+#!/usr/bin/env rip
+
+# Durable Sites catalog — Rip owns sites.json. Janus never writes this file.
+# The control plane (agent.rip) reloads it for live supervision while the edge is up.
+
+import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
+import { randomBytes } from 'node:crypto'
+import { agentPaths } from './appliance.rip'
+import { managerRuntime, resolveProject } from './control.rip'
+
+RESERVED = ['edge', 'all', 'tray']
+
+export catalogPaths = (label = 'rip-sites') ->
+  paths = agentPaths label
+  {
+    ...paths
+    catalog: paths.state
+    legacyCatalog: paths.legacyState
+  }
+
+isRecord = (value) -> value? and typeof value is 'object' and not Array.isArray(value)
+
+fail = (message) -> abort message
+
+validHost = (host) ->
+  return false unless typeof host is 'string'
+  return false if host.length > 253 or host.includes(':') or host.includes('/') or host.includes(' ')
+  labels = host.split '.'
+  return false if labels.some (label) -> label.length is 0 or label.length > 63
+  labels.every (label) -> /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test label
+
+validName = (name) -> typeof name is 'string' and /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/i.test(name) and name.length <= 80
+
+defaultEdge = ->
+  desired: 'stopped'
+  managed: false
+  pid: null
+  caddy: null
+  config: null
+  control: process.env.JANUS_CONTROL or 'http://127.0.0.1:7600'
+  admin: null
+  baseUrl: 'https://{host}/'
+  mode: 'default'
+  httpPort: 80
+  httpsPort: 443
+  localCaTrusted: false
+  lastError: null
+
+export defaultCatalog = ->
+  version: 1
+  apps: []
+  edge: defaultEdge()
+
+defaultAppHosts = (name) -> ["#{name}.ripdev.io", "#{name}.local"]
+
+ensureLanHosts = (hosts) ->
+  out = [...hosts]
+  seen = Set.new out
+  for host in hosts
+    continue unless host.endsWith '.ripdev.io'
+    twin = "#{host.slice(0, -'.ripdev.io'.length)}.local"
+    continue if seen.has twin
+    fail "invalid LAN twin host #{JSON.stringify(twin)}" unless validHost twin
+    out.push twin
+    seen.add twin
+  out
+
+writeSecure = (paths, path, text) ->
+  temporary = "#{path}.tmp-#{process.pid}"
+  fd = openSync temporary, 'w', 0o600
+  try
+    writeFileSync fd, text
+    fsyncSync fd
+  finally
+    closeSync fd
+  renameSync temporary, path
+  directory = openSync paths.stateRoot, 'r'
+  try fsyncSync(directory) finally closeSync(directory)
+
+migrateLegacy = (paths) ->
+  # agentPaths already renames agent.json → sites.json when needed.
+  null
+
+validateCatalog = (doc, path) ->
+  fail("malformed catalog at #{path}") unless isRecord(doc) and doc.version is 1 and Array.isArray(doc.apps) and isRecord(doc.edge)
+  ids = Set.new()
+  names = Set.new()
+  roots = Set.new()
+  for app in doc.apps
+    valid = isRecord(app) and /^[a-f0-9]{16}$/.test(app.id) and typeof app.name is 'string' and typeof app.root is 'string' and Array.isArray(app.hosts) and isRecord(app.options)
+    fail("malformed app record at #{path}") unless valid
+    fail("reserved app name #{JSON.stringify(app.name)} at #{path}") if app.name in RESERVED
+    fail("duplicate app record at #{path}") if ids.has(app.id) or names.has(app.name) or roots.has(app.root)
+    ids.add app.id
+    names.add app.name
+    roots.add app.root
+  doc
+
+export loadCatalog = (label = 'rip-sites') ->
+  paths = catalogPaths label
+  migrateLegacy paths
+  return defaultCatalog() unless existsSync paths.catalog
+  try
+    validateCatalog JSON.parse(readFileSync(paths.catalog, 'utf8')), paths.catalog
+  catch error
+    fail "cannot read catalog at #{paths.catalog}: #{error?.message or error}"
+
+export saveCatalog = (doc, label = 'rip-sites') ->
+  paths = catalogPaths label
+  validateCatalog doc, paths.catalog
+  writeSecure paths, paths.catalog, JSON.stringify(doc, null, 2) + '\n'
+  doc
+
+export findCatalogApp = (doc, selector) ->
+  decoded = decodeURIComponent selector
+  matches = doc.apps.filter (app) -> app.id is decoded or app.name is decoded or app.root is decoded
+  fail "unknown app #{JSON.stringify(decoded)}" unless matches.length
+  fail "ambiguous app #{JSON.stringify(decoded)}" unless matches.length is 1
+  matches[0]
+
+export addCatalogApp = (body, label = 'rip-sites') ->
+  doc = loadCatalog label
+  root = body.root or process.cwd()
+  project = resolveProject root, 'rip-sites'
+  name = body.name or basename(project.root).replace /\.[^.]+$/, ''
+  fail "invalid app name #{JSON.stringify(name)}" unless validName name
+  fail "#{JSON.stringify(name)} is reserved (edge | all | tray) — not an app name" if name in RESERVED
+  fail "app name is already registered: #{name}" if doc.apps.some((app) -> app.name is name)
+  fail "project is already registered: #{project.root}" if doc.apps.some((app) -> app.root is project.root)
+  hosts = body.hosts
+  if not hosts?
+    hosts = if existsSync(join(project.root, 'serve.rip')) then [] else defaultAppHosts(name)
+  fail 'hosts must be an array' unless Array.isArray hosts
+  fail "invalid host #{JSON.stringify(host)}" for host in hosts when not validHost(host)
+  hosts = ensureLanHosts hosts
+  fail 'hosts must not contain duplicates' unless Set.new(hosts).size is hosts.length
+  options = body.options or {}
+  workers = options.workers ?? 2
+  concurrency = options.concurrency ?? 1
+  watchApp = options.watchApp ?? true
+  watchApi = options.watchApi ?? true
+  eager = options.eager is true
+  fail 'workers must be a positive integer' unless Number.isInteger(workers) and workers > 0
+  fail 'concurrency must be a positive integer' unless Number.isInteger(concurrency) and concurrency > 0
+  app =
+    id: randomBytes(8).toString 'hex'
+    name: name
+    root: project.root
+    hosts: hosts
+    options: { workers, concurrency, watchApp, watchApi, eager }
+    desired: 'stopped'
+    addedAt: Date.new().toISOString()
+    lastError: null
+    lastExit: null
+  doc.apps.push app
+  saveCatalog doc, label
+  # Prefer the preferred host for a stable URL hint when the edge is down.
+  host = app.hosts.find((h) -> h.endsWith '.ripdev.io') or app.hosts[0]
+  {
+    ...app
+    state: 'stopped'
+    pid: null
+    url: if host? then "https://#{host}/" else null
+    manager: null
+  }
+
+export removeCatalogApp = (selector, label = 'rip-sites') ->
+  doc = loadCatalog label
+  app = findCatalogApp doc, selector
+  fail "#{app.name} is marked desired=running — stop it before removal" if app.desired is 'running'
+  socket = managerRuntime(app.root, label).socket
+  try
+    response = fetch! 'http://manager/status', { method: 'GET', unix: socket, signal: AbortSignal.timeout(500) }
+    fail "#{app.name} is running — stop it before removal" if response.ok
+  catch then null
+  doc.apps = doc.apps.filter (row) -> row.id isnt app.id
+  saveCatalog doc, label
+  {
+    ...app
+    state: 'stopped'
+    pid: null
+    url: null
+    manager: null
+  }

@@ -36,6 +36,7 @@
     "bundle.rip",
     "control.rip",
     "appliance.rip",
+    "catalog.rip",
     "agent.rip",
     "launchd-listener.js",
     "sites.rip",

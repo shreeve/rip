@@ -32,14 +32,12 @@ Usage:
                                      (default: the current directory; 'rip check --help')
   rip schema <verb> [args...]        Schema evolution: status | plan | make | migrate
                                      (run 'rip schema --help' for the full surface)
-  rip site [entry] [flags...]        Run a @rip-lang/sites project under the worker-pool
-                                     manager behind Janus
-  rip site browse <directory>        Publish one directory through Janus browse
-                                     (run 'rip site --help' for the flags)
-  rip sites <verb> [args...]         Remember and control Rip Sites
-                                     (list | add | start | stop | status | logs)
-  rip edge <verb> [args...]          Control the shared Caddy + Janus edge
-                                     (status | start | stop | reload)
+  rip site [entry] [flags...]        Foreground Sites manager (also: rip sites run)
+  rip sites <verb> [noun] [args...]  Rip Sites: catalog, apps, edge, tray + advanced
+                                     (run | browse | hold | release | migrate | recover)
+                                     Reserved nouns: edge | all | tray
+                                     (run 'rip sites --help' for the full surface)
+  rip edge <verb> [args...]          Alias of \`rip sites <verb> edge\`
   rip test [args...]                 Run \`bun test\` with the .rip loader preloaded
                                      (default --timeout 15000; extra args pass through)
   rip <name> [args...]               Run rip-<name>: sibling of this executable, repo

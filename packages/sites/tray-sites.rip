@@ -1,8 +1,8 @@
 #!/usr/bin/env rip
 
 # Rip Sites menu-bar provider. Imports the reusable tray vocabulary from
-# @rip-lang/tray and drives menus only through the public `rip sites` /
-# `rip edge` CLI.
+# @rip-lang/tray and drives menus only through the unified `rip sites` CLI
+# (`edge` / `all` / `tray` are reserved nouns).
 
 import { dirname, join } from 'node:path'
 import { action, directory, label, link, quit, separator, serve, submenu, svgFile, tray } from '@rip-lang/tray'
@@ -52,19 +52,19 @@ edgeMenu = (edge) ->
   if edge.state is 'running'
     items.push link 'Open Dashboard', dashboardUrl(edge), id: 'edge.dashboard', icon: 'safari'
   if edge.managed or edge.state isnt 'running'
-    items.push action 'Trust CA…', id: 'edge.trust', icon: 'lock.shield', run: -> json! 'edge', 'trust', '--json'
+    items.push action 'Trust CA…', id: 'edge.trust', icon: 'lock.shield', run: -> json! 'sites', 'trust', 'edge', '--json'
   if mode is 'local'
-    items.push action 'Use Default (loopback)', id: 'edge.local.off', icon: 'laptopcomputer', run: -> json! 'edge', 'local', '--off', '--json'
+    items.push action 'Use Default (loopback)', id: 'edge.local.off', icon: 'laptopcomputer', run: -> json! 'sites', 'local', 'edge', '--off', '--json'
   else
-    items.push action 'Use Local (LAN)…', id: 'edge.local.on', icon: 'wifi', run: -> json! 'edge', 'local', '--json'
+    items.push action 'Use Local (LAN)…', id: 'edge.local.on', icon: 'wifi', run: -> json! 'sites', 'local', 'edge', '--json'
   if edge.state is 'running'
     if edge.managed
       items.push separator()
-      items.push action 'Reload', id: 'edge.reload', icon: 'arrow.clockwise', run: -> json! 'edge', 'reload', '--json'
-      items.push action 'Stop', id: 'edge.stop', icon: 'stop.fill', run: -> json! 'edge', 'stop', '--json'
+      items.push action 'Reload', id: 'edge.reload', icon: 'arrow.clockwise', run: -> json! 'sites', 'reload', 'edge', '--json'
+      items.push action 'Stop', id: 'edge.stop', icon: 'stop.fill', run: -> json! 'sites', 'stop', 'edge', '--json'
   else
     items.push separator()
-    items.push action 'Start', id: 'edge.start', icon: 'play.fill', run: -> json! 'edge', 'start', '--json'
+    items.push action 'Start', id: 'edge.start', icon: 'play.fill', run: -> json! 'sites', 'start', 'edge', '--json'
   submenu 'Edge', items, id: 'edge', icon: 'network'
 
 siteMenu = (site) ->
@@ -86,8 +86,9 @@ serve! tray
   tooltip: 'Rip Sites'
   refresh: 2
   menu: ->
-    edge = json! 'edge', 'status', '--json'
-    sites = json! 'sites', 'status', '--json'
+    snapshot = json! 'sites', 'status', '--json'
+    edge = snapshot.edge
+    sites = snapshot.apps
     items = [edgeMenu(edge), separator()]
     items.push siteMenu(site) for site in sites
     items.push directory 'Add Site…', id: 'sites.add', icon: 'plus', prompt: 'Add', run: (path) -> json! 'sites', 'add', path, '--json'
