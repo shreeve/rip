@@ -1,7 +1,7 @@
 #!/usr/bin/env rip
 
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
 
 fail = (message) -> throw Error.new message
 
@@ -212,71 +212,45 @@ export serve = (definition) ->
   finally
     clearInterval timer if timer?
 
-# Imported, this file is the reusable tray framework. Run directly, the same
-# file is the Rip Sites tray backed only by the public `rip sites`/`rip edge` CLI.
-ripSites = ->
-  rip = process.env.RIP_TRAY_RIP or 'rip'
+# `rip tray` — find a provider in the cwd, then launch the generic host with
+# that file. Candidates, in order:
+#   tray.rip
+#   tray-<cwd-basename>.rip   (e.g. packages/sites → tray-sites.rip)
+# The toolkit file itself never counts as a provider.
+export resolveProvider = (cwd = process.cwd()) ->
+  self = realpathSync(join(import.meta.dir, 'tray.rip'))
+  dir = realpathSync cwd
+  names = ['tray.rip', "tray-#{basename(dir)}.rip"]
+  seen = Set.new()
+  for name in names
+    continue if seen.has name
+    seen.add name
+    path = resolve dir, name
+    continue unless existsSync(path) and statSync(path).isFile()
+    real = realpathSync path
+    continue if real is self
+    return real
+  hint = if basename(dir) is 'tray' then ' — from this package run: bun run demo' else ''
+  fail "no tray provider in #{dir} — expected tray.rip or tray-#{basename(dir)}.rip#{hint}"
 
-  command = (args) ->
-    proc = Bun.spawn [rip, ...args], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }
-    out = Response.new(proc.stdout).text()
-    err = Response.new(proc.stderr).text()
-    code = await proc.exited
-    out = await out
-    err = await err
-    throw Error.new(err.trim() or "rip #{args.join(' ')} exited #{code}") unless code is 0
-    out
+export resolveHost = ->
+  if process.env.RIP_TRAY_HOST?
+    path = resolve process.env.RIP_TRAY_HOST
+    fail "RIP_TRAY_HOST not found: #{path}" unless existsSync(path) and statSync(path).isFile()
+    return realpathSync path
+  for rel in ['macos/.build/release/rip-tray-host', 'macos/.build/debug/rip-tray-host']
+    path = join(import.meta.dir, rel)
+    return realpathSync path if existsSync(path) and statSync(path).isFile()
+  fail 'rip-tray-host not found — build with: swift build -c release --package-path packages/tray/macos --product rip-tray-host (or set RIP_TRAY_HOST)'
 
-  json = (...args) -> JSON.parse command! args
-  capitalize = (text) -> text[0].toUpperCase() + text.slice(1)
-
-  openLog = (site) ->
-    log = json! 'sites', 'logs', site.name, '--lines', '1', '--json'
-    result = Bun.spawnSync ['open', log.path], { stdout: 'ignore', stderr: 'pipe' }
-    throw Error.new(result.stderr.toString().trim() or "cannot open #{log.path}") unless result.exitCode is 0
-
-  edgeMenu = (edge) ->
-    items = [
-      label "#{capitalize(edge.state)} · #{if edge.managed then 'Rip-owned' else if edge.state is 'running' then 'external' else 'not running'}",
-        icon: if edge.state is 'running' then 'checkmark.circle.fill' else 'circle'
-    ]
-    if edge.state is 'running'
-      if edge.managed
-        items.push action 'Reload', id: 'edge.reload', icon: 'arrow.clockwise', run: -> json! 'edge', 'reload', '--json'
-        items.push action 'Stop', id: 'edge.stop', icon: 'stop.fill', run: -> json! 'edge', 'stop', '--json'
-    else
-      items.push action 'Start', id: 'edge.start', icon: 'play.fill', run: -> json! 'edge', 'start', '--json'
-    submenu 'Edge', items, id: 'edge', icon: 'network'
-
-  siteMenu = (site) ->
-    running = site.state is 'running'
-    items = [label site.root, subtitle: site.state]
-    if running
-      items.push link 'Open', site.url, id: "#{site.id}.open", icon: 'safari' if site.url?
-      items.push action 'Stop', id: "#{site.id}.stop", icon: 'stop.fill', run: -> json! 'sites', 'stop', site.id, '--json'
-      items.push action 'Restart', id: "#{site.id}.restart", icon: 'arrow.clockwise', run: -> json! 'sites', 'restart', site.id, '--json'
-    else
-      items.push action 'Start', id: "#{site.id}.start", icon: 'play.fill', run: -> json! 'sites', 'start', site.id, '--json'
-    items.push action 'Open Log', id: "#{site.id}.logs", icon: 'doc.text', run: -> openLog! site
-    submenu site.name, items, id: site.id, icon: if running then 'circle.fill' else 'circle'
-
-  definition = tray
-    title: 'Rip'
-    icon: svgFile "#{import.meta.dir}/assets/rip-template.svg"
-    logo: svgFile "#{import.meta.dir}/assets/rip-color.svg", template: false
-    tooltip: 'Rip Sites'
-    refresh: 2
-    menu: ->
-      edge = json! 'edge', 'status', '--json'
-      sites = json! 'sites', 'status', '--json'
-      items = [edgeMenu(edge), separator()]
-      items.push siteMenu(site) for site in sites
-      items.push directory 'Add Site…', id: 'sites.add', icon: 'plus', prompt: 'Add', run: (path) -> json! 'sites', 'add', path, '--json'
-      items.push separator()
-      items.push action 'Refresh', id: 'tray.refresh', icon: 'arrow.clockwise', run: -> null
-      items.push quit 'Quit', icon: 'power'
-      items
-
-  serve! definition
-
-ripSites! if import.meta.main
+if import.meta.main
+  fail 'rip tray requires macOS (SwiftUI host)' unless process.platform is 'darwin'
+  provider = resolveProvider!
+  host = resolveHost!
+  env = { ...process.env }
+  unless env.RIP_TRAY_RIP?
+    checkoutRip = join(import.meta.dir, '../../bin/rip')
+    env.RIP_TRAY_RIP = checkoutRip if existsSync(checkoutRip)
+  proc = Bun.spawn [host, provider], { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit', env }
+  status = await proc.exited
+  exit if status? then status else 1

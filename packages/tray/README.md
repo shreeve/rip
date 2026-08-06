@@ -2,237 +2,203 @@
 
 # Rip Tray - @rip-lang/tray
 
-> **Pure-Rip macOS menu-bar apps rendered by one small reusable SwiftUI host**
+> **One generic macOS host. Many Rip providers. No per-app native binary.**
 
-A tray app is an ordinary `.rip` program. It computes its own title, icon,
-panel, state, and callbacks with the full Rip language — functions, loops,
-conditions, imports, processes, and reactive data included. There is no
-manifest format, YAML schema, JSON configuration, or second template language.
-The native host knows only how to render the panel and return user actions.
+A tray is an ordinary `.rip` **provider**: it owns title, icon, menu, state, and
+callbacks. One reusable SwiftUI **host** (`rip-tray-host`) renders whatever
+panel the provider sends and returns clicks. There is no YAML/JSON menu schema
+and no Sites-specific code in the host.
 
-**Runtime:** not browser-safe — providers use Bun processes and the native host
-uses SwiftUI/AppKit. One `.rip` library plus one reusable Swift host.
+**Runtime:** macOS — providers use Bun processes; the host uses SwiftUI/AppKit.
+Not browser-safe.
+
+## Mental model
+
+```text
+provider.rip          rip-tray-host (ONE program)
+├── tray { … }   ──►  ├── MenuBarExtra
+├── serve!            ├── renders panel JSON
+└── actions/state     └── posts clicks back to Rip
+```
+
+Sites is just another provider
+([`packages/sites/tray-sites.rip`](../sites/tray-sites.rip)). It is not a second
+native app.
+
+## Layout
+
+| Path | Role |
+| --- | --- |
+| [`tray.rip`](tray.rip) | Toolkit library **and** `rip tray` CLI (discover provider → launch host) |
+| [`demo.rip`](demo.rip) | Minimal demo provider — start here |
+| [`build.rip`](build.rip) | Optional `rip-tray-build` — Finder `.app` wrapper only |
+| [`assets/`](assets/) | Shared Rip SVG artwork |
+| [`macos/`](macos/) | Swift: **TrayKit** + **RipTrayHost** (`rip-tray-host`) + **TrayKitCheck** |
+| [`test.rip`](test.rip) | Rip suite |
+| `macos/.build/` | Compiled host (gitignored) |
+| `dist/` | Optional `.app` output (gitignored) |
+
+**Not in this package:** Sites LaunchAgent
+([`packages/sites/bin/rip-tray-agent`](../sites/bin/rip-tray-agent)), Sites
+provider (`tray-sites.rip`). Repo `bin/` holds only the `rip` compiler CLI.
+
+### Swift pieces
+
+| Target | Product | Why |
+| --- | --- | --- |
+| `TrayKit` | library | Panel UI + Rip process protocol |
+| `RipTrayHost` | `rip-tray-host` | ~20-line `@main` — the **one** runnable host |
+| `TrayKitCheck` | `tray-kit-check` | Protocol self-test for CI |
 
 ## Quick Start
 
 ```bash
 bun add @rip-lang/tray
-```
-
-Create `example.rip`:
-
-```coffee
-#!/usr/bin/env rip
-
-import { action, label, quit, separator, serve, svg, tray } from '@rip-lang/tray'
-
-count = 0
-
-app = tray
-  title: 'Example'
-  icon: svg '''
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-      <path d="M12 2 15 9l7 .6-5.3 4.7 1.6 7.2L12 17.8l-6.3 3.7 1.6-7.2L2 9.6 9 9z"/>
-    </svg>
-    '''
-  refresh: 0
-  menu: -> [
-    label "Count: #{count}", icon: 'number.circle'
-    separator()
-    action 'Increment', id: 'increment', icon: 'plus', run: -> count++
-    quit()
-  ]
-
-serve! app if import.meta.main
-```
-
-Run it through the generic native host:
-
-```bash
 cd packages/tray
-RIP_TRAY_RIP=../../bin/rip swift run --package-path macos rip-tray-host /absolute/path/to/example.rip
-```
-
-Clicking **Increment** calls the Rip closure, changes ordinary Rip state, and
-rerenders the native menu. The Swift application contains no app-specific menu
-or command logic.
-
-Build it as a Finder-launchable application:
-
-```bash
-rip-tray example.rip \
-  --name Example \
-  --identifier io.example.tray.example \
-  --output dist
-open dist/Example.app
-```
-
-`rip-tray` compiles the shared host, embeds the selected provider and tray
-runtime, writes an `LSUIElement` application bundle, and applies an ad-hoc
-signature. Use the same command with another provider, name, and identifier to
-build another independent tray app. Pass `--icon AppIcon.icns` for a bundle
-icon and `--force` when intentionally replacing that exact destination.
-
-## Features
-
-- **Pure Rip authoring** — the complete application is one `.rip` program
-- **One native host** — SwiftUI's `MenuBarExtra` renders any tray provider
-- **Apple-style panel** — a rounded native popover with a branded header,
-  flat status rows, contextual controls, and a scrollable body
-- **Full panel vocabulary** — labels, separators, actions, toggles, links,
-  submenus, directory pickers, and Quit
-- **Native and custom icons** — SF Symbols plus inline or file-backed SVGs
-- **Adaptive row sizing** — Apple-aligned automatic height with tray and item overrides
-- **Live callbacks** — one persistent Rip process retains closures and state
-- **Computed menus** — ordinary Rip loops and conditions build each render
-- **Automatic refresh** — a provider chooses its own interval or disables it
-- **Loud boundaries** — malformed items, duplicate action IDs, provider errors,
-  and invalid host messages remain visible instead of producing an empty menu
-
-## How It Works
-
-```text
-your tray.rip
-├── owns state, data, commands, and callbacks
-├── computes a complete panel tree
-└── serves the tree through @rip-lang/tray
-                │
-                │ private render/action protocol
-                ▼
-generic SwiftUI host
-├── MenuBarExtra status item
-├── native popover, labels, icons, controls, and pickers
-└── sends each click back to its Rip callback
-```
-
-The provider sends a complete render whenever it starts, refreshes, or handles
-an action. Each render atomically replaces the native panel and callback table.
-Stable action IDs preserve identity; duplicates reject before the menu reaches
-SwiftUI. Standard output is reserved for the private newline-delimited
-transport, while provider diagnostics use standard error.
-
-## Panel Vocabulary
-
-Every constructor returns an ordinary Rip object, so items compose naturally
-in arrays, comprehensions, and helper functions.
-
-| Constructor | Native result |
-| --- | --- |
-| `label title, ...` | Informational, disabled menu row |
-| `separator()` | Native divider |
-| `action title, id:, run:, ...` | Button calling a Rip closure |
-| `toggle title, id:, value:, run:, ...` | Checked item passing its new Boolean |
-| `link title, url, ...` | URL opened through macOS |
-| `submenu title, items, ...` | Nested native menu |
-| `directory title, id:, run:, ...` | Directory picker passing the selected path |
-| `quit title, ...` | Terminates the native host |
-
-Common options are `icon:`, `enabled:`, and `rowHeight:`. Callback items require
-a stable `id:` and `run:` function. A directory callback receives the selected
-path; a toggle callback receives the requested Boolean value.
-
-## Row Height
-
-Rows use the 44-point rhythm of current macOS system panels by default. Keep
-that adaptive default explicitly with `rowHeight: 'automatic'`, or set a
-positive minimum height in points for the complete tray:
-
-```coffee
-app = tray
-  title: 'Example'
-  rowHeight: 48
-  menu: -> [...]
-```
-
-An individual item overrides the tray default:
-
-```coffee
-action 'Detailed Status', id: 'status', rowHeight: 56, run: -> showStatus!()
-```
-
-The value is a minimum, not a fixed frame. Subtitles, localization, and
-accessibility text can still make a row taller. Omitting `rowHeight:` is the
-same as `automatic`, letting the host track the native default as macOS evolves.
-
-## Icons
-
-A string remains the compact spelling for an SF Symbol:
-
-```coffee
-icon: 'bolt.horizontal.circle'
-```
-
-Leading icons align as one sibling-group column. If any row in a group supplies
-`icon:`, every row reserves that column; when no row supplies one, the column
-disappears completely.
-
-Inline SVG keeps a complete tray app in one `.rip` file. SVGs use macOS
-template rendering by default: their color is replaced by the system's current
-menu-bar foreground, so they follow light mode, dark mode, selection, and
-accessibility contrast automatically.
-
-```coffee
-icon: svg '''
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">...</svg>
-  '''
-```
-
-Preserve authored colors explicitly when an image belongs inside the panel:
-
-```coffee
-logo: svg COLOR_LOGO, template: false
-```
-
-`logo:` replaces the panel's text heading with a branded image at the upper
-left; omitting it keeps the heading typographic. `svgFile './logo.svg'` reads a
-file relative to the provider's working directory. Prefer inline SVG when
-building a self-contained `.app`, since the builder cannot infer arbitrary
-files read by provider code. This package ships
-[`rip-color.svg`](assets/rip-color.svg) and
-[`rip-template.svg`](assets/rip-template.svg) as ready-to-use Rip artwork.
-
-## Rip Sites Tray
-
-The package's executable [`tray.rip`](tray.rip) mode is the first complete tray
-app. It uses only the public `rip edge` and `rip sites` commands to:
-
-- show whether the shared Caddy/Janus edge is stopped, external, or Rip-owned
-- start, stop, or reload the edge when Rip owns it
-- list every remembered Rip application and its live state
-- start, stop, restart, and open applications
-- open an application's manager log
-- add a project with the native macOS directory picker
-
-Starting the packaged edge asks the per-user Rip Agent to register a
-loopback-only `launchd` socket on standard HTTPS. Caddy and Janus continue to
-run as the signed-in user; `launchd` contributes only the inherited
-`127.0.0.1:443` listener that macOS does not allow an ordinary process to bind
-directly.
-
-Run it from this package:
-
-```bash
 bun run demo
 ```
 
-`RIP_TRAY_RIP` selects the Rip executable. `RIP_TRAY_PROVIDER` selects a
-provider when it is not passed as the host's first argument.
+That builds/runs the generic host against [`demo.rip`](demo.rip). Click
+**Increment** — Rip state updates and the menu rerenders. Copy `demo.rip` to
+start your own provider.
 
-## Native Host
+Explicit host launch:
 
-`TrayKit` is the reusable Swift package. `rip-tray-host` is its minimal
-executable: an accessory application with no Dock icon and one SwiftUI
-`MenuBarExtra` using the native window presentation. The host resolves and
-launches `rip`, decodes the provider's panel, renders it, presents native
-directory pickers and URLs, and returns action messages. It contains no
-knowledge of Rip Sites or the included provider.
+```bash
+swift build --package-path macos --product rip-tray-host
+RIP_TRAY_RIP=../../bin/rip \
+  macos/.build/debug/rip-tray-host "$(pwd)/demo.rip"
+```
 
-The built application still locates the machine's `rip` executable at runtime;
-`~/.bun/rip` and `~/.bun/bin/rip` are checked automatically. Run
-`bun run link-global` once on a development machine or set `RIP_TRAY_RIP` when
-launching the host directly. A portable bundle embeds one provider file and
-the tray runtime; keep that provider self-contained apart from
-`@rip-lang/tray`, Node/Bun built-ins, and commands available on the machine.
+### `rip tray` — discover + launch the menubar
+
+```bash
+rip tray
+```
+
+1. Finds a provider in the **current directory**:
+   - `tray.rip` (skipped if it is this toolkit file)
+   - `tray-<dirname>.rip` — e.g. `packages/sites` → `tray-sites.rip`
+2. Launches `rip-tray-host` with that provider (menubar appears).
+
+```bash
+cd packages/sites
+rip tray              # host + tray-sites.rip
+```
+
+From `packages/tray` itself there is no provider file (only the toolkit) —
+use `bun run demo` instead. Build the host once if missing:
+`swift build -c release --package-path macos --product rip-tray-host`.
+
+## How to run
+
+| Goal | Command |
+| --- | --- |
+| Demo counter tray | `bun run demo` |
+| Menubar for cwd provider | `rip tray` |
+| Sites menubar (dev) | `cd packages/sites && rip tray` |
+| Sites menubar (launchd) | `packages/sites/bin/rip-tray-agent start\|stop\|status` |
+| Any provider path | `rip-tray-host /abs/path/to/provider.rip` |
+
+Bins: `rip-tray` / `rip tray` launches the host; `rip-tray-build` is the optional
+`.app` wrapper. After pulling this rename, run `bun run link-global` once so
+`~/.bun/bin/rip-tray` points at the launcher (not the old builder). Restart a
+legacy LaunchAgent with `packages/sites/bin/rip-tray-agent start` if you still
+have an old `bin/rip-tray` job.
+
+### Environment
+
+| Variable | Meaning |
+| --- | --- |
+| `RIP_TRAY_RIP` | Path to `rip` (host looks here first; also `~/.bun/rip`, …) |
+| `RIP_TRAY_PROVIDER` | Provider path when not passed as the host’s first argument |
+| `RIP_TRAY_HOST` | Host binary override (`rip tray` and `rip-tray-agent`) |
+
+## Optional: Finder `.app` (`rip-tray-build`)
+
+Day-to-day use does **not** need a per-app binary. Use `rip-tray-build` only
+when you want a double-clickable wrapper that embeds one provider:
+
+```bash
+bun run build:demo
+# or:
+rip-tray-build demo.rip --name Demo --identifier io.example.tray.demo --output dist
+open dist/Demo.app
+```
+
+Flags: `--name`, `--identifier`, `--output`, `--icon`, `--force`. Prefer inline
+SVG in bundled providers — the builder does not chase arbitrary `svgFile` paths.
+
+## Features
+
+- **Pure Rip authoring** — one `.rip` provider is the whole app logic
+- **One native host** — SwiftUI `MenuBarExtra` for every provider
+- **Apple-style panel** — branded header, status rows, controls, scrollable body
+- **Full vocabulary** — labels, separators, actions, toggles, links, submenus, directory pickers, Quit
+- **SF Symbols + SVG** — template (menu-bar tint) or full-color logos
+- **Adaptive row height** — automatic or per-tray / per-item points
+- **Live callbacks** — one persistent Rip process keeps closures and state
+- **Loud errors** — bad items, duplicate ids, and host/provider faults stay visible
+
+## How It Works
+
+The provider sends a complete render on start, refresh, and after each action.
+Each render replaces the native panel and callback table. Stable action `id`s
+preserve identity; duplicates reject before SwiftUI. Stdout is the private
+newline-delimited protocol; diagnostics go to stderr.
+
+## Panel Vocabulary
+
+| Constructor | Native result |
+| --- | --- |
+| `label title, …` | Informational row |
+| `separator()` | Divider |
+| `action title, id:, run:, …` | Button → Rip closure |
+| `toggle title, id:, value:, run:, …` | Check item → Boolean |
+| `link title, url, …` | Opens URL |
+| `submenu title, items, …` | Nested menu |
+| `directory title, id:, run:, …` | Folder picker → path |
+| `quit title, …` | Quits the host |
+| `svg` / `svgFile` | Icon or `logo:` artwork |
+| `tray` / `serve` / `snapshot` | Definition, live loop, test helper |
+| `resolveProvider` / `resolveHost` | cwd discovery + host binary for `rip tray` |
+
+Common options: `icon:`, `enabled:`, `rowHeight:`, `subtitle:` (labels),
+`prompt:` (directory). Callbacks need a stable `id:` and `run:`.
+
+## Row Height
+
+Default is the ~44pt macOS system rhythm (`rowHeight: 'automatic'` or omit).
+Set a positive point minimum on the tray or on one item; values are minima, not
+fixed frames.
+
+## Icons
+
+```coffee
+icon: 'bolt.horizontal.circle'          # SF Symbol
+icon: svg '''<svg …>…</svg>'''          # template-tinted by default
+logo: svg COLOR_LOGO, template: false   # full-color panel heading
+```
+
+Leading icons share one column when any sibling row has an `icon:`. This package
+ships [`rip-color.svg`](assets/rip-color.svg) and
+[`rip-template.svg`](assets/rip-template.svg).
+
+## Rip Sites (separate package)
+
+Full instructions:
+[packages/sites/README.md — Menu-bar tray](../sites/README.md#menu-bar-tray).
+
+| Piece | Location |
+| --- | --- |
+| Provider | [`packages/sites/tray-sites.rip`](../sites/tray-sites.rip) |
+| LaunchAgent | [`packages/sites/bin/rip-tray-agent`](../sites/bin/rip-tray-agent) |
+| CLIs used | `rip sites`, `rip edge` only |
+
+```bash
+cd packages/sites && rip tray
+# or: packages/sites/bin/rip-tray-agent start
+```
 
 ## Test
 
@@ -241,8 +207,6 @@ bun run test
 bun run test:swift
 ```
 
-The Rip suite pins the public vocabulary, SVG modes, normalization, strict
-validation, callback dispatch, stateful rerendering, and compilation of the
-included app. The Swift check pins protocol decoding, native SVG rendering,
-and executable/provider discovery; a normal Swift build compiles both the
-reusable library and menu-bar host.
+Rip tests cover vocabulary, SVG modes, validation, callbacks, provider
+discovery, and compilation of the toolkit plus Sites provider. Swift checks
+cover protocol decoding, SVG rendering, and host discovery.

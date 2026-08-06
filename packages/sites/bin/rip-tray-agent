@@ -3,21 +3,26 @@
 # Closing this shell (or Cursor) does not stop the tray, edge, or sites.
 #
 # Expected:
-#   bin/rip, bin/rip-tray-host, packages/sites/bin/caddy-janus
-# Provider (from the checkout): packages/tray/tray.rip
+#   bin/rip, packages/sites/bin/caddy-janus, packages/sites/tray-sites.rip
+#   packages/tray/macos/.build/release/rip-tray-host  (swift build -c release)
+#
+# Ordinary CLI: from packages/sites, `rip tray` discovers tray-sites.rip.
+# This script only owns launchd start | stop | status.
 set -euo pipefail
 
-BIN="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$BIN/.." && pwd)"
-HOST="$BIN/rip-tray-host"
-RIP="$BIN/rip"
-CADDY="$ROOT/packages/sites/bin/caddy-janus"
-PROVIDER="$ROOT/packages/tray/tray.rip"
+SITES_BIN="$(cd "$(dirname "$0")" && pwd)"
+SITES="$(cd "$SITES_BIN/.." && pwd)"
+ROOT="$(cd "$SITES/../.." && pwd)"
+HOST="${RIP_TRAY_HOST:-$ROOT/packages/tray/macos/.build/release/rip-tray-host}"
+RIP="$ROOT/bin/rip"
+CADDY="$SITES_BIN/caddy-janus"
+PROVIDER="$SITES/tray-sites.rip"
 LABEL="io.ripdev.apps.tray"
 UID_NUM="$(/usr/bin/id -u)"
 DOMAIN="gui/$UID_NUM"
-PLIST="$BIN/.rip-tray.plist"
 HOME_DIR="${HOME:-$(/usr/bin/dscl . -read "/Users/$(/usr/bin/id -un)" NFSHomeDirectory 2>/dev/null | /usr/bin/awk '{print $2}')}"
+PLIST="$HOME_DIR/Library/LaunchAgents/$LABEL.plist"
+LOG="$HOME_DIR/Library/Logs/rip-tray.log"
 
 xml() {
   # Escape values embedded in the LaunchAgent plist.
@@ -36,12 +41,14 @@ tray_path() {
 
 usage() {
   echo "usage: $(basename "$0") [start|stop|status|help]"
+  echo "  LaunchAgent helper for the Rip Sites tray (not \`rip tray\`)."
 }
 
 write_plist() {
   local path_value home_value
   path_value="$(tray_path)"
   home_value="$HOME_DIR"
+  /bin/mkdir -p "$(/usr/bin/dirname "$PLIST")" "$(/usr/bin/dirname "$LOG")"
   /bin/cat >"$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -52,7 +59,7 @@ write_plist() {
     <string>$(xml "$HOST")</string>
     <string>$(xml "$PROVIDER")</string>
   </array>
-  <key>WorkingDirectory</key><string>$(xml "$ROOT")</string>
+  <key>WorkingDirectory</key><string>$(xml "$SITES")</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key><string>$(xml "$home_value")</string>
@@ -62,8 +69,8 @@ write_plist() {
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><false/>
-  <key>StandardOutPath</key><string>$(xml "$BIN/.rip-tray.log")</string>
-  <key>StandardErrorPath</key><string>$(xml "$BIN/.rip-tray.log")</string>
+  <key>StandardOutPath</key><string>$(xml "$LOG")</string>
+  <key>StandardErrorPath</key><string>$(xml "$LOG")</string>
 </dict></plist>
 EOF
 }
@@ -113,6 +120,9 @@ case "$cmd" in
     for path in "$HOST" "$RIP" "$CADDY" "$PROVIDER"; do
       if [[ ! -e "$path" ]]; then
         echo "missing: $path" >&2
+        if [[ "$path" == "$HOST" ]]; then
+          echo "build with: swift build -c release --package-path packages/tray/macos --product rip-tray-host" >&2
+        fi
         exit 1
       fi
     done
@@ -126,6 +136,8 @@ case "$cmd" in
     echo "  provider $PROVIDER"
     echo "  rip      $RIP"
     echo "  caddy    $CADDY"
+    echo "  plist    $PLIST"
+    echo "  log      $LOG"
     echo "  PATH     $(tray_path)"
     ;;
   *)
