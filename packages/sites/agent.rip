@@ -95,6 +95,7 @@ validateState = (state) ->
   for app in state.apps
     valid = isRecord(app) and /^[a-f0-9]{16}$/.test(app.id) and typeof app.name is 'string' and typeof app.root is 'string' and Array.isArray(app.hosts) and app.hosts.every((host) -> typeof host is 'string') and isRecord(app.options) and Number.isInteger(app.options.workers) and app.options.workers > 0 and Number.isInteger(app.options.concurrency) and app.options.concurrency > 0 and typeof app.options.watchApp is 'boolean' and typeof app.options.watchApi is 'boolean' and typeof app.options.eager is 'boolean' and app.desired in ['running', 'stopped']
     fail("malformed app record at #{paths.state}", 500) unless valid
+    fail("reserved app name #{JSON.stringify(app.name)} at #{paths.state}", 500) if app.name in ['edge', 'all', 'tray']
     fail("duplicate app record at #{paths.state}", 500) if ids.has(app.id) or names.has(app.name) or roots.has(app.root)
     ids.add app.id
     names.add app.name

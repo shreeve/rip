@@ -229,6 +229,10 @@ Without `--control` / `JANUS_CONTROL` you get:
 Also: `rip sites hold|release|migrate|recover <app>`, `rip sites browse`,
 and the package-bin equivalents under `rip site …` — see [CLI](#cli).
 
+`hold` / `release` / `migrate` / `recover` take the same catalog selectors as
+`start` / `stop` (id, name, or root). Migrate and recover run with the app’s
+project root as cwd so migration paths resolve where the manager expects.
+
 ### Menubar — Sites tray
 
 A clickable subset of `rip sites`, via
@@ -1284,11 +1288,12 @@ Control commands find the canonical manager for the project:
 ```bash
 rip sites hold <app>
 rip sites release <app>
-rip sites migrate <app> [models] --dir migrations
+rip sites migrate <app> [migration-entry] --dir migrations
 rip sites recover <app> <operation-id>
-# Foreground equivalents still work via `rip site …` / `rip sites run …`
-rip site status [project]
-rip site stop [project]
+# Foreground without the catalog still works:
+rip site hold [project]
+rip site migrate [migration-entry] --dir migrations
+rip site recover <operation-id>
 ```
 
 `status` prints the manager's machine-readable JSON state. `stop` asks the

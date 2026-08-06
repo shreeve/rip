@@ -4,7 +4,7 @@
 # Reserved nouns: edge, all, tray — never real app names.
 
 import { agentPaths, printJson, probeAgent, requestAgent } from './appliance.rip'
-import { addCatalogApp, findCatalogApp, loadCatalog, removeCatalogApp } from './catalog.rip'
+import { addCatalogApp, findCatalogApp, loadCatalog, removeCatalogApp, snapshotCatalogApp } from './catalog.rip'
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -40,12 +40,12 @@ HELP = '''
     open <app|edge>                      Open the app URL or status dashboard
     logs <app|edge|all> [--lines N] [-f] Manager or edge logs
 
-  Advanced (foreground manager — was `rip site`):
-    run [project] …                    Foreground manager (blocks)
-    browse <dir> …                     Publish one directory
-    hold|release <app>                 Deploy barriers
-    migrate <app> [entry] …            Coordinated DB migrate
-    recover <app> <op-id>              Fix-forward recovery
+  Advanced (catalog app → manager; same nouns as start/stop):
+    run [project] …                    Foreground manager (no catalog)
+    browse <dir> …                     Publish one directory (no catalog)
+    hold|release <app> […]             Deploy barriers on a remembered app
+    migrate <app> [entry] […]         Coordinated DB migrate (cwd = app root)
+    recover <app> <op-id> […]         Fix-forward recovery (cwd = app root)
 
   Start edge options:
     --caddy PATH  --config PATH  --control TARGET
@@ -86,39 +86,59 @@ exportPath = null
 trustExport = false
 localOff = false
 
-# Advanced / foreground manager verbs forward the rest of argv unchanged
-# to site.rip (its own flags). Do not parse Sites catalog/edge options first.
+# Advanced verbs: run/browse stay thin `rip site` forwards.
+# hold/release/migrate/recover take a catalog <app> noun (id|name|root),
+# resolve it, then invoke site.rip against that project — same selectors as start/stop.
 ADVANCED = ['run', 'browse', 'hold', 'release', 'migrate', 'recover']
 
-forwardSite = (argv) ->
+seedJanusControl = (env) ->
+  return env if env.JANUS_CONTROL
+  try
+    doc = loadCatalog()
+    control = doc.edge?.control
+    want = doc.edge?.desired is 'running' or doc.apps.some((app) -> app.desired is 'running')
+    if want
+      edge = requestAgent! 'rip-sites', 'GET', '/1.0/edge', null, { start: true }
+      env.JANUS_CONTROL = edge.control if edge?.control?
+    else if control?
+      env.JANUS_CONTROL = control
+  catch then null
+  env
+
+forwardSite = (argv, options = {}) ->
   site = join(import.meta.dir, 'site.rip')
   preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
   abort 'rip-sites: the Rip loader is missing' unless preload?
-  env = { ...process.env }
-  unless env.JANUS_CONTROL
-    try
-      doc = loadCatalog()
-      control = doc.edge?.control
-      want = doc.edge?.desired is 'running' or doc.apps.some((app) -> app.desired is 'running')
-      if want
-        edge = requestAgent! 'rip-sites', 'GET', '/1.0/edge', null, { start: true }
-        env.JANUS_CONTROL = edge.control if edge?.control?
-      else if control?
-        env.JANUS_CONTROL = control
-    catch then null
+  env = seedJanusControl! { ...process.env }
   result = Bun.spawnSync [process.execPath, preload, site, ...argv],
+    cwd: options.cwd or process.cwd()
     stdout: 'inherit'
     stderr: 'inherit'
     stdin: 'inherit'
     env: env
   exit result.exitCode ?? 1
 
+takeAppNoun = ->
+  abort "rip-sites: #{verb} requires an app noun (id | name | root)" unless args.length and not args[0].startsWith('-')
+  selector = args.shift()
+  abort "rip-sites: #{JSON.stringify(selector)} is reserved (edge | all | tray) — not an app name" if selector in RESERVED
+  findCatalogApp loadCatalog(), selector
+
 if verb in ADVANCED
-  if verb in ['hold', 'release', 'migrate', 'recover']
-    abort "rip-sites: #{verb} requires an app noun" unless args.length and not args[0].startsWith('-')
-    abort "rip-sites: #{JSON.stringify(args[0])} is reserved (edge | all | tray) — not an app name" if args[0] in RESERVED
-  forwarded = if verb is 'browse' then ['browse', ...args] else if verb is 'run' then args else [verb, ...args]
-  forwardSite! forwarded
+  if verb is 'run'
+    forwardSite! args
+  else if verb is 'browse'
+    forwardSite! ['browse', ...args]
+  else if verb in ['hold', 'release']
+    app = takeAppNoun!
+    forwardSite! [verb, app.root, ...args]
+  else if verb is 'migrate'
+    app = takeAppNoun!
+    forwardSite! ['migrate', ...args], { cwd: app.root }
+  else if verb is 'recover'
+    app = takeAppNoun!
+    abort 'rip-sites: recover requires an operation id' unless args.length and not args[0].startsWith('-')
+    forwardSite! ['recover', ...args], { cwd: app.root }
 
 take = (flag) ->
   abort "rip-sites: #{flag} requires a value" unless args.length
@@ -293,15 +313,16 @@ wantsControl = ->
 controlGet = (path) ->
   requestAgent! 'rip-sites', 'GET', path, null, { start: wantsControl! }
 
-offlineApp = (app) ->
-  host = app.hosts?.find((h) -> h.endsWith '.ripdev.io') or app.hosts?[0]
-  {
-    ...app
-    state: 'stopped'
-    pid: null
-    url: if host? then "https://#{host}/" else null
-    manager: null
-  }
+offlineApp = (app) -> snapshotCatalogApp app
+
+ensureLiveControl = ->
+  live = probeAgent! 'rip-sites'
+  return live if live
+  return null unless wantsControl!
+  try
+    requestAgent! 'rip-sites', 'GET', '/1.0', null, { start: true }
+    probeAgent! 'rip-sites'
+  catch then null
 
 offlineEdge = (edge, health = null) ->
   control = process.env.JANUS_CONTROL or edge?.control or null
@@ -345,7 +366,8 @@ readOfflineEdge = ->
 switch verb
   when 'list'
     abort 'rip-sites: list takes no noun' if noun?
-    if probeAgent! 'rip-sites'
+    live = ensureLiveControl!
+    if live
       apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: false }
     else
       apps = loadCatalog().apps.map offlineApp
@@ -392,12 +414,7 @@ switch verb
 
   when 'status'
     abort 'rip-sites: status takes at most one noun' if positionals.length > 1
-    live = probeAgent! 'rip-sites'
-    if not live and wantsControl!
-      try
-        requestAgent! 'rip-sites', 'GET', '/1.0', null, { start: true }
-        live = probeAgent! 'rip-sites'
-      catch then live = null
+    live = ensureLiveControl!
     if not noun? or noun is 'all'
       if live
         edge = requestAgent! 'rip-sites', 'GET', '/1.0/edge', null, { start: false }

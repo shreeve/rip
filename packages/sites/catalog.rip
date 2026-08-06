@@ -119,6 +119,31 @@ export findCatalogApp = (doc, selector) ->
   fail "ambiguous app #{JSON.stringify(decoded)}" unless matches.length is 1
   matches[0]
 
+readOwnerPid = (root, label) ->
+  owner = managerRuntime(root, label).owner
+  return null unless existsSync owner
+  try
+    value = JSON.parse readFileSync(owner, 'utf8')
+    if Number.isInteger(value.pid) then value.pid else null
+  catch then null
+
+# Live manager probe without the control plane — keeps list/status honest after crash.
+export snapshotCatalogApp = (app, label = 'rip-sites') ->
+  host = app.hosts?.find((h) -> h.endsWith '.ripdev.io') or app.hosts?[0]
+  urlHint = if host? then "https://#{host}/" else null
+  manager = null
+  try
+    response = fetch! 'http://manager/status', { method: 'GET', unix: managerRuntime(app.root, label).socket, signal: AbortSignal.timeout(500) }
+    manager = response.json! if response.ok
+  catch then null
+  {
+    ...app
+    state: if manager? then (if manager.stopping then 'stopping' else 'running') else 'stopped'
+    pid: if manager? then readOwnerPid(app.root, label) else null
+    url: urlHint
+    manager
+  }
+
 export addCatalogApp = (body, label = 'rip-sites') ->
   doc = loadCatalog label
   root = body.root or process.cwd()
@@ -155,15 +180,7 @@ export addCatalogApp = (body, label = 'rip-sites') ->
     lastExit: null
   doc.apps.push app
   saveCatalog doc, label
-  # Prefer the preferred host for a stable URL hint when the edge is down.
-  host = app.hosts.find((h) -> h.endsWith '.ripdev.io') or app.hosts[0]
-  {
-    ...app
-    state: 'stopped'
-    pid: null
-    url: if host? then "https://#{host}/" else null
-    manager: null
-  }
+  snapshotCatalogApp app, label
 
 export removeCatalogApp = (selector, label = 'rip-sites') ->
   doc = loadCatalog label

@@ -137,6 +137,22 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     ok existsSync(join(site.state, 'sites.json')), 'add writes sites.json'
     ok not existsSync(join(site.runtime, 'agent.json')), 'add must not spawn the control plane'
 
+    # Catalog nouns resolve like start/stop — not as raw site.rip paths/entries.
+    held = cli! APP, ['hold', 'fixture'], env
+    eq held.code, 1
+    ok not held.err.includes('project not found: fixture'), 'hold must resolve catalog name to root'
+    ok held.err.includes('hold failed') or held.err.includes('ECONNREFUSED') or held.err.includes('No such file') or held.err.includes('manager'), "hold reaches manager for #{project}: #{held.err}"
+    migrated = cli! APP, ['migrate', 'fixture', '--dir', 'migrations'], env
+    eq migrated.code, 1
+    ok not migrated.err.includes('migration entries'), 'migrate must not treat the app name as a migration entry'
+    ok not migrated.err.includes('project not found: fixture')
+    unknownHold = cli! APP, ['hold', 'missing-app'], env
+    eq unknownHold.code, 1
+    ok unknownHold.err.includes 'unknown app'
+    recoverShape = cli! APP, ['recover', 'fixture'], env
+    eq recoverShape.code, 1
+    ok recoverShape.err.includes 'operation id'
+
     duplicate = cli! APP, ['add', project], env
     eq duplicate.code, 1
     ok duplicate.err.includes 'project is already registered'
@@ -173,6 +189,11 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     eq adopted.state, 'running'
     eq adopted.desired, 'running'
     eq adopted.pid, live.pid
+    # list must agree with status after control crash (revive or probe manager).
+    listedAfter = JSON.parse((cli!(APP, ['list', '--json'], env)).out)
+    eq listedAfter.length, 1
+    eq listedAfter[0].state, 'running'
+    eq listedAfter[0].pid, live.pid
 
     logs = cli! APP, ['logs', 'fixture', '--json'], env
     eq logs.code, 0
