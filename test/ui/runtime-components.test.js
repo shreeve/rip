@@ -925,6 +925,7 @@ describe('context: offer/accept walks', () => {
       const Leaf = defineComponent(api, {
         name: 'Leaf', props: [],
         init(props, a) { out.push(a.getContext('depth')); },
+        create() { return document.createComment('leaf'); },
       });
       const Mid = defineComponent(api, {
         name: 'Mid', props: [],
