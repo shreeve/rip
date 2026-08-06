@@ -31,6 +31,7 @@ export agentPaths = (label = 'rip-agent') ->
     owner: join(runtimeRoot, 'agent.json')
     edgeAdmin: join(runtimeRoot, 'caddy-admin.sock')
     edgeControl: join(runtimeRoot, 'janus.sock')
+    edgeStatus: join(runtimeRoot, 'edge-status.sock')
     edgePid: join(runtimeRoot, 'caddy.pid')
     edgeExit: join(runtimeRoot, 'caddy.exit.json')
     edgeLog: join(stateRoot, 'edge.log')

@@ -71,9 +71,34 @@ rip edge status
 #   Config:  …/packages/sites/Caddyfile
 ```
 
-That binds `ripdev.io` and `*.ripdev.io` on loopback HTTPS with the
-development certificate beside this README. Those names resolve only to
-`127.0.0.1`.
+That binds `ripdev.io` and `*.ripdev.io` on loopback **HTTP→HTTPS** (ports
+**80/443** by default) with the development certificate beside this README.
+Those names resolve only to `127.0.0.1`. Browser status is at
+`https://sites.ripdev.io/` / `https://ripdev.io/` (Rip-owned page — not Bonjour).
+
+Three postures:
+
+| | **Default** (`rip edge start`) | **`local`** | **`public`** |
+| --- | --- | --- | --- |
+| Bind | `127.0.0.1` | all interfaces | phase 2 |
+| Bonjour | off | shared `sites.local` (apps use `{name}.local` hosts) | — |
+| Apps | `https://{name}.ripdev.io/` | `https://{name}.local/` (register that host) | — |
+| Status | `https://sites.ripdev.io/` | `https://sites.local/` (Rip catalog + `/trust`) | — |
+| TLS | packaged `*.ripdev.io` | `tls internal` (trust first) | — |
+
+```bash
+rip edge trust                 # install the local CA (required before local)
+# stop running sites first — mode flips recreate the edge
+rip edge local                 # LAN / Bonjour posture (stop+recreate)
+rip edge local --off           # back to default
+rip edge trust --export ca.crt # share the CA with a phone / peer
+# phone bootstrap without temporary HTTPS accept:
+#   http://sites.local/trust
+rip edge public                # refuses until phase 2
+```
+
+`*.ripdev.io` names still resolve only to `127.0.0.1`, so phones on the LAN
+need `{name}.local` hosts (and the trusted local CA), not the ripdev.io URLs.
 
 Overrides when needed:
 
@@ -149,13 +174,17 @@ manager (see [`rip site`](#rip-site--one-foreground-manager)).
 
 | Command | Meaning |
 | --- | --- |
-| `rip edge status [--json]` | Running? Rip-owned or external? Control socket path |
-| `rip edge start [options]` | Start packaged (or `--caddy` / `--config`) edge |
+| `rip edge status [--json]` | Running? Mode? Rip-owned or external? Control socket path |
+| `rip edge start [options]` | Start packaged (or `--caddy` / `--config`) edge in current mode |
 | `rip edge reload` | Reload a Rip-owned Caddyfile |
 | `rip edge stop` | Stop a Rip-owned edge (**rejects if any site is running**) |
+| `rip edge trust [--export [PATH]]` | Install (or export) the local edge CA |
+| `rip edge local [--off]` | Enter (or leave) LAN / Bonjour posture — requires trust |
+| `rip edge public` | Refuse — public posture is phase 2 |
 
 Start options: `--caddy PATH`, `--config PATH`, `--control TARGET`,
-`--base-url TEMPLATE` (must contain `{host}`).
+`--base-url TEMPLATE` (must contain `{host}`), `--http-port N`,
+`--https-port N` (defaults **80** / **443**).
 
 ### `rip sites` — Agent catalog (remembered projects)
 
@@ -196,10 +225,16 @@ Also: `rip site status|stop|hold|release`, `rip site browse`, `rip site migrate`
 
 ### Menubar — Sites tray
 
-Same operations as `rip sites` / `rip edge`, via
+A clickable subset of `rip sites` / `rip edge`, via
 [`tray-sites.rip`](tray-sites.rip) and the generic `@rip-lang/tray` host.
 There is **no** Sites-specific native binary — see
 [packages/tray/README.md](../tray/README.md).
+
+**Tray covers:** edge start/stop/reload, **Open Dashboard**, **Trust CA**,
+**Use Local / Use Default**, site start/stop/restart/open/log, Add Site.
+
+**CLI-only for now:** `rip sites remove`, `rip edge trust --export`,
+`rip edge public`, port overrides, custom `--config` / `--caddy`.
 
 **Foreground (dev)** — build the host once, then from this package:
 
@@ -224,9 +259,11 @@ Plist under `~/Library/LaunchAgents`; logs under `~/Library/Logs`.
 **Using the menu**
 
 1. **Edge → Start** if the shared edge is down  
-2. **Add Site…** and pick a project directory  
-3. Site submenu → **Start** → **Open**  
-4. **Open Log** / **Restart** / **Stop** as needed  
+2. **Edge → Open Dashboard** for the Rip status page (`sites.ripdev.io` or `sites.local`)  
+3. **Edge → Trust CA…** then **Use Local (LAN)…** when you want Bonjour (stop sites first)  
+4. **Add Site…** and pick a project directory  
+5. Site submenu → **Start** → **Open**  
+6. **Open Log** / **Restart** / **Stop** as needed  
 
 Provider alone (what the host spawns), without the menubar chrome:
 
@@ -1271,19 +1308,25 @@ another Caddyfile; the packaged baseline beside this README is the default. An
 external reachable edge is observable but never silently adopted as a
 Rip-owned process.
 
-On macOS, the packaged baseline remains both unprivileged and loopback-only on
-standard HTTPS. The Agent registers a per-user `launchd` socket for
-`127.0.0.1:443`; the launchd listener passes that descriptor to an ordinary
-user-owned Caddy process, which serves HTTP/1.1 and HTTP/2 directly from the
-inherited TCP socket. The packaged Caddyfile explicitly selects `h1 h2` because
-HTTP/3 is QUIC over UDP and cannot use the stream descriptor passed as `fd/3`.
-Adding HTTP/3 to this launch path requires a separately inherited loopback UDP
-socket on port 443 and Caddy integration that assigns it to QUIC; enabling the
-protocol without that datagram listener makes Caddy reject startup. Stop
-removes the launchd job and releases port 443. A running edge survives an Agent
-restart, and the Agent recreates its launchd job after a login or reboot when
-the durable desired state is `running`. An explicitly selected Caddyfile runs
-directly as a Rip-owned child and retains its own listener choices.
+On macOS, the packaged baselines remain both unprivileged and (in default
+mode) loopback-only on standard HTTP and HTTPS. The Agent registers per-user
+`launchd` sockets for `127.0.0.1:80` and `127.0.0.1:443` (or the configured
+ports; `local` mode omits the loopback node name so launchd binds all
+interfaces). The launchd listener activates both sockets and passes them as
+`fd/3` (HTTP) and `fd/4` (HTTPS) to an ordinary user-owned Caddy process, which
+serves HTTP/1.1 and HTTP/2 directly from the inherited TCP sockets. The
+packaged Caddyfiles explicitly select `h1 h2` because HTTP/3 is QUIC over UDP
+and cannot use stream descriptors. Adding HTTP/3 to this launch path requires
+separately inherited loopback UDP sockets on the HTTPS port and Caddy
+integration that assigns them to QUIC; enabling the protocol without that
+datagram listener makes Caddy reject startup. Default posture has no Bonjour
+and no side-door status port. Stop removes the launchd job and releases the
+ports. A running edge survives an Agent restart, and the Agent recreates its
+launchd job after a login or reboot when the durable desired state is
+`running`. Mode flips (`rip edge local` / `local --off`) stop and recreate
+rather than reload, because the socket bind and Caddyfile change. An
+explicitly selected Caddyfile runs directly as a Rip-owned child and retains
+its own listener choices.
 
 Migration is explicit. It never runs because the server started, a file
 changed, or a worker booted. Coordinated migration enters Maintenance, drains

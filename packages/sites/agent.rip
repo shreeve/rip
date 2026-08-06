@@ -10,9 +10,22 @@ throw Error.new('@rip-lang/sites/agent is private process machinery') unless imp
 
 paths = agentPaths 'rip-agent'
 secureDirectory paths.appLogs, 'rip-agent'
-PACKAGED_CADDYFILE = realpathSync join(import.meta.dir, 'Caddyfile')
+PACKAGED_DEFAULT = realpathSync join(import.meta.dir, 'Caddyfile')
+PACKAGED_LOCAL = realpathSync join(import.meta.dir, 'Caddyfile.local')
+PACKAGED_CADDYFILES = Set.new [PACKAGED_DEFAULT, PACKAGED_LOCAL]
+CADDY_PKI_ROOT = if platform() is 'darwin'
+  join process.env.HOME, 'Library', 'Application Support', 'Caddy', 'pki', 'authorities', 'local', 'root.crt'
+else
+  join process.env.XDG_DATA_HOME or join(process.env.HOME, '.local', 'share'), 'caddy', 'pki', 'authorities', 'local', 'root.crt'
 
-usesLaunchd = (config) -> platform() is 'darwin' and config is PACKAGED_CADDYFILE
+usesLaunchd = (config) -> platform() is 'darwin' and PACKAGED_CADDYFILES.has(config)
+
+packagedConfigForMode = (mode) -> if mode is 'local' then PACKAGED_LOCAL else PACKAGED_DEFAULT
+
+# App hosts follow posture: *.ripdev.io in default, *.local in local.
+defaultAppHost = (name, mode) -> if mode is 'local' then "#{name}.local" else "#{name}.ripdev.io"
+
+bindHost = -> if state.edge.mode is 'local' then '0.0.0.0' else '127.0.0.1'
 
 fail = (message, status = 400) ->
   error = Error.new message
@@ -45,6 +58,10 @@ defaultState = ->
     control: process.env.JANUS_CONTROL or 'http://127.0.0.1:7600'
     admin: null
     baseUrl: 'https://{host}/'
+    mode: 'default'
+    httpPort: 80
+    httpsPort: 443
+    localCaTrusted: false
     lastError: null
 
 validateState = (state) ->
@@ -60,7 +77,7 @@ validateState = (state) ->
     names.add app.name
     roots.add app.root
   edge = state.edge
-  valid = edge.desired in ['running', 'stopped'] and typeof edge.managed is 'boolean' and (edge.pid is null or Number.isInteger(edge.pid)) and (edge.caddy is null or typeof edge.caddy is 'string') and (edge.config is null or typeof edge.config is 'string') and typeof edge.control is 'string' and edge.control.length > 0 and (edge.admin is null or typeof edge.admin is 'string') and typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}') and (edge.lastError is null or typeof edge.lastError is 'string')
+  valid = edge.desired in ['running', 'stopped'] and typeof edge.managed is 'boolean' and (edge.pid is null or Number.isInteger(edge.pid)) and (edge.caddy is null or typeof edge.caddy is 'string') and (edge.config is null or typeof edge.config is 'string') and typeof edge.control is 'string' and edge.control.length > 0 and (edge.admin is null or typeof edge.admin is 'string') and typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}') and edge.mode in ['default', 'local'] and Number.isInteger(edge.httpPort) and edge.httpPort >= 1 and edge.httpPort <= 65535 and Number.isInteger(edge.httpsPort) and edge.httpsPort >= 1 and edge.httpsPort <= 65535 and typeof edge.localCaTrusted is 'boolean' and (edge.lastError is null or typeof edge.lastError is 'string')
   fail("malformed edge record at #{paths.state}", 500) unless valid
   state
 
@@ -88,8 +105,22 @@ migrateState = (raw) ->
     return app if typeof options.watchApp is 'boolean' and typeof options.watchApi is 'boolean' and not ('watch' of app.options)
     changed = true
     { ...app, options }
-  return { state: raw, dirty: false } unless changed
-  { state: { ...raw, apps }, dirty: true }
+  edge = if isRecord(raw.edge) then { ...raw.edge } else null
+  if edge?
+    unless edge.mode in ['default', 'local']
+      edge.mode = 'default'
+      changed = true
+    unless Number.isInteger(edge.httpPort) and edge.httpPort >= 1 and edge.httpPort <= 65535
+      edge.httpPort = 80
+      changed = true
+    unless Number.isInteger(edge.httpsPort) and edge.httpsPort >= 1 and edge.httpsPort <= 65535
+      edge.httpsPort = 443
+      changed = true
+    unless typeof edge.localCaTrusted is 'boolean'
+      edge.localCaTrusted = false
+      changed = true
+  return { state: (if edge? then { ...raw, apps, edge } else { ...raw, apps }), dirty: true } if changed
+  { state: raw, dirty: false }
 
 loadState = ->
   return { state: defaultState(), dirty: false } unless existsSync paths.state
@@ -209,7 +240,7 @@ addApp = (body) ->
   fail "app name is already registered: #{name}", 409 if state.apps.some((app) -> app.name is name)
   hosts = body.hosts
   if not hosts?
-    hosts = if existsSync(join(project.root, 'serve.rip')) then [] else ["#{name}.ripdev.io"]
+    hosts = if existsSync(join(project.root, 'serve.rip')) then [] else [defaultAppHost(name, state.edge.mode)]
   fail 'hosts must be an array' unless Array.isArray hosts
   fail "invalid host #{JSON.stringify(host)}" for host in hosts when not validHost(host)
   fail 'hosts must not contain duplicates' unless Set.new(hosts).size is hosts.length
@@ -365,6 +396,10 @@ snapshotEdge = ->
     config: state.edge.config
     control: state.edge.control
     baseUrl: state.edge.baseUrl
+    mode: state.edge.mode
+    httpPort: state.edge.httpPort
+    httpsPort: state.edge.httpsPort
+    localCaTrusted: state.edge.localCaTrusted
     launcher: launcher
     janus: health
     lastError: state.edge.lastError
@@ -378,7 +413,28 @@ resolveFile = (value, description) ->
   fail "#{description} is not a file: #{value}" unless statSync(path).isFile()
   path
 
+resolveCaddy = (explicit = null) ->
+  packagedCaddy = join(import.meta.dir, 'bin', 'caddy-janus')
+  caddyInput = explicit or state.edge.caddy or process.env.JANUS_CADDY or (existsSync(packagedCaddy) and packagedCaddy) or Bun.which('caddy')
+  fail 'no Janus-enabled Caddy binary — pass --caddy PATH or set JANUS_CADDY', 503 unless caddyInput?
+  caddy = resolveFile caddyInput, 'Caddy binary'
+  modules = Bun.spawnSync [caddy, 'list-modules'], { stdout: 'pipe', stderr: 'pipe' }
+  fail "Caddy binary does not contain Janus: #{caddy}", 503 unless modules.exitCode is 0 and modules.stdout.toString().split('\n').includes('janus')
+  caddy
+
 edgeAddress = (path) -> "unix/#{path}"
+
+edgeEnv = (launcher, control) ->
+  {
+    ...process.env
+    RIP_EDGE_ADMIN: paths.edgeAdmin
+    RIP_EDGE_HTTP_BIND: if launcher is 'launchd' then 'fd/3' else bindHost()
+    RIP_EDGE_BIND: if launcher is 'launchd' then 'fd/4' else bindHost()
+    RIP_EDGE_CONTROL: control
+    RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt')
+    RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key')
+    RIP_EDGE_STATUS: paths.edgeStatus
+  }
 
 LAUNCHD_LABEL = 'io.ripdev.edge'
 LAUNCHD_DOMAIN = if typeof process.getuid is 'function' then "gui/#{process.getuid!}" else null
@@ -386,6 +442,17 @@ LAUNCHD_SERVICE = if LAUNCHD_DOMAIN? then "#{LAUNCHD_DOMAIN}/#{LAUNCHD_LABEL}" e
 
 xml = (value) -> String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
 xmlEntry = (key, value) -> "<key>#{xml key}</key><string>#{xml value}</string>"
+
+launchdSocket = (name, port) ->
+  node = if state.edge.mode is 'local' then '' else '<key>SockNodeName</key><string>127.0.0.1</string>'
+  """
+        <key>#{xml name}</key><dict>
+          <key>SockFamily</key><string>IPv4</string>
+          #{node}
+          <key>SockServiceName</key><integer>#{port}</integer>
+          <key>SockType</key><string>stream</string>
+        </dict>
+  """
 
 launchdPlist = (caddy, config, control) ->
   launcher = resolveFile join(import.meta.dir, 'launchd-listener.js'), 'launchd edge listener'
@@ -395,10 +462,10 @@ launchdPlist = (caddy, config, control) ->
     PATH: '/usr/bin:/bin:/usr/sbin:/sbin'
     TMPDIR: process.env.TMPDIR
     RIP_EDGE_ADMIN: paths.edgeAdmin
-    RIP_EDGE_BIND: 'fd/3'
     RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt')
     RIP_EDGE_CONTROL: control
     RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key')
+    RIP_EDGE_STATUS: paths.edgeStatus
   argumentXml = argv.map((value) -> "<string>#{xml value}</string>").join('')
   environmentXml = Object.keys(environment).sort().filter((key) -> environment[key]?).map((key) -> xmlEntry(key, environment[key])).join('')
   """<?xml version="1.0" encoding="UTF-8"?>
@@ -414,12 +481,8 @@ launchdPlist = (caddy, config, control) ->
       <key>StandardOutPath</key><string>#{xml paths.edgeLog}</string>
       <key>StandardErrorPath</key><string>#{xml paths.edgeLog}</string>
       <key>Sockets</key><dict>
-        <key>HTTPS</key><dict>
-          <key>SockFamily</key><string>IPv4</string>
-          <key>SockNodeName</key><string>127.0.0.1</string>
-          <key>SockServiceName</key><integer>443</integer>
-          <key>SockType</key><string>stream</string>
-        </dict>
+#{launchdSocket 'HTTP', state.edge.httpPort}
+#{launchdSocket 'HTTPS', state.edge.httpsPort}
       </dict>
     </dict></plist>
     """
@@ -446,24 +509,25 @@ edgeRestartAt = 0
 startEdge = (body = {}, automatic = false) ->
   return edgeStarting if edgeStarting?
   task = do ->
-    rejectUnknown body, ['caddy', 'config', 'control', 'baseUrl'], 'edge start body'
+    rejectUnknown body, ['caddy', 'config', 'control', 'baseUrl', 'httpPort', 'httpsPort'], 'edge start body'
     fail 'control must be a non-empty string' if body.control? and (typeof body.control isnt 'string' or not body.control)
     fail 'baseUrl must be a string containing {host}' if body.baseUrl? and (typeof body.baseUrl isnt 'string' or not body.baseUrl.includes('{host}'))
+    fail 'httpPort must be an integer from 1 through 65535' if body.httpPort? and (not Number.isInteger(body.httpPort) or body.httpPort < 1 or body.httpPort > 65535)
+    fail 'httpsPort must be an integer from 1 through 65535' if body.httpsPort? and (not Number.isInteger(body.httpsPort) or body.httpsPort < 1 or body.httpsPort > 65535)
     current = snapshotEdge!
     return current if current.state is 'running'
-    packagedCaddy = join(import.meta.dir, 'bin', 'caddy-janus')
-    caddyInput = body.caddy or state.edge.caddy or process.env.JANUS_CADDY or (existsSync(packagedCaddy) and packagedCaddy) or Bun.which('caddy')
-    fail 'no Janus-enabled Caddy binary — pass --caddy PATH or set JANUS_CADDY', 503 unless caddyInput?
-    caddy = resolveFile caddyInput, 'Caddy binary'
-    configInput = body.config or state.edge.config or join(import.meta.dir, 'Caddyfile')
+    fail 'local mode requires `rip edge trust` first — install the edge CA, then retry', 403 if state.edge.mode is 'local' and not state.edge.localCaTrusted
+    caddy = resolveCaddy! body.caddy
+    configInput = body.config or state.edge.config or packagedConfigForMode(state.edge.mode)
     config = resolveFile configInput, 'Caddyfile'
-    modules = Bun.spawnSync [caddy, 'list-modules'], { stdout: 'pipe', stderr: 'pipe' }
-    moduleText = modules.stdout.toString()
-    fail "Caddy binary does not contain Janus: #{caddy}", 503 unless modules.exitCode is 0 and moduleText.split('\n').includes('janus')
     control = body.control or paths.edgeControl
     baseUrl = body.baseUrl or state.edge.baseUrl or 'https://{host}/'
+    httpPort = if body.httpPort? then body.httpPort else state.edge.httpPort
+    httpsPort = if body.httpsPort? then body.httpsPort else state.edge.httpsPort
+    state.edge.httpPort = httpPort
+    state.edge.httpsPort = httpsPort
     launcher = if usesLaunchd(config) then 'launchd' else 'direct'
-    environment = { ...process.env, RIP_EDGE_ADMIN: paths.edgeAdmin, RIP_EDGE_BIND: (if launcher is 'launchd' then 'fd/3' else '127.0.0.1'), RIP_EDGE_CONTROL: control, RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt'), RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key') }
+    environment = edgeEnv launcher, control
     # These paths belong exclusively to a Rip-owned edge. An unclean exit can
     # leave the filesystem entries behind after no listener remains.
     try unlinkSync paths.edgeAdmin
@@ -526,8 +590,7 @@ stopEdge = ->
   for app in state.apps
     running.push app if managerStatus!(app)?
   fail "stop #{running.map((app) -> app.name).join(', ')} before stopping the edge", 409 if running.length
-  bind = if launcher is 'launchd' then 'fd/3' else '127.0.0.1'
-  result = Bun.spawnSync [state.edge.caddy, 'stop', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, RIP_EDGE_ADMIN: state.edge.admin, RIP_EDGE_BIND: bind, RIP_EDGE_CONTROL: state.edge.control, RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt'), RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key') } }
+  result = Bun.spawnSync [state.edge.caddy, 'stop', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: edgeEnv(launcher, state.edge.control) }
   fail "Caddy stop failed: #{result.stderr.toString().trim()}", 503 unless result.exitCode is 0
   bootoutLaunchd true if launcher is 'launchd'
   state.edge = { ...state.edge, desired: 'stopped', managed: false, pid: null, lastError: null }
@@ -536,10 +599,95 @@ stopEdge = ->
 
 reloadEdge = ->
   fail 'edge is not owned by Rip; reload the external Caddy service with its own supervisor', 409 unless state.edge.managed
-  bind = if usesLaunchd(state.edge.config) then 'fd/3' else '127.0.0.1'
-  result = Bun.spawnSync [state.edge.caddy, 'reload', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, RIP_EDGE_ADMIN: state.edge.admin, RIP_EDGE_BIND: bind, RIP_EDGE_CONTROL: state.edge.control, RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt'), RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key') } }
+  launcher = if usesLaunchd(state.edge.config) then 'launchd' else 'direct'
+  result = Bun.spawnSync [state.edge.caddy, 'reload', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: edgeEnv(launcher, state.edge.control) }
   fail "Caddy reload failed: #{result.stderr.toString().trim()}", 503 unless result.exitCode is 0
   snapshotEdge!
+
+# Mode flips recreate the edge (launchd sockets + Caddyfile) — reload is not enough.
+setEdgeMode = (mode) ->
+  fail "edge mode must be default or local, got #{JSON.stringify(mode)}" unless mode in ['default', 'local']
+  fail 'local mode requires `rip edge trust` first — install the edge CA, then retry', 403 if mode is 'local' and not state.edge.localCaTrusted
+  return snapshotEdge! if state.edge.mode is mode and (not state.edge.config? or state.edge.config is packagedConfigForMode(mode))
+  current = snapshotEdge!
+  wasRunning = current.state is 'running' and state.edge.managed
+  stopEdge! if wasRunning
+  state.edge.mode = mode
+  state.edge.config = packagedConfigForMode mode
+  state.edge.baseUrl = 'https://{host}/'
+  state.edge.lastError = null
+  saveState()
+  return startEdge!({}) if wasRunning
+  snapshotEdge!
+
+trustEdge = ->
+  caddy = resolveCaddy!
+  result = Bun.spawnSync [caddy, 'trust'], { stdout: 'pipe', stderr: 'pipe' }
+  detail = result.stderr.toString().trim() or result.stdout.toString().trim()
+  fail "Caddy trust failed#{if detail then ": #{detail}" else ''}", 503 unless result.exitCode is 0
+  state.edge.localCaTrusted = true
+  saveState()
+  { trusted: true, root: if existsSync(CADDY_PKI_ROOT) then CADDY_PKI_ROOT else null }
+
+exportEdgeCa = ->
+  fail "edge CA not found at #{CADDY_PKI_ROOT} — run `rip edge trust` (and start local once if needed)", 404 unless existsSync CADDY_PKI_ROOT
+  { path: CADDY_PKI_ROOT, pem: readFileSync(CADDY_PKI_ROOT, 'utf8') }
+
+escapeHtml = (value) -> String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+
+statusPage = ->
+  apps = Promise.all! state.apps.map (app) -> snapshotApp! app
+  edge = snapshotEdge!
+  rows = apps.map (app) ->
+    url = if app.url? then "<a href=\"#{escapeHtml app.url}\">#{escapeHtml app.url}</a>" else '—'
+    "<tr><td>#{escapeHtml app.name}</td><td>#{escapeHtml app.state}</td><td>#{url}</td></tr>"
+  .join ''
+  statusHost = if edge.mode is 'local' then 'https://sites.local/' else 'https://sites.ripdev.io/'
+  trustHint = if edge.mode is 'local'
+    'Trust bootstrap: <a href="/trust">/trust</a> (HTTPS) · phone/peer without cert accept: <a href="http://sites.local/trust">http://sites.local/trust</a>'
+  else
+    'Trust bootstrap: <a href="/trust">/trust</a> · CLI: <code>rip edge status</code>'
+  """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rip Sites</title>
+<style>
+  :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+  body { margin: 2rem auto; max-width: 52rem; padding: 0 1rem; line-height: 1.45; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  .meta { color: #666; margin-bottom: 1.5rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 0.5rem 0.4rem; border-bottom: 1px solid #ccc3; }
+  a { color: inherit; }
+</style></head><body>
+  <h1>Rip Sites</h1>
+  <p class="meta">Edge #{escapeHtml edge.state} · mode #{escapeHtml edge.mode} · #{escapeHtml statusHost}</p>
+  <table><thead><tr><th>App</th><th>State</th><th>URL</th></tr></thead><tbody>
+  #{rows or '<tr><td colspan="3">No apps registered.</td></tr>'}
+  </tbody></table>
+  <p class="meta" style="margin-top:1.5rem">#{trustHint}</p>
+</body></html>
+"""
+
+handleStatus = (request) ->
+  url = URL.new request.url
+  try
+    if request.method is 'GET' and (url.pathname is '/' or url.pathname is '')
+      return Response.new statusPage!, { headers: { 'content-type': 'text/html; charset=utf-8' } }
+    if request.method is 'GET' and (url.pathname is '/trust' or url.pathname is '/trust/')
+      if existsSync CADDY_PKI_ROOT
+        return Response.new readFileSync(CADDY_PKI_ROOT), {
+          headers:
+            'content-type': 'application/x-x509-ca-cert'
+            'content-disposition': 'attachment; filename="rip-edge-local-ca.crt"'
+        }
+      html = '''<!doctype html><html><body style="font-family:system-ui;margin:2rem">
+        <h1>Trust this edge</h1>
+        <p>Local CA is not ready yet. On the Mac run <code>rip edge trust</code>, then <code>rip edge local</code>.</p>
+        </body></html>'''
+      return Response.new html, { headers: { 'content-type': 'text/html; charset=utf-8' }, status: 503 }
+    Response.json { error: 'not found' }, { status: 404 }
+  catch error
+    Response.json({ error: error?.message or String(error) }, { status: error?.status or 500 })
 
 jsonBody = (request) ->
   try request.json! catch then fail! 'request body must be valid JSON'
@@ -588,6 +736,11 @@ handle = (request) ->
         return Response.json(mutate!(-> startEdge! jsonBody! request)) if parts[2] is 'start'
         return Response.json(mutate!(-> stopEdge!)) if parts[2] is 'stop'
         return Response.json(mutate!(-> reloadEdge!)) if parts[2] is 'reload'
+        return Response.json(mutate!(-> trustEdge!)) if parts[2] is 'trust'
+        return Response.json(exportEdgeCa!) if parts[2] is 'export-ca'
+        return Response.json(mutate!(-> setEdgeMode! if (jsonBody! request).off then 'default' else 'local')) if parts[2] is 'local'
+        if parts[2] is 'public'
+          fail 'public edge posture is not available yet — use default or `rip edge local`', 501
     Response.json({ error: 'not found' }, { status: 404 })
   catch error
     Response.json({ error: error?.message or String(error) }, { status: error?.status or 500 })
@@ -606,14 +759,18 @@ acquire = ->
 
 acquire()
 try unlinkSync paths.socket
+try unlinkSync paths.edgeStatus
 server = null
+statusServer = null
 stopping = false
 
 shutdown = ->
   return if stopping
   stopping = true
   try server?.stop true
+  try statusServer?.stop true
   try unlinkSync paths.socket
+  try unlinkSync paths.edgeStatus
   try unlinkSync paths.owner
   exit 0
 
@@ -622,6 +779,7 @@ process.on 'SIGTERM', shutdown
 
 try
   server = Bun.serve { unix: paths.socket, fetch: handle }
+  statusServer = Bun.serve { unix: paths.edgeStatus, fetch: handleStatus }
   reconcile = ->
     for app in state.apps when app.desired is 'running' and not managerStatus!(app)?
       startApp(app, true).catch (error) ->

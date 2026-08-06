@@ -29,32 +29,42 @@ const finish = (result) => {
   writeFileSync(exitfile, `${JSON.stringify(result)}\n`, { mode: 0o600 })
 }
 
-let child = null
-let exitCode = 1
-
-try {
-  const name = Buffer.from('HTTPS\0')
+const activate = (socketName) => {
+  const name = Buffer.from(`${socketName}\0`)
   const descriptorsAddress = new BigUint64Array(1)
   const count = new BigUint64Array(1)
   const status = library.symbols.launch_activate_socket(ptr(name), ptr(descriptorsAddress), ptr(count))
   if (status !== 0) {
-    throw new Error(`launch_activate_socket(HTTPS): ${library.symbols.strerror(status)}`)
+    throw new Error(`launch_activate_socket(${socketName}): ${library.symbols.strerror(status)}`)
   }
   if (count[0] !== 1n || descriptorsAddress[0] === 0n) {
     if (descriptorsAddress[0] !== 0n) library.symbols.free(Number(descriptorsAddress[0]))
-    throw new Error(`launchd supplied ${count[0]} HTTPS sockets; expected exactly one`)
+    throw new Error(`launchd supplied ${count[0]} ${socketName} sockets; expected exactly one`)
   }
-
   const descriptors = new Int32Array(toArrayBuffer(Number(descriptorsAddress[0]), 0, 4))
   const listener = descriptors[0]
   library.symbols.free(Number(descriptorsAddress[0]))
+  return listener
+}
+
+let child = null
+let exitCode = 1
+
+try {
+  // stdio slots 0–2 are stdin/out/err; Caddy gets HTTP as fd/3 and HTTPS as fd/4.
+  const httpListener = activate('HTTP')
+  const httpsListener = activate('HTTPS')
 
   child = Bun.spawn(
     [caddy, 'run', '--config', config, '--adapter', 'caddyfile', '--pidfile', pidfile],
     {
       cwd: process.cwd(),
-      env: process.env,
-      stdio: ['ignore', 'inherit', 'inherit', listener],
+      env: {
+        ...process.env,
+        RIP_EDGE_HTTP_BIND: 'fd/3',
+        RIP_EDGE_BIND: 'fd/4',
+      },
+      stdio: ['ignore', 'inherit', 'inherit', httpListener, httpsListener],
     },
   )
 
