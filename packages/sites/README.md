@@ -1,45 +1,126 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="assets/rip-color.svg" alt="Rip" width="50" />
 
 # Rip Sites - @rip-lang/sites
 
-> **Rip Sites — concise routes, smart responses, validated input, safe hot reload,
-> and disposable Bun workers behind Caddy and Janus (App + API)**
+> **Routes, workers, and a browser App — behind one shared Caddy+Janus edge.**
 
-Rip Sites has four CLI/API surfaces that share one contract, plus an optional
-macOS menu-bar UI over the same CLIs:
+Rip Sites is how you run Rip projects on HTTPS locally: a **framework** for
+routes and validation, a **manager** per project, a **shared edge** for TLS and
+routing, and an optional **menu-bar tray** that drives the same CLIs.
 
-- `@rip-lang/sites` is the framework API source imports: routes, response
-  helpers, `read()` validation, schemas, middleware, sessions, and request
-  context.
-- `rip site` is the manager for one project: it registers with Janus,
-  publishes browser-App coordination files, watches source, prepares API
-  generations, and supervises worker processes.
-- `rip sites` remembers projects and controls their managers through the private
-  per-user Rip Agent.
-- `rip edge` observes or controls the one shared Caddy+Janus edge.
-- The **Sites tray** ([`tray-sites.rip`](tray-sites.rip)) is a menu-bar provider
-  for `@rip-lang/tray`: one generic host renders it; there is no Sites-specific
-  native binary.
+**Runtime:** Bun on the server (managers, workers, Agent). Browser Apps use the
+published Workspace. The menubar host is macOS-only (`@rip-lang/tray`).
 
-Caddy and [Janus](https://github.com/shreeve/janus) form the public edge. They
-own HTTP and TLS, host and tenant admission, static and App files, cache
-policy, Hub WebSockets, and routing to private API worker sockets. The manager
-never handles an ordinary client request.
+The system-wide ownership, reload, migration, and cache contract is
+[docs/SERVER.md](../../docs/SERVER.md). App publication wire details are under
+[Detailed Lifecycle](#detailed-lifecycle) below.
 
-The system-wide ownership, reload, migration, request-flow, and cache-policy
-contract is [docs/SERVER.md](../../docs/SERVER.md). The App publication wire
-contract and its implementation lifecycle are specified below under
-[Detailed Lifecycle](#detailed-lifecycle).
+## Mental model
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│  rip edge          Caddy + Janus (one per user)             │
+│                    HTTPS *.ripdev.io → files / Hub / /api   │
+└────────────────────────────┬────────────────────────────────┘
+                             │ Janus control socket
+┌────────────────────────────▼────────────────────────────────┐
+│  rip sites / Agent     remembers projects, starts managers  │
+│  rip site              one foreground manager (optional)    │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+┌────────────────────────────▼────────────────────────────────┐
+│  your project          index.rip + app/ + serve.rip         │
+│                        workers + published dist/            │
+└─────────────────────────────────────────────────────────────┘
+
+Optional UI:  rip tray  /  rip-tray-agent   →  menu over the same CLIs
+```
+
+Caddy and [Janus](https://github.com/shreeve/janus) own every client request
+(TLS, hosts, static/App files, Hub, `/api` proxy). Managers never take
+ordinary HTTP themselves — they register with Janus and supervise workers.
+
+## Surfaces
+
+| Surface | What it is | When you use it |
+| --- | --- | --- |
+| `@rip-lang/sites` | Framework API (`get`, `read`, middleware, …) | Inside `index.rip` / App code |
+| `rip edge` | Shared Caddy+Janus process | Once per machine/session — TLS + routing |
+| `rip sites` | Remembered catalog via the private **Rip Agent** | Add / start / stop / open projects |
+| `rip site` | Foreground manager for **one** project | Dev without the Agent, or advanced ops |
+| Sites tray | Menu-bar UI over `rip sites` + `rip edge` | Click instead of typing |
+
+The **Rip Agent** is not a separate CLI. `rip sites` and `rip edge` auto-start
+it on demand. It owns durable state at
+`~/Library/Application Support/Rip/agent.json` (macOS) and the runtime socket
+under `$TMPDIR/rip-agent-<uid>/`.
 
 ## Quick Start
 
-Install the package:
+### 1. Start the edge
+
+From this repo the packaged Janus-enabled binary and Caddyfile are the
+defaults:
+
+```bash
+rip edge start
+rip edge status
+# ● Edge  running (Rip-owned)
+#   Control: …/rip-agent-…/janus.sock
+#   Caddy:   …/packages/sites/bin/caddy-janus
+#   Config:  …/packages/sites/Caddyfile
+```
+
+That binds `ripdev.io` and `*.ripdev.io` on loopback HTTPS with the
+development certificate beside this README. Those names resolve only to
+`127.0.0.1`.
+
+Overrides when needed:
+
+```bash
+rip edge start --caddy /path/to/caddy-janus --config /path/to/Caddyfile
+# or: JANUS_CADDY=/path/to/caddy-janus rip edge start
+```
+
+`rip edge status` also reports an **external** edge Rip did not start — Rip
+will not stop or reload a process it does not own.
+
+### 2. Remember and start a demo site
+
+```bash
+rip sites add packages/sites/demos/hello --name hello --host hello.ripdev.io
+rip sites start hello
+rip sites open hello          # https://hello.ripdev.io/
+rip sites list
+# ● hello  running  https://hello.ripdev.io/
+```
+
+Packaged demos: [`demos/hello`](demos/hello), [`demos/pulse`](demos/pulse),
+[`demos/cart`](demos/cart).
+
+Pass `--host` when you want a stable URL in the catalog (needed for
+`rip sites open` while stopped). Projects with `serve.rip` hosts still run
+without it; the Agent stores hosts from `--host` / add options.
+
+### 3. Stop cleanly
+
+Stop sites **before** the edge — the edge refuses to die under a live manager:
+
+```bash
+rip sites stop hello
+rip edge stop
+```
+
+```text
+rip edge stop
+# rip-edge: stop hello before stopping the edge   ← intentional
+```
+
+### Install into an app
 
 ```bash
 bun add @rip-lang/sites
 ```
-
-Create `index.rip`:
 
 ```coffee
 import { get, post, read, error, prefix, start } from '@rip-lang/sites'
@@ -59,66 +140,78 @@ prefix '/api', ->
 start!
 ```
 
-With Janus running, launch the project:
+Then either use the Agent path (`rip sites add` / `start`) or a foreground
+manager (see [`rip site`](#rip-site--one-foreground-manager)).
+
+## Commands at a glance
+
+### `rip edge` — shared HTTPS edge
+
+| Command | Meaning |
+| --- | --- |
+| `rip edge status [--json]` | Running? Rip-owned or external? Control socket path |
+| `rip edge start [options]` | Start packaged (or `--caddy` / `--config`) edge |
+| `rip edge reload` | Reload a Rip-owned Caddyfile |
+| `rip edge stop` | Stop a Rip-owned edge (**rejects if any site is running**) |
+
+Start options: `--caddy PATH`, `--config PATH`, `--control TARGET`,
+`--base-url TEMPLATE` (must contain `{host}`).
+
+### `rip sites` — Agent catalog (remembered projects)
+
+| Command | Meaning |
+| --- | --- |
+| `rip sites list [--json]` | Remembered sites and run state |
+| `rip sites add [project] [options]` | Remember a project (default: cwd) |
+| `rip sites remove <site>` | Forget a **stopped** site |
+| `rip sites start \| stop \| restart <site>` | Supervise the manager |
+| `rip sites status [site] [--json]` | One site or every site |
+| `rip sites open <site>` | Open its URL in the default browser |
+| `rip sites logs <site> [--lines N] [--follow]` | Manager log |
+
+Add options: `--name`, `--host` (repeatable), `--workers`, `--concurrency`,
+`--no-watch` / `--no-watch-app` / `--no-watch-api`, `--eager`.
+
+Selectors accept stable id, unique name, or canonical root. Starting needs a
+reachable Janus control plane (normally: edge already up).
+
+### `rip site` — one foreground manager
+
+Does **not** use the Agent catalog. Needs Janus control explicitly:
 
 ```bash
-rip site . --host hello.ripdev.io --control /run/janus/control.sock
+rip edge start
+CONTROL=$(rip edge status --json | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).control)')
+
+cd packages/sites/demos/hello
+rip site --control "$CONTROL"
+# or: JANUS_CONTROL=$CONTROL rip site
 ```
 
-`rip site` discovers `app.rip`, `index.rip`, or an App-only `app/`
-directory in the selected project or its parents. One invocation creates one
-manager. Many managers may register independent servers behind the same
-Caddy+Janus process.
+Without `--control` / `JANUS_CONTROL` you get:
+`rip-site: --control or JANUS_CONTROL is required`.
 
-For a remembered, supervised project:
+Also: `rip site status|stop|hold|release`, `rip site browse`, `rip site migrate`,
+`rip site recover` — see [CLI](#cli) for flags.
 
-```bash
-rip edge start --caddy /path/to/janus-enabled-caddy
-rip sites add . --name hello --host hello.ripdev.io
-rip sites start hello
-rip sites open hello
-```
+### Menubar — Sites tray
 
-The packaged edge baseline binds `ripdev.io` and `*.ripdev.io` on loopback
-HTTPS using the real, publicly trusted development-only certificate and key
-included with this package. Both names resolve only to `127.0.0.1`.
-`rip edge status` also observes an already-running external edge, but Rip will
-not stop or reload a process it does not own.
+Same operations as `rip sites` / `rip edge`, via
+[`tray-sites.rip`](tray-sites.rip) and the generic `@rip-lang/tray` host.
+There is **no** Sites-specific native binary — see
+[packages/tray/README.md](../tray/README.md).
 
-## Menu-bar tray
-
-The Sites tray is an ordinary Rip **provider**
-([`tray-sites.rip`](tray-sites.rip)). It drives menus only through `rip sites`
-and `rip edge`. The native UI is the shared `@rip-lang/tray` host — see
-[packages/tray/README.md](../tray/README.md) for the toolkit, `demo.rip`, and
-host layout.
-
-The menubar is **host + provider**. From a directory that contains `tray.rip` or
-`tray-<dirname>.rip`, `rip tray` discovers the provider and launches the generic
-host. The LaunchAgent keeps that pair alive across shells.
-
-### Foreground (dev)
-
-From the **repo root**, build the generic host once, then either:
+**Foreground (dev)** — build the host once, then from this package:
 
 ```bash
+# from repo root
 swift build -c release --package-path packages/tray/macos --product rip-tray-host
 
 cd packages/sites
-rip tray
+rip tray                  # discovers tray-sites.rip → launches rip-tray-host
 ```
 
-or pass the provider to the host explicitly (still from the repo root):
-
-```bash
-RIP_TRAY_RIP="$PWD/bin/rip" \
-  packages/tray/macos/.build/release/rip-tray-host \
-  "$PWD/packages/sites/tray-sites.rip"
-```
-
-### Keep it alive (LaunchAgent)
-
-Closing the terminal does not stop the tray, edge, or sites:
+**Keep it alive (LaunchAgent)** — survives closing the terminal / Cursor:
 
 ```bash
 packages/sites/bin/rip-tray-agent start
@@ -126,23 +219,59 @@ packages/sites/bin/rip-tray-agent status
 packages/sites/bin/rip-tray-agent stop
 ```
 
-Plist and log live under `~/Library/LaunchAgents` and `~/Library/Logs`.
+Plist under `~/Library/LaunchAgents`; logs under `~/Library/Logs`.
 
-### Provider path only
+**Using the menu**
 
-`rip tray` always starts the menubar host. To run the provider process alone
-(what the host spawns), point `rip` at the file:
+1. **Edge → Start** if the shared edge is down  
+2. **Add Site…** and pick a project directory  
+3. Site submenu → **Start** → **Open**  
+4. **Open Log** / **Restart** / **Stop** as needed  
+
+Provider alone (what the host spawns), without the menubar chrome:
 
 ```bash
 rip packages/sites/tray-sites.rip
 ```
 
-### Using the menu
+## Typical sessions
 
-1. **Edge → Start** if the shared edge is down  
-2. **Add Site…** and pick a project directory  
-3. Open that site’s submenu → **Start** → **Open**  
-4. **Open Log** / **Restart** / **Stop** as needed  
+**Happy path (Agent)**
+
+```bash
+rip edge start
+rip sites add packages/sites/demos/pulse --name pulse --host pulse.ripdev.io
+rip sites start pulse
+rip sites open pulse
+# …develop…
+rip sites stop pulse
+rip edge stop
+```
+
+**Several sites, one edge**
+
+```bash
+rip edge start
+rip sites start hello
+rip sites start pulse
+rip sites start cart
+# https://hello.ripdev.io/  https://pulse.ripdev.io/  https://cart.ripdev.io/
+rip sites stop hello && rip sites stop pulse && rip sites stop cart
+rip edge stop
+```
+
+**Tear down order**
+
+```text
+sites (running)  →  stop each
+edge (Rip-owned) →  rip edge stop
+tray LaunchAgent →  rip-tray-agent stop   (optional; independent of edge)
+```
+
+The Agent process itself stays until idle/exit; you rarely need to kill it.
+Stale state after renames or moved checkouts lives in
+`~/Library/Application Support/Rip/` — remove obsolete sites with
+`rip sites remove`, or clear that directory only when you intend a hard reset.
 
 ## The Shape of a Site
 
@@ -1115,37 +1244,22 @@ control artifacts, and exit cleanly.
 `release` prepares one coherent API/App snapshot, exposes it, sends one
 full-reload notification, and then clears hold.
 
-## Per-User App and Edge Control
+## Per-User Agent and Edge Internals
 
-The Rip Agent is private process machinery shared by both public CLIs. It
-auto-starts on demand, stores one durable app catalog, captures manager and
+Day-to-day commands live under [Commands at a glance](#commands-at-a-glance).
+This section is the ownership contract behind them.
+
+The Rip Agent is private process machinery shared by `rip sites` and
+`rip edge`. It auto-starts on demand, stores one durable site catalog
+(`~/Library/Application Support/Rip/agent.json` on macOS), captures manager and
 edge logs, and adopts healthy managers after an agent restart.
 
-```bash
-rip sites list
-rip sites add [project] [--name NAME] [--host HOST]
-rip sites start <site>
-rip sites stop <site>
-rip sites restart <site>
-rip sites status [site] [--json]
-rip sites open <site>
-rip sites logs <site> [--lines N] [--follow]
-
-rip edge status [--json]
-rip edge start [--caddy PATH] [--config PATH]
-rip edge stop
-rip edge reload
-```
-
-An app selector may be its stable id, unique name, or canonical root. Removal
-rejects while the app is running. Starting requires a reachable Janus control
-plane. Stopping the edge rejects while an app manager is still running.
-
 `rip edge start` finds Caddy through `--caddy`, the remembered configuration,
-`JANUS_CADDY`, or `PATH`, in that order, and verifies that the binary contains
-Janus before starting it. `--config` selects another Caddyfile; the packaged
-baseline is the default. An external reachable edge is observable but never
-silently adopted as a Rip-owned process.
+`JANUS_CADDY`, the packaged `bin/caddy-janus`, or `PATH`, in that order, and
+verifies that the binary contains Janus before starting it. `--config` selects
+another Caddyfile; the packaged baseline beside this README is the default. An
+external reachable edge is observable but never silently adopted as a
+Rip-owned process.
 
 On macOS, the packaged baseline remains both unprivileged and loopback-only on
 standard HTTPS. The Agent registers a per-user `launchd` socket for

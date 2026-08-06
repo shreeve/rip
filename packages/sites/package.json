@@ -46,7 +46,8 @@
     "ripdev.io.crt",
     "ripdev.io.key",
     "monitor.rip",
-    "README.md"
+    "README.md",
+    "assets"
   ],
   "dependencies": {
     "@rip-lang/app": "workspace:*",
