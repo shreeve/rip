@@ -57,13 +57,34 @@ test! 'the packaged ripdev.io pair is publicly trusted, current, matching, and d
   ok Date.parse(certificate.validTo) > Date.now()
   eq createPublicKey(privateKey).export({ type: 'spki', format: 'pem' }), certificate.publicKey.export({ type: 'spki', format: 'pem' })
 
-test! 'the packaged macOS edge activates one loopback HTTPS socket for Caddy', ->
+test! 'the packaged macOS edge activates loopback HTTP+HTTPS sockets without Bonjour', ->
   caddyfile = readFileSync join(import.meta.dir, '..', '..', 'Caddyfile'), 'utf8'
+  localfile = readFileSync join(import.meta.dir, '..', '..', 'Caddyfile.local'), 'utf8'
   launcher = readFileSync join(import.meta.dir, '..', '..', 'launchd-listener.js'), 'utf8'
+  agent = readFileSync join(import.meta.dir, '..', '..', 'agent.rip'), 'utf8'
   ok caddyfile.includes 'default_bind {$RIP_EDGE_BIND:127.0.0.1}'
   ok caddyfile.includes 'protocols h1 h2'
-  ok launcher.includes "launch_activate_socket(ptr(name), ptr(descriptorsAddress), ptr(count))"
-  ok launcher.includes "stdio: ['ignore', 'inherit', 'inherit', listener]"
+  ok caddyfile.includes 'bind {$RIP_EDGE_HTTP_BIND:127.0.0.1}'
+  ok caddyfile.includes 'redir https://{host}{uri} 308'
+  ok caddyfile.includes 'sites.ripdev.io, ripdev.io'
+  ok caddyfile.includes 'reverse_proxy unix/{$RIP_EDGE_STATUS}'
+  ok not /\bmdns\b/.test(caddyfile)
+  ok not caddyfile.includes '7680'
+  ok localfile.includes 'mdns'
+  ok localfile.includes 'name sites.local'
+  ok localfile.includes 'tls internal'
+  # Product HTTPS status is the Rip catalog — Janus stays on the HTTP mdns door.
+  ok /sites\.local \{\s*tls internal\s*reverse_proxy unix\/\{\$RIP_EDGE_STATUS\}/s.test(localfile)
+  ok localfile.includes 'handle /trust*'
+  ok not localfile.includes 'RIP_EDGE_JANUS_HTTP'
+  ok launcher.includes "activate('HTTP')"
+  ok launcher.includes "activate('HTTPS')"
+  ok launcher.includes "RIP_EDGE_HTTP_BIND: 'fd/3'"
+  ok launcher.includes "RIP_EDGE_BIND: 'fd/4'"
+  ok launcher.includes "stdio: ['ignore', 'inherit', 'inherit', httpListener, httpsListener]"
+  ok agent.includes 'PACKAGED_CADDYFILES'
+  ok agent.includes "mode: 'default'"
+  ok agent.includes 'localCaTrusted'
 
 startJanus = (socket, calls) ->
   serial = 0

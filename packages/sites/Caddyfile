@@ -1,9 +1,6 @@
-# Rip's development edge baseline. ripdev.io and *.ripdev.io resolve only to
-# loopback. The publicly trusted development-only certificate and key beside
-# this file give each app clean HTTPS. The edge exposes no public control
-# listener and names no application.
-# `rip sites` registers projects through the private Janus socket at runtime.
-# On macOS, `rip edge` supplies a launchd-owned loopback socket as fd/3.
+# Rip development edge — DEFAULT posture (loopback, no Bonjour).
+# Ports default to 80/443 via launchd fds or RIP_EDGE_*_BIND.
+# Status at ripdev.io / sites.ripdev.io is Rip-owned (not Janus Bonjour).
 {
 	admin unix/{$RIP_EDGE_ADMIN}
 	persist_config off
@@ -11,7 +8,6 @@
 	default_bind {$RIP_EDGE_BIND:127.0.0.1}
 	skip_install_trust
 	servers {
-		# fd/3 is the packaged macOS edge's TCP socket; HTTP/3 requires UDP.
 		protocols h1 h2
 	}
 
@@ -33,17 +29,22 @@
 			precompressed
 		}
 		browse
-		# Dedicated status front door (this edge is HTTPS-only on 443).
-		mdns {
-			listen :7680
-		}
 	}
 }
 
-ripdev.io, *.ripdev.io {
+http://ripdev.io, http://sites.ripdev.io, http://*.ripdev.io {
+	bind {$RIP_EDGE_HTTP_BIND:127.0.0.1}
+	redir https://{host}{uri} 308
+}
+
+sites.ripdev.io, ripdev.io {
+	tls {$RIP_EDGE_CERT} {$RIP_EDGE_KEY}
+	reverse_proxy unix/{$RIP_EDGE_STATUS}
+}
+
+*.ripdev.io {
 	tls {$RIP_EDGE_CERT} {$RIP_EDGE_KEY}
 	janus
-	# Janus access-stream encoder (required for `rip sites logs` / pretty access).
 	log {
 		output stderr
 		format janus

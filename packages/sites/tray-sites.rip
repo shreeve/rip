@@ -25,21 +25,45 @@ command = (args) ->
 json = (...args) -> JSON.parse command! args
 capitalize = (text) -> text[0].toUpperCase() + text.slice(1)
 
+openUrl = (url) ->
+  result = Bun.spawnSync ['open', url], { stdout: 'ignore', stderr: 'pipe' }
+  throw Error.new(result.stderr.toString().trim() or "cannot open #{url}") unless result.exitCode is 0
+
 openLog = (site) ->
   log = json! 'sites', 'logs', site.name, '--lines', '1', '--json'
-  result = Bun.spawnSync ['open', log.path], { stdout: 'ignore', stderr: 'pipe' }
-  throw Error.new(result.stderr.toString().trim() or "cannot open #{log.path}") unless result.exitCode is 0
+  openUrl! log.path
+
+# Browser status host for the current edge posture (portless when on 443).
+dashboardUrl = (edge) ->
+  host = if edge.mode is 'local' then 'sites.local' else 'sites.ripdev.io'
+  port = if Number.isInteger(edge.httpsPort) and edge.httpsPort isnt 443 then ":#{edge.httpsPort}" else ''
+  "https://#{host}#{port}/"
 
 edgeMenu = (edge) ->
+  ownership = if edge.managed then 'Rip-owned' else if edge.state is 'running' then 'external' else 'not running'
+  mode = edge.mode or 'default'
+  trusted = if edge.localCaTrusted then 'trusted' else 'CA not trusted'
   items = [
-    label "#{capitalize(edge.state)} · #{if edge.managed then 'Rip-owned' else if edge.state is 'running' then 'external' else 'not running'}",
+    label "#{capitalize(edge.state)} · #{ownership}",
       icon: if edge.state is 'running' then 'checkmark.circle.fill' else 'circle'
+    label "Mode #{mode} · #{trusted}",
+      icon: if mode is 'local' then 'wifi' else 'laptopcomputer'
   ]
   if edge.state is 'running'
+    items.push link 'Open Dashboard', dashboardUrl(edge), id: 'edge.dashboard', icon: 'safari'
+  if edge.managed or edge.state isnt 'running'
+    items.push action 'Trust CA…', id: 'edge.trust', icon: 'lock.shield', run: -> json! 'edge', 'trust', '--json'
+  if mode is 'local'
+    items.push action 'Use Default (loopback)', id: 'edge.local.off', icon: 'laptopcomputer', run: -> json! 'edge', 'local', '--off', '--json'
+  else
+    items.push action 'Use Local (LAN)…', id: 'edge.local.on', icon: 'wifi', run: -> json! 'edge', 'local', '--json'
+  if edge.state is 'running'
     if edge.managed
+      items.push separator()
       items.push action 'Reload', id: 'edge.reload', icon: 'arrow.clockwise', run: -> json! 'edge', 'reload', '--json'
       items.push action 'Stop', id: 'edge.stop', icon: 'stop.fill', run: -> json! 'edge', 'stop', '--json'
   else
+    items.push separator()
     items.push action 'Start', id: 'edge.start', icon: 'play.fill', run: -> json! 'edge', 'start', '--json'
   submenu 'Edge', items, id: 'edge', icon: 'network'
 
