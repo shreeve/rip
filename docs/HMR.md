@@ -350,8 +350,10 @@ a morph project, and not as churn for its own sake.
 | Patch (view remount + effect/computed rebind) | Shipped; Cart Gate A green |
 | Migrate diagnostics + remount floor | Shipped; not the confirmation headline |
 | LKG overlay + in-place recovery | Shipped; Cart Gate B green |
+| Cart certification (`test:cart`) | **Done** — Gates A and B are the product bar |
 | Surgical DOM morph | **Out of scope** as a goal |
-| Seam compression | Open; see above |
+| Seam compression | Optional later; see above — not blocking |
 
-The meal is the contract. Morph is not dessert we owe. Fewer utensils —
-when the pins stay green — is the only improvement path that matters.
+**Product HMR for the contracted bars is done.** Further work is
+optional kitchen cleanup (fewer utensils), not a missing course. Morph
+is not dessert we owe.

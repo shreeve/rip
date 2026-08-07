@@ -218,13 +218,12 @@ boundaries.
 
 Publication substrate, compile overlay, signature metadata, living-instance
 registry, patch-when-compatible (state-preserving view remount with
-effect/computed rebind), and narrow remount with UI restore are shipped
-under watch mode — see [HMR.md](HMR.md). Remaining open work: certify the
-Cart **Order Placed!** confirmation sequence as the React Fast Refresh
-bar (local mutation/action state must survive a render-only
-`cart.rip` edit); then Phase 5 graph-quality hardening where evidence
-still drives the ladder. Stash-module definition edits stay document
-reload by design.
+effect/computed rebind), narrow remount with UI restore, and Cart
+confirmation certification (Gate A local action-state + Gate B LKG
+recover in place) are shipped under watch mode — see [HMR.md](HMR.md).
+Product HMR for that contract is done. Optional later work is seam
+compression only (same doc), not surgical DOM morph. Stash-module
+definition edits stay document reload by design.
 
 ## Rip-native hypermedia
 

@@ -5,43 +5,28 @@ Read this first when starting a session. Permanent architecture lives in
 
 ## Orientation
 
-- Repo: `~/Data/Code/rip` — live v4 checkout; branch `rip-hmr-test`
-  (uncommitted work below) atop `main` with HMR #218 + #219.
+- Repo: `~/Data/Code/rip` — live v4 checkout; `main` at merge of HMR
+  Cart confirmation #220 (plus prior #218 / #219).
 - Fast commands: `bun run test:rip` · package-local `bun run test` ·
   `packages/browser-tests`: `bun run test:smoke`.
 - Explicit certification: `bun run test:all` · `bun run audit` ·
   `packages/browser-tests`: `bun run test:cart`.
-- HMR contract: `docs/HMR.md` · Workspace: `docs/WORKSPACE.md`.
-- Sites: `docs/SERVER.md` · `packages/sites/README.md`.
+- HMR constitution: [docs/HMR.md](docs/HMR.md) · Workspace:
+  [docs/WORKSPACE.md](docs/WORKSPACE.md).
+- Sites: [docs/SERVER.md](docs/SERVER.md) · `packages/sites/README.md`.
 - Open notes: `TODO.md` · `packages/sites/TODO.md`.
 
-## Cart confirmation bars — green on this branch
+## HMR — product complete
 
-`packages/browser-tests` `test:cart` — all 8 `cart-apply` specs pass,
-including:
+Cart Gates A and B are green on `test:cart`. The honest claim is
+React-tier local refresh **plus** App-level failed-publication
+quarantine — not “faster DOM than React.” Surgical DOM morph is out of
+scope. Optional seam compression (not a second product) is listed in
+`docs/HMR.md`.
 
-- **Gate A** — order confirmation survives a compatible `cart.rip`
-  markup edit (`rip:hmr` `patch`, not remount).
-- **Gate B** — confirmation + compile-fail overlay + recover with
-  stamped heading in place (no reload, no re-order).
-
-Root causes that had to land for those pins:
-
-1. **Staging `_target`** — after layout reuse, `mount` recorded a
-   DocumentFragment; patch reinserted into the empty husk. Prefer a
-   connected live parent (`#content`).
-2. **`router.rebuild` after Workspace commit** — content-only route
-   edits must soft-skip when the living match identity is unchanged;
-   otherwise the renderer remounts and drops `placeOrder.succeeded`.
-3. **Manager assemble gate** — watch refresh publishes raw sources when
-   assemble/compile fails so the browser can quarantine (overlay).
-4. **Quarantine recovery** — feed enqueues the next live generation;
-   browser rebases when `change.from` is a rejected hash; walking back
-   to the same LKG hash still clears the overlay.
-
-Honest competitive claim (only with Gate B green): React-tier local
-refresh **plus** App-level failed-publication quarantine — not “faster
-DOM than React.”
+Live demo: `rip sites start edge` (if needed) → `rip sites start cart`
+→ place order → render-only edit of `app/routes/cart.rip` confirmation
+h1 → stay on Order Placed.
 
 ## Working agreements
 
