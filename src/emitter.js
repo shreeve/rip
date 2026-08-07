@@ -8429,51 +8429,94 @@ class Emitter {
       // load-bearing idiom), where the module-level form deliberately
       // returns nothing — the asymmetry is pinned on both
       // sides.
-      for (const eff of effects) {
-        const bodyNode = eff[2];
-        const isAsync = Emitter.containsAwait(bodyNode);
-        this.b.emit(ipad);
-        this.mark(eff, '$self', () => {
-          this.mark(eff, 'operator', () => this.b.emit(this.runtimeName('__effect')));
-          this.b.emit(isAsync ? '(async () => ' : '(() => ');
-          if (isBlock(bodyNode) && bodyNode.length > 2) {
-            this.mark(eff, 'value', () => this.withExpression(() => {
-              const bodyStmts = this.liveStmts(bodyNode.slice(1), { forwards: true });
-              const { entries, names } = this.scopedHoist(bodyStmts, []);
-              for (const n of this.pushReactiveFrame(bodyStmts, names)) names.add(n);
+      //
+      // Under hmr, effects live in `_hmrBindEffects` so `_hmrRerender`
+      // can recreate them after disposing the owner frame without
+      // re-running `_init` (which would duplicate state containers).
+      const emitBodyEffects = (bodyPad) => {
+        for (const eff of effects) {
+          const bodyNode = eff[2];
+          const isAsync = Emitter.containsAwait(bodyNode);
+          this.b.emit(bodyPad);
+          this.mark(eff, '$self', () => {
+            this.mark(eff, 'operator', () => this.b.emit(this.runtimeName('__effect')));
+            this.b.emit(isAsync ? '(async () => ' : '(() => ');
+            if (isBlock(bodyNode) && bodyNode.length > 2) {
+              this.mark(eff, 'value', () => this.withExpression(() => {
+                const bodyStmts = this.liveStmts(bodyNode.slice(1), { forwards: true });
+                const { entries, names } = this.scopedHoist(bodyStmts, []);
+                for (const n of this.pushReactiveFrame(bodyStmts, names)) names.add(n);
+                this.scopes.push(names);
+                this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries);
+                this.scopes.pop();
+                this.rframes.pop();
+              }));
+            } else {
+              const single = isBlock(bodyNode) ? bodyNode[1] : bodyNode;
+              const { entries, names } = this.scopedHoist([single], []);
               this.scopes.push(names);
-              this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries);
+              this.rframes.push({ reactive: new Set(), bound: names });
+              this.b.emit('{ ');
+              if (entries.length) {
+                this.hoistLine(entries);
+                this.b.emit(' ');
+              }
+              this.b.emit('return ');
+              this.mark(eff, 'value', () => this.withExpression(() => {
+                const wrap = Emitter.needsGrouping(single, 'operand') || isObject(single);
+                if (wrap) this.b.emit('(');
+                this.expr(single);
+                if (wrap) this.b.emit(')');
+              }));
+              this.b.emit('; }');
               this.scopes.pop();
               this.rframes.pop();
-            }));
-          } else {
-            const single = isBlock(bodyNode) ? bodyNode[1] : bodyNode;
-            const { entries, names } = this.scopedHoist([single], []);
-            this.scopes.push(names);
-            this.rframes.push({ reactive: new Set(), bound: names });
-            this.b.emit('{ ');
-            if (entries.length) {
-              this.hoistLine(entries);
-              this.b.emit(' ');
             }
-            this.b.emit('return ');
-            this.mark(eff, 'value', () => this.withExpression(() => {
-              const wrap = Emitter.needsGrouping(single, 'operand') || isObject(single);
-              if (wrap) this.b.emit('(');
-              this.expr(single);
-              if (wrap) this.b.emit(')');
-            }));
-            this.b.emit('; }');
-            this.scopes.pop();
-            this.rframes.pop();
-          }
-          this.b.emit(')');
-        });
-        this.b.emit(';\n');
+            this.b.emit(')');
+          });
+          this.b.emit(';\n');
+        }
+      };
+      if (this.hmr && effects.length > 0) {
+        this.b.emit(`${ipad}this._hmrBindEffects();\n`);
+      } else {
+        emitBodyEffects(ipad);
       }
       this.rframes.pop();
       this.scopes.pop();
       this.b.emit(`${pad}}\n`);
+
+      if (this.hmr && effects.length > 0) {
+        this.b.emit(`${pad}_hmrBindEffects() {\n`);
+        this.scopes.push(initNames);
+        this.rframes.push({ reactive: new Set(), bound: initNames });
+        emitBodyEffects(ipad);
+        this.rframes.pop();
+        this.scopes.pop();
+        this.b.emit(`${pad}}\n`);
+      }
+
+      // Refresh computed bodies on patch without re-running `_init`
+      // (which would mint duplicate state containers).
+      if (this.hmr && derivedVars.length > 0) {
+        this.b.emit(`${pad}_hmrRefreshComputeds() {\n`);
+        this.scopes.push(initNames);
+        this.rframes.push({ reactive: new Set(), bound: initNames });
+        for (const m of derivedVars) {
+          // Kill the prior computed before replacing it — frame
+          // dispose owns effects, not computed containers, so a bare
+          // reassignment would leave the old body subscribed to state.
+          this.b.emit(`${ipad}this.${m.name}?.kill?.();\n`);
+          this.b.emit(ipad);
+          memberName(m.node, m.name);
+          this.b.emit(` = ${this.runtimeName('__computed')}(() => `);
+          this.mark(m.node, 'value', () => this.withExpression(() => this.computedBody(m.node, m.value, ind + 2)));
+          this.b.emit(');\n');
+        }
+        this.rframes.pop();
+        this.scopes.pop();
+        this.b.emit(`${pad}}\n`);
+      }
 
       // A named handler ref (`@submit: @handleSubmit`, or the bare
       // `@submit: handleSubmit` spelling) types the METHOD's event

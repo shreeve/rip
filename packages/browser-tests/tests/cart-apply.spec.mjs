@@ -132,8 +132,9 @@ test.describe('cart publication apply', () => {
       // Compatible render edit: form binding should still show the typed value.
       await expect(first).toHaveValue(stamp);
       expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
+      // Compatible leaf markup: must take the patch path (not remount).
       await expect.poll(async () =>
-        page.evaluate(() => globalThis.__ripHmr.some((e) => e?.type === 'patch' || e?.type === 'remount')),
+        page.evaluate(() => globalThis.__ripHmr.some((e) => e?.type === 'patch')),
       { timeout: 10000 }).toBe(true);
     } finally {
       edit.restore();
