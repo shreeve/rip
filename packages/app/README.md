@@ -312,8 +312,10 @@ injectable host (`listen(type, fn)`), so they test under Node;
 
 Watch-mode publication (Sites + `bootApp({ watch: true })`) applies ordered
 Workspace changes. Compatible component edits **patch** living instances when
-compiler signatures match; incompatible shape changes **remount** the narrowest
-dirty route/layout chain while preserving the stash and ancestor layouts.
+compiler signatures match — same instance and `:=` / prop containers, refreshed
+`~=` bodies and body `~>` effects, DOM rebuilt via `_create`/`_setup` (not
+surgical morph). Incompatible shape changes **remount** the narrowest dirty
+route/layout chain while preserving the stash and ancestor layouts.
 Focus, selection, and scroll are snapshotted around the refresh. A
 compile or activation failure keeps the last-known-good App interactive and
 shows a dismissible overlay; the next good generation (or reload) clears it.

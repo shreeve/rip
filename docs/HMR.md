@@ -264,11 +264,14 @@ Exit: editing a leaf preserves the application shell.
 ### Phase 3 — patch
 
 - signatures and implementation hashes;
-- method/render replacement;
-- effect recreation;
-- DOM reconciliation.
+- method/render replacement via prototype swap;
+- owner-frame dispose + `_hmrBindEffects` / `_hmrRefreshComputeds`
+  (body `~>` recreation and `~=` body refresh without re-running `_init`);
+- DOM rebuild through `_create`/`_setup` while keeping instance identity
+  and `:=` / prop containers (state-preserving view remount — not
+  surgical DOM morph).
 
-Exit: compatible edits preserve named state.
+Exit: compatible edits preserve named state and refresh derived work.
 
 ### Phase 4 — migration
 

@@ -1118,7 +1118,10 @@ class __Component {
   }
   // Patch refresh: dispose owned children and frame effects, keep
   // instance identity and `_init` state, then rebuild DOM via
-  // `_create`/`_setup` without re-running `_init`.
+  // `_create`/`_setup` without re-running `_init`. Emitter-minted
+  // `_hmrRefreshComputeds` / `_hmrBindEffects` (hmr builds only)
+  // refresh derived closures and recreate body effects on the new
+  // owner frame — the silent-wrong-math / dead-effect defect class.
   _hmrRerender() {
     const name = this.constructor.name || 'component';
     if (this._state !== 'mounted') {
@@ -1190,6 +1193,25 @@ class __Component {
     this._inheritedEl = null;
     this._frame = __ownerFrame({ nested: false });
     this._state = 'new';
+
+    // Mirror constructor `_init` ownership: refresh computeds and
+    // rebind body effects under the new owner before `_create`.
+    {
+      const prevC = __pushComponent(this);
+      const prevO = __pushOwner(this._frame);
+      try {
+        if (typeof this._hmrRefreshComputeds === 'function') this._hmrRefreshComputeds();
+        if (typeof this._hmrBindEffects === 'function') this._hmrBindEffects();
+      } catch (e) {
+        __popOwner(prevO);
+        __popComponent(prevC);
+        report('hmr rebind', e);
+        this._failMount(e);
+        return this;
+      }
+      __popOwner(prevO);
+      __popComponent(prevC);
+    }
 
     if (typeof this._create !== 'function') {
       this._state = 'mounted';

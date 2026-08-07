@@ -15448,56 +15448,95 @@ ${pad ?? ""}`);
       for (const name of offeredVars) {
         initLine(seen.get(name), () => this.b.emit(`${this.runtimeName("setContext")}('${name}', this.${name})`));
       }
-      for (const eff of effects) {
-        const bodyNode = eff[2];
-        const isAsync = Emitter.containsAwait(bodyNode);
-        this.b.emit(ipad);
-        this.mark(eff, "$self", () => {
-          this.mark(eff, "operator", () => this.b.emit(this.runtimeName("__effect")));
-          this.b.emit(isAsync ? "(async () => " : "(() => ");
-          if (isBlock2(bodyNode) && bodyNode.length > 2) {
-            this.mark(eff, "value", () => this.withExpression(() => {
-              const bodyStmts = this.liveStmts(bodyNode.slice(1), { forwards: true });
-              const { entries, names } = this.scopedHoist(bodyStmts, []);
-              for (const n of this.pushReactiveFrame(bodyStmts, names))
-                names.add(n);
+      const emitBodyEffects = (bodyPad) => {
+        for (const eff of effects) {
+          const bodyNode = eff[2];
+          const isAsync = Emitter.containsAwait(bodyNode);
+          this.b.emit(bodyPad);
+          this.mark(eff, "$self", () => {
+            this.mark(eff, "operator", () => this.b.emit(this.runtimeName("__effect")));
+            this.b.emit(isAsync ? "(async () => " : "(() => ");
+            if (isBlock2(bodyNode) && bodyNode.length > 2) {
+              this.mark(eff, "value", () => this.withExpression(() => {
+                const bodyStmts = this.liveStmts(bodyNode.slice(1), { forwards: true });
+                const { entries, names } = this.scopedHoist(bodyStmts, []);
+                for (const n of this.pushReactiveFrame(bodyStmts, names))
+                  names.add(n);
+                this.scopes.push(names);
+                this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries);
+                this.scopes.pop();
+                this.rframes.pop();
+              }));
+            } else {
+              const single = isBlock2(bodyNode) ? bodyNode[1] : bodyNode;
+              const { entries, names } = this.scopedHoist([single], []);
               this.scopes.push(names);
-              this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries);
+              this.rframes.push({ reactive: new Set, bound: names });
+              this.b.emit("{ ");
+              if (entries.length) {
+                this.hoistLine(entries);
+                this.b.emit(" ");
+              }
+              this.b.emit("return ");
+              this.mark(eff, "value", () => this.withExpression(() => {
+                const wrap = Emitter.needsGrouping(single, "operand") || isObject(single);
+                if (wrap)
+                  this.b.emit("(");
+                this.expr(single);
+                if (wrap)
+                  this.b.emit(")");
+              }));
+              this.b.emit("; }");
               this.scopes.pop();
               this.rframes.pop();
-            }));
-          } else {
-            const single = isBlock2(bodyNode) ? bodyNode[1] : bodyNode;
-            const { entries, names } = this.scopedHoist([single], []);
-            this.scopes.push(names);
-            this.rframes.push({ reactive: new Set, bound: names });
-            this.b.emit("{ ");
-            if (entries.length) {
-              this.hoistLine(entries);
-              this.b.emit(" ");
             }
-            this.b.emit("return ");
-            this.mark(eff, "value", () => this.withExpression(() => {
-              const wrap = Emitter.needsGrouping(single, "operand") || isObject(single);
-              if (wrap)
-                this.b.emit("(");
-              this.expr(single);
-              if (wrap)
-                this.b.emit(")");
-            }));
-            this.b.emit("; }");
-            this.scopes.pop();
-            this.rframes.pop();
-          }
-          this.b.emit(")");
-        });
-        this.b.emit(`;
+            this.b.emit(")");
+          });
+          this.b.emit(`;
 `);
+        }
+      };
+      if (this.hmr && effects.length > 0) {
+        this.b.emit(`${ipad}this._hmrBindEffects();
+`);
+      } else {
+        emitBodyEffects(ipad);
       }
       this.rframes.pop();
       this.scopes.pop();
       this.b.emit(`${pad}}
 `);
+      if (this.hmr && effects.length > 0) {
+        this.b.emit(`${pad}_hmrBindEffects() {
+`);
+        this.scopes.push(initNames);
+        this.rframes.push({ reactive: new Set, bound: initNames });
+        emitBodyEffects(ipad);
+        this.rframes.pop();
+        this.scopes.pop();
+        this.b.emit(`${pad}}
+`);
+      }
+      if (this.hmr && derivedVars.length > 0) {
+        this.b.emit(`${pad}_hmrRefreshComputeds() {
+`);
+        this.scopes.push(initNames);
+        this.rframes.push({ reactive: new Set, bound: initNames });
+        for (const m of derivedVars) {
+          this.b.emit(`${ipad}this.${m.name}?.kill?.();
+`);
+          this.b.emit(ipad);
+          memberName(m.node, m.name);
+          this.b.emit(` = ${this.runtimeName("__computed")}(() => `);
+          this.mark(m.node, "value", () => this.withExpression(() => this.computedBody(m.node, m.value, ind + 2)));
+          this.b.emit(`);
+`);
+        }
+        this.rframes.pop();
+        this.scopes.pop();
+        this.b.emit(`${pad}}
+`);
+      }
       const methodEventNames = new Map;
       if (this.ts && renderNode !== null) {
         const scanHandlers = (x) => {
@@ -24657,6 +24696,24 @@ class __Component {
     this._inheritedEl = null;
     this._frame = __ownerFrame({ nested: false });
     this._state = "new";
+    {
+      const prevC = __pushComponent(this);
+      const prevO = __pushOwner(this._frame);
+      try {
+        if (typeof this._hmrRefreshComputeds === "function")
+          this._hmrRefreshComputeds();
+        if (typeof this._hmrBindEffects === "function")
+          this._hmrBindEffects();
+      } catch (e) {
+        __popOwner(prevO);
+        __popComponent(prevC);
+        report("hmr rebind", e);
+        this._failMount(e);
+        return this;
+      }
+      __popOwner(prevO);
+      __popComponent(prevC);
+    }
     if (typeof this._create !== "function") {
       this._state = "mounted";
       return this;
