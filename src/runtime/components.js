@@ -166,11 +166,54 @@ function __hmrClassify(oldCtor, newCtor) {
   return 'patch';
 }
 
+// Named-state migrate diff — kept / added / removed (orphaned) slots.
+function __hmrMigrateDiff(oldSig, newSig) {
+  const prev = Array.isArray(oldSig?.state) ? oldSig.state : [];
+  const next = Array.isArray(newSig?.state) ? newSig.state : [];
+  const prevSet = new Set(prev);
+  const nextSet = new Set(next);
+  const kept = next.filter(name => prevSet.has(name));
+  const added = next.filter(name => !prevSet.has(name));
+  const removed = prev.filter(name => !nextSet.has(name));
+  return { kept, added, removed };
+}
+
+// Thin HMR tooling seam: CustomEvent on window + a ring buffer tests can
+// read. Never required for correctness.
+const __hmrEventLog = [];
+const __HMR_EVENT_CAP = 64;
+
+function __hmrEmit(type, detail = {}) {
+  const event = { type, at: Date.now(), ...detail };
+  __hmrEventLog.push(event);
+  if (__hmrEventLog.length > __HMR_EVENT_CAP) __hmrEventLog.shift();
+  if (typeof console !== 'undefined' && typeof console.debug === 'function') {
+    console.debug(`[Rip HMR] ${type}`, detail);
+  }
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+    try {
+      window.dispatchEvent(new CustomEvent('rip:hmr', { detail: event }));
+    } catch { /* non-DOM hosts */ }
+  }
+  return event;
+}
+
+function __hmrEvents() {
+  return __hmrEventLog.slice();
+}
+
 function __hmrPreserveState(oldInstance, newInstance) {
-  const retained = oldInstance?.constructor?.__hmrSig?.state;
-  const nextNames = newInstance?.constructor?.__hmrSig?.state;
-  if (!Array.isArray(retained) || !Array.isArray(nextNames)) return;
+  const oldSig = oldInstance?.constructor?.__hmrSig;
+  const newSig = newInstance?.constructor?.__hmrSig;
+  const retained = oldSig?.state;
+  const nextNames = newSig?.state;
+  const diff = __hmrMigrateDiff(oldSig, newSig);
+  if (!Array.isArray(retained) || !Array.isArray(nextNames)) {
+    __hmrEmit('migrate', { id: newInstance?.constructor?.__hmrId ?? null, ...diff, copied: [] });
+    return diff;
+  }
   const keep = new Set(retained);
+  const copied = [];
   for (const name of nextNames) {
     if (!keep.has(name)) continue;
     const prev = oldInstance[name];
@@ -181,8 +224,22 @@ function __hmrPreserveState(oldInstance, newInstance) {
       'value' in prev && 'value' in next
     ) {
       next.value = prev.value;
+      copied.push(name);
     }
   }
+  const id = newInstance?.constructor?.__hmrId ?? oldInstance?.constructor?.__hmrId ?? null;
+  if (diff.removed.length > 0 && typeof console !== 'undefined' && typeof console.warn === 'function') {
+    console.warn(
+      `[Rip HMR] migrate ${id ?? '<component>'}: dropping orphaned state [${diff.removed.join(', ')}]`,
+    );
+  }
+  if (diff.added.length > 0 && typeof console !== 'undefined' && typeof console.info === 'function') {
+    console.info(
+      `[Rip HMR] migrate ${id ?? '<component>'}: initializing new state [${diff.added.join(', ')}]`,
+    );
+  }
+  __hmrEmit('migrate', { id, ...diff, copied });
+  return { ...diff, copied };
 }
 
 function __hmrSnapshotUi() {
@@ -228,6 +285,7 @@ function __hmrPatch(instance, NewCtor) {
   __hmrRegisterDefinition(NewCtor);
   __hmrRegistry.get(NewCtor.__hmrId)?.instances.add(instance);
   instance._hmrRerender();
+  __hmrEmit('patch', { id: NewCtor.__hmrId ?? oldId ?? null });
   return instance;
 }
 
@@ -1209,6 +1267,6 @@ export {
   __Component, __pushComponent, __popComponent, setContext, getContext, hasContext,
   __clsx, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach,
   __ownerFrame, __pushOwner, __popOwner, __detachRef, __claimGateConstructor,
-  __hmrRegistry, __hmrLookup, __hmrEntries, __hmrRegisterDefinition, __hmrClassify, __hmrPreserveState,
-  __hmrPatch, __hmrMigrateRemount, __hmrSnapshotUi, __hmrRestoreUi,
+  __hmrRegistry, __hmrLookup, __hmrEntries, __hmrRegisterDefinition, __hmrClassify, __hmrMigrateDiff,
+  __hmrPreserveState, __hmrEmit, __hmrEvents, __hmrPatch, __hmrMigrateRemount, __hmrSnapshotUi, __hmrRestoreUi,
 };

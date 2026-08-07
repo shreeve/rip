@@ -50,12 +50,16 @@ Watch-mode delivery also ships:
   `remount`);
 - patch of living instances when signatures allow; otherwise narrow remount
   of the affected route/layout chain with focus/selection/scroll restore;
+- migrate diagnostics: kept / added / removed named state slots (orphans warn);
+- thin tooling events (`rip:hmr` CustomEvent + `__hmrEvents()` ring buffer)
+  for `patch` / `migrate` / `remount` / `reject`;
 - stash-module / `data.rip` definition edits request a document reload
   (runtime stash *value* updates stay surgical and never reload).
 
 Migrate that cannot patch in place still uses the narrow remount floor while
 preserving intersecting named state where the remount path constructs a
-replacement. Graph-quality hardening continues under Phase 5.
+replacement. Graph-quality hardening and deeper DOM reconcile continue under
+Phase 5.
 
 ## Two-layer architecture
 

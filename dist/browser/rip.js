@@ -23610,8 +23610,11 @@ __export(exports_components, {
   __hmrPreserveState: () => __hmrPreserveState,
   __hmrPatch: () => __hmrPatch,
   __hmrMigrateRemount: () => __hmrMigrateRemount,
+  __hmrMigrateDiff: () => __hmrMigrateDiff,
   __hmrLookup: () => __hmrLookup,
+  __hmrEvents: () => __hmrEvents,
   __hmrEntries: () => __hmrEntries,
+  __hmrEmit: () => __hmrEmit,
   __hmrClassify: () => __hmrClassify,
   __handleComponentError: () => __handleComponentError,
   __gateBind: () => __gateBind,
@@ -23690,12 +23693,48 @@ function __hmrClassify(oldCtor, newCtor) {
   }
   return "patch";
 }
+function __hmrMigrateDiff(oldSig, newSig) {
+  const prev = Array.isArray(oldSig?.state) ? oldSig.state : [];
+  const next = Array.isArray(newSig?.state) ? newSig.state : [];
+  const prevSet = new Set(prev);
+  const nextSet = new Set(next);
+  const kept = next.filter((name) => prevSet.has(name));
+  const added = next.filter((name) => !prevSet.has(name));
+  const removed = prev.filter((name) => !nextSet.has(name));
+  return { kept, added, removed };
+}
+var __hmrEventLog = [];
+var __HMR_EVENT_CAP = 64;
+function __hmrEmit(type, detail = {}) {
+  const event = { type, at: Date.now(), ...detail };
+  __hmrEventLog.push(event);
+  if (__hmrEventLog.length > __HMR_EVENT_CAP)
+    __hmrEventLog.shift();
+  if (typeof console !== "undefined" && typeof console.debug === "function") {
+    console.debug(`[Rip HMR] ${type}`, detail);
+  }
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    try {
+      window.dispatchEvent(new CustomEvent("rip:hmr", { detail: event }));
+    } catch {}
+  }
+  return event;
+}
+function __hmrEvents() {
+  return __hmrEventLog.slice();
+}
 function __hmrPreserveState(oldInstance, newInstance) {
-  const retained = oldInstance?.constructor?.__hmrSig?.state;
-  const nextNames = newInstance?.constructor?.__hmrSig?.state;
-  if (!Array.isArray(retained) || !Array.isArray(nextNames))
-    return;
+  const oldSig = oldInstance?.constructor?.__hmrSig;
+  const newSig = newInstance?.constructor?.__hmrSig;
+  const retained = oldSig?.state;
+  const nextNames = newSig?.state;
+  const diff = __hmrMigrateDiff(oldSig, newSig);
+  if (!Array.isArray(retained) || !Array.isArray(nextNames)) {
+    __hmrEmit("migrate", { id: newInstance?.constructor?.__hmrId ?? null, ...diff, copied: [] });
+    return diff;
+  }
   const keep = new Set(retained);
+  const copied = [];
   for (const name of nextNames) {
     if (!keep.has(name))
       continue;
@@ -23703,8 +23742,18 @@ function __hmrPreserveState(oldInstance, newInstance) {
     const next = newInstance[name];
     if (prev != null && next != null && typeof prev === "object" && typeof next === "object" && "value" in prev && "value" in next) {
       next.value = prev.value;
+      copied.push(name);
     }
   }
+  const id = newInstance?.constructor?.__hmrId ?? oldInstance?.constructor?.__hmrId ?? null;
+  if (diff.removed.length > 0 && typeof console !== "undefined" && typeof console.warn === "function") {
+    console.warn(`[Rip HMR] migrate ${id ?? "<component>"}: dropping orphaned state [${diff.removed.join(", ")}]`);
+  }
+  if (diff.added.length > 0 && typeof console !== "undefined" && typeof console.info === "function") {
+    console.info(`[Rip HMR] migrate ${id ?? "<component>"}: initializing new state [${diff.added.join(", ")}]`);
+  }
+  __hmrEmit("migrate", { id, ...diff, copied });
+  return { ...diff, copied };
 }
 function __hmrSnapshotUi() {
   if (typeof document === "undefined")
@@ -23753,6 +23802,7 @@ function __hmrPatch(instance, NewCtor) {
   __hmrRegisterDefinition(NewCtor);
   __hmrRegistry.get(NewCtor.__hmrId)?.instances.add(instance);
   instance._hmrRerender();
+  __hmrEmit("patch", { id: NewCtor.__hmrId ?? oldId ?? null });
   return instance;
 }
 function __hmrMigrateRemount(oldInstance, NewCtor, props = {}) {
@@ -27287,6 +27337,7 @@ function createRenderer(opts) {
           continue;
         __hmrPreserveState(keep.instance, next.instance);
       }
+      __hmrEmit("remount", { paths: [...dirty], from: firstDirty, migrate: migrateKeep.length });
     } catch (error) {
       forceFrom = null;
       throw error;
@@ -29174,6 +29225,11 @@ ${path}
   }
   root.appendChild(card);
   overlayEl = card;
+  __hmrEmit("reject", {
+    kind: kind2 || "compile",
+    path: failurePath(error),
+    message: failureText(error).slice(0, 500)
+  });
   return card;
 }
 function clearHmrOverlay() {

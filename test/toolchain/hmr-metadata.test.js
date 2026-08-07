@@ -5,7 +5,10 @@ import { compile } from '../../src/compile.js';
 import {
   __Component,
   __hmrClassify,
+  __hmrEmit,
+  __hmrEvents,
   __hmrLookup,
+  __hmrMigrateDiff,
   __hmrPreserveState,
   __hmrRegisterDefinition,
   __hmrRegistry,
@@ -141,14 +144,26 @@ describe('__hmrClassify', () => {
   });
 });
 
-describe('__hmrPreserveState', () => {
-  test('copies intersecting signal .value slots listed in __hmrSig.state', () => {
+describe('__hmrMigrateDiff / __hmrPreserveState', () => {
+  test('reports kept, added, and removed named state slots', () => {
+    expect(__hmrMigrateDiff(
+      { state: ['count', 'gone'] },
+      { state: ['count', 'extra'] },
+    )).toEqual({
+      kept: ['count'],
+      added: ['extra'],
+      removed: ['gone'],
+    });
+  });
+
+  test('copies intersecting signal .value slots and emits a migrate event', () => {
     class Old extends __Component {
       _init() {
         this.count = __state(7);
         this.gone = __state(1);
       }
     }
+    Old.__hmrId = 'test/migrate.rip#Old';
     Old.__hmrSig = { state: ['count', 'gone'], computed: [], props: [], gates: 0, extends: null };
     class Next extends __Component {
       _init() {
@@ -156,12 +171,31 @@ describe('__hmrPreserveState', () => {
         this.extra = __state(9);
       }
     }
+    Next.__hmrId = 'test/migrate.rip#Old';
     Next.__hmrSig = { state: ['count', 'extra'], computed: [], props: [], gates: 0, extends: null };
     const prev = new Old({});
     const next = new Next({});
-    __hmrPreserveState(prev, next);
+    const before = __hmrEvents().length;
+    const report = __hmrPreserveState(prev, next);
     expect(next.count.value).toBe(7);
     expect(next.extra.value).toBe(9);
+    expect(report.kept).toEqual(['count']);
+    expect(report.added).toEqual(['extra']);
+    expect(report.removed).toEqual(['gone']);
+    expect(report.copied).toEqual(['count']);
+    const events = __hmrEvents().slice(before);
+    expect(events.some(e => e.type === 'migrate' && e.removed?.includes('gone'))).toBeTrue();
+  });
+});
+
+describe('__hmrEmit', () => {
+  test('records events for tooling and tests', () => {
+    const before = __hmrEvents().length;
+    __hmrEmit('patch', { id: 'demo.rip#X' });
+    const last = __hmrEvents().at(-1);
+    expect(__hmrEvents().length).toBe(before + 1);
+    expect(last.type).toBe('patch');
+    expect(last.id).toBe('demo.rip#X');
   });
 });
 

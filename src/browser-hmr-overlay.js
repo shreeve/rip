@@ -2,6 +2,8 @@
 // App interactive underneath; never mounts into the App target (remounts
 // would wipe it). Cleared on the next successful apply or destroy.
 
+import { __hmrEmit } from './runtime/components.js';
+
 const ATTR = 'data-rip-hmr-overlay';
 
 let overlayEl = null;
@@ -99,6 +101,11 @@ export function showHmrOverlay(kind, error) {
 
   root.appendChild(card);
   overlayEl = card;
+  __hmrEmit('reject', {
+    kind: kind || 'compile',
+    path: failurePath(error),
+    message: failureText(error).slice(0, 500),
+  });
   return card;
 }
 

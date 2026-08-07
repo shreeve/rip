@@ -122,8 +122,9 @@ describe('module shape', () => {
   test('named exports are the delivered set plus the private renderer construction seam', () => {
     expect(Object.keys(v4c).sort()).toEqual([
  '__Component', '__claimGateConstructor', '__clsx', '__detach', '__detachRef', '__gateBind', '__handleComponentError',
- '__hmrClassify', '__hmrEntries', '__hmrLookup', '__hmrMigrateRemount', '__hmrPatch', '__hmrPreserveState',
- '__hmrRegisterDefinition', '__hmrRegistry', '__hmrRestoreUi', '__hmrSnapshotUi',
+ '__hmrClassify', '__hmrEmit', '__hmrEntries', '__hmrEvents', '__hmrLookup', '__hmrMigrateDiff',
+ '__hmrMigrateRemount', '__hmrPatch', '__hmrPreserveState', '__hmrRegisterDefinition', '__hmrRegistry',
+ '__hmrRestoreUi', '__hmrSnapshotUi',
  '__lis',
  '__ownerFrame', '__popComponent', '__popOwner', '__pushComponent', '__pushOwner',
  '__reconcile', '__transition',

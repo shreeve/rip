@@ -3,6 +3,7 @@ import { _isSourceCell, _isSourceFamily } from './source.rip'
 import {
   __claimGateConstructor
   __hmrClassify
+  __hmrEmit
   __hmrEntries
   __hmrPatch
   __hmrPreserveState
@@ -613,6 +614,10 @@ export def createRenderer(opts: RendererOpts): Renderer
         continue unless next?.instance?
         continue unless next.instance.constructor?.__hmrId is keep.id
         __hmrPreserveState keep.instance, next.instance
+      __hmrEmit 'remount',
+        paths: [...dirty]
+        from: firstDirty
+        migrate: migrateKeep.length
     catch error
       forceFrom = null
       throw error
