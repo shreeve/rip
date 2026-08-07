@@ -29,6 +29,7 @@ test('public entry exposes named substrate exports only', () => {
     'source',
     'throttle',
     'unwrapStash',
+    'validatePrepared',
   ]);
   expect('default' in app).toBeFalse();
 });

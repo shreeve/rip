@@ -17,8 +17,8 @@ export type LinkHost =
 # Only a pointer resting on (or focus holding) a link for the settle
 # window preloads — brushing past never fires — and re-visiting the
 # same href re-preloads only after the repeat window; freshness stays
-# the cells' job either way. Both are v3's established thresholds for
-# deliberate intent, implementation details rather than knobs.
+# the cells' job either way. Fixed thresholds for deliberate intent,
+# not author knobs.
 SETTLE_MS = 50
 REPEAT_MS = 3000
 

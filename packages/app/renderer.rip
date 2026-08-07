@@ -26,7 +26,7 @@ export type Renderer =
   mount: (info: Record<string, any>) => Promise<any>
   preload: (info: Record<string, any>) => void
   # Remount the current route chain from the first dirty module down,
-  # keeping ancestor layouts and the live stash (Probe 1 / S3 floor).
+  # keeping ancestor layouts and the live stash.
   # Returns 'narrow' when it remounted, 'noop' when nothing was mounted,
   # 'escape' when the caller should fall back to whole-launch remount.
   remountDirty: (paths: string[], candidate?: Record<string, any>) => Promise<'narrow' | 'noop' | 'escape' | 'reload'>
@@ -245,8 +245,8 @@ export def createRenderer(opts: RendererOpts): Renderer
   # unhandled boot failure renders a self-contained error card into the
   # target instead of leaving a blank page. Inline styles only: the card
   # is the fallback for when the app itself is broken, so it depends on
-  # no app CSS. It shows the failure's stack or message (matching v3's
-  # fatal-error display), and the next successful commit clears it.
+  # no app CSS. It shows the failure's stack or message, and the next
+  # successful commit clears it.
   fatalCard: any = null
 
   clearFatalCard = ->

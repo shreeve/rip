@@ -178,9 +178,9 @@ export def launch(opts: LaunchOpts): LaunchResult
     return if destroyed
     destroyed = true
     # Every disposer runs; errors aggregate. Globals ALWAYS clear — a
-    # stuck __ripApp bricks every future launch (destroy latches
-    # `destroyed` before work, so a mid-teardown throw used to leave
-    # the sentinel set with no recovery path).
+    # stuck __ripApp bricks every future launch. Destroy latches
+    # `destroyed` before work so a mid-teardown throw cannot leave the
+    # sentinel set with no recovery path.
     errors = []
     run = (fn) ->
       try

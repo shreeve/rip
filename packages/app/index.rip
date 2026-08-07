@@ -1,11 +1,3 @@
-export type GateFailure =
-  name: string
-  message: string
-  status: number
-  path: string
-  file: string
-  error: unknown
-
 export { source } from './source.rip'
 export { createStash, unwrapStash } from './stash.rip'
 export { createMutation } from './mutation.rip'
@@ -15,7 +7,7 @@ export { buildRoutes, parseQuery } from './routes.rip'
 export { createRouter, browserAdapter } from './router.rip'
 export { createRenderer } from './renderer.rip'
 export { persistStash } from './persist.rip'
-export { launch } from './launch.rip'
+export { launch, validatePrepared } from './launch.rip'
 export { ariaCurrent, ownsAnchor } from './aria.rip'
 export { interceptClicks, preloadLinks } from './links.rip'
 export { createWorkspace } from './workspace.rip'

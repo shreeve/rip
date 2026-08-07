@@ -4,8 +4,9 @@
 // browser's job—boot does not keep its own ETag/body cache.
 import { createModuleLoader } from './browser-modules.js';
 import { app, embeddedPackages } from './browser-app.js';
-import { validatePrepared } from '../packages/app/launch.rip';
 import { clearHmrOverlay, showHmrOverlay } from './browser-hmr-overlay.js';
+
+const { validatePrepared } = app;
 
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const validHash = value => typeof value === 'string' && /^[A-Za-z0-9_]{6}$/.test(value);

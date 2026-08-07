@@ -24795,6 +24795,7 @@ var runtimes = Object.freeze({
 // packages/app/index.rip
 var exports_app = {};
 __export(exports_app, {
+  validatePrepared: () => validatePrepared,
   unwrapStash: () => unwrapStash,
   throttle: () => throttle,
   source: () => source,
@@ -29345,6 +29346,7 @@ function clearHmrOverlay() {
 }
 
 // src/browser-boot.js
+var { validatePrepared: validatePrepared2 } = exports_app;
 var isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 var validHash3 = (value) => typeof value === "string" && /^[A-Za-z0-9_]{6}$/.test(value);
 var validPath3 = (path, ripOnly = false) => {
@@ -29595,7 +29597,7 @@ async function bootApp(opts = {}) {
       const staged = await program.compile(changedRip);
       nextCompiled = staged.compiled;
       applyPaths = staged.invalidated.filter((path) => !path.startsWith("@rip-lang/"));
-      validatePrepared({ compiled: nextCompiled, data: dataFor(nextCompiled) });
+      validatePrepared2({ compiled: nextCompiled, data: dataFor(nextCompiled) });
     } catch (error) {
       program.sources(activeSources());
       rejected.add(change.hash);
