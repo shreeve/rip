@@ -42,7 +42,7 @@ With a Janus control endpoint running (`--control <target>` or the
 
 ```bash
 cd packages/sites/demos/pulse
-rip site index.rip --name pulse
+rip sites run --name pulse
 ```
 
 The manager registers `pulse` with Janus, publishes the browser App,
@@ -57,7 +57,7 @@ Same as leg 2, with the flag in the manager's environment:
 
 ```bash
 cd packages/sites/demos/pulse
-rip site index.rip --name pulse
+rip sites run --name pulse
 ```
 
 Open the page, then edit `app/mood.rip`: change the `up` label

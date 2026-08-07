@@ -32,12 +32,9 @@ Usage:
                                      (default: the current directory; 'rip check --help')
   rip schema <verb> [args...]        Schema evolution: status | plan | make | migrate
                                      (run 'rip schema --help' for the full surface)
-  rip site [entry] [flags...]        Foreground Sites manager (also: rip sites run)
-  rip sites <verb> [noun] [args...]  Rip Sites: catalog, apps, edge, tray + advanced
-                                     (run | browse | hold | release | migrate | recover)
+  rip sites <verb> [noun] [args...]  Rip Sites: catalog, apps, edge, tray, manager
                                      Reserved nouns: edge | all | tray
                                      (run 'rip sites --help' for the full surface)
-  rip edge <verb> [args...]          Alias of \`rip sites <verb> edge\`
   rip test [args...]                 Run \`bun test\` with the .rip loader preloaded
                                      (default --timeout 15000; extra args pass through)
   rip <name> [args...]               Run rip-<name>: sibling of this executable, repo
@@ -153,16 +150,24 @@ if (args[0] === 'test') {
   process.exit(r.status ?? 1);
 }
 
-// `rip sites` and `rip edge` are the two appliance clients shipped by
-// @rip-lang/sites. They are core surfaces, so dispatch is independent of the
-// caller's cwd and of package-manager bin-link installation.
-if (args[0] === 'sites' || args[0] === 'edge') {
-  const applianceCliPath = join(dirname(fileURLToPath(import.meta.url)), `../packages/sites/${args[0]}.rip`);
+// `rip sites` is the Sites appliance CLI shipped by @rip-lang/sites.
+// Dispatch is independent of the caller's cwd and of package-manager bin links.
+if (args[0] === 'sites') {
+  const applianceCliPath = join(dirname(fileURLToPath(import.meta.url)), '../packages/sites/sites.rip');
   const r = spawnSync('bun', [`--preload=${loaderPath}`, applianceCliPath, ...args.slice(1)], {
     stdio: 'inherit',
     env: process.env,
   });
   process.exit(r.status ?? 1);
+}
+
+// Retired CLIs — point at the unified surface.
+if (args[0] === 'edge' || args[0] === 'site') {
+  const hint = args[0] === 'edge'
+    ? 'use `rip sites <verb> edge` (e.g. `rip sites start edge`, `rip sites expose local`)'
+    : 'use `rip sites run` / `rip sites publish` / `rip sites stop` / …';
+  console.error(`rip: \`rip ${args[0]}\` was removed — ${hint}`);
+  process.exit(1);
 }
 
 // --- Subcommand dispatch: rip <name> [args...] → rip-<name> ---

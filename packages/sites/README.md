@@ -27,7 +27,7 @@ The system-wide ownership, reload, migration, and cache contract is
 ┌────────────────────────────▼────────────────────────────────┐
 │  sites.json + control      remembered projects, start/stop  │
 │  (control lives with edge — no idle forever daemon)         │
-│  rip sites run             one foreground manager (optional)│
+│  rip sites run/publish     foreground manager (optional)    │
 └────────────────────────────┬────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────┐
@@ -48,11 +48,11 @@ ordinary HTTP themselves — they register with Janus and supervise workers.
 | --- | --- | --- |
 | `@rip-lang/sites` | Framework API (`get`, `read`, middleware, …) | Inside `index.rip` / App code |
 | `rip sites` | Unified CLI: catalog, apps, edge, tray, advanced | Day-to-day Sites |
-| `rip sites run` / `rip site` | Foreground manager for **one** project | Dev without the catalog |
+| `rip sites run` / `publish` | Foreground manager / directory publish | Dev without the catalog |
 | Sites tray | Menu-bar UI over `rip sites` | Click instead of typing |
 
 Reserved nouns (not app names): **`edge`**, **`all`**, **`tray`**.
-`rip edge …` is a thin alias of `rip sites … edge`. Durable catalog is
+Durable catalog is
 `sites.json` (Rip-owned). The control plane starts with the edge / desired
 apps and exits when nothing remains to supervise — Janus stays live-only.
 
@@ -90,17 +90,17 @@ Three postures:
 ```bash
 rip sites trust edge                 # install the local CA (required before local)
 # stop running sites first — mode flips recreate the edge
-rip sites local edge                 # LAN / Bonjour posture (stop+recreate)
-rip sites local edge --off           # back to default
+rip sites expose local               # LAN / Bonjour posture (stop+recreate)
+rip sites expose loopback            # back to default
 rip sites trust edge --export ca.crt # share the CA with a phone / peer
 # phone bootstrap without temporary HTTPS accept:
 #   http://sites.local/trust
-rip sites public edge                # refuses until phase 2
+rip sites expose public              # refuses until phase 2
 ```
 
 `*.ripdev.io` names still resolve only to `127.0.0.1`, so phones on the LAN
 need `{name}.local` hosts (and the trusted local CA), not the ripdev.io URLs.
-Catalog adds and `rip sites local edge` dual-claim every `*.ripdev.io` host with a
+Catalog adds and `rip sites expose local` dual-claim every `*.ripdev.io` host with a
 matching `*.local` twin; demos declare both in `serve.rip`. After a mode flip,
 restart sites so managers re-register the hosts.
 
@@ -108,7 +108,7 @@ Phone walkthrough (hello):
 
 ```bash
 rip sites stop hello
-rip sites trust edge && rip sites local edge
+rip sites trust edge && rip sites expose local
 rip sites start hello
 # http://sites.local/trust  → install CA on the phone
 # https://hello.local/      → the app
@@ -153,7 +153,7 @@ rip sites stop edge
 
 ```text
 rip sites stop edge
-# rip-edge: stop hello before stopping the edge   ← intentional
+# rip-sites: stop hello before stopping the edge   ← intentional
 ```
 
 ### Install into an app
@@ -180,8 +180,8 @@ prefix '/api', ->
 start!
 ```
 
-Then either use the Agent path (`rip sites add` / `start`) or a foreground
-manager (see [`rip site`](#rip-site--one-foreground-manager)).
+Then either use the catalog path (`rip sites add` / `start`) or a foreground
+manager (`rip sites run`).
 
 ## Commands at a glance
 
@@ -199,10 +199,8 @@ Grammar: `rip sites <verb> <noun>`. Reserved nouns (not app names):
 | `rip sites status [app\|all\|edge\|tray]` | Summary (bare = edge + apps) |
 | `rip sites open <app\|edge>` | Open app URL or status dashboard |
 | `rip sites logs <app\|edge\|all>` | Logs |
-| `rip sites reload \| trust \| local \| public edge` | Edge-only verbs |
-| `rip sites run \| browse \| hold \| release \| migrate \| recover` | Advanced / foreground (was `rip site`) |
-
-`rip edge <verb>` is a thin alias of `rip sites <verb> edge`.
+| `rip sites reload \| trust edge` / `expose local\|public\|loopback` | Edge |
+| `rip sites run \| publish \| hold \| release \| migrate \| recover` | Manager |
 
 Add options: `--name`, `--host` (repeatable), `--workers`, `--concurrency`,
 `--no-watch` / `--no-watch-app` / `--no-watch-api`, `--eager`.
@@ -210,7 +208,7 @@ Add options: `--name`, `--host` (repeatable), `--workers`, `--concurrency`,
 Selectors accept stable id, unique name, or canonical root. Starting apps needs a
 reachable Janus control plane (normally: `rip sites start edge` first).
 
-### `rip sites run` / `rip site` — one foreground manager
+### `rip sites run` / `publish` — foreground manager
 
 Does **not** use the Sites catalog. Needs Janus control explicitly:
 
@@ -220,14 +218,13 @@ CONTROL=$(rip sites status edge --json | bun -e 'console.log(JSON.parse(await Bu
 
 cd packages/sites/demos/hello
 rip sites run --control "$CONTROL"
-# or: JANUS_CONTROL=$CONTROL rip site
+# or: JANUS_CONTROL=$CONTROL rip sites run
 ```
 
 Without `--control` / `JANUS_CONTROL` you get:
-`rip-site: --control or JANUS_CONTROL is required`.
+`rip-site: --control or JANUS_CONTROL is required` (manager).
 
-Also: `rip sites hold|release|migrate|recover <app>`, `rip sites browse`,
-and the package-bin equivalents under `rip site …` — see [CLI](#cli).
+Also: `rip sites hold|release|migrate|recover <app>`, `rip sites publish`.
 
 `hold` / `release` / `migrate` / `recover` take the same catalog selectors as
 `start` / `stop` (id, name, or root). Migrate and recover run with the app’s
@@ -1188,7 +1185,7 @@ mutually exclusive.
 is the pretty picture (same grammar as `--access-format`); it is only legal with
 pretty logging. CLI `--access-log` / `--access-format` override `serve.rip` when
 passed. You can edit `access.format` while the site is running; restart the
-manager (`rip sites restart <site>`, or stop/start a foreground `rip site`) to
+manager (`rip sites restart <app>`, or stop/start a foreground `rip sites run`) to
 pick up the new picture — the access stream does not hot-reload `serve.rip`.
 
 `app.root` selects the browser App directory relative to the project.
@@ -1291,9 +1288,6 @@ rip sites release <app>
 rip sites migrate <app> [migration-entry] --dir migrations
 rip sites recover <app> <operation-id>
 # Foreground without the catalog still works:
-rip site hold [project]
-rip site migrate [migration-entry] --dir migrations
-rip site recover <operation-id>
 ```
 
 `status` prints the manager's machine-readable JSON state. `stop` asks the
@@ -1353,9 +1347,8 @@ changed, activation failure stays in Maintenance for fix-forward recovery.
 
 ```bash
 rip sites run [project] [options]
-rip sites browse <directory> [--host <host>] [--control <target>]
-rip sites browse <directory> [--host <host>] [--until-restart]
-# `rip site …` remains the package bin for the same foreground manager.
+rip sites publish [directory] [--host <host>] [--control <target>]
+rip sites publish [directory] [--host <host>] [--until-restart]
 ```
 
 The project argument may identify an entry or directory. Discovery searches
@@ -1381,7 +1374,7 @@ for `app.rip`, `index.rip`, or `app/`.
 `JANUS_CONTROL` supplies the control endpoint when `--control` is omitted.
 Startup validates the endpoint before claiming the server.
 
-`rip sites browse` (or `rip site browse`) resolves and publishes exactly the
+`rip sites publish` resolves and publishes exactly the
 named directory as one
 `revalidate` browsable root. It publishes no worker upstreams and no SPA shell. By
 default it chooses `browse-<random>.localhost`, prints

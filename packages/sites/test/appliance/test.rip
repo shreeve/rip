@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 APP = join(import.meta.dir, '..', '..', 'sites.rip')
-EDGE = join(import.meta.dir, '..', '..', 'edge.rip')
 FAKE_CADDY = join(import.meta.dir, 'fake-caddy.rip')
 
 run = (file, args, env) ->
@@ -137,7 +136,7 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     ok existsSync(join(site.state, 'sites.json')), 'add writes sites.json'
     ok not existsSync(join(site.runtime, 'agent.json')), 'add must not spawn the control plane'
 
-    # Catalog nouns resolve like start/stop — not as raw site.rip paths/entries.
+    # Catalog nouns resolve like start/stop — manager is internal, not `rip site`.
     held = cli! APP, ['hold', 'fixture'], env
     eq held.code, 1
     ok not held.err.includes('project not found: fixture'), 'hold must resolve catalog name to root'
@@ -152,6 +151,9 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     recoverShape = cli! APP, ['recover', 'fixture'], env
     eq recoverShape.code, 1
     ok recoverShape.err.includes 'operation id'
+    exposeHelp = cli! APP, ['expose'], env
+    eq exposeHelp.code, 1
+    ok exposeHelp.err.includes 'local | public | loopback'
 
     duplicate = cli! APP, ['add', project], env
     eq duplicate.code, 1
@@ -222,24 +224,21 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     janus.stop true
     rmSync site.root, { recursive: true, force: true }
 
-test! 'rip edge distinguishes an external edge from one owned by Rip', ->
+test! 'rip sites distinguishes an external edge from one owned by Rip', ->
   external = fixture 'rip-agent-external-edge-'
   externalSocket = join external.root, 'janus.sock'
   janus = startJanus externalSocket, []
   externalEnv = { RIP_AGENT_HOME: external.state, RIP_AGENT_RUNTIME: external.runtime, JANUS_CONTROL: externalSocket }
   try
-    status = JSON.parse((cli!(EDGE, ['status', '--json'], externalEnv)).out)
+    status = JSON.parse((cli!(APP, ['status', 'edge', '--json'], externalEnv)).out)
     eq status.state, 'running'
     eq status.managed, false
-    stopped = cli! EDGE, ['stop'], externalEnv
+    stopped = cli! APP, ['stop', 'edge'], externalEnv
     eq stopped.code, 1
     ok stopped.err.includes 'edge is not owned by Rip'
-    wrongSurface = cli! EDGE, ['status', '--caddy', FAKE_CADDY], externalEnv
+    wrongSurface = cli! APP, ['status', 'edge', '--caddy', FAKE_CADDY], externalEnv
     eq wrongSurface.code, 1
     ok wrongSurface.err.includes 'does not accept start options'
-    viaSites = JSON.parse((cli!(APP, ['status', 'edge', '--json'], externalEnv)).out)
-    eq viaSites.state, 'running'
-    eq viaSites.managed, false
   finally
     stopAgent! external.runtime
     janus.stop true
@@ -251,7 +250,7 @@ test! 'rip edge distinguishes an external edge from one owned by Rip', ->
   writeFileSync ownedConfig, ''
   chmodSync FAKE_CADDY, 0o755
   try
-    started = cli! EDGE, ['start', '--caddy', FAKE_CADDY, '--config', ownedConfig, '--json'], ownedEnv
+    started = cli! APP, ['start', 'edge', '--caddy', FAKE_CADDY, '--config', ownedConfig, '--json'], ownedEnv
     eq started.code, 0
     edge = JSON.parse started.out
     eq edge.state, 'running'
@@ -260,7 +259,7 @@ test! 'rip edge distinguishes an external edge from one owned by Rip', ->
     ok Number.isInteger edge.pid
 
     stopAgent! owned.runtime
-    adopted = JSON.parse((cli!(EDGE, ['status', '--json'], ownedEnv)).out)
+    adopted = JSON.parse((cli!(APP, ['status', 'edge', '--json'], ownedEnv)).out)
     eq adopted.state, 'running'
     eq adopted.managed, true
     eq adopted.pid, edge.pid
@@ -270,7 +269,7 @@ test! 'rip edge distinguishes an external edge from one owned by Rip', ->
     replacement = null
     deadline = Date.now() + 8000
     loop
-      probe = JSON.parse((cli!(EDGE, ['status', '--json'], ownedEnv)).out)
+      probe = JSON.parse((cli!(APP, ['status', 'edge', '--json'], ownedEnv)).out)
       if probe.state is 'running' and probe.pid? and probe.pid isnt edge.pid
         replacement = probe
         break
@@ -283,17 +282,17 @@ test! 'rip edge distinguishes an external edge from one owned by Rip', ->
     eq replacement.desired, 'running'
     eq replacement.managed, true
 
-    reloaded = cli! EDGE, ['reload', '--json'], ownedEnv
+    reloaded = cli! APP, ['reload', 'edge', '--json'], ownedEnv
     eq reloaded.code, 0
     eq JSON.parse(reloaded.out).state, 'running'
 
-    stopped = cli! EDGE, ['stop', '--json'], ownedEnv
+    stopped = cli! APP, ['stop', 'edge', '--json'], ownedEnv
     eq stopped.code, 0
     waitFor! 'fake edge shutdown', -> not existsSync(join(owned.runtime, 'janus.sock'))
-    final = JSON.parse((cli!(EDGE, ['status', '--json'], ownedEnv)).out)
+    final = JSON.parse((cli!(APP, ['status', 'edge', '--json'], ownedEnv)).out)
     eq final.state, 'stopped'
     eq final.managed, false
   finally
-    try cli! EDGE, ['stop'], ownedEnv
+    try cli! APP, ['stop', 'edge'], ownedEnv
     stopAgent! owned.runtime
     rmSync owned.root, { recursive: true, force: true }

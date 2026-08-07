@@ -22,15 +22,15 @@ rip sites start hello
 ```
 
 `serve.rip` declares the `hello` name, dual hosts (`hello.ripdev.io` for
-loopback, `hello.local` for LAN after `rip edge local`), conventional
+loopback, `hello.local` for LAN after `rip sites expose local`), conventional
 `app/` root, and explicit default change policy.
 
 ## LAN / phone
 
 ```sh
 rip sites stop hello          # mode flips refuse while sites run
-rip edge trust
-rip edge local
+rip sites trust edge
+rip sites expose local
 rip sites start hello
 # Mac:     https://hello.local/
 # Phone:   install CA from http://sites.local/trust (then Full Trust on iOS)

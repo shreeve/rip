@@ -12,7 +12,7 @@ controls landed. Remaining:
       (working tree: `agent.rip`, demos `serve.rip`, `Caddyfile.local`
       `mdns { apps on }`, README walkthrough).
 - [ ] **`public` posture (phase 2):** ACME / real DNS hosts; keep
-      `rip edge public` refusing until the Caddyfile and Agent mode
+      `rip sites expose public` refusing until the Caddyfile and mode
       exist. Do not persist `public` in state before that.
 - [ ] Behavioral appliance pins for trust gate, mode flip (stop sites
       first), and `.local` host registration — today only static string

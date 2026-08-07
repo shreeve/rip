@@ -9,9 +9,7 @@
     "./middleware": "./middleware.rip"
   },
   "bin": {
-    "rip-site": "./site.rip",
-    "rip-sites": "./sites.rip",
-    "rip-edge": "./edge.rip"
+    "rip-sites": "./sites.rip"
   },
   "scripts": {
     "test": "rip test/test.rip",
@@ -40,7 +38,6 @@
     "agent.rip",
     "launchd-listener.js",
     "sites.rip",
-    "edge.rip",
     "tray-sites.rip",
     "bin/rip-tray-agent",
     "Caddyfile",

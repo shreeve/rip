@@ -12,7 +12,7 @@ import {
 
 encoder = TextEncoder.new()
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
-SERVER = join(import.meta.dir, '..', '..', 'site.rip')
+SERVER = join(import.meta.dir, '..', '..', 'manager.rip')
 ENTRY = join(import.meta.dir, '..', 'hello-api', 'index.rip')
 
 record = (changes = {}) ->

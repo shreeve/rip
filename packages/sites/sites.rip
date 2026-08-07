@@ -1,10 +1,12 @@
 #!/usr/bin/env rip
 
-# Unified Sites CLI: rip sites <verb> <noun>
+# Unified Sites CLI: rip sites <verb> [noun]
 # Reserved nouns: edge, all, tray — never real app names.
+# The only user-facing Sites CLI — no rip site / rip edge commands.
 
 import { agentPaths, printJson, probeAgent, requestAgent } from './appliance.rip'
 import { addCatalogApp, findCatalogApp, loadCatalog, removeCatalogApp, snapshotCatalogApp } from './catalog.rip'
+import { existsSync } from 'node:fs'
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -18,34 +20,34 @@ HELP = '''
 
   Grammar: rip sites <verb> <noun>
   Reserved nouns (not app names): edge · all · tray
+  Path nouns default to the current directory when omitted.
 
   Catalog:
     list                                 List remembered apps
     add [project] [options]              Remember a project (default: cwd)
     remove <app>                         Forget a stopped app
 
-  Lifecycle (noun: <app> | all | edge | tray):
-    start <noun>                         Start app(s), edge, or tray
-    stop <noun>                          Stop app(s), edge, or tray
-    restart <noun>                       Restart app(s), edge, or tray
-    status [noun]                        Edge+apps summary, or one target
+  Lifecycle (noun: <app> | all | edge | tray | <path>):
+    start <app|all|edge|tray>            Start supervised app(s), edge, or tray
+    stop [noun]                          Stop (default: manager at cwd)
+    restart <app|all|edge|tray>          Restart (edge/tray = full recreate)
+    status [noun]                        Summary, or one target (default: edge+apps)
 
-  Edge-only (noun must be edge):
+  Edge:
     reload edge                          Reload the Rip-owned Caddyfile
     trust edge [--export [PATH]]         Install (or export) the local CA
-    local edge [--off]                   LAN / Bonjour posture (trust first)
-    public edge                          Refuse — public posture is phase 2
+    expose local|public|loopback         Edge reachability posture
 
   Daily:
     open <app|edge>                      Open the app URL or status dashboard
     logs <app|edge|all> [--lines N] [-f] Manager or edge logs
 
-  Advanced (catalog app → manager; same nouns as start/stop):
-    run [project] …                      Foreground manager (no catalog)
-    browse <dir> …                       Publish one directory (no catalog)
+  Manager (cwd default for path forms):
+    run [project] …                      Foreground manager
+    publish [dir] …                      Publish one directory through Janus
     hold|release <app> […]               Deploy barriers on a remembered app
-    migrate <app> [entry] […]            Coordinated DB migrate (cwd = app root)
-    recover <app> <op-id> […]            Fix-forward recovery (cwd = app root)
+    migrate <app> [entry] […]            Coordinated DB migrate
+    recover <app> <op-id> […]            Fix-forward recovery
 
   Start edge options:
     --caddy PATH  --config PATH  --control TARGET
@@ -57,8 +59,6 @@ HELP = '''
 
   Output:
     --json                               Machine-readable response
-
-  `rip edge …` remains a thin alias of these spells (e.g. start → start edge).
 '''
 
 args = process.argv.slice 2
@@ -84,12 +84,9 @@ edgeBody = {}
 edgeFlags = []
 exportPath = null
 trustExport = false
-localOff = false
 
-# Advanced verbs: run/browse stay thin `rip site` forwards.
-# hold/release/migrate/recover take a catalog <app> noun (id|name|root),
-# resolve it, then invoke site.rip against that project — same selectors as start/stop.
-ADVANCED = ['run', 'browse', 'hold', 'release', 'migrate', 'recover']
+# Manager verbs invoke manager.rip as an internal module (not a user CLI).
+MANAGER = ['run', 'publish', 'browse', 'hold', 'release', 'migrate', 'recover']
 
 seedJanusControl = (env) ->
   return env if env.JANUS_CONTROL
@@ -105,12 +102,12 @@ seedJanusControl = (env) ->
   catch then null
   env
 
-forwardSite = (argv, options = {}) ->
-  site = join(import.meta.dir, 'site.rip')
+runManager = (argv, options = {}) ->
+  manager = join(import.meta.dir, 'manager.rip')
   preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
   abort 'rip-sites: the Rip loader is missing' unless preload?
   env = seedJanusControl! { ...process.env }
-  result = Bun.spawnSync [process.execPath, preload, site, ...argv],
+  result = Bun.spawnSync [process.execPath, preload, manager, ...argv],
     cwd: options.cwd or process.cwd()
     stdout: 'inherit'
     stderr: 'inherit'
@@ -124,21 +121,30 @@ takeAppNoun = ->
   abort "rip-sites: #{JSON.stringify(selector)} is reserved (edge | all | tray) — not an app name" if selector in RESERVED
   findCatalogApp loadCatalog(), selector
 
-if verb in ADVANCED
+# Path forms keep manager flags intact — handle before Sites option parsing.
+if verb in MANAGER
   if verb is 'run'
-    forwardSite! args
-  else if verb is 'browse'
-    forwardSite! ['browse', ...args]
+    runManager! args
+  else if verb is 'publish' or verb is 'browse'
+    # publish is the taught verb; browse remains as a quiet synonym.
+    dir = null
+    rest = []
+    for value, i in args
+      if not dir? and not value.startsWith('-')
+        dir = value
+      else
+        rest.push value
+    runManager! ['browse', (dir or process.cwd()), ...rest]
   else if verb in ['hold', 'release']
     app = takeAppNoun!
-    forwardSite! [verb, app.root, ...args]
+    runManager! [verb, app.root, ...args]
   else if verb is 'migrate'
     app = takeAppNoun!
-    forwardSite! ['migrate', ...args], { cwd: app.root }
+    runManager! ['migrate', ...args], { cwd: app.root }
   else if verb is 'recover'
     app = takeAppNoun!
     abort 'rip-sites: recover requires an operation id' unless args.length and not args[0].startsWith('-')
-    forwardSite! ['recover', ...args], { cwd: app.root }
+    runManager! ['recover', ...args], { cwd: app.root }
 
 take = (flag) ->
   abort "rip-sites: #{flag} requires a value" unless args.length
@@ -191,9 +197,6 @@ while args.length
     when '--eager'
       addFlags.push value
       eager = true
-    when '--off'
-      localOff = true
-      edgeFlags.push value
     when '--export'
       trustExport = true
       edgeFlags.push value
@@ -228,13 +231,12 @@ abort "rip-sites: #{verb} does not accept add options: #{addFlags.join(', ')}" i
 abort "rip-sites: #{verb} does not accept log options: #{logFlags.join(', ')}" if verb isnt 'logs' and logFlags.length
 abort 'rip-sites: --follow conflicts with --json' if follow and json
 abort "rip-sites: #{verb} does not accept start options" if Object.keys(edgeBody).length and not (verb is 'start' and noun is 'edge')
-abort "rip-sites: --off is only valid on `local edge`" if localOff and verb isnt 'local'
 abort "rip-sites: --export is only valid on `trust edge`" if trustExport and verb isnt 'trust'
 abort "rip-sites: unexpected arguments #{JSON.stringify(extra)}" if extra.length and verb isnt 'add'
 
 requireNoun = (allowed) ->
   abort "rip-sites: #{verb} requires a noun (#{allowed.join(' | ')})" unless noun?
-  abort "rip-sites: #{verb} does not accept noun #{JSON.stringify(noun)}" unless noun in allowed or (allowed.includes('<app>') and noun not in RESERVED)
+  abort "rip-sites: #{verb} does not accept noun #{JSON.stringify(noun)}" unless noun in allowed or (allowed.includes('<app>') and noun not in RESERVED) or (allowed.includes('<path>') and noun not in RESERVED)
   noun
 
 requireApp = ->
@@ -245,7 +247,15 @@ requireApp = ->
 reservedAsApp = (label) ->
   abort "rip-sites: #{JSON.stringify(label)} is reserved (edge | all | tray) — not an app name" if label in RESERVED
 
-isAppNoun = (n) -> n? and n not in RESERVED
+catalogHas = (selector) ->
+  try
+    findCatalogApp loadCatalog(), selector
+    true
+  catch then false
+
+pathNoun = (selector = null) ->
+  raw = selector or process.cwd()
+  resolve if raw is '.' then process.cwd() else raw
 
 renderApp = (app) ->
   marker = if app.state is 'running' then '●' else '○'
@@ -261,7 +271,7 @@ renderEdge = (edge) ->
   lines.push "  Caddy:   #{edge.caddy}" if edge.caddy
   lines.push "  Config:  #{edge.config}" if edge.config
   lines.push "  Ports:   HTTP #{edge.httpPort} / HTTPS #{edge.httpsPort}" if edge.httpPort? and edge.httpsPort?
-  lines.push "  Trusted: #{if edge.localCaTrusted then 'yes' else 'no (run rip sites trust edge)'}" if edge.mode is 'local' or verb is 'local'
+  lines.push "  Trusted: #{if edge.localCaTrusted then 'yes' else 'no (run rip sites trust edge)'}" if edge.mode is 'local' or verb is 'expose'
   lines.push "  Error:   #{edge.lastError}" if edge.lastError
   lines.join '\n'
 
@@ -289,7 +299,6 @@ runTray = (action) ->
   out = result.stdout.toString()
   err = result.stderr.toString()
   unless result.exitCode is 0
-    # status exits 1 when stopped — still a successful query for humans.
     if action is 'status' and result.exitCode is 1 and out.trim() is 'stopped'
       if json then printJson { state: 'stopped' } else console.log out.trim()
       return
@@ -304,14 +313,9 @@ runTray = (action) ->
 edgePost = (path, body = {}, start = true) ->
   requestAgent! 'rip-sites', 'POST', path, body, { start }
 
-# Revive the control plane only when the catalog still wants something running
-# (adoption after crash). Idle catalog reads never spawn it.
 wantsControl = ->
   doc = loadCatalog()
   doc.edge?.desired is 'running' or doc.apps.some((app) -> app.desired is 'running')
-
-controlGet = (path) ->
-  requestAgent! 'rip-sites', 'GET', path, null, { start: wantsControl! }
 
 offlineApp = (app) -> snapshotCatalogApp app
 
@@ -344,7 +348,6 @@ offlineEdge = (edge, health = null) ->
     lastError: edge?.lastError or null
   }
 
-# Live Janus without a Rip control plane (external edge) — no spawn.
 probeJanus = (control) ->
   return null unless typeof control is 'string' and control.length
   try
@@ -396,54 +399,72 @@ switch verb
     if json then printJson app else console.log "Removed #{app.name}"
 
   when 'start', 'stop', 'restart'
-    requireNoun ['<app>', 'all', 'edge', 'tray']
-    if noun is 'edge'
-      abort "rip-sites: restart edge is not supported — use stop edge && start edge" if verb is 'restart'
-      abort "rip-sites: start options only apply to `start edge`" if verb isnt 'start' and Object.keys(edgeBody).length
-      edge = if verb is 'start' then edgePost!('/1.0/edge/start', edgeBody, true) else edgePost!('/1.0/edge/stop', {}, true)
-      printEdge edge
-    else if noun is 'tray'
-      abort "rip-sites: restart tray is not supported — use stop tray && start tray" if verb is 'restart'
-      runTray! if verb is 'start' then 'start' else 'stop'
-    else if noun is 'all'
-      results = eachApp! verb
-      if json then printJson results else console.log results.map(renderApp).join('\n')
+    # Bare stop → manager at cwd. Path stop when noun is a filesystem path
+    # (and not a catalog name). Otherwise supervised lifecycle.
+    if verb is 'stop' and not noun?
+      runManager! ['stop']
+    else if verb is 'stop' and noun? and noun not in RESERVED and noun isnt 'all' and not catalogHas!(noun) and (noun is '.' or existsSync(noun))
+      runManager! ['stop', pathNoun!(noun)]
     else
-      app = requestAgent! 'rip-sites', 'POST', "/1.0/apps/#{encodeURIComponent(noun)}/#{verb}", {}, { start: true }
-      printApp app
+      requireNoun ['<app>', 'all', 'edge', 'tray']
+      if noun is 'edge'
+        abort "rip-sites: start options only apply to `start edge`" if verb isnt 'start' and Object.keys(edgeBody).length
+        if verb is 'restart'
+          edgePost! '/1.0/edge/stop', {}, true
+          edge = edgePost! '/1.0/edge/start', {}, true
+        else
+          edge = if verb is 'start' then edgePost!('/1.0/edge/start', edgeBody, true) else edgePost!('/1.0/edge/stop', {}, true)
+        printEdge edge
+      else if noun is 'tray'
+        if verb is 'restart'
+          runTray! 'stop'
+          runTray! 'start'
+        else
+          runTray! if verb is 'start' then 'start' else 'stop'
+      else if noun is 'all'
+        results = eachApp! verb
+        if json then printJson results else console.log results.map(renderApp).join('\n')
+      else
+        app = requestAgent! 'rip-sites', 'POST', "/1.0/apps/#{encodeURIComponent(noun)}/#{verb}", {}, { start: true }
+        printApp app
 
   when 'status'
     abort 'rip-sites: status takes at most one noun' if positionals.length > 1
-    live = ensureLiveControl!
-    if not noun? or noun is 'all'
-      if live
-        edge = requestAgent! 'rip-sites', 'GET', '/1.0/edge', null, { start: false }
-        apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: false }
-      else
-        doc = loadCatalog()
-        edge = readOfflineEdge!
-        apps = doc.apps.map offlineApp
-      if json
-        printJson if noun is 'all' then apps else { edge, apps }
-      else if noun is 'all'
-        if apps.length then console.log(apps.map(renderApp).join('\n')) else console.log 'No Rip sites.'
-      else
-        console.log renderEdge(edge)
-        console.log ''
-        if apps.length then console.log(apps.map(renderApp).join('\n')) else console.log 'No Rip sites.'
-    else if noun is 'edge'
-      if live or wantsControl!
-        printEdge requestAgent!('rip-sites', 'GET', '/1.0/edge', null, { start: true })
-      else
-        printEdge readOfflineEdge!
-    else if noun is 'tray'
-      runTray! 'status'
+    # Path / cwd manager JSON when noun is `.`, an existing path, or missing
+    # from the catalog — but bare status stays the edge+apps summary.
+    if noun? and noun not in RESERVED and noun isnt 'all' and (noun is '.' or (not catalogHas!(noun) and existsSync(noun)))
+      runManager! ['status', pathNoun!(noun)]
     else
-      requireApp!
-      if live or wantsControl!
-        printApp requestAgent!('rip-sites', 'GET', "/1.0/apps/#{encodeURIComponent(noun)}", null, { start: true })
+      live = ensureLiveControl!
+      if not noun? or noun is 'all'
+        if live
+          edge = requestAgent! 'rip-sites', 'GET', '/1.0/edge', null, { start: false }
+          apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: false }
+        else
+          doc = loadCatalog()
+          edge = readOfflineEdge!
+          apps = doc.apps.map offlineApp
+        if json
+          printJson if noun is 'all' then apps else { edge, apps }
+        else if noun is 'all'
+          if apps.length then console.log(apps.map(renderApp).join('\n')) else console.log 'No Rip sites.'
+        else
+          console.log renderEdge(edge)
+          console.log ''
+          if apps.length then console.log(apps.map(renderApp).join('\n')) else console.log 'No Rip sites.'
+      else if noun is 'edge'
+        if live or wantsControl!
+          printEdge requestAgent!('rip-sites', 'GET', '/1.0/edge', null, { start: true })
+        else
+          printEdge readOfflineEdge!
+      else if noun is 'tray'
+        runTray! 'status'
       else
-        printApp offlineApp(findCatalogApp(loadCatalog(), noun))
+        requireApp!
+        if live or wantsControl!
+          printApp requestAgent!('rip-sites', 'GET', "/1.0/apps/#{encodeURIComponent(noun)}", null, { start: true })
+        else
+          printApp offlineApp(findCatalogApp(loadCatalog(), noun))
 
   when 'open'
     requireNoun ['<app>', 'edge']
@@ -508,13 +529,18 @@ switch verb
       edge = edgePost! '/1.0/edge/trust', {}, true
       if json then printJson edge else console.log "● Edge CA trusted for local mode#{if edge.root then "\n  Root: #{edge.root}" else ''}"
 
-  when 'local'
-    requireNoun ['edge']
-    printEdge edgePost!('/1.0/edge/local', { off: localOff }, true)
-
-  when 'public'
-    requireNoun ['edge']
-    abort 'rip-sites: public posture is not available yet — use default (`rip sites start edge`) or `rip sites local edge`'
+  when 'expose'
+    posture = noun
+    abort 'rip-sites: expose requires a posture (local | public | loopback)' unless posture?
+    abort "rip-sites: unexpected arguments #{JSON.stringify(extra)}" if extra.length
+    if posture is 'public'
+      abort 'rip-sites: public posture is not available yet — use `rip sites expose loopback` or `rip sites expose local`'
+    if posture in ['loopback', 'default']
+      printEdge edgePost!('/1.0/edge/local', { off: true }, true)
+    else if posture is 'local'
+      printEdge edgePost!('/1.0/edge/local', { off: false }, true)
+    else
+      abort "rip-sites: unknown posture #{JSON.stringify(posture)} — use local | public | loopback"
 
   else
     abort "rip-sites: unknown verb #{JSON.stringify(verb)} — run `rip sites --help`"

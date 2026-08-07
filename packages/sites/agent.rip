@@ -301,7 +301,7 @@ addApp = (body) ->
   snapshotApp! app
 
 serverArgv = (app) ->
-  argv = [process.execPath, loaderArg('rip-agent'), join(import.meta.dir, 'site.rip'), app.root, '--name', app.name, '--control', state.edge.control, '--workers', String(app.options.workers), '--concurrency', String(app.options.concurrency)]
+  argv = [process.execPath, loaderArg('rip-agent'), join(import.meta.dir, 'manager.rip'), app.root, '--name', app.name, '--control', state.edge.control, '--workers', String(app.options.workers), '--concurrency', String(app.options.concurrency)]
   argv.push '--host', host for host in app.hosts
   if app.options.watchApp and app.options.watchApi
     argv.push '--watch'
@@ -548,7 +548,7 @@ startEdge = (body = {}, automatic = false) ->
     fail 'httpsPort must be an integer from 1 through 65535' if body.httpsPort? and (not Number.isInteger(body.httpsPort) or body.httpsPort < 1 or body.httpsPort > 65535)
     current = snapshotEdge!
     return current if current.state is 'running'
-    fail 'local mode requires `rip edge trust` first — install the edge CA, then retry', 403 if state.edge.mode is 'local' and not state.edge.localCaTrusted
+    fail 'local mode requires `rip sites trust edge` first — install the edge CA, then retry', 403 if state.edge.mode is 'local' and not state.edge.localCaTrusted
     caddy = resolveCaddy! body.caddy
     configInput = body.config or state.edge.config or packagedConfigForMode(state.edge.mode)
     config = resolveFile configInput, 'Caddyfile'
@@ -713,7 +713,7 @@ statusPage = ->
   trustHint = if edge.mode is 'local'
     'Trust bootstrap: <a href="/trust">/trust</a> (HTTPS) · phone/peer without cert accept: <a href="http://sites.local/trust">http://sites.local/trust</a>'
   else
-    'Trust bootstrap: <a href="/trust">/trust</a> · CLI: <code>rip edge status</code>'
+    'Trust bootstrap: <a href="/trust">/trust</a> · CLI: <code>rip sites status edge</code>'
   """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rip Sites</title>
@@ -752,7 +752,7 @@ handleStatus = (request) ->
         }
       html = '''<!doctype html><html><body style="font-family:system-ui;margin:2rem">
         <h1>Trust this edge</h1>
-        <p>Local CA is not ready yet. On the Mac run <code>rip edge trust</code>, then <code>rip edge local</code>.</p>
+        <p>Local CA is not ready yet. On the Mac run <code>rip sites trust edge</code>, then <code>rip sites expose local</code>.</p>
         </body></html>'''
       return Response.new html, { headers: { 'content-type': 'text/html; charset=utf-8' }, status: 503 }
     actionMatch = url.pathname.match /^\/apps\/([^/]+)\/(start|stop|restart)$/
@@ -820,7 +820,7 @@ handle = (request) ->
         return Response.json(exportEdgeCa!) if parts[2] is 'export-ca'
         return Response.json(mutate!(-> setEdgeMode! if (jsonBody! request).off then 'default' else 'local')) if parts[2] is 'local'
         if parts[2] is 'public'
-          fail 'public edge posture is not available yet — use default or `rip edge local`', 501
+          fail 'public edge posture is not available yet — use default (`rip sites expose loopback`) or `rip sites expose local`', 501
     Response.json({ error: 'not found' }, { status: 404 })
   catch error
     Response.json({ error: error?.message or String(error) }, { status: error?.status or 500 })

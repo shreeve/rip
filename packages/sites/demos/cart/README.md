@@ -31,7 +31,7 @@ With a Janus control endpoint running:
 
 ```bash
 cd packages/sites/demos/cart
-rip site index.rip --name cart
+rip sites run --name cart
 ```
 
 Open the registered site. Seeded products render; add to cart, place an

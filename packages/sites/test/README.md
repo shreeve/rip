@@ -15,8 +15,8 @@ Order:
 7. `manager-boundary` — declaration, finite file policy, and standalone browse.
 8. `middleware` — application-owned request policy.
 9. `monitor` — Janus access protocol, framing, formatting, and foreground output.
-10. `appliance` — `sites.json` catalog, edge-scoped control, `rip sites` /
-    `rip edge` lifecycle (no idle forever control plane).
+10. `appliance` — `sites.json` catalog, edge-scoped control, unified
+    `rip sites` lifecycle (no separate edge/site CLIs).
 11. `janus` — the released Janus data plane and control plane.
 
 Code enters `@rip-lang/sites` only when one of these fixtures demonstrates why

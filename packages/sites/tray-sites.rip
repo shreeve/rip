@@ -54,9 +54,9 @@ edgeMenu = (edge) ->
   if edge.managed or edge.state isnt 'running'
     items.push action 'Trust CA…', id: 'edge.trust', icon: 'lock.shield', run: -> json! 'sites', 'trust', 'edge', '--json'
   if mode is 'local'
-    items.push action 'Use Default (loopback)', id: 'edge.local.off', icon: 'laptopcomputer', run: -> json! 'sites', 'local', 'edge', '--off', '--json'
+    items.push action 'Use Default (loopback)', id: 'edge.expose.loopback', icon: 'laptopcomputer', run: -> json! 'sites', 'expose', 'loopback', '--json'
   else
-    items.push action 'Use Local (LAN)…', id: 'edge.local.on', icon: 'wifi', run: -> json! 'sites', 'local', 'edge', '--json'
+    items.push action 'Use Local (LAN)…', id: 'edge.expose.local', icon: 'wifi', run: -> json! 'sites', 'expose', 'local', '--json'
   if edge.state is 'running'
     if edge.managed
       items.push separator()
