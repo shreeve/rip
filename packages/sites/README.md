@@ -185,63 +185,104 @@ manager (`rip sites run`).
 
 ## Commands at a glance
 
-### `rip sites` — unified Sites CLI
+One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge`.
 
-Grammar: `rip sites <verb> <noun>`. Reserved nouns (not app names):
-**`edge`**, **`all`**, **`tray`**.
+**Grammar**
 
-| Command | Meaning |
+- Most spells are `<verb> <noun>`.
+- Reserved nouns (never app names): **`edge`**, **`all`**, **`tray`**.
+- App selectors: catalog **id**, unique **name**, or canonical **root**.
+- Path forms (`run`, `publish`, bare `stop`, path `status`) default to the
+  **current directory** when the path is omitted.
+- Durable catalog: `sites.json` (Rip-owned). Control starts with the edge /
+  desired apps and exits when nothing remains to supervise.
+
+### Catalog — remember projects
+
+| Command | What it does |
 | --- | --- |
-| `rip sites list` | Remembered apps |
-| `rip sites add [project]` | Remember a project |
-| `rip sites remove <app>` | Forget a stopped app |
-| `rip sites start \| stop \| restart <app\|all\|edge\|tray>` | Lifecycle |
-| `rip sites status [app\|all\|edge\|tray]` | Summary (bare = edge + apps) |
-| `rip sites open <app\|edge>` | Open app URL or status dashboard |
-| `rip sites logs <app\|edge\|all>` | Logs |
-| `rip sites reload \| trust edge` / `expose local\|public\|loopback` | Edge |
-| `rip sites run \| publish \| hold \| release \| migrate \| recover` | Manager |
+| `rip sites list` | List remembered apps (file I/O when control is down; live probe when up). |
+| `rip sites add [project]` | Remember a project (default: cwd). Options: `--name`, `--host` (repeatable), `--workers`, `--concurrency`, `--no-watch` / `--no-watch-app` / `--no-watch-api`, `--eager`. |
+| `rip sites remove <app>` | Forget a stopped app (refuses if desired-running or a live manager is still up). |
 
-Add options: `--name`, `--host` (repeatable), `--workers`, `--concurrency`,
-`--no-watch` / `--no-watch-app` / `--no-watch-api`, `--eager`.
+### Lifecycle — start, stop, restart, status
 
-Selectors accept stable id, unique name, or canonical root. Starting apps needs a
-reachable Janus control plane (normally: `rip sites start edge` first).
+| Command | What it does |
+| --- | --- |
+| `rip sites start <app\|all\|edge\|tray>` | Start a supervised app, every app, the shared edge, or the menubar tray. Apps need a reachable Janus control plane (normally: start the edge first). |
+| `rip sites stop [noun]` | Stop a supervised app, `all`, `edge`, or `tray`. **Bare `stop`** stops the manager at cwd. A filesystem path stops that project’s manager without requiring catalog membership. |
+| `rip sites restart <app\|all\|edge\|tray>` | Restart. For `edge` / `tray` this is a full recreate (stop then start), not a config reload. |
+| `rip sites status` | Edge + apps summary (JSON: `{ edge, apps }`). |
+| `rip sites status all` | Apps only. |
+| `rip sites status <app\|edge\|tray>` | One target. |
+| `rip sites status <path>` | Manager JSON for a project path (`.` or an existing directory not in the catalog). |
 
-### `rip sites run` / `publish` — foreground manager
+### Edge — TLS, Janus, reachability
 
-Does **not** use the Sites catalog. Needs Janus control explicitly:
+| Command | What it does |
+| --- | --- |
+| `rip sites start edge` | Bring up Rip-owned Caddy+Janus (default loopback posture). Options: `--caddy`, `--config`, `--control`, `--base-url`, `--http-port`, `--https-port`. |
+| `rip sites stop edge` | Stop a Rip-owned edge (refuses if sites are still running; never stops an external edge). |
+| `rip sites reload edge` | Reload the Rip-owned Caddyfile without tearing down sockets. |
+| `rip sites trust edge` | Install the local CA (required before LAN posture). |
+| `rip sites trust edge --export [PATH]` | Write the CA PEM (default: `rip-edge-local-ca.crt`). |
+| `rip sites expose local` | LAN / Bonjour posture (all interfaces, `sites.local` / `{app}.local`, `tls internal`). Recreates the edge — stop sites first. |
+| `rip sites expose loopback` | Back to default loopback `*.ripdev.io` posture (same recreate rule). |
+| `rip sites expose public` | Public internet posture — **refuses until phase 2**. |
+
+External Janus (something else already listening on the control socket) shows as
+`status edge` → running, unmanaged; Rip will not stop or reload it.
+
+### Daily — open and logs
+
+| Command | What it does |
+| --- | --- |
+| `rip sites open <app>` | Open the app URL in the default browser. |
+| `rip sites open edge` | Open the status dashboard (`sites.ripdev.io` or `sites.local`). |
+| `rip sites logs <app> [--lines N] [-f]` | Print (or follow) a supervised app’s manager log. |
+| `rip sites logs all [--lines N]` | Tail every remembered app’s log once. |
+| `rip sites logs edge` | Print paths to the edge and control log files. |
+
+### Manager — foreground, publish, deploy barriers
+
+Supervised apps use the catalog lifecycle above. These forms are for foreground
+work and explicit deploy ops (the manager module is internal — not a second CLI).
+
+| Command | What it does |
+| --- | --- |
+| `rip sites run [project] …` | Foreground manager for a project (default: cwd). Blocks until Ctrl-C. Needs `--control` / `JANUS_CONTROL` (or an edge already up so control can be seeded). Flags: `--name`, `--host`, `--workers`, `--watch` / `--no-watch`, … |
+| `rip sites publish [dir] …` | Publish one directory through Janus (default: cwd). Options include `--host`, `--control`, `--until-restart`. |
+| `rip sites hold <app>` | Hold a remembered app’s manager (freeze App/API activation). |
+| `rip sites release <app>` | Release hold — one coherent snapshot, then clear hold. |
+| `rip sites migrate <app> [entry] [--dir DIR] [--id 32hex]` | Coordinated DB migrate for a remembered app (cwd = that app’s root). |
+| `rip sites recover <app> <operation-id>` | Fix-forward recovery after a failed migrate activation. |
 
 ```bash
-rip sites start edge
-CONTROL=$(rip sites status edge --json | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).control)')
-
 cd packages/sites/demos/hello
-rip sites run --control "$CONTROL"
-# or: JANUS_CONTROL=$CONTROL rip sites run
+rip sites start edge
+rip sites run --control "$(rip sites status edge --json | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).control)')"
+# …or with the edge already up and JANUS_CONTROL set:
+rip sites stop              # drain manager for cwd
+rip sites status .          # manager JSON for cwd
 ```
 
-Without `--control` / `JANUS_CONTROL` you get:
-`rip-site: --control or JANUS_CONTROL is required` (manager).
+### Tray — menubar host
 
-Also: `rip sites hold|release|migrate|recover <app>`, `rip sites publish`.
+| Command | What it does |
+| --- | --- |
+| `rip sites start tray` | Install/start the LaunchAgent that keeps the Sites menu alive. |
+| `rip sites status tray` | Report whether the tray host is running. |
+| `rip sites stop tray` | Stop the tray LaunchAgent. |
 
-`hold` / `release` / `migrate` / `recover` take the same catalog selectors as
-`start` / `stop` (id, name, or root). Migrate and recover run with the app’s
-project root as cwd so migration paths resolve where the manager expects.
-
-### Menubar — Sites tray
-
-A clickable subset of `rip sites`, via
-[`tray-sites.rip`](tray-sites.rip) and the generic `@rip-lang/tray` host.
-There is **no** Sites-specific native binary — see
+The menu drives the same `rip sites` spells. There is **no** Sites-specific
+native binary — see [`tray-sites.rip`](tray-sites.rip) and
 [packages/tray/README.md](../tray/README.md).
 
-**Tray covers:** edge start/stop/reload, **Open Dashboard**, **Trust CA**,
-**Use Local / Use Default**, site start/stop/restart/open/log, Add Site.
+**Tray covers:** edge start/stop/reload, Open Dashboard, Trust CA, Use Local /
+Use Default (`expose`), site start/stop/restart/open/log, Add Site.
 
-**CLI-only for now:** `rip sites remove`, `rip sites trust edge --export`,
-`rip sites public edge`, port overrides, custom `--config` / `--caddy`.
+**CLI-only for now:** `remove`, `trust edge --export`, `expose public`, port
+overrides, custom `--config` / `--caddy`.
 
 **Foreground (dev)** — build the host once, then from this package:
 
@@ -253,24 +294,16 @@ cd packages/sites
 rip tray                  # discovers tray-sites.rip → launches rip-tray-host
 ```
 
-**Keep it alive (LaunchAgent)** — survives closing the terminal / Cursor:
-
-```bash
-rip sites start tray      # or: packages/sites/bin/rip-tray-agent start
-rip sites status tray
-rip sites stop tray
-```
-
 Plist under `~/Library/LaunchAgents`; logs under `~/Library/Logs`.
 
 **Using the menu**
 
-1. **Edge → Start** if the shared edge is down  
-2. **Edge → Open Dashboard** for the Rip status page (`sites.ripdev.io` or `sites.local`)  
-3. **Edge → Trust CA…** then **Use Local (LAN)…** when you want Bonjour (stop sites first)  
-4. **Add Site…** and pick a project directory  
-5. Site submenu → **Start** → **Open**  
-6. **Open Log** / **Restart** / **Stop** as needed  
+1. **Edge → Start** if the shared edge is down
+2. **Edge → Open Dashboard** for the Rip status page (`sites.ripdev.io` or `sites.local`)
+3. **Edge → Trust CA…** then **Use Local (LAN)…** when you want Bonjour (stop sites first)
+4. **Add Site…** and pick a project directory
+5. Site submenu → **Start** → **Open**
+6. **Open Log** / **Restart** / **Stop** as needed
 
 Provider alone (what the host spawns), without the menubar chrome:
 
@@ -278,9 +311,11 @@ Provider alone (what the host spawns), without the menubar chrome:
 rip packages/sites/tray-sites.rip
 ```
 
+Output: add `--json` on most verbs for machine-readable responses.
+
 ## Typical sessions
 
-**Happy path (Agent)**
+**Happy path (catalog)**
 
 ```bash
 rip sites start edge
@@ -309,10 +344,10 @@ rip sites stop edge
 ```text
 sites (running)  →  stop each
 edge (Rip-owned) →  rip sites stop edge
-tray LaunchAgent →  rip-tray-agent stop   (optional; independent of edge)
+tray LaunchAgent →  rip sites stop tray   (optional; independent of edge)
 ```
 
-The Agent process itself stays until idle/exit; you rarely need to kill it.
+Control stays until idle/exit; you rarely need to kill it.
 Stale state after renames or moved checkouts lives in
 `~/Library/Application Support/Rip/` — remove obsolete sites with
 `rip sites remove`, or clear that directory only when you intend a hard reset.
@@ -1287,12 +1322,13 @@ rip sites hold <app>
 rip sites release <app>
 rip sites migrate <app> [migration-entry] --dir migrations
 rip sites recover <app> <operation-id>
-# Foreground without the catalog still works:
+rip sites status .          # manager JSON for cwd / path
+rip sites stop              # drain manager for cwd / path
 ```
 
-`status` prints the manager's machine-readable JSON state. `stop` asks the
-canonical manager to drain its workers, deregister from Janus, remove its local
-control artifacts, and exit cleanly.
+`status <path>` prints the manager's machine-readable JSON state. `stop` (bare
+or with a path) asks that manager to drain its workers, deregister from Janus,
+remove its local control artifacts, and exit cleanly.
 
 `release` prepares one coherent API/App snapshot, exposes it, sends one
 full-reload notification, and then clears hold.
@@ -1332,7 +1368,7 @@ datagram listener makes Caddy reject startup. Default posture has no Bonjour
 and no side-door status port. Stop removes the launchd job and releases the
 ports. A running edge survives a control-plane restart, and desired
 `running` edge state reconciles after login when the control plane comes
-back. Mode flips (`rip sites local edge` / `local --off`) stop and recreate
+back. Mode flips (`rip sites expose local` / `expose loopback`) stop and recreate
 rather than reload, because the socket bind and Caddyfile change. An
 explicitly selected Caddyfile runs directly as a Rip-owned child and retains
 its own listener choices.
@@ -1343,7 +1379,9 @@ workers, runs the database-only child, records a durable outcome, and either
 returns safely to Held or activates the candidate. Once the database may have
 changed, activation failure stays in Maintenance for fix-forward recovery.
 
-## CLI
+## Manager flags
+
+Day-to-day spells are under [Commands at a glance](#commands-at-a-glance). Foreground `run` / `publish` accept:
 
 ```bash
 rip sites run [project] [options]
