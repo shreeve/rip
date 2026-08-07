@@ -214,6 +214,41 @@ remount or navigation. Remount or navigate when the UI must clear.
 This package does not provide source compilation or browser delivery;
 `launch` is part of App.
 
+## Loading and empty
+
+Route data, navigation, and writes each have a “not ready yet” moment.
+Use one dialect so screens do not invent four different spinner stories:
+
+1. **Route waiting** — gate with `<~`. The page does not construct until
+   the source resolves. Prefer gates for anything the route needs before
+   paint.
+2. **Navigation pending** — read `router.navigating` (100 ms grace so fast
+   mounts never flash). Compose with `delay` when a layout spinner should
+   wait out that grace: `delay(100, -> router.navigating)`.
+3. **Empty data** — sources return a real empty value (`[]` / `{}`). The
+   UI branches on length or keys. Do not return `null` to mean empty; a
+   gate treats `null` as failure (see Renderer above).
+4. **Actions in flight** — `createMutation` exposes `pending` /
+   `succeeded` / `error`. Disable the button on `pending`; use `hold` for
+   a brief “saved” flash that outlives a quick success.
+5. **Ungated stash reads** — a direct `data.user` read may return `null`
+   while loading. Prefer a gate for route-critical data. When you must
+   read ungated, use `data.source('user').loading` (and `.error`)
+   explicitly instead of treating `null` as empty.
+
+The Cart demo is the exemplar: gated route data, `[].length` empty
+branches, and `mutation.pending` on submit buttons.
+
+### Today’s five surfaces
+
+Today authors meet five related knobs — gates, `navigating`,
+`source().loading`, `mutation.pending`, and timing helpers
+(`delay` / `hold` / `debounce` / `throttle`). That split is intentional
+(each owns a different moment), but practice is still uneven across
+demos and docs. We plan to consolidate how these are taught and composed
+in the golden path — clearer recipes and Cart as the pin — without
+adding a second Suspense-style layer or softening gate `null` failures.
+
 ## Launch
 
 `launch({ bundle, ... })` is the one boot path: it builds the stash
