@@ -92,12 +92,16 @@ Precedence is decided per segment, left to right — static before dynamic
 before optional before catch-all — and two files claiming the same URL shape
 reject at build time.
 
-`match` takes a URL pathname without query or hash. Segments are
-percent-decoded before comparison, so an encoded spelling reaches its route
-and a `%2F` inside a dynamic segment yields a param containing `/`; a segment
-that fails to decode matches nothing. `parseQuery` turns a search string into
-a plain object with `URLSearchParams` semantics: last value wins per key and
-`+` reads as a space.
+`match` takes a URL pathname without query or hash. A trailing `/` is
+stripped before matching, except at the root, so `/about/` and `/about`
+resolve to the same route. Segments are percent-decoded before comparison,
+so an encoded spelling reaches its route and a `%2F` inside a dynamic
+segment yields a param containing `/`; a segment that fails to decode
+matches nothing. A nested catch-all matches its own prefix:
+`docs/[...rest].rip` matches `/docs` with `rest: ''` as well as
+`/docs/a/b`. `parseQuery` turns a search string into a plain object with
+`URLSearchParams` semantics: last value wins per key and `+` reads as a
+space.
 
 ## Router
 
@@ -141,6 +145,15 @@ other — by throwing. `navigating` is a writable flag the renderer owns
 during mounts, read through a 100 ms grace: a navigation that finishes
 inside the window never shows as navigating, so fast pages don't flash
 a spinner.
+
+`match` and `claims` take different spellings of a URL. `match` takes an
+app-relative URL — in path mode the argument is used as given, with no
+base stripped. `claims` takes an external href — the spelling as it
+appears in the document — and normalizes it: the base is stripped in
+path mode, and a hash fragment is required in hash mode. On a hit,
+`claims` returns an ownership payload that includes the internal `url`
+for `push` and `replace`. That payload is the one ownership seam
+`aria-current`, click interception, and preload share.
 
 ## Renderer
 
@@ -190,8 +203,16 @@ retained and the failure rejects `renderer.mount(info)` and reaches
 `error`. When nothing has committed yet — a failed boot — there is no screen
 to retain, so a self-contained error card (inline styles, no app CSS)
 renders into the target instead of a blank page; the next successful mount
-clears it. This package does
-not provide source compilation, launch, or browser delivery.
+clears it.
+
+A source that resolves to `null` is a `GateFailure`. A fetch a gate awaits
+must resolve to a real value — `[]` or `{}` for empty — not `null`. After
+mount, gate bindings keep their last non-null value when a source resets:
+sign-out or `reset` does not tear painted values out of the view until
+remount or navigation. Remount or navigate when the UI must clear.
+
+This package does not provide source compilation or browser delivery;
+`launch` is part of App.
 
 ## Launch
 

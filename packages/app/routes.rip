@@ -15,9 +15,11 @@
 # Markers claim whole segments and a catch-all must be the final segment.
 # Matching compares percent-decoded path segments, so an encoded segment
 # reaches its route and a `%2F` inside a dynamic segment yields a param
-# containing `/`. Precedence is per segment — static before dynamic
-# before optional before catch-all — and two files claiming the same URL
-# shape reject at build time.
+# containing `/`. Before segmentizing, `match` strips trailing `/` while
+# the path is longer than one character — `/about/` and `/about` are the
+# same path; root `/` stays `/`. Precedence is per segment — static
+# before dynamic before optional before catch-all — and two files
+# claiming the same URL shape reject at build time.
 
 export type Route =
   readonly pattern: string
@@ -152,10 +154,10 @@ matchParts = (parts, segments) ->
         return null unless rest
         [[part.name, value], ...rest]
       when 'catchall'
-        # A catch-all owns the slash that introduces it, so a bare prefix
-        # ('/docs' against docs/[...rest].rip) is not a match — except at
-        # the root, where the path's own slash introduces the capture.
-        return null if si is segments.length and si isnt 0
+        # A catch-all matches its bare prefix with an empty rest (`''`),
+        # root or nested — `/docs` against docs/[...rest].rip is the same
+        # capture as `/docs/` after trailing-slash strip. Mid-path
+        # catch-alls still reject at compile time.
         pieces = []
         for segment in segments.slice si
           value = decodeSegment segment
@@ -235,6 +237,7 @@ export def buildRoutes(files: string[], root: string = 'routes'): RouteManifest
     unless typeof path is 'string'
       throw TypeError.new 'Rip App: route match expects a path string'
     return null unless path.startsWith '/'
+    path = path.slice(0, -1) while path.length > 1 and path.endsWith '/'
     segments = if path is '/' then [] else path.slice(1).split '/'
     for entry in compiled
       pairs = matchParts entry.parts, segments

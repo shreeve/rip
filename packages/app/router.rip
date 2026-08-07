@@ -35,6 +35,7 @@ export type Router =
   back: () => void
   forward: () => void
   match: (url: string) => Record<string, any> | null
+  claims: (url: string) => Record<string, any> | null
   onNavigate: (fn: (info: Record<string, any>) => void) => () => void
   rebuild: () => void
   destroy: () => void

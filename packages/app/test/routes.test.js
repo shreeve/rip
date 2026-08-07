@@ -34,9 +34,9 @@ describe('route patterns', () => {
     expect(m.match('/foo(bar)')).not.toBeNull();
   });
 
-  test('a trailing slash is a different path', () => {
+  test('a trailing slash normalizes to the same path', () => {
     const m = manifest(['about.rip', 'index.rip']);
-    expect(m.match('/about/')).toBeNull();
+    expect(m.match('/about/').route.file).toBe(m.match('/about').route.file);
     expect(m.match('/')).not.toBeNull();
   });
 });
@@ -145,8 +145,8 @@ describe('catch-all segments', () => {
   test('a nested catch-all requires its prefix', () => {
     const m = manifest(['docs/[...rest].rip']);
     expect(m.match('/docs/x/y').params).toEqual({ rest: 'x/y' });
+    expect(m.match('/docs').params).toEqual({ rest: '' });
     expect(m.match('/docs/').params).toEqual({ rest: '' });
-    expect(m.match('/docs')).toBeNull();
     expect(m.match('/other')).toBeNull();
   });
 
