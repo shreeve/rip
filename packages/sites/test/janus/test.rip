@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { AccessFramer } from '../../monitor.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith('--preload=')
-SERVER = join(import.meta.dir, '..', '..', 'site.rip')
+SERVER = join(import.meta.dir, '..', '..', 'manager.rip')
 PROJECT = join(import.meta.dir, '..', 'reloads', 'project')
 
 releasedCaddy = ->

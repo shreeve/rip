@@ -913,13 +913,7 @@ export read = (name?: string, type?: string | RegExp | any[] | Record<string, an
 
   v
 
-# ==============================================================================
-# CLI — `rip site` / `rip-site`
-# ==============================================================================
-
-# Executed directly, this file is the manager bin. The manager loads
-# dynamically so DSL importers never pull in orchestration code; argv is
-# handed over unparsed.
+# Executed directly, this file is the framework library only.
+# The user CLI is `rip sites`; the control plane spawns manager.rip.
 if import.meta.main
-  { main } = import!('./manager.rip')
-  main! process.argv.slice(2)
+  abort 'rip-sites: this module is the Sites framework library — use `rip sites run` (or other `rip sites` verbs)'

@@ -95,6 +95,7 @@ validateState = (state) ->
   for app in state.apps
     valid = isRecord(app) and /^[a-f0-9]{16}$/.test(app.id) and typeof app.name is 'string' and typeof app.root is 'string' and Array.isArray(app.hosts) and app.hosts.every((host) -> typeof host is 'string') and isRecord(app.options) and Number.isInteger(app.options.workers) and app.options.workers > 0 and Number.isInteger(app.options.concurrency) and app.options.concurrency > 0 and typeof app.options.watchApp is 'boolean' and typeof app.options.watchApi is 'boolean' and typeof app.options.eager is 'boolean' and app.desired in ['running', 'stopped']
     fail("malformed app record at #{paths.state}", 500) unless valid
+    fail("reserved app name #{JSON.stringify(app.name)} at #{paths.state}", 500) if app.name in ['edge', 'all', 'tray']
     fail("duplicate app record at #{paths.state}", 500) if ids.has(app.id) or names.has(app.name) or roots.has(app.root)
     ids.add app.id
     names.add app.name
@@ -261,6 +262,7 @@ addApp = (body) ->
   fail "project is already registered: #{project.root}", 409 if state.apps.some((app) -> app.root is project.root)
   name = body.name or basename(project.root).replace(/\.[^.]+$/, '')
   fail "invalid app name #{JSON.stringify(name)}" unless validName name
+  fail "#{JSON.stringify(name)} is reserved (edge | all | tray) — not an app name" if name in ['edge', 'all', 'tray']
   fail "app name is already registered: #{name}", 409 if state.apps.some((app) -> app.name is name)
   hosts = body.hosts
   if not hosts?
@@ -299,7 +301,7 @@ addApp = (body) ->
   snapshotApp! app
 
 serverArgv = (app) ->
-  argv = [process.execPath, loaderArg('rip-agent'), join(import.meta.dir, 'site.rip'), app.root, '--name', app.name, '--control', state.edge.control, '--workers', String(app.options.workers), '--concurrency', String(app.options.concurrency)]
+  argv = [process.execPath, loaderArg('rip-agent'), join(import.meta.dir, 'manager.rip'), app.root, '--name', app.name, '--control', state.edge.control, '--workers', String(app.options.workers), '--concurrency', String(app.options.concurrency)]
   argv.push '--host', host for host in app.hosts
   if app.options.watchApp and app.options.watchApi
     argv.push '--watch'
@@ -379,12 +381,17 @@ stopApp = (app) ->
   saveState()
   runtime = managerRuntime app.root, 'rip-agent'
   live = managerStatus! app
-  return snapshotApp! app unless live?
+  unless live?
+    snap = snapshotApp! app
+    maybeExitIdle()
+    return snap
   response = managerRequest! runtime.socket, 'POST', '/stop'
   body = response.text!
   fail "manager stop failed (#{response.status}): #{body}", 503 unless response.ok
   waitManagerStopped! runtime.socket
-  snapshotApp! app
+  snap = snapshotApp! app
+  maybeExitIdle()
+  snap
 
 restartApp = (app) ->
   stopApp! app
@@ -541,7 +548,7 @@ startEdge = (body = {}, automatic = false) ->
     fail 'httpsPort must be an integer from 1 through 65535' if body.httpsPort? and (not Number.isInteger(body.httpsPort) or body.httpsPort < 1 or body.httpsPort > 65535)
     current = snapshotEdge!
     return current if current.state is 'running'
-    fail 'local mode requires `rip edge trust` first — install the edge CA, then retry', 403 if state.edge.mode is 'local' and not state.edge.localCaTrusted
+    fail 'local mode requires `rip sites trust edge` first — install the edge CA, then retry', 403 if state.edge.mode is 'local' and not state.edge.localCaTrusted
     caddy = resolveCaddy! body.caddy
     configInput = body.config or state.edge.config or packagedConfigForMode(state.edge.mode)
     config = resolveFile configInput, 'Caddyfile'
@@ -610,7 +617,9 @@ stopEdge = ->
     bootoutLaunchd true if launcher is 'launchd'
     state.edge = { ...state.edge, desired: 'stopped', managed: false, pid: null, lastError: null }
     saveState()
-    return snapshotEdge!
+    snap = snapshotEdge!
+    maybeExitIdle()
+    return snap
   running = []
   for app in state.apps
     running.push app if managerStatus!(app)?
@@ -620,7 +629,9 @@ stopEdge = ->
   bootoutLaunchd true if launcher is 'launchd'
   state.edge = { ...state.edge, desired: 'stopped', managed: false, pid: null, lastError: null }
   saveState()
-  snapshotEdge!
+  snap = snapshotEdge!
+  maybeExitIdle()
+  snap
 
 reloadEdge = ->
   fail 'edge is not owned by Rip; reload the external Caddy service with its own supervisor', 409 unless state.edge.managed
@@ -632,7 +643,7 @@ reloadEdge = ->
 # Mode flips recreate the edge (launchd sockets + Caddyfile) — reload is not enough.
 setEdgeMode = (mode) ->
   fail "edge mode must be default or local, got #{JSON.stringify(mode)}" unless mode in ['default', 'local']
-  fail 'local mode requires `rip edge trust` first — install the edge CA, then retry', 403 if mode is 'local' and not state.edge.localCaTrusted
+  fail 'local mode requires `rip sites trust edge` first — install the edge CA, then retry', 403 if mode is 'local' and not state.edge.localCaTrusted
   return snapshotEdge! if state.edge.mode is mode and (not state.edge.config? or state.edge.config is packagedConfigForMode(mode))
   current = snapshotEdge!
   wasRunning = current.state is 'running' and state.edge.managed
@@ -649,6 +660,12 @@ setEdgeMode = (mode) ->
   return startEdge!({}) if wasRunning
   snapshotEdge!
 
+# Exit when nothing remains to supervise — no idle forever control plane.
+maybeExitIdle = ->
+  return unless state.edge.desired is 'stopped' and not state.edge.managed
+  return if state.apps.some (app) -> app.desired is 'running'
+  setTimeout shutdown, 100
+
 trustEdge = ->
   caddy = resolveCaddy!
   result = Bun.spawnSync [caddy, 'trust'], { stdout: 'pipe', stderr: 'pipe' }
@@ -659,7 +676,7 @@ trustEdge = ->
   { trusted: true, root: if existsSync(CADDY_PKI_ROOT) then CADDY_PKI_ROOT else null }
 
 exportEdgeCa = ->
-  fail "edge CA not found at #{CADDY_PKI_ROOT} — run `rip edge trust` (and start local once if needed)", 404 unless existsSync CADDY_PKI_ROOT
+  fail "edge CA not found at #{CADDY_PKI_ROOT} — run `rip sites trust edge` (and start local once if needed)", 404 unless existsSync CADDY_PKI_ROOT
   { path: CADDY_PKI_ROOT, pem: readFileSync(CADDY_PKI_ROOT, 'utf8') }
 
 escapeHtml = (value) -> String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
@@ -696,7 +713,7 @@ statusPage = ->
   trustHint = if edge.mode is 'local'
     'Trust bootstrap: <a href="/trust">/trust</a> (HTTPS) · phone/peer without cert accept: <a href="http://sites.local/trust">http://sites.local/trust</a>'
   else
-    'Trust bootstrap: <a href="/trust">/trust</a> · CLI: <code>rip edge status</code>'
+    'Trust bootstrap: <a href="/trust">/trust</a> · CLI: <code>rip sites status edge</code>'
   """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rip Sites</title>
@@ -735,7 +752,7 @@ handleStatus = (request) ->
         }
       html = '''<!doctype html><html><body style="font-family:system-ui;margin:2rem">
         <h1>Trust this edge</h1>
-        <p>Local CA is not ready yet. On the Mac run <code>rip edge trust</code>, then <code>rip edge local</code>.</p>
+        <p>Local CA is not ready yet. On the Mac run <code>rip sites trust edge</code>, then <code>rip sites expose local</code>.</p>
         </body></html>'''
       return Response.new html, { headers: { 'content-type': 'text/html; charset=utf-8' }, status: 503 }
     actionMatch = url.pathname.match /^\/apps\/([^/]+)\/(start|stop|restart)$/
@@ -803,7 +820,7 @@ handle = (request) ->
         return Response.json(exportEdgeCa!) if parts[2] is 'export-ca'
         return Response.json(mutate!(-> setEdgeMode! if (jsonBody! request).off then 'default' else 'local')) if parts[2] is 'local'
         if parts[2] is 'public'
-          fail 'public edge posture is not available yet — use default or `rip edge local`', 501
+          fail 'public edge posture is not available yet — use default (`rip sites expose loopback`) or `rip sites expose local`', 501
     Response.json({ error: 'not found' }, { status: 404 })
   catch error
     Response.json({ error: error?.message or String(error) }, { status: error?.status or 500 })
@@ -856,7 +873,10 @@ try
         state.edge.lastError = error.message
         saveState()
   setTimeout reconcile, 0
-  setInterval reconcile, 2000
+  setInterval (->
+    reconcile()
+    maybeExitIdle()
+  ), 2000
 catch error
   try unlinkSync paths.owner
   throw error

@@ -1819,3 +1819,8 @@ export main = (argv) ->
     try unlinkSync managerPath if managerOwned
     try unlinkSync managerOwner if managerOwned
     rmSync runDir, { recursive: true, force: true }
+
+# Private process entry — spawned by the Sites control plane and by `rip sites run`.
+# Not a user-facing CLI (`rip sites` owns every spell).
+if import.meta.main
+  main! process.argv.slice(2)

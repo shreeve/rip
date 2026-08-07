@@ -1,6 +1,6 @@
 export default
   name: 'hello'
-  hosts: ['hello.ripdev.io', 'hello.local'] # loopback + LAN (after `rip edge local`)
+  hosts: ['hello.ripdev.io', 'hello.local'] # loopback + LAN (after `rip sites expose local`)
   hub:
     bridge: 'hub'           # Janus Bam door for live App watch (see index.rip)
   access:

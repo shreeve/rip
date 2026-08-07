@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 GENERATOR = join(import.meta.dir, '..', '..', 'generate.rip')
 WORKER = join(import.meta.dir, '..', '..', 'worker.rip')
-SERVER = join(import.meta.dir, '..', '..', 'site.rip')
+SERVER = join(import.meta.dir, '..', '..', 'manager.rip')
 
 generate = (entry, artifact, result, task) ->
   proc = Bun.spawn [process.execPath, PRELOAD, GENERATOR, entry, artifact, result, task, '0'],

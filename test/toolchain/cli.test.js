@@ -102,16 +102,24 @@ describe('cli: compile surface', () => {
     expect(h.status).toBe(0);
     expect(h.stdout).toContain('Usage:');
     expect(h.stdout).toContain('rip sites <verb>');
-    expect(h.stdout).toContain('rip edge <verb>');
+    expect(h.stdout).not.toContain('rip edge <verb>');
+    expect(h.stdout).not.toContain('rip site [entry]');
   });
 
-  test('the sites and edge appliance help is cwd-independent', () => {
+  test('the sites appliance help is cwd-independent', () => {
     const sites = rip(['sites', '--help']);
     expect(sites.status).toBe(0);
-    expect(sites.stdout).toContain('rip sites <command>');
+    expect(sites.stdout).toContain('rip sites <verb>');
+    expect(sites.stdout).toContain('expose local|public|loopback');
+  });
+
+  test('retired site and edge CLIs point at rip sites', () => {
     const edge = rip(['edge', '--help']);
-    expect(edge.status).toBe(0);
-    expect(edge.stdout).toContain('rip edge <command>');
+    expect(edge.status).toBe(1);
+    expect(edge.stderr).toContain('rip sites');
+    const site = rip(['site', '--help']);
+    expect(site.status).toBe(1);
+    expect(site.stderr).toContain('rip sites');
   });
 });
 

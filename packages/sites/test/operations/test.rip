@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
-SERVER = join(import.meta.dir, '..', '..', 'site.rip')
+SERVER = join(import.meta.dir, '..', '..', 'manager.rip')
 RELOAD_PROJECT = join(import.meta.dir, '..', 'reloads', 'project')
 
 FILE_DB = '''

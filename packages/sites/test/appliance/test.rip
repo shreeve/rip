@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 APP = join(import.meta.dir, '..', '..', 'sites.rip')
-EDGE = join(import.meta.dir, '..', '..', 'edge.rip')
 FAKE_CADDY = join(import.meta.dir, 'fake-caddy.rip')
 
 run = (file, args, env) ->
@@ -118,6 +117,15 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     empty = cli! APP, ['list', '--json'], env
     eq empty.code, 0
     eq JSON.parse(empty.out), []
+    ok not existsSync(join(site.runtime, 'agent.json')), 'list must not spawn the control plane'
+
+    idleStatus = cli! APP, ['status', '--json'], env
+    eq idleStatus.code, 0
+    idle = JSON.parse idleStatus.out
+    # Fixture Janus is already listening — report external, never spawn control.
+    eq idle.edge.state, 'running'
+    eq idle.edge.managed, false
+    ok not existsSync(join(site.runtime, 'agent.json')), 'idle status must not spawn the control plane'
 
     added = cli! APP, ['add', project, '--name', 'fixture', '--host', 'fixture.ripdev.io', '--json'], env
     eq added.code, 0
@@ -125,6 +133,27 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     eq app.name, 'fixture'
     eq app.state, 'stopped'
     eq app.url, 'https://fixture.ripdev.io/'
+    ok existsSync(join(site.state, 'sites.json')), 'add writes sites.json'
+    ok not existsSync(join(site.runtime, 'agent.json')), 'add must not spawn the control plane'
+
+    # Catalog nouns resolve like start/stop — manager is internal, not `rip site`.
+    held = cli! APP, ['hold', 'fixture'], env
+    eq held.code, 1
+    ok not held.err.includes('project not found: fixture'), 'hold must resolve catalog name to root'
+    ok held.err.includes('hold failed') or held.err.includes('ECONNREFUSED') or held.err.includes('No such file') or held.err.includes('manager'), "hold reaches manager for #{project}: #{held.err}"
+    migrated = cli! APP, ['migrate', 'fixture', '--dir', 'migrations'], env
+    eq migrated.code, 1
+    ok not migrated.err.includes('migration entries'), 'migrate must not treat the app name as a migration entry'
+    ok not migrated.err.includes('project not found: fixture')
+    unknownHold = cli! APP, ['hold', 'missing-app'], env
+    eq unknownHold.code, 1
+    ok unknownHold.err.includes 'unknown app'
+    recoverShape = cli! APP, ['recover', 'fixture'], env
+    eq recoverShape.code, 1
+    ok recoverShape.err.includes 'operation id'
+    exposeHelp = cli! APP, ['expose'], env
+    eq exposeHelp.code, 1
+    ok exposeHelp.err.includes 'local | public | loopback'
 
     duplicate = cli! APP, ['add', project], env
     eq duplicate.code, 1
@@ -144,9 +173,16 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     eq live.desired, 'running'
     ok Number.isInteger live.pid
 
-    listed = JSON.parse((cli!(APP, ['status', '--json'], env)).out)
+    listed = JSON.parse((cli!(APP, ['list', '--json'], env)).out)
     eq listed.length, 1
     eq listed[0].pid, live.pid
+    summary = JSON.parse((cli!(APP, ['status', '--json'], env)).out)
+    ok summary.edge?
+    eq summary.apps.length, 1
+    eq summary.apps[0].pid, live.pid
+    reserved = cli! APP, ['add', project, '--name', 'edge'], env
+    eq reserved.code, 1
+    ok reserved.err.includes 'reserved'
 
     # The manager outlives the UI/control client. A replacement agent adopts
     # the same canonical manager socket and preserves the desired state.
@@ -155,6 +191,11 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     eq adopted.state, 'running'
     eq adopted.desired, 'running'
     eq adopted.pid, live.pid
+    # list must agree with status after control crash (revive or probe manager).
+    listedAfter = JSON.parse((cli!(APP, ['list', '--json'], env)).out)
+    eq listedAfter.length, 1
+    eq listedAfter[0].state, 'running'
+    eq listedAfter[0].pid, live.pid
 
     logs = cli! APP, ['logs', 'fixture', '--json'], env
     eq logs.code, 0
@@ -183,21 +224,21 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     janus.stop true
     rmSync site.root, { recursive: true, force: true }
 
-test! 'rip edge distinguishes an external edge from one owned by Rip', ->
+test! 'rip sites distinguishes an external edge from one owned by Rip', ->
   external = fixture 'rip-agent-external-edge-'
   externalSocket = join external.root, 'janus.sock'
   janus = startJanus externalSocket, []
   externalEnv = { RIP_AGENT_HOME: external.state, RIP_AGENT_RUNTIME: external.runtime, JANUS_CONTROL: externalSocket }
   try
-    status = JSON.parse((cli!(EDGE, ['status', '--json'], externalEnv)).out)
+    status = JSON.parse((cli!(APP, ['status', 'edge', '--json'], externalEnv)).out)
     eq status.state, 'running'
     eq status.managed, false
-    stopped = cli! EDGE, ['stop'], externalEnv
+    stopped = cli! APP, ['stop', 'edge'], externalEnv
     eq stopped.code, 1
     ok stopped.err.includes 'edge is not owned by Rip'
-    wrongSurface = cli! EDGE, ['status', '--caddy', FAKE_CADDY], externalEnv
+    wrongSurface = cli! APP, ['status', 'edge', '--caddy', FAKE_CADDY], externalEnv
     eq wrongSurface.code, 1
-    ok wrongSurface.err.includes 'status does not accept start options'
+    ok wrongSurface.err.includes 'does not accept start options'
   finally
     stopAgent! external.runtime
     janus.stop true
@@ -209,7 +250,7 @@ test! 'rip edge distinguishes an external edge from one owned by Rip', ->
   writeFileSync ownedConfig, ''
   chmodSync FAKE_CADDY, 0o755
   try
-    started = cli! EDGE, ['start', '--caddy', FAKE_CADDY, '--config', ownedConfig, '--json'], ownedEnv
+    started = cli! APP, ['start', 'edge', '--caddy', FAKE_CADDY, '--config', ownedConfig, '--json'], ownedEnv
     eq started.code, 0
     edge = JSON.parse started.out
     eq edge.state, 'running'
@@ -218,7 +259,7 @@ test! 'rip edge distinguishes an external edge from one owned by Rip', ->
     ok Number.isInteger edge.pid
 
     stopAgent! owned.runtime
-    adopted = JSON.parse((cli!(EDGE, ['status', '--json'], ownedEnv)).out)
+    adopted = JSON.parse((cli!(APP, ['status', 'edge', '--json'], ownedEnv)).out)
     eq adopted.state, 'running'
     eq adopted.managed, true
     eq adopted.pid, edge.pid
@@ -228,12 +269,12 @@ test! 'rip edge distinguishes an external edge from one owned by Rip', ->
     replacement = null
     deadline = Date.now() + 8000
     loop
-      probe = JSON.parse((cli!(EDGE, ['status', '--json'], ownedEnv)).out)
+      probe = JSON.parse((cli!(APP, ['status', 'edge', '--json'], ownedEnv)).out)
       if probe.state is 'running' and probe.pid? and probe.pid isnt edge.pid
         replacement = probe
         break
       if Date.now() >= deadline
-        diagnostic = readFileSync join(owned.state, 'agent.json'), 'utf8'
+        diagnostic = readFileSync join(owned.state, 'sites.json'), 'utf8'
         agentLog = readFileSync join(owned.state, 'agent.log'), 'utf8'
         edgeLog = readFileSync join(owned.state, 'edge.log'), 'utf8'
         throw Error.new("timed out waiting for owned edge restart: #{JSON.stringify(probe)}\n#{diagnostic}\nAGENT:\n#{agentLog}\nEDGE:\n#{edgeLog}")
@@ -241,17 +282,17 @@ test! 'rip edge distinguishes an external edge from one owned by Rip', ->
     eq replacement.desired, 'running'
     eq replacement.managed, true
 
-    reloaded = cli! EDGE, ['reload', '--json'], ownedEnv
+    reloaded = cli! APP, ['reload', 'edge', '--json'], ownedEnv
     eq reloaded.code, 0
     eq JSON.parse(reloaded.out).state, 'running'
 
-    stopped = cli! EDGE, ['stop', '--json'], ownedEnv
+    stopped = cli! APP, ['stop', 'edge', '--json'], ownedEnv
     eq stopped.code, 0
     waitFor! 'fake edge shutdown', -> not existsSync(join(owned.runtime, 'janus.sock'))
-    final = JSON.parse((cli!(EDGE, ['status', '--json'], ownedEnv)).out)
+    final = JSON.parse((cli!(APP, ['status', 'edge', '--json'], ownedEnv)).out)
     eq final.state, 'stopped'
     eq final.managed, false
   finally
-    try cli! EDGE, ['stop'], ownedEnv
+    try cli! APP, ['stop', 'edge'], ownedEnv
     stopAgent! owned.runtime
     rmSync owned.root, { recursive: true, force: true }
