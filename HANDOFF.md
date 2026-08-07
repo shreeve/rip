@@ -6,57 +6,50 @@ Read this first when starting a session. Permanent architecture lives in
 ## Orientation
 
 - Repo: `~/Data/Code/rip` — live v4 checkout; branch `main` tracking
-  `origin/main`.
+  `origin/main` (tip includes HMR #218 + patch correctness #219).
 - Fast commands: `bun run test:rip` · package-local `bun run test` ·
   `packages/browser-tests`: `bun run test:smoke`.
 - Explicit certification: `bun run test:all` · `bun run audit` ·
   `packages/browser-tests`: `bun run test:cart`.
-- Sites architecture: `docs/SERVER.md` · `packages/sites/README.md`.
-- Browser publication: `docs/WORKSPACE.md`.
-- Sites open work: `packages/sites/TODO.md`.
-- Repo open notes: `TODO.md`.
+- HMR contract: `docs/HMR.md` · Workspace: `docs/WORKSPACE.md`.
+- Sites: `docs/SERVER.md` · `packages/sites/README.md`.
+- Open notes: `TODO.md` · `packages/sites/TODO.md`.
 
-## Uncommitted working tree (Sites CLI unification)
+## Just landed (HMR)
 
-Ready to commit/PR when asked — **do not land mixed with unrelated
-compiler work**. `packages/sites` suite verified green (including
-`test:appliance`).
+True-merged and source branches deleted:
 
-What landed in the tree:
+- **#218** — signature-aware HMR (overlay, classify, patch / migrate /
+  remount floor, `rip:hmr` events, Cart profile pin).
+- **#219** — patch correctness: `_hmrBindEffects` +
+  `_hmrRefreshComputeds` so body `~>` and `~=` refresh without
+  re-running `_init`. Production/`hmr:false` bytes unchanged.
 
-- **Unified CLI:** `rip sites <verb> <noun>` — reserved nouns `edge` |
-  `all` | `tray`. `rip edge …` thin alias. Advanced verbs fold in:
-  `run` | `browse` | `hold` | `release` | `migrate` | `recover`
-  (raw-forward to `site.rip` before Sites option parsing).
-- **`sites.json`:** Rip-owned durable catalog (one-time rename from
-  `agent.json`). `list` / `add` / `remove` / idle `status` are file I/O
-  (+ Janus probe for external edge) — **no control-plane spawn**.
-- **Edge-scoped control:** control process starts when edge / desired
-  apps need supervision; `maybeExitIdle` exits when edge is stopped and
-  no app remains desired-running. Tray polls stay cheap.
-- Docs: `packages/sites/README.md`, `TODO.md`, `bin/rip` help, appliance
-  pins for no-spawn + reserved names.
+Patch is a **correct state-preserving view remount** (instance + `:=` /
+prop containers + plain `_init` members survive; DOM rebuilt via
+`_create`/`_setup`). Not surgical DOM morph — and that is enough for
+correctness; React Fast Refresh is the competitive bar, not morphdom.
 
-Key files: `packages/sites/{sites,catalog,appliance,agent,edge}.rip`.
+## Cart HMR confirmation bar (pins in progress)
 
-## Live machine state
+Do **not** treat the profile typed-input pin as sufficient.
 
-Re-verify edge/hello before treating status as healthy — prior session
-had `sites.ripdev.io` answering 500 and cautioned about stale Agent
-plists after Caddyfile changes. After pulling this work: stop edge (lets
-control exit), then `rip sites start edge` so launchd picks up a fresh
-dual-socket plist.
+**Local action-state:** add item → place order → render-only h1 edit on
+`cart.rip` → stay on confirmation; require `rip:hmr` `patch`. Smoking
+gun if empty cart: remount fallthrough after `cart.clear()` — patch
+keeps plain `placeOrder`; re-`_init` does not. Migrate cannot save this
+(`succeeded` is not a `:=` sig slot).
 
-## Product posture (Sites edge)
+**LKG-on-confirmation:** same state + compile-fail LKG while still
+confirmed + recover with stamped heading, no reload / re-order.
 
-| Mode | Bind | Apps | Status |
-| --- | --- | --- | --- |
-| default | loopback 80/443 | `*.ripdev.io` | `https://sites.ripdev.io/` |
-| local | all interfaces | `*.local` (+ ripdev.io twin) | `https://sites.local/` |
-| public | phase 2 | — | `rip sites public edge` refuses |
+Strategy canvas (IDE): `hmr-beat-react-vue`.
 
-Trust required before `rip sites local edge`. Mode flips stop+recreate;
-stop sites first.
+## Working agreements
+
+- **Land** = merge green + delete feature branch.
+- Shared branches catch up by merge, never rebase; never force-push.
+- Pull requests land as true merge commits only. No AI attribution.
 
 ## Testing cadence (durable — also in AGENTS.md)
 
@@ -64,9 +57,3 @@ stop sites first.
 2. Milestone — owning package suite + direct consumers.
 3. Landing — freeze candidate, then PR gates (`test:rip` + browser smoke);
    `test:all` / cart only when explicitly certifying.
-
-## Working agreements
-
-- **Land** = merge green + delete feature branch.
-- Shared branches catch up by merge, never rebase; never force-push.
-- Pull requests land as true merge commits only. No AI attribution.

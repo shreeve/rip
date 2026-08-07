@@ -309,6 +309,35 @@ Automated tests cover:
 Browser-level behavior requires a real browser harness; pure graph and
 signature decisions remain deterministic unit tests.
 
+### Cart acceptance bar
+
+The decisive live scenario is **not** typing into a profile form field.
+It is the cart confirmation branch, where losing one local flag removes
+an entire screen:
+
+1. Add an item to the cart.
+2. Place the order → `placeOrder.succeeded` gates the “Order Placed!” UI
+   (and `onSuccess` clears the cart).
+3. Make a **render-only** edit to `app/routes/cart.rip` (e.g. change the
+   h1 to `Order Placed! - edited`).
+4. The confirmation screen must **stay**; the new heading must show.
+
+Failing this drops the user onto “Your cart is empty” — the edit still
+applies (place another order and the new heading appears), but local
+action state was destroyed. Among React / Vue / Svelte / Solid, only
+React’s Fast Refresh has been observed to survive this sequence — the
+**local action-state** bar (tie React / beat Vue). The stronger
+**LKG-on-confirmation** bar (ahead of React and Vue) compounds this with
+App-level failed-publication quarantine while still confirmed, then
+recover with the new heading — see `TODO.md`.
+
+Mechanics: `placeOrder` is a plain `_init` member. Compatible **patch**
+keeps it; any remount/migrate that re-runs `_init` after `cart.clear()`
+makes the empty-cart branch win. Migrate’s state copy does not cover
+mutation objects — do not use migrate-on-confirmation as the headline
+pin. A profile input surviving a leaf edit is a weaker pin and is not
+sufficient Cart HMR certification.
+
 ## Resolved decisions
 
 Aligned with [WORKSPACE.md](WORKSPACE.md):

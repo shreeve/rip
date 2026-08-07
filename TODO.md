@@ -39,6 +39,26 @@ Package-local leftovers live beside the package (for example
 
 ---
 
+## HMR — Cart confirmation bar
+
+Signature-aware patch + effect/computed rebind landed (#218, #219). Cart
+certification ladder (see [docs/HMR.md](docs/HMR.md)):
+
+- [ ] **Local action-state bar:** add item → place order → render-only
+      edit of `app/routes/cart.rip` h1 → confirmation stays with new
+      heading; assert `rip:hmr` `patch` (not remount). Empty cart after
+      edit almost always means `tryHmrPatch` fell through to remount
+      after `onSuccess` cleared the cart (`placeOrder` is a plain `=`
+      member — survives patch, dies on re-`_init`).
+- [ ] **LKG-on-confirmation bar** (publication win vs React/Vue): same
+      confirmation → break compile on `cart.rip` → LKG stays on
+      confirmation and interactive → restore/fix with stamped heading
+      → still confirmation, no document reload, no re-order.
+- [ ] Do **not** lead with migrate-on-confirmation: `__hmrPreserveState`
+      only copies `:=` sig slots, so migrate remounts a fresh
+      `createMutation` and drops `succeeded`. Profile form survival
+      remains a weaker pin.
+
 ## Test-lane audits (remaining)
 
 Edit / milestone / landing gates and PR vs certification CI already

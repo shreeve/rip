@@ -27,6 +27,29 @@ async function editFile(relPath, transform) {
   return { abs, before, restore: () => writeFileSync(abs, before) };
 }
 
+async function listenHmr(page) {
+  await page.evaluate(() => {
+    globalThis.__wsSentinel = 'alive';
+    globalThis.__ripHmr = [];
+    window.addEventListener('rip:hmr', (e) => globalThis.__ripHmr.push(e.detail));
+  });
+}
+
+/** Confirmation UI with placeOrder.succeeded true and an empty cart. */
+async function reachOrderPlaced(page) {
+  await bootCart(page);
+  const add = page.getByRole('button', { name: 'Add to Cart' }).first();
+  await expect(add).toBeVisible({ timeout: 15000 });
+  await add.click();
+  await expect(page.locator('nav')).toContainText('Cart (1)', { timeout: 10000 });
+  await page.goto('/cart');
+  await expect(page.getByRole('button', { name: 'Place Order' })).toBeVisible({ timeout: 15000 });
+  await page.getByRole('button', { name: 'Place Order' }).click();
+  await expect(page.locator('h1')).toHaveText('Order Placed!', { timeout: 20000 });
+  await expect(page.getByRole('link', { name: 'Continue Shopping' })).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('Your cart is empty');
+}
+
 test.describe('cart publication apply', () => {
   test('leaf markup edit updates without reload through one ordered change', async ({ page }) => {
     await bootCart(page);
@@ -117,11 +140,7 @@ test.describe('cart publication apply', () => {
     await first.fill(stamp);
     await expect(first).toHaveValue(stamp);
 
-    await page.evaluate(() => {
-      globalThis.__wsSentinel = 'alive';
-      globalThis.__ripHmr = [];
-      window.addEventListener('rip:hmr', (e) => globalThis.__ripHmr.push(e.detail));
-    });
+    await listenHmr(page);
 
     const edit = await editFile('app/routes/profile.rip', (src) =>
       src.replace("h1 'Profiler'", `h1 'Profiler ${stamp.slice(-4)}'`));
@@ -138,6 +157,72 @@ test.describe('cart publication apply', () => {
       { timeout: 10000 }).toBe(true);
     } finally {
       edit.restore();
+    }
+  });
+
+  // Local action-state bar: confirmation must survive a render-only leaf edit via patch.
+  test('order confirmation survives a compatible cart.rip markup edit', async ({ page }) => {
+    await reachOrderPlaced(page);
+    await listenHmr(page);
+
+    const stamp = Date.now().toString(36).slice(-4);
+    const heading = `Order Placed! - ${stamp}`;
+    const edit = await editFile('app/routes/cart.rip', (src) =>
+      src.replace("h1 'Order Placed!'", `h1 '${heading}'`));
+
+    try {
+      await expect(page.locator('h1')).toHaveText(heading, { timeout: 15000 });
+      await expect(page.getByRole('link', { name: 'Continue Shopping' })).toBeVisible();
+      await expect(page.locator('body')).not.toContainText('Your cart is empty');
+      expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
+      await expect.poll(async () =>
+        page.evaluate(() => globalThis.__ripHmr.some((e) => e?.type === 'patch')),
+      { timeout: 10000 }).toBe(true);
+      // Remount after cart.clear() would fake a "successful" edit on empty cart — forbid it.
+      expect(await page.evaluate(() =>
+        globalThis.__ripHmr.some((e) => e?.type === 'remount'))).toBe(false);
+    } finally {
+      edit.restore();
+    }
+  });
+
+  // App-level LKG quarantine while confirmed, then recover with the render edit applied.
+  test('order confirmation survives compile failure and recover with edit', async ({ page }) => {
+    await reachOrderPlaced(page);
+    await listenHmr(page);
+
+    const stamp = Date.now().toString(36).slice(-4);
+    const heading = `Order Placed! - ${stamp}`;
+    const root = await cartRoot();
+    const abs = join(root, 'app/routes/cart.rip');
+    const original = readFileSync(abs, 'utf8');
+    const stamped = original.replace("h1 'Order Placed!'", `h1 '${heading}'`);
+
+    try {
+      writeFileSync(abs, `${original}\nthis is not valid rip {{{`);
+      await expect(page.locator('[data-rip-hmr-overlay]')).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('[data-rip-hmr-overlay]')).toContainText('failed to compile');
+      // LKG: still on confirmation, interactive — not empty cart, not a frozen shell.
+      await expect(page.locator('h1')).toHaveText('Order Placed!');
+      await expect(page.getByRole('link', { name: 'Continue Shopping' })).toBeVisible();
+      await expect(page.locator('body')).not.toContainText('Your cart is empty');
+      expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
+      await expect.poll(async () =>
+        page.evaluate(() => globalThis.__ripHmr.some((e) => e?.type === 'reject')),
+      { timeout: 5000 }).toBe(true);
+
+      // Recover with the render edit applied — must not require placing another order.
+      writeFileSync(abs, stamped);
+      await expect(page.locator('[data-rip-hmr-overlay]')).toHaveCount(0, { timeout: 20000 });
+      await expect(page.locator('h1')).toHaveText(heading, { timeout: 20000 });
+      await expect(page.getByRole('link', { name: 'Continue Shopping' })).toBeVisible();
+      await expect(page.locator('body')).not.toContainText('Your cart is empty');
+      expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
+      await expect.poll(async () =>
+        page.evaluate(() => globalThis.__ripHmr.some((e) => e?.type === 'patch')),
+      { timeout: 10000 }).toBe(true);
+    } finally {
+      writeFileSync(abs, original);
     }
   });
 
