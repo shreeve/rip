@@ -36,19 +36,12 @@
 
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './typetext.js';
 import { attributeNamesFor } from './dom-vocab.js';
+import { COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS } from './component-vocab.js';
+export { COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS } from './component-vocab.js';
 
 const isNode = (x) => Array.isArray(x);
 const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
 const isBlock = (x) => isNode(x) && x[0] === 'block';
-
-// The exact-five lifecycle hooks — the single source (the emitter's
-// categorization consumes this set too).
-export const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError']);
-export const COMPONENT_RUNTIME_FIELDS = new Set([
-  '_state', '_frame', '_parent', '_children', '_root', '_nodes', '_target',
-  '_context', '_rest', '_restWriters', '_restHandlers', '_inheritedEl',
-  '_refCleanups', '_initFailed',
-]);
 
 // A member TARGET: `x` (private) or `@x` ([".", "this", "x"]).
 const memberTarget = (t) => {

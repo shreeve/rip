@@ -1,4 +1,4 @@
-// Deterministic browser bundle. The committed artifact is byte-gated
+// Deterministic browser bundle. The committed artifacts are byte-gated
 // in CI, so the toolchain version is load-bearing: regeneration under
 // a different Bun refuses instead of producing unexplained drift.
 // Upgrading Bun is a deliberate change — regenerate, inspect the diff,
@@ -6,6 +6,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
 import { compile } from '../src/compile.js';
 
 const REQUIRED_BUN = '1.3.14';
@@ -18,6 +19,7 @@ if (Bun.version !== REQUIRED_BUN) {
 }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const outDir = resolve(root, 'dist/browser');
 
 // The emitter imports fs for inline runtime delivery, which the
 // browser never uses (runtimes arrive by scope). The stub keeps the
@@ -29,6 +31,75 @@ const nodeStubs = {
     build.onLoad({ filter: /.*/, namespace: 'rip-stub' }, () => ({
       contents:
         "export const readFileSync = () => { throw new Error('rip: filesystem access is unavailable in the browser'); };\n",
+      loader: 'js',
+    }));
+  },
+};
+
+// IDE / type-face modules: the browser ships Rip→JS only. JS-face helpers
+// that emission needs at runtime live in schema-names.js / component-vocab.js;
+// these stubs satisfy the emitter's static face:'ts' imports with loud
+// throws if a TS-only path is ever reached in-page.
+const unavailable = (surface) =>
+  `() => { throw new Error('rip: ${surface} is unavailable in the browser'); }`;
+
+const IDE_STUBS = new Map([
+  ['dts.js', [
+    `export const emitDeclarations = ${unavailable('declaration emission')};`,
+  ].join('\n')],
+  ['schema-types.js', [
+    `export class SchemaTypeError extends Error {`,
+    `  constructor(message, start = null, node = null) {`,
+    `    super(message);`,
+    `    this.name = 'SchemaTypeError';`,
+    `    this.start = start;`,
+    `    this.node = node;`,
+    `  }`,
+    `}`,
+    `export const buildSchemaTypeStory = ${unavailable('schema type story')};`,
+    `export const isModuleShaped = () => false;`,
+  ].join('\n')],
+  ['typetext.js', [
+    `export class TypeTextError extends Error {`,
+    `  constructor(message) { super(message); this.name = 'TypeTextError'; }`,
+    `}`,
+    `export const normalizeTypeText = (raw) => String(raw ?? '').trim();`,
+    `export const tidyType = (t) => String(t ?? '');`,
+    `export const renderTypeDecl = ${unavailable('type-text rendering')};`,
+    `export const renderParams = ${unavailable('type-text rendering')};`,
+    `export const optionalReader = () => () => false;`,
+    `export const jsArityOptional = () => new Set();`,
+  ].join('\n')],
+  ['component-types.js', [
+    `export const componentTypeInfo = ${unavailable('component type story')};`,
+    `export const memberDeclareSegments = ${unavailable('component type story')};`,
+    `export const isDeclarableMember = () => false;`,
+    `export const declaresContainer = () => false;`,
+    `export const propsTypeSegments = ${unavailable('component type story')};`,
+    `export const propsTypeText = ${unavailable('component type story')};`,
+    `export const propsParamOptional = () => true;`,
+    `export const instanceTypeLines = ${unavailable('component type story')};`,
+    `export const containerType = ${unavailable('component type story')};`,
+    `export const MINTED = '';`,
+    `export const syntacticLiteralType = () => null;`,
+    `export const selfArgsOf = () => '';`,
+    `export const anyArgsOf = () => '';`,
+    `export const readonlyCastType = ${unavailable('component type story')};`,
+  ].join('\n')],
+]);
+
+const ideStubs = {
+  name: 'rip-ide-stubs',
+  setup(build) {
+    // Match the import spelling (`./dts.js`) and absolute forms the
+    // resolver may surface; always stub by basename.
+    build.onResolve({ filter: /(?:^|\/)(dts|schema-types|typetext|component-types)\.js$/ }, (args) => {
+      const file = args.path.split('/').pop();
+      if (!IDE_STUBS.has(file)) return null;
+      return { path: file, namespace: 'rip-ide-stub' };
+    });
+    build.onLoad({ filter: /.*/, namespace: 'rip-ide-stub' }, (args) => ({
+      contents: IDE_STUBS.get(args.path) + '\n',
       loader: 'js',
     }));
   },
@@ -51,22 +122,42 @@ const ripModules = {
   },
 };
 
-const result = await Bun.build({
+const buildOpts = {
   entrypoints: [resolve(root, 'src/browser.js')],
   root: resolve(root, 'src'),
   target: 'browser',
   format: 'esm',
-  minify: false,
   sourcemap: 'none',
-  plugins: [ripModules, nodeStubs],
-});
+  plugins: [ripModules, nodeStubs, ideStubs],
+};
 
+const result = await Bun.build({ ...buildOpts, minify: false });
 if (!result.success) {
   for (const log of result.logs) console.error(String(log));
   process.exit(1);
 }
 
+const minResult = await Bun.build({ ...buildOpts, minify: true });
+if (!minResult.success) {
+  for (const log of minResult.logs) console.error(String(log));
+  process.exit(1);
+}
+
 const code = await result.outputs[0].text();
-mkdirSync(resolve(root, 'dist/browser'), { recursive: true });
-writeFileSync(resolve(root, 'dist/browser/rip.js'), code);
-console.log(`browser-bundle: dist/browser/rip.js ${(code.length / 1024).toFixed(1)} KB`);
+const minCode = await minResult.outputs[0].text();
+const minBytes = Buffer.from(minCode);
+const brBytes = brotliCompressSync(minBytes, {
+  params: {
+    [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
+  },
+});
+
+mkdirSync(outDir, { recursive: true });
+writeFileSync(resolve(outDir, 'rip.js'), code);
+writeFileSync(resolve(outDir, 'rip.min.js'), minBytes);
+writeFileSync(resolve(outDir, 'rip.min.js.br'), brBytes);
+
+const kb = n => (n / 1024).toFixed(1);
+console.log(`browser-bundle: dist/browser/rip.js ${kb(Buffer.byteLength(code))} KB`);
+console.log(`browser-bundle: dist/browser/rip.min.js ${kb(minBytes.length)} KB`);
+console.log(`browser-bundle: dist/browser/rip.min.js.br ${kb(brBytes.length)} KB`);

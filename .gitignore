@@ -3,6 +3,11 @@ dist/*
 !dist/browser
 dist/browser/*
 !dist/browser/rip.js
+!dist/browser/rip.min.js
+!dist/browser/rip.min.js.br
+!dist/browser/SIZES.before.md
+!dist/browser/SIZES.after.md
+!dist/browser/SIZES.artifacts.md
 
 .DS_Store
 *.log

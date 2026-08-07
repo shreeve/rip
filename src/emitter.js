@@ -27,8 +27,9 @@ import { Parser } from './parser.js';
 import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, identifierRunAt, isIdentifierName } from './lexer.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './typetext.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom-vocab.js';
+import { COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS } from './component-vocab.js';
 import {
-  COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS, componentTypeInfo, memberDeclareSegments, isDeclarableMember,
+  componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
   syntacticLiteralType,
@@ -13117,7 +13118,9 @@ class Emitter {
 
   emitParams(params, firstParamTypeText = null, jsArity = true) {
     const list = Emitter.expansionSplit(params).list;
-    const optional = jsArity ? jsArityOptional(list) : new Set();
+    // Arity softens only the TS face (`?` markers); the JS face never
+    // reads the set, so skip the walk unless type syntax will emit.
+    const optional = jsArity && this.ts ? jsArityOptional(list) : new Set();
     // The injected handler-param annotation types the FIRST param, so JS
     // arity leaves it alone — it is no longer unannotated.
     if (firstParamTypeText !== null) optional.delete(0);

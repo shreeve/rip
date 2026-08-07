@@ -25,7 +25,7 @@
 // `debug` appends an inline source map to every compiled module, so
 // devtools show the .rip source. Off by default: maps are a
 // development affordance and never ship in production boots.
-import { compile } from './compile.js';
+import { compile } from './browser-compile.js';
 import * as intrinsics from './runtime/intrinsics.js';
 import * as stdlib from './runtime/stdlib.js';
 import * as schema from './runtime/schema.js';

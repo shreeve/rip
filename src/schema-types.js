@@ -52,6 +52,8 @@
 // positioned emitter diagnostic.
 
 import { derivedSchemaDescriptors } from './schema.js';
+import { behaviorName } from './schema-names.js';
+export { behaviorName } from './schema-names.js';
 
 export class SchemaTypeError extends Error {
   constructor(message, start = null, node = null) {
@@ -242,9 +244,8 @@ export const schemaIntrinsicLines = (withModel, withMixin = false) => [
 
 // The projection folder lives with the runtime's own algebra
 // (src/schema.js), so the shape a derivation TYPES is the shape the
-// runtime BUILDS, computed once. schema.js imports `behaviorName` from
-// here; both sides of that cycle are function declarations, reached
-// only at call time.
+// runtime BUILDS, computed once. Naming helpers live in schema-names.js
+// so the JS face can spell behavior bindings without this type story.
 const isNode = (x) => Array.isArray(x);
 const isSchemaNode = (x) =>
   isNode(x) && x[0] === 'schema' && x.length === 2 &&
@@ -340,11 +341,6 @@ export function isModuleShaped(programSexpr, isModuleImport) {
   }
   return false;
 }
-
-// The face-only behavior object's name for a schema: one module-local
-// const carrying the same compiled callable bodies the descriptor
-// does, so `ReturnType<typeof …>` can read what each returns.
-export const behaviorName = (name) => `__${name}__behavior`;
 
 // ── field/property rendering ─────────────────────────────────────────
 

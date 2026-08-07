@@ -136,7 +136,7 @@ const isKeywordWord = (t) =>
   (t.kind === t.value.toUpperCase() || t.kind === 'LEADING_WHEN' || t.kind === 'RELATION' || t.kind === 'STATEMENT');
 
 import { ops } from './ops.js';
-import { behaviorName } from './schema-types.js';
+import { behaviorName } from './schema-names.js';
 
 // The symbol spelling: ':' followed by an UNSPACED word. The kind
 // position additionally admits keyword-kind tokens (`:enum` scans the
