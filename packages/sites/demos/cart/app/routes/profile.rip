@@ -9,8 +9,6 @@ export Profile = component
   form: User := { ...user }
   errors: ApiErrors<keyof User> := {}
 
-  fragile ~= "larry"
-
   mounted: -> document.title = title('Profile')
 
   updateUser = createMutation (data: User) -> User.parse(api.patch!('user', { json: data }).json!),
@@ -20,7 +18,7 @@ export Profile = component
     onError: (err) => errors = parseApiError!(err)
 
   render
-    h1 'Profiler'
+    h1 'Profile'
     form @submit: ((e) -> e.preventDefault(); updateUser(form))
       div.grid
         label
@@ -46,10 +44,6 @@ export Profile = component
           input
             value <=> form.phone
             type: 'tel'
-      div.grid
-        label
-          'Shoe Size'
-          input value: fragile
       Button type: 'submit', loading: updateUser.pending, 'Update Profile'
       if errors.form
         p.error errors.form
