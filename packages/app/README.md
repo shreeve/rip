@@ -18,6 +18,8 @@ The package currently provides:
   modules, and one complete App hash ([docs/WORKSPACE.md](../../docs/WORKSPACE.md))
 - `connectFeed` for ordered watch changes and subscribe-before-`latest.json`
   reconnect recovery
+- `createApply` for watch-mode absorb policy (`reload` | `css` | `update` |
+  `ignore`) over the renderer’s remount seam
 - `rash` and `check` as server/tooling hash utilities; the browser publication
   consumer trusts Manager's declared App hash
 
@@ -311,16 +313,23 @@ injectable host (`listen(type, fn)`), so they test under Node;
 ## Hot module replacement
 
 Watch-mode publication (Sites + `bootApp({ watch: true })`) applies ordered
-Workspace changes. Compatible component edits **patch** living instances when
-compiler signatures match — same instance and `:=` / prop containers, refreshed
-`~=` bodies and body `~>` effects, DOM rebuilt via `_create`/`_setup` (not
-surgical morph). Incompatible shape changes **remount** the narrowest dirty
-route/layout chain while preserving the stash and ancestor layouts.
-Focus, selection, and scroll are snapshotted around the refresh. A
-compile or activation failure keeps the last-known-good App interactive and
-shows a dismissible overlay; the next good generation (or reload) clears it.
-Editing `stash.rip` / `data.rip` (the stash *definition*) reloads the document —
-runtime stash *value* updates never reload. See [docs/HMR.md](../../docs/HMR.md).
+Workspace changes. Signature classify selects **patch**, **migrate**, or
+**remount**:
+
+- **Patch** — compatible signatures keep the living instance and `:=` / prop
+  containers; refresh `~=` bodies and body `~>` effects; rebuild the DOM via
+  `_create`/`_setup` (state-preserving view remount, not surgical morph).
+- **Migrate** — compatible named-state shape change: remount floor with
+  intersecting `:=` slots preserved (`__hmrPreserveState`).
+- **Remount** — incompatible shape: replace the narrowest dirty route/layout
+  chain while preserving the stash and ancestor layouts.
+
+Focus, selection, and scroll are snapshotted around the refresh. A compile or
+activation failure keeps the last-known-good App interactive and shows a
+dismissible overlay; the next good generation (or reload) clears it. Editing
+`stash.rip` / `data.rip` (the stash *definition*) reloads the document —
+runtime stash *value* updates never reload. See
+[docs/HMR.md](../../docs/HMR.md).
 
 ## Test
 
