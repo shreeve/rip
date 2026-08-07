@@ -73,6 +73,7 @@ export function createModuleLoader({
   components: registry,
   embeddedPackages = {},
   debug = false,
+  hmr = false,
 } = {}) {
   if (!registry || typeof registry.read !== 'function') {
     throw new TypeError('rip: createModuleLoader requires a component registry');
@@ -195,7 +196,12 @@ export function createModuleLoader({
       if (source === undefined) {
         throw new Error(`rip: '${path}' is not in the bundle`);
       }
-      const compiled = compile(source, { path, runtimeDelivery: 'import', browserModule: true });
+      const compiled = compile(source, {
+        path,
+        runtimeDelivery: 'import',
+        browserModule: true,
+        ...(hmr ? { hmr: true } : null),
+      });
       let code = compiled.code;
       for (const span of [...compiled.imports].reverse()) {
         const target = resolvePath(span.specifier, path);

@@ -374,7 +374,7 @@ export function isModuleImportNode(stores, x) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false } = {}) {
+  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null } = {}) {
     this.stores = stores;
     this.b = builder;
     // repl emission: the final top-level expression statement lands
@@ -390,6 +390,10 @@ class Emitter {
     // its own position instead of emitting bytes new Function cannot take.
     this.script = script;
     this.browserModule = browserModule;
+    // HMR metadata on module-scope named components. Off by default —
+    // production emission must stay byte-identical when hmr is false.
+    this.hmr = hmr === true;
+    this.modulePath = typeof modulePath === 'string' && modulePath.length > 0 ? modulePath : null;
     // Emitted module-specifier spans, RECORDED at emission (never
     // rediscovered by scanning output): the browser module loader
     // splices resolved specifiers by these exact offsets.
@@ -7729,6 +7733,40 @@ class Emitter {
     return { path, pathNode, key, keyCode: keySegments.join('.'), keyParts: keySegments };
   }
 
+  // Deterministic FNV-1a (32-bit) over a JSON payload — HMR shape/impl
+  // fingerprints. Emission-only; never rediscovered from generated text.
+  static hmrFingerprint(value) {
+    const s = JSON.stringify(value);
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16).padStart(8, '0');
+  }
+
+  // static __hmrId / __hmrSig for a module-scope named component.
+  // Call only when `this.hmr && this.modulePath` — the production path
+  // never reaches here.
+  emitComponentHmrMeta(pad, {
+    bindingName, declaredProps, stateVars, derivedVars, gateVars,
+    extendsTag, methods, hooks, hasRender,
+  }) {
+    const sortNames = (names) => [...names].sort();
+    const props = sortNames(declaredProps);
+    const state = sortNames(stateVars.map((m) => m.name));
+    const computed = sortNames(derivedVars.map((m) => m.name));
+    const methodNames = sortNames(methods.map((m) => m.name));
+    const hookNames = sortNames(hooks.map((h) => h.name));
+    const gates = gateVars.length;
+    const shape = Emitter.hmrFingerprint({ props, state, computed, gates, extends: extendsTag });
+    const impl = Emitter.hmrFingerprint({ methods: methodNames, hooks: hookNames, render: hasRender });
+    const id = `${this.modulePath}#${bindingName}`;
+    const sig = { shape, impl, state, computed, props, gates, extends: extendsTag };
+    this.b.emit(`${pad}static __hmrId = ${JSON.stringify(id)};\n`);
+    this.b.emit(`${pad}static __hmrSig = ${JSON.stringify(sig)};\n`);
+  }
+
   // ["component", parent, ["block", …]] — the declaration. Expression
   // position (the value of `Card = component …`); statement position
   // groups like a class expression.
@@ -8205,6 +8243,21 @@ class Emitter {
         this.b.emit(`${pad}static __extends = `);
         this.emitQuotedPrimitive(extendsTag);
         this.b.emit(';\n');
+      }
+      // HMR identity/signature — module-scope named components only.
+      // Gated on `hmr`: off keeps production bytes unchanged.
+      if (this.hmr && this.modulePath && this.scopes.length === 1 && typeof this._componentName === 'string') {
+        this.emitComponentHmrMeta(pad, {
+          bindingName: this._componentName,
+          declaredProps,
+          stateVars,
+          derivedVars,
+          gateVars,
+          extendsTag,
+          methods,
+          hooks,
+          hasRender: renderNode !== null,
+        });
       }
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
       this.b.emit(`${pad}_init(props`);
@@ -14801,7 +14854,7 @@ const inventoryBindings = (emitter, sexpr, ambientNames) => {
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false } = {}) {
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -14811,7 +14864,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath });
   emitter.dataPayload = dataPayload;
 
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {

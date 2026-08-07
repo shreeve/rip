@@ -80,17 +80,61 @@ test.describe('cart publication apply', () => {
 
   test('compile failure keeps the last good page interactive (S10)', async ({ page }) => {
     await bootCart(page);
-    await page.evaluate(() => { globalThis.__wsSentinel = 'alive'; });
+    await page.evaluate(() => {
+      globalThis.__wsSentinel = 'alive';
+      globalThis.__ripHmr = [];
+      window.addEventListener('rip:hmr', (e) => globalThis.__ripHmr.push(e.detail));
+    });
 
     const edit = await editFile('app/routes/index.rip', (src) =>
       `${src}\nthis is not valid rip {{{`);
 
     try {
-      // Give the door a moment to attempt apply; the page must stay put.
-      await page.waitForTimeout(1500);
+      await expect(page.locator('[data-rip-hmr-overlay]')).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('[data-rip-hmr-overlay]')).toContainText('failed to compile');
       expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
       await expect(page.locator('h1')).toHaveText('Products');
       await expect(page.locator('nav')).toContainText('Shop');
+      await expect.poll(async () =>
+        page.evaluate(() => globalThis.__ripHmr.some((e) => e?.type === 'reject')),
+      { timeout: 5000 }).toBe(true);
+    } finally {
+      edit.restore();
+    }
+
+    // Restoring the good source clears the overlay (reload or successful apply).
+    await expect(page.locator('[data-rip-hmr-overlay]')).toHaveCount(0, { timeout: 20000 });
+    await expect(page.locator('h1')).toHaveText('Products', { timeout: 20000 });
+  });
+
+  test('profile local form state survives a compatible leaf markup edit', async ({ page }) => {
+    await bootCart(page);
+    await page.goto('/profile');
+    await expect(page.locator('h1')).toHaveText('Profiler', { timeout: 20000 });
+
+    const stamp = `Ada-${Date.now()}`;
+    const first = page.locator('input').first();
+    await first.fill(stamp);
+    await expect(first).toHaveValue(stamp);
+
+    await page.evaluate(() => {
+      globalThis.__wsSentinel = 'alive';
+      globalThis.__ripHmr = [];
+      window.addEventListener('rip:hmr', (e) => globalThis.__ripHmr.push(e.detail));
+    });
+
+    const edit = await editFile('app/routes/profile.rip', (src) =>
+      src.replace("h1 'Profiler'", `h1 'Profiler ${stamp.slice(-4)}'`));
+
+    try {
+      await expect(page.locator('h1')).toContainText('Profiler', { timeout: 15000 });
+      await expect(page.locator('h1')).toContainText(stamp.slice(-4));
+      // Compatible render edit: form binding should still show the typed value.
+      await expect(first).toHaveValue(stamp);
+      expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
+      await expect.poll(async () =>
+        page.evaluate(() => globalThis.__ripHmr.some((e) => e?.type === 'patch' || e?.type === 'remount')),
+      { timeout: 10000 }).toBe(true);
     } finally {
       edit.restore();
     }

@@ -5,6 +5,7 @@
 import { createModuleLoader } from './browser-modules.js';
 import { app, embeddedPackages } from './browser-app.js';
 import { validatePrepared } from '../packages/app/launch.rip';
+import { clearHmrOverlay, showHmrOverlay } from './browser-hmr-overlay.js';
 
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const validHash = value => typeof value === 'string' && /^[A-Za-z0-9_]{6}$/.test(value);
@@ -88,7 +89,7 @@ export async function fetchBundle(url, { fetchText = browserFetchText } = {}) {
   }
 }
 
-const createProgram = (initialSources, debug) => {
+const createProgram = (initialSources, debug, { hmr = false } = {}) => {
   let files = new Map(Object.entries(initialSources));
   const staged = new Map();
   const registry = {
@@ -97,7 +98,7 @@ const createProgram = (initialSources, debug) => {
     getCompiled: path => staged.get(path),
     setCompiled: (path, module) => void staged.set(path, module),
   };
-  const loader = createModuleLoader({ components: registry, embeddedPackages, debug });
+  const loader = createModuleLoader({ components: registry, embeddedPackages, debug, hmr });
   return {
     sources(nextSources) {
       files = new Map(Object.entries(nextSources));
@@ -131,7 +132,8 @@ export async function bootApp(opts = {}) {
   const bundle = opts.bundle ?? await fetchBundle(opts.url, { fetchText: opts.fetchText });
   const sources = publicationSources(bundle);
   const debug = opts.debug === true;
-  const program = createProgram(sources, debug);
+  const watch = opts.watch === true || opts.feed != null;
+  const program = createProgram(sources, debug, { hmr: watch });
   const workspace = app.createWorkspace();
   const dataFor = modules => modules['data.rip']?.data;
   const launchWith = modules => app.launch({
@@ -160,6 +162,7 @@ export async function bootApp(opts = {}) {
   const handle = {};
   const report = opts.feed?.report ?? ((...args) => console.error(...args));
   const reload = reason => {
+    clearHmrOverlay();
     report(`[Rip] reloading${reason ? ` — ${reason}` : ''}`);
     if (typeof opts.reload === 'function') opts.reload(reason);
     else if (typeof location !== 'undefined') location.reload();
@@ -241,6 +244,7 @@ export async function bootApp(opts = {}) {
     } catch (error) {
       program.sources(activeSources());
       report('[Rip] changed Rip program failed to compile:', error);
+      showHmrOverlay('compile', error);
       return 'rejected';
     }
 
@@ -271,6 +275,7 @@ export async function bootApp(opts = {}) {
       for (const entry of change.entries) {
         if (entry.path.endsWith('.css')) refreshCss(entry.path, change.hash);
       }
+      clearHmrOverlay();
       if (verdict === 'reload') {
         report('[Rip] committed App update requires a document reload');
         return 'reload';
@@ -280,11 +285,11 @@ export async function bootApp(opts = {}) {
       if (transaction && !committed) transaction.rollback();
       program.sources(activeSources());
       report('[Rip] changed Rip program failed to activate:', error);
+      showHmrOverlay('activate', error);
       return 'rejected';
     }
   };
 
-  const watch = opts.watch === true || opts.feed != null;
   if (watch) {
     const latestUrl = opts.latestUrl ?? opts.feed?.latestUrl ?? (opts.url ? sibling(opts.url, 'latest.json') : '/latest.json');
     feed = app.connectFeed({ hash: () => workspace.hash(), apply: applyChange, reload }, {
@@ -297,6 +302,7 @@ export async function bootApp(opts = {}) {
   const destroy = () => {
     if (destroyed) return;
     destroyed = true;
+    clearHmrOverlay();
     feed?.close();
     current.destroy();
     program.dispose();

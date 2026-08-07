@@ -216,11 +216,12 @@ boundaries.
 
 ## Hot module replacement
 
-Framework-refresh aspiration and phased tests: [HMR.md](HMR.md).
-Mutations enter through one ordered Workspace transition; refresh decides how
-living instances adopt them. Watch-mode changes may include Rip source, while
-ordinary asset bytes remain on HTTP. HMR.md's apply layer remains the
-aspirational ladder once evidence lands.
+Publication substrate, compile overlay, signature metadata, living-instance
+registry, patch-when-compatible, and narrow remount with UI restore are
+shipped under watch mode — see [HMR.md](HMR.md). Remaining open work is
+Phase 5 graph-quality hardening (multi-module transaction polish, deeper
+devtools events) where evidence still drives the ladder. Stash-module
+definition edits stay document reload by design.
 
 ## Rip-native hypermedia
 

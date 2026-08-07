@@ -9605,7 +9605,7 @@ function isModuleImportNode(stores, x) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = "js", pins = null, strict = false, script = false, browserModule = false, repl = false } = {}) {
+  constructor(stores, builder, { face = "js", pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null } = {}) {
     this.stores = stores;
     this.b = builder;
     this.repl = repl;
@@ -9613,6 +9613,8 @@ class Emitter {
     this.replImportResolver = null;
     this.script = script;
     this.browserModule = browserModule;
+    this.hmr = hmr === true;
+    this.modulePath = typeof modulePath === "string" && modulePath.length > 0 ? modulePath : null;
     this.importSpans = [];
     this.typeOnlyImports = new Set;
     this.pins = pins;
@@ -14905,6 +14907,42 @@ ${pad ?? ""}`);
     }
     return { path, pathNode, key, keyCode: keySegments.join("."), keyParts: keySegments };
   }
+  static hmrFingerprint(value) {
+    const s = JSON.stringify(value);
+    let h = 2166136261;
+    for (let i = 0;i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(16).padStart(8, "0");
+  }
+  emitComponentHmrMeta(pad, {
+    bindingName,
+    declaredProps,
+    stateVars,
+    derivedVars,
+    gateVars,
+    extendsTag,
+    methods,
+    hooks,
+    hasRender
+  }) {
+    const sortNames = (names) => [...names].sort();
+    const props = sortNames(declaredProps);
+    const state = sortNames(stateVars.map((m) => m.name));
+    const computed = sortNames(derivedVars.map((m) => m.name));
+    const methodNames = sortNames(methods.map((m) => m.name));
+    const hookNames = sortNames(hooks.map((h) => h.name));
+    const gates = gateVars.length;
+    const shape = Emitter.hmrFingerprint({ props, state, computed, gates, extends: extendsTag });
+    const impl = Emitter.hmrFingerprint({ methods: methodNames, hooks: hookNames, render: hasRender });
+    const id = `${this.modulePath}#${bindingName}`;
+    const sig = { shape, impl, state, computed, props, gates, extends: extendsTag };
+    this.b.emit(`${pad}static __hmrId = ${JSON.stringify(id)};
+`);
+    this.b.emit(`${pad}static __hmrSig = ${JSON.stringify(sig)};
+`);
+  }
   componentExpr(node) {
     const [, parent, body] = node;
     let extendsTag = null;
@@ -15265,6 +15303,19 @@ ${pad ?? ""}`);
         this.emitQuotedPrimitive(extendsTag);
         this.b.emit(`;
 `);
+      }
+      if (this.hmr && this.modulePath && this.scopes.length === 1 && typeof this._componentName === "string") {
+        this.emitComponentHmrMeta(pad, {
+          bindingName: this._componentName,
+          declaredProps,
+          stateVars,
+          derivedVars,
+          gateVars,
+          extendsTag,
+          methods,
+          hooks,
+          hasRender: renderNode !== null
+        });
       }
       if (tsInfo !== null)
         this.tsComponentCtor(tsInfo, pad);
@@ -20365,7 +20416,7 @@ var inventoryBindings = (emitter, sexpr, ambientNames) => {
   }
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
-function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false } = {}) {
+function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error("emitter: cannot emit a failed parse");
   }
@@ -20375,7 +20426,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === "ts" });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath });
   emitter.dataPayload = dataPayload;
   if (runtimeDelivery !== "none" && runtimeDelivery !== "import" && runtimeDelivery !== "inline") {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
@@ -21204,7 +21255,7 @@ var diagnosticError = (file, path, d) => {
   (a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y)` : d.message;
   return positioned(file, path, message, d.start, d.end);
 };
-function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false } = {}) {
+function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false, hmr = false } = {}) {
   if (typeof source !== "string") {
     const kind = source === null ? "null" : Array.isArray(source) ? "an array" : `a ${typeof source}`;
     throw new CompileError(`compile: source must be a string; got ${kind}`, { path });
@@ -21242,7 +21293,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     foldDerivedSchemas(result.sexpr);
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl, hmr, modulePath: path });
   } catch (err) {
     if (typeof err.start === "number") {
       throw positioned(file, path, err.message, err.start, err.end);
@@ -23552,6 +23603,19 @@ __export(exports_components, {
   __popComponent: () => __popComponent,
   __ownerFrame: () => __ownerFrame,
   __lis: () => __lis,
+  __hmrSnapshotUi: () => __hmrSnapshotUi,
+  __hmrRestoreUi: () => __hmrRestoreUi,
+  __hmrRegistry: () => __hmrRegistry,
+  __hmrRegisterDefinition: () => __hmrRegisterDefinition,
+  __hmrPreserveState: () => __hmrPreserveState,
+  __hmrPatch: () => __hmrPatch,
+  __hmrMigrateRemount: () => __hmrMigrateRemount,
+  __hmrMigrateDiff: () => __hmrMigrateDiff,
+  __hmrLookup: () => __hmrLookup,
+  __hmrEvents: () => __hmrEvents,
+  __hmrEntries: () => __hmrEntries,
+  __hmrEmit: () => __hmrEmit,
+  __hmrClassify: () => __hmrClassify,
   __handleComponentError: () => __handleComponentError,
   __gateBind: () => __gateBind,
   __detachRef: () => __detachRef,
@@ -23570,6 +23634,182 @@ var __GATE_CONSTRUCTION_BRAND = {};
 var __pendingGateConstruction = null;
 var __gateMetadata = new WeakMap;
 var __gateConstructorClaimed = false;
+var __hmrRegistry = new Map;
+function __hmrSameNames(a, b) {
+  if (a === b)
+    return true;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length)
+    return false;
+  for (let i = 0;i < a.length; i++)
+    if (a[i] !== b[i])
+      return false;
+  return true;
+}
+function __hmrLookup(id) {
+  return __hmrRegistry.get(id);
+}
+function __hmrEntries() {
+  return [...__hmrRegistry.entries()];
+}
+function __hmrRegisterDefinition(ctor) {
+  const id = ctor?.__hmrId;
+  if (typeof id !== "string" || !id)
+    return;
+  let entry = __hmrRegistry.get(id);
+  if (!entry) {
+    entry = { definition: ctor, instances: new Set };
+    __hmrRegistry.set(id, entry);
+  } else {
+    entry.definition = ctor;
+  }
+  return entry;
+}
+function __hmrRegisterInstance(instance) {
+  const id = instance?.constructor?.__hmrId;
+  if (typeof id !== "string" || !id)
+    return;
+  const entry = __hmrRegisterDefinition(instance.constructor);
+  entry.instances.add(instance);
+}
+function __hmrUnregisterInstance(instance) {
+  const id = instance?.constructor?.__hmrId;
+  if (typeof id !== "string" || !id)
+    return;
+  const entry = __hmrRegistry.get(id);
+  if (!entry)
+    return;
+  entry.instances.delete(instance);
+}
+function __hmrClassify(oldCtor, newCtor) {
+  const a = oldCtor?.__hmrSig;
+  const b = newCtor?.__hmrSig;
+  if (!a || !b)
+    return "remount";
+  if (!__hmrSameNames(a.props, b.props) || a.gates !== b.gates || a.extends !== b.extends) {
+    return "remount";
+  }
+  if (!__hmrSameNames(a.state, b.state) || !__hmrSameNames(a.computed, b.computed)) {
+    return "migrate";
+  }
+  return "patch";
+}
+function __hmrMigrateDiff(oldSig, newSig) {
+  const prev = Array.isArray(oldSig?.state) ? oldSig.state : [];
+  const next = Array.isArray(newSig?.state) ? newSig.state : [];
+  const prevSet = new Set(prev);
+  const nextSet = new Set(next);
+  const kept = next.filter((name) => prevSet.has(name));
+  const added = next.filter((name) => !prevSet.has(name));
+  const removed = prev.filter((name) => !nextSet.has(name));
+  return { kept, added, removed };
+}
+var __hmrEventLog = [];
+var __HMR_EVENT_CAP = 64;
+function __hmrEmit(type, detail = {}) {
+  const event = { type, at: Date.now(), ...detail };
+  __hmrEventLog.push(event);
+  if (__hmrEventLog.length > __HMR_EVENT_CAP)
+    __hmrEventLog.shift();
+  if (typeof console !== "undefined" && typeof console.debug === "function") {
+    console.debug(`[Rip HMR] ${type}`, detail);
+  }
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    try {
+      window.dispatchEvent(new CustomEvent("rip:hmr", { detail: event }));
+    } catch {}
+  }
+  return event;
+}
+function __hmrEvents() {
+  return __hmrEventLog.slice();
+}
+function __hmrPreserveState(oldInstance, newInstance) {
+  const oldSig = oldInstance?.constructor?.__hmrSig;
+  const newSig = newInstance?.constructor?.__hmrSig;
+  const retained = oldSig?.state;
+  const nextNames = newSig?.state;
+  const diff = __hmrMigrateDiff(oldSig, newSig);
+  if (!Array.isArray(retained) || !Array.isArray(nextNames)) {
+    __hmrEmit("migrate", { id: newInstance?.constructor?.__hmrId ?? null, ...diff, copied: [] });
+    return diff;
+  }
+  const keep = new Set(retained);
+  const copied = [];
+  for (const name of nextNames) {
+    if (!keep.has(name))
+      continue;
+    const prev = oldInstance[name];
+    const next = newInstance[name];
+    if (prev != null && next != null && typeof prev === "object" && typeof next === "object" && "value" in prev && "value" in next) {
+      next.value = prev.value;
+      copied.push(name);
+    }
+  }
+  const id = newInstance?.constructor?.__hmrId ?? oldInstance?.constructor?.__hmrId ?? null;
+  if (diff.removed.length > 0 && typeof console !== "undefined" && typeof console.warn === "function") {
+    console.warn(`[Rip HMR] migrate ${id ?? "<component>"}: dropping orphaned state [${diff.removed.join(", ")}]`);
+  }
+  if (diff.added.length > 0 && typeof console !== "undefined" && typeof console.info === "function") {
+    console.info(`[Rip HMR] migrate ${id ?? "<component>"}: initializing new state [${diff.added.join(", ")}]`);
+  }
+  __hmrEmit("migrate", { id, ...diff, copied });
+  return { ...diff, copied };
+}
+function __hmrSnapshotUi() {
+  if (typeof document === "undefined")
+    return null;
+  const active = document.activeElement;
+  let selection = null;
+  if (active && typeof active.selectionStart === "number") {
+    selection = { start: active.selectionStart, end: active.selectionEnd };
+  }
+  return {
+    active: active && active !== document.body && active !== document.documentElement ? active : null,
+    selection,
+    scrollX: typeof window !== "undefined" ? window.scrollX : 0,
+    scrollY: typeof window !== "undefined" ? window.scrollY : 0
+  };
+}
+function __hmrRestoreUi(snap) {
+  if (!snap || typeof document === "undefined")
+    return;
+  if (typeof window !== "undefined")
+    window.scrollTo(snap.scrollX ?? 0, snap.scrollY ?? 0);
+  const el = snap.active;
+  if (!el || !document.contains(el) || typeof el.focus !== "function")
+    return;
+  try {
+    el.focus();
+    if (snap.selection && typeof el.setSelectionRange === "function") {
+      el.setSelectionRange(snap.selection.start, snap.selection.end);
+    }
+  } catch {}
+}
+function __hmrPatch(instance, NewCtor) {
+  if (!instance || !NewCtor) {
+    throw new Error("__hmrPatch requires a living instance and a replacement constructor");
+  }
+  const oldId = instance.constructor?.__hmrId;
+  if (typeof oldId === "string" && oldId) {
+    __hmrRegistry.get(oldId)?.instances.delete(instance);
+  }
+  Object.setPrototypeOf(instance, NewCtor.prototype);
+  Object.defineProperty(instance, "constructor", {
+    value: NewCtor,
+    writable: true,
+    configurable: true
+  });
+  __hmrRegisterDefinition(NewCtor);
+  __hmrRegistry.get(NewCtor.__hmrId)?.instances.add(instance);
+  instance._hmrRerender();
+  __hmrEmit("patch", { id: NewCtor.__hmrId ?? oldId ?? null });
+  return instance;
+}
+function __hmrMigrateRemount(oldInstance, NewCtor, props = {}) {
+  const next = new NewCtor(props);
+  __hmrPreserveState(oldInstance, next);
+  return next;
+}
 function __claimGateConstructor() {
   if (__gateConstructorClaimed) {
     throw new Error("[Rip] the render-gate construction capability is already claimed");
@@ -24005,6 +24245,8 @@ class __Component {
     }
     __popOwner(prevO);
     __popComponent(prevC);
+    if (this.constructor.__hmrId)
+      __hmrRegisterInstance(this);
   }
   _init(props) {}
   _updateProp(name, value) {
@@ -24214,6 +24456,8 @@ class __Component {
   _teardown({ state, hooks, removeDOM }) {
     if (this._state === "failed" || this._state === "unmounted")
       return;
+    if (this.constructor.__hmrId)
+      __hmrUnregisterInstance(this);
     this._state = state;
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
     if (hooks) {
@@ -24318,6 +24562,128 @@ class __Component {
     this._restWriters = null;
     this._restHandlers = null;
     this._inheritedEl = null;
+  }
+  _hmrRerender() {
+    const name = this.constructor.name || "component";
+    if (this._state !== "mounted") {
+      throw new Error(`${name}: _hmrRerender requires a mounted instance`);
+    }
+    const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    const target = this._target;
+    const nodes = this._nodes;
+    const first = nodes?.[0] ?? this._root;
+    const insertParent = first?.parentNode ?? null;
+    const insertBefore = nodes?.length ? nodes[nodes.length - 1].nextSibling : this._root ? this._root.nextSibling : null;
+    try {
+      if (this.beforeUnmount)
+        this.beforeUnmount();
+    } catch (e) {
+      report("beforeUnmount", e);
+    }
+    if (this._children) {
+      for (const child of this._children) {
+        try {
+          child.unmount({ removeDOM: true });
+        } catch (e) {
+          report("child teardown", e);
+        }
+      }
+      this._children = null;
+    }
+    try {
+      this._frame?.dispose();
+    } catch (e) {
+      report("owner disposal", e);
+    }
+    if (this._restWriters) {
+      for (const writer of Object.values(this._restWriters)) {
+        try {
+          writer();
+        } catch (e) {
+          report("rest writer cleanup", e);
+        }
+      }
+      this._restWriters = null;
+    }
+    if (this._restHandlers) {
+      if (this._inheritedEl) {
+        for (const [key, handler] of Object.entries(this._restHandlers)) {
+          try {
+            this._inheritedEl.removeEventListener(key.slice(1).split(".")[0], handler);
+          } catch (e) {
+            report("rest handler cleanup", e);
+          }
+        }
+      }
+      this._restHandlers = null;
+    }
+    if (this._refCleanups) {
+      const cleanups = this._refCleanups;
+      this._refCleanups = null;
+      try {
+        __batch(() => {
+          for (const c of cleanups) {
+            try {
+              c();
+            } catch (e) {
+              report("ref cleanup", e);
+            }
+          }
+        });
+      } catch (e) {
+        report("ref cleanup batch flush", e);
+      }
+    }
+    if (nodes) {
+      for (const n of nodes) {
+        try {
+          __detach(n);
+        } catch (e) {
+          report("DOM detach", e);
+        }
+      }
+    } else {
+      try {
+        __detach(this._root);
+      } catch (e) {
+        report("DOM detach", e);
+      }
+    }
+    this._root = null;
+    this._nodes = null;
+    this._refCleanups = null;
+    this._restWriters = null;
+    this._restHandlers = null;
+    this._inheritedEl = null;
+    this._frame = __ownerFrame({ nested: false });
+    this._state = "new";
+    if (typeof this._create !== "function") {
+      this._state = "mounted";
+      return this;
+    }
+    if (!this._mountCreate())
+      return this;
+    try {
+      if (target) {
+        if (typeof target === "string") {
+          this._target = document.querySelector(target);
+        }
+        if (this._root && this._target)
+          this._target.appendChild(this._root);
+      } else if (insertParent) {
+        if (this._nodes) {
+          for (const n of this._nodes)
+            insertParent.insertBefore(n, insertBefore);
+        } else if (this._root) {
+          insertParent.insertBefore(this._root, insertBefore);
+        }
+      }
+    } catch (error) {
+      this._failMount(error);
+      return this;
+    }
+    this._mountSetup();
+    return this;
   }
   mount(target) {
     if (!this._mountCreate())
@@ -25782,8 +26148,6 @@ matchParts = function(parts, segments) {
             return null;
           return [[part.name, value], ...rest];
         case "catchall":
-          if (si === segments.length && si !== 0)
-            return null;
           pieces = [];
           for (let segment of segments.slice(si)) {
             value = decodeSegment(segment);
@@ -25890,6 +26254,9 @@ function buildRoutes(files, root = "routes") {
     }
     if (!path.startsWith("/"))
       return null;
+    while (path.length > 1 && path.endsWith("/")) {
+      path = path.slice(0, -1);
+    }
     segments = path === "/" ? [] : path.slice(1).split("/");
     for (let entry of compiled) {
       pairs = matchParts(entry.parts, segments);
@@ -26836,7 +27203,80 @@ function createRenderer(opts) {
     }
     return;
   };
+  let hmrCtorFor = function(module, hmrId) {
+    if (!(module != null && typeof module === "object" && typeof hmrId === "string"))
+      return null;
+    let isComponent = function(value) {
+      return typeof value === "function" && value.__hmrId === hmrId;
+    };
+    if (isComponent(module.default))
+      return module.default;
+    for (let key in module) {
+      let value = module[key];
+      if (isComponent(value))
+        return value;
+    }
+    return null;
+  };
+  let tryHmrPatch = function(paths, candidate) {
+    let NewCtor, id, module, prefix;
+    let dirty = (() => {
+      const result1 = [];
+      for (let path of paths) {
+        if (typeof path === "string" && path.endsWith(".rip")) {
+          result1.push(path);
+        }
+      }
+      return result1;
+    })();
+    if (!(dirty.length > 0))
+      return "empty";
+    let patched = 0;
+    let seen = new Set;
+    for (let path of dirty) {
+      module = candidate.getCompiled(path);
+      if (!(module != null))
+        continue;
+      prefix = path + "#";
+      for (let entry of mountedEntries) {
+        if (entry.file === path && entry.instance != null) {
+          id = entry.instance.constructor?.__hmrId;
+          if (!(typeof id === "string" && id.startsWith(prefix)))
+            continue;
+          NewCtor = hmrCtorFor(module, id);
+          if (!(NewCtor != null))
+            continue;
+          __hmrRegisterDefinition(NewCtor);
+          if (!(__hmrClassify(entry.instance.constructor, NewCtor) === "patch"))
+            return "fallback";
+          __hmrPatch(entry.instance, NewCtor);
+          entry.cls = NewCtor;
+          seen.add(entry.instance);
+          patched += 1;
+        }
+      }
+      for (let [id2, reg] of __hmrEntries()) {
+        if (!(typeof id2 === "string" && id2.startsWith(prefix)))
+          continue;
+        NewCtor = hmrCtorFor(module, id2);
+        if (!(NewCtor != null))
+          continue;
+        __hmrRegisterDefinition(NewCtor);
+        for (let instance of [...reg.instances]) {
+          if (seen.has(instance))
+            continue;
+          if (!(__hmrClassify(instance.constructor, NewCtor) === "patch"))
+            return "fallback";
+          __hmrPatch(instance, NewCtor);
+          seen.add(instance);
+          patched += 1;
+        }
+      }
+    }
+    return patched > 0 ? "done" : "empty";
+  };
   let remountDirty = async function(paths, candidate = components) {
+    let NewCtor, entry, id, next, verdict;
     if (!(Array.isArray(paths) && paths.length > 0))
       return "noop";
     for (let path of paths) {
@@ -26846,6 +27286,14 @@ function createRenderer(opts) {
     let info = router.current;
     if (!(info?.route?.file && lastRoute != null))
       return "noop";
+    let snap = __hmrSnapshotUi();
+    try {
+      verdict = tryHmrPatch(paths, candidate);
+      if (verdict === "done") {
+        __hmrRestoreUi(snap);
+        return "narrow";
+      }
+    } catch {}
     let dirty = new Set(paths);
     let layoutFiles = info.layouts ?? info.route.layouts ?? [];
     let chain = [...layoutFiles, info.route.file];
@@ -26859,14 +27307,42 @@ function createRenderer(opts) {
     }
     if (firstDirty < 0)
       firstDirty = chain.length - 1;
+    let migrateKeep = [];
+    for (let index = firstDirty, _ref = chain.length;index < _ref; index++) {
+      entry = mountedEntries[index];
+      if (!(entry?.instance != null && entry.file != null))
+        continue;
+      id = entry.instance.constructor?.__hmrId;
+      if (!(typeof id === "string"))
+        continue;
+      NewCtor = hmrCtorFor(candidate.getCompiled(entry.file), id);
+      if (!(NewCtor != null))
+        continue;
+      if (!(__hmrClassify(entry.instance.constructor, NewCtor) === "migrate"))
+        continue;
+      migrateKeep.push({ file: entry.file, instance: entry.instance, id });
+    }
     forceFrom = firstDirty;
     lastCommitTeardownFailed = false;
     let expectedGeneration = generation + 1;
     try {
       await mount(info, candidate);
+      for (let keep of migrateKeep) {
+        next = mountedEntries.find(function(entry2) {
+          return entry2.file === keep.file && entry2.instance != null;
+        });
+        if (!(next?.instance != null))
+          continue;
+        if (!(next.instance.constructor?.__hmrId === keep.id))
+          continue;
+        __hmrPreserveState(keep.instance, next.instance);
+      }
+      __hmrEmit("remount", { paths: [...dirty], from: firstDirty, migrate: migrateKeep.length });
     } catch (error) {
       forceFrom = null;
       throw error;
+    } finally {
+      __hmrRestoreUi(snap);
     }
     return generation !== expectedGeneration || lastCommitTeardownFailed ? "reload" : "narrow";
   };
@@ -28297,7 +28773,8 @@ var toObjectUrl = (code) => {
 function createModuleLoader({
   components: registry,
   embeddedPackages: embeddedPackages2 = {},
-  debug = false
+  debug = false,
+  hmr = false
 } = {}) {
   if (!registry || typeof registry.read !== "function") {
     throw new TypeError("rip: createModuleLoader requires a component registry");
@@ -28398,7 +28875,12 @@ function createModuleLoader({
       if (source2 === undefined) {
         throw new Error(`rip: '${path}' is not in the bundle`);
       }
-      const compiled = compile(source2, { path, runtimeDelivery: "import", browserModule: true });
+      const compiled = compile(source2, {
+        path,
+        runtimeDelivery: "import",
+        browserModule: true,
+        ...hmr ? { hmr: true } : null
+      });
       let code = compiled.code;
       for (const span of [...compiled.imports].reverse()) {
         const target = resolvePath(span.specifier, path);
@@ -28646,6 +29128,121 @@ ${compiled.code}
   }
   return { count: active.length, executed, failures };
 }
+// src/browser-hmr-overlay.js
+var ATTR = "data-rip-hmr-overlay";
+var overlayEl = null;
+var failureText = (error) => {
+  if (error == null)
+    return "Unknown update failure";
+  if (typeof error === "string")
+    return error;
+  return error.message || error.stack || String(error);
+};
+var failurePath = (error) => {
+  if (error == null || typeof error !== "object")
+    return null;
+  if (typeof error.path === "string" && error.path)
+    return error.path;
+  if (typeof error.file === "string" && error.file)
+    return error.file;
+  return null;
+};
+function showHmrOverlay(kind2, error) {
+  if (typeof document === "undefined" || typeof document.createElement !== "function")
+    return null;
+  const root = document.body || document.documentElement;
+  if (!root)
+    return null;
+  clearHmrOverlay();
+  const card = document.createElement("div");
+  card.setAttribute(ATTR, kind2 || "compile");
+  card.setAttribute("role", "alert");
+  card.style.cssText = [
+    "position:fixed",
+    "inset:0",
+    "z-index:2147483646",
+    "display:flex",
+    "align-items:flex-start",
+    "justify-content:center",
+    "padding:2rem 1rem",
+    "box-sizing:border-box",
+    "background:rgba(15,23,42,0.45)",
+    "overflow:auto"
+  ].join(";");
+  const shell = document.createElement("div");
+  shell.style.cssText = "position:relative;max-width:52rem;width:100%";
+  const panel = document.createElement("pre");
+  panel.style.cssText = [
+    "margin:0",
+    "padding:1rem 1.25rem",
+    "color:#b91c1c",
+    "background:#fef2f2",
+    "border:1px solid #fecaca",
+    "border-radius:8px",
+    "font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace",
+    "white-space:pre-wrap",
+    "overflow-wrap:anywhere"
+  ].join(";");
+  const title = kind2 === "activate" ? "Rip: update failed to activate" : "Rip: update failed to compile";
+  const path = failurePath(error);
+  const header = path ? `${title}
+${path}
+
+` : `${title}
+
+`;
+  panel.textContent = header + failureText(error);
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.textContent = "Dismiss";
+  dismiss.style.cssText = [
+    "position:absolute",
+    "top:0.5rem",
+    "right:0.5rem",
+    "padding:0.4rem 0.75rem",
+    "font:12px/1.2 system-ui,sans-serif",
+    "color:#0f172a",
+    "background:#fff",
+    "border:1px solid #cbd5e1",
+    "border-radius:6px",
+    "cursor:pointer"
+  ].join(";");
+  dismiss.addEventListener("click", () => clearHmrOverlay());
+  shell.appendChild(panel);
+  shell.appendChild(dismiss);
+  card.appendChild(shell);
+  card.addEventListener("click", (event) => {
+    if (event.target === card)
+      clearHmrOverlay();
+  });
+  const onKey = (event) => {
+    if (event.key === "Escape")
+      clearHmrOverlay();
+  };
+  card._ripOnKey = onKey;
+  if (typeof document.addEventListener === "function") {
+    document.addEventListener("keydown", onKey);
+  }
+  root.appendChild(card);
+  overlayEl = card;
+  __hmrEmit("reject", {
+    kind: kind2 || "compile",
+    path: failurePath(error),
+    message: failureText(error).slice(0, 500)
+  });
+  return card;
+}
+function clearHmrOverlay() {
+  if (!overlayEl)
+    return;
+  const onKey = overlayEl._ripOnKey;
+  if (onKey && typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+    document.removeEventListener("keydown", onKey);
+  }
+  overlayEl.remove?.();
+  overlayEl = null;
+}
+
 // src/browser-boot.js
 var isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 var validHash3 = (value) => typeof value === "string" && /^[A-Za-z0-9_]{6}$/.test(value);
@@ -28728,7 +29325,7 @@ async function fetchBundle(url, { fetchText = browserFetchText } = {}) {
     throw new Error(`rip: bundle '${url}' is not valid JSON: ${error.message}`);
   }
 }
-var createProgram = (initialSources, debug) => {
+var createProgram = (initialSources, debug, { hmr = false } = {}) => {
   let files = new Map(Object.entries(initialSources));
   const staged = new Map;
   const registry = {
@@ -28737,7 +29334,7 @@ var createProgram = (initialSources, debug) => {
     getCompiled: (path) => staged.get(path),
     setCompiled: (path, module) => void staged.set(path, module)
   };
-  const loader = createModuleLoader({ components: registry, embeddedPackages, debug });
+  const loader = createModuleLoader({ components: registry, embeddedPackages, debug, hmr });
   return {
     sources(nextSources) {
       files = new Map(Object.entries(nextSources));
@@ -28772,7 +29369,8 @@ async function bootApp(opts = {}) {
   const bundle = opts.bundle ?? await fetchBundle(opts.url, { fetchText: opts.fetchText });
   const sources = publicationSources(bundle);
   const debug = opts.debug === true;
-  const program = createProgram(sources, debug);
+  const watch = opts.watch === true || opts.feed != null;
+  const program = createProgram(sources, debug, { hmr: watch });
   const workspace = exports_app.createWorkspace();
   const dataFor = (modules) => modules["data.rip"]?.data;
   const launchWith = (modules) => exports_app.launch({
@@ -28800,6 +29398,7 @@ async function bootApp(opts = {}) {
   const handle = {};
   const report = opts.feed?.report ?? ((...args) => console.error(...args));
   const reload = (reason) => {
+    clearHmrOverlay();
     report(`[Rip] reloading${reason ? ` — ${reason}` : ""}`);
     if (typeof opts.reload === "function")
       opts.reload(reason);
@@ -28888,6 +29487,7 @@ async function bootApp(opts = {}) {
     } catch (error) {
       program.sources(activeSources());
       report("[Rip] changed Rip program failed to compile:", error);
+      showHmrOverlay("compile", error);
       return "rejected";
     }
     const ordinaryReload = change.entries.some((entry) => !entry.path.endsWith(".rip") && (!entry.path.endsWith(".css") || entry.deletion));
@@ -28912,6 +29512,7 @@ async function bootApp(opts = {}) {
         if (entry.path.endsWith(".css"))
           refreshCss(entry.path, change.hash);
       }
+      clearHmrOverlay();
       if (verdict === "reload") {
         report("[Rip] committed App update requires a document reload");
         return "reload";
@@ -28922,10 +29523,10 @@ async function bootApp(opts = {}) {
         transaction.rollback();
       program.sources(activeSources());
       report("[Rip] changed Rip program failed to activate:", error);
+      showHmrOverlay("activate", error);
       return "rejected";
     }
   };
-  const watch = opts.watch === true || opts.feed != null;
   if (watch) {
     const latestUrl = opts.latestUrl ?? opts.feed?.latestUrl ?? (opts.url ? sibling(opts.url, "latest.json") : "/latest.json");
     feed = exports_app.connectFeed({ hash: () => workspace.hash(), apply: applyChange, reload }, {
@@ -28938,6 +29539,7 @@ async function bootApp(opts = {}) {
     if (destroyed)
       return;
     destroyed = true;
+    clearHmrOverlay();
     feed?.close();
     current.destroy();
     program.dispose();

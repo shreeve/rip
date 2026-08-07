@@ -1,6 +1,16 @@
 import { unwrapStash } from './stash.rip'
 import { _isSourceCell, _isSourceFamily } from './source.rip'
-import { __claimGateConstructor } from '../../src/runtime/components.js'
+import {
+  __claimGateConstructor
+  __hmrClassify
+  __hmrEmit
+  __hmrEntries
+  __hmrPatch
+  __hmrPreserveState
+  __hmrRegisterDefinition
+  __hmrRestoreUi
+  __hmrSnapshotUi
+} from '../../src/runtime/components.js'
 
 constructGateComponent = __claimGateConstructor()
 
@@ -508,18 +518,70 @@ export def createRenderer(opts: RendererOpts): Renderer
     job.cell.preload().catch(-> null) for job in jobs
     return
 
-  # Publication apply seam: remount living route/layout instances whose
-  # modules changed, keeping the stash and ancestor layouts. Stash and
-  # non-UI modules are the caller's escape (whole-launch remount).
+  # Resolve the replacement constructor for a living HMR id from a
+  # staged module. Returns null when the module does not export it.
+  hmrCtorFor = (module, hmrId) ->
+    return null unless module? and typeof module is 'object' and typeof hmrId is 'string'
+    isComponent = (value) -> typeof value is 'function' and value.__hmrId is hmrId
+    return module.default if isComponent module.default
+    for key, value of module
+      return value if isComponent value
+    null
+
+  # Signature-aware refresh: patch living instances when the compiler
+  # signatures allow. Migrate/remount tiers fall back to the narrow
+  # remount floor below (with UI focus/scroll restore around it).
+  tryHmrPatch = (paths, candidate) ->
+    dirty = (path for path in paths when typeof path is 'string' and path.endsWith('.rip'))
+    return 'empty' unless dirty.length > 0
+    patched = 0
+    seen = Set.new()
+    for path in dirty
+      module = candidate.getCompiled path
+      continue unless module?
+      prefix = path + '#'
+      for entry in mountedEntries when entry.file is path and entry.instance?
+        id = entry.instance.constructor?.__hmrId
+        continue unless typeof id is 'string' and id.startsWith(prefix)
+        NewCtor = hmrCtorFor module, id
+        continue unless NewCtor?
+        __hmrRegisterDefinition NewCtor
+        return 'fallback' unless __hmrClassify(entry.instance.constructor, NewCtor) is 'patch'
+        __hmrPatch entry.instance, NewCtor
+        entry.cls = NewCtor
+        seen.add entry.instance
+        patched += 1
+      for [id, reg] in __hmrEntries()
+        continue unless typeof id is 'string' and id.startsWith(prefix)
+        NewCtor = hmrCtorFor module, id
+        continue unless NewCtor?
+        __hmrRegisterDefinition NewCtor
+        for instance in [...reg.instances]
+          continue if seen.has instance
+          return 'fallback' unless __hmrClassify(instance.constructor, NewCtor) is 'patch'
+          __hmrPatch instance, NewCtor
+          seen.add instance
+          patched += 1
+    if patched > 0 then 'done' else 'empty'
+
+  # Publication apply seam: signature patch when possible, otherwise
+  # remount living route/layout instances from the first dirty module
+  # down, keeping ancestor layouts and the live stash. Stash-module
+  # edits escape to document reload (rare definition change).
   remountDirty = (paths, candidate = components) ->
     return 'noop' unless Array.isArray(paths) and paths.length > 0
-    # Escape before the live-route guard: after a failed whole-launch
-    # escape the renderer may be stopped (no lastRoute), but a stash
-    # edit must still request escape so the next good generation recovers.
     for path in paths
       return 'escape' if path is 'stash.rip' or path.startsWith('stash/') or path is 'data.rip'
     info = router.current
     return 'noop' unless info?.route?.file and lastRoute?
+    snap = __hmrSnapshotUi()
+    try
+      verdict = tryHmrPatch paths, candidate
+      if verdict is 'done'
+        __hmrRestoreUi snap
+        return 'narrow'
+    catch then
+      # A failed patch falls through to remount — never leave a half-patched tree.
     dirty = Set.new paths
     layoutFiles = info.layouts ?? info.route.layouts ?? []
     chain = [...layoutFiles, info.route.file]
@@ -529,16 +591,38 @@ export def createRenderer(opts: RendererOpts): Renderer
         firstDirty = index
         break
     # A dirty module not in the chain (a shared App child) still
-    # remounts the page — Vue script remount floor for that leaf.
+    # remounts the page — migrate/remount floor for that leaf.
     firstDirty = chain.length - 1 if firstDirty < 0
+    # Snapshot migrate-tier state before the remount floor replaces instances.
+    migrateKeep = []
+    for index in [firstDirty...chain.length]
+      entry = mountedEntries[index]
+      continue unless entry?.instance? and entry.file?
+      id = entry.instance.constructor?.__hmrId
+      continue unless typeof id is 'string'
+      NewCtor = hmrCtorFor candidate.getCompiled(entry.file), id
+      continue unless NewCtor?
+      continue unless __hmrClassify(entry.instance.constructor, NewCtor) is 'migrate'
+      migrateKeep.push { file: entry.file, instance: entry.instance, id }
     forceFrom = firstDirty
     lastCommitTeardownFailed = false
     expectedGeneration = generation + 1
     try
       mount! info, candidate
+      for keep in migrateKeep
+        next = mountedEntries.find (entry) -> entry.file is keep.file and entry.instance?
+        continue unless next?.instance?
+        continue unless next.instance.constructor?.__hmrId is keep.id
+        __hmrPreserveState keep.instance, next.instance
+      __hmrEmit 'remount',
+        paths: [...dirty]
+        from: firstDirty
+        migrate: migrateKeep.length
     catch error
       forceFrom = null
       throw error
+    finally
+      __hmrRestoreUi snap
     if generation isnt expectedGeneration or lastCommitTeardownFailed then 'reload' else 'narrow'
 
   mount = (info, componentRegistry = components) ->
