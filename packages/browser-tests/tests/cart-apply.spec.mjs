@@ -86,8 +86,8 @@ test.describe('cart publication apply', () => {
       `${src}\nthis is not valid rip {{{`);
 
     try {
-      // Give the door a moment to attempt apply; the page must stay put.
-      await page.waitForTimeout(1500);
+      await expect(page.locator('[data-rip-hmr-overlay]')).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('[data-rip-hmr-overlay]')).toContainText('failed to compile');
       expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
       await expect(page.locator('h1')).toHaveText('Products');
       await expect(page.locator('nav')).toContainText('Shop');

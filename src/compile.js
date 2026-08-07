@@ -131,7 +131,7 @@ const diagnosticError = (file, path, d) => {
 // fabricate, and inventing a closing quote would change what every
 // byte after it means; the editor rides out those keystrokes on the
 // last good face instead.
-export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, browserModule = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false } = {}) {
+export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, browserModule = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false, hmr = false } = {}) {
   // One stable identifying error for a non-string source — without
   // it, malformed input fails in whichever subsystem dereferences it
   // first, with an incidental TypeError.
@@ -182,7 +182,7 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
 
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl, hmr, modulePath: path });
   } catch (err) {
     // Emitter rejections carry the offending node's offset span
     // (Emitter#positionedError) and format like every other

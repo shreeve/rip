@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bootApp, fetchBundle } from '../../src/browser.js';
+import { hmrOverlayElement } from '../../src/browser-hmr-overlay.js';
 import { assembleRipBundle } from '../../packages/sites/bundle.rip';
 import { installRecordingDOM } from '../support/recording-dom.js';
 
@@ -307,7 +308,7 @@ describe('bootApp watch changes', () => {
   });
 
   test('a failed changed program quarantines its generation and keeps the prior publication', async () => {
-    const { result, hub, reloads } = await open();
+    const { result, hub, reloads, reports } = await open();
     try {
       await subscribe(hub.sockets[0]);
       hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['routes/index.rip', 'x = ((']] } }) });
@@ -315,6 +316,30 @@ describe('bootApp watch changes', () => {
       expect(result.workspace.hash()).toBe(H1);
       expect(result.workspace.read('routes/index.rip')).toBe(APP_MODULES['routes/index.rip']);
       expect(reloads).toEqual([]);
+      expect(reports.some(args => String(args[0]).includes('failed to compile'))).toBeTrue();
+      const overlay = hmrOverlayElement();
+      expect(overlay).toBeTruthy();
+      expect(overlay.getAttribute('data-rip-hmr-overlay')).toBe('compile');
+      expect(overlay.textContent).toContain('failed to compile');
+    } finally {
+      result.destroy();
+      expect(hmrOverlayElement()).toBeNull();
+    }
+  });
+
+  test('a newer generation after quarantine clears the compile overlay via reload', async () => {
+    const { result, hub, reloads } = await open();
+    try {
+      await subscribe(hub.sockets[0]);
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H2, list: [['routes/index.rip', 'x = ((']] } }) });
+      await settle();
+      expect(hmrOverlayElement()).toBeTruthy();
+      const next = route('Home', 'recovered');
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H3, list: [['routes/index.rip', next]] } }) });
+      await settle();
+      expect(reloads.length).toBeGreaterThan(0);
+      // Reload path clears the overlay before invoking opts.reload.
+      expect(hmrOverlayElement()).toBeNull();
     } finally {
       result.destroy();
     }

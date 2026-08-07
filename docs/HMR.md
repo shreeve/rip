@@ -39,9 +39,23 @@ The publication substrate (Layer A) is defined by
 [WORKSPACE.md](WORKSPACE.md): initial `bundle.json`, ordered
 `change {from,hash,list}` messages in watch mode, and reconnect recovery through
 `latest.json`. Rip Sites produces that protocol and Rip App consumes it.
-The baseline remounts the affected live route while preserving the App stash
-and compatible ancestor layouts. Definition patching and signature-aware
-state migration remain outside this baseline.
+
+Watch-mode delivery also ships:
+
+- a compile/activation failure overlay that leaves the last-known-good App
+  interactive underneath;
+- compiler-emitted `__hmrId` / `__hmrSig` on module-scope components (omitted
+  when `hmr` is off);
+- a living-instance registry and signature classify (`patch` | `migrate` |
+  `remount`);
+- patch of living instances when signatures allow; otherwise narrow remount
+  of the affected route/layout chain with focus/selection/scroll restore;
+- stash-module / `data.rip` definition edits request a document reload
+  (runtime stash *value* updates stay surgical and never reload).
+
+Migrate that cannot patch in place still uses the narrow remount floor while
+preserving intersecting named state where the remount path constructs a
+replacement. Graph-quality hardening continues under Phase 5.
 
 ## Two-layer architecture
 
@@ -306,6 +320,9 @@ Aligned with [WORKSPACE.md](WORKSPACE.md):
 - **Stash / schema-registry replacement: replace-and-revalidate.** The
   registry is replaced and revalidated; live stash values are preserved
   by key and orphaned keys are dropped loudly.
+- **Stash-module definition edits: document reload.** Editing `stash.rip`
+  / `data.rip` (rare) escapes to a full reload. Runtime assignments to
+  stash values never reload.
 - **Workspace unit noun: module.** Rip modules are path-keyed. Swappable
   component identity is **component definition**, not “definition cell.”
 - **Delivery: complete Rip program first paint.** `bundle.json.list` carries

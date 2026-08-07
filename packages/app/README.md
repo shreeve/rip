@@ -308,6 +308,18 @@ double fetch. Both delegate on `document` by default and accept an
 injectable host (`listen(type, fn)`), so they test under Node;
 `launch()` installs both and its teardown removes every listener.
 
+## Hot module replacement
+
+Watch-mode publication (Sites + `bootApp({ watch: true })`) applies ordered
+Workspace changes. Compatible component edits **patch** living instances when
+compiler signatures match; incompatible shape changes **remount** the narrowest
+dirty route/layout chain while preserving the stash and ancestor layouts.
+Focus, selection, and scroll are snapshotted around the refresh. A
+compile or activation failure keeps the last-known-good App interactive and
+shows a dismissible overlay; the next good generation (or reload) clears it.
+Editing `stash.rip` / `data.rip` (the stash *definition*) reloads the document —
+runtime stash *value* updates never reload. See [docs/HMR.md](../../docs/HMR.md).
+
 ## Test
 
 ```sh

@@ -19,6 +19,15 @@
 //                               optional-use probe)
 //   hasContext(key)           - is a provider in reach?
 //   __gateBind(c, path, key?) - computed last-good app-data binding
+//   __hmrRegistry             - id → { definition, instances }
+//   __hmrLookup(id)           - registry entry or undefined
+//   __hmrRegisterDefinition(c)- record/replace a component definition
+//   __hmrClassify(old, next)  - 'patch' | 'migrate' | 'remount'
+//   __hmrPreserveState(a, b)  - copy intersecting __hmrSig.state .value
+//   __hmrPatch(inst, NewCtor) - prototype swap + _hmrRerender
+//   __hmrMigrateRemount(...)  - new instance + preserve (app remounts)
+//   __hmrSnapshotUi()         - focus/selection/scroll snapshot
+//   __hmrRestoreUi(snap)      - restore a snapshot
 //   __clsx(...args)           - flatten strings/arrays/objects to a
 //                               class string
 //   __lis(arr)                - longest increasing subsequence indices
@@ -94,6 +103,141 @@ const __GATE_CONSTRUCTION_BRAND = {};
 let __pendingGateConstruction = null;
 const __gateMetadata = new WeakMap();
 let __gateConstructorClaimed = false;
+
+// Process-wide HMR registry: compiler-emitted __hmrId → living definition
+// and instances. Entries exist only when a constructor carries __hmrId.
+const __hmrRegistry = new Map();
+
+function __hmrSameNames(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function __hmrLookup(id) {
+  return __hmrRegistry.get(id);
+}
+
+function __hmrEntries() {
+  return [...__hmrRegistry.entries()];
+}
+
+function __hmrRegisterDefinition(ctor) {
+  const id = ctor?.__hmrId;
+  if (typeof id !== 'string' || !id) return undefined;
+  let entry = __hmrRegistry.get(id);
+  if (!entry) {
+    entry = { definition: ctor, instances: new Set() };
+    __hmrRegistry.set(id, entry);
+  } else {
+    entry.definition = ctor;
+  }
+  return entry;
+}
+
+function __hmrRegisterInstance(instance) {
+  const id = instance?.constructor?.__hmrId;
+  if (typeof id !== 'string' || !id) return;
+  const entry = __hmrRegisterDefinition(instance.constructor);
+  entry.instances.add(instance);
+}
+
+function __hmrUnregisterInstance(instance) {
+  const id = instance?.constructor?.__hmrId;
+  if (typeof id !== 'string' || !id) return;
+  const entry = __hmrRegistry.get(id);
+  if (!entry) return;
+  entry.instances.delete(instance);
+}
+
+// Signature tiers from compiler-emitted __hmrSig arrays (never from
+// scanning generated method tables).
+function __hmrClassify(oldCtor, newCtor) {
+  const a = oldCtor?.__hmrSig;
+  const b = newCtor?.__hmrSig;
+  if (!a || !b) return 'remount';
+  if (!__hmrSameNames(a.props, b.props) || a.gates !== b.gates || a.extends !== b.extends) {
+    return 'remount';
+  }
+  if (!__hmrSameNames(a.state, b.state) || !__hmrSameNames(a.computed, b.computed)) {
+    return 'migrate';
+  }
+  return 'patch';
+}
+
+function __hmrPreserveState(oldInstance, newInstance) {
+  const retained = oldInstance?.constructor?.__hmrSig?.state;
+  const nextNames = newInstance?.constructor?.__hmrSig?.state;
+  if (!Array.isArray(retained) || !Array.isArray(nextNames)) return;
+  const keep = new Set(retained);
+  for (const name of nextNames) {
+    if (!keep.has(name)) continue;
+    const prev = oldInstance[name];
+    const next = newInstance[name];
+    if (
+      prev != null && next != null &&
+      typeof prev === 'object' && typeof next === 'object' &&
+      'value' in prev && 'value' in next
+    ) {
+      next.value = prev.value;
+    }
+  }
+}
+
+function __hmrSnapshotUi() {
+  if (typeof document === 'undefined') return null;
+  const active = document.activeElement;
+  let selection = null;
+  if (active && typeof active.selectionStart === 'number') {
+    selection = { start: active.selectionStart, end: active.selectionEnd };
+  }
+  return {
+    active: active && active !== document.body && active !== document.documentElement ? active : null,
+    selection,
+    scrollX: typeof window !== 'undefined' ? window.scrollX : 0,
+    scrollY: typeof window !== 'undefined' ? window.scrollY : 0,
+  };
+}
+
+function __hmrRestoreUi(snap) {
+  if (!snap || typeof document === 'undefined') return;
+  if (typeof window !== 'undefined') window.scrollTo(snap.scrollX ?? 0, snap.scrollY ?? 0);
+  const el = snap.active;
+  if (!el || !document.contains(el) || typeof el.focus !== 'function') return;
+  try {
+    el.focus();
+    if (snap.selection && typeof el.setSelectionRange === 'function') {
+      el.setSelectionRange(snap.selection.start, snap.selection.end);
+    }
+  } catch { /* focus/selection can reject on non-focusable nodes */ }
+}
+
+function __hmrPatch(instance, NewCtor) {
+  if (!instance || !NewCtor) {
+    throw new Error('__hmrPatch requires a living instance and a replacement constructor');
+  }
+  const oldId = instance.constructor?.__hmrId;
+  if (typeof oldId === 'string' && oldId) {
+    __hmrRegistry.get(oldId)?.instances.delete(instance);
+  }
+  Object.setPrototypeOf(instance, NewCtor.prototype);
+  Object.defineProperty(instance, 'constructor', {
+    value: NewCtor, writable: true, configurable: true,
+  });
+  __hmrRegisterDefinition(NewCtor);
+  __hmrRegistry.get(NewCtor.__hmrId)?.instances.add(instance);
+  instance._hmrRerender();
+  return instance;
+}
+
+// Migrate keeps intersecting state on a fresh instance; the app layer
+// remounts that instance into the tree (replace the dirty subtree).
+function __hmrMigrateRemount(oldInstance, NewCtor, props = {}) {
+  const next = new NewCtor(props);
+  __hmrPreserveState(oldInstance, next);
+  return next;
+}
 
 // The private app renderer claims the construction capability exactly
 // once at module initialization. The compiler never delivers this name,
@@ -616,6 +760,7 @@ class __Component {
     }
     __popOwner(prevO);
     __popComponent(prevC);
+    if (this.constructor.__hmrId) __hmrRegisterInstance(this);
   }
   // The base no-op takes the props the constructor passes (the
   // subclass override's signature — the face annotates it, and an
@@ -842,6 +987,7 @@ class __Component {
   }
   _teardown({ state, hooks, removeDOM }) {
     if (this._state === 'failed' || this._state === 'unmounted') return;
+    if (this.constructor.__hmrId) __hmrUnregisterInstance(this);
     this._state = state;
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
     if (hooks) {
@@ -912,6 +1058,108 @@ class __Component {
     this._restHandlers = null;
     this._inheritedEl = null;
   }
+  // Patch refresh: dispose owned children and frame effects, keep
+  // instance identity and `_init` state, then rebuild DOM via
+  // `_create`/`_setup` without re-running `_init`.
+  _hmrRerender() {
+    const name = this.constructor.name || 'component';
+    if (this._state !== 'mounted') {
+      throw new Error(`${name}: _hmrRerender requires a mounted instance`);
+    }
+    const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    const target = this._target;
+    const nodes = this._nodes;
+    const first = nodes?.[0] ?? this._root;
+    const insertParent = first?.parentNode ?? null;
+    const insertBefore = nodes?.length
+      ? nodes[nodes.length - 1].nextSibling
+      : (this._root ? this._root.nextSibling : null);
+
+    try {
+      if (this.beforeUnmount) this.beforeUnmount();
+    } catch (e) { report('beforeUnmount', e); }
+
+    if (this._children) {
+      for (const child of this._children) {
+        try { child.unmount({ removeDOM: true }); }
+        catch (e) { report('child teardown', e); }
+      }
+      this._children = null;
+    }
+
+    try { this._frame?.dispose(); } catch (e) { report('owner disposal', e); }
+
+    if (this._restWriters) {
+      for (const writer of Object.values(this._restWriters)) {
+        try { writer(); } catch (e) { report('rest writer cleanup', e); }
+      }
+      this._restWriters = null;
+    }
+    if (this._restHandlers) {
+      if (this._inheritedEl) {
+        for (const [key, handler] of Object.entries(this._restHandlers)) {
+          try { this._inheritedEl.removeEventListener(key.slice(1).split('.')[0], handler); }
+          catch (e) { report('rest handler cleanup', e); }
+        }
+      }
+      this._restHandlers = null;
+    }
+    if (this._refCleanups) {
+      const cleanups = this._refCleanups;
+      this._refCleanups = null;
+      try {
+        __batch(() => {
+          for (const c of cleanups) {
+            try { c(); } catch (e) { report('ref cleanup', e); }
+          }
+        });
+      } catch (e) { report('ref cleanup batch flush', e); }
+    }
+
+    if (nodes) {
+      for (const n of nodes) {
+        try { __detach(n); } catch (e) { report('DOM detach', e); }
+      }
+    } else {
+      try { __detach(this._root); } catch (e) { report('DOM detach', e); }
+    }
+
+    this._root = null;
+    this._nodes = null;
+    this._refCleanups = null;
+    this._restWriters = null;
+    this._restHandlers = null;
+    this._inheritedEl = null;
+    this._frame = __ownerFrame({ nested: false });
+    this._state = 'new';
+
+    if (typeof this._create !== 'function') {
+      this._state = 'mounted';
+      return this;
+    }
+    if (!this._mountCreate()) return this;
+
+    try {
+      if (target) {
+        if (typeof target === 'string') {
+          this._target = document.querySelector(target);
+        }
+        if (this._root && this._target) this._target.appendChild(this._root);
+      } else if (insertParent) {
+        if (this._nodes) {
+          for (const n of this._nodes) insertParent.insertBefore(n, insertBefore);
+        } else if (this._root) {
+          insertParent.insertBefore(this._root, insertBefore);
+        }
+      }
+    } catch (error) {
+      this._failMount(error);
+      return this;
+    }
+
+    this._mountSetup();
+    return this;
+  }
   mount(target) {
     if (!this._mountCreate()) return this;
     try {
@@ -957,4 +1205,10 @@ class __Component {
 // so they ride the COMPONENTS delivered-name table — the reactive
 // table (and every reactive-only program's injected bytes) stays
 // untouched.
-export { __Component, __pushComponent, __popComponent, setContext, getContext, hasContext, __clsx, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef, __claimGateConstructor };
+export {
+  __Component, __pushComponent, __popComponent, setContext, getContext, hasContext,
+  __clsx, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach,
+  __ownerFrame, __pushOwner, __popOwner, __detachRef, __claimGateConstructor,
+  __hmrRegistry, __hmrLookup, __hmrEntries, __hmrRegisterDefinition, __hmrClassify, __hmrPreserveState,
+  __hmrPatch, __hmrMigrateRemount, __hmrSnapshotUi, __hmrRestoreUi,
+};
