@@ -5,8 +5,8 @@ Read this first when starting a session. Permanent architecture lives in
 
 ## Orientation
 
-- Repo: `~/Data/Code/rip` — live v4 checkout; branch `main` tracking
-  `origin/main` (tip includes HMR #218 + patch correctness #219).
+- Repo: `~/Data/Code/rip` — live v4 checkout; branch `rip-hmr-test`
+  (uncommitted work below) atop `main` with HMR #218 + #219.
 - Fast commands: `bun run test:rip` · package-local `bun run test` ·
   `packages/browser-tests`: `bun run test:smoke`.
 - Explicit certification: `bun run test:all` · `bun run audit` ·
@@ -15,35 +15,33 @@ Read this first when starting a session. Permanent architecture lives in
 - Sites: `docs/SERVER.md` · `packages/sites/README.md`.
 - Open notes: `TODO.md` · `packages/sites/TODO.md`.
 
-## Just landed (HMR)
+## Cart confirmation bars — green on this branch
 
-True-merged and source branches deleted:
+`packages/browser-tests` `test:cart` — all 8 `cart-apply` specs pass,
+including:
 
-- **#218** — signature-aware HMR (overlay, classify, patch / migrate /
-  remount floor, `rip:hmr` events, Cart profile pin).
-- **#219** — patch correctness: `_hmrBindEffects` +
-  `_hmrRefreshComputeds` so body `~>` and `~=` refresh without
-  re-running `_init`. Production/`hmr:false` bytes unchanged.
+- **Gate A** — order confirmation survives a compatible `cart.rip`
+  markup edit (`rip:hmr` `patch`, not remount).
+- **Gate B** — confirmation + compile-fail overlay + recover with
+  stamped heading in place (no reload, no re-order).
 
-Patch is a **correct state-preserving view remount** (instance + `:=` /
-prop containers + plain `_init` members survive; DOM rebuilt via
-`_create`/`_setup`). Not surgical DOM morph — and that is enough for
-correctness; React Fast Refresh is the competitive bar, not morphdom.
+Root causes that had to land for those pins:
 
-## Cart HMR confirmation bar (pins in progress)
+1. **Staging `_target`** — after layout reuse, `mount` recorded a
+   DocumentFragment; patch reinserted into the empty husk. Prefer a
+   connected live parent (`#content`).
+2. **`router.rebuild` after Workspace commit** — content-only route
+   edits must soft-skip when the living match identity is unchanged;
+   otherwise the renderer remounts and drops `placeOrder.succeeded`.
+3. **Manager assemble gate** — watch refresh publishes raw sources when
+   assemble/compile fails so the browser can quarantine (overlay).
+4. **Quarantine recovery** — feed enqueues the next live generation;
+   browser rebases when `change.from` is a rejected hash; walking back
+   to the same LKG hash still clears the overlay.
 
-Do **not** treat the profile typed-input pin as sufficient.
-
-**Local action-state:** add item → place order → render-only h1 edit on
-`cart.rip` → stay on confirmation; require `rip:hmr` `patch`. Smoking
-gun if empty cart: remount fallthrough after `cart.clear()` — patch
-keeps plain `placeOrder`; re-`_init` does not. Migrate cannot save this
-(`succeeded` is not a `:=` sig slot).
-
-**LKG-on-confirmation:** same state + compile-fail LKG while still
-confirmed + recover with stamped heading, no reload / re-order.
-
-Strategy canvas (IDE): `hmr-beat-react-vue`.
+Honest competitive claim (only with Gate B green): React-tier local
+refresh **plus** App-level failed-publication quarantine — not “faster
+DOM than React.”
 
 ## Working agreements
 

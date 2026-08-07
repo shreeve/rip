@@ -133,8 +133,11 @@ reloads the page instead of guessing at missing state.
 A failed Rip compilation or activation records the candidate hash as rejected
 without committing it. The active App continues running, duplicate delivery of
 that rejected hash is ignored, and reconnect confirmation of the same hash
-waits without fetching the same bad bundle. The first newer hash reloads and
-obtains a complete publication.
+waits without fetching the same bad bundle. A newer live generation after
+quarantine applies in place: when `change.from` is the rejected hash, the
+browser rebases the delta onto the living last-known-good App. Reconnect that
+observes a still-newer `latest.json` (a missed recovery while disconnected)
+reloads and obtains a complete publication.
 
 A validated transition that requires whole-App reconstruction is different
 from a failed candidate. A stash change or deletion of the mounted route or

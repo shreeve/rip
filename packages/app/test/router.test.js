@@ -588,13 +588,15 @@ describe('rebuild and destroy', () => {
     expect(router.current.route.file).toBe('routes/late.rip');
   });
 
-  test('rebuild with a static manifest re-resolves in place', () => {
+  test('rebuild with a static manifest keeps the living match (no re-navigate)', () => {
     const { router } = makeRouter({ initial: '/about' });
     const seen = [];
     router.onNavigate(info => seen.push(info.path));
     router.init();
+    const before = router.current.route;
     router.rebuild();
-    expect(seen).toEqual(['/about', '/about']);
+    expect(seen).toEqual(['/about']);
+    expect(router.current.route).toBe(before);
   });
 
   test('traversal to a URL the manifest no longer claims keeps prior state', () => {

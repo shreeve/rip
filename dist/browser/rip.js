@@ -24721,19 +24721,25 @@ class __Component {
     if (!this._mountCreate())
       return this;
     try {
-      if (target) {
-        if (typeof target === "string") {
-          this._target = document.querySelector(target);
-        }
-        if (this._root && this._target)
-          this._target.appendChild(this._root);
-      } else if (insertParent) {
+      let parent = insertParent && insertParent.nodeType !== 11 ? insertParent : null;
+      if (parent && parent.isConnected === false)
+        parent = null;
+      if (!parent && typeof target === "string" && typeof document !== "undefined") {
+        parent = document.querySelector(target);
+      } else if (!parent && target && target.nodeType !== 11 && target.isConnected !== false) {
+        parent = target;
+      } else if (!parent && typeof document !== "undefined") {
+        parent = document.querySelector("#content") || document.querySelector("#app");
+      }
+      if (parent) {
+        const before = insertBefore && (typeof parent.contains !== "function" || parent.contains(insertBefore)) ? insertBefore : null;
         if (this._nodes) {
           for (const n of this._nodes)
-            insertParent.insertBefore(n, insertBefore);
+            parent.insertBefore(n, before);
         } else if (this._root) {
-          insertParent.insertBefore(this._root, insertBefore);
+          parent.insertBefore(this._root, before);
         }
+        this._target = parent.nodeType === 11 ? null : parent;
       }
     } catch (error) {
       this._failMount(error);
@@ -26580,9 +26586,36 @@ function createRouter(opts) {
       };
     },
     rebuild() {
+      let at, hash, inner, path, query;
       activeManifest = typeof routes === "function" ? validManifest(routes()) : activeManifest;
-      if (unlisten)
-        handleExternal();
+      if (!unlisten)
+        return;
+      let external = adapter.read();
+      if (hashMode) {
+        at = external.indexOf("#");
+        inner = at >= 0 ? external.slice(at + 1) : "/";
+        if (inner === "")
+          inner = "/";
+        ({ path, query, hash } = splitUrl(inner));
+      } else {
+        ({ path, query, hash } = splitUrl(external));
+        path = stripBase(path);
+        if (!(path != null))
+          return miss(splitUrl(external).path);
+      }
+      let hit = attempt(path);
+      if (!hit)
+        return miss(path);
+      let prev = _route.value;
+      let prevLayouts = prev?.layouts ?? [];
+      let nextLayouts = hit.route.layouts ?? [];
+      let sameLayouts = prevLayouts.length === nextLayouts.length && prevLayouts.every(function(file, index) {
+        return file === nextLayouts[index];
+      });
+      if (prev?.file === hit.route.file && sameLayouts && _path.value === path) {
+        return;
+      }
+      commit(hit, path, query, hash);
       return;
     },
     destroy() {
@@ -27194,6 +27227,10 @@ function createRenderer(opts) {
       }
       keepPrefix = firstNew > 0;
       commitStaging(staging, keepPrefix ? pageMountPoint ?? target : target);
+      for (let instance2 of built) {
+        if (instance2._target?.nodeType === 11)
+          instance2._target = null;
+      }
     } catch (error) {
       cleanup(built);
       throw error;
@@ -27350,7 +27387,10 @@ function createRenderer(opts) {
         __hmrRestoreUi(snap);
         return "narrow";
       }
-    } catch {}
+    } catch (error) {
+      console.error("[Rip] HMR patch failed; falling back to remount:", error);
+      __hmrEmit("reject", { reason: "patch-failed", paths: [...paths], message: error?.message ? String(error.message) : String(error) });
+    }
     let dirty = new Set(paths);
     let layoutFiles = info.layouts ?? info.route.layouts ?? [];
     let chain = [...layoutFiles, info.route.file];
@@ -28482,7 +28522,11 @@ function connectFeed(client, opts = {}) {
           if (object.change?.hash === rejectedHash) {
             continue;
           }
-          reload(`a newer App generation followed rejected ${rejectedHash}`);
+          if (ready) {
+            enqueue(object.change, owner);
+          } else {
+            buffer.push(object.change);
+          }
         } else if (ready) {
           enqueue(object.change, owner);
         } else {
@@ -29509,6 +29553,7 @@ async function bootApp(opts = {}) {
         report(...args);
     }
   });
+  const rejected = new Set;
   const applyChange = async (wire) => {
     let change;
     try {
@@ -29517,10 +29562,20 @@ async function bootApp(opts = {}) {
       report("[Rip] malformed publication change:", error);
       return "reload";
     }
-    if (workspace.hash() === change.hash)
+    if (workspace.hash() === change.hash) {
+      rejected.clear();
+      clearHmrOverlay();
       return true;
-    if (workspace.hash() !== change.from)
-      return "reload";
+    }
+    if (rejected.has(change.hash))
+      return true;
+    let stageFrom = change.from;
+    if (workspace.hash() !== change.from) {
+      if (rejected.has(change.from))
+        stageFrom = workspace.hash();
+      else
+        return "reload";
+    }
     const activeSources = () => Object.fromEntries(workspace.listAll().map((path) => [path, workspace.read(path)]));
     const nextSources = activeSources();
     const changedRip = [];
@@ -29543,6 +29598,7 @@ async function bootApp(opts = {}) {
       validatePrepared({ compiled: nextCompiled, data: dataFor(nextCompiled) });
     } catch (error) {
       program.sources(activeSources());
+      rejected.add(change.hash);
       report("[Rip] changed Rip program failed to compile:", error);
       showHmrOverlay("compile", error);
       return "rejected";
@@ -29561,10 +29617,11 @@ async function bootApp(opts = {}) {
     let transaction = null;
     let committed = false;
     try {
-      transaction = workspace.stage(change.from, { hash: change.hash, sources: nextSources, compiled: nextCompiled }, changedRip);
+      transaction = workspace.stage(stageFrom, { hash: change.hash, sources: nextSources, compiled: nextCompiled }, changedRip);
       const verdict = applyPaths.length ? await apply.absorb(applyPaths, transaction.components) : "ignore";
       transaction.commit();
       committed = true;
+      rejected.clear();
       for (const entry of change.entries) {
         if (entry.path.endsWith(".css"))
           refreshCss(entry.path, change.hash);
@@ -29579,6 +29636,7 @@ async function bootApp(opts = {}) {
       if (transaction && !committed)
         transaction.rollback();
       program.sources(activeSources());
+      rejected.add(change.hash);
       report("[Rip] changed Rip program failed to activate:", error);
       showHmrOverlay("activate", error);
       return "rejected";

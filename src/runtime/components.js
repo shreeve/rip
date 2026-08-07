@@ -1220,17 +1220,31 @@ class __Component {
     if (!this._mountCreate()) return this;
 
     try {
-      if (target) {
-        if (typeof target === 'string') {
-          this._target = document.querySelector(target);
-        }
-        if (this._root && this._target) this._target.appendChild(this._root);
-      } else if (insertParent) {
+      // Resolve a CONNECTED parent. `mount()` often records a staging
+      // DocumentFragment as `_target`; after the renderer commits that
+      // fragment into #content, the fragment is empty and must not be
+      // reused — patching into it leaves the UI invisible and the old
+      // page slot looking like a remounted empty state.
+      let parent = insertParent && insertParent.nodeType !== 11 ? insertParent : null;
+      if (parent && parent.isConnected === false) parent = null;
+      if (!parent && typeof target === 'string' && typeof document !== 'undefined') {
+        parent = document.querySelector(target);
+      } else if (!parent && target && target.nodeType !== 11 && target.isConnected !== false) {
+        parent = target;
+      } else if (!parent && typeof document !== 'undefined') {
+        parent = document.querySelector('#content') || document.querySelector('#app');
+      }
+      if (parent) {
+        const before = insertBefore &&
+          (typeof parent.contains !== 'function' || parent.contains(insertBefore))
+          ? insertBefore
+          : null;
         if (this._nodes) {
-          for (const n of this._nodes) insertParent.insertBefore(n, insertBefore);
+          for (const n of this._nodes) parent.insertBefore(n, before);
         } else if (this._root) {
-          insertParent.insertBefore(this._root, insertBefore);
+          parent.insertBefore(this._root, before);
         }
+        this._target = parent.nodeType === 11 ? null : parent;
       }
     } catch (error) {
       this._failMount(error);

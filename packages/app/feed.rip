@@ -200,9 +200,12 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
       # source into every other subscriber on the shared Hub.
       else if object.change isnt undefined and not Object.hasOwn(object, '<')
         if rejectedHash?
+          # Duplicate rejected delivery is ignored. A newer live generation
+          # tries in-place recovery (browser rebases from LKG when
+          # change.from is the quarantined hash); reload only if apply says so.
           if object.change?.hash is rejectedHash
             continue
-          reload "a newer App generation followed rejected #{rejectedHash}"
+          if ready then enqueue object.change, owner else buffer.push object.change
         else if ready then enqueue object.change, owner else buffer.push object.change
       else if object.reload isnt undefined and not Object.hasOwn(object, '<')
         if rejectedHash? then beginProbe(owner, true) else reload 'server generation changed'

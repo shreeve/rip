@@ -711,6 +711,34 @@ appDocuments = (project, graph) ->
     latest: JSON.stringify({ hash })
   }
 
+# Watch-mode fallback when assemble/compile fails: publish the raw App
+# module snapshot (plus any prior package modules) so the browser can
+# quarantine and show the compile overlay. Coherent bytes, not validity.
+# Hash covers graph.entries (Rip + CSS + assets), matching appDocuments.
+publicationFromRawGraph = (graph, prior = null) ->
+  sources = Map.new()
+  if prior?.list?
+    for [id, source] in prior.list
+      sources.set id, source if typeof source is 'string'
+  for own id, source of graph.modules
+    sources.set id, source if typeof source is 'string'
+  list = [...sources.entries()].sort (a, b) -> if a[0] < b[0] then -1 else if a[0] > b[0] then 1 else 0
+  identities = Map.new (graph.entries or []).map (entry) -> [entry.id, entry]
+  encoder = TextEncoder.new()
+  for [id, source] in list
+    identities.set(id, { id, hash: rash(encoder.encode(source)) }) unless identities.has id
+  complete = [...identities.values()].sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
+  hash = check complete
+  {
+    graph
+    hash
+    list
+    inputs: prior?.inputs ?? []
+    watchRoots: prior?.watchRoots ?? []
+    bundle: JSON.stringify({ hash, list })
+    latest: JSON.stringify({ hash })
+  }
+
 buildAppDocuments = (project) ->
   graph = appModules project.appRoot, project.appChanges
   appDocuments! project, graph
@@ -1280,17 +1308,30 @@ export main = (argv) ->
     { documents, rebuilt }
 
   refreshApp = (batch = { full: true, ids: [] }) ->
+    assembleError = null
     if batch.full
-      documents = buildAppDocuments! project
+      try
+        documents = buildAppDocuments! project
+      catch error
+        assembleError = error
+        graph = appModules project.appRoot, project.appChanges
+        documents = publicationFromRawGraph graph, appPublication
       ids = changedAppIds appPublication, documents
     else
       update = updateAppModules project.appRoot, project.appChanges, appGraph, batch.ids
       return unless update.changed.length
-      documents = appDocuments! project, update.graph
+      try
+        documents = appDocuments! project, update.graph
+      catch error
+        assembleError = error
+        documents = publicationFromRawGraph update.graph, appPublication
       ids = update.changed
-    stabilized = stabilizeAppDocuments! documents
-    documents = stabilized.documents
-    ids = changedAppIds(appPublication, documents) if stabilized.rebuilt
+    unless assembleError?
+      stabilized = stabilizeAppDocuments! documents
+      documents = stabilized.documents
+      ids = changedAppIds(appPublication, documents) if stabilized.rebuilt
+    else
+      warn "rip-site: publishing App sources after assemble failure (browser will quarantine): #{String(assembleError)}"
     return if documents.hash is appPublication.hash
     priorShell = appPublication.graph.entries.some (entry) -> entry.id is 'index.html'
     nextShell = documents.graph.entries.some (entry) -> entry.id is 'index.html'

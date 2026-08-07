@@ -385,7 +385,9 @@ export def createRenderer(opts: RendererOpts): Renderer
     # Staying navigation: same page, same params, same layout chain,
     # only the query moved — the mounted instance keeps its identity and
     # receives load(params, query), unless a query-keyed gate now
-    # addresses a different cell.
+    # addresses a different cell. Identical remount() calls still rebuild
+    # (explicit refresh); publication rebuild must not churn route
+    # identity — that soft path lives in router.rebuild.
     mountedFiles = mountedEntries.map (entry) -> entry.file
     forcedFrom = forceFrom
     forceFrom = null
@@ -465,6 +467,10 @@ export def createRenderer(opts: RendererOpts): Renderer
       # layout reuse: commit into the living layout's page slot.
       keepPrefix = firstNew > 0
       commitStaging staging, (if keepPrefix then pageMountPoint ?? target else target)
+      # Staging fragments are empty after commit — drop them as `_target`
+      # so HMR patch reinserts into the live parent, not the husk.
+      for instance in built
+        instance._target = null if instance._target?.nodeType is 11
     catch error
       cleanup built
       throw error
@@ -580,8 +586,13 @@ export def createRenderer(opts: RendererOpts): Renderer
       if verdict is 'done'
         __hmrRestoreUi snap
         return 'narrow'
-    catch then
+    catch error
       # A failed patch falls through to remount — never leave a half-patched tree.
+      console.error '[Rip] HMR patch failed; falling back to remount:', error
+      __hmrEmit 'reject',
+        reason: 'patch-failed'
+        paths: [...paths]
+        message: error?.message ? String(error.message) : String(error)
     dirty = Set.new paths
     layoutFiles = info.layouts ?? info.route.layouts ?? []
     chain = [...layoutFiles, info.route.file]

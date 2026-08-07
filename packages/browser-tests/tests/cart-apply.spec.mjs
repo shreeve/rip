@@ -24,7 +24,18 @@ async function editFile(relPath, transform) {
   const abs = join(root, relPath);
   const before = readFileSync(abs, 'utf8');
   writeFileSync(abs, transform(before));
-  return { abs, before, restore: () => writeFileSync(abs, before) };
+  return {
+    abs,
+    before,
+    restore: () => writeFileSync(abs, before),
+    /** Wait until a live page reflects restored source (Manager settle). */
+    async restoreAndSettle(page, expectH1) {
+      writeFileSync(abs, before);
+      if (expectH1 != null) {
+        await expect(page.locator('h1')).toHaveText(expectH1, { timeout: 20000 });
+      }
+    },
+  };
 }
 
 async function listenHmr(page) {
@@ -42,11 +53,14 @@ async function reachOrderPlaced(page) {
   await expect(add).toBeVisible({ timeout: 15000 });
   await add.click();
   await expect(page.locator('nav')).toContainText('Cart (1)', { timeout: 10000 });
-  await page.goto('/cart');
+  // Client nav — full goto('/cart') reloads and drops in-memory stash.
+  await page.locator('nav').getByRole('link', { name: /Cart/ }).click();
+  await expect(page.locator('h1')).toHaveText('Cart', { timeout: 15000 });
   await expect(page.getByRole('button', { name: 'Place Order' })).toBeVisible({ timeout: 15000 });
   await page.getByRole('button', { name: 'Place Order' }).click();
   await expect(page.locator('h1')).toHaveText('Order Placed!', { timeout: 20000 });
-  await expect(page.getByRole('link', { name: 'Continue Shopping' })).toBeVisible();
+  // ButtonLink exposes role=button on an <a>.
+  await expect(page.getByRole('button', { name: 'Continue Shopping' })).toBeVisible();
   await expect(page.locator('body')).not.toContainText('Your cart is empty');
 }
 
@@ -78,7 +92,7 @@ test.describe('cart publication apply', () => {
       expect(typeof last.change.from).toBe('string');
       expect(typeof last.change.hash).toBe('string');
     } finally {
-      edit.restore();
+      await edit.restoreAndSettle(page, 'Products');
     }
   });
 
@@ -97,7 +111,7 @@ test.describe('cart publication apply', () => {
       await expect(page.locator('h1')).toHaveText(stamp, { timeout: 15000 });
       await expect(page.locator('nav')).toContainText('Cart (1)');
     } finally {
-      edit.restore();
+      await edit.restoreAndSettle(page, 'Products');
     }
   });
 
@@ -171,13 +185,13 @@ test.describe('cart publication apply', () => {
       src.replace("h1 'Order Placed!'", `h1 '${heading}'`));
 
     try {
+      await expect.poll(async () =>
+        page.evaluate(() => globalThis.__ripHmr?.some?.((e) => e?.type === 'patch')),
+      { timeout: 15000 }).toBe(true);
       await expect(page.locator('h1')).toHaveText(heading, { timeout: 15000 });
-      await expect(page.getByRole('link', { name: 'Continue Shopping' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Continue Shopping' })).toBeVisible();
       await expect(page.locator('body')).not.toContainText('Your cart is empty');
       expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
-      await expect.poll(async () =>
-        page.evaluate(() => globalThis.__ripHmr.some((e) => e?.type === 'patch')),
-      { timeout: 10000 }).toBe(true);
       // Remount after cart.clear() would fake a "successful" edit on empty cart — forbid it.
       expect(await page.evaluate(() =>
         globalThis.__ripHmr.some((e) => e?.type === 'remount'))).toBe(false);
@@ -204,7 +218,7 @@ test.describe('cart publication apply', () => {
       await expect(page.locator('[data-rip-hmr-overlay]')).toContainText('failed to compile');
       // LKG: still on confirmation, interactive — not empty cart, not a frozen shell.
       await expect(page.locator('h1')).toHaveText('Order Placed!');
-      await expect(page.getByRole('link', { name: 'Continue Shopping' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Continue Shopping' })).toBeVisible();
       await expect(page.locator('body')).not.toContainText('Your cart is empty');
       expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
       await expect.poll(async () =>
@@ -215,7 +229,7 @@ test.describe('cart publication apply', () => {
       writeFileSync(abs, stamped);
       await expect(page.locator('[data-rip-hmr-overlay]')).toHaveCount(0, { timeout: 20000 });
       await expect(page.locator('h1')).toHaveText(heading, { timeout: 20000 });
-      await expect(page.getByRole('link', { name: 'Continue Shopping' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Continue Shopping' })).toBeVisible();
       await expect(page.locator('body')).not.toContainText('Your cart is empty');
       expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
       await expect.poll(async () =>

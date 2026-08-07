@@ -39,21 +39,13 @@ Package-local leftovers live beside the package (for example
 
 ---
 
-## HMR — Cart confirmation bar
+## HMR
 
-Signature-aware patch + effect/computed rebind landed (#218, #219). Cart
-certification ladder (see [docs/HMR.md](docs/HMR.md)):
+Constitution and end-state: [docs/HMR.md](docs/HMR.md). Cart Gate A/B
+are green on `packages/browser-tests` `test:cart`. Open compression
+targets live in that doc (quarantine state machine, router/content
+decoupling) — not a morph project.
 
-- [ ] **Local action-state bar:** add item → place order → render-only
-      edit of `app/routes/cart.rip` h1 → confirmation stays with new
-      heading; assert `rip:hmr` `patch` (not remount). Empty cart after
-      edit almost always means `tryHmrPatch` fell through to remount
-      after `onSuccess` cleared the cart (`placeOrder` is a plain `=`
-      member — survives patch, dies on re-`_init`).
-- [ ] **LKG-on-confirmation bar** (publication win vs React/Vue): same
-      confirmation → break compile on `cart.rip` → LKG stays on
-      confirmation and interactive → restore/fix with stamped heading
-      → still confirmation, no document reload, no re-order.
 - [ ] Do **not** lead with migrate-on-confirmation: `__hmrPreserveState`
       only copies `:=` sig slots, so migrate remounts a fresh
       `createMutation` and drops `succeeded`. Profile form survival
