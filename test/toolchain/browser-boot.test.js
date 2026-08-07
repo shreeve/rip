@@ -327,7 +327,7 @@ describe('bootApp watch changes', () => {
     }
   });
 
-  test('a newer generation after quarantine clears the compile overlay via reload', async () => {
+  test('a newer generation after quarantine recovers in place without reload', async () => {
     const { result, hub, reloads } = await open();
     try {
       await subscribe(hub.sockets[0]);
@@ -337,8 +337,9 @@ describe('bootApp watch changes', () => {
       const next = route('Home', 'recovered');
       hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H1, hash: H3, list: [['routes/index.rip', next]] } }) });
       await settle();
-      expect(reloads.length).toBeGreaterThan(0);
-      // Reload path clears the overlay before invoking opts.reload.
+      expect(reloads).toEqual([]);
+      expect(result.workspace.hash()).toBe(H3);
+      expect(result.workspace.read('routes/index.rip')).toBe(next);
       expect(hmrOverlayElement()).toBeNull();
     } finally {
       result.destroy();
@@ -436,7 +437,7 @@ describe('bootApp watch changes', () => {
     }
   });
 
-  test('a generation after a quarantined candidate reloads into the newer complete bundle', async () => {
+  test('a generation after a quarantined candidate rebases onto LKG and applies in place', async () => {
     const { result, hub, reloads } = await open();
     try {
       await subscribe(hub.sockets[0]);
@@ -444,10 +445,13 @@ describe('bootApp watch changes', () => {
       await settle();
       expect(result.workspace.hash()).toBe(H1);
       expect(reloads).toEqual([]);
-      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H2, hash: H3, list: [['routes/index.rip', route('Home', 'recovered')]] } }) });
+      const next = route('Home', 'recovered');
+      hub.sockets[0].onmessage({ data: JSON.stringify({ change: { from: H2, hash: H3, list: [['routes/index.rip', next]] } }) });
       await settle();
-      expect(result.workspace.hash()).toBe(H1);
-      expect(reloads.length).toBe(1);
+      expect(reloads).toEqual([]);
+      expect(result.workspace.hash()).toBe(H3);
+      expect(result.workspace.read('routes/index.rip')).toBe(next);
+      expect(hmrOverlayElement()).toBeNull();
     } finally {
       result.destroy();
     }

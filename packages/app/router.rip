@@ -266,9 +266,33 @@ export def createRouter(opts: RouterOpts): Router
       callbacks.add fn
       -> callbacks.delete fn
 
+    # Refresh the manifest thunk. Re-resolve only when the living match
+    # identity changes (file, layout chain, or URL). Content-only edits of
+    # the current route are applied by HMR before Workspace commit notifies;
+    # churning `_route` here would remount and destroy patched instance state.
     rebuild: ->
       activeManifest = if typeof routes is 'function' then validManifest routes() else activeManifest
-      handleExternal() if unlisten
+      return unless unlisten
+      external = adapter.read()
+      if hashMode
+        at = external.indexOf '#'
+        inner = if at >= 0 then external.slice(at + 1) else '/'
+        inner = '/' if inner is ''
+        { path, query, hash } = splitUrl inner
+      else
+        { path, query, hash } = splitUrl external
+        path = stripBase path
+        return miss splitUrl(external).path unless path?
+      hit = attempt path
+      return miss path unless hit
+      prev = _route.value
+      prevLayouts = prev?.layouts ?? []
+      nextLayouts = hit.route.layouts ?? []
+      sameLayouts = prevLayouts.length is nextLayouts.length and
+        prevLayouts.every (file, index) -> file is nextLayouts[index]
+      if prev?.file is hit.route.file and sameLayouts and _path.value is path
+        return
+      commit hit, path, query, hash
       return
 
     destroy: ->

@@ -39,6 +39,18 @@ Package-local leftovers live beside the package (for example
 
 ---
 
+## HMR
+
+Constitution and end-state: [docs/HMR.md](docs/HMR.md). Cart Gate A/B
+are green on `packages/browser-tests` `test:cart`. Open compression
+targets live in that doc (quarantine state machine, router/content
+decoupling) — not a morph project.
+
+- [ ] Do **not** lead with migrate-on-confirmation: `__hmrPreserveState`
+      only copies `:=` sig slots, so migrate remounts a fresh
+      `createMutation` and drops `succeeded`. Profile form survival
+      remains a weaker pin.
+
 ## Test-lane audits (remaining)
 
 Edit / milestone / landing gates and PR vs certification CI already

@@ -212,6 +212,10 @@ export async function bootApp(opts = {}) {
     },
   });
 
+  // Candidate App hashes that failed compile/activation. Manager may still
+  // advance its chain through them; recovery rebases onto the living LKG.
+  const rejected = new Set();
+
   const applyChange = async wire => {
     let change;
     try {
@@ -220,8 +224,21 @@ export async function bootApp(opts = {}) {
       report('[Rip] malformed publication change:', error);
       return 'reload';
     }
-    if (workspace.hash() === change.hash) return true;
-    if (workspace.hash() !== change.from) return 'reload';
+    // Same final hash as the living App: ignore as a duplicate, but still
+    // clear quarantine/overlay when Manager walks back to LKG after a
+    // rejected candidate (restore of identical good source).
+    if (workspace.hash() === change.hash) {
+      rejected.clear();
+      clearHmrOverlay();
+      return true;
+    }
+    if (rejected.has(change.hash)) return true;
+
+    let stageFrom = change.from;
+    if (workspace.hash() !== change.from) {
+      if (rejected.has(change.from)) stageFrom = workspace.hash();
+      else return 'reload';
+    }
 
     const activeSources = () => Object.fromEntries(workspace.listAll().map(path => [path, workspace.read(path)]));
     const nextSources = activeSources();
@@ -243,6 +260,7 @@ export async function bootApp(opts = {}) {
       validatePrepared({ compiled: nextCompiled, data: dataFor(nextCompiled) });
     } catch (error) {
       program.sources(activeSources());
+      rejected.add(change.hash);
       report('[Rip] changed Rip program failed to compile:', error);
       showHmrOverlay('compile', error);
       return 'rejected';
@@ -268,10 +286,11 @@ export async function bootApp(opts = {}) {
     let transaction = null;
     let committed = false;
     try {
-      transaction = workspace.stage(change.from, { hash: change.hash, sources: nextSources, compiled: nextCompiled }, changedRip);
+      transaction = workspace.stage(stageFrom, { hash: change.hash, sources: nextSources, compiled: nextCompiled }, changedRip);
       const verdict = applyPaths.length ? await apply.absorb(applyPaths, transaction.components) : 'ignore';
       transaction.commit();
       committed = true;
+      rejected.clear();
       for (const entry of change.entries) {
         if (entry.path.endsWith('.css')) refreshCss(entry.path, change.hash);
       }
@@ -284,6 +303,7 @@ export async function bootApp(opts = {}) {
     } catch (error) {
       if (transaction && !committed) transaction.rollback();
       program.sources(activeSources());
+      rejected.add(change.hash);
       report('[Rip] changed Rip program failed to activate:', error);
       showHmrOverlay('activate', error);
       return 'rejected';

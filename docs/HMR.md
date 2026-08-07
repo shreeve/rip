@@ -1,341 +1,286 @@
 # Hot Module Replacement
 
-This document defines Rip's HMR architecture and behavioral contract.
-It is a design specification; implementation proceeds only through the
-dependency-ordered phases and acceptance tests below.
+Rip HMR is the contract for updating a running App without discarding
+developer context that is still valid. This document is the constitution:
+what “world-class” means here, what the system does today, and where
+further simplification still pays off.
 
-## Goal
+Publication wire format and reconnect rules live in
+[WORKSPACE.md](WORKSPACE.md). This file owns framework refresh and the
+acceptance bars that prove it.
 
-Rip HMR updates running applications while preserving every compatible
-piece of developer context:
+---
 
-- local reactive state;
-- global stash and route;
+## The ideal
+
+A save in watch mode should feel like **editing a living program**, not
+restarting one.
+
+Preserve everything that is still true after the edit:
+
+- local reactive state and plain instance members (`:=`, props, and
+  `_init` bindings such as `createMutation`);
+- global stash values and the current route;
 - focus, selection, and scroll;
-- open UI state;
-- the last-known-good application after compile or activation failure.
+- open UI that the edit did not invalidate;
+- the **last-known-good** App when a candidate fails to compile or
+  activate.
 
-An incompatible edit remounts the narrowest affected subtree. Full-page
-reload is a fallback, not the default once framework refresh exists.
+Fail loudly when preservation would lie. Prefer the narrowest honest
+tier — patch, migrate, remount, or reload — never a silent wrong App.
+
+That ideal is **not** “never touch the DOM.” It is **never destroy
+meaning that still holds.**
+
+---
+
+## What patch is (and is not)
+
+**Patch = state-preserving view remount.**
+
+On a compatible edit the runtime:
+
+1. keeps the living instance and its state containers;
+2. does **not** re-run `_init`;
+3. disposes the owner frame (effects and cleanups);
+4. refreshes `~=` bodies and rebinds body `~>` effects
+   (`_hmrRefreshComputeds` / `_hmrBindEffects` on hmr builds);
+5. rebuilds the view through `_create` / `_setup`;
+6. reinserts into a **connected** parent (never a spent staging
+   `DocumentFragment`);
+7. restores focus, selection, and scroll when recorded.
+
+This matches the competitive bar set by React Fast Refresh: keep state,
+swap implementation, re-render. It is **not** surgical DOM morph
+(morphdom-style node reuse).
+
+**Surgical DOM morph is not a goal.** Morph is optional UX polish
+(flicker, caret edge cases). It does not define correctness and does not
+win the Cart bars. Focus/selection/scroll restore plus a correct instance
+are enough. Do not treat morph as unfinished destiny.
+
+---
+
+## Two layers
+
+HMR has two owners. Confusing them is how good patch work dies after
+commit.
+
+```text
+Layer A — Workspace publication
+  watch → Manager confirms bytes → change {from,hash,list}
+       → browser stage / compile / activate or quarantine
+
+Layer B — framework refresh
+  identity → signature → patch | migrate | remount → view
+```
+
+| Layer | Owns | Must not own |
+|---|---|---|
+| A | Complete App generations, ordered transport, LKG vs candidate, overlay | Instance state, DOM identity |
+| B | Living components, signatures, effects, view rebuild | Publication hashes, Hub framing |
+
+Rip owns language, compiler, runtime, renderer, router, and Sites, so
+both layers share compiler-owned ids and metadata — never heuristic
+scans of generated JavaScript.
+
+---
+
+## Competitive bars (the constitution)
+
+Typing into a profile field is a **weak** pin. The decisive surface is
+Cart confirmation in
+`packages/browser-tests/tests/cart-apply.spec.mjs` (`bun run test:cart`
+from that package).
+
+### Gate A — local action-state (tie React / beat Vue)
+
+1. Add an item; place the order → `placeOrder.succeeded` shows
+   “Order Placed!” (`onSuccess` clears the cart).
+2. Make a **render-only** edit to `app/routes/cart.rip` (stamp the h1).
+3. Confirmation **stays**; the new heading shows; `rip:hmr` reports
+   `patch`, not `remount`.
+
+Failure mode: empty cart. The edit “worked” only after placing another
+order — local action state was destroyed. Among React / Vue / Svelte /
+Solid, only React Fast Refresh has been observed to survive this
+sequence.
+
+Mechanics: `placeOrder` is a plain `_init` member. **Patch** keeps it.
+Any path that re-runs `_init` after `cart.clear()` makes the empty-cart
+branch win. Migrate’s `__hmrPreserveState` copies `:=` signature slots
+only — it does **not** preserve mutation objects. Do not sell
+migrate-on-confirmation as the headline pin.
+
+### Gate B — LKG-on-confirmation (ahead of React and Vue)
+
+Same confirmation, then:
+
+1. Break compile on `cart.rip` → overlay; LKG stays on confirmation and
+   interactive.
+2. Publish a good stamped edit → overlay clears; stamped confirmation
+   remains; **no** document reload; **no** re-order.
+
+This is the honest claim beyond React-tier local refresh: **App-hash
+publication quarantine** while the last good App stays live. Not “faster
+DOM than React.”
+
+---
+
+## How the system meets the ideal
+
+### Layer A — publication
+
+Defined in detail by [WORKSPACE.md](WORKSPACE.md). HMR-critical facts:
+
+- Watch changes are ordered `from → hash` with Rip source inline;
+  ordinary assets stay on HTTP.
+- Manager may publish a candidate even when assemble/compile of the
+  complete program fails: coherent **bytes** reach the browser so the
+  client can quarantine. Validity is the browser’s job on the live path.
+- Compile/activation failure: candidate hash is **rejected**, LKG App
+  stays active, overlay shows, duplicate rejected delivery is ignored.
+- A newer **live** generation after quarantine applies **in place**.
+  When `change.from` is the rejected hash, the browser rebases the
+  delta onto the living LKG. Walking back to the same LKG hash still
+  clears overlay/quarantine.
+- Reconnect that sees a still-newer `latest.json` (missed recovery while
+  disconnected) reloads for a complete publication.
+- `stash.rip` / `data.rip` **definition** edits request document reload.
+  Runtime stash *value* updates never reload.
+- CSS refreshes through HTTP identity; HTML and other managed assets
+  reload.
+
+### Layer B — refresh tiers
+
+Compiler emits `__hmrId` / `__hmrSig` on module-scope components when
+`hmr` is on (omitted in production). A process registry maps id →
+definition, signature, living instances.
+
+| Tier | When | Keeps | Rebuilds |
+|---|---|---|---|
+| **Patch** | Compatible implementation/render | Instance, `:=` / props, plain `_init` members | View + effects/computeds |
+| **Migrate** | Compatible named-state shape change | Intersecting `:=` slots (diagnostics for kept/added/removed) | New instance on remount floor when patch cannot apply |
+| **Remount** | Incompatible contract / forced dirty chain | Ancestors above the dirty boundary; stash; UI restore | Narrowest dirty route/layout suffix |
+| **Reload** | Graph/runtime cannot isolate safely | Nothing in-page | Full document |
+
+Every tier is chosen from signatures. No incompatible shape is silently
+accepted. Tooling sees thin events: `rip:hmr` / `__hmrEvents()` for
+`patch` | `migrate` | `remount` | `reject`.
+
+### Couplings that must stay true
+
+These are load-bearing invariants, not folklore:
+
+1. **Content edits must not churn route identity.** After a successful
+   Layer B patch, Workspace commit notifies route watchers and
+   `router.rebuild()` refreshes the manifest. Rebuild **soft-skips**
+   re-resolve when file, layout chain, and path are unchanged. Otherwise
+   the renderer remounts the page and Gate A dies after a “successful”
+   patch.
+2. **Patch reinserts into a live parent.** Layout staging often mounts
+   into a `DocumentFragment`; after commit that fragment is empty.
+   `_hmrRerender` resolves a connected parent (`#content` / `#app`) and
+   clears fragment `_target` values.
+3. **Owner frames own effects.** Patch disposes the frame once, then
+   rebinds. Effects never survive without their cleanup owner.
+4. **Mode flags are zero-effect when off.** `hmr: false` production
+   bytes omit HMR helpers and metadata.
+
+---
 
 ## Vocabulary
 
 | Term | Meaning |
 |---|---|
-| live reload | full page reload; the JavaScript heap is discarded |
-| HMR | replace modules without reloading the page |
-| hot refresh | framework-aware HMR that preserves compatible component state |
-| dev substrate | watcher, graph, transport, module delivery, CSS, overlay, fallback |
-| framework refresh | identity, signatures, state migration, effects, DOM reconciliation |
-| boundary | module/component that accepts an update |
-| component definition | stable component identity whose implementation can swap |
-| signature | structural fingerprint used to select patch, migrate, or remount |
-| last-known-good | the active successful generation retained across a failed update |
-| transactional activation | stage, validate, swap atomically, and roll back on failure |
+| live reload | Full page reload; the JavaScript heap is discarded |
+| HMR | Replace modules without reloading the page |
+| hot refresh | Framework-aware HMR that preserves compatible component state |
+| patch | State-preserving view remount on a living instance |
+| migrate | Preserve intersecting named `:=` slots across a replacement |
+| remount | Replace the narrowest dirty subtree; keep ancestors |
+| last-known-good (LKG) | Active successful App generation retained across a failed candidate |
+| quarantine | Rejected candidate hash retained so recovery can rebase or ignore duplicates |
+| signature | Compiler fingerprint selecting patch / migrate / remount |
+| component definition | Stable identity (`module#Name`) whose implementation can swap |
 
-## Current baseline
-
-The publication substrate (Layer A) is defined by
-[WORKSPACE.md](WORKSPACE.md): initial `bundle.json`, ordered
-`change {from,hash,list}` messages in watch mode, and reconnect recovery through
-`latest.json`. Rip Sites produces that protocol and Rip App consumes it.
-
-Watch-mode delivery also ships:
-
-- a compile/activation failure overlay that leaves the last-known-good App
-  interactive underneath;
-- compiler-emitted `__hmrId` / `__hmrSig` on module-scope components (omitted
-  when `hmr` is off);
-- a living-instance registry and signature classify (`patch` | `migrate` |
-  `remount`);
-- patch of living instances when signatures allow; otherwise narrow remount
-  of the affected route/layout chain with focus/selection/scroll restore;
-- migrate diagnostics: kept / added / removed named state slots (orphans warn);
-- thin tooling events (`rip:hmr` CustomEvent + `__hmrEvents()` ring buffer)
-  for `patch` / `migrate` / `remount` / `reject`;
-- stash-module / `data.rip` definition edits request a document reload
-  (runtime stash *value* updates stay surgical and never reload).
-
-Migrate that cannot patch in place still uses the narrow remount floor while
-preserving intersecting named state where the remount path constructs a
-replacement. Graph-quality hardening and deeper DOM reconcile continue under
-Phase 5.
-
-## Two-layer architecture
-
-HMR has two independent owners:
-
-```text
-Layer A — Workspace publication (dev substrate)
-watch → Manager confirms bytes → change {from,hash,list} → Workspace transaction
-                         │
-                         ▼
-Layer B — framework refresh (apply engine)
-identity → signature → patch/migrate/remount → effects → DOM
-```
-
-Layer A mutates the active module Workspace. Layer B decides whether living
-instances can adopt the mutation. Rip source may ride in a watch-mode change;
-ordinary asset bytes remain on HTTP.
-
-Rip owns the language, compiler, runtime, renderer, router, and server,
-so both layers can share stable ids and compiler-produced metadata
-without heuristic source transforms.
-
-## Layer A contract
-
-### Module graph
-
-The active Workspace records canonical Rip module paths, source, compiled
-modules, and one complete Manager-declared App hash. Per-file hashes remain
-private to Manager. Dependency and acceptance metadata needed for finer HMR
-belongs to the compiler/module graph rather than the publication wire format.
-
-### Update protocol
-
-```text
-save
-  → compile changed source
-  → retain old revision on failure
-  → invalidate changed graph nodes
-  → find accepting boundaries
-  → send ordered revision update
-  → stage new module namespaces
-  → dispose outgoing revisions
-  → activate boundaries transactionally
-  → prune unreachable modules
-  → commit or roll back the transaction
-```
-
-The client ignores stale revisions and detects missed revisions after
-reconnect.
-
-### Boundary API
-
-The exact source spelling remains an open decision, but the semantic
-surface contains:
-
-- self-accept and dependency-accept callbacks;
-- dispose before replacement;
-- prune when a module leaves the graph;
-- persistent per-module data;
-- explicit invalidation to continue propagation;
-- custom devtools/framework events.
-
-Boundary discovery must be compiler-owned or structurally explicit,
-never based on brittle scanning of generated JavaScript.
-
-### Errors
-
-A compile failure shows an overlay and leaves the active application
-running. An activation failure restores the active module graph and living
-implementations. The failed candidate hash is quarantined until Manager
-publishes a newer generation. Full reload remains available for a malformed or
-disconnected transition and when post-commit teardown cannot leave a coherent
-document.
-
-### CSS
-
-CSS updates independently and removes obsolete styles when their
-modules are pruned. A CSS-only change never remounts JavaScript state.
-
-## Layer B contract
-
-### Stable component identity
-
-Each component declaration receives a stable id derived from module id
-and declaration identity. A process-wide registry owns:
-
-```text
-component id
-  → current component definition
-  → structural signature
-  → living instances
-```
-
-Generated code resolves the component definition rather than permanently
-capturing one class object.
-
-### Signature
-
-The compiler records a deterministic signature covering:
-
-- state names and initializer fingerprints;
-- computed names;
-- prop names and contracts;
-- offer/accept context shape;
-- method and lifecycle names;
-- render structure/implementation hash;
-- inheritance and root shape;
-- effect declarations and cleanup ownership.
-
-Compiler metadata is preferred over runtime reflection because erased
-types and source roles are already available during emission.
-
-### Refresh tiers
-
-1. **Patch:** compatible implementation/render change. Keep state
-   containers and instance identity, replace methods/render behavior,
-   recreate owned effects, and reconcile DOM.
-2. **Migrate:** compatible named-state shape change. Preserve retained
-   slots, initialize added slots, dispose removed-slot ownership, then
-   patch.
-3. **Remount:** incompatible inheritance/root/contract change. Replace
-   only the affected component subtree while preserving ancestors.
-4. **Reload:** graph/runtime change that cannot be safely isolated.
-
-Every tier is selected explicitly from signatures. No incompatible
-shape is silently accepted.
-
-### Effects
-
-Effects belong to owner frames. Refresh disposes outgoing effects and
-their cleanups exactly once before creating replacements. A failed
-replacement cannot leave partial effects alive.
-
-### DOM and interaction state
-
-Patch and migration tiers reuse existing DOM where reconciliation can
-prove identity. The refresh transaction records and restores:
-
-- focused element;
-- input selection;
-- scroll positions;
-- route and stash references;
-- component refs.
-
-Remount tiers preserve everything outside the replaced subtree.
+---
 
 ## Transaction model
 
-A multi-module update is one transaction:
+One multi-module update is one transaction:
 
-1. compile every changed module;
-2. validate graph and signatures;
-3. stage namespaces and definition updates;
-4. snapshot affected runtime/DOM ownership;
-5. apply deepest dependencies first;
-6. commit all updates;
-7. on any failure, restore namespaces, definitions, effects, and DOM.
+1. Compile every changed module (complete candidate program).
+2. Validate graph and signatures.
+3. Stage namespaces and definition updates.
+4. Snapshot UI (focus / selection / scroll) where refresh will touch the tree.
+5. Apply deepest dependencies first (patch → migrate floor → remount).
+6. Commit Workspace; soft-rebuild the router manifest without remounting
+   an unchanged living match.
+7. On failure before commit: roll back; keep LKG; overlay when appropriate.
 
 The previous successful revision remains authoritative until commit.
 
-## Required rejection/fallback cases
+---
 
-- missing accept boundary;
-- unsafe circular evaluation order;
+## Required rejection and fallback
+
 - incompatible component signature;
-- runtime ABI change;
 - failed compile or module evaluation;
-- failed effect cleanup/setup;
-- revision gap or stale client;
-- transaction rollback failure.
+- failed activation / gate validation;
+- failed effect cleanup or setup that cannot leave a coherent tree;
+- revision gap or stale client (reload);
+- stash-module definition edit (reload);
+- mounted route/layout deletion (reload);
+- transaction rollback failure (reload if the document is not coherent).
 
-Each case reports the narrowest honest fallback: patch, migrate,
-remount, or reload.
+Each case uses the narrowest honest tier. A failed update never destroys
+the LKG App in place of a blank or silently wrong one.
 
-## Delivery phases
-
-### Phase 0 — honest live reload
-
-- connect browser delivery to the development server;
-- provide revisioned reload notifications and a compile-failure overlay;
-- add CSS soft updates and full-reload fallback.
-
-Exit: no product surface claims state-preserving HMR.
-
-### Phase 1 — substrate
-
-- revisioned transport and module graph;
-- last-known-good compilation;
-- self-accepting non-UI modules;
-- ordered reconnect/catch-up behavior.
-
-Exit: utility modules update without reload.
-
-### Phase 2 — narrow remount
-
-- component registry and stable ids;
-- living-instance tracking;
-- affected-subtree remount.
-
-Exit: editing a leaf preserves the application shell.
-
-### Phase 3 — patch
-
-- signatures and implementation hashes;
-- method/render replacement via prototype swap;
-- owner-frame dispose + `_hmrBindEffects` / `_hmrRefreshComputeds`
-  (body `~>` recreation and `~=` body refresh without re-running `_init`);
-- DOM rebuild through `_create`/`_setup` while keeping instance identity
-  and `:=` / prop containers (state-preserving view remount — not
-  surgical DOM morph).
-
-Exit: compatible edits preserve named state and refresh derived work.
-
-### Phase 4 — migration
-
-- add/remove/reset named state slots;
-- explicit migration diagnostics and cleanup.
-
-Exit: compatible state-shape edits preserve unaffected slots.
-
-### Phase 5 — graph quality
-
-- transactional multi-module activation;
-- shared dependency propagation;
-- focus/selection/scroll restoration;
-- devtools events and rollback hardening.
-
-Exit: the full behavioral contract is automated.
+---
 
 ## Test contract
 
-Automated tests cover:
+Automated coverage includes:
 
-1. ordered revisions, stale updates, and reconnect catch-up;
-2. compile failure with a still-interactive previous revision;
-3. activation failure and complete rollback;
-4. patch preserving state/container/instance identity;
-5. migration preserving retained state and initializing new slots;
-6. remount preserving parent/sibling state;
+1. ordered revisions, stale updates, reconnect catch-up;
+2. compile failure with interactive LKG + overlay;
+3. activation failure and rollback;
+4. patch preserves instance and state containers; refreshes computeds/effects;
+5. migrate diagnostics for kept / added / removed slots;
+6. remount preserves parent / sibling / stash state;
 7. effect cleanup and recreation exactly once;
-8. DOM focus, selection, and scroll preservation;
+8. focus, selection, and scroll restoration;
 9. CSS update without JavaScript remount;
 10. explicit full-reload fallback;
-11. circular/shared module propagation;
-12. multi-module transaction atomicity.
+11. **Gate A** — confirmation survives render-only `cart.rip` edit via patch;
+12. **Gate B** — LKG on confirmation; recover stamped heading in place.
 
-Browser-level behavior requires a real browser harness; pure graph and
-signature decisions remain deterministic unit tests.
+Browser behavior requires a real browser harness
+(`packages/browser-tests`). Signature and registry decisions stay
+deterministic unit tests (`test/ui/hmr-patch.test.js`,
+`test/toolchain/browser-boot.test.js`, `packages/app` remount/apply
+suites).
+
+---
 
 ## Resolved decisions
 
-Aligned with [WORKSPACE.md](WORKSPACE.md):
+- **Transport:** publication changes per [WORKSPACE.md](WORKSPACE.md);
+  no `import.meta.hot` shim — compiler-owned accept/identity.
+- **Patch DOM strategy:** state-preserving view remount; not morph.
+- **Container identity:** owner-frame + declared key; never positional.
+- **Type-fingerprint change:** remount; stable fingerprint may patch.
+- **Route/layout identity:** same layout-chain identity navigation uses;
+  content-only publication must not force page remount.
+- **Stash definition vs values:** definition edit → reload; value
+  updates → surgical reactive updates only.
+- **Workspace noun:** module (path-keyed). Swappable UI identity:
+  component definition.
+- **Delivery:** complete Rip program in `bundle.json`; `latest.json` for
+  reconnect; no public per-file hash inventory.
 
-- **Layer A transport: publication changes.** A watch-mode Hub message carries
-  one ordered `from → hash` transition. Changed Rip source may be inline;
-  ordinary asset bytes use HTTP. Watch-off publication requires no Hub.
-- **API: Rip-native, no `import.meta.hot` shim.** Compiler-owned
-  accept/boundaries; Rip events for tools later.
-- **Container identity during patch: owner-frame + declared key**, never
-  positional (honors "state never migrates by positional guesswork").
-- **Type-fingerprint change: remount.** A changed fingerprint remounts;
-  a stable fingerprint patches in place.
-- **Route/layout boundary identity: reuse the App stage's** layout-chain
-  identity (route id + layout key), the same identity navigation uses.
-- **Stash / schema-registry replacement: replace-and-revalidate.** The
-  registry is replaced and revalidated; live stash values are preserved
-  by key and orphaned keys are dropped loudly.
-- **Stash-module definition edits: document reload.** Editing `stash.rip`
-  / `data.rip` (rare) escapes to a full reload. Runtime assignments to
-  stash values never reload.
-- **Workspace unit noun: module.** Rip modules are path-keyed. Swappable
-  component identity is **component definition**, not “definition cell.”
-- **Delivery: complete Rip program first paint.** `bundle.json.list` carries
-  the validated source graph and `bundle.json.hash` identifies the complete
-  managed App state. `latest.json` is reconnect recovery; there is no
-  manifest or public per-file hash inventory.
+---
 
 ## Architectural constraints
 
@@ -345,3 +290,68 @@ Aligned with [WORKSPACE.md](WORKSPACE.md):
 - Component state never migrates by positional guesswork.
 - Generated code is never scanned to reconstruct mapping or HMR facts.
 - A failed update never destroys the last-known-good application.
+- Invalid input and incompatible shapes reject loudly; silent
+  mis-apply is the forbidden defect class.
+
+---
+
+## Inherent complexity vs seam compression
+
+### Inherent (the problem’s mass)
+
+Any serious system needs these *ideas*, whatever the spelling:
+
+1. ordered App generations and LKG vs candidate;
+2. classify: patch / migrate / remount / reload;
+3. preserve instance + non-DOM state on the compatible path;
+4. rebuild the view without re-running `_init`;
+5. honest failure with an interactive previous App.
+
+That mass does not disappear. Frameworks only hide it.
+
+### Accidental (compress later)
+
+The working system has discoverable scaffolding. A future architecture
+pass — driven by the pins above as the constitution — can aim for:
+
+```text
+Apply  = classify → (patch view | remount subtree | reload) → done
+Publish = stage complete App → browser accepts or quarantines
+Router  = remounts on route-table identity change only;
+          content applies never churn living match identity
+```
+
+Concrete compression candidates (open work, not a second product):
+
+- **One quarantine disposition** — Manager publish fallback, feed
+  `rejectedHash`, browser rejected set, and overlay clear-on-same-hash
+  should collapse toward a single candidate state machine.
+- **Router ignorance of content** — soft-skip in `rebuild` is correct;
+  a sharper model makes content applies unable to request resolve at all.
+- **One “owner frame + view rebuild” primitive** — fewer emitter scars
+  (`_hmrBindEffects` / `_hmrRefreshComputeds` / staging `_target`
+  special cases) without changing the patch contract.
+- **Manager snapshot on assemble failure** — keep publishing coherent
+  bytes; tighten error-tolerant import closure so the fallback path is
+  as boring as the success path.
+
+Rewrite from green pins and this document, not from memory. Seam
+compression is justified when complexity hurts day-to-day work — not as
+a morph project, and not as churn for its own sake.
+
+---
+
+## Status
+
+| Concern | State |
+|---|---|
+| Publication substrate (Layer A) | Contracted in WORKSPACE.md; Sites + browser-boot |
+| Signature classify + registry | Shipped |
+| Patch (view remount + effect/computed rebind) | Shipped; Cart Gate A green |
+| Migrate diagnostics + remount floor | Shipped; not the confirmation headline |
+| LKG overlay + in-place recovery | Shipped; Cart Gate B green |
+| Surgical DOM morph | **Out of scope** as a goal |
+| Seam compression | Open; see above |
+
+The meal is the contract. Morph is not dessert we owe. Fewer utensils —
+when the pins stay green — is the only improvement path that matters.
