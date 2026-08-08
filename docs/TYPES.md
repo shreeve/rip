@@ -113,7 +113,7 @@ location for bytes that do not exist.
 
 ### Declarations
 
-`src/dts.js` renders exported/module-visible declarations. Untyped
+`src/types/dts.js` renders exported/module-visible declarations. Untyped
 files requested as declarations produce the trivial valid surface.
 
 ### TypeScript face
@@ -122,7 +122,7 @@ The normal emitter renders annotations, casts, declarations, overloads,
 reactive containers, enum companions, schema intrinsics, and component
 types through TS-only regions.
 
-`src/typetext.js` owns shared type-text and signature rendering so the
+`src/types/typetext.js` owns shared type-text and signature rendering so the
 face and declarations cannot drift structurally.
 
 ## Ownership boundary
@@ -200,7 +200,7 @@ the static contract.
 ## Components
 
 Component type rendering has one shared owner:
-`src/component-types.js`.
+`src/types/components.js`.
 
 It produces:
 
@@ -348,11 +348,11 @@ silent until you open it.
 |---|---|
 | lexer claims | `src/lexer.js` |
 | grammar span labels | `src/grammar/grammar.rip`, `src/grammar/solar.rip` |
-| shared type rendering | `src/typetext.js` |
-| declarations | `src/dts.js` |
+| shared type rendering | `src/types/typetext.js` |
+| declarations | `src/types/dts.js` |
 | TS face and strip | `src/emitter.js`, `src/builder.js` |
-| schema type rendering | `src/schema-types.js` |
-| component type rendering | `src/component-types.js` |
+| schema type rendering | `src/types/schemas.js` |
+| component type rendering | `src/types/components.js` |
 | editor broker | `packages/vscode/src/` |
 | diagnostic gate | `packages/vscode/src/scopes.js` |
 | type gates | `test/lang/`, `test/toolchain/`, `test/audit/` |

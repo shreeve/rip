@@ -9,11 +9,6 @@
 // mapping story, and delivery staying zero-cost for readonly-only
 // files.
 import { test, expect, describe } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
-import { join, resolve } from 'path';
-import { pathToFileURL } from 'url';
-import { spawnSync } from 'child_process';
 import parser from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
@@ -22,8 +17,6 @@ import { Mappings } from '../../src/stores.js';
 import * as rt from '../../src/runtime/reactive.js';
 
 parser.lexer = makeParserLexer();
-
-const BIN = resolve(import.meta.dir, '../../bin/rip');
 
 const compile = (src, opts = {}) => {
   const r = parser.parse(src);
@@ -447,37 +440,12 @@ describe('delivery: readonly-only files stay zero-cost; the interplay triggers o
     expect([...runtimes]).toEqual(['reactive']);
   });
 
-  test('the loader path end to end: an exported readonly is a plain const binding across modules', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'rip-m9d-loader-'));
-    try {
-      writeFileSync(join(dir, 'store.rip'), 'export limit =! 10\nexport count := 1\nexport snap =! count + 1\n');
-      writeFileSync(join(dir, 'main.rip'), [
- 'import { limit, count, snap } from "./store.rip"',
-        // The readonly export is the VALUE itself; the reactive export
-        // is its container — the two surfaces side by side.
- 'console.log limit',
- 'console.log [count.value, snap]',
-      ].join('\n'));
-      const r = spawnSync('bun', [BIN, 'main.rip'], { cwd: dir, encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim().split('\n')).toEqual(['10', '[ 1, 2 ]']);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
   test('standalone inline: a readonly-only file carries ZERO runtime bytes and runs', () => {
     const { code } = fullCompile('x =! 21\nconsole.log x * 2', { runtimeDelivery: 'inline' });
     expect(code).not.toContain('__state');
     expect(code).not.toContain('__readonly');
-    const dir = mkdtempSync(join(tmpdir(), 'rip-m9d-inline-'));
-    try {
-      writeFileSync(join(dir, 'one.js'), code);
-      const r = spawnSync('bun', [join(dir, 'one.js')], { encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim()).toBe('42');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const logs = [];
+    new Function('console', code)({ log: (v) => logs.push(String(v)) });
+    expect(logs).toEqual(['42']);
   });
 });

@@ -1,17 +1,19 @@
 # Every .rip file in this repository — the grammar sources included —
 # compiles through the repository's own loader.
-preload = ["./src/loader.js"]
+preload = ["./src/cli/loader.js"]
 
 [test]
-preload = ["./src/loader.js"]
+preload = ["./src/cli/loader.js"]
 
 # The test boundary: package suites run from their own directories
 # (rip test.rip), and misc/ is an untracked scratch area — root runs
-# exclude both mechanically. `bun run test:all` crosses that boundary
-# through scripts/test-all.mjs, which spawns every packages/*/ suite as
-# its own lane alongside the root one. The single suite a local test:all
-# does not run is packages/browser-tests, which needs installed Playwright
-# browsers; CI runs it as its own job.
+# exclude both mechanically. `bun run test` further narrows to
+# in-process trees via its script path list (skips test/spawn/).
+# `bun run test:all` crosses the package boundary through
+# scripts/test-all.mjs and runs bare `bun test` for the root lane so
+# spawn + extended tiers still certify. The single suite a local
+# test:all does not run is packages/browser-tests, which needs
+# installed Playwright browsers; CI runs it as its own job.
 pathIgnorePatterns = ["packages/**", "misc/**"]
 
 # The per-test timeout lives in package.json's test script as a CLI

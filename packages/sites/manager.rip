@@ -693,7 +693,7 @@ appDocuments = (project, graph) ->
     moduleFiles: graph.moduleFiles
     appDir: project.root
     appRoot: project.appRoot
-    packagesDir: join(loaderDir(), '..', 'packages')
+    packagesDir: join(loaderDir(), '..', '..', 'packages')
   list = assembled.list
   identities = Map.new graph.entries.map (entry) -> [entry.id, entry]
   encoder = TextEncoder.new()
@@ -784,7 +784,7 @@ publishApp = (project, name, watch, documents = undefined, declaredShell = null)
   else if documents?
     commitAppDocuments project, documents
     publication = documents
-  runtime = join(loaderDir(), '..', 'dist', 'browser', 'rip.js')
+  runtime = join(loaderDir(), '..', '..', 'dist', 'browser', 'rip.js')
   abort "rip-site: browser runtime missing at #{runtime}" unless existsSync runtime
   copyFileSync runtime, join(dist, '@rip', 'rip.js')
 
@@ -1528,7 +1528,7 @@ export main = (argv) ->
       { outcome: 'unknown', error: 'migration child produced a malformed outcome report' }
 
   runMigrationChild = (body) ->
-    bin = join loaderDir(), '..', 'bin', 'rip'
+    bin = join loaderDir(), '..', '..', 'bin', 'rip'
     childArgs = [process.execPath, bin, 'schema', 'migrate']
     childArgs.push body.entry if body.entry?
     childArgs.push '--dir', body.dir, '--coordinated', '--operation-id', body.id

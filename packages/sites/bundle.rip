@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { compile } from '../../src/compile.js'
-import { extractClientProjections } from '../../src/extract-projections.js'
+import { extractClientProjections } from '../../src/projections.js'
 
 RUNTIME_RE =! /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/
 VERB_FILES =! Set.new ['test.rip', 'demo.rip', 'bench.rip']
@@ -169,7 +169,7 @@ export assembleBundle = ({ modules, packagesDir, data = null, moduleFiles = null
       framed.cause = error
       throw framed
 
-    if compiled.runtimes? and compiled.runtimes.has('schema-orm')
+    if compiled.runtimes? and compiled.runtimes.has('orm')
       throw Error.new "rip: '#{path}' declares a :model schema — persistence is server-only and cannot travel to the browser"
 
     for span in compiled.imports

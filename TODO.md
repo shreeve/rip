@@ -14,7 +14,7 @@ Package-local leftovers live beside the package (for example
 
 - [ ] Write the REAL syntax reference: drill down from
       `src/grammar/grammar.rip`, the lexer's context-sensitive behavior
-      (retags like `POST_IF`), and the battery (the syntax contract)
+      (retags like `POST_IF`), and the language suite (the syntax contract)
       into an authoritative document. It takes the `docs/SYNTAX.md`
       name when it exists. Cross-check the three editor grammars for
       drift while at it.
@@ -56,6 +56,6 @@ landed. Still worth a focused pass when touching that package:
 - [ ] `packages/app` — consolidate repeated Workspace/apply scenarios
       around shared transactional invariants.
 - [ ] Root compiler suite — collapse permutations already covered by
-      battery, corpus, mapping, or generated-byte gates.
+      the language suite (`test/rip`), corpus, mapping, or generated-byte gates.
 - [ ] `packages/vscode` — separate fast protocol/unit behavior from
       tsgo process integration and editor-wide certification.

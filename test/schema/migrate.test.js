@@ -1,4 +1,4 @@
-// The migration layer — src/migrate.js: the deterministic
+// The migration layer — src/cli/migrate.js: the deterministic
 // differ, the numbered-SQL artifacts with checksummed history, and
 // the runner. Three tiers:
 //
@@ -19,8 +19,8 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const rt4 = await import('../../src/runtime/schema.js');
-const orm4 = await import('../../src/runtime/schema-orm.js');
-const mig = await import('../../src/migrate.js');
+const orm4 = await import('../../src/runtime/orm.js');
+const mig = await import('../../src/cli/migrate.js');
 
 // ── kits: one uniform handle per runtime ─────────────────────────────
 
@@ -1151,7 +1151,7 @@ describe('migrate: the CLI-only boundary — no migration bytes in delivered out
     const { code } = compile('export User = schema :model\n  name! string\n', { path: 'm.rip', runtimeDelivery: 'inline' });
     expect(code).toContain('__schemaMigrationStub');
     expect(code).toContain('CLI-only');
-    // Markers that exist ONLY in src/migrate.js — any of them in
+    // Markers that exist ONLY in src/cli/migrate.js — any of them in
     // delivered output means the machinery leaked past the boundary.
     for (const marker of ['diffSchemas', 'rename-table', 'conflicting migration files', '_rip_migrations', 'topoOrder']) {
       expect(code).not.toContain(marker);

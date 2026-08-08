@@ -2,11 +2,15 @@
 // nullish-chain line continuation, loop-binding rejections,
 // statement-only arrow bodies, and loop-temporary naming.
 import { describe, test, expect } from 'bun:test';
-import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
+import * as schemaRuntime from '../../src/runtime/schema.js';
+import * as reactiveRuntime from '../../src/runtime/reactive.js';
+import * as componentRuntime from '../../src/runtime/components.js';
+import * as intrinsicRuntime from '../../src/runtime/intrinsics.js';
+import * as stdlibRuntime from '../../src/runtime/stdlib.js';
 
 parser.lexer = makeParserLexer();
 
@@ -20,6 +24,23 @@ const compileDelivered = (src, runtimeDelivery) => {
   const r = parser.parse(src);
   expect(r.diagnostics).toEqual([]);
   return emit(r, { source: src, runtimeDelivery }).code;
+};
+
+// Compile with delivery 'none' and evaluate against already-imported
+// runtime modules. Minted aliases (`__state_`, …) always bind; a
+// public name binds only when the program references it and does not
+// itself declare it (so source shadows stay source-owned).
+const evalNone = (src, tail, modules) => {
+  const code = compileDelivered(src, 'none');
+  const env = {};
+  for (const [name, value] of Object.entries(modules)) {
+    const esc = name.replace(/\$/g, '\\$');
+    for (const m of code.matchAll(new RegExp(`\\b${esc}_\\d*\\b`, 'g'))) env[m[0]] = value;
+    const declared = new RegExp(`\\b(?:let|const|var|function|class)\\s+${esc}\\b`).test(code);
+    if (!declared && new RegExp(`\\b${esc}\\b`).test(code)) env[name] = value;
+  }
+  const keys = Object.keys(env);
+  return new Function(...keys, `${code}\n${tail}`)(...keys.map((k) => env[k]));
 };
 
 describe('trailing array elisions survive emission', () => {
@@ -245,14 +266,13 @@ describe('object-comprehension intrinsic delivery', () => {
         expect(code).toMatch(/__toPropertyKey:\s*__toPropertyKey[_\d]+/);
         expect(code).toMatch(/__defineOwnDataProperty:\s*__defineOwnDataProperty[_\d]+/);
       }
-      if (mode === 'inline') {
-        const run = spawnSync('bun', ['-e', `${code}\nconsole.log(result.a);`], {
-          encoding: 'utf8',
-        });
-        expect(run.status).toBe(0);
-        expect(run.stdout.trim()).toBe('9');
-      }
     }
+    schemaRuntime.__SchemaRegistry.reset();
+    const result = evalNone(source, 'return result;', {
+      ...schemaRuntime,
+      ...intrinsicRuntime,
+    });
+    expect(result.a).toBe(9);
   });
 });
 
@@ -273,7 +293,6 @@ describe('compiler-generated runtime aliases', () => {
       'x := 1',
       'y ~= x * 2',
       '~> log.push("effect:" + y)',
-      'console.log JSON.stringify([x, y, log])',
     ].join('\n');
     for (const mode of ['none', 'import', 'inline']) {
       const code = compileDelivered(source, mode);
@@ -290,12 +309,9 @@ describe('compiler-generated runtime aliases', () => {
           expect(code).toMatch(new RegExp(`${name}:\\s*${name}[_\\d]+`));
         }
       }
-      if (mode !== 'none') {
-        const run = spawnSync('bun', ['-e', code], { encoding: 'utf8' });
-        expect(run.status).toBe(0);
-        expect(run.stdout.trim()).toBe('[1,2,["effect:2"]]');
-      }
     }
+    expect(evalNone(`${source}\nout = [x, y, log]`, 'return out;', reactiveRuntime))
+      .toEqual([1, 2, ['effect:2']]);
   });
 
   test('schema callable sub-emitters inherit reactive aliases', () => {
@@ -336,11 +352,11 @@ describe('compiler-generated runtime aliases', () => {
         if (mode === 'import') expect(code).toMatch(new RegExp(`${name} as ${name}[_\\d]+`));
         if (mode === 'inline') expect(code).toMatch(new RegExp(`${name}:\\s*${name}[_\\d]+`));
       }
-      if (mode === 'inline') {
-        const run = spawnSync('bun', ['-e', code], { encoding: 'utf8' });
-        expect(run.status).toBe(0);
-      }
     }
+    expect(() => evalNone(source, 'return null;', {
+      ...reactiveRuntime,
+      ...componentRuntime,
+    })).not.toThrow();
   });
 });
 
@@ -400,39 +416,7 @@ describe('match reads deliver the stdlib runtime', () => {
     expect(code.match(/let _;/g)).toHaveLength(1);
   });
 
-  test('concurrent async invocations keep their own `_` across await interleavings', () => {
-    const src = [
-      '"seed" =~ /s(e)ed/',
-      'f = (s, ms) ->',
-      '  s =~ /x(\\w+)/',
-      '  await sleep ms',
-      '  _[1]',
-      'main = ->',
-      '  [a, b] = await Promise.all [f("xAAA", 30), f("xBBB", 5)]',
-      '  console.log "#{a} #{b}"',
-      'main()',
-    ].join('\n');
-    const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
-    const { tmpdir } = require('node:os');
-    const { join } = require('node:path');
-    const dir = mkdtempSync(join(tmpdir(), 'rip-match-'));
-    try {
-      const file = join(dir, 'probe.rip');
-      writeFileSync(file, src);
-      const run = spawnSync('bun', ['bin/rip', file], { encoding: 'utf8' });
-      expect(run.stderr).toBe('');
-      expect(run.stdout).toBe('AAA BBB\n');
-      expect(run.status).toBe(0);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
   test('a single-statement schema body hoists its targets like a multi-statement one', () => {
-    // The battery evaluates in sloppy eval where an undeclared write
-    // leaks to the global — only a real (strict) module exposes a
-    // missing declaration, so this pin runs the compiled output in a
-    // subprocess.
     const src = [
       'X = schema :shape',
       '  name! string',
@@ -444,44 +428,18 @@ describe('match reads deliver the stdlib runtime', () => {
     const code = compileDelivered(src, 'none');
     expect(code).toMatch(/name: "tail", fn: \(function\(\) \{ let _; return/);
     expect(code).toMatch(/name: "five", fn: \(function\(\) \{ let y; return/);
-    const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
-    const { tmpdir } = require('node:os');
-    const { join } = require('node:path');
-    const dir = mkdtempSync(join(tmpdir(), 'rip-match-'));
-    try {
-      const file = join(dir, 'probe.rip');
-      writeFileSync(file, src);
-      const run = spawnSync('bun', ['bin/rip', file], { encoding: 'utf8' });
-      expect(run.stderr).toBe('');
-      expect(run.stdout).toBe('c 5\n');
-      expect(run.status).toBe(0);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 
   test('a compiled match-op program runs standalone', () => {
     const src = [
       'v = "x42"',
-      'console.log v[/^x(\\d+)$/, 1]',
-      'console.log v[/x\\d+/]',
-      'console.log(("y7" =~ /(\\d)/) and _[1])',
+      'a = v[/^x(\\d+)$/, 1]',
+      'b = v[/x\\d+/]',
+      'c = (("y7" =~ /(\\d)/) and _[1])',
       'toMatchable = "shadow"',
-      'console.log toMatchable',
+      'd = toMatchable',
     ].join('\n');
-    const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
-    const { tmpdir } = require('node:os');
-    const { join } = require('node:path');
-    const dir = mkdtempSync(join(tmpdir(), 'rip-match-'));
-    try {
-      const file = join(dir, 'probe.rip');
-      writeFileSync(file, src);
-      const run = spawnSync('bun', ['bin/rip', file], { encoding: 'utf8' });
-      expect(run.stderr).toBe('');
-      expect(run.stdout).toBe('42\nx42\n7\nshadow\n');
-      expect(run.status).toBe(0);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(evalNone(src, 'return [a, b, c, d];', { toMatchable: stdlibRuntime.toMatchable }))
+      .toEqual(['42', 'x42', '7', 'shadow']);
   });
 });

@@ -70,9 +70,6 @@ var syncOpsFlag = () => {
   return ops.on;
 };
 
-// src/schema-names.js
-var behaviorName = (name) => `__${name}__behavior`;
-
 // src/schema.js
 var VALID_KINDS = new Set(["input", "shape", "mixin", "enum", "union", "model"]);
 var KIND_DEFAULT = "input";
@@ -181,6 +178,7 @@ var EXPR_START_PREV = new Set([
 var SCHEMA_PRAGMA_KEYS = new Set(["defaultMaxString"]);
 var isWord = (t) => t && (t.kind === "IDENTIFIER" || t.kind === "PROPERTY");
 var isKeywordWord = (t) => t && typeof t.value === "string" && /^[a-z]+$/.test(t.value) && (t.kind === t.value.toUpperCase() || t.kind === "LEADING_WHEN" || t.kind === "RELATION" || t.kind === "STATEMENT");
+var behaviorName = (name) => `__${name}__behavior`;
 var symWordAt = (tokens, i, keywordOk = false) => {
   if (tokens[i]?.kind !== ":")
     return null;
@@ -1920,7 +1918,7 @@ function foldDerivedSchemas(sexpr) {
   });
 }
 
-// src/dom-vocab.js
+// src/dom.js
 var HTML_TAGS = new Set([
   "a",
   "abbr",
@@ -7978,7 +7976,7 @@ class CodeBuilder {
   }
 }
 
-// rip-ide-stub:schema-types.js
+// rip-ide-stub:schemas.js
 class SchemaTypeError extends Error {
   constructor(message, start = null, node = null) {
     super(message);
@@ -8010,26 +8008,7 @@ var renderParams = () => {
 var optionalReader = () => () => false;
 var jsArityOptional = () => new Set;
 
-// src/component-vocab.js
-var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError"]);
-var COMPONENT_RUNTIME_FIELDS = new Set([
-  "_state",
-  "_frame",
-  "_parent",
-  "_children",
-  "_root",
-  "_nodes",
-  "_target",
-  "_context",
-  "_rest",
-  "_restWriters",
-  "_restHandlers",
-  "_inheritedEl",
-  "_refCleanups",
-  "_initFailed"
-]);
-
-// rip-ide-stub:component-types.js
+// rip-ide-stub:components.js
 var componentTypeInfo = () => {
   throw new Error("rip: component type story is unavailable in the browser");
 };
@@ -8060,6 +8039,23 @@ var readonlyCastType = () => {
 };
 
 // src/emitter.js
+var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError"]);
+var COMPONENT_RUNTIME_FIELDS = new Set([
+  "_state",
+  "_frame",
+  "_parent",
+  "_children",
+  "_root",
+  "_nodes",
+  "_target",
+  "_context",
+  "_rest",
+  "_restWriters",
+  "_restHandlers",
+  "_inheritedEl",
+  "_refCleanups",
+  "_initFailed"
+]);
 var BINOPS = new Set(["+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "&&", "||", "??", "<<", ">>", ">>>", "&", "^", "|"]);
 var ASSIGNS = new Set(["=", "void-assign", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "<<=", ">>=", ">>>=", "&=", "^=", "|="]);
 var DECLARING_ASSIGNS = new Set(["=", "void-assign"]);
@@ -18721,9 +18717,9 @@ var RUNTIME_TABLE = [
     triggers: (sexpr, preds) => containsSchema(sexpr)
   },
   {
-    key: "schema-orm",
+    key: "orm",
     names: ["schema", "__schemaSetAdapter"],
-    url: new URL("./runtime/schema-orm.js", import.meta.url),
+    url: new URL("./runtime/orm.js", import.meta.url),
     requires: "schema",
     triggers: (sexpr, preds) => containsModelSchema(sexpr)
   },
@@ -19604,14 +19600,6 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
   };
 }
 
-// src/browser-compile.js
-function compile2(source, options = {}) {
-  if (options.face === "ts") {
-    throw new Error("rip: TypeScript face is unavailable in the browser");
-  }
-  return compile(source, { ...options, face: "js" });
-}
-
 // src/runtime/intrinsics.js
 var exports_intrinsics = {};
 __export(exports_intrinsics, {
@@ -19673,7 +19661,7 @@ var exit = (code) => {
 };
 var kind = (v) => v != null ? (v.constructor?.name || Object.prototype.toString.call(v).slice(8, -1)).toLowerCase() : String(v);
 var noop = () => {};
-var p = console.log;
+var p = (...args) => console.log(...args);
 var pp = (v) => {
   console.dir(v, { depth: null, colors: true });
   return v;
@@ -19757,7 +19745,7 @@ var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 var todo = (msg) => {
   throw new Error(msg || "Not implemented");
 };
-var warn = console.warn;
+var warn = (...args) => console.warn(...args);
 var zip = (...a) => a[0].map((_, i) => a.map((b) => b[i]));
 var toMatchable = (v) => {
   if (typeof v === "string")
@@ -20093,7 +20081,7 @@ var __SchemaRegistry = {
 class __SchemaDef {
   constructor(desc) {
     if (desc.kind === "model" && !__schemaPersistence) {
-      throw new Error("schema: kind 'model' needs the persistence runtime (src/runtime/schema-orm.js), which is not " + "loaded in this process — reference a persistence name (schema.transaction, __schemaSetAdapter) " + "or import the module directly");
+      throw new Error("schema: kind 'model' needs the persistence runtime (src/runtime/orm.js), which is not " + "loaded in this process — reference a persistence name (schema.transaction, __schemaSetAdapter) " + "or import the module directly");
     }
     this._desc = desc;
     this.kind = desc.kind;
@@ -21978,9 +21966,6 @@ function __hmrEmit(type, detail = {}) {
   __hmrEventLog.push(event);
   if (__hmrEventLog.length > __HMR_EVENT_CAP)
     __hmrEventLog.shift();
-  if (typeof console !== "undefined" && typeof console.debug === "function") {
-    console.debug(`[Rip HMR] ${type}`, detail);
-  }
   if (typeof window !== "undefined" && typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
     try {
       window.dispatchEvent(new CustomEvent("rip:hmr", { detail: event }));
@@ -22014,12 +21999,6 @@ function __hmrPreserveState(oldInstance, newInstance) {
     }
   }
   const id = newInstance?.constructor?.__hmrId ?? oldInstance?.constructor?.__hmrId ?? null;
-  if (diff.removed.length > 0 && typeof console !== "undefined" && typeof console.warn === "function") {
-    console.warn(`[Rip HMR] migrate ${id ?? "<component>"}: dropping orphaned state [${diff.removed.join(", ")}]`);
-  }
-  if (diff.added.length > 0 && typeof console !== "undefined" && typeof console.info === "function") {
-    console.info(`[Rip HMR] migrate ${id ?? "<component>"}: initializing new state [${diff.added.join(", ")}]`);
-  }
   __hmrEmit("migrate", { id, ...diff, copied });
   return { ...diff, copied };
 }
@@ -23011,15 +22990,6 @@ class __Component {
     return new this().mount(target);
   }
 }
-
-// src/browser-runtimes.js
-var runtimes = Object.freeze({
-  ...exports_intrinsics,
-  ...exports_stdlib,
-  ...exports_schema,
-  ...exports_reactive,
-  ...exports_components
-});
 
 // packages/app/index.rip
 var exports_app = {};
@@ -24265,7 +24235,7 @@ function createComponents() {
   return store;
 }
 // packages/app/routes.rip
-var compile3;
+var compile2;
 var fail;
 var layoutChain;
 var matchParts;
@@ -24323,7 +24293,7 @@ var parseSegment = function(segment, rel) {
     return { kind: "static", text: segment };
   }
 };
-compile3 = function(rel) {
+compile2 = function(rel) {
   let piece;
   let parsed = (() => {
     const result = [];
@@ -24504,7 +24474,7 @@ function buildRoutes(files, root = "routes") {
     if (!rel.endsWith(".rip")) {
       throw new TypeError(`Rip App: route files must be .rip sources: '${file}'`);
     }
-    entries.push({ ...compile3(rel), rel, file });
+    entries.push({ ...compile2(rel), rel, file });
   }
   let seen = new Map;
   for (let entry of [...entries].sort(function(a, b) {
@@ -27067,15 +27037,27 @@ var check = function(files) {
   }));
   return rash(new TextEncoder().encode(inventory));
 };
-// src/browser-app.js
+// src/browser.js
+var { __hmrEmit: __hmrEmit2 } = exports_components;
+function compile3(source2, options = {}) {
+  if (options.face === "ts") {
+    throw new Error("rip: TypeScript face is unavailable in the browser");
+  }
+  return compile(source2, { ...options, face: "js" });
+}
+var RUNTIME_MODULES = { intrinsics: exports_intrinsics, stdlib: exports_stdlib, schema: exports_schema, reactive: exports_reactive, components: exports_components };
+var runtimes = Object.freeze({
+  ...exports_intrinsics,
+  ...exports_stdlib,
+  ...exports_schema,
+  ...exports_reactive,
+  ...exports_components
+});
 var rash2 = Object.freeze({ rash, check });
 var embeddedPackages = Object.freeze({
   "@rip-lang/app": exports_app,
   "@rip-lang/app/rash": rash2
 });
-
-// src/browser-modules.js
-var RUNTIME_MODULES = { intrinsics: exports_intrinsics, stdlib: exports_stdlib, schema: exports_schema, reactive: exports_reactive, components: exports_components };
 var RUNTIME_PATHS = new Map(Object.keys(RUNTIME_MODULES).map((name) => [new URL(`./runtime/${name}.js`, import.meta.url).pathname, name]));
 var RUNTIME_RE = /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/;
 var BRIDGE_KEY = "__ripModuleBridge";
@@ -27101,7 +27083,7 @@ var toObjectUrl = (code) => {
   }
   return `data:text/javascript;base64,${btoa(unescape(encodeURIComponent(code)))}`;
 };
-function createModuleLoader({
+function createModuleLoaderImpl({
   components: registry,
   embeddedPackages: embeddedPackages2 = {},
   debug = false,
@@ -27206,7 +27188,7 @@ function createModuleLoader({
       if (source2 === undefined) {
         throw new Error(`rip: '${path}' is not in the bundle`);
       }
-      const compiled = compile2(source2, {
+      const compiled = compile3(source2, {
         path,
         runtimeDelivery: "import",
         browserModule: true,
@@ -27289,8 +27271,6 @@ function createModuleLoader({
     }
   };
 }
-
-// src/browser-scripts.js
 var scopeNames = Object.keys(runtimes);
 var scopeValues = scopeNames.map((name) => runtimes[name]);
 var browserHost3 = () => {
@@ -27415,7 +27395,7 @@ async function processRipScripts(host = null) {
 `).length;
     }
     try {
-      compiled = compile2(parts.join(`
+      compiled = compile3(parts.join(`
 `), { path: "<scripts>", runtimeDelivery: "none", script: true });
       break;
     } catch (error) {
@@ -27459,7 +27439,6 @@ ${compiled.code}
   }
   return { count: active.length, executed, failures };
 }
-// src/browser-hmr-overlay.js
 var ATTR = "data-rip-hmr-overlay";
 var overlayEl = null;
 var failureText = (error) => {
@@ -27556,7 +27535,7 @@ ${path}
   }
   root.appendChild(card);
   overlayEl = card;
-  __hmrEmit("reject", {
+  __hmrEmit2("reject", {
     kind: kind2 || "compile",
     path: failurePath(error),
     message: failureText(error).slice(0, 500)
@@ -27573,8 +27552,9 @@ function clearHmrOverlay() {
   overlayEl.remove?.();
   overlayEl = null;
 }
-
-// src/browser-boot.js
+function hmrOverlayElement() {
+  return overlayEl;
+}
 var { validatePrepared: validatePrepared2 } = exports_app;
 var isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 var validHash3 = (value) => typeof value === "string" && /^[A-Za-z0-9_]{6}$/.test(value);
@@ -27666,7 +27646,7 @@ var createProgram = (initialSources, debug, { hmr = false } = {}) => {
     getCompiled: (path) => staged.get(path),
     setCompiled: (path, module) => void staged.set(path, module)
   };
-  const loader = createModuleLoader({ components: registry, embeddedPackages, debug, hmr });
+  const loader = createModuleLoaderImpl({ components: registry, embeddedPackages, debug, hmr });
   return {
     sources(nextSources) {
       files = new Map(Object.entries(nextSources));
@@ -27703,9 +27683,9 @@ async function bootApp(opts = {}) {
   const debug = opts.debug === true;
   const watch = opts.watch === true || opts.feed != null;
   const program = createProgram(sources, debug, { hmr: watch });
-  const workspace = exports_app.createWorkspace();
+  const workspace = createWorkspace();
   const dataFor = (modules) => modules["data.rip"]?.data;
-  const launchWith = (modules) => exports_app.launch({
+  const launchWith = (modules) => launch({
     bundle: { compiled: modules, data: dataFor(modules) },
     components: workspace,
     target: opts.target,
@@ -27774,15 +27754,10 @@ async function bootApp(opts = {}) {
       link.disabled = false;
     }
   };
-  const apply = exports_app.createApply({
+  const apply = createApply({
     renderer: { remountDirty: (paths, candidate) => current.renderer.remountDirty(paths, candidate) },
     escape: async () => "reload",
-    report: (...args) => {
-      if (typeof args[0] === "string" && args[0].startsWith("[Rip] applied"))
-        console.log(...args);
-      else
-        report(...args);
-    }
+    report
   });
   const rejected = new Set;
   const applyChange = async (wire) => {
@@ -27875,7 +27850,7 @@ async function bootApp(opts = {}) {
   };
   if (watch) {
     const latestUrl = opts.latestUrl ?? opts.feed?.latestUrl ?? (opts.url ? sibling(opts.url, "latest.json") : "/latest.json");
-    feed = exports_app.connectFeed({ hash: () => workspace.hash(), apply: applyChange, reload }, {
+    feed = connectFeed({ hash: () => workspace.hash(), apply: applyChange, reload }, {
       ...opts.feed ?? {},
       latestUrl,
       report
@@ -27893,22 +27868,29 @@ async function bootApp(opts = {}) {
   const stable = { workspace, feed, destroy };
   return Object.assign(handle, current, stable);
 }
-// src/browser.js
-function createModuleLoader2(options = {}) {
-  return createModuleLoader({ ...options, embeddedPackages });
+function createModuleLoader(options = {}) {
+  return createModuleLoaderImpl({
+    ...options,
+    embeddedPackages: { ...embeddedPackages, ...options.embeddedPackages }
+  });
 }
 function compileToJS(source2, options = {}) {
   if (options.runtimeDelivery !== undefined && options.runtimeDelivery !== "none") {
     throw new Error(`rip: browser compilation delivers runtimes by scope; runtimeDelivery '${options.runtimeDelivery}' is not available here`);
   }
-  return compile2(source2, { ...options, runtimeDelivery: "none" });
+  return compile3(source2, { ...options, runtimeDelivery: "none" });
 }
 export {
+  showHmrOverlay,
   runtimes,
   processRipScripts,
+  hmrOverlayElement,
   fetchBundle,
-  createModuleLoader2 as createModuleLoader,
+  embeddedPackages,
+  createModuleLoader,
   compileToJS,
-  compile2 as compile,
-  bootApp
+  compile3 as compile,
+  clearHmrOverlay,
+  bootApp,
+  exports_app as app
 };

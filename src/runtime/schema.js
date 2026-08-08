@@ -2,7 +2,7 @@
 // through the delivery machinery: the pure validation core every
 // compiled `__schema({...})` call needs. The persistence surface
 // (:model, ORM, hydration, relations) lives in its sibling module,
-// src/runtime/schema-orm.js, which installs through the persistence
+// src/runtime/orm.js, which installs through the persistence
 // seam below; kind 'model' rejects loudly wherever that module is
 // absent .
 //
@@ -30,7 +30,7 @@ if (globalThis[__RIP_SCHEMA_SENTINEL]) {
 }
 globalThis[__RIP_SCHEMA_SENTINEL] = true;
 
-// The persistence seam : src/runtime/schema-orm.js installs
+// The persistence seam : src/runtime/orm.js installs
 // its model machinery here at load. Kind 'model' is rejected loudly
 // until it does — a hand-built model descriptor in a process without
 // the persistence runtime has no working reading. The seam carries:
@@ -393,7 +393,7 @@ class __SchemaDef {
   constructor(desc) {
     if (desc.kind === 'model' && !__schemaPersistence) {
       throw new Error(
-        "schema: kind 'model' needs the persistence runtime (src/runtime/schema-orm.js), which is not " +
+        "schema: kind 'model' needs the persistence runtime (src/runtime/orm.js), which is not " +
         'loaded in this process — reference a persistence name (schema.transaction, __schemaSetAdapter) ' +
         'or import the module directly',
       );

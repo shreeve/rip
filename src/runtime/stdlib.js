@@ -23,7 +23,9 @@ const assert = (v, msg) => { if (!v) throw new Error(msg || 'Assertion failed');
 const exit = (code) => { if (typeof process !== 'undefined') process.exit(code || 0); throw new Error(`exit(${code || 0}) outside a process`); };
 const kind = (v) => v != null ? (v.constructor?.name || Object.prototype.toString.call(v).slice(8, -1)).toLowerCase() : String(v);
 const noop = () => {};
-const p = console.log;
+// Call through the live console — a captured `console.log` alias would
+// ignore later stubs (battery quieting, user overrides).
+const p = (...args) => console.log(...args);
 const pp = (v) => { console.dir(v, { depth: null, colors: true }); return v; };
 const pj = (v) => { console.log(JSON.stringify(v, null, 2)); return v; };
 const pr = (() => {
@@ -66,7 +68,7 @@ const raise = (a, b) => { throw (b !== undefined ? new a(b) : new Error(a)); };
 const rand = (a, b) => b !== undefined ? (a > b && ([a, b] = [b, a]), Math.floor(Math.random() * (b - a + 1) + a)) : a ? Math.floor(Math.random() * a) : Math.random();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const todo = (msg) => { throw new Error(msg || 'Not implemented'); };
-const warn = console.warn;
+const warn = (...args) => console.warn(...args);
 const zip = (...a) => a[0].map((_, i) => a.map((b) => b[i]));
 // The match operator's receiver coercion: anything reasonable becomes
 // a string to match against, and matching is EXACTLY JavaScript's —

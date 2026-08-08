@@ -34,8 +34,8 @@ test "bad input rejects loudly", ->
 
 ## Features
 
-- **Four exports** — `test`, `eq`, `ok`, `throws`; no runner binary, no
-  config, no lifecycle hooks
+- **Five exports** — `test`, `eq`, `ok`, `throws`, `plainEnv`; no runner
+  binary, no config, no lifecycle hooks
 - **Tally on exit** — one summary line, printed exactly once; failures
   set `process.exitCode = 1`
 - **Structural `eq`** — arrays ordered, object keys unordered, scalars
@@ -44,8 +44,9 @@ test "bad input rejects loudly", ->
   checks message containment, both may be given in order
 - **Async via `test!`** — the file awaits the case in place, so output
   stays ordered
-- **Colors honor NO_COLOR / FORCE_COLOR** — and `NO_COLOR` wins when
-  both are set
+- **Colors follow `Bun.enableANSIColors`** — TTY / `NO_COLOR` /
+  `FORCE_COLOR` / CI. `test:all` gives lanes a PTY so paint works
+  without forcing `FORCE_COLOR`
 
 ## The four helpers
 
@@ -55,6 +56,7 @@ test "bad input rejects loudly", ->
 | `eq got, want` | Deep structural equality — arrays ordered, object keys unordered, scalars by identity. Throws `expected <want>, got <got>`. |
 | `ok cond, msg?` | Throws `msg` (default `assertion failed`) unless `cond` is truthy. |
 | `throws fn, ...refinements` | Requires `fn` to throw. An Error-class refinement checks `instanceof`; a string refinement checks message containment. |
+| `plainEnv(extra?)` | `process.env` plus `extra`, with `FORCE_COLOR` removed unless `extra` sets it — for subprocesses whose stdout is byte-pinned. |
 
 Async cases use the dammit form so the suite stays sequential:
 

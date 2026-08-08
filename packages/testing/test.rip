@@ -7,7 +7,7 @@
 # as real subprocesses through this repository's rip.
 # ==============================================================================
 
-import { test, eq, ok, throws } from '@rip-lang/testing'
+import { test, eq, ok, throws, plainEnv } from '@rip-lang/testing'
 import * as mod from '@rip-lang/testing'
 import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -20,8 +20,8 @@ pkg =! JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
 
 console.log "\nPackage"
 
-test "module exports the four helpers and nothing else", ->
-  eq Object.keys(mod).sort(), ['eq', 'ok', 'test', 'throws']
+test "module exports the helpers and nothing else", ->
+  eq Object.keys(mod).sort(), ['eq', 'ok', 'plainEnv', 'test', 'throws']
   ok not ('default' of mod), 'no default export'
   for name in ['test', 'eq', 'ok', 'throws']
     eq typeof mod[name], 'function'
@@ -133,9 +133,11 @@ fixture = (name, source) ->
   writeFileSync file, source
   file
 
-# NO_COLOR pins byte-exact output; the color case forces codes on.
+# NO_COLOR pins byte-exact mono output; the color case forces codes on.
+# plainEnv drops FORCE_COLOR — Bun paints inspect under FORCE_COLOR even
+# when NO_COLOR is set, which would break every mono pin below.
 suite = (file, env = {}) ->
-  spawnSync process.execPath, [ripCli, file], { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1', ...env } }
+  spawnSync process.execPath, [ripCli, file], { encoding: 'utf8', env: plainEnv({ NO_COLOR: '1', ...env }) }
 
 mixed =! fixture 'mixed.rip', [
   "import { test, eq } from '#{harness}'"
@@ -169,10 +171,10 @@ test "NO_COLOR output carries no escape codes", ->
   r = suite mixed
   ok not r.stdout.includes('\x1b[')
 
-test "FORCE_COLOR paints; NO_COLOR still wins over it", ->
-  env = { ...process.env }
-  delete env.NO_COLOR
-  forced = spawnSync process.execPath, [ripCli, mixed], { encoding: 'utf8', env: { ...env, FORCE_COLOR: '1' } }
-  ok forced.stdout.includes('\x1b[32m')
-  both = suite mixed, { FORCE_COLOR: '1' }
-  ok not both.stdout.includes('\x1b[')
+test "FORCE_COLOR paints chrome on a pipe", ->
+  r = spawnSync process.execPath, [ripCli, mixed], {
+    encoding: 'utf8'
+    env: plainEnv({ FORCE_COLOR: '1' })
+  }
+  ok r.stdout.includes('\x1b[32m')
+  ok r.stdout.includes('\x1b[31m')

@@ -15,7 +15,7 @@
 //              typed projects quieting untyped/legacy paths.
 //   repl     — REPL presentation: { theme: 'dark'|'light'|'mono',
 //              colors: { <class>: <ansi name | #hex> } } — consumed by
-//              src/repl.js; anything non-object leaves the null default.
+//              src/cli/repl.js; anything non-object leaves the null default.
 //
 // Resolution: walk UP to the FIRST package.json and stop — that file
 // is the project boundary whether or not it carries a `rip` block. A

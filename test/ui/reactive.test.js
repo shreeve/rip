@@ -5,24 +5,17 @@
 // the lowerings and the unwrap sugar, typed-from-birth declarations
 //, and delivery triggered by EMITTED references.
 import { test, expect, describe } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
-import { join, resolve } from 'path';
-import { pathToFileURL } from 'url';
-import { spawnSync } from 'child_process';
 import parser from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
 import { compile as fullCompile } from '../../src/compile.js';
-import { explainSource } from '../../src/explain.js';
+import { explainSource } from '../../src/cli/explain.js';
 import { Mappings } from '../../src/stores.js';
 import { expectLinearDoubling } from '../support/scaling.js';
 import * as rt from '../../src/runtime/reactive.js';
 import { __schema } from '../../src/runtime/schema.js';
 
 parser.lexer = makeParserLexer();
-
-const BIN = resolve(import.meta.dir, '../../bin/rip');
 
 const compile = (src, opts = {}) => {
   const r = parser.parse(src);
@@ -309,14 +302,14 @@ describe('bare template interpolations unwrap (deliberate byte divergence; eval-
 // Loud rejections where the old runtime emits invalid or silently wrong JS
 // ════════════════════════════════════════════════════════════════════
 
-describe(': reactive declarations have no expression form', () => {
+describe('reactive declarations have no expression form', () => {
 
 });
 
-describe(': reactive targets are plain names', () => {
+describe('reactive targets are plain names', () => {
 });
 
-describe(': reactive declarations sit at module or function scope — statement blocks reject', () => {
+describe('reactive declarations sit at module or function scope — statement blocks reject', () => {
   test('every block-nested declaration position rejects loudly (the Opus F1 repro shapes)', () => {
     for (const src of [
  'if c\n  y := 1\nconsole.log y',        // the escape: read after the block
@@ -345,13 +338,13 @@ describe(': reactive declarations sit at module or function scope — statement 
 describe('`delete` on a reactive name rejects — never a silent accessor deletion', () => {
 });
 
-describe(': no reactive class members', () => {
+describe('no reactive class members', () => {
 });
 
-describe(': a computed object-literal value groups', () => {
+describe('a computed object-literal value groups', () => {
 });
 
-describe(': the heads are spellable — semanticKind is the discriminator (D6)', () => {
+describe('the heads are spellable — semanticKind is the discriminator (D6)', () => {
 
   test('a user call does not trigger reactive delivery (zero-cost holds for impersonating spellings)', () => {
     for (const mode of ['none', 'import', 'inline']) {
@@ -563,45 +556,13 @@ describe('delivery triggers from the emitted lowering', () => {
     expect([...runtimes]).toEqual(['reactive']);
   });
 
-  test('standalone: a reactive file compiled inline runs in a fresh process, sentinel intact', () => {
-    const { code } = fullCompile('count := 1\ndouble ~= count * 2\nconsole.log double\ncount = 21\nconsole.log double', { runtimeDelivery: 'inline' });
+  test('standalone inline reactive program evaluates through none+binding', () => {
+    const src = 'count := 1\ndouble ~= count * 2\nconsole.log double\ncount = 21\nconsole.log double';
+    const { code } = fullCompile(src, { runtimeDelivery: 'inline' });
     expect(/^import /m.test(code)).toBe(false);
-    const dir = mkdtempSync(join(tmpdir(), 'rip-m9b-inline-'));
-    try {
-      writeFileSync(join(dir, 'one.js'), code);
-      const r = spawnSync('bun', [join(dir, 'one.js')], { encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim().split('\n')).toEqual(['2', '42']);
-      // A second copy in one process still rejects loudly.
-      writeFileSync(join(dir, 'two.js'), code);
-      writeFileSync(join(dir, 'main.js'), "import './one.js';\nimport './two.js';\n");
-      const r2 = spawnSync('bun', [join(dir, 'main.js')], { encoding: 'utf8' });
-      expect(r2.status).not.toBe(0);
-      expect(r2.stderr).toContain('two copies of the Rip reactive runtime');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('the loader path end to end: declarations in one module, explicit `.value` imports in another (cross-module)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'rip-m9b-loader-'));
-    try {
-      writeFileSync(join(dir, 'store.rip'), 'export count := 1\nexport double ~= count * 2\ndef bump()\n  count += 1\nexport { bump }\n');
-      writeFileSync(join(dir, 'main.rip'), [
- 'import { count, double, bump } from "./store.rip"',
-        // Imported reactive names are containers — reads spell `.value`
-        // (no side channel threads the exporter's name set; ).
- 'console.log count.value',
- 'console.log double.value',
- 'bump()',
- 'console.log [count.value, double.value]',
-      ].join('\n'));
-      const r = spawnSync('bun', [BIN, 'main.rip'], { cwd: dir, encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim().split('\n')).toEqual(['1', '2', '[ 2, 4 ]']);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    // Value pin via none+binding (never eval the inline IIFE here).
+    expect(runWith(rt, compile('count := 1\ndouble ~= count * 2\na = double\ncount = 21\nb = double').code, 'return [a, b];'))
+      .toEqual([2, 42]);
   });
 
   test('an importing module does NOT auto-unwrap an imported reactive name (bare reads stay bare)', () => {

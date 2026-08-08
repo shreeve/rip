@@ -62,9 +62,11 @@ describe('enum: runtime behavior', () => {
 
 // ── Zero-cost: enum output is self-contained ────────────────────────
 
-test('enum output carries no imports and no preamble', () => {
-  const { code } = compile('enum Color\n  red = 0');
-  expect(code).toBe('const Color = {red: 0, 0: "red"};');
+describe('enum: zero-cost emission', () => {
+  test('output carries no imports and no preamble', () => {
+    const { code } = compile('enum Color\n  red = 0');
+    expect(code).toBe('const Color = {red: 0, 0: "red"};');
+  });
 });
 
 // ── Statement discipline + rejections ───────────────────────────────

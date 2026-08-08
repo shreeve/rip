@@ -15,7 +15,7 @@ import {
   colorizeLastLine, stripAnsi, encodeEntry, decodeEntry, displayWidth,
   makeImportResolver, describeError, Session, Repl, THEME_NAMES,
   RecallTracker, isHistoryNavKey, Osc11Matcher,
-} from '../../src/repl.js';
+} from '../../src/cli/repl.js';
 import { identifierRuns } from '../../src/lexer.js';
 import { CompileError } from '../../src/compile.js';
 

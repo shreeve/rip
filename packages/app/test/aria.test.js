@@ -224,9 +224,20 @@ describe('aria reconciliation', () => {
       },
     });
     boom = true;
-    expect(router.push('/users')).toBeTrue();
-    expect(router.path).toBe('/users');
-    dispose();
+    const reported = [];
+    const prev = console.error;
+    console.error = (...args) => { reported.push(args); };
+    try {
+      expect(router.push('/users')).toBeTrue();
+      expect(router.path).toBe('/users');
+      expect(reported).toHaveLength(1);
+      expect(reported[0][0]).toBe('[Rip] aria-current walk failed:');
+      expect(reported[0][1]).toBeInstanceOf(Error);
+      expect(reported[0][1].message).toBe('host down');
+    } finally {
+      console.error = prev;
+      dispose();
+    }
   });
 
   test('same-origin absolute hrefs resolve under a stubbed location', () => {

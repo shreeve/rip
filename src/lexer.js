@@ -31,7 +31,7 @@
 import { SourceFile } from './source.js';
 import { rewriteSchema } from './schema.js';
 import { rewriteRender } from './render.js';
-import { TEMPLATE_TAGS } from './dom-vocab.js';
+import { TEMPLATE_TAGS } from './dom.js';
 import { ops, syncOpsFlag } from './ops.js';
 
 // ── Pipeline: post-scan passes ──────────────────────────────────────────
@@ -1582,7 +1582,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     // ── `type Name = …` / `interface Name` — whole-statement type
     // declarations. The entire declaration collapses into ONE
     // TYPE_DECL token whose value is the raw source text (opaque to
-    // the grammar; declaration emission — src/dts.js — structures
+    // the grammar; declaration emission — src/types/dts.js — structures
     // it); the grammar reduces it to an erased statement node
     // carrying the span. An `export` prefix folds in — the whole
     // exported declaration erases.

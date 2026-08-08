@@ -118,7 +118,7 @@ repository root; consulted for UNDERSTANDING → docs/.
  reassignment, state write-through (`x = 2` after `x := 1` emits
  `x.value = 2`), pattern-element writes. Nested scopes shadow
  freely. Duplicate names within one pattern reject unconditionally.
- Pins: `test/battery/redeclare.rip`.
+ Pins: `test/rip/redeclare.rip`.
 - **Files strict, REPL fluid.** The REPL deliberately allows
  cross-line redeclaration: each entry compiles with the prior lines'
  bindings as an ambient seed (an ENCLOSING scope), so an in-file
@@ -207,15 +207,16 @@ strict as the emitter's.
  needed to compute the removal set is remembered per element, never
  rediscovered from the DOM.
 - **One reactive runtime per process.** The runtime guards against a
- second copy loading (a sentinel throws). Tests that execute compiled
- output run it in a subprocess (`bun bin/rip <file>`) — evaluating
- inline-runtime output inside the test process collides with the
- suite's own runtime. The REPL loads each feature runtime once per
+ second copy loading (a sentinel throws). In-process suite oracles use
+ `runtimeDelivery: 'none'` plus binding-pass `new Function` against the
+ once-imported runtime — never eval inline-delivery IIFE output in a
+ process that already loaded that runtime. True two-heap / loader pins
+ live under `test/spawn/`. The REPL loads each feature runtime once per
  process on first need.
 
 ## The REPL
 
-`src/repl.js` rests on four compiler seams — `ambientBindings`
+`src/cli/repl.js` rests on four compiler seams — `ambientBindings`
 (seeding prior lines' binding kinds into the next compile),
 `result.bindings` (the inventory), `classifyCompleteness` (the
 lexer+parser-owned complete/incomplete/error verdict), and `repl: true`
@@ -314,7 +315,7 @@ alters surface syntax updates ALL THREE in the same change.
   failed because `Return` is `Statement`, not `Expression`, and `Try`
   only had `TRY Expression Catch`. Owned by the grammar: `TRY Statement`
   / `TRY Statement Catch` (+ finally twins) in `grammar.rip`;
-  conflict-neutral. Pins: `test/battery/control.rip` (`try return catch
+  conflict-neutral. Pins: `test/rip/control.rip` (`try return catch
   then return`). Expanding to braced JS `try`/`catch` in user code to
   dodge the parse error is rejected.
 - **`new` × dammit → grammar.** `new Response(x).text!` nested the
@@ -333,6 +334,14 @@ alters surface syntax updates ALL THREE in the same change.
 
 ## Test-Authoring Sharp Edges
 
+- Process-lane tests live under `test/spawn/` (cli, sentinel, loader,
+ tsc, bundle, repl). Outside that tree — and outside `test/audit/` —
+ suites stay in-process: compile/eval/throw oracles, no
+ `spawnSync` / `Bun.spawn` / `bin/rip` as a child. Stdout pins that
+ only needed a child to read `console.log` must become value/emit
+ compares. Spawn helpers (`test/support/spawn.js`) scrub `FORCE_COLOR`
+ so piped child paint cannot break byte pins; in-process suites do not
+ import that helper.
 - A PTY test must await text that occurs ONCE in the whole stream. The
  terminal echoes the command line back before the command's output, so
  `echo AAA` awaiting `AAA` matches its own echo; only the bytes up to
@@ -341,13 +350,13 @@ alters surface syntax updates ALL THREE in the same change.
  (`echo A$(echo AA)`) — otherwise the assertion is a bet on PTY read
  boundaries, which coalesce under load: measured 5 failures in 12
  concurrent runs before, 0 in 44 after.
-- Battery files are themselves Rip source, so quoting nests: a `"""`
- heredoc interpolates `#{}` at the battery-file level (the test's
- source never sees it); a `'''` heredoc is raw for interpolation but
- consumes one backslash level; a double-quoted EXPECTED string
- interpolates `${}` at the file level — single-quote it. When a pin's
- bytes matter, write the probe file exactly (a script that writes
- bytes beats a shell heredoc).
+- Language-suite files (`test/rip/*.rip`) are themselves Rip source, so
+  quoting nests: a `"""` heredoc interpolates `#{}` at the suite-file
+  level (the test's source never sees it); a `'''` heredoc is raw for
+  interpolation but consumes one backslash level; a double-quoted
+  EXPECTED string interpolates `${}` at the file level — single-quote
+  it. When a pin's bytes matter, write the probe file exactly (a
+  script that writes bytes beats a shell heredoc).
 - The parser-regeneration gate doubles as a canary: the parser
  generator compiles itself, so an emitter change that alters minted
  temporaries or ref decisions surfaces as parser byte drift even when
@@ -385,20 +394,25 @@ start final certification before review can still change code. A code
 change after certification starts creates a new candidate and requires
 the affected final gates again.
 
-- `bun run test:rip` — the battery alone (every test/battery/*.rip
- row — the language's syntax contract), sub-second: the inner loop
- for language work and the automatic pull-request code check.
-- `bun run test` — the FAST compiler loop: language, mapping,
- snapshots, strip/emission pins. The extended tier (tsc-spawning
- validity gates, scaling gates, fuzz drift) registers visible skips
- here.
-- `bun run test:all` — the EXHAUSTIVE repository certification: everything above PLUS
- the extended tier PLUS every `packages/*/` suite, which
- `scripts/test-all.mjs` spawns as parallel lanes and aggregates into
- one exit code. Run it explicitly for release certification; the manual
- `repository-certification` workflow runs it with the corpus audit and
- generated-byte gates. It is not the edit loop or an automatic pull-request
- gate. The ONE suite it does not
+- `bun run test:rip` — the language suite alone (every test/rip/*.rip
+  row — the language's syntax contract), sub-second: the inner loop
+  for language work and the automatic pull-request code check.
+- `bun run test` — the FAST compiler loop: in-process trees only
+  (`test/{rip,lang,mapping,ui,schema,toolchain}`), file-parallel.
+  Skips `test/spawn/`. The extended tier (tsc validity gates, scaling
+  gates, fuzz drift) stays quiet locally and is required under
+  `test:all` / certification CI.
+- `bun run test:spawn` — the process lane alone (`test/spawn/**`: CLI,
+  sentinels, loader, tsc, bundle, REPL). Run when the change touches
+  those seams; not part of the default edit loop.
+- `bun run test:all` — the EXHAUSTIVE repository certification: the
+  fast loop PLUS `test/spawn/` PLUS the extended tier PLUS every
+  `packages/*/` suite, which `scripts/test-all.mjs` spawns as parallel
+  lanes and aggregates into one exit code. Run it explicitly for
+  release certification; the manual `repository-certification`
+  workflow runs it with the corpus audit and generated-byte gates. It
+  is not the edit loop or an automatic pull-request gate. The ONE
+  suite it does not
  carry is `packages/browser-tests` — it needs installed Playwright
  browsers. CI runs its deterministic Chromium/Firefox/WebKit smoke
  matrix as a required job; the live Cart Server/Manager certification
@@ -428,7 +442,7 @@ the affected final gates again.
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus-expected` — regenerate the corpus expected outputs.
 - `bun run browser-bundle` — regenerate `dist/browser/rip.js` (and
- `rip.min.js` / `rip.min.js.br`) after any `src/browser-*.js` change; a
+ `rip.min.js` / `rip.min.js.br`) after any `src/browser.js` change; a
  freshness gate in `test:all` catches a stale bundle.
 - `bun run audit` — the typed-editor scoreboard, and NOT `bun audit`,
   which is Bun's dependency scanner. Six lanes (grammar, mapping, type,

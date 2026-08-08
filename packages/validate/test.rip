@@ -7,7 +7,7 @@
 # below need no bridge import.
 # ==============================================================================
 
-import { test, eq, ok, throws } from '@rip-lang/testing'
+import { test, eq, ok, throws, plainEnv } from '@rip-lang/testing'
 import {
   check, formatMoney, getValidator, isBlank, isRawType,
   registerValidator, toName, toPhone, validatorNames,
@@ -77,7 +77,10 @@ test "a fresh process holds exactly the 37 built-ins, all bridged", ->
     "p validatorNames().length"
     "p S.parse({ d: '20240229' }).d"
   ].join('\n')
-  r = spawnSync process.execPath, [join(import.meta.dir, '..', '..', 'bin', 'rip'), probe], { encoding: 'utf8' }
+  r = spawnSync process.execPath, [join(import.meta.dir, '..', '..', 'bin', 'rip'), probe], {
+    encoding: 'utf8'
+    env: plainEnv()
+  }
   eq r.status, 0
   eq r.stdout, '37\n2024-02-29\n'
 
@@ -457,7 +460,10 @@ test "a coercer-name collision rejects the package import, naming the coercer", 
     '  p "guarded: #{e.message}"'
     "  exit 1"
   ].join('\n')
-  r = spawnSync process.execPath, [join(import.meta.dir, '..', '..', 'bin', 'rip'), probe], { encoding: 'utf8' }
+  r = spawnSync process.execPath, [join(import.meta.dir, '..', '..', 'bin', 'rip'), probe], {
+    encoding: 'utf8'
+    env: plainEnv()
+  }
   eq r.status, 1
   ok r.stdout.includes('guarded:')
   ok r.stdout.includes("'~:money' is already registered")

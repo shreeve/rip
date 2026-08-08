@@ -1,7 +1,7 @@
 # ==============================================================================
 # @rip-lang/testing: shared helpers for package test.rip files
 #
-#   import { test, eq, ok, throws } from '@rip-lang/testing'
+#   import { test, eq, ok, throws, plainEnv } from '@rip-lang/testing'
 #
 #   test "does the thing", ->
 #     eq CSV.read("a,b\n"), [['a','b']]
@@ -20,13 +20,10 @@ GREEN =! "\x1b[32m"
 RED   =! "\x1b[31m"
 DIM   =! "\x1b[2m"
 
-# Color when stdout is a TTY (or FORCE_COLOR), unless NO_COLOR is set.
-useColor =! if process.env.NO_COLOR?
-  false
-else if process.env.FORCE_COLOR? and "#{process.env.FORCE_COLOR}" isnt '0'
-  true
-else
-  !!process.stdout.isTTY
+# Chrome paint only — never wrap values under test. Bun.enableANSIColors
+# is the single gate (TTY / NO_COLOR / FORCE_COLOR / CI). test:all gives
+# lanes a PTY so this is true there without FORCE_COLOR.
+useColor =! !!Bun.enableANSIColors
 
 paint = (code, text) ->
   if useColor then "#{code}#{text}#{RESET}" else text
@@ -103,3 +100,11 @@ export def throws(fn, ...expected)
     else
       unless caught instanceof want
         throw Error.new "expected #{want?.name ?? 'error class'}, got #{caught?.constructor?.name}"
+
+# Env for subprocesses whose stdout is byte-pinned. FORCE_COLOR wins over
+# NO_COLOR for Bun's inspect paint, so a parent that set FORCE_COLOR for
+# its own reporter must not leak it into children under test.
+export def plainEnv(extra = {})
+  env = { ...process.env, ...extra }
+  delete env.FORCE_COLOR unless Object.hasOwn(extra, 'FORCE_COLOR')
+  env

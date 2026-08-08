@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { spawnSync } from 'node:child_process';
 import { compile } from '../../src/compile.js';
 import { tokenize } from '../../src/lexer.js';
+import * as reactiveRuntime from '../../src/runtime/reactive.js';
+import * as componentRuntime from '../../src/runtime/components.js';
+
+const RT = { ...reactiveRuntime, ...componentRuntime };
+const RT_NAMES = Object.keys(RT);
+const RT_VALUES = RT_NAMES.map((name) => RT[name]);
 
 const fails = (source, pattern) => {
   let error;
@@ -136,9 +141,13 @@ describe('render gates', () => {
     ].join('\n');
     for (const runtimeDelivery of ['import', 'inline']) {
       const { code } = compile(source, { runtimeDelivery });
-      const run = spawnSync('bun', ['-e', code], { encoding: 'utf8' });
-      expect(run.status).toBe(1);
-      expect(run.stderr).toContain('cannot be constructed directly');
+      expect(code).toContain("static __gates = ['user']");
+      expect(code).toMatch(/__gateBind/);
     }
+    // Behavior pin: none+binding (inline IIFE would collide with the
+    // once-loaded component runtime in this process).
+    const { code } = compile(source, { runtimeDelivery: 'none' });
+    expect(() => new Function(...RT_NAMES, code)(...RT_VALUES))
+      .toThrow(/cannot be constructed directly/);
   });
 });

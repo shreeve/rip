@@ -22,19 +22,28 @@ import { readFileSync } from 'fs';
 import { Stores } from './stores.js';
 import { CodeBuilder } from './builder.js';
 import { descriptorSegments, behaviorObjectText, paramNamesOf, splitTopLevelByComma } from './schema.js';
-import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './schema-types.js';
+import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './types/schemas.js';
 import { Parser } from './parser.js';
 import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, identifierRunAt, isIdentifierName } from './lexer.js';
-import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './typetext.js';
-import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom-vocab.js';
-import { COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS } from './component-vocab.js';
+import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './types/typetext.js';
+import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom.js';
 import {
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType,
-} from './component-types.js';
+} from './types/components.js';
+
+// Component member vocabulary — emission owns these sets. The type story
+// in types/components.js carries the same spellings for categorization;
+// keep both lists identical.
+const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError']);
+const COMPONENT_RUNTIME_FIELDS = new Set([
+  '_state', '_frame', '_parent', '_children', '_root', '_nodes', '_target',
+  '_context', '_rest', '_restWriters', '_restHandlers', '_inheritedEl',
+  '_refCleanups', '_initFailed',
+]);
 
 const BINOPS = new Set(['+', '-', '*', '/', '%', '**', '<', '>', '<=', '>=', '==', '!=', '&&', '||', '??', '<<', '>>', '>>>', '&', '^', '|']);
 // 'void-assign' is the void definition (`save! = ->`): assignment
@@ -1968,7 +1977,7 @@ class Emitter {
     }
   }
 
-  // Shared-renderer rejections (src/typetext.js), positioned on the
+  // Shared-renderer rejections (src/types/typetext.js), positioned on the
   // offending statement: a malformed alias body fails the TS-face
   // compile from the declaration's own span (rule 5), with the same
   // message class the dts consumer raises.
@@ -2043,7 +2052,7 @@ class Emitter {
   }
 
   // ── The component face ──────────────────────────────────────
-  // Segment lists from src/component-types.js: named pieces re-mark
+  // Segment lists from src/types/components.js: named pieces re-mark
   // their recorded store rows (the builder decides exact vs cover by
   // verbatim comparison; mark() no-ops where a role has no row — the
   // span-less optional glyphs), plain pieces emit bare.
@@ -7328,7 +7337,7 @@ class Emitter {
       // the annotation names the `.value` slot (the dts convention;
       // a computed's container is read-only from the outside), and
       // the container carries the `read(): T` structural brand (the
-      // runtime's detection predicate — src/component-types.js has
+      // runtime's detection predicate — src/types/components.js has
       // the doctrine): a plain `{ value: … }` literal must never
       // satisfy a container position the runtime would double-wrap.
       if (this.ts && this.annotationText(node) !== null) {
@@ -7648,12 +7657,11 @@ class Emitter {
   // duplicate members and render blocks reject, and
   // `offer` takes member declarations only (#127).
 
-  // The exact-five lifecycle hooks — src/component-types.js is the
-  // single source (the type story reads the same set).
+  // The exact-five lifecycle hooks (module COMPONENT_HOOKS above).
   static COMPONENT_HOOKS = COMPONENT_HOOKS;
 
   // Boolean HTML attributes the render DSL toggles as properties of
-  // presence — src/dom-vocab.js is the single source (the VS Code
+  // presence — src/dom.js is the single source (the VS Code
   // grammar's own-line flag rule reads the same set).
   static BOOLEAN_ATTRS = BOOLEAN_ATTRS;
 
@@ -14416,7 +14424,7 @@ const containsMatchRead = (sexpr) => {
 //               user code catches, and the registration entry `~:name`
 //               coercers resolve through (coercers resolve lazily at
 //               parse time, so in-module order is free).
-//   schema-orm: the persistence runtime — the `schema`
+//   orm: the persistence runtime — the `schema`
 //               namespace (transaction/connect/setAdapter/
 //               registerCoercer) and the adapter installer, plus the
 //               structural trigger: a `:model` declaration
@@ -14460,9 +14468,9 @@ const RUNTIME_TABLE = [
     triggers: (sexpr, preds) => containsSchema(sexpr),
   },
   {
-    key: 'schema-orm',
+    key: 'orm',
     names: ['schema', '__schemaSetAdapter'],
-    url: new URL('./runtime/schema-orm.js', import.meta.url),
+    url: new URL('./runtime/orm.js', import.meta.url),
     requires: 'schema',
     triggers: (sexpr, preds) => containsModelSchema(sexpr),
   },

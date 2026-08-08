@@ -25,10 +25,10 @@ import { writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { compile, CompileError } from '../../src/compile.js';
 import { stripFace } from '../../src/emitter.js';
-import { pluralize } from '../../src/schema-types.js';
+import { pluralize } from '../../src/types/schemas.js';
 
 const rt4 = await import('../../src/runtime/schema.js');
-await import('../../src/runtime/schema-orm.js');
+await import('../../src/runtime/orm.js');
 
 const dts = (src) => compile(src).declarations;
 const face = (src, opts = {}) => compile(src, { runtimeDelivery: 'none', face: 'ts', ...opts });
@@ -577,7 +577,7 @@ describe('naming drift gates: renderer copies vs the runtime\'s installed names'
 
   test('the timestamp columns the renderer types as Date ARE Dates at the runtime', async () => {
     await rt4.__SchemaRegistry.scope(async () => {
-      const orm = await import('../../src/runtime/schema-orm.js');
+      const orm = await import('../../src/runtime/orm.js');
       const calls = [];
       orm.__schemaSetAdapter({
         async query(sql, params) {

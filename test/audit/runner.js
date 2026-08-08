@@ -249,7 +249,7 @@ import { readProjectConfig } from '../../src/config.js';
 import { codeMask, specifierSpans } from './mask.js';
 import { Parser } from '../../src/parser.js';
 import { makeParserLexer, tokenize, ALIASES, identifierRuns, isIdentifierName } from '../../src/lexer.js';
-import { renderTypeDecl } from '../../src/typetext.js';
+import { renderTypeDecl } from '../../src/types/typetext.js';
 import { judge } from './contract.js';
 import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, generatedSpanToSource, offsetToPosition } from '../../packages/vscode/src/translate.js';
 
@@ -1952,7 +1952,7 @@ const fixtures = [...grammarFixtures, ...claimsFixtures].sort();
 // pool below can size itself to the lane's workload.
 const errorFixtures = fs.existsSync(ERRD) ? fs.readdirSync(ERRD).filter((f) => f.endsWith('.rip')).sort() : [];
 // ── shared presentation helpers
-const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+const useColor = Bun.enableANSIColors;
 const paint = (code, s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
 const bold = (s) => paint('1', s);
 const dim = (s) => paint('2', s);

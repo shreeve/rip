@@ -11,26 +11,22 @@ const files = [
   'src/schema.js',
   'src/runtime/schema.js',
   'src/runtime/components.js',
-  'src/runtime/schema-orm.js',
+  'src/runtime/orm.js',
   'src/runtime/reactive.js',
-  'src/schema-types.js',
-  'src/component-types.js',
-  'src/dts.js',
-  'src/typetext.js',
+  'src/types/schemas.js',
+  'src/types/components.js',
+  'src/types/dts.js',
+  'src/types/typetext.js',
   'src/render.js',
   'src/compile.js',
   'src/builder.js',
   'src/stores.js',
-  'src/browser-boot.js',
   'src/browser.js',
-  'src/browser-modules.js',
-  'src/browser-scripts.js',
-  'src/browser-runtimes.js',
-  'src/repl.js',
-  'src/migrate.js',
-  'src/check.js',
+  'src/cli/repl.js',
+  'src/cli/migrate.js',
+  'src/cli/check.js',
   'src/runtime/stdlib.js',
-  'src/dom-vocab.js',
+  'src/dom.js',
 ]
 
 function stripComments(src) {
@@ -152,7 +148,7 @@ lines.push('## Notes')
 lines.push('')
 lines.push('- `dist/rip.js` is the committed unminified browser bundle.')
 lines.push('- Per-file `min` is Bun.Transpiler minify on that file alone.')
-lines.push('- `runtime/schema-orm.js` is CLI/server weight; it must stay out of the browser graph.')
+lines.push('- `runtime/orm.js` is CLI/server weight; it must stay out of the browser graph.')
 lines.push('- Full-graph `rip.min.js` / `.br` sizes are recorded after the bundle script emits them.')
 lines.push('')
 

@@ -1,11 +1,11 @@
 // Client projection extraction — what assembleBundle uses to lift
 // server-defined projections across the browser boundary.
-import { describe, expect, test } from 'bun:test';
-import { extractClientProjections } from '../../src/extract-projections.js';
+import { beforeEach, describe, expect, test } from 'bun:test';
+import { extractClientProjections } from '../../src/projections.js';
 import { compile } from '../../src/compile.js';
-import { __schema } from '../../src/runtime/schema.js';
+import { __schema, __SchemaRegistry } from '../../src/runtime/schema.js';
 // Models in the parity fixture need the persistence runtime loaded.
-import '../../src/runtime/schema-orm.js';
+import '../../src/runtime/orm.js';
 
 const MODELS = `export User = schema :model
   firstName! string, 1..
@@ -35,6 +35,8 @@ const loadFromSynthetic = (syntheticSource, name) => {
 };
 
 describe('extractClientProjections', () => {
+  beforeEach(() => __SchemaRegistry.reset());
+
   test('folded projection is shippable and round-trips validation', () => {
     const r = extractClientProjections(MODELS, ['UserView'], { path: 'api/models.rip' });
     expect(r.ok).toBe(true);
@@ -43,6 +45,7 @@ describe('extractClientProjections', () => {
     const View = loadFromSynthetic(r.source, 'UserView');
     expect(View.kind).toBe('shape');
 
+    __SchemaRegistry.reset();
     const runtimeJs = compile(MODELS, { runtimeDelivery: 'none', path: 'api/models.rip' })
       .code.replace(/export const /g, 'const ');
     // eslint-disable-next-line no-new-func

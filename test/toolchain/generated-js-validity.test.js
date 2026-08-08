@@ -1,25 +1,22 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { describe, expect, test } from 'bun:test';
+import { compile } from '../../src/compile.js';
+import * as reactive from '../../src/runtime/reactive.js';
 
-const root = resolve(import.meta.dir, '../..');
-const bin = join(root, 'bin/rip');
-let dir;
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
-beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'rip-generated-validity-')); });
-afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
-
-const run = (name, source) => {
-  const file = join(dir, name);
-  writeFileSync(file, source);
-  return spawnSync('bun', [bin, file], { cwd: root, encoding: 'utf8' });
+const run = (source, tail = 'return undefined;') => {
+  const { code } = compile(source, { runtimeDelivery: 'none' });
+  const names = Object.keys(reactive);
+  const body = `${code}\n${tail}`;
+  if (/\bawait\b/.test(body)) {
+    return new AsyncFunction(...names, body)(...names.map((n) => reactive[n]));
+  }
+  return new Function(...names, body)(...names.map((n) => reactive[n]));
 };
 
 describe('generated JavaScript validity under composed lowerings', () => {
   test('generator control composes with optional compounds and nested comprehensions', () => {
-    const r = run('generator-composition.rip', [
+    const out = run([
       'calls = 0',
       'get = ->',
       '  calls += 1',
@@ -32,15 +29,13 @@ describe('generated JavaScript validity under composed lowerings', () => {
       'g = build()',
       'first = g.next().value',
       'last = g.next(3).value',
-      'p JSON.stringify([first, last])',
       '',
-    ].join('\n'));
-    expect({ status: r.status, stderr: r.stderr }).toEqual({ status: 0, stderr: '' });
-    expect(r.stdout).toBe('[3,[3,3,[[11,12],[21,22]],1]]\n');
+    ].join('\n'), 'return [first, last];');
+    expect(out).toEqual([3, [3, 3, [[11, 12], [21, 22]], 1]]);
   });
 
-  test('async functions compose with value lowerings and class-field captures', () => {
-    const r = run('async-class-composition.rip', [
+  test('async functions compose with value lowerings and class-field captures', async () => {
+    const out = await run([
       'reads = 0',
       'make = ->',
       '  reads += 1',
@@ -55,15 +50,13 @@ describe('generated JavaScript validity under composed lowerings', () => {
       '  else',
       '    []',
       'out = choose!',
-      'p JSON.stringify(out)',
       '',
-    ].join('\n'));
-    expect({ status: r.status, stderr: r.stderr }).toEqual({ status: 0, stderr: '' });
-    expect(r.stdout).toBe('[7,7,1]\n');
+    ].join('\n'), 'return out;');
+    expect(out).toEqual([7, 7, 1]);
   });
 
   test('effects compose with class fields and comprehension values in one runtime process', () => {
-    const r = run('effect-composition.rip', [
+    const out = run([
       'source := 2',
       'seen = []',
       'class Scale',
@@ -72,11 +65,9 @@ describe('generated JavaScript validity under composed lowerings', () => {
       'dispose = ~> seen.push([source, box.values])',
       'source = 4',
       'dispose()',
-      'p JSON.stringify(seen)',
       '',
-    ].join('\n'));
-    expect({ status: r.status, stderr: r.stderr }).toEqual({ status: 0, stderr: '' });
-    expect(r.stdout).toBe('[[2,[[2,4],[3,6]]],[4,[[2,4],[3,6]]]]\n');
+    ].join('\n'), 'return seen;');
+    expect(out).toEqual([[2, [[2, 4], [3, 6]]], [4, [[2, 4], [3, 6]]]]);
   });
 });
 
@@ -114,12 +105,19 @@ describe('illegal generated-scope compositions reject before JavaScript executio
 
   for (const c of cases) {
     test(c.name, () => {
-      const r = run(c.name, c.source);
-      expect(r.status).toBe(1);
-      expect(r.stdout).toBe('');
-      expect(r.stderr).toContain(`${c.name}:${c.line}:${c.col}`);
-      expect(r.stderr).toMatch(c.message);
-      expect(r.stderr).not.toMatch(/SyntaxError|Cannot use ['"]?(?:yield|await)/);
+      const error = (() => {
+        let caught;
+        try {
+          compile(c.source, { path: c.name, runtimeDelivery: 'none' });
+        } catch (e) {
+          caught = e;
+        }
+        expect(caught).toBeDefined();
+        return caught;
+      })();
+      expect(error.message).toContain(`${c.name}:${c.line}:${c.col}`);
+      expect(error.message).toMatch(c.message);
+      expect(error.message).not.toMatch(/SyntaxError|Cannot use ['"]?(?:yield|await)/);
     });
   }
 });

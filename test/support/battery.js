@@ -23,7 +23,7 @@ import { collectInto } from './testing.js';
 import { compile, CompileError } from '../../src/compile.js';
 import * as reactiveRuntime from '../../src/runtime/reactive.js';
 import * as schemaRuntime from '../../src/runtime/schema.js';
-import * as ormRuntime from '../../src/runtime/schema-orm.js';
+import * as ormRuntime from '../../src/runtime/orm.js';
 import * as componentsRuntime from '../../src/runtime/components.js';
 import * as intrinsicRuntime from '../../src/runtime/intrinsics.js';
 import * as stdlibRuntime from '../../src/runtime/stdlib.js';
@@ -298,6 +298,22 @@ function evalInScope(__code, __env) {
   return fn(__code, ...keys.map((k) => __env[k]));
 }
 
+// Rows pin return values, not the suite reporter. Print helpers (p/pp/pr/pj),
+// void-function demos, and product warnings (Tailwind, …) must not leak into
+// `bun test` output. Snippets that mock console capture the stub and restore
+// it themselves — that still works under this wrap.
+async function withQuietConsole(fn) {
+  const methods = ['log', 'info', 'warn', 'debug', 'dir', 'error'];
+  const prior = Object.fromEntries(methods.map((m) => [m, console[m]]));
+  const sink = () => {};
+  for (const m of methods) console[m] = sink;
+  try {
+    return await fn();
+  } finally {
+    for (const m of methods) console[m] = prior[m];
+  }
+}
+
 async function evaluate(compiled) {
   // Battery snippets redeclare the same schema names across hundreds
   // of rows in one process — replace semantics apply DURING a battery
@@ -308,11 +324,13 @@ async function evaluate(compiled) {
   if (registry) registry.replace = true;
   try {
     const env = { ...ENV, ...stdlibEnv(compiled) };
-    if (needsAsyncWrapper(compiled)) {
-      const fn = new AsyncFunction(...Object.keys(env), injectReturn(compiled));
-      return await fn(...Object.values(env));
-    }
-    return await evalInScope(compiled, env);
+    return await withQuietConsole(async () => {
+      if (needsAsyncWrapper(compiled)) {
+        const fn = new AsyncFunction(...Object.keys(env), injectReturn(compiled));
+        return await fn(...Object.values(env));
+      }
+      return await evalInScope(compiled, env);
+    });
   } finally {
     if (registry) registry.replace = prior;
   }

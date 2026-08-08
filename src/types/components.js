@@ -1,0 +1,690 @@
+// The component TYPE story — one walker and one set of
+// renderers shared by the two typed artifacts: the TS-face emission
+// (src/emitter.js — TS-only member declares, the constructor's props
+// surface, the companion interface) and declaration emission
+// (src/types/dts.js — the component's .d.ts shape). Both render from the
+// SAME recorded data: the member model read off the component node's
+// statements, annotation/optionalMarker spans from the side tables
+// (side-band roles), never re-derived from generated code.
+//
+// The type conventions (settled):
+//   - a reactive member (state, prop) types its CONTAINER —
+//     `{ value: T }`, the reactive convention; a computed's
+//     container is `{ readonly value: T }`; readonly/plain members
+//     and accept handles type the raw value.
+//   - unannotated members type `{ value: any }` / `any` — the
+//     CONTAINER shape is the lowering's own fact, the value type is
+//     TypeScript's honest unknown-ness; the face never invents a
+//     value type.
+//   - the PROPS surface: a prop accepts a snapshot OR a container
+//     (`T | { value: T }` — the #135 sharing contract admits both),
+//     with a `__bind_x__` slot for the `<=>` channel; `@x: T`
+//     (annotated, no marker, no default) is REQUIRED — passable as
+//     the plain slot or the bind slot (a per-prop union arm);
+//     everything else is optional; `@x?: T` renders `x?: T | …`.
+//   - `extends <tag>`: the props surface gains the tag's attribute
+//     names (src/dom.js — spec-derived data, the #125 table)
+//     and a string index signature (undeclared props are REST props
+//     by the runtime-root design; excess-property checking stays ON
+//     for non-extends components — the #131 fix's editor twin).
+//
+// Renderers produce SEGMENT lists ({ text } | { text, node, role })
+// so the face can mark each named piece under its recorded store row
+// (the CodeBuilder mark protocol decides exact vs cover) while dts
+// joins the same segments as plain text — one assembly, two
+// consumers, no drift.
+
+import { tidyType, normalizeTypeText, renderParams, optionalReader } from './typetext.js';
+import { attributeNamesFor } from '../dom.js';
+
+// Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
+// JS-face list; this file cannot import the emitter).
+const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError']);
+
+const isNode = (x) => Array.isArray(x);
+const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
+const isBlock = (x) => isNode(x) && x[0] === 'block';
+
+// A member TARGET: `x` (private) or `@x` ([".", "this", "x"]).
+const memberTarget = (t) => {
+  if (typeof t === 'string') return { name: t, isPublic: false };
+  if (isNode(t) && t[0] === '.' && t[1] === 'this' && t.length === 3 && typeof t[2] === 'string') {
+    return { name: t[2], isPublic: true };
+  }
+  return null;
+};
+
+// containsAwait's shape (the Promise spelling for async methods):
+// nested function/class bodies keep their own awaits.
+const awaitsIn = (x) => {
+  if (!isNode(x)) return false;
+  const h = x[0];
+  if (h === 'await' || h === 'dammit!' || h === 'dammit?') return true;
+  if (h === 'for-as' && x[3] === true) return true;
+  if (h === '->' || h === '=>' || h === 'def' || h === 'void-def' || h === 'class') return false;
+  return x.some(awaitsIn);
+};
+
+// ── the walker ───────────────────────────────────────────────────────
+// Reads a VALID component node (JS emission has already accepted it —
+// every rejection class fires before any type story renders) into the
+// member list the renderers consume. Statements that carry no type
+// story (render, effects) skip; anything unrecognized skips rather
+// than guessing (the JS emission is the rejection authority).
+// `behavior` names the face's per-component behavior object, or is
+// null on the road that has none (dts). Every member carries it, so
+// the segment assembly can read a computed's type through the body.
+export function componentTypeInfo(stores, source, node, behavior = null) {
+  const [, parent, body] = node;
+  const extendsTag = typeof parent === 'string' ? parent : null;
+  const stmts = isBlock(body) ? body.slice(1) : [];
+  const members = [];
+
+  const semantic = (n) => {
+    if (!isNode(n)) return null;
+    const id = stores.idOf(n);
+    return id !== null ? stores.node(id)?.semanticKind : null;
+  };
+  const roleText = (n, role) => {
+    if (source == null) return null;
+    const id = isNode(n) ? stores.idOf(n) : null;
+    if (id === null) return null;
+    const row = stores.role(id, role);
+    if (!row || row.sourceStart == null) return null;
+    return normalizeTypeText(source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, ''));
+  };
+  const hasRole = (n, role) => {
+    const id = isNode(n) ? stores.idOf(n) : null;
+    return id !== null && stores.role(id, role) !== null;
+  };
+  // The name's mark coordinates: a bare target re-marks the owning
+  // statement's `target` role; an `@name` target re-marks the member
+  // node's `property` role.
+  const nameMark = (stmt, t) =>
+    typeof t === 'string' ? { nameNode: stmt, nameRole: 'target' } : { nameNode: t, nameRole: 'property' };
+
+  const classify = (stmt) => {
+    const kind = semantic(stmt);
+    if (kind === 'render' || kind === 'effect') return;
+    if (kind === 'offer') {
+      classify(stmt[1]);
+      return;
+    }
+    if (kind === 'accept' && typeof stmt[1] === 'string') {
+      members.push({
+        node: stmt, name: stmt[1], kind: 'accept', isPublic: false,
+        optional: false, hasDefault: false, annotation: null,
+        nameNode: stmt, nameRole: 'name',
+      });
+      return;
+    }
+    if (((kind === 'state' || kind === 'computed' || kind === 'readonly') && stmt.length === 3) ||
+        (kind === 'gate' && stmt.length >= 3)) {
+      const t = memberTarget(stmt[1]);
+      if (t === null) return;
+      members.push({
+        node: stmt, name: t.name, kind, isPublic: t.isPublic,
+        optional: hasRole(stmt, 'optionalMarker'), hasDefault: true,
+        annotation: roleText(stmt, 'annotation'),
+        ...nameMark(stmt, stmt[1]),
+      });
+      return;
+    }
+    if (!isNode(stmt)) return;
+    // `@x?` — the optional bare prop (an existence node over the
+    // member; the `?` glyph is the operator literal, span-less).
+    if (stmt[0] === '?' && stmt.length === 2) {
+      const t = memberTarget(stmt[1]);
+      if (t === null || !t.isPublic) return;
+      members.push({
+        node: stmt, name: t.name, kind: 'prop', isPublic: true,
+        optional: true, hasDefault: false, annotation: null,
+        nameNode: stmt[1], nameRole: 'property',
+      });
+      return;
+    }
+    // `@x: T` / `@x?: T` — the typed prop (a typed-var wrapper; the
+    // optionalMarker role carries the `?` span side-band).
+    if (stmt[0] === 'typed-var' && stmt.length === 3) {
+      const t = memberTarget(stmt[1]);
+      if (t === null || !t.isPublic) return;
+      members.push({
+        node: stmt, name: t.name, kind: 'prop', isPublic: true,
+        optional: hasRole(stmt, 'optionalMarker'), hasDefault: false,
+        annotation: roleText(stmt, 'annotation') ?? tidyType(stmt[2]),
+        ...nameMark(stmt, stmt[1]),
+      });
+      return;
+    }
+    // `@x` — the bare required prop.
+    if (stmt[0] === '.' && stmt[1] === 'this' && stmt.length === 3 && typeof stmt[2] === 'string') {
+      members.push({
+        node: stmt, name: stmt[2], kind: 'prop', isPublic: true,
+        optional: false, hasDefault: false, annotation: null,
+        nameNode: stmt, nameRole: 'property',
+      });
+      return;
+    }
+    // Plain assigns: fields, methods, hooks.
+    if ((stmt[0] === '=' || stmt[0] === 'void-assign') && stmt.length === 3) {
+      const t = memberTarget(stmt[1]);
+      if (t === null) return;
+      const isVoid = stmt[0] === 'void-assign';
+      if (isFunc(stmt[2])) {
+        members.push({
+          node: stmt, name: t.name,
+          kind: COMPONENT_HOOKS.has(t.name) ? 'hook' : 'method',
+          isPublic: false, optional: false, hasDefault: true, annotation: null,
+          func: stmt[2], isVoid,
+          ...nameMark(stmt, stmt[1]),
+        });
+        return;
+      }
+      if (isVoid) return;
+      members.push({
+        node: stmt, name: t.name, kind: 'plain', isPublic: t.isPublic,
+        optional: false, hasDefault: true,
+        annotation: roleText(stmt, 'annotation'),
+        ...nameMark(stmt, stmt[1]),
+      });
+      return;
+    }
+    // Colon-method groups (`save: (e) -> …`).
+    if (stmt[0] === 'object') {
+      for (const pair of stmt.slice(1)) {
+        if (!isNode(pair) || (pair[0] !== ':' && pair[0] !== 'void-pair')) continue;
+        if (typeof pair[1] !== 'string' || !isFunc(pair[2])) continue;
+        members.push({
+          node: pair, name: pair[1],
+          kind: COMPONENT_HOOKS.has(pair[1]) ? 'hook' : 'method',
+          isPublic: false, optional: false, hasDefault: true, annotation: null,
+          func: pair[2], isVoid: pair[0] === 'void-pair',
+          nameNode: pair, nameRole: 'key',
+        });
+      }
+    }
+  };
+
+  for (const stmt of stmts) classify(stmt);
+  // Sibling-name set for the typeof-spelling guard (a member's
+  // initializer rooted at another member cannot spell module-scope
+  // typeof).
+  const siblings = new Set(members.map((m) => m.name));
+  for (const m of members) { m.siblings = siblings; m.behavior = behavior; }
+  return {
+    extendsTag,
+    behavior,
+    members,
+    roleText,
+    // The shared optionality reader, carried on `info` because BOTH
+    // signature emitters render a component's instance type through
+    // the same instanceTypeLines() — so a dropped `?` here is dropped
+    // in the face AND the .d.ts identically. They agree, and are both
+    // wrong: the face's own method body keeps `note?` while the
+    // instance type it declares says `note` is required, so a legal
+    // call draws a spurious TS2554. Agreeing outputs mean no
+    // face/dts diff can see it, and both are valid TS, so no tsc gate
+    // can either. Read the role; never assume.
+    isOptionalParam: optionalReader(stores),
+  };
+}
+
+// ── segment assembly ─────────────────────────────────────────────────
+// A segment is { text } or { text, node, role }; the face marks the
+// named pieces (mark() no-ops where the role has no store row — the
+// span-less optional glyphs), dts joins the text.
+export const segmentsText = (segs) => segs.map((s) => s.text).join('');
+
+// Is a reactive-container member — its runtime slot is a `__state`
+// container ({ value: T; read(): T; touch(): void }).
+const containerish = (m) => m.kind === 'state' || m.kind === 'prop';
+
+// A WRITABLE container's notify seam: a nested write (`form.first <=> …`)
+// changes no container identity, so the bind notifies the root through
+// `touch`. The two spellings answer two different questions, and a
+// container position must pick the one that matches how it got its
+// container:
+//
+//   MINTED — the slot holds a container `__state` made (a module
+//     reactive, `rest`, a component's own `:=` member). It has `touch`,
+//     so the type says so outright and a consumer holding the container
+//     writes `count.touch()` with no guard. Spelling this optional was
+//     measured: under `rip.strict` the guardless call draws TS2722 on a
+//     notify that cannot be absent.
+//
+//   TAKEN — the slot ACCEPTS a container from somewhere else (a prop, a
+//     bind channel, and the prop's own instance type, since that is the
+//     accepted container). The sharing contract admits a caller-supplied
+//     `{ value, read }`, which the runtime treats as a container (the
+//     `read` predicate) but which has no `touch`, so its nested writes
+//     notify nothing. Optional is the honest spelling and is why the
+//     lowering emits `.touch?.()` rather than `.touch()`.
+//
+// Read-only containers (`~=`) have no `touch` at runtime and spell
+// neither. TAKEN is the default: claiming a `touch` that is not there
+// rejects containers the runtime accepts, which is the louder failure.
+export const MINTED = '; touch(): void';
+export const TAKEN = '; touch?(): void';
+
+// The container type carries the STRUCTURAL BRAND `read(): T` — the
+// runtime's own container-detection predicate (`typeof x.read ===
+// 'function'`, src/runtime/reactive.js), spelled into the type. A
+// plain object literal (`{ value: 5 }`) is NOT signal-shaped: the
+// runtime would DOUBLE-WRAP it (`__state({value: 5})` makes `.value`
+// the object), so the type must reject it — and with the predicate AS
+// the brand, anything the type accepts is exactly what the runtime
+// treats as a container (type story = runtime truth — taken
+// structurally: a unique-symbol brand would
+// need the ambient-mode symbol and the inline-mode runtime's own
+// symbol to be the SAME type, which no spelling gives — `read` is
+// already on every real container's inferred type in every delivery).
+// The bare parameter NAMES of a type-parameter list, for the self-arguments
+// a generic component's own surface applies (`mount(): Select<TOption>` —
+// constraints stay on the header that declares them). Split at bracket
+// DEPTH ZERO: a constraint or default carries its own commas
+// (`<T extends Record<string, number>>`), and a naive split renders a list
+// that does not parse, which is a worse failure than the unbound name it
+// was meant to fix.
+export const typeParamNames = (typeParams) => {
+  if (!typeParams) return [];
+  const body = typeParams.slice(1, -1);
+  const names = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    // A quoted constraint carries whatever bytes it likes, commas and
+    // brackets included — skip to its close before counting anything.
+    if (c === '"' || c === "'" || c === '`') {
+      for (i++; i < body.length; i++) {
+        if (body[i] === '\\') { i++; continue; }
+        if (body[i] === c) break;
+      }
+      continue;
+    }
+    if (c === '<' || c === '(' || c === '[' || c === '{') depth++;
+    // The `>` of an ARROW closes nothing: a function-type constraint
+    // (`F extends () => void`) would otherwise drive depth negative and
+    // swallow the comma that ends the parameter.
+    else if (c === '>' && body[i - 1] === '=') continue;
+    else if (c === '>' || c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ',' && depth === 0) { names.push(body.slice(start, i)); start = i + 1; }
+  }
+  names.push(body.slice(start));
+  // A variance or const modifier precedes the name it governs.
+  const MODIFIERS = new Set(['const', 'in', 'out']);
+  return names.map((n) => {
+    const words = n.trim().split(/\s+/).filter(Boolean);
+    while (words.length > 1 && MODIFIERS.has(words[0])) words.shift();
+    return words[0] ?? '';
+  }).filter(Boolean);
+};
+
+// The same arity filled with `any` — for a surface that references the
+// component's own type where no parameter is in scope to name.
+export const anyArgsOf = (typeParams) => {
+  const n = typeParamNames(typeParams).length;
+  return n === 0 ? '' : `<${Array(n).fill('any').join(', ')}>`;
+};
+
+// The self-reference arguments for a generic surface — `<A, B>` — or ''.
+export const selfArgsOf = (typeParams) => {
+  const names = typeParamNames(typeParams);
+  return names.length === 0 ? '' : `<${names.join(', ')}>`;
+};
+
+export const containerType = (t, ro = '', notify = TAKEN) =>
+  `{ ${ro}value: ${t}; read(): ${t}${ro === '' ? notify : ''} }`;
+
+// The member's INSTANCE type as segments (`declare name: …` bodies,
+// interface member lines). The annotated piece marks as `: T` — the
+// recorded span's own shape (a TYPE run spans colon→end), so the
+// builder's verbatim comparison can classify it EXACT. Optional
+// annotated props read `T | undefined` — the container exists on
+// every instance; only the value may be absent.
+// Syntactic literal inference for unannotated member initializers
+//: `loading := false` declares `{ value: boolean }` —
+// what `let loading = false` would infer, computed from the literal
+// alone (no checker in the emitter; the same widening rules as
+// declare-in-place: literals widen, `let` members stay mutable).
+// Non-evident initializers keep `any`.
+export const syntacticLiteralType = (v) => {
+  if (typeof v === 'string') {
+    if (v === 'true' || v === 'false') return 'boolean';
+    if (/^-?\d[\d_]*(\.\d+)?$/.test(v)) return 'number';
+    if (/^["'][^]*["']$/.test(v)) return 'string';
+    return null;
+  }
+  if (!Array.isArray(v)) return null;
+  const h = v[0];
+  if (h === 'str') return 'string';
+  if (h === 'array') {
+    if (v.length === 1) return 'any[]';
+    const el = new Set(v.slice(1).map(syntacticLiteralType));
+    return el.size === 1 && !el.has(null) ? `${[...el][0]}[]` : null;
+  }
+  // Operator results with syntactically-fixed types (the reactive
+  // faces lean on these: `clicks * 2` is number whatever clicks is;
+  // comparisons are boolean; `+` only when both sides agree).
+  if (v.length === 3 && ['*', '/', '%', '**', '//', '%%', '-', '<<', '>>', '>>>', '&', '^', '|'].includes(h)) return 'number';
+  if (v.length === 2 && (h === '-' || h === '+')) return syntacticLiteralType(v[1]) === 'number' ? 'number' : null;
+  if (v.length === 3 && ['<', '>', '<=', '>=', '==', '!='].includes(h)) return 'boolean';
+  if (v.length === 2 && (h === '!' || h === 'not')) return 'boolean';
+  if (v.length === 3 && (h === '&&' || h === '||' || h === '??')) {
+    const a = syntacticLiteralType(v[1]);
+    return a !== null && a === syntacticLiteralType(v[2]) ? a : null;
+  }
+  if (v.length === 3 && h === '+') {
+    const a = syntacticLiteralType(v[1]);
+    const b = syntacticLiteralType(v[2]);
+    return a === 'number' && b === 'number' ? 'number' : a === 'string' && b === 'string' ? 'string' : null;
+  }
+  return null;
+};
+
+// typeof spelling for member initializers whose type is a NAME's:
+// `store ~= cart` declares `typeof cart` (the module binding's full
+// inferred type); `ref ~= new X({})` declares `InstanceType<typeof X>`.
+// Only entity paths — plain identifiers, dotted identifier chains, and
+// new-expressions over them — spell; anything else stays null.
+const entityPath = (v) => {
+  if (typeof v === 'string') {
+    return /^[A-Za-z_$][\w$]*$/.test(v) &&
+      !['true', 'false', 'null', 'undefined', 'this', 'it'].includes(v) ? v : null;
+  }
+  if (Array.isArray(v) && v[0] === '.' && v.length === 3 && typeof v[2] === 'string') {
+    const base = entityPath(v[1]);
+    return base === null ? null : `${base}.${v[2]}`;
+  }
+  return null;
+};
+const typeofSpelling = (v) => {
+  const path = entityPath(v);
+  if (path !== null) return `typeof ${path}`;
+  if (Array.isArray(v) && v[0] === 'new' && v.length === 2 &&
+      Array.isArray(v[1]) && typeof v[1][0] === 'string' && /^[A-Za-z_$][\w$]*$/.test(v[1][0])) {
+    return `InstanceType<typeof ${v[1][0]}>`;
+  }
+  return null;
+};
+
+// Does the face declare this member as the lowering's CONTAINER rather
+// than as its value? Only these have a container for a declaration
+// hover to see past — a `=!` or plain member's declared type IS its
+// value type (`declare readonly cap: number`), and a member whose
+// annotation happens to spell the container shape by hand meant it.
+export const declaresContainer = (m) =>
+  containerish(m) || m.kind === 'computed' || m.kind === 'gate';
+
+// Does this member's face type read through the lowering's behavior
+// object? The projection below is the one member type spelled from a
+// MINTED name, which the editor cannot present in the author's
+// vocabulary — so the two places that care read one predicate.
+export const isBehaviorProjected = (m) =>
+  m.kind === 'computed' && m.annotation == null && Boolean(m.behavior);
+
+const memberTypeSegments = (m, lead) => {
+  // An unannotated computed reads its type from the BODY, through the
+  // face's behavior object (the emitter emits one per named component,
+  // carrying the same compiled bodies `_init` does). The form table
+  // below cannot do this: it reads the initializer's SHAPE, so `count
+  // * 2` types number and `words.length` types any. An author's own
+  // annotation still wins — it is a declaration, not a guess.
+  //
+  // `m.behavior` is absent on the dts road, which has no module-local
+  // value to name and keeps the form table (the schema-callable
+  // precedent: derivation reaches this checker, not consumers).
+  if (isBehaviorProjected(m)) {
+    const rt = `ReturnType<typeof ${m.behavior}.${m.name}>`;
+    return [{ text: `${lead}{ readonly value: ${rt}; read(): ${rt} }` }];
+  }
+  // The typeof spelling resolves at MODULE scope (the declare row sits
+  // on the class) — an initializer rooted at a SIBLING member
+  // (`bad1 ~= store.itms`) must not spell it (this.store is not in
+  // scope there); those members keep any.
+  const rootOf = (v) => (typeof v === 'string' ? v
+    : Array.isArray(v) && v[0] === '.' && v.length === 3 ? rootOf(v[1]) : null);
+  const siblingRooted = m.siblings !== undefined &&
+    Array.isArray(m.node) && m.node.length === 3 && m.siblings.has(rootOf(m.node[2]));
+  const t = m.annotation ??
+    (m.hasDefault && !siblingRooted && Array.isArray(m.node) && m.node.length === 3
+      ? (syntacticLiteralType(m.node[2]) ?? typeofSpelling(m.node[2]))
+      : null);
+  const typed = t !== null
+    ? [{ text: `: ${t}`, node: m.node, role: 'annotation' }]
+    : [{ text: ': any' }];
+  const vt = t ?? 'any';
+  if (m.kind === 'accept') return [{ text: `${lead}any` }];
+  // The container renders the member's type TWICE — once on `value`, once
+  // as `read()`'s return. Both spellings are the same annotation, so both
+  // carry its span: an unmarked one falls to whatever cover encloses the
+  // line, which in the companion interface is the whole component.
+  const readBack = (pre, post) => (t !== null
+    ? [{ text: pre }, { text: vt, node: m.node, role: 'annotation' }, { text: post }]
+    : [{ text: `${pre}${vt}${post}` }]);
+  if (containerish(m)) {
+    const und = t !== null && m.optional && m.kind === 'prop' ? ' | undefined' : '';
+    // PUBLIC is the line, not the kind: a member the caller can reach
+    // takes whatever container arrives on its bind channel, and a
+    // defaulted prop (`@step: number = 1`) carries kind 'state' while
+    // `_init` still reads `props.__bind_step__` first. A private member
+    // is minted here and nowhere else.
+    const notify = m.isPublic ? TAKEN : MINTED;
+    return [
+      { text: `${lead}{ value` }, ...typed,
+      ...readBack(`${und}; read(): `, `${und}${notify} }`),
+    ];
+  }
+  if (m.kind === 'computed' || m.kind === 'gate') {
+    return [{ text: `${lead}{ readonly value` }, ...typed, ...readBack('; read(): ', ' }')];
+  }
+  if (t === null) return [{ text: `${lead}any` }];
+  return typed; // readonly / plain: the annotation IS `: T`
+};
+
+// One face `declare` line for a non-callable member (methods and
+// hooks are REAL class methods — their annotations ride the shared
+// param/return machinery).
+export const memberDeclareSegments = (m) => {
+  // An unannotated computed takes an INFERRED position rather than a
+  // `declare` carrying a type node. TypeScript's quickinfo echoes a
+  // written type node VERBATIM — driven against tsgo, both
+  // `ReturnType<typeof f>` and an inlined conditional print exactly as
+  // spelled, resolved neither time — so no projection can be written that
+  // does not read as machinery, and no server-side rewrite reaches past
+  // it. A declaration with no type node has nothing to echo, so
+  // TypeScript prints the RESOLVED type instead.
+  //
+  // The initializer reuses the behavior object the face already carries,
+  // which holds the same compiled body `_init` assigns, so nothing is
+  // computed twice and the two cannot drift. At a field initializer
+  // `this` is the class, which is the position v3 reaches by
+  // construction (its shadow emits the computed as a field with its
+  // initializer). TS-only: the region strips, and `_init`'s assignment
+  // remains the only one the shipped JS carries.
+  if (isBehaviorProjected(m)) return [
+    { text: m.name, node: m.nameNode, role: m.nameRole },
+    // `this as any` is not sloppiness — it breaks a real circularity. The
+    // behavior function declares `this: <Component>`, and the member being
+    // initialized is PART of that component's type, so checking the
+    // argument's assignability means resolving the class while this field
+    // is still being inferred (driven: TS2345, `'this' is not assignable to
+    // parameter of type 'Badge'`). The cast costs nothing that matters: the
+    // return type comes from the function's own signature, not from the
+    // argument, so the member still infers its resolved value type. v3
+    // avoids the circularity differently, by inlining the body so `this` is
+    // only ever a receiver and never an argument.
+    { text: ` = __computed(() => ${m.behavior}.${m.name}.call(this as any));` },
+  ];
+  return [
+    // A `=!` member is a CONST value: readonly on the declare, so
+    // instance writes draw TS2540.
+    { text: m.kind === 'readonly' ? 'declare readonly ' : 'declare ' },
+    { text: m.name, node: m.nameNode, role: m.nameRole },
+    ...memberTypeSegments(m, ': '),
+    { text: ';' },
+  ];
+};
+
+// The `=!` seam's this-cast type: one MUTABLE member carrying the
+// declared type the class states readonly. `_init` is the lowering's
+// constructor seam, so its one legitimate readonly write has to quiet
+// TS2540 — through a cast that keeps the member's type, so the value
+// still checks against it.
+export const readonlyCastType = (m) => `{ ${m.name}${segmentsText(memberTypeSegments(m, ': '))} }`;
+
+export const isDeclarableMember = (m) => m.kind !== 'method' && m.kind !== 'hook';
+
+// ── the props surface ────────────────────────────────────────────────
+const publicProps = (info) =>
+  info.members.filter((m) => m.isPublic && (containerish(m) || m.kind === 'readonly' || m.kind === 'plain'));
+
+const isRequiredProp = (m) => m.kind === 'prop' && m.annotation !== null && !m.optional;
+
+// A props-object key spelling (attribute names may carry hyphens).
+const keyText = (name) => (/^[A-Za-z_$][\w$]*$/.test(name) ? name : `'${name}'`);
+
+// Every component takes `props` optionally unless a REQUIRED prop
+// exists (annotated `@x: T`, no marker, no default).
+export const propsParamOptional = (info) => !publicProps(info).some(isRequiredProp);
+
+// The props object type as segments: every prop as an optional entry
+// with its `<=>` bind slot, `children` (+ the extends attribute
+// surface and its index signature), then one union arm per REQUIRED
+// prop making it non-optional — passable as the plain slot or the
+// container slot (the base keeps both keys optional so _init's
+// `props.x` / `props.__bind_x__` reads type on every arm).
+export function propsTypeSegments(info) {
+  const props = publicProps(info);
+  const segs = [{ text: '{ ' }];
+  const used = new Set();
+  let first = true;
+  const sep = () => {
+    if (!first) segs.push({ text: '; ' });
+    first = false;
+  };
+  for (const m of props) {
+    used.add(m.name);
+    const t = m.annotation;
+    sep();
+    segs.push(
+      { text: m.name, node: m.nameNode, role: m.nameRole },
+      { text: '?', node: m.node, role: 'optionalMarker' },
+    );
+    if (t === null) segs.push({ text: ': any' });
+    else if (containerish(m)) segs.push({ text: `: ${t}`, node: m.node, role: 'annotation' }, { text: ` | ${containerType(t)}` });
+    else segs.push({ text: `: ${t}`, node: m.node, role: 'annotation' });
+    if (containerish(m)) {
+      segs.push({ text: `; __bind_${m.name}__?: ${containerType(t ?? 'any')}` });
+    }
+  }
+  // The projection channel — UNLESS the component declares a member
+  // named `children` of its own (legal: `children` is ONE prop, the
+  // extends record; a declared prop's entry above already carries the
+  // name, and a duplicate key is TS2300 on every artifact (the
+  // same member-wide suppression instanceTypeLines carries).
+  if (!info.members.some((m) => m.name === 'children')) {
+    sep();
+    segs.push({ text: 'children?: any' });
+  }
+  used.add('children');
+  if (info.extendsTag !== null) {
+    // Intrinsic attr typing: passthrough attributes
+    // type through the tag's DOM interface — `disabled?:` on a button
+    // is boolean, not any — via an extends-Record guard so attributes
+    // with no matching property fall back to any instead of erroring.
+    // Attributes whose DOM property is camelCased get BOTH spellings
+    // (authors write maxLength; the spec list says maxlength).
+    const CAMEL = {
+      maxlength: 'maxLength', minlength: 'minLength', readonly: 'readOnly',
+      tabindex: 'tabIndex', colspan: 'colSpan', rowspan: 'rowSpan',
+      contenteditable: 'contentEditable', formaction: 'formAction',
+      formenctype: 'formEnctype', formmethod: 'formMethod',
+      formnovalidate: 'formNoValidate', formtarget: 'formTarget',
+      novalidate: 'noValidate', crossorigin: 'crossOrigin',
+      usemap: 'useMap', srclang: 'srcLang', autocomplete: 'autocomplete',
+    };
+    const tagMap = `HTMLElementTagNameMap[${JSON.stringify(info.extendsTag)}]`;
+    const guarded = (prop) => `${tagMap} extends Record<'${prop}', infer T> ? T : any`;
+    const isHtmlTag = attributeNamesFor(info.extendsTag).length > 0 && !/^(svg|path|circle|rect|line|g|text|defs|use)$/.test(info.extendsTag);
+    for (const attr of attributeNamesFor(info.extendsTag)) {
+      if (used.has(attr)) continue;
+      const prop = CAMEL[attr] ?? attr;
+      const t = isHtmlTag ? guarded(prop) : 'any';
+      segs.push({ text: `; ${keyText(attr)}?: ${t}` });
+      if (prop !== attr && !used.has(prop)) segs.push({ text: `; ${prop}?: ${t}` });
+    }
+    segs.push({ text: '; [key: string]: any' });
+  }
+  segs.push({ text: ' }' });
+  for (const m of props.filter(isRequiredProp)) {
+    const t = m.annotation;
+    segs.push(
+      { text: ' & ({ ' },
+      { text: m.name, node: m.nameNode, role: m.nameRole },
+      { text: `: ${t}`, node: m.node, role: 'annotation' },
+      { text: ` | ${containerType(t)} } | { __bind_${m.name}__: ${containerType(t)} })` },
+    );
+  }
+  return segs;
+}
+
+export const propsTypeText = (info) => segmentsText(propsTypeSegments(info));
+
+// ── the instance surface ─────────────────────────────────────────────
+// The lines shared by the face's companion interface and the .d.ts
+// declaration: every member (typed or explicit-any — a declared
+// component carries its WHOLE public surface, so a consumer's legal
+// call never draws TS2339), then the __Component API the runtime
+// provides (mount returns the instance; static mount mirrors it on
+// the constructor type).
+// Each line is { text, node?, role? }. Behavior-projected computeds
+// carry their member's name node: their ReturnType<> projection is
+// where a type-level cycle surfaces (mutually-recursive computeds draw
+// TS2502 on the container's `value`), and an unanchored line would
+// cover-map that diagnostic across the whole component instead of the
+// computed the author wrote. Every other line stays unanchored — the
+// companion's enclosing $self mark serves it, and a second source row
+// per member would compete with the class declare road's for hover.
+export function instanceTypeLines(info, selfType) {
+  const lines = [];
+  let hasChildren = false;
+  for (const m of info.members) {
+    if (m.name === 'children') hasChildren = true;
+    if (m.kind === 'method' || m.kind === 'hook') {
+      const declared = info.roleText(m.func, 'returnType');
+      const base = declared ?? (m.isVoid ? 'void' : 'any');
+      const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
+      lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};` }] });
+      continue;
+    }
+    // SEGMENTS, not one blob: the member's type is rendered here a second
+    // time (the class declare is the first), so a fault in it publishes
+    // twice, and the companion has no source line of its own to fall back
+    // on — an unmapped byte lands on the component's `$self` cover and
+    // paints every line of the component. The type segments already carry
+    // their annotation spans; passing them through is what puts the second
+    // publication on the member the author wrote.
+    lines.push({
+      // The line's own cover is the MEMBER, so any byte without a finer
+      // span of its own — the container's `value`, which is where TS
+      // reports a computed cycle — lands on the member the author wrote
+      // instead of on the component. Segments carrying a span (the
+      // annotation) nest inside and win where they apply.
+      node: m.nameNode, role: m.nameRole,
+      segs: [
+        { text: m.kind === 'readonly' ? 'readonly ' : '' },
+        { text: m.name },
+        ...memberTypeSegments(m, ': '),
+        { text: ';' },
+      ],
+    });
+  }
+  // Scaffolding the author never wrote: no source span exists for these, so
+  // they carry no mark and stay under the component's cover.
+  if (!hasChildren) lines.push({ segs: [{ text: 'children?: any;' }] });
+  if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${containerType('Record<string, any>', '', MINTED)};` }] });
+  lines.push({ segs: [{ text: `mount(target?: any): ${selfType};` }] });
+  lines.push({ segs: [{ text: 'unmount(options?: { removeDOM?: boolean }): void;' }] });
+  lines.push({ segs: [{ text: 'emit(name: string, detail?: any): void;' }] });
+  return lines;
+}

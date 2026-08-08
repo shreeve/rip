@@ -1,0 +1,116 @@
+// The TS-face drift-detection layer — the
+// EXTENDED tier's property harness over generated annotated programs
+// (scripts/fuzz-tsface.mjs: seeded, deterministic, type-correct by
+// construction). Three properties per program:
+//   1. STRIP IDENTITY: stripFace(tsFace) === JS-mode bytes, both
+//      runtime deliveries — the drift gate over programs the corpus
+//      never spelled.
+//   2. DRIFT DETECTOR: every annotated construct, compiled alone,
+//      produces ≥1 TS-only region — an emission path that silently
+//      stops emitting TS bytes for a construct class fails HERE, by
+//      construct name, before any corpus row notices.
+//   3. TSC-CLEAN: every composed face checks clean under tsc — ONE
+//      batched program, diagnostics attributed per seed.
+//
+// Reproduction: every failure message carries the seed; run
+//   RIP_FUZZ_SEED=<seed> bun run test:all test/fuzz-tsface.test.js
+// to isolate it, and
+//   bun scripts/fuzz-tsface.mjs <seed>
+// to print the program, its face, and the recorded regions.
+import { test, expect } from 'bun:test';
+import { compile } from '../../../src/compile.js';
+import { stripFace } from '../../../src/emitter.js';
+import { describeExtended, EXTENDED } from '../../support/extended.js';
+import { tscBatch } from '../../support/tscbatch.js';
+import { resolveTsc } from '../../support/tsc.js';
+import { generateProgram, CONSTRUCT_KINDS } from '../../support/fuzz-tsface.mjs';
+import { AMBIENT } from '../../support/ambient.js';
+
+// tsc is the repository's pinned TypeScript (resolveTsc), resolved only
+// in the extended tier that spawns it. A missing install throws here —
+// loud, a broken environment — never a silent skip.
+const TSC = EXTENDED ? resolveTsc() : null;
+const TSC_TIMEOUT = 60_000;
+
+// The seed corpus: 48 programs (~230 constructs) per run, or exactly
+// one under RIP_FUZZ_SEED (the reproduction path).
+const SEEDS = process.env.RIP_FUZZ_SEED
+  ? [Number(process.env.RIP_FUZZ_SEED)]
+  : Array.from({ length: 48 }, (_, i) => i + 1);
+
+const repro = (seed) =>
+  `reproduce: RIP_FUZZ_SEED=${seed} bun run test:all test/fuzz-tsface.test.js; ` +
+  `inspect: bun scripts/fuzz-tsface.mjs ${seed}`;
+
+const programs = EXTENDED ? SEEDS.map(generateProgram) : [];
+
+describeExtended('fuzz: strip identity — generated faces minus regions equal JS-mode bytes', () => {
+  for (const p of programs) {
+    test(`seed ${p.seed} (${p.constructs.length} constructs)`, () => {
+      for (const runtimeDelivery of ['none', 'inline']) {
+        const faced = compile(p.source, { runtimeDelivery, face: 'ts' });
+        const plain = compile(p.source, { runtimeDelivery });
+        expect(
+          stripFace(faced.code, faced.tsRegions),
+          `strip(face) !== JS bytes (delivery ${runtimeDelivery}) — ${repro(p.seed)}\n--- source ---\n${p.source}`,
+        ).toBe(plain.code);
+        expect(plain.tsRegions).toEqual([]);
+      }
+    });
+  }
+});
+
+describeExtended('fuzz: the drift detector — every annotated construct produces at least one TS-only region', () => {
+  for (const p of programs) {
+    test(`seed ${p.seed}`, () => {
+      for (const construct of p.constructs) {
+        const faced = compile(construct.source, { runtimeDelivery: 'none', face: 'ts' });
+        expect(
+          faced.tsRegions.length,
+          `'${construct.kind}' emitted ZERO TS-only regions — its annotations no longer reach the face; ` +
+          `${repro(p.seed)}\n--- construct ---\n${construct.source}`,
+        ).toBeGreaterThanOrEqual(1);
+      }
+    });
+  }
+
+  test('the surface floor: the default seed corpus exercises EVERY generator construct kind', () => {
+    if (process.env.RIP_FUZZ_SEED) return; // single-seed reproduction runs are exempt
+    const seen = new Set(programs.flatMap((p) => p.constructs.map((c) => c.kind)));
+    for (const kind of CONSTRUCT_KINDS) {
+      expect(seen.has(kind), `construct kind never generated across the corpus: '${kind}'`).toBe(true);
+    }
+  });
+});
+
+
+const describeTscExtended = describeExtended;
+
+describeTscExtended('fuzz: every composed face is tsc-clean (one batched program)', () => {
+  let batch = null;
+  const files = { 'ambient.d.ts': AMBIENT };
+  if (EXTENDED && TSC) {
+    for (const p of programs) {
+      const faced = compile(p.source, { runtimeDelivery: 'none', face: 'ts' });
+      files[`seed${p.seed}.ts`] = `${faced.code}\nexport {};\n`;
+    }
+  }
+  const runBatch = () => {
+    batch ??= tscBatch(TSC, files, ['--module', 'esnext', '--noImplicitAny', 'false']);
+    return batch;
+  };
+
+  for (const p of programs) {
+    test(`seed ${p.seed}`, () => {
+      const errors = runBatch().byFile.get(`seed${p.seed}.ts`);
+      expect(
+        errors,
+        `tsc rejected the face — ${repro(p.seed)}\n${errors.join('\n')}\n--- face ---\n${files[`seed${p.seed}.ts`]}`,
+      ).toEqual([]);
+    }, TSC_TIMEOUT);
+  }
+
+  test('no diagnostic escapes seed attribution', () => {
+    expect(runBatch().unattributed).toEqual([]);
+  }, TSC_TIMEOUT);
+});

@@ -187,9 +187,8 @@ function __hmrEmit(type, detail = {}) {
   const event = { type, at: Date.now(), ...detail };
   __hmrEventLog.push(event);
   if (__hmrEventLog.length > __HMR_EVENT_CAP) __hmrEventLog.shift();
-  if (typeof console !== 'undefined' && typeof console.debug === 'function') {
-    console.debug(`[Rip HMR] ${type}`, detail);
-  }
+  // Event log + rip:hmr CustomEvent are the seams. No console traffic —
+  // suite runs and headless boots must stay quiet; tooling reads __hmrEvents.
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
     try {
       window.dispatchEvent(new CustomEvent('rip:hmr', { detail: event }));
@@ -228,16 +227,6 @@ function __hmrPreserveState(oldInstance, newInstance) {
     }
   }
   const id = newInstance?.constructor?.__hmrId ?? oldInstance?.constructor?.__hmrId ?? null;
-  if (diff.removed.length > 0 && typeof console !== 'undefined' && typeof console.warn === 'function') {
-    console.warn(
-      `[Rip HMR] migrate ${id ?? '<component>'}: dropping orphaned state [${diff.removed.join(', ')}]`,
-    );
-  }
-  if (diff.added.length > 0 && typeof console !== 'undefined' && typeof console.info === 'function') {
-    console.info(
-      `[Rip HMR] migrate ${id ?? '<component>'}: initializing new state [${diff.added.join(', ')}]`,
-    );
-  }
   __hmrEmit('migrate', { id, ...diff, copied });
   return { ...diff, copied };
 }
