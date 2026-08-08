@@ -21,14 +21,9 @@ Permanent documentation:
 - [docs/CLEANROOM.md](docs/CLEANROOM.md) — the clean-room engine
   rewrite plan (activates when v4 is declared done).
 
-Working ledgers (not permanent docs):
-
-- `HANDOFF.md` — the tracked session launch document. Read it first
-  when starting a session; rewrite it at session boundaries with
-  live-verified facts only — never stale state. It is committed like
-  any other file.
-- Package-local leftovers live beside the package (for example
-  `packages/sites/TODO.md`).
+Working leftovers (not permanent docs) live beside the package that
+owns them (for example `packages/sites/TODO.md`). Open product work
+is tracked in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 Placement test for any new document: opened as part of WORKING →
 repository root; consulted for UNDERSTANDING → docs/.

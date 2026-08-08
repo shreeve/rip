@@ -25,11 +25,10 @@ package-local `TODO.md` files (for example
 
 ## Documentation
 
-**Working ledgers (read / rewrite while shipping):**
+**Working docs (read / rewrite while shipping):**
 
 - [AGENTS.md](AGENTS.md) — mandatory repository rules and invariants
 - [packages/AGENTS.md](packages/AGENTS.md) — first-party package mold and earned shapes
-- [HANDOFF.md](HANDOFF.md) — current session launch facts
 
 **Understanding (permanent contracts under `docs/`):**
 
