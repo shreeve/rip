@@ -88,7 +88,8 @@ const brotli = (buf) => zlib.brotliCompressSync(buf, {
 const minify = new Bun.Transpiler({ loader: 'js', minify: true, target: 'browser' })
 
 const label = process.argv[2] || 'BEFORE'
-const outPath = process.argv[3] || 'dist/browser/SIZES.before.md'
+// Scratch report — dist/browser/* is gitignored except the ship artifacts.
+const outPath = process.argv[3] || 'dist/browser/SIZES.md'
 
 const rows = []
 for (const file of files) {
