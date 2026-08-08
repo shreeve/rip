@@ -124,17 +124,19 @@ describe('Tier 3: pinnables and pins', () => {
   });
 });
 
-test('the all-scope binding inventory covers every declaring shape', () => {
-  const src = [
-    'export sent = 1',
-    'fixed =! 2',
-    'typed: number = 3',
-    '[left, right] = [4, 5]',
-    'use = (param, {nested}) -> param + nested',
-  ].join('\n');
-  expect(new Set(compile(src).bindingNames)).toEqual(new Set([
-    'sent', 'fixed', 'typed', 'left', 'right', 'use', 'param', 'nested',
-  ]));
+describe('binding inventory', () => {
+  test('the all-scope inventory covers every declaring shape', () => {
+    const src = [
+      'export sent = 1',
+      'fixed =! 2',
+      'typed: number = 3',
+      '[left, right] = [4, 5]',
+      'use = (param, {nested}) -> param + nested',
+    ].join('\n');
+    expect(new Set(compile(src).bindingNames)).toEqual(new Set([
+      'sent', 'fixed', 'typed', 'left', 'right', 'use', 'param', 'nested',
+    ]));
+  });
 });
 
 describe('runtime semantics are unchanged', () => {

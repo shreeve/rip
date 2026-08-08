@@ -44,7 +44,7 @@ package-local `TODO.md` files (for example
 ## Core commands
 
 ```sh
-bun run test:rip       # language battery (PR code check)
+bun run test:rip       # language suite (PR code check)
 bun run test           # fast compiler/runtime suite
 bun run test:all       # exhaustive: extended tier + every package
 rip check [paths...]   # headless TypeScript checking over Rip source

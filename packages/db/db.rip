@@ -28,8 +28,8 @@ envToken = ->
 # Soft doorbell to the schema ORM — never hard-import the runtime so
 # this package can load outside the monorepo. `connect` publishes the
 # adapter on `globalThis.__ripDbAdapter` and calls
-# `__ripSchema.__schemaSetAdapter` when schema-orm is already loaded;
-# schema-orm picks up `__ripDbAdapter` if models load later.
+# `__ripSchema.__schemaSetAdapter` when orm is already loaded;
+# orm picks up `__ripDbAdapter` if models load later.
 wireSchemaAdapter = (adapter) ->
   return unless typeof globalThis isnt 'undefined'
   globalThis.__ripDbAdapter = adapter

@@ -21,10 +21,6 @@
 //   - delivery: the component structural trigger, mode parity,
 //     zero-cost
 import { test, expect, describe } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { pathToFileURL } from 'url';
 import parser from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
@@ -1941,13 +1937,7 @@ describe('`extends <tag>`: the rest-forwarding surface', () => {
 
 
 describe('member initialization order is observable source order', () => {
-  // Executed in a SUBPROCESS: an inline runtime copy inside the test
-  // process would collide with the shared runtime the other UI tests
-  // load (the two-copies guard is load-bearing).
-  test('a state above a plain member initializes first; the plain member reads it', async () => {
-    const os = await import('node:os');
-    const fs = await import('node:fs');
-    const path = await import('node:path');
+  test('a state above a plain member initializes first; the plain member reads it', () => {
     const src = [
       'trace = []',
       'mark = (n, v) ->',
@@ -1956,17 +1946,12 @@ describe('member initialization order is observable source order', () => {
       'C = component',
       '  a := mark "state", 1',
       '  b = mark "plain", a + 1',
-      'x = new C()',
-      'console.log JSON.stringify [trace, x.b]',
-      '',
     ].join('\n');
-    const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rip-init-')), 'order.rip');
-    fs.writeFileSync(f, src);
-    try {
-      const r = Bun.spawnSync(['bun', path.join(import.meta.dir, '../../bin/rip'), f]);
-      expect(r.stdout.toString().trim()).toBe('[["state","plain"],2]');
-    } finally {
-      fs.rmSync(path.dirname(f), { recursive: true, force: true });
-    }
+    const { code } = compile(src, { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { trace, x } = new Function(...names, `${code}\nreturn { trace, x: new C() };`)(
+      ...names.map((name) => RT[name]),
+    );
+    expect([trace, x.b]).toEqual([['state', 'plain'], 2]);
   });
 });

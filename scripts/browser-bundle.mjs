@@ -37,7 +37,7 @@ const nodeStubs = {
 };
 
 // IDE / type-face modules: the browser ships Rip→JS only. JS-face helpers
-// that emission needs at runtime live in schema-names.js / component-vocab.js;
+// that emission needs at runtime live in schema.js / emitter.js;
 // these stubs satisfy the emitter's static face:'ts' imports with loud
 // throws if a TS-only path is ever reached in-page.
 const unavailable = (surface) =>
@@ -47,7 +47,7 @@ const IDE_STUBS = new Map([
   ['dts.js', [
     `export const emitDeclarations = ${unavailable('declaration emission')};`,
   ].join('\n')],
-  ['schema-types.js', [
+  ['schemas.js', [
     `export class SchemaTypeError extends Error {`,
     `  constructor(message, start = null, node = null) {`,
     `    super(message);`,
@@ -70,7 +70,7 @@ const IDE_STUBS = new Map([
     `export const optionalReader = () => () => false;`,
     `export const jsArityOptional = () => new Set();`,
   ].join('\n')],
-  ['component-types.js', [
+  ['components.js', [
     `export const componentTypeInfo = ${unavailable('component type story')};`,
     `export const memberDeclareSegments = ${unavailable('component type story')};`,
     `export const isDeclarableMember = () => false;`,
@@ -91,11 +91,14 @@ const IDE_STUBS = new Map([
 const ideStubs = {
   name: 'rip-ide-stubs',
   setup(build) {
-    // Match the import spelling (`./dts.js`) and absolute forms the
-    // resolver may surface; always stub by basename.
-    build.onResolve({ filter: /(?:^|\/)(dts|schema-types|typetext|component-types)\.js$/ }, (args) => {
+    // Stub only the types/ modules. Basenames alone are not enough —
+    // `components.js` also names the reactive runtime module.
+    build.onResolve({ filter: /(?:^|\/)(dts|schemas|typetext|components)\.js$/ }, (args) => {
       const file = args.path.split('/').pop();
       if (!IDE_STUBS.has(file)) return null;
+      const inTypes = /(?:^|\/)types\//.test(args.path)
+        || /(?:^|\/)types\//.test(args.importer || '');
+      if (!inTypes) return null;
       return { path: file, namespace: 'rip-ide-stub' };
     });
     build.onLoad({ filter: /.*/, namespace: 'rip-ide-stub' }, (args) => ({

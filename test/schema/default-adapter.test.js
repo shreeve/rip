@@ -16,7 +16,7 @@
 // swaps in a scripted double and restores it.
 import { test, expect, describe } from 'bun:test';
 
-const orm = await import('../../src/runtime/schema-orm.js');
+const orm = await import('../../src/runtime/orm.js');
 
 const adapter = () => orm.__schemaConnect({ url: 'http://h' });
 

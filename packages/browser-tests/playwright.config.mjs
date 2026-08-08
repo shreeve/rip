@@ -4,7 +4,7 @@ const cartUrl = process.env.CART_HARNESS_URL || 'http://127.0.0.1:4174';
 const cartCertification = process.env.RIP_CART_CERTIFICATION === '1';
 
 const smokeServers = [{
-  command: 'bun --preload=../../src/loader.js serve.mjs',
+  command: 'bun --preload=../../src/cli/loader.js serve.mjs',
   port: 4173,
   reuseExistingServer: !process.env.CI,
 }];

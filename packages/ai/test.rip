@@ -149,7 +149,7 @@ urlError = (url) -> caught!(-> att.load(store, null, [{ type: 'url', url: url }]
 
 # Paths for the subprocess tests: run the entry under the repo loader.
 PKG_DIR = URL.new('.', import.meta.url).pathname
-LOADER  = URL.new('../../src/loader.js', import.meta.url).pathname
+LOADER  = URL.new('../../src/cli/loader.js', import.meta.url).pathname
 AI_RIP  = join PKG_DIR, 'ai.rip'
 
 pkg = JSON.parse readFileSync(URL.new('./package.json', import.meta.url), 'utf8')

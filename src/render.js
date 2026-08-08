@@ -51,7 +51,7 @@ const COMPONENT_RE = /^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/;
 // separator/closer kinds stay untouched.
 const INLINE_CONTENT = new Set(['STRING', 'STRING_START', 'NUMBER', 'BOOL', 'IDENTIFIER', 'PROPERTY', '@', '(', '[', '{']);
 
-import { TEMPLATE_TAGS } from './dom-vocab.js';
+import { TEMPLATE_TAGS } from './dom.js';
 import { ops } from './ops.js';
 
 const isHtmlTag = (name) => TEMPLATE_TAGS.has(String(name).split('#')[0]);

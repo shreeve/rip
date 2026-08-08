@@ -17,8 +17,8 @@ import {
   createMcpServer,
 } from '@rip-lang/db'
 import { __schema, __SchemaRegistry, SchemaError } from '../../src/runtime/schema.js'
-import { __schemaSetAdapter, __schemaTransaction } from '../../src/runtime/schema-orm.js'
-import * as mig from '../../src/migrate.js'
+import { __schemaSetAdapter, __schemaTransaction } from '../../src/runtime/orm.js'
+import * as mig from '../../src/cli/migrate.js'
 
 caught = (promise) -> promise.then((-> null), ((e) -> e))
 trap = (fn) ->
@@ -196,7 +196,7 @@ test "package files ship the library, README, and example — not misc/", ->
 
 test "db.rip does not hard-import the schema runtime", ->
   source = readFileSync DB_RIP, 'utf8'
-  ok not /schema-orm\.js|from ['"].*src\/runtime/.test source
+  ok not /orm\.js|from ['"].*src\/runtime/.test source
 
 test "db.rip is shebang'd and executable", ->
   source = readFileSync DB_RIP, 'utf8'

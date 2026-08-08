@@ -73,7 +73,7 @@ let __currentOwner = null;         // the owner frame effects register on
 // are handled-by-design: an async rejection has no synchronous caller
 // to propagate to, so the runtime reports and the program continues
 // (the handle rule). The PRINTER is swappable so a harness that owns
-// error display (src/run.js remaps stack frames to .rip coordinates)
+// error display (src/cli/run.js remaps stack frames to .rip coordinates)
 // can make the report tell the truth about source positions —
 // swallow-don't-crash semantics stay the runtime's, only the printing
 // changes. Harness-facing module state, deliberately NOT a delivered

@@ -17,7 +17,7 @@ Most rewrite-from-the-tests attempts fail because the tests are
 incidental. Ours are constitutional — rule 5 says tests are the
 contract, and the corpus was built accordingly:
 
-- **The battery** (`test/battery/*.rip`) pins syntax → JavaScript,
+- **The language suite** (`test/rip/*.rip`) pins syntax → JavaScript,
   row by row — the language's syntax contract.
 - **Corpus snapshots** pin whole-program emission.
 - **Negative tests** pin positioned, identifying error messages.

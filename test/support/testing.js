@@ -1,11 +1,11 @@
-// The battery vocabulary: the four verbs every test/battery/*.rip file
+// The language-suite vocabulary: the four verbs every test/rip/*.rip file
 // imports. Two modes, decided by whether a collector is active:
 //
 //   collected — loadBattery() points `rows` at a fresh array and
-//     imports the battery file; each verb call records a row.
+//     imports the suite file; each verb call records a row.
 //   standalone — no collector (the file was run directly:
-//     `bun test/battery/assignment.rip`); each verb call runs its row
-//     immediately and reports, so a battery file is an ordinary
+//     `bun test/rip/assignment.rip`); each verb call runs its row
+//     immediately and reports, so a suite file is an ordinary
 //     runnable program.
 import { basename } from 'node:path';
 

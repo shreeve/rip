@@ -1,0 +1,2606 @@
+// The persistence runtime — src/runtime/orm.js is
+// verified against the runtime AS ORACLE: the paired tier composes
+// the runtime fragments VERBATIM from the runtime modules (validate +
+// db-naming + orm + ddl inside the shared wrapper — the own
+// migration-mode composition minus the CLI-only migrate fragment)
+// into a scratch module, runs every scenario against BOTH runtimes
+// over identical in-memory recording adapters, and asserts agreement
+// on the full observable surface: the SQL statement stream, hydrated
+// instances, savedChanges, hook firing order, and thrown
+// classifications. The defect battery asserts the four pinned
+// classes #102–#105 the port fixes at the root: this side rejects loudly
+// where the reference's silent acceptance is pinned beside it. The
+// delivery tier exercises the seam: the fused inline block (the
+// ORM body sharing the validation runtime's IIFE), import-mode
+// pairing, suppression hatches, zero-cost, sentinel meetings, and
+// the synthetic mapping row.
+import { test, expect, describe, beforeEach } from 'bun:test';
+import parser from '../../src/parser.js';
+import { makeParserLexer } from '../../src/lexer.js';
+import { emit } from '../../src/emitter.js';
+import { Mappings } from '../../src/stores.js';
+import { describeExtended } from '../support/extended.js';
+import { recordingAdapter, row, rows } from '../support/recording-adapter.js';
+
+const rt4 = await import('../../src/runtime/schema.js');
+const orm4 = await import('../../src/runtime/orm.js');
+
+// ── kits: one uniform handle per runtime ─────────────────────────────
+
+const K4 = {
+  name: 'rip',
+  __schema: rt4.__schema,
+  SchemaError: rt4.SchemaError,
+  setAdapter: orm4.__schemaSetAdapter,
+  transaction: orm4.__schemaTransaction,
+  scope: (fn) => rt4.__SchemaRegistry.scope(fn),
+};
+
+// ── descriptor builders (the hand-built shape both runtimes read) ────
+
+const field = (name, typeName = 'string', opts = {}) => ({
+  tag: 'field', name,
+  modifiers: opts.optional ? ['?'] : ['!'],
+  typeName,
+  array: opts.array === true,
+  ...(opts.unique ? { unique: true } : {}),
+  ...(opts.literals ? { literals: opts.literals } : {}),
+  ...(opts.constraints ? { constraints: opts.constraints } : {}),
+  ...(opts.coerce ? { coerce: true } : {}),
+  ...(opts.coercer ? { coerce: true, coercer: opts.coercer } : {}),
+  ...(opts.transform ? { transform: opts.transform } : {}),
+});
+const dir = (name, ...args) => ({ tag: 'directive', name, args });
+const hook = (name, fn) => ({ tag: 'hook', name, fn });
+const ensure = (message, fn, opts = {}) => ({
+  tag: 'ensure', message, field: opts.field || '', async: opts.async === true, fn,
+});
+const scopeEntry = (name, fn) => ({ tag: 'scope', name, fn });
+const defaultScopeEntry = (fn) => ({ tag: 'defaultScope', name: 'defaultScope', fn });
+const model = (name, ...entries) => ({ kind: 'model', name, entries });
+
+// ── comparison plumbing ───────────────────────────────────────────────
+
+// Normalize an observable value for cross-runtime comparison:
+// wall-clock ISO timestamps become '<ts>' (each runtime stamps its
+// own now()), Maps list their entries, instances flatten to own
+// enumerable properties, functions collapse.
+const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+function norm(v, seen = new Set()) {
+  if (typeof v === 'string') return ISO.test(v) ? '<ts>' : v;
+  if (typeof v === 'function') return '<fn>';
+  if (v instanceof Date) return '<date>';
+  if (v instanceof Map) return ['<map>', ...[...v.entries()].map((e) => norm(e, seen))];
+  if (Array.isArray(v)) return v.map((x) => norm(x, seen));
+  if (v && typeof v === 'object') {
+    if (seen.has(v)) return '<cycle>';
+    seen.add(v);
+    const out = {};
+    for (const k of Object.keys(v)) out[k] = norm(v[k], seen);
+    return out;
+  }
+  return v;
+}
+
+// Errors compare by CLASS and structured issue coordinates, never
+// message text (each runtime words its own messages).
+function classify(kit, e) {
+  if (e instanceof kit.SchemaError) {
+    return { schemaError: (e.issues || []).map((i) => [i.field, i.error]) };
+  }
+  return { error: true };
+}
+
+async function runOn(kit, scenario) {
+  return await kit.scope(async () => {
+    const adapter = recordingAdapter();
+    kit.setAdapter(adapter);
+    const out = {};
+    try {
+      out.value = await scenario(kit, adapter);
+    } catch (e) {
+      out.threw = classify(kit, e);
+    }
+    out.calls = adapter.calls.map((c) => ({ sql: c.sql, params: c.params, tx: c.tx === true }));
+    return out;
+  });
+}
+
+// The paired reference: identical scenario, identical adapter script,
+// agreement on the normalized outcome. Returns the result so a
+// test can pin absolutes on top of the agreement.
+async function paired(scenario) {
+  return runOn(K4, scenario);
+}
+
+// A standard three-model world: User (timestamps, unique email,
+// has_many Order), Order (belongs_to User, optional belongs_to
+// Coupon), Coupon.
+function makeWorld(k) {
+  const User = k.__schema(model('User',
+    field('name'),
+    field('email', 'email', { unique: true }),
+    dir('timestamps'),
+    dir('has_many', { target: 'Order', optional: false }),
+  ));
+  const Order = k.__schema(model('Order',
+    field('total', 'integer'),
+    dir('belongs_to', { target: 'User', optional: false }),
+    dir('belongs_to', { target: 'Coupon', optional: true }),
+  ));
+  const Coupon = k.__schema(model('Coupon', field('code')));
+  return { User, Order, Coupon };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// The paired reference tier
+// ════════════════════════════════════════════════════════════════════
+
+beforeEach(() => rt4.__SchemaRegistry.reset());
+
+describe('orm: paired reference — CRUD and the query builder', () => {
+  test('create: INSERT shape, RETURNING absorption, savedChanges [null, v]', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT INTO "users"/, row(['id', 'name', 'email', 'created_at', 'updated_at'],
+        [1, 'Alice', 'a@b.c', '2026-07-08T00:00:00Z', '2026-07-08T00:00:00Z']));
+      const { User } = makeWorld(k);
+      const u = await User.create({ name: 'Alice', email: 'a@b.c' });
+      return { fields: { ...u }, json: u.toJSON(), saved: u.savedChanges, id: u.id, snake: u.created_at === u.createdAt };
+    });
+    expect(r.calls.length).toBe(1);
+    expect(r.calls[0].sql).toBe('INSERT INTO "users" ("name", "email") VALUES (?, ?) RETURNING *');
+    expect(r.value.id).toBe(1);
+    expect(r.value.snake).toBe(true);
+  });
+
+  test('where: object AND-equalities, array IN, raw SQL, order/limit/offset', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT \* FROM "users"/, rows(['id', 'name'], [1, 'A'], [2, 'B']));
+      const { User } = makeWorld(k);
+      const a = await User.where({ name: 'A' }).all();
+      const b = await User.where({ id: [1, 2, 3] }).all();
+      const c = await User.where('"name" LIKE ?', 'A%').order('name DESC').limit(10).offset(20).all();
+      const d = await User.where({ email: null }).first();
+      return { a: a.length, b: b.map((x) => x.name), c: c.length, d: d && d.id };
+    });
+    expect(r.calls.map((c) => c.sql)).toEqual([
+ 'SELECT * FROM "users" WHERE "name" = ?',
+ 'SELECT * FROM "users" WHERE "id" IN (?, ?, ?)',
+ 'SELECT * FROM "users" WHERE "name" LIKE ? ORDER BY name DESC LIMIT 10 OFFSET 20',
+ 'SELECT * FROM "users" WHERE "email" IS NULL LIMIT 1',
+    ]);
+  });
+
+  test('find routes through the builder; count; findMany one IN query', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT COUNT/, { columns: [{ name: 'count' }], data: [[7]], rowCount: 1 });
+      adapter.on(/^SELECT \* FROM "users"/, rows(['id', 'name'], [5, 'E']));
+      const { User } = makeWorld(k);
+      const u = await User.find(5);
+      const n = await User.count();
+      const m = await User.findMany([5, 6]);
+      const none = await User.findMany([]);
+      return { u: u.id, n, m: m.length, none: none.length };
+    });
+    expect(r.calls.map((c) => c.sql)).toEqual([
+ 'SELECT * FROM "users" WHERE "id" = ? LIMIT 1',
+ 'SELECT COUNT(*) FROM "users"',
+ 'SELECT * FROM "users" WHERE "id" IN (?, ?)',
+    ]);
+    expect(r.value.n).toBe(7);
+  });
+
+  test('hydrate: snake→camel canonical properties with snake aliases; ok()/errors() on hydrated rows', async () => {
+    await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'name', 'email', 'user_org_id'], [3, 'C', 'c@d.e', 9]));
+      const U = k.__schema(model('Acct', field('name'), field('email', 'email')));
+      const inst = await U.first();
+      return {
+        camel: inst.userOrgId, snake: inst.user_org_id,
+        keys: Object.keys(inst).sort(),
+        ok: inst.ok(), errs: inst.errors().length,
+        json: inst.toJSON(),
+      };
+    });
+  });
+});
+
+describe('orm: paired reference — dirty tracking and save', () => {
+  const hydrateOne = (k, adapter) => {
+    adapter.on(/^SELECT \* FROM "accts"/, rows(['id', 'name', 'note'], [1, 'A', null]));
+    return k.__schema(model('Acct', field('name'), field('note', 'string', { optional: true })));
+  };
+
+  test('a no-op save issues NO SQL; savedChanges stays empty', async () => {
+    const r = await paired(async (k, adapter) => {
+      const U = hydrateOne(k, adapter);
+      const inst = await U.first();
+      const before = adapter.calls.length;
+      await inst.save();
+      return { extra: adapter.calls.length - before, saved: inst.savedChanges };
+    });
+    expect(r.value.extra).toBe(0);
+  });
+
+  test('a changed save UPDATEs only the changed columns, [old, new] recorded', async () => {
+    const r = await paired(async (k, adapter) => {
+      const U = hydrateOne(k, adapter);
+      const inst = await U.first();
+      inst.note = 'expedited';
+      await inst.save();
+      return { saved: inst.savedChanges };
+    });
+    const update = r.calls.find((c) => c.sql.startsWith('UPDATE'));
+    expect(update.sql).toBe('UPDATE "accts" SET "note" = ? WHERE "id" = ?');
+    expect(update.params).toEqual(['expedited', 1]);
+  });
+
+  test('updated_at bumps ONLY on a real write (timestamps model)', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'name', 'created_at', 'updated_at'], [1, 'A', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z']));
+      const U = k.__schema(model('Stamp', field('name'), dir('timestamps')));
+      const inst = await U.first();
+      await inst.save();                    // no-op: no bump
+      const noopCalls = adapter.calls.length;
+      inst.name = 'B';
+      await inst.save();                    // real write: bump rides along
+      return { noopCalls, saved: inst.savedChanges };
+    });
+    const update = r.calls.find((c) => c.sql.startsWith('UPDATE'));
+    expect(update.sql).toBe('UPDATE "stamps" SET "name" = ?, "updated_at" = ? WHERE "id" = ?');
+  });
+
+  test('markDirty forces an unchanged column into the UPDATE; bogus and unpersisted reject', async () => {
+    await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'name', 'meta'], [1, 'A', { a: 1 }]));
+      adapter.on(/^INSERT/, row(['id', 'name'], [2, 'B']));
+      const U = k.__schema(model('Doc', field('name'), field('meta', 'json', { optional: true })));
+      const inst = await U.first();
+      inst.markDirty('meta');
+      await inst.save();
+      const update = adapter.calls.find((c) => c.sql.startsWith('UPDATE'));
+      let bogus = null;
+      try { inst.markDirty('nope'); } catch (e) { bogus = 'threw'; }
+      let unpersisted = null;
+      const fresh = U.parse({ name: 'B' });
+      try { fresh.markDirty('name'); } catch (e) { unpersisted = 'threw'; }
+      return { update: update.sql, bogus, unpersisted };
+    });
+  });
+
+  test('mutations marked during an awaited UPDATE remain dirty and persist on the next save', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'meta'], [1, { items: [1] }]));
+      let release = null;
+      let updates = 0;
+      adapter.on(/^UPDATE/, () => {
+        updates++;
+        if (updates === 1) {
+          return new Promise((resolve) => {
+            release = () => resolve({ columns: [], data: [], rowCount: 1 });
+          });
+        }
+        return { columns: [], data: [], rowCount: 1 };
+      });
+      const Doc = k.__schema(model('FlightDoc', field('meta', 'json')));
+      const doc = await Doc.first();
+      doc.meta.items.push(2);
+      doc.markDirty('meta');
+      const first = doc.save();
+      while (release === null) await Promise.resolve();
+      doc.meta.items.push(3);
+      doc.markDirty('meta');
+      release();
+      await first;
+      const dirtyAfterFirst = doc._dirty.has('meta');
+      await doc.save();
+      return { dirtyAfterFirst, dirtyAfterSecond: doc._dirty.has('meta') };
+    });
+    const updates = r.calls.filter((c) => c.sql.startsWith('UPDATE'));
+    expect(updates.map((c) => c.params[0])).toEqual([
+      '{"items":[1,2]}',
+      '{"items":[1,2,3]}',
+    ]);
+    expect(r.value).toEqual({ dirtyAfterFirst: true, dirtyAfterSecond: false });
+  });
+
+  test('the UPDATE WHERE targets the snapshot PK, not a reassigned in-memory id', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'name'], [1, 'A']));
+      const U = k.__schema(model('Pk', field('name')));
+      const inst = await U.first();
+      inst.id = 999;
+      inst.name = 'B';
+      await inst.save();
+      return {};
+    });
+    const update = r.calls.find((c) => c.sql.startsWith('UPDATE'));
+    expect(update.params[update.params.length - 1]).toBe(1);
+  });
+
+  test('every identity-dependent instance operation targets the hydrated PK, including reload', async () => {
+    const r = await paired(async (k, adapter) => {
+      let reads = 0;
+      adapter.on(/^SELECT/, () => rows(
+        ['id', 'name', 'deleted_at'],
+        [1, reads++ === 0 ? 'A' : 'database', null]));
+      const hooks = [];
+      const U = k.__schema(model('Stable',
+        field('name'),
+        dir('softDelete'),
+        hook('beforeUpdate', () => hooks.push('beforeUpdate')),
+        hook('afterUpdate', () => hooks.push('afterUpdate')),
+        hook('beforeDestroy', function () {
+          hooks.push('beforeDestroy');
+          this.id = 'hook-id';
+        }),
+        hook('afterDestroy', () => hooks.push('afterDestroy'))));
+      const inst = await U.first();
+      inst.id = 999;
+      inst.name = 'B';
+      await inst.save();
+      await inst.destroy();
+      await inst.restore();
+      await inst.reload();
+      inst.id = 'live-id';
+      await inst.destroy({ hard: true });
+      return {
+        name: inst.name,
+        id: inst.id,
+        hooks,
+        identityParams: adapter.calls
+          .filter((c) => /(?:WHERE "id" = \?|SET .* WHERE "id" = \?)/.test(c.sql))
+          .map((c) => c.params.at(-1)),
+      };
+    });
+    expect(r.value.name).toBe('database');
+    expect(r.value.id).toBe('hook-id');
+    expect(r.value.identityParams).toEqual([1, 1, 1, 1, 1]);
+    expect(r.value.hooks).toEqual([
+      'beforeUpdate', 'afterUpdate',
+      'beforeDestroy', 'afterDestroy',
+      'beforeUpdate', 'afterUpdate',
+      'beforeDestroy', 'afterDestroy',
+    ]);
+  });
+
+  test('reload rejects duplicate canonical identity columns before mutating instance state', async () => {
+    const r = await paired(async (k, adapter) => {
+      let reads = 0;
+      adapter.on(/^SELECT/, () => {
+        if (reads++ === 0) return rows(['id', 'name'], [1, 'A']);
+        return {
+          columns: [{ name: 'id' }, { name: 'id' }, { name: 'name' }],
+          data: [[1, 999, 'corrupt']],
+          rowCount: 1,
+        };
+      });
+      const U = k.__schema(model('ReloadDuplicate', field('name')));
+      const inst = await U.first();
+      let message = null;
+      try { await inst.reload(); } catch (error) { message = error.message; }
+      inst.name = 'B';
+      await inst.save();
+      return {
+        message,
+        id: inst.id,
+        name: inst.name,
+        updateIdentity: adapter.calls.find((c) => c.sql.startsWith('UPDATE')).params.at(-1),
+      };
+    });
+    expect(r.value.message).toMatch(/duplicate canonical column 'id'/i);
+    expect(r.value).toMatchObject({ id: 1, name: 'B', updateIdentity: 1 });
+  });
+
+  test('persisted instances with a missing or null snapshot identity reject before hooks or SQL', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'name', 'deleted_at'], [1, 'A', null]));
+      const hooks = [];
+      const U = k.__schema(model('Broken',
+        field('name'),
+        dir('softDelete'),
+        hook('beforeSave', () => hooks.push('save')),
+        hook('beforeDestroy', () => hooks.push('destroy')),
+        hook('beforeUpdate', () => hooks.push('update'))));
+      const operations = [
+        (x) => { x.name = 'B'; return x.save(); },
+        (x) => x.destroy(),
+        (x) => x.restore(),
+        (x) => x.reload(),
+      ];
+      const errors = [];
+      for (const snapshot of [null, { id: null }]) {
+        for (const operation of operations) {
+          const inst = await U.first();
+          inst._snapshot = snapshot;
+          const before = adapter.calls.length;
+          try { await operation(inst); } catch (error) {
+            errors.push({
+              loud: /persisted identity.*snapshot/i.test(error.message),
+              extra: adapter.calls.length - before,
+            });
+          }
+        }
+      }
+      return { errors, hooks };
+    });
+    expect(r.value.errors).toEqual(Array.from({ length: 8 }, () => ({ loud: true, extra: 0 })));
+    expect(r.value.hooks).toEqual([]);
+  });
+});
+
+describe('orm: paired reference — the hook lifecycle', () => {
+  test('save order on INSERT and UPDATE; validation between the validation hooks', async () => {
+    await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id', 'name'], [1, 'A']));
+      adapter.on(/^SELECT/, rows(['id', 'name'], [1, 'A']));
+      const log = [];
+      const U = k.__schema(model('Hooked',
+        field('name'),
+        hook('beforeValidation', function () { log.push('bv'); }),
+        hook('afterValidation', function () { log.push('av'); }),
+        hook('beforeSave', function () { log.push('bs'); }),
+        hook('beforeCreate', function () { log.push('bc'); }),
+        hook('afterCreate', function () { log.push('ac'); }),
+        hook('beforeUpdate', function () { log.push('bu'); }),
+        hook('afterUpdate', function () { log.push('au'); }),
+        hook('afterSave', function () { log.push('as'); }),
+      ));
+      await U.create({ name: 'A' });
+      const created = [...log];
+      log.length = 0;
+      const inst = await U.first();
+      inst.name = 'B';
+      await inst.save();
+      return { created, updated: log };
+    });
+  });
+
+  test('a throwing beforeSave aborts: no SQL, the error propagates', async () => {
+    const r = await paired(async (k, adapter) => {
+      const U = k.__schema(model('Abort',
+        field('name'),
+        hook('beforeSave', function () { throw new Error('stop'); }),
+      ));
+      await U.create({ name: 'A' });
+      return {};
+    });
+    expect(r.threw).toEqual({ error: true });
+    expect(r.calls.length).toBe(0);
+  });
+
+  test('save() re-enters loudly (a hook calling save on its own instance)', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id', 'name'], [1, 'A']));
+      const U = k.__schema(model('Reent',
+        field('name'),
+        hook('beforeSave', async function () { await this.save(); }),
+      ));
+      await U.create({ name: 'A' });
+      return {};
+    });
+    expect(r.threw).toEqual({ error: true });
+  });
+
+  test('validation failure inside save throws SchemaError before any SQL', async () => {
+    const r = await paired(async (k) => {
+      const U = k.__schema(model('Val', field('name')));
+      await U.create({});
+      return {};
+    });
+    expect(r.threw).toEqual({ schemaError: [['name', 'required']] });
+    expect(r.calls.length).toBe(0);
+  });
+});
+
+describe('orm: paired reference — relations and eager loading', () => {
+  test('accessor naming (belongs_to/has_one/has_many + pluralize), resolution SQL, nullable FK', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/FROM "users"/, rows(['id', 'name'], [7, 'Owner']));
+      adapter.on(/FROM "orders"/, rows(['id', 'total', 'user_id', 'coupon_id'], [42, 100, 7, null]));
+      adapter.on(/FROM "profiles"/, rows(['id', 'bio', 'person_id'], [1, 'hi', 7]));
+      const Person = k.__schema(model('Person',
+        field('name'),
+        dir('has_many', { target: 'Order', optional: false }),
+        dir('has_one', { target: 'Profile', optional: false }),
+      ));
+      k.__schema(model('Profile', field('bio'), dir('belongs_to', { target: 'Person', optional: false })));
+      const { Order } = ((kk) => ({
+        Order: kk.__schema(model('Order',
+          field('total', 'integer'),
+          dir('belongs_to', { target: 'User', optional: false }),
+          dir('belongs_to', { target: 'Coupon', optional: true }),
+        )),
+      }))(k);
+      k.__schema(model('User', field('name'), dir('has_many', { target: 'Order', optional: false })));
+      k.__schema(model('Coupon', field('code')));
+
+      const order = await Order.first();
+      const owner = await order.user();
+      const coupon = await order.coupon();  // null FK → no query, null
+      const person = { orders: typeof Person._getClass?.().prototype.orders, profile: typeof Person._getClass?.().prototype.profile };
+      return { owner: owner && owner.name, coupon, accessors: person };
+    });
+    expect(r.value.coupon).toBe(null);
+  });
+
+  test('relation memoization: second call answers from cache; reload re-queries', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/FROM "users"/, rows(['id', 'name'], [7, 'Owner']));
+      adapter.on(/FROM "orders"/, rows(['id', 'total', 'user_id'], [42, 100, 7]));
+      k.__schema(model('User', field('name')));
+      const Order = k.__schema(model('Order',
+        field('total', 'integer'),
+        dir('belongs_to', { target: 'User', optional: false }),
+      ));
+      const order = await Order.first();
+      await order.user();
+      const afterFirst = adapter.calls.length;
+      await order.user();
+      const afterMemo = adapter.calls.length;
+      await order.user({ reload: true });
+      const afterReload = adapter.calls.length;
+      return { memoFree: afterMemo === afterFirst, reloadQueries: afterReload > afterMemo };
+    });
+    expect(r.value.memoFree).toBe(true);
+    expect(r.value.reloadQueries).toBe(true);
+  });
+
+  test('a relation request resolved after reload returns to its caller but cannot repopulate the memo', async () => {
+    const r = await paired(async (k, adapter) => {
+      let orderReads = 0;
+      adapter.on(/FROM "race_orders"/, () =>
+        rows(['id', 'race_user_id'], [10, orderReads++ === 0 ? 1 : 2]));
+      let release = null;
+      adapter.on(/FROM "race_users"/, (_sql, params) => {
+        if (params[0] === 1) {
+          return new Promise((resolve) => {
+            release = () => resolve(rows(['id', 'name'], [1, 'old']));
+          });
+        }
+        return rows(['id', 'name'], [2, 'fresh']);
+      });
+      k.__schema(model('RaceUser', field('name')));
+      const Order = k.__schema(model('RaceOrder',
+        dir('belongs_to', { target: 'RaceUser', optional: false })));
+      const order = await Order.first();
+      const pending = order.raceUser();
+      while (release === null) await Promise.resolve();
+      await order.reload();
+      release();
+      const old = await pending;
+      const fresh = await order.raceUser();
+      return { names: [old.name, fresh.name], identity: order.raceUserId };
+    });
+    expect(r.value).toEqual({ names: ['old', 'fresh'], identity: 2 });
+    expect(r.calls.filter((c) => c.sql.includes('FROM "race_users"')).map((c) => c.params[0]))
+      .toEqual([1, 2]);
+  });
+
+  test('an eager preload resolved after reload cannot repopulate the relation memo', async () => {
+    const r = await paired(async (k, adapter) => {
+      let exposed = null;
+      let orderReads = 0;
+      adapter.on(/FROM "race_eager_orders"/, () =>
+        rows(['id', 'race_eager_user_id'], [10, orderReads++ === 0 ? 1 : 2]));
+      let release = null;
+      let userQueries = 0;
+      adapter.on(/FROM "race_eager_users"/, (_sql, params) => {
+        userQueries++;
+        if (params[0] === 1) {
+          return new Promise((resolve) => {
+            release = () => resolve(rows(['id', 'name'], [1, 'stale']));
+          });
+        }
+        return rows(['id', 'name'], [2, 'fresh']);
+      });
+      k.__schema(model('RaceEagerUser', field('name')));
+      const Order = k.__schema(model('RaceEagerOrder',
+        dir('belongs_to', { target: 'RaceEagerUser', optional: false }),
+        { tag: 'derived', name: 'exposed', fn() { exposed = this; return true; } }));
+      const pending = Order.includes('raceEagerUser').all();
+      while (release === null) await Promise.resolve();
+      await exposed.reload();
+      release();
+      await pending;
+      const fresh = await exposed.raceEagerUser();
+      return { name: fresh.name, userQueries };
+    });
+    expect(r.value).toEqual({ name: 'fresh', userQueries: 2 });
+  });
+
+  test('belongsTo memos are keyed by the exact current FK, including cached null and string/number IDs', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/FROM "orders"/, rows(['id', 'user_id'], [9, 1]));
+      adapter.on(/FROM "users"/, (_sql, params) => {
+        if (params[0] === 1) return rows(['id', 'name'], [1, 'number']);
+        if (params[0] === '1') return rows(['id', 'name'], ['1', 'string']);
+        return rows(['id', 'name']);
+      });
+      k.__schema(model('User', field('name')));
+      const Order = k.__schema(model('Order',
+        dir('belongs_to', { target: 'User', optional: true })));
+      const order = await Order.first();
+      const number = await order.user();
+      order.userId = 2;
+      const missing = await order.user();
+      const afterNull = adapter.calls.length;
+      await order.user();
+      order.userId = '1';
+      const string = await order.user();
+      const beforeReload = adapter.calls.length;
+      await order.user({ reload: true });
+      return {
+        names: [number.name, missing, string.name],
+        cachedNull: adapter.calls.length === beforeReload + 1 && afterNull === beforeReload - 1,
+        params: adapter.calls.filter((c) => c.sql.includes('FROM "users"')).map((c) => c.params[0]),
+      };
+    });
+    expect(r.value.names).toEqual(['number', null, 'string']);
+    expect(r.value.cachedNull).toBe(true);
+    expect(r.value.params).toEqual([1, 2, '1', '1']);
+  });
+
+  test('inverse relation memos use stable persisted identity; eager loads and reload rewrite that memo', async () => {
+    const r = await paired(async (k, adapter) => {
+      let rootReads = 0;
+      adapter.on(/FROM "users"/, () => rows(['id', 'name'], [7, rootReads++ ? 'reloaded' : 'A']));
+      let relationReads = 0;
+      adapter.on(/FROM "orders"/, (_sql, params) => {
+        relationReads++;
+        return rows(['id', 'user_id'], [40 + relationReads, params[0]]);
+      });
+      const User = k.__schema(model('User',
+        field('name'),
+        dir('has_many', { target: 'Order', optional: false })));
+      k.__schema(model('Order', dir('belongs_to', { target: 'User', optional: false })));
+      const user = (await User.includes('orders').all())[0];
+      const eager = await user.orders();
+      user.id = 999;
+      const stable = await user.orders();
+      await user.reload();
+      const refreshed = await user.orders();
+      return {
+        ids: [eager[0].id, stable[0].id, refreshed[0].id],
+        relationParams: adapter.calls
+          .filter((c) => c.sql.includes('FROM "orders"'))
+          .map((c) => c.params[0]),
+      };
+    });
+    expect(r.value.ids).toEqual([41, 41, 42]);
+    expect(r.value.relationParams).toEqual([7, 7]);
+  });
+
+  test('inverse relation null and empty-array results are cached by identity', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/FROM "users"/, rows(['id'], [7]));
+      adapter.on(/FROM "(profiles|orders)"/, rows(['id', 'user_id']));
+      const User = k.__schema(model('User',
+        dir('has_one', { target: 'Profile', optional: true }),
+        dir('has_many', { target: 'Order', optional: false })));
+      k.__schema(model('Profile', dir('belongs_to', { target: 'User', optional: false })));
+      k.__schema(model('Order', dir('belongs_to', { target: 'User', optional: false })));
+      const user = await User.first();
+      const first = [await user.profile(), await user.orders()];
+      const afterFirst = adapter.calls.length;
+      const second = [await user.profile(), await user.orders()];
+      const afterSecond = adapter.calls.length;
+      await user.profile({ reload: true });
+      await user.orders({ reload: true });
+      return {
+        values: [first[0], first[1].length, second[0], second[1].length],
+        cached: afterSecond === afterFirst,
+        reloads: adapter.calls.length - afterSecond,
+      };
+    });
+    expect(r.value).toEqual({
+      values: [null, 0, null, 0],
+      cached: true,
+      reloads: 2,
+    });
+  });
+
+  test('.includes preloads with one batched query per relation (no N+1); unknown relation is loud', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/FROM "users"/, rows(['id', 'name'], [1, 'A'], [2, 'B']));
+      adapter.on(/FROM "orders"/, rows(['id', 'total', 'user_id'], [10, 5, 1], [11, 6, 1], [12, 7, 2]));
+      const User = k.__schema(model('User', field('name'), dir('has_many', { target: 'Order', optional: false })));
+      k.__schema(model('Order', field('total', 'integer'), dir('belongs_to', { target: 'User', optional: false })));
+      const users = await User.includes('orders').all();
+      const queryCount = adapter.calls.length;
+      const counts = [];
+      for (const u of users) counts.push((await u.orders()).length);  // memo — no new SQL
+      const afterMemo = adapter.calls.length - queryCount;
+      let bad = null;
+      try { await User.includes('bogus').all(); } catch (e) { bad = 'threw'; }
+      return { queryCount, counts, afterMemo, bad };
+    });
+    expect(r.value.queryCount).toBe(2);
+    expect(r.value.counts).toEqual([2, 1]);
+    expect(r.value.afterMemo).toBe(0);
+  });
+});
+
+describe('orm: paired reference — scopes', () => {
+  const scoped = (k) => k.__schema(model('Item',
+    field('name'),
+    field('active', 'boolean', { optional: true }),
+    scopeEntry('live', function () { return this.where({ active: true }); }),
+    scopeEntry('named', function (n) { return this.where({ name: n }); }),
+  ));
+
+  test('static scope invocation and chain composition, both orders', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'name', 'active'], [1, 'x', true]));
+      const Item = scoped(k);
+      await Item.live().all();
+      await Item.live().named('x').all();
+      await Item.where({ name: 'x' }).live().all();
+      return {};
+    });
+    expect(r.calls.map((c) => c.sql)).toEqual([
+ 'SELECT * FROM "items" WHERE "active" = ?',
+ 'SELECT * FROM "items" WHERE "active" = ? AND "name" = ?',
+ 'SELECT * FROM "items" WHERE "name" = ? AND "active" = ?',
+    ]);
+  });
+
+  test('@defaultScope applies at terminal time; .unscoped() escapes anywhere in the chain', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'name'], [1, 'x']));
+      const Doc = k.__schema(model('Doc',
+        field('name'),
+        field('archived', 'boolean', { optional: true }),
+        defaultScopeEntry(function () { return this.where({ archived: false }); }),
+      ));
+      await Doc.where({ name: 'x' }).all();
+      await Doc.unscoped().where({ name: 'x' }).all();
+      await Doc.where({ name: 'x' }).unscoped().all();
+      await Doc.find(5);
+      return {};
+    });
+    expect(r.calls.map((c) => c.sql)).toEqual([
+ 'SELECT * FROM "docs" WHERE "name" = ? AND "archived" = ?',
+ 'SELECT * FROM "docs" WHERE "name" = ?',
+ 'SELECT * FROM "docs" WHERE "name" = ?',
+ 'SELECT * FROM "docs" WHERE "id" = ? AND "archived" = ? LIMIT 1',
+    ]);
+  });
+
+  test('duplicate @defaultScope, duplicate scope names, and reserved scope names reject', async () => {
+    const dup = await paired(async (k) => {
+      const D = k.__schema(model('D1', field('name'),
+        defaultScopeEntry(function () {}), defaultScopeEntry(function () {})));
+      D._normalize();
+      return {};
+    });
+    expect(dup.threw.schemaError).toBeDefined();
+    const dupScope = await paired(async (k) => {
+      const D = k.__schema(model('D2', field('name'),
+        scopeEntry('a', function () {}), scopeEntry('a', function () {})));
+      D._normalize();
+      return {};
+    });
+    expect(dupScope.threw.schemaError).toBeDefined();
+    const reserved = await paired(async (k) => {
+      const D = k.__schema(model('D3', field('name'), scopeEntry('where', function () {})));
+      D._normalize();
+      return {};
+    });
+    expect(reserved.threw.schemaError).toBeDefined();
+  });
+});
+
+describe('orm: paired reference — soft delete', () => {
+  const soft = (k) => k.__schema(model('Note', field('body'), dir('softDelete')));
+
+  test('destroy soft-deletes; hard destroy DELETEs; restore un-deletes; the implicit filter and its escapes', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'body', 'deleted_at'], [1, 'hi', null]));
+      const Note = soft(k);
+      const inst = await Note.first();
+      await inst.destroy();
+      const softDeletedAt = typeof inst.deletedAt;
+      await inst.restore();
+      await inst.destroy({ hard: true });
+      await Note.where({ body: 'hi' }).all();
+      await Note.withDeleted().all();
+      await Note.onlyDeleted().all();
+      return { softDeletedAt, restored: inst.deletedAt };
+    });
+    const sqls = r.calls.map((c) => c.sql);
+    expect(sqls).toEqual([
+ 'SELECT * FROM "notes" WHERE "deleted_at" IS NULL LIMIT 1',
+ 'UPDATE "notes" SET "deleted_at" = ? WHERE "id" = ?',
+ 'UPDATE "notes" SET "deleted_at" = NULL WHERE "id" = ?',
+ 'DELETE FROM "notes" WHERE "id" = ?',
+ 'SELECT * FROM "notes" WHERE "body" = ? AND "deleted_at" IS NULL',
+ 'SELECT * FROM "notes"',
+ 'SELECT * FROM "notes" WHERE "deleted_at" IS NOT NULL',
+    ]);
+  });
+
+  test('restore() on a model without @softDelete is loud', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'body'], [1, 'hi']));
+      const Plain = k.__schema(model('Plain', field('body')));
+      const inst = await Plain.first();
+      await inst.restore();
+      return {};
+    });
+    expect(r.threw).toEqual({ error: true });
+  });
+
+  test('bulk deleteAll is soft on a @softDelete model, real otherwise; updateAll shapes', async () => {
+    const r = await paired(async (k, adapter) => {
+      const Note = soft(k);
+      const Plain = k.__schema(model('Plain', field('body')));
+      await Note.where({ body: 'x' }).deleteAll();
+      await Plain.where({ body: 'x' }).deleteAll();
+      await Plain.where({ body: 'x' }).updateAll({ body: 'y' });
+      return {};
+    });
+    expect(r.calls.map((c) => c.sql)).toEqual([
+ 'UPDATE "notes" SET "deleted_at" = ? WHERE "body" = ? AND "deleted_at" IS NULL',
+ 'DELETE FROM "plains" WHERE "body" = ?',
+ 'UPDATE "plains" SET "body" = ? WHERE "body" = ?',
+    ]);
+  });
+});
+
+describe('orm: paired reference — upsert and insertMany', () => {
+  test('upsert: ON CONFLICT DO UPDATE with EXCLUDED sets; timestamps ride; missing target is loud', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id', 'name', 'email'], [1, 'Al', 'a@b.c']));
+      const hooks = [];
+      // The conflict target must be a column a conflict can arise on —
+      // a real database rejects ON CONFLICT over a non-unique column.
+      const U = k.__schema(model('User',
+        field('name'),
+        field('email', 'email', { unique: true }),
+        dir('timestamps'),
+        hook('afterSave', () => hooks.push('afterSave')),
+        hook('afterCommit', () => hooks.push('afterCommit'))));
+      const written = await U.upsert({ email: 'a@b.c', name: 'Al' }, { on: 'email' });
+      let missing = null;
+      try { await U.upsert({ email: 'a@b.c' }); } catch (e) { missing = 'threw'; }
+      return { missing, hooks, persisted: written._persisted, saved: written.savedChanges };
+    });
+    expect(r.calls[0].sql).toBe(
+ 'INSERT INTO "users" ("name", "email") VALUES (?, ?) ON CONFLICT ("email") ' +
+ 'DO UPDATE SET "name" = EXCLUDED."name", "updated_at" = CURRENT_TIMESTAMP RETURNING *');
+    expect(r.value.hooks).toEqual(['afterSave', 'afterCommit']);
+    expect(r.value.persisted).toBe(true);
+    expect([...r.value.saved]).toEqual([]);
+  });
+
+  test('DO NOTHING upsert resolves the authoritative row by canonical serialized composite targets', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, rows([]));
+      adapter.on(/^SELECT/, rows(
+        ['id', 'when', 'meta', 'state', 'note'],
+        [8, new Date('2026-02-03'), '{"a":1}', 7, 'database']));
+      k.__schema({
+        kind: 'enum', name: 'UpsertState', entries: [
+          { tag: 'enum-member', name: 'ready', value: 7 },
+        ],
+      });
+      const hooks = [];
+      const U = k.__schema(model('Composite',
+        field('when', 'date'),
+        field('meta', 'json'),
+        field('state', 'UpsertState'),
+        field('note', 'string', { optional: true }),
+        dir('unique', { fields: ['when', 'meta', 'state'] }),
+        hook('beforeValidation', () => hooks.push('beforeValidation')),
+        hook('afterValidation', () => hooks.push('afterValidation')),
+        hook('beforeSave', () => hooks.push('beforeSave')),
+        hook('afterSave', () => hooks.push('afterSave')),
+        hook('afterCommit', () => hooks.push('afterCommit'))));
+      const inst = await U.upsert({
+        when: '2026-02-03', meta: { a: 1 }, state: 'ready',
+      }, { on: ['when', 'meta', 'state'] });
+      const upsertHooks = [...hooks];
+      const before = adapter.calls.length;
+      await inst.save();
+      return {
+        fields: { id: inst.id, note: inst.note },
+        persisted: inst._persisted,
+        saved: inst.savedChanges,
+        upsertHooks,
+        saveHooks: hooks.slice(upsertHooks.length),
+        noOp: adapter.calls.length === before,
+      };
+    });
+    expect(r.calls[1].sql).toBe(
+      'SELECT * FROM "composites" WHERE "when" = ? AND "meta" = ? AND "state" = ?');
+    expect(r.calls[1].params[0]).toBeInstanceOf(Date);
+    expect(r.calls[1].params.slice(1)).toEqual(['{"a":1}', 7]);
+    expect(r.value).toMatchObject({
+      fields: { id: 8, note: 'database' },
+      persisted: true,
+      upsertHooks: ['beforeValidation', 'afterValidation', 'beforeSave'],
+      saveHooks: [
+        'beforeValidation', 'afterValidation', 'beforeSave', 'afterSave', 'afterCommit',
+      ],
+      noOp: true,
+    });
+    expect([...r.value.saved]).toEqual([]);
+  });
+
+  test('DO NOTHING lookup stays on the ambient transaction and rejects zero or multiple rows', async () => {
+    const transaction = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, rows([]));
+      adapter.on(/^SELECT/, rows(['id', 'email'], [3, 'a@b.co']));
+      const U = k.__schema(model('TxUpsert', field('email', 'email', { unique: true })));
+      const inst = await k.transaction(() => U.upsert({ email: 'a@b.co' }, { on: 'email' }));
+      return { id: inst.id };
+    });
+    expect(transaction.value.id).toBe(3);
+    expect(transaction.calls.filter((c) => /^(INSERT|SELECT)/.test(c.sql)).map((c) => c.tx)).toEqual([true, true]);
+
+    for (const answer of [rows(['id', 'email']), rows(['id', 'email'], [1, 'a@b.co'], [2, 'a@b.co'])]) {
+      const r = await paired(async (k, adapter) => {
+        adapter.on(/^INSERT/, rows([]));
+        adapter.on(/^SELECT/, answer);
+        const U = k.__schema(model('RaceUpsert', field('email', 'email', { unique: true })));
+        await U.upsert({ email: 'a@b.co' }, { on: 'email' });
+        return {};
+      });
+      expect(r.threw).toEqual({ error: true });
+      expect(r.calls.length).toBe(2);
+    }
+  });
+
+  test('upsert requires one exact declared unique tuple before hooks or SQL; tuple order is canonical', async () => {
+    const rejected = await paired(async (k) => {
+      const hooks = [];
+      const U = k.__schema(model('Targeted',
+        field('email', 'email', { optional: true, unique: true }),
+        field('tenant', 'string', { optional: true }),
+        field('slug', 'string', { optional: true }),
+        dir('unique', { fields: ['tenant', 'slug'] }),
+        hook('beforeValidation', () => hooks.push('beforeValidation'))));
+      const outcomes = [];
+      for (const [data, on] of [
+        [{ tenant: 'x' }, 'email'],
+        [{ email: null, tenant: 'x' }, 'email'],
+        [{ email: 'a@b.co', tenant: 'x' }, ['email', 'email']],
+        [{ tenant: 'x', slug: 's' }, 'tenant'],
+        [{ email: 'a@b.co', tenant: 'x' }, ['email', 'tenant']],
+        [{ email: 'a@b.co', tenant: 'x', slug: 's' }, ['email', 'tenant', 'slug']],
+      ]) {
+        try { await U.upsert(data, { on }); } catch (error) {
+          outcomes.push(/conflict target/i.test(error.message));
+        }
+      }
+      return { outcomes, hooks };
+    });
+    expect(rejected.value.outcomes).toEqual([true, true, true, true, true, true]);
+    // Missing/null values belong to input validation; malformed tuple
+    // shapes (duplicate, partial, superset, mixed) reject before hooks.
+    expect(rejected.value.hooks).toEqual(['beforeValidation', 'beforeValidation']);
+    expect(rejected.calls).toEqual([]);
+
+    const ordered = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id', 'tenant', 'slug'], [4, 'x', 's']));
+      const U = k.__schema(model('OrderedTarget',
+        field('tenant'),
+        field('slug'),
+        dir('unique', { fields: ['tenant', 'slug'] })));
+      return await U.upsert({ tenant: 'x', slug: 's' }, { on: ['slug', 'tenant'] });
+    });
+    expect(ordered.calls[0].sql).toContain('ON CONFLICT ("slug", "tenant") DO NOTHING');
+    expect(ordered.value.id).toBe(4);
+  });
+
+  test('unique/index declarations reject duplicate canonical columns before upsert planning', async () => {
+    const r = await paired(async (k) => {
+      const outcomes = [];
+      for (const fields of [
+        ['tenant', 'tenant'],
+        ['firstName', 'first_name'],
+      ]) {
+        try {
+          const M = k.__schema(model('DuplicateTuple' + outcomes.length,
+            field('tenant', 'string', { optional: true }),
+            field('firstName', 'string', { optional: true }),
+            dir('unique', { fields })));
+          M._normalize();
+          outcomes.push('accepted');
+        } catch (error) {
+          outcomes.push(/distinct/i.test(error.message));
+        }
+      }
+      return outcomes;
+    });
+    expect(r.value).toEqual([true, true]);
+    expect(r.calls).toEqual([]);
+  });
+
+  test('upsert RETURNING accepts one valid row only; failures precede completion hooks', async () => {
+    for (const [data, answer] of [
+      [
+        { email: 'a@b.co', name: 'A' },
+        rows(['id', 'email', 'name']),
+      ],
+      [
+        { email: 'a@b.co', name: 'A' },
+        rows(['id', 'email', 'name'], [1, 'a@b.co', 'A'], [2, 'a@b.co', 'A']),
+      ],
+      [
+        { email: 'a@b.co' },
+        rows(['id', 'email'], [1, 'a@b.co'], [2, 'a@b.co']),
+      ],
+      [
+        { email: 'a@b.co', name: 'A' },
+        { columns: null, data: [[1, 'a@b.co', 'A']], rowCount: 1 },
+      ],
+    ]) {
+      const r = await paired(async (k, adapter) => {
+        const hooks = [];
+        adapter.on(/^INSERT/, answer);
+        const U = k.__schema(model('ReturningUpsert',
+          field('email', 'email', { unique: true }),
+          field('name', 'string', { optional: true }),
+          hook('afterSave', () => hooks.push('afterSave')),
+          hook('afterCommit', () => hooks.push('afterCommit'))));
+        try {
+          await U.upsert(data, { on: 'email' });
+        } catch {
+          return { hooks };
+        }
+        return { accepted: true, hooks };
+      });
+      expect(r.value).toEqual({ hooks: [] });
+      expect(r.calls.length).toBe(1);
+    }
+  });
+
+  test('adapter rows reject duplicate canonical columns before identity absorption', async () => {
+    for (const answer of [
+      {
+        columns: [{ name: 'id' }, { name: 'id' }, { name: 'email' }],
+        data: [[1, 999, 'a@b.co']],
+        rowCount: 1,
+      },
+      {
+        columns: [{ name: 'user_id' }, { name: 'userId' }, { name: 'email' }],
+        data: [[1, 999, 'a@b.co']],
+        rowCount: 1,
+      },
+    ]) {
+      const r = await paired(async (k, adapter) => {
+        const hooks = [];
+        adapter.on(/^INSERT/, answer);
+        const U = k.__schema(model('DuplicateColumns',
+          field('email', 'email', { unique: true }),
+          hook('afterSave', () => hooks.push('afterSave'))));
+        try {
+          await U.upsert({ email: 'a@b.co' }, { on: 'email' });
+        } catch (error) {
+          return { message: error.message, hooks };
+        }
+        return { accepted: true, hooks };
+      });
+      expect(r.value.message).toMatch(/duplicate canonical column/i);
+      expect(r.value.hooks).toEqual([]);
+    }
+  });
+
+  test('DO NOTHING lookup verifies every returned target column and serialized value', async () => {
+    for (const answer of [
+      rows(['id', 'email'], [3, 'wrong@b.co']),
+      rows(['id', 'name'], [3, 'database']),
+      {
+        columns: [{ name: 'id' }, { name: 'email' }, { name: 'email' }],
+        data: [[3, 'a@b.co', 'wrong@b.co']],
+        rowCount: 1,
+      },
+    ]) {
+      const r = await paired(async (k, adapter) => {
+        adapter.on(/^INSERT/, rows([]));
+        adapter.on(/^SELECT/, answer);
+        const U = k.__schema(model('LookupTarget', field('email', 'email', { unique: true })));
+        await U.upsert({ email: 'a@b.co' }, { on: 'email' });
+      });
+      expect(r.threw).toEqual({ error: true });
+      expect(r.calls.length).toBe(2);
+    }
+
+    for (const returnedTargetValues of [
+      [new Date('2026-02-04'), '{"a":1}', 7],
+      [new Date('2026-02-03'), '{"a":2}', 7],
+      [new Date('2026-02-03'), '{"a":1}', 8],
+    ]) {
+      const r = await paired(async (k, adapter) => {
+        adapter.on(/^INSERT/, rows([]));
+        adapter.on(/^SELECT/, rows(
+          ['id', 'when', 'meta', 'state'],
+          [8, ...returnedTargetValues]));
+        k.__schema({
+          kind: 'enum', name: 'LookupState', entries: [
+            { tag: 'enum-member', name: 'ready', value: 7 },
+          ],
+        });
+        const U = k.__schema(model('CompositeMismatch',
+          field('when', 'date'),
+          field('meta', 'json'),
+          field('state', 'LookupState'),
+          dir('unique', { fields: ['when', 'meta', 'state'] })));
+        await U.upsert({
+          when: '2026-02-03', meta: { a: 1 }, state: 'ready',
+        }, { on: ['when', 'meta', 'state'] });
+      });
+      expect(r.threw).toEqual({ error: true });
+      expect(r.calls.length).toBe(2);
+    }
+  });
+
+  test('insertMany validates EVERY row before any SQL; one multi-VALUES INSERT', async () => {
+    const bad = await paired(async (k) => {
+      const U = k.__schema(model('User', field('name'), field('age', 'integer', { optional: true })));
+      await U.insertMany([{ name: 'A' }, { age: 'x' }, {}]);
+      return {};
+    });
+    expect(bad.threw.schemaError).toEqual([
+      ['[1].name', 'required'], ['[1].age', 'type'], ['[2].name', 'required'],
+    ]);
+    expect(bad.calls.length).toBe(0);
+
+    const ok = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, rows(['id', 'name'], [1, 'A'], [2, 'B']));
+      const U = k.__schema(model('User', field('name')));
+      const out = await U.insertMany([{ name: 'A' }, { name: 'B' }]);
+      return { n: out.length, names: out.map((x) => x.name) };
+    });
+    expect(ok.calls.length).toBe(1);
+    expect(ok.calls[0].sql).toBe('INSERT INTO "users" ("name") VALUES (?), (?) RETURNING *');
+  });
+});
+
+describe('orm: refinements guard every persistence path (R9)', () => {
+  const Adult = (k, ...extra) => k.__schema(model('User',
+    field('age', 'integer'),
+    ensure('must be adult', (u) => u.age >= 18),
+    ...extra,
+  ));
+
+  test('create(): a failing @ensure rejects before any SQL; a passing one inserts', async () => {
+    const bad = await paired(async (k) => {
+      await Adult(k).create({ age: 12 });
+      return {};
+    });
+    expect(bad.threw.schemaError).toEqual([['', 'ensure']]);
+    expect(bad.calls.length).toBe(0);
+
+    const ok = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id', 'age'], [1, 30]));
+      const u = await Adult(k).create({ age: 30 });
+      return { age: u.age };
+    });
+    expect(ok.value.age).toBe(30);
+    expect(ok.calls.length).toBe(1);
+  });
+
+  test('create(): validation failure stops the hook lifecycle after beforeValidation', async () => {
+    const r = await paired(async (k) => {
+      const ran = [];
+      const U = Adult(k,
+        hook('beforeValidation', () => ran.push('beforeValidation')),
+        hook('afterValidation', () => ran.push('afterValidation')),
+        hook('beforeSave', () => ran.push('beforeSave')),
+        hook('afterSave', () => ran.push('afterSave')));
+      try { await U.create({ age: 12 }); } catch { /* the rejection under test */ }
+      return { ran };
+    });
+    expect(r.value.ran).toEqual(['beforeValidation']);
+    expect(r.calls.length).toBe(0);
+  });
+
+  test('save(): an update that violates a refinement rejects with NO UPDATE SQL', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'age'], [1, 30]));
+      const U = Adult(k);
+      const inst = await U.first();
+      inst.age = 12;
+      const before = adapter.calls.length;
+      let threw = null;
+      try { await inst.save(); } catch (e) { threw = classify(k, e); }
+      return { threw, extra: adapter.calls.length - before };
+    });
+    expect(r.value.threw.schemaError).toEqual([['', 'ensure']]);
+    expect(r.value.extra).toBe(0);
+  });
+
+  test('upsert(): refinements run before the INSERT … ON CONFLICT', async () => {
+    const bad = await paired(async (k) => {
+      const U = k.__schema(model('User',
+        field('age', 'integer'),
+        field('email', 'email', { unique: true }),
+        ensure('must be adult', (u) => u.age >= 18)));
+      await U.upsert({ age: 12, email: 'a@b.c' }, { on: 'email' });
+      return {};
+    });
+    expect(bad.threw.schemaError).toEqual([['', 'ensure']]);
+    expect(bad.calls.length).toBe(0);
+  });
+
+  test('insertMany(): refinements run per row, issues prefixed [i], before any SQL', async () => {
+    const bad = await paired(async (k) => {
+      await Adult(k).insertMany([{ age: 30 }, { age: 12 }]);
+      return {};
+    });
+    expect(bad.threw.schemaError).toEqual([['[1]', 'ensure']]);
+    expect(bad.calls.length).toBe(0);
+  });
+
+  test('an async @ensure! is awaited on create — never silently accepted', async () => {
+    const bad = await paired(async (k) => {
+      const U = k.__schema(model('User',
+        field('age', 'integer'),
+        ensure('must be adult', (u) => Promise.resolve(u.age >= 18), { async: true })));
+      await U.create({ age: 12 });
+      return {};
+    });
+    expect(bad.threw.schemaError).toEqual([['', 'ensure']]);
+    expect(bad.calls.length).toBe(0);
+
+    const ok = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id', 'age'], [1, 30]));
+      const U = k.__schema(model('User',
+        field('age', 'integer'),
+        ensure('must be adult', (u) => Promise.resolve(u.age >= 18), { async: true })));
+      const u = await U.create({ age: 30 });
+      return { age: u.age };
+    });
+    expect(ok.value.age).toBe(30);
+  });
+});
+
+describe('orm: defensive structured SQL and canonical persistence', () => {
+  test('create/upsert/insertMany share the caller-writable key policy before hooks or SQL', async () => {
+    const r = await paired(async (k, adapter) => {
+      k.__schema(model('Owner', field('name')));
+      const hooks = [];
+      const Account = k.__schema(model('Account',
+        field('firstName'),
+        field('email', 'email', { unique: true }),
+        dir('timestamps'),
+        dir('softDelete'),
+        dir('belongs_to', { target: 'Owner', optional: false }),
+        hook('beforeValidation', () => hooks.push('hook'))));
+      const inputs = [
+        { typo: 'x', firstName: 'Ada', email: 'a@b.co' },
+        { id: 1, firstName: 'Ada', email: 'a@b.co' },
+        { createdAt: 'x', firstName: 'Ada', email: 'a@b.co' },
+        { created_at: 'x', firstName: 'Ada', email: 'a@b.co' },
+        { updatedAt: 'x', firstName: 'Ada', email: 'a@b.co' },
+        { deleted_at: 'x', firstName: 'Ada', email: 'a@b.co' },
+        { firstName: 'Ada', first_name: 'Grace', email: 'a@b.co' },
+        { first_name: 'Grace', firstName: 'Ada', email: 'a@b.co' },
+      ];
+      const apis = [
+        ['create', (data) => Account.create(data)],
+        ['upsert', (data) => Account.upsert(data, { on: 'email' })],
+        ['insertMany', (data) => Account.insertMany([data])],
+      ];
+      const rejected = [];
+      for (const [api, call] of apis) {
+        for (const data of inputs) {
+          try { await call(data); }
+          catch (error) {
+            rejected.push([api, error.issues?.[0]?.field, error.issues?.[0]?.error]);
+          }
+        }
+      }
+      return { rejected, hooks, calls: adapter.calls.length };
+    });
+    expect(r.value.rejected.length).toBe(24);
+    for (const api of ['create', 'upsert', 'insertMany']) {
+      const rows = r.value.rejected.filter(([name]) => name === api);
+      expect(rows.map((x) => x[2])).toEqual([
+        'unknown', 'pk', 'managed', 'managed', 'managed', 'managed', 'alias', 'alias',
+      ]);
+      expect(rows[6][1].replace(/^\[0\]\./, '')).toBe('firstName');
+      expect(rows[7][1].replace(/^\[0\]\./, '')).toBe('firstName');
+    }
+    expect(r.value.hooks).toEqual([]);
+    expect(r.value.calls).toBe(0);
+  });
+
+  test('all persistence insert APIs accept belongsTo FKs in canonical camel or snake spelling', async () => {
+    const r = await paired(async (k, adapter) => {
+      let id = 0;
+      adapter.on(/^INSERT/, (_sql, params) =>
+        row(['id', 'name', 'email', 'owner_id'], [++id, params[0], params[1], params[2]]));
+      k.__schema(model('Owner', field('name')));
+      const Account = k.__schema(model('Account',
+        field('name'),
+        field('email', 'email', { unique: true }),
+        dir('belongs_to', { target: 'Owner', optional: false })));
+      for (const [suffix, fk] of [['camel', { ownerId: 7 }], ['snake', { owner_id: 8 }]]) {
+        await Account.create({ name: suffix, email: suffix + '1@x.co', ...fk });
+        await Account.upsert({ name: suffix, email: suffix + '2@x.co', ...fk }, { on: 'email' });
+        await Account.insertMany([{ name: suffix, email: suffix + '3@x.co', ...fk }]);
+      }
+      return adapter.calls.map((call) => ({ sql: call.sql, params: call.params }));
+    });
+    expect(r.value.length).toBe(6);
+    expect(r.value.every((call) => call.sql.includes('"owner_id"'))).toBe(true);
+    expect(r.value.map((call) => call.params[2])).toEqual([7, 7, 7, 8, 8, 8]);
+  });
+
+  test('updateAll validates writable columns before SQL; empty is a zero-row no-op', async () => {
+    const r = await paired(async (k, adapter) => {
+      const U = k.__schema(model('User', field('name'), dir('timestamps')));
+      const empty = await U.where({}).updateAll({});
+      const rejected = [];
+      for (const values of [
+        { 'name" = 1; DROP TABLE users; --': 'x' },
+        { 'bad\nname': 'x' },
+        { typo: 'x' },
+        { id: 9 },
+        { updatedAt: 'x' },
+      ]) {
+        try { await U.where({}).updateAll(values); } catch { rejected.push(true); }
+      }
+      await U.where({}).updateAll({ name: 'Ada' });
+      return { empty, rejected, calls: adapter.calls.length };
+    });
+    expect(r.value).toEqual({ empty: 0, rejected: [true, true, true, true, true], calls: 1 });
+    expect(r.calls[0]).toMatchObject({
+      sql: 'UPDATE "users" SET "name" = ?, "updated_at" = ?',
+    });
+  });
+
+  test('order is trusted-string-only and upsert targets reject empty/coercible objects before hooks or SQL', async () => {
+    const r = await paired(async (k) => {
+      const ran = [];
+      const U = k.__schema(model('User',
+        field('email', 'email', { unique: true }),
+        hook('beforeValidation', () => ran.push('hook'))));
+      const rejected = [];
+      for (const action of [
+        () => U.where({}).order({ toString: () => 'email' }).all(),
+        () => U.upsert({ email: 'a@b.co' }, { on: [] }),
+        () => U.upsert({ email: 'a@b.co' }, { on: { toString: () => 'email' } }),
+      ]) {
+        try { await action(); } catch { rejected.push(true); }
+      }
+      return { rejected, ran };
+    });
+    expect(r.value).toEqual({ rejected: [true, true, true], ran: [] });
+    expect(r.calls).toEqual([]);
+  });
+
+  test('derived inverse relation keys must exist on the target before resolve or preload SQL', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT \* FROM "users"/, rows(['id', 'name'], [1, 'A']));
+      const User = k.__schema(model('User', field('name'), dir('has_many', { target: 'Order', optional: false })));
+      k.__schema(model('Order', field('total', 'integer')));
+      const u = await User.first();
+      const before = adapter.calls.length;
+      const rejected = [];
+      try { await u.orders(); } catch { rejected.push('resolve'); }
+      try { await User.includes('orders').all(); } catch { rejected.push('preload'); }
+      return { rejected, extra: adapter.calls.length - before };
+    });
+    expect(r.value).toEqual({ rejected: ['resolve', 'preload'], extra: 0 });
+    // Includes validates its whole relation tree before the root
+    // query, so no adapter call occurs for an impossible preload.
+    expect(r.calls.filter((c) => c.sql.includes('"user_id"')).length).toBe(0);
+  });
+
+  test('create/upsert/insertMany share transforms, coercions, defaults, dates, and normalized SQL params', async () => {
+    const r = await paired(async (k, adapter) => {
+      let transforms = 0;
+      const entries = [
+        field('name', 'string', { transform: (raw) => { transforms++; return raw.name.trim(); } }),
+        field('age', 'integer', { coerce: true }),
+        field('when', 'date'),
+        field('role', 'string', { constraints: { default: 'reader' } }),
+        field('email', 'email', { unique: true }),
+      ];
+      const U = k.__schema(model('User', ...entries));
+      adapter.on(/^INSERT INTO "users".*ON CONFLICT/, row(
+        ['id', 'name', 'age', 'when', 'role', 'email'],
+        [2, 'Bob', 8, new Date('2026-01-02'), 'reader', 'b@b.co']));
+      adapter.on(/^INSERT INTO "users"/, row(
+        ['id', 'name', 'age', 'when', 'role', 'email'],
+        [1, 'Ada', 7, new Date('2026-01-01'), 'reader', 'a@b.co']));
+      await U.create({ name: ' Ada ', age: '7', when: '2026-01-01', email: 'a@b.co' });
+      await U.upsert({ name: ' Bob ', age: '8', when: '2026-01-02', email: 'b@b.co' }, { on: 'email' });
+      await U.insertMany([{ name: ' Cid ', age: '9', when: '2026-01-03', email: 'c@b.co' }]);
+      return { transforms, params: adapter.calls.map((c) => c.params) };
+    });
+    expect(r.value.transforms).toBe(3);
+    for (const params of r.value.params) {
+      expect(params.some((v) => typeof v === 'string' && /^\s|\s$/.test(v))).toBe(false);
+      expect(params.some((v) => v === '7' || v === '8' || v === '9')).toBe(false);
+      expect(params.some((v) => v instanceof Date)).toBe(true);
+      expect(params).toContain('reader');
+    }
+  });
+
+  test('failed save stages nested async normalization atomically and runs no post hooks or SQL', async () => {
+    const r = await paired(async (k, adapter) => {
+      let transforms = 0;
+      const Child = k.__schema({
+        kind: 'shape', name: 'Child', entries: [
+          field('name', 'string', { transform: (raw) => { transforms++; return raw.name.trim(); } }),
+          field('n', 'integer', { coerce: true }),
+          ensure('even', async (v) => v.n % 2 === 0, { async: true, field: 'n' }),
+        ],
+      });
+      void Child;
+      const ran = [];
+      const U = k.__schema(model('User',
+        field('child', 'Child'),
+        hook('afterValidation', () => ran.push('afterValidation')),
+        hook('beforeSave', () => ran.push('beforeSave'))));
+      adapter.on(/^SELECT/, rows(['id', 'child'], [1, { name: 'Ada', n: 2 }]));
+      const inst = await U.first();
+      inst.child = { name: '  Ada  ', n: '3' };
+      const before = structuredClone(inst.child);
+      const calls = adapter.calls.length;
+      let issue;
+      try { await inst.save(); } catch (e) { issue = e.issues[0]; }
+      return {
+        transforms,
+        before,
+        after: inst.child,
+        issue: [issue.field, issue.error],
+        extra: adapter.calls.length - calls,
+        ran,
+      };
+    });
+    expect(r.value).toEqual({
+      transforms: 0,
+      before: { name: '  Ada  ', n: '3' },
+      after: { name: '  Ada  ', n: '3' },
+      issue: ['child.n', 'type'],
+      extra: 0,
+      ran: [],
+    });
+  });
+
+  test('failed save runs no nested eager-derived side effect before the whole graph validates', async () => {
+    const r = await paired(async (k, adapter) => {
+      let derived = 0;
+      k.__schema({
+        kind: 'shape', name: 'Child', entries: [
+          field('n', 'integer'),
+          { tag: 'derived', name: 'doubled', fn() { derived++; return this.n * 2; } },
+        ],
+      });
+      const U = k.__schema(model('User', field('child', 'Child'), field('later', 'integer')));
+      adapter.on(/^SELECT/, rows(['id', 'child', 'later'], [1, { n: 1 }, 1]));
+      const inst = await U.first();
+      inst.child = { n: 2 };
+      inst.later = 'bad';
+      const before = structuredClone(inst.child);
+      const calls = adapter.calls.length;
+      let issue = null;
+      try { await inst.save(); } catch (error) { issue = error.issues[0]; }
+      return {
+        derived,
+        before,
+        after: inst.child,
+        issue: [issue.field, issue.error],
+        extra: adapter.calls.length - calls,
+      };
+    });
+    expect(r.value).toEqual({
+      derived: 0,
+      before: { n: 2 },
+      after: { n: 2 },
+      issue: ['later', 'type'],
+      extra: 0,
+    });
+  });
+
+  test('nested async refinements reject create/upsert/insertMany before SQL or hooks', async () => {
+    const r = await paired(async (k) => {
+      k.__schema({
+        kind: 'shape', name: 'Child', entries: [
+          field('n', 'integer'),
+          ensure('even', async (v) => v.n % 2 === 0, { async: true, field: 'n' }),
+        ],
+      });
+      const ran = [];
+      const U = k.__schema(model('User',
+        field('child', 'Child'),
+        field('email', 'email', { unique: true }),
+        hook('beforeSave', () => ran.push('beforeSave'))));
+      const issues = [];
+      for (const action of [
+        () => U.create({ child: { n: 3 }, email: 'a@b.co' }),
+        () => U.upsert({ child: { n: 3 }, email: 'a@b.co' }, { on: 'email' }),
+        () => U.insertMany([{ child: { n: 3 }, email: 'a@b.co' }]),
+      ]) {
+        try { await action(); } catch (e) { issues.push(e.issues.map((i) => [i.field, i.error])); }
+      }
+      return { issues, ran };
+    });
+    expect(r.value).toEqual({
+      issues: [
+        [['child.n', 'ensure']],
+        [['child.n', 'ensure']],
+        [['[0].child.n', 'ensure']],
+      ],
+      ran: [],
+    });
+    expect(r.calls).toEqual([]);
+  });
+
+  test('nested enum normalization reaches persistence params and normalized nested no-op saves stay no-op', async () => {
+    const r = await paired(async (k, adapter) => {
+      k.__schema({
+        kind: 'enum', name: 'State', entries: [
+          { tag: 'enum-member', name: 'ready', value: 7 },
+        ],
+      });
+      k.__schema({
+        kind: 'shape', name: 'Child', entries: [
+          field('name'),
+          field('state', 'State'),
+        ],
+      });
+      const U = k.__schema(model('User', field('child', 'Child')));
+      adapter.on(/^INSERT/, row(['id', 'child'], [1, { name: 'Ada', state: 7 }]));
+      await U.create({ child: { name: 'Ada', state: 'ready' } });
+      adapter.on(/^SELECT/, rows(['id', 'child'], [2, { name: 'Bob', state: 7 }]));
+      const loaded = await U.first();
+      const before = adapter.calls.length;
+      await loaded.save();
+      return {
+        persistedState: adapter.calls[0].params[0].state,
+        noOpCalls: adapter.calls.length - before,
+      };
+    });
+    expect(r.value).toEqual({ persistedState: 7, noOpCalls: 0 });
+  });
+});
+
+describe('orm: paired reference — transactions', () => {
+  test('ambient join: BEGIN once, statements ride the handle, COMMIT, block value returned', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id', 'name'], [1, 'A']));
+      const U = k.__schema(model('User', field('name')));
+      const out = await k.transaction(async () => {
+        const u = await U.create({ name: 'A' });
+        await k.transaction(async () => U.create({ name: 'B' }));  // nested joins
+        return u.id;
+      });
+      return { out };
+    });
+    const sqls = r.calls.map((c) => [c.sql.startsWith('INSERT') ? 'INSERT' : c.sql, c.tx]);
+    expect(sqls).toEqual([
+      ['<BEGIN>', false], ['INSERT', true], ['INSERT', true], ['<COMMIT>', false],
+    ]);
+    expect(r.value.out).toBe(1);
+  });
+
+  test('a throwing block ROLLS BACK and propagates; afterRollback fires, afterCommit does not', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id', 'name'], [1, 'A']));
+      const log = [];
+      const U = k.__schema(model('User', field('name'),
+        hook('afterCommit', function () { log.push('commit'); }),
+        hook('afterRollback', function () { log.push('rollback'); }),
+      ));
+      let threw = false;
+      try {
+        await k.transaction(async () => {
+          await U.create({ name: 'A' });
+          throw new Error('boom');
+        });
+      } catch { threw = true; }
+      return { threw, log };
+    });
+    expect(r.value.log).toEqual(['rollback']);
+    expect(r.calls.map((c) => c.sql.startsWith('INSERT') ? 'INSERT' : c.sql)).toEqual(['<BEGIN>', 'INSERT', '<ROLLBACK>']);
+  });
+
+  test('afterCommit fires at COMMIT inside a transaction, immediately outside one; dedupe per instance', async () => {
+    const r = await paired(async (k, adapter) => {
+      // RETURNING echoes only the id, so the hook reads the caller's
+      // own field values (absorbed columns would overwrite them).
+      adapter.on(/^INSERT/, row(['id'], [1]));
+      const log = [];
+      const U = k.__schema(model('User', field('name'),
+        hook('afterCommit', function () { log.push('commit:' + this.name); }),
+      ));
+      await U.create({ name: 'solo' });          // no tx: fires immediately
+      const soloLog = [...log];
+      log.length = 0;
+      await k.transaction(async () => {
+        const u = await U.create({ name: 'tx' });
+        u.name = 'tx2';
+        await u.save();                          // same instance saved twice → ONE callback
+        log.push('inside:' + log.length);
+      });
+      return { soloLog, log };
+    });
+    expect(r.value.soloLog).toEqual(['commit:solo']);
+    expect(r.value.log).toEqual(['inside:0', 'commit:tx2']);
+  });
+
+  test('an adapter without begin() rejects transactions by name', async () => {
+    const r = await paired(async (k) => {
+      k.setAdapter({ query: async () => ({ columns: [], data: [], rowCount: 0 }) });
+      await k.transaction(async () => 1);
+      return {};
+    });
+    expect(r.threw).toEqual({ error: true });
+  });
+});
+
+describe('orm: paired reference — DDL', () => {
+  test('toSQL byte-agreement on the rich model (constraints, unique, index, idStart, timestamps, softDelete, FKs)', async () => {
+    const r = await paired(async (k) => {
+      k.__schema(model('User', field('name')));
+      k.__schema(model('Coupon', field('code')));
+      const T = k.__schema(model('Trade',
+        field('name', 'string', { constraints: { min: 1, max: 100 } }),
+        field('email', 'email', { unique: true }),
+        field('notes', 'text', { optional: true }),
+        field('tags', 'string', { array: true, optional: true }),
+        field('price', 'number', { optional: true, constraints: { default: 0 } }),
+        dir('timestamps'),
+        dir('softDelete'),
+        dir('idStart', { value: 5000 }),
+        dir('index', { fields: ['name'] }),
+        dir('unique', { fields: ['name', 'email'] }),
+        dir('belongs_to', { target: 'User', optional: false }),
+        dir('belongs_to', { target: 'Coupon', optional: true }),
+      ));
+      return { sql: T.toSQL(), dropped: T.toSQL({ dropFirst: true, idStart: 9000 }) };
+    });
+    expect(r.value.sql).toContain('CREATE SEQUENCE "trades_seq" START 5000;');
+    expect(r.value.sql).toContain('"name" VARCHAR(100) NOT NULL');
+    expect(r.value.sql).toContain('"user_id" INTEGER NOT NULL REFERENCES "users"("id")');
+    expect(r.value.sql).toContain('"coupon_id" INTEGER REFERENCES "coupons"("id")');
+    expect(r.value.sql).toContain('CREATE UNIQUE INDEX "idx_trades_email" ON "trades" ("email");');
+    expect(r.value.sql).toContain('CREATE UNIQUE INDEX "idx_trades_name_email" ON "trades" ("name", "email");');
+    expect(r.value.dropped).toContain('DROP TABLE IF EXISTS "trades" CASCADE;');
+    expect(r.value.dropped).toContain('START 9000');
+  });
+
+  test('duplicate index declarations on one column set reject', async () => {
+    const r = await paired(async (k) => {
+      const T = k.__schema(model('Dup',
+        field('email', 'email', { unique: true }),
+        dir('unique', { fields: ['email'] }),
+      ));
+      T.toSQL();
+      return {};
+    });
+    expect(r.threw).toEqual({ error: true });
+  });
+
+  test('toSQL works with no adapter configured; ORM statics on non-models reject', async () => {
+    const r = await paired(async (k) => {
+      const T = k.__schema(model('Solo', field('name')));
+      const S = k.__schema({ kind: 'shape', name: 'Sh', entries: [field('a')] });
+      let shapeFind = null;
+      try { await S.find(1); } catch (e) { shapeFind = 'threw'; }
+      return { sql: T.toSQL().length > 0, shapeFind };
+    });
+    expect(r.value.shapeFind).toBe('threw');
+    expect(r.calls.length).toBe(0);
+  });
+});
+
+describe('orm: paired reference — model algebra and wire shapes', () => {
+  test('algebra projects over the implicit columns; the result is a :shape without ORM', async () => {
+    const r = await paired(async (k) => {
+      const U = k.__schema(model('User',
+        field('name'),
+        field('secret'),
+        dir('timestamps'),
+        dir('belongs_to', { target: 'Org', optional: false }),
+      ));
+      k.__schema(model('Org', field('name')));
+      const View = U.pick('id', 'name', 'createdAt', 'orgId');
+      const Partial = U.omit('secret').partial();
+      let ormOnDerived = null;
+      try { await View.find(1); } catch (e) { ormOnDerived = 'threw'; }
+      return {
+        kind: View.kind,
+        parsed: { ...View.parse({ id: 1, name: 'A', createdAt: new Date('2026-01-01'), orgId: 2 }) },
+        partialOk: Partial.ok({}),
+        ormOnDerived,
+      };
+    });
+    expect(r.value.kind).toBe('shape');
+    expect(r.value.ormOnDerived).toBe('threw');
+  });
+
+  test('a model reserved-name field collides loudly; model wire shape carries implicit columns in JSON Schema', async () => {
+    const reserved = await paired(async (k) => {
+      const U = k.__schema(model('Bad', field('save')));
+      U._normalize();
+      return {};
+    });
+    expect(reserved.threw.schemaError).toBeDefined();
+
+    const js = await paired(async (k) => {
+      const U = k.__schema(model('User',
+        field('name'),
+        dir('timestamps'), dir('softDelete'),
+        dir('belongs_to', { target: 'Org', optional: true }),
+      ));
+      k.__schema(model('Org', field('name')));
+      return U.toJSONSchema();
+    });
+    expect(js.value.properties.id).toEqual({ type: 'integer' });
+    expect(js.value.properties.createdAt).toEqual({ type: 'string', format: 'date-time' });
+    expect(js.value.properties.orgId).toEqual({ type: ['integer', 'null'] });
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// The defect battery: silent-failure classes, fixed at the root —
+// every rejection loud and positioned
+// ════════════════════════════════════════════════════════════════════
+
+describe('orm: the defect battery (#102–#105)', () => {
+  const loud4 = async (desc, re) => {
+    await K4.scope(() => {
+      expect(() => K4.__schema(desc)._normalize()).toThrow(re);
+    });
+  };
+
+  test('#102: an unknown :model directive rejects by name', async () => {
+    const typo = model('User', field('name'), dir('timestamp'));
+    await loud4(typo, /unknown directive '@timestamp'/);
+    await loud4(model('User', field('name'), dir('bogus')), /unknown directive '@bogus'/);
+    await loud4(model('User', field('name'), dir('belongs_too', { target: 'Order', optional: false })), /unknown directive '@belongs_too'/);
+  });
+
+  test('#103: malformed or junk-bearing directive args reject', async () => {
+    // relation with no usable target — the old runtime returns null and drops it
+    const noTarget = model('User', field('name'), { tag: 'directive', name: 'belongs_to', args: null });
+    await loud4(noTarget, /@belongs_to: takes exactly one target name/);
+    // trailing junk: a second arg — the old runtime reads args[0] and ignores the rest
+    const junk = model('User', field('name'),
+      dir('belongs_to', { target: 'Org', optional: false }, { target: 'Extra', optional: false }));
+    await loud4(junk, /@belongs_to: takes exactly one target name/);
+    // args on an argless directive
+    await loud4(model('User', field('name'), dir('timestamps', { target: 'yes', optional: false })), /@timestamps: takes no arguments/);
+    // idStart without an integer
+    await loud4(model('User', field('name'), dir('idStart', { value: 'hello' })), /@idStart: takes one integer literal/);
+  });
+
+  test('#104: @unique/@index over undeclared columns reject at normalize', async () => {
+    const bad = model('Thing', field('name'),
+      dir('unique', { fields: ['nope', 'missing'] }),
+      dir('index', { fields: ['bogusColumn'] }));
+    await loud4(bad, /@unique: unknown column 'nope'/);
+    // implicit columns count as known
+    await K4.scope(() => {
+      const ok = K4.__schema(model('Known', field('name'),
+        dir('timestamps'), dir('softDelete'),
+        dir('belongs_to', { target: 'Org', optional: false }),
+        dir('index', { fields: ['createdAt'] }),
+        dir('index', { fields: ['orgId'] }),
+        dir('unique', { fields: ['deletedAt', 'name'] })));
+      expect(() => ok._normalize()).not.toThrow();
+    });
+  });
+
+  test('#108: a field and a relation owning one column reject at normalize', async () => {
+    // the exact repro: `userId integer` + `@belongs_to User` — one
+    // table column, two owners
+    const collide = model('User',
+      field('userId', 'integer'),
+      field('name'),
+      dir('belongs_to', { target: 'User', optional: false }));
+    await loud4(collide, /field 'userId' and the @belongs_to User relation both own column 'user_id'/);
+    // the mixin channel reaches the directive-managed columns (direct
+    // declarations are caught by the reserved set first): a
+    // mixin-included createdAt + @timestamps is the same collision
+    await K4.scope(() => {
+      K4.__schema({ kind: 'mixin', name: 'Stamps', entries: [field('createdAt', 'datetime')] });
+      const M = K4.__schema(model('Doc', field('name'), dir('mixin', { target: 'Stamps' }), dir('timestamps')));
+      expect(() => M._normalize()).toThrow(/field 'createdAt' and @timestamps both own column 'created_at'/);
+    });
+    // the legal neighbor stays legal
+    await K4.scope(() => {
+      const ok = K4.__schema(model('Post', field('userName'), dir('belongs_to', { target: 'User', optional: false })));
+      expect(() => ok._normalize()).not.toThrow();
+    });
+  });
+
+  test('#105: acronym-style relation targets reject', async () => {
+    const acro = model('Widget', field('name'), dir('belongs_to', { target: 'MDMUser', optional: false }));
+    await loud4(acro, /not canonical PascalCase/);
+    // the canonical spelling is fine
+    await K4.scope(() => {
+      K4.__schema(model('MdmUser', field('name')));
+      const W = K4.__schema(model('Widget', field('name'), dir('belongs_to', { target: 'MdmUser', optional: false })));
+      expect(W._normalize().relations.get('mdmUser').foreignKey).toBe('mdm_user_id');
+    });
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// this side-only unit tier (no reference dependence)
+// ════════════════════════════════════════════════════════════════════
+
+describe('orm:  unit tier', () => {
+  test('an anonymous :model rejects (its table name derives from the name)', async () => {
+    await K4.scope(() => {
+      expect(() => K4.__schema({ kind: 'model', entries: [field('a')] })._normalize())
+        .toThrow(/a :model needs a name/);
+    });
+  });
+
+  test('persistence entries on non-model kinds reject at the base layer', async () => {
+    await K4.scope(() => {
+      expect(() => K4.__schema({ kind: 'shape', name: 'S1', entries: [field('a'), hook('beforeSave', () => {})] })._normalize())
+        .toThrow(/:model-only/);
+      expect(() => K4.__schema({ kind: 'input', name: 'S2', entries: [field('a'), scopeEntry('live', () => {})] })._normalize())
+        .toThrow(/:model-only/);
+      expect(() => K4.__schema({ kind: 'shape', name: 'S3', entries: [field('a'), defaultScopeEntry(() => {})] })._normalize())
+        .toThrow(/:model-only/);
+    });
+  });
+
+  test('parse() on a model stays a standalone class-with-validation (no adapter, no SQL)', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const U = K4.__schema(model('User', field('name'), dir('timestamps')));
+      const u = U.parse({ name: 'A' });
+      expect(u.name).toBe('A');
+      expect(u.ok()).toBe(true);
+      expect(adapter.calls.length).toBe(0);
+    });
+  });
+
+  test('the schema namespace: the M11-A surface plus the M11-C CLI-pointing migration stubs', () => {
+    expect(Object.keys(orm4.schema).sort()).toEqual([
+ 'connect', 'introspect', 'make', 'migrate', 'plan', 'registerCoercer', 'setAdapter', 'status', 'transaction',
+    ]);
+    expect(orm4.schema.registerCoercer).toBe(rt4.registerCoercer);
+    // The migration machinery is CLI-only: the delivered
+    // namespace REJECTS the verbs loudly, naming the CLI — never
+    // `undefined is not a function`, never the differ itself.
+    for (const verb of ['plan', 'status', 'make', 'migrate', 'introspect']) {
+      expect(() => orm4.schema[verb]()).toThrow(/CLI-only/);
+      expect(() => orm4.schema[verb]()).toThrow(/rip schema/);
+    }
+  });
+
+  test('schema.connect builds a NEW adapter value without installing it; a url is required', () => {
+    const a = orm4.__schemaConnect({ url: 'http://x.example:1' });
+    expect(typeof a.query).toBe('function');
+    expect(typeof a.begin).toBe('function');
+    expect(a.capabilities.tx).toBe(true);
+    expect(() => orm4.__schemaConnect({})).toThrow(/url is required/);
+  });
+
+  test("a per-schema `on:` adapter pins that model's SQL; the global adapter keeps the rest", async () => {
+    await K4.scope(async () => {
+      const global_ = recordingAdapter();
+      const pinned = recordingAdapter();
+      K4.setAdapter(global_);
+      const A = K4.__schema({ kind: 'model', name: 'Alpha', entries: [field('name')], adapter: pinned });
+      const B = K4.__schema(model('Beta', field('name')));
+      await A.count();
+      await B.count();
+      expect(pinned.calls.map((c) => c.sql)).toEqual(['SELECT COUNT(*) FROM "alphas"']);
+      expect(global_.calls.map((c) => c.sql)).toEqual(['SELECT COUNT(*) FROM "betas"']);
+    });
+  });
+
+  test('constraint-violation translation: a DuckDB unique violation becomes a structured SchemaError', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      adapter.on(/^INSERT/, () => {
+        throw new Error('Constraint Error: Duplicate key "email: a@b.c" violates unique constraint');
+      });
+      K4.setAdapter(adapter);
+      const U = K4.__schema(model('User', field('email', 'email')));
+      let err = null;
+      try { await U.create({ email: 'a@b.c' }); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(rt4.SchemaError);
+      expect(err.issues).toEqual([{ field: 'email', error: 'unique', message: 'email already taken' }]);
+      expect(err.cause).toBeInstanceOf(Error);
+    });
+  });
+
+  test('pluralization: irregulars, uncountables, y/es endings drive table and accessor names', async () => {
+    await K4.scope(() => {
+      expect(K4.__schema(model('Person', field('name')))._normalize().tableName).toBe('people');
+      expect(K4.__schema(model('Box', field('name')))._normalize().tableName).toBe('boxes');
+      expect(K4.__schema(model('Company', field('name')))._normalize().tableName).toBe('companies');
+      expect(K4.__schema(model('Datum', field('name')))._normalize().tableName).toBe('datums');
+    });
+  });
+
+  // ── the adapter-contract boundary ─
+
+  test('setAdapter rejects a non-adapter loudly, by name, citing the contract', () => {
+    expect(() => orm4.__schemaSetAdapter(42)).toThrow(/schema\.setAdapter\(\).*query\(sql, params\).*Adapter Contract v2/);
+    expect(() => orm4.__schemaSetAdapter(null)).toThrow(/Adapter Contract v2/);
+    expect(() => orm4.__schemaSetAdapter({ begin() {} })).toThrow(/Adapter Contract v2/);
+    // the module-global adapter survived every rejected installation
+    orm4.__schemaSetAdapter(recordingAdapter());
+  });
+
+  test("a malformed `on:` adapter rejects at declaration; a malformed transaction `on:` rejects at the call", async () => {
+    await K4.scope(async () => {
+      expect(() => K4.__schema({ kind: 'model', name: 'Pinned', entries: [field('name')], adapter: 42 }))
+        .toThrow(/schema :model on: \(Pinned\).*Adapter Contract v2/);
+      let err = null;
+      try { await K4.transaction({ on: 7 }, async () => 1); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/schema\.transaction\(on:\).*Adapter Contract v2/);
+    });
+  });
+
+  test('an INSERT whose response produced no primary key rejects before _persisted flips', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();  // default answer: no RETURNING row
+      K4.setAdapter(adapter);
+      const U = K4.__schema(model('User', field('name')));
+      let err = null;
+      let inst = null;
+      try { inst = await U.create({ name: 'A' }); } catch (e) { err = e; }
+      expect(inst).toBe(null);
+      expect(err?.message).toMatch(/INSERT INTO "users" produced no id/);
+      expect(err?.message).toMatch(/\{columns: 0 cols, data: 0 rows\}/);
+      // a response with data but still no id column names its shape too
+      adapter.on(/^INSERT/, row(['name'], ['A']));
+      err = null;
+      try { await U.create({ name: 'A' }); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/produced no id/);
+    });
+  });
+
+  test('the adapter near-miss names the missing method; a non-object names its type', () => {
+    // Near-miss: an object that just lacks query() — the message says
+    // what to add, not what was passed.
+    expect(() => orm4.__schemaSetAdapter({ begin() {}, capabilities: {} }))
+      .toThrow(/no query\(\) method.*Adapter Contract v2.*carries: begin, capabilities/);
+    // Non-objects keep the type-naming shape.
+    expect(() => orm4.__schemaSetAdapter(42)).toThrow(/got number, not an adapter object/);
+    expect(() => orm4.__schemaSetAdapter(null)).toThrow(/got null, not an adapter object/);
+    expect(() => orm4.__schemaSetAdapter('http://db')).toThrow(/got string, not an adapter object/);
+    orm4.__schemaSetAdapter(recordingAdapter());
+  });
+
+  // ── the caller-supplied-pk posture ─
+  // A caller id never reaches the INSERT (the pk is sequence-assigned,
+  // RETURNING-absorbed), and a preset id defeats the
+  // RETURNING-produced-the-pk check — so every insert path REJECTS it
+  // loudly instead of resting the hole on the DB constraint.
+
+  test('create()/save() with a caller-supplied id reject loudly;  silently drops the id ()', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const U = K4.__schema(model('User', field('name')));
+      let err = null;
+      try { await U.create({ id: 99, name: 'A' }); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/caller-supplied id.*primary key is runtime-managed/);
+      expect(adapter.calls.length).toBe(0); // rejected before any SQL
+      // a before-hook presetting the pk is the same channel — checked
+      // after every before-hook ran
+      const H = K4.__schema(model('Hk', field('name'), hook('beforeCreate', function () { this.id = 7; })));
+      err = null;
+      try { await H.create({ name: 'B' }); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/caller-supplied id/);
+    });
+  });
+
+  test('upsert() and insertMany() reject caller-supplied ids too (before any SQL)', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const U = K4.__schema(model('User', field('name'), field('email', 'email', { unique: true })));
+      let err = null;
+      try { await U.upsert({ id: 5, name: 'A', email: 'a@b.c' }, { on: 'email' }); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/upsert\(\) on User received a caller-supplied id/);
+      err = null;
+      try { await U.insertMany([{ name: 'A', email: 'a@b.c' }, { id: 3, name: 'B', email: 'b@b.c' }]); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(rt4.SchemaError);
+      expect(err.issues.some((i) => i.field === '[1].id' && i.error === 'pk')).toBe(true);
+      expect(adapter.calls.length).toBe(0);
+    });
+  });
+
+  test("a declared `id` field on a :model collides with the runtime-managed primary key", async () => {
+    await K4.scope(() => {
+      expect(() => K4.__schema(model('U1', field('id', 'integer'), field('name')))._normalize())
+        .toThrow(/id collides with the runtime-managed primary key/);
+      // non-model kinds keep `id` as an ordinary field
+      expect(() => K4.__schema({ kind: 'shape', name: 'S1', entries: [field('id', 'integer')] })._normalize())
+        .not.toThrow();
+    });
+  });
+
+  // ── the ALS cold start ───────
+
+});
+
+// ════════════════════════════════════════════════════════════════════
+// delivery: the persistence runtime through the seam
+// ════════════════════════════════════════════════════════════════════
+
+parser.lexer = makeParserLexer();
+
+const compile = (source, opts = {}) => {
+  const result = parser.parse(source);
+  if (result.diagnostics?.length) throw new Error(result.diagnostics[0].message);
+  const emitted = emit(result, { source, ...opts });
+  return {
+    code: emitted.code,
+    runtimes: emitted.runtimes,
+    mappings: new Mappings(emitted.mappings),
+  };
+};
+
+describe('orm: runtime delivery', () => {
+  const ORM_SRC = 'schema.setAdapter({query: (sql) -> {columns: [], data: [], rowCount: 0}})\nconsole.log "installed"';
+  const BOTH_SRC = 'S = schema\n  a! integer\nschema.setAdapter({query: (sql) -> {columns: [], data: [], rowCount: 0}})\nconsole.log S.parse({a: 4}).a';
+
+  test('referencing the schema namespace delivers the persistence runtime AND its validation dependency', () => {
+    const { runtimes } = compile(ORM_SRC);
+    expect([...runtimes].sort()).toEqual(['orm', 'schema']);
+  });
+
+  test('a schema DECLARATION alone never delivers the persistence runtime', () => {
+    const { runtimes, code } = compile('S = schema\n  a! integer', { runtimeDelivery: 'inline' });
+    expect([...runtimes]).toEqual(['schema']);
+    expect(code).not.toContain('__schemaTransaction');
+    expect(code).not.toContain('PERSISTENCE');
+    // import mode: only the validation runtime's module
+    const imp = compile('S = schema\n  a! integer', { runtimeDelivery: 'import' });
+    expect(imp.code).toContain('runtime/schema.js');
+    expect(imp.code).not.toContain('runtime/orm.js');
+  });
+
+  test("'import' injects BOTH modules, validation first; names bound match inline mode", () => {
+    const { code } = compile(BOTH_SRC, { runtimeDelivery: 'import' });
+    const lines = code.split('\n');
+    expect(lines[0]).toMatch(/^import \{ __schema, SchemaError, registerCoercer \} from ".*src\/runtime\/schema\.js";$/);
+    expect(lines[1]).toMatch(/^import \{ schema, __schemaSetAdapter \} from ".*src\/runtime\/orm\.js";$/);
+  });
+
+  test("'inline' fuses the two bodies into ONE IIFE binding the union (the fragment-scope model)", () => {
+    const { code } = compile(BOTH_SRC, { runtimeDelivery: 'inline' });
+    expect(code.startsWith('const { __schema, SchemaError, registerCoercer, schema, __schemaSetAdapter } = (() => {')).toBe(true);
+    // one runtime IIFE, one sentinel, no import statements
+    expect((code.match(/\(\(\) => \{\n\/\//g) ?? []).length).toBe(1);
+    expect((code.match(/class SchemaError/g) ?? []).length).toBe(1);
+    expect(/^import /m.test(code)).toBe(false);
+    // the orm body made it in, its import line stripped
+    expect(code).toContain('__schemaInstallPersistence({');
+    expect(code).not.toContain("from './schema.js'");
+  });
+
+  test('a transaction-only module (no schema declaration) still gets the fused pair', () => {
+    const { code, runtimes } = compile(ORM_SRC, { runtimeDelivery: 'inline' });
+    expect([...runtimes].sort()).toEqual(['orm', 'schema']);
+    expect(code.startsWith('const { __schema, SchemaError, registerCoercer, schema, __schemaSetAdapter } = (() => {')).toBe(true);
+  });
+
+  test('the fused inline block records ONE synthetic mapping row that never serializes', () => {
+    const { code, mappings } = compile(BOTH_SRC, { runtimeDelivery: 'inline' });
+    const runtimeRows = mappings.rows.filter((r) => r.role === 'runtime');
+    expect(runtimeRows.length).toBe(1);
+    expect(runtimeRows[0].mappingKind).toBe('synthetic');
+    expect(runtimeRows[0].sourceStart).toBe(runtimeRows[0].sourceEnd);
+    expect(code.slice(runtimeRows[0].generatedStart, runtimeRows[0].generatedEnd)).toContain('__schemaInstallPersistence');
+    expect(mappings.serializableRows().some((r) => r.role === 'runtime')).toBe(false);
+  });
+
+  test('program-scope bindings suppress per name (the bring-your-own hatch)', () => {
+    // `schema` bound: no namespace injection; __schemaSetAdapter still delivers
+    const a = compile('schema = {setAdapter: (x) -> x}\nschema.setAdapter 1\n__schemaSetAdapter 2', { runtimeDelivery: 'import' });
+    const ormLine = a.code.split('\n').find((l) => l.includes('orm.js'));
+    expect(ormLine).toMatch(/^import \{ __schemaSetAdapter \} from/);
+    // both orm names bound: nothing triggers, nothing injects
+    const b = compile('schema = 1\n__schemaSetAdapter = 2\nschema.setAdapter 3', { runtimeDelivery: 'import' });
+    expect([...b.runtimes]).toEqual([]);
+    expect(b.code).not.toContain('runtime/schema');
+  });
+
+  test('zero-cost holds: plain programs byte-identical across modes; validation-only programs carry no persistence bytes', () => {
+    for (const mode of ['none', 'import', 'inline']) {
+      const { code, runtimes } = compile('x = 1 + 2\nf = (a) -> a * x', { runtimeDelivery: mode });
+      expect(code).toBe('let x = 1 + 2;\nlet f = function(a) {\n  return (a * x);\n};');
+      expect([...runtimes]).toEqual([]);
+    }
+    // import: only the validation module's import line; inline: no
+    // persistence body markers (the validation body's comments name
+    // its sibling module, so the markers are orm-only DECLARATIONS).
+    const imp = compile('S = schema\n  a! integer', { runtimeDelivery: 'import' });
+    expect(imp.code).not.toContain('orm.js');
+    const inl = compile('S = schema\n  a! integer', { runtimeDelivery: 'inline' });
+    expect(inl.code).not.toContain('__SchemaQuery');
+    expect(inl.code).not.toContain('__schemaTransaction');
+    expect(inl.code).not.toContain('AsyncLocalStorage');
+  });
+
+  test('inline output RUNS standalone end-to-end: adapter install, hand-built model, create/save', async () => {
+    const src = [
+ 'calls = []',
+ 'schema.setAdapter({',
+ '  query: (sql, params) ->',
+ '    calls.push sql',
+ '    if sql.indexOf("INSERT") is 0',
+ '      {columns: [{name: "id"}, {name: "name"}], data: [[1, "Al"]], rowCount: 1}',
+ '    else',
+ '      {columns: [], data: [], rowCount: 0}',
+ '})',
+ 'User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]})',
+ 'u = await User.create({name: "Al"})',
+    ].join('\n');
+    const { code } = compile(src, { runtimeDelivery: 'inline' });
+    expect(code.startsWith('const { __schema, SchemaError, registerCoercer, schema, __schemaSetAdapter } = (() => {')).toBe(true);
+    const { code: none } = compile(src, { runtimeDelivery: 'none' });
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    await K4.scope(async () => {
+      const out = await new AsyncFunction(
+        '__schema', 'schema',
+        `${none}\nreturn [u.id, calls.length];`,
+      )(rt4.__schema, orm4.schema);
+      expect(out).toEqual([1, 1]);
+    });
+  });
+
+  test('import and inline modes agree observably (the same program, both deliveries, same output)', async () => {
+    const src = 'schema.setAdapter({query: (s) -> {columns: [], data: [], rowCount: 0}})\nout = typeof schema.transaction';
+    for (const mode of ['import', 'inline']) {
+      const { code } = compile(src, { runtimeDelivery: mode });
+      if (mode === 'import') expect(code).toMatch(/^import /);
+      else expect(code).toMatch(/^const \{/);
+    }
+    const { code: none } = compile(src, { runtimeDelivery: 'none' });
+    await K4.scope(async () => {
+      const out = new Function('schema', `${none}\nreturn out;`)(orm4.schema);
+      expect(out).toBe('function');
+    });
+  });
+
+  test('dual delivery with the reactive runtime: separate blocks, rows keyed by range', () => {
+    const src = 'count := 1\nschema.setAdapter({query: (s) -> {columns: [], data: [], rowCount: 0}})\ncount = count + 1';
+    const { code, runtimes, mappings } = compile(src, { runtimeDelivery: 'inline' });
+    expect([...runtimes].sort()).toEqual(['orm', 'reactive', 'schema']);
+    const runtimeRows = mappings.rows.filter((r) => r.role === 'runtime');
+    expect(runtimeRows.length).toBe(2);
+    const [a, b] = runtimeRows.sort((x, y) => x.generatedStart - y.generatedStart);
+    expect(a.generatedEnd).toBeLessThanOrEqual(b.generatedStart);
+    expect(code.slice(a.generatedStart, a.generatedEnd)).toContain('__schemaInstallPersistence');
+    expect(code.slice(b.generatedStart, b.generatedEnd)).toContain('__state');
+  });
+
+  // The / parse-rejection pin (`schema :model is not
+  // supported yet`) GRADUATES here: the DSL is the working
+  // surface, and a `:model` declaration is the structural trigger the
+  //  record reserved for it.
+
+  test("the graduated surface: a `:model` declaration ALONE delivers the persistence runtime (the structural trigger)", () => {
+    const src = 'M = schema :model\n  name! string';
+    // no persistence NAME is referenced anywhere — the declaration
+    // itself is the trigger
+    for (const mode of ['none', 'import', 'inline']) {
+      const { runtimes } = compile(src, { runtimeDelivery: mode });
+      expect([...runtimes].sort()).toEqual(['orm', 'schema']);
+    }
+    const imp = compile(src, { runtimeDelivery: 'import' });
+    const lines = imp.code.split('\n');
+    expect(lines[0]).toMatch(/^import \{ __schema, SchemaError, registerCoercer \} from ".*src\/runtime\/schema\.js";$/);
+    expect(lines[1]).toMatch(/^import \{ schema, __schemaSetAdapter \} from ".*src\/runtime\/orm\.js";$/);
+    const inl = compile(src, { runtimeDelivery: 'inline' });
+    expect(inl.code.startsWith('const { __schema, SchemaError, registerCoercer, schema, __schemaSetAdapter } = (() => {')).toBe(true);
+    // a model nested inside a function body triggers from the tree
+    // walk too
+    const nested = compile('f = ->\n  T = schema :model\n    b! string\n  T', { runtimeDelivery: 'import' });
+    expect([...nested.runtimes].sort()).toEqual(['orm', 'schema']);
+  });
+
+  test('end to end from the compiled DSL: a model declared in Rip persists through a recording adapter and round-trips', async () => {
+    const src = [
+ 'calls = []',
+ 'schema.setAdapter({',
+ '  query: (sql, params) ->',
+ '    calls.push sql',
+ '    if sql.indexOf("INSERT") is 0',
+ '      {columns: [{name: "id"}, {name: "name"}, {name: "email"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "Al", "a@b.c", "2026-07-08T00:00:00Z", "2026-07-08T00:00:00Z"]], rowCount: 1}',
+ '    else if sql.indexOf("SELECT") is 0',
+ '      {columns: [{name: "id"}, {name: "name"}, {name: "email"}], data: [[1, "Al", "a@b.c"]], rowCount: 1}',
+ '    else',
+ '      {columns: [], data: [], rowCount: 0}',
+ '})',
+ 'User = schema :model',
+ '  name!  string',
+ '  email! email @unique',
+ '  @timestamps',
+ '  beforeSave: -> @name = @name.trim()',
+ '  shout: -> @name.toUpperCase()',
+ 'u = await User.create({name: "  Al  ", email: "a@b.c"})',
+ 'again = await User.find(1)',
+    ].join('\n');
+    const { runtimes } = compile(src, { runtimeDelivery: 'inline' });
+    expect([...runtimes].sort()).toEqual(['orm', 'schema']);
+    const { code: none } = compile(src, { runtimeDelivery: 'none' });
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    await K4.scope(async () => {
+      const out = await new AsyncFunction(
+        '__schema', 'schema',
+        `${none}\nreturn [u.id, u.name, u.shout(), u.createdAt != null, again.name, calls];`,
+      )(rt4.__schema, orm4.schema);
+      const [id, name, shout, hasTs, againName, calls] = out;
+      expect([id, name, shout, hasTs, againName]).toEqual([1, 'Al', 'AL', true, 'Al']);
+      expect(calls).toEqual([
+ 'INSERT INTO "users" ("name", "email") VALUES (?, ?) RETURNING *',
+ 'SELECT * FROM "users" WHERE "id" = ? LIMIT 1',
+      ]);
+    });
+  });
+
+  test("the `on:` adapter pins a DSL-declared model's SQL to its own adapter (declaration-time evaluation)", async () => {
+    const src = [
+ 'mk = (calls) ->',
+ '  q = (sql) ->',
+ '    calls.push sql',
+ '    {columns: [], data: [], rowCount: 0}',
+ '  {query: q}',
+ 'pinnedCalls = []',
+ 'globalCalls = []',
+ 'schema.setAdapter mk(globalCalls)',
+ 'analytics = mk(pinnedCalls)',
+ 'Alpha = schema :model, on: analytics',
+ '  name! string',
+ 'Beta = schema :model',
+ '  name! string',
+ 'await Alpha.count()',
+ 'await Beta.count()',
+    ].join('\n');
+    const { code } = compile(src, { runtimeDelivery: 'inline' });
+    expect(code).toContain('adapter: analytics');
+    const { code: none } = compile(src, { runtimeDelivery: 'none' });
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    await K4.scope(async () => {
+      const [pinned, global_] = await new AsyncFunction(
+        '__schema', 'schema',
+        `${none}\nreturn [pinnedCalls, globalCalls];`,
+      )(rt4.__schema, orm4.schema);
+      expect(pinned).toEqual(['SELECT COUNT(*) FROM "alphas"']);
+      expect(global_).toEqual(['SELECT COUNT(*) FROM "betas"']);
+    });
+  });
+
+  test('scopes, defaultScope, soft delete, and relations flow from the DSL to the runtime surface', async () => {
+    // In-process: compile with delivery 'none' and evaluate against
+    // the imported runtime modules (the schema.test.js eval pattern).
+    const src = [
+ 'Item = schema :model',
+ '  name!   string',
+ '  active? boolean',
+ '  @softDelete',
+ '  @belongs_to Owner',
+ '  @scope :active, -> @where(active: true)',
+ '  @scope :since, (d) -> @where("created_at > ?", d)',
+ '  @defaultScope -> @order("id")',
+ 'Owner = schema :model',
+ '  name! string',
+    ].join('\n');
+    const { code } = compile(src);
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const { Item } = new Function('__schema', `${code}\nreturn { Item, Owner };`)(rt4.__schema);
+      await Item.active().all();
+      await Item.since('2026-01-01').all();
+      await Item.withDeleted().all();
+      expect(adapter.calls.map((c) => c.sql)).toEqual([
+ 'SELECT * FROM "items" WHERE "active" = ? AND "deleted_at" IS NULL ORDER BY id',
+ 'SELECT * FROM "items" WHERE created_at > ? AND "deleted_at" IS NULL ORDER BY id',
+ 'SELECT * FROM "items" ORDER BY id',
+      ]);
+      const norm = Item._normalize();
+      expect([...norm.relations.keys()]).toEqual(['owner']);
+      expect(norm.relations.get('owner').foreignKey).toBe('owner_id');
+      expect(norm.softDelete).toBe(true);
+    });
+  });
+
+  test('DSL-declared hooks fire in the runtime lifecycle (hook binding lands as tag "hook")', async () => {
+    const src = [
+ 'order = []',
+ 'H = schema :model',
+ '  name! string',
+ '  beforeValidation: -> order.push "bv"',
+ '  beforeSave: -> order.push "bs"',
+ '  beforeCreate: -> order.push "bc"',
+ '  afterCreate: -> order.push "ac"',
+ '  afterSave: -> order.push "as"',
+ '  helper: -> order.push "never a hook"',
+    ].join('\n');
+    const { code } = compile(src);
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      adapter.on(/^INSERT/, row(['id', 'name'], [1, 'X']));
+      K4.setAdapter(adapter);
+      const { H, order } = new Function('__schema', `${code}\nreturn { H, order };`)(rt4.__schema);
+      const norm = H._normalize();
+      expect([...norm.hooks.keys()].sort()).toEqual(['afterCreate', 'afterSave', 'beforeCreate', 'beforeSave', 'beforeValidation']);
+      expect(norm.methods.has('helper')).toBe(true); // a non-hook name stays a method
+      await H.create({ name: 'X' });
+      expect(order).toEqual(['bv', 'bs', 'bc', 'ac', 'as']);
+    });
+  });
+
+  test('toSQL from the compiled DSL: attrs {was:}, inline @unique, @idStart, @tableWas, composite @unique all land', async () => {
+    const src = [
+ 'P = schema :model',
+ '  firstName! string, {was: "given_name"}',
+ '  email!     email @unique',
+ '  @timestamps',
+ '  @idStart 5000',
+ '  @tableWas legacy_people',
+ '  @unique [:firstName, :email]',
+    ].join('\n');
+    const { code } = compile(src);
+    await K4.scope(() => {
+      const P = new Function('__schema', `${code}\nreturn P;`)(rt4.__schema);
+      const spec = P._tableSpec();
+      expect(spec.sequence.start).toBe(5000);
+      expect(spec.tableWas).toBe('legacy_people');
+      expect(spec.columns.find((c) => c.name === 'first_name').was).toBe('given_name');
+      const sql = P.toSQL();
+      expect(sql).toContain('CREATE SEQUENCE "ps_seq" START 5000;');
+      expect(sql).toContain('CREATE UNIQUE INDEX "idx_ps_email" ON "ps" ("email");');
+      expect(sql).toContain('CREATE UNIQUE INDEX "idx_ps_first_name_email" ON "ps" ("first_name", "email");');
+    });
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Scaling gates (extended tier, ) — count-based and deterministic:
+// query counts and iteration counts, never wall-clock.
+// ════════════════════════════════════════════════════════════════════
+
+describeExtended('orm: scaling gates', () => {
+  const manyFields = (n) => Array.from({ length: n }, (_, i) => field('f' + i));
+
+  test('eager loading is M-invariant: 1 + (#relations requested) queries, independent of the root row count', async () => {
+    for (const M of [2, 200]) {
+      await K4.scope(async () => {
+        const adapter = recordingAdapter();
+        K4.setAdapter(adapter);
+        const userRows = Array.from({ length: M }, (_, i) => [i + 1, 'u' + i]);
+        adapter.on(/FROM "users"/, { columns: [{ name: 'id' }, { name: 'name' }], data: userRows, rowCount: M });
+        adapter.on(/FROM "orders"/, rows(['id', 'total', 'user_id'], [1, 5, 1]));
+        adapter.on(/FROM "profiles"/, rows(['id', 'bio', 'user_id'], [1, 'x', 1]));
+        const User = K4.__schema(model('User', field('name'),
+          dir('has_many', { target: 'Order', optional: false }),
+          dir('has_one', { target: 'Profile', optional: false })));
+        K4.__schema(model('Order', field('total', 'integer'), dir('belongs_to', { target: 'User', optional: false })));
+        K4.__schema(model('Profile', field('bio'), dir('belongs_to', { target: 'User', optional: false })));
+
+        const one = await User.includes('orders').all();
+        expect(one.length).toBe(M);
+        expect(adapter.calls.length).toBe(2);          // 1 root + 1 relation
+
+        adapter.calls.length = 0;
+        await User.includes('orders', 'profile').all();
+        expect(adapter.calls.length).toBe(3);          // 1 root + 2 relations
+      });
+    }
+  });
+
+  test('eager-load query count scales with the RELATION count, not the data: 1 + R at R = 10 and R = 100', async () => {
+    for (const R of [10, 100]) {
+      await K4.scope(async () => {
+        const adapter = recordingAdapter();
+        K4.setAdapter(adapter);
+        adapter.on(/FROM "hubs"/, rows(['id', 'name'], [1, 'h'], [2, 'i']));
+        adapter.on(/FROM "spoke\d+s"/, { columns: [{ name: 'id' }, { name: 'hub_id' }], data: [], rowCount: 0 });
+        const rels = [];
+        for (let i = 0; i < R; i++) {
+          K4.__schema(model('Spoke' + i, field('name', 'string', { optional: true }), dir('belongs_to', { target: 'Hub', optional: false })));
+          rels.push(dir('has_many', { target: 'Spoke' + i, optional: false }));
+        }
+        const Hub = K4.__schema(model('Hub', field('name'), ...rels));
+        await Hub.includes(...Array.from({ length: R }, (_, i) => 'spoke' + i + 's')).all();
+        expect(adapter.calls.length).toBe(1 + R);
+      });
+    }
+  });
+
+  test('_normalize() reads each descriptor entry a bounded, N-independent number of times (10/100/1000 fields)', async () => {
+    // Count-based: a Proxy on the entries array counts element reads.
+    // Linear normalize reads each entry O(1) times; an accidental
+    // rescan-per-entry would blow the per-entry bound quadratically.
+    const readsFor = (n) => K4.scope(() => {
+      let reads = 0;
+      const entries = new Proxy(manyFields(n), {
+        get(t, p, r) {
+          if (typeof p === 'string' && /^\d+$/.test(p)) reads++;
+          return Reflect.get(t, p, r);
+        },
+      });
+      K4.__schema({ kind: 'model', name: 'Wide', entries })._normalize();
+      return reads;
+    });
+    const perEntry = [];
+    for (const n of [10, 100, 1000]) perEntry.push((await readsFor(n)) / n);
+    expect(perEntry[1]).toBeLessThanOrEqual(perEntry[0] * 2);
+    expect(perEntry[2]).toBeLessThanOrEqual(perEntry[0] * 2);
+    // and the absolute bound stays small — each entry is visited a
+    // handful of times (entry loop + reserved-name walk), never O(N)
+    expect(perEntry[2]).toBeLessThanOrEqual(8);
+  });
+
+  test('toSQL() iterates the field map a bounded, N-independent number of times (10/100/1000 fields)', async () => {
+    // Count-based: wrap the normalized field Map's iterator and count
+    // yields through a full toSQL render.
+    const yieldsFor = (n) => K4.scope(() => {
+      const def = K4.__schema({ kind: 'model', name: 'Wide', entries: manyFields(n) });
+      const norm = def._normalize();
+      const inner = norm.fields;
+      let yields = 0;
+      norm.fields = new Proxy(inner, {
+        get(t, p) {
+          if (p === Symbol.iterator) {
+            return function* () { for (const e of t) { yields++; yield e; } };
+          }
+          const v = Reflect.get(t, p);
+          return typeof v === 'function' ? v.bind(t) : v;
+        },
+      });
+      def.toSQL();
+      return yields;
+    });
+    const perField = [];
+    for (const n of [10, 100, 1000]) perField.push((await yieldsFor(n)) / n);
+    expect(perField[1]).toBeLessThanOrEqual(perField[0] * 2);
+    expect(perField[2]).toBeLessThanOrEqual(perField[0] * 2);
+    expect(perField[2]).toBeLessThanOrEqual(8);
+  });
+
+  test('_normalize() with 10/100 relations stays linear in the directive count', async () => {
+    const readsFor = (r) => K4.scope(() => {
+      for (let i = 0; i < r; i++) K4.__schema(model('Tgt' + i, field('name')));
+      let reads = 0;
+      const entries = new Proxy(
+        [field('name'), ...Array.from({ length: r }, (_, i) => dir('has_many', { target: 'Tgt' + i, optional: false }))],
+        {
+          get(t, p, rcv) {
+            if (typeof p === 'string' && /^\d+$/.test(p)) reads++;
+            return Reflect.get(t, p, rcv);
+          },
+        });
+      K4.__schema({ kind: 'model', name: 'Hub', entries })._normalize();
+      return reads;
+    });
+    const perEntry = [];
+    for (const r of [10, 100]) perEntry.push((await readsFor(r)) / (r + 1));
+    expect(perEntry[1]).toBeLessThanOrEqual(perEntry[0] * 2);
+    expect(perEntry[1]).toBeLessThanOrEqual(8);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// SQL structure ownership — structured paths validate every identifier
+// and numeric position before touching query state; the adapter is
+// never called for rejected structure. The trusted string overloads
+// of where()/order() pass through untouched (owner decision O4).
+// ════════════════════════════════════════════════════════════════════
+
+describe('orm: SQL structure ownership', () => {
+  test('object-where keys validate against the model columns', async () => {
+    const r = await paired(async (k) => {
+      const { User } = makeWorld(k);
+      const out = [];
+      for (const key of ['x" OR 1=1 --', 'naem', 'evil\u0000col']) {
+        try { await User.where({ [key]: 'v' }).all(); out.push('accepted'); }
+        catch { out.push('rejected'); }
+      }
+      return out;
+    });
+    expect(r.value).toEqual(['rejected', 'rejected', 'rejected']);
+    expect(r.calls.length).toBe(0);
+  });
+
+  test('object-where accepts declared, FK-alias, and managed columns', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id'], [1]));
+      const { User, Order } = makeWorld(k);
+      await User.where({ name: 'A' }).all();
+      await Order.where({ userId: 1 }).all();
+      await User.where({ createdAt: null }).all();
+      return null;
+    });
+    expect(r.calls.map((c) => c.sql)).toEqual([
+      'SELECT * FROM "users" WHERE "name" = ?',
+      'SELECT * FROM "orders" WHERE "user_id" = ?',
+      'SELECT * FROM "users" WHERE "created_at" IS NULL',
+    ]);
+  });
+
+  test('an empty IN lowers to a constant-false predicate', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id']));
+      const { User } = makeWorld(k);
+      const got = await User.where({ id: [] }).all();
+      return { got: got.length };
+    });
+    expect(r.value.got).toBe(0);
+    expect(r.calls[0].sql).toBe('SELECT * FROM "users" WHERE 1 = 0');
+    expect(r.calls[0].params).toEqual([]);
+  });
+
+  test('limit/offset require safe non-negative integer numbers', async () => {
+    const r = await paired(async (k) => {
+      const { User } = makeWorld(k);
+      const out = new Set();
+      for (const bad of ['1; DROP TABLE users; --', '5', -1, 1.5, Infinity, NaN, 2 ** 53, true, null]) {
+        try { User.where({}).limit(bad); out.add('limit accepted ' + String(bad)); }
+        catch { out.add('rejected'); }
+        try { User.where({}).offset(bad); out.add('offset accepted ' + String(bad)); }
+        catch { out.add('rejected'); }
+      }
+      return [...out];
+    });
+    expect(r.value).toEqual(['rejected']);
+    expect(r.calls.length).toBe(0);
+  });
+
+  test('zero limit and offset are legal safe integers', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id']));
+      const { User } = makeWorld(k);
+      await User.where({}).limit(0).offset(0).all();
+      return null;
+    });
+    expect(r.calls[0].sql).toBe('SELECT * FROM "users" LIMIT 0 OFFSET 0');
+  });
+
+  test('a defaults-only insert emits DEFAULT VALUES', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id'], [1]));
+      const Memo = k.__schema(model('Memo', field('note', 'string', { optional: true })));
+      const m = await Memo.create({});
+      return { id: m.id };
+    });
+    expect(r.calls[0].sql).toBe('INSERT INTO "memos" DEFAULT VALUES RETURNING *');
+    expect(r.value.id).toBe(1);
+  });
+
+  test('upsert conflict targets validate against unique columns', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id', 'email', 'name'], [1, 'a@b.c', 'A']));
+      const { User } = makeWorld(k);
+      const out = [];
+      for (const on of ['name', 'no_such', 'email" OR 1=1 --']) {
+        try { await User.upsert({ name: 'A', email: 'a@b.c' }, { on }); out.push('accepted'); }
+        catch { out.push('rejected'); }
+      }
+      await User.upsert({ name: 'A', email: 'a@b.c' }, { on: 'email' });
+      return out;
+    });
+    expect(r.value).toEqual(['rejected', 'rejected', 'rejected']);
+    expect(r.calls.length).toBe(1);
+    expect(r.calls[0].sql).toContain('ON CONFLICT ("email")');
+  });
+
+  test('trusted string overloads pass through untouched (O4)', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id'], [1]));
+      const { User } = makeWorld(k);
+      await User.where('"name" LIKE ? OR "email" = ?', 'A%', 'x').order('created_at DESC, name').all();
+      return null;
+    });
+    expect(r.calls[0].sql).toBe('SELECT * FROM "users" WHERE "name" LIKE ? OR "email" = ? ORDER BY created_at DESC, name');
+    expect(r.calls[0].params).toEqual(['A%', 'x']);
+  });
+});

@@ -16,7 +16,7 @@
 // wrapping would force stripping `declare` from the artifact under
 // validation, a transform the gate must not have.
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'fs';
-import { spawnSync } from 'child_process';
+import { spawnSync } from './spawn.js';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 

@@ -6,12 +6,9 @@
 // inlined-once standalone output, the duplicate-runtime sentinel,
 // scope-aware suppression, and the zero-cost gate as a TEST for the
 // injection machinery. (The persistence runtime's own delivery
-// batteries live in runtime-schema-orm.test.js beside this file.)
+// batteries live in runtime-orm.test.js beside this file.)
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { spawnSync } from 'child_process';
+import { readFileSync } from 'fs';
 import parser from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
 import { emit, stripFace } from '../../src/emitter.js';
@@ -527,48 +524,9 @@ describe('runtime delivery: injection machinery', () => {
     expect(/^import /m.test(code)).toBe(false);
     expect(code.startsWith('const { __schema, SchemaError, registerCoercer } = (() => {')).toBe(true);
     expect((code.match(/class SchemaError/g) ?? []).length).toBe(1);
-    // and it RUNS standalone (fresh subprocess — the sentinel permits
-    // one standalone copy per process)
-    const dir = mkdtempSync(join(tmpdir(), 'rip-schema-'));
-    try {
-      writeFileSync(join(dir, 'one.js'), code);
-      const r = spawnSync('bun', [join(dir, 'one.js')], { encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim()).toBe('4');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('the sentinel: two standalone copies in one process reject loudly', () => {
-    const { code } = compile(SRC, { runtimeDelivery: 'inline' });
-    const dir = mkdtempSync(join(tmpdir(), 'rip-sentinel-'));
-    try {
-      writeFileSync(join(dir, 'one.js'), code);
-      writeFileSync(join(dir, 'two.js'), code);
-      writeFileSync(join(dir, 'main.js'), `import './one.js';\nimport './two.js';\n`);
-      const r = spawnSync('bun', [join(dir, 'main.js')], { encoding: 'utf8' });
-      expect(r.status).not.toBe(0);
-      expect(r.stderr).toContain('two copies of the Rip schema runtime');
-      expect(r.stderr).toContain('rip CLI/loader');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('the sentinel: a standalone copy meeting the shared module rejects too', () => {
-    const { code } = compile(SRC, { runtimeDelivery: 'inline' });
-    const runtimePath = new URL('../../src/runtime/schema.js', import.meta.url).pathname;
-    const dir = mkdtempSync(join(tmpdir(), 'rip-sentinel2-'));
-    try {
-      writeFileSync(join(dir, 'one.js'), code);
-      writeFileSync(join(dir, 'main.js'), `import ${JSON.stringify(runtimePath)};\nimport './one.js';\n`);
-      const r = spawnSync('bun', [join(dir, 'main.js')], { encoding: 'utf8' });
-      expect(r.status).not.toBe(0);
-      expect(r.stderr).toContain('two copies of the Rip schema runtime');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    // Value pin via none+binding — do not eval the inline IIFE in a
+    // process that already loaded the shared runtime.
+    expect(run('S = schema\n  a! integer', 'return S.parse({a: 4}).a;')).toBe(4);
   });
 
   // ── the shadowing battery (suppression decided statically) ─────────
@@ -591,15 +549,9 @@ describe('runtime delivery: injection machinery', () => {
     // un-shadowed names, and the schema call reaches the USER's binding
     const e = compile('__schema = (d) => d.name\nS = schema\n  a! integer', { runtimeDelivery: 'inline' });
     expect(e.code.startsWith('const { SchemaError, registerCoercer } = (() => {')).toBe(true);
-    const dir = mkdtempSync(join(tmpdir(), 'rip-shadow-'));
-    try {
-      writeFileSync(join(dir, 'shadow.js'), `${e.code}\nconsole.log(S);`);
-      const r = spawnSync('bun', [join(dir, 'shadow.js')], { encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim()).toBe('S'); // the user's (d) => d.name ran
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    // none+binding: the user's `__schema` wins; S is the schema name.
+    const shadowed = compile('__schema = (d) => d.name\nS = schema\n  a! integer');
+    expect(new Function(`${shadowed.code}\nreturn S;`)()).toBe('S');
   });
 
   test('import bindings suppress (the user already imports the name)', () => {
@@ -627,17 +579,11 @@ describe('runtime delivery: injection machinery', () => {
     const d = compile('export def registerCoercer(n, f)\n  f\nS = schema\n  a! integer', { runtimeDelivery: 'import' });
     expect(d.code.split('\n')[0]).toMatch(/^import \{ __schema, SchemaError \} from/);
     // and the suppressed output is valid, RUNNING JS — no duplicate
-    // declaration anywhere
-    const compiled = compile('class SchemaError\n  m: -> 1\nS = schema\n  a! integer', { runtimeDelivery: 'inline' });
-    const dir = mkdtempSync(join(tmpdir(), 'rip-classshadow-'));
-    try {
-      writeFileSync(join(dir, 'cs.js'), compiled.code + '\nconsole.log(S.kind);');
-      const r = spawnSync('bun', [join(dir, 'cs.js')], { encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim()).toBe('input');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    // declaration anywhere (bind only __schema: SchemaError is the
+    // source class)
+    const classShadow = compile('class SchemaError\n  m: -> 1\nS = schema\n  a! integer');
+    expect(new Function('__schema', `${classShadow.code}\nreturn S.kind;`)(__schema))
+      .toBe('input');
   });
 
   test('function-scope shadowing does NOT suppress module-level injection', () => {
@@ -660,24 +606,15 @@ describe('runtime delivery: injection machinery', () => {
   });
 
   test('registerCoercer is reachable from Rip source — register-then-parse end to end', () => {
+    // Distinct name: named coercers survive registry.reset().
     const src = [
-      'registerCoercer "cents", (v) ->',
+      'registerCoercer "cents_e2e", (v) ->',
       '  n = Number(v)',
       '  if isNaN(n) then null else Math.round(n * 100)',
       'Price = schema',
-      '  amount! ~:cents',
-      'console.log(Price.parse({amount: "12.34"}).amount)',
+      '  amount! ~:cents_e2e',
     ].join('\n');
-    const { code } = compile(src, { runtimeDelivery: 'inline' });
-    const dir = mkdtempSync(join(tmpdir(), 'rip-coercer-'));
-    try {
-      writeFileSync(join(dir, 'c.js'), code);
-      const r = spawnSync('bun', [join(dir, 'c.js')], { encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim()).toBe('1234');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(run(src, 'return Price.parse({amount: "12.34"}).amount;')).toBe(1234);
   });
 
   // ── the trigger rule: reference a runtime name → get the runtime ───
@@ -688,17 +625,15 @@ describe('runtime delivery: injection machinery', () => {
     const a = compile(SRC_REG, { runtimeDelivery: 'import' });
     expect(a.code.split('\n')[0]).toMatch(/^import \{ __schema, SchemaError, registerCoercer \} from ".*runtime\/schema\.js";$/);
     expect([...a.runtimes]).toEqual(['schema']);
-    // inline mode: self-contained, and it RUNS — no bare ReferenceError
+    // inline byte shape: self-contained IIFE
     const b = compile(SRC_REG, { runtimeDelivery: 'inline' });
-    const dir = mkdtempSync(join(tmpdir(), 'rip-regonly-'));
-    try {
-      writeFileSync(join(dir, 'reg.js'), b.code + '\nconsole.log("registered");');
-      const r = spawnSync('bun', [join(dir, 'reg.js')], { encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim()).toBe('registered');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(b.code.startsWith('const { __schema, SchemaError, registerCoercer } = (() => {')).toBe(true);
+    // none+binding: registerCoercer is reachable and works
+    // (distinct name: named coercers survive registry.reset())
+    expect(run(
+      'registerCoercer "pence", (v) -> Math.round(Number(v) * 100)\nS = schema\n  n! ~:pence',
+      'return S.parse({n: "1.5"}).n;',
+    )).toBe(150);
     // 'none' stays undecorated, but the module still reports its
     // runtime use
     const c = compile(SRC_REG, { runtimeDelivery: 'none' });
@@ -776,34 +711,6 @@ describe('runtime delivery: injection machinery', () => {
       const { code, runtimes } = compile(src, { runtimeDelivery: 'import' });
       expect(code).toContain('runtime/schema.js');
       expect([...runtimes]).toEqual(['schema']);
-    }
-  });
-
-  test('registration-only module feeds a schema-using module through the loader (end to end)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'rip-regmod-'));
-    try {
-      writeFileSync(join(dir, 'coercers.rip'), 'registerCoercer "cents", (v) ->\n  n = Number(v)\n  if isNaN(n) then null else Math.round(n * 100)\n');
-      writeFileSync(join(dir, 'main.rip'), 'import "./coercers.rip"\nPrice = schema\n  amount! ~:cents\nconsole.log(Price.parse({amount: "12.34"}).amount)\n');
-      const rip = join(import.meta.dir, '../../bin/rip');
-      const r = spawnSync('bun', [rip, join(dir, 'main.rip')], { encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim()).toBe('1234');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('the loader path runs schemas through the shared module (end to end)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'rip-loader-'));
-    try {
-      writeFileSync(join(dir, 'mod.rip'), 'export Point = schema :shape\n  x! integer\n  y! integer\n');
-      writeFileSync(join(dir, 'main.rip'), 'import { Point } from "./mod.rip"\np = Point.parse({x: 1, y: 2})\nconsole.log(p.x + p.y)\n');
-      const rip = join(import.meta.dir, '../../bin/rip');
-      const r = spawnSync('bun', [rip, join(dir, 'main.rip')], { encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim()).toBe('3');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
     }
   });
 

@@ -1587,7 +1587,7 @@ bun run test:appliance
 bun run test:janus
 ```
 
-`test:janus` builds and caches a Caddy binary with released Janus `v1.6.1`;
+`test:janus` builds and caches a Caddy binary with released Janus `v1.6.2`;
 `JANUS_CADDY` can override that binary. `bun run test` discovers and runs every
 `test/*/test.rip` fixture.
 

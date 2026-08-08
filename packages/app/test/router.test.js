@@ -265,9 +265,20 @@ describe('onNavigate', () => {
     const seen = [];
     router.onNavigate(() => { throw new Error('boom'); });
     router.onNavigate(() => seen.push('ok'));
-    router.init();
-    expect(seen).toEqual(['ok']);
-    expect(router.current).not.toBeNull();
+    const reported = [];
+    const prev = console.error;
+    console.error = (...args) => { reported.push(args); };
+    try {
+      router.init();
+      expect(seen).toEqual(['ok']);
+      expect(router.current).not.toBeNull();
+      expect(reported).toHaveLength(1);
+      expect(reported[0][0]).toBe('[Rip] router onNavigate error:');
+      expect(reported[0][1]).toBeInstanceOf(Error);
+      expect(reported[0][1].message).toBe('boom');
+    } finally {
+      console.error = prev;
+    }
   });
 
   test('the disposer removes the callback', () => {
@@ -311,10 +322,23 @@ describe('onNavigate', () => {
       flips += 1;
       router.push(flips % 2 ? '/about' : '/users/1');
     });
-    router.init();
-    expect(adapter.entries.length).toBeLessThan(15);
-    expect(adapter.read().startsWith('/')).toBeTrue();
-    expect(router.path).not.toBeNull();
+    const reported = [];
+    const prev = console.error;
+    console.error = (...args) => { reported.push(args); };
+    try {
+      router.init();
+      expect(adapter.entries.length).toBeLessThan(15);
+      expect(adapter.read().startsWith('/')).toBeTrue();
+      expect(router.path).not.toBeNull();
+      expect(reported.length).toBeGreaterThan(0);
+      expect(reported.every((args) => args[0] === '[Rip] router onNavigate error:')).toBeTrue();
+      expect(reported.some((args) =>
+        args[1] instanceof Error &&
+        args[1].message.includes('navigation loop'),
+      )).toBeTrue();
+    } finally {
+      console.error = prev;
+    }
   });
 });
 

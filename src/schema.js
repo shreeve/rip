@@ -23,7 +23,7 @@
 // option (a per-schema adapter expression). Every persistence
 // spelling stays :model-only on the other kinds. Malformed
 // persistence spellings reject HERE, at parse time, positioned — the
-// runtime (src/runtime/schema-orm.js) re-rejects at the root, since
+// runtime (src/runtime/orm.js) re-rejects at the root, since
 // a descriptor is hand-buildable.
 //
 // Spelling notes (there is no SYMBOL token kind):
@@ -136,7 +136,12 @@ const isKeywordWord = (t) =>
   (t.kind === t.value.toUpperCase() || t.kind === 'LEADING_WHEN' || t.kind === 'RELATION' || t.kind === 'STATEMENT');
 
 import { ops } from './ops.js';
-import { behaviorName } from './schema-names.js';
+
+// Face-only behavior object name for a schema (`ReturnType<typeof …>`
+// and the JS face share this spelling). Lives here — not in
+// types/schemas.js — so the browser compile graph can take the
+// name without the IDE type machinery.
+export const behaviorName = (name) => `__${name}__behavior`;
 
 // The symbol spelling: ':' followed by an UNSPACED word. The kind
 // position additionally admits keyword-kind tokens (`:enum` scans the
@@ -1744,7 +1749,7 @@ function foldHasMixin(descriptor) {
 }
 
 // The `@belongs_to <Target>` FK column name, computed exactly as the
-// runtime does (`__schemaCamel(__schemaFkName(target))` in schema-orm.js).
+// runtime does (`__schemaCamel(__schemaFkName(target))` in orm.js).
 function foldFkName(target) {
   const snake = target.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
   return (snake + '_id').replace(/_([a-z])/g, (_, c) => c.toUpperCase());
@@ -1753,7 +1758,7 @@ function foldFkName(target) {
 // The projectable columns of a descriptor as an ordered Map(name → field
 // entry): declared fields, then a :model's implicit id / @timestamps /
 // @softDelete / @belongs_to FK columns — matching `projectableFields` in
-// runtime/schema-orm.js so a fold yields the same field set the runtime
+// runtime/orm.js so a fold yields the same field set the runtime
 // would. Returns null (bail) when the base uses `@mixin`.
 function foldProjectableMap(descriptor) {
   if (foldHasMixin(descriptor)) return null;

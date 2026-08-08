@@ -47,7 +47,7 @@
 //   --timeout <ms>   per-lane timeout (default: 600000)
 //   --plan           print the lanes that would run, spawn nothing
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -97,7 +97,13 @@ const EXCLUDED = new Map([
 // comparable.
 const ROOT_LANE = 'root (extended tier)';
 
-const color = process.stdout.isTTY && !process.env.NO_COLOR;
+// Bun's gate (TTY / NO_COLOR / FORCE_COLOR / CI). When this process will
+// paint, lanes get a PTY (Bun.spawn `terminal`) so runners see isTTY and
+// color themselves — never by inheriting FORCE_COLOR. FORCE_COLOR on a
+// piped child paints console.log/inspect (Bun latches it) and breaks
+// every suite that pins subprocess stdout bytes.
+const color = Bun.enableANSIColors;
+const usePty = color && process.platform !== 'win32';
 const paint = (code, s) => (color ? `\x1b[${code}m${s}\x1b[0m` : s);
 const dim = (s) => paint('2', s);
 const red = (s) => paint('31', s);
@@ -134,13 +140,15 @@ const planLanes = () => {
   const lanes = [];
   const excluded = [];
 
-  // The root suite, extended tier included — the tier `bun test` alone
-  // leaves out (see test/support/extended.js).
+  // The full root suite: in-process + test/spawn + the extended tier
+  // (see test/support/extended.js). `bun run test` is the fast edit loop
+  // (in-process path list only); this lane runs all of `test/` so the
+  // process lane and extended gates still certify here.
   lanes.push({
     label: ROOT_LANE,
     cwd: ROOT,
     cmd: process.execPath,
-    args: ['test', '--timeout', '15000'],
+    args: ['test', '--parallel', '--timeout', '15000'],
     env: { RIP_EXTENDED: '1', RIP_REQUIRE_TSC: '1' },
   });
 
@@ -200,59 +208,87 @@ const TEST_COUNTS = [
   /(?:^|\n)Ran (\d+) tests?\b/g, // bun test
   /(?:^|\n)(\d+) tests?:/g,      // rip test (@rip-lang/testing)
 ];
+// Strip CSI / OSC so painted tallies still match the count regexes.
+const stripAnsi = (s) => s.replace(/\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))/g, '');
+// PTYs speak CRLF / bare CR (progress redraws); normalize before matching
+// and before reprinting so blocks read like a captured pipe.
+const normalizeOut = (chunks) =>
+  Buffer.concat(chunks).toString('utf8').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 const testsReported = (output) => {
+  const plain = stripAnsi(output);
   let total = null;
   for (const re of TEST_COUNTS) {
-    for (const m of output.matchAll(re)) total = (total ?? 0) + Number(m[1]);
+    for (const m of plain.matchAll(re)) total = (total ?? 0) + Number(m[1]);
   }
   return total; // null → the lane never printed a count
 };
 
-const runLane = (lane) => new Promise((done) => {
+const runLane = async (lane) => {
   const started = Date.now();
   const chunks = [];
-  const finish = (extra) => done({
+  const finish = (extra) => ({
     lane,
     ms: Date.now() - started,
-    output: Buffer.concat(chunks).toString('utf8'),
+    output: normalizeOut(chunks),
     ...extra,
   });
 
-  let child;
+  const env = { ...process.env, ...lane.env };
+  // Parent may have FORCE_COLOR (piped `test:all | less -R`). Strip it
+  // so lane children that pin stdout stay byte-stable; the PTY above is
+  // what paints the lane reporters.
+  delete env.FORCE_COLOR;
+  let proc;
   try {
-    child = spawn(lane.cmd, lane.args, {
-      cwd: lane.cwd,
-      env: { ...process.env, ...lane.env },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    if (usePty) {
+      proc = Bun.spawn([lane.cmd, ...lane.args], {
+        cwd: lane.cwd,
+        env,
+        terminal: {
+          cols: process.stdout.columns || 120,
+          rows: process.stdout.rows || 40,
+          data(_term, data) { chunks.push(Buffer.from(data)); },
+        },
+      });
+    } else {
+      proc = Bun.spawn([lane.cmd, ...lane.args], {
+        cwd: lane.cwd,
+        env,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+    }
   } catch (e) {
     return finish({ status: 'fail', why: `could not spawn: ${e?.message ?? e}` });
   }
 
-  child.stdout.on('data', (c) => chunks.push(c));
-  child.stderr.on('data', (c) => chunks.push(c));
-
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    child.kill('SIGTERM');
-    setTimeout(() => child.kill('SIGKILL'), 5000).unref();
+    try { proc.kill('SIGTERM'); } catch { /* already dead */ }
+    setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* already dead */ } }, 5000).unref();
   }, TIMEOUT_MS);
 
-  child.on('error', (e) => {
-    clearTimeout(timer);
-    finish({ status: 'fail', why: `could not spawn: ${e?.message ?? e}` });
-  });
-  child.on('close', (code, signal) => {
-    clearTimeout(timer);
-    if (timedOut) return finish({ status: 'fail', why: `timed out after ${secs(TIMEOUT_MS)}` });
-    if (code !== 0) return finish({ status: 'fail', why: signal ? `killed by ${signal}` : `exit ${code}` });
-    const ran = testsReported(Buffer.concat(chunks).toString('utf8'));
-    if (ran === null) return finish({ status: 'fail', why: 'exited 0 without reporting a test count' });
-    if (ran === 0) return finish({ status: 'fail', why: 'exited 0 having run no tests' });
-    finish({ status: 'pass', ran });
-  });
-});
+  if (!usePty) {
+    const pull = async (stream) => {
+      if (!stream) return;
+      for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+    };
+    await Promise.all([pull(proc.stdout), pull(proc.stderr)]);
+  }
+
+  const code = await proc.exited;
+  clearTimeout(timer);
+  try { proc.terminal?.close(); } catch { /* closed */ }
+
+  if (timedOut) return finish({ status: 'fail', why: `timed out after ${secs(TIMEOUT_MS)}` });
+  if (code !== 0) return finish({ status: 'fail', why: `exit ${code}` });
+  const ran = testsReported(normalizeOut(chunks));
+  if (ran === null) return finish({ status: 'fail', why: 'exited 0 without reporting a test count' });
+  if (ran === 0) return finish({ status: 'fail', why: 'exited 0 having run no tests' });
+  return finish({ status: 'pass', ran });
+};
 
 const runAll = async (lanes) => {
   const queue = lanes.filter((l) => !l.skip);

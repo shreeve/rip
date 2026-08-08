@@ -9,7 +9,7 @@
 # swarm as a real subprocess through this repository's rip.
 # ==============================================================================
 
-import { test, eq, ok, throws } from '@rip-lang/testing'
+import { test, eq, ok, throws, plainEnv } from '@rip-lang/testing'
 import * as mod from '@rip-lang/swarm'
 import { spawnSync } from 'child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
@@ -21,8 +21,16 @@ ripCli   =! join(import.meta.dir, '..', '..', 'bin', 'rip')
 swarmRip =! join(import.meta.dir, 'swarm.rip')
 fixture  =  (name) -> join(import.meta.dir, 'fixtures', name)
 
+# plainEnv: FORCE_COLOR paints `p true`/`p 37` and breaks queue stdout pins.
 run = (dir, script, ...flags) ->
-  spawnSync process.execPath, [ripCli, fixture(script), ...flags], { cwd: dir, encoding: 'utf8', timeout: 12000 }
+  spawnSync process.execPath, [ripCli, fixture(script), ...flags], {
+    cwd: dir, encoding: 'utf8', timeout: 12000, env: plainEnv()
+  }
+
+cli = (args, opts = {}) ->
+  spawnSync process.execPath, [ripCli, ...args], {
+    encoding: 'utf8', timeout: 12000, ...opts, env: plainEnv(opts.env)
+  }
 
 fresh = -> mkdtempSync join(tmpdir(), 'swarm-')
 
@@ -241,33 +249,33 @@ test "the whole file-based queue contract, pinned line for line", ->
 console.log "\nThe swarm command"
 
 test "without a script prints usage and exits 1", ->
-  r = spawnSync process.execPath, [ripCli, swarmRip], { encoding: 'utf8', timeout: 12000 }
+  r = cli [swarmRip]
   eq r.status, 1
   ok r.stderr.includes('usage: swarm <script.rip> [options]')
 
 test "-v prints the version from package.json", ->
-  r = spawnSync process.execPath, [ripCli, swarmRip, '-v'], { encoding: 'utf8', timeout: 12000 }
+  r = cli [swarmRip, '-v']
   eq r.status, 0
   eq r.stdout, "swarm #{pkg.version}\n"
 
 test "-h prints usage and the flag table, exit 0", ->
-  r = spawnSync process.execPath, [ripCli, swarmRip, '--help'], { encoding: 'utf8', timeout: 12000 }
+  r = cli [swarmRip, '--help']
   eq r.status, 0
   ok r.stdout.includes('usage: swarm <script.rip> [options]')
   ok r.stdout.includes('-w, --workers <n>')
   ok r.stdout.includes('-r, --reset')
 
 test "a missing script is a named error", ->
-  r = spawnSync process.execPath, [ripCli, swarmRip, 'no-such-job.rip'], { encoding: 'utf8', timeout: 12000 }
+  r = cli [swarmRip, 'no-such-job.rip']
   eq r.status, 1
   ok r.stderr.includes('error: no such script: no-such-job.rip')
 
 test "runs a job script, forwarding flags and exit status", ->
   dir = fresh()
-  good = spawnSync process.execPath, [ripCli, swarmRip, fixture('basic.rip'), '-w', '2', '-q'], { cwd: dir, encoding: 'utf8', timeout: 12000 }
+  good = cli [swarmRip, fixture('basic.rip'), '-w', '2', '-q'], { cwd: dir }
   eq good.status, 0
   ok summary(12, 2).test(good.stdout)
-  bad = spawnSync process.execPath, [ripCli, swarmRip, fixture('noperform.rip'), '-q'], { cwd: dir, encoding: 'utf8', timeout: 12000 }
+  bad = cli [swarmRip, fixture('noperform.rip'), '-q'], { cwd: dir }
   eq bad.status, 1
 
 # ==[ Consumer pattern ]==
@@ -285,7 +293,7 @@ test "the downloader pattern: args() input, tasks from lines, idempotent perform
   mkdirSync join(dir, 'out')
   writeFileSync join(dir, 'out', 'beta.json'), 'SENTINEL'   # already downloaded
 
-  r = spawnSync process.execPath, [ripCli, fixture('consumer.rip'), 'codes.txt', '-w', '2', '-q'], { cwd: dir, encoding: 'utf8', timeout: 12000 }
+  r = cli [fixture('consumer.rip'), 'codes.txt', '-w', '2', '-q'], { cwd: dir }
   eq r.status, 0
   ok /^\d+\.\d{2} secs for 3 jobs by 2 workers/.test(r.stdout)
 

@@ -14,8 +14,9 @@
     "parser": "bun src/grammar/solar.rip -o src/parser.js src/grammar/grammar.rip",
     "corpus-expected": "bun scripts/corpus-expected.mjs",
     "browser-bundle": "bun scripts/browser-bundle.mjs",
-    "test": "bun test --timeout 15000",
-    "test:rip": "bun test test/battery.test.js --timeout 15000",
+    "test": "bun test --parallel --timeout 15000 test/rip.test.js test/lang test/mapping test/ui test/schema test/toolchain",
+    "test:rip": "bun test test/rip.test.js --timeout 15000",
+    "test:spawn": "bun test --timeout 15000 test/spawn",
     "test:all": "bun scripts/test-all.mjs",
     "ext": "bun scripts/install-ext.mjs",
     "audit": "bun test/audit/runner.js"

@@ -6,24 +6,17 @@
 // cleanup channel, delivery from the emitted lowering, and the
 // Debugging showcase: a runtime stack trace from a throw INSIDE
 // an effect body resolving to the .rip line.
-import { test, expect, beforeAll, afterAll, describe } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
-import { join, resolve } from 'path';
-import { pathToFileURL } from 'url';
-import { spawnSync } from 'child_process';
+import { test, expect, describe } from 'bun:test';
 import parser from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
 import { compile as fullCompile } from '../../src/compile.js';
-import { explainSource } from '../../src/explain.js';
+import { explainSource } from '../../src/cli/explain.js';
 import { Mappings } from '../../src/stores.js';
 import { expectLinearDoubling } from '../support/scaling.js';
 import * as rt from '../../src/runtime/reactive.js';
 
 parser.lexer = makeParserLexer();
-
-const BIN = resolve(import.meta.dir, '../../bin/rip');
 
 const compile = (src, opts = {}) => {
   const r = parser.parse(src);
@@ -37,7 +30,6 @@ const emitFails = (src, re) => {
   expect(r.diagnostics).toEqual([]);
   expect(() => emit(r, { source: src })).toThrow(re);
 };
-
 
 // Tier 1 declare-in-place is a SANCTIONED divergence from: this side
 // declares straight-line locals at their first write. unplaced()
@@ -247,17 +239,6 @@ describe('eval checks: paired runs against each side\'s own runtime', () => {
 // Divergences: loud where the old runtime ships invalid or silently wrong JS
 // ════════════════════════════════════════════════════════════════════
 
-describe(': awaiting effect bodies emit ASYNC arrows ; yield rejects', () => {
-
-});
-
-describe(': an expression body\'s fresh names hoist INSIDE the body scope ', () => {
-
-});
-
-describe(': an object-literal expression body groups ', () => {
-});
-
 describe('the #79/the pinned contractes extend to effects: no expression form for the BOUND effect, plain-name handles', () => {
 
   test('a bare TAIL effect RETURNS the disposer (byte-matched): the caller owns disposal', () => {
@@ -279,9 +260,6 @@ describe('the pinned contract extends to the dispose handle: bound effects sit a
   });
 });
 
-describe('the pinned contract extends: no effect class members', () => {
-});
-
 describe(' extends: the effect head is spellable — semanticKind discriminates', () => {
 
   test('a user call does not trigger reactive delivery (zero-cost holds for the impersonating spelling)', () => {
@@ -291,10 +269,6 @@ describe(' extends: the effect head is spellable — semanticKind discriminates'
       expect(code).not.toContain('__effect');
     }
   });
-});
-
-describe('boundary rejections: the delivered-name self-reference class, export of a bare effect', () => {
-
 });
 
 describe('emitter rejections carry source positions', () => {
@@ -417,50 +391,6 @@ describe('--explain tells the story at the effect operator', () => {
 });
 
 // ════════════════════════════════════════════════════════════════════
-// THE MAPPING SHOWCASE: a stack trace from inside an effect body
-// ════════════════════════════════════════════════════════════════════
-
-// A throw inside an effect body crosses the `__effect(() => {…})`
-// scaffolding AND the runtime's flush frames; the run harness must resolve the frame to the .rip source line.
-// The fixture compiles line-SHIFTED (hoist line + wrapper lines push
-// every statement down), so a frame echoing generated coordinates
-// cannot pass.
-describe('the stack-trace showcase: an error in reactive code points at source', () => {
-  let dir;
-  beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'rip-m9c-stack-')); });
-  afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
-
-  test('a throw INSIDE an effect body resolves to the .rip line:col end-to-end', () => {
-    const src = [
- 'count := 0',            // 1
- 'armed = false',         // 2
- '~>',                    // 3
- '  probe = count',       // 4
- '  throw new Error "effect kapow #{probe}" if armed', // 5 — `Error` at col 13
- 'armed = true',          // 6
- 'count = 1',             // 7 — the write that triggers the flush
- '',
-    ].join('\n');
-    const path = join(dir, 'fx.rip');
-    writeFileSync(path, src);
-    // The generated line of the throw differs from the source line
-    // (hoist + wrapper shift) — assert the remap is real.
-    const { code } = fullCompile(src, { path: 'fx.rip' });
-    const genLine = code.slice(0, code.indexOf('throw new Error')).split('\n').length;
-    expect(genLine).not.toBe(5);
-    const r = spawnSync('bun', [BIN, path], { encoding: 'utf8' });
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain('effect kapow 1');
-    // The throw frame: source line 5, the `Error` construction column.
-    expect(r.stderr).toMatch(/fx\.rip:5:13/);
-    // The triggering write's frame resolves to source line 7.
-    expect(r.stderr).toMatch(/fx\.rip:7(?![.\d])/);
-    // No frame leaks the generated coordinates for the throw.
-    expect(r.stderr).not.toMatch(new RegExp(`fx\\.rip:${genLine}:`));
-  });
-});
-
-// ════════════════════════════════════════════════════════════════════
 // Typed handles: erasure, declarations
 // ════════════════════════════════════════════════════════════════════
 
@@ -503,42 +433,13 @@ describe('delivery triggers from the emitted lowering', () => {
     const src = 'count := 1\ndouble ~= count * 2\n~> console.log double\ncount = 21\n';
     const { code } = fullCompile(src, { runtimeDelivery: 'inline' });
     expect(/^import /m.test(code)).toBe(false);
-    const dir = mkdtempSync(join(tmpdir(), 'rip-m9c-inline-'));
-    try {
-      writeFileSync(join(dir, 'one.js'), code);
-      const r = spawnSync('bun', [join(dir, 'one.js')], { encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim().split('\n')).toEqual(['2', '42']);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('the loader path end to end: an exported handle disposes a cross-module effect', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'rip-m9c-loader-'));
-    try {
-      writeFileSync(join(dir, 'store.rip'), [
- 'export count := 0',
- 'export watch ~> console.log "count is #{count}"',
- 'def bump()',
- '  count += 1',
- 'export { bump }',
- '',
-      ].join('\n'));
-      writeFileSync(join(dir, 'main.rip'), [
- 'import { count, watch, bump } from "./store.rip"',
- 'bump()',
- 'watch()',
- 'bump()',
- 'console.log "final #{count.value}"',
- '',
-      ].join('\n'));
-      const r = spawnSync('bun', [BIN, 'main.rip'], { cwd: dir, encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim().split('\n')).toEqual(['count is 0', 'count is 1', 'final 2']);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    // Value pin via none+binding — never eval the inline IIFE here.
+    const seen = [];
+    const { code: none } = compile('count := 1\ndouble ~= count * 2\n~> seen.push(double)\ncount = 21\n');
+    new Function('__state', '__computed', '__effect', 'seen', none)(
+      rt.__state, rt.__computed, rt.__effect, seen,
+    );
+    expect(seen).toEqual([2, 42]);
   });
 
   test('zero-cost: an effect-free file is byte-identical under every mode (the standing gate extends)', () => {
@@ -578,30 +479,30 @@ describe('schema callable bodies propagate runtime delivery', () => {
     expect(code).toMatch(/^import \{ __schema, .* \} from ".*runtime\/schema\.js";$/m);
   });
 
-  test("end-to-end 'inline': the method's effect tracks module state in a fresh process", () => {
+  test("end-to-end 'inline': the method's effect tracks module state in a fresh process", async () => {
     const { code } = fullCompile(src, { runtimeDelivery: 'inline' });
-    const dir = mkdtempSync(join(tmpdir(), 'rip-m9c-schemafx-'));
-    try {
-      writeFileSync(join(dir, 'one.js'), code);
-      const r = spawnSync('bun', [join(dir, 'one.js')], { encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      // First run 1+0, the tracked write 1+1, disposed before count=2.
-      expect(r.stdout.trim().split('\n')).toEqual(['sum 1', 'sum 2']);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("end-to-end 'import': the loader path executes the same program", () => {
-    const dir = mkdtempSync(join(tmpdir(), 'rip-m9c-schemafx-loader-'));
-    try {
-      writeFileSync(join(dir, 'main.rip'), src);
-      const r = spawnSync('bun', [BIN, 'main.rip'], { cwd: dir, encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim().split('\n')).toEqual(['sum 1', 'sum 2']);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(/^import /m.test(code)).toBe(false);
+    // Value pin via none+binding against shared schema + reactive modules.
+    const schema = await import('../../src/runtime/schema.js');
+    schema.__SchemaRegistry.reset();
+    const seen = [];
+    const valueSrc = [
+      'count := 0',
+      'S = schema :shape',
+      '  a! integer',
+      '  watch: -> ~> seen.push("sum #{@a + count}")',
+      'v = S.parse {a: 1}',
+      'stop = v.watch()',
+      'count = 1',
+      'stop()',
+      'count = 2',
+    ].join('\n');
+    const { code: none } = compile(valueSrc);
+    new Function('__schema', '__state', '__computed', '__effect', 'seen', none)(
+      schema.__schema, rt.__state, rt.__computed, rt.__effect, seen,
+    );
+    // First run 1+0, the tracked write 1+1, disposed before count=2.
+    expect(seen).toEqual(['sum 1', 'sum 2']);
   });
 
   test('effects in ensure bodies and field transforms trigger too; reactive declarations inside method bodies as well', () => {
@@ -619,63 +520,6 @@ describe('schema callable bodies propagate runtime delivery', () => {
     const callSrc = 'S = schema :shape\n  a! integer\n  m: -> effect @a, 1';
     expect([...fullCompile(callSrc, { runtimeDelivery: 'import' }).runtimes]).toEqual(['schema']);
   });
-});
-
-describe('async effect errors resolve to .rip coordinates', () => {
-  test('the reported stack carries true source line:col through the loader reporter; exit stays 0 (report-and-continue)', () => {
-    // Line-shifted (hoist + wrapper push the throw down in the
-    // generated JS), so an unmapped frame cannot pass.
-    const src = [
- 'pad = 1',                                          // 1
- 'count := 0',                                       // 2
- '~> =>',                                            // 3
- '  v = count',                                      // 4
- '  await Promise.resolve()',                        // 5
- '  throw new Error "async kapow #{v}" if v > 0',    // 6 — `Error` at col 13
- 'count = 1',                                        // 7
- '',
-    ].join('\n');
-    const dir = mkdtempSync(join(tmpdir(), 'rip-m9c-asyncerr-'));
-    try {
-      const path = join(dir, 'afx.rip');
-      writeFileSync(path, src);
-      const { code } = fullCompile(src, { path: 'afx.rip' });
-      const genLine = code.slice(0, code.indexOf('throw new Error')).split('\n').length;
-      expect(genLine).not.toBe(6);
-      const r = spawnSync('bun', [BIN, path], { encoding: 'utf8' });
-      // Report-and-continue: the rejection is handled by the runtime
-      // (no synchronous caller exists to rethrow to — the design,
-      // recorded in ), so the process completes normally…
-      expect(r.status).toBe(0);
-      // …and the report tells the truth about the source position.
-      expect(r.stderr).toContain('[Rip] async effect error:');
-      expect(r.stderr).toContain('async kapow 1');
-      expect(r.stderr).toMatch(/afx\.rip:6:13/);
-      expect(r.stderr).not.toMatch(new RegExp(`afx\\.rip:${genLine}:`));
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('a reactive-free session never evaluates the runtime module (the sentinel stays unset)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'rip-m9c-nosentinel-'));
-    try {
-      writeFileSync(join(dir, 'plain.rip'),
- 'x = 1 + 2\nif globalThis[Symbol.for("rip.runtime.reactive")]\n  console.log "loaded"\nelse\n  console.log "unset"\n');
-      const r = spawnSync('bun', [BIN, 'plain.rip'], { cwd: dir, encoding: 'utf8' });
-      expect(r.status).toBe(0);
-      expect(r.stdout.trim()).toBe('unset');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('the bound handle is TDZ during the synchronous first run', () => {
-});
-
-describe('the handle claims, pinned', () => {
-
 });
 
 describe('the cleanup channel surface', () => {

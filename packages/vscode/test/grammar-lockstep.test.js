@@ -16,7 +16,7 @@ import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import path from 'node:path';
 import { compile } from '../../../src/compile.js';
-import { BOOLEAN_ATTRS } from '../../../src/dom-vocab.js';
+import { BOOLEAN_ATTRS } from '../../../src/dom.js';
 
 const grammar = JSON.parse(readFileSync(
   path.resolve(import.meta.dir, '..', 'syntaxes', 'rip.tmLanguage.json'), 'utf8'));

@@ -6,7 +6,7 @@
 // types yields the trivial (empty) declaration, and requesting
 // declarations never changes what the compile produced.
 //
-// src/dts.js is the reference for declaration SHAPES. The `declare`
+// src/types/dts.js is the reference for declaration SHAPES. The `declare`
 // prefix on module bindings is the settled convention; the bare
 // `let x: T` form serves a checker's merge pass.
 import { describe, test, expect } from 'bun:test';

@@ -108,10 +108,10 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 26 | The match operator's emission was never null-clean | `check`, `tsface` |
 | 27 | A pattern catch destructured `unknown` | `check`, audit `verdict` (07-exceptions), `tsface` |
 | 28 | A postfix cast on an inline try body detached the catch arm | audit `compiles`, `verdict` |
-| 29 | `new` on an optional chain emitted an unconstructable spelling | audit `verdict`/`runtime`/`strict`, `battery` (classes.rip) |
-| 30 | `new` on a tagged template leaked the sexpr head | audit `compiles`/`verdict`/`runtime`, and `battery` (classes.rip) pinning the bytes; the parked production cleared |
+| 29 | `new` on an optional chain emitted an unconstructable spelling | audit `verdict`/`runtime`/`strict`, `rip` (classes.rip) |
+| 30 | `new` on a tagged template leaked the sexpr head | audit `compiles`/`verdict`/`runtime`, and `rip` (classes.rip) pinning the bytes; the parked production cleared |
 | 31 | A promoted param declared no field on the checked face | `check` (08-functions) |
-| 32 | Reassigning an exported plain binding double-declared | `battery` (modules.rip) |
+| 32 | Reassigning an exported plain binding double-declared | `rip` (modules.rip) |
 | 33 | An enum name's semantic token said `type`, not `enum` | audit `type`, `contract.js` (the enum reason clause deleted) |
 | 34 | The bare `~>` operator hovered the runtime's machinery | audit `silence` |
 | 35 | A wrong `:=`/`~=` initializer published twice, in lowering vocabulary | the Diagnostics Audit's codes and positions on 12-reactive, via `contract.js` — both reactive lines DERIVED, the twin spelling the call each lowers to, and their two `error-pins.json` entries deleted; plus `tsface` region shapes and `generated-scopes` |
@@ -130,7 +130,7 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 48 | A method member in an inline type body rejected | audit `compiles` and `types`' shorthand-admission rows |
 | 49 | An import type could not name a `.rip` module | audit `verdict` (11-types) |
 | 50 | A rewritten literal widened its neighbours' diagnostics to the whole element list | `mapping`, `contract.js` (the element-position reason clause deleted) |
-| 51 | A value word names a binding — every read became the literal, silently | `battery` (value-words.rip): rejection rows for every annotated binding site, property-position rows for the legal negative space |
+| 51 | A value word names a binding — every read became the literal, silently | `rip` (value-words.rip): rejection rows for every annotated binding site, property-position rows for the legal negative space |
 | 52 | A destructured binding read by a hoisted def was implicitly `any` under strict | `check`, audit `strict` (20-inference) |
 | 53 | A paren-injected call's arity error lands on the wrong argument | the Diagnostics Audit, position rows on 02-operations |
 | 54 | A generic component's shipped declarations referenced a type parameter they never declared | `dts-tsc` |
@@ -138,7 +138,7 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 57 | A void-marked binding's declaration split, so its token read `variable` | audit `type`, `contract.js` (the reason clause deleted) |
 | 58 | A classed SVG element emitted an unclosed call | audit `runtime`/`verdict`/`strict` |
 | 59 | A type predicate shipped as `==` in the emitted declarations | `dts-tsc` |
-| 60 | A value word in a destructuring pattern bound — the module did not parse | `battery` (value-words.rip): rejection rows for every pattern form, negative-space rows for ordinary names |
+| 60 | A value word in a destructuring pattern bound — the module did not parse | `rip` (value-words.rip): rejection rows for every pattern form, negative-space rows for ordinary names |
 | 61 | A constructor body's `@field =` declared no field, so every read of it rejected | `check` |
 | 62 | An unannotated computed member's face type named the lowering | `hover-pins.json`, audit `ruled` — limit: a component nested in a FUNCTION keeps the form table's any, because the behavior object the inferred position reads is emitted only for a module-scope named component; the projection never reached that shape either |
 | 63 | A forward-referenced class binding lost its class color | `semantic-tokens` |

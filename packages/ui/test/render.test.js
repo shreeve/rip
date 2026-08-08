@@ -132,8 +132,12 @@ test('email SSR rolls back a genuine partial global install', () => {
   // The child is a bare `bun -e`, so the .rip import compiles only if a
   // bunfig preload is visible from its cwd. Per-package bunfigs are gone
   // (the repo root's is the one loader config), so spawn from the root.
+  // FORCE_COLOR paints console.log booleans/strings and breaks the pin.
+  const env = { ...process.env };
+  delete env.FORCE_COLOR;
   const result = Bun.spawnSync(['bun', '-e', source], {
     cwd: new URL('../../..', import.meta.url).pathname,
+    env,
   });
   expect(result.exitCode).toBe(0);
   expect(result.stdout.toString().trim()).toBe('false sentinel true');

@@ -24,8 +24,8 @@ import { toSourceMap } from './sourcemap.js';
 import { Mappings } from './stores.js';
 // Declaration emission is IDE/CLI weight. The getter below stays sync
 // (callers read `.declarations` as a string), so this import is static;
-// the browser bundle stubs dts.js so the artifact never carries it.
-import { emitDeclarations } from './dts.js';
+// the browser bundle stubs types/dts.js so the artifact never carries it.
+import { emitDeclarations } from './types/dts.js';
 import { foldDerivedSchemas } from './schema.js';
 
 export class CompileError extends Error {

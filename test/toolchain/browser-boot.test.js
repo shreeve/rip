@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bootApp, fetchBundle } from '../../src/browser.js';
-import { hmrOverlayElement } from '../../src/browser-hmr-overlay.js';
+import { hmrOverlayElement } from '../../src/browser.js';
 import { assembleRipBundle } from '../../packages/sites/bundle.rip';
 import { installRecordingDOM } from '../support/recording-dom.js';
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 // The Rip CLI: compile .rip files to JavaScript, or run them directly
-// through the Bun loader plugin (src/loader.js) so .rip imports compile
+// through the Bun loader plugin (src/cli/loader.js) so .rip imports compile
 // transitively. Diagnostics print as path:line:col with a source excerpt
 // (CompileError's formatted message) and exit non-zero.
 
@@ -11,15 +11,15 @@ import { randomBytes } from 'crypto';
 import { join, dirname, resolve, relative, sep, delimiter } from 'path';
 import { fileURLToPath } from 'url';
 import { compile, CompileError } from '../src/compile.js';
-import { explainSource, explainGenerated, parseTarget, UsageError, PositionError } from '../src/explain.js';
+import { explainSource, explainGenerated, parseTarget, UsageError, PositionError } from '../src/cli/explain.js';
 import { tokenize, makeParserLexer } from '../src/lexer.js';
 import { Parser } from '../src/parser.js';
 import { toInlineMapComment } from '../src/sourcemap.js';
 import packageJson from '../package.json' with { type: 'json' };
 
-const loaderPath = join(dirname(fileURLToPath(import.meta.url)), '../src/loader.js');
-const runnerPath = join(dirname(fileURLToPath(import.meta.url)), '../src/run.js');
-const replPath = join(dirname(fileURLToPath(import.meta.url)), '../src/repl.js');
+const loaderPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/loader.js');
+const runnerPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/run.js');
+const replPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/repl.js');
 
 const HELP = `rip ${packageJson.version} — ${packageJson.description}
 
@@ -110,7 +110,7 @@ const args = process.argv.slice(2);
 // under the .rip loader so importing the models entry compiles its
 // modules transitively.
 if (args[0] === 'schema') {
-  const schemaCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/schema-cli.js');
+  const schemaCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/schema.js');
   const r = spawnSync('bun', [`--preload=${loaderPath}`, schemaCliPath, ...args.slice(1)], {
     stdio: 'inherit',
     env: process.env,
@@ -125,7 +125,7 @@ if (args[0] === 'schema') {
 // `rip ./check`). No loader preload — the checker spawns the language
 // server, which owns compilation.
 if (args[0] === 'check') {
-  const checkCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/check.js');
+  const checkCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/check.js');
   const r = spawnSync('bun', [checkCliPath, ...args.slice(1)], {
     stdio: 'inherit',
     env: process.env,
@@ -482,11 +482,11 @@ if (showTsFace) {
 }
 
 // Run `path` through Bun with the .rip loader preloaded. The entry goes
-// through the run harness (src/run.js), which dynamic-imports it — so
+// through the run harness (src/cli/run.js), which dynamic-imports it — so
 // the loader plugin compiles it like any import, and uncaught errors
 // print with stack frames remapped to .rip source positions (Bun's own
 // reporter shows generated-JS coordinates for plugin-loaded modules;
-// src/stackmap.js). The child's exit status is ours.
+// src/cli/stackmap.js). The child's exit status is ours.
 const run = (path, argv) => {
   const r = spawnSync('bun', [`--preload=${loaderPath}`, runnerPath, path, ...argv], {
     stdio: 'inherit',

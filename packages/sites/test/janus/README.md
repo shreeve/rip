@@ -1,7 +1,7 @@
 # janus
 
 `test.rip` runs Rip Sites through a Janus-enabled Caddy binary built from the
-published `v1.6.1` module. It rejects a local module replacement and certifies:
+published `v1.6.2` module. It rejects a local module replacement and certifies:
 
 - registration, heartbeat survival, doorbell activation, and upstream swap;
 - generated shell, bundle, App CSS, weak ETag revalidation, and SPA routing;
@@ -15,7 +15,7 @@ Run it with:
 bun run test:janus
 ```
 
-The test builds and caches a Caddy binary from the published Janus `v1.6.1`
+The test builds and caches a Caddy binary from the published Janus `v1.6.2`
 module with `xcaddy`. `JANUS_CADDY=/path/to/released/caddy` may supply an
 existing binary instead. In both cases the test rejects a local module
 replacement.
