@@ -18,3 +18,4 @@ dist/browser/*
 tmp-*
 /packages/tray/macos/.build
 /packages/tray/dist
+/test/browser/test-results
