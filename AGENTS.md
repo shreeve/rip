@@ -95,7 +95,13 @@ repository root; consulted for UNDERSTANDING → docs/.
  MERGE, never rebase; never force-push. PRs land as TRUE MERGE
  commits — never squash-merged, never rebase-merged: a landed
  branch's tip stays an ancestor of main, so merged-branch
- verification is a pure git ancestry check.
+ verification is a pure git ancestry check. The `main` ruleset
+ requires PR CI jobs `test` (`test:rip`) and `browser` (Playwright
+ smoke); both must be green to merge. That workflow runs on the
+ pull request only — not again on the post-merge push. Merge-queue
+ CI is unavailable on a user-owned repo; if the repository moves to
+ an organization, prefer `merge_group`. `test:all` / `audit` stay
+ manual certification, not merge blockers.
 
 10. **Big merges get adversarial review, including one COLD pass.**
  Before a substantial PR lands: independent empirical verification
@@ -396,7 +402,7 @@ the affected final gates again.
 
 - `bun run test:rip` — the language suite alone (every test/rip/*.rip
   row — the language's syntax contract), sub-second: the inner loop
-  for language work and the automatic pull-request code check.
+  for language work and the required PR `test` job.
 - `bun run test` — the FAST compiler loop: in-process trees only
   (`test/{rip,lang,mapping,ui,schema,toolchain}`), file-parallel.
   Skips `test/spawn/`. The extended tier (tsc validity gates, scaling

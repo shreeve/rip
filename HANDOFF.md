@@ -48,11 +48,12 @@ folded); `dom.js` is the HTML/SVG vocab; language suite is `test/rip/`
 
 - **Land** = merge green + delete feature branch.
 - Shared branches catch up by merge, never rebase; never force-push.
-- Pull requests land as true merge commits only. No AI attribution.
+- Pull requests land as true merge commits only (squash/rebase disabled).
+- `main` ruleset requires PR jobs `test` + `browser`; no post-merge CI re-run.
 
 ## Testing cadence
 
 1. Edit loop — smallest disproof (`test:rip`, `test`, package `test`, named spec).
 2. Process seams — `test:spawn`.
-3. Landing — freeze candidate, then PR gates (`test:rip` + browser smoke);
+3. Landing — freeze candidate; PR CI (`test` + `browser`) must be green to merge;
    `test:all` / cart only when explicitly certifying.
