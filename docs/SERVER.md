@@ -41,6 +41,8 @@ project/
 └── dist/                     Manager-owned publication output
     ├── @rip/rip.min.js       browser compiler and Rip App runtime
     ├── @rip/rip.min.js.br    Brotli sidecar (transparent via Accept-Encoding)
+    ├── @rip/tailwind.min.js  optional Tailwind browser runtime
+    ├── @rip/tailwind.min.js.br
     ├── bundle.json           complete browser Rip program
     ├── bundle.json.br        Brotli representation of the exact JSON bytes
     └── latest.json           current complete App hash

@@ -396,6 +396,8 @@ project/
 └── dist/                         manager-owned publication
     ├── @rip/rip.min.js
     ├── @rip/rip.min.js.br
+    ├── @rip/tailwind.min.js
+    ├── @rip/tailwind.min.js.br
     ├── bundle.json
     ├── bundle.json.br            precompressed bundle representation
     └── latest.json               current App identity
