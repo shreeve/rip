@@ -12,9 +12,9 @@
 // document. api.codes(path) / api.has(path, re) read the LAST published
 // diagnostics for it (unused-var noise filtered).
 import { fileURLToPath } from 'node:url';
-import { LspClient, tsgoBinaryPath } from '../../src/tsgo.js';
+import { LspClient, tsgoBinaryPath } from '../../../src/tsgo.js';
 
-const serverPath = fileURLToPath(new URL('../../src/server.js', import.meta.url));
+const serverPath = fileURLToPath(new URL('../../../src/server.js', import.meta.url));
 
 export let tsgoAvailable = false;
 try { tsgoBinaryPath(); tsgoAvailable = true; } catch { /* deps not installed */ }

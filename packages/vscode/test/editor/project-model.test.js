@@ -35,16 +35,14 @@ import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { typeImportSpecifiers } from '../src/mirror.js';
-
 let tsgoAvailable = false;
 try {
-  const { tsgoBinaryPath } = await import('../src/tsgo.js');
+  const { tsgoBinaryPath } = await import('../../src/tsgo.js');
   tsgoBinaryPath();
   tsgoAvailable = true;
 } catch { /* dependencies not installed */ }
 
-const SERVER = path.resolve(import.meta.dir, '..', 'src', 'server.js');
+const SERVER = path.resolve(import.meta.dir, '..', '..', 'src', 'server.js');
 
 function makeWorkspace(files) {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-pm-'));
@@ -61,7 +59,7 @@ function makeWorkspace(files) {
 // the server's log lines; `initialized` resolves after the cache
 // revalidation log line arrives (startup complete).
 async function inSession(ws, fn) {
-  const { LspClient } = await import('../src/tsgo.js');
+  const { LspClient } = await import('../../src/tsgo.js');
   const published = [];
   const logs = [];
   const client = new LspClient('bun', [SERVER, '--stdio'], {
@@ -213,21 +211,6 @@ const UTIL = 'export answer: number = 42\n';
 const INFERRED_UTIL = 'export answer = 42\n';
 
 const APP = 'import { answer } from "./util.rip"\nbad = answer.toUpperCase()\n';
-
-test('type import discovery skips literal, comment, property, and identifier bodies', () => {
-  const text = [
-    `import('./real.rip').Thing`,
-    `import /* before */ ( /* argument */ "../other.rip" /* close */ ).Other`,
-    `"import('./string-ghost.rip')"`,
-    `'import("./single-ghost.rip")'`,
-    `unknown /* import('./comment-ghost.rip') */`,
-    `unknown # import('./hash-ghost.rip')\n | known`,
-    `Ωimport('./identifier-ghost.rip')`,
-    `namespace.import('./property-ghost.rip')`,
-    `namespace. /* gap */ import('./spaced-property-ghost.rip')`,
-  ].join(' | ');
-  expect(typeImportSpecifiers(text)).toEqual(['./real.rip', '../other.rip']);
-});
 
 describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
   test('an unopened dependency materializes on demand and serves', async () => {

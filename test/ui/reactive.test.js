@@ -24,27 +24,12 @@ const compile = (src, opts = {}) => {
   return { ...out, mappings: new Mappings(out.mappings) };
 };
 
-const parseFails = (src) => {
-  const r = parser.parse(src);
-  expect(r.sexpr).toBeNull();
-  expect(r.diagnostics).not.toHaveLength(0);
-};
-
 const emitFails = (src, re) => {
   const r = parser.parse(src);
   expect(r.diagnostics).toEqual([]);
   expect(() => emit(r, { source: src })).toThrow(re);
 };
 
-
-// Tier 1 declare-in-place is a SANCTIONED divergence from: this side
-// declares straight-line locals at their first write. unplaced()
-// erases declaration placement from BOTH sides — hoist lines drop,
-// in-place declarations become bare assignments — so these
-// tests keep pinning the feature bytes they exist for.
-const unplaced = (code) => code
-  .replace(/^[ \t]*let [A-Za-z_$][\w$]*(, [A-Za-z_$][\w$]*)*;\n\n?/gm, '')
-  .replace(/^([ \t]*)let ([A-Za-z_$][\w$]*)( = )/gm, '$1$2$3');
 
 // Eval pairing: each compiler's undecorated output runs against ITS
 // runtime (the module, the materialized template), same harness —
@@ -53,40 +38,6 @@ const NAMES = ['__state', '__computed', '__effect', '__batch'];
 const runWith = (runtime, code, harness) =>
   new Function(...NAMES, `${code}\n${harness}`)(...NAMES.map((n) => runtime[n]));
 const evalBoth = (src, harness) => runWith(rt, compile(src).code, harness);
-
-// ════════════════════════════════════════════════════════════════════
-// Grammar: forms, sexpr pins, 0-conflict shapes
-// ════════════════════════════════════════════════════════════════════
-
-describe('the declaration forms parse to  sexpr shapes', () => {
-  const rows = [
-    ['count := 0', ['program', ['state', 'count', '0']]],
-    ['count := 1 + 2', ['program', ['state', 'count', ['+', '1', '2']]]],
-    ['count :=\n  0', ['program', ['state', 'count', '0']]],
-    ['total ~= count * 2', ['program', ['computed', 'total', ['*', 'count', '2']]]],
-    ['total ~=\n  count * 2', ['program', ['computed', 'total', ['block', ['*', 'count', '2']]]]],
-    ['total ~=\n  a = 1\n  a + 1', ['program', ['computed', 'total', ['block', ['=', 'a', '1'], ['+', 'a', '1']]]]],
-    // Typed twins: byte-identical s-expressions (erasure by construction).
-    ['count: number := 0', ['program', ['state', 'count', '0']]],
-    ['total: number ~= 7', ['program', ['computed', 'total', '7']]],
-    ['export count := 0', ['program', ['export', ['state', 'count', '0']]]],
-    ['export total ~= 7', ['program', ['export', ['computed', 'total', '7']]]],
-    ['export count: number := 0', ['program', ['export', ['state', 'count', '0']]]],
-    ['export total: number ~= 7', ['program', ['export', ['computed', 'total', '7']]]],
-    // THE POSTFIX SHIFT, PLAINLY (Opus F3; the design record):
-    // `count := 0 if c` DECLARES count UNCONDITIONALLY — only the
-    // VALUE is conditional (undefined when the guard is false). It is
-    // NOT a guarded declaration: REACTIVE_ASSIGN sits below
-    // POST_IF/POST_UNLESS in precedence, so the guard shifts into the
-    // value — the shape, and the only reading with a valid lowering
-    // (a const declaration has no guarded statement form).
-    ['count := 0 if c', ['program', ['state', 'count', ['if', 'c', ['0']]]]],
-    ['count := 0 unless c', ['program', ['state', 'count', ['if', ['!', 'c'], ['0']]]]],
-  ];
-  for (const [src, sexpr] of rows) {
-  }
-
-});
 
 describe('token fixtures: the reactive spellings', () => {
   const stream = (src) => tokenize(src).tokens.map((t) => `${t.kind}:${t.value}`);
@@ -112,87 +63,6 @@ describe('token fixtures: the reactive spellings', () => {
     expect(stream('a != b')).toEqual(['IDENTIFIER:a', 'COMPARE:!=', 'IDENTIFIER:b']);
     expect(stream('x = 1')).toEqual(['IDENTIFIER:x', '=:=', 'NUMBER:1']);
   });
-});
-
-// ════════════════════════════════════════════════════════════════════
-// Lowerings: byte pins, Function-validated
-// ════════════════════════════════════════════════════════════════════
-
-describe('lowerings byte-match  where  is correct', () => {
-  const rows = [
- 'count := 0',
- 'count := 1 + 2',
- 'count :=\n  0',
- 'config :=\n  {a: 1}',
- 'total ~= count * 2',
- 'total ~=\n  count * 2',
- 'total ~=\n  a = count * 2\n  a + 1',
- 'b ~=\n  if x\n    1\n  else\n    2',
- 'x ~= 42',
- 'count := 0\nx = count + 1',
- 'count := 0\ncount = 5',
- 'count := 0\ncount += 1',
- 'count := 0\ncount++',
- 'count := 0\n++count',
- 'count := 0\nobj = {count: 1}',
- 'count := 0\nobj = {count}',
- 'count := 0\nobj = {n: count}',
- 'count := 0\nobj = {"count": count}',
- 'count := 0\nobj = {[count]: 1}',
- 'user := {name: "Ada"}\nx = user.name',
- 'user := {name: "Ada"}\nuser.name = "Bob"',
- 'count := 0\nconsole.log count',
- 'count := 0\nf = -> count + 1',
- 'count := 0\nf = -> count = 9',
- 'f = ->\n  local := 5\n  local + 1',
- 'def f()\n  z := 1\n  z + 1',
- 'count := 0\ndef bump()\n  count += 1\nbump()',
- 'count := 0\ndef f()\n  return count',
- 'count := 0\nclass A\n  m: -> count + 1',
- 'base := null\nclass A extends base\n  m: -> 1',
- 'export count := 0',
- 'count := 0\nexport total ~= count * 2',
- 'count: number := 0',
- 'export count: number := 0',
- 'a := 1\nb ~= a * 2\nc ~= b + 1',
- 'count := count + 1',
- 'count := 0\nif count then x = 1',
- 'items := [1,2,3]\nfor x in items\n  console.log x',
- 'items := [1, 2]\nys = (x * 2 for x in items)',
- 'count := 0\na = count = 7',
- 'a := 1\nb := 2\na = b',
- 'a := 1\na = 2',
- 'fn := null\nfn()',
- 'fn := null\nfn?()',
- 'user := null\nx = user?.name',
- 'a := 1\nx = a?.b',
- 'count := 0\ncount = 5 if true',
- 'count := 0 if true',
- 'count := 5\nx = -count',
- 'flag := true\nx = !flag',
- 'a := 1\nx = a > 0',
- 'a := null\nx = a ?? 5',
- 'arr := [1,2]\nx = arr[0]',
- 'arr := [1,2]\narr[0] = 9',
- 'a := 1\nxs = [a, 2]',
- 'xs := [1,2]\nys = [...xs]',
- 'n := 3\nxs = [1..n]',
- 'a := 1\nswitch a\n  when 1 then x = 1\n  else x = 2',
- 'a := 3\nwhile a > 0\n  a -= 1',
- 'a := 1\nx = if a then 1 else 2',
- 'a := 1\nx = typeof a',
- 'obj := {a: 1}\ndelete obj.a',
- 'obj := {a: 1}\n{a} = obj',
- 'a := 1\nx = do -> a',
- 'f = ->\n  x := await g()\n  x',
- 'count := 0\ns = "n=#{count + 1}"',
- 'count := 0\ncount = 1 if c else 2',
- 'count := 0\nx = 1 if count else 2',
- 'count := 0\nobj = {count: x for x of src}',
- 'count := 5\nf = (x = count) -> x',
-  ];
-  for (const src of rows) {
-  }
 });
 
 describe('eval checks: paired runs against each side\'s own runtime', () => {

@@ -10,7 +10,7 @@ Read this first when starting a session. Permanent architecture lives in
   · `bun run test:browser` · package-local `bun run test`.
 - Explicit certification: `bun run test:all` · `bun run audit` ·
   `bun run test:cart`.
-- Open notes: `TODO.md` · `packages/sites/TODO.md`.
+- Open notes: `packages/sites/TODO.md` · [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Layout (current)
 

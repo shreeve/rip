@@ -25,27 +25,12 @@ const compile = (src, opts = {}) => {
   return { ...out, mappings: new Mappings(out.mappings) };
 };
 
-const parseFails = (src) => {
-  const r = parser.parse(src);
-  expect(r.sexpr).toBeNull();
-  expect(r.diagnostics).not.toHaveLength(0);
-};
-
 const emitFails = (src, re) => {
   const r = parser.parse(src);
   expect(r.diagnostics).toEqual([]);
   expect(() => emit(r, { source: src })).toThrow(re);
 };
 
-
-// Tier 1 declare-in-place is a SANCTIONED divergence from: this side
-// declares straight-line locals at their first write. unplaced()
-// erases declaration placement from BOTH sides — hoist lines drop,
-// in-place declarations become bare assignments — so these
-// tests keep pinning the feature bytes they exist for.
-const unplaced = (code) => code
-  .replace(/^[ \t]*let [A-Za-z_$][\w$]*(, [A-Za-z_$][\w$]*)*;\n\n?/gm, '')
-  .replace(/^([ \t]*)let ([A-Za-z_$][\w$]*)( = )/gm, '$1$2$3');
 
 // Eval pairing for rows that touch the reactive runtime: each
 // compiler's undecorated output runs against ITS runtime.
@@ -58,33 +43,6 @@ const evalBoth = (src, harness) => runWith(rt, compile(src).code, harness);
 // runtime name, so both outputs run bare.
 const runBare = (code, harness) => new Function(`${code}\n${harness}`)();
 const evalBothBare = (src, harness) => runBare(compile(src).code, harness);
-
-// ════════════════════════════════════════════════════════════════════
-// Grammar: forms, sexpr pins
-// ════════════════════════════════════════════════════════════════════
-
-describe('the declaration forms parse to  sexpr shapes', () => {
-  const rows = [
-    ['x =! 5', ['program', ['readonly', 'x', '5']]],
-    ['x =! 1 + 2', ['program', ['readonly', 'x', ['+', '1', '2']]]],
-    ['x =!\n  5', ['program', ['readonly', 'x', '5']]],
-    // Typed twins: byte-identical s-expressions (erasure by construction).
-    ['x: number =! 5', ['program', ['readonly', 'x', '5']]],
-    ['export x =! 5', ['program', ['export', ['readonly', 'x', '5']]]],
-    ['export x: number =! 5', ['program', ['export', ['readonly', 'x', '5']]]],
-    // The postfix shift (the design record extends): `x =! 5 if c`
-    // DECLARES unconditionally; only the VALUE is conditional.
-    ['x =! 5 if c', ['program', ['readonly', 'x', ['if', 'c', ['5']]]]],
-    ['x =! 5 unless c', ['program', ['readonly', 'x', ['if', ['!', 'c'], ['5']]]]],
-  ];
-  for (const [src, sexpr] of rows) {
-  }
-
-});
-
-// ════════════════════════════════════════════════════════════════════
-// Token fixtures: the adjacency boundary
-// ════════════════════════════════════════════════════════════════════
 
 describe('token fixtures: adjacent `=!` is one token; spaced `= !` is two', () => {
   const stream = (src) => tokenize(src).tokens.map((t) => `${t.kind}:${t.value}`);
@@ -122,67 +80,6 @@ describe('token fixtures: adjacent `=!` is one token; spaced `= !` is two', () =
       ['IDENTIFIER:x', 'TYPE:number', 'READONLY_ASSIGN:=!', 'NUMBER:5']);
   });
 });
-
-// ════════════════════════════════════════════════════════════════════
-// Lowerings: byte pins, Function-validated
-// ════════════════════════════════════════════════════════════════════
-
-describe('lowerings byte-match  where  is correct', () => {
-  const rows = [
- 'x =! 5',
- 'x =! 1 + 2',
- 'x =!5',
- 'x=!5',
- 'x =!\n  5',
- 'x =! "text"',
- 'x =! [1, 2]',
- 'x =! {a: 1}',
- 'x =! -> 5',
- 'x =! if c then 1 else 2',
- 'x =! 5 if c',
- 'x =! 5 unless c',
- 'x = !5',
- 'x =! 5\ny = x + 1',
- 'x =! 5\nx = 6',
- 'x =! 5\nx += 1',
- 'x =! 5\nx++',
- 'x =! 5\n--x',
- 'x =! 5\nf = -> x + 1',
- 'x =! 5\nconsole.log x',
- 'x =! 5\nobj = {x}',
- 'x =! 5\nobj = {n: x}',
- 'x =! Math.max(1, 2)',
- 'x =! 5\ns = "v=#{x}"',
- 'f = ->\n  x =! 5\n  x + 1',
- 'def g()\n  z =! 1\n  z + 1',
- 'export x =! 5',
- 'export x: number =! 5',
- 'x: number =! 5',
- 'g = ->\n  x =! await f()\n  x',
-    // The reactive interplay: the initializer unwraps like any value —
-    // a SNAPSHOT of the current value, never a `__readonly(…)` call
-    // (the surface never reaches its runtime's wrapper either; ).
- 'count := 0\nro =! count',
- 'count := 0\nro =! count + 1',
- 'ro =! 5\ncount := ro',
- 'count := 0\nf = ->\n  ro =! count\n  ro',
- 'x =! 5\n~> probe x',
- 'x =! 5\nd ~= x * 2',
- 'x =! 5\nx =! 6',
- 'h ~> f()\nh =! 5',
-    // The scope-blind set stays scope-blind in the old runtime only where
-    // OBSERVABLE; these rows agree byte-for-byte.
- 'x =! 5\nf = (x) -> x + 1',
- 'f = ->\n  q =! 5\n  q\nq = 10\nr = q + 1',
-  ];
-  for (const src of rows) {
-  }
-
-});
-
-// ════════════════════════════════════════════════════════════════════
-// Eval checks: write semantics ride JS's own const TypeError
-// ════════════════════════════════════════════════════════════════════
 
 describe('eval checks: reads, writes, and the reactive interplay', () => {
   test('reads compose everywhere a value reads', () => {

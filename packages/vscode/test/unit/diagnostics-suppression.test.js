@@ -5,8 +5,8 @@
 // settled text above the incompleteness has a cover row as its only
 // mapping; file-wide suppression traded it for silence.
 import { describe, test, expect } from 'bun:test';
-import { applyRipDirectives, mapTsDiagnostic } from '../src/diagnostics.js';
-import { Mappings } from '../../../src/stores.js';
+import { applyRipDirectives, mapTsDiagnostic } from '../../src/diagnostics.js';
+import { Mappings } from '../../../../src/stores.js';
 
 // One-line texts keep positions arithmetic: offset === character.
 const TEXT = 'aaaaaaaaaa bbbbbbbbbb cccccccccc';

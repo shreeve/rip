@@ -30,7 +30,6 @@ package-local `TODO.md` files (for example
 - [AGENTS.md](AGENTS.md) — mandatory repository rules and invariants
 - [packages/AGENTS.md](packages/AGENTS.md) — first-party package mold and earned shapes
 - [HANDOFF.md](HANDOFF.md) — current session launch facts
-- [TODO.md](TODO.md) — open design/correctness notes (repo-wide)
 
 **Understanding (permanent contracts under `docs/`):**
 

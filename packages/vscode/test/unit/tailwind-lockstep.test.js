@@ -21,9 +21,9 @@
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import path from 'node:path';
-import { compile } from '../../../src/compile.js';
+import { compile } from '../../../../src/compile.js';
 
-const pkg = JSON.parse(readFileSync(path.resolve(import.meta.dir, '..', 'package.json'), 'utf8'));
+const pkg = JSON.parse(readFileSync(path.resolve(import.meta.dir, '..', '..', 'package.json'), 'utf8'));
 const CLASS_REGEXES = pkg.contributes.configurationDefaults['tailwindCSS.experimental.classRegex'];
 
 // The Tailwind extension's evaluation: a STRING pattern's first group

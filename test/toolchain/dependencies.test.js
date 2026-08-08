@@ -1,12 +1,13 @@
 // The dependency policy as a standing gate.
 //
 // The compiler core ships nothing: the root declares no runtime
-// dependencies, and its only dev dependency is TypeScript — the test
-// toolchain's oracle for the tsc-spawning validity gates
-// (test/support/tsc.js). That the SHIPPED compiler stays free of it is
-// proven directly by the purity gate below, not by an empty graph:
-// every import in src/ and bin/ resolves to a relative path or a
-// runtime builtin, never a package that would enter node_modules.
+// dependencies. Dev dependencies are TypeScript (the tsc-spawning
+// validity oracle in test/support/tsc.js) and the exact pin of
+// `@tailwindcss/browser` that `bun run tailwind` vendors into
+// dist/@rip/. That the SHIPPED compiler stays free of both is proven
+// by the purity gate below, not by an empty graph: every import in
+// src/ and bin/ resolves to a relative path or a runtime builtin,
+// never a package that would enter node_modules.
 //
 // TypeScript's VERSION is spelled once — in the workspace catalog. The
 // two packages that own it as their own concern reference it as
@@ -29,11 +30,14 @@ test('root declares no runtime dependencies; TypeScript lives once in the worksp
   for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
     expect(pkg[field]).toBeUndefined();
   }
-  // The compiler's only dev dependency is TypeScript, referenced from the
-  // catalog so its version is written in exactly one place.
-  expect(Object.keys(pkg.devDependencies ?? {})).toEqual(['typescript']);
+  // Dev graph: TypeScript from the catalog, plus the exact Tailwind
+  // browser pin consumed only by scripts/tailwind-bundle.mjs.
+  expect(Object.keys(pkg.devDependencies ?? {}).sort()).toEqual(
+    ['@tailwindcss/browser', 'typescript'].sort(),
+  );
   expect(pkg.devDependencies.typescript).toBe('catalog:');
-  // The version — the ONE place it is spelled — is an exact pin.
+  expect(pkg.devDependencies['@tailwindcss/browser']).toMatch(/^\d/);
+  // The TypeScript version — the ONE place it is spelled — is an exact pin.
   expect(pkg.catalog?.typescript).toMatch(/^\d/); // no range sigils
   // The root is the workspace root (owner decision: in-tree @rip-lang/*
   // resolution, hoisted linker). Playwright lives under test/browser as

@@ -31,16 +31,16 @@ import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { decodeSemanticTokens } from '../src/tsgo.js';
+import { decodeSemanticTokens } from '../../src/tsgo.js';
 
 let tsgoAvailable = false;
 try {
-  const { tsgoBinaryPath } = await import('../src/tsgo.js');
+  const { tsgoBinaryPath } = await import('../../src/tsgo.js');
   tsgoBinaryPath();
   tsgoAvailable = true;
 } catch { /* dependencies not installed */ }
 
-const SERVER = path.resolve(import.meta.dir, '..', 'src', 'server.js');
+const SERVER = path.resolve(import.meta.dir, '..', '..', 'src', 'server.js');
 
 function makeWorkspace(files) {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-feat-'));
@@ -55,7 +55,7 @@ function makeWorkspace(files) {
 // One live session over a fresh workspace; the api wraps every feature
 // request in current-buffer coordinates.
 async function inWorkspace(files, fn) {
-  const { LspClient } = await import('../src/tsgo.js');
+  const { LspClient } = await import('../../src/tsgo.js');
   const ws = makeWorkspace(files);
   const published = [];
   const logs = [];

@@ -13,15 +13,15 @@ import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { compile } from '../../../src/compile.js';
+import { compile } from '../../../../src/compile.js';
 import {
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, generatedSpanToSource, SUPPRESSED_TS_CODES,
-} from '../src/translate.js';
+} from '../../src/translate.js';
 
 let tsgoAvailable = false;
 try {
-  const { tsgoBinaryPath } = await import('../src/tsgo.js');
+  const { tsgoBinaryPath } = await import('../../src/tsgo.js');
   tsgoBinaryPath();
   tsgoAvailable = true;
 } catch { /* dependencies not installed */ }
@@ -35,7 +35,7 @@ if (!tsgoAvailable) {
 
 describe.skipIf(!tsgoAvailable)('rip → tsgo → rip round trip', () => {
   test('diagnostics and hover land on .rip source', async () => {
-    const { startTsgo } = await import('../src/tsgo.js');
+    const { startTsgo } = await import('../../src/tsgo.js');
 
     // Same governing options the server materializes (src/server.js).
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-broker-test-'));
@@ -117,7 +117,7 @@ describe.skipIf(!tsgoAvailable)('rip → tsgo → rip round trip', () => {
   }, 30000);
 
   test('tsgo supplies its OWN diagnostic tags through the pull slot (tagSupport in textDocument.diagnostic)', async () => {
-    const { startTsgo } = await import('../src/tsgo.js');
+    const { startTsgo } = await import('../../src/tsgo.js');
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-broker-tags-'));
     fs.writeFileSync(path.join(root, 'tsconfig.json'), JSON.stringify({
       compilerOptions: { target: 'es2022', module: 'esnext', lib: ['es2022', 'dom'], noImplicitAny: true },
