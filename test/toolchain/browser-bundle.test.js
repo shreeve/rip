@@ -9,11 +9,14 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { brotliDecompressSync } from 'node:zlib';
 import { describeExtended } from '../support/extended.js';
 import { compile } from '../../src/compile.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const artifactPath = resolve(root, 'dist/browser/rip.js');
+const minPath = resolve(root, 'dist/browser/rip.min.js');
+const brPath = resolve(root, 'dist/browser/rip.min.js.br');
 
 // Server-only surfaces that must never be reachable from the browser
 // entry. config/loader/run own the filesystem and process; schema-orm
@@ -58,6 +61,23 @@ const walkGraph = () => {
     }
   }
   return { seen, externals };
+};
+
+const smokeCompile = (path) => {
+  const probe = spawnSync('bun', ['-e', [
+    `const mod = await import(${JSON.stringify(path)});`,
+    "const out = mod.compileToJS('x = 41\\nx + 1');",
+    "if (out.code !== 'let x = 41;\\nx + 1;') throw new Error('unexpected output: ' + out.code);",
+    "if (typeof mod.runtimes.__state !== 'function') throw new Error('missing runtime');",
+    "const files = new Map([['probe.rip', \"import { rash } from '@rip-lang/app/rash'\\nexport value = rash(new TextEncoder().encode('probe'))\"]]);",
+    "const compiled = new Map();",
+    "const loader = mod.createModuleLoader({ components: { read: p => files.get(p), exists: p => files.has(p), setCompiled: (p, v) => compiled.set(p, v) } });",
+    "const probe = await loader.import('probe.rip');",
+    "if (!/^[A-Za-z0-9_]{6}$/.test(probe.value)) throw new Error('embedded App package did not resolve');",
+    "console.log('ok');",
+  ].join('\n')], { cwd: root, encoding: 'utf8' });
+  expect(probe.stderr).toBe('');
+  expect(probe.stdout.trim()).toBe('ok');
 };
 
 describe('browser entry graph', () => {
@@ -127,7 +147,27 @@ describe('browser entry surface', () => {
     expect(typeof caught.line).toBe('number');
     expect(typeof caught.col).toBe('number');
   });
+
+  test('browser compile rejects the TypeScript face', async () => {
+    const entry = await import(resolve(root, 'src/browser.js'));
+    expect(() => entry.compile('x = 1', { face: 'ts' })).toThrow(/TypeScript face/);
+    expect(() => entry.compileToJS('x = 1', { face: 'ts' })).toThrow(/TypeScript face/);
+  });
 });
+
+// Strings that exist only inside IDE / type-face module bodies — never as
+// identifiers the JS-face emitter references. Their absence proves the
+// browser artifact received the bundle stubs, not the real modules.
+const IDE_ONLY_MARKERS = [
+  'schemaIntrinsicLines',
+  'INTRINSIC_FIELD_TYPES',
+  'collectSchemaDecls',
+  'unsupported object-pattern member',
+  "the '...' expansion parameter has no declaration form",
+  'isBehaviorProjected',
+  'DtsError',
+  'declaration emission: class',
+];
 
 describe('browser bundle artifact', () => {
   test('exists and carries no Node reach', () => {
@@ -148,31 +188,59 @@ describe('browser bundle artifact', () => {
     expect(code).toContain('launch requires an options object');
   });
 
+  test('excludes IDE type-face module bodies', () => {
+    expect(existsSync(artifactPath)).toBeTrue();
+    expect(existsSync(minPath)).toBeTrue();
+    const code = readFileSync(artifactPath, 'utf8');
+    const min = readFileSync(minPath, 'utf8');
+    for (const marker of IDE_ONLY_MARKERS) {
+      expect(code.includes(marker)).toBeFalse();
+      expect(min.includes(marker)).toBeFalse();
+    }
+    // Unminified artifact keeps the stub throw messages verbatim.
+    expect(code).toContain('rip: declaration emission is unavailable in the browser');
+    expect(code).toContain('rip: schema type story is unavailable in the browser');
+    expect(code).toContain('rip: component type story is unavailable in the browser');
+    // JS-face helpers that remain after the IDE split.
+    expect(code).toContain('__${name}__behavior');
+    expect(code).toContain('beforeMount');
+    expect(min).toContain('beforeMount');
+  });
+
   test('loads standalone and compiles', () => {
-    const probe = spawnSync('bun', ['-e', [
-      `const mod = await import(${JSON.stringify(artifactPath)});`,
-      "const out = mod.compileToJS('x = 41\\nx + 1');",
-      "if (out.code !== 'let x = 41;\\nx + 1;') throw new Error('unexpected output: ' + out.code);",
-      "if (typeof mod.runtimes.__state !== 'function') throw new Error('missing runtime');",
-      "const files = new Map([['probe.rip', \"import { rash } from '@rip-lang/app/rash'\\nexport value = rash(new TextEncoder().encode('probe'))\"]]);",
-      "const compiled = new Map();",
-      "const loader = mod.createModuleLoader({ components: { read: p => files.get(p), exists: p => files.has(p), setCompiled: (p, v) => compiled.set(p, v) } });",
-      "const probe = await loader.import('probe.rip');",
-      "if (!/^[A-Za-z0-9_]{6}$/.test(probe.value)) throw new Error('embedded App package did not resolve');",
-      "console.log('ok');",
-    ].join('\n')], { cwd: root, encoding: 'utf8' });
-    expect(probe.stderr).toBe('');
-    expect(probe.stdout.trim()).toBe('ok');
+    smokeCompile(artifactPath);
+  });
+
+  test('min and brotli artifacts exist', () => {
+    expect(existsSync(minPath)).toBeTrue();
+    expect(existsSync(brPath)).toBeTrue();
+  });
+
+  test('brotli decompresses to exact min bytes', () => {
+    const minBytes = readFileSync(minPath);
+    const brBytes = readFileSync(brPath);
+    expect(brotliDecompressSync(brBytes).equals(minBytes)).toBeTrue();
+  });
+
+  test('min loads standalone and compiles', () => {
+    smokeCompile(minPath);
   });
 });
 
 describeExtended('browser bundle freshness', () => {
-  test('regeneration is byte-identical to the committed artifact', () => {
-    const before = readFileSync(artifactPath);
+  test('regeneration is byte-identical across rip.js / rip.min.js / rip.min.js.br', () => {
+    const beforeJs = readFileSync(artifactPath);
+    const beforeMin = readFileSync(minPath);
+    const beforeBr = readFileSync(brPath);
     const run = spawnSync('bun', ['scripts/browser-bundle.mjs'], { cwd: root, encoding: 'utf8' });
     expect(run.stderr).toBe('');
     expect(run.status).toBe(0);
-    const after = readFileSync(artifactPath);
-    expect(after.equals(before)).toBeTrue();
+    const afterJs = readFileSync(artifactPath);
+    const afterMin = readFileSync(minPath);
+    const afterBr = readFileSync(brPath);
+    expect(afterJs.equals(beforeJs)).toBeTrue();
+    expect(afterMin.equals(beforeMin)).toBeTrue();
+    expect(afterBr.equals(beforeBr)).toBeTrue();
+    expect(brotliDecompressSync(afterBr).equals(afterMin)).toBeTrue();
   });
 });

@@ -427,9 +427,9 @@ the affected final gates again.
  manual certification surface, not a pull-request gate.
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus-expected` — regenerate the corpus expected outputs.
-- `bun run browser-bundle` — regenerate `dist/browser/rip.js` after any
- `src/browser-*.js` change; a freshness gate in `test:all` catches a
- stale bundle.
+- `bun run browser-bundle` — regenerate `dist/browser/rip.js` (and
+ `rip.min.js` / `rip.min.js.br`) after any `src/browser-*.js` change; a
+ freshness gate in `test:all` catches a stale bundle.
 - `bun run audit` — the typed-editor scoreboard, and NOT `bun audit`,
   which is Bun's dependency scanner. Six lanes (grammar, mapping, type,
   diagnostics, hover, token); no flag runs EVERY lane, and a lane's

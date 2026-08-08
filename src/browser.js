@@ -7,7 +7,7 @@
 // (loader, run harness, project config, persistence, migration, CLI)
 // are structurally unreachable from this module; the bundle gate pins
 // that.
-import { compile } from './compile.js';
+import { compile } from './browser-compile.js';
 import { runtimes } from './browser-runtimes.js';
 import { embeddedPackages } from './browser-app.js';
 import { createModuleLoader as createLoader } from './browser-modules.js';

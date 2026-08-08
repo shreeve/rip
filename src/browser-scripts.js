@@ -17,7 +17,7 @@
 // FUNCTION CONSTRUCTION produces one loud diagnostic naming the
 // unsafe-eval requirement; an error thrown by running user code is the
 // page's own and reports as such.
-import { compile } from './compile.js';
+import { compile } from './browser-compile.js';
 import { runtimes } from './browser-runtimes.js';
 
 const scopeNames = Object.keys(runtimes);
