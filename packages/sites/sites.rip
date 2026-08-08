@@ -317,7 +317,9 @@ wantsControl = ->
   doc = loadCatalog()
   doc.edge?.desired is 'running' or doc.apps.some((app) -> app.desired is 'running')
 
-offlineApp = (app) -> snapshotCatalogApp app
+# snapshotCatalogApp awaits a manager probe — map through Promise.all, never
+# leave bare Promises (JSON.stringify turns those into `{}`).
+offlineApps = (apps) -> Promise.all! apps.map (app) -> snapshotCatalogApp! app
 
 ensureLiveControl = ->
   live = probeAgent! 'rip-sites'
@@ -373,7 +375,7 @@ switch verb
     if live
       apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: false }
     else
-      apps = loadCatalog().apps.map offlineApp
+      apps = offlineApps! loadCatalog().apps
     if json then printJson apps else if apps.length then console.log(apps.map(renderApp).join('\n')) else console.log 'No Rip sites. Add one with `rip sites add [project]`.'
 
   when 'add'
@@ -443,7 +445,7 @@ switch verb
         else
           doc = loadCatalog()
           edge = readOfflineEdge!
-          apps = doc.apps.map offlineApp
+          apps = offlineApps! doc.apps
         if json
           printJson if noun is 'all' then apps else { edge, apps }
         else if noun is 'all'
@@ -464,7 +466,7 @@ switch verb
         if live or wantsControl!
           printApp requestAgent!('rip-sites', 'GET', "/1.0/apps/#{encodeURIComponent(noun)}", null, { start: true })
         else
-          printApp offlineApp(findCatalogApp(loadCatalog(), noun))
+          printApp snapshotCatalogApp!(findCatalogApp(loadCatalog(), noun))
 
   when 'open'
     requireNoun ['<app>', 'edge']

@@ -11,7 +11,7 @@
 // (like `bun run parser`): the test layer fails loudly on any drift,
 // and only a deliberate regeneration — reviewed in the same commit as
 // the emitter change that caused it — may move the pinned bytes.
-// Run: bun run corpus-expected
+// Run: bun run corpus
 //
 // The artifacts pin emit()'s undecorated output (runtimeDelivery
 // 'none'), exactly the certified surface — delivery
@@ -70,6 +70,6 @@ for (const orphan of stale) {
 }
 
 console.log(
-  `corpus-expected: ${files.length} corpus files → ${written} artifact(s) written, ` +
+  `corpus: ${files.length} corpus files → ${written} artifact(s) written, ` +
   `${unchanged} unchanged, ${stale.size} orphan(s) removed`,
 );

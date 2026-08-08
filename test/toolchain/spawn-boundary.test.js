@@ -1,7 +1,8 @@
-// Process-lane tests live under test/spawn/. Outside that tree (and
-// Philip's audit suite), suites must stay in-process — no child_process
-// spawn, no Bun.spawn*. Hidden stdout-spawn is the defect this gate
-// makes loud. `execSync('git …')` meta-gates are out of scope.
+// Process-lane tests live under test/spawn/. Outside that tree (Philip's
+// audit suite, shared spawn helpers, and the Playwright browser lane),
+// suites must stay in-process — no child_process spawn, no Bun.spawn*.
+// Hidden stdout-spawn is the defect this gate makes loud.
+// `execSync('git …')` meta-gates are out of scope.
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -13,6 +14,7 @@ const ALLOWED_PREFIX = [
   'test/spawn/',
   'test/audit/',
   'test/support/',
+  'test/browser/',
 ];
 
 const FORBIDDEN = [
@@ -35,7 +37,7 @@ const walk = (dir, out = []) => {
 const allowed = (rel) => ALLOWED_PREFIX.some((p) => rel.startsWith(p));
 
 describe('spawn boundary', () => {
-  test('only test/spawn, test/audit, and test/support may spawn child processes', () => {
+  test('only test/spawn, test/audit, test/support, and test/browser may spawn child processes', () => {
     const violations = [];
     for (const path of walk(TEST)) {
       const rel = relative(ROOT, path).split('\\').join('/');

@@ -2,7 +2,7 @@
 // program's emitted JS, sexpr, and serialized source map must be
 // BYTE-IDENTICAL to the committed artifacts in test/corpus/expected/ —
 // with no external involvement. Drift fails here loudly; accepting new
-// bytes is an explicit act (`bun run corpus-expected`, regenerated in
+// bytes is an explicit act (`bun run corpus`, regenerated in
 // the same commit as the change that moved them — like `bun run
 // parser`).
 import { describe, test, expect } from 'bun:test';

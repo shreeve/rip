@@ -35,6 +35,8 @@ test 'the framework and macOS host contain no Rip Sites policy', ->
   ok kit.includes '.frame(minHeight: rowHeight)'
   ok kit.includes 'panelHeight(defaultRowHeight: rowHeight)'
   ok kit.includes 'PanelCompactControl(item: control, provider: provider)'
+  ok kit.includes 'CompactControlTip(text: tip, visible: showTip)'
+  ok kit.includes '.help(tip)'
   ok kit.includes 'items.contains { $0.kind != "separator" && $0.icon != nil }'
   ok kit.includes 'PanelLeadingIcon(icon: item.icon, reservesSpace: reservesLeadingIconSpace)'
   ok kit.includes 'if let logo = provider.tray.logo {'

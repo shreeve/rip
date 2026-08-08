@@ -1,7 +1,7 @@
 # Rip
 
 Rip is a zero-build, full-stack language for reactive UI, schemas, ORM,
-and server logic. It runs directly under Bun, emits clean JavaScript,
+and server code. It runs directly under Bun, emits clean JavaScript,
 type-checks through TypeScript 7, and ships a full LSP.
 
 ## Repository scope
@@ -50,7 +50,7 @@ bun run test           # fast compiler/runtime suite
 bun run test:all       # exhaustive: extended tier + every package
 rip check [paths...]   # headless TypeScript checking over Rip source
 bun run parser         # regenerate src/parser.js
-bun run corpus-expected
+bun run corpus
 bun run audit
 ```
 

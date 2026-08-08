@@ -1,5 +1,5 @@
 import { test, eq, ok } from '@rip-lang/testing'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { X509Certificate, createPrivateKey, createPublicKey } from 'node:crypto'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -135,6 +135,20 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     eq app.url, 'https://fixture.ripdev.io/'
     ok existsSync(join(site.state, 'sites.json')), 'add writes sites.json'
     ok not existsSync(join(site.runtime, 'agent.json')), 'add must not spawn the control plane'
+
+    # Offline list/status must await catalog snapshots — bare Promises JSON as `{}`
+    # and the tray then throws "label title must be a non-empty string".
+    offlineList = JSON.parse((cli!(APP, ['list', '--json'], env)).out)
+    eq offlineList.length, 1
+    eq offlineList[0].name, 'fixture'
+    eq offlineList[0].root, app.root
+    eq realpathSync(offlineList[0].root), realpathSync(project)
+    eq offlineList[0].state, 'stopped'
+    offlineSummary = JSON.parse((cli!(APP, ['status', '--json'], env)).out)
+    eq offlineSummary.apps.length, 1
+    eq offlineSummary.apps[0].name, 'fixture'
+    eq offlineSummary.apps[0].root, app.root
+    ok not existsSync(join(site.runtime, 'agent.json')), 'offline list/status must not spawn the control plane'
 
     # Catalog nouns resolve like start/stop — manager is internal, not `rip site`.
     held = cli! APP, ['hold', 'fixture'], env

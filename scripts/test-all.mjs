@@ -25,11 +25,11 @@
 // developer in that directory gets exactly what this does — running a
 // suite differently here than it runs there is how the two drift apart.
 //
-// Two guardrails run before any lane: scripts/link-check.mjs (nothing
-// answers `@rip-lang/*` from outside this repo) and scripts/preflight.mjs
-// (tsgo resolves). Both are failures whose symptoms otherwise appear
-// inside unrelated lanes, or — worse for tsgo — as a green run with the
-// editor surface skipped.
+// Two guardrails run before any lane: scripts/local.mjs (this repo's
+// `@rip-lang/*` resolves here) and scripts/preflight.mjs (tsgo resolves).
+// Both are failures whose symptoms otherwise appear inside unrelated
+// lanes, or — worse for tsgo — as a green run with the editor surface
+// skipped.
 //
 // Teeth, following test/support/extended.js: a lane whose tool is missing
 // SKIPS locally behind a visible line, and in CI (the CI environment
@@ -340,7 +340,7 @@ const report = ({ lane, status, ms, why, output }) => {
 // needs tsgo too and has no preflight of its own, so the guarantee lives
 // here — every entry point reaches it, not just `bun run test:all`.
 const guardrails = () => {
-  for (const [script, args] of [['link-check.mjs', ['--quiet']], ['preflight.mjs', []]]) {
+  for (const [script, args] of [['local.mjs', ['--quiet']], ['preflight.mjs', []]]) {
     const r = spawnSync(process.execPath, [join(HERE, 'scripts', script), ...args], { stdio: 'inherit' });
     if (r.status !== 0) process.exit(r.status ?? 1);
   }
