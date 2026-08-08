@@ -121,6 +121,8 @@ test! 'App-only manager publishes a finite dist surface with no workers', ->
     ok existsSync(join(dist, 'latest.json'))
     ok existsSync(join(dist, '@rip', 'rip.min.js'))
     ok existsSync(join(dist, '@rip', 'rip.min.js.br'))
+    ok existsSync(join(dist, '@rip', 'tailwind.min.js'))
+    ok existsSync(join(dist, '@rip', 'tailwind.min.js.br'))
     ok existsSync(join(dist, 'index.html'))
     ok not existsSync(join(dist, 'manifest.json'))
     bundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')

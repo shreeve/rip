@@ -453,6 +453,9 @@ the affected final gates again.
 - `bun run browser` — regenerate `dist/@rip/rip.js` (and
  `rip.min.js` / `rip.min.js.br`) after any `src/browser.js` change; a
  freshness gate in `test:all` catches a stale bundle.
+- `bun run tailwind` — vendor `@tailwindcss/browser` into
+ `dist/@rip/tailwind.js` (+ min + br). Pin stays in lockstep with
+ `packages/ui`'s `tailwindcss` version.
 - `bun run audit` — the typed-editor scoreboard, and NOT `bun audit`,
   which is Bun's dependency scanner. Six lanes (grammar, mapping, type,
   diagnostics, hover, token); no flag runs EVERY lane, and a lane's

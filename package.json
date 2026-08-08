@@ -17,6 +17,7 @@
     "local": "bun scripts/local.mjs",
     "parser": "bun src/grammar/solar.rip -o src/parser.js src/grammar/grammar.rip",
     "postinstall": "mkdir -p node_modules/.bin && ln -sf ../../bin/rip node_modules/.bin/rip && bun scripts/local.mjs --quiet",
+    "tailwind": "bun scripts/tailwind-bundle.mjs",
     "test": "bun test --parallel --timeout 15000 test/rip.test.js test/lang test/mapping test/ui test/schema test/toolchain",
     "test:all": "bun scripts/test-all.mjs",
     "test:browser": "bun --cwd=test/browser run test:smoke",
@@ -31,6 +32,7 @@
     "typescript": "7.0.2"
   },
   "devDependencies": {
+    "@tailwindcss/browser": "4.3.2",
     "typescript": "catalog:"
   }
 }

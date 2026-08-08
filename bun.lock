@@ -5,6 +5,7 @@
     "": {
       "name": "rip",
       "devDependencies": {
+        "@tailwindcss/browser": "4.3.2",
         "typescript": "catalog:",
       },
     },
@@ -253,6 +254,8 @@
     "@rip-lang/validate": ["@rip-lang/validate@workspace:packages/validate"],
 
     "@rip-lang/x12": ["@rip-lang/x12@workspace:packages/x12"],
+
+    "@tailwindcss/browser": ["@tailwindcss/browser@4.3.2", "", {}, "sha512-R6hewP9HHwLAY88bFkgAYFIQMRGi9bqx6sR1anI3IThTJtwhPlAm4aHIzDKrnJ8Ct4M3d5A9PCsah8Z5+EjLiQ=="],
 
     "@typescript/typescript-aix-ppc64": ["@typescript/typescript-aix-ppc64@7.0.2", "", { "os": "aix", "cpu": "ppc64" }, "sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ=="],
 
