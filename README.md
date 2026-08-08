@@ -54,8 +54,7 @@ bun run audit
 ```
 
 Package work: `bun run test` from that package directory (for example
-`packages/sites`). Browser smoke:
-`cd packages/browser-tests && bun run test:smoke`.
+`packages/sites`). Browser smoke: `bun run test:browser`.
 
 `test:all` needs `xcaddy` on PATH for the Sites janus lane:
 

@@ -16,10 +16,9 @@
 // `test` script, never from a list maintained here. One piece of
 // structural knowledge is unavoidable, and it is named:
 //
-//   * packages/browser-tests is excluded. It needs installed Playwright
-//     browsers, which a local checkout is not required to have; CI runs it
-//     as its own job. It is the ONE suite a local `bun run test:all` does
-//     not cover.
+//   * test/browser (Playwright) is not a packages/*/ lane. It needs
+//     installed browsers; run `bun run test:browser` / CI's browser job.
+//     Local `bun run test:all` does not cover it.
 //
 // Every other package runs the way its own package.json says to. A suite
 // that wants file-level parallelism asks for it in its own script, so the
@@ -87,10 +86,8 @@ const JOBS = Math.floor(number('jobs', Math.max(4, Math.floor(cpus().length / 2)
 const TIMEOUT_MS = number('timeout', 600_000, 1);
 const CI = Boolean(process.env.CI);
 
-// The one excluded suite, named once.
-const EXCLUDED = new Map([
-  ['browser-tests', 'needs installed Playwright browsers — CI runs it as its own job'],
-]);
+// Named package exclusions (none today — Playwright lives under test/browser).
+const EXCLUDED = new Map();
 
 // The label names its tier: the extended tier is what makes this lane
 // ~2x the work of a bare `bun run test`, so the two wall times are not

@@ -66,13 +66,13 @@ login in front of an unsecured app) lives in the Janus repository.
 `<script type="text/rip">` compilation/loading and module/browser-safe
 package-graph handling are shipped and certified in CI: Node suites
 plus real-browser Playwright runs across Chromium, Firefox, and WebKit
-(`packages/browser-tests`) drive `processRipScripts` and the
+(`test/browser`) drive `processRipScripts` and the
 `assembleRipBundle` → `bootApp` → `launch` path end to end — SPA
 navigation, ordinary HTTP cache behavior, debug-gated source maps.
 
 The manager assembles the page and publication for Janus to serve directly;
 API workers do not carry a browser-delivery surface. The certification
-fixture `packages/browser-tests/serve.mjs` remains the browser-CI harness.
+fixture `test/browser/serve.mjs` remains the browser-CI harness.
 The browser consumes `bundle.json {hash,list}`, watch-mode
 `change {from,hash,list}`, and reconnect recovery through `latest.json` as
 specified by [WORKSPACE.md](WORKSPACE.md). The remaining browser work is:
