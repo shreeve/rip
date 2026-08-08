@@ -2,9 +2,13 @@
 
 # Rip Vim - vim-rip
 
-> **Vim syntax highlighting, indentation, and filetype support for Rip**
+> **Vim syntax highlighting, indentation, and filetype support for Rip.**
 
-Full-featured Vim plugin for the [Rip](https://github.com/shreeve/rip) programming language, with highlighting quality on par with the VS Code extension.
+Full-featured Vim plugin for the [Rip](https://github.com/shreeve/rip)
+programming language, with highlighting quality on par with the VS Code
+extension.
+
+**Runtime:** Vim / Neovim plugin (editor host). Not a Bun package import.
 
 ## Features
 
