@@ -203,13 +203,11 @@ describe('the lane orchestrator', () => {
     expect(`${r.stderr}${r.stdout}`).toContain('(nothing)');
   });
 
-  test('a package with no test script is not a lane; browser-tests is excluded by name', () => {
+  test('a package with no test script is not a lane', () => {
     const r = orchestrate(fixture({
       alpha: GREEN,
-      'browser-tests': { script: 'playwright test' },
       docs: { script: '' },
     }));
-    expect(r.stdout).toContain('packages/browser-tests excluded');
     expect(r.stdout).not.toContain('packages/docs');
     expect(r.status).toBe(0);
   });
@@ -220,7 +218,7 @@ describe('the lane orchestrator', () => {
 // orchestrator would spawn here must actually cover the packages that
 // declare a suite. A discovery bug — a walk that silently matches nothing —
 // otherwise reads as a fast, green run.
-test('the plan for this repository is one lane per packages/*/ suite, excluding only browser-tests', () => {
+test('the plan for this repository is one lane per packages/*/ suite plus root', () => {
   const repo = resolve(import.meta.dir, '../../..');
   const r = spawnSync(process.execPath, [ORCHESTRATOR, '--root', repo, '--plan'], {
     encoding: 'utf8',
@@ -247,13 +245,12 @@ test('the plan for this repository is one lane per packages/*/ suite, excluding 
   expect(declared.length).toBeGreaterThan(15); // not vacuous
 
   for (const name of declared) {
-    if (name === 'browser-tests') {
-      expect(discovered).not.toContain('packages/browser-tests');
-      expect(r.stdout).toContain('packages/browser-tests excluded');
-    } else {
-      expect(discovered).toContain(`packages/${name}`);
-    }
+    expect(discovered).toContain(`packages/${name}`);
   }
+  // Playwright lives under test/browser — not a packages/*/ lane.
+  expect(discovered).not.toContain('packages/browser-tests');
+  expect(discovered).not.toContain('test/browser');
+  expect(discovered).not.toContain('rip-browser-tests');
   // The root lane names its tier: it runs with RIP_EXTENDED set, so its
   // wall time is not comparable to a bare `bun run test` and the label
   // has to say which one a reader is looking at.
@@ -261,5 +258,5 @@ test('the plan for this repository is one lane per packages/*/ suite, excluding 
   // One lane per suite: a package must never be expanded here into
   // something a developer running `bun run test` in that directory would
   // not get. Parallelism inside a suite is that suite's own business.
-  expect(discovered.length).toBe(declared.length); // browser-tests out, root in
+  expect(discovered.length).toBe(declared.length + 1); // packages + root
 });

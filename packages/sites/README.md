@@ -1595,7 +1595,7 @@ Repository-wide certification additionally runs:
 
 ```bash
 bun run test:all
-cd packages/browser-tests && bunx playwright test
+bun run test:browser
 ```
 
 The first command covers the compiler and generated browser bundle; Playwright

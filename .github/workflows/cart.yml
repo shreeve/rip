@@ -23,9 +23,8 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Install Chromium and system dependencies
-        working-directory: packages/browser-tests
+        working-directory: test/browser
         run: bunx playwright install --with-deps chromium
 
       - name: Live Cart Server/Manager certification
-        working-directory: packages/browser-tests
         run: bun run test:cart

@@ -12,9 +12,9 @@ preload = ["./src/cli/loader.js"]
 # `bun run test:all` crosses the package boundary through
 # scripts/test-all.mjs and runs bare `bun test` for the root lane so
 # spawn + extended tiers still certify. The single suite a local
-# test:all does not run is packages/browser-tests, which needs
-# installed Playwright browsers; CI runs it as its own job.
-pathIgnorePatterns = ["packages/**", "misc/**"]
+# test:all does not run is test/browser (Playwright), which needs
+# installed browsers; CI runs it as its own job via `bun run test:browser`.
+pathIgnorePatterns = ["packages/**", "misc/**", "test/browser/**"]
 
 # The per-test timeout lives in package.json's test script as a CLI
 # flag (`bun test --timeout 15000`): Bun ignores a bunfig [test]

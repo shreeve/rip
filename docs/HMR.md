@@ -90,7 +90,7 @@ scans of generated JavaScript.
 
 Typing into a profile field is a **weak** pin. The decisive surface is
 Cart confirmation in
-`packages/browser-tests/tests/cart-apply.spec.mjs` (`bun run test:cart`
+`test/browser/tests/cart-apply.spec.mjs` (`bun run test:cart`
 from that package).
 
 ### Gate A — local action-state (tie React / beat Vue)
@@ -257,7 +257,7 @@ Automated coverage includes:
 12. **Gate B** — LKG on confirmation; recover stamped heading in place.
 
 Browser behavior requires a real browser harness
-(`packages/browser-tests`). Signature and registry decisions stay
+(`test/browser`). Signature and registry decisions stay
 deterministic unit tests (`test/ui/hmr-patch.test.js`,
 `test/toolchain/browser-boot.test.js`, `packages/app` remount/apply
 suites).

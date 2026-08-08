@@ -7,9 +7,9 @@ Read this first when starting a session. Permanent architecture lives in
 
 - Repo: `~/Data/Code/rip` — mainline after src layout + test-lane split.
 - Fast commands: `bun run test:rip` · `bun run test` · `bun run test:spawn`
-  · package-local `bun run test` · `packages/browser-tests`: `bun run test:smoke`.
+  · `bun run test:browser` · package-local `bun run test`.
 - Explicit certification: `bun run test:all` · `bun run audit` ·
-  `packages/browser-tests`: `bun run test:cart`.
+  `bun run test:cart`.
 - Open notes: `TODO.md` · `packages/sites/TODO.md`.
 
 ## Layout (current)
@@ -33,6 +33,7 @@ folded); `dom.js` is the HTML/SVG vocab; language suite is `test/rip/`
 - `test/` in-process trees — default `bun run test` (file-parallel; no spawn).
 - `test/spawn/{cli,sentinel,loader,tsc,bundle,repl}/` — process pins only;
   `bun run test:spawn` or the root lane of `test:all`.
+- `test/browser/` — Playwright real-DOM; `bun run test:browser` / `test:cart`.
 - `test/audit/` — Philip’s editor scoreboard; `bun run audit` (untouched).
 - Boundary gate: `test/toolchain/spawn-boundary.test.js`.
 

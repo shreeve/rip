@@ -25,13 +25,6 @@
         "@rip-lang/testing": "workspace:*",
       },
     },
-    "packages/browser-tests": {
-      "name": "@rip-lang/browser-tests",
-      "version": "0.0.0",
-      "devDependencies": {
-        "@playwright/test": "1.58.2",
-      },
-    },
     "packages/csv": {
       "name": "@rip-lang/csv",
       "version": "4.0.0",
@@ -207,6 +200,13 @@
         "@rip-lang/testing": "workspace:*",
       },
     },
+    "test/browser": {
+      "name": "rip-browser-tests",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@playwright/test": "1.58.2",
+      },
+    },
   },
   "catalog": {
     "typescript": "7.0.2",
@@ -217,8 +217,6 @@
     "@rip-lang/ai": ["@rip-lang/ai@workspace:packages/ai"],
 
     "@rip-lang/app": ["@rip-lang/app@workspace:packages/app"],
-
-    "@rip-lang/browser-tests": ["@rip-lang/browser-tests@workspace:packages/browser-tests"],
 
     "@rip-lang/csv": ["@rip-lang/csv@workspace:packages/csv"],
 
@@ -315,6 +313,8 @@
     "playwright": ["playwright@1.58.2", "", { "dependencies": { "playwright-core": "1.58.2" }, "optionalDependencies": { "fsevents": "2.3.2" }, "bin": { "playwright": "cli.js" } }, "sha512-vA30H8Nvkq/cPBnNw4Q8TWz1EJyqgpuinBcHET0YVJVFldr8JDNiU9LaWAE1KqSkRYazuaBhTpB5ZzShOezQ6A=="],
 
     "playwright-core": ["playwright-core@1.58.2", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-yZkEtftgwS8CsfYo7nm0KE8jsvm6i/PTgVtB8DL726wNf6H2IMsDuxCpJj59KDaxCtSnrWan2AeDqM7JBaultg=="],
+
+    "rip-browser-tests": ["rip-browser-tests@workspace:test/browser"],
 
     "semver": ["semver@7.8.5", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA=="],
 

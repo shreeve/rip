@@ -411,6 +411,8 @@ the affected final gates again.
 - `bun run test:spawn` — the process lane alone (`test/spawn/**`: CLI,
   sentinels, loader, tsc, bundle, REPL). Run when the change touches
   those seams; not part of the default edit loop.
+- `bun run test:browser` — Playwright real-DOM smoke (`test/browser`).
+  Required PR job `browser`; not part of `bun run test`.
 - `bun run test:all` — the EXHAUSTIVE repository certification: the
   fast loop PLUS `test/spawn/` PLUS the extended tier PLUS every
   `packages/*/` suite, which `scripts/test-all.mjs` spawns as parallel
@@ -418,33 +420,32 @@ the affected final gates again.
   release certification; the manual `repository-certification`
   workflow runs it with the corpus audit and generated-byte gates. It
   is not the edit loop or an automatic pull-request gate. The ONE
-  suite it does not
- carry is `packages/browser-tests` — it needs installed Playwright
- browsers. CI runs its deterministic Chromium/Firefox/WebKit smoke
- matrix as a required job; the live Cart Server/Manager certification
- is explicit through `bun run test:cart` in that package and the manual
- `cart-certification` workflow. `packages/sites` needs
- `xcaddy` on PATH — `go install
- github.com/caddyserver/xcaddy/cmd/xcaddy@latest`, PLUS
- `$(go env GOPATH)/bin` on PATH, which it is not by default: without
- that the lane fails exactly as it does uninstalled. Its janus lane
- builds Caddy from the PUBLISHED Janus module and rejects a local
- module replacement; the binary is cached after the first build.
- `JANUS_CADDY=<path>` supplies a janus-enabled binary instead.
- Without either, the lane is fail-fast at `janus` and the six
- directories sorted after it do not run.
+  suite it does not carry is `test/browser` — it needs installed
+  Playwright browsers. CI runs its deterministic Chromium/Firefox/WebKit
+  smoke matrix as a required job (`bun run test:browser`); the live Cart
+  Server/Manager certification is explicit through `bun run test:cart`
+  and the manual `cart-certification` workflow. `packages/sites` needs
+  `xcaddy` on PATH — `go install
+  github.com/caddyserver/xcaddy/cmd/xcaddy@latest`, PLUS
+  `$(go env GOPATH)/bin` on PATH, which it is not by default: without
+  that the lane fails exactly as it does uninstalled. Its janus lane
+  builds Caddy from the PUBLISHED Janus module and rejects a local
+  module replacement; the binary is cached after the first build.
+  `JANUS_CADDY=<path>` supplies a janus-enabled binary instead.
+  Without either, the lane is fail-fast at `janus` and the six
+  epochs sorted after it do not run.
 - `bun run test` FROM a package (`packages/vscode`, `packages/sites`,
  `packages/app`, …) — that package's own suite, and the inner loop
  for work on that package; the root fast loop excludes `packages/**`
  by bunfig, and `test:all` reaches these only by spawning them there
  (deps come from the repo-root `bun install`; no package-local lock).
-- `bun run test:smoke` FROM `packages/browser-tests` — the required
- real-DOM matrix across Chromium, Firefox, and WebKit. It does not boot
+- `bun run test:browser` — the required real-DOM Playwright matrix
+ (`test/browser`) across Chromium, Firefox, and WebKit. It does not boot
  the live Cart Server/Manager harness and includes the Workspace
  publication-change spec.
-- `bun run test:cart` FROM `packages/browser-tests` — the explicit live
- Cart Server/Manager certification in Chromium. It is preserved as a
- manual certification surface, not a pull-request gate.
+- `bun run test:cart` — the explicit live Cart Server/Manager
+ certification in Chromium (`test/browser`). Manual certification, not
+ a pull-request gate.
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus-expected` — regenerate the corpus expected outputs.
 - `bun run browser-bundle` — regenerate `dist/browser/rip.js` (and
