@@ -1,6 +1,39 @@
+# Minimal page whose job is the Workspace publication checklist in README.md:
+# edit a Rip module, the stylesheet, the shell, or an HTTP asset and watch
+# which apply verdict the feed delivers (update | css | reload / invalidate).
 export Index = component
   render
     main
       img src: '/images/rip.png', alt: '', width: 144, height: 144
-      h1 'Hello Rip!'
-      p 'Edit this module, the stylesheet, the shell, or the image and watch what happens.'
+      h1 'Hello Rip'
+      p 'Publication + watch — not a product UI.'
+      p class: 'lede'
+        'Edit a file under '
+        code 'app/'
+        ', save, and watch the apply verdict.'
+      section class: 'checklist'
+        h2 'Try these'
+        ul
+          li
+            code 'routes/index.rip'
+            ' — Rip source '
+            code 'update'
+            ' (no full reload)'
+          li
+            code 'styles.css'
+            ' — '
+            code 'css'
+            ' refresh'
+          li
+            code 'index.html'
+            ' / '
+            code 'template.html'
+            ' / '
+            code 'images/'
+            ' — reload or asset invalidate'
+      p class: 'hint'
+        'Shell boots '
+        code 'bootApp({ watch: true })'
+        ' from '
+        code '/@rip/rip.min.js'
+        '.'

@@ -1,9 +1,9 @@
 # Cart
 
-A multi-route shop that proves the full app rails: `index.rip` + `app/` +
-`api/` + SQLite persistence. Products, cart, profile, and orders — the
-canonical full-shape exemplar beside Pulse’s thin live-publication demo
-([docs/WORKSPACE.md](../../docs/WORKSPACE.md)).
+Top rung of the [demos ladder](../README.md): a multi-route shop that proves
+the full App rails — `index.rip` + `app/` + `api/` + SQLite. Products, cart,
+profile, and orders — the canonical full-shape exemplar beside Pulse’s thin
+live-publication demo ([docs/WORKSPACE.md](../../docs/WORKSPACE.md)).
 
 It is a runnable example; the browser suite also drives its publication apply
 path through a real Rip Site.

@@ -359,6 +359,18 @@ public struct TrayPanel: View {
       .frame(height: min(max(provider.tray.items.panelHeight(defaultRowHeight: rowHeight) + (provider.error == nil ? 0 : 54), 120), 520))
     }
     .frame(width: 340)
+    // Tips are collected from compact controls and drawn HERE — above the
+    // header/Divider/ScrollView — so they are not clipped by scroll bounds.
+    .overlayPreferenceValue(CompactTipPreferenceKey.self) { tip in
+      GeometryReader { proxy in
+        if let tip {
+          let rect = proxy[tip.anchor]
+          CompactControlTipBubble(text: tip.text)
+            .position(x: rect.midX, y: max(12, rect.minY - 14))
+        }
+      }
+      .allowsHitTesting(false)
+    }
   }
 }
 
@@ -541,7 +553,9 @@ private struct PanelCompactControl: View {
       .controlSize(.mini)
       .help(tip)
       .disabled(!(item.enabled ?? true))
-      .overlay { CompactControlTip(text: tip, visible: showTip) }
+      .anchorPreference(key: CompactTipPreferenceKey.self, value: .bounds) { anchor in
+        showTip && !tip.isEmpty ? CompactTipAnchor(text: tip, anchor: anchor) : nil
+      }
       .onHover(perform: hoverChanged)
     } else {
       Button { provider.perform(item) } label: {
@@ -556,7 +570,9 @@ private struct PanelCompactControl: View {
       .buttonStyle(.plain)
       .help(tip)
       .accessibilityLabel(Text(tip))
-      .overlay { CompactControlTip(text: tip, visible: showTip) }
+      .anchorPreference(key: CompactTipPreferenceKey.self, value: .bounds) { anchor in
+        showTip && !tip.isEmpty ? CompactTipAnchor(text: tip, anchor: anchor) : nil
+      }
       .onHover(perform: hoverChanged)
       .disabled(!(item.enabled ?? true))
       .opacity(item.enabled ?? true ? 1 : 0.3)
@@ -579,29 +595,38 @@ private struct PanelCompactControl: View {
   }
 }
 
-/// In-panel tip for compact icon buttons — floats above the control so it is
-/// not clipped by neighboring icons. Complements `.help` for accessibility.
-private struct CompactControlTip: View {
+/// Tip geometry published from a compact control; resolved on TrayPanel so the
+/// bubble can paint above the header and outside ScrollView clipping.
+private struct CompactTipAnchor {
   let text: String
-  let visible: Bool
+  let anchor: Anchor<CGRect>
+}
+
+private struct CompactTipPreferenceKey: PreferenceKey {
+  static var defaultValue: CompactTipAnchor? { nil }
+
+  static func reduce(value: inout CompactTipAnchor?, nextValue: () -> CompactTipAnchor?) {
+    if let next = nextValue() { value = next }
+  }
+}
+
+/// In-panel tip chrome for compact icon buttons. Complements `.help`.
+private struct CompactControlTipBubble: View {
+  let text: String
 
   var body: some View {
-    if visible, !text.isEmpty {
-      Text(text)
-        .font(.system(size: 11, weight: .medium))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background {
-          RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .fill(.ultraThinMaterial)
-            .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
-        }
-        .fixedSize()
-        .offset(y: -30)
-        .transition(.opacity)
-        .allowsHitTesting(false)
-        .zIndex(10)
-    }
+    Text(text)
+      .font(.system(size: 11, weight: .medium))
+      .foregroundStyle(.primary)
+      .padding(.horizontal, 8)
+      .padding(.vertical, 4)
+      .background {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+          .fill(.ultraThinMaterial)
+          .shadow(color: .black.opacity(0.22), radius: 4, y: 1)
+      }
+      .fixedSize()
+      .allowsHitTesting(false)
   }
 }
 

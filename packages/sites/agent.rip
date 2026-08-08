@@ -668,7 +668,11 @@ maybeExitIdle = ->
 
 trustEdge = ->
   caddy = resolveCaddy!
-  result = Bun.spawnSync [caddy, 'trust'], { stdout: 'pipe', stderr: 'pipe' }
+  # Edge admin is a unix socket (Caddyfile `admin unix/{$RIP_EDGE_ADMIN}`),
+  # never the stock localhost:2019 — same address stop/reload already use.
+  admin = state.edge.admin or paths.edgeAdmin
+  fail 'edge must be running to trust the CA — run `rip sites start edge` first', 503 unless existsSync(admin)
+  result = Bun.spawnSync [caddy, 'trust', '--address', edgeAddress(admin)], { stdout: 'pipe', stderr: 'pipe' }
   detail = result.stderr.toString().trim() or result.stdout.toString().trim()
   fail "Caddy trust failed#{if detail then ": #{detail}" else ''}", 503 unless result.exitCode is 0
   state.edge.localCaTrusted = true
@@ -694,12 +698,14 @@ statusActions = (app) ->
 statusPage = ->
   apps = Promise.all! state.apps.map (app) -> snapshotApp! app
   edge = snapshotEdge!
-  rows = apps.map (app) ->
+  # Trailing `.join` after an indented `map ->` body binds to the last
+  # expression (the string), not the array — parenthesize the map call.
+  rows = (apps.map (app) ->
     hosts = if app.hosts.length then app.hosts else app.manager?.hosts or []
     url = if app.url? then "<a href=\"#{escapeHtml app.url}\">#{escapeHtml app.url}</a>" else '—'
-    extras = hosts.filter((host) -> not app.url? or not app.url.includes(host)).map (host) ->
+    extras = (hosts.filter((host) -> not app.url? or not app.url.includes(host)).map (host) ->
       "<div class=\"alt\"><a href=\"https://#{escapeHtml host}/\">https://#{escapeHtml host}/</a></div>"
-    .join ''
+    ).join ''
     """
     <tr>
       <td>#{escapeHtml app.name}</td>
@@ -708,7 +714,7 @@ statusPage = ->
       <td class="actions">#{statusActions app}</td>
     </tr>
     """
-  .join ''
+  ).join ''
   statusHost = if edge.mode is 'local' then 'https://sites.local/' else 'https://sites.ripdev.io/'
   trustHint = if edge.mode is 'local'
     'Trust bootstrap: <a href="/trust">/trust</a> (HTTPS) · phone/peer without cert accept: <a href="http://sites.local/trust">http://sites.local/trust</a>'
@@ -743,6 +749,11 @@ handleStatus = (request) ->
   try
     if request.method is 'GET' and (url.pathname is '/' or url.pathname is '')
       return Response.new statusPage!, { headers: { 'content-type': 'text/html; charset=utf-8' } }
+    # Caddy on_demand_tls ask — allow only single-label *.local names.
+    if request.method is 'GET' and url.pathname is '/tls-ask'
+      domain = String(url.searchParams.get('domain') or '').toLowerCase()
+      allowed = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.local$/.test(domain)
+      return Response.new null, { status: if allowed then 200 else 404 }
     if request.method is 'GET' and (url.pathname is '/trust' or url.pathname is '/trust/')
       if existsSync CADDY_PKI_ROOT
         return Response.new readFileSync(CADDY_PKI_ROOT), {

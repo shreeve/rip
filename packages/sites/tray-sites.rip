@@ -40,18 +40,22 @@ dashboardUrl = (edge) ->
   "https://#{host}#{port}/"
 
 edgeMenu = (edge) ->
-  ownership = if edge.managed then 'Rip-owned' else if edge.state is 'running' then 'external' else 'not running'
   mode = edge.mode or 'default'
-  trusted = if edge.localCaTrusted then 'trusted' else 'CA not trusted'
+  posture = if mode is 'local' then 'LAN' else 'loopback'
+  # Ownership only when it isn't the usual Rip-managed edge.
+  status = if edge.managed then "#{capitalize(edge.state)} · #{posture}"
+  else if edge.state is 'running' then "Running · external · #{posture}"
+  else 'Not running'
   items = [
-    label "#{capitalize(edge.state)} · #{ownership}",
-      icon: if edge.state is 'running' then 'checkmark.circle.fill' else 'circle'
-    label "Mode #{mode} · #{trusted}",
-      icon: if mode is 'local' then 'wifi' else 'laptopcomputer'
+    label status, icon: if edge.state is 'running' then 'checkmark.circle.fill' else 'circle'
   ]
   if edge.state is 'running'
     items.push link 'Open Dashboard', dashboardUrl(edge), id: 'edge.dashboard', icon: 'safari'
-  if edge.managed or edge.state isnt 'running'
+  # After a successful trust the action becomes this confirmation row — silent
+  # success with an unchanged "Trust CA…" button reads as "nothing happened".
+  if edge.localCaTrusted
+    items.push label 'Local CA trusted', icon: 'checkmark.seal.fill'
+  else if edge.managed or edge.state isnt 'running'
     items.push action 'Trust CA…', id: 'edge.trust', icon: 'lock.shield', run: -> json! 'sites', 'trust', 'edge', '--json'
   if mode is 'local'
     items.push action 'Use Default (loopback)', id: 'edge.expose.loopback', icon: 'laptopcomputer', run: -> json! 'sites', 'expose', 'loopback', '--json'
