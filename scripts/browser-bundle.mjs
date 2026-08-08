@@ -12,7 +12,7 @@ import { compile } from '../src/compile.js';
 const REQUIRED_BUN = '1.3.14';
 if (Bun.version !== REQUIRED_BUN) {
   console.error(
-    `browser-bundle: Bun ${REQUIRED_BUN} required, found ${Bun.version}; ` +
+    `browser: Bun ${REQUIRED_BUN} required, found ${Bun.version}; ` +
     'the committed artifact is byte-gated against this exact toolchain',
   );
   process.exit(2);
@@ -161,6 +161,6 @@ writeFileSync(resolve(outDir, 'rip.min.js'), minBytes);
 writeFileSync(resolve(outDir, 'rip.min.js.br'), brBytes);
 
 const kb = n => (n / 1024).toFixed(1);
-console.log(`browser-bundle: dist/browser/rip.js ${kb(Buffer.byteLength(code))} KB`);
-console.log(`browser-bundle: dist/browser/rip.min.js ${kb(minBytes.length)} KB`);
-console.log(`browser-bundle: dist/browser/rip.min.js.br ${kb(brBytes.length)} KB`);
+console.log(`browser: dist/browser/rip.js ${kb(Buffer.byteLength(code))} KB`);
+console.log(`browser: dist/browser/rip.min.js ${kb(minBytes.length)} KB`);
+console.log(`browser: dist/browser/rip.min.js.br ${kb(brBytes.length)} KB`);

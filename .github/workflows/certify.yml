@@ -35,12 +35,12 @@ jobs:
 
       - name: Corpus snapshots
         run: |
-          bun run corpus-expected
+          bun run corpus
           git diff --exit-code test/corpus/expected
 
       - name: Browser bundle
         run: |
-          bun run browser-bundle
+          bun run browser
           git diff --exit-code dist/browser
 
   audit:

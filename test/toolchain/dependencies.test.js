@@ -35,9 +35,10 @@ test('root declares no runtime dependencies; TypeScript lives once in the worksp
   expect(pkg.devDependencies.typescript).toBe('catalog:');
   // The version — the ONE place it is spelled — is an exact pin.
   expect(pkg.catalog?.typescript).toMatch(/^\d/); // no range sigils
-  // The root IS the packages/* workspace root (owner decision: in-tree
-  // @rip-lang/* resolution, hoisted linker).
-  expect(pkg.workspaces).toEqual(['packages/*']);
+  // The root is the workspace root (owner decision: in-tree @rip-lang/*
+  // resolution, hoisted linker). Playwright lives under test/browser as
+  // its own workspace member — not a packages/* lane.
+  expect(pkg.workspaces).toEqual(['packages/*', 'test/browser']);
 });
 
 // Workspace packages must not carry a sibling bun.lock. Under

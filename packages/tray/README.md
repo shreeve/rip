@@ -101,7 +101,7 @@ use `bun run demo` instead. Build the host once if missing:
 | Any provider path | `rip-tray-host /abs/path/to/provider.rip` |
 
 Bins: `rip-tray` / `rip tray` launches the host; `rip-tray-build` is the optional
-`.app` wrapper. After pulling this rename, run `bun run link-global` once so
+`.app` wrapper. After pulling this rename, run `bun run global` once so
 `~/.bun/bin/rip-tray` points at the launcher (not the old builder). Restart a
 legacy LaunchAgent with `packages/sites/bin/rip-tray-agent start` if you still
 have an old `bin/rip-tray` job.

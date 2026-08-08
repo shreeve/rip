@@ -514,6 +514,10 @@ private struct PanelCompactControl: View {
   let item: TrayItem
   @ObservedObject var provider: TrayProvider
   @State private var hovering = false
+  @State private var showTip = false
+  @State private var hoverToken = UUID()
+
+  private var tip: String { item.title ?? "" }
 
   private var fallbackIcon: TrayIcon {
     switch item.kind {
@@ -535,23 +539,68 @@ private struct PanelCompactControl: View {
       .labelsHidden()
       .toggleStyle(.switch)
       .controlSize(.mini)
-      .help(item.title ?? "")
+      .help(tip)
       .disabled(!(item.enabled ?? true))
+      .overlay { CompactControlTip(text: tip, visible: showTip) }
+      .onHover(perform: hoverChanged)
     } else {
       Button { provider.perform(item) } label: {
         TrayIconView(icon: item.icon ?? fallbackIcon, size: 14)
           .frame(width: 27, height: 27)
+          .contentShape(Rectangle())
           .background(
             hovering ? Color.primary.opacity(0.09) : Color.clear,
             in: RoundedRectangle(cornerRadius: 6)
           )
       }
       .buttonStyle(.plain)
-      .help(item.title ?? "")
-      .accessibilityLabel(Text(item.title ?? ""))
-      .onHover { hovering = $0 }
+      .help(tip)
+      .accessibilityLabel(Text(tip))
+      .overlay { CompactControlTip(text: tip, visible: showTip) }
+      .onHover(perform: hoverChanged)
       .disabled(!(item.enabled ?? true))
       .opacity(item.enabled ?? true ? 1 : 0.3)
+    }
+  }
+
+  private func hoverChanged(_ inside: Bool) {
+    hovering = inside
+    let token = UUID()
+    hoverToken = token
+    if inside {
+      // MenuBarExtra windows often swallow system `.help` tooltips; show our
+      // own after a short dwell so sweeping across the icon row stays quiet.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+        if hoverToken == token { showTip = !tip.isEmpty }
+      }
+    } else {
+      showTip = false
+    }
+  }
+}
+
+/// In-panel tip for compact icon buttons — floats above the control so it is
+/// not clipped by neighboring icons. Complements `.help` for accessibility.
+private struct CompactControlTip: View {
+  let text: String
+  let visible: Bool
+
+  var body: some View {
+    if visible, !text.isEmpty {
+      Text(text)
+        .font(.system(size: 11, weight: .medium))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background {
+          RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
+        }
+        .fixedSize()
+        .offset(y: -30)
+        .transition(.opacity)
+        .allowsHitTesting(false)
+        .zIndex(10)
     }
   }
 }

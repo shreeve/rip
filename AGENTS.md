@@ -77,7 +77,7 @@ repository root; consulted for UNDERSTANDING → docs/.
 
 7. **Emitted output never changes silently.** A change that alters the
  compiler's output bytes lands with its regenerated corpus snapshots
- (`bun run corpus-expected`) in the same commit — and the diff is
+ (`bun run corpus`) in the same commit — and the diff is
  ENUMERATED: every changed region is inspected and matches the
  change's stated intent. An unexplained region is a stop-and-report.
 
@@ -343,13 +343,13 @@ alters surface syntax updates ALL THREE in the same change.
 ## Test-Authoring Sharp Edges
 
 - Process-lane tests live under `test/spawn/` (cli, sentinel, loader,
- tsc, bundle, repl). Outside that tree — and outside `test/audit/` —
- suites stay in-process: compile/eval/throw oracles, no
- `spawnSync` / `Bun.spawn` / `bin/rip` as a child. Stdout pins that
- only needed a child to read `console.log` must become value/emit
- compares. Spawn helpers (`test/support/spawn.js`) scrub `FORCE_COLOR`
- so piped child paint cannot break byte pins; in-process suites do not
- import that helper.
+ tsc, bundle, repl). Outside that tree — and outside `test/audit/`,
+ `test/support/`, and `test/browser/` (Playwright) — suites stay
+ in-process: compile/eval/throw oracles, no `spawnSync` / `Bun.spawn` /
+ `bin/rip` as a child. Stdout pins that only needed a child to read
+ `console.log` must become value/emit compares. Spawn helpers
+ (`test/support/spawn.js`) scrub `FORCE_COLOR` so piped child paint
+ cannot break byte pins; in-process suites do not import that helper.
 - A PTY test must await text that occurs ONCE in the whole stream. The
  terminal echoes the command line back before the command's output, so
  `echo AAA` awaiting `AAA` matches its own echo; only the bytes up to
@@ -449,8 +449,8 @@ the affected final gates again.
  certification in Chromium (`test/browser`). Manual certification, not
  a pull-request gate.
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
-- `bun run corpus-expected` — regenerate the corpus expected outputs.
-- `bun run browser-bundle` — regenerate `dist/browser/rip.js` (and
+- `bun run corpus` — regenerate the corpus expected outputs.
+- `bun run browser` — regenerate `dist/browser/rip.js` (and
  `rip.min.js` / `rip.min.js.br`) after any `src/browser.js` change; a
  freshness gate in `test:all` catches a stale bundle.
 - `bun run audit` — the typed-editor scoreboard, and NOT `bun audit`,
@@ -460,13 +460,13 @@ the affected final gates again.
   `--help` is the full surface: what each lane measures, and what it is
   judged against.
 - `bun run ext` — build and install the VS Code extension.
-- `bun run link-global` — make THIS checkout the machine's global rip:
- symlinks `rip` and every package bin into `~/.bun`, and points
- `~/node_modules/@rip-lang/*` here. Run once per machine (idempotent);
- running another checkout's link-global flips ownership back.
-- `bun run link-check` — guardrail (also runs on postinstall): fails
- loudly if any `@rip-lang/*` name resolves outside this repo (e.g.
- shadowed by a sibling checkout's global links).
+- `bun run global` — make THIS checkout the machine's global Rip:
+  symlinks `rip` and every package bin into `~/.bun`, and points
+  `~/node_modules/@rip-lang/*` here. Run once per machine (idempotent);
+  running another checkout's `bun run global` flips ownership back.
+- `bun run local` — point THIS checkout's `./node_modules/@rip-lang/*`
+  at `packages/*` (also runs on postinstall / before `test:all`). Does
+  not touch `~/`.
 - `rip` on a TTY (or `rip -r`) — the interactive REPL; `rip -e <code>`
  evaluates one entry; `rip schema`/`rip site`/`rip test` dispatch
  their surfaces (`--help` on each).
