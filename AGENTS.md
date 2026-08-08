@@ -7,6 +7,8 @@ support.
 Permanent documentation:
 
 - [README.md](README.md) — repository orientation and entry points.
+- [packages/AGENTS.md](packages/AGENTS.md) — first-party package mold
+  (layout, package.json, README LAF, tests) and earned-shape inventory.
 - [docs/SERVER.md](docs/SERVER.md) — Rip Sites' system-wide
   Caddy/Janus/manager/worker architecture and lifecycle contract.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
