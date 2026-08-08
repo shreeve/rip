@@ -454,7 +454,8 @@ the affected final gates again.
  `rip.min.js` / `rip.min.js.br`) after any `src/browser.js` change; a
  freshness gate in `test:all` catches a stale bundle.
 - `bun run tailwind` — vendor `@tailwindcss/browser` into
- `dist/@rip/tailwind.js` (+ min + br). Pin stays in lockstep with
+ `dist/@rip/tailwind.min.js` (+ `.br`). Upstream is already minified;
+ there is no separate `tailwind.js`. Pin stays in lockstep with
  `packages/ui`'s `tailwindcss` version.
 - `bun run audit` — the typed-editor scoreboard, and NOT `bun audit`,
   which is Bun's dependency scanner. Six lanes (grammar, mapping, type,
