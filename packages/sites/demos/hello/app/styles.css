@@ -19,6 +19,51 @@ main {
 }
 
 h1,
+h2,
 p {
   margin: 0;
+}
+
+.lede {
+  max-width: 28rem;
+  line-height: 1.45;
+  color: #1e3a8a;
+}
+
+.checklist {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+  width: min(28rem, 100%);
+  padding: 1.25rem 1.5rem;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.75rem;
+}
+
+.checklist h2 {
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+}
+
+.checklist ul {
+  margin: 0;
+  padding-left: 1.15rem;
+  line-height: 1.55;
+}
+
+.checklist code,
+.hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.hint {
+  max-width: 28rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #334155;
 }

@@ -13,17 +13,17 @@ releasedCaddy = ->
   xcaddy = Bun.which 'xcaddy'
   throw Error.new('test:janus requires xcaddy or JANUS_CADDY') unless xcaddy?
   cache = join tmpdir(), 'rip-janus-release'
-  binary = join cache, 'caddy-v1.6.2-access'
+  binary = join cache, 'caddy-v1.6.3-access'
   return binary if existsSync binary
   mkdirSync cache, { recursive: true }
   buildDir = mkdtempSync join(cache, 'build-')
   candidate = join buildDir, 'caddy'
   try
-    result = Bun.spawnSync [xcaddy, 'build', '--with', 'github.com/shreeve/janus@v1.6.2', '--output', candidate],
+    result = Bun.spawnSync [xcaddy, 'build', '--with', 'github.com/shreeve/janus@v1.6.3', '--output', candidate],
       cwd: buildDir
       stdout: 'pipe'
       stderr: 'pipe'
-    throw Error.new("cannot build published Janus v1.6.2:\n#{result.stderr.toString()}") unless result.exitCode is 0
+    throw Error.new("cannot build published Janus v1.6.3:\n#{result.stderr.toString()}") unless result.exitCode is 0
     renameSync candidate, binary
   finally
     rmSync buildDir, { recursive: true, force: true }
@@ -45,8 +45,8 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
   info = Bun.spawnSync [CADDY, 'build-info']
   build = info.stdout.toString()
   eq info.exitCode, 0, info.stderr.toString()
-  ok build.includes("github.com/shreeve/janus\tv1.6.2"), build
-  ok not build.includes("github.com/shreeve/janus\tv1.6.2 =>"), 'integration requires the published module, not a local replacement'
+  ok build.includes("github.com/shreeve/janus\tv1.6.3"), build
+  ok not build.includes("github.com/shreeve/janus\tv1.6.3 =>"), 'integration requires the published module, not a local replacement'
 
   dir = mkdtempSync join(tmpdir(), 'rip-janus-release-')
   project = join dir, 'project'

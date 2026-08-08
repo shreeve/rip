@@ -135,8 +135,7 @@ rip sites list
 # ● hello  running  https://hello.ripdev.io/
 ```
 
-Packaged demos: [`demos/hello`](demos/hello), [`demos/pulse`](demos/pulse),
-[`demos/cart`](demos/cart).
+Packaged demos (hello → pulse → cart): [`demos/`](demos/README.md).
 
 Pass `--host` when you want a stable URL in the catalog (needed for
 `rip sites open` while stopped). Projects with `serve.rip` hosts still run
@@ -1592,7 +1591,7 @@ bun run test:appliance
 bun run test:janus
 ```
 
-`test:janus` builds and caches a Caddy binary with released Janus `v1.6.2`;
+`test:janus` builds and caches a Caddy binary with released Janus `v1.6.3`;
 `JANUS_CADDY` can override that binary. `bun run test` discovers and runs every
 `test/*/test.rip` fixture.
 

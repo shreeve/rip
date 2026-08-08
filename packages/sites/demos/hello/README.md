@@ -1,9 +1,13 @@
 # Hello App
 
-A minimal Rip App demo: `app/` plus a tiny Hub-admit API (`index.rip`) so
-live watch works on the packaged bridge-mode edge. Permanent publication
-details live in [`docs/SERVER.md`](../../docs/SERVER.md); browser consumption
-details live in [`docs/WORKSPACE.md`](../../docs/WORKSPACE.md).
+First rung of the [demos ladder](../README.md): a minimal App whose **page
+states the Workspace publication + watch contract** — Rip source `update`,
+CSS refresh, asset invalidate. `app/` plus a tiny Hub-admit API (`index.rip`)
+so live watch works on the packaged bridge-mode edge. Permanent details:
+[`docs/SERVER.md`](../../docs/SERVER.md), [`docs/WORKSPACE.md`](../../docs/WORKSPACE.md).
+
+Edge TLS/Janus is system-wide (`rip sites start edge`); this demo does not
+ship a Caddyfile.
 
 ## Add and start
 

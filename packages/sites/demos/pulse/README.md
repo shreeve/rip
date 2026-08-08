@@ -1,16 +1,18 @@
 # Pulse
 
-A tiny status board that proves the whole stack end to end: Janus serves
-the browser App, Rip Sites handles a small API, and saving a component
-file updates the running page through the Workspace publication feed.
+Middle rung of the [demos ladder](../README.md): a tiny status board that
+proves the stack end to end — Janus serves the browser App, Rip Sites
+handles a small API, saving a component remounts through the Workspace
+feed, and Hub members collaborate with hint-only frames.
 
 It is a runnable example and a demo script — not a test suite. Nothing
-here is wired into CI.
+here is wired into CI (cart’s publication path is what `test:cart` drives).
 
 ## Layout
 
 | File | Role |
 | --- | --- |
+| `serve.rip` | Catalog name, hosts, Hub bridge (tray **Add Site…** target) |
 | `index.rip` | The API: statuses routes and bare `start!` handoff |
 | `app/index.html` | SPA shell (`bootApp` over `/bundle.json`) |
 | `app/stash.rip` | `stash` — the `statuses` source over `/api/statuses` |
@@ -37,8 +39,16 @@ restart) boots fresh workers and clears the list.
 
 ## Run
 
-With a Janus control endpoint running (`--control <target>` or the
-`JANUS_CONTROL` env var):
+With the edge up (`rip sites start edge`), add and start from this
+directory (or pass `--name` / `--host` explicitly):
+
+```bash
+rip sites add packages/sites/demos/pulse
+rip sites start pulse
+rip sites open pulse          # https://pulse.ripdev.io/
+```
+
+One-shot without the catalog:
 
 ```bash
 cd packages/sites/demos/pulse

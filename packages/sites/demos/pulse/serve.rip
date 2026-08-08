@@ -1,0 +1,7 @@
+export default
+  name: 'pulse'
+  hosts: ['pulse.ripdev.io', 'pulse.local'] # loopback + LAN (after `rip sites expose local`)
+  hub:
+    bridge: 'hub'           # Janus Bam door for live App watch + /pulse collab
+  app:
+    root: 'app'

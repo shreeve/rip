@@ -45,7 +45,11 @@ export Home = component
     hub.send JSON.stringify('@': ['/pulse'], changed: {}) if hub?.readyState is 1
 
   render
-    h1 "Pulse"
+    h1 'Pulse'
+    p
+      'Edit '
+      code 'app/mood.rip'
+      ' and save — badges remount through the publication feed. Post in two windows for Hub collab.'
     input placeholder: "What's happening?", value <=> text
     span " mood: #{mood} "
     button "up"

@@ -10,6 +10,13 @@
 	servers {
 		protocols h1 h2
 	}
+	# Browsers reject second-level wildcards (SAN DNS:*.local). Issue one
+	# exact-host cert per SNI name from the local CA instead — trust the CA
+	# once (`rip sites trust edge`), then https://{app}.local works.
+	# Ask must be a plain HTTP URL (unix dial syntax is not honored here).
+	on_demand_tls {
+		ask http://127.0.0.1/tls-ask
+	}
 
 	janus {
 		control internal {$RIP_EDGE_CONTROL}
@@ -48,6 +55,14 @@ http://sites.local {
 	}
 }
 
+# on_demand_tls ask target (loopback; no Host / Bonjour dependency).
+http://127.0.0.1 {
+	bind {$RIP_EDGE_HTTP_BIND:0.0.0.0}
+	handle /tls-ask* {
+		reverse_proxy unix/{$RIP_EDGE_STATUS}
+	}
+}
+
 http://*.local {
 	bind {$RIP_EDGE_HTTP_BIND:0.0.0.0}
 	redir https://{host}{uri} 308
@@ -59,13 +74,21 @@ http://ripdev.io, http://sites.ripdev.io, http://*.ripdev.io {
 }
 
 # Product status + /trust on HTTPS (same Rip page as sites.ripdev.io).
+# on_demand so we mint DNS:sites.local — not a leftover *.local wildcard.
 sites.local {
-	tls internal
+	tls {
+		issuer internal
+		on_demand
+	}
 	reverse_proxy unix/{$RIP_EDGE_STATUS}
 }
 
+# Catch-all app hosts: on-demand exact names (hello.local), never *.local.
 *.local {
-	tls internal
+	tls {
+		issuer internal
+		on_demand
+	}
 	janus
 	log {
 		output stderr

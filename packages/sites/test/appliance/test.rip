@@ -72,9 +72,15 @@ test! 'the packaged macOS edge activates loopback HTTP+HTTPS sockets without Bon
   ok localfile.includes 'mdns'
   ok localfile.includes 'name sites.local'
   ok localfile.includes 'apps on'
-  ok localfile.includes 'tls internal'
+  # Exact-host internal certs — browsers reject SAN DNS:*.local wildcards.
+  ok localfile.includes 'on_demand_tls'
+  ok localfile.includes 'ask http://127.0.0.1/tls-ask'
+  ok localfile.includes 'issuer internal'
+  ok localfile.includes 'on_demand'
+  ok localfile.includes 'http://127.0.0.1'
+  ok agent.includes "/tls-ask"
   # Product HTTPS status is the Rip catalog — Janus stays on the HTTP mdns door.
-  ok /sites\.local \{\s*tls internal\s*reverse_proxy unix\/\{\$RIP_EDGE_STATUS\}/s.test(localfile)
+  ok /sites\.local \{[\s\S]*?reverse_proxy unix\/\{\$RIP_EDGE_STATUS\}/.test(localfile)
   ok localfile.includes 'handle /trust*'
   ok not localfile.includes 'RIP_EDGE_JANUS_HTTP'
   ok launcher.includes "activate('HTTP')"
@@ -87,6 +93,11 @@ test! 'the packaged macOS edge activates loopback HTTP+HTTPS sockets without Bon
   ok agent.includes 'localCaTrusted'
   ok agent.includes 'ensureLanHosts'
   ok agent.includes 'defaultAppHosts'
+  # trust talks to the unix admin socket — never stock :2019
+  ok agent.includes "'trust', '--address', edgeAddress(admin)"
+  # status page: `.join` must follow a parenthesized map, not the row string
+  ok agent.includes '(apps.map (app) ->'
+  ok /\)\.join ''/.test(agent)
   helloServe = readFileSync join(import.meta.dir, '..', '..', 'demos', 'hello', 'serve.rip'), 'utf8'
   ok helloServe.includes 'hello.ripdev.io'
   ok helloServe.includes 'hello.local'
