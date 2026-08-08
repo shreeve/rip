@@ -19,7 +19,7 @@ if (Bun.version !== REQUIRED_BUN) {
 }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const outDir = resolve(root, 'dist/browser');
+const outDir = resolve(root, 'dist/@rip');
 
 // The emitter imports fs for inline runtime delivery, which the
 // browser never uses (runtimes arrive by scope). The stub keeps the
@@ -161,6 +161,6 @@ writeFileSync(resolve(outDir, 'rip.min.js'), minBytes);
 writeFileSync(resolve(outDir, 'rip.min.js.br'), brBytes);
 
 const kb = n => (n / 1024).toFixed(1);
-console.log(`browser: dist/browser/rip.js ${kb(Buffer.byteLength(code))} KB`);
-console.log(`browser: dist/browser/rip.min.js ${kb(minBytes.length)} KB`);
-console.log(`browser: dist/browser/rip.min.js.br ${kb(brBytes.length)} KB`);
+console.log(`browser: dist/@rip/rip.js ${kb(Buffer.byteLength(code))} KB`);
+console.log(`browser: dist/@rip/rip.min.js ${kb(minBytes.length)} KB`);
+console.log(`browser: dist/@rip/rip.min.js.br ${kb(brBytes.length)} KB`);

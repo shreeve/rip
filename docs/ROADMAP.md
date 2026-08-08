@@ -1,95 +1,67 @@
 # Product Roadmap
 
 This document lists current open work only. Completed behavior belongs
-in tests and permanent reference documentation.
+in tests and permanent reference documentation
+([WORKSPACE.md](WORKSPACE.md), [HMR.md](HMR.md), [SERVER.md](SERVER.md),
+[TYPES.md](TYPES.md), package READMEs).
 
 No item here authorizes a silent design choice. Product decisions are
 resolved before implementation depends on them.
 
-## Package and application portfolio
+## Package substrate
 
-The compiler, feature runtimes, schema/ORM core, and editor integrations
-are present. The first-party application and package portfolio remains
-open work.
+New packages follow [packages/AGENTS.md](../packages/AGENTS.md): mold
+layout for simple library/CLI packages, earned shapes for larger trees,
+Bun workspaces at the repo root (`packages/*` plus `test/browser`),
+`install.linker = "hoisted"`, and a dependency-free compiler core.
 
-### Package substrate
+Open substrate work is only what that contract still leaves undecided
+for a given package (browser-safe subpath rules, publish metadata when
+`private` lifts). Do not block direct-path package tests on a complete
+publish story.
 
-New packages follow one package contract:
+## Application foundation
 
-- package layout, exports, and named-only public APIs;
-- direct package test commands through the Rip loader;
-- Bun workspaces at the repo root (`packages/*`, `install.linker =
-  "hoisted"`) so `@rip-lang/*` lands in `node_modules/@rip-lang/` and
-  resolves in-tree; package-specific dependency budgets stay on the
-  packages that need them — the compiler itself remains dependency-free;
-- browser-safe metadata and bundle discovery;
-- CLI subcommand discovery for package-provided tools;
-- declaration, strict-check, and public-surface audit gates.
+- **Sites leftovers** — shipped architecture is [SERVER.md](SERVER.md).
+  Open items live in [packages/sites/TODO.md](../packages/sites/TODO.md)
+  (opt-in file logging, `public` edge posture, compression and security
+  header pins, Manager watch defaults, appliance distribution, Cart
+  cleanups). Process workers, control-plane registration, watch
+  publication, and the structured startup report are already shipped.
+- **UI** — browser interaction primitives (`@rip-lang/ui/browser`) and
+  the Tailwind compilation boundary are shipped with tests. The
+  headless widget catalog and its app-framework integration remain
+  open with Philip.
 
-The substrate is a prerequisite for publishing and cross-package imports,
-but it must not block direct-path package implementation and tests.
+## Browser delivery
 
-### Application foundation
+Shipped and CI-certified: `<script type="text/rip">`,
+`assembleRipBundle` → `bootApp` → `launch`, Workspace publication
+consume ([WORKSPACE.md](WORKSPACE.md)), and real-browser Playwright
+(`bun run test:browser`) across Chromium, Firefox, and WebKit.
 
-- **Server:** the edge belongs to Janus running with Caddy — proxy
-  and stream execution, the TLS story (ACME, certificates, SNI), and
-  WebSocket termination with hub fan-out — so none of that is Rip
-  Sites work; `packages/sites` atomically registers files, direct Hub
-  admission, and API upstreams with the control plane. Remaining in Rip
-  Sites itself (contract in the packages/sites README's Planned
-  section): opt-in file logging (a
-  `logs:` knob / `RIP_LOG_DIR` redirect of the merged server stream
-  to `logs/server.log`; stdout stays the default). Process workers,
-  control-plane registration with heartbeats and upstream
-  publication, dev watch with live reload, and the structured
-  startup report (read-back composed) are shipped.
-- **UI:** the headless widget catalog and its app-framework
-  integration. The browser interaction primitives the widgets build
-  on (`@rip-lang/ui/browser`: nav, dismiss, overlay, position, focus,
-  scroll) and the Tailwind compilation boundary (`@rip-lang/ui`
-  tailwind engine/inline/serve) are shipped with tests. The gating
-  audit PR (#156) landed 2026-07-28; the work proceeds with Philip.
+Product HMR for the contracted Cart bars is done
+([HMR.md](HMR.md)); optional seam compression only, not morph.
 
-### Independent libraries and tools
+Still open:
 
-The first-party library portfolio is ported: CSV, decimal, XML (rsx),
-X12, HTTP, time, worker-swarm, interactive scripting, source printing,
-AI/MCP, host provisioning (stamp), and the database client (`rip-db`
-over duckdb-harbor, with its MCP server and CLI) all ship with
-converted or new test suites. Each package earns its place through an
-independently runnable contract and current Rip types. Auth-wall
-functionality is Janus's job: the `auth` capability (edge-terminated
-login in front of an unsecured app) lives in the Janus repository.
-
-### Browser delivery
-
-`<script type="text/rip">` compilation/loading and module/browser-safe
-package-graph handling are shipped and certified in CI: Node suites
-plus real-browser Playwright runs across Chromium, Firefox, and WebKit
-(`test/browser`) drive `processRipScripts` and the
-`assembleRipBundle` → `bootApp` → `launch` path end to end — SPA
-navigation, ordinary HTTP cache behavior, debug-gated source maps.
-
-The manager assembles the page and publication for Janus to serve directly;
-API workers do not carry a browser-delivery surface. The certification
-fixture `test/browser/serve.mjs` remains the browser-CI harness.
-The browser consumes `bundle.json {hash,list}`, watch-mode
-`change {from,hash,list}`, and reconnect recovery through `latest.json` as
-specified by [WORKSPACE.md](WORKSPACE.md). The remaining browser work is:
-
-- transparent `bundle.json.br` selection in Janus's registered-file path;
-- `rip.browser` granularity: the flag is package-level, so
-  `@rip-lang/ui/browser` cannot travel while the package's Tailwind
-  half carries npm dependencies — subpath metadata, a package split,
-  or an assembly-time export filter needs an owner ruling.
-
-Production precompiled output (a CSP-clean path with no in-browser
-compiler) is deliberately deferred by owner leaning (2026-07-22: the
-compiler stays available on-the-fly; possibly a hybrid later); it does
-not block dev-server work. That deferral does **not** override
-Workspace **M0** on the Workspace path — see
-[WORKSPACE.md](WORKSPACE.md) (signed cells + CSP without
-`unsafe-eval` on the happy path).
+- **`rip.browser` granularity** (needs an owner call — see breakdown
+  below if opening work). Today `"rip": { "browser": true }` is
+  package-wide, and assembly that claims a package copies every `.rip`
+  file under its root. A package such as `@rip-lang/ui` mixes
+  browser-safe surfaces (`./browser`) with server-only / npm-backed
+  surfaces (`./tailwind`), so it cannot set the flag without lying.
+- **Sites pin for precompressed `bundle.json`.** Janus (≥ v1.6) already
+  selects `.br` / `.zst` / `.gz` sidecars from `Accept-Encoding` when
+  `files { precompressed }` is on (Sites Caddyfiles already enable it).
+  Remaining work is a Sites certification pin that
+  `GET /bundle.json` with `Accept-Encoding: br` returns the Manager
+  sidecar bytes — not new Janus transport. Track under
+  [packages/sites/TODO.md](../packages/sites/TODO.md) edge policy.
+- **Production precompiled output** (CSP-clean path with no in-browser
+  compiler) remains deliberately deferred; the on-the-fly compiler
+  stays. That is not a Workspace milestone name — just a later product
+  leaning.
 
 This delivery layer is distinct from compiler runtime `inline`/`import`
 emission.
@@ -178,6 +150,8 @@ schema behavior.
 
 ## Type and editor directions
 
+Architecture: [TYPES.md](TYPES.md). Still open:
+
 ### Bare optional parameters under strict checking
 
 An untyped optional parameter emits the valid TypeScript spelling
@@ -206,39 +180,22 @@ Bindings produced by schema algebra can type through the TypeScript
 face, but shipping `.d.ts` declarations require an explicit,
 mapping-safe representation of argument literals.
 
-## Rip Workspace
-
-The browser publication-consumption and mutation contract lives in
-[WORKSPACE.md](WORKSPACE.md). Rip Sites publishes applications; Janus
-transports their files and watch-mode changes; Rip App consumes them. The
-publication substrate and framework-aware apply engine remain separate test
-boundaries.
-
-## Hot module replacement
-
-Publication substrate, compile overlay, signature metadata, living-instance
-registry, patch-when-compatible (state-preserving view remount with
-effect/computed rebind), narrow remount with UI restore, and Cart
-confirmation certification (Gate A local action-state + Gate B LKG
-recover in place) are shipped under watch mode — see [HMR.md](HMR.md).
-Product HMR for that contract is done. Optional later work is seam
-compression only (same doc), not surgical DOM morph. Stash-module
-definition edits stay document reload by design.
-
 ## Rip-native hypermedia
 
-The active architecture and phased acceptance contract live in
-[FRAME.md](FRAME.md). Hypermedia is a parallel interaction mode beside
-the reactive SPA path: a `Frame` component owns declarative requests,
-targets, and swaps; fragments are inert first and managed later; and
-committed responses invalidate stash and source state. It does not
-embed `htmx.js` inside Rip-owned trees. Work begins after
-browser-delivery and app/server foundations can host inert fragment
-swaps.
+Design and phased acceptance: [FRAME.md](FRAME.md). Not started.
+Work begins after browser-delivery and app/server foundations can host
+inert fragment swaps, and after FRAME's open surface decisions are
+closed (exact `$` / prop spelling, optional load-on-mount, fragment
+trust policy).
+
+## Clean-room engine
+
+[CLEANROOM.md](CLEANROOM.md) is shelved until v4 is declared done. It
+is not scheduled product work and does not belong in the edit loop.
 
 ## Roadmap hygiene
 
 - One owner and one acceptance contract per item.
 - Syntax changes update all three editor grammars.
-- Implemented items leave this file.
+- Implemented items leave this file (point at permanent docs instead).
 - Completed probes and campaign ledgers do not accumulate here.

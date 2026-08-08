@@ -3,7 +3,7 @@
 <title>rip workspace certification</title>
 <div id="app"></div>
 <script type="module">
-  import { bootApp } from '/dist/browser/rip.js';
+  import { bootApp } from '/dist/@rip/rip.js';
   // Hash routing keeps the fixture page's own pathname out of the
   // route table; the hub URL may arrive as a query param.
   const hub = new URLSearchParams(location.search).get('hub') ?? `ws://${location.host}/hub`;

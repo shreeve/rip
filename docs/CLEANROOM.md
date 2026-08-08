@@ -8,8 +8,9 @@ have was cobbled forward from v1 → v2 → v3 → v4. The rewrite starts
 with the end in mind: we know exactly what the engine must produce,
 because the test suite says so.
 
-This document is the ethos and the method. It is not scheduled work;
-it activates when v4 is declared done.
+This document is the ethos and the method. It is not scheduled work
+and is not an item on [ROADMAP.md](ROADMAP.md); it activates when v4
+is declared done.
 
 ## Why this is viable for Rip
 

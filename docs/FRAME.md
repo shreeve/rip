@@ -4,18 +4,16 @@ This document defines Rip's hypermedia architecture and behavioral
 contract. It is a design specification; implementation proceeds only
 through the dependency-ordered phases and acceptance tests below.
 
-> **Surface revision in progress (recorded 2026-07-15).** The public
-> surface spelled below predates two resolved decisions: there is no
-> sub-brand and no `HyperBoundary` component — the public owner is a
-> plain `Frame` component — and dotted `rip.*` attributes are
-> rejected in favor of ordinary component props plus `$`-sigil data
-> attributes. Three details remain open and undecided: the exact
-> element-level spelling (bare `$get` versus a namespaced form), a
-> possible deferred `Frame get` load-on-mount prop, and the written
-> fragment trust policy. Read the ownership, transaction, protocol,
-> and rejection contracts below as authoritative; read the
-> `HyperBoundary` and `rip.*` spellings as superseded pending the
-> revision.
+> **Surface spelling is not final.** Ownership, transaction, protocol,
+> and rejection contracts in this document are authoritative. The public
+> owner name is `Frame` (no sub-brand, no `HyperBoundary`). Dotted
+> `rip.*` attributes are rejected in favor of ordinary component props
+> plus `$`-sigil data attributes. Draft examples and phase checklists
+> below may still say `HyperBoundary` / `rip.*` — treat those as
+> placeholders until the open decisions at the end of this file close:
+> exact element-level spelling (bare `$get` vs namespaced), optional
+> `Frame get` load-on-mount, and fragment trust policy. Do not implement
+> against the placeholder spellings.
 
 The design is inspired by HTMX's server-driven interaction model, but
 it does not embed or emulate HTMX inside Rip-owned trees.
@@ -51,8 +49,8 @@ Product promise:
 |---|---|
 | hypermedia mode | server-driven interaction through requests and fragment swaps |
 | reactive SPA mode | client-driven interaction through stash, sources, mutations, renderer, and router |
-| `HyperBoundary` | Rip owner that captures hypermedia actions and controls requests and swaps within one DOM region |
-| directive | compiler-recognized `rip.*` declaration such as `rip.get` or `rip.target` |
+| `Frame` | Rip owner that captures hypermedia actions and controls requests and swaps within one DOM region (draft text may still say `HyperBoundary`) |
+| directive | declarative request/target/swap marking — final spelling is props / `$…` data attributes, not `rip.*` |
 | inert fragment | HTML inserted as DOM without Rip component activation, bindings, effects, or hydration |
 | Rip fragment | compiler-produced HTML plus a manifest sufficient for deterministic Rip activation |
 | fragment manifest | compiler metadata describing ABI, roots, cells, bindings, ownership, and required modules |
@@ -74,8 +72,8 @@ model (`@rip-lang/sites`).
 
 Rip does not yet define:
 
-- a hypermedia boundary or request runtime;
-- compiler semantics for `rip.*` directives;
+- a `Frame` hypermedia boundary or request runtime;
+- compiler semantics for hypermedia props / `$` directives;
 - a fragment response protocol;
 - deterministic client activation of server-produced Rip fragments;
 - source or stash invalidation headers;
@@ -763,11 +761,10 @@ request headers and emit correct cache metadata.
 
 ### Attribute spelling
 
-Use dotted `rip.*` source directives.
-
-Examples: `rip.get`, `rip.post`, `rip.delete`, `rip.target`,
-`rip.swap`, `rip.pending`, and `rip.abort`. Compiler emission is private
-and may use a more compact representation.
+**Resolved direction:** no dotted `rip.*` source directives. Prefer
+ordinary `Frame` props and `$`-sigil data attributes. Exact spellings
+remain open (see Open decisions). Draft examples elsewhere in this
+file that show `rip.get` / similar are placeholders only.
 
 ### Server rendering for the MVP
 
@@ -800,8 +797,8 @@ selectors. Generic OOB swapping remains a hard no.
 
 ### Phase 0 — ownership and protocol skeleton
 
-- define `HyperBoundary` ownership;
-- define directive compiler metadata;
+- define `Frame` ownership (placeholder text may say `HyperBoundary`);
+- define directive compiler metadata (final prop / `$` spellings);
 - implement native link and form interception;
 - implement `GET`, `POST`, and `DELETE`;
 - implement request headers and inert `c.fragment`;
@@ -916,6 +913,9 @@ and HMR interaction require a real browser harness.
 
 ## Open decisions
 
+- Exact element-level spelling: bare `$get` versus a namespaced form.
+- Whether `Frame` grows a deferred load-on-mount prop (e.g. `get`).
+- Written fragment trust policy (which response shapes may activate).
 - Exact compiler syntax for declaring a boundary default target.
 - Whether directive URL values permit only literals and references or
   also pure expressions.
@@ -927,8 +927,8 @@ and HMR interaction require a real browser harness.
 - Cache keys and ETag behavior for user-specific fragments.
 - Router history snapshot contents for back and forward restoration.
 - Strict-mode behavior for unknown source and stash invalidation ids.
-- Whether non-success fragment swaps need an explicit `rip.error-target`
-  in a later phase.
+- Whether non-success fragment swaps need an explicit error-target
+  prop / `$` spelling in a later phase.
 - Whether a future multi-region transaction is sufficiently valuable to
   justify a separate protocol.
 - Focus, selection, and scroll policy for replace versus managed morph.

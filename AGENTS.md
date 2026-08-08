@@ -450,7 +450,7 @@ the affected final gates again.
  a pull-request gate.
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus` — regenerate the corpus expected outputs.
-- `bun run browser` — regenerate `dist/browser/rip.js` (and
+- `bun run browser` — regenerate `dist/@rip/rip.js` (and
  `rip.min.js` / `rip.min.js.br`) after any `src/browser.js` change; a
  freshness gate in `test:all` catches a stale bundle.
 - `bun run audit` — the typed-editor scoreboard, and NOT `bun audit`,

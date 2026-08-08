@@ -356,4 +356,5 @@ a morph project, and not as churn for its own sake.
 
 **Product HMR for the contracted bars is done.** Further work is
 optional kitchen cleanup (fewer utensils), not a missing course. Morph
-is not dessert we owe.
+is not dessert we owe. Do not re-open this as ROADMAP product work
+unless the Cart bars regress.

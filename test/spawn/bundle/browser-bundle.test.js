@@ -14,9 +14,9 @@ import { describeExtended } from '../../support/extended.js';
 import { compile } from '../../../src/compile.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const artifactPath = resolve(root, 'dist/browser/rip.js');
-const minPath = resolve(root, 'dist/browser/rip.min.js');
-const brPath = resolve(root, 'dist/browser/rip.min.js.br');
+const artifactPath = resolve(root, 'dist/@rip/rip.js');
+const minPath = resolve(root, 'dist/@rip/rip.min.js');
+const brPath = resolve(root, 'dist/@rip/rip.min.js.br');
 
 // Server-only surfaces that must never be reachable from the browser
 // entry. config/loader/run own the filesystem and process; orm

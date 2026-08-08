@@ -20,7 +20,7 @@ Three host surfaces, separate graphs:
   migrate, explain, stackmap). Process entries live under `cli/`.
 - **IDE / types** — `src/types/` (dts, typetext, schemas, components) plus
   `packages/vscode`. Browser stubs those modules at bundle time.
-- **Browser** — `src/browser.js` → `dist/browser/rip.js` (+ min + br).
+- **Browser** — `src/browser.js` → `dist/@rip/rip.js` (+ min + br).
   In-page Rip→JS compile stays; no tsgo/ORM in the page.
 
 Other root notes: `ops.js` and `config.js` stay as shared leaves;

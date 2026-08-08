@@ -39,7 +39,8 @@ project/
 │   ├── images/
 │   └── fonts/
 └── dist/                     Manager-owned publication output
-    ├── @rip/rip.js           stable browser compiler and Rip App runtime
+    ├── @rip/rip.min.js       browser compiler and Rip App runtime
+    ├── @rip/rip.min.js.br    Brotli sidecar (transparent via Accept-Encoding)
     ├── bundle.json           complete browser Rip program
     ├── bundle.json.br        Brotli representation of the exact JSON bytes
     └── latest.json           current complete App hash
@@ -78,7 +79,7 @@ It contains:
 
 It does not contain CSS, HTML, images, fonts, videos, API implementation,
 server-only packages, or `@rip-lang/app`. The complete App package is already
-embedded in `/@rip/rip.js`.
+embedded in `/@rip/rip.min.js`.
 
 Browser package roots normalize to `@rip-lang/<name>/index.rip`. Package
 manifests are Manager inputs used for browser-safety validation and import
@@ -148,11 +149,13 @@ Removing the old sidecar first creates a brief uncompressed fallback window
 but prevents new JSON from ever pairing with old compressed bytes. The JSON
 rename is the canonical commit point. `latest.json` never leads it.
 
-Released Janus v1.5 serves the canonical `bundle.json` and does not yet select
-`.br` sidecars. Manager generates the sidecar now; transparent selection at
-`GET /bundle.json` requires the Janus static-file transport to recognize
-precompressed files and set `Content-Encoding: br`. Clients must not request
-`/bundle.json.br` directly.
+Released Janus (≥ v1.6.0) selects precompressed sidecars transparently:
+the client requests `/bundle.json`; with `Accept-Encoding: br` and a same-root
+`bundle.json.br`, Janus serves the sidecar bytes with `Content-Encoding: br`
+and `Vary: Accept-Encoding`. Sites' packaged Caddyfile enables
+`files { precompressed }` (default order `br`, `zstd`, `gzip`). Clients must
+not request `/bundle.json.br` by name. Open work is Sites certification of
+that path through the released binary, not missing Janus transport.
 
 ## Watch mode
 
@@ -282,6 +285,16 @@ Caddy owns TLS and dispatches requests into Janus. Janus owns dynamic App
 registration, root search, API proxying, Hub transport, access streams, and
 weak file ETags. Rip Manager communicates with Janus through its private
 control socket.
+
+## Open leftovers
+
+Architecture above is the shipped contract. Package-local open work
+(logging, `public` posture, compression/security-header pins, Manager
+defaults, distribution, Cart cleanups) lives in
+[packages/sites/TODO.md](../packages/sites/TODO.md). Janus precompressed
+sidecar selection is implemented; pin delivery of `bundle.json` under
+`Accept-Encoding: br` in the Sites suite if that path is not already
+covered.
 
 ## Verification
 

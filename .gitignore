@@ -1,10 +1,7 @@
 node_modules/
+# Track dist/@rip ship artifacts; ignore other dist/ scratch.
 dist/*
-!dist/browser
-dist/browser/*
-!dist/browser/rip.js
-!dist/browser/rip.min.js
-!dist/browser/rip.min.js.br
+!dist/@rip/
 
 .DS_Store
 *.log

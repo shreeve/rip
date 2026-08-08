@@ -3,7 +3,7 @@
 <title>rip certification</title>
 <div id="app"></div>
 <script type="module">
-  import { bootApp } from '/dist/browser/rip.js';
+  import { bootApp } from '/dist/@rip/rip.js';
   const debug = new URLSearchParams(location.search).has('debug');
   globalThis.__bootResult = bootApp({ url: '/bundle.json', debug })
     .then(result => { globalThis.__rip = result; return 'ok'; })
