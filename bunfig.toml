@@ -1,27 +1,8 @@
-# Every .rip file in this repository — the grammar sources included —
-# compiles through the repository's own loader.
 preload = ["./src/cli/loader.js"]
 
 [test]
 preload = ["./src/cli/loader.js"]
-
-# The test boundary: package suites run from their own directories
-# (rip test.rip), and misc/ is an untracked scratch area — root runs
-# exclude both mechanically. `bun run test` further narrows to
-# in-process trees via its script path list (skips test/spawn/).
-# `bun run test:all` crosses the package boundary through
-# scripts/test-all.mjs and runs bare `bun test` for the root lane so
-# spawn + extended tiers still certify. The single suite a local
-# test:all does not run is test/browser (Playwright), which needs
-# installed browsers; CI runs it as its own job via `bun run test:browser`.
 pathIgnorePatterns = ["packages/**", "misc/**", "test/browser/**"]
 
-# The per-test timeout lives in package.json's test script as a CLI
-# flag (`bun test --timeout 15000`): Bun ignores a bunfig [test]
-# timeout key — a key here would be dead config.
-
-# Workspace packages must land in node_modules/@rip-lang/* so in-tree
-# imports resolve here instead of falling through to ~/node_modules
-# (which may still point at a sibling rip-lang checkout).
 [install]
 linker = "hoisted"

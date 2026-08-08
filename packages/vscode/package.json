@@ -88,7 +88,9 @@
     }
   },
   "scripts": {
-    "test": "bun ../../scripts/preflight.mjs && bun test --timeout 30000",
+    "test": "bun run test:unit && bun run test:editor",
+    "test:unit": "bun test --timeout 10000 test/unit",
+    "test:editor": "bun ../../scripts/preflight.mjs && bun test --timeout 30000 test/editor",
     "package": "bun scripts/package.js",
     "install-vscode": "bun ../../scripts/install-ext.mjs rip vscode",
     "install-cursor": "bun ../../scripts/install-ext.mjs rip cursor"

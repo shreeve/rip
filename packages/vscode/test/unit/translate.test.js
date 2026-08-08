@@ -3,7 +3,7 @@
 // conversion, source → generated hover mapping, generated → source
 // diagnostic mapping, and the synthetic-drop policy.
 import { test, expect, describe } from 'bun:test';
-import { compile } from '../../../src/compile.js';
+import { compile } from '../../../../src/compile.js';
 import {
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated,
@@ -12,7 +12,7 @@ import {
   exactSpanMapper, staleOffsetMap,
   isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   diagnosticTagsFor, noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
-} from '../src/translate.js';
+} from '../../src/translate.js';
 
 describe('offset ↔ LSP position', () => {
   const text = 'ab\ncde\n\nf';

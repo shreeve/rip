@@ -6,6 +6,34 @@
 import { test, eq, throws } from '@rip-lang/testing'
 import { createApply } from '../apply.rip'
 
+makeApply = (opts = {}) ->
+  calls = []
+  escaped = []
+  logs = []
+  remountDirty = opts.remountDirty
+  unless remountDirty?
+    remountDirty = if typeof opts.remount is 'function'
+      opts.remount
+    else if opts.remount?
+      remount = opts.remount
+      -> remount
+    else
+      (paths) -> calls.push ['narrow', paths]; 'narrow'
+  escape = opts.escape
+  escape = if not escape?
+    (paths) -> calls.push ['escape', paths]
+  else if escape is 'record'
+    (paths) -> escaped.push paths
+  else
+    escape
+  report = opts.report
+  if report is true
+    report = (...args) -> logs.push args.join ' '
+  options = { renderer: { remountDirty }, escape }
+  options.report = report if report?
+  apply = createApply options
+  { apply, calls, escaped, logs }
+
 test "createApply validates its options", ->
   # @ts-expect-error
   throws (-> createApply()), 'expects an options object'
@@ -15,62 +43,50 @@ test "createApply validates its options", ->
   throws (-> createApply { renderer: remountDirty: -> 'narrow' }), 'requires an escape remount'
 
 test! "absorb ignores an empty set and reloads for ordinary assets", ->
-  calls = []
-  apply = createApply
-    renderer: remountDirty: (paths) -> calls.push ['narrow', paths]; 'narrow'
-    escape: (paths) -> calls.push ['escape', paths]
+  { apply, calls } = makeApply()
   eq apply.absorb!([]), 'ignore'
   eq apply.absorb!(['notes.txt']), 'reload'
   eq calls, []
 
 test! "absorb reports css for CSS-only dirty sets (never reload)", ->
-  calls = []
-  apply = createApply
-    renderer: remountDirty: (paths) -> calls.push ['narrow', paths]; 'narrow'
-    escape: (paths) -> calls.push ['escape', paths]
+  { apply, calls } = makeApply()
   eq apply.absorb!(['styles.css']), 'css'
   eq apply.absorb!(['styles.css', 'theme.css']), 'css'
   eq calls, []
 
 test! "absorb reports reload for HTML dirty sets", ->
-  calls = []
-  apply = createApply
-    renderer: remountDirty: (paths) -> calls.push ['narrow', paths]; 'narrow'
-    escape: (paths) -> calls.push ['escape', paths]
+  { apply, calls } = makeApply()
   eq apply.absorb!(['index.html']), 'reload'
   eq apply.absorb!(['index.html', 'styles.css']), 'reload'
   eq calls, []
 
 test! "absorb reports update when the renderer accepts a narrow remount", ->
-  logs = []
-  escaped = []
-  apply = createApply
-    renderer: remountDirty: -> 'narrow'
-    escape: (paths) -> escaped.push paths
-    report: (...args) -> logs.push args.join ' '
+  { apply, escaped, logs } = makeApply
+    remount: 'narrow'
+    escape: 'record'
+    report: true
   eq apply.absorb!(['routes/index.rip']), 'update'
   eq escaped, []
   eq (logs.some (l) -> l.includes('— update')), true
 
 test! "absorb requests reload after a committed remount with teardown damage", ->
-  apply = createApply
-    renderer: remountDirty: -> 'reload'
+  { apply } = makeApply
+    remount: 'reload'
     escape: -> throw Error.new 'committed remount must not escape'
     report: ->
   eq apply.absorb!(['routes/index.rip']), 'reload'
 
 test! "absorb reports update after whole-launch remount for stash edits", ->
-  escaped = []
-  apply = createApply
-    renderer: remountDirty: -> 'escape'
-    escape: (paths) -> escaped.push paths
+  { apply, escaped } = makeApply
+    remount: 'escape'
+    escape: 'record'
     report: ->
   eq apply.absorb!(['stash.rip']), 'update'
   eq escaped, [['stash.rip']]
 
 test! "absorb surfaces a failed narrow activation", ->
-  apply = createApply
-    renderer: remountDirty: -> throw Error.new 'boom'
+  { apply } = makeApply
+    remountDirty: -> throw Error.new 'boom'
     escape: -> throw Error.new 'failed activation must not escape'
     report: ->
   failure = null
@@ -81,8 +97,8 @@ test! "absorb surfaces a failed narrow activation", ->
   eq failure?.message, 'boom'
 
 test! "an unsupported in-page update may request document reload", ->
-  apply = createApply
-    renderer: remountDirty: -> 'escape'
+  { apply } = makeApply
+    remount: 'escape'
     escape: -> 'reload'
     report: ->
   eq apply.absorb!(['stash.rip']), 'reload'

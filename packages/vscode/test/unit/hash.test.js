@@ -7,7 +7,7 @@ import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { hashTree, hashText, cacheIdentityOf } from '../src/hash.js';
+import { hashTree, hashText, cacheIdentityOf } from '../../src/hash.js';
 
 function makeTree(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-hashtree-'));

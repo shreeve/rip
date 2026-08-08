@@ -26,12 +26,12 @@ import { execSync } from 'node:child_process';
 
 let tsgoAvailable = false;
 try {
-  const { tsgoBinaryPath } = await import('../src/tsgo.js');
+  const { tsgoBinaryPath } = await import('../../src/tsgo.js');
   tsgoBinaryPath();
   tsgoAvailable = true;
 } catch { /* dependencies not installed; tsgo-broker.test.js owns the loud notice */ }
 
-const SERVER = path.resolve(import.meta.dir, '..', 'src', 'server.js');
+const SERVER = path.resolve(import.meta.dir, '..', '..', 'src', 'server.js');
 const uri = 'file:///demo/app.rip';
 
 // Lines chosen for the GPT repro: `greeting` on line 0, `count` on
@@ -41,7 +41,7 @@ const uri = 'file:///demo/app.rip';
 const GOOD = 'greeting = "hello"\ncount = 42\nconsole.log greeting, count\n';
 
 async function startServer(onDiagnostics) {
-  const { LspClient } = await import('../src/tsgo.js');
+  const { LspClient } = await import('../../src/tsgo.js');
   const client = new LspClient('bun', [SERVER, '--stdio'], {
     onNotification: (method, params) => {
       if (method === 'textDocument/publishDiagnostics') onDiagnostics(params);

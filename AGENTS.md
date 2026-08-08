@@ -23,14 +23,12 @@ Permanent documentation:
 
 Working ledgers (not permanent docs):
 
-- `TODO.md` — open design/correctness notes ONLY. Remove items when
-  fixed or moved into real docs/tests; git history and PR bodies are
-  the record of completed work. No done-items archive. Package-local
-  leftovers live beside the package (for example `packages/sites/TODO.md`).
 - `HANDOFF.md` — the tracked session launch document. Read it first
   when starting a session; rewrite it at session boundaries with
   live-verified facts only — never stale state. It is committed like
   any other file.
+- Package-local leftovers live beside the package (for example
+  `packages/sites/TODO.md`).
 
 Placement test for any new document: opened as part of WORKING →
 repository root; consulted for UNDERSTANDING → docs/.
@@ -381,9 +379,10 @@ alters surface syntax updates ALL THREE in the same change.
  load-bearing: on Bun 1.3.14 the test runner does not inherit the
  top-level list. Removing either breaks its half of the world.
 - `packages/vscode` tests never ride the compiler's fast loop; the
- extension suite is its own boundary, which `test:all` runs as one lane
- through that package's own `bun run test` — the same command, and the
- same ~60s, as running it in that directory.
+  extension suite is its own boundary. Edit loop is `bun run test:unit`
+  (protocol/lockstep, seconds, no tsgo preflight); full package /
+  `test:all` still runs `bun run test` — unit then editor certification
+  (~60s with tsgo).
 - An unreproduced single-failure suite run is a KNOWN open mystery
  (sightings: `test:all` 2026-07-20/21, an audit lane 2026-07-28, one
  Playwright firefox spec 2026-07-29 — all unreproduced; evidence
@@ -437,10 +436,12 @@ the affected final gates again.
   Without either, the lane is fail-fast at `janus` and the six
   epochs sorted after it do not run.
 - `bun run test` FROM a package (`packages/vscode`, `packages/sites`,
- `packages/app`, …) — that package's own suite, and the inner loop
- for work on that package; the root fast loop excludes `packages/**`
- by bunfig, and `test:all` reaches these only by spawning them there
- (deps come from the repo-root `bun install`; no package-local lock).
+  `packages/app`, …) — that package's own suite, and the inner loop
+  for work on that package (`packages/vscode` also exposes
+  `test:unit` / `test:editor`); the root fast loop excludes
+  `packages/**` by bunfig, and `test:all` reaches these only by
+  spawning them there (deps come from the repo-root `bun install`; no
+  package-local lock).
 - `bun run test:browser` — the required real-DOM Playwright matrix
  (`test/browser`) across Chromium, Firefox, and WebKit. It does not boot
  the live Cart Server/Manager harness and includes the Workspace

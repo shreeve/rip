@@ -162,21 +162,33 @@ fakeFetch = (routes) ->
       { ok: false, status: 404, json: -> null }
   { fn, calls }
 
-openFeed = (initial = HASH_1, routes = { '/latest.json': JSON.stringify({ hash: HASH_1 }) }, extra = {}) ->
+openFeed = (initial = HASH_1, opts = {}) ->
   active = initial
   applied = []
   reloads = []
   reports = []
   { factory, sockets } = fakeHub()
-  { fn, calls } = fakeFetch routes
+  if opts.fetch?
+    calls = []
+    fn = (url, fetchOpts = {}) ->
+      calls.push { url, opts: fetchOpts }
+      opts.fetch url, fetchOpts
+  else
+    routes = opts.routes ?? { '/latest.json': JSON.stringify({ hash: initial }) }
+    { fn, calls } = fakeFetch routes
+  defaultApply = (change) ->
+    applied.push change
+    return false unless change.from is active
+    active = change.hash
+    true
   client =
-    hash: -> active
-    apply: (change) ->
-      applied.push change
-      return false unless change.from is active
-      active = change.hash
-      true
-    reload: (reason) -> reloads.push reason
+    hash: opts.hash ?? -> active
+    apply: opts.apply ?? defaultApply
+    reload: opts.reload ?? (reason) -> reloads.push reason
+  extra = {}
+  for key, value of opts
+    continue if key is 'routes' or key is 'fetch' or key is 'apply' or key is 'reload' or key is 'hash'
+    extra[key] = value
   options = Object.assign {},
     hub: 'ws://test/hub'
     makeSocket: factory
@@ -192,6 +204,20 @@ ack = (socket) ->
   join = JSON.parse socket.sent[0]
   socket.onmessage { data: JSON.stringify({ '!': join['?'] }) }
   return
+
+subscribe = (socket) ->
+  socket.onopen()
+  ack socket
+  settle!
+  return
+
+reconnect = (sockets) ->
+  sockets[0].onclose()
+  Promise.new! (resolve) -> setTimeout resolve, 10
+  sockets[1].onopen()
+  ack sockets[1]
+  settle!
+  sockets[1]
 
 test "connectFeed validates the callback boundary", ->
   throws (-> connectFeed(null)), 'expects hash, apply, and reload callbacks'
@@ -231,17 +257,15 @@ test! "only one exact server acknowledgement can start the reconnect probe", ->
 
 test! "latest.json is exactly one hash field", ->
   routes = { '/latest.json': JSON.stringify({ hash: HASH_1, unexpected: true }) }
-  { feed, sockets, reports } = openFeed HASH_1, routes
-  sockets[0].onopen()
-  ack sockets[0]
-  settle!
+  { feed, sockets, reports } = openFeed HASH_1, { routes }
+  subscribe! sockets[0]
   ok not feed.connected()
   ok reports.some((args) -> String(args[0]).includes('reconnect check failed'))
   feed.close()
 
 test! "a change received before acknowledgement is buffered and may explain latest", ->
   routes = { '/latest.json': JSON.stringify({ hash: HASH_2 }) }
-  { feed, sockets, applied, reloads, active } = openFeed HASH_1, routes
+  { feed, sockets, applied, reloads, active } = openFeed HASH_1, { routes }
   socket = sockets[0]
   socket.onopen()
   change = { from: HASH_1, hash: HASH_2, list: [['app.rip', 'v2']] }
@@ -257,20 +281,12 @@ test! "a change received before acknowledgement is buffered and may explain late
 test! "a buffered generation beyond a rejected candidate reloads the complete App", ->
   active = HASH_1
   applied = []
-  reloads = []
-  { factory, sockets } = fakeHub()
-  client =
+  { feed, sockets, reloads } = openFeed HASH_1,
     hash: -> active
     apply: (change) ->
       applied.push change.hash
       'rejected'
-    reload: (reason) -> reloads.push reason
-  feed = connectFeed client,
-    hub: 'ws://test/hub'
-    makeSocket: factory
     fetch: -> { ok: true, status: 200, json: -> { hash: HASH_3 } }
-    backoff: { min: 1, max: 2 }
-    ackTimeout: 100
   socket = sockets[0]
   socket.onopen()
   socket.onmessage { data: JSON.stringify({ change: { from: HASH_1, hash: HASH_2, list: [] } }) }
@@ -285,10 +301,8 @@ test! "a buffered generation beyond a rejected candidate reloads the complete Ap
 
 test! "a latest hash outside the subscribed change chain reloads", ->
   routes = { '/latest.json': JSON.stringify({ hash: HASH_2 }) }
-  { feed, sockets, reloads } = openFeed HASH_1, routes
-  sockets[0].onopen()
-  ack sockets[0]
-  settle!
+  { feed, sockets, reloads } = openFeed HASH_1, { routes }
+  subscribe! sockets[0]
   eq reloads.length, 1
   eq feed.connected(), false
   feed.close()
@@ -296,9 +310,7 @@ test! "a latest hash outside the subscribed change chain reloads", ->
 test! "live changes apply serially in WSS arrival order", ->
   { feed, sockets, applied, active } = openFeed()
   socket = sockets[0]
-  socket.onopen()
-  ack socket
-  settle!
+  subscribe! socket
   first = { from: HASH_1, hash: HASH_2, list: [] }
   second = { from: HASH_2, hash: HASH_3, list: [] }
   socket.onmessage { data: JSON.stringify([{ change: first }, { chat: 'foreign' }, { change: second }]) }
@@ -310,9 +322,7 @@ test! "live changes apply serially in WSS arrival order", ->
 test! "client-originated Hub changes never enter the publication feed", ->
   { feed, sockets, applied, reloads, active } = openFeed()
   socket = sockets[0]
-  socket.onopen()
-  ack socket
-  settle!
+  subscribe! socket
   forged = { from: HASH_1, hash: HASH_2, list: [['app.rip', 'attacker source']] }
   socket.onmessage { data: JSON.stringify({ '<': ['attacker'], change: forged }) }
   settle!
@@ -323,21 +333,15 @@ test! "client-originated Hub changes never enter the publication feed", ->
 
 test! "only a server-origin operational reload reloads the App", ->
   forgedRun = openFeed()
-  forgedSocket = forgedRun.sockets[0]
-  forgedSocket.onopen()
-  ack forgedSocket
-  settle!
-  forgedSocket.onmessage { data: JSON.stringify({ '<': ['attacker'], reload: { epoch: 7 } }) }
+  subscribe! forgedRun.sockets[0]
+  forgedRun.sockets[0].onmessage { data: JSON.stringify({ '<': ['attacker'], reload: { epoch: 7 } }) }
   settle!
   eq forgedRun.reloads, []
   forgedRun.feed.close()
 
   trustedRun = openFeed()
-  trustedSocket = trustedRun.sockets[0]
-  trustedSocket.onopen()
-  ack trustedSocket
-  settle!
-  trustedSocket.onmessage { data: JSON.stringify({ reload: { epoch: 8 } }) }
+  subscribe! trustedRun.sockets[0]
+  trustedRun.sockets[0].onmessage { data: JSON.stringify({ reload: { epoch: 8 } }) }
   settle!
   eq trustedRun.reloads, ['server generation changed']
   trustedRun.feed.close()
@@ -353,9 +357,7 @@ test! "malformed publication JSON reloads instead of guessing", ->
 
 test! "a dropped connection resubscribes with a fresh token and probes again", ->
   { feed, sockets, calls } = openFeed()
-  sockets[0].onopen()
-  ack sockets[0]
-  settle!
+  subscribe! sockets[0]
   firstToken = JSON.parse(sockets[0].sent[0])['?']
   sockets[0].onclose()
   Promise.new! (resolve) -> setTimeout resolve, 10
@@ -373,9 +375,8 @@ test! "a reconnect probe waits for an apply already in flight", ->
   started = false
   release = null
   gate = Promise.new (resolve) -> release = resolve
-  { factory, sockets } = fakeHub()
   probes = 0
-  client =
+  { feed, sockets } = openFeed HASH_1,
     hash: -> active
     apply: (change) ->
       started = true
@@ -384,31 +385,19 @@ test! "a reconnect probe waits for an apply already in flight", ->
       active = change.hash
       true
     reload: -> throw Error.new 'coherent reconnect must not reload'
-  feed = connectFeed client,
-    hub: 'ws://test/hub'
-    makeSocket: factory
     fetch: ->
       probes++
       hash = if probes is 1 then HASH_1 else HASH_2
       { ok: true, status: 200, json: -> { hash } }
-    backoff: { min: 1, max: 2 }
-    ackTimeout: 100
   first = sockets[0]
-  first.onopen()
-  ack first
-  settle!
+  subscribe! first
   first.onmessage { data: JSON.stringify({ change: { from: HASH_1, hash: HASH_2, list: [] } }) }
   waitFor = ->
     loop
       return if started
       sleep! 1
   waitFor!
-  first.onclose()
-  Promise.new! (resolve) -> setTimeout resolve, 10
-  second = sockets[1]
-  second.onopen()
-  ack second
-  settle!
+  reconnect! sockets
   eq probes, 1
   release!
   settle!
@@ -419,35 +408,19 @@ test! "a reconnect probe waits for an apply already in flight", ->
 test! "a rejected generation survives reconnect and operational probes", ->
   active = HASH_1
   latest = HASH_1
-  reloads = []
-  { factory, sockets } = fakeHub()
-  client =
+  { feed, sockets, reloads } = openFeed HASH_1,
     hash: -> active
     apply: -> 'rejected'
-    reload: (reason) -> reloads.push reason
-  options =
-    hub: 'ws://test/hub'
-    makeSocket: factory
     fetch: -> { ok: true, status: 200, json: -> { hash: latest } }
-    backoff: { min: 1, max: 2 }
-    ackTimeout: 100
-  feed = connectFeed client, options
   first = sockets[0]
-  first.onopen()
-  ack first
-  settle!
+  subscribe! first
   first.onmessage { data: JSON.stringify({ change: { from: HASH_1, hash: HASH_2, list: [] } }) }
   settle!
   eq reloads, []
   eq active, HASH_1
 
   latest = HASH_2
-  first.onclose()
-  Promise.new! (resolve) -> setTimeout resolve, 10
-  second = sockets[1]
-  second.onopen()
-  ack second
-  settle!
+  second = reconnect! sockets
   eq feed.connected(), true
   eq reloads, []
   second.onmessage { data: JSON.stringify({ reload: { epoch: 9 } }) }
@@ -458,40 +431,26 @@ test! "a rejected generation survives reconnect and operational probes", ->
 
 test! "an operational reload queues a fresh probe behind a stale quarantine probe", ->
   active = HASH_1
-  reloads = []
   fetchCount = 0
   releaseStale = null
   stale = Promise.new (resolve) ->
     releaseStale = -> resolve { ok: true, status: 200, json: -> { hash: HASH_2 } }
-  { factory, sockets } = fakeHub()
-  client =
+  { feed, sockets, reloads } = openFeed HASH_1,
     hash: -> active
     apply: -> 'rejected'
-    reload: (reason) -> reloads.push reason
-  feed = connectFeed client,
-    hub: 'ws://test/hub'
-    makeSocket: factory
     fetch: ->
       fetchCount++
       return { ok: true, status: 200, json: -> { hash: HASH_1 } } if fetchCount is 1
       return stale if fetchCount is 2
       { ok: true, status: 200, json: -> { hash: HASH_3 } }
-    backoff: { min: 1, max: 2 }
-    ackTimeout: 100
 
   first = sockets[0]
-  first.onopen()
-  ack first
-  settle!
+  subscribe! first
   first.onmessage { data: JSON.stringify({ change: { from: HASH_1, hash: HASH_2, list: [] } }) }
   settle!
   eq reloads, []
 
-  first.onclose()
-  Promise.new! (resolve) -> setTimeout resolve, 10
-  second = sockets[1]
-  second.onopen()
-  ack second
+  second = reconnect! sockets
   waitForProbe = ->
     loop
       return if fetchCount is 2

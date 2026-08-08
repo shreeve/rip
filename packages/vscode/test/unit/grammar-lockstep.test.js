@@ -15,11 +15,11 @@
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import path from 'node:path';
-import { compile } from '../../../src/compile.js';
-import { BOOLEAN_ATTRS } from '../../../src/dom.js';
+import { compile } from '../../../../src/compile.js';
+import { BOOLEAN_ATTRS } from '../../../../src/dom.js';
 
 const grammar = JSON.parse(readFileSync(
-  path.resolve(import.meta.dir, '..', 'syntaxes', 'rip.tmLanguage.json'), 'utf8'));
+  path.resolve(import.meta.dir, '..', '..', 'syntaxes', 'rip.tmLanguage.json'), 'utf8'));
 
 // The own-line flag rule, found by shape: a render-block pattern whose
 // match anchors a line-start alternation followed by the end-of-line
@@ -37,7 +37,7 @@ const presenceRule = grammar.patterns.find((p) =>
 const controlRule = grammar.patterns.find((p) =>
   p.name === 'keyword.control.rip' && p.match?.includes('finally'));
 const vimSyntax = readFileSync(
-  path.resolve(import.meta.dir, '..', '..', 'vim', 'syntax', 'rip.vim'), 'utf8');
+  path.resolve(import.meta.dir, '..', '..', '..', 'vim', 'syntax', 'rip.vim'), 'utf8');
 
 describe('own-line bare-flag lockstep (grammar ⇄ compiler)', () => {
   test('the grammar alternation is BOOLEAN_ATTRS minus `loop`', () => {

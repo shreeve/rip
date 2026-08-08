@@ -197,7 +197,7 @@ describe.skipIf(!tsgoAvailable)('per-project tsconfig resolution', () => {
         await api.open(nestedFile, BAD);
         return { root: api.codes(rootFile).includes(2322), nested: api.codes(nestedFile).includes(2322) };
       });
-      const bin = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'bin', 'rip');
+      const bin = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'bin', 'rip');
       const run = spawnSync('bun', [bin, 'check', '--json'], { cwd: ws, encoding: 'utf8', timeout: 90_000 });
       const rows = JSON.parse(run.stdout);
       const batch = {

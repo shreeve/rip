@@ -109,7 +109,7 @@ dammit-on-new, run at language scale.
 ## What the rewrite may bake in
 
 Findings already measured and filed (see the performance map in the
-janus repo and TODO.md) become design inputs instead of patches:
+janus repo) become design inputs instead of patches:
 allocation-light per-request paths in emitted code, emitter output
 shaped for JIT-friendliness, and any hot-path structure the profiler
 has since identified. The clean room is the one place these can be

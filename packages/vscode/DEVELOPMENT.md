@@ -56,11 +56,12 @@ The staged package embeds the compiler from the repository's `src/` (version loc
 
 ## Tests
 
-Extension tests live ONLY in this package (the owner-ratified test boundary): `bun run test` here runs a preflight first that fails loudly if the tsgo binary is missing (run `bun install`), then the suite — which gates each live tsgo test on availability. The repository root's suite excludes `packages/**` mechanically (root `bunfig.toml`), so the compiler's fast loop never absorbs them; CI runs the two suites as separate steps.
+Extension tests live ONLY in this package (the owner-ratified test boundary): `bun run test:unit` is the fast protocol/lockstep loop (no tsgo); `bun run test:editor` runs preflight then tsgo/editor certification; `bun run test` is unit then editor. The repository root's suite excludes `packages/**` mechanically (root `bunfig.toml`), so the compiler's fast loop never absorbs them; CI runs this package via `bun run test`.
 
 ## Distribution & publishing
 
 How the extension (and the rip CLI it depends on) ships is an open
-owner decision — see the Distribution item in the repo-root `TODO.md`.
-Marketplace identity stays `rip-lang.vscode-rip`; each publish must
-increment `packages/vscode/package.json` version and never reuse one.
+owner decision (CLI publish channel, thin-client vs self-contained
+extension, timing). Marketplace identity stays `rip-lang.vscode-rip`;
+each publish must increment `packages/vscode/package.json` version and
+never reuse one.

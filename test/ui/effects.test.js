@@ -31,47 +31,12 @@ const emitFails = (src, re) => {
   expect(() => emit(r, { source: src })).toThrow(re);
 };
 
-// Tier 1 declare-in-place is a SANCTIONED divergence from: this side
-// declares straight-line locals at their first write. unplaced()
-// erases declaration placement from BOTH sides — hoist lines drop,
-// in-place declarations become bare assignments — so these
-// tests keep pinning the feature bytes they exist for.
-const unplaced = (code) => code
-  .replace(/^[ \t]*let [A-Za-z_$][\w$]*(, [A-Za-z_$][\w$]*)*;\n\n?/gm, '')
-  .replace(/^([ \t]*)let ([A-Za-z_$][\w$]*)( = )/gm, '$1$2$3');
-
 // Eval pairing: each compiler's undecorated output runs against ITS
 // runtime — tier 4 with the delivery seam factored out.
 const NAMES = ['__state', '__computed', '__effect', '__batch'];
 const runWith = (runtime, code, harness) =>
   new Function(...NAMES, `${code}\n${harness}`)(...NAMES.map((n) => runtime[n]));
 const evalBoth = (src, harness) => runWith(rt, compile(src).code, harness);
-
-// ════════════════════════════════════════════════════════════════════
-// Grammar: the six the old runtime rule shapes (plus typed twins), sexpr pins
-// ════════════════════════════════════════════════════════════════════
-
-describe('the effect forms parse to  sexpr shapes', () => {
-  const rows = [
-    ['~> f()', ['program', ['effect', null, ['f']]]],
-    ['~>\nf()', ['program', ['effect', null, ['f']]]],
-    ['~>\n  a = 1\n  b', ['program', ['effect', null, ['block', ['=', 'a', '1'], 'b']]]],
-    ['h ~> f()', ['program', ['effect', 'h', ['f']]]],
-    ['h ~>\nf()', ['program', ['effect', 'h', ['f']]]],
-    ['h ~>\n  g()', ['program', ['effect', 'h', ['block', ['g']]]]],
-    // THE POSTFIX SHIFT (the record's shape, extended): EFFECT sits
-    // below POST_IF, so the guard shifts INTO the body — the effect
-    // registers unconditionally; only the body run is conditional.
-    ['~> f() if c', ['program', ['effect', null, ['if', 'c', [['f']]]]]],
-    ['export h ~> f()', ['program', ['export', ['effect', 'h', ['f']]]]],
-    // The typed twin erases to the identical s-expression.
-    ['h: Function ~> f()', ['program', ['effect', 'h', ['f']]]],
-    // The spellable head: a user CALL builds the same array .
-    ['effect h, 5', ['program', ['effect', 'h', '5']]],
-  ];
-  for (const [src, sexpr] of rows) {
-  }
-});
 
 describe('token fixtures: the `~>` spelling', () => {
   const stream = (src) => tokenize(src).tokens.map((t) => `${t.kind}:${t.value}`);
@@ -99,68 +64,12 @@ describe('token fixtures: the `~>` spelling', () => {
   });
 });
 
-// ════════════════════════════════════════════════════════════════════
-// Lowerings: byte pins, Function-validated
-// ════════════════════════════════════════════════════════════════════
-
-describe('lowerings byte-match  where  is correct', () => {
-  const rows = [
- '~> console.log(1)',
- '~>\nconsole.log(1)',
- '~>\n  a = 1\n  console.log(a)',
- 'h ~> console.log(1)',
- 'h ~>\n  console.log(1)',
- 'h ~>\n  1 + 2',
-    // Arrow-valued bodies pass through AS the effect function (`->`
-    // grouped, `=>` bare — the value-context bytes); an awaiting
-    // arrow is the async surface both compilers share.
- '~> -> console.log(1)',
- 'h ~> => console.log(1)',
- 'h ~> => await f()',
-    // The postfix shift: the guard compiles INTO the body.
- '~> f() if c',
- '~> f() unless c',
- 'h ~> f() if c',
-    // Reads and writes inside effect bodies unwrap AND track — the
-    // runtime's dependency tracking meeting the surface.
- 'count := 0\n~> console.log(count)',
- 'count := 0\n~> count = count + 1',
- 'count := 0\n~>\n  console.log count',
- 'count := 0\nh ~> console.log(count)\nconsole.log(h)',
-    // A BARE effect is a valid expression: the disposer is the value.
- 'x = (~> f())',
- 'g(~> f())',
- 'f = ->\n  ~> g()',
- 'h ~> f()\nh()',
- 'export h ~> f()',
- '~>\n  ~> f()',
-    // The cleanup channel: a block body implicitly RETURNS its last
-    // expression; a returned function is the effect's cleanup.
- 'h ~>\n  id = setInterval((-> 1), 10)\n  -> clearInterval(id)',
-    // Typed twin: byte-identical erasure.
- 'h: Function ~> f()',
-    // A body writing an outer (hoisted) name assigns it, no shadow.
- 'tick = 0\n~> tick = tick + 1',
- '~> "side"',
- '~> (x for x in xs)',
- 'do -> ~> f()',
- 'def g()\n  ~> f()',
-    // Bare effects in statement blocks are plain expression statements.
- 'if c\n  ~> f()',
- 'try\n  ~> f()\ncatch e\n  g()',
-  ];
-  for (const src of rows) {
-  }
-
+describe('typed twin erasure', () => {
   test('the typed twin compiles byte-identical to its untyped twin (erasure-neutrality)', () => {
     expect(compile('h: Function ~> f()').code).toBe(compile('h ~> f()').code);
     expect(compile('export h: Function ~> f()').code).toBe(compile('export h ~> f()').code);
   });
 });
-
-// ════════════════════════════════════════════════════════════════════
-// Eval checks: the runtime meets the surface, paired on both runtimes
-// ════════════════════════════════════════════════════════════════════
 
 describe('eval checks: paired runs against each side\'s own runtime', () => {
   test('THE END-TO-END PIN: a state write triggers the effect (both runtimes)', () => {

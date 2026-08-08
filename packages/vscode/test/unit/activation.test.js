@@ -28,7 +28,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PKG_DIR = path.join(HERE, '..');
+const PKG_DIR = path.join(HERE, '..', '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(PKG_DIR, 'package.json'), 'utf8'));
 
 const EXT_PATH = '/fake/extension/path';       // what the host passes as context.extensionPath
