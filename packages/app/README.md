@@ -1,6 +1,15 @@
-# @rip-lang/app
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
 
-Dependency-free application data substrate for Rip.
+# Rip App - @rip-lang/app
+
+> **Dependency-free application data substrate — stash, source, routes, workspace, and apply.**
+
+The client-side substrate for Rip applications: lazy source-backed data,
+routing, mutations, timing signals, Workspace publication consumption, and
+watch-mode apply. Named exports only; zero npm dependencies.
+
+**Runtime:** browser-safe (`rip.browser: true`). Server/tooling helpers such as
+`rash` / `check` also run under Bun.
 
 The package currently provides:
 

@@ -1,17 +1,21 @@
-# @rip-lang/ui
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
 
-First-party UI infrastructure for Rip.
+# Rip UI - @rip-lang/ui
 
-The package is organized by ownership:
+> **First-party UI infrastructure — email components, shared utilities, and Tailwind compilation.**
+
+Named-export surfaces for browser and email UI. Ownership is split so each
+boundary stays clear:
 
 - `email/` — synchronous server-side email DOM, rendering, and components
 - `shared/` — utilities genuinely shared by browser and email surfaces
 - `tailwind/` — the sole boundary for Tailwind compilation and CSS parsing
 
-Public APIs use named exports. This package's dependency budget
-(`css-tree`, `tailwindcss` — exact pins) lives in its `package.json`;
-the repo-root `bun.lock` owns resolution under the hoisted workspace.
-The Rip compiler itself remains dependency-free.
+**Runtime:** email rendering is server-side (Bun); `browser/` and `shared/`
+are for browser consumers. Dependency budget is `css-tree` and `tailwindcss`
+(exact pins in this package's `package.json`; the repo-root `bun.lock` owns
+resolution under the hoisted workspace). The Rip compiler itself remains
+dependency-free.
 
 ## Email
 

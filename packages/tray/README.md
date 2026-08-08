@@ -1,4 +1,4 @@
-<img src="assets/rip-color.svg" alt="Rip" width="50" />
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
 
 # Rip Tray - @rip-lang/tray
 
@@ -9,8 +9,8 @@ callbacks. One reusable SwiftUI **host** (`rip-tray-host`) renders whatever
 panel the provider sends and returns clicks. There is no YAML/JSON menu schema
 and no Sites-specific code in the host.
 
-**Runtime:** macOS — providers use Bun processes; the host uses SwiftUI/AppKit.
-Not browser-safe.
+**Runtime:** not browser-safe — macOS only; providers use Bun processes and
+the host uses SwiftUI/AppKit.
 
 ## Mental model
 
