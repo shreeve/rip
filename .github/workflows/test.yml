@@ -1,18 +1,14 @@
-# Lightweight CI for every push and pull request to main. Package milestone suites
-# are run by their owners while a layer is being built; exhaustive repository
-# and corpus certification live in the explicit repository-certification
-# workflow.
+# PR merge gate for main. Runs on pull requests (and manual dispatch),
+# not again on the post-merge push — the PR already proved the tip.
+# Required checks `test` and `browser` are enforced by the main ruleset
+# so a red gate blocks the merge. Exhaustive certification stays in the
+# manual repository-certification / cart-certification workflows.
 #
-# `browser` is the real-browser smoke matrix, isolated because its
-# slow part is not ours: `playwright install --with-deps` runs an apt
-# install the browser cache cannot cover, and a throttled Ubuntu mirror
-# can stretch it past 20 minutes — a stall that must not sit between a
-# green verdict and its report.
+# `browser` is isolated because its slow part is not ours: Playwright
+# install --with-deps runs apt work the browser cache cannot cover.
 name: test
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -45,10 +41,6 @@ jobs:
       - name: Rip language battery
         run: bun run test:rip
 
-  # The one smoke suite test:all does not carry: it needs real browsers,
-  # which a local checkout is not required to have. Parallel to `test`, so its
-  # environment setup — the slowest and least ours part of CI — cannot
-  # delay the main verdict.
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 40
