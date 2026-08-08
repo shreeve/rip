@@ -11,6 +11,11 @@ Rip types are recorded, erased, and delegated.
 There is one Rip language, not separate typed and untyped dialects.
 Type-free programs pay no runtime or output cost.
 
+**Status:** this architecture is the shipping contract. Open product
+directions (optional-parameter strictness, workspace-wide editor
+features, render-DSL face positions, derived-schema `.d.ts`) live in
+[ROADMAP.md](ROADMAP.md), not as missing milestones in this file.
+
 ## Two consumers, one program
 
 The compiler serves two TypeScript consumers without changing the

@@ -4,7 +4,7 @@ import zlib from 'node:zlib'
 import { execSync } from 'node:child_process'
 
 const files = [
-  'dist/browser/rip.js',
+  'dist/@rip/rip.js',
   'src/emitter.js',
   'src/parser.js',
   'src/lexer.js',
@@ -88,8 +88,8 @@ const brotli = (buf) => zlib.brotliCompressSync(buf, {
 const minify = new Bun.Transpiler({ loader: 'js', minify: true, target: 'browser' })
 
 const label = process.argv[2] || 'BEFORE'
-// Scratch report — dist/browser/* is gitignored except the ship artifacts.
-const outPath = process.argv[3] || 'dist/browser/SIZES.md'
+// Scratch report — covered by root tmp-* gitignore.
+const outPath = process.argv[3] || 'tmp-SIZES.md'
 
 const rows = []
 for (const file of files) {
@@ -137,7 +137,7 @@ const lines = [
 
 for (const r of rows) {
   const name = r.file
-    .replace('dist/browser/', 'dist/')
+    .replace('dist/@rip/', 'dist/')
     .replace(/^src\//, '')
   lines.push(
     `| ${name} | ${kb(r.raw)} | ${kb(r.nocom)} | ${kb(r.min)} | ${kb(r.brRaw)} | ${kb(r.brNocom)} | ${kb(r.brMin)} | ${r.cmtPct.toFixed(0)}% |`,
@@ -147,7 +147,7 @@ for (const r of rows) {
 lines.push('')
 lines.push('## Notes')
 lines.push('')
-lines.push('- `dist/rip.js` is the committed unminified browser bundle.')
+lines.push('- `dist/@rip/rip.js` is the committed unminified browser bundle.')
 lines.push('- Per-file `min` is Bun.Transpiler minify on that file alone.')
 lines.push('- `runtime/orm.js` is CLI/server weight; it must stay out of the browser graph.')
 lines.push('- Full-graph `rip.min.js` / `.br` sizes are recorded after the bundle script emits them.')

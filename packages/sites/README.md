@@ -394,7 +394,8 @@ project/
 │   ├── routes/[id].rip           live Rip modules
 │   └── styles.css
 └── dist/                         manager-owned publication
-    ├── @rip/rip.js
+    ├── @rip/rip.min.js
+    ├── @rip/rip.min.js.br
     ├── bundle.json
     ├── bundle.json.br            precompressed bundle representation
     └── latest.json               current App identity
@@ -752,7 +753,7 @@ Janus serves:
 - The App shell
 - Authored `.rip`, CSS, HTML, and other registered files
 - `bundle.json` and `latest.json`
-- The browser runtime at `/@rip/rip.js`, including compiled `@rip-lang/app`
+- The browser runtime at `/@rip/rip.min.js`, including compiled `@rip-lang/app`
 - Hub WebSockets
 
 Workers serve API routes only. The manager writes files and publishes control
@@ -761,7 +762,8 @@ state but is never on the client data path.
 The complete `@rip-lang/app` package is part of the versioned browser runtime,
 not an App publication. `bundle.json` carries authored modules and any imported
 non-core browser packages; it never duplicates App framework source. Authored
-imports from `@rip-lang/app` resolve to the copy already active in `rip.js`.
+imports from `@rip-lang/app` resolve to the copy already active in
+`/@rip/rip.min.js`.
 
 The conventional change policy updates every `.rip`, refreshes every `.css`,
 and reloads for every other non-hidden App file. Paths are relative to the App
@@ -859,7 +861,7 @@ The rules are:
 - `hash` is the resulting complete App hash.
 - `list` contains exactly `[modulePath, RipSource]` pairs.
 - The list is sorted by module path and contains every browser Rip module once.
-- `@rip-lang/app` is absent because `rip.js` embeds it.
+- `@rip-lang/app` is absent because `/@rip/rip.min.js` embeds it.
 - CSS, HTML, images, fonts, video, and other ordinary assets are absent.
 - A complete bundle contains no deletion markers.
 
@@ -1138,7 +1140,8 @@ server logic into Rip App:
   or unknown-asset reload, last-known-good behavior, and one atomic apply
   batch.
 
-The complete browser surface still belongs to Rip App and ships in `rip.js`.
+The complete browser surface still belongs to Rip App and ships in
+`/@rip/rip.min.js`.
 Its internal launch core receives compiled components and remains ignorant of
 HTTP, WSS, `latest.json`, and bundle syntax.
 

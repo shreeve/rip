@@ -45,7 +45,8 @@ host and the trusted local CA.
 Manager writes these files under `dist/`:
 
 ```text
-@rip/rip.js
+@rip/rip.min.js
+@rip/rip.min.js.br
 bundle.json
 bundle.json.br
 latest.json

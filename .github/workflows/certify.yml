@@ -41,7 +41,7 @@ jobs:
       - name: Browser bundle
         run: |
           bun run browser
-          git diff --exit-code dist/browser
+          git diff --exit-code dist/@rip
 
   audit:
     runs-on: ubuntu-latest

@@ -2,7 +2,15 @@
 
 The Workspace is Rip App's browser-side view of a published application. It
 holds the active Rip module program, remembers one complete App hash, and
-provides the mutation boundary used by live development and future HMR.
+provides the mutation boundary used by live development and HMR.
+
+**Status:** the publication and reconnect contract below is shipped and
+CI-certified (Sites Manager + Rip App browser boot +
+`bun run test:browser`). Framework refresh on top of this wire is
+[HMR.md](HMR.md) (product Cart bars done). Open edge/browser leftovers
+live in [ROADMAP.md](ROADMAP.md) and
+[packages/sites/TODO.md](../packages/sites/TODO.md) — not as missing
+Workspace milestones.
 
 The durable architecture is producer versus consumer:
 
@@ -41,7 +49,7 @@ The initial publication is `/bundle.json`:
 browser Rip program as canonical `[modulePath, source]` pairs. It includes
 authored browser Rip modules, browser-safe package source, generated browser
 schema projections, and `data.rip` when present. `@rip-lang/app` is already
-embedded in `rip.js` and is absent from the list.
+embedded in `/@rip/rip.min.js` and is absent from the list.
 
 CSS, HTML, images, fonts, videos, and other ordinary assets are absent from
 the source list. They remain normal HTTP resources and use the browser's HTTP

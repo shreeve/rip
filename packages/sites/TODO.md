@@ -1,71 +1,54 @@
 # TODO — Rip Sites
 
-Open work only. Remove an item when it lands or moves into real docs/tests;
-commits and PR bodies retain completed history.
+Open work only. Delete a line when it lands or moves into docs/tests.
 
-## Edge postures (follow-ups)
+## Edge
 
-Default / local / trust / dual-port launchd / Rip status / tray mode
-controls landed. Remaining:
-
-- [ ] Land uncommitted LAN dual-claim + status-page Start/Stop/Restart
-      (working tree: `agent.rip`, demos `serve.rip`, `Caddyfile.local`
-      `mdns { apps on }`, README walkthrough).
-- [ ] **`public` posture (phase 2):** ACME / real DNS hosts; keep
-      `rip sites expose public` refusing until the Caddyfile and mode
-      exist. Do not persist `public` in state before that.
+- [ ] **`public` posture:** ACME / real DNS; keep `expose public` refusing
+      until Caddyfile + mode exist. Do not persist `public` in state first.
 - [ ] Behavioral appliance pins for trust gate, mode flip (stop sites
-      first), and `.local` host registration — today only static string
-      pins.
-- [ ] After control-plane / Caddyfile changes, document (or automate)
+      first), and `.local` host registration (today: static string pins).
+- [ ] After control-plane / Caddyfile changes, document or automate
       restart so launchd dual-socket listeners cannot race a stale
       in-memory process writing an old plist.
+- [ ] Pin `GET /bundle.json` + `Accept-Encoding: br` → Manager
+      `bundle.json.br` bytes (`Content-Encoding: br`, `Vary:
+      Accept-Encoding`) through released Janus. Packaged Caddyfiles
+      already have `files { precompressed }`; the janus test fixture
+      still uses bare `files`.
+- [ ] Pin one Caddy compression policy (encodings, min size, MIME
+      exclusions, streaming, pre-encoded, `no-transform`) and certify
+      through released Janus.
+- [ ] Pin edge security-header baseline + fill-only precedence;
+      certify static, generated, SPA shell, X-Sendfile, proxied API,
+      redirects, Janus errors.
 
-## Opt-in file logging
+## Logging
 
-Roadmap still cites a README Planned contract that no longer exists.
-Re-lock before coding:
+- [ ] Opt-in merged file log: decide `serve.rip` `logs:` vs
+      `RIP_LOG_DIR` (precedence; foreground vs remembered apps —
+      control already writes `apps/<id>.log`), then
+      `<dir>/server.log` (0600). Stdout when unset. Edge `access.log`
+      stays Caddy/operator-owned.
 
-- [ ] Decide knob shape: `serve.rip` `logs: '<dir>'` and/or
-      `RIP_LOG_DIR`; env vs serve precedence; foreground-only vs also
-      remembered apps (control already writes `apps/<id>.log`).
-- [ ] Implement merged stream → `<dir>/server.log` (0600); stdout
-      remains the default when unset. Edge `access.log` stays
-      Caddy/operator-owned.
-- [ ] Drop or rewrite the stale “Planned section” pointer in
-      `docs/ROADMAP.md`.
+## Manager
 
-## Edge policy
+- [ ] Watch on by default; drop `--watch`; keep `--no-watch` /
+      `--no-watch-app` / `--no-watch-api`.
+- [ ] Symlinked / workspace API deps participate in invalidation.
+- [ ] Bound heartbeat / re-registration so a stalled control plane
+      cannot pile overlapping requests.
+- [ ] One concurrency policy, not environment-named modes.
 
-- [ ] Pin one Caddy compression policy: encodings, minimum size, MIME
-      exclusions, streaming bodies, pre-encoded responses, and
-      `Cache-Control: no-transform`.
-- [ ] Certify compression through released Janus (streaming,
-      `no-transform`, already-encoded response).
-- [ ] Pin the edge security-header baseline and fill-only precedence so
-      explicit application headers win; certify across static files,
-      generated files, SPA shells, `X-Sendfile`, proxied API, redirects,
-      and Janus-generated errors.
+## Distribution
 
-## Manager policy
+- [ ] Signed/notarized tray host, Janus-enabled Caddy, and local edge
+      assets. Control plane stays edge-scoped (no idle forever
+      LaunchAgent for a separate Agent product).
 
-- [ ] Make watching the default; remove `--watch`; keep `--no-watch` /
-      `--no-watch-app` / `--no-watch-api` as explicit opt-outs.
-- [ ] Make configured symlinked and workspace dependencies participate
-      in API invalidation.
-- [ ] Bound heartbeat and re-registration so a stalled control plane
-      cannot accumulate overlapping requests.
-- [ ] Pin one concurrency policy independent of environment-named modes.
+## Cart demo
 
-## Appliance / distribution
-
-- [ ] Signed/notarized distribution for tray host, Janus-enabled Caddy,
-      and local edge assets. Control plane is edge-scoped (no idle
-      forever LaunchAgent for a separate Agent product).
-
-## Project cleanups
-
-- [ ] Remove Cart’s worker route for authored `app/styles.css` if Janus
-      already serves it from the App root.
-- [ ] Move Cart migration and seed setup out of worker import into an
-      explicit one-off command.
+- [ ] Drop worker `get '/styles.css'` if Janus App-root serving covers
+      it.
+- [ ] Move migrate/seed off worker import (`setup!` in `index.rip`)
+      into an explicit one-off command.

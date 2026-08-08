@@ -8,7 +8,7 @@
   <body>
     <div id="app"></div>
     <script type="module">
-      import { bootApp } from '/@rip/rip.js'
+      import { bootApp } from '/@rip/rip.min.js'
       const debug = new URLSearchParams(location.search).has('debug')
       bootApp({ url: '/bundle.json', debug, watch: true })
     </script>

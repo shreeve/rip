@@ -784,9 +784,13 @@ publishApp = (project, name, watch, documents = undefined, declaredShell = null)
   else if documents?
     commitAppDocuments project, documents
     publication = documents
-  runtime = join(loaderDir(), '..', '..', 'dist', 'browser', 'rip.js')
+  shipDir = join(loaderDir(), '..', '..', 'dist', '@rip')
+  runtime = join shipDir, 'rip.min.js'
+  runtimeBr = join shipDir, 'rip.min.js.br'
   abort "rip-site: browser runtime missing at #{runtime}" unless existsSync runtime
-  copyFileSync runtime, join(dist, '@rip', 'rip.js')
+  abort "rip-site: browser runtime brotli missing at #{runtimeBr}" unless existsSync runtimeBr
+  copyFileSync runtime, join(dist, '@rip', 'rip.min.js')
+  copyFileSync runtimeBr, join(dist, '@rip', 'rip.min.js.br')
 
   authoredShell = join project.appRoot, 'index.html'
   shell = declaredShell or authoredShell
@@ -799,7 +803,7 @@ publishApp = (project, name, watch, documents = undefined, declaredShell = null)
     <title>#{escapeHtml(name)}</title>
     <div id="app"></div>
     <script type="module">
-      import { bootApp } from '/@rip/rip.js'
+      import { bootApp } from '/@rip/rip.min.js'
       bootApp({ url: '/bundle.json', watch: #{if watch then 'true' else 'false'} })
     </script>
     """
