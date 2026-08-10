@@ -9520,6 +9520,16 @@ class Emitter {
         bound.push(...Emitter.importedNames([x]));
         return;
       }
+      if (x[0] === "typed-var" && x.length === 3) {
+        walk(x[1]);
+        return;
+      }
+      if (x[0] === "def-sig") {
+        walk(x[2]);
+        return;
+      }
+      if (x[0] === "type-decl")
+        return;
       for (const c of x)
         walk(c);
     };
@@ -10348,7 +10358,7 @@ class Emitter {
     }
     return specs;
   }
-  static TYPE_ROLES = new Set(["annotation", "returnType", "typeParams"]);
+  static TYPE_ROLES = new Set(["annotation", "returnType", "typeParams", "declaration"]);
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {
@@ -22450,6 +22460,10 @@ class __Component {
         });
       }
     }
+    if (this.app == null && globalThis.__ripApp != null)
+      this.app = globalThis.__ripApp;
+    if (this.router == null && globalThis.__ripRouter != null)
+      this.router = globalThis.__ripRouter;
     __checkDeclaredProps(this.constructor, this);
     const declared = this.constructor.__props ?? [];
     const extendsTag = this.constructor.__extends ?? null;
