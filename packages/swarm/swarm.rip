@@ -98,13 +98,14 @@ char = wide = len = null
 drawFrame! = (workers) ->
   len = String(workers).length
   write clear()
-  write go(2 + workers, len + 3) + "╰" + "─".repeat(wide + 2) + "╯"
   write go(1,           len + 3) + "╭" + "─".repeat(wide + 2) + "╮"
   for i in [0...workers]
     write go(i + 2, 1)
     label = String(i + 1).padStart(len)
     write " #{label} │ " + " ".repeat(wide) + " │"
-  write go(workers + 3, len + 3) + "│ " + " ".repeat(wide) + " │"
+  write go(workers + 2, len + 3) + "├"  + "─".repeat(wide  + 2) + "┤"
+  write go(workers + 3, len + 3) + "│ " + " ".repeat(wide) +     " │"
+  write go(workers + 4, len + 3) + "╰"  + "─".repeat(wide  + 2) + "╯"
 
 draw! = (state) ->
   { live, done, died, jobs, workers, info } = state
@@ -170,10 +171,10 @@ export swarm! = (opts = {}) ->
     exit(0)
 
   # run setup
-  abort 'error: perform() function is required' unless kind(opts.perform) is 'function'
+  abort 'error: perform() function is required' unless typeof opts.perform is 'function'
 
   context = {}
-  if kind(opts.setup) is 'function'
+  if typeof opts.setup is 'function'
     result = opts.setup!
     context = result if result? and typeof result is 'object'
   context.safe = dosafe
@@ -219,7 +220,7 @@ export swarm! = (opts = {}) ->
   process.on 'SIGINT', ->
     unless quiet
       cursor(true)
-      write go(workers + 5, 1) + "\n"
+      write go(workers + 6, 1) + "\n"
     exit(1)
   unless quiet
     process.on 'SIGWINCH', ->
@@ -272,7 +273,7 @@ export swarm! = (opts = {}) ->
               fatal = true
               unless quiet
                 cursor(true)
-                write go(workers + 5, 1)
+                write go(workers + 6, 1)
               abort "\nswarm: #{msg.error}"
           when 'ready'
             dispatchNext(w, slot)
@@ -328,7 +329,7 @@ export swarm! = (opts = {}) ->
       write go(parseInt(slot) + 1, len + 5) + fgw + bg("5383ec") + char.repeat(wide) + fg() + bg() + " │ #{n} jobs @ #{rate}/sec" + clear(true)
     draw({ live: 0, done, died, jobs, workers, info })
     cursor(true)
-    write go(workers + 5, 1)
+    write go(workers + 6, 1)
     write "#{secs.toFixed(2)} secs"
     write " for #{jobs} jobs"
     write " by #{workers} workers"
@@ -427,7 +428,7 @@ if not isMainThread and workerData?.scriptPath?
   perform = null
   try
     import!(pathToFileURL(workerData.scriptPath).href)
-    raise 'No perform() function provided to swarm()' unless kind(_workerPerform) is 'function'
+    raise 'No perform() function provided to swarm()' unless typeof _workerPerform is 'function'
     perform = _workerPerform
   catch err
     parentPort.postMessage { type: 'error', error: err.message }
