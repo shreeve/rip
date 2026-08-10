@@ -747,6 +747,13 @@ class __Component {
         });
       }
     }
+    // Ambience: `@app` and `@router` are how everything works, so every
+    // component reaches them by default. Route-chain components got the
+    // renderer's injection above; everything else falls back to the
+    // live launch globals. `@params`/`@query` stay route-only — they
+    // are navigation state, not app state.
+    if (this.app == null && globalThis.__ripApp != null) this.app = globalThis.__ripApp;
+    if (this.router == null && globalThis.__ripRouter != null) this.router = globalThis.__ripRouter;
     __checkDeclaredProps(this.constructor, this);
     const declared = this.constructor.__props ?? [];
     const extendsTag = this.constructor.__extends ?? null;
