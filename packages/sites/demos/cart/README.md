@@ -23,7 +23,7 @@ Client modules import `UserPublic` / etc. from `../api/models.rip`; the
 bundler overlays shippable projections at that path (`:model` stays server-side).
 
 Persistence starts on **bun:sqlite**. A follow-up swaps `api/db.rip` to
-`@rip-lang/db` (DuckDB over duckdb-harbor).
+`rip/db` (DuckDB over duckdb-harbor).
 
 ## Run
 

@@ -268,9 +268,9 @@ test 'heregex forward slashes', '''
       ([^/]+)       # hostname
       (/.*)?$       # path
     ///
-    [_, proto, host, path] = "https://rip-lang.org/docs".match(pattern)
+    [_, proto, host, path] = "https://ripdev.io/docs".match(pattern)
     host
-  ''', "rip-lang.org"
+  ''', "ripdev.io"
 
 code 'regex literal', '/test/', '/test/'
 code 'regex with flags', '/test/gi', '/test/gi'

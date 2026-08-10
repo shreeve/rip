@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createStash, persistStash, source, unwrapStash } from '@rip-lang/app';
+import { createStash, persistStash, source, unwrapStash } from 'rip/app';
 
 const fakeStorage = (initial = {}) => {
   const table = new Map(Object.entries(initial));

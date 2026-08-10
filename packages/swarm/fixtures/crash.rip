@@ -2,7 +2,7 @@
 # bare exit. The main thread must count the in-flight task as died,
 # respawn the worker, and still finish the batch cleanly.
 
-import { swarm, init, retry, todo } from '@rip-lang/swarm'
+import { swarm, init, retry, todo } from 'rip/swarm'
 
 setup = ->
   unless retry()

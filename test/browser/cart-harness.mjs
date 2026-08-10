@@ -2,8 +2,8 @@
 // Janus edge. API requests proxy to API-only workers; registered roots serve
 // App/dist bytes; `/hub` fans out ordered Manager publication changes.
 import {
-  cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync,
-  statSync, symlinkSync, unlinkSync, writeFileSync, readFileSync,
+  cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -21,19 +21,8 @@ const fixtureRoot = mkdtempSync(join(tmpdir(), `rip-cart-harness-${process.pid}-
 const cartDir = join(fixtureRoot, 'cart');
 cpSync(cartSrc, cartDir, { recursive: true });
 
-// Bun resolves @rip-lang/* upward from the app; seed the same workspace
-// links the server suite uses so a /tmp cart boots the checkout's packages.
-const nm = join(fixtureRoot, 'node_modules', '@rip-lang');
-mkdirSync(nm, { recursive: true });
-const repoRipLang = join(root, 'node_modules', '@rip-lang');
-for (const name of readdirSync(repoRipLang)) {
-  const target = join(repoRipLang, name);
-  // Skip dangling workspace leftovers (e.g. a stale `site` link after rename).
-  if (!existsSync(target)) continue;
-  const link = join(nm, name);
-  try { unlinkSync(link); } catch { /* fresh */ }
-  symlinkSync(target, link);
-}
+// The cart imports `rip/*` — the loader's stdlib namespace resolves
+// them from this checkout, so a /tmp cart needs no node_modules.
 
 const ctlSock = join(fixtureRoot, 'janus.sock');
 const calls = [];

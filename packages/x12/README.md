@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip X12 - @rip-lang/x12
+# Rip X12
 
 > **X12 EDI parser, editor, and query engine — path-based addressing over auto-detected separators, zero dependencies.**
 
@@ -16,12 +16,8 @@ filesystem (`fs`). One `.rip` file.
 
 ## Quick Start
 
-```bash
-bun add @rip-lang/x12
-```
-
 ```coffee
-import { X12 } from '@rip-lang/x12'
+import { X12 } from 'rip/x12'
 
 # Parse an X12 message
 x12 = new X12 rawString

@@ -4,7 +4,7 @@ import {
   createStash,
   source,
   unwrapStash,
-} from '@rip-lang/app';
+} from 'rip/app';
 import { __effect } from '../../../src/runtime/reactive.js';
 
 const deferred = () => {

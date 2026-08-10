@@ -1,8 +1,8 @@
 # ==============================================================================
-# @rip-lang/ui/email — curated email rendering + public component surface
+# rip/ui/email — curated email rendering + public component surface
 #
 # Usage:
-#   import { toHTML, Email, Head, Body, Container, Heading, Text, Button } from '@rip-lang/ui/email'
+#   import { toHTML, Email, Head, Body, Container, Heading, Text, Button } from 'rip/ui/email'
 #   html = toHTML(MyEmail, name: "Alice")
 # ==============================================================================
 

@@ -19,7 +19,7 @@ Order:
     `rip sites` lifecycle (no separate edge/site CLIs).
 11. `janus` — the released Janus data plane and control plane.
 
-Code enters `@rip-lang/sites` only when one of these fixtures demonstrates why
+Code enters `rip/sites` only when one of these fixtures demonstrates why
 the server, rather than Janus, Caddy, or application code, must own it.
 
 ## Capability admission

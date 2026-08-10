@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip Script - @rip-lang/script
+# Rip Script
 
 > **Homoiconic interaction engine — the nested data structure IS the program, driving PTY, SSH, and TCP conversations.**
 
@@ -16,7 +16,7 @@ branching on patterns, and recursing into sub-scripts.
 ## Quick Start
 
 ```coffee
-import Script from '@rip-lang/script'
+import Script from 'rip/script'
 
 chat = Script.spawn! 'bash'
 

@@ -2570,7 +2570,7 @@ connection.onHover(async (params) => {
 // current-buffer range — quotes included, matching what TypeScript
 // underlines — or null. This is the origin a client underlines for
 // go-to-definition: left to the editor's word pattern, a path like
-// `@rip-lang/http` underlines one segment at a time (words break at `/`,
+// `rip/http` underlines one segment at a time (words break at `/`,
 // `-`, `.`) where TypeScript underlines the whole string literal. The
 // stores carry the exact span, so a definition answered from inside one
 // names it — as LocationLink's originSelectionRange, which only a

@@ -1,4 +1,4 @@
-import { test, eq, ok } from '@rip-lang/testing'
+import { test, eq, ok } from 'rip/testing'
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -38,9 +38,8 @@ buildWorker = (dir, appEntry) ->
 
 temporaryProject = (dir, fixture) ->
   project = join dir, 'project'
-  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
+  mkdirSync project, { recursive: true }
   copyFileSync join(import.meta.dir, fixture), join(project, 'index.rip')
-  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'sites'), 'dir'
   project
 
 spawnWorker = (built, socket, env = {}) ->

@@ -57,7 +57,7 @@ const route = (name, text) => [
 const APP_MODULES = {
   'data.rip': "export data = { title: 'probe' }",
   'stash.rip': [
-    "import { source } from '@rip-lang/app'",
+    "import { source } from 'rip/app'",
     'export stash = {',
     '  user: source fetch: -> Promise.resolve { name: "Ada" }',
     '}',
@@ -124,10 +124,10 @@ describe('bootApp publication', () => {
 
   test('resolves browser-safe package roots by canonical index.rip convention', async () => {
     const modules = {
-      'routes/index.rip': "import { check } from '@rip-lang/validate'\nexport value = -> check('a@b.co', 'email')",
+      'routes/index.rip': "import { check } from 'rip/validate'\nexport value = -> check('a@b.co', 'email')",
     };
     const bundle = bundleFor(modules);
-    expect(bundle.list.some(([path]) => path === '@rip-lang/validate/index.rip')).toBeTrue();
+    expect(bundle.list.some(([path]) => path === 'rip/validate/index.rip')).toBeTrue();
     const result = await bootApp({ bundle, target: node('host'), adapter: fakeAdapter('/') });
     try {
       expect(result.workspace.getCompiled('routes/index.rip').value()).toBe('a@b.co');
@@ -172,7 +172,7 @@ describe('bootApp publication', () => {
     await expect(boot({ hash: 'bad', list: [] })).rejects.toThrow(/source list/);
     await expect(boot({ hash: H1, list: [['styles.css', 'x']] })).rejects.toThrow(/malformed/);
     await expect(boot({ hash: H1, list: [['b.rip', 'b'], ['a.rip', 'a']] })).rejects.toThrow(/unsorted/);
-    await expect(boot({ hash: H1, list: [['@rip-lang/app/index.rip', 'x']] })).rejects.toThrow(/collides/);
+    await expect(boot({ hash: H1, list: [['rip/app/index.rip', 'x']] })).rejects.toThrow(/collides/);
   });
 
   test('watch-off boot creates no publication socket', async () => {

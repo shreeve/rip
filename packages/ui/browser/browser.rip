@@ -1,4 +1,4 @@
-# @rip-lang/ui/browser -- the browser interaction primitives the headless
+# rip/ui/browser -- the browser interaction primitives the headless
 # widgets are built on: keyboard navigation, popup dismissal and lifecycle,
 # native top-layer binding, positioning, focus management, and scroll lock.
 #

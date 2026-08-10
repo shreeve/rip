@@ -26,7 +26,7 @@ import { readFileSync } from 'fs'
 
 # A pure CLI with no library surface: importing this module is always a
 # mistake, so it rejects loudly instead of silently running the program.
-throw Error.new('@rip-lang/utils/curl is a CLI, not a library; run curl.rip (rip-curl)') unless import.meta.main
+throw Error.new('rip/utils/curl is a CLI, not a library; run curl.rip (rip-curl)') unless import.meta.main
 
 VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
 

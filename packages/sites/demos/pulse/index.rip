@@ -1,7 +1,7 @@
 # Pulse — a tiny status board proving the stack end to end: Janus serves
 # the browser App while Rip Sites handles this API. See README.md for the
 # demo script.
-import { get, post, read, error, start } from '@rip-lang/sites'
+import { get, post, read, error, start } from 'rip/sites'
 
 MOODS = ['up', 'even', 'down']
 

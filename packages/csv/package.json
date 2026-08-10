@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/csv",
+  "name": "@rip/csv",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -17,8 +17,5 @@
   "files": [
     "csv.rip",
     "README.md"
-  ],
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
-  }
+  ]
 }

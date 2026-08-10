@@ -4,7 +4,7 @@
 # skipped, names trimmed), and a perform() that skips work already on
 # disk and writes one output file per task.
 
-import { swarm, args, init, retry, todo } from '@rip-lang/swarm'
+import { swarm, args, init, retry, todo } from 'rip/swarm'
 import { isMainThread } from 'worker_threads'
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join, resolve } from 'path'

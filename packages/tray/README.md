@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip Tray - @rip-lang/tray
+# Rip Tray
 
 > **One generic macOS host. Many Rip providers. No per-app native binary.**
 
@@ -53,7 +53,7 @@ provider (`tray-sites.rip`). Repo `bin/` holds only the `rip` compiler CLI.
 ## Quick Start
 
 ```bash
-bun add @rip-lang/tray
+bun add rip/tray
 cd packages/tray
 bun run demo
 ```

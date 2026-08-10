@@ -2,9 +2,9 @@
 # csv tests — parsing and writing
 # ==============================================================================
 
-import { test, eq, ok } from '@rip-lang/testing'
-import { CSV } from '@rip-lang/csv'
-import * as mod from '@rip-lang/csv'
+import { test, eq, ok } from 'rip/testing'
+import { CSV } from 'rip/csv'
+import * as mod from 'rip/csv'
 import { readFileSync, statSync } from 'fs'
 import { join } from 'path'
 

@@ -2,9 +2,9 @@
 # rsx tests — parse, stringify, security defaults, round trips
 # ==============================================================================
 
-import { test, eq, ok, throws } from '@rip-lang/testing'
-import { RsxError, parse, stringify } from '@rip-lang/rsx'
-import * as mod from '@rip-lang/rsx'
+import { test, eq, ok, throws } from 'rip/testing'
+import { RsxError, parse, stringify } from 'rip/rsx'
+import * as mod from 'rip/rsx'
 import { readFileSync } from 'fs'
 
 # ==[ Package surface ]==
@@ -15,11 +15,11 @@ test "module exports parse, stringify, RsxError and nothing else", ->
   eq Object.keys(mod).sort(), ['RsxError', 'parse', 'stringify']
   ok not ('default' of mod), 'no default export'
 
-test "no runtime deps; testing harness is the only devDependency", ->
+test "no dependencies of any kind (the stdlib ships with rip)", ->
   pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  eq pkg.devDependencies, undefined
 
 test "declares browser safety and earns it", ->
   pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))

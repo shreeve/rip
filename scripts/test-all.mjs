@@ -25,10 +25,9 @@
 // developer in that directory gets exactly what this does — running a
 // suite differently here than it runs there is how the two drift apart.
 //
-// Two guardrails run before any lane: scripts/local.mjs (this repo's
-// `@rip-lang/*` resolves here) and scripts/preflight.mjs (tsgo resolves).
-// Both are failures whose symptoms otherwise appear inside unrelated
-// lanes, or — worse for tsgo — as a green run with the editor surface
+// One guardrail runs before any lane: scripts/preflight.mjs (tsgo
+// resolves) — a failure whose symptoms otherwise appear inside
+// unrelated lanes, or worse, as a green run with the editor surface
 // skipped.
 //
 // Teeth, following test/support/extended.js: a lane whose tool is missing
@@ -203,7 +202,7 @@ const planLanes = () => {
 // redrawn progress line would count as a run.
 const TEST_COUNTS = [
   /(?:^|\n)Ran (\d+) tests?\b/g, // bun test
-  /(?:^|\n)(\d+) tests?:/g,      // rip test (@rip-lang/testing)
+  /(?:^|\n)(\d+) tests?:/g,      // rip test (rip/testing)
 ];
 // Strip CSI / OSC so painted tallies still match the count regexes.
 const stripAnsi = (s) => s.replace(/\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))/g, '');
@@ -332,15 +331,14 @@ const report = ({ lane, status, ms, why, output }) => {
 };
 
 // ── Guardrails ─────────────────────────────────────────────────────────
-// Both must hold before any lane starts, and both fail confusingly INSIDE
-// unrelated lanes when they do not: a stray sibling checkout answering
-// `@rip-lang/*` surfaces as duplicate-runtime and ENOENT errors scattered
-// across half the packages, and a missing tsgo makes the vscode suite
-// skip its whole LSP surface and pass. The root lane's extended tier
-// needs tsgo too and has no preflight of its own, so the guarantee lives
-// here — every entry point reaches it, not just `bun run test:all`.
+// Must hold before any lane starts, and fails confusingly INSIDE
+// unrelated lanes when it does not: a missing tsgo makes the vscode
+// suite skip its whole LSP surface and pass. The root lane's extended
+// tier needs tsgo too and has no preflight of its own, so the
+// guarantee lives here — every entry point reaches it, not just
+// `bun run test:all`.
 const guardrails = () => {
-  for (const [script, args] of [['local.mjs', ['--quiet']], ['preflight.mjs', []]]) {
+  for (const [script, args] of [['preflight.mjs', []]]) {
     const r = spawnSync(process.execPath, [join(HERE, 'scripts', script), ...args], { stdio: 'inherit' });
     if (r.status !== 0) process.exit(r.status ?? 1);
   }

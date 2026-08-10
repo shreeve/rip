@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/http",
+  "name": "@rip/http",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -16,8 +16,5 @@
   "files": [
     "http.rip",
     "README.md"
-  ],
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
-  }
+  ]
 }

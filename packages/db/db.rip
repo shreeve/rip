@@ -1,6 +1,6 @@
 #!/usr/bin/env rip
 # ==============================================================================
-# @rip-lang/db — DuckDB over duckdb-harbor: adapter, client, boot probe,
+# rip/db — DuckDB over duckdb-harbor: adapter, client, boot probe,
 # MCP stdio server, and the rip-db operational CLI in one file.
 #
 # Library: connect (global default), module-level query/find*/Model,
@@ -453,7 +453,7 @@ defaultPair = ->
 # Pass `adapter` to skip harbor (tests / custom wires). Returns the client;
 # `.adapter` is the same handle the schema ORM uses.
 #
-#   import { connect, query, findOne, Model, ensureRunning } from '@rip-lang/db'
+#   import { connect, query, findOne, Model, ensureRunning } from 'rip/db'
 #   ensureRunning!
 #   connect!                              # or connect! 'http://…'
 #   findOne! 'SELECT * FROM users WHERE id = ?', [1]
@@ -1147,7 +1147,7 @@ export def startStdio(options = {})
 # ==============================================================================
 
 USAGE =! '''
-rip-db — CLI for @rip-lang/db (talks to a running duckdb-harbor).
+rip-db — CLI for rip/db (talks to a running duckdb-harbor).
 
 Usage:
   rip-db ping                                Is harbor up? Print url + database name.

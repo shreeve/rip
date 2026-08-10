@@ -1,8 +1,8 @@
-import { test, eq, ok, throws } from '@rip-lang/testing'
+import { test, eq, ok, throws } from 'rip/testing'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { cors, csrf, htmlJson, secureHeaders, sessions, timeout } from '@rip-lang/sites/middleware'
+import { cors, csrf, htmlJson, secureHeaders, sessions, timeout } from 'rip/sites/middleware'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith('--preload=')
 GENERATOR = join(import.meta.dir, '..', '..', 'generate.rip')
@@ -55,11 +55,9 @@ runMode = (encrypt) ->
   appArtifact = join dir, 'app.js'
   workerArtifact = join dir, 'worker.js'
   socket = join dir, 'worker.sock'
-  mkdirSync join(dir, 'node_modules', '@rip-lang'), { recursive: true }
-  symlinkSync PACKAGE, join(dir, 'node_modules', '@rip-lang', 'sites'), 'dir'
   writeFileSync entry, """
-  import { get, post, session, start, use } from '@rip-lang/sites'
-  import { cors, csrf, sessions, timeout } from '@rip-lang/sites/middleware'
+  import { get, post, session, start, use } from 'rip/sites'
+  import { cors, csrf, sessions, timeout } from 'rip/sites/middleware'
 
   use cors origin: 'https://client.test', credentials: true
   use sessions secret: 'session-secret', encrypt: #{encrypt}

@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip Validate - @rip-lang/validate
+# Rip Validate
 
 > **The validation and normalization vocabulary — 37 pure US-English normalizers, one registry, doubling as ~:name schema coercers.**
 
@@ -20,12 +20,8 @@ the page's single copy.
 
 ## Quick Start
 
-```bash
-bun add @rip-lang/validate
-```
-
 ```coffee
-import { check, registerValidator } from '@rip-lang/validate'
+import { check, registerValidator } from 'rip/validate'
 
 check '2024-02-29', 'date'       # '2024-02-29' — calendar-true, leap years included
 check '$1,292.22', 'money'       # 129222 — dollars in, integer cents out

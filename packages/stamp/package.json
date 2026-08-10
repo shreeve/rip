@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/stamp",
+  "name": "@rip/stamp",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -18,8 +18,5 @@
     "directives",
     "stamps",
     "README.md"
-  ],
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
-  }
+  ]
 }

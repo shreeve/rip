@@ -1,13 +1,13 @@
 # ==============================================================================
-# @rip-lang/db — unified test suite (adapter, client, temporal, CLI, MCP, probe)
+# rip/db — unified test suite (adapter, client, temporal, CLI, MCP, probe)
 # ==============================================================================
 
-import { test, eq, ok, throws } from '@rip-lang/testing'
+import { test, eq, ok, throws } from 'rip/testing'
 import { readFileSync, mkdtempSync, rmSync, writeFileSync, statSync } from 'fs'
 import { spawnSync } from 'child_process'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import * as db from '@rip-lang/db'
+import * as db from 'rip/db'
 import {
   harborAdapter, createClient, connect, isDbError, DbError, ConnectionError, QueryError, CancelledError,
   query, findOne, findAll, transaction, begin, Model, ident, materializeAll,
@@ -15,7 +15,7 @@ import {
   resolveUrl, sqlString, safeFileStem, stamp, humanSize, unsafeTarPath,
   makeSql, makeMcpSql, currentDatabase, assertEmptyDatabase, dump, load, checkpoint,
   createMcpServer,
-} from '@rip-lang/db'
+} from 'rip/db'
 import { __schema, __SchemaRegistry, SchemaError } from '../../src/runtime/schema.js'
 import { __schemaSetAdapter, __schemaTransaction } from '../../src/runtime/orm.js'
 import * as mig from '../../src/cli/migrate.js'
@@ -174,11 +174,11 @@ test "public entry exposes named exports only", ->
   eq Object.keys(db).sort(), ROOT_EXPORTS
   ok not ('default' of db)
 
-test "no runtime deps; testing harness is the only devDependency", ->
+test "no dependencies of any kind (the stdlib ships with rip)", ->
   pkg = JSON.parse readFileSync join(import.meta.dir, 'package.json'), 'utf8'
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  eq pkg.devDependencies, undefined
 
 test "server-only: browser safety is never declared", ->
   pkg = JSON.parse readFileSync join(import.meta.dir, 'package.json'), 'utf8'
@@ -210,7 +210,7 @@ test "no certificate or private key is committed", ->
 test "example.rip is a runnable smoke script", ->
   example = readFileSync join(import.meta.dir, 'example.rip'), 'utf8'
   ok example.startsWith('#!/usr/bin/env rip\n')
-  ok example.includes("@rip-lang/db")
+  ok example.includes("rip/db")
   ok example.includes('ensureRunning!')
   ok example.includes('connect!')
 
@@ -677,7 +677,7 @@ test! "a transaction statement encodes through the same seam", ->
 # Child is bare `bun -e` (JS): use await import, not Rip dammit.
 test "naive TIMESTAMP decodes off-UTC without host-offset shift (subprocess)", ->
   script = """
-    const { harborAdapter } = await import('@rip-lang/db');
+    const { harborAdapter } = await import('rip/db');
     const fail = (msg) => { console.error(msg); process.exit(1); };
     if (new Date('2024-03-15T10:30:00').getTimezoneOffset() === 0) fail('TZ pin did not take: offset is 0');
     const fetch = async () => ({ ok: true, status: 200, statusText: '', json: async () => ({ ok: true,

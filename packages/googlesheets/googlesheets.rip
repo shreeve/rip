@@ -339,15 +339,15 @@ export class Sheet
   refresh: -> @sheets! true
 
   list: ->
-    @sheets!().map (item) ->
+    @sheets!.map (item) ->
       out = { id: item.sheetId, name: item.title }
       out.color = rgb2hex(item.tabColor) if item.tabColor?
       out
 
-  names: -> @sheets!().map (s) -> s.title
+  names: -> @sheets!.map (s) -> s.title
 
   sheetId: (obj = null) ->
-    list = @sheets!()
+    list = @sheets!
     target = obj ?? @wsid
     if typeof target is 'string' and (m = target.match /^#(\d+)/)
       item = list[Number(m[1]) - 1]
@@ -362,7 +362,7 @@ export class Sheet
     hit.sheetId
 
   sheetName: (obj = null) ->
-    list = @sheets!()
+    list = @sheets!
     target = obj ?? @wsid
     if target is '' or target is 0 or not target?
       return list[0]?.title or fail 'spreadsheet has no sheets'
@@ -378,14 +378,14 @@ export class Sheet
 
   resolveArea: (area = null) ->
     if not area? or area is ''
-      wsid = @sheetName!()
+      wsid = @sheetName!
       rect = @rect
     else if typeof area is 'string' and area.includes('!')
       parts = area.split '!'
       wsid = @sheetName! parts[0]
       rect = parts.slice(1).join '!'
     else if typeof area is 'string' and (area.includes(':') or /^[a-z]{1,3}\d+$/i.test(area))
-      wsid = @sheetName!()
+      wsid = @sheetName!
       rect = area
     else
       wsid = @sheetName! area
@@ -551,9 +551,9 @@ if import.meta.main
     i += 1
   fail 'usage: rip-shat [options] <url>' unless link?
 
-  authorize!()
+  authorize!
   sheet = open! link
-  rows = sheet.read!()
+  rows = sheet.read!
   if opts.strip
     rows = rows.map (cols) -> cols.map (c) -> if c? then String(c).trim() else ''
   if opts.fill and rows[0]?

@@ -253,7 +253,11 @@ export function projectWrapper({ wrapperDir, sourceTsconfig, sourceDir: sourceDi
   // The mirror root's bare-specifier map, rebased through this wrapper's
   // reach-up: paths are read from the config that declares them.
   if (workspaceRoot && mirrorRoot) {
-    const ripPaths = workspaceRipPaths(workspaceRoot, path.relative(wrapperDir, mirrorRoot));
+    const reachUpToMirror = path.relative(wrapperDir, mirrorRoot);
+    const ripPaths = {
+      ...stdlibRipPaths(workspaceRoot, reachUpToMirror),
+      ...workspaceRipPaths(workspaceRoot, reachUpToMirror),
+    };
     if (Object.keys(ripPaths).length) overrides.paths = ripPaths;
   }
   chain.clear();
@@ -297,7 +301,10 @@ export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = n
   // on `.rip` files TypeScript will not follow, so `paths` points each
   // bare name at the mirror face the closure compiled. `paths` outranks
   // the node_modules walk.
-  const ripPaths = mirrorRootIsFallback ? {} : workspaceRipPaths(workspaceRoot);
+  const ripPaths = mirrorRootIsFallback ? {} : {
+    ...stdlibRipPaths(workspaceRoot),
+    ...workspaceRipPaths(workspaceRoot),
+  };
   if (Object.keys(ripPaths).length) overrides.paths = ripPaths;
   const floorRoot = mirrorRootIsFallback ? null : workspaceRoot;
   const userConfig = !mirrorRootIsFallback && workspaceRoot
@@ -755,8 +762,59 @@ export function bareRipSpecifierTarget(spec, fromDir) {
       try { real = fs.realpathSync(path.join(pkgDir, target)); } catch { return null; }
       return real.includes(`${path.sep}node_modules${path.sep}`) ? null : real;
     }
-    if (path.dirname(dir) === dir) return null;
+    if (path.dirname(dir) === dir) return stdlibRipTarget(spec);
   }
+}
+
+// The rip checkout's packages/ — the stdlib the runtime loader serves
+// as `rip/<pkg>` with no node_modules
+// anywhere. Checking resolves the same names: bare-specifier targets
+// fall back here when no node_modules provides the package, and
+// tsconfig paths point each name at the entry's mirror face.
+const STDLIB_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'packages');
+
+function stdlibRipTarget(spec) {
+  if (!spec.startsWith('rip/')) return null;
+  const rest = spec.slice('rip/'.length);
+  const [name, ...deeper] = rest.split('/');
+  const pkgDir = path.join(STDLIB_DIR, name);
+  let manifest;
+  try { manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')); } catch { return null; }
+  const target = ripManifestTarget(manifest, '.' + (deeper.length ? '/' + deeper.join('/') : ''));
+  if (target === null) return null;
+  let real;
+  try { real = fs.realpathSync(path.join(pkgDir, target)); } catch { return null; }
+  return real;
+}
+
+// tsconfig `paths` for the stdlib namespace: `rip/<pkg>` (plus
+// manifest export subpaths) → the mirror face of each package entry.
+// Merged UNDER workspaceRipPaths, so a workspace's own copy of a name
+// wins — the same local-first rule the runtime loader applies.
+export function stdlibRipPaths(workspaceRoot, fromConfigDirToMirrorRoot = '') {
+  const paths = {};
+  let entries;
+  try { entries = fs.readdirSync(STDLIB_DIR, { withFileTypes: true }); } catch { return paths; }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const dir = path.join(STDLIB_DIR, e.name);
+    let manifest;
+    try { manifest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); } catch { continue; }
+    const subpaths = ['.'];
+    if (manifest.exports && typeof manifest.exports === 'object') {
+      for (const k of Object.keys(manifest.exports)) if (k.startsWith('./') && !k.includes('*')) subpaths.push(k);
+    }
+    for (const sub of subpaths) {
+      const target = ripManifestTarget(manifest, sub);
+      if (target === null) continue;
+      let real;
+      try { real = fs.realpathSync(path.resolve(dir, target)); } catch { continue; }
+      const face = mirrorRelForFsPath(real, workspaceRoot) + '.ts';
+      const name = sub === '.' ? `rip/${e.name}` : `rip/${e.name}` + sub.slice(1);
+      paths[name] ??= [posix(path.join(fromConfigDirToMirrorRoot, face))];
+    }
+  }
+  return paths;
 }
 
 // tsconfig `paths` for every workspace package serving `.rip`:

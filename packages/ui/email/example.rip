@@ -1,7 +1,7 @@
 import {
   Email, Head, Body, Preview, Container,
   Heading, Text, Link
-} from '@rip-lang/ui/email'
+} from 'rip/ui/email'
 
 export WelcomeEmail = component
   @name: string =! 'friend'

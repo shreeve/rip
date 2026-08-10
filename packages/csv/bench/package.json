@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Head-to-head CSV parser comparison — competitor deps are quarantined here, never in @rip-lang/csv",
+  "description": "Head-to-head CSV parser comparison — competitor deps are quarantined here, never in rip/csv",
   "scripts": {
     "compare": "rip compare.rip"
   },

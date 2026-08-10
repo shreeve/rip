@@ -10,14 +10,14 @@
 # ==============================================================================
 
 import hljs from 'highlight.js'
-import ripLanguage from '@rip-lang/highlight'
+import ripLanguage from 'rip/highlight'
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { basename, extname, join, relative } from 'path'
 import { execSync } from 'child_process'
 
 # A pure CLI with no library surface: importing this module is always a
 # mistake, so it rejects loudly instead of silently running the program.
-throw Error.new('@rip-lang/print is a CLI, not a library; run print.rip (rip-print)') unless import.meta.main
+throw Error.new('rip/print is a CLI, not a library; run print.rip (rip-print)') unless import.meta.main
 
 VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
 

@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip Decimal - @rip-lang/decimal
+# Rip Decimal
 
 > **Zero-dependency, BigInt-backed arbitrary-precision exact decimals — with explicit rounding and hard resource limits.**
 
@@ -19,12 +19,8 @@ importing it also registers the `~:Decimal` schema coercer, so
 
 ## Quick Start
 
-```bash
-bun add @rip-lang/decimal
-```
-
 ```coffee
-import { Decimal, D } from '@rip-lang/decimal'
+import { Decimal, D } from 'rip/decimal'
 
 price = D"19.99"                       # tagged literal
 qty   = Decimal.from(3)                # safe integers only (no floats)
@@ -46,7 +42,7 @@ total.toCentsNumber('HALF_EVEN')       # 6854  (integer cents)
 - No IEEE specials — `NaN`, `Infinity`, and lossy coercion all throw
 - `valueOf()` throws, so `+d` and `d == 1` can't silently float-coerce
 - Resource limits preflight before allocating — hostile inputs can't OOM you
-- Integer-cents interop matching `@rip-lang/validate` (`money` / `money_even`)
+- Integer-cents interop matching `rip/validate` (`money` / `money_even`)
 - DuckDB `DECIMAL(p, s)` fit checking and lossless round-trips
 - `~:Decimal` schema coercer registered automatically on import — collisions reject loudly
 
@@ -130,7 +126,7 @@ float — use `.toNumber()` / `.cmp()` instead.
 
 ## Interop
 
-**Money / `@rip-lang/validate`.** That package keeps money as integer cents
+**Money / `rip/validate`.** That package keeps money as integer cents
 (`money` = HALF_UP, `money_even` = HALF_EVEN). `toCentsNumber(mode)` produces the
 same cents for safe-range inputs, inspecting **all** discarded digits (no
 double-rounding).
@@ -144,15 +140,15 @@ d.fitsDecimal(38, 2)                    # true if it fits DECIMAL(38, 2) lossles
 d.toFixed(2, 'UNNECESSARY')             # emit at the column scale (throws if lossy)
 ```
 
-**Rip Schema `~:Decimal`.** Importing `@rip-lang/decimal` registers a
+**Rip Schema `~:Decimal`.** Importing `rip/decimal` registers a
 `~:Decimal` coercer that hydrates a wire string/number into a `Decimal` —
 no bridge import, no setup call. A name collision with an
 already-registered coercer rejects the import loudly. The lowercase
-`~:decimal` from `@rip-lang/validate` (which returns a string) is
+`~:decimal` from `rip/validate` (which returns a string) is
 untouched. Register under another name with `registerDecimalCoercer(name)`.
 
 ```coffee
-import { Decimal } from '@rip-lang/decimal'
+import { Decimal } from 'rip/decimal'
 
 Invoice = schema
   amount! ~:Decimal
@@ -189,4 +185,4 @@ bun run test
 The suite pins the full rounding matrix, negative-tie goldens,
 carry/signed-zero/negative-scale edges, OOM-preflight rejection, parse
 strictness, exact and rounded division, DuckDB fit, cents compatibility
-with `@rip-lang/validate`, and the `~:Decimal` schema coercer.
+with `rip/validate`, and the `~:Decimal` schema coercer.

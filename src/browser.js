@@ -53,8 +53,8 @@ export const runtimes = Object.freeze({
 const rash = Object.freeze({ rash: app.rash, check: app.check });
 
 export const embeddedPackages = Object.freeze({
-  '@rip-lang/app': app,
-  '@rip-lang/app/rash': rash,
+  'rip/app': app,
+  'rip/app/rash': rash,
 });
 
 export { app };
@@ -168,7 +168,7 @@ function createModuleLoaderImpl({
       // import that climbs out of that mount (for a shippable API schema
       // projection, for example) resolves against the hidden physical mount
       // without putting `app/` back into any bundle or Workspace identity.
-      if (!from.startsWith('@rip-lang/')) {
+      if (!from.startsWith('rip/')) {
         const physical = joinPath(`app/${from}`, spec);
         const mounted = physical?.startsWith('app/') ? physical.slice('app/'.length) : physical;
         if (mounted && inBundle(mounted)) return { path: mounted };
@@ -179,10 +179,10 @@ function createModuleLoaderImpl({
     // Store paths use the author-facing package spelling. The publication
     // needs no separate resolver table: package roots and subpaths have one
     // canonical Rip filename convention.
-    const bare = spec.match(/^@rip-lang\/([\w-]+)(?:\/(.+))?$/);
+    const bare = spec.match(/^rip\/([\w-]+)(?:\/(.+))?$/);
     if (bare) {
       if (inBundle(spec)) return { path: spec };
-      const packageName = `@rip-lang/${bare[1]}`;
+      const packageName = `rip/${bare[1]}`;
       const embedded = embeddedPackages[spec];
       if (embedded) return { bridge: `package:${spec}`, namespace: embedded };
       if (embeddedPackages[packageName]) {
@@ -675,8 +675,8 @@ const publicationSources = bundle => {
     if (!Array.isArray(entry) || entry.length !== 2 || !validPath(entry[0], true) || typeof entry[1] !== 'string' || (prior !== null && prior >= entry[0])) {
       throw new Error(`rip: bundle has a malformed or unsorted source entry: ${JSON.stringify(entry)}`);
     }
-    if (entry[0] === '@rip-lang/app' || entry[0].startsWith('@rip-lang/app/')) {
-      throw new Error(`rip: bundle source '${entry[0]}' collides with embedded package '@rip-lang/app'`);
+    if (entry[0] === 'rip/app' || entry[0].startsWith('rip/app/')) {
+      throw new Error(`rip: bundle source '${entry[0]}' collides with embedded package 'rip/app'`);
     }
     prior = entry[0];
     sources[entry[0]] = entry[1];
@@ -749,7 +749,7 @@ const createProgram = (initialSources, debug, { hmr = false } = {}) => {
       try {
         const compiled = {};
         for (const path of files.keys()) {
-          if (!path.startsWith('@rip-lang/')) compiled[path] = { ...(await loader.import(path)) };
+          if (!path.startsWith('rip/')) compiled[path] = { ...(await loader.import(path)) };
         }
         return { compiled, invalidated: [...invalidated] };
       } finally {
@@ -891,7 +891,7 @@ export async function bootApp(opts = {}) {
       program.sources(nextSources);
       const staged = await program.compile(changedRip);
       nextCompiled = staged.compiled;
-      applyPaths = staged.invalidated.filter(path => !path.startsWith('@rip-lang/'));
+      applyPaths = staged.invalidated.filter(path => !path.startsWith('rip/'));
       validatePrepared({ compiled: nextCompiled, data: dataFor(nextCompiled) });
     } catch (error) {
       program.sources(activeSources());

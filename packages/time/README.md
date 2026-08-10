@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip Time - @rip-lang/time
+# Rip Time
 
 > **Tiny, immutable, US-English date/time library with timezones and durations — zero runtime dependencies.**
 
@@ -14,12 +14,8 @@ relative time, calendar, durations) so you never reach for an
 
 ## Quick Start
 
-```bash
-bun add @rip-lang/time
-```
-
 ```coffee
-import time from '@rip-lang/time'
+import time from 'rip/time'
 
 # Construction
 now = time()

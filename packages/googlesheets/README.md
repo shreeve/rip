@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip Google Sheets - @rip-lang/googlesheets
+# Rip Google Sheets
 
 > **Google Sheets for Rip — silent OAuth refresh, A1 helpers, and the fluid sheet ops from the old Ruby gem.**
 
@@ -10,8 +10,8 @@ invoices `lib/sheets.rip` helper. Credentials stay at
 tokens refresh quietly; first run opens a loopback browser login (no
 OOB copy-paste).
 
-Import as `rip/googlesheets` when Rip is on the machine (stdlib
-namespace), or `@rip-lang/googlesheets` from a workspace install.
+Import as `rip/googlesheets` — the stdlib namespace; whoever has
+rip has the package.
 
 **Runtime:** server-side (Bun / Node file + `fetch`). Not browser-safe.
 

@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip VS Code - vscode-rip
+# Rip VS Code
 
 > **Full IntelliSense for `.rip` files — syntax highlighting, hover, completions, refactoring, and live type-checking.**
 

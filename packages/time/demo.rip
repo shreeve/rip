@@ -1,5 +1,5 @@
 # ==============================================================================
-# @rip-lang/time — a runnable tour
+# rip/time — a runnable tour
 # ==============================================================================
 #
 #   rip packages/time/demo.rip        (from the repo root)
@@ -8,7 +8,7 @@
 # Each line shows a real call and its output. The base instant is fixed so the
 # tour is deterministic; only the `relative` example reads "now".
 
-import time, { age } from '@rip-lang/time'
+import time, { age } from 'rip/time'
 
 show = (label, value) -> console.log "  #{String(label).padEnd(28)} #{value}"
 head = (title)        -> console.log "\n#{title}"

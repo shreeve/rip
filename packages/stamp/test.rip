@@ -11,9 +11,9 @@
 # handler ever spawns a shell.
 # ==============================================================================
 
-import { test, eq, ok as testOk, throws } from '@rip-lang/testing'
-import * as stamp from '@rip-lang/stamp'
-import { parse, execute, sh, run, setExec, ok } from '@rip-lang/stamp'
+import { test, eq, ok as testOk, throws } from 'rip/testing'
+import * as stamp from 'rip/stamp'
+import { parse, execute, sh, run, setExec, ok } from 'rip/stamp'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
@@ -22,7 +22,7 @@ pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
 
 DIR_NAMES = ['brew', 'container', 'dataset', 'ensure', 'firewall', 'group', 'incus', 'multipass', 'packages', 'pool', 'profile', 'service', 'ssh', 'user']
 
-# Pre-load every builtin directive (importing @rip-lang/stamp wired sh/ok/run
+# Pre-load every builtin directive (importing rip/stamp wired sh/ok/run
 # onto globalThis, which the handlers use). The exec seam is installed per test.
 directives = {}
 for name in DIR_NAMES
@@ -51,10 +51,10 @@ test "public entry exposes named exports only", ->
   eq Object.keys(stamp).sort(), ['apply', 'execute', 'log', 'ok', 'parse', 'plan', 'run', 'setExec', 'sh', 'verify']
   testOk not ('default' of stamp), 'no default export'
 
-test "no runtime deps; testing harness is the only devDependency", ->
+test "no dependencies of any kind (the stdlib ships with rip)", ->
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  eq pkg.devDependencies, undefined
 
 test "the description is the README pitch, byte for byte", ->
   readme = readFileSync join(import.meta.dir, 'README.md'), 'utf8'

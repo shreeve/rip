@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/db",
+  "name": "@rip/db",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -17,8 +17,5 @@
     "db.rip",
     "README.md",
     "example.rip"
-  ],
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
-  }
+  ]
 }

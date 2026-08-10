@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip CSV - @rip-lang/csv
+# Rip CSV
 
 > **Fast, flexible CSV parser and writer — indexOf ratchet, auto-detect, zero dependencies.**
 
@@ -16,12 +16,8 @@ APIs (`read`/`write` are pure string work). One `.rip` file.
 
 ## Quick Start
 
-```bash
-bun add @rip-lang/csv
-```
-
 ```coffee
-import { CSV } from '@rip-lang/csv'
+import { CSV } from 'rip/csv'
 
 # Parse a string (delimiter, quoting, line endings auto-detected)
 rows = CSV.read "name,age\nAlice,30\nBob,25\n"

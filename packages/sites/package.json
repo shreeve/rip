@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/sites",
+  "name": "@rip/sites",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -47,13 +47,5 @@
     "monitor.rip",
     "README.md",
     "assets"
-  ],
-  "dependencies": {
-    "@rip-lang/app": "workspace:*",
-    "@rip-lang/tray": "workspace:*",
-    "@rip-lang/validate": "workspace:*"
-  },
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
-  }
+  ]
 }

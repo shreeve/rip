@@ -22398,7 +22398,7 @@ function __gateBind(self, index) {
   const metadata = __gateMetadata.get(self);
   const binding = metadata?.gates?.[index];
   if (!binding?.cell) {
-    throw new Error(`[Rip] render gate ${index} has no renderer-resolved source binding — ` + "gated components may only be constructed by @rip-lang/app createRenderer()");
+    throw new Error(`[Rip] render gate ${index} has no renderer-resolved source binding — ` + "gated components may only be constructed by rip/app createRenderer()");
   }
   let last = binding.value;
   let prefetched = true;
@@ -22430,7 +22430,7 @@ class __Component {
     if (rendererAuthorized)
       mount.used = true;
     if (gates?.length && !rendererAuthorized) {
-      throw new Error("[Rip] component declares render gates (<~) and cannot be constructed directly or as an " + "embedded child; render gates are honored only by @rip-lang/app createRenderer()");
+      throw new Error("[Rip] component declares render gates (<~) and cannot be constructed directly or as an " + "embedded child; render gates are honored only by rip/app createRenderer()");
     }
     if (rendererAuthorized) {
       __gateMetadata.set(this, mount);
@@ -27055,8 +27055,8 @@ var runtimes = Object.freeze({
 });
 var rash2 = Object.freeze({ rash, check });
 var embeddedPackages = Object.freeze({
-  "@rip-lang/app": exports_app,
-  "@rip-lang/app/rash": rash2
+  "rip/app": exports_app,
+  "rip/app/rash": rash2
 });
 var RUNTIME_PATHS = new Map(Object.keys(RUNTIME_MODULES).map((name) => [new URL(`./runtime/${name}.js`, import.meta.url).pathname, name]));
 var RUNTIME_RE = /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/;
@@ -27149,7 +27149,7 @@ function createModuleLoaderImpl({
       const joined = joinPath(from, spec);
       if (joined && inBundle(joined))
         return { path: joined };
-      if (!from.startsWith("@rip-lang/")) {
+      if (!from.startsWith("rip/")) {
         const physical = joinPath(`app/${from}`, spec);
         const mounted = physical?.startsWith("app/") ? physical.slice("app/".length) : physical;
         if (mounted && inBundle(mounted))
@@ -27157,11 +27157,11 @@ function createModuleLoaderImpl({
       }
       throw new Error(`rip: '${from}' imports '${spec}', which is not in the bundle${hint}`);
     }
-    const bare = spec.match(/^@rip-lang\/([\w-]+)(?:\/(.+))?$/);
+    const bare = spec.match(/^rip\/([\w-]+)(?:\/(.+))?$/);
     if (bare) {
       if (inBundle(spec))
         return { path: spec };
-      const packageName = `@rip-lang/${bare[1]}`;
+      const packageName = `rip/${bare[1]}`;
       const embedded = embeddedPackages2[spec];
       if (embedded)
         return { bridge: `package:${spec}`, namespace: embedded };
@@ -27586,8 +27586,8 @@ var publicationSources = (bundle) => {
     if (!Array.isArray(entry) || entry.length !== 2 || !validPath3(entry[0], true) || typeof entry[1] !== "string" || prior !== null && prior >= entry[0]) {
       throw new Error(`rip: bundle has a malformed or unsorted source entry: ${JSON.stringify(entry)}`);
     }
-    if (entry[0] === "@rip-lang/app" || entry[0].startsWith("@rip-lang/app/")) {
-      throw new Error(`rip: bundle source '${entry[0]}' collides with embedded package '@rip-lang/app'`);
+    if (entry[0] === "rip/app" || entry[0].startsWith("rip/app/")) {
+      throw new Error(`rip: bundle source '${entry[0]}' collides with embedded package 'rip/app'`);
     }
     prior = entry[0];
     sources[entry[0]] = entry[1];
@@ -27660,7 +27660,7 @@ var createProgram = (initialSources, debug, { hmr = false } = {}) => {
       try {
         const compiled = {};
         for (const path of files.keys()) {
-          if (!path.startsWith("@rip-lang/"))
+          if (!path.startsWith("rip/"))
             compiled[path] = { ...await loader.import(path) };
         }
         return { compiled, invalidated: [...invalidated] };
@@ -27800,7 +27800,7 @@ async function bootApp(opts = {}) {
       program.sources(nextSources);
       const staged = await program.compile(changedRip);
       nextCompiled = staged.compiled;
-      applyPaths = staged.invalidated.filter((path) => !path.startsWith("@rip-lang/"));
+      applyPaths = staged.invalidated.filter((path) => !path.startsWith("rip/"));
       validatePrepared2({ compiled: nextCompiled, data: dataFor(nextCompiled) });
     } catch (error) {
       program.sources(activeSources());

@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip Stamp - @rip-lang/stamp
+# Rip Stamp
 
 > **Declarative host provisioning — no state file, no agent, no YAML.**
 
@@ -19,12 +19,8 @@ just an ordered blueprint and an engine that walks it top to bottom.
 
 ## Quick Start
 
-```bash
-bun add @rip-lang/stamp
-```
-
 ```coffee
-import { parse } from '@rip-lang/stamp'
+import { parse } from 'rip/stamp'
 
 { directives } = parse """
 packages curl git jq

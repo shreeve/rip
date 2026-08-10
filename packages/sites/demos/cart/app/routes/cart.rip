@@ -1,7 +1,7 @@
 import { api, ApiErrors, parseApiError } from '../api-client.rip'
 import { Button, ButtonLink } from '../components/button.rip'
 import { title, formatPrice } from '../config.rip'
-import { createMutation } from '@rip-lang/app'
+import { createMutation } from 'rip/app'
 
 export Cart = component
   cart ~= @app.data.cart

@@ -1,5 +1,5 @@
 # ==============================================================================
-# @rip-lang/validate: the validation and normalization vocabulary
+# rip/validate: the validation and normalization vocabulary
 #
 # One registry of pure, synchronous normalizers. Every validator takes a
 # value and returns its normalized form, or null on miss. All of them

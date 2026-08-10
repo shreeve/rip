@@ -1,4 +1,4 @@
-import { test, eq, ok } from '@rip-lang/testing'
+import { test, eq, ok } from 'rip/testing'
 import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -22,8 +22,6 @@ test! 'App edits preserve workers and valid API candidates swap through the door
   dir = mkdtempSync join(tmpdir(), 'rip-reloads-')
   project = join dir, 'project'
   cpSync join(import.meta.dir, 'project'), project, { recursive: true }
-  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
-  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'sites'), 'dir'
   controlSocket = join dir, 'janus.sock'
   registration = null
   updates = []
@@ -70,7 +68,7 @@ test! 'App edits preserve workers and valid API candidates swap through the door
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }
 
     writeFileSync join(project, 'index.rip'), """
-    import { get, start } from '@rip-lang/sites'
+    import { get, start } from 'rip/sites'
     sleep! 1000
     get '/version' -> { version: 'two' }
     start!
@@ -79,7 +77,7 @@ test! 'App edits preserve workers and valid API candidates swap through the door
     ring = unixFetch '/ring', doorbell[0].path
     sleep! 50
     writeFileSync join(project, 'index.rip'), """
-    import { get, start } from '@rip-lang/sites'
+    import { get, start } from 'rip/sites'
     get '/version' -> { version: 'three' }
     start!
     """
@@ -103,8 +101,6 @@ test! 'App-only watch publishes Hub changes without API upstream swaps', ->
   dir = mkdtempSync join(tmpdir(), 'rip-reloads-app-only-')
   project = join dir, 'project'
   cpSync join(import.meta.dir, 'project'), project, { recursive: true }
-  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
-  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'sites'), 'dir'
   controlSocket = join dir, 'janus.sock'
   registration = null
   updates = []
@@ -142,7 +138,7 @@ test! 'App-only watch publishes Hub changes without API upstream swaps', ->
     eq updates.length, 0
 
     writeFileSync join(project, 'index.rip'), """
-    import { get, start } from '@rip-lang/sites'
+    import { get, start } from 'rip/sites'
     get '/version' -> { version: 'two' }
     start!
     """
@@ -162,8 +158,6 @@ test! 'API-only watch swaps workers without App Hub publication', ->
   dir = mkdtempSync join(tmpdir(), 'rip-reloads-api-only-')
   project = join dir, 'project'
   cpSync join(import.meta.dir, 'project'), project, { recursive: true }
-  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
-  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'sites'), 'dir'
   controlSocket = join dir, 'janus.sock'
   registration = null
   updates = []
@@ -202,7 +196,7 @@ test! 'API-only watch swaps workers without App Hub publication', ->
     eq updates.length, 0
 
     writeFileSync join(project, 'index.rip'), """
-    import { get, start } from '@rip-lang/sites'
+    import { get, start } from 'rip/sites'
     sleep! 1000
     get '/version' -> { version: 'two' }
     start!

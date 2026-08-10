@@ -1,5 +1,5 @@
 import { existsSync, writeFileSync } from 'node:fs'
-import { get, start } from '@rip-lang/sites'
+import { get, start } from 'rip/sites'
 
 marker = process.env.RIP_TEST_CRASH_ONCE
 if marker? and not existsSync(marker)

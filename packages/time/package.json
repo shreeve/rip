@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/time",
+  "name": "@rip/time",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -19,7 +19,6 @@
     "README.md"
   ],
   "devDependencies": {
-    "@rip-lang/testing": "workspace:*",
     "dayjs": "1.11.20"
   }
 }

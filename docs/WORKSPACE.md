@@ -39,7 +39,7 @@ The initial publication is `/bundle.json`:
 {
   "hash": "APP123",
   "list": [
-    ["@rip-lang/http/index.rip", "export class HTTPError ..."],
+    ["rip/http/index.rip", "export class HTTPError ..."],
     ["routes/index.rip", "export Index = component ..."]
   ]
 }
@@ -48,7 +48,7 @@ The initial publication is `/bundle.json`:
 `hash` identifies the complete managed App state. `list` is the complete
 browser Rip program as canonical `[modulePath, source]` pairs. It includes
 authored browser Rip modules, browser-safe package source, generated browser
-schema projections, and `data.rip` when present. `@rip-lang/app` is already
+schema projections, and `data.rip` when present. `rip/app` is already
 embedded in `/@rip/rip.min.js` and is absent from the list.
 
 CSS, HTML, images, fonts, videos, and other ordinary assets are absent from

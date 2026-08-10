@@ -7,12 +7,12 @@
 # below need no bridge import.
 # ==============================================================================
 
-import { test, eq, ok, throws, plainEnv } from '@rip-lang/testing'
+import { test, eq, ok, throws, plainEnv } from 'rip/testing'
 import {
   check, formatMoney, getValidator, isBlank, isRawType,
   registerValidator, toName, toPhone, validatorNames,
-} from '@rip-lang/validate'
-import * as mod from '@rip-lang/validate'
+} from 'rip/validate'
+import * as mod from 'rip/validate'
 import { registerCoercer, SchemaError } from '../../src/runtime/schema.js'
 import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -53,10 +53,10 @@ test "public entry exposes named exports only", ->
   ]
   ok not ('default' of mod), 'no default export'
 
-test "no runtime deps; testing harness is the only devDependency", ->
+test "no dependencies of any kind (the stdlib ships with rip)", ->
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  eq pkg.devDependencies, undefined
 
 test "declares browser safety and earns it", ->
   eq pkg.rip, { browser: true }

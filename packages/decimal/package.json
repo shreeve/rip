@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/decimal",
+  "name": "@rip/decimal",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -16,8 +16,5 @@
   "files": [
     "decimal.rip",
     "README.md"
-  ],
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
-  }
+  ]
 }

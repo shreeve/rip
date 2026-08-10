@@ -1,7 +1,7 @@
-import { test, eq, ok, throws } from '@rip-lang/testing'
-import { action, directory, label, link, quit, resolveHost, resolveProvider, separator, snapshot, submenu, svg, svgFile, toggle, tray } from '@rip-lang/tray'
+import { test, eq, ok, throws } from 'rip/testing'
+import { action, directory, label, link, quit, resolveHost, resolveProvider, separator, snapshot, submenu, svg, svgFile, toggle, tray } from 'rip/tray'
 import { optionsFor } from './build.rip'
-import * as mod from '@rip-lang/tray'
+import * as mod from 'rip/tray'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -14,7 +14,7 @@ test 'exports the complete Rip-authored tray vocabulary', ->
 test 'has no runtime dependencies and keeps the native host in the package', ->
   pkg = JSON.parse readFileSync("#{import.meta.dir}/package.json", 'utf8')
   eq pkg.dependencies, undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  eq pkg.devDependencies, undefined
   ok pkg.files.includes 'assets'
   ok existsSync "#{import.meta.dir}/assets/rip-color.svg"
   ok existsSync "#{import.meta.dir}/assets/rip-template.svg"
@@ -35,7 +35,7 @@ test 'the framework and macOS host contain no Rip Sites policy', ->
   ok kit.includes '.frame(minHeight: rowHeight)'
   ok kit.includes 'panelHeight(defaultRowHeight: rowHeight)'
   ok kit.includes 'PanelCompactControl(item: control, provider: provider)'
-  ok kit.includes 'CompactControlTip(text: tip, visible: showTip)'
+  ok kit.includes 'CompactControlTipBubble(text: tip.text)'
   ok kit.includes '.help(tip)'
   ok kit.includes 'items.contains { $0.kind != "separator" && $0.icon != nil }'
   ok kit.includes 'PanelLeadingIcon(icon: item.icon, reservesSpace: reservesLeadingIconSpace)'
@@ -207,7 +207,7 @@ test 'the toolkit, demo provider, and Sites provider each compile', ->
   eq demo.exitCode, 0, demo.stderr.toString()
   provider = Bun.spawnSync ['rip', '-c', "#{import.meta.dir}/../sites/tray-sites.rip"], { stdout: 'ignore', stderr: 'pipe' }
   eq provider.exitCode, 0, provider.stderr.toString()
-  ok readFileSync("#{import.meta.dir}/../sites/tray-sites.rip", 'utf8').includes "@rip-lang/tray"
+  ok readFileSync("#{import.meta.dir}/../sites/tray-sites.rip", 'utf8').includes "rip/tray"
 
 test 'rip tray resolves tray.rip or tray-<dirname>.rip in the cwd, never itself', ->
   root = mkdtempSync join(tmpdir(), 'rip-tray-resolve-')

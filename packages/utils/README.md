@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip Utils - @rip-lang/utils
+# Rip Utils
 
 > **Small single-script CLI utilities for common tasks — zero dependencies.**
 
@@ -15,10 +15,6 @@ process environment, and (for `rip-curl`) the network. One `.rip` file
 per utility; each is itself a binary.
 
 ## Quick Start
-
-```bash
-bun add @rip-lang/utils
-```
 
 ```bash
 rip-curl 'https://api.example.com/users'

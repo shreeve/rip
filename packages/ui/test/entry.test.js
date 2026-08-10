@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
-import { Email, Text, toHTML } from '@rip-lang/ui/email';
-import { Heading as ComponentsHeading } from '@rip-lang/ui/email/components';
+import { Email, Text, toHTML } from 'rip/ui/email';
+import { Heading as ComponentsHeading } from 'rip/ui/email/components';
 import { WelcomeEmail } from '../email/example.rip';
 
 test('package self-reference resolves the public email export', () => {

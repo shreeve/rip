@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/utils",
+  "name": "@rip/utils",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -13,8 +13,5 @@
   "files": [
     "curl.rip",
     "README.md"
-  ],
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
-  }
+  ]
 }

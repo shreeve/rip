@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip DB - @rip-lang/db
+# Rip DB
 
 > **DuckDB over duckdb-harbor — connect(), module-level query/Model, MCP stdio server, and rip-db CLI.**
 
@@ -27,10 +27,6 @@ is outside this package (keep the DuckDB process up yourself).
 
 ## Quick Start
 
-```bash
-bun add @rip-lang/db
-```
-
 ### 1. Start harbor (once)
 
 ```sql
@@ -51,7 +47,7 @@ export RIP_DB_TOKEN=rip-token   # omit only if harbor_serve(..., token := NULL)
 Use Rip's dammit operator (`!`) to call and await in one step.
 
 ```coffee
-import { connect, ensureRunning, findOne, findAll, query, Model, transaction } from '@rip-lang/db'
+import { connect, ensureRunning, findOne, findAll, query, Model, transaction } from 'rip/db'
 
 ensureRunning!    # fail fast if harbor is down
 connect!          # process default from env (or connect! url)
@@ -260,7 +256,7 @@ caller's `AbortSignal`. Timeouts are `ConnectionError` with code
 `TIMEOUT`; caller aborts use code `ABORTED`.
 
 ```coffee
-import { harborAdapter, createClient } from '@rip-lang/db'
+import { harborAdapter, createClient } from 'rip/db'
 
 adapter = harborAdapter url: '…', token: '…', fetch: myFetch
 client  = createClient adapter
@@ -293,7 +289,7 @@ Catch the family with `isDbError(err)`. `httpStatus` is set when the
 failure came back over HTTP.
 
 ```coffee
-import { findOne, isDbError, QueryError } from '@rip-lang/db'
+import { findOne, isDbError, QueryError } from 'rip/db'
 
 try
   findOne! 'SELECT * FROM users WHERE id = ?', [1]
@@ -308,7 +304,7 @@ catch e
 ## Boot Probe
 
 ```coffee
-import { assertReachable, ensureRunning, ping } from '@rip-lang/db'
+import { assertReachable, ensureRunning, ping } from 'rip/db'
 
 ensureRunning!                 # same as assertReachable!
 assertReachable!               # RIP_DB_URL / default
@@ -366,7 +362,7 @@ tests.
 bun run test
 ```
 
-One `test.rip` on `@rip-lang/testing` covers the package surface, the
+One `test.rip` on `rip/testing` covers the package surface, the
 adapter and temporal wire, the client, module-level API / `Model`, CLI
 helpers, boot probe, MCP protocol, and the `rip-db` bin. Network-facing
 cases run against fetch doubles — no live harbor required.

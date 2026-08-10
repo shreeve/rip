@@ -70,7 +70,7 @@ const smokeCompile = (path) => {
     "const out = mod.compileToJS('x = 41\\nx + 1');",
     "if (out.code !== 'let x = 41;\\nx + 1;') throw new Error('unexpected output: ' + out.code);",
     "if (typeof mod.runtimes.__state !== 'function') throw new Error('missing runtime');",
-    "const files = new Map([['probe.rip', \"import { rash } from '@rip-lang/app/rash'\\nexport value = rash(new TextEncoder().encode('probe'))\"]]);",
+    "const files = new Map([['probe.rip', \"import { rash } from 'rip/app/rash'\\nexport value = rash(new TextEncoder().encode('probe'))\"]]);",
     "const compiled = new Map();",
     "const loader = mod.createModuleLoader({ components: { read: p => files.get(p), exists: p => files.has(p), setCompiled: (p, v) => compiled.set(p, v) } });",
     "const probe = await loader.import('probe.rip');",

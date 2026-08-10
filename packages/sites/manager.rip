@@ -3,7 +3,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { brotliCompressSync, constants as zlib } from 'node:zlib'
-import { rash, check } from '@rip-lang/app/rash'
+import { rash, check } from 'rip/app/rash'
 import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
 

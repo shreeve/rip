@@ -39,7 +39,7 @@ test('root declares no runtime dependencies; TypeScript lives once in the worksp
   expect(pkg.devDependencies['@tailwindcss/browser']).toMatch(/^\d/);
   // The TypeScript version — the ONE place it is spelled — is an exact pin.
   expect(pkg.catalog?.typescript).toMatch(/^\d/); // no range sigils
-  // The root is the workspace root (owner decision: in-tree @rip-lang/*
+  // The root is the workspace root (owner decision: in-tree rip/*
   // resolution, hoisted linker). Playwright lives under test/browser as
   // its own workspace member — not a packages/* lane.
   expect(pkg.workspaces).toEqual(['packages/*', 'test/browser']);
@@ -140,12 +140,12 @@ test('packages/ui isolates an exact Tailwind dependency budget', () => {
   }
 });
 
-test('packages/app remains runtime-dependency-free; testing is its only dev dep', () => {
+test('packages/app remains dependency-free', () => {
   const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../../packages/app/package.json'), 'utf8'));
   for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
     expect(pkg[field]).toBeUndefined();
   }
-  // The workspace test harness (test/workspace.rip) runs on the rip
-  // testing package; nothing ships with it.
-  expect(pkg.devDependencies).toEqual({ '@rip-lang/testing': 'workspace:*' });
+  // Its tests import rip/testing through the loader's stdlib
+  // namespace; nothing is declared, nothing ships.
+  expect(pkg.devDependencies).toBeUndefined();
 });

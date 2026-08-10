@@ -1,7 +1,7 @@
 # ==============================================================================
-# @rip-lang/testing: shared helpers for package test.rip files
+# rip/testing: shared helpers for package test.rip files
 #
-#   import { test, eq, ok, throws, plainEnv } from '@rip-lang/testing'
+#   import { test, eq, ok, throws, plainEnv } from 'rip/testing'
 #
 #   test "does the thing", ->
 #     eq CSV.read("a,b\n"), [['a','b']]

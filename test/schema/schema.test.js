@@ -87,7 +87,7 @@ describe('schema runtime: the validation pipeline', () => {
   });
 
   test('~:name coercion resolves through the registry; missing registration is loud', () => {
-    // A fixture-local name: 'money' belongs to @rip-lang/validate, whose
+    // A fixture-local name: 'money' belongs to rip/validate, whose
     // entry registers the real vocabulary into this same process table
     // when browser-graph tests evaluate it.
     registerCoercer('usd_pin', (v) => {

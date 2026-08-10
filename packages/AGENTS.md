@@ -9,7 +9,7 @@ copy that shape. New packages start here.
 Larger packages follow the **values** below and the README top LAF;
 they earn structure and are listed under [Earned shapes](#earned-shapes)
 rather than forced into a one-file tree. Editor trees (`vscode`, `vim`)
-sit beside `@rip-lang/*` and follow the same values where they apply.
+sit beside the stdlib packages and follow the same values where they apply.
 
 ## Style — the values that generate the rules
 
@@ -148,7 +148,7 @@ Keys in exactly this order for mold packages (omit what does not apply):
 
 ```json
 {
-  "name": "@rip-lang/<name>",
+  "name": "@rip/<name>",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -160,10 +160,7 @@ Keys in exactly this order for mold packages (omit what does not apply):
     "bench": "rip bench.rip"
   },
   "rip": { "browser": true },
-  "files": ["<name>.rip", "README.md"],
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
-  }
+  "files": ["<name>.rip", "README.md"]
 }
 ```
 
@@ -179,9 +176,11 @@ Keys in exactly this order for mold packages (omit what does not apply):
   checkout. Always run suites via `bun run test` (a bare `rip` typed in
   a shell may be a different checkout). Do not use `bun test` for
   `.rip` suites — it never sees them.
-- In-repo deps use `workspace:*` (root workspaces + hoisted linker
-  resolve them). Mold packages keep external runtime deps at zero;
-  earned deps are declared in that package's own `package.json`.
+- In-repo imports use the `rip/<name>` stdlib namespace (the loader
+  resolves them from this checkout) — no `workspace:*` entries, no
+  dependency declarations between stdlib packages. Mold packages keep
+  external runtime deps at zero; earned external deps are declared in
+  that package's own `package.json`.
 - No `keywords`, `license`, `repository`, `author` while
   `private: true` — publish metadata comes with the publish pass.
   Marketplace packages (`vscode-rip`) are the exception and carry the
@@ -210,13 +209,16 @@ trees):
 1. Logo on its own paragraph, then the title:
 
    ```
-   <img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+   <img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-   # Rip <Name> - @rip-lang/<name>
+   # Rip <Name>
    ```
 
-   Use the published id when it is not `@rip-lang/*` (`vscode-rip`,
-   `vim-rip`). (`alt`/`width` ATTRIBUTES, never `style` — GitHub strips
+   The logo lives in this repo (`docs/assets/rip.png`); the src is the
+   relative path from the README's own directory (deeper trees add
+   `../` accordingly).
+
+   (`alt`/`width` ATTRIBUTES, never `style` — GitHub strips
    `style`. No `align` tricks: floats and inline-in-heading placements
    render inconsistently across GitHub and editor previews.)
 2. `> **<pitch>**` — same text as `package.json` `description` (trailing
@@ -233,9 +235,9 @@ trees):
 **Default mold sections** (library/CLI packages — omit when they do not
 apply):
 
-5. `## Quick Start` — `bun add @rip-lang/<name>` in a `bash` fence,
-   then a `coffee` example. Skip `bun add` for editor plugins and
-   non-npm distribution.
+5. `## Quick Start` — a `coffee` example importing from
+   `rip/<name>`; the stdlib ships with rip, so there is no install
+   step to show.
 6. `## Features` — bullet list when a feature inventory helps.
 7. Domain sections (whatever the package needs — Mental model, Install,
    How it works, …).
@@ -247,12 +249,12 @@ All shell fences use `bash`. No `## License` footer.
 
 ## Tests
 
-- Mold default: one root `test.rip` importing from `@rip-lang/testing`
+- Mold default: one root `test.rip` importing from `rip/testing`
   (`test`, `eq`, `ok`, `throws` — tally on exit, failures set
   `process.exitCode`; colors honor NO_COLOR/FORCE_COLOR).
-- Import the package under test by its published name
-  (`from '@rip-lang/<name>'`), not a relative path — this exercises the
-  real `exports` map.
+- Import the package under test by its stdlib name
+  (`from 'rip/<name>'`), not a relative path — this exercises the
+  loader's stdlib namespace and the real `exports` map.
 - Start the suite with a "Package surface" section pinning the export
   names, dependency posture, and (when claimed) browser safety.
 - Run with `bun run test` from the package directory.

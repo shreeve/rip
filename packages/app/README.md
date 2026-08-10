@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip App - @rip-lang/app
+# Rip App
 
 > **Dependency-free application data substrate — stash, source, routes, workspace, and apply.**
 
@@ -35,7 +35,7 @@ The package currently provides:
 Only named exports are supported:
 
 ```coffee
-import { createStash, source, createComponents } from '@rip-lang/app'
+import { createStash, source, createComponents } from 'rip/app'
 
 data = createStash
   user: source fetch: -> fetch! '/api/user'

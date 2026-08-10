@@ -8,7 +8,7 @@
 # never drift from packages/highlight.
 # ==============================================================================
 
-import { test, eq, ok } from '@rip-lang/testing'
+import { test, eq, ok } from 'rip/testing'
 import { generate } from './sync.rip'
 import { generatePrintHtml, generateMarkdownHtml, walkDir, getLang } from './src/printer.js'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'

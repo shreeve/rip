@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createComponents, launch, source, unwrapStash } from '@rip-lang/app';
+import { createComponents, launch, source, unwrapStash } from 'rip/app';
 import { __Component } from '../../../src/runtime/components.js';
 
 const node = name => ({

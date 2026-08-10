@@ -1,9 +1,9 @@
-import { test, eq, ok } from '@rip-lang/testing'
+import { test, eq, ok } from 'rip/testing'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { brotliDecompressSync } from 'node:zlib'
-import { check, rash } from '@rip-lang/app/rash'
+import { check, rash } from 'rip/app/rash'
 import { appChangeKind, appEventPublication, updateAppModules } from '../../manager.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='

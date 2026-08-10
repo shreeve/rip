@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createMutation } from '@rip-lang/app';
+import { createMutation } from 'rip/app';
 import { __effect } from '../../../src/runtime/reactive.js';
 
 const deferred = () => {

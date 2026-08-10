@@ -10,154 +10,112 @@
       },
     },
     "packages/ai": {
-      "name": "@rip-lang/ai",
+      "name": "@rip/ai",
       "version": "4.0.0",
       "bin": {
         "rip-ai": "./ai.rip",
       },
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
-      },
     },
     "packages/app": {
-      "name": "@rip-lang/app",
+      "name": "@rip/app",
       "version": "0.0.0",
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
-      },
     },
     "packages/csv": {
-      "name": "@rip-lang/csv",
+      "name": "@rip/csv",
       "version": "4.0.0",
       "bin": {
         "rip-csv": "./csv.rip",
       },
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
-      },
     },
     "packages/db": {
-      "name": "@rip-lang/db",
+      "name": "@rip/db",
       "version": "4.0.0",
       "bin": {
         "rip-db": "./db.rip",
       },
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
-      },
     },
     "packages/decimal": {
-      "name": "@rip-lang/decimal",
+      "name": "@rip/decimal",
       "version": "4.0.0",
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
+    },
+    "packages/googlesheets": {
+      "name": "@rip/googlesheets",
+      "version": "4.0.0",
+      "bin": {
+        "rip-shat": "./googlesheets.rip",
       },
     },
     "packages/highlight": {
-      "name": "@rip-lang/highlight",
+      "name": "@rip/highlight",
       "version": "4.0.0",
       "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
         "highlight.js": "11.11.1",
       },
     },
     "packages/http": {
-      "name": "@rip-lang/http",
+      "name": "@rip/http",
       "version": "4.0.0",
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
-      },
     },
     "packages/print": {
-      "name": "@rip-lang/print",
+      "name": "@rip/print",
       "version": "4.0.0",
       "bin": {
         "rip-print": "./print.rip",
       },
       "dependencies": {
-        "@rip-lang/highlight": "workspace:*",
         "highlight.js": "11.11.1",
-      },
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
       },
     },
     "packages/rsx": {
-      "name": "@rip-lang/rsx",
+      "name": "@rip/rsx",
       "version": "4.0.0",
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
-      },
     },
     "packages/script": {
-      "name": "@rip-lang/script",
+      "name": "@rip/script",
       "version": "4.0.0",
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
-      },
     },
     "packages/sites": {
-      "name": "@rip-lang/sites",
+      "name": "@rip/sites",
       "version": "4.0.0",
       "bin": {
-        "rip-site": "./site.rip",
         "rip-sites": "./sites.rip",
-        "rip-edge": "./edge.rip",
-      },
-      "dependencies": {
-        "@rip-lang/app": "workspace:*",
-        "@rip-lang/tray": "workspace:*",
-        "@rip-lang/validate": "workspace:*",
-      },
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
       },
     },
     "packages/stamp": {
-      "name": "@rip-lang/stamp",
+      "name": "@rip/stamp",
       "version": "4.0.0",
       "bin": {
         "rip-stamp": "./stamp.rip",
       },
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
-      },
     },
     "packages/swarm": {
-      "name": "@rip-lang/swarm",
+      "name": "@rip/swarm",
       "version": "4.0.0",
       "bin": {
         "swarm": "./swarm.rip",
       },
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
-      },
     },
     "packages/testing": {
-      "name": "@rip-lang/testing",
+      "name": "@rip/testing",
       "version": "4.0.0",
     },
     "packages/time": {
-      "name": "@rip-lang/time",
+      "name": "@rip/time",
       "version": "4.0.0",
       "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
         "dayjs": "1.11.20",
       },
     },
     "packages/tray": {
-      "name": "@rip-lang/tray",
+      "name": "@rip/tray",
       "version": "4.0.0",
       "bin": {
         "rip-tray": "./tray.rip",
         "rip-tray-build": "./build.rip",
       },
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
-      },
     },
     "packages/ui": {
-      "name": "@rip-lang/ui",
+      "name": "@rip/ui",
       "version": "0.0.0",
       "dependencies": {
         "css-tree": "3.2.1",
@@ -165,21 +123,15 @@
       },
     },
     "packages/utils": {
-      "name": "@rip-lang/utils",
+      "name": "@rip/utils",
       "version": "4.0.0",
       "bin": {
         "rip-curl": "./curl.rip",
       },
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
-      },
     },
     "packages/validate": {
-      "name": "@rip-lang/validate",
+      "name": "@rip/validate",
       "version": "4.0.0",
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
-      },
     },
     "packages/vscode": {
       "name": "vscode-rip",
@@ -192,13 +144,10 @@
       },
     },
     "packages/x12": {
-      "name": "@rip-lang/x12",
+      "name": "@rip/x12",
       "version": "4.0.0",
       "bin": {
         "rip-x12": "./x12.rip",
-      },
-      "devDependencies": {
-        "@rip-lang/testing": "workspace:*",
       },
     },
     "test/browser": {
@@ -215,45 +164,47 @@
   "packages": {
     "@playwright/test": ["@playwright/test@1.58.2", "", { "dependencies": { "playwright": "1.58.2" }, "bin": { "playwright": "cli.js" } }, "sha512-akea+6bHYBBfA9uQqSYmlJXn61cTa+jbO87xVLCWbTqbWadRVmhxlXATaOjOgcBaWU4ePo0wB41KMFv3o35IXA=="],
 
-    "@rip-lang/ai": ["@rip-lang/ai@workspace:packages/ai"],
+    "@rip/ai": ["@rip/ai@workspace:packages/ai"],
 
-    "@rip-lang/app": ["@rip-lang/app@workspace:packages/app"],
+    "@rip/app": ["@rip/app@workspace:packages/app"],
 
-    "@rip-lang/csv": ["@rip-lang/csv@workspace:packages/csv"],
+    "@rip/csv": ["@rip/csv@workspace:packages/csv"],
 
-    "@rip-lang/db": ["@rip-lang/db@workspace:packages/db"],
+    "@rip/db": ["@rip/db@workspace:packages/db"],
 
-    "@rip-lang/decimal": ["@rip-lang/decimal@workspace:packages/decimal"],
+    "@rip/decimal": ["@rip/decimal@workspace:packages/decimal"],
 
-    "@rip-lang/highlight": ["@rip-lang/highlight@workspace:packages/highlight"],
+    "@rip/googlesheets": ["@rip/googlesheets@workspace:packages/googlesheets"],
 
-    "@rip-lang/http": ["@rip-lang/http@workspace:packages/http"],
+    "@rip/highlight": ["@rip/highlight@workspace:packages/highlight"],
 
-    "@rip-lang/print": ["@rip-lang/print@workspace:packages/print"],
+    "@rip/http": ["@rip/http@workspace:packages/http"],
 
-    "@rip-lang/rsx": ["@rip-lang/rsx@workspace:packages/rsx"],
+    "@rip/print": ["@rip/print@workspace:packages/print"],
 
-    "@rip-lang/script": ["@rip-lang/script@workspace:packages/script"],
+    "@rip/rsx": ["@rip/rsx@workspace:packages/rsx"],
 
-    "@rip-lang/sites": ["@rip-lang/sites@workspace:packages/sites"],
+    "@rip/script": ["@rip/script@workspace:packages/script"],
 
-    "@rip-lang/stamp": ["@rip-lang/stamp@workspace:packages/stamp"],
+    "@rip/sites": ["@rip/sites@workspace:packages/sites"],
 
-    "@rip-lang/swarm": ["@rip-lang/swarm@workspace:packages/swarm"],
+    "@rip/stamp": ["@rip/stamp@workspace:packages/stamp"],
 
-    "@rip-lang/testing": ["@rip-lang/testing@workspace:packages/testing"],
+    "@rip/swarm": ["@rip/swarm@workspace:packages/swarm"],
 
-    "@rip-lang/time": ["@rip-lang/time@workspace:packages/time"],
+    "@rip/testing": ["@rip/testing@workspace:packages/testing"],
 
-    "@rip-lang/tray": ["@rip-lang/tray@workspace:packages/tray"],
+    "@rip/time": ["@rip/time@workspace:packages/time"],
 
-    "@rip-lang/ui": ["@rip-lang/ui@workspace:packages/ui"],
+    "@rip/tray": ["@rip/tray@workspace:packages/tray"],
 
-    "@rip-lang/utils": ["@rip-lang/utils@workspace:packages/utils"],
+    "@rip/ui": ["@rip/ui@workspace:packages/ui"],
 
-    "@rip-lang/validate": ["@rip-lang/validate@workspace:packages/validate"],
+    "@rip/utils": ["@rip/utils@workspace:packages/utils"],
 
-    "@rip-lang/x12": ["@rip-lang/x12@workspace:packages/x12"],
+    "@rip/validate": ["@rip/validate@workspace:packages/validate"],
+
+    "@rip/x12": ["@rip/x12@workspace:packages/x12"],
 
     "@tailwindcss/browser": ["@tailwindcss/browser@4.3.2", "", {}, "sha512-R6hewP9HHwLAY88bFkgAYFIQMRGi9bqx6sR1anI3IThTJtwhPlAm4aHIzDKrnJ8Ct4M3d5A9PCsah8Z5+EjLiQ=="],
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { delay, debounce, throttle, hold } from '@rip-lang/app';
+import { delay, debounce, throttle, hold } from 'rip/app';
 import { __state } from '../../../src/runtime/reactive.js';
 
 describe('delay', () => {

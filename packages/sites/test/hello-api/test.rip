@@ -1,4 +1,4 @@
-import { test, eq, ok } from '@rip-lang/testing'
+import { test, eq, ok } from 'rip/testing'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'

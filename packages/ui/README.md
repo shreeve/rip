@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip UI - @rip-lang/ui
+# Rip UI
 
 > **First-party UI infrastructure — email components, shared utilities, and Tailwind compilation.**
 
@@ -27,7 +27,7 @@ import {
   toHTML
   Email, Head, Body, Preview, Container
   Heading, Text, Link, Divider
-} from '@rip-lang/ui/email'
+} from 'rip/ui/email'
 
 WelcomeEmail = component
   @name =! 'World'
@@ -47,17 +47,17 @@ WelcomeEmail = component
 html = toHTML WelcomeEmail, name: 'Alice'
 ```
 
-`@rip-lang/ui/email/dom`, `/compat`, and `/render` expose focused substrate
+`rip/ui/email/dom`, `/compat`, and `/render` expose focused substrate
 APIs for framework and tooling code. Application email templates should use
-`@rip-lang/ui/email`.
+`rip/ui/email`.
 
 Email rendering is synchronous. The default Tailwind configuration is prepared
 when the package loads. Prepare a custom configuration once before passing the
 same object to `Tailwind`:
 
 ```coffee
-import { prepareConfig } from '@rip-lang/ui/tailwind'
-import { Tailwind, Text, toHTML } from '@rip-lang/ui/email'
+import { prepareConfig } from 'rip/ui/tailwind'
+import { Tailwind, Text, toHTML } from 'rip/ui/email'
 
 config = theme: extend: colors: brand: '#123456'
 prepareConfig! config

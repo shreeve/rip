@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip RSX - @rip-lang/rsx
+# Rip RSX
 
 > **Rip Style XML — XML ⇄ Rip object, with security defaults that match what you want for SOAP and EDI envelopes.**
 
@@ -13,12 +13,8 @@ defaults appropriate for talking to outside systems.
 
 ## Quick Start
 
-```bash
-bun add @rip-lang/rsx
-```
-
 ```coffee
-import { parse, stringify } from '@rip-lang/rsx'
+import { parse, stringify } from 'rip/rsx'
 
 obj = parse soapXml
 obj.Envelope.Body.COREEnvelopeRealTimeRequest.Payload  # → X12 string

@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/ui",
+  "name": "@rip/ui",
   "version": "0.0.0",
   "private": true,
   "type": "module",

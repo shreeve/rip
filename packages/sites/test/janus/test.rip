@@ -1,4 +1,4 @@
-import { test, eq, ok } from '@rip-lang/testing'
+import { test, eq, ok } from 'rip/testing'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -51,8 +51,6 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
   dir = mkdtempSync join(tmpdir(), 'rip-janus-release-')
   project = join dir, 'project'
   cpSync PROJECT, project, { recursive: true }
-  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
-  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'sites'), 'dir'
   privateFile = join project, 'private.txt'
   writeFileSync privateFile, 'authorized bytes'
   mkdirSync join(project, 'data')
@@ -62,7 +60,7 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
   writeFileSync join(project, 'app', 'styles.css'), "body { color: navy; }\n"
   writeFileSync join(project, 'index.rip'), """
   # api-source-secret
-  import { get, start } from '@rip-lang/sites'
+  import { get, start } from 'rip/sites'
 
   get '/api/version' -> { version: 'one' }
   get '/api/send' -> new Response null, { headers: { 'X-Sendfile': #{JSON.stringify(privateFile)} } }
@@ -209,7 +207,7 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
     eq alive.json!, { version: 'one' }
 
     writeFileSync join(project, 'index.rip'), """
-    import { get, start } from '@rip-lang/sites'
+    import { get, start } from 'rip/sites'
 
     get '/api/version' -> { version: 'two' }
     get '/api/send' -> new Response null, { headers: { 'X-Sendfile': #{JSON.stringify(privateFile)} } }

@@ -2,7 +2,7 @@ import { UserPublic as User } from '../../api/models.rip'
 import { api, ApiErrors, parseApiError } from '../api-client.rip'
 import { Button } from '../components/button.rip'
 import { title } from '../config.rip'
-import { createMutation } from '@rip-lang/app'
+import { createMutation } from 'rip/app'
 
 export Profile = component
   user <~ @app.data.user

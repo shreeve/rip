@@ -1,13 +1,13 @@
 #!/usr/bin/env rip
 
 # Rip Sites menu-bar provider. Imports the reusable tray vocabulary from
-# @rip-lang/tray and drives menus only through the unified `rip sites` CLI
+# rip/tray and drives menus only through the unified `rip sites` CLI
 # (`edge` / `all` / `tray` are reserved nouns).
 
 import { dirname, join } from 'node:path'
-import { action, directory, label, link, quit, separator, serve, submenu, svgFile, tray } from '@rip-lang/tray'
+import { action, directory, label, link, quit, separator, serve, submenu, svgFile, tray } from 'rip/tray'
 
-trayDir = dirname(Bun.resolveSync('@rip-lang/tray', import.meta.dir))
+trayDir = dirname(Bun.resolveSync('rip/tray', import.meta.dir))
 asset = (name, options = {}) -> svgFile(join(trayDir, 'assets', name), options)
 
 rip = process.env.RIP_TRAY_RIP or 'rip'

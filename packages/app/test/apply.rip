@@ -3,7 +3,7 @@
 # Run via `rip test/apply.rip` (chained in the package's test script).
 # ==============================================================================
 
-import { test, eq, throws } from '@rip-lang/testing'
+import { test, eq, throws } from 'rip/testing'
 import { createApply } from '../apply.rip'
 
 makeApply = (opts = {}) ->

@@ -2,7 +2,7 @@
 # csv compare — head-to-head against other JS CSV parsers, for real
 #
 #   cd packages/csv/bench
-#   bun install          # competitor parsers live HERE, not in @rip-lang/csv
+#   bun install          # competitor parsers live HERE, not in rip/csv
 #   bun run compare
 #
 # Every parser gets the same in-memory string and the same protocol:
@@ -12,7 +12,7 @@
 # malformation recovery at all.
 # ==============================================================================
 
-import { CSV } from '@rip-lang/csv'
+import { CSV } from 'rip/csv'
 import Papa from 'papaparse'
 import { csvParseRows } from 'd3-dsv'
 import { parse as csvParse } from 'csv-parse/sync'

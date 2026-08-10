@@ -10,7 +10,7 @@ import { existsSync } from 'node:fs'
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-throw Error.new('@rip-lang/sites/sites is a CLI, not a library; run `rip sites`') unless import.meta.main
+throw Error.new('rip/sites/sites is a CLI, not a library; run `rip sites`') unless import.meta.main
 
 RESERVED = ['edge', 'all', 'tray']
 TRAY_AGENT = join(import.meta.dir, 'bin', 'rip-tray-agent')

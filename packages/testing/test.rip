@@ -7,8 +7,8 @@
 # as real subprocesses through this repository's rip.
 # ==============================================================================
 
-import { test, eq, ok, throws, plainEnv } from '@rip-lang/testing'
-import * as mod from '@rip-lang/testing'
+import { test, eq, ok, throws, plainEnv } from 'rip/testing'
+import * as mod from 'rip/testing'
 import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -124,7 +124,7 @@ tmp    =! mkdtempSync join(tmpdir(), 'testing-')
 ripCli =! join(import.meta.dir, '..', '..', 'bin', 'rip')
 
 # Fixtures import the harness by absolute path: they run from the temp
-# dir, where bare @rip-lang/* specifiers have no node_modules to resolve
+# dir, where bare rip/* specifiers have no node_modules to resolve
 # against.
 harness =! join(import.meta.dir, 'testing.rip')
 

@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip HTTP - @rip-lang/http
+# Rip HTTP
 
 > **Zero-dependency HTTP client — ky-inspired convenience over native fetch.**
 
@@ -14,12 +14,8 @@ browser, relative paths resolve against the page origin.
 
 ## Quick Start
 
-```bash
-bun add @rip-lang/http
-```
-
 ```coffee
-import { http } from '@rip-lang/http'
+import { http } from 'rip/http'
 
 # Simple GET
 data = http.get!('https://api.example.com/users').json!
@@ -312,7 +308,7 @@ catch err
 This package is inspired by [ky](https://github.com/sindresorhus/ky) and covers
 the same core feature set in a fraction of the code.
 
-| | ky | @rip-lang/http |
+| | ky | rip/http |
 |---|---|---|
 | Source files | 24 | 1 |
 | Runtime code | ~1,200 lines | ~260 lines |

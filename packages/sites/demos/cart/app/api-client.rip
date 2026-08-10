@@ -1,4 +1,4 @@
-import { http, HTTPError } from '@rip-lang/http'
+import { http, HTTPError } from 'rip/http'
 
 export api = http.create({ prefixUrl: '/api', retry: 0 })
 

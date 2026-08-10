@@ -687,7 +687,7 @@ function __gateBind(self, index) {
   if (!binding?.cell) {
     throw new Error(
       `[Rip] render gate ${index} has no renderer-resolved source binding — ` +
-      'gated components may only be constructed by @rip-lang/app createRenderer()',
+      'gated components may only be constructed by rip/app createRenderer()',
     );
   }
   let last = binding.value;
@@ -726,7 +726,7 @@ class __Component {
     if (gates?.length && !rendererAuthorized) {
       throw new Error(
         '[Rip] component declares render gates (<~) and cannot be constructed directly or as an ' +
-        'embedded child; render gates are honored only by @rip-lang/app createRenderer()',
+        'embedded child; render gates are honored only by rip/app createRenderer()',
       );
     }
     if (rendererAuthorized) {

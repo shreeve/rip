@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/print",
+  "name": "@rip/print",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -15,10 +15,6 @@
     "README.md"
   ],
   "dependencies": {
-    "@rip-lang/highlight": "workspace:*",
     "highlight.js": "11.11.1"
-  },
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
   }
 }

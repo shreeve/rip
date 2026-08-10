@@ -1,4 +1,4 @@
-import { test, eq, ok } from '@rip-lang/testing'
+import { test, eq, ok } from 'rip/testing'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { X509Certificate, createPrivateKey, createPublicKey } from 'node:crypto'
 import { join } from 'node:path'

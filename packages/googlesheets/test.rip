@@ -1,23 +1,23 @@
 # ==============================================================================
-# @rip-lang/googlesheets — unit pins (no live Google)
+# rip/googlesheets — unit pins (no live Google)
 # ==============================================================================
 
-import { test, eq, ok, throws } from '@rip-lang/testing'
+import { test, eq, ok, throws } from 'rip/testing'
 import {
   Sheet, biject, extractSsid, filterCriteria, hex2rgb, open, parseSheet, rgb2hex, version
-} from '@rip-lang/googlesheets'
-import * as mod from '@rip-lang/googlesheets'
+} from 'rip/googlesheets'
+import * as mod from 'rip/googlesheets'
 import { readFileSync } from 'node:fs'
 
 console.log '\nPackage'
 
 test 'mold package surface', ->
   pkg = JSON.parse readFileSync("#{import.meta.dir}/package.json", 'utf8')
-  eq pkg.name, '@rip-lang/googlesheets'
+  eq pkg.name, '@rip/googlesheets'
   eq pkg.exports, { '.': './googlesheets.rip' }
   eq pkg.bin, { 'rip-shat': './googlesheets.rip' }
   eq pkg.dependencies, undefined
-  eq pkg.devDependencies['@rip-lang/testing'], 'workspace:*'
+  eq pkg.devDependencies, undefined
   eq pkg.files.includes('test'), false
   eq version, '4.0.0'
   for name in [

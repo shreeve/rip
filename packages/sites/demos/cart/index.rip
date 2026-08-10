@@ -1,7 +1,7 @@
 # Cart — a multi-route shop proving the full app rails: index.rip +
 # app/ + api/ + SQLite. See README.md for the run script.
-import { get, start, use, hub } from '@rip-lang/sites'
-import { sessions } from '@rip-lang/sites/middleware'
+import { get, start, use, hub } from 'rip/sites'
+import { sessions } from 'rip/sites/middleware'
 import { setup } from './setup.rip'
 import './api/index.rip'
 

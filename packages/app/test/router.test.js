@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { browserAdapter, buildRoutes, createRouter } from '@rip-lang/app';
+import { browserAdapter, buildRoutes, createRouter } from 'rip/app';
 import { __effect } from '../../../src/runtime/reactive.js';
 
 const FILES = [

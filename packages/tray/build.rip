@@ -77,7 +77,7 @@ export build = (options) ->
   contents = join app, 'Contents'
   macos = join contents, 'MacOS'
   resources = join contents, 'Resources'
-  trayModule = join resources, 'node_modules', '@rip-lang', 'tray'
+  trayModule = join resources, 'node_modules', '@rip', 'tray'
   try
     mkdirSync macos, { recursive: true }
     mkdirSync trayModule, { recursive: true }

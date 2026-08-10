@@ -12,7 +12,7 @@ This repository owns the complete Rip product:
 - precise bidirectional mappings between Rip and generated artifacts;
 - reactive, schema, ORM, component, and standard-library runtimes;
 - package and application infrastructure, including
-  [`@rip-lang/sites`](packages/sites) (Agent, edge, tray, demos);
+  [`rip/sites`](packages/sites) (Agent, edge, tray, demos);
 - VS Code/Cursor, Vim, and highlight.js integrations;
 - language, mapping, type, runtime, corpus, and editor test contracts.
 

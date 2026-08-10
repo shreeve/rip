@@ -1,12 +1,12 @@
-import { test, eq, ok, throws } from '@rip-lang/testing'
-import * as server from '@rip-lang/sites'
+import { test, eq, ok, throws } from 'rip/testing'
+import * as server from 'rip/sites'
 import {
   get, post, put, patch, del, all, use, prefix,
   before, after, raw, onError, notFound, fetch as handle,
   App, resetGlobals, requestContext,
   start, read, error, notice, bail, hub,
   ctx, session, env, subrequest, mark, errorEnvelope, openapi,
-} from '@rip-lang/sites'
+} from 'rip/sites'
 import { resolve } from 'node:path'
 
 request = (method, path, opts = {}) ->

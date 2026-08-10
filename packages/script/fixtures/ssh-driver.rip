@@ -4,7 +4,7 @@
 # received transcript as JSON. The suite spawns this with a stub ssh
 # on PATH.
 
-import Script from '@rip-lang/script'
+import Script from 'rip/script'
 
 url  = process.argv[2]
 opts = JSON.parse(process.argv[3] ?? '{}')

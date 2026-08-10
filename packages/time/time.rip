@@ -1,5 +1,5 @@
 # ==============================================================================
-# @rip-lang/time — Rip Time: tiny, immutable, US-English date/time library
+# rip/time — Rip Time: tiny, immutable, US-English date/time library
 #
 # Author: Steve Shreeve (steve.shreeve@gmail.com)
 #   Date: April 19, 2026

@@ -5,7 +5,7 @@ import {
   interceptClicks,
   launch,
   preloadLinks,
-} from '@rip-lang/app';
+} from 'rip/app';
 import { __Component } from '../../../src/runtime/components.js';
 
 const FILES = [

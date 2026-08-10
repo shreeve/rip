@@ -1,7 +1,7 @@
 #!/usr/bin/env rip
 
 # ==============================================================================
-# @rip-lang/sites — Rip Sites authoring framework
+# rip/sites — Rip Sites authoring framework
 # ==============================================================================
 #
 # Routes, smart responses, read() validation, and AsyncLocalStorage-powered
@@ -774,7 +774,7 @@ export subrequest = (data, fn) ->
     fn.call!(store.env)
 
 # Session proxy — access session.foo anywhere (via AsyncLocalStorage)
-export session = Proxy.new {},
+export session: Record<string, any> = Proxy.new {},
   get: (_, key) ->
     requestContext.getStore()?.env?.session?[key]
   set: (_, key, value) ->
@@ -814,14 +814,14 @@ export bail = ->
 # Utility Functions
 # ==============================================================================
 
-# The validation/normalization vocabulary lives in @rip-lang/validate — a
+# The validation/normalization vocabulary lives in rip/validate — a
 # zero-dependency, browser-safe (`rip.browser: true`) package, so the same
 # validators that power `read()` here also power `~:name` schema coercers
 # in client-side `.parse()` calls. Importing it registers every validator
 # as a named schema coercer. Re-exported here: these are part of
-# @rip-lang/sites's public surface.
+# rip/sites's public surface.
 
-import { isBlank, toName, toPhone, formatMoney, registerValidator, getValidator, isRawType, validatorNames, check } from '@rip-lang/validate'
+import { isBlank, toName, toPhone, formatMoney, registerValidator, getValidator, isRawType, validatorNames, check } from 'rip/validate'
 export { isBlank, toName, toPhone, formatMoney, registerValidator, getValidator, isRawType, validatorNames, check }
 
 # ==============================================================================

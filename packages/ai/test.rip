@@ -1,5 +1,5 @@
 # ==============================================================================
-# @rip-lang/ai — the whole suite, one file.
+# rip/ai — the whole suite, one file.
 #
 # The environment is pinned BEFORE any package module loads: HOME points
 # at a fresh temp dir (so ~/.config/rip-ai and ~/.config/rip/credentials
@@ -10,7 +10,7 @@
 # reach the real network fails loudly.
 # ==============================================================================
 
-import { test, eq, ok } from '@rip-lang/testing'
+import { test, eq, ok } from 'rip/testing'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -159,15 +159,15 @@ pkg = JSON.parse readFileSync(URL.new('./package.json', import.meta.url), 'utf8'
 p "\nPackage surface"
 
 test "package is private, version 4.0.0, module type", ->
-  eq pkg.name, '@rip-lang/ai'
+  eq pkg.name, '@rip/ai'
   ok pkg.private, 'private'
   eq pkg.version, '4.0.0'
   eq pkg.type, 'module'
 
-test "one dev dependency (the test harness); no runtime deps", ->
+test "no dependencies of any kind (the stdlib ships with rip)", ->
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  eq pkg.devDependencies, undefined
 
 test "the entry is the MCP server module", ->
   eq pkg.exports, { '.': './ai.rip' }
@@ -185,7 +185,7 @@ test "the rip-ai bin is ai.rip itself, shebang'd and executable", ->
 test! "importing the entry as a module starts nothing and exports nothing", ->
   # import by the published name, exercising the real exports map; import.meta.main
   # is false here, so the stdio loop must not start
-  mod = import!('@rip-lang/ai')
+  mod = import!('rip/ai')
   eq Object.keys(mod), []
 
 # ==[ Providers — usage formatting ]============================================

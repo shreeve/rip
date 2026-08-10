@@ -28,7 +28,7 @@ publish story.
   header pins, Manager watch defaults, appliance distribution, Cart
   cleanups). Process workers, control-plane registration, watch
   publication, and the structured startup report are already shipped.
-- **UI** — browser interaction primitives (`@rip-lang/ui/browser`) and
+- **UI** — browser interaction primitives (`rip/ui/browser`) and
   the Tailwind compilation boundary are shipped with tests. The
   headless widget catalog and its app-framework integration remain
   open with Philip.
@@ -48,7 +48,7 @@ Still open:
 - **`rip.browser` granularity** (needs an owner call — see breakdown
   below if opening work). Today `"rip": { "browser": true }` is
   package-wide, and assembly that claims a package copies every `.rip`
-  file under its root. A package such as `@rip-lang/ui` mixes
+  file under its root. A package such as `rip/ui` mixes
   browser-safe surfaces (`./browser`) with server-only / npm-backed
   surfaces (`./tailwind`), so it cannot set the flag without lying.
 - **Sites pin for precompressed `bundle.json`.** Janus (≥ v1.6) already

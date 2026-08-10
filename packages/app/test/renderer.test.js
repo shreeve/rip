@@ -5,7 +5,7 @@ import {
   createStash,
   source,
   unwrapStash,
-} from '@rip-lang/app';
+} from 'rip/app';
 import { __state } from '../../../src/runtime/reactive.js';
 import {
   __Component,

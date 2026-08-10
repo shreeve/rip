@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip Sites - @rip-lang/sites
+# Rip Sites
 
 > **Routes, workers, and a browser App — behind one shared Caddy+Janus edge.**
 
@@ -10,7 +10,7 @@ routing, and an optional **menu-bar tray** that drives the same CLIs.
 
 **Runtime:** Bun on the server (managers, workers, edge-scoped control).
 Browser Apps use the published Workspace. The menubar host is macOS-only
-(`@rip-lang/tray`).
+(`rip/tray`).
 
 The system-wide ownership, reload, migration, and cache contract is
 [docs/SERVER.md](../../docs/SERVER.md). App publication wire details are under
@@ -46,7 +46,7 @@ ordinary HTTP themselves — they register with Janus and supervise workers.
 
 | Surface | What it is | When you use it |
 | --- | --- | --- |
-| `@rip-lang/sites` | Framework API (`get`, `read`, middleware, …) | Inside `index.rip` / App code |
+| `rip/sites` | Framework API (`get`, `read`, middleware, …) | Inside `index.rip` / App code |
 | `rip sites` | Unified CLI: catalog, apps, edge, tray, advanced | Day-to-day Sites |
 | `rip sites run` / `publish` | Foreground manager / directory publish | Dev without the catalog |
 | Sites tray | Menu-bar UI over `rip sites` | Click instead of typing |
@@ -157,12 +157,8 @@ rip sites stop edge
 
 ### Install into an app
 
-```bash
-bun add @rip-lang/sites
-```
-
 ```coffee
-import { get, post, read, error, prefix, start } from '@rip-lang/sites'
+import { get, post, read, error, prefix, start } from 'rip/sites'
 
 prefix '/api', ->
   get '/hello' -> { message: 'Hello!' }
@@ -471,7 +467,7 @@ Caddy/Janus cache policy.
 - **Response helpers:** `@json`, `@text`, `@html`, `@body`, `@redirect`,
   `@header`, `@cache`, and `@send`.
 - **Validated input:** `read()` draws from body, query, and path parameters
-  using the shared `@rip-lang/validate` vocabulary.
+  using the shared `rip/validate` vocabulary.
 - **Schema routes:** `input:` validates JSON through a Rip schema and
   contributes to an automatically generated OpenAPI 3.1 document.
 - **Request context:** `ctx()`, `session`, `mark()`, and `subrequest()` ride
@@ -591,7 +587,7 @@ page = read 'page', 'int', 1
 token = read 'token', 'text', -> mintToken()
 ```
 
-Named validators come from `@rip-lang/validate` and are re-exported by this
+Named validators come from `rip/validate` and are re-exported by this
 package. `registerValidator` adds an application validator.
 
 ## Errors
@@ -670,10 +666,10 @@ connections lives in [docs/SERVER.md](../../docs/SERVER.md#url-addressable-resou
 ## Middleware
 
 ```coffee
-import { use, session } from '@rip-lang/sites'
+import { use, session } from 'rip/sites'
 import {
   cors, csrf, htmlJson, secureHeaders, sessions, timeout
-} from '@rip-lang/sites/middleware'
+} from 'rip/sites/middleware'
 
 use secureHeaders!
 use cors origin: 'https://app.example.com'
@@ -754,16 +750,16 @@ Janus serves:
 - The App shell
 - Authored `.rip`, CSS, HTML, and other registered files
 - `bundle.json` and `latest.json`
-- The browser runtime at `/@rip/rip.min.js`, including compiled `@rip-lang/app`
+- The browser runtime at `/@rip/rip.min.js`, including compiled `rip/app`
 - Hub WebSockets
 
 Workers serve API routes only. The manager writes files and publishes control
 state but is never on the client data path.
 
-The complete `@rip-lang/app` package is part of the versioned browser runtime,
+The complete `rip/app` package is part of the versioned browser runtime,
 not an App publication. `bundle.json` carries authored modules and any imported
 non-core browser packages; it never duplicates App framework source. Authored
-imports from `@rip-lang/app` resolve to the copy already active in
+imports from `rip/app` resolve to the copy already active in
 `/@rip/rip.min.js`.
 
 The conventional change policy updates every `.rip`, refreshes every `.css`,
@@ -823,7 +819,7 @@ browser's HTTP cache rather than a second Rip-owned content store.
 
 A module path is App-root-relative, such as `routes/home.rip`, never a disk
 path such as `app/routes/home.rip`. Browser-package modules use canonical
-paths such as `@rip-lang/http/index.rip`. Paths have no leading slash, query,
+paths such as `rip/http/index.rip`. Paths have no leading slash, query,
 fragment, backslash, empty segment, `.` segment, or `..` segment.
 
 Every wire hash is the six-character, Base64URL-folded value produced by `rash`.
@@ -850,7 +846,7 @@ package, or server-only browser code rejects before publication.
 {
   "hash": "APP123",
   "list": [
-    ["@rip-lang/http/index.rip", "export class HTTPError ..."],
+    ["rip/http/index.rip", "export class HTTPError ..."],
     ["data.rip", "export data = ..."],
     ["routes/index.rip", "export Index = component ..."]
   ]
@@ -862,7 +858,7 @@ The rules are:
 - `hash` is the resulting complete App hash.
 - `list` contains exactly `[modulePath, RipSource]` pairs.
 - The list is sorted by module path and contains every browser Rip module once.
-- `@rip-lang/app` is absent because `/@rip/rip.min.js` embeds it.
+- `rip/app` is absent because `/@rip/rip.min.js` embeds it.
 - CSS, HTML, images, fonts, video, and other ordinary assets are absent.
 - A complete bundle contains no deletion markers.
 

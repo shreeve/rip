@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ariaCurrent, buildRoutes, createRouter, ownsAnchor } from '@rip-lang/app';
+import { ariaCurrent, buildRoutes, createRouter, ownsAnchor } from 'rip/app';
 
 const FILES = [
   'routes/index.rip',

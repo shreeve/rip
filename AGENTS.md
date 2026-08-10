@@ -461,12 +461,11 @@ the affected final gates again.
   judged against.
 - `bun run ext` — build and install the VS Code extension.
 - `bun run global` — make THIS checkout the machine's global Rip:
-  symlinks `rip` and every package bin into `~/.bun`, and points
-  `~/node_modules/@rip-lang/*` here. Run once per machine (idempotent);
-  running another checkout's `bun run global` flips ownership back.
-- `bun run local` — point THIS checkout's `./node_modules/@rip-lang/*`
-  at `packages/*` (also runs on postinstall / before `test:all`). Does
-  not touch `~/`.
+  symlinks `rip` and every package bin into `~/.bun`. Run once per
+  machine (idempotent); running another checkout's `bun run global`
+  flips ownership back. Module resolution needs no links — the
+  loader's `rip/<pkg>` stdlib namespace resolves from whichever
+  checkout owns the `rip` bin.
 - `rip` on a TTY (or `rip -r`) — the interactive REPL; `rip -e <code>`
  evaluates one entry; `rip schema`/`rip site`/`rip test` dispatch
  their surfaces (`--help` on each).

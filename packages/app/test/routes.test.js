@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildRoutes, parseQuery } from '@rip-lang/app';
+import { buildRoutes, parseQuery } from 'rip/app';
 
 const manifest = files => buildRoutes(files.map(f => `routes/${f}`));
 const patterns = m => m.routes.map(r => r.pattern);

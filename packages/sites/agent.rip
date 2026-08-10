@@ -6,7 +6,7 @@ import { platform } from 'node:os'
 import { agentPaths, loaderArg, secureDirectory } from './appliance.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
 
-throw Error.new('@rip-lang/sites/agent is private process machinery') unless import.meta.main
+throw Error.new('rip/sites/agent is private process machinery') unless import.meta.main
 
 paths = agentPaths 'rip-agent'
 secureDirectory paths.appLogs, 'rip-agent'

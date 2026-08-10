@@ -1,13 +1,13 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip Print - @rip-lang/print
+# Rip Print
 
 > **Syntax-highlighted source code printer — 190+ languages via highlight.js, served once to your browser, print-ready.**
 
 `rip-print` highlights the files you point it at, serves the result
 once on `http://localhost:9111/`, opens your browser, and exits — no
 output files, no cleanup, nothing left running. Rip sources highlight
-through the repository's shared grammar (`@rip-lang/highlight`), so
+through the repository's shared grammar (`rip/highlight`), so
 Rip Print and the editor surfaces stay in lockstep. This is a pure
 CLI: `print.rip` is the whole program and there is no library export
 surface — importing it throws.
@@ -17,10 +17,6 @@ surface — importing it throws.
 is itself the `rip-print` binary (first line `#!/usr/bin/env rip`).
 
 ## Quick Start
-
-```bash
-bun add @rip-lang/print
-```
 
 ```bash
 rip-print src/                # Print all source files in src/

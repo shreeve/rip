@@ -9,8 +9,8 @@
 # swarm as a real subprocess through this repository's rip.
 # ==============================================================================
 
-import { test, eq, ok, throws, plainEnv } from '@rip-lang/testing'
-import * as mod from '@rip-lang/swarm'
+import { test, eq, ok, throws, plainEnv } from 'rip/testing'
+import * as mod from 'rip/swarm'
 import { spawnSync } from 'child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
 import { cpus, tmpdir } from 'os'
@@ -49,10 +49,10 @@ test "public entry exposes named exports only", ->
   eq Object.keys(mod).sort(), ['args', 'init', 'retry', 'swarm', 'todo']
   ok not ('default' of mod), 'no default export'
 
-test "no runtime deps; testing harness is the only devDependency", ->
+test "no dependencies of any kind (the stdlib ships with rip)", ->
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  eq pkg.devDependencies, undefined
 
 test "the description is the README pitch, byte for byte", ->
   readme = readFileSync join(import.meta.dir, 'README.md'), 'utf8'

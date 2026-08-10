@@ -1,4 +1,4 @@
-import { test, eq, ok, throws } from '@rip-lang/testing'
+import { test, eq, ok, throws } from 'rip/testing'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { EventEmitter } from 'node:events'
 import { join } from 'node:path'

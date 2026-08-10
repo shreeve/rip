@@ -2,7 +2,7 @@
 # Workspace and publication-feed contract
 # ==============================================================================
 
-import { test, eq, ok, throws } from '@rip-lang/testing'
+import { test, eq, ok, throws } from 'rip/testing'
 import { createWorkspace } from '../workspace.rip'
 import * as workspaceMod from '../workspace.rip'
 import { connectFeed } from '../feed.rip'

@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip Vim - vim-rip
+# Rip Vim
 
 > **Vim syntax highlighting, indentation, and filetype support for Rip.**
 

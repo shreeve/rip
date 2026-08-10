@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/ai",
+  "name": "@rip/ai",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -17,8 +17,5 @@
     "ai.rip",
     "lib/",
     "README.md"
-  ],
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
-  }
+  ]
 }

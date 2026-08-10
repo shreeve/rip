@@ -10,9 +10,9 @@
 # dropped the write).
 # ==============================================================================
 
-import { test, eq, ok, throws } from '@rip-lang/testing'
-import { X12, ISA_WIDTHS, SELECTOR } from '@rip-lang/x12'
-import * as mod from '@rip-lang/x12'
+import { test, eq, ok, throws } from 'rip/testing'
+import { X12, ISA_WIDTHS, SELECTOR } from 'rip/x12'
+import * as mod from 'rip/x12'
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -55,10 +55,10 @@ test "public entry exposes named exports only", ->
   eq Object.keys(mod).sort(), ['ISA_WIDTHS', 'SELECTOR', 'X12']
   ok not ('default' of mod), 'no default export'
 
-test "no runtime deps; testing harness is the only devDependency", ->
+test "no dependencies of any kind (the stdlib ships with rip)", ->
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  eq pkg.devDependencies, undefined
 
 test "does not claim browser safety (it reads the filesystem)", ->
   eq pkg.rip, undefined

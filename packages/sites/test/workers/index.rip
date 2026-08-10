@@ -1,4 +1,4 @@
-import { get, start } from '@rip-lang/sites'
+import { get, start } from 'rip/sites'
 
 get '/hello' -> { message: 'hello' }
 get '/slow' ->

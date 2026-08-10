@@ -1,4 +1,4 @@
-import { test, eq, ok } from '@rip-lang/testing'
+import { test, eq, ok } from 'rip/testing'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -186,9 +186,8 @@ test! 'serve.rip hub.bridge normalizes Bam names onto registration', ->
   dir = mkdtempSync join(tmpdir(), 'rip-manager-hub-')
   project = join dir, 'project'
   mkdirSync join(project, 'app'), { recursive: true }
-  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
   writeFileSync join(project, 'index.rip'), """
-  import { get, start, hub } from '@rip-lang/sites'
+  import { get, start, hub } from 'rip/sites'
   hub bridge: 'hub', auth: false
   get '/api/ok' -> 'ok'
   start!
@@ -202,7 +201,6 @@ test! 'serve.rip hub.bridge normalizes Bam names onto registration', ->
     app:
       root: 'app'
   """
-  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'sites'), 'dir'
   calls = []
   controlSocket = join dir, 'janus.sock'
   control = startControl controlSocket, calls

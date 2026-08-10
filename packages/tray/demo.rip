@@ -29,7 +29,7 @@
 # Full docs: README.md
 # =============================================================================
 
-import { action, label, quit, separator, serve, svg, tray } from '@rip-lang/tray'
+import { action, label, quit, separator, serve, svg, tray } from 'rip/tray'
 
 # Ordinary Rip state — survives across menu clicks in this process.
 count = 0

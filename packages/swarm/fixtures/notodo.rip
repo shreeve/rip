@@ -1,5 +1,5 @@
 # swarm() with no .swarm/todo directory — setup never queued anything.
 
-import { swarm } from '@rip-lang/swarm'
+import { swarm } from 'rip/swarm'
 
 swarm { perform: noop }

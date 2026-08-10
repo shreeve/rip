@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/tray",
+  "name": "@rip/tray",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -24,8 +24,5 @@
     "assets",
     "macos",
     "README.md"
-  ],
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
-  }
+  ]
 }

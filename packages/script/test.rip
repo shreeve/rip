@@ -11,9 +11,9 @@
 # in fixtures/ssh-driver.rip with the stub directory on its PATH).
 # ==============================================================================
 
-import { test, eq, ok, throws } from '@rip-lang/testing'
-import Script, { prompts, replace, quote, enter } from '@rip-lang/script'
-import * as mod from '@rip-lang/script'
+import { test, eq, ok, throws } from 'rip/testing'
+import Script, { prompts, replace, quote, enter } from 'rip/script'
+import * as mod from 'rip/script'
 import { spawnSync } from 'child_process'
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -59,10 +59,10 @@ test "the default export is the Script class carrying the factories", ->
   for name in ['spawn', 'ssh', 'tcp', 'connect', 'trace']
     eq typeof Script[name], 'function'
 
-test "no runtime deps; testing harness is the only devDependency", ->
+test "no dependencies of any kind (the stdlib ships with rip)", ->
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  eq pkg.devDependencies, undefined
 
 test "the description is the README pitch, byte for byte", ->
   readme = readFileSync join(import.meta.dir, 'README.md'), 'utf8'

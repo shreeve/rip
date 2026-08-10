@@ -514,7 +514,7 @@ code ":shape + @mixin is allowed (field sharing)", '''
 # ==============================================================================
 
 # Fixture coercer names are battery-local (id9, ssn9, state2, …): the
-# plain vocabulary names (id, ssn, money, …) belong to @rip-lang/validate,
+# plain vocabulary names (id, ssn, money, …) belong to rip/validate,
 # which registers them into this same process table when browser-graph
 # tests evaluate its entry.
 test '~:name resolves through the registry; output validates and constrains', '''

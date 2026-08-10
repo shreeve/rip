@@ -2,7 +2,7 @@
 # JSON line per task so the test can verify the context round trip
 # (setup's object plus swarm's `safe` flag) reached every worker call.
 
-import { swarm, init, retry, todo } from '@rip-lang/swarm'
+import { swarm, init, retry, todo } from 'rip/swarm'
 import { appendFileSync } from 'fs'
 
 setup = ->

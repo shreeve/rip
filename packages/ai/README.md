@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip AI - @rip-lang/ai
+# Rip AI
 
 > **Persistent multi-model AI consultation MCP — discuss, panel, fresh-review, content-hashed attachments, live model catalog.**
 
@@ -18,10 +18,6 @@ SQLite (`bun:sqlite`), reads credentials and attachments from the filesystem,
 and calls provider APIs over the network. One `.rip` entry plus `lib/`.
 
 ## Quick Start
-
-```bash
-bun add @rip-lang/ai
-```
 
 ```coffee
 # Tool surface an assisting model drives through MCP:
@@ -283,7 +279,7 @@ Every tool that calls a model returns a `usage` object with a token breakdown, t
 bun run test
 ```
 
-One `test.rip` on `@rip-lang/testing` covers the package surface, the provider
+One `test.rip` on `rip/testing` covers the package surface, the provider
 adapters and model resolution, the SQLite store, all eleven tools, the MCP wire
 protocol, credential and SSRF security, and attachment handling. Every provider
 call runs against an in-process double, so the suite touches no network and no

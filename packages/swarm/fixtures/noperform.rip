@@ -1,5 +1,5 @@
 # swarm() without a perform function — a usage error.
 
-import { swarm } from '@rip-lang/swarm'
+import { swarm } from 'rip/swarm'
 
 swarm {}

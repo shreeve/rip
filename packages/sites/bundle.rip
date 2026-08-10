@@ -110,8 +110,8 @@ export assembleBundle = ({ modules, packagesDir, data = null, moduleFiles = null
 
   bundle = { modules: { ...modules }, packages: {}, inputs: [], watchRoots: [] }
   for path in Object.keys bundle.modules
-    if path is '@rip-lang/app' or path.startsWith '@rip-lang/app/'
-      throw Error.new "rip: App module '#{path}' collides with embedded browser package '@rip-lang/app'"
+    if path is 'rip/app' or path.startsWith('rip/app/')
+      throw Error.new "rip: App module '#{path}' collides with embedded browser package 'rip/app'"
   bundle.data = data if data?
 
   if moduleFiles? and appDir?
@@ -121,7 +121,7 @@ export assembleBundle = ({ modules, packagesDir, data = null, moduleFiles = null
 
   claimPackage = (name, importer) ->
     return if bundle.packages[name]?
-    short = name.replace /^@rip-lang\//, ''
+    short = name.replace /^rip\//, ''
     root = if packagesDir? then join(packagesDir, short) else null
     unless root? and existsSync join(root, 'package.json')
       throw Error.new "rip: '#{importer}' imports '#{name}', which is not a known package"
@@ -175,15 +175,15 @@ export assembleBundle = ({ modules, packagesDir, data = null, moduleFiles = null
     for span in compiled.imports
       specifier = unquote span.specifier
       continue if RUNTIME_RE.test specifier
-      continue if specifier in ['@rip-lang/app', '@rip-lang/app/rash']
-      if specifier.startsWith '@rip-lang/app/'
-        throw Error.new "rip: '#{path}' imports '#{specifier}', which embedded package '@rip-lang/app' does not export"
+      continue if specifier in ['rip/app', 'rip/app/rash']
+      if specifier.startsWith 'rip/app/'
+        throw Error.new "rip: '#{path}' imports '#{specifier}', which embedded package 'rip/app' does not export"
       continue if specifier.startsWith('./') or specifier.startsWith('../') or bundle.modules[specifier]?
 
-      bare = specifier.match /^(@rip-lang\/[\w-]+)(?:\/.+)?$/
+      bare = specifier.match /^rip\/([\w-]+)(?:\/.+)?$/
       unless bare?
         throw Error.new "rip: '#{path}' imports '#{specifier}', which cannot travel to the browser — server-only and unknown modules stay on the server"
-      claimPackage bare[1], path
+      claimPackage "rip/#{bare[1]}", path
       queue.push added for added in Object.keys(bundle.modules) when not seen.has(added)
 
   bundle
@@ -214,17 +214,17 @@ validateRipProgram = (modules) ->
     if specifier.startsWith('./') or specifier.startsWith('../')
       joined = joinModulePath from, specifier
       return joined if joined? and modules[joined]?
-      unless from.startsWith '@rip-lang/'
+      unless from.startsWith 'rip/'
         physical = joinModulePath "app/#{from}", specifier
         mounted = if physical?.startsWith('app/') then physical.slice('app/'.length) else physical
         return mounted if mounted? and modules[mounted]?
       hint = if specifier.endsWith('.rip') then '' else " — did you mean '#{specifier}.rip'?"
       throw Error.new "rip: '#{from}' imports '#{specifier}', which is not in the bundle#{hint}"
 
-    bare = specifier.match /^(@rip-lang\/[\w-]+)(?:\/(.+))?$/
+    bare = specifier.match /^rip\/([\w-]+)(?:\/(.+))?$/
     if bare?
       subpath = if bare[2]? then (if bare[2].endsWith('.rip') then bare[2] else "#{bare[2]}.rip") else 'index.rip'
-      target = "#{bare[1]}/#{subpath}"
+      target = "rip/#{bare[1]}/#{subpath}"
       throw Error.new "rip: '#{from}' imports '#{specifier}', but '#{target}' is not in the bundle" unless modules[target]?
       return target
 
@@ -238,7 +238,7 @@ validateRipProgram = (modules) ->
     for span in compiled.imports
       specifier = unquote span.specifier
       continue if RUNTIME_RE.test specifier
-      continue if specifier in ['@rip-lang/app', '@rip-lang/app/rash']
+      continue if specifier in ['rip/app', 'rip/app/rash']
       dependencies.push resolveImport(path, specifier)
     edges.set path, dependencies
 
@@ -256,7 +256,7 @@ validateRipProgram = (modules) ->
   return
 
 # The wire program is only canonical `[[path, source], ...]`. Bare package
-# roots resolve by convention to `@rip-lang/<name>/index.rip`, keeping resolver
+# roots resolve by convention to `rip/<name>/index.rip`, keeping resolver
 # metadata private to Manager.
 export assembleRipPublication = (options = {}) ->
   assembled = assembleBundle options

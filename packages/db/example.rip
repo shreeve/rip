@@ -1,5 +1,5 @@
 #!/usr/bin/env rip
-# Minimal @rip-lang/db smoke — requires a running duckdb-harbor.
+# Minimal rip/db smoke — requires a running duckdb-harbor.
 #
 #   # Terminal A
 #   duckdb -init ~/.duckdb-harbor.rc my.duckdb
@@ -10,7 +10,7 @@
 #   export RIP_DB_TOKEN=rip-token   # match harbor_serve
 #   rip example.rip
 
-import { connect, ensureRunning, query, findOne, Model } from '@rip-lang/db'
+import { connect, ensureRunning, query, findOne, Model } from 'rip/db'
 
 ensureRunning!
 connect!

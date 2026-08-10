@@ -11,7 +11,7 @@
 # (bench/compare.rip) runs automatically after the self workloads.
 # ==============================================================================
 
-import { CSV } from '@rip-lang/csv'
+import { CSV } from 'rip/csv'
 import { basename } from 'path'
 
 MB =! 1048576
@@ -66,7 +66,7 @@ else
 
   # head-to-head vs uDSV/PapaParse/d3-dsv/csv-parse — runs when the
   # competitor parsers are installed; they are quarantined in bench/
-  # so @rip-lang/csv itself stays dependency-free
+  # so rip/csv itself stays dependency-free
   try
     import!('./bench/compare.rip')
   catch e

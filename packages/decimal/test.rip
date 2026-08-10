@@ -2,14 +2,14 @@
 # decimal tests — parsing, exact arithmetic, rounding, limits, coercers
 # ==============================================================================
 
-import { test, eq, ok, throws } from '@rip-lang/testing'
+import { test, eq, ok, throws } from 'rip/testing'
 import {
   Decimal, D, registerDecimalCoercer,
   DecimalError, DecimalParseError, DecimalDivisionByZeroError,
   DecimalNonTerminatingError, DecimalInvalidOperationError, DecimalRangeError,
   DecimalResourceLimitError, DecimalInexactError, DecimalUnsafeConversionError,
-} from '@rip-lang/decimal'
-import * as mod from '@rip-lang/decimal'
+} from 'rip/decimal'
+import * as mod from 'rip/decimal'
 import { registerCoercer } from '../../src/runtime/schema.js'
 import { readFileSync } from 'fs'
 
@@ -39,11 +39,11 @@ test "public entry exposes named exports only", ->
   ]
   ok not ('default' of mod), 'no default export'
 
-test "no runtime deps; testing harness is the only devDependency", ->
+test "no dependencies of any kind (the stdlib ships with rip)", ->
   pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  eq pkg.devDependencies, undefined
 
 test "declares browser safety; the source imports only the schema runtime, no host APIs", ->
   pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
@@ -258,7 +258,7 @@ test "magnitudes below half an ulp round as a tiny remainder", ->
 
 # ==[ Cents interop ]==
 
-console.log "\nCents interop with @rip-lang/validate"
+console.log "\nCents interop with rip/validate"
 
 test "toCentsNumber matches the cents convention", ->
   # validate `money` is HALF_UP, `money_even` is HALF_EVEN; both return
@@ -406,7 +406,7 @@ test "valueOf blocks implicit coercion", ->
 
 # ==[ The ~:Decimal schema coercer ]==
 #
-# Registered automatically by importing '@rip-lang/decimal' — no bridge
+# Registered automatically by importing 'rip/decimal' — no bridge
 # import, no setup call.
 
 console.log "\nSchema coercer (~:Decimal)"

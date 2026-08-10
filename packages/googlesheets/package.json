@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/googlesheets",
+  "name": "@rip/googlesheets",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -16,8 +16,5 @@
   "files": [
     "googlesheets.rip",
     "README.md"
-  ],
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
-  }
+  ]
 }

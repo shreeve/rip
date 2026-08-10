@@ -1,13 +1,13 @@
 #!/usr/bin/env rip
 
 # ==============================================================================
-# @rip-lang/swarm - Parallel job runner with worker threads
+# rip/swarm - Parallel job runner with worker threads
 #
 # Author: Steve Shreeve (steve.shreeve@gmail.com)
 #   Date: January 18, 2026
 #
 # Usage:
-#   import { swarm, init, retry, todo } from '@rip-lang/swarm'
+#   import { swarm, init, retry, todo } from 'rip/swarm'
 #
 #   setup = ->
 #     unless retry()

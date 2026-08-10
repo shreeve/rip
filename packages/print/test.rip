@@ -7,11 +7,11 @@
 # repository's rip, with a stub open/xdg-open/start first on PATH so no
 # browser ever launches. Expected values were pinned from the running v3
 # implementation (the port's behavioral oracle); the declared divergences
-# are the shared @rip-lang/highlight grammar and the package.json-sourced
+# are the shared rip/highlight grammar and the package.json-sourced
 # version.
 # ==============================================================================
 
-import { test, eq, ok } from '@rip-lang/testing'
+import { test, eq, ok } from 'rip/testing'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -105,7 +105,7 @@ test "a pure CLI: importing the module rejects loudly", ->
     '  p "guarded: #{e.message}"'
   ]
   r = spawnSync process.execPath, [ripCli, guard], { env, encoding: 'utf8' }
-  ok r.stdout.includes('guarded: @rip-lang/print is a CLI, not a library')
+  ok r.stdout.includes('guarded: rip/print is a CLI, not a library')
 
 test "the rip-print bin is print.rip itself, shebang'd and executable", ->
   eq pkg.bin, { 'rip-print': './print.rip' }
@@ -114,9 +114,9 @@ test "the rip-print bin is print.rip itself, shebang'd and executable", ->
   mode = statSync(printRip).mode
   ok (mode & 0o111) isnt 0
 
-test "dependency posture: highlight.js and the shared grammar, nothing else", ->
-  eq pkg.dependencies, { '@rip-lang/highlight': 'workspace:*', 'highlight.js': '11.11.1' }
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+test "dependency posture: highlight.js, nothing else", ->
+  eq pkg.dependencies, { 'highlight.js': '11.11.1' }
+  eq pkg.devDependencies, undefined
   for field in ['peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
 
@@ -310,7 +310,7 @@ test! "-d force-darkens the document and drops the media query", ->
   ok html.includes(':root { --bg: #0a0a0c;')
   ok not html.includes('@media (prefers-color-scheme: dark)')
 
-# ==[ Shared Rip grammar (@rip-lang/highlight) ]==
+# ==[ Shared Rip grammar (rip/highlight) ]==
 
 console.log "\nShared grammar"
 

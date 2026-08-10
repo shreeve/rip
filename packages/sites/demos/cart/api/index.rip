@@ -1,5 +1,5 @@
 import './db.rip'
-import { get, post, patch, read, session } from '@rip-lang/sites'
+import { get, post, patch, read, session } from 'rip/sites'
 import { User, Product, Order, OrderItem, OrderLine, UserPublic, ProductPublic, OrderPublic } from './models.rip'
 
 def errorResponse(errors: { form?: string, field?: Partial<Record<string, string>> }, status = 400)

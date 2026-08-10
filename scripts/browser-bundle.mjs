@@ -108,7 +108,7 @@ const ideStubs = {
   },
 };
 
-// @rip-lang/app is part of the stable browser distribution. Compile its Rip
+// rip/app is part of the stable browser distribution. Compile its Rip
 // modules while building rip.js; authored App source still compiles in the
 // browser, while the shared framework is transferred and evaluated once per
 // runtime version instead of once per App publication.

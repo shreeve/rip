@@ -64,7 +64,7 @@ private files are not public unless a file root explicitly exposes them.
 {
   "hash": "APP123",
   "list": [
-    ["@rip-lang/http/index.rip", "export class HTTPError ..."],
+    ["rip/http/index.rip", "export class HTTPError ..."],
     ["data.rip", "export data = ..."],
     ["routes/index.rip", "export Index = component ..."]
   ]
@@ -80,10 +80,10 @@ It contains:
 - `data.rip`, when the App defines it.
 
 It does not contain CSS, HTML, images, fonts, videos, API implementation,
-server-only packages, or `@rip-lang/app`. The complete App package is already
+server-only packages, or `rip/app`. The complete App package is already
 embedded in `/@rip/rip.min.js`.
 
-Browser package roots normalize to `@rip-lang/<name>/index.rip`. Package
+Browser package roots normalize to `rip/<name>/index.rip`. Package
 manifests are Manager inputs used for browser-safety validation and import
 resolution; resolver metadata does not cross the wire. The published graph
 uses static imports only. Missing targets, import cycles, and dynamic imports

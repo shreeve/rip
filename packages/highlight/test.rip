@@ -2,9 +2,9 @@
 # highlight tests: the shared Rip grammar, exercised through highlight.js
 # ==============================================================================
 
-import { test, eq, ok } from '@rip-lang/testing'
-import ripLanguage from '@rip-lang/highlight'
-import * as mod from '@rip-lang/highlight'
+import { test, eq, ok } from 'rip/testing'
+import ripLanguage from 'rip/highlight'
+import * as mod from 'rip/highlight'
 import hljs from 'highlight.js/lib/core'
 import { readFileSync } from 'fs'
 import { join } from 'path'
@@ -29,7 +29,7 @@ test "no runtime deps; highlight.js is the test oracle only", ->
   pkg = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*', 'highlight.js': '11.11.1' }
+  eq pkg.devDependencies, { 'highlight.js': '11.11.1' }
 
 test "declares browser safety and earns it", ->
   pkg = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))

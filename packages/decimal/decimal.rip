@@ -1,5 +1,5 @@
 # ==============================================================================
-# @rip-lang/decimal — zero-dependency, BigInt-backed arbitrary-precision decimal
+# rip/decimal — zero-dependency, BigInt-backed arbitrary-precision decimal
 #
 # A value is `coef * 10^exp` with a signed BigInt coefficient and an integer
 # exponent. Exact for + - * ; division and scale changes require an EXPLICIT
@@ -435,7 +435,7 @@ export class Decimal
     rounded = @quantizeToScale(scale, mode)
     rounded.coef
 
-  # Integer cents as a JS number (matches @rip-lang/validate's cents convention).
+  # Integer cents as a JS number (matches rip/validate's cents convention).
   # Throws if the result is outside the JS safe-integer range.
   toCentsNumber: (mode) ->
     cents = @toScaledInteger(2, mode)
@@ -460,12 +460,12 @@ export D = (strings, ...values) ->
 # Importing this package registers a `~:Decimal` coercer that hydrates a
 # wire string/number into a Decimal (scale preserved; a value that does
 # not parse is a structured coerce issue). This is additive — the
-# lowercase `~:decimal` from @rip-lang/validate, which returns a
+# lowercase `~:decimal` from rip/validate, which returns a
 # lossless STRING, is untouched.
 #
 # One evaluation per process (the module cache owns idempotence). A name
 # collision with an already-registered coercer rejects the import loudly,
-# naming the coercer — the only way `import '@rip-lang/decimal'` can
+# naming the coercer — the only way `import 'rip/decimal'` can
 # throw is a genuine foreign claim on `~:Decimal`, which must not be
 # swallowed. Apps can register the same hydration under other names via
 # registerDecimalCoercer.

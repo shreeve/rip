@@ -6,6 +6,12 @@ abort 'rip-site generate: the Rip loader is missing' unless preload?
 # Preload lives in src/cli/; the compiler root is one level up.
 compiler = import!(join(dirname(resolve(preload)), '..', 'compile.js')).compile
 
+# Bare specifiers (`rip/<pkg>` stdlib, bun-global fallback) share the
+# loader's enumeration — but Bun.build never consults the runtime's
+# virtual modules, so the bundler needs its own onResolve over the
+# same map.
+bare = import!(join(dirname(resolve(preload)), 'stdlib.js')).bareSpecifierMap()
+
 rewriteMeta = (code, path) ->
   return code unless code.includes 'import.meta'
   full = JSON.stringify path
@@ -28,6 +34,14 @@ record = (path, bytes) ->
 plugin =
   name: 'rip'
   setup: (build) ->
+    # Bare specifiers only — a catch-all filter here makes Bun treat
+    # relative .rip imports it declines as side-effect-free, silently
+    # dropping route-registration modules from the bundle (measured on
+    # 1.3.14 — .js modules are unaffected).
+    build.onResolve { filter: /^[^.\/]/ }, (args) ->
+      path = bare.get args.path
+      return { path } if path?
+      return
     build.onLoad { filter: /\.rip$/ }, (args) ->
       bytes = readFileSync args.path
       record args.path, bytes

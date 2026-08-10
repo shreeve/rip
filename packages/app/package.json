@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/app",
+  "name": "@rip/app",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -16,8 +16,5 @@
   ],
   "rip": {
     "browser": true
-  },
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
   }
 }

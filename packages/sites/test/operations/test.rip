@@ -1,4 +1,4 @@
-import { test, eq, ok } from '@rip-lang/testing'
+import { test, eq, ok } from 'rip/testing'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -86,8 +86,6 @@ test! 'hold fences App publication, API replacement, and client messages', ->
   dir = mkdtempSync join(tmpdir(), 'rip-operations-hold-')
   project = join dir, 'project'
   cpSync RELOAD_PROJECT, project, { recursive: true }
-  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
-  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'sites'), 'dir'
   controlSocket = join dir, 'janus.sock'
   registration = null
   updates = []
@@ -133,7 +131,7 @@ test! 'hold fences App publication, API replacement, and client messages', ->
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }
 
     writeFileSync join(project, 'index.rip'), """
-    import { get, start } from '@rip-lang/sites'
+    import { get, start } from 'rip/sites'
     get '/version' -> { version: 'held-change' }
     start!
     """
@@ -167,8 +165,6 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
   dir = mkdtempSync join(tmpdir(), 'rip-operations-migrate-')
   project = join dir, 'project'
   cpSync RELOAD_PROJECT, project, { recursive: true }
-  mkdirSync join(project, 'node_modules', '@rip-lang'), { recursive: true }
-  symlinkSync join(import.meta.dir, '..', '..'), join(project, 'node_modules', '@rip-lang', 'sites'), 'dir'
   writeFileSync join(project, 'filedb.mjs'), FILE_DB
   writeFileSync join(project, 'models.rip'), MODELS
   mkdirSync join(project, 'migrations')
@@ -215,7 +211,7 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
     waitFor! -> registration?
     command! 'hold', project
     writeFileSync join(project, 'index.rip'), """
-    import { get, start } from '@rip-lang/sites'
+    import { get, start } from 'rip/sites'
     get '/version' -> { version: 'migrated' }
     start!
     """
@@ -228,7 +224,7 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
       updates.some (update) -> update.upstreams.length is 0
     eq migrationProc.exitCode, null
     writeFileSync join(project, 'index.rip'), """
-    import { get, start } from '@rip-lang/sites'
+    import { get, start } from 'rip/sites'
     get '/version' -> { version: 'reconciled' }
     get '/crash' -> process.exit 7
     start!
@@ -257,7 +253,7 @@ test! 'coordinated migration cuts admission and unresolved work recovers durably
 
     command! 'hold', project
     writeFileSync join(project, 'index.rip'), """
-    import { get, start } from '@rip-lang/sites'
+    import { get, start } from 'rip/sites'
     get '/version' -> { version: 'recovered' }
     start!
     """

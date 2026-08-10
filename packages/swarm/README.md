@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip Swarm - @rip-lang/swarm
+# Rip Swarm
 
 > **Parallel job runner with worker threads — setup once, swarm many.**
 
@@ -52,14 +52,10 @@ thousands of tasks reliably. Boring infrastructure, rock solid.
 
 ## Quick Start
 
-```bash
-bun add @rip-lang/swarm
-```
-
 Create a job script:
 
 ```coffee
-import { swarm, init, retry, todo } from '@rip-lang/swarm'
+import { swarm, init, retry, todo } from 'rip/swarm'
 
 setup = ->
   unless retry()
@@ -141,7 +137,7 @@ or contain a payload that `perform` reads. File moves use `renameSync`
 ### Task Queue
 
 ```coffee
-import { init, retry, todo } from '@rip-lang/swarm'
+import { init, retry, todo } from 'rip/swarm'
 
 init()               # Remove old .swarm, create todo/done/died dirs
 retry()              # Move .swarm/died/* back to .swarm/todo/ for retry
@@ -186,7 +182,7 @@ Swarm also exports `args()` which returns `process.argv` with all
 swarm flags stripped — only your script's positional arguments remain:
 
 ```coffee
-import { swarm, args } from '@rip-lang/swarm'
+import { swarm, args } from 'rip/swarm'
 
 inputFile = args()[0]    # first non-swarm argument
 ```
@@ -209,7 +205,7 @@ back for reprocessing — only the failed tasks run, not the entire batch.
 Downloading 15,000 lab test definitions from an API with 40 workers:
 
 ```coffee
-import { swarm, args, init, retry, todo } from '@rip-lang/swarm'
+import { swarm, args, init, retry, todo } from 'rip/swarm'
 import { isMainThread } from 'worker_threads'
 import { readFileSync, existsSync, mkdirSync } from 'fs'
 import { join, resolve } from 'path'

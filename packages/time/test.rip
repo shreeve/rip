@@ -1,10 +1,10 @@
 # ==============================================================================
-# @rip-lang/time tests — black-box parity against dayjs
+# rip/time tests — black-box parity against dayjs
 # ==============================================================================
 
-import { test, eq, ok } from '@rip-lang/testing'
-import time, { Duration, Time, age } from '@rip-lang/time'
-import * as mod from '@rip-lang/time'
+import { test, eq, ok } from 'rip/testing'
+import time, { Duration, Time, age } from 'rip/time'
+import * as mod from 'rip/time'
 import ref from 'dayjs'
 import { readFileSync } from 'fs'
 
@@ -33,8 +33,7 @@ test "no runtime deps; dayjs is the test oracle only", ->
   pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies.dayjs, '1.11.20'
-  eq pkg.devDependencies['@rip-lang/testing'], 'workspace:*'
+  eq pkg.devDependencies, { dayjs: '1.11.20' }
   eq pkg.files.includes('test'), false
 
 test "declares browser safety and earns it", ->

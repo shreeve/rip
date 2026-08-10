@@ -4,9 +4,9 @@
 # (status, network, Retry-After), timeout/abort, hooks, and instances
 # ==============================================================================
 
-import { test, eq, ok } from '@rip-lang/testing'
-import { HTTPError, TimeoutError, http } from '@rip-lang/http'
-import * as mod from '@rip-lang/http'
+import { test, eq, ok } from 'rip/testing'
+import { HTTPError, TimeoutError, http } from 'rip/http'
+import * as mod from 'rip/http'
 import { readFileSync } from 'fs'
 
 # ==[ Fixture server ]==
@@ -75,11 +75,11 @@ test "public entry exposes named exports only", ->
   eq Object.keys(mod).sort(), ['HTTPError', 'TimeoutError', 'http']
   ok not ('default' of mod), 'no default export'
 
-test "no runtime deps; testing harness is the only devDependency", ->
+test "no dependencies of any kind (the stdlib ships with rip)", ->
   pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  eq pkg.devDependencies, undefined
 
 test "declares browser safety and earns it", ->
   pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))

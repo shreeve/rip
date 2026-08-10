@@ -1,5 +1,5 @@
 # ==============================================================================
-# @rip-lang/http — Zero-dependency HTTP client for Rip
+# rip/http — Zero-dependency HTTP client for Rip
 #
 # Author: Steve Shreeve (steve.shreeve@gmail.com)
 #   Date: February 18, 2026

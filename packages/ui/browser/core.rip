@@ -2,7 +2,7 @@
 #
 # These primitives are the WAI-ARIA keyboard and popup-lifecycle patterns
 # the headless widgets consume. In v3 they lived on `globalThis.ARIA`; here
-# they are ordinary typed named exports of `@rip-lang/ui/browser`. Nothing
+# they are ordinary typed named exports of `rip/ui/browser`. Nothing
 # is published on a global.
 #
 # The pure logic (key->action mapping, roving index math, dismissal

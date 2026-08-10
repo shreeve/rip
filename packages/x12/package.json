@@ -1,5 +1,5 @@
 {
-  "name": "@rip-lang/x12",
+  "name": "@rip/x12",
   "version": "4.0.0",
   "private": true,
   "type": "module",
@@ -16,8 +16,5 @@
   "files": [
     "x12.rip",
     "README.md"
-  ],
-  "devDependencies": {
-    "@rip-lang/testing": "workspace:*"
-  }
+  ]
 }

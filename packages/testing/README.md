@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../docs/assets/rip.png" alt="Rip" width="50" />
 
-# Rip Testing - @rip-lang/testing
+# Rip Testing
 
 > **Tiny Rip harness for first-party package test.rip files (test, eq, ok, throws).**
 
@@ -17,13 +17,9 @@ writes to stdout. One `.rip` file.
 
 ## Quick Start
 
-```bash
-bun add @rip-lang/testing
-```
-
 ```coffee
-import { test, eq, ok, throws } from '@rip-lang/testing'
-import { CSV } from '@rip-lang/csv'
+import { test, eq, ok, throws } from 'rip/testing'
+import { CSV } from 'rip/csv'
 
 test "simple CSV", ->
   eq CSV.read("a,b\n"), [['a','b']]

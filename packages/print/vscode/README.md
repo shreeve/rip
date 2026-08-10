@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+<img src="../../../docs/assets/rip.png" alt="Rip" width="50" />
 
 # Rip Print
 
