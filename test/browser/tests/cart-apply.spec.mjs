@@ -147,7 +147,7 @@ test.describe('cart publication apply', () => {
   test('profile local form state survives a compatible leaf markup edit', async ({ page }) => {
     await bootCart(page);
     await page.goto('/profile');
-    await expect(page.locator('h1')).toHaveText('Profiler', { timeout: 20000 });
+    await expect(page.locator('h1')).toHaveText('Profile', { timeout: 20000 });
 
     const stamp = `Ada-${Date.now()}`;
     const first = page.locator('input').first();
@@ -157,10 +157,10 @@ test.describe('cart publication apply', () => {
     await listenHmr(page);
 
     const edit = await editFile('app/routes/profile.rip', (src) =>
-      src.replace("h1 'Profiler'", `h1 'Profiler ${stamp.slice(-4)}'`));
+      src.replace("h1 'Profile'", `h1 'Profile ${stamp.slice(-4)}'`));
 
     try {
-      await expect(page.locator('h1')).toContainText('Profiler', { timeout: 15000 });
+      await expect(page.locator('h1')).toContainText('Profile', { timeout: 15000 });
       await expect(page.locator('h1')).toContainText(stamp.slice(-4));
       // Compatible render edit: form binding should still show the typed value.
       await expect(first).toHaveValue(stamp);
