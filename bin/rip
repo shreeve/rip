@@ -175,7 +175,8 @@ if (args[0] === 'edge' || args[0] === 'site') {
 // The word in first position is a subcommand when it is not a flag, not
 // an existing file or directory, and not path-shaped (contains no '/'
 // or '.'). Resolution order, first hit wins: a rip-<name> next to this
-// executable, the cwd's git checkout bin/ (rip-<name>, then <name>),
+// executable, the cwd's git checkout bin/ (rip-<name>, rip-<name>.rip,
+// <name>, then <name>.rip),
 // the nearest node_modules/.bin/rip-<name> walking up from the cwd
 // (where package.json "bin" entries land via bun install), then PATH.
 // A miss rejects loudly.
@@ -233,7 +234,9 @@ if (args.length > 0 && !args[0].startsWith('-') && !args[0].includes('/') && !ar
   const repoRoot = toplevel.status === 0 ? toplevel.stdout.trim() : null;
   if (repoRoot) {
     if (existsSync(join(repoRoot, 'bin', `rip-${name}`))) await runSub(join(repoRoot, 'bin', `rip-${name}`));
+    if (existsSync(join(repoRoot, 'bin', `rip-${name}.rip`))) await runSub(join(repoRoot, 'bin', `rip-${name}.rip`));
     if (existsSync(join(repoRoot, 'bin', name))) await runSub(join(repoRoot, 'bin', name));
+    if (existsSync(join(repoRoot, 'bin', `${name}.rip`))) await runSub(join(repoRoot, 'bin', `${name}.rip`));
   }
 
   let nmDir = process.cwd();
