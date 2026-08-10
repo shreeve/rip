@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 
 preload = process.execArgv.find((arg) -> arg.startsWith('--preload='))?.slice('--preload='.length)
@@ -31,6 +31,18 @@ inventory = {}
 record = (path, bytes) ->
   inventory[path] = Bun.CryptoHasher.new('sha256').update(bytes).digest('hex')
 
+# Directory-membership inputs (the sites dir): verified by re-listing,
+# not re-reading — a directory has no bytes, but its listing shapes the
+# generated module just as file bytes do.
+dirInventory = {}
+siteDirNames = (sitesDir) ->
+  readdirSync(sitesDir, { withFileTypes: true })
+    .filter((entry) -> entry.isDirectory() and not entry.name.startsWith('.'))
+    .map((entry) -> entry.name)
+    .sort()
+recordDir = (path, names) ->
+  dirInventory[path] = JSON.stringify names
+
 plugin =
   name: 'rip'
   setup: (build) ->
@@ -42,6 +54,32 @@ plugin =
       path = bare.get args.path
       return { path } if path?
       return
+    # rip/sites/configs — tenant branding as DATA. Enumerate the entry
+    # project's sites dir (serve.rip sites.dir), evaluate each site's
+    # config.rip through the loader, and emit ONE module keyed by
+    # DIRECTORY NAME. Tenant names are data, never identifiers: a new
+    # tenant is a new directory, not an edit to a registry, and the
+    # recorded inputs make watch mode regenerate on any config edit or
+    # membership change.
+    build.onResolve { filter: /^rip\/sites\/configs$/ }, ->
+      { path: 'rip/sites/configs', namespace: 'rip-sites-configs' }
+    build.onLoad { filter: /.*/, namespace: 'rip-sites-configs' }, ->
+      root = dirname resolve(entry)
+      servePath = join root, 'serve.rip'
+      serveConfig = import!(servePath).default
+      dir = serveConfig?.sites?.dir
+      unless typeof dir is 'string' and dir
+        throw Error.new "rip/sites/configs: #{servePath} does not declare sites.dir — tenant configs require sites mode"
+      sitesDir = join root, dir
+      names = siteDirNames sitesDir
+      recordDir sitesDir, names
+      configs = {}
+      for name in names
+        configPath = join sitesDir, name, 'config.rip'
+        continue unless existsSync configPath
+        record configPath, readFileSync(configPath)
+        configs[name] = import!(configPath).default
+      { contents: "export default #{JSON.stringify(configs)}", loader: 'js' }
     build.onLoad { filter: /\.rip$/ }, (args) ->
       bytes = readFileSync args.path
       record args.path, bytes
@@ -83,6 +121,9 @@ try
   for path, expected of inventory
     actual = Bun.CryptoHasher.new('sha256').update(readFileSync(path)).digest('hex')
     throw Error.new("input changed during generation: #{path}") unless actual is expected
+    inputs.push path
+  for path, expected of dirInventory
+    throw Error.new("site directory changed during generation: #{path}") unless JSON.stringify(siteDirNames(path)) is expected
     inputs.push path
   inputs.sort()
 
