@@ -16,3 +16,6 @@ tmp-*
 /packages/tray/macos/.build
 /packages/tray/dist
 /test/browser/test-results
+
+# Janus binary: downloaded from github.com/shreeve/janus releases, never committed
+/packages/sites/bin/caddy-janus
