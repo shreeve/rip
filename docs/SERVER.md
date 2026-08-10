@@ -167,7 +167,7 @@ truth, and the published hashes describe exactly what the browser was sent:
 
 ```text
 watcher event (filename = relevance hint only)
-→ 50ms delay, leading-edge (first event arms it; later events ride along)
+→ 50ms trailing delay, capped at 250ms after the burst's first event
 → snapshot the whole App tree, hash every managed file
 → compare with the published hashes
 → identical: stop
@@ -179,16 +179,16 @@ The event's filename decides only whether to wake at all — hidden paths and
 unmanaged suffixes are ignored. Reconciliation always re-reads the complete
 managed tree, so a lost or misattributed notification can never strand one
 file; and because publication repeats until disk and publication agree, a
-write racing the read is caught by the next round. The delay is leading-edge
-on purpose: the read happens 50ms after the first event and sees everything
-written since, so sustained rapid writes cannot postpone publication. A slow
-sweep (default 2s, `RIP_APP_SWEEP_MS`) runs the same disk comparison with no
-event at all — covering the App tree and the assembled inputs (package
-sources outside the App root) hashed as they stood at publish time — and
-retries work left owed by a failed publication. That is the recovery path
-for total notification loss, which every OS watcher admits (FSEvents drops
-and rescan flags, inotify queue overflow). Normally the sweep is a
-snapshot-compare no-op.
+write racing the read is caught by the next round. The delay is trailing so
+a save-burst publishes once, but capped so sustained rapid writes cannot
+postpone publication past 250ms. A slow sweep (default 2s,
+`RIP_APP_SWEEP_MS`) runs the same disk comparison with no event at all —
+covering the App tree and every assembled input (package sources outside
+the App root) against hashes of the bytes the assembly actually consumed —
+and retries work left owed by a failed publication or a quarantined
+assembly. That is the recovery path for total notification loss, which
+every OS watcher admits (FSEvents drops and rescan flags, inotify queue
+overflow). Normally the sweep is a snapshot-compare no-op.
 
 The default `serve.rip` change policy is:
 

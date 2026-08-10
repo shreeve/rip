@@ -677,6 +677,7 @@ appDocuments = (project, graph) ->
     hash
     list
     inputs: assembled.inputs
+    inputHashes: assembled.inputHashes
     watchRoots: assembled.watchRoots
     bundle: JSON.stringify({ hash, list })
     latest: JSON.stringify({ hash })
@@ -705,6 +706,7 @@ publicationFromRawGraph = (graph, prior = null) ->
     hash
     list
     inputs: prior?.inputs ?? []
+    inputHashes: prior?.inputHashes ?? []
     watchRoots: prior?.watchRoots ?? []
     bundle: JSON.stringify({ hash, list })
     latest: JSON.stringify({ hash })
@@ -919,6 +921,7 @@ export main = (argv) ->
   appPublication = null
   appWatcher = null
   appTimer = null
+  appDeadline = null
   appSweep = null
   appInputsCheck = null
   appReconcile = false
@@ -1073,6 +1076,7 @@ export main = (argv) ->
           if appTimer?
             clearTimeout appTimer
             appTimer = null
+            appDeadline = null
             appReconcile = true
           if apiTimer?
             clearTimeout apiTimer
@@ -1245,15 +1249,24 @@ export main = (argv) ->
   # Every OS watcher eventually says "something changed, rescan"; this
   # pipeline never asks more of it than that.
   #
-  # The 50ms delay is leading-edge on purpose: the first event arms it and
-  # later events ride along, because the reconcile reads disk at fire time
-  # and the fixpoint catches writes racing the read. A trailing (resetting)
-  # delay would let sustained sub-50ms writes postpone publication forever.
+  # Trailing debounce with a hard cap: the reconcile fires 50ms after the
+  # LATEST event so save-bursts publish once, but never later than 250ms
+  # after the FIRST event of the burst — sustained sub-50ms writes cannot
+  # postpone publication (that is capped trigger latency, not a publication
+  # frequency guarantee: jobs still serialize on appChain). appTimer and
+  # appDeadline are set and cleared together; the sweep's appTimer? skip
+  # relies on that pairing.
   scheduleAppReconcile = ->
     appReconcile = true
-    return if appTimer?
+    now = Date.now()
+    if appTimer?
+      return if appDeadline - now <= 50
+      clearTimeout appTimer
+    else
+      appDeadline = now + 250
     appTimer = setTimeout ->
       appTimer = null
+      appDeadline = null
       next = appChain.then ->
         appReconcile = false
         reconcileApp!
@@ -1263,16 +1276,18 @@ export main = (argv) ->
     , 50
     return
 
-  inputsCheck = (paths) ->
+  diskInputsCheck = (paths) ->
     check sourceHashes(paths or []).map (entry) -> { id: entry.path, hash: entry.hash ?? 'missing' }
 
-  # Every appPublication assignment funnels here: the settled check needs
-  # the assembled-input hashes (package sources and other files outside
-  # the App root) as they stood at publish time, so a lost notification
-  # from a dependency watcher is still recovered by the sweep.
+  # Every appPublication assignment funnels here. The settled baseline
+  # comes from documents.inputHashes — hashes of the input bytes AS THE
+  # ASSEMBLY CONSUMED THEM, never a re-read — so a dependency change that
+  # raced the build (or whose notification was lost) always shows up as
+  # disk disagreeing with the baseline, and the sweep recovers it.
   setAppPublication = (documents) ->
     appPublication = documents
-    appInputsCheck = inputsCheck documents.inputs
+    appGraph = documents.graph
+    appInputsCheck = check (documents.inputHashes or []).map (entry) -> { id: entry.path, hash: entry.hash }
 
   # Disk-truth check: do the App tree AND the assembled inputs hash to
   # what we last published? Unreadable or torn files mean disk is
@@ -1280,7 +1295,7 @@ export main = (argv) ->
   appSettled = ->
     try
       return false unless appModules(project.appRoot, project.appChanges).check is appPublication.graph.check
-      inputsCheck(appPublication.inputs) is appInputsCheck
+      diskInputsCheck(appPublication.inputs) is appInputsCheck
     catch
       false
 
@@ -1292,7 +1307,13 @@ export main = (argv) ->
         # resume path reschedules it, and release appChain for the fence.
         appReconcile = true
         return
-      refreshApp!
+      quarantined = refreshApp!
+      if quarantined
+        # Assembly is failing; looping cannot converge and would spin a
+        # full rebuild every 25ms. Leave the work owed — the sweep retries
+        # on its own cadence until the sources assemble again.
+        appReconcile = true
+        return
       break if appSettled()
       warn 'rip-site: App sources changed during publication; reconciling again'
       sleep! 25
@@ -1327,6 +1348,9 @@ export main = (argv) ->
       rebuilt = true
     { documents, rebuilt }
 
+  # Returns true when this round published (or kept) a quarantine — the
+  # sources do not assemble — so the caller retries on the sweep cadence
+  # instead of fixpoint-looping.
   refreshApp = ->
     assembleError = null
     try
@@ -1342,7 +1366,14 @@ export main = (argv) ->
       ids = changedAppIds(appPublication, documents) if stabilized.rebuilt
     else
       warn "rip-site: publishing App sources after assemble failure (browser will quarantine): #{String(assembleError)}"
-    return if documents.hash is appPublication.hash
+    if documents.hash is appPublication.hash
+      # Output-neutral change (e.g. a package manifest edit that leaves
+      # assembly identical): re-baseline from the consumed hashes so the
+      # settled check converges instead of livelocking. Never re-baseline
+      # the quarantine fallback — its inherited inputs describe the PRIOR
+      # successful assembly, not the state that just failed.
+      setAppPublication documents unless assembleError?
+      return assembleError?
     priorShell = appPublication.graph.entries.some (entry) -> entry.id is 'index.html'
     nextShell = documents.graph.entries.some (entry) -> entry.id is 'index.html'
     if priorShell isnt nextShell
@@ -1350,8 +1381,8 @@ export main = (argv) ->
     change = appChange appPublication, documents, ids
     commitAppDocuments project, documents
     setAppPublication documents
-    appGraph = documents.graph
     publishChange! change
+    assembleError?
 
   startAppWatcher = ->
     return unless args.watchApp and project.appRoot?
@@ -1502,7 +1533,6 @@ export main = (argv) ->
       commitAppDocuments project, documents if documents?
       if documents?
         setAppPublication documents
-        appGraph = documents.graph
       for worker in workers
         monitorWorker worker
       publishReload!
@@ -1604,7 +1634,6 @@ export main = (argv) ->
       commitAppDocuments project, documents if documents?
       if documents?
         setAppPublication documents
-        appGraph = documents.graph
       apiInputs = Set.new record.inputs
       appChanged = documents? and buildAppDocuments!(project).hash isnt documents.hash
       apiChanged = JSON.stringify(sourceHashes(record.inputs)) isnt JSON.stringify(record.inputHashes)
@@ -1762,6 +1791,8 @@ export main = (argv) ->
       clearInterval heartbeat if heartbeat?
       clearInterval appSweep if appSweep?
       clearTimeout appTimer if appTimer?
+      appTimer = null
+      appDeadline = null
       clearTimeout apiTimer if apiTimer?
       appWatcher?.close()
       watcher.close() for [_, watcher] in appDependencyWatchers
@@ -1814,13 +1845,11 @@ export main = (argv) ->
     if project.appRoot? and operation isnt 'Maintenance'
       preliminary = buildAppDocuments! project
       setAppPublication preliminary
-      appGraph = preliminary.graph
       startAppWatcher()
       authoritative = buildAppDocuments! project
       authoritative = (stabilizeAppDocuments! authoritative).documents
       publication = publishApp! project, args.name, args.watchApp, authoritative, serve?.files?.shell
       setAppPublication authoritative
-      appGraph = authoritative.graph
     else
       publication = publishApp! project, args.name, args.watchApp, (if operation is 'Maintenance' then null else undefined), serve?.files?.shell
     files = registrationFiles project, serve?.files, publication
@@ -1839,7 +1868,6 @@ export main = (argv) ->
           if authoritative.hash isnt appPublication.hash
             commitAppDocuments project, authoritative
             setAppPublication authoritative
-            appGraph = authoritative.graph
         for slot in [0...args.workers]
           bootSlot!
         startDoorbell()

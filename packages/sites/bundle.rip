@@ -3,6 +3,7 @@
 # permitted schema projections, and keeps package manifests off the wire.
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
+import { rash } from 'rip/app/rash'
 import { compile } from '../../src/compile.js'
 import { extractClientProjections } from '../../src/projections.js'
 
@@ -12,14 +13,15 @@ SKIP_DIRS =! Set.new ['node_modules', 'test', 'bench']
 
 unquote = (specifier) -> specifier.slice 1, -1
 
-readRipSource = (path) ->
-  bytes = readFileSync path
+decodeRipBytes = (path, bytes) ->
   try
     TextDecoder.new('utf-8', { fatal: true, ignoreBOM: true }).decode bytes
   catch error
     framed = Error.new "rip: '#{path}' is not valid UTF-8"
     framed.cause = error
     throw framed
+
+readRipSource = (path) -> decodeRipBytes path, readFileSync(path)
 
 ripFilesUnder = (dir) ->
   out = []
@@ -93,22 +95,29 @@ materializeSharedSchemas = (modules, moduleFiles, appDir, appRoot) ->
         needs.set absolute, entry
       entry.names.add name for name in names
 
+  consumed = []
   for [absolute, entry] in needs
     relativeRoot = relative(appDir, appRoot).replace(/\\/g, '/') if appRoot?
     if appRoot? and relativeRoot isnt 'app'
       throw Error.new "rip: browser schema projections require the conventional 'app' root; '#{relativeRoot}' cannot preserve imports that cross the App boundary"
-    result = extractClientProjections readRipSource(absolute), [...entry.names], { path: entry.key }
+    bytes = readFileSync absolute
+    consumed.push { path: absolute, hash: rash bytes }
+    result = extractClientProjections decodeRipBytes(absolute, bytes), [...entry.names], { path: entry.key }
     unless result.ok
       throw Error.new "rip: cannot ship schema import to the browser bundle: #{result.error}"
     modules[entry.key] = result.source
 
-  [...needs.keys()]
+  consumed
 
 export assembleBundle = ({ modules, packagesDir, data = null, moduleFiles = null, appDir = null, appRoot = null } = {}) ->
   unless modules? and typeof modules is 'object'
     throw TypeError.new 'rip: assembleBundle requires a modules object'
 
-  bundle = { modules: { ...modules }, packages: {}, inputs: [], watchRoots: [] }
+  # inputHashes records every input's bytes AS CONSUMED by this assembly —
+  # the manager's settled check compares later disk state against these, so
+  # they must never be re-read after the fact (a file changing between the
+  # read and a re-hash would certify content that was never built).
+  bundle = { modules: { ...modules }, packages: {}, inputHashes: [], watchRoots: [] }
   for path in Object.keys bundle.modules
     if path is 'rip/app' or path.startsWith('rip/app/')
       throw Error.new "rip: App module '#{path}' collides with embedded browser package 'rip/app'"
@@ -116,8 +125,8 @@ export assembleBundle = ({ modules, packagesDir, data = null, moduleFiles = null
 
   if moduleFiles? and appDir?
     projectionInputs = materializeSharedSchemas(bundle.modules, moduleFiles, appDir, appRoot) or []
-    bundle.inputs.push ...projectionInputs
-    bundle.watchRoots.push dirname(input) for input in projectionInputs
+    bundle.inputHashes.push ...projectionInputs
+    bundle.watchRoots.push dirname(entry.path) for entry in projectionInputs
 
   claimPackage = (name, importer) ->
     return if bundle.packages[name]?
@@ -126,8 +135,10 @@ export assembleBundle = ({ modules, packagesDir, data = null, moduleFiles = null
     unless root? and existsSync join(root, 'package.json')
       throw Error.new "rip: '#{importer}' imports '#{name}', which is not a known package"
 
-    manifest = JSON.parse readFileSync(join(root, 'package.json'), 'utf8')
-    bundle.inputs.push join(root, 'package.json')
+    manifestPath = join root, 'package.json'
+    manifestBytes = readFileSync manifestPath
+    bundle.inputHashes.push { path: manifestPath, hash: rash manifestBytes }
+    manifest = JSON.parse decodeRipBytes(manifestPath, manifestBytes)
     bundle.watchRoots.push root
     unless manifest?.rip?.browser is true
       throw Error.new "rip: '#{importer}' imports '#{name}', which does not declare browser safety — a package travels to the browser only with \"rip\": { \"browser\": true }"
@@ -151,8 +162,9 @@ export assembleBundle = ({ modules, packagesDir, data = null, moduleFiles = null
       key = "#{name}/#{relativePath}"
       if bundle.modules[key]?
         throw Error.new "rip: App module '#{key}' collides with browser package '#{name}'"
-      bundle.modules[key] = readRipSource file
-      bundle.inputs.push file
+      fileBytes = readFileSync file
+      bundle.inputHashes.push { path: file, hash: rash fileBytes }
+      bundle.modules[key] = decodeRipBytes file, fileBytes
 
   queue = Object.keys bundle.modules
   seen = Set.new()
@@ -280,9 +292,16 @@ export assembleRipPublication = (options = {}) ->
         throw Error.new "rip: browser package '#{name}' export '#{subpath}' must target './#{canonicalTarget}'"
 
   validateRipProgram modules
+  seenInputs = Map.new()
+  for entry in assembled.inputHashes
+    seenInputs.set entry.path, entry.hash unless seenInputs.has entry.path
+  inputHashes = [...seenInputs.entries()]
+    .map(([path, hash]) -> { path, hash })
+    .sort (a, b) -> if a.path < b.path then -1 else if a.path > b.path then 1 else 0
   {
     list: Object.entries(modules).sort ([a], [b]) -> if a < b then -1 else if a > b then 1 else 0
-    inputs: [...Set.new(assembled.inputs)].sort()
+    inputs: inputHashes.map (entry) -> entry.path
+    inputHashes
     watchRoots: [...Set.new(assembled.watchRoots)].sort()
   }
 
