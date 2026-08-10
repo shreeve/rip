@@ -49,6 +49,41 @@ test('a module importing a type-only name loads', async () => {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('a type used only in a parameter annotation elides', async () => {
+  // The annotation rides the tree as a typed-var's text slot, not a side
+  // table — the one type position a value-tree walk can mistake for a use.
+  const { dir, url } = build({
+    'lib.rip': LIB,
+    'use.rip': [
+      "import { val, Shape } from './lib.rip'",
+      'export label = (s: Shape) -> val',
+      'export answer = label({})',
+    ].join('\n') + '\n',
+  }, 'use.rip');
+  try {
+    const mod = await import(url);
+    expect(mod.answer).toBe(41);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a type used only in a def param, alias body, and def-sig return elides', async () => {
+  const { dir, url } = build({
+    'lib.rip': LIB,
+    'use.rip': [
+      "import { Shape } from './lib.rip'",
+      'type Local = Shape',
+      'def f(s: Shape): Shape',
+      'def f(s)',
+      '  s',
+      'export seen = f({})',
+    ].join('\n') + '\n',
+  }, 'use.rip');
+  try {
+    const mod = await import(url);
+    expect(mod.seen).toEqual({});
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("a module whose whole clause is types still RUNS the module it imported", async () => {
   const { dir, url } = build({
     'lib.rip': LIB,

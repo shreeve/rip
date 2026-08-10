@@ -2419,10 +2419,13 @@ class Emitter {
   // contract — face minus regions === JS bytes — holds only if both
   // modes make that layout decision from the same map.
   // The imported bindings that are TYPE-ONLY: named in an import and
-  // then never referenced by the running program. Type syntax is absent
-  // from the s-expression tree — an annotation is erased into the side
-  // tables — so a name used only in one appears NOWHERE in the value
-  // tree, and that absence is the whole test. No cross-module
+  // then never referenced by the running program. Most type syntax is
+  // erased into the side tables before the s-expression tree, but three
+  // shapes carry their type TEXT in the tree as plain strings — a
+  // typed-var's annotation slot, a def-sig's return slot, a type-decl's
+  // whole declaration — and the walk must step over those slots, or
+  // `(n: T)` counts as a value use of T and vetoes the very elision the
+  // annotation calls for. No cross-module
   // resolution is needed, and none would help: whether the exporting
   // module spells the name as a type is its business, while whether
   // THIS file needs it at runtime is answerable here.
@@ -2452,6 +2455,13 @@ class Emitter {
         bound.push(...Emitter.importedNames([x]));
         return;
       }
+      // The in-tree type text (see above): the target of a typed-var
+      // still walks — a pattern can reference values — but the type
+      // slots do not. Their identifiers reach inTypes through the
+      // roles scan below.
+      if (x[0] === 'typed-var' && x.length === 3) { walk(x[1]); return; }
+      if (x[0] === 'def-sig') { walk(x[2]); return; }
+      if (x[0] === 'type-decl') return;
       for (const c of x) walk(c);
     };
     walk(sexpr);
@@ -3709,7 +3719,10 @@ class Emitter {
 
   // The roles whose recorded span is TYPE text. Additive by design —
   // see collectTypeOnlyImports for why an omission is safe.
-  static TYPE_ROLES = new Set(['annotation', 'returnType', 'typeParams']);
+  // 'declaration' is a type-decl's whole `type A = …` text: an import
+  // referenced only there is used by a type, so it must reach inTypes
+  // or the alias body pins the import as merely-unused dead code.
+  static TYPE_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declaration']);
 
   static importedNames(imports) {
     const names = [];
