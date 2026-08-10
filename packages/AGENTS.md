@@ -209,14 +209,15 @@ trees):
 1. Logo on its own paragraph, then the title:
 
    ```
-   <img src="../../docs/assets/rip.png" alt="Rip" width="50" />
+   <img src="https://raw.githubusercontent.com/shreeve/rip/main/docs/assets/rip.png" alt="Rip" width="50" />
 
    # Rip <Name>
    ```
 
-   The logo lives in this repo (`docs/assets/rip.png`); the src is the
-   relative path from the README's own directory (deeper trees add
-   `../` accordingly).
+   The asset lives in this repo (`docs/assets/rip.png`); the src is
+   the absolute raw URL above — identical in every README, and it
+   renders in contexts where a relative path has no repo to resolve
+   against (offline copies, packaged extension pages).
 
    (`alt`/`width` ATTRIBUTES, never `style` — GitHub strips
    `style`. No `align` tricks: floats and inline-in-heading placements
