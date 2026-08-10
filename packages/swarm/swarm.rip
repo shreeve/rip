@@ -113,19 +113,27 @@ draw! = (state) ->
   ppct = (done + died) / jobs
   most = Math.max(...Object.values(info), 1)
 
-  # worker bars: set colors once, just move cursor per row
-  write fgw + bg("5383ec")
+  # worker bars: `most` sits in the denominator, so a bar can shrink
+  # between frames when the leader surges — repaint the tail so stale
+  # glyphs never overstate a worker's share
+  write fgw
   for slot, count of info
     tpct = count / most
     cols = Math.floor(ppct * tpct * wide)
-    write go(parseInt(slot) + 1, len + 5) + char.repeat(cols)
+    write go(parseInt(slot) + 1, len + 5) + bg("5383ec") + char.repeat(cols) + bg() + " ".repeat(wide - cols)
 
-  # summary bar: one atomic write
-  dpct = done / jobs
-  lpct = live / jobs
-  gcol = Math.floor(dpct * wide)
-  ycol = Math.floor(lpct * wide)
-  rcol = Math.max(0, wide - gcol - ycol)
+  # summary bar: one atomic write — round the green and yellow segment
+  # BOUNDARIES and take differences, so the three segments always sum
+  # to wide exactly; flooring green and yellow independently leaked
+  # their rounding crumbs into red, showing phantom "pending" cells
+  # even when every job was done or in flight
+  gcol = Math.round(done / jobs * wide)
+  ycol = Math.round((done + live) / jobs * wide) - gcol
+  # in-flight work always shows: sub-half-cell live rounds to nothing
+  if live > 0 and ycol is 0
+    ycol = 1
+    gcol-- if gcol + ycol > wide
+  rcol = wide - gcol - ycol
   row  = workers + 3
 
   out = [
@@ -324,10 +332,12 @@ export swarm! = (opts = {}) ->
   if quiet
     p "#{secs.toFixed(2)} secs for #{jobs} jobs by #{workers} workers" + (" @ #{(jobs / secs).toFixed(2)} jobs/sec" if secs > 0 else "")
   else
+    # final summary bar first: draw() repaints worker bars at their
+    # relative widths, which would truncate the full stats bars below
+    draw({ live: 0, done, died, jobs, workers, info })
     for slot, n of info
       rate = (n / secs).toFixed(1) if secs > 0 else '-'
       write go(parseInt(slot) + 1, len + 5) + fgw + bg("5383ec") + char.repeat(wide) + fg() + bg() + " │ #{n} jobs @ #{rate}/sec" + clear(true)
-    draw({ live: 0, done, died, jobs, workers, info })
     cursor(true)
     write go(workers + 6, 1)
     write "#{secs.toFixed(2)} secs"
