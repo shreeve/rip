@@ -90,8 +90,9 @@ JSON to `~/.google/credentials.json`.
 ## CLI
 
 ```bash
-rip-shat 'https://docs.google.com/spreadsheets/d/<id>/edit#gid=0' --tsv
-# options: -f/--fill  -s/--strip  --csv|--psv|--tsv
+rip-shat -fs 'https://docs.google.com/spreadsheets/d/<id>/edit#gid=0'
+# options: -f/--fill  -s|-t/--strip  --csv|--psv|--tsv
+# clusters work: -fs / -ft (same as old Ruby shat)
 ```
 
 ## From the Ruby gem
