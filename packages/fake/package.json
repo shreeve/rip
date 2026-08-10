@@ -3,12 +3,15 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Rip's own fake data — curated, valid-looking, seedable, zero dependencies; powers Model.factory()",
+  "description": "Fake data and Model.factory() — curated, valid-looking, seedable, zero dependencies",
   "exports": {
-    ".": "./index.js"
+    ".": "./fake.rip"
+  },
+  "scripts": {
+    "test": "rip test.rip"
   },
   "files": [
-    "index.js",
+    "fake.rip",
     "README.md"
   ]
 }

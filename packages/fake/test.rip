@@ -1,0 +1,200 @@
+# ==============================================================================
+# fake tests — generators, determinism, and Model.factory
+# ==============================================================================
+
+import { test, eq, ok, throws } from 'rip/testing'
+import { fake } from 'rip/fake'
+import * as mod from 'rip/fake'
+import { __schemaSetAdapter } from '../../src/runtime/orm.js'
+import { recordingAdapter, row } from '../../test/support/recording-adapter.js'
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "module exports fake and the factory field seam", ->
+  eq Object.keys(mod).sort(), ['__fakeFieldValue', 'fake']
+  eq typeof fake.firstName, 'function'
+  eq typeof fake.phone, 'function'
+  eq typeof fake.seed, 'function'
+
+# ==[ Generators ]==
+
+console.log "\nGenerators"
+
+test "names come from gendered pools", ->
+  fake.seed 7
+  ok ['M', 'F'].includes fake.sex()
+  ok typeof fake.firstName('M') is 'string'
+  ok fake.fullName().includes ' '
+  fake.seed()
+
+test "phones are NANP-legal, fax matches, extensions opt in", ->
+  fake.seed 7
+  for i in [0...50]
+    m = fake.phone().match /^\((\d{3})\) (\d{3})-\d{4}$/
+    ok m, 'phone shape'
+    ok m[1][0] >= '2', 'area code starts 2-9'
+    ok m[1] % 100 isnt 11, 'area code never N11'
+    ok m[2][0] >= '2', 'exchange starts 2-9'
+  ok /ext\. \d+/.test fake.phone(ext: true)
+  ok /^\(\d{3}\) \d{3}-\d{4}$/.test fake.fax()
+  ok ['cell', 'home', 'work'].includes fake.phoneType()
+  fake.seed()
+
+test "emails are well-formed and correlate with names", ->
+  fake.seed 7
+  ok /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test fake.email()
+  addr = fake.email 'Emily', 'Diaz'
+  ok addr.includes('diaz') or addr.includes('emily')
+  fake.seed()
+
+test "streets compose base + type, addresses lead with a number", ->
+  fake.seed 7
+  seen = (fake.street() for i in [0...40])
+  ok seen.some((s) -> not s.includes(' ')), 'bare base names occur'
+  ok seen.some((s) -> /\s(St|Ave|Dr|Blvd|Ln|Rd|Way|Ct|Pl|Hwy|Ter|Peak)$/.test(s)), 'typed streets occur'
+  ok /^\d+ /.test fake.streetAddress()
+  ok /^\d{5}$/.test fake.zip()
+  ok fake.state().length is 2
+  fake.seed()
+
+test "work fields: company, profession, job title", ->
+  ok fake.company().includes ' '
+  ok typeof fake.profession() is 'string'
+  ok fake.jobTitle().includes ' '
+
+test "patterns: numerify/letterify/digits/token/uuid", ->
+  ok /^\d{3}-\d{4}$/.test fake.numerify('###-####')
+  ok /^[a-z]{3}$/.test fake.letterify('???')
+  ok /^\d{6}$/.test fake.digits()
+  ok /^[0-9a-f]{8}$/.test fake.token()
+  ok /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test fake.uuid()
+
+test "dates respect year ranges", ->
+  fake.seed 7
+  year = Number fake.date(years: [21, 55]).slice(0, 4)
+  now = Date.new().getFullYear()
+  ok year <= now - 20 and year >= now - 57
+  fake.seed()
+
+test "seeded runs reproduce byte-for-byte", ->
+  fake.seed 42
+  a = [fake.fullName(), fake.phone(), fake.email()]
+  fake.seed 42
+  b = [fake.fullName(), fake.phone(), fake.email()]
+  eq a, b
+  fake.seed()
+
+test "maybe honors probability edges; unique refuses exhaustion", ->
+  eq fake.maybe(0, -> 'x'), null
+  eq fake.maybe(1, -> 'x'), 'x'
+  one = -> 'only'
+  eq fake.unique(one), 'only'
+  exhausted = false
+  try
+    fake.unique one, 5
+  catch e
+    exhausted = /exhausted/.test String(e?.message or e)
+  ok exhausted, 'unique throws after max retries'
+
+# ==[ Model.factory ]==
+
+console.log "\nModel.factory"
+
+FakePatient = schema :model
+  firstName!  string
+  lastName!   string
+  sex?        "M" | "F" | "O" | "U"
+  email?      email
+  phone?      phone
+  dob?        string
+
+FakeSeeded = schema :model
+  firstName! string
+  lastName!  string
+  seed: (opts) ->
+    { firstName: 'Recipe', ...(opts or {}) }
+
+FakeCatalog = schema :model
+  code!  string
+  name!  string
+  price! integer
+
+FakeOwner = schema :model
+  name! string
+
+FakeChild = schema :model
+  label! string
+  @belongs_to FakeOwner
+
+adapter = recordingAdapter()
+adapter.on /INSERT INTO/i, (sql, params) -> row ['id'], [42]
+__schemaSetAdapter adapter
+
+reset = ->
+  adapter.calls.length = 0
+  return
+
+inserts = -> adapter.calls.filter((c) -> /INSERT/i.test(c.sql)).length
+
+test! "signed counts: 0/-1 build one, -3 builds three, no INSERT", ->
+  reset()
+  for n in [0, -1]
+    p = FakePatient.factory! n
+    ok p.firstName.length > 0
+    ok p.lastName.length > 0
+  ary = FakePatient.factory!(-3)
+  eq ary.length, 3
+  eq inserts(), 0
+
+test! "signed counts: 1 creates one, 3 creates three", ->
+  reset()
+  one = FakePatient.factory! 1
+  ok not Array.isArray one
+  ary = FakePatient.factory! 3
+  eq ary.length, 3
+  eq inserts(), 4
+
+test! "schema-derived values: enums sampled, email/phone shapes valid", ->
+  reset()
+  fake.seed 7
+  for p in FakePatient.factory!(-10)
+    ok ['M', 'F', 'O', 'U'].includes(p.sex) if p.sex?
+    ok /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p.email) if p.email?
+    ok /^\(\d{3}\) \d{3}-\d{4}/.test(p.phone) if p.phone?
+  fake.seed()
+
+test! "overrides win; a declared seed recipe wins over derivation", ->
+  reset()
+  p = FakePatient.factory! 0, firstName: 'Zed', sex: 'M'
+  eq p.firstName, 'Zed'
+  eq p.sex, 'M'
+  s = FakeSeeded.factory! 0
+  eq s.firstName, 'Recipe'
+  s2 = FakeSeeded.factory! 0, lastName: 'Override'
+  eq s2.lastName, 'Override'
+
+test! "pipe tables create exact rows, typed by the schema", ->
+  reset()
+  made = FakeCatalog.factory! """
+    code   | name                 | price
+    005009 | Complete Blood Count | 2800
+    322000 | Basic Metabolic      | 4200
+  """
+  eq made.length, 2
+  eq inserts(), 2
+  first = adapter.calls.find (c) -> /INSERT/i.test(c.sql)
+  ok first.params.includes '005009'
+  ok first.params.includes 2800
+
+test! "required foreign keys are never invented", ->
+  reset()
+  failed = false
+  try
+    FakeChild.factory! 1
+  catch e
+    failed = /required foreign key/.test String(e?.message or e)
+  ok failed, 'persisting without the FK throws the named error'
+  built = FakeChild.factory! 0, fakeOwnerId: 7
+  ok built.label?

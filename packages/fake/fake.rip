@@ -1,0 +1,396 @@
+# ==============================================================================
+# rip/fake — Rip's own fake data
+#
+# The distillation of Ruby's faker (102 generator classes + YAML locale
+# machinery) and ffaker (203 modules + 1.7MB of data files) down to the
+# screenful a business app actually seeds: curated inline data, zero
+# dependencies, and values that are VALID-looking (NANP-legal phones,
+# well-formed emails, real state codes) so fakes survive real validators.
+#
+# Deterministic when you want it: fake.seed(n) switches the module to a
+# seeded PRNG (mulberry32) so tests reproduce byte-for-byte; fake.seed()
+# returns to Math.random.
+#
+# Importing this package also installs Model.factory() on every :model
+# schema — one polymorphic verb for fabricating records, deriving
+# plausible values straight from the schema declarations.
+# ==============================================================================
+
+import { __SchemaDef } from '../../src/runtime/schema.js'
+import { __schemaNormalizePersistenceInput, __schemaConstructInputInstance } from '../../src/runtime/orm.js'
+
+# ==[ Randomness ]==
+
+__rand = Math.random
+
+mulberry32 = (a) ->
+  ->
+    a |= 0
+    a = (a + 0x6D2B79F5) | 0
+    t = Math.imul a ^ (a >>> 15), 1 | a
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    ((t ^ (t >>> 14)) >>> 0) / 4294967296
+
+seed = (n) ->
+  __rand = if n? then mulberry32(n >>> 0) else Math.random
+  return
+
+random  = -> __rand()
+integer = (min = 0, max = 100) -> min + Math.floor __rand() * (max - min + 1)
+sample  = (ary) -> ary[Math.floor __rand() * ary.length]
+chance  = (prob = 0.5) -> __rand() < prob
+maybe   = (prob, fn) ->
+  return null unless __rand() < prob
+  if typeof fn is 'function' then fn() else fn
+
+# ==[ Pattern templating (faker's numerify/letterify, kept) ]==
+
+LETTERS = 'abcdefghijklmnopqrstuvwxyz'
+
+numerify  = (s) -> s.replace /#/g, -> String integer(0, 9)
+letterify = (s) -> s.replace /\?/g, -> sample LETTERS
+pattern   = (s) -> letterify numerify(s)
+digits    = (n = 6) -> numerify '#'.repeat(n)
+token     = (n = 8) -> (sample('0123456789abcdef') for i in [0...n]).join ''
+uuid      = ->
+  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace /[xy]/g, (c) ->
+    r = integer 0, 15
+    v = if c is 'x' then r else (r & 0x3) | 0x8
+    v.toString 16
+
+# ==[ Curated data ]==
+
+FIRST_M = [
+  'James', 'Robert', 'John', 'Michael', 'David', 'William', 'Richard', 'Joseph',
+  'Thomas', 'Charles', 'Daniel', 'Matthew', 'Anthony', 'Mark', 'Steven', 'Andrew',
+  'Paul', 'Joshua', 'Kenneth', 'Kevin', 'Brian', 'George', 'Timothy', 'Ronald',
+  'Edward', 'Jason', 'Jeffrey', 'Ryan', 'Jacob', 'Gary', 'Nicholas', 'Eric',
+  'Jonathan', 'Stephen', 'Larry', 'Justin', 'Scott', 'Brandon', 'Benjamin', 'Samuel',
+]
+FIRST_F = [
+  'Mary', 'Patricia', 'Jennifer', 'Linda', 'Elizabeth', 'Barbara', 'Susan', 'Jessica',
+  'Sarah', 'Karen', 'Lisa', 'Nancy', 'Betty', 'Margaret', 'Sandra', 'Ashley',
+  'Kimberly', 'Emily', 'Donna', 'Michelle', 'Carol', 'Amanda', 'Dorothy', 'Melissa',
+  'Deborah', 'Stephanie', 'Rebecca', 'Sharon', 'Laura', 'Cynthia', 'Kathleen', 'Amy',
+  'Angela', 'Shirley', 'Anna', 'Brenda', 'Pamela', 'Emma', 'Nicole', 'Helen',
+]
+LAST = [
+  'Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis',
+  'Rodriguez', 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Thomas',
+  'Taylor', 'Moore', 'Jackson', 'Martin', 'Lee', 'Perez', 'Thompson', 'White',
+  'Harris', 'Sanchez', 'Clark', 'Ramirez', 'Lewis', 'Robinson', 'Walker', 'Young',
+  'Allen', 'King', 'Wright', 'Scott', 'Torres', 'Nguyen', 'Hill', 'Flores',
+  'Green', 'Adams', 'Nelson', 'Baker', 'Hall', 'Rivera', 'Campbell', 'Mitchell',
+  'Carter', 'Roberts', 'Gomez', 'Phillips', 'Evans', 'Turner', 'Diaz', 'Parker',
+  'Cruz', 'Edwards', 'Collins', 'Reyes', 'Stewart', 'Morris', 'Morales', 'Murphy',
+]
+NICK_M = [
+  'Bart', 'Biggie', 'Bitsy', 'Chucky', 'Frodo', 'Hawkeye', 'Holmes', 'Homer',
+  'Homie', 'Marky', 'Mufasa', 'Romeo', 'Sherlock', 'Simba', 'Snitch', 'Tank', 'Weasel', 'Yoda',
+]
+NICK_F = [
+  'Apples', 'Barbie', 'Brownie', 'Cherie', 'Chica', 'Daisy', 'Duchess', 'Holly',
+  'Jo', 'Peaches', 'Pinky', 'Puma', 'Pumpkin', 'Queen', 'Sparky', 'Twinnie', 'Viola', 'Zee',
+]
+STREETS = [
+  'Elm', 'Oak', 'Maple', 'Main', 'Cedar', 'Pine', 'Park', 'Lake',
+  'Hill', 'River', 'Sunset', 'Ridge', 'Meadow', 'Willow', 'Forest', 'Spring',
+  'Franklin', 'Chestnut', 'Highland', 'Washington', 'Juniper', 'Aspen', 'Birch', 'Laurel',
+]
+STREET_TYPES = ['St', 'Ave', 'Dr', 'Blvd', 'Ln', 'Rd', 'Way', 'Ct', 'Pl', 'Hwy', 'Ter', 'Peak']
+CITIES = [
+  'Springfield', 'Riverside', 'Georgetown', 'Franklin', 'Clinton', 'Fairview',
+  'Salem', 'Madison', 'Bristol', 'Clayton', 'Dayton', 'Lexington',
+  'Milton', 'Auburn', 'Ashland', 'Burlington', 'Manchester', 'Oxford',
+]
+STATES = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL',
+  'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT',
+  'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI',
+  'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+]
+COMPANIES = [
+  'Acme', 'Apex', 'Atlas', 'Beacon', 'Cascade', 'Summit', 'Pinnacle', 'Horizon',
+  'Keystone', 'Landmark', 'Meridian', 'Northwind', 'Redwood', 'Sterling', 'Vanguard', 'Zenith',
+]
+COMPANY_SUFFIX = ['Labs', 'Group', 'Health', 'Partners', 'Systems', 'Works', 'Co', 'Inc']
+PROFESSIONS = [
+  'Accountant', 'Architect', 'Attorney', 'Carpenter', 'Chef', 'Dentist', 'Electrician',
+  'Engineer', 'Firefighter', 'Journalist', 'Librarian', 'Mechanic', 'Nurse', 'Paramedic',
+  'Pharmacist', 'Photographer', 'Physician', 'Pilot', 'Plumber', 'Professor',
+  'Programmer', 'Scientist', 'Teacher', 'Therapist', 'Veterinarian', 'Welder',
+]
+JOB_LEVELS = ['Junior', 'Senior', 'Lead', 'Staff', 'Principal', 'Chief', 'Associate', 'Regional']
+JOB_ROLES = [
+  'Engineer', 'Analyst', 'Manager', 'Director', 'Coordinator', 'Designer',
+  'Consultant', 'Administrator', 'Specialist', 'Strategist', 'Technician', 'Officer',
+]
+WORDS = [
+  'alpha', 'amber', 'apex', 'aria', 'atlas', 'aurora', 'basil', 'birch', 'bloom',
+  'brook', 'cedar', 'cinder', 'cloud', 'coral', 'crest', 'delta', 'drift', 'echo',
+  'ember', 'fable', 'fern', 'flint', 'gale', 'glade', 'grove', 'harbor', 'haven',
+  'iris', 'ivory', 'jade', 'juniper', 'lark', 'lumen', 'maple', 'marsh', 'mesa',
+  'nimbus', 'north', 'oasis', 'onyx', 'opal', 'pine', 'quartz', 'raven', 'reef',
+  'sage', 'slate', 'summit', 'terra', 'tide', 'vale', 'willow', 'wren', 'zephyr',
+]
+
+# ==[ Generators ]==
+
+firstName = (sex) ->
+  switch sex
+    when 'M' then sample FIRST_M
+    when 'F' then sample FIRST_F
+    else sample(if chance() then FIRST_M else FIRST_F)
+
+lastName = -> sample LAST
+fullName = (sex) -> "#{firstName sex} #{lastName()}"
+
+nickname = (sex) ->
+  switch sex
+    when 'M' then sample NICK_M
+    when 'F' then sample NICK_F
+    else sample(if chance() then NICK_M else NICK_F)
+
+domain = -> "#{sample WORDS}#{sample ['mail', 'box', 'net', 'hub']}.example.com"
+
+email = (first, last) ->
+  f = (first ?? firstName()).toLowerCase().replace /[^a-z]/g, ''
+  l = (last ?? lastName()).toLowerCase().replace /[^a-z]/g, ''
+  sample(["#{f}.#{l}", "#{f}#{l}", "#{f[0]}#{l}", "#{f}#{integer 1, 99}"]) + '@' + domain()
+
+username = (first, last) ->
+  "#{(first ?? firstName()).toLowerCase()}#{(last ?? lastName()).toLowerCase()}#{integer 1, 999}"
+
+# NANP-legal: area and exchange codes start 2-9, area code never N11.
+areaCode = ->
+  loop
+    n = integer 201, 999
+    return String(n) unless n % 100 is 11
+
+exchangeCode = -> String(integer 2, 9) + digits(2)
+
+phone = ({ ext } = {}) ->
+  s = "(#{areaCode()}) #{exchangeCode()}-#{digits 4}"
+  s += ", ext. #{integer 50, 3000}" if ext is true or (typeof ext is 'number' and chance(ext))
+  s
+
+fax = -> phone()
+phoneType = -> sample ['cell', 'home', 'work']
+
+sex = -> sample ['M', 'F']
+age = (min = 18, max = 90) -> integer min, max
+
+# Base name, with a street type appended most of the time — so you get
+# 'Elm', 'Elm St', 'Elm Peak', … from a small combinatorial pool.
+street = ->
+  s = sample STREETS
+  s += " #{sample STREET_TYPES}" if chance 0.8
+  s
+
+streetAddress = -> "#{integer 10, 9950} #{street()}"
+city = -> sample CITIES
+state = -> sample STATES
+zip = -> digits 5
+company = -> "#{sample COMPANIES} #{sample COMPANY_SUFFIX}"
+profession = -> sample PROFESSIONS
+jobTitle = -> "#{sample JOB_LEVELS} #{sample JOB_ROLES}"
+
+word = -> sample WORDS
+words = (n = 3) -> (word() for i in [0...n]).join ' '
+sentence = (n = 8) ->
+  s = words n
+  s[0].toUpperCase() + s.slice(1) + '.'
+
+# date(years: [21, 55]) -> an ISO date for someone 21-55 years old;
+# date(days: 30) -> within the last 30 days; date() -> last year.
+MS_DAY = 86400000
+
+date = (opts = {}) ->
+  ms = if opts.years
+    [a, b] = opts.years
+    Date.now() - integer(a * 365.25 * MS_DAY, b * 365.25 * MS_DAY)
+  else
+    Date.now() - integer(0, (opts.days ?? 365) * MS_DAY)
+  Date.new(ms).toISOString().slice 0, 10
+
+datetime = (opts = {}) -> Date.new(Date.parse(date opts) + integer(0, MS_DAY - 1))
+
+# unique(fn) — retry fn until unseen, then error.
+__seen = Map.new()
+
+unique = (fn, max = 1000) ->
+  set = __seen.get fn
+  unless set
+    set = Set.new()
+    __seen.set fn, set
+  i = 0
+  while i < max
+    v = fn()
+    unless set.has v
+      set.add v
+      return v
+    i++
+  throw Error.new "fake.unique: exhausted after #{max} retries — pool too small"
+
+export fake = {
+  seed, random, integer, sample, chance, maybe,
+  numerify, letterify, pattern, digits, token, uuid,
+  firstName, lastName, fullName, nickname, sex, age,
+  email, username, domain, phone, fax, phoneType, areaCode,
+  street, streetAddress, city, state, zip, company, profession, jobTitle,
+  word, words, sentence, date, datetime, unique,
+}
+
+# ==[ Schema-driven derivation (used by Model.factory) ]==
+#
+# Given a field descriptor from the schema runtime, produce a plausible
+# value. The schema carries the semantics — enum literals, email/phone/
+# zip/uuid types, optionality — so most models need no per-field recipe
+# at all. Name heuristics cover the string fields the type system can't
+# distinguish.
+
+NAME_HINTS = [
+  [/^first_?name$/i,      (ctx) -> ctx.firstName ?? firstName(ctx.sex)]
+  [/^last_?name$/i,       (ctx) -> ctx.lastName ?? lastName()]
+  [/^(full_?)?name$/i,    -> if chance(0.5) then fullName() else company()]
+  [/fax/i,                -> fax()]
+  [/phone_?type/i,        -> phoneType()]
+  [/phone/i,              -> phone()]
+  [/email/i,              (ctx) -> email ctx.firstName, ctx.lastName]
+  [/profession|occupation/i, -> profession()]
+  [/job_?title/i,         -> jobTitle()]
+  [/(street|address)/i,   -> streetAddress()]
+  [/city/i,               -> city()]
+  [/state/i,              -> state()]
+  [/zip/i,                -> zip()]
+  [/^(sex|gender)$/i,     (ctx) -> ctx.sex ?? sex()]
+  [/^dob|birth/i,         -> date years: [18, 90]]
+  [/description|notes?$/i, -> sentence()]
+  [/^(slug|username)$/i,  -> word() + integer(10, 99)]
+  [/^(token|secret|key)$/i, -> token 20]
+  [/^(code|number|mrn)$/i, -> digits 6]
+  [/^title$/i,            -> words 2]
+  [/company|organization/i, -> company()]
+]
+
+export __fakeFieldValue = (f, ctx = {}) ->
+  return sample f.literals if f.literals
+  switch f.typeName
+    when 'email' then email ctx.firstName, ctx.lastName
+    when 'phone' then phone()
+    when 'zip' then zip()
+    when 'uuid' then uuid()
+    when 'url' then 'https://' + domain() + '/' + word()
+    when 'boolean' then chance()
+    when 'integer' then integer 1, 100
+    when 'number' then Math.round(random() * 10000) / 100
+    when 'date' then date days: 365
+    when 'datetime' then datetime days: 365
+    when 'string', 'text'
+      snake = f.name.replace /([a-z0-9])([A-Z])/g, '$1_$2'
+      for [re, gen] in NAME_HINTS
+        return gen(ctx) if re.test(f.name) or re.test(snake)
+      if f.typeName is 'text' then sentence() else words 2
+    else undefined
+
+# ==[ Model.factory — schema-driven fabrication ]==
+#
+# One polymorphic verb, sign says persisted (trust/sinatra heritage):
+#
+#   Model.factory(5)      five created (persisted) instances
+#   Model.factory(1)      one created instance
+#   Model.factory(0)      one built (unsaved) instance   — the default
+#   Model.factory(-1)     one built (unsaved) instance
+#   Model.factory(-3)     three built (unsaved) instances
+#   Model.factory("…|…")  pipe-table literal: exact rows, all created
+#
+# Attribute derivation, lowest to highest precedence: schema-derived
+# fakes -> the model's own `seed` method (a recipe returning an
+# attribute object, receiving factory's extra args) -> a plain-object
+# argument as direct overrides. Fields with declared defaults are left
+# to the save pipeline; foreign keys are NEVER invented — pass them
+# explicitly.
+
+__camel = (s) -> String(s).replace /_([a-z])/g, (_, c) -> c.toUpperCase()
+
+__factoryDerive = (norm, overrides) ->
+  attrs = {}
+  fkCols = Set.new()
+  norm.relations.forEach (rel) ->
+    fkCols.add __camel(rel.foreignKey) if rel.kind is 'belongsTo'
+  skip = Set.new [norm.primaryKey, 'createdAt', 'updatedAt', 'deletedAt']
+
+  # Names first, so emails and correlated fields can agree with them.
+  ctx = {}
+  norm.fields.forEach (f, n) ->
+    if /^(sex|gender)$/i.test n
+      picks = f.literals?.filter((l) -> l is 'M' or l is 'F')
+      ctx.sex = overrides[n] ?? (if picks?.length then sample picks else sex())
+  norm.fields.forEach (f, n) ->
+    snake = n.replace /([a-z0-9])([A-Z])/g, '$1_$2'
+    ctx.firstName = overrides[n] ?? firstName(ctx.sex) if /^first_?name$/i.test snake
+    ctx.lastName  = overrides[n] ?? lastName()         if /^last_?name$/i.test snake
+
+  norm.fields.forEach (f, n) ->
+    return if skip.has(n) or fkCols.has(n)
+    return if f.constraints?.default isnt undefined
+    return if f.optional and not chance(0.8)
+    if n is 'firstName' and ctx.firstName then attrs[n] = ctx.firstName; return
+    if n is 'lastName' and ctx.lastName then attrs[n] = ctx.lastName; return
+    if ctx.sex isnt undefined and /^(sex|gender)$/i.test(n) then attrs[n] = ctx.sex; return
+    v = __fakeFieldValue f, ctx
+    return if v is undefined
+    attrs[n] = if f.unique and typeof v is 'string' then "#{v}-#{token 4}" else v
+  attrs
+
+__factoryTableRows = (norm, text) ->
+  lines = text.split(/\r?\n/).map((l) -> l.trim()).filter (l) -> l and not /^[|\s:-]+$/.test(l)
+  throw Error.new 'fake: factory(table) needs a header line and at least one row' if lines.length < 2
+  cells = (l) -> l.replace(/^\||\|$/g, '').split('|').map (c) -> c.trim()
+  header = cells(lines[0]).map __camel
+  for line in lines[1...]
+    row = {}
+    cells(line).forEach (v, i) ->
+      name = header[i]
+      return if name is undefined or v is ''
+      t = norm.fields.get(name)?.typeName
+      row[name] = switch t
+        when 'integer', 'number' then Number v
+        when 'boolean' then v is 'true' or v is '1'
+        else v
+    row
+
+__SchemaDef.prototype.factory = (num = 0, ...args) ->
+  @_assertModel 'factory'
+  norm = @_normalize()
+
+  if typeof num is 'string'
+    out = []
+    out.push @create!(row) for row in __factoryTableRows(norm, num)
+    return out
+  throw Error.new 'fake: factory(n) expects an integer count or a pipe-table string' unless Number.isInteger num
+
+  persist = num >= 1
+  many = num >= 2 or num <= -2
+  count = if many then Math.abs(num) else 1
+  seedFn = norm.methods.get('seed') or null
+  overrides = if not seedFn and args.length is 1 and args[0] and typeof args[0] is 'object' then args[0] else null
+
+  make = =>
+    derived = __factoryDerive norm, overrides ?? {}
+    custom = if seedFn then seedFn.apply!(this, args) else overrides
+    data = { ...derived, ...(custom or {}) }
+    norm.relations.forEach (rel) =>
+      return unless rel.kind is 'belongsTo' and not rel.optional
+      fk = __camel rel.foreignKey
+      if persist and not data[fk]?
+        throw Error.new "fake: #{@name}.factory() — required foreign key #{fk} is not invented; pass it explicitly (e.g. factory(n, {#{fk}: parent.id}))"
+    return @create!(data) if persist
+    canonical = __schemaNormalizePersistenceInput!(this, data, { skipEnsures: true, api: 'factory()' })
+    __schemaConstructInputInstance this, canonical
+
+  return make() unless many
+  out = []
+  for i in [0...count]
+    out.push make!
+  out

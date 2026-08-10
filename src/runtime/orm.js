@@ -100,7 +100,7 @@ const __SCHEMA_RESERVED_STATIC = new Set([
   'parse', 'array', 'safe', 'ok', 'parseAsync', 'safeAsync', 'okAsync', 'toJSONSchema',
   'find', 'findMany', 'where', 'all', 'first', 'count', 'create', 'toSQL',
   'includes', 'upsert', 'insertMany', 'updateAll', 'deleteAll', 'withDeleted', 'onlyDeleted',
-  'unscoped',
+  'unscoped', 'factory',
 ]);
 // Names a @scope may not take: the model statics above plus the
 // builder-only chain methods — scopes install on both surfaces.
@@ -2482,7 +2482,10 @@ const schema = {
   introspect: __schemaMigrationStub('introspect'),
 };
 
-export { schema, __schemaSetAdapter, __schemaTransaction, __schemaConnect, __schemaRunSQL, __schemaAdapterFor, __schemaAdapterConfigured, __schemaQuoteIdent, __schemaRenderCreate, __schemaRenderIndex };
+// The last two are the build-an-unsaved-instance seam rip/fake's
+// Model.factory() augmentation composes with — normalize caller
+// input, construct without saving.
+export { schema, __schemaSetAdapter, __schemaTransaction, __schemaConnect, __schemaRunSQL, __schemaAdapterFor, __schemaAdapterConfigured, __schemaQuoteIdent, __schemaRenderCreate, __schemaRenderIndex, __schemaNormalizePersistenceInput, __schemaConstructInputInstance };
 
 // Process doorbell for packages that must not hard-import this file
 // (e.g. rip/db). `connect()` sets `globalThis.__ripDbAdapter` and
