@@ -183,8 +183,10 @@ write racing the read is caught by the next round. The delay is trailing so
 a save-burst publishes once, but capped so sustained rapid writes cannot
 postpone publication past 250ms. A slow sweep (default 2s,
 `RIP_APP_SWEEP_MS`) runs the same disk comparison with no event at all —
-covering the App tree and every assembled input (package sources outside
-the App root) against hashes of the bytes the assembly actually consumed —
+covering the App tree, every assembled input (package sources outside the
+App root) against hashes of the bytes the assembly actually consumed, and
+package-root membership (a `.rip` file added or removed after enumeration
+changes assembly output without touching any recorded per-file hash) —
 and retries work left owed by a failed publication or a quarantined
 assembly. That is the recovery path for total notification loss, which
 every OS watcher admits (FSEvents drops and rescan flags, inotify queue

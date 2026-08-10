@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { brotliCompressSync, constants as zlib } from 'node:zlib'
 import { rash, check } from 'rip/app/rash'
+import { packageInventory } from './bundle.rip'
 import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
 
@@ -678,6 +679,7 @@ appDocuments = (project, graph) ->
     list
     inputs: assembled.inputs
     inputHashes: assembled.inputHashes
+    inventories: assembled.inventories
     watchRoots: assembled.watchRoots
     bundle: JSON.stringify({ hash, list })
     latest: JSON.stringify({ hash })
@@ -707,6 +709,7 @@ publicationFromRawGraph = (graph, prior = null) ->
     list
     inputs: prior?.inputs ?? []
     inputHashes: prior?.inputHashes ?? []
+    inventories: prior?.inventories ?? []
     watchRoots: prior?.watchRoots ?? []
     bundle: JSON.stringify({ hash, list })
     latest: JSON.stringify({ hash })
@@ -924,6 +927,7 @@ export main = (argv) ->
   appDeadline = null
   appSweep = null
   appInputsCheck = null
+  appInventoriesCheck = null
   appReconcile = false
   appChain = Promise.resolve()
   appDependencyWatchers = Map.new()
@@ -1260,10 +1264,14 @@ export main = (argv) ->
     appReconcile = true
     now = Date.now()
     if appTimer?
-      return if appDeadline - now <= 50
       clearTimeout appTimer
+      # Trailing reset, but never past the burst deadline: near the cap
+      # the delay shrinks so the reconcile fires AT the deadline instead
+      # of splitting one sustained burst into several short windows.
+      delay = Math.max 0, Math.min(50, appDeadline - now)
     else
       appDeadline = now + 250
+      delay = 50
     appTimer = setTimeout ->
       appTimer = null
       appDeadline = null
@@ -1273,7 +1281,7 @@ export main = (argv) ->
       appChain = next.catch (error) ->
         appReconcile = true
         warn "rip-site: App publication failed: #{String(error)}"
-    , 50
+    , delay
     return
 
   diskInputsCheck = (paths) ->
@@ -1288,6 +1296,7 @@ export main = (argv) ->
     appPublication = documents
     appGraph = documents.graph
     appInputsCheck = check (documents.inputHashes or []).map (entry) -> { id: entry.path, hash: entry.hash }
+    appInventoriesCheck = check (documents.inventories or []).map (entry) -> { id: entry.path, hash: entry.hash }
 
   # Disk-truth check: do the App tree AND the assembled inputs hash to
   # what we last published? Unreadable or torn files mean disk is
@@ -1295,7 +1304,12 @@ export main = (argv) ->
   appSettled = ->
     try
       return false unless appModules(project.appRoot, project.appChanges).check is appPublication.graph.check
-      diskInputsCheck(appPublication.inputs) is appInputsCheck
+      return false unless diskInputsCheck(appPublication.inputs) is appInputsCheck
+      # Membership, not content: a .rip file ADDED to a package root after
+      # enumeration changes assembly output without touching any recorded
+      # per-file hash — only re-enumeration can see it.
+      current = (appPublication.inventories or []).map (entry) -> { id: entry.path, hash: packageInventory(entry.path).hash }
+      check(current) is appInventoriesCheck
     catch
       false
 
@@ -1651,7 +1665,9 @@ export main = (argv) ->
       clearMigration record
       if appChanged
         next = appChain.then -> reconcileApp!
-        appChain = next.catch (error) -> warn "rip-site: post-migration App refresh failed: #{String(error)}"
+        appChain = next.catch (error) ->
+          appReconcile = true
+          warn "rip-site: post-migration App refresh failed: #{String(error)}"
       scheduleApiRefresh() if apiChanged or apiReconcile
       status()
     catch error
@@ -1852,6 +1868,10 @@ export main = (argv) ->
       setAppPublication authoritative
     else
       publication = publishApp! project, args.name, args.watchApp, (if operation is 'Maintenance' then null else undefined), serve?.files?.shell
+      # A Maintenance boot must still watch: an in-process /recover brings
+      # this manager Active without another chance to start the watcher or
+      # sweep, and both self-fence until then (appWatchReady / operation).
+      startAppWatcher() if project.appRoot?
     files = registrationFiles project, serve?.files, publication
     files = ensureProxyFirst files, hubBridge
     if project.entry?
