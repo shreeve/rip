@@ -14481,18 +14481,10 @@ const RUNTIME_TABLE = [
     triggers: (sexpr, preds) => containsSchema(sexpr),
   },
   {
-    // fake data (`fake.firstName()`, `fake.phone()`) — reference-
-    // triggered on its own; also delivered by orm, whose factory()
-    // derives values through it.
-    key: 'fake',
-    names: ['fake'],
-    url: new URL('./runtime/fake.js', import.meta.url),
-  },
-  {
     key: 'orm',
     names: ['schema', '__schemaSetAdapter'],
     url: new URL('./runtime/orm.js', import.meta.url),
-    requires: ['schema', 'fake'],
+    requires: 'schema',
     triggers: (sexpr, preds) => containsModelSchema(sexpr),
   },
   {
@@ -14607,7 +14599,7 @@ const runtimeText = (rt) => {
     const raw = readFileSync(rt.url, 'utf8');
     runtimeBodies.set(rt.key, raw
       .replace(/^export \{[^}]*\};\s*$/m, '')
-      .replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/gm, '')
+      .replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/m, '')
       .trimEnd());
   }
   return runtimeBodies.get(rt.key);
@@ -15024,12 +15016,11 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       runtimes.add(rt.key);
     }
   }
-  // A runtime whose body depends on sibling runtimes delivers them all —
+  // A runtime whose body depends on a sibling runtime delivers both —
   // in BOTH modes, so mode parity is exact (the toolchain path would
   // resolve the dependency through the module graph regardless).
-  const requiresOf = (rt) => (rt.requires ? [].concat(rt.requires) : []);
   for (const rt of RUNTIME_TABLE) {
-    if (rt.requires && runtimes.has(rt.key)) for (const dep of requiresOf(rt)) runtimes.add(dep);
+    if (rt.requires && runtimes.has(rt.key)) runtimes.add(rt.requires);
   }
   if (runtimeDelivery !== 'none') {
     // Injection units: one per delivered runtime, except inline mode
@@ -15053,25 +15044,17 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       // import-delivered face means giving these units a signature source too.
       for (const rt of active) units.push({ runtimes: [rt], names: rt.names, imp: rt.url.pathname });
     } else {
-      const fused = new Set(active.flatMap((rt) => requiresOf(rt)));
+      const fused = new Set(active.filter((rt) => rt.requires).map((rt) => rt.requires));
       for (const rt of active) {
         if (fused.has(rt.key)) continue;
         if (rt.requires) {
-          const deps = requiresOf(rt).map((key) => RUNTIME_TABLE.find((d) => d.key === key));
-          const chain = [...deps, rt];
+          const dep = RUNTIME_TABLE.find((d) => d.key === rt.requires);
           // A fused unit states the union of its runtimes' face types
           // — and only when one of them HAS a table: the assertion
           // types every bound name, so an empty union would flatten
           // names that infer honestly through the IIFE to `any`.
-          const types = chain.some((r) => r.types)
-            ? Object.assign({}, ...chain.map((r) => r.types || {}))
-            : undefined;
-          units.push({
-            runtimes: chain,
-            names: chain.flatMap((r) => r.names),
-            body: chain.map(runtimeText).join('\n'),
-            types,
-          });
+          const types = (dep.types || rt.types) ? { ...dep.types, ...rt.types } : undefined;
+          units.push({ runtimes: [dep, rt], names: [...dep.names, ...rt.names], body: runtimeText(dep) + '\n' + runtimeText(rt), types });
         } else {
           units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt), types: rt.types });
         }

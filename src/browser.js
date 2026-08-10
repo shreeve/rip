@@ -15,7 +15,6 @@ import { compile as compileSource } from './compile.js';
 import * as intrinsics from './runtime/intrinsics.js';
 import * as stdlib from './runtime/stdlib.js';
 import * as schema from './runtime/schema.js';
-import * as fakeRuntime from './runtime/fake.js';
 import * as reactive from './runtime/reactive.js';
 import * as components from './runtime/components.js';
 import * as app from '../packages/app/index.rip';
@@ -37,13 +36,12 @@ export function compile(source, options = {}) {
 // Runtimes — one frozen scope namespace (no ORM)
 // ---------------------------------------------------------------------------
 
-const RUNTIME_MODULES = { intrinsics, stdlib, schema, fake: fakeRuntime, reactive, components };
+const RUNTIME_MODULES = { intrinsics, stdlib, schema, reactive, components };
 
 export const runtimes = Object.freeze({
   ...intrinsics,
   ...stdlib,
   ...schema,
-  fake: fakeRuntime.fake,
   ...reactive,
   ...components,
 });
