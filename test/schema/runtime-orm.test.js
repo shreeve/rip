@@ -2050,7 +2050,7 @@ describe('orm: runtime delivery', () => {
 
   test('referencing the schema namespace delivers the persistence runtime AND its validation dependency', () => {
     const { runtimes } = compile(ORM_SRC);
-    expect([...runtimes].sort()).toEqual(['orm', 'schema']);
+    expect([...runtimes].sort()).toEqual(['fake', 'orm', 'schema']);
   });
 
   test('a schema DECLARATION alone never delivers the persistence runtime', () => {
@@ -2068,12 +2068,13 @@ describe('orm: runtime delivery', () => {
     const { code } = compile(BOTH_SRC, { runtimeDelivery: 'import' });
     const lines = code.split('\n');
     expect(lines[0]).toMatch(/^import \{ __schema, SchemaError, registerCoercer \} from ".*src\/runtime\/schema\.js";$/);
-    expect(lines[1]).toMatch(/^import \{ schema, __schemaSetAdapter \} from ".*src\/runtime\/orm\.js";$/);
+    expect(lines[1]).toMatch(/^import \{ fake \} from ".*src\/runtime\/fake\.js";$/);
+    expect(lines[2]).toMatch(/^import \{ schema, __schemaSetAdapter \} from ".*src\/runtime\/orm\.js";$/);
   });
 
   test("'inline' fuses the two bodies into ONE IIFE binding the union (the fragment-scope model)", () => {
     const { code } = compile(BOTH_SRC, { runtimeDelivery: 'inline' });
-    expect(code.startsWith('const { __schema, SchemaError, registerCoercer, schema, __schemaSetAdapter } = (() => {')).toBe(true);
+    expect(code.startsWith('const { __schema, SchemaError, registerCoercer, fake, schema, __schemaSetAdapter } = (() => {')).toBe(true);
     // one runtime IIFE, one sentinel, no import statements
     expect((code.match(/\(\(\) => \{\n\/\//g) ?? []).length).toBe(1);
     expect((code.match(/class SchemaError/g) ?? []).length).toBe(1);
@@ -2085,8 +2086,8 @@ describe('orm: runtime delivery', () => {
 
   test('a transaction-only module (no schema declaration) still gets the fused pair', () => {
     const { code, runtimes } = compile(ORM_SRC, { runtimeDelivery: 'inline' });
-    expect([...runtimes].sort()).toEqual(['orm', 'schema']);
-    expect(code.startsWith('const { __schema, SchemaError, registerCoercer, schema, __schemaSetAdapter } = (() => {')).toBe(true);
+    expect([...runtimes].sort()).toEqual(['fake', 'orm', 'schema']);
+    expect(code.startsWith('const { __schema, SchemaError, registerCoercer, fake, schema, __schemaSetAdapter } = (() => {')).toBe(true);
   });
 
   test('the fused inline block records ONE synthetic mapping row that never serializes', () => {
@@ -2142,7 +2143,7 @@ describe('orm: runtime delivery', () => {
  'u = await User.create({name: "Al"})',
     ].join('\n');
     const { code } = compile(src, { runtimeDelivery: 'inline' });
-    expect(code.startsWith('const { __schema, SchemaError, registerCoercer, schema, __schemaSetAdapter } = (() => {')).toBe(true);
+    expect(code.startsWith('const { __schema, SchemaError, registerCoercer, fake, schema, __schemaSetAdapter } = (() => {')).toBe(true);
     const { code: none } = compile(src, { runtimeDelivery: 'none' });
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     await K4.scope(async () => {
@@ -2171,7 +2172,7 @@ describe('orm: runtime delivery', () => {
   test('dual delivery with the reactive runtime: separate blocks, rows keyed by range', () => {
     const src = 'count := 1\nschema.setAdapter({query: (s) -> {columns: [], data: [], rowCount: 0}})\ncount = count + 1';
     const { code, runtimes, mappings } = compile(src, { runtimeDelivery: 'inline' });
-    expect([...runtimes].sort()).toEqual(['orm', 'reactive', 'schema']);
+    expect([...runtimes].sort()).toEqual(['fake', 'orm', 'reactive', 'schema']);
     const runtimeRows = mappings.rows.filter((r) => r.role === 'runtime');
     expect(runtimeRows.length).toBe(2);
     const [a, b] = runtimeRows.sort((x, y) => x.generatedStart - y.generatedStart);
@@ -2191,18 +2192,19 @@ describe('orm: runtime delivery', () => {
     // itself is the trigger
     for (const mode of ['none', 'import', 'inline']) {
       const { runtimes } = compile(src, { runtimeDelivery: mode });
-      expect([...runtimes].sort()).toEqual(['orm', 'schema']);
+      expect([...runtimes].sort()).toEqual(['fake', 'orm', 'schema']);
     }
     const imp = compile(src, { runtimeDelivery: 'import' });
     const lines = imp.code.split('\n');
     expect(lines[0]).toMatch(/^import \{ __schema, SchemaError, registerCoercer \} from ".*src\/runtime\/schema\.js";$/);
-    expect(lines[1]).toMatch(/^import \{ schema, __schemaSetAdapter \} from ".*src\/runtime\/orm\.js";$/);
+    expect(lines[1]).toMatch(/^import \{ fake \} from ".*src\/runtime\/fake\.js";$/);
+    expect(lines[2]).toMatch(/^import \{ schema, __schemaSetAdapter \} from ".*src\/runtime\/orm\.js";$/);
     const inl = compile(src, { runtimeDelivery: 'inline' });
-    expect(inl.code.startsWith('const { __schema, SchemaError, registerCoercer, schema, __schemaSetAdapter } = (() => {')).toBe(true);
+    expect(inl.code.startsWith('const { __schema, SchemaError, registerCoercer, fake, schema, __schemaSetAdapter } = (() => {')).toBe(true);
     // a model nested inside a function body triggers from the tree
     // walk too
     const nested = compile('f = ->\n  T = schema :model\n    b! string\n  T', { runtimeDelivery: 'import' });
-    expect([...nested.runtimes].sort()).toEqual(['orm', 'schema']);
+    expect([...nested.runtimes].sort()).toEqual(['fake', 'orm', 'schema']);
   });
 
   test('end to end from the compiled DSL: a model declared in Rip persists through a recording adapter and round-trips', async () => {
@@ -2228,7 +2230,7 @@ describe('orm: runtime delivery', () => {
  'again = await User.find(1)',
     ].join('\n');
     const { runtimes } = compile(src, { runtimeDelivery: 'inline' });
-    expect([...runtimes].sort()).toEqual(['orm', 'schema']);
+    expect([...runtimes].sort()).toEqual(['fake', 'orm', 'schema']);
     const { code: none } = compile(src, { runtimeDelivery: 'none' });
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     await K4.scope(async () => {

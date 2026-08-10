@@ -28,6 +28,7 @@
 // where the host has none.
 
 import { SchemaError, __SchemaRegistry, registerCoercer, __SchemaDef, __schemaInstallPersistence } from './schema.js';
+import { fake, __fakeFieldValue } from './fake.js';
 
 // ── naming: the snake_case ↔ camelCase bijection ─────────────────────
 
@@ -100,7 +101,7 @@ const __SCHEMA_RESERVED_STATIC = new Set([
   'parse', 'array', 'safe', 'ok', 'parseAsync', 'safeAsync', 'okAsync', 'toJSONSchema',
   'find', 'findMany', 'where', 'all', 'first', 'count', 'create', 'toSQL',
   'includes', 'upsert', 'insertMany', 'updateAll', 'deleteAll', 'withDeleted', 'onlyDeleted',
-  'unscoped',
+  'unscoped', 'factory',
 ]);
 // Names a @scope may not take: the model statics above plus the
 // builder-only chain methods — scopes install on both surfaces.
@@ -1832,6 +1833,117 @@ __SchemaDef.prototype.first = function () {
 __SchemaDef.prototype.count = function () {
   this._assertModel('count');
   return new __SchemaQuery(this).count();
+};
+
+// ── factory: schema-driven fabrication ────────────────────────────────
+//
+// One polymorphic verb, sign says persisted (trust/sinatra heritage):
+//
+//   Model.factory(5)      five created (persisted) instances
+//   Model.factory(1)      one created instance
+//   Model.factory(0)      one built (unsaved) instance   — the default
+//   Model.factory(-1)     one built (unsaved) instance
+//   Model.factory(-3)     three built (unsaved) instances
+//   Model.factory("…|…")  pipe-table literal: exact rows, all created
+//
+// Attribute derivation, lowest to highest precedence: schema-derived
+// fakes (enum literals sampled, email/phone/zip/uuid types, name
+// heuristics for plain strings) → the model's own `seed` method (a
+// recipe returning an attribute object, receiving factory's extra
+// args) → a plain-object argument as direct overrides. Fields with
+// declared defaults are left to the save pipeline; foreign keys are
+// NEVER invented — pass them explicitly.
+
+function __schemaFactoryDerive(def, norm, overrides) {
+  const attrs = {};
+  const fkCols = new Set();
+  for (const [, rel] of norm.relations) {
+    if (rel.kind === 'belongsTo') fkCols.add(__schemaCamel(rel.foreignKey));
+  }
+  const skip = new Set([norm.primaryKey, 'createdAt', 'updatedAt', 'deletedAt']);
+  // Names first, so emails and correlated fields can agree with them.
+  const ctx = {};
+  for (const [n, f] of norm.fields) {
+    if (/^(sex|gender)$/i.test(n)) ctx.sex = overrides[n] ?? (f.literals ? fake.sample(f.literals.filter((l) => l === 'M' || l === 'F')) : fake.sex());
+  }
+  for (const [n, f] of norm.fields) {
+    if (/^first_?name$/i.test(n.replace(/([a-z0-9])([A-Z])/g, '$1_$2'))) ctx.firstName = overrides[n] ?? fake.firstName(ctx.sex);
+    if (/^last_?name$/i.test(n.replace(/([a-z0-9])([A-Z])/g, '$1_$2'))) ctx.lastName = overrides[n] ?? fake.lastName();
+  }
+  for (const [n, f] of norm.fields) {
+    if (skip.has(n) || fkCols.has(n)) continue;
+    if (f.constraints?.default !== undefined) continue;
+    if (f.optional && !fake.chance(0.8)) continue;
+    if (n === 'firstName' && ctx.firstName) { attrs[n] = ctx.firstName; continue; }
+    if (n === 'lastName' && ctx.lastName) { attrs[n] = ctx.lastName; continue; }
+    if (ctx.sex !== undefined && /^(sex|gender)$/i.test(n)) { attrs[n] = ctx.sex; continue; }
+    const v = __fakeFieldValue(f, ctx);
+    if (v !== undefined) attrs[n] = f.unique && typeof v === 'string' ? v + '-' + fake.token(4) : v;
+  }
+  return attrs;
+}
+
+function __schemaFactoryTableRows(def, norm, text) {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^[|\s:-]+$/.test(l));
+  if (lines.length < 2) throw new Error('schema: factory(table) needs a header line and at least one row');
+  const cells = (l) => l.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+  const header = cells(lines[0]).map(__schemaCamel);
+  return lines.slice(1).map((line) => {
+    const row = {};
+    cells(line).forEach((v, i) => {
+      const name = header[i];
+      if (name === undefined || v === '') return;
+      const f = norm.fields.get(name);
+      const t = f?.typeName;
+      row[name] =
+        t === 'integer' || t === 'number' ? Number(v)
+        : t === 'boolean' ? v === 'true' || v === '1'
+        : v;
+    });
+    return row;
+  });
+}
+
+__SchemaDef.prototype.factory = async function (num = 0, ...args) {
+  this._assertModel('factory');
+  const norm = this._normalize();
+
+  if (typeof num === 'string') {
+    const rows = __schemaFactoryTableRows(this, norm, num);
+    const out = [];
+    for (const row of rows) out.push(await this.create(row));
+    return out;
+  }
+  if (!Number.isInteger(num)) throw new Error('schema: factory(n) expects an integer count or a pipe-table string');
+
+  const persist = num >= 1;
+  const many = num >= 2 || num <= -2;
+  const count = many ? Math.abs(num) : 1;
+  const seedFn = norm.methods.get('seed') || null;
+  const overrides = !seedFn && args.length === 1 && args[0] && typeof args[0] === 'object' ? args[0] : null;
+
+  const make = async () => {
+    const derived = __schemaFactoryDerive(this, norm, overrides ?? {});
+    const custom = seedFn ? await seedFn.apply(this, args) : overrides;
+    const data = { ...derived, ...(custom || {}) };
+    for (const [, rel] of norm.relations) {
+      if (rel.kind !== 'belongsTo' || rel.optional) continue;
+      const fk = __schemaCamel(rel.foreignKey);
+      if (persist && data[fk] == null) {
+        throw new Error(
+          'schema: ' + this.name + '.factory() — required foreign key ' + fk +
+          ' is not invented; pass it explicitly (e.g. factory(n, {' + fk + ': parent.id}))');
+      }
+    }
+    if (persist) return this.create(data);
+    const canonical = await __schemaNormalizePersistenceInput(this, data, { skipEnsures: true, api: 'factory()' });
+    return __schemaConstructInputInstance(this, canonical);
+  };
+
+  if (!many) return make();
+  const out = [];
+  for (let i = 0; i < count; i++) out.push(await make());
+  return out;
 };
 
 __SchemaDef.prototype.create = async function (data) {

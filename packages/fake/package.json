@@ -1,0 +1,14 @@
+{
+  "name": "@rip/fake",
+  "version": "4.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Rip's own fake data — curated, valid-looking, seedable, zero dependencies; powers Model.factory()",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md"
+  ]
+}
