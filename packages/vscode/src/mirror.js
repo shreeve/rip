@@ -3,6 +3,7 @@
 // and strictness identically.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -771,7 +772,30 @@ export function bareRipSpecifierTarget(spec, fromDir) {
 // anywhere. Checking resolves the same names: bare-specifier targets
 // fall back here when no node_modules provides the package, and
 // tsconfig paths point each name at the entry's mirror face.
-const STDLIB_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'packages');
+//
+// Finding the checkout follows the runtime's ownership rule: the
+// stdlib lives in whichever checkout owns the `rip` bin. In-repo, this
+// server IS in that checkout (../../../packages); the installed .vsix
+// carries no stdlib, so it follows the `rip` bin's symlink home — PATH
+// plus the standard bin dirs, because an extension host's PATH can be
+// narrower than a shell's. A candidate counts only if it actually
+// holds the stdlib (packages/vscode/package.json), so a stray
+// `packages` dir near an installed extension never wins.
+const STDLIB_DIR = (() => {
+  const candidates = [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'packages')];
+  const binDirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  binDirs.push(
+    path.join(process.env.BUN_INSTALL ?? path.join(os.homedir(), '.bun'), 'bin'),
+    path.join(os.homedir(), '.local', 'bin'),
+  );
+  for (const dir of binDirs) {
+    try {
+      const repo = path.dirname(path.dirname(fs.realpathSync(path.join(dir, 'rip'))));
+      candidates.push(path.join(repo, 'packages'));
+    } catch { /* no rip bin here */ }
+  }
+  return candidates.find((c) => fs.existsSync(path.join(c, 'vscode', 'package.json'))) ?? candidates[0];
+})();
 
 function stdlibRipTarget(spec) {
   if (!spec.startsWith('rip/')) return null;

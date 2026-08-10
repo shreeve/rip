@@ -86,7 +86,7 @@ if (argv.includes('-h') || argv.includes('--help')) { console.log(HELP); process
 // two hashes differ, the installed extension is running different code
 // than this CLI — the skew behind "the editor and rip check disagree".
 if (argv.includes('--build')) {
-  const compilerDir = path.dirname(fileURLToPath(import.meta.url));
+  const compilerDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const serverDir = path.join(compilerDir, '..', 'packages', 'vscode', 'src');
   const tilde = (p) => (p.startsWith(os.homedir() + path.sep) ? '~' + p.slice(os.homedir().length) : p);
   console.log(`rip check build ${cacheIdentityOf(compilerDir, serverDir)}`);
@@ -205,7 +205,7 @@ try {
   fs.rmSync(mirrorRoot, { recursive: true, force: true });
   fs.mkdirSync(mirrorRoot, { recursive: true });
   fs.writeFileSync(path.join(mirrorRoot, '.gitignore'), '*\n');
-  const compilerDir = path.dirname(fileURLToPath(import.meta.url));
+  const compilerDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   fs.writeFileSync(path.join(mirrorRoot, '.build'),
     cacheIdentityOf(compilerDir, path.join(compilerDir, '..', 'packages', 'vscode', 'src')) + '\n');
 } catch (err) {
