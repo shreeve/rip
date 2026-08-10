@@ -1,0 +1,103 @@
+# ==============================================================================
+# @rip-lang/googlesheets — unit pins (no live Google)
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import {
+  Sheet, biject, extractSsid, filterCriteria, hex2rgb, open, parseSheet, rgb2hex, version
+} from '@rip-lang/googlesheets'
+import * as mod from '@rip-lang/googlesheets'
+import { readFileSync } from 'node:fs'
+
+console.log '\nPackage'
+
+test 'mold package surface', ->
+  pkg = JSON.parse readFileSync("#{import.meta.dir}/package.json", 'utf8')
+  eq pkg.name, '@rip-lang/googlesheets'
+  eq pkg.exports, { '.': './googlesheets.rip' }
+  eq pkg.bin, { 'rip-shat': './googlesheets.rip' }
+  eq pkg.dependencies, undefined
+  eq pkg.devDependencies['@rip-lang/testing'], 'workspace:*'
+  eq pkg.files.includes('test'), false
+  eq version, '4.0.0'
+  for name in [
+    'authorize', 'login', 'open', 'Sheet', 'biject', 'hex2rgb', 'rgb2hex'
+    'extractSsid', 'parseSheet', 'filterCriteria'
+    'sheetNames', 'sheetRead', 'sheetWrite', 'sheetClear', 'sheetSave', 'version'
+  ]
+    ok name of mod, "missing export #{name}"
+
+console.log '\nbiject'
+
+test 'letters ↔ 1-based indices', ->
+  eq biject('A'), 1
+  eq biject('Z'), 26
+  eq biject('AA'), 27
+  eq biject('AZ'), 52
+  eq biject('BA'), 53
+  eq biject('AAA'), 703
+  eq biject('a'), 1
+  eq biject(1), 'A'
+  eq biject(26), 'Z'
+  eq biject(27), 'AA'
+  eq biject(703), 'AAA'
+  for n in [1, 2, 26, 27, 52, 53, 702, 703, 1000]
+    eq biject(biject(n)), n
+
+test 'biject rejects junk', ->
+  throws (-> biject(0)), 'positive integer'
+  throws (-> biject(-1)), 'positive integer'
+  throws (-> biject(1.5)), 'positive integer'
+
+console.log '\ncolor'
+
+test 'hex ↔ rgb floats', ->
+  eq hex2rgb('#ff0000'), { red: 1, green: 0, blue: 0 }
+  eq hex2rgb('0f0'), { red: 0, green: 1, blue: 0 }
+  eq hex2rgb('#00F'), { red: 0, green: 0, blue: 1 }
+  eq rgb2hex({ red: 1, green: 0, blue: 0 }), '#ff0000'
+  eq hex2rgb('nope'), null
+
+console.log '\nids & tables'
+
+test 'extractSsid from URLs and bare ids', ->
+  id = '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms'
+  eq extractSsid(id), id
+  eq extractSsid("https://docs.google.com/spreadsheets/d/#{id}/edit"), id
+  eq extractSsid("https://docs.google.com/spreadsheets/d/#{id}/edit#gid=0"), id
+  throws (-> extractSsid('https://example.com/nope')), 'cannot extract'
+
+test 'parseSheet builds header lookup', ->
+  grid = [
+    ['Name', 'Age']
+    ['Ada', '36']
+    ['Bob']
+  ]
+  { hdrs, rows, val } = parseSheet grid
+  eq hdrs, ['Name', 'Age']
+  eq rows.length, 2
+  eq val(rows[0], 'Name'), 'Ada'
+  eq val(rows[0], 'Age'), '36'
+  eq val(rows[1], 'Age'), ''
+  eq val(rows[0], 'Nope'), ''
+
+test 'filterCriteria maps letters to TEXT_EQ columns', ->
+  c = filterCriteria { A: 'x', B: ['y', 'z'] }
+  eq c['0'].condition.type, 'TEXT_EQ'
+  eq c['0'].condition.values, [{ userEnteredValue: 'x' }]
+  eq c['1'].condition.values, [{ userEnteredValue: 'y' }, { userEnteredValue: 'z' }]
+
+console.log '\nSheet bootstrap'
+
+test 'open parses URL gid and default rect', ->
+  id = '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms'
+  s = open! "https://docs.google.com/spreadsheets/d/#{id}/edit#gid=42"
+  eq s.ssid, id
+  eq s.wsid, 42
+  eq s.rect, 'A:ZZ'
+  s2 = open! "https://docs.google.com/spreadsheets/d/#{id}/edit#gid=0!B:D"
+  eq s2.wsid, 0
+  eq s2.rect, 'B1:D'
+  s3 = Sheet.new id, { rect: 'A1:C10' }
+  eq s3.ssid, id
+  eq s3.rect, 'A1:C10'

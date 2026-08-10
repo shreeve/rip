@@ -1,0 +1,564 @@
+#!/usr/bin/env rip
+
+# ==============================================================================
+# googlesheets — Google Sheets for Rip
+#
+# Author: Steve Shreeve (steve.shreeve@gmail.com)
+#   Date: August 9, 2026
+#
+# Silent OAuth refresh (and one-time loopback login), Values API read/write,
+# plus the fluid helpers from the Ruby googlesheets gem: biject, A1 ranges,
+# rename, tab color, basic filter, number format. Same ~/.google credential
+# contract as the gem / invoices scripts — drop-in for both.
+# ==============================================================================
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { createServer } from 'node:http'
+import { homedir, platform } from 'node:os'
+
+VERSION =! '4.0.0'
+SCOPE   =! 'https://www.googleapis.com/auth/spreadsheets'
+TOKEN_URL  =! 'https://oauth2.googleapis.com/token'
+AUTH_URL   =! 'https://accounts.google.com/o/oauth2/v2/auth'
+SHEETS_URL =! 'https://sheets.googleapis.com/v4/spreadsheets'
+
+GOOGLE_DIR = join(homedir(), '.google')
+
+accessToken = null
+
+fail = (message) -> throw Error.new message
+
+# ==[ Paths & token store (googleauth FileTokenStore shape) ]==
+
+resolvePaths = (opts = {}) ->
+  jsonName = opts.credentials or 'credentials.json'
+  yamlName = opts.token or 'token.yaml'
+  json = jsonName
+  yaml = yamlName
+  unless existsSync(json)
+    fail "Google API credentials not found (tried #{jsonName} and #{join GOOGLE_DIR, 'credentials.json'})" unless existsSync(GOOGLE_DIR)
+    json = join GOOGLE_DIR, 'credentials.json'
+    yaml = join GOOGLE_DIR, 'token.yaml'
+  else unless existsSync(yaml)
+    # credentials in cwd but token under ~/.google (common)
+    yaml = join GOOGLE_DIR, 'token.yaml' if existsSync(join(GOOGLE_DIR, 'token.yaml'))
+  { json, yaml }
+
+readCredentials = (jsonPath) ->
+  fail "credentials file not found: #{jsonPath}" unless existsSync(jsonPath)
+  data = JSON.parse readFileSync(jsonPath, 'utf8')
+  installed = data.installed or data.web
+  fail 'credentials.json must contain an installed (or web) OAuth client' unless installed?.client_id and installed?.client_secret
+  installed
+
+parseTokenYaml = (text) ->
+  m = text.match /^\s*default:\s*'(.*)'\s*$/m
+  m = text.match /^\s*default:\s*"(.*)"\s*$/m unless m?
+  fail 'token.yaml is missing a default credential entry (run authorize! / login! once)' unless m?
+  JSON.parse m[1]
+
+writeTokenYaml = (yamlPath, token) ->
+  mkdirSync dirname(yamlPath), { recursive: true } unless existsSync(dirname(yamlPath))
+  writeFileSync yamlPath, "---\ndefault: '#{JSON.stringify token}'\n", { mode: 0o600 }
+
+bearer = ->
+  fail 'not authorized — call authorize! first' unless accessToken?
+  { Authorization: "Bearer #{accessToken}" }
+
+# ==[ OAuth ]==
+
+exchangeRefresh = (creds, refreshToken) ->
+  params = URLSearchParams.new
+    client_id:     creds.client_id
+    client_secret: creds.client_secret
+    refresh_token: refreshToken
+    grant_type:    'refresh_token'
+  res = fetch! TOKEN_URL,
+    method: 'POST'
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    body: params.toString()
+  data = res.json!
+  fail "token refresh failed: #{JSON.stringify data}" unless data.access_token
+  data
+
+pickRedirect = (creds, port) ->
+  uris = creds.redirect_uris or []
+  loopback = uris.find (u) -> /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$/i.test(u)
+  if loopback?
+    m = loopback.match /:(\d+)/
+    return loopback.replace(/\/$/, '') unless m?
+    return "http://127.0.0.1:#{m[1]}"
+  "http://127.0.0.1:#{port}"
+
+openBrowser = (url) ->
+  cmd = switch platform()
+    when 'darwin' then ['open', url]
+    when 'win32' then ['cmd', '/c', 'start', '', url]
+    else ['xdg-open', url]
+  Bun.spawnSync cmd, { stdout: 'ignore', stderr: 'ignore' }
+
+listen = (server, port) ->
+  Promise.new (resolve, reject) ->
+    server.once 'error', reject
+    server.listen port, '127.0.0.1', -> resolve server.address().port
+
+waitClose = (server) -> Promise.new (resolve) -> server.close resolve
+
+# One-time consent via loopback (OOB copy-paste is deprecated).
+export login = (opts = {}) ->
+  paths = resolvePaths opts
+  creds = readCredentials paths.json
+  codeResult = null
+  server = createServer (req, res) ->
+    url = URL.new req.url, 'http://127.0.0.1'
+    err = url.searchParams.get 'error'
+    code = url.searchParams.get 'code'
+    if err?
+      res.writeHead 400, { 'content-type': 'text/html; charset=utf-8' }
+      res.end "<h1>Authorization failed</h1><p>#{err}</p>"
+      codeResult = { error: err }
+    else if code?
+      res.writeHead 200, { 'content-type': 'text/html; charset=utf-8' }
+      res.end '<h1>Authorized</h1><p>You can close this window and return to Rip.</p>'
+      codeResult = { code }
+    else
+      res.writeHead 404
+      res.end 'not found'
+
+  bound = listen! server, opts.port or 0
+  redirect = pickRedirect creds, bound
+  fixed = redirect.match /:(\d+)$/
+  if fixed? and Number(fixed[1]) isnt bound
+    desired = Number fixed[1]
+    waitClose! server
+    bound = listen! server, desired
+    redirect = pickRedirect creds, bound
+
+  auth = URL.new AUTH_URL
+  auth.searchParams.set 'client_id', creds.client_id
+  auth.searchParams.set 'redirect_uri', redirect
+  auth.searchParams.set 'response_type', 'code'
+  auth.searchParams.set 'scope', SCOPE
+  auth.searchParams.set 'access_type', 'offline'
+  auth.searchParams.set 'prompt', 'consent'
+
+  console.log "Open this URL if a browser did not appear:\n#{auth.href}\n"
+  openBrowser auth.href
+
+  deadline = Date.now() + (opts.timeout or 300000)
+  loop
+    break if codeResult?
+    fail 'authorization timed out — run login! again' if Date.now() >= deadline
+    Bun.sleep! 50
+  waitClose! server
+  fail "authorization failed: #{codeResult.error}" if codeResult.error?
+
+  params = URLSearchParams.new
+    client_id:     creds.client_id
+    client_secret: creds.client_secret
+    code:          codeResult.code
+    grant_type:    'authorization_code'
+    redirect_uri:  redirect
+  res = fetch! TOKEN_URL,
+    method: 'POST'
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    body: params.toString()
+  data = res.json!
+  fail "authorization code exchange failed: #{JSON.stringify data}" unless data.access_token and data.refresh_token
+
+  token =
+    access_token: data.access_token
+    refresh_token: data.refresh_token
+    expiration_time_millis: Date.now() + (data.expires_in or 3600) * 1000
+    scope: [SCOPE]
+    client_id: creds.client_id
+  writeTokenYaml paths.yaml, token
+  accessToken = token.access_token
+  token
+
+# Load token; refresh when expired; login when missing.
+export authorize = (opts = {}) ->
+  paths = resolvePaths opts
+  creds = readCredentials paths.json
+  unless existsSync(paths.yaml)
+    console.log 'No token.yaml — starting one-time browser login…'
+    return login! opts
+
+  token = null
+  try
+    token = parseTokenYaml readFileSync(paths.yaml, 'utf8')
+  catch error
+    console.log "token.yaml unreadable (#{error?.message or error}) — starting browser login…"
+    return login! opts
+
+  unless token.refresh_token
+    console.log 'token.yaml has no refresh_token — starting browser login…'
+    return login! opts
+
+  # Refresh 60s early so a long script does not race expiry mid-call.
+  if Number(token.expiration_time_millis) > Date.now() + 60000 and token.access_token
+    accessToken = token.access_token
+    return token
+
+  console.log 'Refreshing access token…'
+  data = exchangeRefresh! creds, token.refresh_token
+  token.access_token = data.access_token
+  token.expiration_time_millis = Date.now() + (data.expires_in or 3600) * 1000
+  token.refresh_token = data.refresh_token if data.refresh_token
+  writeTokenYaml paths.yaml, token
+  accessToken = token.access_token
+  token
+
+# ==[ Pure helpers ]==
+
+# Column letters ↔ 1-based index: a=1 … z=26, aa=27, aaa=703.
+export biject = (x) ->
+  if typeof x is 'string'
+    n = 0
+    for c in x
+      n = n * 26 + (c.toUpperCase().charCodeAt(0) - 64)
+    n
+  else if Number.isInteger(x) and x > 0
+    s = []
+    n = x
+    while n > 0
+      n -= 1
+      s.push String.fromCharCode (n % 26) + 65
+      n = Math.floor n / 26
+    s.reverse().join ''
+  else
+    fail "biject expects a column letter string or positive integer, got #{JSON.stringify x}"
+
+export hex2rgb = (color) ->
+  return null unless typeof color is 'string'
+  m = color.match /^#?(?:([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})|([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F]))$/
+  return null unless m?
+  [r, g, b] = if m[1]? then [m[1], m[2], m[3]] else [m[4] + m[4], m[5] + m[5], m[6] + m[6]]
+  red:   parseInt(r, 16) / 255
+  green: parseInt(g, 16) / 255
+  blue:  parseInt(b, 16) / 255
+
+export rgb2hex = (color) ->
+  return null unless color?
+  r = Math.round (color.red   or 0) * 255
+  g = Math.round (color.green or 0) * 255
+  b = Math.round (color.blue  or 0) * 255
+  '#' + [r, g, b].map((n) -> n.toString(16).padStart(2, '0')).join('')
+
+export extractSsid = (url) ->
+  return url unless typeof url is 'string'
+  return url unless /^https?:/i.test(url)
+  url.match(/\/d\/([a-zA-Z0-9_-]+)/)?[1] or fail "cannot extract spreadsheet id from #{JSON.stringify url}"
+
+export parseSheet = (grid) ->
+  fail 'parseSheet expects a non-empty grid with a header row' unless Array.isArray(grid) and grid.length
+  hdrs = grid[0]
+  idx = {}
+  for name, n in hdrs
+    idx[name] = n
+  val = (row, name) ->
+    n = idx[name]
+    if n? then (row[n] ?? '') else ''
+  { hdrs, rows: grid.slice(1), val, idx }
+
+# Filter criteria: { A: 'x', B: ['y','z'] } → Sheets basicFilter column criteria.
+export filterCriteria = (hash) ->
+  out = {}
+  return out unless hash?
+  for own k, v of hash
+    values = if Array.isArray(v) then v else [v]
+    col = if typeof k is 'number' then k else biject(String(k)) - 1
+    out[String(col)] =
+      condition:
+        type: 'TEXT_EQ'
+        values: values.map (e) -> { userEnteredValue: String(e) }
+  out
+
+# ==[ REST ]==
+
+sheetsGet = (path, query = null) ->
+  url = "#{SHEETS_URL}/#{path}"
+  if query?
+    u = URL.new url
+    for own k, v of query
+      u.searchParams.set k, v if v?
+    url = u.href
+  res = fetch! url, { headers: bearer() }
+  text = res.text!
+  fail "Sheets GET #{path} failed (#{res.status}): #{text}" unless res.ok
+  if text then JSON.parse(text) else {}
+
+sheetsPut = (path, body, query = null) ->
+  url = "#{SHEETS_URL}/#{path}"
+  if query?
+    u = URL.new url
+    for own k, v of query
+      u.searchParams.set k, v if v?
+    url = u.href
+  res = fetch! url,
+    method: 'PUT'
+    headers: { ...bearer(), 'Content-Type': 'application/json' }
+    body: JSON.stringify body
+  text = res.text!
+  fail "Sheets PUT #{path} failed (#{res.status}): #{text}" unless res.ok
+  if text then JSON.parse(text) else {}
+
+sheetsPost = (path, body = {}) ->
+  res = fetch! "#{SHEETS_URL}/#{path}",
+    method: 'POST'
+    headers: { ...bearer(), 'Content-Type': 'application/json' }
+    body: JSON.stringify body
+  text = res.text!
+  fail "Sheets POST #{path} failed (#{res.status}): #{text}" unless res.ok
+  if text then JSON.parse(text) else {}
+
+# ==[ Sheet session ]==
+
+export class Sheet
+  constructor: (ssid, opts = {}) ->
+    raw = String ssid
+    if /^https?:/i.test(raw)
+      @ssid = extractSsid raw
+      gid = raw.match /#gid=(\d+)(?:!([a-z0-9:]+))?$/i
+      @wsid = if gid? then Number(gid[1]) else '#1'
+      @rect = if gid?[2] then gid[2].replace(/(?<=\D):/, '1:') else 'A:ZZ'
+    else
+      @ssid = raw
+      @wsid = opts.wsid ?? opts.gid ?? '#1'
+      @rect = opts.rect or 'A:ZZ'
+    @_sheets = null
+    @debug = opts.debug is true
+
+  sheets: (force = false) ->
+    if force or not @_sheets?
+      data = sheetsGet! @ssid, { fields: 'sheets.properties' }
+      @_sheets = (data.sheets or []).map (s) -> s.properties
+    @_sheets
+
+  refresh: -> @sheets! true
+
+  list: ->
+    @sheets!().map (item) ->
+      out = { id: item.sheetId, name: item.title }
+      out.color = rgb2hex(item.tabColor) if item.tabColor?
+      out
+
+  names: -> @sheets!().map (s) -> s.title
+
+  sheetId: (obj = null) ->
+    list = @sheets!()
+    target = obj ?? @wsid
+    if typeof target is 'string' and (m = target.match /^#(\d+)/)
+      item = list[Number(m[1]) - 1]
+      fail "no sheet at index #{m[1]}" unless item?
+      return item.sheetId
+    if typeof target is 'number'
+      hit = list.find (item) -> item.sheetId is target
+      fail "no sheet with gid #{target}" unless hit?
+      return hit.sheetId
+    hit = list.find (item) -> item.title is target
+    fail "no sheet titled #{JSON.stringify target}" unless hit?
+    hit.sheetId
+
+  sheetName: (obj = null) ->
+    list = @sheets!()
+    target = obj ?? @wsid
+    if target is '' or target is 0 or not target?
+      return list[0]?.title or fail 'spreadsheet has no sheets'
+    if typeof target is 'string' and (m = target.match /^#(\d+)/)
+      item = list[Number(m[1]) - 1]
+      fail "no sheet at index #{m[1]}" unless item?
+      return item.title
+    if typeof target is 'number'
+      hit = list.find (item) -> item.sheetId is target
+      fail "no sheet with gid #{target}" unless hit?
+      return hit.title
+    target
+
+  resolveArea: (area = null) ->
+    if not area? or area is ''
+      wsid = @sheetName!()
+      rect = @rect
+    else if typeof area is 'string' and area.includes('!')
+      parts = area.split '!'
+      wsid = @sheetName! parts[0]
+      rect = parts.slice(1).join '!'
+    else if typeof area is 'string' and (area.includes(':') or /^[a-z]{1,3}\d+$/i.test(area))
+      wsid = @sheetName!()
+      rect = area
+    else
+      wsid = @sheetName! area
+      rect = @rect
+    rect = if rect then rect.replace(/(?<=\D):/, '1:') else @rect
+    "#{wsid}!#{rect}"
+
+  # A1 → GridRange. Open ends omit the corresponding end index.
+  range: (area) ->
+    full = @resolveArea! area
+    bang = full.indexOf '!'
+    if bang >= 0
+      sh = full.slice 0, bang
+      rc = full.slice bang + 1
+    else
+      sh = null
+      rc = full
+    parts = rc.split ':'
+    as = parts[0]
+    ae = parts[1] or as
+    splitCell = (cell) ->
+      m = String(cell).match /^([A-Za-z]*)(\d*)$/
+      fail "invalid A1 cell #{JSON.stringify cell}" unless m?
+      { col: m[1], row: m[2] }
+    start = splitCell as
+    end = splitCell ae
+    out = {}
+    out.sheetId = @sheetId! sh if sh?
+    out.startColumnIndex = biject(start.col) - 1 if start.col
+    out.startRowIndex = Number(start.row) - 1 if start.row
+    out.endColumnIndex = biject(end.col) if end.col
+    out.endRowIndex = Number(end.row) if end.row
+    out
+
+  read: (area = null) ->
+    resolved = @resolveArea! area
+    data = sheetsGet! "#{@ssid}/values/#{encodeURIComponent resolved}"
+    data.values or []
+
+  write: (area, rows) ->
+    fail 'write expects a 2D array of rows' unless Array.isArray(rows)
+    resolved = @resolveArea! area
+    data = sheetsPut! "#{@ssid}/values/#{encodeURIComponent resolved}",
+      { values: rows },
+      { valueInputOption: 'USER_ENTERED' }
+    console.log "#{data.updatedCells} cells updated." if @debug
+    data
+
+  save: (area, rows) ->
+    data = @write! area, rows
+    data.updatedCells
+
+  clear: (area = null) ->
+    resolved = @resolveArea! area
+    sheetsPost! "#{@ssid}/values/#{encodeURIComponent resolved}:clear", {}
+    true
+
+  batch: (requests) ->
+    sheetsPost! "#{@ssid}:batchUpdate", { requests }
+    true
+
+  rename: (curr, name) ->
+    shid = @sheetId! curr
+    fail 'rename requires a new title' unless typeof name is 'string' and name.length
+    @batch! [
+      updateSheetProperties:
+        properties: { sheetId: shid, title: name }
+        fields: 'title'
+    ]
+
+  color: (curr, hex) ->
+    shid = @sheetId! curr
+    rgb = hex2rgb(hex) or fail "invalid color #{JSON.stringify hex}"
+    @batch! [
+      updateSheetProperties:
+        properties: { sheetId: shid, tabColor: rgb }
+        fields: 'tabColor'
+    ]
+
+  filter: (area, filt = null) ->
+    grid = @range! area
+    filterBody = { range: grid }
+    filterBody.criteria = filterCriteria(filt) if filt?
+    @batch! [
+      { clearBasicFilter: { sheetId: grid.sheetId } }
+      { setBasicFilter: { filter: filterBody } }
+    ]
+
+  format: (area, pattern) ->
+    fail 'format requires a number-format pattern string' unless typeof pattern is 'string'
+    grid = @range! area
+    @batch! [
+      repeatCell:
+        range: grid
+        cell:
+          userEnteredFormat:
+            numberFormat: { type: 'NUMBER', pattern }
+        fields: 'userEnteredFormat.numberFormat'
+    ]
+
+export open = (ssid, opts = {}) -> Sheet.new ssid, opts
+
+# ==[ Module-level (ssid-first, invoices-compatible) ]==
+
+export sheetNames = (ssid) ->
+  data = sheetsGet! extractSsid(ssid), { fields: 'sheets.properties.title' }
+  (data.sheets or []).map (s) -> s.properties.title
+
+export sheetRead = (ssid, range) ->
+  data = sheetsGet! "#{extractSsid ssid}/values/#{encodeURIComponent range}"
+  data.values or []
+
+export sheetWrite = (ssid, range, rows) ->
+  sheetsPut! "#{extractSsid ssid}/values/#{encodeURIComponent range}",
+    { values: rows },
+    { valueInputOption: 'USER_ENTERED' }
+
+export sheetClear = (ssid, sheet) ->
+  sheetsPost! "#{extractSsid ssid}/values/#{encodeURIComponent sheet}:clear", {}
+  true
+
+export sheetSave = sheetWrite
+
+export version = VERSION
+
+# ==[ CLI: rip-shat <url> ]==
+
+if import.meta.main
+  args = process.argv.slice 2
+  opts = { fill: false, strip: false, sep: ',' }
+  link = null
+  i = 0
+  while i < args.length
+    a = args[i]
+    if a in ['-h', '--help']
+      console.log '''usage: rip-shat [options] <url>
+  -f, --fill     Pad short rows to the header width
+  -s, --strip    Trim cell whitespace
+      --csv      Comma separated (default)
+      --psv      Pipe separated
+      --tsv      Tab separated
+  -v, --version  Print version
+'''
+      process.exit 0
+    else if a in ['-v', '--version']
+      console.log "rip-shat #{VERSION}"
+      process.exit 0
+    else if a in ['-f', '--fill'] then opts.fill = true
+    else if a in ['-s', '--strip'] then opts.strip = true
+    else if a is '--csv' then opts.sep = ','
+    else if a is '--psv' then opts.sep = '|'
+    else if a is '--tsv' then opts.sep = '\t'
+    else if a.startsWith '-' then fail "unknown option #{a}"
+    else if not link? then link = a
+    else fail "unexpected argument #{a}"
+    i += 1
+  fail 'usage: rip-shat [options] <url>' unless link?
+
+  authorize!()
+  sheet = open! link
+  rows = sheet.read!()
+  if opts.strip
+    rows = rows.map (cols) -> cols.map (c) -> if c? then String(c).trim() else ''
+  if opts.fill and rows[0]?
+    need = rows[0].length
+    rows = rows.map (cols, idx) ->
+      fail "row #{idx + 1} has more columns than the header row" if cols.length > need
+      if cols.length < need then [...cols, ...Array(need - cols.length).fill('')] else cols
+
+  escape = (cell) ->
+    s = if cell? then String(cell) else ''
+    if s.includes(opts.sep) or s.includes('"') or s.includes('\n') or s.includes('\r')
+      '"' + s.replaceAll('"', '""') + '"'
+    else s
+  for row in rows
+    console.log row.map(escape).join(opts.sep)

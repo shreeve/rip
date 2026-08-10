@@ -1,0 +1,23 @@
+{
+  "name": "@rip-lang/googlesheets",
+  "version": "4.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Google Sheets for Rip — silent OAuth refresh, A1 helpers, and the fluid sheet ops from the old Ruby gem.",
+  "exports": {
+    ".": "./googlesheets.rip"
+  },
+  "bin": {
+    "rip-shat": "./googlesheets.rip"
+  },
+  "scripts": {
+    "test": "rip test.rip"
+  },
+  "files": [
+    "googlesheets.rip",
+    "README.md"
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
+}
