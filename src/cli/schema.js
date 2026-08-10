@@ -22,7 +22,7 @@
 // 1 for operational failures, 0 for success.
 
 import { existsSync } from 'fs';
-import { resolve } from 'path';
+import { dirname, join, resolve } from 'path';
 import { pathToFileURL } from 'url';
 import { CompileError } from '../compile.js';
 import { __schemaAdapterFor } from '../runtime/orm.js';
@@ -43,7 +43,8 @@ Usage:
                      [--repair] [--force]
 
 entry.rip       file that declares/imports every :model (default: ${ENTRY_CANDIDATES.join(' | ')})
---dir DIR       migrations directory (default: migrations)
+--dir DIR       migrations directory (default: migrations/ beside the models entry —
+                e.g. api/models.rip -> api/migrations — falling back to ./migrations)
 --allow-lossy   include steps that may lose data on existing rows (type changes, SET NOT NULL)
 --allow-destructive   include DROP TABLE / DROP COLUMN steps
 --repair        re-record checksums for applied migrations whose files changed
@@ -70,7 +71,7 @@ if (!['status', 'plan', 'make', 'migrate'].includes(cmd)) {
 
 const rest = args.slice(1);
 const flags = {
-  dir: 'migrations',
+  dir: null,
   allowLossy: false,
   allowDestructive: false,
   repair: false,
@@ -123,6 +124,15 @@ if (!entry) {
   die(
     `no models entry found. Pass one explicitly (rip schema ${cmd}${cmd === 'make' ? ' <name>' : ''} path/to/models.rip)\n` +
     'or create one of: ' + ENTRY_CANDIDATES.join(', '));
+}
+
+// Migrations live beside the models entry (api/models.rip ->
+// api/migrations), with ./migrations kept as a fallback for layouts
+// that hold them at the root. An explicit --dir always wins; when
+// neither candidate exists (a first `make`), create beside the entry.
+if (!flags.dir) {
+  const beside = join(dirname(entry), 'migrations');
+  flags.dir = [beside, 'migrations'].find((c) => existsSync(c)) || beside;
 }
 
 // Importing the entry registers every :model it declares (directly

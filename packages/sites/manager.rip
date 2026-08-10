@@ -24,7 +24,7 @@ REGISTER_409_MS = positiveEnv 'RIP_REGISTER_409_MS', 30000
 
 parseArgs = (argv) ->
   command = if ['browse', 'status', 'stop', 'hold', 'release', 'migrate', 'recover'].includes(argv[0]) then argv[0] else 'start'
-  args: any = { command, entry: null, migrationEntry: null, migrationDir: 'migrations', operationId: null, name: null, hosts: [], control: process.env.JANUS_CONTROL or null, workers: 2, concurrency: 1, watchApp: null, watchApi: null, allowWatch: false, eager: false, untilRestart: false, accessMode: 'pretty', accessPicture: null, accessExplicit: false, startupFlags: [] }
+  args: any = { command, entry: null, migrationEntry: null, migrationDir: null, operationId: null, name: null, hosts: [], control: process.env.JANUS_CONTROL or null, workers: 2, concurrency: 1, watchApp: null, watchApi: null, allowWatch: false, eager: false, untilRestart: false, accessMode: 'pretty', accessPicture: null, accessExplicit: false, startupFlags: [] }
   i = if command is 'start' then 0 else 1
   while i < argv.length
     value = argv[i]
@@ -857,7 +857,9 @@ export main = (argv) ->
     if args.command is 'migrate'
       migrationEntry = resolve args.migrationEntry if args.migrationEntry?
       abort "rip-site: migration entry not found: #{args.migrationEntry}" if migrationEntry? and not existsSync(migrationEntry)
-      body = { id: args.operationId or randomBytes(16).toString('hex'), entry: migrationEntry, dir: resolve(args.migrationDir) }
+      # dir stays null unless given: the schema child discovers the
+      # conventional directory (beside the models entry) from cwd.
+      body = { id: args.operationId or randomBytes(16).toString('hex'), entry: migrationEntry, dir: (if args.migrationDir? then resolve(args.migrationDir) else null) }
     else if args.command is 'recover'
       body = { id: args.operationId }
     options = { method: (if args.command is 'status' then 'GET' else 'POST'), unix: managerPath }
@@ -1591,7 +1593,8 @@ export main = (argv) ->
     bin = join loaderDir(), '..', '..', 'bin', 'rip'
     childArgs = [process.execPath, bin, 'schema', 'migrate']
     childArgs.push body.entry if body.entry?
-    childArgs.push '--dir', body.dir, '--coordinated', '--operation-id', body.id
+    childArgs.push '--dir', body.dir if body.dir?
+    childArgs.push '--coordinated', '--operation-id', body.id
     migrationChild = Bun.spawn childArgs,
       cwd: project.root
       stdin: 'ignore'
