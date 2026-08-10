@@ -3,8 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { brotliDecompressSync } from 'node:zlib'
-import { check, rash } from 'rip/app/rash'
-import { appChangeKind, appEventPublication, updateAppModules } from '../../manager.rip'
+import { appChangeKind, appEventRelevant } from '../../manager.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 SERVER = join(import.meta.dir, '..', '..', 'manager.rip')
@@ -30,48 +29,18 @@ test! 'App watcher reports configured files and reconciles directory ambiguity',
     eq appChangeKind(changes, 'other/index.rip'), null
     eq appChangeKind(changes, 'styles/site.css'), 'css'
     eq appChangeKind(changes, 'index.html'), 'reload'
-    eq appEventPublication(dir, graph, changes, 'routes/index.rip'), 'routes/index.rip'
-    eq appEventPublication(dir, graph, changes, 'other/index.rip'), null
-    eq appEventPublication(dir, graph, changes, 'styles/site.css'), 'styles/site.css'
-    eq appEventPublication(dir, graph, changes, 'index.html'), 'index.html'
-    eq appEventPublication(dir, graph, changes, 'images/hero.png'), null
-    eq appEventPublication(dir, graph, changes, 'fonts/body.woff2'), null
-    eq appEventPublication(dir, graph, changes, '.cache/probe.rip'), null
-    eq appEventPublication(dir, graph, changes, 'assets'), '*'
-    eq appEventPublication(dir, graph, changes, 'removed'), '*'
-    eq appEventPublication(dir, graph, changes, null), '*'
-  finally
-    rmSync dir, { recursive: true, force: true }
-
-test! 'App publication rehashes only watcher-reported configured files', ->
-  dir = mkdtempSync join(tmpdir(), 'rip-sites-dirty-files-')
-  try
-    mkdirSync join(dir, 'routes')
-    route = "export Index = component\n  render\n    h1 'Stable'\n"
-    css = 'body { color: navy; }\n'
-    routePath = join dir, 'routes', 'index.rip'
-    cssPath = join dir, 'styles.css'
-    writeFileSync routePath, route
-    writeFileSync cssPath, css
-    routeEntry = { id: 'routes/index.rip', hash: rash(Buffer.from(route)) }
-    cssEntry = { id: 'styles.css', hash: rash(Buffer.from(css)) }
-    graph =
-      modules: { 'routes/index.rip': route }
-      moduleFiles: { 'routes/index.rip': routePath }
-      entries: [routeEntry, cssEntry]
-      directories: ['routes']
-      check: check([routeEntry, cssEntry])
-    changes =
-      update: ['**/*.rip']
-      css: ['**/*.css']
-      reload: ['**/*.html']
-    writeFileSync routePath, Buffer.from([0xff])
-    writeFileSync cssPath, 'body { color: green; }\n'
-    result = updateAppModules dir, changes, graph, ['styles.css']
-    eq result.changed, ['styles.css']
-    eq result.graph.modules['routes/index.rip'], route
-    eq result.graph.entries.find((entry) -> entry.id is 'routes/index.rip'), routeEntry
-    ok result.graph.entries.find((entry) -> entry.id is 'styles.css').hash isnt cssEntry.hash
+    # Event filenames are relevance hints only — a true wakes whole-tree
+    # reconciliation; they never select which files get re-read.
+    eq appEventRelevant(dir, graph, changes, 'routes/index.rip'), true
+    eq appEventRelevant(dir, graph, changes, 'other/index.rip'), false
+    eq appEventRelevant(dir, graph, changes, 'styles/site.css'), true
+    eq appEventRelevant(dir, graph, changes, 'index.html'), true
+    eq appEventRelevant(dir, graph, changes, 'images/hero.png'), false
+    eq appEventRelevant(dir, graph, changes, 'fonts/body.woff2'), false
+    eq appEventRelevant(dir, graph, changes, '.cache/probe.rip'), false
+    eq appEventRelevant(dir, graph, changes, 'assets'), true
+    eq appEventRelevant(dir, graph, changes, 'removed'), true
+    eq appEventRelevant(dir, graph, changes, null), true
   finally
     rmSync dir, { recursive: true, force: true }
 
