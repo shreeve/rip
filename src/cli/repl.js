@@ -21,6 +21,7 @@ import { inspect } from 'node:util';
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { bareSpecifierMap } from './stdlib.js';
 import { compile, CompileError, classifyCompleteness } from '../compile.js';
 import { tokenize, makeParserLexer, identifierRuns, isIdentifierName } from '../lexer.js';
 import { Parser } from '../parser.js';
@@ -449,11 +450,21 @@ const AsyncFunction = (async () => {}).constructor;
 // unresolvable one throws NAMING the specifier and the resolution base
 // (never an opaque resolver object).
 export function makeImportResolver(cwd) {
+  let stdlib = null;
   return (spec) => {
     if (typeof spec !== 'string') return spec;
     if (spec.startsWith('node:') || spec.startsWith('bun:') || spec.startsWith('data:') ||
         spec.startsWith('/') || spec.includes('://')) {
       return spec;
+    }
+    // The stdlib namespace (`rip/<pkg>`) and the bun-global fallback —
+    // the same map the loader plugin serves, so REPL imports resolve
+    // exactly like module imports. Enumerated once per session, on the
+    // first bare specifier that needs it.
+    if (!spec.startsWith('./') && !spec.startsWith('../')) {
+      stdlib ??= bareSpecifierMap();
+      const hit = stdlib.get(spec);
+      if (hit) return hit;
     }
     try {
       return Bun.resolveSync(spec, cwd);
