@@ -5,13 +5,15 @@
   "type": "module",
   "description": "Tiny Rip harness for first-party package test.rip files (test, eq, ok, throws)",
   "exports": {
-    ".": "./testing.rip"
+    ".": "./testing.rip",
+    "./app": "./app.rip"
   },
   "scripts": {
     "test": "rip test.rip"
   },
   "files": [
     "testing.rip",
+    "app.rip",
     "README.md"
   ]
 }

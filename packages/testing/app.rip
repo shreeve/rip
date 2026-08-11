@@ -1,0 +1,116 @@
+# ==============================================================================
+# rip/testing/app: the app-testing harness
+#
+#   import { scratchDb, bootApp, appClient } from 'rip/testing/app'
+#
+# Three capabilities, none app-specific:
+#
+#   scratchDb   temp DuckDB file + the app's migration ledger replayed +
+#               duckdb-harbor on an ephemeral port. Real database, real
+#               SQL, disposable — your dev database is never in play.
+#   bootApp     set env, import the app's entry in-process, hand back
+#               the framework's fetch handler (start() installs it as
+#               globalThis.__ripHandler under the worker-env guard).
+#   appClient   a cookie-jar HTTP client over that handler, so route
+#               tests read like user stories: login, then get, then
+#               assert — sessions ride the jar automatically.
+#
+# Model-layer tests import the app's models directly; route-layer tests
+# go through appClient and exercise the real middleware and auth gates.
+# ==============================================================================
+
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+# Replay every .sql in migrationsDir (sorted, same order as rip schema)
+# into a fresh DuckDB file, then serve it with duckdb-harbor. Returns
+# { url, token, file, dir, stop } — stop! kills harbor and removes the
+# scratch directory; the process-exit hook covers forgotten stops.
+export scratchDb = (migrationsDir, opts = {}) ->
+  dir = mkdtempSync join(tmpdir(), 'rip-scratch-')
+  file = join dir, 'scratch.duckdb'
+  ledger = readdirSync(migrationsDir).filter((n) -> n.endsWith '.sql').sort()
+  throw Error.new "scratchDb: no migrations in #{migrationsDir}" unless ledger.length
+  for name in ledger
+    ran = Bun.spawnSync ['duckdb', file, '-c', ".read #{join migrationsDir, name}"],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'pipe'
+    unless ran.exitCode is 0
+      throw Error.new "scratchDb: migration #{name} failed: #{ran.stderr.toString()}"
+
+  token = opts.token ?? 'scratch-token'
+  launcher = Bun.which('duckdb-harbor') or join(process.env.HOME, 'bin', 'duckdb-harbor')
+  proc = null
+  url = null
+  for attempt in [1..3]
+    port = 20000 + Math.floor(Math.random() * 20000)
+    url = "http://127.0.0.1:#{port}"
+    proc = Bun.spawn [launcher, '--bind', '127.0.0.1', '--port', String(port), '--token', token, file],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'ignore'
+    # A live child must not hold the test process's event loop open —
+    # the tally prints at exit, and exit is what kills harbor.
+    proc.unref()
+    deadline = Date.now() + 15000
+    healthy = false
+    while Date.now() < deadline
+      res = try fetch!("#{url}/health", { signal: AbortSignal.timeout(500) }) catch then null
+      if res?.ok
+        healthy = true
+        break
+      Bun.sleep! 100
+    break if healthy
+    proc.kill()
+    throw Error.new 'scratchDb: duckdb-harbor failed to start on three ports' if attempt is 3
+
+  stopped = false
+  stop! = ->
+    return if stopped
+    stopped = true
+    proc.kill()
+    try rmSync(dir, { recursive: true, force: true }) catch then null
+  process.on 'exit', -> try proc.kill() catch then null
+  { url, token, file, dir, stop }
+
+# Point the app at its (scratch) world and import it. `start()` throws
+# without APP_ARTIFACT/SOCKET_PATH — the worker-runtime guard — so the
+# harness satisfies it with sentinels; start() then installs the fetch
+# handler on globalThis and the app is fully wired, in this process.
+export bootApp = (entry, env = {}) ->
+  process.env[k] = String(v) for k, v of env
+  process.env.APP_ARTIFACT ?= '(rip-testing)'
+  process.env.SOCKET_PATH ?= '(rip-testing)'
+  import!(entry)
+  handler = globalThis.__ripHandler
+  throw Error.new "bootApp: #{entry} did not install a handler — does it call start()?" unless handler
+  handler
+
+# Cookie-jar client over an in-process handler. Object bodies JSON-
+# encode themselves; set-cookie headers persist into the jar so a
+# login on one call authenticates the next.
+export appClient = (handler, base = 'https://app.test') ->
+  jar = Map.new()
+  send = (method, path, body = null, headers = {}) ->
+    h = { ...headers }
+    cookies = [...jar.entries()].map(([k, v]) -> "#{k}=#{v}").join '; '
+    h.cookie = cookies if cookies
+    if body? and typeof body is 'object'
+      h['content-type'] ?= 'application/json'
+      body = JSON.stringify body
+    res = handler!(Request.new("#{base}#{path}", { method, body, headers: h }))
+    for raw in (res.headers.getSetCookie?() ?? [])
+      pair = raw.split(';')[0]
+      i = pair.indexOf '='
+      jar.set pair.slice(0, i).trim(), pair.slice(i + 1) if i > 0
+    res
+  {
+    get:   (p, h) -> send 'GET', p, null, h
+    post:  (p, b, h) -> send 'POST', p, b, h
+    put:   (p, b, h) -> send 'PUT', p, b, h
+    patch: (p, b, h) -> send 'PATCH', p, b, h
+    del:   (p, h) -> send 'DELETE', p, null, h
+    jar
+  }

@@ -64,6 +64,39 @@ await plugin({
 
     for (const [name, path] of bareSpecifierMap()) build.module(name, shimFor(path));
 
+    // rip/sites/configs — the same virtual module the sites artifact
+    // generator serves to bundled workers, here for in-process
+    // contexts (tests, REPL, scripts). The app is the nearest
+    // serve.rip at or above cwd; tenant configs are enumerated from
+    // its sites.dir and keyed by DIRECTORY NAME, exactly like the
+    // bundler's emission. Throws only when actually imported.
+    build.module('rip/sites/configs', () => ({
+      loader: 'js',
+      contents: `
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+let __dir = process.cwd(), __root = null;
+for (;;) {
+  if (existsSync(join(__dir, 'serve.rip'))) { __root = __dir; break; }
+  const parent = dirname(__dir);
+  if (parent === __dir) break;
+  __dir = parent;
+}
+if (!__root) throw new Error('rip/sites/configs: no serve.rip found at or above ' + process.cwd() + ' — run from inside a Rip Sites app (bundled workers get this module from the generator)');
+const __serve = (await import(join(__root, 'serve.rip'))).default;
+const __sub = __serve?.sites?.dir;
+if (typeof __sub !== 'string' || !__sub) throw new Error('rip/sites/configs: ' + join(__root, 'serve.rip') + ' does not declare sites.dir — tenant configs require sites mode');
+const __sitesDir = join(__root, __sub);
+const __configs = {};
+for (const __name of readdirSync(__sitesDir).sort()) {
+  const __stat = statSync(join(__sitesDir, __name), { throwIfNoEntry: false });
+  const __config = join(__sitesDir, __name, 'config.rip');
+  if (__stat?.isDirectory() && existsSync(__config)) __configs[__name] = (await import(__config)).default;
+}
+export default __configs;
+`,
+    }));
+
     build.onLoad({ filter: /\.rip$/ }, async (args) => {
       const source = readFileSync(args.path, 'utf8');
       // The loader is a toolchain path: feature runtimes arrive
