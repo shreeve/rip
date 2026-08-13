@@ -56,8 +56,15 @@ export scratchDb = (migrationsDir, opts = {}) ->
     proc.unref()
     deadline = Date.now() + 15000
     healthy = false
+    # `/ready` on current harbors, `/health` on ones predating the swap.
+    # Whichever launcher is on the PATH here is not this repo's to pick,
+    # so accept either rather than hang for fifteen seconds against a
+    # server that is up and answering the other name.
+    probe = (path) ->
+      try fetch!("#{url}#{path}", { signal: AbortSignal.timeout(500) }) catch then null
     while Date.now() < deadline
-      res = try fetch!("#{url}/health", { signal: AbortSignal.timeout(500) }) catch then null
+      res = probe! '/ready'
+      res = probe! '/health' if res?.status is 404
       if res?.ok
         healthy = true
         break

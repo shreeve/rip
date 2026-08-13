@@ -829,20 +829,31 @@ export Model = (table, databaseOrOpts = null) ->
 
 PROBE_TIMEOUT_MS =! 5000
 
-# GET /health, which is the endpoint harbor actually serves and the one
-# it leaves unauthenticated on purpose, so a probe needs no credential.
-# It answers `{"status":"ok"}`; `{ok:true}` is accepted too, so a future
-# harbor (or a stand-in) may use either spelling. Anything else -- a 404,
-# a 503, a non-ok body, a transport failure, or a timeout -- reads as not
-# reachable. The timeout keeps a half-open TCP from hanging boot forever.
+# GET /ready, which harbor leaves unauthenticated on purpose, so a probe
+# needs no credential. It runs `SELECT 1` and answers `{"status":"ready"}`
+# — an answer worth having, unlike the `/health` it replaced, which was a
+# hardcoded 200 that stayed cheerful while the executor thread was gone.
+#
+# `/health` is still tried, but only on a 404: harbors predating the swap
+# are still out there, and a boot probe that fails against a database
+# that is up and serving is worse than one extra round trip on the older
+# server. Both spellings of "yes" are accepted for the same reason.
+#
+# Anything else -- a 503, a body that says neither, a transport failure,
+# or a timeout -- reads as not reachable. The timeout keeps a half-open
+# TCP from hanging boot forever, and it covers both probes together, so
+# the fallback cannot double it.
 reachable = (url, fetchFn) ->
   ctrl = AbortController.new()
   timer = setTimeout (-> ctrl.abort()), PROBE_TIMEOUT_MS
+  affirmative = (data) ->
+    data?.status is 'ready' or data?.status is 'ok' or data?.ok is true
   try
-    res = fetchFn! "#{url}/health", { signal: ctrl.signal }
+    res = fetchFn! "#{url}/ready", { signal: ctrl.signal }
+    if res?.status is 404
+      res = fetchFn! "#{url}/health", { signal: ctrl.signal }
     return false unless res?.ok
-    data = res.json!
-    data?.status is 'ok' or data?.ok is true
+    affirmative res.json!
   catch
     false
   finally
