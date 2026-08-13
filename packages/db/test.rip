@@ -403,6 +403,9 @@ test! "a token becomes a bearer authorization header", ->
   harborAdapter!({ url: 'http://h', token: 'secret', fetch }).query! 'SELECT 1'
   eq fetch.calls[0].headers.Authorization, 'Bearer secret'
   eq fetch.calls[0].headers['Content-Type'], 'application/json'
+  # Streaming, explicitly: harbor's one-shot JSON shape has a size ceiling
+  # and this adapter has no use for it.
+  eq fetch.calls[0].headers['Accept'], 'application/x-ndjson'
 
 p "\nAdapter — query"
 
@@ -482,6 +485,24 @@ test! "an error line mid-stream is a QueryError, whatever the status was", ->
 
 # Only the engine domains are query errors. A rejected credential is an
 # availability problem and must not look like bad SQL to a retry loop.
+# harbor can also answer with the whole result as one JSON document. This
+# adapter does not ask for that shape, but a proxy or a stand-in may answer
+# in it regardless, and reading it costs nothing — it is the envelope the
+# reader already produces.
+test! "a one-shot JSON document reads back the same as a stream", ->
+  document = JSON.stringify
+    ok: true
+    columns: [{ name: 'id', duckdbType: 'INTEGER', lossless: true }]
+    data: [[1], [2]]
+    rowCount: 2
+    timeMs: 3
+  fetch = (url) ->
+    Promise.resolve { ok: true, status: 200, statusText: '', text: (-> Promise.resolve document) }
+  eq harborAdapter!({ url: 'http://h', fetch }).query!('SELECT id FROM u'),
+    columns: [{ name: 'id', duckdbType: 'INTEGER', lossless: true, type: 'INTEGER' }]
+    data: [[1], [2]]
+    rowCount: 2
+
 test! "a non-engine error line is a ConnectionError, not a QueryError", ->
   denied = '{"type":"error","code":"unauthorized","message":"missing or invalid bearer token"}'
   fetch = (url) ->

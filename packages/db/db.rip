@@ -224,8 +224,14 @@ export def harborAdapter(opts = {})
   token = opts.token ?? envToken()
   fetchFn = opts.fetch ?? fetch
   timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  # `Accept: application/x-ndjson`, explicitly, even though the reader below
+  # handles either shape. harbor also offers the whole result as one JSON
+  # document — but that shape cannot be flushed as it is built, so it carries a
+  # size ceiling and refuses past it with a 406. Streaming has no ceiling. This
+  # adapter buffers the response anyway, so one-shot would buy it nothing but
+  # a query that works until the day the table gets big.
   headers = ->
-    h = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+    h = { 'Content-Type': 'application/json', 'Accept': 'application/x-ndjson' }
     h['Authorization'] = "Bearer #{token}" if token
     h
 
