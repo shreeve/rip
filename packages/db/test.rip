@@ -855,8 +855,8 @@ test! "a conflict that never clears surfaces after the last attempt", ->
   adapter = flaky 99, conflict
   err = trap! (-> createClient(adapter).transaction (tx) -> tx.query 'UPDATE t SET n = 1')
   ok /Conflict on update/.test err.message
-  # The first attempt plus the default three retries.
-  eq adapter.attempts.count, 4
+  # The first attempt plus the default five retries.
+  eq adapter.attempts.count, 6
 
 # The escape hatch, and the reason it exists: a callback with an effect
 # outside the database cannot be repeated safely, and the caller is the

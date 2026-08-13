@@ -491,8 +491,15 @@ makeSurface = (run, beginTx) ->
 # Also retried: a transaction refused for want of a connection, and one
 # whose lease expired mid-flight. Both mean "this never happened, try
 # again", which is exactly what a conflict means.
-DEFAULT_TX_RETRIES =! 3
-TX_RETRY_BASE_MS =! 25
+# Contention costs rounds, not milliseconds: DuckDB lets exactly one
+# writer win a contested row per round, so N transactions racing for it
+# need about N attempts before the last one lands. Five retries covers
+# the six-way case, which is well past what an application usually does
+# to a single row; heavier contention should raise `retries` rather than
+# discover this by losing writes. The backoff doubles from 40ms so the
+# losers of one round do not re-collide on the next.
+DEFAULT_TX_RETRIES =! 5
+TX_RETRY_BASE_MS =! 40
 TX_RETRY_CAP_MS =! 2_000
 
 RETRYABLE_CODES =! ['no_lease_available', 'no_such_session']
