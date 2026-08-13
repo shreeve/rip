@@ -186,6 +186,11 @@ parseNdjson = (text) ->
       when 'end' then env.rowCount = msg.rowCount
       when 'error'
         env.error = msg.message ?? 'db request failed'
+        # Two fields, because they answer different questions. `errorCode`
+        # decides the error CLASS below and is engine-only. `harborCode` is
+        # whatever harbor said, and rides along so a caller can tell a busy
+        # pool from a bad token without parsing prose.
+        env.harborCode = msg.code if msg.code?
         env.errorCode = msg.code if ENGINE_ERROR_CODES.includes msg.code
       else null
   env.rowCount ?= env.data.length
@@ -307,6 +312,12 @@ export def harborAdapter(opts = {})
           QueryError.new message
         error.sql = sql if sql?
         error.httpStatus = response.status
+        error.code ?= data.harborCode if data.harborCode?
+        # harbor sends Retry-After when the wait is knowable — a transaction
+        # pool with nothing free. Honouring the server's number beats inventing
+        # a backoff that is either too eager or too patient.
+        after = try Number(response.headers?.get?('Retry-After')) catch then NaN
+        error.retryAfterMs = after * 1000 if Number.isFinite(after) and after >= 0
         throw error
       data
     finally
@@ -458,6 +469,48 @@ makeSurface = (run, beginTx) ->
     if row? then (Object.values(row)[0] ?? null) else null
   { query, rows, one, value, transaction: beginTx }
 
+# ── Retrying a transaction ───────────────────────────────────────────
+#
+# DuckDB resolves write conflicts optimistically: two transactions
+# touching the same row do not queue, the second is refused the moment
+# it writes. Postgres would have made it wait, so code carrying those
+# instincts meets an error where it expected a pause — and the correct
+# response is almost always the same one, which is to run the whole
+# thing again on a fresh snapshot. That is the standard answer for
+# optimistic concurrency, and it is what this does.
+#
+# The contract it asks for is real and worth stating: **the callback may
+# run more than once**, so it must be safe to repeat. Database work
+# qualifies by construction — the failed attempt rolled back. Anything
+# with an effect outside the database does not: a callback that charges
+# a card or sends mail between two writes must pass `{ retries: 0 }` and
+# handle conflicts itself. Retrying is the default because the common
+# case is pure DB work and silently failing it is worse; visible in the
+# options because the exception is real.
+#
+# Also retried: a transaction refused for want of a connection, and one
+# whose lease expired mid-flight. Both mean "this never happened, try
+# again", which is exactly what a conflict means.
+DEFAULT_TX_RETRIES =! 3
+TX_RETRY_BASE_MS =! 25
+TX_RETRY_CAP_MS =! 2_000
+
+RETRYABLE_CODES =! ['no_lease_available', 'no_such_session']
+CONFLICT_SHAPE = /\bconflict\b/i
+
+sleep = (ms) ->
+  Promise.new (resolve) ->
+    setTimeout resolve, ms
+    return
+
+# Would running this again plausibly succeed? Only for failures that left
+# nothing behind — never for a bad statement, which will fail identically
+# however many times it is sent.
+export def isRetryable(error)
+  return false unless error?
+  return true if RETRYABLE_CODES.includes error.code
+  error instanceof QueryError and CONFLICT_SHAPE.test(String(error.message ?? ''))
+
 export def createClient(adapter)
   fail 'createClient requires an adapter with a query() method' unless typeof adapter?.query is 'function'
 
@@ -465,8 +518,7 @@ export def createClient(adapter)
   # to that session — whose own transaction() JOINS this one (no
   # savepoints), so a nested call reuses the session rather than
   # opening a second — commit on return, roll back on any throw.
-  transaction = (fn) ->
-    fail 'this adapter does not support transactions' unless typeof adapter.begin is 'function'
+  attempt = (fn) ->
     tx = adapter.begin!
     joined = null
     join = (inner) -> inner joined
@@ -487,6 +539,28 @@ export def createClient(adapter)
     # adapter already dropped.
     tx.commit!
     result
+
+  transaction = (fn, opts = {}) ->
+    fail 'this adapter does not support transactions' unless typeof adapter.begin is 'function'
+    retries = opts.retries ?? DEFAULT_TX_RETRIES
+    for attemptNo in [0..retries]
+      try
+        return attempt! fn
+      catch error
+        throw error unless attemptNo < retries and isRetryable error
+        # Full jitter. Two callbacks that collided will otherwise collide
+        # again on the same schedule, which is the one thing a retry must
+        # not reproduce.
+        # The server's number when it gave one, our own backoff otherwise.
+        # Full jitter on ours: two callbacks that collided will otherwise
+        # collide again on the same schedule, which is the one thing a retry
+        # must not reproduce.
+        wait = if error.retryAfterMs?
+          error.retryAfterMs
+        else
+          Math.floor(Math.random() * Math.min(TX_RETRY_CAP_MS, TX_RETRY_BASE_MS * 2 ** attemptNo))
+        sleep! wait
+    return
 
   makeSurface(((sql, params, signal) -> adapter.query sql, params, { signal }), transaction)
 
@@ -1021,7 +1095,30 @@ export checkpoint = (force, deps) ->
   catch e
     msg = e?.message or String(e)
     if not force and /transaction/i.test msg
-      throw Error.new "#{msg}\n\nOther writers are active. Re-run with --force if you're sure that's OK."
+      # Expected, not exceptional: harbor's own `harbor_wait()` holds a read
+      # transaction older than every write for as long as the server runs, so
+      # an explicit CHECKPOINT refuses once anything has been written. DuckDB
+      # still checkpoints automatically at its threshold, and harbor folds the
+      # WAL on a clean stop, so the database is not accumulating risk while
+      # this fails.
+      #
+      # --force is offered last and hedged on purpose. FORCE CHECKPOINT aborts
+      # other transactions to get its lock, and since harbor grew sessions
+      # those include real application transactions mid-flight — not just
+      # harbor's own bookkeeping. It can also abort `harbor_wait()` itself,
+      # which stops the server.
+      throw Error.new """
+        #{msg}
+
+        This is normal while harbor is serving: its own wait holds a
+        transaction older than every write. DuckDB checkpoints on its own at
+        the threshold, and harbor folds the WAL when it stops, so there is
+        usually nothing to do here.
+
+        To fold it now, stop harbor — that checkpoints on the way out. Only
+        reach for --force if you know no transaction is in flight: it aborts
+        the ones that are, including other clients', and can stop the server.
+        """
     throw e
   "#{stmt.toLowerCase()} complete (#{now().getTime() - t0} ms)"
 

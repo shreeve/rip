@@ -9,7 +9,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import * as db from 'rip/db'
 import {
-  harborAdapter, createClient, connect, isDbError, DbError, ConnectionError, QueryError, CancelledError,
+  harborAdapter, createClient, connect, isDbError, isRetryable, DbError, ConnectionError, QueryError, CancelledError,
   query, findOne, findAll, transaction, begin, Model, ident, materializeAll,
   ping, assertReachable, ensureRunning,
   resolveUrl, sqlString, safeFileStem, stamp, humanSize, unsafeTarPath,
@@ -37,7 +37,8 @@ ROOT_EXPORTS = [
   'CancelledError', 'ConnectionError', 'DbError', 'Model', 'QueryError',
   'assertEmptyDatabase', 'assertReachable', 'begin', 'checkpoint', 'connect', 'createClient',
   'createMcpServer', 'currentDatabase', 'dump', 'ensureRunning', 'findAll', 'findOne',
-  'harborAdapter', 'humanSize', 'ident', 'isDbError', 'load', 'makeMcpSql', 'makeSql',
+  'harborAdapter', 'humanSize', 'ident', 'isDbError', 'isRetryable', 'load', 'makeMcpSql',
+  'makeSql',
   'materializeAll', 'ping', 'query', 'resolveUrl', 'safeFileStem', 'sqlString', 'stamp',
   'startStdio', 'transaction', 'unsafeTarPath',
 ]
@@ -815,6 +816,105 @@ test! "parameters pass straight through to the adapter", ->
   createClient!(adapter).query! 'SELECT * FROM u WHERE id = ?', [42]
   eq adapter.log[0], { sql: 'SELECT * FROM u WHERE id = ?', params: [42] }
 
+p "\nClient — retrying a transaction"
+
+# DuckDB refuses a conflicting write the moment it happens rather than
+# making it wait, so the callback has to be able to run again. These
+# drive that through the client, not the adapter.
+conflict = ->
+  e = QueryError.new 'TransactionContext Error: Conflict on update!'
+  e.code = 'sql_error'
+  e
+
+# An adapter whose first N transactions fail at a chosen point.
+flaky = (failures, make) ->
+  attempts = { count: 0 }
+  {
+    attempts
+    query: (-> Promise.resolve { columns: [], data: [], rowCount: 0 })
+    begin: ->
+      attempts.count += 1
+      mine = attempts.count
+      Promise.resolve
+        query: (sql) ->
+          if mine <= failures then Promise.reject make() else Promise.resolve { columns: [], data: [], rowCount: 0 }
+        commit: (-> Promise.resolve())
+        rollback: (-> Promise.resolve())
+    capabilities: { tx: true, ddlTransactional: true }
+  }
+
+test! "a conflict is retried and the second attempt stands", ->
+  adapter = flaky 1, conflict
+  result = createClient!(adapter).transaction! (tx) ->
+    tx.query! 'UPDATE t SET n = 1'
+    'done'
+  eq result, 'done'
+  eq adapter.attempts.count, 2
+
+test! "a conflict that never clears surfaces after the last attempt", ->
+  adapter = flaky 99, conflict
+  err = trap! (-> createClient(adapter).transaction (tx) -> tx.query 'UPDATE t SET n = 1')
+  ok /Conflict on update/.test err.message
+  # The first attempt plus the default three retries.
+  eq adapter.attempts.count, 4
+
+# The escape hatch, and the reason it exists: a callback with an effect
+# outside the database cannot be repeated safely, and the caller is the
+# only one who knows that.
+test! "retries: 0 runs the callback exactly once", ->
+  adapter = flaky 99, conflict
+  runs = 0
+  body = (tx) ->
+    runs += 1
+    tx.query 'UPDATE t SET n = 1'
+  client = createClient! adapter
+  err = trap! -> client.transaction body, { retries: 0 }
+  ok /Conflict on update/.test err.message
+  eq runs, 1
+  eq adapter.attempts.count, 1
+
+test! "a bad statement is not retried — it would fail identically", ->
+  broken = ->
+    e = QueryError.new 'Catalog Error: Table with name nope does not exist!'
+    e.code = 'sql_error'
+    e
+  adapter = flaky 99, broken
+  err = trap! (-> createClient(adapter).transaction (tx) -> tx.query 'SELECT * FROM nope')
+  ok /does not exist/.test err.message
+  eq adapter.attempts.count, 1
+
+# Exhaustion and expiry both mean "this never happened", which is the
+# same thing a conflict means.
+test! "a pool with no free connection is retried", ->
+  busy = ->
+    e = ConnectionError.new 'all 4 transaction connections are in use'
+    e.code = 'no_lease_available'
+    e
+  adapter = flaky 2, busy
+  createClient!(adapter).transaction! (tx) -> tx.query! 'UPDATE t SET n = 1'
+  eq adapter.attempts.count, 3
+
+test! "a lease that expired mid-flight is retried", ->
+  gone = ->
+    e = ConnectionError.new 'no such session'
+    e.code = 'no_such_session'
+    e
+  adapter = flaky 1, gone
+  createClient!(adapter).transaction! (tx) -> tx.query! 'UPDATE t SET n = 1'
+  eq adapter.attempts.count, 2
+
+test "isRetryable names the cases, and only those", ->
+  retryable = (message, code) ->
+    e = (if code is 'sql_error' then QueryError.new(message) else ConnectionError.new(message))
+    e.code = code
+    isRetryable e
+  ok retryable('TransactionContext Error: Conflict on update!', 'sql_error')
+  ok retryable('all connections in use', 'no_lease_available')
+  ok retryable('no such session', 'no_such_session')
+  ok not retryable('Catalog Error: no such table', 'sql_error')
+  ok not retryable('this session is already running a statement', 'session_busy')
+  ok not isRetryable(null)
+
 p "\nClient — transactions"
 
 test! "a returning callback commits and yields its value", ->
@@ -1095,10 +1195,17 @@ test! "--force runs FORCE CHECKPOINT", ->
   eq checkpoint!(true, { sql, now: clock }), 'force checkpoint complete (0 ms)'
   eq fetch.calls, ['FORCE CHECKPOINT']
 
-test! "a concurrent-writer failure escalates to a --force hint", ->
+# harbor's own wait holds a transaction older than every write, so this
+# is the normal answer while it is serving rather than a fault. The
+# advice says so, and puts --force last: it aborts transactions in
+# flight, which since sessions means other clients' work.
+test! "a blocked checkpoint explains itself before mentioning --force", ->
   sql = makeSql { url: 'http://h', fetch: sqlDouble [[/CHECKPOINT/, { ok: false, error: 'Cannot CHECKPOINT: there is an active transaction' }]] }
   err = trap! (-> checkpoint(false, { sql, now: clock }))
-  ok /Re-run with --force/.test err.message
+  ok /normal while harbor is serving/.test err.message
+  ok /stop harbor/.test err.message
+  ok /--force/.test err.message
+  ok err.message.indexOf('normal while harbor is serving') < err.message.indexOf('--force')
 
 # ==[ 6. Embed probe ]==========================================================
 
